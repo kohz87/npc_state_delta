@@ -6,62 +6,69 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-      - name: Setup Node
-        uses: actions/setup-node@v5
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
         with:
           node-version: 24
+
       - name: Syntax and diff check
+        shell: bash
         run: |
-          node --check bootstrap.js
-          node --check hardening.js
-          node --check hardening-core.js
-          node --check index.js
-          node --check core.js
-          node --check core-v0218.js
-          node --check branch.js
-          node --check branch-v0218.js
-          node --check bundle.js
-          node --check full-cast.js
-          node --check dossier-ui.js
-          node --check launcher-ui.js
-          node --check social.js
-          node --check storage.js
-          node --check identity.js
-          git diff --check
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const config = JSON.parse(fs.readFileSync('runtime-modules.json', 'utf8'));
+          const modules = config.modules.map(item => item.path);
+          if (!modules.length) throw new Error('runtime-modules.json contains no active modules');
+          require('node:child_process').execFileSync(process.execPath, ['--check', ...modules], { stdio: 'inherit' });
+          NODE
+          git diff --check "${{ github.event.pull_request.base.sha || github.event.before }}" "${{ github.sha }}" || git diff --check HEAD^ HEAD
+
       - name: Full verification
         run: npm test
+
       - name: Delta validation and prompt measurement
         run: |
           npm run validate
           npm run measure:prompts
+
       - name: Verify runtime package
         run: npm run package
+
       - name: Release consistency
+        shell: bash
         run: |
-          node --input-type=module <<'NODE'
-          import fs from 'node:fs';
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('node:fs');
           const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
           const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const runtime = JSON.parse(fs.readFileSync('runtime-modules.json', 'utf8'));
           const core = fs.readFileSync('core.js', 'utf8');
           const readme = fs.readFileSync('README.md', 'utf8');
-          const bootstrap = fs.readFileSync('bootstrap.js', 'utf8');
-          const escaped = String(manifest.version).replaceAll('.', '\\.');
-          if (!new RegExp(`NPC_STATE_VERSION = ['\"]${escaped}['\"]`).test(core)) throw new Error('core version does not match manifest');
-          if (pkg.version !== manifest.version) throw new Error('package version does not match manifest');
-          if (!readme.startsWith(`# NPC State Delta v${manifest.version}`)) throw new Error('README version does not match manifest');
-          if (manifest.js !== 'bootstrap.js') throw new Error('manifest must load bootstrap.js');
-          if (bootstrap.includes('enhancements.js')) throw new Error('superseded enhancements wrapper is still loaded');
-          if (!bootstrap.includes("await import('./full-cast.js')")) throw new Error('full-cast owner must be loaded');
-          const prepareAt = bootstrap.indexOf('await prepareNpcStateHardening()');
-          const engineAt = bootstrap.indexOf("await import('./index.js')");
-          if (prepareAt < 0 || engineAt < 0 || prepareAt > engineAt) throw new Error('hardening must initialize before the retained engine');
+          const rootJs = fs.readdirSync('.', { withFileTypes: true })
+            .filter(entry => entry.isFile() && entry.name.endsWith('.js'))
+            .map(entry => entry.name)
+            .sort();
+          const configured = runtime.modules.map(item => item.path).sort();
+          if (manifest.version !== pkg.version) throw new Error(`version mismatch: manifest=${manifest.version} package=${pkg.version}`);
+          if (runtime.applicationVersion !== manifest.version) throw new Error(`runtime inventory version mismatch: ${runtime.applicationVersion}`);
+          if (runtime.entrypoint !== manifest.js) throw new Error(`runtime inventory entrypoint mismatch: ${runtime.entrypoint}`);
+          if (JSON.stringify(rootJs) !== JSON.stringify(configured)) throw new Error('active runtime inventory does not exactly match root JS modules');
+          if (!core.includes(`NPC_STATE_VERSION = '${manifest.version}'`)) throw new Error('core application version mismatch');
+          if (!core.includes("./core-mechanics.js")) throw new Error('canonical core mechanics owner missing');
+          if (!fs.readFileSync('branch.js', 'utf8').includes("./branch-core.js")) throw new Error('canonical branch core owner missing');
+          if (configured.some(path => /(?:^|[-_.])legacy(?:[-_.]|$)|(?:^|[-_.])v\d{3,}(?:[-_.]|$)/i.test(path))) throw new Error('active runtime inventory contains legacy/version-labelled paths');
+          if (!readme.startsWith(`# NPC State Delta v${manifest.version}`)) throw new Error('README title/version mismatch');
+          if (manifest.js !== 'bootstrap.js' || !fs.readFileSync('bootstrap.js', 'utf8').includes("await import('./index.js')")) throw new Error('entrypoint mismatch');
+          console.log(`Delta ${manifest.version}; ${configured.length} canonical active runtime modules`);
           NODE
+          test -f "dist/npc_state_delta-$(node -p "require('./manifest.json').version").zip"
+          unzip -l "dist/npc_state_delta-$(node -p "require('./manifest.json').version").zip"
