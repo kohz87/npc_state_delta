@@ -378,7 +378,7 @@ try {
     await import(pathToFileURL(path.join(extRoot, 'index.js')).href + `?t=${Date.now()}`);
     await sleep(30);
     assert.equal(mounted, true, 'settings panel should mount');
-    assert.equal(globalThis.NPCStateDelta?.version, '0.2.23');
+    assert.equal(globalThis.NPCStateDelta?.version, '0.1.0');
     assert.ok(mockState.extensionSettings.npc_state_delta, 'settings namespace should initialize');
     assert.equal(mockState.extensionSettings.npc_state_delta.admissionMode, 'conservative');
     assert.equal(mockState.extensionSettings.npc_state_delta.chats, undefined, 'live NPC database should not be stored in extension_settings');
@@ -522,8 +522,6 @@ try {
     assert.deepEqual(mockState.extensionSettings.npc_state_delta.portraitStylePositive, savedPortraitSettings.portraitStylePositive);
     await globalThis.NPCStateDelta.savePortraitSettings(originalPortraitSettings);
 
-    // Durable-profile updates use their own top-level channel so a manual baseline can
-    // organically refine even when the ordinary NPC delta object carries no profile text.
     const yunyunProfileId = state.npcs.find(n => n.name === 'Yunyun').id;
     const wizProfileId = state.npcs.find(n => n.name === 'Wiz').id;
     mockState.quietResponder = async () => JSON.stringify({
@@ -549,8 +547,6 @@ try {
     assert.equal(profileMetrics.profileUpdates, 1);
     assert.equal(profileMetrics.profileApplied, 1);
 
-    // Megumin Suite 2026-08-18+ renders one .meg-blocks card. NPC State Delta should move the
-    // already-recorded snapshot into that exact card, then fall back cleanly if the card disappears.
     const meguminBlock = createMockMeguminBlock();
     meguminBlocks.set(1, meguminBlock);
     eventSource.emit('character_message_rendered', 1);
@@ -597,8 +593,6 @@ try {
     await sleep(90);
     assert.equal(inlineAnchors.some(anchor => anchor.dataset.npcStateDeltaMessageId === '1'), true, 'standalone dossier should return when no compatible Megumin card is present');
 
-    // A valid primary dossier response may omit relationship fields entirely. The focused
-    // relationship pass must still apply a drastic change instead of silently treating omission as zero.
     const yunyunBeforeRepair = state.npcs.find(n => n.name === 'Yunyun');
     const wizBeforeRepair = state.npcs.find(n => n.name === 'Wiz');
     const trustBeforeRepair = yunyunBeforeRepair.relationship.trust;
@@ -631,8 +625,6 @@ try {
     assert.equal(repairMetrics.relationshipPass, true);
     assert.equal(repairMetrics.relationshipTargets, 2);
 
-    // Routine/no-change evaluation must keep the durable Relationship field byte-for-byte stable,
-    // even if the primary dossier scanner tries to stylistically rewrite it.
     mockState.quietResponder = async (args = {}) => {
         const systemPrompt = String(args.systemPrompt || '');
         if (/isolated relationship evaluator/i.test(systemPrompt)) {
@@ -649,8 +641,6 @@ try {
     state = globalThis.NPCStateDelta.getState();
     assert.equal(state.npcs.find(n => n.name === 'Yunyun').relationshipSummary, betrayalSummary, 'routine focused evaluation should preserve an accurate relationship summary exactly');
 
-    // Major/extreme malformed output that omits the required prose summary must still not leave
-    // a clearly stale Relationship field behind. The focused reason is used as a conservative fallback.
     const beforeFallbackSummary = state.npcs.find(n => n.name === 'Yunyun').relationshipSummary;
     mockState.context.chat[1].mes += ' Immediately after the betrayal, Kazuma risks his life to save Yunyun, forcing her to profoundly reassess him.';
     mockState.quietResponder = async (args = {}) => {
@@ -671,7 +661,6 @@ try {
     assert.notEqual(fallbackYunyun.relationshipSummary, beforeFallbackSummary, 'major/extreme missing-summary output must not leave stale Relationship prose untouched');
     assert.match(fallbackYunyun.relationshipSummary, /risked his life to save Yunyun/i);
 
-    // Settings-roster clicks are handled in capture phase so host drawer handlers cannot swallow them.
     const yunyunForEditor = state.npcs.find(n => n.name === 'Yunyun');
     const fakeRosterButton = {
         dataset: { npcId: yunyunForEditor.id },
@@ -701,8 +690,6 @@ try {
     assert.match(livePrompt, /Yunyun/);
     assert.doesNotMatch(livePrompt, /- Wiz:/, 'off-screen NPC must not be injected into generation');
 
-    // Next scene flips presence. Visible NPC State Delta follows only the newest present cast; historical
-    // snapshots remain stored internally for branch rollback but disappear from the visible pane.
     mockState.quietResponder = async () => JSON.stringify({ npcs: [
         { name: 'Yunyun', present: false, location: 'Axel guild' },
         { name: 'Wiz', present: true, mood: 'concerned', location: 'Wiz\'s shop' },
@@ -718,7 +705,6 @@ try {
     assert.match(inlineAnchors[0].innerHTML, /Wiz/);
     assert.doesNotMatch(inlineAnchors[0].innerHTML, /Yunyun/);
 
-    // Deleting the latest turn rolls back to the surviving branch checkpoint and restores presence.
     mockState.context.chat.length = 2;
     eventSource.emit('message_deleted', 2);
     await sleep(320);
@@ -734,7 +720,6 @@ try {
     assert.equal(inlineAnchors[0].dataset.npcStateDeltaMessageId, '1');
     assert.match(inlineAnchors[0].innerHTML, /Yunyun/);
 
-    // Settings delete uses the dossier ID, hard-deletes the exact entry, and suppresses automatic rediscovery.
     const wizIdForDelete = state.npcs.find(n => n.name === 'Wiz').id;
     assert.equal(globalThis.NPCStateDelta.deleteNpc(wizIdForDelete), true);
     state = globalThis.NPCStateDelta.getState();
@@ -742,7 +727,6 @@ try {
     assert.ok(state.userDismissedGroups.some(group => group.ids?.includes(wizIdForDelete)), 'settings delete should suppress immediate scanner rediscovery by stable ID');
     assert.ok(!state.dismissed.includes('wiz'), 'modern ID tombstones must not globally suppress future same-name NPCs');
 
-    // Manual archive preserves Yunyun but immediately removes her from live injection; restore is reversible.
     const yunyunId = state.npcs.find(n => n.name === 'Yunyun').id;
     assert.equal(globalThis.NPCStateDelta.archive(yunyunId), true);
     state = globalThis.NPCStateDelta.getState();
@@ -754,8 +738,6 @@ try {
     state = globalThis.NPCStateDelta.getState();
     assert.equal(state.npcs.find(n => n.name === 'Yunyun').archived, false);
 
-    // A scan generated against an older dossier revision must not overwrite a manual edit
-    // made while the model call is pending, even when the chat lineage itself is unchanged.
     let resolveStateStale;
     mockState.quietResponder = () => new Promise(resolve => { resolveStateStale = resolve; });
     const stateStaleScan = globalThis.NPCStateDelta.scan();
@@ -768,7 +750,6 @@ try {
     assert.notEqual(state.npcs.find(n => n.id === yunyunId).mood, 'STALE MODEL MOOD');
     assert.equal(globalThis.NPCStateDelta.restore(yunyunId), true);
 
-    // Stale scan after a swipe/branch change must not write into the new branch.
     let resolveQuiet;
     mockState.quietResponder = () => new Promise(resolve => { resolveQuiet = resolve; });
     const staleScan = globalThis.NPCStateDelta.scan();
@@ -778,7 +759,6 @@ try {
     await staleScan;
     assert.equal(globalThis.NPCStateDelta.getState().npcs.some(n => n.name === 'Luna'), false);
 
-    // Removing an NPC purges its historical inline cards and persists the removal.
     mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: '(OOC: NPC State Delta: remove Yunyun)' });
     eventSource.emit('message_sent', 2);
     await sleep(30);
@@ -786,9 +766,6 @@ try {
     assert.equal(globalThis.NPCStateDelta.getState().inlineCards.some(entry => entry.cards.some(card => card.name === 'Yunyun')), false);
     await globalThis.NPCStateDelta.flush();
 
-    // Megumin World State / Inner Chatter details must remain available to two targeted OOC backfills.
-    // The responder deliberately returns an empty array if jsonSchema is supplied, simulating a
-    // provider whose structured-output handling rejects/overconstrains the old generic object schema.
     mockState.context.chat.push({
         is_user: false, is_system: false, name: 'Megumin', swipe_id: 0,
         mes: 'The two receptionists stack the forms. <details><summary>📌 <b>World State</b></summary><b>Myla (Senior Receptionist):</b> Working the Bluewatch guild desk, calm and methodical.<br><b>Toris (Receptionist):</b> Sorting contract ledgers beside her, tired but attentive.</details><details><summary>💭 <b>NPC Inner Chatter</b></summary>Myla: I need to finish the audit before noon.<br>Toris: I still have three ledgers to finish.</details>',
@@ -837,8 +814,6 @@ try {
     assert.ok(latestBackfillCalls.length >= 2);
     assert.ok(latestBackfillCalls.every(call => !('jsonSchema' in (call?.[0] || {}))), 'real backfill calls should omit structured-output schemas');
 
-    // Truncated Gemini-style JSON must trigger one compact retry instead of surfacing an
-    // "Unterminated string" failure. This covers the real backfill failure reported on mobile.
     mockState.context.chat.push({
         is_user: false, is_system: false, name: 'Megumin', swipe_id: 0,
         mes: 'Neris, the guild records clerk, closes a ledger. <details><summary>📌 <b>World State</b></summary><b>Neris (Records Clerk):</b> At the Bluewatch guild archive desk, organizing contract files.</details>',
@@ -878,8 +853,6 @@ try {
     assert.equal(retryCalls[0].responseLength, 3200);
     assert.equal(retryCalls[1].responseLength, 5200);
 
-    // Automatic Conservative scanning uses the same truncation guard. A properly named NPC
-    // should still be admitted after the first JSON response is cut off mid-string.
     let autoRetryAttempt = 0;
     mockState.quietResponder = async (args = {}) => {
         const prompt = String(args.prompt || '');
@@ -906,8 +879,6 @@ try {
     assert.ok(lioraInline?.cards.some(card => card.name === 'Liora'), 'if merged state marks Liora present, the same scan must record her inline card');
     assert.equal(autoRetryAttempt, 2, 'automatic/manual scanner path should retry exactly once after truncation');
 
-    // v0.2.22: a new NPC admitted by automatic full-window scanning must be enriched
-    // automatically, while its numeric relationship is scored from CURRENT exchange only.
     const savedMiraFullScan = mockState.extensionSettings.npc_state_delta.fullScanEveryTurn;
     const savedMiraBaseline = structuredClone(mockState.extensionSettings.npc_state_delta.relationshipBaseline);
     mockState.extensionSettings.npc_state_delta.relationshipBaseline = { trust: 0, affection: 0, desire: 0, tension: 0 };
@@ -987,9 +958,6 @@ try {
     mockState.extensionSettings.npc_state_delta.relationshipBaseline = savedMiraBaseline;
     mockState.extensionSettings.npc_state_delta.fullScanEveryTurn = savedMiraFullScan;
 
-    // v0.2.23: an NPC involved at the beginning of a response must still reconcile when the
-    // broad full-window scan returns only a newcomer from the ending scene. Relationship uses
-    // the complete current exchange; the omitted existing NPC also gets a targeted memory repair.
     const savedCastFullScan = mockState.extensionSettings.npc_state_delta.fullScanEveryTurn;
     const savedCastDepth = mockState.extensionSettings.npc_state_delta.scanDepth;
     mockState.extensionSettings.npc_state_delta.fullScanEveryTurn = true;
@@ -1006,7 +974,6 @@ try {
         const prompt = String(args.prompt || '');
         if (/private NPC dossier scanner/i.test(prompt) && /Neri/i.test(prompt)) {
             castBroadCalls += 1;
-            // Deliberately omit Mira to reproduce the old failure mode.
             return JSON.stringify({ npcs: [{
                 name: 'Neri', identityKind: 'proper_name', dossierSignal: 'meaningful', role: 'Apothecary clerk', present: true,
                 relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 },
@@ -1066,8 +1033,6 @@ try {
     mockState.extensionSettings.npc_state_delta.fullScanEveryTurn = savedCastFullScan;
     mockState.extensionSettings.npc_state_delta.scanDepth = savedCastDepth;
 
-    // Non-truncation structural JSON errors also get one clean correction retry. Local separator
-    // repair handles missing commas without a second call; this invalid literal forces the fallback.
     let malformedRetryAttempt = 0;
     mockState.quietResponder = async (args = {}) => {
         const prompt = String(args.prompt || '');
@@ -1091,8 +1056,6 @@ try {
     assert.ok(state.npcs.some(n => n.name === 'Mave'), 'generic malformed JSON should recover through one correction retry');
     assert.equal(malformedRetryAttempt, 2, 'generic malformed scanner JSON should retry exactly once');
 
-    // A scan may finish before SillyTavern inserts the assistant message DOM. The rendered-message
-    // lifecycle event must mount the already-recorded inline card once the host node exists.
     mockState.quietResponder = async () => JSON.stringify({ npcs: [{
         name: 'Liora', id: globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Liora')?.id, present: true, role: 'Courier',
         identityKind: 'proper_name', dossierSignal: 'incidental', relationshipImpact: 'none',
@@ -1111,8 +1074,6 @@ try {
     await sleep(120);
     assert.equal(inlineAnchors.some(anchor => anchor.dataset.npcStateDeltaMessageId === String(lateDomMessageId)), true, 'render lifecycle event should mount delayed inline card');
 
-    // Host/mobile redraws can remove extension siblings after the render event. The chat
-    // MutationObserver must notice the missing anchor and restore it without another scan.
     const redrawnAnchor = inlineAnchors.find(anchor => anchor.dataset.npcStateDeltaMessageId === String(lateDomMessageId));
     redrawnAnchor?.remove?.();
     assert.equal(inlineAnchors.some(anchor => anchor.dataset.npcStateDeltaMessageId === String(lateDomMessageId)), false, 'simulated host redraw should remove the card anchor');
@@ -1121,13 +1082,10 @@ try {
     await sleep(100);
     assert.equal(inlineAnchors.some(anchor => anchor.dataset.npcStateDeltaMessageId === String(lateDomMessageId)), true, 'chat mutation should self-heal a removed inline card');
 
-    // Reconciliation is idempotent: rendering again must not duplicate the same message anchor.
     globalThis.NPCStateDelta.renderInline();
     globalThis.NPCStateDelta.renderInline();
     assert.equal(inlineAnchors.filter(anchor => anchor.dataset.npcStateDeltaMessageId === String(lateDomMessageId)).length, 1, 'inline reconciliation should never duplicate an existing card anchor');
 
-    // SillyTavern 1.18 emits MESSAGE_SWIPED before it starts Generate('swipe'). NPC State Delta
-    // must not launch generateRaw in that pre-generation window or it can steal the host request.
     const rawCallsBeforeSwipe = mockState.rawCalls.length;
     const broadScansBeforeSwipe = mockState.rawCalls.filter(call => /isolated dossier scanner/i.test(String(call?.[0]?.systemPrompt || ''))).length;
     mockState.quietResponder = async () => '{"npcs":[]}';
@@ -1141,8 +1099,6 @@ try {
     assert.equal(mockState.rawCalls.length, rawCallsBeforeSwipe, 'MESSAGE_SWIPED must never start dossier generation while host swipeState=swiping');
     assert.equal(globalThis.NPCStateDelta.uiStatus().swipeSettlementPending, true, 'swipe should be held for settled reconciliation');
 
-    // Some providers emit MESSAGE_RECEIVED before SillyTavern clears swipeState. That must
-    // also be deferred, otherwise auto-scan can still collide with the active swipe request.
     eventSource.emit('message_received', lateDomMessageId);
     await sleep(180);
     assert.equal(mockState.rawCalls.length, rawCallsBeforeSwipe, 'MESSAGE_RECEIVED during a swipe must not start dossier generation');
@@ -1153,8 +1109,6 @@ try {
     assert.equal(broadScansAfterSwipe, broadScansBeforeSwipe + 1, 'settled replacement should receive exactly one deferred dossier scan even when that scan also needs focused relationship evaluation');
     assert.equal(globalThis.NPCStateDelta.uiStatus().swipeSettlementPending, false, 'settlement queue should clear after host swipe becomes idle');
 
-    // Explicit per-NPC dossier import reads Megumin's structured New_NPC / NPC_Update blocks
-    // without treating them as automatic story evidence or manufacturing player relationship scores.
     mockState.context.chat.push({
         is_user: false, is_system: false, name: 'Megumin', swipe_id: 0,
         mes: `<Blocks>\n<New_NPC name="Luna">\n**Name:** Luna | **Age:** 24\n**Role:** Guild archivist\n**Where to Find Them:** Bluewatch archive\n**Voice:** Clipped, formal, and precise.\n**Inner Circle:**\n* Mara — younger sister | fiercely protective\n* Dain — old rival | grudging respect\n**Read on the PC:** Wary but curious.\n</New_NPC>\n</Blocks>`,
@@ -1196,8 +1150,6 @@ try {
     assert.equal(dossierImportCalls.at(-1).responseLength, 3200);
     assert.equal('jsonSchema' in dossierImportCalls.at(-1), false);
 
-    // Explicit social facts must update Key Relationships even when the model returns no NPC
-    // delta object at all. This exercises the local current-exchange fallback and top-level edge merge.
     mockState.quietResponder = async () => '{"npcs":[]}';
     mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'Who is Tessa to Luna?' });
     mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', swipe_id: 0, mes: "Tessa is Luna's cousin. They grew up in neighboring households. Luna is reserved, shows dry humor with trusted colleagues, and consistently uses careful honorifics while speaking in a clipped, formal, precise manner." });
@@ -1206,8 +1158,6 @@ try {
     const lunaAfterExplicitTie = state.npcs.find(n => n.name === 'Luna');
     assert.ok(lunaAfterExplicitTie.keyRelationships.some(entry => /Tessa — cousin/i.test(entry)), 'explicit relationship statement must survive even when scanner JSON omits the NPC entirely');
 
-    // Per-NPC Refresh from Chat re-reads the configured history window and reconciles the
-    // dossier without replaying relationship deltas or pretending the NPC was newly present.
     const lunaBeforeRefresh = structuredClone(globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Luna'));
     mockState.quietResponder = async (args = {}) => {
         const prompt = String(args.prompt || '');
@@ -1257,9 +1207,6 @@ try {
     assert.equal(globalThis.NPCStateDelta.getState().npcs.some(n => n.name === 'Luna'), false, 'test cleanup should remove imported Luna');
     assert.equal(globalThis.NPCStateDelta.getState().pendingBackfills.some(item => item.label === 'Luna'), false, 'removal should also clear the queued OOC backfill');
 
-    // Optional full-scan mode must use the configured rolling window every assistant turn,
-    // even when the quick-scan cadence would not otherwise be due. Relationship scoring is
-    // explicitly isolated to the newest exchange inside that wider reconciliation prompt.
     mockState.extensionSettings.npc_state_delta.fullScanEveryTurn = true;
     mockState.extensionSettings.npc_state_delta.scanEvery = 20;
     mockState.extensionSettings.npc_state_delta.scanDepth = 4;
@@ -1303,9 +1250,6 @@ try {
     assert.deepEqual(globalThis.NPCStateDelta.getState().npcs.find(n => n.id === fullScanTarget.id).relationship, relationshipBeforeFullScan, 'full-window scans must not replay numeric relationship deltas from older history');
     assert.equal(globalThis.NPCStateDelta.scanMetrics()?.relationshipPass, true, 'full-window existing-NPC relationship scoring should be revalidated against only the current exchange');
 
-
-    // Persistence is version-aware: a mutation made while the first upload is in
-    // flight must trigger a second snapshot instead of being falsely marked saved.
     const persistenceTarget = globalThis.NPCStateDelta.getState().npcs.find(n => !n.archived);
     assert.ok(persistenceTarget, 'runtime should retain an NPC for persistence race validation');
     let releaseUpload;
@@ -1316,9 +1260,6 @@ try {
         promise: new Promise(resolve => { releaseUpload = resolve; }),
     };
     const uploadsBeforeRace = mockState.uploadCalls;
-    // v0.2.17 starts high-value user mutations immediately. Install the barrier before
-    // the archive so the test blocks that first critical write, then mutates again while
-    // it is in flight and verifies the writer loops to a newer snapshot.
     globalThis.NPCStateDelta.archive(persistenceTarget.id);
     await uploadEntered;
     const racingFlush = globalThis.NPCStateDelta.flush();
@@ -1331,8 +1272,6 @@ try {
     const persistedAfterRace = JSON.parse(mockState.files.get(racePointer.path));
     assert.equal(persistedAfterRace.state.npcs.find(n => n.id === persistenceTarget.id).archived, false, 'latest in-memory state must win the write race');
 
-    // Whole-chat deletion waits for an in-flight write before removing the pointer,
-    // so the completed upload cannot resurrect a deleted chat sidecar.
     let releaseDeleteUpload;
     let markDeleteUploadEntered;
     const deleteUploadEntered = new Promise(resolve => { markDeleteUploadEntered = resolve; });
@@ -1352,7 +1291,6 @@ try {
     assert.equal(mockState.extensionSettings.npc_state_delta.dataFiles['chat:megumin.png:smoke-chat'], undefined);
     assert.equal(mockState.files.has(deletedPointer.path), false);
 
-    // SillyTavern exposes both groupId and the active group chat_id as chatId. Group identity must win.
     mockState.context.groupId = 'party-1';
     mockState.context.chatId = 'group-chat-1';
     mockState.context.getCurrentChatId = () => 'group-chat-1';
@@ -1361,7 +1299,6 @@ try {
     await sleep(80);
     assert.equal(globalThis.NPCStateDelta.uiStatus().chatKey, 'group:party-1:group-chat-1', 'group identity must include both group owner and active group chat id');
 
-    // Two character cards may legitimately use the same chat filename. Their durable namespaces must never collide.
     mockState.context.groupId = null;
     mockState.context.characters = [{ name: 'Megumin', avatar: 'megumin.png' }, { name: 'Yunyun', avatar: 'yunyun.png' }];
     mockState.context.characterId = 0;
