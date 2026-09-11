@@ -30,11 +30,12 @@ jobs:
           node --check branch.js
           node --check branch-v0218.js
           node --check bundle.js
+          node --check full-cast.js
+          node --check dossier-ui.js
+          node --check launcher-ui.js
           node --check social.js
           node --check storage.js
           node --check identity.js
-          node --check tests/hardening-v0219.test.js
-          node --check tests/hardening-v0220.test.js
           git diff --check
       - name: Full verification
         run: npm test
@@ -49,13 +50,17 @@ jobs:
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
           const core = fs.readFileSync('core.js', 'utf8');
           const readme = fs.readFileSync('README.md', 'utf8');
           const bootstrap = fs.readFileSync('bootstrap.js', 'utf8');
           const escaped = String(manifest.version).replaceAll('.', '\\.');
           if (!new RegExp(`NPC_STATE_VERSION = ['\"]${escaped}['\"]`).test(core)) throw new Error('core version does not match manifest');
+          if (pkg.version !== manifest.version) throw new Error('package version does not match manifest');
           if (!readme.startsWith(`# NPC State Delta v${manifest.version}`)) throw new Error('README version does not match manifest');
           if (manifest.js !== 'bootstrap.js') throw new Error('manifest must load bootstrap.js');
+          if (bootstrap.includes('enhancements.js')) throw new Error('superseded enhancements wrapper is still loaded');
+          if (!bootstrap.includes("await import('./full-cast.js')")) throw new Error('full-cast owner must be loaded');
           const prepareAt = bootstrap.indexOf('await prepareNpcStateHardening()');
           const engineAt = bootstrap.indexOf("await import('./index.js')");
           if (prepareAt < 0 || engineAt < 0 || prepareAt > engineAt) throw new Error('hardening must initialize before the retained engine');

@@ -6,7 +6,7 @@ Read in order: `AGENTS.md`, `docs/core-contract.md`, `docs/WORKPLAN.md`, and `DE
 
 The user's current instruction controls scope and authorization. The core contract is the single behavior authority; the workplan defines work stages, not separate runtime systems. Historical documents under `docs/history/` are evidence only and do not govern Delta. Alpha/Beta contracts do not govern this repository.
 
-Inspect current branch, remote HEAD, working-tree changes, and available execution tools before changing files. Preserve unrelated work and concurrent commits. Complete only the requested stage or task; a request to seed the repository does not authorize stages 1–9. Do not start a rewrite simply because a later stage describes one.
+Inspect current branch, remote HEAD, working-tree changes, and available execution tools before changing files. Preserve unrelated work and concurrent commits. Complete only the requested stage or task; authorization for one stage does not authorize later stages. Do not start a rewrite simply because a later stage describes one.
 
 ## Main implementation rule
 
@@ -24,7 +24,7 @@ Keep Delta settings, globals, DOM identifiers, storage files/locks, injection ke
 
 Trace callers, exports, event hooks, stored-data readers, tests and packaging before deleting code. Remove superseded paths together; do not retain no-op facades or new legacy directories for hypothetical compatibility. Preserve active tombstones, source identity, writer locking, pending-write recovery and rollback safety.
 
-Seed module names and compatibility layers remain intentionally until stage 2. Historical documentation is not a runtime compatibility layer. Remove or consolidate it when useful without losing the source provenance record or required licensing.
+Stage 2 established Delta application version `0.1.0` and retired the superseded enhancement dossier-library layer. Actively referenced source modules may still carry legacy version-bearing filenames where caller tracing proves they contain live baseline algorithms or migration/lineage helpers. Do not delete or rename such files solely for cosmetic cleanliness; move their callers and tests first. Historical documentation is not a runtime compatibility layer and must not be rewritten to falsify source provenance.
 
 Do not silently loosen or tighten legacy evidence interpretation under cleanup. Keep model-facing instructions compact. Do not add unsolicited scans, retries, per-field calls, classifiers or summarizers. Account for retained focused passes as real requests.
 

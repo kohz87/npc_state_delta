@@ -1,5 +1,14 @@
 # NPC State Delta changes
 
+## Stage 2 consolidation / Delta v0.1.0 - 11 September 2026
+
+- Establish `0.1.0` as NPC State Delta's own application-version baseline in the manifest, core facade and package metadata. Retained source-engine, bundle and branch schema versions remain independent.
+- Replace the broad `enhancements.js` layer with a dedicated `full-cast.js` owner that preserves the opt-in full-cast scan and redundant-backfill guard.
+- Remove the superseded secondary Dossier Library overlay now that Stage 1 owns the dossier/cast presentation surface.
+- Update bootstrap, validation, package naming and focused tests around the consolidated owner boundaries.
+- Retain actively called `core-v0218.js` and `branch-v0218.js` source modules because caller tracing shows they still own baseline algorithms and lineage/migration helpers; their versioned names are provenance, not duplicate runtime engines.
+- Keep scanner semantics, persistence/recovery, relationship mechanics, evidence/injection behavior and later-stage contracts unchanged.
+
 ## Stage 1 tablet cast rail fix - 11 September 2026
 
 - Keep the cast search field and lifecycle filters on one row for tablet widths so they do not consume most of the fixed cast rail height.

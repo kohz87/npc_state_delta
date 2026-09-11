@@ -28,13 +28,18 @@ for (const file of runtimeFiles) {
   }
 }
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
+const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const facade = fs.readFileSync(path.join(root, 'core.js'), 'utf8');
 const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
 const bootstrap = fs.readFileSync(path.join(root, 'bootstrap.js'), 'utf8');
 requireCheck(manifest.display_name === 'NPC State Delta', 'manifest identity');
 requireCheck(manifest.js === 'bootstrap.js' && manifest.css === 'style.css', 'manifest entrypoints');
 requireCheck(facade.includes(`NPC_STATE_VERSION = '${manifest.version}'`), 'core facade/manifest version mismatch');
+requireCheck(pkg.version === manifest.version, 'package/manifest version mismatch');
 requireCheck(readme.startsWith(`# NPC State Delta v${manifest.version}`), 'README/manifest version mismatch');
+requireCheck(!fs.existsSync(path.join(root, 'enhancements.js')), 'superseded enhancements.js remains');
+requireCheck(fs.existsSync(path.join(root, 'full-cast.js')), 'full-cast owner missing');
+requireCheck(!bootstrap.includes('enhancements.js') && bootstrap.includes("await import('./full-cast.js')"), 'bootstrap full-cast ownership mismatch');
 requireCheck(bootstrap.indexOf('await prepareNpcStateHardening()') >= 0 && bootstrap.indexOf('await prepareNpcStateHardening()') < bootstrap.indexOf("await import('./index.js')"), 'hardening must precede engine');
 for (const file of ['AGENTS.md', 'docs/core-contract.md', 'docs/WORKPLAN.md', 'DEVELOPMENT.md', 'docs/seed-provenance.md', 'docs/seed-provenance.json', 'LICENSE']) {
   requireCheck(fs.existsSync(path.join(root, file)), `missing ${file}`);
@@ -42,4 +47,4 @@ for (const file of ['AGENTS.md', 'docs/core-contract.md', 'docs/WORKPLAN.md', 'D
 if (errors.length) {
   console.error(errors.join('\n'));
   process.exitCode = 1;
-} else console.log(`Validation passed: ${runtimeFiles.length} runtime JS modules; syntax, local imports, isolation, entrypoints and governing documents.`);
+} else console.log(`Validation passed: ${runtimeFiles.length} runtime JS modules; syntax, local imports, isolation, consolidated owners, application version, entrypoints and governing documents.`);
