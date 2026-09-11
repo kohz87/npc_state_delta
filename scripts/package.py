@@ -10,7 +10,7 @@ manifest = json.loads((root / 'manifest.json').read_text())
 files = sorted([p.name for p in root.glob('*.js')] + ['style.css', 'manifest.json', 'LICENSE', 'README.md'])
 out = root / 'dist'
 out.mkdir(exist_ok=True)
-archive = out / f"npc_state_delta-{manifest['version']}-seed.zip"
+archive = out / f"npc_state_delta-{manifest['version']}.zip"
 with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as bundle:
     for name in files:
         info = zipfile.ZipInfo(f'npc_state_delta/{name}', date_time=(2026, 9, 11, 0, 0, 0))
