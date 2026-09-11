@@ -13,3 +13,8 @@ try {
 } catch (error) {
     console.error('[NPC State Delta] Stage 1 dossier UI failed to load', error);
 }
+try {
+    await import('./launcher-ui.js');
+} catch (error) {
+    console.error('[NPC State Delta] Stage 1 launcher refinement failed to load', error);
+}
