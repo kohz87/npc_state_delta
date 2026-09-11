@@ -8,6 +8,7 @@ import {
     scannerRoutingMetrics,
     scannerProfileOptions,
 } from './scanner-routing.js';
+import { backfillNeedsRequest } from './scan-context.js';
 import {
     NPC_STATE_VERSION,
     DEFAULT_RELATIONSHIP,
@@ -1291,8 +1292,11 @@ async function drainPendingAutoScan(chatKey) {
         return false;
     }
     pendingAutoScans.delete(chatKey);
-    await scanNow({ manual: false, messageId: pending.messageId });
-    return true;
+    const succeeded = await scanNow({ manual: false, messageId: pending.messageId });
+    if (succeeded && getChatKey() === chatKey && latestMessageId(true) === pending.messageId) {
+        await processPendingBackfills(pending.messageId);
+    }
+    return succeeded;
 }
 
 function queueBranchRescan(messageId, _attempt = 0, originKey = getChatKey()) {
@@ -2304,6 +2308,7 @@ async function backfillNpcFromHistory(request, messageId = null) {
     // anywhere in the configured history window has no evidence that this pass can safely
     // reconcile. Treat it as a clean no-op rather than spending a model call or creating a retry.
     if (request.deepSweep === true && !transcriptMentionsNpcRecord(transcript, existing)) return true;
+    if (!backfillNeedsRequest(existing, state.npcs, currentExchangeTranscript())) return true;
     const scanLineage = chatLineage(ctx.chat || []);
     const prompt = buildBackfillPrompt({
         transcript,
@@ -2412,6 +2417,7 @@ async function backfillNpcFromHistory(request, messageId = null) {
         return true;
     } catch (error) {
         console.error('[NPC State Delta] dossier backfill failed', error);
+        if (error?.code === 'NPC_SCANNER_ROUTE_CANCELLED' || error?.code === 'NPC_SCANNER_ROUTE_TIMEOUT') return null;
         if (!request.silent || (isScannerRoutingError(error) && error.code !== 'NPC_SCANNER_ROUTE_CANCELLED')) globalThis.toastr?.warning?.(`NPC State Delta backfill failed for ${request.label}: ${error?.message || error}`);
         return false;
     } finally {
@@ -2443,6 +2449,7 @@ async function processPendingBackfills(messageId = null) {
         if (attempts > 0 && lastAttemptAt && Date.now() - lastAttemptAt < BACKFILL_RETRY_COOLDOWN_MS) continue;
 
         const succeeded = await backfillNpcFromHistory(request, messageId);
+        if (succeeded === null) break;
         if (getChatKey() !== chatKey || !requireReadyChatMutation('settle queued dossier backfill', chatKey, { notify: false })) break;
         const latest = getChatState(chatKey);
         const currentRequest = (latest.pendingBackfills || []).find(item => item.npcId === request.npcId);
@@ -2742,21 +2749,21 @@ function applyStaleLifecycleAfterScan(state, scanResult, transcript, settings, {
 
 async function scanNow({ manual = false, messageId = null, allowDuringSwipe = false } = {}) {
     const settings = getSettings();
-    if (!settings.enabled) return;
+    if (!settings.enabled) return false;
     if (!allowDuringSwipe && isHostSwipeActive()) {
         if (manual) globalThis.toastr?.info?.('NPC State Delta: wait for the current swipe to finish before scanning.');
-        return;
+        return false;
     }
     const ctx = getContext();
     const scanChatKey = getChatKey();
-    if (scanChatKey === 'no-chat') return;
+    if (scanChatKey === 'no-chat') return false;
     const sourceFingerprint = Number.isInteger(messageId) ? fingerprintMessage(ctx.chat?.[messageId] || {}) : null;
     await ensureChatStateLoaded(scanChatKey);
-    if (getChatKey() !== scanChatKey || (sourceFingerprint !== null && sourceFingerprint !== fingerprintMessage(getContext().chat?.[messageId] || {}))) return;
+    if (getChatKey() !== scanChatKey || (sourceFingerprint !== null && sourceFingerprint !== fingerprintMessage(getContext().chat?.[messageId] || {}))) return false;
     if (isScanBusy(scanChatKey)) {
         if (manual) globalThis.toastr?.info?.('NPC State Delta: another dossier scan is already running in this chat.');
         else if (Number.isInteger(messageId)) queuePendingAutoScan(scanChatKey, messageId, 'busy-auto-scan');
-        return;
+        return false;
     }
     const scanLineage = chatLineage(ctx.chat || []);
     const currentTranscript = currentExchangeTranscript(messageId);
@@ -2764,11 +2771,11 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
     const transcript = (manual || fullWindowScan) ? recentTranscript(settings.scanDepth) : currentTranscript;
     if (!transcript) {
         if (manual) globalThis.toastr?.warning?.('NPC State Delta: no story text to scan yet.');
-        return;
+        return false;
     }
 
     const operation = beginScanOperation(scanChatKey, manual ? 'manual dossier scan' : 'automatic dossier scan');
-    if (!operation) return;
+    if (!operation) return false;
     setScanIndicator(true);
     const state = getChatState(scanChatKey);
     const scanStateVersion = Number(stateVersions.get(scanChatKey) || 0);
@@ -2824,7 +2831,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
             };
             console.info('[NPC State Delta] discarded stale dossier scan after chat or dossier state changed.');
             if (manual) globalThis.toastr?.info?.('NPC State Delta: chat changed during scan; stale result was discarded.');
-            return;
+            return false;
         }
 
         const resolvedParsed = resolveInterimIdentityPromotions(parsed, state.npcs, state.candidates);
@@ -2875,7 +2882,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         if (!scanOperationCurrent(scanChatKey, operation) || getChatKey() !== scanChatKey || firstLineageDivergence(scanLineage, currentLineage) !== -1 || Number(stateVersions.get(scanChatKey) || 0) !== scanStateVersion) {
             console.info('[NPC State Delta] discarded stale dossier scan after chat or dossier state changed during relationship evaluation.');
             if (manual) globalThis.toastr?.info?.('NPC State Delta: chat changed during scan; stale result was discarded.');
-            return;
+            return false;
         }
         const targetMessageId = Number.isInteger(messageId) ? messageId : latestMessageId(true);
         const compactWorldStateTurn = hasCompactMeguminWorldState(ctx.chat?.[targetMessageId]?.mes || '');
@@ -2946,7 +2953,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
             || Number(stateVersions.get(scanChatKey) || 0) !== scanStateVersion) {
             console.info('[NPC State Delta] discarded stale dossier scan after new-NPC relationship evaluation.');
             if (manual) globalThis.toastr?.info?.('NPC State Delta: chat changed during scan; stale result was discarded.');
-            return;
+            return false;
         }
         if (lastScanMetrics) {
             lastScanMetrics.profileApplied = Number(merged.report?.profileUpdateStats?.applied || 0);
@@ -3024,9 +3031,11 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
             if (removed.length) parts.push(`${removed.length} stale deleted${names ? ` (${names}${extra})` : ''}`);
             globalThis.toastr?.info?.(`NPC State Delta: ${parts.join(', ')}. Deleted stale NPCs can be rediscovered if they return.`);
         }
+        return true;
     } catch (error) {
         console.error('[NPC State Delta] dossier scan failed', error);
         if (manual || (isScannerRoutingError(error) && error.code !== 'NPC_SCANNER_ROUTE_CANCELLED')) globalThis.toastr?.error?.(`NPC State Delta scan failed: ${error?.message || error}`);
+        return false;
     } finally {
         endScanOperation(scanChatKey, operation);
         if (getChatKey() === scanChatKey) setScanIndicator(isScanBusy(scanChatKey));
@@ -3665,7 +3674,7 @@ function setClassActive(node, active) {
     if (node.classList?.toggle) node.classList.toggle('active', Boolean(active));
     else {
         const names = new Set(String(node.className || '').split(/\s+/).filter(Boolean));
-        if (active) names.add('active'); else names.delete('active');
+        if (active) names.add('active'); else names.delete(active);
         node.className = [...names].join(' ');
     }
 }
@@ -5374,9 +5383,10 @@ async function handleAssistantMessageReceived(messageId, { bypassSwipeGuard = fa
     updateInjection();
 
     if (scanExpected) {
-        await scanNow({ manual: false, messageId, allowDuringSwipe: bypassSwipeGuard });
+        if (await scanNow({ manual: false, messageId, allowDuringSwipe: bypassSwipeGuard }) === false) return;
     }
-    if (getChatKey() !== eventChatKey) return;
+    if (getChatKey() !== eventChatKey || latestMessageId(true) !== messageId
+        || eventSourceKey !== lineageCheckpointKey(chatLineage(getContext().chat || []), messageId)) return;
     await processPendingBackfills(messageId);
 }
 
