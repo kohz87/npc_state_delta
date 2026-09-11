@@ -11,6 +11,7 @@ const identity = fs.readFileSync(path.join(root, 'identity.js'), 'utf8');
 const hardening = fs.readFileSync(path.join(root, 'hardening.js'), 'utf8');
 const contextSource = `${index}\n${identity}\n${hardening}`;
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
+const runtimeConfig = JSON.parse(fs.readFileSync(path.join(root, 'runtime-modules.json'), 'utf8'));
 
 const st118Contract = {
     extensionsModule: ['extension_settings', 'getContext'],
@@ -22,6 +23,8 @@ const st118Contract = {
 assert.equal(manifest.js, 'bootstrap.js');
 assert.equal(manifest.css, 'style.css');
 assert.equal(manifest.minimum_client_version, '1.18.0');
+assert.equal(runtimeConfig.entrypoint, manifest.js);
+assert.equal(runtimeConfig.applicationVersion, manifest.version);
 assert.match(bootstrap, /prepareNpcStateHardening/);
 assert.match(bootstrap, /import\('\.\/index\.js'\)/);
 assert.match(index, /from '\.\.\/\.\.\/\.\.\/extensions\.js'/);
@@ -61,11 +64,20 @@ assert.match(index, /function inlineRosterHtml/, 'present-only roster renderer m
 assert.match(index, /function openNpcViewer/, 'portrait-card dossier viewer missing');
 assert.doesNotMatch(index, /\bnpcBank\b|\blocalProfile\b|from\s+['\"][^'\"]*Megumin|extension_settings\s*\[[^\]]*Megumin-Suite/i, 'standalone build must not import or access Megumin NPC Bank internals');
 
-for (const file of ['bootstrap.js', 'index.js', 'hardening.js', 'hardening-core.js', 'core.js', 'core-v0218.js', 'bundle.js', 'branch.js', 'branch-v0218.js', 'social.js', 'storage.js', 'identity.js', 'style.css', 'manifest.json']) {
-    assert.ok(fs.existsSync(path.join(root, file)), `missing ${file}`);
-}
+const configuredRuntime = runtimeConfig.modules.map(module => module.path).sort();
+const rootRuntime = fs.readdirSync(root, { withFileTypes: true })
+    .filter(entry => entry.isFile() && entry.name.endsWith('.js'))
+    .map(entry => entry.name)
+    .sort();
+assert.deepEqual(configuredRuntime, rootRuntime, 'active runtime inventory must match the installed root modules');
+for (const file of configuredRuntime) assert.ok(fs.existsSync(path.join(root, file)), `missing active runtime module ${file}`);
+assert.ok(configuredRuntime.includes('core-mechanics.js'));
+assert.ok(configuredRuntime.includes('branch-core.js'));
+assert.equal(configuredRuntime.includes('core-v0218.js'), false);
+assert.equal(configuredRuntime.includes('branch-v0218.js'), false);
+assert.equal(configuredRuntime.some(file => /(?:^|[-_.])legacy(?:[-_.]|$)|(?:^|[-_.])v\d{3,}(?:[-_.]|$)/i.test(file)), false, 'active runtime module names must be semantic Delta roles');
 
 console.log('Compatibility contract: SillyTavern 1.18.0 API/import/event checks passed.');
-console.log('Lifecycle hardening contract: owner-wide character rename/delete and historical rebase hooks passed.');
+console.log('Lifecycle hardening contract: owner-wide character rename/delete and historical-shape rebase hooks passed.');
 console.log('Isolation check: optional Megumin DOM integration has no Megumin NPC Bank imports/settings dependency.');
-console.log('Manifest/layout check: passed.');
+console.log('Active runtime inventory/layout check: passed.');
