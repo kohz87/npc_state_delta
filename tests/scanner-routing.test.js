@@ -124,6 +124,27 @@ test('cancelling an in-flight profile request aborts it and does not fall back',
     assert.equal(scannerRoutingMetrics().inflight, 0);
 });
 
+test('profile timeout aborts the scoped request without host fallback', async () => {
+    const before = scannerRoutingMetrics();
+    const { context, calls } = makeContext({
+        profileId: 'scan-timeout',
+        profiles: [{ id: 'scan-timeout', name: 'Scanner Timeout', supported: true }],
+        responder: ({ options }) => new Promise((resolve, reject) => {
+            options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+        }),
+    });
+    await assert.rejects(
+        dispatchScannerRequest(context, { prompt: 'payload', responseLength: 100 }, { label: 'timeout pass', timeoutMs: 25 }),
+        error => error?.code === 'NPC_SCANNER_ROUTE_TIMEOUT',
+    );
+    const after = scannerRoutingMetrics();
+    assert.equal(calls.host.length, 0);
+    assert.equal(calls.profile.length, 1);
+    assert.equal(after.timedOut, before.timedOut + 1);
+    assert.equal(after.inflight, 0);
+    assert.equal(after.last.outcome, 'timeout');
+});
+
 test('scanner routing metrics count actual dispatcher requests, including route and outcome', async () => {
     const before = scannerRoutingMetrics();
     const { context } = makeContext();
