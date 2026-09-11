@@ -1,0 +1,12 @@
+{
+  "name": "npc_state_delta",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "node --test tests/*.test.js && node tests/compatibility-check.js && node tests/runtime-smoke.mjs && node tests/migration-smoke.mjs",
+    "validate": "node scripts/validate.mjs",
+    "measure:prompts": "node scripts/measure-prompts.mjs",
+    "package": "python3 scripts/package.py"
+  }
+}

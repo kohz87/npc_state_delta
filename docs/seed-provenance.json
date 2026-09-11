@@ -1,0 +1,503 @@
+{
+  "sourceRepository": "kohz87/npc_state",
+  "sourceCommit": "a12b2937b5c1305e3e3017218a626478a5bedcdc",
+  "sourceDirectory": "legacy/v0.2.x",
+  "sourceManifestVersion": "0.2.23",
+  "deltaBaseCommit": "744faae8b72651cb3c304a12f211cca3661b01d7",
+  "replacements": [
+    [
+      "npc_state",
+      "npc_state_delta"
+    ],
+    [
+      "npc-state",
+      "npc-state-delta"
+    ],
+    [
+      "npcState",
+      "npcStateDelta"
+    ],
+    [
+      "NPCState",
+      "NPCStateDelta"
+    ],
+    [
+      "NPC State",
+      "NPC State Delta"
+    ],
+    [
+      "NPC STATE",
+      "NPC STATE DELTA"
+    ],
+    [
+      "npcstate",
+      "npcstatedelta"
+    ]
+  ],
+  "additionalAdaptations": [
+    "Historical markdown relocated to docs/history; package layout test points to relocated audit reports.",
+    "Root README, CHANGELOG, package scripts and CI are Delta-maintained seed scaffolding; see seed-provenance.md.",
+    "OOC recognizer regex and uppercase test fixture use the Delta namespace until stage 7 removal."
+  ],
+  "files": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "sourcePath": "legacy/v0.2.x/.github/workflows/ci.yml",
+      "gitBlobSha": "9fac99190bac8e15bfd6805ef46398aa5c43682d",
+      "size": 2151,
+      "destination": ".github/workflows/ci.yml",
+      "seedSha256": "e054a713a8a8d89a639430c160923aca05562db5b1bc0b4a5d3b37c3aa23930e",
+      "identityAdapted": true
+    },
+    {
+      "path": "CHANGELOG.md",
+      "sourcePath": "legacy/v0.2.x/CHANGELOG.md",
+      "gitBlobSha": "f3bc799c28a64cba41544296211ad1f97ea76f0b",
+      "size": 6860,
+      "destination": "docs/history/legacy-CHANGELOG.md",
+      "seedSha256": "ceea004c578118fd46ef124b564c094c63f9b2a69234b2ef9a27a2d0863e5509",
+      "identityAdapted": false
+    },
+    {
+      "path": "CODE-REVIEW.md",
+      "sourcePath": "legacy/v0.2.x/CODE-REVIEW.md",
+      "gitBlobSha": "e187c21a390c1709d85e9872e9408c68a36b6994",
+      "size": 34035,
+      "destination": "docs/history/legacy-CODE-REVIEW.md",
+      "seedSha256": "09aed91b67ed14d423466fe9809a6fd0b7bd9a40efc51a5eb92e34ad6859f724",
+      "identityAdapted": false
+    },
+    {
+      "path": "README.md",
+      "sourcePath": "legacy/v0.2.x/README.md",
+      "gitBlobSha": "6672d6fe071ae27cdaf84a955f7ff1df36b69b1c",
+      "size": 4415,
+      "destination": "docs/history/legacy-README.md",
+      "seedSha256": "478411f5b87d95d6695d210e2bd6237b20931762af1c00729301cbdacbe29d1a",
+      "identityAdapted": false
+    },
+    {
+      "path": "TEST-REPORT.md",
+      "sourcePath": "legacy/v0.2.x/TEST-REPORT.md",
+      "gitBlobSha": "a6230bf7196336ca5b8a6089eaac4e68f4e34373",
+      "size": 20563,
+      "destination": "docs/history/legacy-TEST-REPORT.md",
+      "seedSha256": "656fe6e36d4e7a797339810c57bf7f54cc9e8e63f17cb3a8ae43ae2fb24cd576",
+      "identityAdapted": false
+    },
+    {
+      "path": "bootstrap.js",
+      "sourcePath": "legacy/v0.2.x/bootstrap.js",
+      "gitBlobSha": "35eeef358ce3b08e8dac2b79abdf5225460e0e51",
+      "size": 352,
+      "destination": "bootstrap.js",
+      "seedSha256": "84855bd84b48357d7cbaf6749b7e5121478005a0d7c64397441910d31046f0a6",
+      "identityAdapted": true
+    },
+    {
+      "path": "branch-v0218.js",
+      "sourcePath": "legacy/v0.2.x/branch-v0218.js",
+      "gitBlobSha": "ba08ebb8d8309c71163765c8f73dc32b4c3c532e",
+      "size": 32731,
+      "destination": "branch-v0218.js",
+      "seedSha256": "4ed221f5529d542fa95a89213d6105a0be6282c02cdfa5d216e59b60975d1c8f",
+      "identityAdapted": true
+    },
+    {
+      "path": "branch.js",
+      "sourcePath": "legacy/v0.2.x/branch.js",
+      "gitBlobSha": "4080c9490d75ebe9cb2866ca92d07328e4f32189",
+      "size": 27426,
+      "destination": "branch.js",
+      "seedSha256": "a41ad63ac49d967f9c9a86fd9401bf4b2bcdda750de06a73134f69be03a4834b",
+      "identityAdapted": false
+    },
+    {
+      "path": "bundle.js",
+      "sourcePath": "legacy/v0.2.x/bundle.js",
+      "gitBlobSha": "8cd957f58f2253d354851b31f69f316470e1f66e",
+      "size": 17334,
+      "destination": "bundle.js",
+      "seedSha256": "a9158951178b1478fe888be30b2dad2b21451d42ef43a09fb8af48077d562b5b",
+      "identityAdapted": true
+    },
+    {
+      "path": "core-v0218.js",
+      "sourcePath": "legacy/v0.2.x/core-v0218.js",
+      "gitBlobSha": "6d55d08889c04bf55d1d72e44ecc758b800ccc35",
+      "size": 293051,
+      "destination": "core-v0218.js",
+      "seedSha256": "771cef9fd7f7e12b72538cd6d6082c19ec6b137bda94beec09e0799db919fece",
+      "identityAdapted": true
+    },
+    {
+      "path": "core.js",
+      "sourcePath": "legacy/v0.2.x/core.js",
+      "gitBlobSha": "d71a5039ef43992bfb3be54ed9211def08821fc6",
+      "size": 76,
+      "destination": "core.js",
+      "seedSha256": "a7f4ac8ffd39e79237650668b5423194b4e078b0f0144088827544ba794afc5e",
+      "identityAdapted": false
+    },
+    {
+      "path": "docs/CHANGELOG-v0.2.18.md",
+      "sourcePath": "legacy/v0.2.x/docs/CHANGELOG-v0.2.18.md",
+      "gitBlobSha": "5502bd4fdfd1fb386e8b104fba369f344b81b7b8",
+      "size": 30364,
+      "destination": "docs/history/CHANGELOG-v0.2.18.md",
+      "seedSha256": "dca74310946157fe2a6fa8bea17906004faf6b33c903d77d2911e074e98ebb4d",
+      "identityAdapted": false
+    },
+    {
+      "path": "docs/README-v0.2.18.md",
+      "sourcePath": "legacy/v0.2.x/docs/README-v0.2.18.md",
+      "gitBlobSha": "9c687b6707a8ea188301520bf1e4a7f9e25d8707",
+      "size": 30509,
+      "destination": "docs/history/README-v0.2.18.md",
+      "seedSha256": "8c18a27df567e744f60c669e08628444a1a33042533132f777b9bd308da42ede",
+      "identityAdapted": false
+    },
+    {
+      "path": "enhancements.js",
+      "sourcePath": "legacy/v0.2.x/enhancements.js",
+      "gitBlobSha": "eb976f3c0f0d1b296d72767de64bf260c69cdeab",
+      "size": 23219,
+      "destination": "enhancements.js",
+      "seedSha256": "753ce5e5ea10bd4f5be21e66468336c175a0de9ded85f7c658b6991c3412e851",
+      "identityAdapted": true
+    },
+    {
+      "path": "hardening-core.js",
+      "sourcePath": "legacy/v0.2.x/hardening-core.js",
+      "gitBlobSha": "5a975ce2f09f399501247a863cda1c5be89ba7c4",
+      "size": 8302,
+      "destination": "hardening-core.js",
+      "seedSha256": "44ce76618e5fe73adb6d4c2aa499e9f97ee8bc8263e75f76298e0f5dc2fd36a8",
+      "identityAdapted": false
+    },
+    {
+      "path": "hardening.js",
+      "sourcePath": "legacy/v0.2.x/hardening.js",
+      "gitBlobSha": "4b857237471d1c9c1fe18e13f9dc09cb884869c1",
+      "size": 31561,
+      "destination": "hardening.js",
+      "seedSha256": "cee926b8d30fc62014fc647944ab2d7c3e8c34cea32ce9a37b595e37c362edcd",
+      "identityAdapted": true
+    },
+    {
+      "path": "identity.js",
+      "sourcePath": "legacy/v0.2.x/identity.js",
+      "gitBlobSha": "70d6e8bbf4b53a273b03aa3529854f858754baa7",
+      "size": 3503,
+      "destination": "identity.js",
+      "seedSha256": "8d5fa20faf57de07f59e6f147b3f4b4cab1564ee3532cef2ca09b0516dc5d4a1",
+      "identityAdapted": false
+    },
+    {
+      "path": "index.js",
+      "sourcePath": "legacy/v0.2.x/index.js",
+      "gitBlobSha": "29c5b1ae767608a9efc955715f4ff6229bfdbafb",
+      "size": 311565,
+      "destination": "index.js",
+      "seedSha256": "82327691fd10ba228b1b436bc14652878fa908af691389ad28f4428207f585f3",
+      "identityAdapted": true
+    },
+    {
+      "path": "manifest.json",
+      "sourcePath": "legacy/v0.2.x/manifest.json",
+      "gitBlobSha": "52d96eb61b8905aa7607c1a01ae1bc19e9fa441d",
+      "size": 265,
+      "destination": "manifest.json",
+      "seedSha256": "9c6b708f7e49952e524d09ade6a8cc857c1a1e1cb61d4449d43308ae9f7acf8d",
+      "identityAdapted": true
+    },
+    {
+      "path": "package.json",
+      "sourcePath": "legacy/v0.2.x/package.json",
+      "gitBlobSha": "c208a3f2a01a23335b5bc8acd94c34fa611699a5",
+      "size": 207,
+      "destination": "package.json",
+      "seedSha256": "6899870cb30c64e49f5a892b7824206e2400aa4b5a3e3aba9e0aa07a6ac42529",
+      "identityAdapted": false
+    },
+    {
+      "path": "social.js",
+      "sourcePath": "legacy/v0.2.x/social.js",
+      "gitBlobSha": "029c53585291a5333c0c0d79d8c67410935d8872",
+      "size": 36296,
+      "destination": "social.js",
+      "seedSha256": "f1c49867ff6377547ce23fdb0d4442413d98466f075bade203add972121f1dbd",
+      "identityAdapted": false
+    },
+    {
+      "path": "storage.js",
+      "sourcePath": "legacy/v0.2.x/storage.js",
+      "gitBlobSha": "c5642c979ab9bb11792a9f3f659c2046fc3ba4ab",
+      "size": 22028,
+      "destination": "storage.js",
+      "seedSha256": "cb6d4546bba969134ee8e967fe22133c55c8a81e4a7997036a3910e3a2734202",
+      "identityAdapted": true
+    },
+    {
+      "path": "style.css",
+      "sourcePath": "legacy/v0.2.x/style.css",
+      "gitBlobSha": "c769578afb0236008c387ddaebe1959f3260ab40",
+      "size": 31650,
+      "destination": "style.css",
+      "seedSha256": "fdd18d61eb7b42a36caa21e4ed4379496d4926dfe8932773ad415a858f786da0",
+      "identityAdapted": true
+    },
+    {
+      "path": "tests/branch-safety.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/branch-safety.test.js",
+      "gitBlobSha": "4ff9bb370f4e6a3d3d3ff5777be9f45a5366f5d9",
+      "size": 5907,
+      "destination": "tests/branch-safety.test.js",
+      "seedSha256": "01018eb3094a9258d6eb07f2c7bb9ebcb5f19ddacbde82cde656b7ba2b90f6d5",
+      "identityAdapted": false
+    },
+    {
+      "path": "tests/branch.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/branch.test.js",
+      "gitBlobSha": "f3176c4d316c4dc7a24b8e03ce777da63fb84fac",
+      "size": 24679,
+      "destination": "tests/branch.test.js",
+      "seedSha256": "49af09cf5dc07b94e45a278a6d5b043302ad8da78ade85dcb9560d795c940136",
+      "identityAdapted": false
+    },
+    {
+      "path": "tests/bundle-safety.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/bundle-safety.test.js",
+      "gitBlobSha": "7872d75df7db3bee2dacc632805d389f9280d752",
+      "size": 7142,
+      "destination": "tests/bundle-safety.test.js",
+      "seedSha256": "3ec35c4c0c486c430df197d8c08820e17889e237eb25df1950b552fd5691f834",
+      "identityAdapted": false
+    },
+    {
+      "path": "tests/bundle.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/bundle.test.js",
+      "gitBlobSha": "5c78cf47d53eae786053ecab6e04695857feb6ed",
+      "size": 8708,
+      "destination": "tests/bundle.test.js",
+      "seedSha256": "7e86e723056e6649e62b237c0cea3a9bbbb1ecd45845ebe1bf2b1820766b9274",
+      "identityAdapted": false
+    },
+    {
+      "path": "tests/compatibility-check.js",
+      "sourcePath": "legacy/v0.2.x/tests/compatibility-check.js",
+      "gitBlobSha": "f352589d04e633940f71d052081f9a9c1b6e3f37",
+      "size": 5152,
+      "destination": "tests/compatibility-check.js",
+      "seedSha256": "61f5b75fddae8c52e21056c49bf025db20c5be151e629a2f5f469d9bddf7d670",
+      "identityAdapted": true
+    },
+    {
+      "path": "tests/core.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/core.test.js",
+      "gitBlobSha": "a20474ccb4bbf2831dcfcee2ccba7a602f317d5e",
+      "size": 198262,
+      "destination": "tests/core.test.js",
+      "seedSha256": "9fa5d58e8e8b9b19fe7f9de23da3fe98e0b8a4638cde55797643c6b82c4921b8",
+      "identityAdapted": true
+    },
+    {
+      "path": "tests/enhancements-v0224.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/enhancements-v0224.test.js",
+      "gitBlobSha": "5f5aecea540decdffed18eae5dc199e7beb1c960",
+      "size": 2022,
+      "destination": "tests/enhancements-v0224.test.js",
+      "seedSha256": "8138b185d639e102f8d8108a6dc15852afa73eb36294570ef9150a9048ef8030",
+      "identityAdapted": true
+    },
+    {
+      "path": "tests/hardening-v0219.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/hardening-v0219.test.js",
+      "gitBlobSha": "7295dc9218b30500fdd40e5e14d7aea4b0adb2e2",
+      "size": 4462,
+      "destination": "tests/hardening-v0219.test.js",
+      "seedSha256": "81416d99c9df1a0248a212f46ff4bedbc46b5a3eb9c36e0a3a8723a2b20eb42b",
+      "identityAdapted": false
+    },
+    {
+      "path": "tests/hardening-v0220.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/hardening-v0220.test.js",
+      "gitBlobSha": "ec9e5fdf8070ffcca106bbf290d4488a335dd13c",
+      "size": 10381,
+      "destination": "tests/hardening-v0220.test.js",
+      "seedSha256": "249a970db794f6d825f718b5afdb9eb86e3334980df2b1b46cb064582732efae",
+      "identityAdapted": false
+    },
+    {
+      "path": "tests/hardening-v0221.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/hardening-v0221.test.js",
+      "gitBlobSha": "256efd5bc7ea5905d137fee5f5ef80cef5e74d52",
+      "size": 10538,
+      "destination": "tests/hardening-v0221.test.js",
+      "seedSha256": "38b50f6054c0fa1b8c70f597940525ef84f087ee31d063fe3d0a0978820dc325",
+      "identityAdapted": true
+    },
+    {
+      "path": "tests/hardening-v0222.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/hardening-v0222.test.js",
+      "gitBlobSha": "a779a6c70f4ff36c33905d96723cf9623c48cbed",
+      "size": 10549,
+      "destination": "tests/hardening-v0222.test.js",
+      "seedSha256": "67f414f6a3466649ae2386d76d72b9f98726246c0498ffdeae981d3a468508a7",
+      "identityAdapted": false
+    },
+    {
+      "path": "tests/hardening-v0223.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/hardening-v0223.test.js",
+      "gitBlobSha": "d805e0ec297130a41e496f9a8eb7d83143d5a877",
+      "size": 2482,
+      "destination": "tests/hardening-v0223.test.js",
+      "seedSha256": "cf4fb927c63f260235052cb27d8ad23dad416a83d92b5e893af64f16af8c62e8",
+      "identityAdapted": true
+    },
+    {
+      "path": "tests/identity.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/identity.test.js",
+      "gitBlobSha": "a233675c4e1da249017f7c51128b5b176d6137ef",
+      "size": 2281,
+      "destination": "tests/identity.test.js",
+      "seedSha256": "6bd12d18a29239fc7c5766f26b498bfbd32cab81cd4f57694f4dce63116a8b5b",
+      "identityAdapted": false
+    },
+    {
+      "path": "tests/index-hardening.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/index-hardening.test.js",
+      "gitBlobSha": "eeed2a4a55082cfcb998ae8bd58bbf9149bcbf13",
+      "size": 2522,
+      "destination": "tests/index-hardening.test.js",
+      "seedSha256": "4203f28e83666edd4cded5c6ca18d600c90d45dd968f24f3ed166b0f3b531c1c",
+      "identityAdapted": false
+    },
+    {
+      "path": "tests/migration-smoke.mjs",
+      "sourcePath": "legacy/v0.2.x/tests/migration-smoke.mjs",
+      "gitBlobSha": "15a7317d68391f830f0138cc0aa1e4c6c8560bbe",
+      "size": 15148,
+      "destination": "tests/migration-smoke.mjs",
+      "seedSha256": "87f572c5672dc8447493891a91d6b5dbf74f031882e9563a4c6f56695aac362c",
+      "identityAdapted": true
+    },
+    {
+      "path": "tests/package.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/package.test.js",
+      "gitBlobSha": "82550a532c65dc045e90e365bd932bfce872b7d2",
+      "size": 1231,
+      "destination": "tests/package.test.js",
+      "seedSha256": "490386f9eec07e3df5d4137e28c538913e75af6a3ea261554936dae09adee919",
+      "identityAdapted": true
+    },
+    {
+      "path": "tests/quality.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/quality.test.js",
+      "gitBlobSha": "0df37a56f04304e696b8270a8f63db9a7f3c1a41",
+      "size": 3786,
+      "destination": "tests/quality.test.js",
+      "seedSha256": "90bd1343422712db54802caa5e02175b54d634b5175dc7518c40e5db7bf55893",
+      "identityAdapted": true
+    },
+    {
+      "path": "tests/runtime-safety.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/runtime-safety.test.js",
+      "gitBlobSha": "7d32558ba747699e48edfef226faf85396a538cc",
+      "size": 2133,
+      "destination": "tests/runtime-safety.test.js",
+      "seedSha256": "c050e79011e37063ad7ef4e2e696d2f00161dbb9b37bba5493e082c14eb83724",
+      "identityAdapted": false
+    },
+    {
+      "path": "tests/runtime-smoke.mjs",
+      "sourcePath": "legacy/v0.2.x/tests/runtime-smoke.mjs",
+      "gitBlobSha": "848f9ca96c82e045bc052cea20722aee9ddccdea",
+      "size": 95223,
+      "destination": "tests/runtime-smoke.mjs",
+      "seedSha256": "8efecd7308f2e577d39dca9c628a23873aef3e00348a62ae6521b531a03e5354",
+      "identityAdapted": true
+    },
+    {
+      "path": "tests/scanner-isolation.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/scanner-isolation.test.js",
+      "gitBlobSha": "2bb4ce3bffb402e53c51f09cf8e1187e552c6157",
+      "size": 1185,
+      "destination": "tests/scanner-isolation.test.js",
+      "seedSha256": "9e26222186da828aa39daeb59067722f660dc4bd1a7b7b47c836da59b27a7b9a",
+      "identityAdapted": false
+    },
+    {
+      "path": "tests/social.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/social.test.js",
+      "gitBlobSha": "c1822cc474414e65f9f9463780b13895215add79",
+      "size": 15787,
+      "destination": "tests/social.test.js",
+      "seedSha256": "fca6e2bc0ab83c5921157cffcb04072ab52238d7095dd75480fd4750063efb12",
+      "identityAdapted": false
+    },
+    {
+      "path": "tests/storage.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/storage.test.js",
+      "gitBlobSha": "4398e83387a5bd79c6173cc4e5c8b62108172dd7",
+      "size": 8504,
+      "destination": "tests/storage.test.js",
+      "seedSha256": "1ae36bf5d41f2aca5f663e3a029f73c1beef79d348602b93f54651c7129fc2d9",
+      "identityAdapted": true
+    },
+    {
+      "path": "tests/swipe-safety.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/swipe-safety.test.js",
+      "gitBlobSha": "df6146ebd5af46af4055c4e57a9d9166397217b0",
+      "size": 1856,
+      "destination": "tests/swipe-safety.test.js",
+      "seedSha256": "ed0f80216d3f305154cbec1d2d085a1127e16cda11b4c5832bdce386d3592c03",
+      "identityAdapted": false
+    },
+    {
+      "path": "tests/ui-layout.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/ui-layout.test.js",
+      "gitBlobSha": "970b70965047538fda27e1288260efddece00766",
+      "size": 28454,
+      "destination": "tests/ui-layout.test.js",
+      "seedSha256": "4e88585407b0232bd315f23caca1bbbf797e0a59d16d4806ec2ac4b65bbf3d2f",
+      "identityAdapted": true
+    },
+    {
+      "path": "tests/v0214-hardening.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/v0214-hardening.test.js",
+      "gitBlobSha": "ecaf128b23b39630363e71da68a1d72601d516f7",
+      "size": 3229,
+      "destination": "tests/v0214-hardening.test.js",
+      "seedSha256": "6372e4309dac60f2e748327d13caa6ac41ea5e9a4d7301241ab0f5a860140769",
+      "identityAdapted": true
+    },
+    {
+      "path": "tests/v0215-hardening.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/v0215-hardening.test.js",
+      "gitBlobSha": "d5cd617191181bc52c414ac27f383e9753480b66",
+      "size": 4039,
+      "destination": "tests/v0215-hardening.test.js",
+      "seedSha256": "1cde9fa4593a8316dd2222fc5d3add72fe4c075ace9cbe0e0997652333b04209",
+      "identityAdapted": false
+    },
+    {
+      "path": "tests/v0215-identity-hardening.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/v0215-identity-hardening.test.js",
+      "gitBlobSha": "7e0582bbcebfa2c955869c3b331bacb1e200bd68",
+      "size": 5192,
+      "destination": "tests/v0215-identity-hardening.test.js",
+      "seedSha256": "8051b7359048c160c58e77958c188caa9b32ad7ff4741345fedf65120d6fbf0b",
+      "identityAdapted": true
+    },
+    {
+      "path": "tests/v0217-hardening.test.js",
+      "sourcePath": "legacy/v0.2.x/tests/v0217-hardening.test.js",
+      "gitBlobSha": "70f291fc3912e4275adda71f6ca762e12bfa89c0",
+      "size": 5005,
+      "destination": "tests/v0217-hardening.test.js",
+      "seedSha256": "4bda9c5ffa18da1b63d065c3b1def689b2ba17df1a4efceffb1ce5c31ed811c2",
+      "identityAdapted": false
+    }
+  ]
+}
