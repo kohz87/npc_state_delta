@@ -5,7 +5,7 @@
   "type": "module",
   "engines": { "node": ">=24" },
   "scripts": {
-    "test": "node --test tests/*.test.js && node tests/compatibility-check.js && node tests/runtime-smoke.mjs && node tests/migration-smoke.mjs",
+    "test": "node --import ./tests/active-runtime-test-setup.mjs --test tests/*.test.js && node --import ./tests/active-runtime-test-setup.mjs tests/compatibility-check.js && node --import ./tests/active-runtime-test-setup.mjs tests/runtime-smoke.mjs && node --import ./tests/active-runtime-test-setup.mjs tests/migration-smoke.mjs",
     "validate": "node scripts/validate.mjs",
     "measure:prompts": "node scripts/measure-prompts.mjs",
     "package": "python3 scripts/package.py"

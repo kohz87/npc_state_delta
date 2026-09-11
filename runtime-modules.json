@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "applicationVersion": "0.1.0",
+  "entrypoint": "bootstrap.js",
+  "modules": [
+    { "path": "bootstrap.js", "role": "bootstrap", "required": true },
+    { "path": "index.js", "role": "runtime-controller", "required": true },
+    { "path": "core.js", "role": "core-facade", "required": true },
+    { "path": "core-mechanics.js", "role": "core-mechanics", "required": true },
+    { "path": "branch.js", "role": "branch-recovery", "required": true },
+    { "path": "branch-core.js", "role": "branch-primitives", "required": true },
+    { "path": "bundle.js", "role": "bundle-format", "required": true },
+    { "path": "identity.js", "role": "chat-identity", "required": true },
+    { "path": "social.js", "role": "social-graph", "required": true },
+    { "path": "storage.js", "role": "persistence", "required": true },
+    { "path": "hardening-core.js", "role": "lifecycle-primitives", "required": true },
+    { "path": "hardening.js", "role": "lifecycle-hardening", "required": true },
+    { "path": "full-cast.js", "role": "optional-full-cast-scan", "required": false },
+    { "path": "dossier-ui.js", "role": "dossier-ui", "required": true },
+    { "path": "launcher-ui.js", "role": "launcher-ui", "required": true }
+  ]
+}

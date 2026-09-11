@@ -4,7 +4,7 @@ import { NPC_STATE_VERSION } from './core.js';
 import {
     chatLineage as legacyV2Lineage,
     legacyChatLineageV0210,
-} from './branch-v0218.js';
+} from './branch-core.js';
 import {
     BRANCH_LINEAGE_VERSION,
     chatLineage,
