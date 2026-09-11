@@ -1,12 +1,22 @@
 # NPC State Delta changes
 
+## Stage 2 active-runtime normalization - 11 September 2026
+
+- Classify every implementation module executed by Delta as active Delta code regardless of source ancestry.
+- Add `runtime-modules.json` as the canonical machine-readable inventory for every shipped top-level JavaScript module and its semantic role.
+- Normalize the active mechanics and branch primitive paths to `core-mechanics.js` and `branch-core.js`; remove the old source-version-labelled runtime paths.
+- Make validation require an exact one-to-one match between the active inventory and root runtime JavaScript, and reject legacy/version-labelled active paths or dependencies.
+- Build packages from the same active inventory instead of a root wildcard so undeclared residue cannot silently enter a release archive.
+- Drive CI syntax and release-consistency checks from the same inventory, and rename source-version-labelled safety test filenames to their current responsibilities.
+- Keep historical source names/versions only in Git history, `docs/history/`, provenance records, and historical-shape fixture data where the old identifier itself is evidence. Required historical-shape readers remain active Delta compatibility logic inside current owners, not a separate runtime layer.
+- Preserve scanner behavior, relationship formulas, persistence/recovery semantics, lifecycle policy, and roleplay injection while performing this structural normalization.
+
 ## Stage 2 consolidation / Delta v0.1.0 - 11 September 2026
 
-- Establish `0.1.0` as NPC State Delta's own application-version baseline in the manifest, core facade and package metadata. Retained source-engine, bundle and branch schema versions remain independent.
+- Establish `0.1.0` as NPC State Delta's own application-version baseline in the manifest, core facade and package metadata. Persisted bundle, branch, and data schema versions remain independent.
 - Replace the broad `enhancements.js` layer with a dedicated `full-cast.js` owner that preserves the opt-in full-cast scan and redundant-backfill guard.
 - Remove the superseded secondary Dossier Library overlay now that Stage 1 owns the dossier/cast presentation surface.
 - Update bootstrap, validation, package naming and focused tests around the consolidated owner boundaries.
-- Retain actively called `core-v0218.js` and `branch-v0218.js` source modules because caller tracing shows they still own baseline algorithms and lineage/migration helpers; their versioned names are provenance, not duplicate runtime engines.
 - Keep scanner semantics, persistence/recovery, relationship mechanics, evidence/injection behavior and later-stage contracts unchanged.
 
 ## Stage 1 tablet cast rail fix - 11 September 2026
@@ -42,19 +52,19 @@
 
 ## Stage 1 dossier UI - 11 September 2026
 
-- Add a persistent side launcher that opens a centered portrait-led dossier surface without changing the legacy scanner, persistence, or relationship engines.
+- Add a persistent side launcher that opens a centered portrait-led dossier surface without changing the canonical Delta scanner, persistence, or relationship behavior.
 - Adapt the useful donor presentation ideas into Delta-local code: selected portrait hero, readable dossier document, searchable horizontal cast rail, and active/archived/dead filters.
-- Project canonical legacy NPC state into bounded UI records so relationship/event histories and branch snapshots are not rendered or retained by the view layer.
+- Project canonical Delta NPC state into bounded UI records so relationship/event histories and branch snapshots are not rendered or retained by the view layer.
 - Route editing through the existing `NPCStateDelta.openEditor` owner and keep settings owned by the existing Delta Extensions settings surface rather than creating duplicate mutation/settings paths.
 - Preserve search state, selection, cast/document scroll, focused cast selection, and external editor drafts while canonical state notifications refresh the open view.
 - Add focused Stage 1 tests for lifecycle filtering, search, selection retention, projection boundaries, no-chat behavior, editor/settings ownership, and bootstrap reachability.
 
 Real-browser visual/performance QA remains a host acceptance check; deterministic HTML/model tests are not treated as visual evidence.
 
-## Legacy seed - 11 September 2026
+## Source seed - 11 September 2026
 
-- Seed the exact `legacy/v0.2.x` snapshot from `kohz87/npc_state` at `a12b2937b5c1305e3e3017218a626478a5bedcdc`.
-- Apply Delta identity isolation to runtime/CSS and inherited tests, retaining legacy algorithms and upstream version markers.
+- Seed the exact source snapshot from `kohz87/npc_state` at `a12b2937b5c1305e3e3017218a626478a5bedcdc`.
+- Apply Delta identity isolation to runtime/CSS and inherited tests while initially preserving source algorithms and version markers for reproducible comparison.
 - Preserve the existing GPL license and record all source paths/blob hashes.
 - Add the core contract, agent instructions, nine-stage workplan and verification/package tooling.
 - Move upstream markdown into historical reference documentation.
