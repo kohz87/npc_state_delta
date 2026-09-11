@@ -140,7 +140,7 @@ export async function dispatchScannerRequest(ctx, options = {}, { label = 'scann
     }
 
     const controller = new AbortController();
-    const boundedTimeout = Math.max(1000, Math.min(30 * 60 * 1000, Number(timeoutMs) || DEFAULT_TIMEOUT_MS));
+    const boundedTimeout = Math.max(20, Math.min(30 * 60 * 1000, Number(timeoutMs) || DEFAULT_TIMEOUT_MS));
     let timedOut = false;
     const timer = setTimeout(() => {
         timedOut = true;
