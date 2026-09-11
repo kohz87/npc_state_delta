@@ -33,6 +33,6 @@ Real-browser visual/performance QA remains a host acceptance check; deterministi
 - Apply Delta identity isolation to runtime/CSS and inherited tests, retaining legacy algorithms and upstream version markers.
 - Preserve the existing GPL license and record all source paths/blob hashes.
 - Add the core contract, agent instructions, nine-stage workplan and verification/package tooling.
-- Move upstream markdown to `docs/history/`; do not create a duplicate runtime under a new legacy folder.
+- Move upstream markdown into historical reference documentation.
 
 No work stages 1–9 were implemented in the original seed. Upstream release history is retained in `docs/history/`.
