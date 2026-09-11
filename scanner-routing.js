@@ -1,318 +1,237 @@
-/* NPC State Delta Stage 3 scanner request routing owner. */
+/* NPC State Delta: request-scoped routing for the existing NPC scanner. */
 
-const EXTENSION_NAME = 'npc_state_delta';
-const PROFILE_KEY = 'scannerConnectionProfile';
-const CONTROL_ID = 'npc_state_delta_scanner_connection_profile';
-const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+export const SCANNER_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 const inflight = new Map();
-let requestSequence = 0;
-let initialized = false;
-let profileEventsBound = false;
-
+let sequence = 0;
 const metrics = {
-    total: 0,
-    defaultRoute: 0,
-    profileRoute: 0,
-    succeeded: 0,
-    failed: 0,
-    timedOut: 0,
-    cancelled: 0,
-    last: null,
+    attempts: 0, total: 0, defaultRoute: 0, profileRoute: 0,
+    succeeded: 0, failed: 0, rejected: 0, timedOut: 0, cancelled: 0, last: null,
 };
 
-function hostContext() {
-    try { return globalThis.SillyTavern?.getContext?.() || null; }
-    catch { return null; }
+export function selectedScannerProfileId(ctx) {
+    const value = ctx?.extensionSettings?.npc_state_delta?.scannerConnectionProfile;
+    return typeof value === 'string' ? value.trim() : '';
 }
 
-function routeSettings(ctx = hostContext()) {
-    const extensionSettings = ctx?.extensionSettings;
-    if (!extensionSettings || typeof extensionSettings !== 'object') return null;
-    const root = extensionSettings[EXTENSION_NAME] ||= {};
-    if (root[PROFILE_KEY] === undefined) root[PROFILE_KEY] = '';
-    return root;
-}
-
-export function selectedScannerProfileId(ctx = hostContext()) {
-    return String(routeSettings(ctx)?.[PROFILE_KEY] || '').trim();
-}
-
-function scannerMessages(options = {}) {
-    const messages = [];
-    const systemPrompt = String(options.systemPrompt || '').trim();
-    const prompt = String(options.prompt || '');
-    if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
-    messages.push({ role: 'user', content: prompt });
-    if (String(options.prefill || '')) messages.push({ role: 'assistant', content: String(options.prefill) });
-    return messages;
-}
-
-function abortError(message, kind = 'cancelled') {
-    const error = new Error(message);
+export function scannerRoutingError(message, code = 'NPC_SCANNER_PROFILE_UNAVAILABLE') {
+    const error = new Error(`NPC State Delta scanner: ${message}`);
     error.name = 'NPCStateDeltaScannerRouteError';
-    error.code = kind === 'timeout' ? 'NPC_SCANNER_ROUTE_TIMEOUT' : 'NPC_SCANNER_ROUTE_CANCELLED';
+    error.code = code;
     return error;
 }
 
-function profileError(message, cause = null) {
-    const error = new Error(`NPC State Delta scanner connection profile: ${message}`);
-    error.name = 'NPCStateDeltaScannerRouteError';
-    error.code = 'NPC_SCANNER_PROFILE_UNAVAILABLE';
-    if (cause) error.cause = cause;
-    return error;
+export function isScannerRoutingError(error) {
+    return error?.name === 'NPCStateDeltaScannerRouteError';
 }
 
-function finishMetric(record, outcome, error = null) {
-    const durationMs = Math.max(0, Date.now() - record.startedAt);
-    if (outcome === 'success') metrics.succeeded += 1;
-    else if (outcome === 'timeout') metrics.timedOut += 1;
-    else if (outcome === 'cancelled') metrics.cancelled += 1;
-    else metrics.failed += 1;
-    metrics.last = {
-        id: record.id,
-        label: record.label,
-        route: record.route,
-        profileId: record.profileId || '',
-        outcome,
-        durationMs,
-        at: Date.now(),
-        error: error ? String(error?.message || error).slice(0, 240) : '',
-    };
+function stoppedError(timeout = false) {
+    return scannerRoutingError(timeout
+        ? 'The scan request timed out. Retry Scan or check the selected connection profile.'
+        : 'The scan was cancelled or its chat/dossier source changed; its result was discarded.',
+    timeout ? 'NPC_SCANNER_ROUTE_TIMEOUT' : 'NPC_SCANNER_ROUTE_CANCELLED');
 }
 
-export async function dispatchScannerRequest(ctx, options = {}, { label = 'scanner request', timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
-    if (!ctx || typeof ctx !== 'object') throw profileError('SillyTavern context is unavailable.');
-    const profileId = selectedScannerProfileId(ctx);
-    const route = profileId ? 'profile' : 'default';
-    const record = {
-        id: ++requestSequence,
-        label: String(label || 'scanner request').slice(0, 120),
-        route,
-        profileId,
-        startedAt: Date.now(),
-    };
-    metrics.total += 1;
-    if (profileId) metrics.profileRoute += 1;
-    else metrics.defaultRoute += 1;
+function connectionManagerDisabled(ctx) {
+    return ctx?.extensionSettings?.disabledExtensions?.includes?.('connection-manager') === true;
+}
 
-    if (!profileId) {
-        if (typeof ctx.generateRaw !== 'function') {
-            const error = profileError('the default host generateRaw() route is unavailable.');
-            finishMetric(record, 'failure', error);
-            throw error;
-        }
-        try {
-            const value = await ctx.generateRaw(options);
-            finishMetric(record, 'success');
-            return value;
-        } catch (error) {
-            finishMetric(record, 'failure', error);
-            throw error;
-        }
+// No dependency on the host service is loaded for the default generateRaw route.
+async function profileService(ctx) {
+    if (connectionManagerDisabled(ctx)) {
+        throw scannerRoutingError('Connection Profiles is disabled. Enable it or explicitly select the default scanner route.');
     }
-
-    const service = ctx.ConnectionManagerRequestService;
-    if (!service || typeof service.sendRequest !== 'function') {
-        const error = profileError(`selected profile ${profileId} cannot be used because SillyTavern Connection Manager request services are unavailable.`);
-        finishMetric(record, 'failure', error);
-        throw error;
+    if (typeof ctx?.ConnectionManagerRequestService?.sendRequest === 'function') {
+        return ctx.ConnectionManagerRequestService;
     }
-
-    let profile;
     try {
-        profile = typeof service.getProfile === 'function'
-            ? service.getProfile(profileId)
-            : (ctx.extensionSettings?.connectionManager?.profiles || []).find(item => String(item?.id || '') === profileId);
-    } catch (cause) {
-        const error = profileError(`selected profile ${profileId} is missing. Choose another scanner profile in NPC State Delta settings or restore that Connection Profile.`, cause);
-        finishMetric(record, 'failure', error);
-        throw error;
-    }
-    if (!profile) {
-        const error = profileError(`selected profile ${profileId} is missing. Choose another scanner profile in NPC State Delta settings or restore that Connection Profile.`);
-        finishMetric(record, 'failure', error);
-        throw error;
-    }
-    if (typeof service.isProfileSupported === 'function' && !service.isProfileSupported(profile)) {
-        const error = profileError(`selected profile "${profile.name || profileId}" is not supported for text generation by this SillyTavern build.`);
-        finishMetric(record, 'failure', error);
-        throw error;
-    }
-
-    const controller = new AbortController();
-    const boundedTimeout = Math.max(20, Math.min(30 * 60 * 1000, Number(timeoutMs) || DEFAULT_TIMEOUT_MS));
-    let timedOut = false;
-    const timer = setTimeout(() => {
-        timedOut = true;
-        controller.abort('NPC State Delta scanner request timeout');
-    }, boundedTimeout);
-    inflight.set(record.id, { controller, record });
-
-    try {
-        const response = await service.sendRequest(
-            profileId,
-            scannerMessages(options),
-            Math.max(1, Math.round(Number(options.responseLength) || 2048)),
-            {
-                stream: false,
-                signal: controller.signal,
-                extractData: true,
-                includePreset: true,
-                includeInstruct: true,
-            },
-        );
-        if (controller.signal.aborted) throw abortError(
-            timedOut
-                ? `Scanner request timed out after ${boundedTimeout} ms while using profile "${profile.name || profileId}".`
-                : `Scanner request was cancelled while using profile "${profile.name || profileId}".`,
-            timedOut ? 'timeout' : 'cancelled',
-        );
-        if (typeof response === 'function') throw profileError(`selected profile "${profile.name || profileId}" unexpectedly returned a streaming response.`);
-        const content = typeof response === 'string' ? response : response?.content;
-        if (content === undefined || content === null) throw profileError(`selected profile "${profile.name || profileId}" returned no text content.`);
-        finishMetric(record, 'success');
-        return String(content);
-    } catch (cause) {
-        if (timedOut) {
-            const error = cause?.code === 'NPC_SCANNER_ROUTE_TIMEOUT'
-                ? cause
-                : abortError(`Scanner request timed out after ${boundedTimeout} ms while using profile "${profile.name || profileId}".`, 'timeout');
-            finishMetric(record, 'timeout', error);
-            throw error;
-        }
-        if (controller.signal.aborted) {
-            const error = cause?.code === 'NPC_SCANNER_ROUTE_CANCELLED'
-                ? cause
-                : abortError(`Scanner request was cancelled while using profile "${profile.name || profileId}".`, 'cancelled');
-            finishMetric(record, 'cancelled', error);
-            throw error;
-        }
-        const error = cause?.name === 'NPCStateDeltaScannerRouteError'
-            ? cause
-            : profileError(`request through profile "${profile.name || profileId}" failed. ${cause?.message || cause}`, cause);
-        finishMetric(record, 'failure', error);
-        throw error;
-    } finally {
-        clearTimeout(timer);
-        inflight.delete(record.id);
-    }
+        const { ConnectionManagerRequestService } = await import('../../shared.js');
+        if (typeof ConnectionManagerRequestService?.sendRequest === 'function') return ConnectionManagerRequestService;
+    } catch { /* Normalize host module/API availability without copying credentials. */ }
+    throw scannerRoutingError('This host does not expose the Connection Manager request service. Update SillyTavern or explicitly select the default scanner route.');
 }
 
-export function cancelScannerRequests(reason = 'context changed') {
-    let cancelled = 0;
-    for (const { controller } of inflight.values()) {
-        if (controller.signal.aborted) continue;
-        cancelled += 1;
-        controller.abort(`NPC State Delta scanner request cancelled: ${reason}`);
-    }
-    return cancelled;
-}
-
-export function scannerRoutingMetrics() {
-    return {
-        ...metrics,
-        inflight: inflight.size,
-        last: metrics.last ? { ...metrics.last } : null,
-    };
-}
-
-function supportedProfiles(ctx) {
+export function scannerProfileOptions(ctx, selected = selectedScannerProfileId(ctx)) {
+    const options = [{ id: '', name: 'Use current roleplay connection' }];
     const service = ctx?.ConnectionManagerRequestService;
-    if (service && typeof service.getSupportedProfiles === 'function') {
-        try { return service.getSupportedProfiles(); }
-        catch { return []; }
+    const profiles = ctx?.extensionSettings?.connectionManager?.profiles;
+    if (!connectionManagerDisabled(ctx) && Array.isArray(profiles)) {
+        for (const profile of profiles) {
+            if (typeof profile?.id !== 'string' || !profile.id.trim()) continue;
+            try {
+                if (typeof service?.isProfileSupported === 'function' && !service.isProfileSupported(profile)) continue;
+            } catch { continue; }
+            if (!options.some(option => option.id === profile.id)) {
+                options.push({ id: profile.id, name: String(profile.name || profile.id) });
+            }
+        }
     }
-    return Array.isArray(ctx?.extensionSettings?.connectionManager?.profiles)
-        ? ctx.extensionSettings.connectionManager.profiles.filter(profile => profile?.id && profile?.name)
-        : [];
-}
-
-function mountProfileControl() {
-    const ctx = hostContext();
-    const settings = routeSettings(ctx);
-    const panel = globalThis.document?.querySelector?.('#npc_state_delta_settings');
-    if (!ctx || !settings || !panel) return false;
-    const anchor = panel.querySelector?.('#npc_state_delta_full_scan_every_turn')?.closest?.('.npc-state-delta-setting-row')
-        || panel.querySelector?.('#npc_state_delta_auto')?.closest?.('.npc-state-delta-setting-row');
-    if (!anchor) return false;
-
-    let row = globalThis.document.getElementById?.(`${CONTROL_ID}_row`);
-    if (!row) {
-        row = globalThis.document.createElement('label');
-        row.id = `${CONTROL_ID}_row`;
-        row.className = 'npc-state-delta-setting-row';
-        row.setAttribute?.('for', CONTROL_ID);
-        row.innerHTML = `<span><b>NPC scanner connection profile</b><small>Default keeps the current host route. Selecting a SillyTavern Connection Profile routes only NPC State Delta text-model requests; ordinary roleplay and portrait generation stay untouched.</small></span><select id="${CONTROL_ID}" class="text_pole"></select>`;
-        anchor.insertAdjacentElement?.('afterend', row);
-    }
-
-    const select = globalThis.document.getElementById?.(CONTROL_ID);
-    if (!select) return false;
-    const selected = String(settings[PROFILE_KEY] || '');
-    const profiles = supportedProfiles(ctx);
-    const options = [{ id: '', name: 'Use current roleplay connection' }, ...profiles.map(profile => ({ id: String(profile.id), name: String(profile.name || profile.id) }))];
     if (selected && !options.some(option => option.id === selected)) {
         options.push({ id: selected, name: `Unavailable profile (${selected})` });
     }
-    select.innerHTML = '';
-    for (const optionData of options) {
-        const option = globalThis.document.createElement('option');
-        option.value = optionData.id;
-        option.textContent = optionData.name;
-        select.appendChild(option);
-    }
-    select.value = selected;
-    if (select.dataset.npcStateDeltaScannerRoutingBound !== '1') {
-        select.dataset.npcStateDeltaScannerRoutingBound = '1';
-        select.addEventListener('change', () => {
-            const liveCtx = hostContext();
-            const liveSettings = routeSettings(liveCtx);
-            if (!liveSettings) return;
-            liveSettings[PROFILE_KEY] = String(select.value || '');
-            try { liveCtx?.saveSettingsDebounced?.(); } catch {}
-        });
-    }
-    return true;
+    return options;
 }
 
-function bindProfileEvents() {
-    if (profileEventsBound) return;
-    const ctx = hostContext();
-    const source = ctx?.eventSource;
-    const events = ctx?.eventTypes || ctx?.event_types || {};
-    if (!source?.on) return;
-    profileEventsBound = true;
-    for (const key of ['CONNECTION_PROFILE_CREATED', 'CONNECTION_PROFILE_UPDATED', 'CONNECTION_PROFILE_DELETED']) {
-        if (events[key]) source.on(events[key], () => setTimeout(mountProfileControl, 0));
-    }
-    if (events.CHAT_CHANGED) source.on(events.CHAT_CHANGED, () => cancelScannerRequests('chat changed'));
-    for (const key of ['APP_READY', 'EXTENSION_SETTINGS_LOADED', 'CHAT_LOADED']) {
-        if (events[key]) source.on(events[key], () => setTimeout(mountProfileControl, 50));
+function profileSignature(profile) {
+    const canonical = value => Array.isArray(value) ? value.map(canonical)
+        : value && typeof value === 'object'
+            ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])]))
+            : value;
+    return JSON.stringify(canonical(profile));
+}
+
+function scannerMessages(options) {
+    const messages = [];
+    if (options.systemPrompt) messages.push({ role: 'system', content: String(options.systemPrompt) });
+    messages.push({ role: 'user', content: String(options.prompt ?? '') });
+    if (options.prefill) messages.push({ role: 'assistant', content: String(options.prefill) });
+    return messages;
+}
+
+/**
+ * One provider call, never an implicit fallback or retry. The caller owns JSON
+ * correction and pins profileId/signal/deadline/isCurrent for its whole scan.
+ * Default generateRaw has no request-local AbortSignal API: cancellation settles
+ * our caller and discards late output, but cannot promise provider-side abort.
+ */
+export async function dispatchScannerRequest(ctx, options = {}, scope = {}) {
+    const route = scope.route || { profileId: scope.profileId === undefined ? selectedScannerProfileId(ctx) : scope.profileId };
+    const profileId = String(route.profileId || '').trim();
+    const record = {
+        id: ++sequence, label: String(scope.label || 'scanner request').slice(0, 120),
+        route: profileId ? 'profile' : 'default', profileId,
+        chatKey: scope.chatKey || '', operationId: scope.operationId ?? null,
+        startedAt: Date.now(), sent: false,
+    };
+    metrics.attempts += 1;
+    const controller = new AbortController();
+    let stop = null;
+    let rejectStop;
+    const stopped = new Promise((_, reject) => { rejectStop = reject; });
+    // A pre-aborted scope may reject before the first asynchronous host call.
+    void stopped.catch(() => {});
+    const cancel = (timeout = false) => {
+        if (stop) return;
+        stop = stoppedError(timeout);
+        rejectStop(stop);
+        controller.abort(stop);
+    };
+    const onAbort = () => cancel(scope.signal?.reason?.code === 'NPC_SCANNER_ROUTE_TIMEOUT');
+    const assertCurrent = () => {
+        if (scope.signal?.aborted) onAbort();
+        if (!stop && typeof scope.isCurrent === 'function' && !scope.isCurrent()) cancel();
+        if (stop) throw stop;
+    };
+    const timeoutMs = Math.max(1, Math.min(30 * 60 * 1000, Number(scope.timeoutMs) || SCANNER_REQUEST_TIMEOUT_MS));
+    const remainingMs = Number.isFinite(scope.deadline) ? Math.min(timeoutMs, scope.deadline - Date.now()) : timeoutMs;
+    let timer = null;
+    let outcome = 'failure';
+    let failureCode = '';
+    inflight.set(record.id, { record, cancel, controller });
+    scope.signal?.addEventListener?.('abort', onAbort, { once: true });
+    if (remainingMs <= 0) cancel(true);
+    else timer = setTimeout(() => cancel(true), remainingMs);
+
+    try {
+        assertCurrent();
+        let invoke;
+        let verifyProfile = () => {};
+        if (!profileId) {
+            if (typeof ctx?.generateRaw !== 'function') {
+                throw scannerRoutingError('This host does not expose generateRaw().', 'NPC_SCANNER_DEFAULT_UNAVAILABLE');
+            }
+            invoke = () => ctx.generateRaw(options);
+        } else {
+            const service = await Promise.race([profileService(ctx), stopped]);
+            assertCurrent();
+            let profile;
+            try {
+                profile = typeof service.getProfile === 'function'
+                    ? service.getProfile(profileId)
+                    : ctx?.extensionSettings?.connectionManager?.profiles?.find(item => item?.id === profileId);
+            } catch { /* A deleted selection remains selected and fails closed. */ }
+            if (!profile || String(profile.id || '') !== profileId) {
+                throw scannerRoutingError(`Selected profile "${profileId}" is missing. Restore it or choose another NPC scanner connection profile.`);
+            }
+            let supported = true;
+            try {
+                if (typeof service.isProfileSupported === 'function') supported = service.isProfileSupported(profile);
+            } catch { supported = false; }
+            if (!supported) throw scannerRoutingError(`Selected profile "${profile.name || profileId}" is not supported for text generation.`);
+            const signature = profileSignature(profile);
+            if (route.signature !== undefined && route.signature !== signature) {
+                throw scannerRoutingError('The selected profile changed during this scan. Retry with the updated profile.', 'NPC_SCANNER_PROFILE_CHANGED');
+            }
+            route.signature = signature;
+            verifyProfile = () => {
+                let current;
+                try {
+                    current = typeof service.getProfile === 'function' ? service.getProfile(profileId)
+                        : ctx?.extensionSettings?.connectionManager?.profiles?.find(item => item?.id === profileId);
+                } catch { /* Treat deletion exactly like a route change. */ }
+                if (connectionManagerDisabled(ctx) || !current || profileSignature(current) !== signature) {
+                    throw scannerRoutingError('The selected profile changed or was removed during this scan. Choose a valid profile and retry.', 'NPC_SCANNER_PROFILE_CHANGED');
+                }
+            };
+            invoke = () => service.sendRequest(profileId, scannerMessages(options),
+                Math.max(1, Math.round(Number(options.responseLength) || 2048)), {
+                    stream: false, signal: controller.signal, extractData: true,
+                    includePreset: true, includeInstruct: true,
+                });
+        }
+        assertCurrent();
+        // Count provider invocations, not rejected settings or cancelled preflights.
+        record.sent = true;
+        metrics.total += 1;
+        metrics[profileId ? 'profileRoute' : 'defaultRoute'] += 1;
+        const response = await Promise.race([invoke(), stopped]);
+        assertCurrent();
+        verifyProfile();
+        let value = response;
+        if (profileId) {
+            value = typeof response === 'string' ? response : response?.content;
+            if (typeof value !== 'string') {
+                throw scannerRoutingError('The selected profile returned no text content. Check its text-generation configuration.', 'NPC_SCANNER_PROFILE_RESPONSE');
+            }
+        }
+        outcome = 'success';
+        metrics.succeeded += 1;
+        return value;
+    } catch (cause) {
+        const error = stop || (isScannerRoutingError(cause) ? cause
+            : cause?.name === 'AbortError' ? stoppedError()
+                : profileId ? scannerRoutingError(`Request through profile "${profileId}" failed. Check that profile\'s model, credentials, and connection in SillyTavern; no fallback was used.`, 'NPC_SCANNER_PROFILE_REQUEST_FAILED')
+                    : cause);
+        failureCode = String(error?.code || 'PROVIDER_ERROR');
+        outcome = failureCode === 'NPC_SCANNER_ROUTE_TIMEOUT' ? 'timeout'
+            : failureCode === 'NPC_SCANNER_ROUTE_CANCELLED' ? 'cancelled' : 'failure';
+        if (!record.sent) metrics.rejected += 1;
+        else metrics[outcome === 'timeout' ? 'timedOut' : outcome === 'cancelled' ? 'cancelled' : 'failed'] += 1;
+        throw error;
+    } finally {
+        if (timer) clearTimeout(timer);
+        scope.signal?.removeEventListener?.('abort', onAbort);
+        inflight.delete(record.id);
+        // No prompts, responses, profile objects, URLs, or credentials in diagnostics.
+        metrics.last = {
+            id: record.id, label: record.label, route: record.route, profileId,
+            dispatched: record.sent, outcome, code: failureCode,
+            durationMs: Math.max(0, Date.now() - record.startedAt), at: Date.now(),
+        };
     }
 }
 
-function init() {
-    if (initialized) return void mountProfileControl();
-    initialized = true;
-    routeSettings();
-    bindProfileEvents();
-    mountProfileControl();
-    let attempts = 0;
-    const timer = setInterval(() => {
-        attempts += 1;
-        bindProfileEvents();
-        if (mountProfileControl() || attempts >= 40) clearInterval(timer);
-    }, 250);
+export function cancelScannerRequests(_reason = 'cancelled', { chatKey, operationId, timedOut = false } = {}) {
+    let count = 0;
+    for (const entry of inflight.values()) {
+        if (chatKey !== undefined && entry.record.chatKey !== chatKey) continue;
+        if (operationId !== undefined && entry.record.operationId !== operationId) continue;
+        if (entry.controller.signal.aborted) continue;
+        entry.cancel(timedOut);
+        count += 1;
+    }
+    return count;
 }
 
-globalThis.NPCStateDeltaScannerRouting = Object.freeze({
-    dispatch: dispatchScannerRequest,
-    cancelAll: cancelScannerRequests,
-    metrics: scannerRoutingMetrics,
-    selectedProfileId: selectedScannerProfileId,
-    mountProfileControl,
-});
-
-if (typeof globalThis.$ === 'function') globalThis.$(init);
-else if (globalThis.document?.readyState === 'loading') globalThis.document.addEventListener('DOMContentLoaded', init, { once: true });
-else if (globalThis.document) init();
+export function scannerRoutingMetrics() {
+    return { ...metrics, inflight: inflight.size, last: metrics.last ? { ...metrics.last } : null };
+}
