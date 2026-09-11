@@ -8,7 +8,7 @@ These are sequential work stages for one legacy-based extension. They are not se
 | --- | --- | --- |
 | Seed | Pinned source, Delta isolation, governing documents, reproducible verification | Prepared; see seed provenance for executed results |
 | 1 | Side launcher and Beta-style dossier UI/UX | Accepted after deterministic checks and user tablet/mobile host QA |
-| 2 | Compact code consolidation and Delta application version | Implemented as Delta `0.1.0`; full CI acceptance required on the exact candidate |
+| 2 | Compact code consolidation and Delta application version | Accepted as Delta `0.1.0`; full PR CI passed on the Stage 2 candidate |
 | 3 | Legacy scanner with selectable connection profiles | Pending |
 | 4 | Legacy evolution, appearance forms, terminal automatic death | Pending |
 | 5 | Verify and retain legacy relationship scoring | Pending |
