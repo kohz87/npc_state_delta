@@ -271,7 +271,39 @@ class DeltaLauncherRefinement {
     min-height: 44px;
   }
   #${ROOT_ID} .delta-cast {
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+}
+@media (min-width: 651px) and (max-width: 900px) {
+  #${ROOT_ID} .delta-library {
+    grid-template-rows: minmax(0, 1fr) 178px;
+  }
+  #${ROOT_ID} .delta-cast-tools {
+    align-items: center;
+    flex-direction: row;
+  }
+  #${ROOT_ID} .delta-search-label {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: none;
+  }
+  #${ROOT_ID} .delta-filters {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+  }
+  #${ROOT_ID} .delta-cast-list {
+    min-height: 92px;
+  }
+}
+@media (max-width: 650px) {
+  #${ROOT_ID} .delta-library {
+    grid-template-rows: minmax(0, 1fr) clamp(224px, 30dvh, 260px);
+  }
+  #${ROOT_ID} .delta-cast {
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+  #${ROOT_ID} .delta-cast-list {
+    min-height: 94px;
   }
 }
 `;
