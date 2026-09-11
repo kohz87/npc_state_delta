@@ -80,8 +80,9 @@ class DeltaLauncherRefinement {
         if (!this.root || !this.launcher || !document.body) return null;
         this.injectStyles();
         this.launcher.id = LAUNCHER_ID;
-        this.launcher.title = 'Drag to move · click to open NPC dossiers';
+        this.launcher.title = 'Drag to move; click to open NPC dossiers';
         this.launcher.setAttribute('aria-label', 'NPC dossiers. Drag to move; activate to open.');
+        this.decorateLauncher();
 
         // Keep the floating launcher outside the dossier root so host/mobile stacking
         // contexts cannot bury it. The refinement owns its open bridge explicitly.
@@ -121,6 +122,25 @@ class DeltaLauncherRefinement {
         this.launcher = null;
     }
 
+    decorateLauncher() {
+        const mark = this.launcher?.querySelector?.('.delta-launcher-mark');
+        if (!mark) return;
+        mark.replaceChildren();
+        const npc = document.createElement('span');
+        npc.className = 'delta-launcher-npc';
+        npc.textContent = 'npc';
+        const state = document.createElement('span');
+        state.className = 'delta-launcher-state';
+        state.textContent = 'state';
+        mark.append(npc, state);
+
+        // The button's aria-label carries its accessible name. Keep only the
+        // compact stacked wordmark visually so the hit target can remain square.
+        for (const child of Array.from(this.launcher.children)) {
+            if (child !== mark) child.remove();
+        }
+    }
+
     injectStyles() {
         if (document.getElementById(STYLE_ID)) return;
         const style = document.createElement('style');
@@ -155,16 +175,18 @@ class DeltaLauncherRefinement {
   display: inline-flex !important;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 42px;
-  max-width: calc(100vw - 16px);
-  padding: 8px 13px 8px 9px;
-  border: 1px solid rgba(138, 163, 200, .9);
-  border-radius: 12px;
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
+  min-height: 48px;
+  max-width: 48px;
+  padding: 3px;
+  border: 1px solid rgba(70, 145, 235, .78);
+  border-radius: 13px;
   color: #eef5ff !important;
-  background: #263a55 !important;
-  box-shadow: 0 5px 20px rgba(0, 0, 0, .46) !important;
-  font: 600 14px/1.3 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #182a43 !important;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, .42) !important;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   visibility: visible !important;
   opacity: 1 !important;
   pointer-events: auto !important;
@@ -173,16 +195,33 @@ class DeltaLauncherRefinement {
   -webkit-user-select: none;
   cursor: grab;
 }
-#${LAUNCHER_ID}:hover { background: #304866 !important; }
+#${LAUNCHER_ID}:hover { background: #203754 !important; }
 #${LAUNCHER_ID}.delta-launcher-dragging { cursor: grabbing; }
 #${LAUNCHER_ID} .delta-launcher-mark {
-  display: grid;
-  place-items: center;
-  width: 25px;
-  height: 25px;
-  border: 1px solid #a9bdd9;
-  border-radius: 8px;
-  font: 700 13px/1 Georgia, serif;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 10px;
+  line-height: .88;
+}
+#${LAUNCHER_ID} .delta-launcher-npc {
+  color: #f7fbff;
+  font-size: 14px;
+  font-weight: 850;
+  letter-spacing: -.065em;
+  text-transform: lowercase;
+}
+#${LAUNCHER_ID} .delta-launcher-state {
+  color: #3e9cff;
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: -.045em;
+  text-transform: lowercase;
 }
 #${LAUNCHER_ID}[data-positioned="true"] {
   right: auto !important;
@@ -201,20 +240,38 @@ class DeltaLauncherRefinement {
     bottom: auto !important;
     transform: translateY(-50%) !important;
   }
-  #${LAUNCHER_ID} {
-    width: 48px;
-    min-width: 48px;
-    height: 48px;
-    min-height: 48px;
-    padding: 0;
-    border-radius: 50%;
+  #${ROOT_ID} .delta-panel {
+    left: 0 !important;
+    top: 0 !important;
+    right: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+    width: 100vw !important;
+    max-width: none !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+    border-left: 0 !important;
+    border-right: 0 !important;
+    overscroll-behavior: contain;
   }
-  #${LAUNCHER_ID} > span:not(.delta-launcher-mark) { display: none; }
-  #${LAUNCHER_ID} .delta-launcher-mark {
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    font-size: 15px;
+  #${ROOT_ID} .delta-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    min-height: 56px;
+    padding-top: max(8px, env(safe-area-inset-top));
+    padding-right: max(10px, env(safe-area-inset-right));
+    padding-left: max(10px, env(safe-area-inset-left));
+  }
+  #${ROOT_ID} .delta-close {
+    flex: 0 0 auto;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  #${ROOT_ID} .delta-cast {
+    padding-bottom: env(safe-area-inset-bottom);
   }
 }
 `;

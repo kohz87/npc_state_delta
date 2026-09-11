@@ -35,17 +35,30 @@ test('launcher uses Pointer Events so the same drag path works for mouse pen and
     assert.match(source, /suppressClickUntil/);
 });
 
-test('mobile and tablet launcher is top-level, icon-sized, and parked at the side midpoint', () => {
+test('launcher is a compact top-level stacked npc state wordmark with a 48px touch target', () => {
     assert.match(source, /document\.body\.appendChild\(this\.launcher\)/);
     assert.match(source, /LAUNCHER_ID\s*=\s*'npc_state_delta_dossier_launcher'/);
-    assert.match(source, /#\$\{LAUNCHER_ID\}[\s\S]*z-index:\s*2147483647\s*!important/);
-    assert.match(source, /visibility:\s*visible\s*!important/);
-    assert.match(source, /pointer-events:\s*auto\s*!important/);
+    assert.match(source, /decorateLauncher\(\)/);
+    assert.match(source, /npc\.textContent\s*=\s*'npc'/);
+    assert.match(source, /state\.textContent\s*=\s*'state'/);
+    assert.match(source, /#\$\{LAUNCHER_ID\}[\s\S]*width:\s*48px;[\s\S]*height:\s*48px;/);
+    assert.match(source, /border-radius:\s*13px/);
+    assert.match(source, /\.delta-launcher-state[\s\S]*color:\s*#3e9cff/);
+    assert.match(source, /z-index:\s*2147483647\s*!important/);
+});
+
+test('mobile and tablet launcher stays parked at the safe-area-aware side midpoint', () => {
     assert.match(source, /@media \(max-width:\s*1100px\)/);
+    assert.match(source, /right:\s*max\(12px,\s*env\(safe-area-inset-right\)\)\s*!important/);
     assert.match(source, /top:\s*50%\s*!important/);
     assert.match(source, /transform:\s*translateY\(-50%\)\s*!important/);
-    assert.match(source, /width:\s*48px/);
-    assert.match(source, /env\(safe-area-inset-right\)/);
+});
+
+test('mobile and tablet dossier is top-anchored to the full dynamic viewport with an always reachable close control', () => {
+    assert.match(source, /#\$\{ROOT_ID\} \.delta-panel\s*\{[\s\S]*left:\s*0\s*!important;[\s\S]*top:\s*0\s*!important;[\s\S]*transform:\s*none\s*!important;/);
+    assert.match(source, /height:\s*100vh\s*!important;[\s\S]*height:\s*100dvh\s*!important;/);
+    assert.match(source, /#\$\{ROOT_ID\} \.delta-topbar\s*\{[\s\S]*position:\s*sticky;[\s\S]*top:\s*0;[\s\S]*safe-area-inset-top/);
+    assert.match(source, /#\$\{ROOT_ID\} \.delta-close\s*\{[\s\S]*min-width:\s*44px;[\s\S]*min-height:\s*44px;/);
 });
 
 test('settings stay under Extensions and the duplicate document-header Edit button is removed', () => {
