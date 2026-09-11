@@ -64,6 +64,8 @@ const facade = fs.readFileSync(path.join(root, 'core.js'), 'utf8');
 const branch = fs.readFileSync(path.join(root, 'branch.js'), 'utf8');
 const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
 const bootstrap = fs.readFileSync(path.join(root, 'bootstrap.js'), 'utf8');
+const runtime = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
+const scannerRouting = fs.readFileSync(path.join(root, 'scanner-routing.js'), 'utf8');
 
 requireCheck(manifest.display_name === 'NPC State Delta', 'manifest identity');
 requireCheck(manifest.js === 'bootstrap.js' && manifest.css === 'style.css', 'manifest entrypoints');
@@ -82,6 +84,14 @@ requireCheck(!fs.existsSync(path.join(root, 'branch-v0218.js')), 'superseded ver
 requireCheck(fs.existsSync(path.join(root, 'full-cast.js')), 'full-cast owner missing');
 requireCheck(!bootstrap.includes('enhancements.js') && bootstrap.includes("await import('./full-cast.js')"), 'bootstrap full-cast ownership mismatch');
 requireCheck(bootstrap.indexOf('await prepareNpcStateHardening()') >= 0 && bootstrap.indexOf('await prepareNpcStateHardening()') < bootstrap.indexOf("await import('./index.js')"), 'hardening must precede engine');
+requireCheck(bootstrap.includes("await import('./scanner-routing.js')") && bootstrap.indexOf("await import('./scanner-routing.js')") < bootstrap.indexOf("await import('./index.js')"), 'scanner routing must load before the runtime controller');
+requireCheck(declaredModules.some(module => module.path === 'scanner-routing.js' && module.role === 'scanner-request-routing' && module.required === true), 'scanner-routing.js must be a required active runtime owner');
+requireCheck(scannerRouting.includes("const PROFILE_KEY = 'scannerConnectionProfile'"), 'scanner routing setting key missing');
+requireCheck(scannerRouting.includes('ConnectionManagerRequestService') && scannerRouting.includes('service.sendRequest('), 'scanner routing must use request-scoped SillyTavern Connection Manager requests');
+requireCheck(scannerRouting.includes('ctx.generateRaw(options)'), 'scanner routing must preserve the default host generateRaw route');
+requireCheck(!/connectionManager\s*\.\s*selectedProfile\s*=/.test(scannerRouting), 'scanner routing must not mutate the host roleplay connection profile');
+requireCheck(runtime.includes('NPCStateDeltaScannerRouting?.dispatch'), 'runtime scanner calls are not wired through the shared dispatcher');
+requireCheck(runtime.includes("scannerConnectionProfile: ''"), 'scanner connection profile is missing from active Delta settings defaults');
 
 for (const file of ['AGENTS.md', 'docs/core-contract.md', 'docs/WORKPLAN.md', 'DEVELOPMENT.md', 'docs/seed-provenance.md', 'docs/seed-provenance.json', 'LICENSE']) {
   requireCheck(fs.existsSync(path.join(root, file)), `missing ${file}`);
@@ -91,5 +101,5 @@ if (errors.length) {
   console.error(errors.join('\n'));
   process.exitCode = 1;
 } else {
-  console.log(`Validation passed: ${rootRuntimeFiles.length} declared active runtime JS modules; syntax, local imports, isolation, semantic module ownership, application version, entrypoints and governing documents.`);
+  console.log(`Validation passed: ${rootRuntimeFiles.length} declared active runtime JS modules; syntax, local imports, isolation, semantic module ownership, scanner routing, application version, entrypoints and governing documents.`);
 }
