@@ -1,5 +1,4 @@
-export * from './core-v0218.js';
-export { NPC_STATE_VERSION as NPC_STATE_SOURCE_ENGINE_VERSION } from './core-v0218.js';
+export * from './core-mechanics.js';
 
-// Delta application version. Data, bundle, branch, and source-engine versions remain independent.
+// NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
 export const NPC_STATE_VERSION = '0.1.0';
