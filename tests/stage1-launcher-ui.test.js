@@ -35,21 +35,34 @@ test('launcher uses Pointer Events so the same drag path works for mouse pen and
     assert.match(source, /suppressClickUntil/);
 });
 
-test('mobile launcher escapes the old root stacking context and stays visible above host chrome', () => {
-    assert.match(source, /#\$\{ROOT_ID\}\s*\{[\s\S]*position:\s*static\s*!important;[\s\S]*z-index:\s*auto\s*!important;/);
-    assert.match(source, /\.delta-launcher\s*\{[\s\S]*z-index:\s*2147483400\s*!important/);
-    assert.match(source, /display:\s*inline-flex\s*!important/);
+test('mobile and tablet launcher is top-level, icon-sized, and parked at the side midpoint', () => {
+    assert.match(source, /document\.body\.appendChild\(this\.launcher\)/);
+    assert.match(source, /LAUNCHER_ID\s*=\s*'npc_state_delta_dossier_launcher'/);
+    assert.match(source, /#\$\{LAUNCHER_ID\}[\s\S]*z-index:\s*2147483647\s*!important/);
     assert.match(source, /visibility:\s*visible\s*!important/);
     assert.match(source, /pointer-events:\s*auto\s*!important/);
+    assert.match(source, /@media \(max-width:\s*1100px\)/);
+    assert.match(source, /top:\s*50%\s*!important/);
+    assert.match(source, /transform:\s*translateY\(-50%\)\s*!important/);
+    assert.match(source, /width:\s*48px/);
     assert.match(source, /env\(safe-area-inset-right\)/);
-    assert.match(source, /env\(safe-area-inset-bottom\)/);
 });
 
-test('settings remain owned by the Extensions settings surface, not the launcher panel', () => {
-    assert.match(source, /removeEmbeddedSettingsAccess/);
+test('settings stay under Extensions and the duplicate document-header Edit button is removed', () => {
     assert.match(source, /querySelectorAll\('\.delta-open-settings'\)/);
+    assert.match(source, /querySelectorAll\('\.delta-document-head > \.delta-edit'\)/);
     assert.match(source, /\.delta-open-settings \{ display: none !important; \}/);
+    assert.match(source, /\.delta-document-head > \.delta-edit \{ display: none !important; \}/);
     assert.doesNotMatch(source, /openSettings\s*\(/);
+});
+
+test('dossier overlay has a real clickable backdrop that closes through the Stage 1 controller', () => {
+    assert.match(source, /className\s*=\s*'delta-backdrop'/);
+    assert.match(source, /this\.backdrop\.addEventListener\('click', this\.boundBackdropClick\)/);
+    assert.match(source, /onBackdropClick\(event\)/);
+    assert.match(source, /controller\.close\(\{ restoreFocus: false \}\)/);
+    assert.match(source, /\.delta-backdrop\s*\{[\s\S]*position:\s*fixed;[\s\S]*inset:\s*0;/);
+    assert.match(source, /\.delta-panel\s*\{[\s\S]*box-shadow:\s*0 20px 70px/);
 });
 
 test('launcher refinement remains UI-only and does not gain canonical mutation paths', () => {

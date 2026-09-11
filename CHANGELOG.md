@@ -1,5 +1,13 @@
 # NPC State Delta changes
 
+## Stage 1 mobile and overlay fixes — 11 September 2026
+
+- Promote the movable dossier launcher to a top-level floating control so SillyTavern mobile/tablet stacking and nested extension layout cannot bury it.
+- Use a compact 48px launcher icon at the right-side midpoint on phone/tablet widths, away from the bottom composer, while retaining drag-and-persist positioning.
+- Replace the visual-only overlay shadow with a real clickable backdrop so clicking outside the dossier closes it.
+- Remove the duplicate Edit button from the dossier document header while retaining the primary Edit dossier action beside the portrait.
+- Keep NPC State Delta settings exclusively under SillyTavern Extensions.
+
 ## Stage 1 launcher refinement — 11 September 2026
 
 - Make the side dossier launcher draggable with mouse, pen, or touch while preserving normal click-to-open behavior.

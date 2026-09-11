@@ -1,6 +1,7 @@
 /* NPC State Delta Stage 1 launcher refinement: movable, mobile-safe, UI-only position state. */
 
 const ROOT_ID = 'npc_state_delta_dossier_root';
+const LAUNCHER_ID = 'npc_state_delta_dossier_launcher';
 const STYLE_ID = 'npc_state_delta_launcher_refinement_styles';
 const STORAGE_KEY = 'npc_state_delta_launcher_position_v1';
 const DRAG_THRESHOLD_PX = 5;
@@ -60,32 +61,43 @@ function viewportSize() {
 class DeltaLauncherRefinement {
     constructor(root) {
         this.root = root;
-        this.launcher = root?.querySelector?.('.delta-launcher') || null;
+        this.launcher = root?.querySelector?.('.delta-launcher') || document.getElementById(LAUNCHER_ID) || null;
+        this.backdrop = null;
         this.drag = null;
         this.suppressClickUntil = 0;
+        this.panelWasOpen = false;
         this.observer = null;
         this.boundResize = () => this.clampCurrentPosition();
         this.boundPointerDown = event => this.onPointerDown(event);
         this.boundPointerMove = event => this.onPointerMove(event);
         this.boundPointerUp = event => this.onPointerUp(event);
         this.boundPointerCancel = event => this.onPointerCancel(event);
-        this.boundClickCapture = event => this.onClickCapture(event);
+        this.boundLauncherClick = event => this.onLauncherClick(event);
+        this.boundBackdropClick = event => this.onBackdropClick(event);
     }
 
     mount() {
-        if (!this.root || !this.launcher) return null;
+        if (!this.root || !this.launcher || !document.body) return null;
         this.injectStyles();
-        this.removeEmbeddedSettingsAccess();
+        this.launcher.id = LAUNCHER_ID;
         this.launcher.title = 'Drag to move · click to open NPC dossiers';
         this.launcher.setAttribute('aria-label', 'NPC dossiers. Drag to move; activate to open.');
+
+        // Keep the floating launcher outside the dossier root so host/mobile stacking
+        // contexts cannot bury it. The refinement owns its open bridge explicitly.
+        if (this.launcher.parentElement !== document.body) document.body.appendChild(this.launcher);
+
         this.launcher.addEventListener('pointerdown', this.boundPointerDown);
         this.launcher.addEventListener('pointermove', this.boundPointerMove);
         this.launcher.addEventListener('pointerup', this.boundPointerUp);
         this.launcher.addEventListener('pointercancel', this.boundPointerCancel);
-        this.launcher.addEventListener('click', this.boundClickCapture, true);
+        this.launcher.addEventListener('click', this.boundLauncherClick);
         globalThis.addEventListener?.('resize', this.boundResize);
         globalThis.visualViewport?.addEventListener?.('resize', this.boundResize);
         globalThis.visualViewport?.addEventListener?.('scroll', this.boundResize);
+
+        this.ensureBackdrop();
+        this.normalizeDossierChrome();
         this.observeDossierRenders();
         requestAnimationFrame(() => this.restoreStoredPosition());
         return this;
@@ -94,14 +106,19 @@ class DeltaLauncherRefinement {
     destroy() {
         this.observer?.disconnect?.();
         this.observer = null;
+        this.backdrop?.removeEventListener?.('click', this.boundBackdropClick);
         this.launcher?.removeEventListener?.('pointerdown', this.boundPointerDown);
         this.launcher?.removeEventListener?.('pointermove', this.boundPointerMove);
         this.launcher?.removeEventListener?.('pointerup', this.boundPointerUp);
         this.launcher?.removeEventListener?.('pointercancel', this.boundPointerCancel);
-        this.launcher?.removeEventListener?.('click', this.boundClickCapture, true);
+        this.launcher?.removeEventListener?.('click', this.boundLauncherClick);
         globalThis.removeEventListener?.('resize', this.boundResize);
         globalThis.visualViewport?.removeEventListener?.('resize', this.boundResize);
         globalThis.visualViewport?.removeEventListener?.('scroll', this.boundResize);
+        this.backdrop?.remove?.();
+        this.backdrop = null;
+        this.launcher?.remove?.();
+        this.launcher = null;
     }
 
     injectStyles() {
@@ -114,42 +131,151 @@ class DeltaLauncherRefinement {
   z-index: auto !important;
 }
 #${ROOT_ID} .delta-open-settings { display: none !important; }
-#${ROOT_ID} .delta-launcher {
+#${ROOT_ID} .delta-document-head > .delta-edit { display: none !important; }
+#${ROOT_ID} .delta-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: block;
+  background: rgba(0, 0, 0, .72);
+  pointer-events: auto;
+}
+#${ROOT_ID} .delta-backdrop[hidden] { display: none !important; }
+#${ROOT_ID} .delta-panel {
+  z-index: 2147483647 !important;
+  box-shadow: 0 20px 70px rgba(0, 0, 0, .55) !important;
+}
+#${LAUNCHER_ID} {
   position: fixed !important;
-  z-index: 2147483400 !important;
+  right: 18px !important;
+  bottom: 74px !important;
+  left: auto;
+  top: auto;
+  z-index: 2147483647 !important;
   display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  max-width: calc(100vw - 16px);
+  padding: 8px 13px 8px 9px;
+  border: 1px solid rgba(138, 163, 200, .9);
+  border-radius: 12px;
+  color: #eef5ff !important;
+  background: #263a55 !important;
+  box-shadow: 0 5px 20px rgba(0, 0, 0, .46) !important;
+  font: 600 14px/1.3 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   visibility: visible !important;
   opacity: 1 !important;
   pointer-events: auto !important;
   touch-action: none !important;
   user-select: none;
   -webkit-user-select: none;
-  max-width: calc(100vw - 16px);
   cursor: grab;
 }
-#${ROOT_ID} .delta-launcher.delta-launcher-dragging { cursor: grabbing; }
-#${ROOT_ID} .delta-launcher[data-positioned="true"] {
+#${LAUNCHER_ID}:hover { background: #304866 !important; }
+#${LAUNCHER_ID}.delta-launcher-dragging { cursor: grabbing; }
+#${LAUNCHER_ID} .delta-launcher-mark {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border: 1px solid #a9bdd9;
+  border-radius: 8px;
+  font: 700 13px/1 Georgia, serif;
+}
+#${LAUNCHER_ID}[data-positioned="true"] {
   right: auto !important;
   bottom: auto !important;
+  transform: none !important;
 }
-@media (max-width: 650px) {
-  #${ROOT_ID} .delta-launcher:not([data-positioned="true"]) {
-    right: max(10px, env(safe-area-inset-right)) !important;
-    bottom: max(84px, calc(74px + env(safe-area-inset-bottom))) !important;
+#${LAUNCHER_ID}[data-panel-open="true"] {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+@media (max-width: 1100px) {
+  #${LAUNCHER_ID}:not([data-positioned="true"]) {
+    right: max(12px, env(safe-area-inset-right)) !important;
+    top: 50% !important;
+    bottom: auto !important;
+    transform: translateY(-50%) !important;
+  }
+  #${LAUNCHER_ID} {
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
+    padding: 0;
+    border-radius: 50%;
+  }
+  #${LAUNCHER_ID} > span:not(.delta-launcher-mark) { display: none; }
+  #${LAUNCHER_ID} .delta-launcher-mark {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    font-size: 15px;
   }
 }
 `;
         document.head.appendChild(style);
     }
 
-    removeEmbeddedSettingsAccess() {
+    controller() {
+        return this.root?.__npcStateDeltaStage1Ui || null;
+    }
+
+    ensureBackdrop() {
+        const panel = this.root?.querySelector?.('.delta-panel');
+        if (!panel) return null;
+        let backdrop = this.root.querySelector('.delta-backdrop');
+        if (!backdrop) {
+            backdrop = document.createElement('div');
+            backdrop.className = 'delta-backdrop';
+            backdrop.hidden = true;
+            backdrop.setAttribute('aria-hidden', 'true');
+            this.root.insertBefore(backdrop, panel);
+        }
+        if (this.backdrop !== backdrop) {
+            this.backdrop?.removeEventListener?.('click', this.boundBackdropClick);
+            this.backdrop = backdrop;
+            this.backdrop.addEventListener('click', this.boundBackdropClick);
+        }
+        return backdrop;
+    }
+
+    normalizeDossierChrome() {
+        if (!this.root) return;
         for (const button of this.root.querySelectorAll('.delta-open-settings')) button.remove();
+        for (const button of this.root.querySelectorAll('.delta-document-head > .delta-edit')) button.remove();
+        this.ensureBackdrop();
+        this.syncPanelState();
+    }
+
+    syncPanelState() {
+        const panel = this.root?.querySelector?.('.delta-panel');
+        const backdrop = this.ensureBackdrop();
+        const open = Boolean(panel && !panel.hidden);
+        if (backdrop && backdrop.hidden === open) backdrop.hidden = !open;
+        if (this.launcher) {
+            this.launcher.setAttribute('aria-expanded', String(open));
+            this.launcher.dataset.panelOpen = String(open);
+        }
+        if (!open && this.panelWasOpen && this.launcher?.isConnected) {
+            this.launcher.focus?.({ preventScroll: true });
+        }
+        this.panelWasOpen = open;
     }
 
     observeDossierRenders() {
         if (typeof MutationObserver === 'undefined') return;
-        this.observer = new MutationObserver(() => this.removeEmbeddedSettingsAccess());
-        this.observer.observe(this.root, { subtree: true, childList: true });
+        this.observer = new MutationObserver(() => this.normalizeDossierChrome());
+        this.observer.observe(this.root, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+            attributeFilter: ['hidden'],
+        });
     }
 
     restoreStoredPosition() {
@@ -223,14 +349,28 @@ class DeltaLauncherRefinement {
         this.drag = null;
     }
 
-    onClickCapture(event) {
-        if (Date.now() >= this.suppressClickUntil) return;
+    onLauncherClick(event) {
+        if (Date.now() < this.suppressClickUntil) {
+            event.preventDefault?.();
+            event.stopImmediatePropagation?.();
+            return;
+        }
         event.preventDefault?.();
-        event.stopImmediatePropagation?.();
+        const controller = this.controller();
+        if (typeof controller?.open === 'function') void controller.open();
+        else globalThis.toastr?.warning?.('NPC State Delta dossier UI is still mounting.');
+    }
+
+    onBackdropClick(event) {
+        if (event.target !== this.backdrop) return;
+        event.preventDefault?.();
+        const controller = this.controller();
+        if (typeof controller?.close === 'function') controller.close({ restoreFocus: false });
+        this.launcher?.focus?.({ preventScroll: true });
     }
 }
 
-export function mountNpcStateDeltaLauncherRefinement(root = document.getElementById(ROOT_ID)) {
+export function mountNpcStateDeltaLauncherRefinement(root = globalThis.document?.getElementById?.(ROOT_ID)) {
     if (typeof document === 'undefined' || !root) return null;
     if (root.__npcStateDeltaLauncherRefinement) return root.__npcStateDeltaLauncherRefinement;
     const refinement = new DeltaLauncherRefinement(root).mount();
@@ -241,12 +381,14 @@ export function mountNpcStateDeltaLauncherRefinement(root = document.getElementB
 function start(attempt = 0) {
     if (typeof document === 'undefined') return;
     const root = document.getElementById(ROOT_ID);
-    if (root?.querySelector?.('.delta-launcher')) {
+    const controller = root?.__npcStateDeltaStage1Ui;
+    const launcher = root?.querySelector?.('.delta-launcher') || document.getElementById(LAUNCHER_ID);
+    if (root && controller && launcher) {
         mountNpcStateDeltaLauncherRefinement(root);
         return;
     }
     if (attempt < START_RETRY_LIMIT) setTimeout(() => start(attempt + 1), START_RETRY_MS);
-    else console.error('[NPC State Delta] launcher refinement could not find the Stage 1 dossier root.');
+    else console.error('[NPC State Delta] launcher refinement could not find the mounted Stage 1 dossier UI.');
 }
 
 if (typeof document !== 'undefined') {
