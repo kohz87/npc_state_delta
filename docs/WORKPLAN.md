@@ -8,7 +8,7 @@ These are sequential work stages for one source-baseline-derived extension. They
 | --- | --- | --- |
 | Seed | Pinned source, Delta isolation, governing documents, reproducible verification | Prepared; see seed provenance for executed results |
 | 1 | Side launcher and Beta-style dossier UI/UX | Accepted after deterministic checks and user tablet/mobile host QA |
-| 2 | Compact code consolidation, active-runtime normalization, and Delta application version | Accepted as Delta `0.1.0`; final normalization requires exact-candidate CI before merge |
+| 2 | Compact code consolidation, active-runtime normalization, and Delta application version | Accepted as Delta `0.1.0`; active-runtime normalization passed exact-candidate PR CI |
 | 3 | Baseline scanner with selectable connection profiles | Pending |
 | 4 | Baseline evolution, appearance forms, terminal automatic death | Pending |
 | 5 | Verify and retain accepted relationship scoring | Pending |
