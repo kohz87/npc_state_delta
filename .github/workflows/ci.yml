@@ -30,7 +30,9 @@ jobs:
           const config = JSON.parse(fs.readFileSync('runtime-modules.json', 'utf8'));
           const modules = config.modules.map(item => item.path);
           if (!modules.length) throw new Error('runtime-modules.json contains no active modules');
-          require('node:child_process').execFileSync(process.execPath, ['--check', ...modules], { stdio: 'inherit' });
+          for (const file of modules) {
+            require('node:child_process').execFileSync(process.execPath, ['--check', file], { stdio: 'inherit' });
+          }
           NODE
           git diff --check "${{ github.event.pull_request.base.sha || github.event.before }}" "${{ github.sha }}" || git diff --check HEAD^ HEAD
 
@@ -75,3 +77,24 @@ jobs:
           NODE
           test -f "dist/npc_state_delta-$(node -p "require('./manifest.json').version").zip"
           unzip -l "dist/npc_state_delta-$(node -p "require('./manifest.json').version").zip"
+
+      - name: Record reproducible verification source
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          git rev-parse HEAD > dist/verification-commit.txt
+          git bundle create dist/verification-source.bundle HEAD
+
+      - name: Retain verification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: delta-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/verification-commit.txt
+            dist/verification-source.bundle
+            dist/npc_state_delta-*.zip
+          retention-days: 3
+          if-no-files-found: error
