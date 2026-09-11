@@ -86,11 +86,11 @@ requireCheck(!bootstrap.includes('enhancements.js') && bootstrap.includes("await
 requireCheck(bootstrap.indexOf('await prepareNpcStateHardening()') >= 0 && bootstrap.indexOf('await prepareNpcStateHardening()') < bootstrap.indexOf("await import('./index.js')"), 'hardening must precede engine');
 requireCheck(bootstrap.includes("await import('./scanner-routing.js')") && bootstrap.indexOf("await import('./scanner-routing.js')") < bootstrap.indexOf("await import('./index.js')"), 'scanner routing must load before the runtime controller');
 requireCheck(declaredModules.some(module => module.path === 'scanner-routing.js' && module.role === 'scanner-request-routing' && module.required === true), 'scanner-routing.js must be a required active runtime owner');
-requireCheck(scannerRouting.includes("const PROFILE_KEY = 'scannerConnectionProfile'"), 'scanner routing setting key missing');
+requireCheck(scannerRouting.includes('scannerConnectionProfile') && scannerRouting.includes('selectedScannerProfileId'), 'scanner routing setting key missing');
 requireCheck(scannerRouting.includes('ConnectionManagerRequestService') && scannerRouting.includes('service.sendRequest('), 'scanner routing must use request-scoped SillyTavern Connection Manager requests');
 requireCheck(scannerRouting.includes('ctx.generateRaw(options)'), 'scanner routing must preserve the default host generateRaw route');
 requireCheck(!/connectionManager\s*\.\s*selectedProfile\s*=/.test(scannerRouting), 'scanner routing must not mutate the host roleplay connection profile');
-requireCheck(runtime.includes('NPCStateDeltaScannerRouting?.dispatch'), 'runtime scanner calls are not wired through the shared dispatcher');
+requireCheck(runtime.includes('dispatchScannerRequest') && runtime.includes('dispatchScannerRequest(ctx,'), 'runtime scanner calls are not wired through the shared dispatcher');
 requireCheck(runtime.includes("scannerConnectionProfile: ''"), 'scanner connection profile is missing from active Delta settings defaults');
 
 for (const file of ['AGENTS.md', 'docs/core-contract.md', 'docs/WORKPLAN.md', 'DEVELOPMENT.md', 'docs/seed-provenance.md', 'docs/seed-provenance.json', 'LICENSE']) {
