@@ -1,14 +1,14 @@
 # NPC State Delta — staged workplan
 
-These are sequential work stages for one legacy-based extension. They are not separate architectures. The seed is complete. Stage 1 has been requested and implemented; stages 2–9 remain pending until requested. The core contract governs behavior.
+These are sequential work stages for one legacy-based extension. They are not separate architectures. The seed is complete. Stages 1 and 2 have been requested and implemented; stages 3–9 remain pending until requested. The core contract governs behavior.
 
 ## Status
 
 | Stage | Scope | Status |
 | --- | --- | --- |
 | Seed | Pinned source, Delta isolation, governing documents, reproducible verification | Prepared; see seed provenance for executed results |
-| 1 | Side launcher and Beta-style dossier UI/UX | Implemented; focused deterministic checks pass, real-browser visual/performance QA pending |
-| 2 | Compact code consolidation | Pending |
+| 1 | Side launcher and Beta-style dossier UI/UX | Accepted after deterministic checks and user tablet/mobile host QA |
+| 2 | Compact code consolidation and Delta application version | Implemented as Delta `0.1.0`; full CI acceptance required on the exact candidate |
 | 3 | Legacy scanner with selectable connection profiles | Pending |
 | 4 | Legacy evolution, appearance forms, terminal automatic death | Pending |
 | 5 | Verify and retain legacy relationship scoring | Pending |
@@ -21,7 +21,7 @@ These are sequential work stages for one legacy-based extension. They are not se
 
 Import `legacy/v0.2.x` at `a12b2937b5c1305e3e3017218a626478a5bedcdc` into the repository root, including runtime, tests and source provenance. Preserve the existing GPL license. Keep a complete verified source snapshot outside the shipping tree during seeding. Move historical markdown to `docs/history/`; do not create a duplicate runtime under a new legacy folder.
 
-Apply deterministic Delta namespace substitutions across runtime, CSS and inherited tests. Keep legacy semantic algorithms and schemas otherwise intact. Keep upstream runtime version markers at 0.2.23/retained-engine 0.2.18 during this seed; these are inherited markers, not a completed Delta release claim. Update Delta's README and verification workflow without changing algorithmic behavior. Stage 2 will choose/unify Delta application versioning without silently changing persistence versions.
+Apply deterministic Delta namespace substitutions across runtime, CSS and inherited tests. Keep legacy semantic algorithms and schemas otherwise intact. Keep upstream runtime version markers at 0.2.23/retained-engine 0.2.18 during this seed; these are inherited markers, not a completed Delta release claim. Update Delta's README and verification workflow without changing algorithmic behavior. Stage 2 chooses Delta application versioning without silently changing persistence versions.
 
 Deliver `AGENTS.md`, `docs/core-contract.md`, this workplan, `DEVELOPMENT.md`, `docs/seed-provenance.md` and the machine-readable source inventory. Verify original blob hashes, run the upstream baseline and seeded synthetic suite, syntax/import/isolation validation, prompt checks and package verification. Do not implement appearance forms, death-policy changes, connection profiles, new UI or OOC removal during seeding.
 
@@ -31,13 +31,17 @@ Use Alpha's side-launcher idea and Beta's dossier/cast-rail UX over legacy state
 
 Deliver a readable dossier, cast selection/search, editor entry points and settings access. Refresh affected views from projections of canonical state. Preserve focus/scroll/unsaved edits. Verify open/close, no-chat state, selection, save/cancel, active/archived/dead filtering and updates arriving during interaction. Measure open-panel behavior in a real browser when available; do not equate generated HTML tests with visual QA. No scanner/scoring redesign.
 
-Stage 1 implementation adds `dossier-ui.js` as a Delta-local presentation adapter loaded after the canonical runtime. It projects only rendered dossier fields, uses the existing `NPCStateDelta.openEditor` and settings owners, refreshes from canonical-state notifications without touching the external editor draft, and keeps search/selection/scroll state in the UI controller. Focused model tests cover filtering, search, no-chat state, selection retention, projection boundaries and ownership. Real-browser visual/performance acceptance remains explicitly separate.
+Stage 1 implementation adds `dossier-ui.js` as a Delta-local presentation adapter loaded after the canonical runtime. It projects only rendered dossier fields, uses the existing `NPCStateDelta.openEditor` and settings owners, refreshes from canonical-state notifications without touching the external editor draft, and keeps search/selection/scroll state in the UI controller. Focused model tests cover filtering, search, no-chat state, selection retention, projection boundaries and ownership. User tablet/mobile host testing supplied the final viewport and cast-rail acceptance feedback.
 
 ## Stage 2 — consolidation
 
 Map entrypoint imports, globals, timers, event bindings, settings, persistence readers, tests and packaging. Consolidate inherited core/wrapper/enhancement layers into clear owners and remove verified superseded paths; there must be only one runtime implementation. Choose coherent Delta application version markers separately from data/bundle schemas.
 
 Preserve behavior, locks, tombstones, dirty-write retries, branch checkpoints and unresolved recovery. Remove stale documentation claims or mark them historical. Unused code removal needs caller evidence, not version-looking filenames alone. Verify the full synthetic suite, runtime reachability, duplicate listener prevention and packaged load. Keep ongoing cleanup in subsequent stages; stage 2 is not permission to retain later loose ends.
+
+Stage 2 implementation establishes Delta application version `0.1.0` in the manifest, core facade and package metadata while leaving bundle, branch-lineage and retained source-engine versions independent. The superseded `enhancements.js` layer and its duplicate dossier-library UI are removed; opt-in full-cast scanning and the retained backfill guard now live in the dedicated `full-cast.js` owner. Bootstrap, validation, packaging and tests are updated around that ownership.
+
+`core-v0218.js` and `branch-v0218.js` remain intentionally because caller tracing shows that they still contain active baseline algorithms and historical lineage/migration helpers. Their version-bearing filenames are provenance, not evidence of duplicate runtime engines. Stage 2 therefore does not delete or cosmetically rename active safety code merely to erase legacy-looking names. Future replacement requires the owning stage to move those callers and preserve their tested behavior.
 
 ## Stage 3 — capture and routing
 
