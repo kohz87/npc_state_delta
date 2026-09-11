@@ -5,6 +5,7 @@
   "modules": [
     { "path": "bootstrap.js", "role": "bootstrap", "required": true },
     { "path": "index.js", "role": "runtime-controller", "required": true },
+    { "path": "scanner-routing.js", "role": "scanner-request-routing", "required": true },
     { "path": "core.js", "role": "core-facade", "required": true },
     { "path": "core-mechanics.js", "role": "core-mechanics", "required": true },
     { "path": "branch.js", "role": "branch-recovery", "required": true },

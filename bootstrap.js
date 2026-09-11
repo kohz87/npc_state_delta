@@ -2,6 +2,7 @@
 import { prepareNpcStateHardening } from './hardening.js';
 
 await prepareNpcStateHardening();
+await import('./scanner-routing.js');
 await import('./index.js');
 try {
     await import('./full-cast.js');
