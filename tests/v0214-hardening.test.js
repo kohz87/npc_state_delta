@@ -54,8 +54,9 @@ test('editor and portrait workflows are chat-affine', () => {
     assert.match(index, /closePortraitGenerator\(\);\n\s*closeNpcViewer\(\);\n\s*closeNpcEditor\(\);/);
 });
 
-test('release metadata is v0.2.23', () => {
-    assert.match(core, /NPC_STATE_VERSION = '0\.2\.23'/);
-    assert.equal(manifest.version, '0.2.23');
+test('Delta application metadata is v0.1.0 while retained source-engine provenance stays explicit', () => {
+    assert.match(core, /NPC_STATE_VERSION = '0\.1\.0'/);
+    assert.match(core, /NPC_STATE_SOURCE_ENGINE_VERSION/);
+    assert.equal(manifest.version, '0.1.0');
     assert.equal(manifest.author, 'kohz87');
 });
