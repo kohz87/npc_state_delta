@@ -1,13 +1,13 @@
 # NPC State Delta — staged workplan
 
-These are sequential work stages for one legacy-based extension. They are not separate architectures. Only seed preparation is in scope for the initial repository task; stages 1–9 remain pending until requested. The core contract governs behavior.
+These are sequential work stages for one legacy-based extension. They are not separate architectures. The seed is complete. Stage 1 has been requested and implemented; stages 2–9 remain pending until requested. The core contract governs behavior.
 
 ## Status
 
 | Stage | Scope | Status |
 | --- | --- | --- |
 | Seed | Pinned source, Delta isolation, governing documents, reproducible verification | Prepared; see seed provenance for executed results |
-| 1 | Side launcher and Beta-style dossier UI/UX | Pending |
+| 1 | Side launcher and Beta-style dossier UI/UX | Implemented; focused deterministic checks pass, real-browser visual/performance QA pending |
 | 2 | Compact code consolidation | Pending |
 | 3 | Legacy scanner with selectable connection profiles | Pending |
 | 4 | Legacy evolution, appearance forms, terminal automatic death | Pending |
@@ -30,6 +30,8 @@ Deliver `AGENTS.md`, `docs/core-contract.md`, this workplan, `DEVELOPMENT.md`, `
 Use Alpha's side-launcher idea and Beta's dossier/cast-rail UX over legacy state. Inspect donor components and their dependencies; adapt presentation only. Keep temporary legacy viewer routes only where a current caller requires them, and retire them with that caller when replacement is complete.
 
 Deliver a readable dossier, cast selection/search, editor entry points and settings access. Refresh affected views from projections of canonical state. Preserve focus/scroll/unsaved edits. Verify open/close, no-chat state, selection, save/cancel, active/archived/dead filtering and updates arriving during interaction. Measure open-panel behavior in a real browser when available; do not equate generated HTML tests with visual QA. No scanner/scoring redesign.
+
+Stage 1 implementation adds `dossier-ui.js` as a Delta-local presentation adapter loaded after the canonical runtime. It projects only rendered dossier fields, uses the existing `NPCStateDelta.openEditor` and settings owners, refreshes from canonical-state notifications without touching the external editor draft, and keeps search/selection/scroll state in the UI controller. Focused model tests cover filtering, search, no-chat state, selection retention, projection boundaries and ownership. Real-browser visual/performance acceptance remains explicitly separate.
 
 ## Stage 2 — consolidation
 
