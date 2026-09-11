@@ -1,5 +1,12 @@
 # NPC State Delta changes
 
+## Stage 1 tablet cast rail fix - 11 September 2026
+
+- Keep the cast search field and lifecycle filters on one row for tablet widths so they do not consume most of the fixed cast rail height.
+- Reserve enough vertical space for complete dossier cards on tablet and phone layouts instead of clipping the portrait/status row at the bottom edge.
+- Add a small minimum bottom inset in touch layouts even when the browser reports no safe-area inset, while retaining horizontal cast scrolling.
+- Keep the change presentation-only; scanner, state, persistence, relationship mechanics, and later stages are unchanged.
+
 ## Stage 1 compact launcher and mobile viewport fix - 11 September 2026
 
 - Restyle the floating launcher as a 48px rounded-square stacked `npc` / `state` wordmark inspired by the supplied icon, keeping the full button as the touch/drag target and avoiding a large raster asset.
