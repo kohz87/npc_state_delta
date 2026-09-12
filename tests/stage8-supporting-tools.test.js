@@ -1,15 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createNpcRecord } from '../core.js';
+import { buildNpcPortraitPrompts, createNpcRecord } from '../core.js';
 import { encodeNpcStateBundle } from '../bundle.js';
 import {
     boundedAppend,
     buildPortablePortraitSettings,
+    flushDurably,
+    keepPromptDraft,
     portraitTargetCurrent,
+    promptDrafts,
     recordToolEvent,
     relationshipDiagnosticRows,
     summarizeDecodedBundle,
     toolEvents,
+    uiRoot,
     validatePortraitFile,
 } from '../dossier-tools-core.js';
 import {
@@ -22,6 +26,18 @@ import {
 function portraitData(bytes = [1, 2, 3, 4]) {
     return `data:image/png;base64,${Buffer.from(bytes).toString('base64')}`;
 }
+
+test('supporting tools bind to the accepted Stage 1 dossier root', () => {
+    const previousDocument = globalThis.document;
+    const root = { id: 'npc_state_delta_dossier_root' };
+    globalThis.document = { getElementById: id => id === root.id ? root : null };
+    try {
+        assert.equal(uiRoot(), root);
+    } finally {
+        if (previousDocument === undefined) delete globalThis.document;
+        else globalThis.document = previousDocument;
+    }
+});
 
 test('portrait validation accepts images and rejects invalid/oversized inputs without mutation', () => {
     assert.equal(validatePortraitFile({ type: 'image/png', size: 1024 }).ok, true);
@@ -40,6 +56,35 @@ test('portrait ownership guard rejects chat switches, deletion, cancellation, su
     assert.equal(portraitTargetCurrent({ ...base, actionSeq: 4 }), false);
 });
 
+test('manual portrait prompt drafts survive ordinary workflow refreshes until explicit replacement', () => {
+    promptDrafts.clear();
+    keepPromptDraft('chat:a::npc_a', { positive: 'manual gold-blue detail', negative: 'manual negative detail' });
+    assert.equal(promptDrafts.get('chat:a::npc_a').positive, 'manual gold-blue detail');
+    keepPromptDraft('chat:b::npc_b', { positive: 'other dossier', negative: '' });
+    assert.equal(promptDrafts.get('chat:a::npc_a').negative, 'manual negative detail');
+});
+
+test('shared portrait prompt resolver preserves canonical colors and current human-form anatomy', () => {
+    const npc = createNpcRecord('Sora');
+    Object.assign(npc, {
+        species: 'Stormcrown Thunderbird Chimera',
+        overallAppearance: 'shoulder-length distinctly golden-blue hair with warm gold and blue pigmentation',
+        appearanceForms: [
+            { name: 'Thunderbird', appearance: 'vast cobalt wings, bright feathers, hooked talons' },
+            { name: 'Human', appearance: 'young human girl with ordinary human ears, two arms, two legs, no avian wings or feathers' },
+        ],
+        currentForm: 'Human',
+        currentFormUnknown: false,
+        appearanceModelVersion: 1,
+    });
+    const prompts = buildNpcPortraitPrompts(npc);
+    assert.match(prompts.positive, /golden-blue/i);
+    assert.match(prompts.positive, /ordinary human ears/i);
+    assert.doesNotMatch(prompts.positive, /vast cobalt wings/i);
+    assert.doesNotMatch(prompts.positive, /hooked talons/i);
+    assert.doesNotMatch(prompts.positive, /Stormcrown Thunderbird Chimera/i);
+});
+
 test('bounded Stage 8 diagnostics exclude arbitrary secret fields and stay bounded', () => {
     toolEvents.splice(0);
     for (let i = 0; i < 75; i += 1) recordToolEvent('scan', { chatKey: 'chat:a', action: `a${i}`, outcome: 'ok', credential: 'SECRET', prompt: 'PRIVATE' });
@@ -49,6 +94,23 @@ test('bounded Stage 8 diagnostics exclude arbitrary secret fields and stay bound
     const custom = [];
     for (let i = 0; i < 5; i += 1) boundedAppend(custom, i, 3);
     assert.deepEqual(custom, [2, 3, 4]);
+});
+
+test('durable flush reports persistence failure separately from local mutation', async () => {
+    const previousApi = globalThis.NPCStateDelta;
+    globalThis.NPCStateDelta = {
+        uiStatus: () => ({ chatKey: 'chat:a' }),
+        flush: async () => { throw new Error('synthetic write failure'); },
+    };
+    try {
+        const result = await flushDurably('chat:a', 'synthetic portrait');
+        assert.equal(result.persisted, false);
+        assert.match(String(result.error?.message || ''), /synthetic write failure/);
+        assert.equal(toolEvents.at(-1).persisted, false);
+    } finally {
+        if (previousApi === undefined) delete globalThis.NPCStateDelta;
+        else globalThis.NPCStateDelta = previousApi;
+    }
 });
 
 test('relationship diagnostics retain signed fractional progress and report only a derived gate audit', () => {
@@ -123,6 +185,13 @@ test('native Delta envelope round-trips portraits, portable settings and source 
     assert.equal(summary.dossiers, 1);
     assert.equal(summary.portraits, 1);
     assert.equal(summary.checkpoints, 1);
+});
+
+test('native transfer rejects unsupported portable metadata before import preparation', () => {
+    const base = encodeNpcStateBundle({ npcs: [], dismissed: [] }, { appVersion: '0.1.0', chatKey: 'chat:source' });
+    assert.throws(() => augmentNativeBundle(base, { portableSettings: { scannerConnectionProfile: 'foreign-route' } }), /unsupported portable setting/i);
+    assert.throws(() => augmentNativeBundle(base, { portableSettings: { portraitUseMood: 'yes' } }), /must be boolean/i);
+    assert.throws(() => augmentNativeBundle(base, { historyArchive: { policy: 'restore-source-history', checkpoints: [] } }), /unsupported source-history policy/i);
 });
 
 test('cross-chat native import clears source message ownership while preserving accepted state and terminal death', () => {
