@@ -117,10 +117,10 @@ export function recordToolEvent(type, values = {}) {
 
 export function api() { return globalThis.NPCStateDelta || null; }
 export function uiRoot() { return document.getElementById(DOSSIER_ROOT_ID); }
-export function overlayMountHost() {
-    const root = uiRoot();
-    if (root && root.isConnected !== false && typeof root.appendChild === 'function') return root;
-    return globalThis.document?.body || null;
+export function overlayMountHost() { return globalThis.document?.body || null; }
+export function modalTopLayerSupported(doc = globalThis.document) {
+    const dialog = doc?.createElement?.('dialog');
+    return Boolean(dialog && typeof dialog.showModal === 'function');
 }
 export function activeChatKey() {
     try { return plain(api()?.uiStatus?.()?.chatKey); } catch { return ''; }
@@ -182,6 +182,9 @@ function restoreFocus(session) {
 export function closeOverlay({ reason = 'closed', restore = true } = {}) {
     const session = activeSession;
     invalidateSession(reason);
+    try {
+        if (activeOverlay?.tagName === 'DIALOG' && activeOverlay.open && typeof activeOverlay.close === 'function') activeOverlay.close();
+    } catch {}
     activeOverlay?.remove?.();
     activeOverlay = null;
     activeSession = null;
@@ -201,7 +204,6 @@ export function makeSession(kind, values = {}) {
         busy: false,
         cancelableBusy: false,
         cancelled: false,
-        previewUrl: '',
         importBytes: null,
         importDecoded: null,
         importSummary: null,
@@ -210,7 +212,7 @@ export function makeSession(kind, values = {}) {
 
 export function mountOverlay(html, session) {
     closeOverlay({ reason: 'replaced', restore: false });
-    const overlay = document.createElement('div');
+    const overlay = document.createElement('dialog');
     overlay.id = OVERLAY_ID;
     overlay.className = 'npc-state-delta-tools-overlay';
     overlay.innerHTML = html;
@@ -222,14 +224,31 @@ export function mountOverlay(html, session) {
             closeOverlay({ reason: 'cancelled' });
         }
     });
+    overlay.addEventListener('cancel', event => {
+        event.preventDefault();
+        if (!session.busy || session.cancelableBusy) closeOverlay({ reason: 'escape' });
+    });
     const host = overlayMountHost();
     if (!host) throw new Error('NPC State Delta could not find a safe host for the supporting-tools overlay.');
     host.appendChild(overlay);
-    overlay.dataset.deltaOverlayHost = host === uiRoot() ? 'dossier-root' : 'body';
-    document.documentElement?.classList?.add?.('npc-state-delta-tools-open');
-    document.body?.classList?.add?.('npc-state-delta-tools-open');
     activeOverlay = overlay;
     activeSession = session;
+    try {
+        if (typeof overlay.showModal === 'function') {
+            overlay.showModal();
+            overlay.dataset.deltaOverlayMode = 'top-layer-dialog';
+        } else {
+            overlay.setAttribute('open', '');
+            overlay.dataset.deltaOverlayMode = 'fixed-fallback';
+        }
+    } catch (error) {
+        activeOverlay = null;
+        activeSession = null;
+        overlay.remove();
+        throw error;
+    }
+    document.documentElement?.classList?.add?.('npc-state-delta-tools-open');
+    document.body?.classList?.add?.('npc-state-delta-tools-open');
     requestAnimationFrame(() => overlay.querySelector('[data-delta-tools-autofocus], [data-delta-tools-close]')?.focus?.());
     recordToolEvent('workflow-opened', { chatKey: session.chatKey, npcId: session.npcId, action: session.kind });
     return overlay;
