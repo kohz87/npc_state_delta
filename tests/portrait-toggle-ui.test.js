@@ -12,9 +12,12 @@ test('portrait prompt workflow uses a footer Copy Prompt action and preserves no
     assert.match(source, /copyPromptText\(combinedPrompt\(draft\), 'Portrait prompt', overlay\)/);
 });
 
-test('portrait copying delegates to SillyTavern host utility and exposes a selected manual fallback', () => {
+test('portrait copying lazy-loads SillyTavern host utility and exposes a selected manual fallback', () => {
     const source = fs.readFileSync(new URL('../portrait-tools.js', import.meta.url), 'utf8');
-    assert.match(source, /import \{ copyText as hostCopyText \} from '\.\.\/\.\.\/\.\.\/utils\.js'/);
+    assert.doesNotMatch(source, /^import .*utils\.js/m, 'host-only utils must not be resolved at module load in isolated tests');
+    assert.match(source, /async function hostCopyText\(value\)/);
+    assert.match(source, /await import\('\.\.\/\.\.\/\.\.\/utils\.js'\)/);
+    assert.match(source, /hostUtils\.copyText\(value\)/);
     assert.match(source, /await hostCopyText\(value\)/);
     assert.doesNotMatch(source, /function fallbackCopyText/);
     assert.match(source, /data-delta-tools-manual-copy/);
