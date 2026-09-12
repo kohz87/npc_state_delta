@@ -50,6 +50,10 @@ function exactAge(value) {
     return /^\d{1,3}$/.test(text) ? Number(text) : null;
 }
 
+function groundedReferenceDate(calendar, referenceDate = null) {
+    return normalizeCalendarDate(referenceDate, calendar) || currentCalendarDate(calendar);
+}
+
 export function normalizeBirthDate(value, config = undefined) {
     return normalizeCalendarDate(value, activeOrProvided(config));
 }
@@ -108,15 +112,17 @@ function generatedBirthdayFor(npc = {}, config = undefined) {
     };
 }
 
-function calculateCalendarAge(npc = {}, config = undefined) {
+function calculateCalendarAge(npc = {}, config = undefined, referenceDate = null) {
     const calendar = activeOrProvided(config);
-    const age = deriveAgeFromBirthDate(npc.birthDate, currentCalendarDate(calendar), calendar);
+    const current = groundedReferenceDate(calendar, referenceDate);
+    if (!current) return null;
+    const age = deriveAgeFromBirthDate(npc.birthDate, current, calendar);
     return Number.isInteger(age) ? age : null;
 }
 
-function anchorMissingBirthYear(npc = {}, config = undefined) {
+function anchorMissingBirthYear(npc = {}, config = undefined, referenceDate = null) {
     const calendar = activeOrProvided(config);
-    const current = currentCalendarDate(calendar);
+    const current = groundedReferenceDate(calendar, referenceDate);
     const age = exactAge(npc.age);
     const date = normalizeBirthDate(npc.birthDate, calendar);
     if (!current || age === null || !date || date.year !== null) return npc;
@@ -130,7 +136,7 @@ function anchorMissingBirthYear(npc = {}, config = undefined) {
     };
 }
 
-export function normalizeNpcBirthday(npc = {}, config = undefined) {
+export function normalizeNpcBirthday(npc = {}, config = undefined, referenceDate = null) {
     const calendar = activeOrProvided(config);
     const rawDate = normalizeStoredBirthDate(npc?.birthDate ?? npc?.birth_date ?? npc?.birthday, calendar);
     const rawSource = String(npc?.birthDateSource ?? npc?.birth_date_source ?? '').trim().toLowerCase();
@@ -162,36 +168,38 @@ export function normalizeNpcBirthday(npc = {}, config = undefined) {
         };
     }
 
-    next = anchorMissingBirthYear(next, calendar);
-    const calendarAge = calculateCalendarAge(next, calendar);
+    next = anchorMissingBirthYear(next, calendar, referenceDate);
+    const calendarAge = calculateCalendarAge(next, calendar, referenceDate);
     next.calendarAge = calendarAge;
     next.birthDateDisplay = formatBirthDate(next.birthDate, calendar);
     return next;
 }
 
-export function effectiveChronologicalAge(npc = {}, config = undefined) {
-    const normalized = normalizeNpcBirthday(npc, config);
+export function effectiveChronologicalAge(npc = {}, config = undefined, referenceDate = null) {
+    const normalized = normalizeNpcBirthday(npc, config, referenceDate);
     return Number.isInteger(normalized.calendarAge) ? String(normalized.calendarAge) : String(normalized.age ?? '').trim();
 }
 
-export function reanchorDerivedBirthYearFromAge(npc = {}, config = undefined) {
+export function reanchorDerivedBirthYearFromAge(npc = {}, config = undefined, referenceDate = null) {
     const calendar = activeOrProvided(config);
-    const next = normalizeNpcBirthday(npc, calendar);
-    if (next.birthDateYearSource !== 'derived' || exactAge(next.age) === null || !currentCalendarDate(calendar)) return next;
+    const current = groundedReferenceDate(calendar, referenceDate);
+    const next = normalizeNpcBirthday(npc, calendar, current);
+    if (next.birthDateYearSource !== 'derived' || exactAge(next.age) === null || !current) return next;
     const partial = { ...next.birthDate, year: null };
-    const derived = deriveBirthDateFromAge(partial, next.age, currentCalendarDate(calendar), calendar);
+    const derived = deriveBirthDateFromAge(partial, next.age, current, calendar);
     if (!derived) return next;
     return normalizeNpcBirthday({
         ...next,
         birthDate: derived,
         birthDatePrecision: 'full',
         birthDateYearSource: 'derived',
-    }, calendar);
+    }, calendar, current);
 }
 
 export function applyNpcBirthdayUpdate(npc = {}, rawUpdate = null, options = {}) {
     const calendar = options.calendarConfig ?? getActiveCalendarConfig();
-    const next = normalizeNpcBirthday(npc, calendar);
+    const referenceDate = groundedReferenceDate(calendar, options.referenceDate);
+    const next = normalizeNpcBirthday(npc, calendar, referenceDate);
     if (!rawUpdate || typeof rawUpdate !== 'object') return next;
     let incoming = normalizeBirthDate(rawUpdate.birthDate ?? rawUpdate.birth_date ?? rawUpdate.birthday, calendar);
     if (!incoming) return next;
@@ -202,8 +210,8 @@ export function applyNpcBirthdayUpdate(npc = {}, rawUpdate = null, options = {})
     const currentEstablished = next.birthDateSource === 'established';
 
     let incomingYearSource = incoming.year === null ? '' : 'established';
-    if (incoming.year === null && currentCalendarDate(calendar) && exactAge(npc.age) !== null) {
-        const derived = deriveBirthDateFromAge(incoming, npc.age, currentCalendarDate(calendar), calendar);
+    if (incoming.year === null && referenceDate && exactAge(npc.age) !== null) {
+        const derived = deriveBirthDateFromAge(incoming, npc.age, referenceDate, calendar);
         if (derived) {
             incoming = derived;
             incomingYearSource = 'derived';
@@ -235,15 +243,15 @@ export function applyNpcBirthdayUpdate(npc = {}, rawUpdate = null, options = {})
         birthDateSourceMessageId: Number.isInteger(options.sourceMessageId)
             ? options.sourceMessageId
             : next.birthDateSourceMessageId,
-    }, calendar);
+    }, calendar, referenceDate);
 }
 
-export function mergeNpcBirthdayKnowledge(sources = [], current = {}, config = undefined) {
+export function mergeNpcBirthdayKnowledge(sources = [], current = {}, config = undefined, referenceDate = null) {
     const calendar = activeOrProvided(config);
-    const next = normalizeNpcBirthday(current, calendar);
+    const next = normalizeNpcBirthday(current, calendar, referenceDate);
     if (next.birthDateSource === 'established') return next;
     const established = (Array.isArray(sources) ? sources : [])
-        .map(source => normalizeNpcBirthday(source, calendar))
+        .map(source => normalizeNpcBirthday(source, calendar, referenceDate))
         .find(source => source.birthDateSource === 'established' && source.birthDate);
     if (!established) return next;
     return normalizeNpcBirthday({
@@ -255,20 +263,22 @@ export function mergeNpcBirthdayKnowledge(sources = [], current = {}, config = u
         birthDateCalendarFingerprint: established.birthDateCalendarFingerprint,
         birthDateReason: established.birthDateReason,
         birthDateSourceMessageId: established.birthDateSourceMessageId,
-    }, calendar);
+    }, calendar, referenceDate);
 }
 
 export function birthdayEvidenceInText(value) {
     return /\b(birth(?:day|date)?|born|hatched|turn(?:s|ed|ing)?\s+\d{1,3}|date\s+of\s+birth)\b/i.test(String(value || ''));
 }
 
-export function birthdayPromptRule(config = undefined) {
+export function birthdayPromptRule(config = undefined, referenceDate = null) {
     const calendar = activeOrProvided(config);
-    const context = calendarPromptContext(calendar);
-    if (!context) {
+    const normalized = normalizeCalendarConfig(calendar, { requireCurrentDate: false });
+    const context = calendarPromptContext(calendar, referenceDate);
+    if (!normalized.calendarValid) {
         return `\nBIRTHDAY: Only grounded birthday/birth-date evidence may return birthDate:"MM-DD|YYYY-MM-DD" with birthDateState:"establish|correct" and a brief birthDateReason; omit otherwise. Never derive from apparentAge, species, or lifespan and never invent a random date; Delta generates the fallback locally.`;
     }
-    return `\nBIRTHDAY: ${context} Preserve configured era/month names exactly. Only grounded birthday/birth-date evidence may return birthDate:{"era":"${normalizeCalendarConfig(calendar).config.era || ''}","year":number|null,"month":"configured month name","day":number} with birthDateState:"establish|correct" and a brief birthDateReason; omit otherwise. Bind words such as today to the configured current date, but do not invent missing birthday evidence. Never derive chronology from apparentAge, species, or lifespan; Delta performs calendar arithmetic locally.`;
+    const contextText = context ? `${context} ` : '';
+    return `\nBIRTHDAY: ${contextText}Preserve fantasy era/month names exactly as stated in grounded evidence. Only grounded birthday/birth-date evidence may return birthDate:{"era":"${normalized.config.era || ''}","year":number|null,"month":"month name","day":number} with birthDateState:"establish|correct" and a brief birthDateReason; omit otherwise. Never invent a missing year or birthday. Never derive chronology from apparentAge, species, or lifespan; Delta performs calendar arithmetic locally.`;
 }
 
 export const BIRTHDAY_PROMPT_RULE = birthdayPromptRule(null);
