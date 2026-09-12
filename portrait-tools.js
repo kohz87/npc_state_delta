@@ -1,5 +1,4 @@
 /* NPC State Delta portrait management: prompt generation plus explicit upload/remove only. */
-import { copyText as hostCopyText } from '../../../utils.js';
 import {
     activeChatKey, api, closeOverlay, currentSessionIs, draftKey, escapeHtml, flushDurably,
     keepPromptDraft, makeSession, mountOverlay, npcById, portraitSignature, promptDrafts,
@@ -64,6 +63,14 @@ function revealManualCopy(overlay, value, label) {
     }
     toast('warning', `NPC State Delta: automatic clipboard access was blocked. ${label} is selected below; press Ctrl+C to copy it.`);
     return true;
+}
+
+async function hostCopyText(value) {
+    // SillyTavern owns this host-only module. Lazy loading keeps Delta's isolated
+    // Node/runtime tests independent from the surrounding SillyTavern install.
+    const hostUtils = await import('../../../utils.js');
+    if (typeof hostUtils?.copyText !== 'function') throw new Error('SillyTavern clipboard helper is unavailable.');
+    return hostUtils.copyText(value);
 }
 
 async function copyPromptText(text, label, overlay) {
