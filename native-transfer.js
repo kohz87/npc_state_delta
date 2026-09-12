@@ -7,6 +7,21 @@ const MAX_MANIFEST_BYTES = 2 * 1024 * 1024;
 const MAX_NATIVE_BYTES = 32 * 1024 * 1024;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+const PORTABLE_SETTING_SCHEMA = Object.freeze({
+    portraitGenerationEnabled: { type: 'boolean' },
+    portraitThemePreset: { type: 'string', max: 80 },
+    portraitStylePositive: { type: 'string', max: 2400 },
+    portraitStyleNegative: { type: 'string', max: 2400 },
+    portraitComposition: { type: 'string', max: 1200 },
+    portraitPromptFormat: { type: 'string', max: 40 },
+    portraitUseMood: { type: 'boolean' },
+    portraitUseLocation: { type: 'boolean' },
+    portraitSaveToGallery: { type: 'boolean' },
+});
+const DECLARED_BOOLEAN_FIELDS = Object.freeze([
+    'dossiers', 'portraits', 'socialGraph', 'dismissedIdentitySuppression',
+    'portablePortraitSettings', 'sourceHistoryAudit',
+]);
 
 function bytes(value) {
     if (value instanceof Uint8Array) return value;
@@ -40,6 +55,46 @@ function withoutPortraitPayload(value) {
     }
     return out;
 }
+function validateDeclaredContents(value) {
+    if (value === undefined) return null;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('NPC State Delta native bundle has invalid declared-contents metadata.');
+    for (const field of DECLARED_BOOLEAN_FIELDS) {
+        if (field in value && typeof value[field] !== 'boolean') throw new Error(`NPC State Delta native bundle has invalid declared field ${field}.`);
+    }
+    if ('historyRestorePolicy' in value && value.historyRestorePolicy !== 'target-safe-baseline') {
+        throw new Error(`NPC State Delta native bundle requests unsupported history restore policy: ${String(value.historyRestorePolicy || 'empty')}.`);
+    }
+    return structuredClone(value);
+}
+function validatePortableSettings(value) {
+    if (value === undefined) return null;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('NPC State Delta native bundle has invalid portable settings.');
+    const output = {};
+    for (const [key, item] of Object.entries(value)) {
+        const rule = PORTABLE_SETTING_SCHEMA[key];
+        if (!rule) throw new Error(`NPC State Delta native bundle contains unsupported portable setting: ${key}.`);
+        if (rule.type === 'boolean') {
+            if (typeof item !== 'boolean') throw new Error(`NPC State Delta native portable setting ${key} must be boolean.`);
+            output[key] = item;
+            continue;
+        }
+        if (typeof item !== 'string' || item.length > rule.max) throw new Error(`NPC State Delta native portable setting ${key} is invalid or exceeds ${rule.max} characters.`);
+        output[key] = item;
+    }
+    return output;
+}
+function validateHistoryArchive(value) {
+    if (value === undefined) return null;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('NPC State Delta native bundle has invalid source-history metadata.');
+    if (value.policy !== 'audit-only-source-history') throw new Error('NPC State Delta native bundle declares an unsupported source-history policy.');
+    for (const field of ['lineage', 'checkpoints', 'inlineCards']) {
+        if (field in value && !Array.isArray(value[field])) throw new Error(`NPC State Delta native history field ${field} must be an array.`);
+    }
+    if ('branchRootSnapshot' in value && value.branchRootSnapshot !== null && (typeof value.branchRootSnapshot !== 'object' || Array.isArray(value.branchRootSnapshot))) {
+        throw new Error('NPC State Delta native branchRootSnapshot is invalid.');
+    }
+    return structuredClone(value);
+}
 
 export function buildHistoryArchive(state = {}) {
     return withoutPortraitPayload({
@@ -58,20 +113,21 @@ export function buildHistoryArchive(state = {}) {
 
 export function augmentNativeBundle(input, { portableSettings = null, historyArchive = null } = {}) {
     const { value, manifest, binary } = parseEnvelope(input);
-    // Run the canonical decoder first so malformed/foreign bundles fail before metadata is added.
     decodeNpcStateBundle(value);
+    const checkedSettings = portableSettings === null ? null : validatePortableSettings(portableSettings);
+    const checkedHistory = historyArchive === null ? null : validateHistoryArchive(historyArchive);
     manifest.declaredContents = {
         dossiers: true,
         portraits: true,
         socialGraph: true,
         dismissedIdentitySuppression: true,
-        portablePortraitSettings: Boolean(portableSettings),
-        sourceHistoryAudit: Boolean(historyArchive),
+        portablePortraitSettings: Boolean(checkedSettings),
+        sourceHistoryAudit: Boolean(checkedHistory),
         historyRestorePolicy: 'target-safe-baseline',
     };
-    if (portableSettings && typeof portableSettings === 'object') manifest.portableSettings = structuredClone(portableSettings);
+    if (checkedSettings) manifest.portableSettings = checkedSettings;
     else delete manifest.portableSettings;
-    if (historyArchive && typeof historyArchive === 'object') manifest.historyArchive = structuredClone(historyArchive);
+    if (checkedHistory) manifest.historyArchive = checkedHistory;
     else delete manifest.historyArchive;
     const manifestBytes = textEncoder.encode(JSON.stringify(manifest));
     if (manifestBytes.length > MAX_MANIFEST_BYTES) throw new Error('NPC State Delta native source-history metadata exceeds the 2 MB manifest safety limit. Reduce retained chat history before exporting.');
@@ -88,24 +144,12 @@ export function augmentNativeBundle(input, { portableSettings = null, historyArc
 export function decodeDeltaNativeBundle(input) {
     const canonical = decodeNpcStateBundle(input);
     const { manifest } = parseEnvelope(input);
-    const declared = manifest.declaredContents;
-    if (declared !== undefined && (!declared || typeof declared !== 'object' || Array.isArray(declared))) {
-        throw new Error('NPC State Delta native bundle has invalid declared-contents metadata.');
-    }
-    const portableSettings = manifest.portableSettings;
-    if (portableSettings !== undefined && (!portableSettings || typeof portableSettings !== 'object' || Array.isArray(portableSettings))) {
-        throw new Error('NPC State Delta native bundle has invalid portable settings.');
-    }
-    const historyArchive = manifest.historyArchive;
-    if (historyArchive !== undefined && (!historyArchive || typeof historyArchive !== 'object' || Array.isArray(historyArchive))) {
-        throw new Error('NPC State Delta native bundle has invalid source-history metadata.');
-    }
-    return {
-        ...canonical,
-        declaredContents: declared ? structuredClone(declared) : null,
-        portableSettings: portableSettings ? structuredClone(portableSettings) : null,
-        historyArchive: historyArchive ? structuredClone(historyArchive) : null,
-    };
+    const declaredContents = validateDeclaredContents(manifest.declaredContents);
+    const portableSettings = validatePortableSettings(manifest.portableSettings);
+    const historyArchive = validateHistoryArchive(manifest.historyArchive);
+    if (declaredContents?.portablePortraitSettings === true && !portableSettings) throw new Error('NPC State Delta native bundle declares portable portrait settings but does not contain them.');
+    if (declaredContents?.sourceHistoryAudit === true && !historyArchive) throw new Error('NPC State Delta native bundle declares source history but does not contain it.');
+    return { ...canonical, declaredContents, portableSettings, historyArchive };
 }
 
 function scrubSourceMessageOwnership(value) {
