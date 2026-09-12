@@ -98,33 +98,39 @@ function injectStyles() {
     const style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
-/* Keep boolean settings CSS-only during startup. Do not add/remove sibling DOM from a global observer. */
-#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]{
-  -webkit-appearance:none!important;appearance:none!important;position:relative!important;display:inline-block!important;
-  width:82px!important;height:26px!important;min-width:82px!important;max-width:82px!important;flex:0 0 82px!important;
-  margin:0!important;padding:0!important;border:1px solid rgba(255,255,255,.2)!important;border-radius:999px!important;
-  background:rgba(255,255,255,.055)!important;background-image:none!important;box-shadow:inset 0 1px 1px rgba(0,0,0,.2)!important;
-  color:rgba(255,255,255,.72)!important;cursor:pointer!important;vertical-align:middle!important;overflow:hidden!important;
+/* Modern Settings booleans use the row Delta already owns. The real checkbox stays
+   semantic and focusable; CSS paints the status pill on the label. No toggle DOM is
+   inserted or synchronized by JavaScript, so the document observer cannot churn it. */
+@supports selector(label:has(> input[type="checkbox"]:checked)) {
+  #${SETTINGS_ID} .npc-state-delta-setting-row:has(> input[type="checkbox"]){
+    position:relative;cursor:pointer;
+  }
+  #${SETTINGS_ID} .npc-state-delta-setting-row>input[type="checkbox"]{
+    position:absolute!important;width:1px!important;height:1px!important;min-width:1px!important;max-width:1px!important;
+    margin:-1px!important;padding:0!important;border:0!important;clip:rect(0 0 0 0)!important;clip-path:inset(50%)!important;
+    overflow:hidden!important;white-space:nowrap!important;opacity:0!important;box-shadow:none!important;background:none!important;
+    pointer-events:none!important;
+  }
+  #${SETTINGS_ID} .npc-state-delta-setting-row:has(> input[type="checkbox"])::after{
+    content:"Disabled"!important;display:inline-flex!important;align-items:center!important;justify-content:flex-start!important;
+    min-width:78px!important;height:24px!important;flex:0 0 auto!important;box-sizing:border-box!important;
+    margin:0!important;padding:0 8px 0 22px!important;border:1px solid rgba(255,255,255,.18)!important;border-radius:999px!important;
+    background:radial-gradient(circle at 10px 50%,rgba(190,195,202,.62) 0 3.5px,transparent 4px),rgba(255,255,255,.045)!important;
+    box-shadow:inset 0 1px 1px rgba(0,0,0,.18)!important;color:rgba(255,255,255,.68)!important;
+    font:600 11.5px/1 inherit!important;letter-spacing:.01em!important;white-space:nowrap!important;overflow:hidden!important;
+    vertical-align:middle!important;
+  }
+  #${SETTINGS_ID} .npc-state-delta-setting-row:has(> input[type="checkbox"]:checked)::after{
+    content:"Enabled"!important;border-color:rgba(87,209,123,.42)!important;
+    background:radial-gradient(circle at 10px 50%,#57d17b 0 3.5px,transparent 4px),rgba(54,91,64,.26)!important;
+    color:rgba(239,255,243,.94)!important;
+  }
+  #${SETTINGS_ID} .npc-state-delta-setting-row:has(> input[type="checkbox"]:focus-visible)::after{
+    outline:2px solid rgba(111,214,139,.9)!important;outline-offset:2px!important;
+  }
+  #${SETTINGS_ID} .npc-state-delta-setting-row:has(> input[type="checkbox"]:disabled){cursor:not-allowed!important}
+  #${SETTINGS_ID} .npc-state-delta-setting-row:has(> input[type="checkbox"]:disabled)::after{opacity:.45!important}
 }
-#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]::before{
-  content:""!important;position:absolute!important;left:7px!important;top:50%!important;width:7px!important;height:7px!important;
-  border:0!important;border-radius:50%!important;background:rgba(190,195,202,.62)!important;box-shadow:0 0 0 2px rgba(190,195,202,.07)!important;
-  transform:translateY(-50%)!important;margin:0!important;padding:0!important;
-}
-#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]::after{
-  content:"Disabled"!important;position:absolute!important;left:20px!important;right:6px!important;top:50%!important;
-  transform:translateY(-50%)!important;margin:0!important;padding:0!important;border:0!important;background:none!important;
-  color:rgba(255,255,255,.62)!important;font:600 11.5px/1 inherit!important;letter-spacing:.01em!important;text-align:left!important;white-space:nowrap!important;
-}
-#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:checked{
-  border-color:rgba(87,209,123,.42)!important;background:rgba(54,91,64,.26)!important;background-image:none!important;
-}
-#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:checked::before{
-  content:""!important;background:#57d17b!important;box-shadow:0 0 0 2px rgba(87,209,123,.12)!important;
-}
-#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:checked::after{content:"Enabled"!important;color:rgba(239,255,243,.94)!important}
-#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:focus-visible{outline:2px solid rgba(111,214,139,.9)!important;outline-offset:2px!important}
-#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:disabled{opacity:.45!important;cursor:not-allowed!important}
 
 /* Keep the long scanner hint and its numeric control in their own bounded columns. */
 #${SETTINGS_ID} .delta-scanner-output-row{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(150px,180px)!important;column-gap:12px!important;row-gap:7px!important;align-items:center!important;min-width:0}
@@ -168,6 +174,15 @@ function injectStyles() {
 }
 @media(max-width:420px){
   #${SETTINGS_ID} .delta-settings-maintenance-actions{grid-template-columns:minmax(0,1fr)!important}
+  @supports selector(label:has(> input[type="checkbox"]:checked)) {
+    #${SETTINGS_ID} .npc-state-delta-setting-row:has(> input[type="checkbox"])::after{
+      min-width:72px!important;height:22px!important;padding:0 6px 0 20px!important;font-size:10.5px!important;
+      background-position:0 0!important;
+    }
+    #${SETTINGS_ID} .npc-state-delta-setting-row:has(> input[type="checkbox"]:checked)::after{
+      background-position:0 0!important;
+    }
+  }
 }
 `;
     document.head.appendChild(style);
