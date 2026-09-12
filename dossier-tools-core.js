@@ -260,7 +260,9 @@ export function stage1Refresh() {
 export async function flushDurably(chatKey, context) {
     if (activeChatKey() !== chatKey) throw new Error('The active chat changed before persistence completed.');
     try {
-        await api()?.flush?.();
+        const runtime = api();
+        if (typeof runtime?.flush !== 'function') throw new Error('Canonical durable flush API is unavailable.');
+        await runtime.flush();
         recordToolEvent('persistence', { chatKey, action: context, outcome: 'saved', persisted: true });
         return { persisted: true, error: null };
     } catch (error) {
