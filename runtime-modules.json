@@ -13,6 +13,7 @@
     { "path": "appearance.js", "role": "appearance-forms", "required": true },
     { "path": "terminal-lifecycle.js", "role": "terminal-lifecycle", "required": true },
     { "path": "continuity-core.js", "role": "appearance-lifecycle-continuity", "required": true },
+    { "path": "birthday.js", "role": "birthday-continuity-policy", "required": true },
     { "path": "branch.js", "role": "branch-recovery", "required": true },
     { "path": "branch-core.js", "role": "branch-primitives", "required": true },
     { "path": "bundle.js", "role": "bundle-format", "required": true },
