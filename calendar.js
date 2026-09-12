@@ -70,8 +70,8 @@ export function monthDefinitionsText(months = []) {
 export function calendarFingerprint(config = null) {
     const normalized = normalizeCalendarConfig(config, { requireCurrentDate: false });
     if (!normalized.calendarValid) return LEGACY_NUMERIC_CALENDAR_ID;
-    return normalized.config.months
-        .map(month => `${normalizeMonthKey(month.name)}:${month.days}`)
+    return [`era:${normalizeMonthKey(normalized.config.era)}`, ...normalized.config.months
+        .map(month => `${normalizeMonthKey(month.name)}:${month.days}`)]
         .join('|');
 }
 
