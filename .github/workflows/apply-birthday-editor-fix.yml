@@ -1,0 +1,150 @@
+name: Apply birthday editor fix
+
+on:
+  push:
+    branches: [fix/edit-dossier-birthday]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: fix/edit-dossier-birthday
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Apply narrow birthday editor patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def read(path):
+              return Path(path).read_text(encoding='utf-8')
+
+          def write(path, text):
+              Path(path).write_text(text, encoding='utf-8')
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              return text.replace(old, new, 1)
+
+          index = read('index.js')
+          index = replace_once(
+              index,
+              "} from './core.js';\nimport {\n    encodeNpcStateBundle,",
+              "} from './core.js';\nimport { applyNpcBirthdayUpdate, normalizeBirthDate } from './birthday.js';\nimport {\n    encodeNpcStateBundle,",
+              'birthday imports',
+          )
+
+          age_field = '        <label>Chronological age<input id="npc_state_delta_edit_age" class="text_pole" maxlength="80" placeholder="Actual stated age; leave blank if unknown" value="${editorValue(npc.age)}"></label>\n'
+          birthday_field = age_field + '        <label>Birthday <small>${npc.birthDateSource === \'generated\' ? \'Generated fallback; editing establishes a manual correction\' : (npc.birthDateSource === \'established\' ? \'Established date; editing records a manual correction\' : \'Uses the active calendar\')}</small><input id="npc_state_delta_edit_birthday" class="text_pole" maxlength="180" placeholder="MM-DD / YYYY-MM-DD or configured calendar date" value="${editorValue(npc.birthDateDisplay)}"></label>\n'
+          index = replace_once(index, age_field, birthday_field, 'birthday editor field')
+
+          sync_age = "    set('npc_state_delta_edit_age', npc.age);\n"
+          index = replace_once(
+              index,
+              sync_age,
+              sync_age + "    set('npc_state_delta_edit_birthday', npc.birthDateDisplay);\n",
+              'birthday editor refresh sync',
+          )
+
+          assign_line = '    Object.assign(next, stableInputs);\n'
+          birthday_save = assign_line + """    const birthdayInput = String(editorField('npc_state_delta_edit_birthday')).trim().slice(0, 180);
+    const currentBirthdayDisplay = String(current.birthDateDisplay || '').trim();
+    if (birthdayInput !== currentBirthdayDisplay) {
+        if (!birthdayInput) {
+            globalThis.toastr?.warning?.('NPC State Delta: birthday cannot be cleared here. Enter a valid date or cancel the edit.');
+            return false;
+        }
+        const normalizedBirthday = normalizeBirthDate(birthdayInput);
+        if (!normalizedBirthday) {
+            globalThis.toastr?.warning?.('NPC State Delta: birthday is not valid for the active calendar.');
+            return false;
+        }
+        Object.assign(next, applyNpcBirthdayUpdate(next, {
+            birthDate: normalizedBirthday,
+            birthDateState: 'correct',
+            birthDateReason: 'Manual dossier birthday correction.',
+        }, { sourceMessageId: latestMessageId(false) }));
+    }
+"""
+          index = replace_once(index, assign_line, birthday_save, 'birthday editor save path')
+          write('index.js', index)
+
+          test_path = Path('tests/index-hardening.test.js')
+          tests = read(test_path)
+          test_block = """
+
+test('manual dossier editor validates birthday corrections through the canonical birthday engine',()=>{
+  assert.match(source,/npc_state_delta_edit_birthday/);
+  assert.match(source,/normalizeBirthDate\\(birthdayInput\\)/);
+  assert.match(source,/applyNpcBirthdayUpdate\\(next,/);
+  assert.match(source,/birthDateState: 'correct'/);
+  assert.match(source,/Manual dossier birthday correction\\./);
+  assert.match(source,/set\\('npc_state_delta_edit_birthday', npc\\.birthDateDisplay\\)/);
+});
+"""
+          if "manual dossier editor validates birthday corrections" in tests:
+              raise SystemExit('birthday editor regression test already exists')
+          write(test_path, tests.rstrip() + test_block)
+
+          contract = read('docs/core-contract.md')
+          old_contract = 'Grounded story facts may establish/correct dates; exact actual age and a compatible full owned date may derive a provisional birth year.'
+          new_contract = 'Grounded story facts and explicit manual Edit Dossier corrections may establish/correct dates. Manual birthday corrections are validated against the active calendar and use the same canonical birthday continuity engine without a model call; exact actual age and a compatible full owned date may derive a provisional birth year.'
+          contract = replace_once(contract, old_contract, new_contract, 'core contract birthday correction')
+          write('docs/core-contract.md', contract)
+
+          birthday_doc = read('docs/birthday-continuity.md')
+          old_doc = 'Dossier birthday/form display is now part of the ordinary read-only projection; it does not require a document-wide observer or full-history copying.'
+          new_doc = 'Dossier birthday/form display remains an ordinary read-only projection. Edit Dossier additionally exposes the canonical birthday as a validated manual correction field: changing it uses the same birthday continuity policy, marks the accepted date established, recalculates deterministic calendar metadata/age where grounded, and performs no model request. Invalid dates for the active calendar are rejected before canonical mutation. The projection still does not require a document-wide observer or full-history copying.'
+          birthday_doc = replace_once(birthday_doc, old_doc, new_doc, 'birthday continuity UI documentation')
+          write('docs/birthday-continuity.md', birthday_doc)
+
+          changelog = read('CHANGELOG.md')
+          marker = '# NPC State Delta changes\n\n\n'
+          unreleased = """# NPC State Delta changes
+
+
+## Unreleased
+
+- Add a Birthday field to Edit Dossier so generated or story-established dates can be corrected manually without editing extension JSON.
+- Validate manual birthday changes against the active calendar and route accepted corrections through the canonical birthday continuity engine, preserving deterministic metadata and avoiding any extra model request.
+
+"""
+          changelog = replace_once(changelog, marker, unreleased, 'changelog unreleased section')
+          write('CHANGELOG.md', changelog)
+          PY
+
+      - name: Verify patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check index.js
+          node --test tests/birthday-continuity.test.js tests/index-hardening.test.js
+          npm test
+          npm run validate
+          npm run measure:prompts
+          npm run package
+          git diff --check
+
+      - name: Commit verified fix and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'NPC State Delta automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git rm .github/workflows/apply-birthday-editor-fix.yml
+          git add index.js tests/index-hardening.test.js docs/core-contract.md docs/birthday-continuity.md CHANGELOG.md
+          git commit -m 'fix: allow manual birthday corrections'
+          git push origin HEAD:fix/edit-dossier-birthday
