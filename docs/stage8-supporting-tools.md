@@ -10,15 +10,15 @@ Stage 8 remains a thin UI/support layer over canonical Delta owners. It does not
 - `portrait-tools.js` owns the maintained portrait workflow: prompt generation/edit/copy plus explicit device upload/replace/remove. Delta does not call SillyTavern Image Generation from this maintained workflow.
 - `dossier-tools.js` owns native Delta backup/restore and compact diagnostics.
 - `native-transfer.js` extends the existing native bundle manifest without replacing `bundle.js`.
-- `dossier-experience.js` refines the live dossier experience: compact cast rail, selected-dossier actions, adaptive editor sizing, and explicit manual life-state correction. It does not replace the Stage 1 launcher controller.
+- `dossier-experience.js` refines the live dossier experience: cast carousel, selected-dossier actions, adaptive editor organization, settings presentation, and explicit manual life-state correction. It does not replace the Stage 1 launcher/controller or canonical editor/state owners.
 
 All UI remains a projection/controller over `NPCStateDelta`; no second dossier store is introduced.
 
 ## Launcher and extension-level tools
 
-The movable NPC State launcher opens the dossier directly through the accepted Stage 1 launcher/controller. It is not an extension-tools hub.
+The movable NPC State launcher opens the dossier directly through the accepted Stage 1 launcher/controller. It is not an extension-tools hub. The 48 px drag/touch target is presented as a circular floating launcher while retaining the existing position persistence and drag behavior.
 
-**Settings** remains in SillyTavern's Extensions tab and is intentionally not duplicated in the dossier. **Backup** and **Diagnostics** remain dossier-level supporting-tool actions. Supporting dialogs use native modal `<dialog>` top-layer behavior where supported, so they are not dependent on SillyTavern/dossier z-index stacking contexts.
+**Settings** remains in SillyTavern's Extensions tab and is intentionally not duplicated in the dossier. Extension-wide **Backup / Restore** and **Diagnostics** are consolidated into the Settings Data & maintenance section rather than occupying the dossier header. Supporting dialogs use native modal `<dialog>` top-layer behavior where supported, so they are not dependent on SillyTavern/dossier z-index stacking contexts.
 
 Backup/Restore keeps the versioned native Delta format. Export includes dossiers, portrait assets, declared portable portrait-prompt settings, and audit history. Import validates before mutation, preserves target history ownership, and does not provide Alpha/Beta/legacy converters.
 
@@ -35,31 +35,39 @@ The selected dossier exposes **Portrait** from its More menu. The maintained wor
 - remove the current portrait through the inherited canonical removal handler;
 - durable-flush confirmation after portrait mutation, distinguishing saved from local-only outcomes.
 
-There is no Generate Preview, Apply Preview, `/imagine`, or host Image Generation call in the maintained Portrait workflow. Portrait prompt generation is not image generation.
+There is no Generate Preview, Apply Preview, `/imagine`, or host Image Generation call in the maintained Portrait workflow. Portrait prompt generation is not image generation. Settings therefore presents this area as **Portrait prompts** and hides the obsolete maintained-UI generation/gallery toggles while leaving their legacy controls mounted for compatibility.
 
 ## Selected dossier actions
 
-Frequent actions live directly under the selected dossier:
+The selected dossier presentation itself is intentionally left unchanged. Frequent actions remain directly under it:
 
 - **Edit**
 - **Refresh**
 - **… More**
 
-More contains **Scan dossier**, **Portrait**, and the applicable lifecycle/archive action (**Archive dossier**, **Restore active**, or **Correct death record**). This removes scan/refresh/archive utilities from the editor itself and keeps editing focused on dossier fields.
+More contains **Scan dossier**, **Portrait**, and the applicable lifecycle/archive action (**Archive dossier**, **Restore active**, or **Correct death record**). Scan/refresh/archive utilities are not duplicated in Edit.
 
-## Dossier library
+## Cast carousel
 
-The cast library is a compact horizontal portrait rail inspired by the accepted reference layout. It includes a total NPC count, search and existing life-bucket filters, fixed-size portrait cards, selected-card emphasis, horizontal scrolling, and explicit left/right rail controls. The card CSS explicitly replaces the Stage 1 horizontal two-column card grid with a one-column portrait-over-copy layout; leaving both grid definitions active squeezes portraits and text into the distorted narrow columns observed during live host testing.
+The library is a compact horizontal cast carousel inspired by the accepted reference layout. Each fixed-size card is a full-bleed portrait (or initial placeholder) with name, identity metadata and lifecycle status overlaid on a bottom gradient. The carousel keeps the canonical Stage 1 count, search, filters and selection projection while adding selected-card emphasis, touch/trackpad scrolling and explicit left/right controls.
 
-The canonical Stage 1 search/filter/selection projection remains the data owner.
+The browser scrollbar is visually hidden so the rail reads as a cast carousel rather than a nested data pane. The library row reserves enough height for the toolbar and complete cards, avoiding the clipped card bottoms seen in live host testing.
 
 ## Adaptive editor and life state
 
-The native dossier editor remains the canonical field editor, but its popup is sized to the same adaptive envelope as the dossier surface. Desktop uses the dossier-sized viewport and tablet/mobile becomes full-screen with `100dvh` behavior.
+The native dossier editor remains the canonical field editor and uses the dossier-sized desktop envelope plus full-screen narrow/tablet/mobile behavior. The popup now has exactly one maintained scrolling region: SillyTavern's outer popup content is overflow-contained and `#npc_state_delta_editor_content` owns vertical scrolling. Save/Cancel remain outside that body.
 
-The redundant editor **Copy portrait prompts** action is removed from the maintained experience because prompt work belongs to Portrait. Scan, Refresh, and Archive/Restore are likewise presented on the dossier rather than duplicated in Edit.
+The existing editor controls are reorganized without creating replacement field owners:
 
-The editor adds an explicit manual **Life state** control with `Unknown`, `Alive`, and `Deceased` choices. Life state is separate from archive status and current presence.
+- **Identity & profile**
+- **Current state**
+- **Relationships**
+- **Continuity**
+- **Advanced NPC options**
+
+Advanced NPC options contains manual **Life state**, stable-profile protection, stale-cleanup retention and Minor NPC controls. Existing per-NPC portrait override inputs remain mounted but hidden so the canonical save path preserves their values; maintained portrait prompt editing belongs to Portrait instead.
+
+The manual Life state choices are `Unknown`, `Alive`, and `Deceased`. Life state is separate from archive status and current presence.
 
 - Marking **Deceased** writes Delta's canonical `deceased` + `explicit` terminal shape, clears present/world-active, and enters deceased archival state.
 - Correcting a confirmed death first uses Delta's canonical Restore/death-correction path so correction provenance remains owned by the runtime, then applies the explicitly selected living/unknown state.
@@ -68,25 +76,43 @@ The editor adds an explicit manual **Life state** control with `Unknown`, `Alive
 
 The life-state update uses Delta's canonical native dossier import/flush boundary for the selected record rather than creating another state writer.
 
-## Editor mutation safety
+## Settings organization
 
-The dossier root and editor now use separate bounded observers. The dossier observer watches only the dossier root. The editor observer reacts only to editor insertion/content changes. Editor text/value synchronization writes only when a displayed value actually changes, preventing the self-triggering `MutationObserver -> textContent mutation -> MutationObserver` loop that could freeze the page immediately after opening Edit.
+The Extensions-tab Settings panel keeps the same canonical inputs and handlers but groups them by task instead of presenting one long wall of controls:
+
+1. **General**
+2. **Scanning**
+3. **Continuity & injection**
+4. **Roster & cleanup**
+5. **Portrait prompts**
+6. **Relationship tuning** (Advanced)
+7. **Memory & behavior rules** (Advanced)
+8. **Data & maintenance**
+
+Data & maintenance contains native Backup / Export, Restore / Import and Diagnostics plus the current-chat scan/add/clear operations and a collapsible current-chat roster. Legacy transfer controls remain mounted but hidden so existing bindings are not broken.
+
+## Mutation safety
+
+The dossier root and editor use separate bounded observers. The dossier observer watches only the dossier root. The editor observer reacts only to editor insertion/content changes. Editor text/value synchronization writes only when a displayed value actually changes, preventing the self-triggering `MutationObserver -> textContent mutation -> MutationObserver` loop that previously froze the page after opening Edit.
+
+Settings restructuring is one-shot and idempotent; it moves existing controls instead of copying or recreating their state.
 
 ## Responsive behavior
 
-The dossier keeps the existing selected portrait-led two-pane presentation. The library rail and action row are touch-sized and responsive. On narrower screens the dossier remains full-viewport, cast tools stack, the horizontal card rail stays scrollable, and the editor matches the same full-screen envelope.
+The dossier keeps the existing selected portrait-led two-pane presentation. The carousel and action row are touch-sized and responsive. On narrower screens the dossier remains full-viewport, cast tools stack, the cast carousel stays horizontally scrollable without a visible browser scrollbar, and the editor becomes full-screen with a single body scroll.
 
 Supporting-tool dialogs remain browser top-layer modals with safe-area-aware bounded scrolling.
 
 ## Verification boundary
 
-Deterministic tests cover the existing Stage 8 native-transfer/stale/persistence safety layer plus manual life-state transformations, canonical terminal state writes, idempotent editor synchronization, direct-launcher ownership, corrected portrait-card layout, and maintained prompt-only portrait behavior. Repository validation and package checks must pass on the exact PR candidate before merge.
+Deterministic tests cover the existing Stage 8 native-transfer/stale/persistence safety layer plus manual life-state transformations, canonical terminal state writes, idempotent editor synchronization, direct-launcher ownership, circular launcher presentation, full-portrait carousel layout, single-scroll editor organization, Settings grouping, and maintained prompt-only portrait behavior. Repository validation and package checks must pass on the exact PR candidate before merge.
 
 Live SillyTavern checks still matter for:
 
-- launcher direct-to-dossier interaction after dragging;
-- desktop/tablet/mobile dossier and editor sizing;
-- cast rail scrolling and portrait thumbnail layout;
+- circular launcher dragging and direct-to-dossier activation;
+- desktop/tablet/mobile carousel card proportions and overlay readability;
+- editor single-scroll behavior and persistent Save/Cancel reachability;
+- Extensions Settings grouping and native Backup / Restore / Diagnostics actions;
 - More-menu reachability;
 - device portrait picker/upload/remove;
 - life-state confirmation/correction UX;
