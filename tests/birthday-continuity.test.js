@@ -5,6 +5,7 @@ import {
     deriveAgeFromBirthDate,
     deriveBirthDateFromAge,
     deterministicBirthday,
+    extractStructuredWorldDate,
     formatBirthDate,
     mergeScanResult,
     normalizeBirthDate,
@@ -16,15 +17,21 @@ import {
 
 const CUSTOM_CALENDAR = Object.freeze({
     era: 'CR',
-    currentYear: 821,
-    currentMonth: 'Redleaf',
-    currentDay: 16,
     months: [
         { name: 'Redleaf', days: 30 },
         { name: 'Sunwane', days: 31 },
         { name: 'Frostwane', days: 30 },
     ],
 });
+
+const CUSTOM_CALENDAR_WITH_CLOCK = Object.freeze({
+    ...CUSTOM_CALENDAR,
+    currentYear: 821,
+    currentMonth: 'Redleaf',
+    currentDay: 16,
+});
+
+const WORLD_STATE_821 = '<World_State>Time | **CR821, Redleaf 16** | 7:42 pm\nLocation | Rimecross</World_State>';
 
 test.afterEach(() => setActiveCalendarConfig(null));
 
@@ -41,32 +48,34 @@ test('legacy numeric birthday fallback remains deterministic before custom calen
     assert.equal(record.calendarAge, null);
 });
 
-test('custom calendar requires ordered months plus a complete current date while era is optional', () => {
-    const valid = normalizeCalendarConfig({
+test('custom calendar requires ordered months while era and current date are optional', () => {
+    const monthsOnly = normalizeCalendarConfig({
         era: 'CR',
-        year: 821,
-        month: 'Redleaf',
-        day: 16,
         monthsText: 'Redleaf:30\nSunwane:31\nFrostwane:30',
     });
-    assert.equal(valid.valid, true);
-    assert.deepEqual(valid.config.months.map(month => month.name), ['Redleaf', 'Sunwane', 'Frostwane']);
+    assert.equal(monthsOnly.valid, true);
+    assert.equal(monthsOnly.calendarValid, true);
+    assert.equal(monthsOnly.currentDateValid, false);
+    assert.deepEqual(monthsOnly.config.months.map(month => month.name), ['Redleaf', 'Sunwane', 'Frostwane']);
 
-    const noEra = normalizeCalendarConfig({
-        year: 821,
-        month: 'Redleaf',
-        day: 16,
-        monthsText: 'Redleaf:30\nSunwane:31',
-    });
+    const noEra = normalizeCalendarConfig({ monthsText: 'Redleaf:30\nSunwane:31' });
     assert.equal(noEra.valid, true);
     assert.equal(noEra.config.era, '');
 
-    assert.equal(normalizeCalendarConfig({ monthsText: 'Redleaf:30' }).valid, false);
+    const completeClock = normalizeCalendarConfig({
+        era: 'CR', year: 821, month: 'Redleaf', day: 16,
+        monthsText: 'Redleaf:30\nSunwane:31',
+    });
+    assert.equal(completeClock.valid, true);
+    assert.equal(completeClock.currentDateValid, true);
+
+    assert.equal(normalizeCalendarConfig({ monthsText: 'Redleaf:30', year: 821 }).valid, false);
+    assert.equal(normalizeCalendarConfig({ monthsText: 'Redleaf:30', month: 'Redleaf', day: 16 }).valid, false);
     assert.equal(normalizeCalendarConfig({ year: 821, month: 'Redleaf', day: 31, monthsText: 'Redleaf:30' }).valid, false);
     assert.equal(normalizeCalendarConfig({ year: 821, month: 'Redleaf', day: 1, monthsText: 'Redleaf:30\nredleaf:20' }).valid, false);
 });
 
-test('custom generated birthdays map deterministically into named months', () => {
+test('custom generated birthdays map deterministically into named months without a year', () => {
     setActiveCalendarConfig(CUSTOM_CALENDAR);
     const first = deterministicBirthday('npc_sora');
     assert.ok(['Redleaf', 'Sunwane', 'Frostwane'].includes(first.month));
@@ -74,31 +83,58 @@ test('custom generated birthdays map deterministically into named months', () =>
     assert.deepEqual(deterministicBirthday('npc_sora'), first);
     const month = CUSTOM_CALENDAR.months.find(item => item.name === first.month);
     assert.ok(first.day >= 1 && first.day <= month.days);
+
+    const record = normalizeNpcRecord({ id: 'npc_sora', name: 'Sora', age: '6', apparentAge: '~6' });
+    assert.equal(record.birthDatePrecision, 'month-day');
+    assert.equal(record.birthDate.year, null);
+    assert.equal(record.calendarAge, null);
 });
 
-test('custom calendar derives birth year and age using month order rather than fantasy lifespan', () => {
+test('birth year and chronological age require a grounded full current date', () => {
     setActiveCalendarConfig(CUSTOM_CALENDAR);
+    assert.equal(deriveBirthDateFromAge({ month: 'Redleaf', day: 16 }, '6'), null);
     assert.deepEqual(
-        deriveBirthDateFromAge({ month: 'Redleaf', day: 16 }, '6'),
+        deriveBirthDateFromAge({ month: 'Redleaf', day: 16 }, '6', { era: 'CR', year: 821, month: 'Redleaf', day: 16 }),
         { era: 'CR', year: 815, month: 'Redleaf', day: 16 },
     );
     assert.deepEqual(
-        deriveBirthDateFromAge({ month: 'Sunwane', day: 4 }, '6'),
+        deriveBirthDateFromAge({ month: 'Sunwane', day: 4 }, '6', { era: 'CR', year: 821, month: 'Redleaf', day: 16 }),
         { era: 'CR', year: 814, month: 'Sunwane', day: 4 },
     );
-    assert.equal(deriveBirthDateFromAge({ month: 'Sunwane', day: 4 }, '~6'), null);
-    assert.equal(deriveAgeFromBirthDate({ era: 'CR', year: 815, month: 'Redleaf', day: 16 }, null, CUSTOM_CALENDAR), 6);
-    assert.equal(deriveAgeFromBirthDate({ era: 'CR', year: 814, month: 'Sunwane', day: 4 }, null, CUSTOM_CALENDAR), 6);
+    assert.equal(deriveBirthDateFromAge({ month: 'Sunwane', day: 4 }, '~6', { era: 'CR', year: 821, month: 'Redleaf', day: 16 }), null);
+    assert.equal(deriveAgeFromBirthDate({ era: 'CR', year: 815, month: 'Redleaf', day: 16 }, null, CUSTOM_CALENDAR), null);
+    assert.equal(deriveAgeFromBirthDate(
+        { era: 'CR', year: 815, month: 'Redleaf', day: 16 },
+        { era: 'CR', year: 821, month: 'Redleaf', day: 16 },
+        CUSTOM_CALENDAR,
+    ), 6);
 });
 
-test('exact chronological age anchors a generated birthday year and exposes deterministic calendarAge', () => {
-    setActiveCalendarConfig(CUSTOM_CALENDAR);
+test('complete manual current date remains an optional fallback for year anchoring', () => {
+    setActiveCalendarConfig(CUSTOM_CALENDAR_WITH_CLOCK);
     const record = normalizeNpcRecord({ id: 'npc_sora', name: 'Sora', age: '6', apparentAge: '~6' });
     assert.equal(record.birthDateSource, 'generated');
     assert.equal(record.birthDatePrecision, 'full');
     assert.equal(record.birthDateYearSource, 'derived');
     assert.equal(record.calendarAge, 6);
     assert.match(record.birthDateDisplay, /^CR-?\d+, (Redleaf|Sunwane|Frostwane) \d+$/);
+});
+
+test('structured World State extraction preserves the grounded date and chooses the latest block', () => {
+    setActiveCalendarConfig(CUSTOM_CALENDAR);
+    const first = extractStructuredWorldDate(WORLD_STATE_821, CUSTOM_CALENDAR);
+    assert.deepEqual(first, {
+        raw: 'CR821, Redleaf 16',
+        date: { era: 'CR', year: 821, month: 'Redleaf', day: 16 },
+        source: 'world-state',
+    });
+
+    const multiple = `${WORLD_STATE_821}\n<details><summary>World State</summary>Time | CR822, Sunwane 4 | dawn</details>`;
+    const latest = extractStructuredWorldDate(multiple, CUSTOM_CALENDAR);
+    assert.equal(latest.raw, 'CR822, Sunwane 4');
+    assert.equal(latest.date.year, 822);
+    assert.equal(latest.date.month, 'Sunwane');
+    assert.equal(latest.date.day, 4);
 });
 
 test('scanner custom birthday fields are normalized without using apparent age', () => {
@@ -116,7 +152,7 @@ test('scanner custom birthday fields are normalized without using apparent age',
     assert.match(incoming.birthDateReason, /explicitly establishes/);
 });
 
-test('explicit named-month birthday replaces generated fallback and later overwrite requires correction', () => {
+test('explicit named-month birthday remains month/day when no current clock exists', () => {
     setActiveCalendarConfig(CUSTOM_CALENDAR);
     const existing = normalizeNpcRecord({ id: 'npc_sora', name: 'Sora', age: '6', apparentAge: '~6' });
     const base = {
@@ -128,43 +164,62 @@ test('explicit named-month birthday replaces generated fallback and later overwr
 
     const established = mergeScanResult(base, {
         npcs: [{
-            id: 'npc_sora',
-            name: 'Sora',
+            id: 'npc_sora', name: 'Sora',
             birthDate: { month: 'Redleaf', day: 16 },
-            birthDateState: 'establish',
-            birthDateReason: 'Explicit birthday.',
+            birthDateState: 'establish', birthDateReason: 'Explicit birthday.',
         }],
     }, { sourceMessageId: 8 });
     let sora = established.state.npcs.find(npc => npc.id === 'npc_sora');
-    assert.deepEqual(sora.birthDate, { era: 'CR', year: 815, month: 'Redleaf', day: 16 });
+    assert.deepEqual(sora.birthDate, { era: '', year: null, month: 'Redleaf', day: 16 });
     assert.equal(sora.birthDateSource, 'established');
-    assert.equal(sora.birthDateYearSource, 'derived');
-    assert.equal(sora.calendarAge, 6);
-    assert.equal(sora.birthDateSourceMessageId, 8);
+    assert.equal(sora.birthDateYearSource, '');
+    assert.equal(sora.calendarAge, null);
 
     const ordinaryOverwrite = mergeScanResult(established.state, {
         npcs: [{ id: 'npc_sora', name: 'Sora', birthDate: { month: 'Sunwane', day: 4 }, birthDateState: 'establish' }],
     }, { sourceMessageId: 9 });
     sora = ordinaryOverwrite.state.npcs.find(npc => npc.id === 'npc_sora');
     assert.equal(sora.birthDate.month, 'Redleaf');
-    assert.equal(sora.birthDate.day, 16);
 
     const corrected = mergeScanResult(ordinaryOverwrite.state, {
-        npcs: [{
-            id: 'npc_sora',
-            name: 'Sora',
-            birthDate: { month: 'Sunwane', day: 4 },
-            birthDateState: 'correct',
-            birthDateReason: 'Explicit correction.',
-        }],
+        npcs: [{ id: 'npc_sora', name: 'Sora', birthDate: { month: 'Sunwane', day: 4 }, birthDateState: 'correct', birthDateReason: 'Explicit correction.' }],
     }, { sourceMessageId: 10 });
     sora = corrected.state.npcs.find(npc => npc.id === 'npc_sora');
-    assert.deepEqual(sora.birthDate, { era: 'CR', year: 814, month: 'Sunwane', day: 4 });
-    assert.equal(sora.birthDateSourceMessageId, 10);
+    assert.deepEqual(sora.birthDate, { era: '', year: null, month: 'Sunwane', day: 4 });
+});
+
+test('World State date can anchor a missing birth year and later advance chronological age locally', () => {
+    setActiveCalendarConfig(CUSTOM_CALENDAR);
+    const existing = normalizeNpcRecord({
+        id: 'npc_sora', name: 'Sora', age: '6', apparentAge: '~6',
+        birthDate: { month: 'Redleaf', day: 16 }, birthDateSource: 'established',
+    });
+    assert.equal(existing.birthDate.year, null);
+
+    const first = mergeScanResult({
+        turn: 1, npcs: [existing], candidates: [], socialGraph: { version: 1, edges: [], unresolved: [] },
+    }, { npcs: [{ id: 'npc_sora', name: 'Sora' }] }, {
+        sourceMessageId: 12,
+        developmentContext: WORLD_STATE_821,
+    });
+    let sora = first.state.npcs.find(npc => npc.id === 'npc_sora');
+    assert.deepEqual(sora.birthDate, { era: 'CR', year: 815, month: 'Redleaf', day: 16 });
+    assert.equal(sora.birthDateYearSource, 'derived');
+    assert.equal(sora.age, '6');
+    assert.equal(first.report.calendarReference.raw, 'CR821, Redleaf 16');
+
+    const second = mergeScanResult(first.state, { npcs: [{ id: 'npc_sora', name: 'Sora' }] }, {
+        sourceMessageId: 13,
+        developmentContext: '<World_State>Time | CR822, Redleaf 16 | evening</World_State>',
+    });
+    sora = second.state.npcs.find(npc => npc.id === 'npc_sora');
+    assert.equal(sora.calendarAge, 7);
+    assert.equal(sora.age, '7');
+    assert.equal(sora.apparentAge, '~6');
 });
 
 test('an explicit full year can upgrade a previously derived year without changing the established birthday day', () => {
-    setActiveCalendarConfig(CUSTOM_CALENDAR);
+    setActiveCalendarConfig(CUSTOM_CALENDAR_WITH_CLOCK);
     const base = normalizeNpcRecord({
         id: 'npc_sora', name: 'Sora', age: '6',
         birthDate: { month: 'Redleaf', day: 16 }, birthDateSource: 'established',
@@ -186,12 +241,9 @@ test('an explicit full year can upgrade a previously derived year without changi
 test('established numeric birthday is preserved when a custom fantasy calendar is enabled', () => {
     setActiveCalendarConfig(CUSTOM_CALENDAR);
     const record = normalizeNpcRecord({
-        id: 'npc_old',
-        name: 'Old Record',
-        age: '',
+        id: 'npc_old', name: 'Old Record', age: '',
         birthDate: { era: '', year: null, month: '09', day: 17 },
-        birthDateSource: 'established',
-        birthDateCalendarFingerprint: 'legacy-numeric-v1',
+        birthDateSource: 'established', birthDateCalendarFingerprint: 'legacy-numeric-v1',
     });
     assert.deepEqual(record.birthDate, { era: '', year: null, month: '09', day: 17 });
     assert.equal(record.birthDateSource, 'established');
@@ -199,24 +251,33 @@ test('established numeric birthday is preserved when a custom fantasy calendar i
     assert.equal(record.calendarAge, null);
 });
 
-test('birthday prompt remains conditional and includes configured fantasy calendar only when needed', () => {
+test('birthday prompt stays conditional and takes structured World State date over an absent manual clock', () => {
     setActiveCalendarConfig(CUSTOM_CALENDAR);
     const ordinary = buildScannerPrompt({
-        transcript: 'Sora crosses the room and sits beside the window.',
-        existingNpcs: [],
-        candidates: [],
+        transcript: `${WORLD_STATE_821}\nSora crosses the room and sits beside the window.`,
+        existingNpcs: [], candidates: [],
     });
     assert.equal(ordinary.includes('BIRTHDAY:'), false);
 
     const birthday = buildScannerPrompt({
-        transcript: "Today is Sora's sixth birthday.",
-        existingNpcs: [],
-        candidates: [],
+        transcript: `${WORLD_STATE_821}\nToday is Sora's sixth birthday.`,
+        existingNpcs: [], candidates: [],
     });
     assert.equal(birthday.includes('BIRTHDAY:'), true);
-    assert.equal(birthday.includes('current world date=CR821, Redleaf 16'), true);
+    assert.equal(birthday.includes('Current grounded world date=CR821, Redleaf 16'), true);
+    assert.equal(birthday.includes('Redleaf:30'), false);
     assert.equal(birthday.includes('Never derive chronology from apparentAge, species, or lifespan'), true);
-    assert.equal(birthday.includes('calendar arithmetic locally'), true);
+});
+
+test('birthday prompt works without any current clock and does not invent a year', () => {
+    setActiveCalendarConfig(CUSTOM_CALENDAR);
+    const birthday = buildScannerPrompt({
+        transcript: "Sora says her birthday is Redleaf 16.",
+        existingNpcs: [], candidates: [],
+    });
+    assert.equal(birthday.includes('BIRTHDAY:'), true);
+    assert.equal(birthday.includes('Current grounded world date='), false);
+    assert.equal(birthday.includes('Never invent a missing year or birthday'), true);
 });
 
 test('custom calendar date validation rejects unknown months and impossible days', () => {
