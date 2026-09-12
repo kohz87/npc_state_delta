@@ -19,12 +19,100 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-      - name: Apply narrow birthday editor patch
+      - name: Apply birthday editor patch
         shell: bash
         run: |
           set -euo pipefail
-          echo 'ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgpkZWYgcmVhZChwYXRoKToKICAgIHJldHVybiBQYXRoKHBhdGgpLnJlYWRfdGV4dChlbmNvZGluZz0idXRmLTgiKQoKZGVmIHdyaXRlKHBhdGgsIHRleHQpOgogICAgUGF0aChwYXRoKS53cml0ZV90ZXh0KHRleHQsIGVuY29kaW5nPSJ1dGYtOCIpCgpkZWYgcmVwbGFjZV9vbmNlKHRleHQsIG9sZCwgbmV3LCBsYWJlbCk6CiAgICBjb3VudCA9IHRleHQuY291bnQob2xkKQogICAgaWYgY291bnQgIT0gMToKICAgICAgICByYWlzZSBTeXN0ZW1FeGl0KGYie2xhYmVsfTogZXhwZWN0ZWQgZXhhY3RseSBvbmUgbWF0Y2gsIGZvdW5kIHtjb3VudH0iKQogICAgcmV0dXJuIHRleHQucmVwbGFjZShvbGQsIG5ldywgMSkKCmluZGV4ID0gcmVhZCgiaW5kZXguanMiKQoKaW5kZXggPSByZXBsYWNlX29uY2UoCiAgICBpbmRleCwKICAgICJ9IGZyb20gJy4vY29yZS5qcyc7XG5pbXBvcnQge1xuICAgIGVuY29kZU5wY1N0YXRlQnVuZGxlLCIsCiAgICAifSBmcm9tICcuL2NvcmUuanMnO1xuaW1wb3J0IHsgYXBwbHlOcGNCaXJ0aGRheVVwZGF0ZSwgbm9ybWFsaXplQmlydGhEYXRlIH0gZnJvbSAnLi9iaXJ0aGRheS5qcyc7XG5pbXBvcnQge1xuICAgIGVuY29kZU5wY1N0YXRlQnVuZGxlLCIsCiAgICAiYmlydGhkYXkgaW1wb3J0cyIsCikKCmFnZV9maWVsZCA9ICIiIiAgICAgICAgPGxhYmVsPkNocm9ub2xvZ2ljYWwgYWdlPGlucHV0IGlkPVwibnBjX3N0YXRlX2RlbHRhX2VkaXRfYWdlXCIgY2xhc3M9XCJ0ZXh0X3BvbGVcIiBtYXhsZW5ndGg9XCI4MFwiIHBsYWNlaG9sZGVyPVwiQWN0dWFsIHN0YXRlZCBhZ2U7IGxlYXZlIGJsYW5rIGlmIHVua25vd25cIiB2YWx1ZT1cIiR7ZWRpdG9yVmFsdWUobnBjLmFnZSl9XCI+PC9sYWJlbD4KIiIiCmJpcnRoZGF5X2ZpZWxkID0gYWdlX2ZpZWxkICsgIiIiICAgICAgICA8bGFiZWw+QmlydGhkYXkgPHNtYWxsPiR7bnBjLmJpcnRoRGF0ZVNvdXJjZSA9PT0gJ2dlbmVyYXRlZCcgPyAnR2VuZXJhdGVkIGZhbGxiYWNrIMK3IGVkaXRpbmcgZXN0YWJsaXNoZXMgYSBtYW51YWwgY29ycmVjdGlvbicgOiAobnBjLmJpcnRoRGF0ZVNvdXJjZSA9PT0gJ2VzdGFibGlzaGVkJyA/ICdFc3RhYmxpc2hlZCBkYXRlIMK3IGVkaXRpbmcgcmVjb3JkcyBhIG1hbnVhbCBjb3JyZWN0aW9uJyA6ICdVc2VzIHRoZSBhY3RpdmUgY2FsZW5kYXInKX08L3NtYWxsPjxpbnB1dCBpZD1cIm5wY19zdGF0ZV9kZWx0YV9lZGl0X2JpcnRoZGF5XCIgY2xhc3M9XCJ0ZXh0X3BvbGVcIiBtYXhsZW5ndGg9XCIxODBcIiBwbGFjZWhvbGRlcj1cIk1NLUREIC8gWVlZWS1NTS1ERCBvciBjb25maWd1cmVkIGNhbGVuZGFyIGRhdGVcIiB2YWx1ZT1cIiR7ZWRpdG9yVmFsdWUobnBjLmJpcnRoRGF0ZURpc3BsYXkpfVwiPjwvbGFiZWw+CiIiIgppbmRleCA9IHJlcGxhY2Vfb25jZShpbmRleCwgYWdlX2ZpZWxkLCBiaXJ0aGRheV9maWVsZCwgImJpcnRoZGF5IGVkaXRvciBmaWVsZCIpCgpzeW5jX2FnZSA9ICIgICAgc2V0KCducGNfc3RhdGVfZGVsdGFfZWRpdF9hZ2UnLCBucGMuYWdlKTtcbiIKaW5kZXggPSByZXBsYWNlX29uY2UoCiAgICBpbmRleCwKICAgIHN5bmNfYWdlLAogICAgc3luY19hZ2UgKyAiICAgIHNldCgnbnBjX3N0YXRlX2RlbHRhX2VkaXRfYmlydGhkYXknLCBucGMuYmlydGhEYXRlRGlzcGxheSk7XG4iLAogICAgImJpcnRoZGF5IGVkaXRvciByZWZyZXNoIHN5bmMiLAopCgphc3NpZ25fbGluZSA9ICIgICAgT2JqZWN0LmFzc2lnbihuZXh0LCBzdGFibGVJbnB1dHMpO1xuIgpiaXJ0aGRheV9zYXZlID0gYXNzaWduX2xpbmUgKyByIiIiICAgIGNvbnN0IGJpcnRoZGF5SW5wdXQgPSBTdHJpbmcoZWRpdG9yRmllbGQoJ25wY19zdGF0ZV9kZWx0YV9lZGl0X2JpcnRoZGF5JykpLnRyaW0oKS5zbGljZSgwLCAxODApOwogICAgY29uc3QgY3VycmVudEJpcnRoZGF5RGlzcGxheSA9IFN0cmluZyhjdXJyZW50LmJpcnRoRGF0ZURpc3BsYXkgfHwgJycpLnRyaW0oKTsKICAgIGlmIChiaXJ0aGRheUlucHV0ICE9PSBjdXJyZW50QmlydGhkYXlEaXNwbGF5KSB7CiAgICAgICAgaWYgKCFiaXJ0aGRheUlucHV0KSB7CiAgICAgICAgICAgIGdsb2JhbFRoaXMudG9hc3RyPy53YXJuaW5nPy4oJ05QQyBTdGF0ZSBEZWx0YTogYmlydGhkYXkgY2Fubm90IGJlIGNsZWFyZWQgaGVyZS4gRW50ZXIgYSB2YWxpZCBkYXRlIG9yIGNhbmNlbCB0aGUgZWRpdC4nKTsKICAgICAgICAgICAgcmV0dXJuIGZhbHNlOwogICAgICAgIH0KICAgICAgICBjb25zdCBub3JtYWxpemVkQmlydGhkYXkgPSBub3JtYWxpemVCaXJ0aERhdGUoYmlydGhkYXlJbnB1dCk7CiAgICAgICAgaWYgKCFub3JtYWxpemVkQmlydGhkYXkpIHsKICAgICAgICAgICAgZ2xvYmFsVGhpcy50b2FzdHI/Lndhcm5pbmc/LignTlBDIFN0YXRlIERlbHRhOiBiaXJ0aGRheSBpcyBub3QgdmFsaWQgZm9yIHRoZSBhY3RpdmUgY2FsZW5kYXIuJyk7CiAgICAgICAgICAgIHJldHVybiBmYWxzZTsKICAgICAgICB9CiAgICAgICAgY29uc3QgY29ycmVjdGVkQmlydGhkYXkgPSBhcHBseU5wY0JpcnRoZGF5VXBkYXRlKG5leHQsIHsKICAgICAgICAgICAgYmlydGhEYXRlOiBub3JtYWxpemVkQmlydGhkYXksCiAgICAgICAgICAgIGJpcnRoRGF0ZVN0YXRlOiAnY29ycmVjdCcsCiAgICAgICAgICAgIGJpcnRoRGF0ZVJlYXNvbjogJ01hbnVhbCBkb3NzaWVyIGJpcnRoZGF5IGNvcnJlY3Rpb24uJywKICAgICAgICB9KTsKICAgICAgICBjb3JyZWN0ZWRCaXJ0aGRheS5iaXJ0aERhdGVTb3VyY2VNZXNzYWdlSWQgPSBudWxsOwogICAgICAgIE9iamVjdC5hc3NpZ24obmV4dCwgY29ycmVjdGVkQmlydGhkYXkpOwogICAgfQoiIiIKaW5kZXggPSByZXBsYWNlX29uY2UoaW5kZXgsIGFzc2lnbl9saW5lLCBiaXJ0aGRheV9zYXZlLCAiYmlydGhkYXkgZWRpdG9yIHNhdmUgcGF0aCIpCndyaXRlKCJpbmRleC5qcyIsIGluZGV4KQoKdGVzdHMgPSByZWFkKCJ0ZXN0cy9pbmRleC1oYXJkZW5pbmcudGVzdC5qcyIpCmlmICJtYW51YWwgZG9zc2llciBlZGl0b3IgdmFsaWRhdGVzIGJpcnRoZGF5IGNvcnJlY3Rpb25zIiBpbiB0ZXN0czoKICAgIHJhaXNlIFN5c3RlbUV4aXQoImJpcnRoZGF5IGVkaXRvciByZWdyZXNzaW9uIHRlc3QgYWxyZWFkeSBleGlzdHMiKQp0ZXN0cyA9IHRlc3RzLnJzdHJpcCgpICsgciIiIgoKdGVzdCgnbWFudWFsIGRvc3NpZXIgZWRpdG9yIHZhbGlkYXRlcyBiaXJ0aGRheSBjb3JyZWN0aW9ucyB0aHJvdWdoIHRoZSBjYW5vbmljYWwgYmlydGhkYXkgZW5naW5lJywoKT0+ewogIGFzc2VydC5tYXRjaChzb3VyY2UsL25wY19zdGF0ZV9kZWx0YV9lZGl0X2JpcnRoZGF5Lyk7CiAgYXNzZXJ0Lm1hdGNoKHNvdXJjZSwvbm9ybWFsaXplQmlydGhEYXRlXChiaXJ0aGRheUlucHV0XCkvKTsKICBhc3NlcnQubWF0Y2goc291cmNlLC9hcHBseU5wY0JpcnRoZGF5VXBkYXRlXChuZXh0LC8pOwogIGFzc2VydC5tYXRjaChzb3VyY2UsL2JpcnRoRGF0ZVN0YXRlOiAnY29ycmVjdCcvKTsKICBhc3NlcnQubWF0Y2goc291cmNlLC9NYW51YWwgZG9zc2llciBiaXJ0aGRheSBjb3JyZWN0aW9uXC4vKTsKICBhc3NlcnQubWF0Y2goc291cmNlLC9jb3JyZWN0ZWRCaXJ0aGRheVwuYmlydGhEYXRlU291cmNlTWVzc2FnZUlkID0gbnVsbC8pOwogIGFzc2VydC5tYXRjaChzb3VyY2UsL3NldFwoJ25wY19zdGF0ZV9kZWx0YV9lZGl0X2JpcnRoZGF5JywgbnBjXC5iaXJ0aERhdGVEaXNwbGF5XCkvKTsKfSk7CiIiIiArICJcbiIKd3JpdGUoInRlc3RzL2luZGV4LWhhcmRlbmluZy50ZXN0LmpzIiwgdGVzdHMpCgpjb250cmFjdCA9IHJlYWQoImRvY3MvY29yZS1jb250cmFjdLm1kIikKb2xkX2NvbnRyYWN0ID0gIkdyb3VuZGVkIHN0b3J5IGZhY3RzIG1heSBlc3RhYmxpc2gvY29ycmVjdCBkYXRlczsgZXhhY3QgYWN0dWFsIGFnZSBhbmQgYSBjb21wYXRpYmxlIGZ1bGwgb3duZWQgZGF0ZSBtYXkgZGVyaXZlIGEgcHJvdmlzaW9uYWwgYmlydGggeWVhci4iCm5ld19jb250cmFjdID0ICJHcm91bmRlZCBzdG9yeSBmYWN0cyBhbmQgZXhwbGljaXQgbWFudWFsIEVkaXQgRG9zc2llciBjb3JyZWN0aW9ucyBtYXkgZXN0YWJsaXNoL2NvcnJlY3QgZGF0ZXMuIE1hbnVhbCBiaXJ0aGRheSBjb3JyZWN0aW9ucyBhcmUgdmFsaWRhdGVkIGFnYWluc3QgdGhlIGFjdGl2ZSBjYWxlbmRhciBhbmQgdXNlIHRoZSBzYW1lIGNhbm9uaWNhbCBiaXJ0aGRheSBjb250aW51aXR5IGVuZ2luZSB3aXRob3V0IGEgbW9kZWwgY2FsbDsgZXhhY3QgYWN0dWFsIGFnZSBhbmQgYSBjb21wYXRpYmxlIGZ1bGwgb3duZWQgZGF0ZSBtYXkgZGVyaXZlIGEgcHJvdmlzaW9uYWwgYmlydGggeWVhci4iCmNvbnRyYWN0ID0gcmVwbGFjZV9vbmNlKGNvbnRyYWN0LCBvbGRfY29udHJhY3QsIG5ld19jb250cmFjdLCAiY29yZSBjb250cmFjdIGJpcnRoZGF5IGNvcnJlY3Rpb24iKQp3cml0ZSgiZG9jcy9jb3JlLWNvbnRyYWN0Lm1kIiwgY29udHJhY3QpCgpiaXJ0aGRheV9kb2MgPSByZWFkKCJkb2NzL2JpcnRoZGF5LWNvbnRpbnVpdHkubWQiKQpvbGRfZG9jID0gIkRvc3NpZXIgYmlydGhkYXkvZm9ybSBkaXNwbGF5IGlzIG5vdyBwYXJ0IG9mIHRoZSBvcmRpbmFyeSByZWFkLW9ubHkgcHJvamVjdGlvbjsgaXQgZG9lcyBub3QgcmVxdWlyZSBhIGRvY3VtZW50LXdpZGUgb2JzZXJ2ZXIgb3IgZnVsbC1oaXN0b3J5IGNvcHlpbmcuIgpuZXdfZG9jID0gIkRvc3NpZXIgYmlydGhkYXkvZm9ybSBkaXNwbGF5IHJlbWFpbnMgcGFydCBvZiB0aGUgb3JkaW5hcnkgcmVhZC1vbmx5IHByb2plY3Rpb24uIEVkaXQgRG9zc2llciBhZGRpdGlvbmFsbHkgZXhwb3NlcyB0aGUgY2Fub25pY2FsIGJpcnRoZGF5IGFzIGEgdmFsaWRhdGVkIG1hbnVhbCBjb3JyZWN0aW9uIGZpZWxkOiBjaGFuZ2luZyBpdCB1c2VzIHRoZSBzYW1lIGJpcnRoZGF5IGNvbnRpbnVpdHkgcG9saWN5LCBtYXJrcyB0aGUgYWNjZXB0ZWQgZGF0ZSBlc3RhYmxpc2hlZCwgY2xlYXJzIHN0b3J5LW1lc3NhZ2UgcHJvdmVuYW5jZSBmb3IgdGhlIG1hbnVhbCBjb3JyZWN0aW9uLCByZWNhbGN1bGF0ZXMgZGV0ZXJtaW5pc3RpYyBjYWxlbmRhciBtZXRhZGF0YSB3aGVyZSBwb3NzaWJsZSwgYW5kIHBlcmZvcm1zIG5vIG1vZGVsIHJlcXVlc3QuIEludmFsaWQgZGF0ZXMgZm9yIHRoZSBhY3RpdmUgY2FsZW5kYXIgYXJlIHJlamVjdGVkIGJlZm9yZSBjYW5vbmljYWwgbXV0YXRpb24uIFRoZSBwcm9qZWN0aW9uIHN0aWxsIGRvZXMgbm90IHJlcXVpcmUgYSBkb2N1bWVudC13aWRlIG9ic2VydmVyIG9yIGZ1bGwtaGlzdG9yeSBjb3B5aW5nLiIKYmlydGhkYXlfZG9jID0gcmVwbGFjZV9vbmNlKGJpcnRoZGF5X2RvYywgb2xkX2RvYywgbmV3X2RvYywgImJpcnRoZGF5IGNvbnRpbnVpdHkgVUkgZG9jdW1lbnRhdGlvbiIpCndyaXRlKCJkb2NzL2JpcnRoZGF5LWNvbnRpbnVpdHkubWQiLCBiaXJ0aGRheV9kb2MpCgpjaGFuZ2Vsb2cgPSByZWFkKCJDSEFOR0VMT0cubWQiKQptYXJrZXIgPSAiIyBOUEMgU3RhdGUgRGVsdGEgY2hhbmdlc1xuXG5cbiIKdW5yZWxlYXNlZCA9ICIiIiMgTlBDIFN0YXRlIERlbHRhIGNoYW5nZXMKCgojIyBVbnJlbGVhc2VkCgotIEFkZCBhIEJpcnRoZGF5IGZpZWxkIHRvIEVkaXQgRG9zc2llciBzbyBnZW5lcmF0ZWQgb3Igc3RvcnktZXN0YWJsaXNoZWQgZGF0ZXMgY2FuIGJlIGNvcnJlY3RlZCBtYW51YWxseSB3aXRob3V0IGVkaXRpbmcgZXh0ZW5zaW9uIEpTT04uCi0gVmFsaWRhdGUgbWFudWFsIGJpcnRoZGF5IGNoYW5nZXMgYWdhaW5zdCB0aGUgYWN0aXZlIGNhbGVuZGFyIGFuZCByb3V0ZSBhY2NlcHRlZCBjb3JyZWN0aW9ucyB0aHJvdWdoIHRoZSBjYW5vbmljYWwgYmlydGhkYXkgY29udGludWl0eSBlbmdpbmUgd2l0aG91dCBhbiBleHRyYSBtb2RlbCByZXF1ZXN0OyBtYW51YWwgY29ycmVjdGlvbnMgY2xlYXIgc3RvcnktbWVzc2FnZSBwcm92ZW5hbmNlLgoKIiIiCmNoYW5nZWxvZyA9IHJlcGxhY2Vfb25jZShjaGFuZ2Vsb2csIG1hcmtlciwgdW5yZWxlYXNlZCwgImNoYW5nZWxvZyB1bnJlbGVhc2VkIHNlY3Rpb24iKQp3cml0ZSgiQ0hBTkdFTE9HLm1kIiwgY2hhbmdlbG9nKQo=' | base64 -d > /tmp/apply-birthday-fix.py
-          python3 /tmp/apply-birthday-fix.py
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 match, found {count}')
+              return text.replace(old, new, 1)
+
+          path = Path('index.js')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              "} from './core.js';\nimport {\n    encodeNpcStateBundle,",
+              "} from './core.js';\nimport { applyNpcBirthdayUpdate, normalizeBirthDate } from './birthday.js';\nimport {\n    encodeNpcStateBundle,",
+              'birthday imports',
+          )
+          age = '        <label>Chronological age<input id="npc_state_delta_edit_age" class="text_pole" maxlength="80" placeholder="Actual stated age; leave blank if unknown" value="${editorValue(npc.age)}"></label>\n'
+          birthday = age + '        <label>Birthday <small>${npc.birthDateSource === \'generated\' ? \'Generated fallback; editing establishes a manual correction\' : (npc.birthDateSource === \'established\' ? \'Established date; editing records a manual correction\' : \'Uses the active calendar\')}</small><input id="npc_state_delta_edit_birthday" class="text_pole" maxlength="180" placeholder="MM-DD / YYYY-MM-DD or configured calendar date" value="${editorValue(npc.birthDateDisplay)}"></label>\n'
+          text = replace_once(text, age, birthday, 'birthday field')
+          sync = "    set('npc_state_delta_edit_age', npc.age || '');\n"
+          text = replace_once(text, sync, sync + "    set('npc_state_delta_edit_birthday', npc.birthDateDisplay || '');\n", 'birthday sync')
+          anchor = '    Object.assign(next, stableInputs);\n'
+          save = anchor + """    const birthdayInput = String(editorField('npc_state_delta_edit_birthday')).trim().slice(0, 180);
+              const currentBirthdayDisplay = String(current.birthDateDisplay || '').trim();
+              if (birthdayInput !== currentBirthdayDisplay) {
+                  if (!birthdayInput) {
+                      globalThis.toastr?.warning?.('NPC State Delta: birthday cannot be cleared here. Enter a valid date or cancel the edit.');
+                      return false;
+                  }
+                  const normalizedBirthday = normalizeBirthDate(birthdayInput);
+                  if (!normalizedBirthday) {
+                      globalThis.toastr?.warning?.('NPC State Delta: birthday is not valid for the active calendar.');
+                      return false;
+                  }
+                  const correctedBirthday = applyNpcBirthdayUpdate(next, {
+                      birthDate: normalizedBirthday,
+                      birthDateState: 'correct',
+                      birthDateReason: 'Manual dossier birthday correction.',
+                  });
+                  correctedBirthday.birthDateSourceMessageId = null;
+                  Object.assign(next, correctedBirthday);
+              }
+          """.replace('              ', '    ')
+          text = replace_once(text, anchor, save, 'birthday save')
+          path.write_text(text)
+
+          tests = Path('tests/index-hardening.test.js')
+          test_text = tests.read_text()
+          test_text += """
+
+          test('manual dossier editor validates birthday corrections through the canonical birthday engine',()=>{
+            assert.match(source,/npc_state_delta_edit_birthday/);
+            assert.match(source,/normalizeBirthDate\\(birthdayInput\\)/);
+            assert.match(source,/applyNpcBirthdayUpdate\\(next,/);
+            assert.match(source,/birthDateState: 'correct'/);
+            assert.match(source,/Manual dossier birthday correction\\./);
+            assert.match(source,/correctedBirthday\\.birthDateSourceMessageId = null/);
+            assert.match(source,/set\\('npc_state_delta_edit_birthday', npc\\.birthDateDisplay \\|\\| ''\\)/);
+          });
+          """
+          tests.write_text(test_text)
+
+          contract = Path('docs/core-contract.md')
+          contract_text = contract.read_text()
+          contract_text = replace_once(
+              contract_text,
+              'Grounded story facts may establish/correct dates; exact actual age and a compatible full owned date may derive a provisional birth year.',
+              'Grounded story facts and explicit manual Edit Dossier corrections may establish/correct dates. Manual birthday corrections are validated against the active calendar and use the same canonical birthday continuity engine without a model call; exact actual age and a compatible full owned date may derive a provisional birth year.',
+              'contract',
+          )
+          contract.write_text(contract_text)
+
+          birthday_doc = Path('docs/birthday-continuity.md')
+          birthday_text = birthday_doc.read_text()
+          birthday_text = replace_once(
+              birthday_text,
+              'Dossier birthday/form display is now part of the ordinary read-only projection; it does not require a document-wide observer or full-history copying.',
+              'Dossier birthday/form display remains part of the ordinary read-only projection. Edit Dossier additionally exposes the canonical birthday as a validated manual correction field: changing it uses the same birthday continuity policy, marks the accepted date established, clears story-message provenance for the manual correction, recalculates deterministic calendar metadata where possible, and performs no model request. Invalid dates for the active calendar are rejected before canonical mutation. The projection still does not require a document-wide observer or full-history copying.',
+              'birthday docs',
+          )
+          birthday_doc.write_text(birthday_text)
+
+          changelog = Path('CHANGELOG.md')
+          change_text = changelog.read_text()
+          marker = '# NPC State Delta changes\n\n\n'
+          entry = '# NPC State Delta changes\n\n\n## Unreleased\n\n- Add a Birthday field to Edit Dossier so generated or story-established dates can be corrected manually without editing extension JSON.\n- Validate manual birthday changes against the active calendar and route accepted corrections through the canonical birthday continuity engine without an extra model request; manual corrections clear story-message provenance.\n\n'
+          change_text = replace_once(change_text, marker, entry, 'changelog')
+          changelog.write_text(change_text)
+          PY
       - name: Verify patch
         shell: bash
         run: |
@@ -36,7 +124,7 @@ jobs:
           npm run measure:prompts
           npm run package
           git diff --check
-      - name: Commit verified fix and remove temporary workflow
+      - name: Commit verified fix
         shell: bash
         run: |
           set -euo pipefail
