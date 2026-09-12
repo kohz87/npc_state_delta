@@ -72,12 +72,18 @@ test('zero scanner output setting preserves built-in request lengths', async () 
     assert.equal(calls.profile[0][2], 900);
 });
 
-test('scanner output UI keeps touch layout bounded and cast cards taller', () => {
+test('scanner output UI keeps settings bounded, groups full cast with scanning, and keeps cast cards taller', () => {
     const source = fs.readFileSync(new URL('../scanner-output-ui.js', import.meta.url), 'utf8');
     assert.match(source, /Maximum output tokens/);
-    assert.match(source, /npc-state-delta-tuning-actions[^}]*flex-wrap:wrap/s);
-    assert.match(source, /delta-settings-maintenance-actions[^}]*auto-fit/s);
+    assert.match(source, /FULL_CAST_CONTROL_ID = 'npc_state_delta_full_cast_scan'/);
+    assert.match(source, /function moveFullCastIntoScanning/);
+    assert.match(source, /npc_state_delta_full_scan_every_turn/);
+    assert.match(source, /npc-state-delta-actions:not\(\.delta-settings-maintenance-actions\)[^}]*flex-wrap:wrap/s);
+    assert.match(source, /delta-settings-maintenance-actions\{display:grid!important;grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/s);
+    assert.match(source, /delta-settings-maintenance-actions>\.menu_button[^}]*width:100%!important/s);
+    assert.match(source, /delta-scanner-output-row[^}]*grid-template-columns:minmax\(0,1fr\) minmax\(150px,180px\)/s);
+    assert.match(source, /@media\(max-width:760px\)[\s\S]*delta-scanner-output-row\{grid-template-columns:minmax\(0,1fr\)!important/s);
     assert.match(source, /delta-cast-card[^}]*height:168px/s);
-    assert.match(source, /@media\(max-width:650px\)[\s\S]*height:150px/);
+    assert.match(source, /@media\(max-width:620px\)[\s\S]*height:150px/);
     assert.match(source, /roleplay or image-generation limits/);
 });
