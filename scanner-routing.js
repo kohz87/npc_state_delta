@@ -1,12 +1,24 @@
 /* NPC State Delta: request-scoped routing for the existing NPC scanner. */
 
 export const SCANNER_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+export const SCANNER_MAX_OUTPUT_TOKENS_MIN = 128;
+export const SCANNER_MAX_OUTPUT_TOKENS_MAX = 15000;
 const inflight = new Map();
 let sequence = 0;
 const metrics = {
     attempts: 0, total: 0, defaultRoute: 0, profileRoute: 0,
     succeeded: 0, failed: 0, rejected: 0, timedOut: 0, cancelled: 0, last: null,
 };
+
+export function normalizeScannerMaxOutputTokens(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number <= 0) return 0;
+    return Math.max(SCANNER_MAX_OUTPUT_TOKENS_MIN, Math.min(SCANNER_MAX_OUTPUT_TOKENS_MAX, Math.round(number)));
+}
+
+export function configuredScannerMaxOutputTokens(ctx) {
+    return normalizeScannerMaxOutputTokens(ctx?.extensionSettings?.npc_state_delta?.scannerMaxOutputTokens);
+}
 
 export function selectedScannerProfileId(ctx) {
     const value = ctx?.extensionSettings?.npc_state_delta?.scannerConnectionProfile;
@@ -96,10 +108,19 @@ function scannerMessages(options) {
 export async function dispatchScannerRequest(ctx, options = {}, scope = {}) {
     const route = scope.route || { profileId: scope.profileId === undefined ? selectedScannerProfileId(ctx) : scope.profileId };
     const profileId = String(route.profileId || '').trim();
+    const requestedResponseLength = Math.max(1, Math.round(Number(options.responseLength) || 2048));
+    if (route.maxOutputTokens === undefined) route.maxOutputTokens = configuredScannerMaxOutputTokens(ctx);
+    const configuredMaxOutputTokens = normalizeScannerMaxOutputTokens(route.maxOutputTokens);
+    const effectiveResponseLength = configuredMaxOutputTokens || requestedResponseLength;
+    const routedOptions = configuredMaxOutputTokens
+        ? { ...options, responseLength: effectiveResponseLength }
+        : options;
     const record = {
         id: ++sequence, label: String(scope.label || 'scanner request').slice(0, 120),
         route: profileId ? 'profile' : 'default', profileId,
         chatKey: scope.chatKey || '', operationId: scope.operationId ?? null,
+        requestedResponseLength, effectiveResponseLength,
+        outputOverrideConfigured: configuredMaxOutputTokens > 0,
         startedAt: Date.now(), sent: false,
     };
     metrics.attempts += 1;
@@ -139,7 +160,7 @@ export async function dispatchScannerRequest(ctx, options = {}, scope = {}) {
             if (typeof ctx?.generateRaw !== 'function') {
                 throw scannerRoutingError('This host does not expose generateRaw().', 'NPC_SCANNER_DEFAULT_UNAVAILABLE');
             }
-            invoke = () => ctx.generateRaw(options);
+            invoke = () => ctx.generateRaw(routedOptions);
         } else {
             const service = await Promise.race([profileService(ctx), stopped]);
             assertCurrent();
@@ -172,11 +193,10 @@ export async function dispatchScannerRequest(ctx, options = {}, scope = {}) {
                     throw scannerRoutingError('The selected profile changed or was removed during this scan. Choose a valid profile and retry.', 'NPC_SCANNER_PROFILE_CHANGED');
                 }
             };
-            invoke = () => service.sendRequest(profileId, scannerMessages(options),
-                Math.max(1, Math.round(Number(options.responseLength) || 2048)), {
-                    stream: false, signal: controller.signal, extractData: true,
-                    includePreset: true, includeInstruct: true,
-                });
+            invoke = () => service.sendRequest(profileId, scannerMessages(routedOptions), effectiveResponseLength, {
+                stream: false, signal: controller.signal, extractData: true,
+                includePreset: true, includeInstruct: true,
+            });
         }
         assertCurrent();
         // Count provider invocations, not rejected settings or cancelled preflights.
@@ -215,6 +235,9 @@ export async function dispatchScannerRequest(ctx, options = {}, scope = {}) {
         metrics.last = {
             id: record.id, label: record.label, route: record.route, profileId,
             dispatched: record.sent, outcome, code: failureCode,
+            requestedResponseLength: record.requestedResponseLength,
+            effectiveResponseLength: record.effectiveResponseLength,
+            outputOverrideConfigured: record.outputOverrideConfigured,
             durationMs: Math.max(0, Date.now() - record.startedAt), at: Date.now(),
         };
     }
