@@ -2,9 +2,8 @@
  * Keeps canonical state/runtime owners while refining dossier actions, cast carousel,
  * adaptive editing, extension settings presentation, and explicit manual life-state correction.
  */
-import { encodeNpcStateBundle } from './bundle.js';
 import { isTerminalNpcDeath } from './core.js';
-import { activeChatKey, api, stage1Refresh, uiRoot } from './dossier-tools-core.js';
+import { activeChatKey, api, flushDurably, stage1Refresh, uiRoot } from './dossier-tools-core.js';
 import { exportNativeTools, openDiagnostics, openImportTools } from './dossier-tools.js';
 import { openPortraitTools } from './portrait-tools.js';
 
@@ -52,35 +51,6 @@ export function lifeStateChoice(npc = {}) {
     return 'unknown';
 }
 
-export function manualLifeStateRecord(npc = {}, requested = 'unknown', now = Date.now()) {
-    const next = structuredClone(npc || {});
-    const choice = ['alive', 'unknown', 'deceased'].includes(requested) ? requested : 'unknown';
-    if (choice === 'deceased') {
-        next.lifeState = 'deceased';
-        next.lifeStateCertainty = 'explicit';
-        next.lifeStateReason = 'Manually marked deceased by the user in the dossier editor.';
-        next.present = false;
-        next.worldActive = false;
-        next.archived = true;
-        next.archiveReason = 'deceased';
-        next.archivedAt = Number(now) || Date.now();
-        next.archiveSourceMessageId = null;
-        return next;
-    }
-
-    next.lifeState = choice;
-    next.lifeStateCertainty = choice === 'alive' ? 'explicit' : '';
-    next.lifeStateReason = choice === 'alive'
-        ? 'Manually confirmed alive by the user in the dossier editor.'
-        : '';
-    if (plain(next.archiveReason).toLowerCase() === 'deceased') {
-        next.archived = false;
-        next.archiveReason = '';
-        next.archivedAt = null;
-        next.archiveSourceMessageId = null;
-    }
-    return next;
-}
 
 function selectedNpcId(root = uiRoot()) {
     return plain(root?.querySelector?.('.delta-hero .delta-edit[data-npc-id]')?.dataset?.npcId
@@ -88,7 +58,7 @@ function selectedNpcId(root = uiRoot()) {
 }
 
 function currentNpc(npcId = selectedNpcId()) {
-    try { return api()?.getState?.()?.npcs?.find?.(npc => String(npc?.id || '') === String(npcId || '')) || null; }
+    try { return api()?.getNpc?.(npcId) || null; }
     catch { return null; }
 }
 
@@ -100,41 +70,22 @@ function lifecycleLabel(npc = {}) {
     return lifeStateChoice(npc) === 'alive' ? 'Alive · Off-screen' : 'Active · life state unknown';
 }
 
-async function applyManualLifeState(npcId, requested) {
+async function applyManualLifeState(npcId, requested, editor) {
     const runtime = api();
     const chatKey = activeChatKey();
-    if (!runtime || !chatKey || chatKey === 'no-chat') throw new Error('Open a chat before changing life state.');
-    let npc = currentNpc(npcId);
+    const control = editor?.querySelector('.delta-editor-life-control');
+    if (!runtime || !chatKey || chatKey === 'no-chat' || !editor?.isConnected || control?.dataset.chatKey !== chatKey) throw new Error('The life-state editor no longer belongs to this chat.');
+    const npc = currentNpc(npcId);
     if (!npc) throw new Error('The selected NPC no longer exists.');
     const choice = ['alive', 'unknown', 'deceased'].includes(requested) ? requested : 'unknown';
     if (lifeStateChoice(npc) === choice) return npc;
-
-    if (choice === 'deceased') {
-        const confirmed = globalThis.confirm?.(`Mark ${npc.name || 'this NPC'} as deceased? This is a terminal manual life-state decision until you explicitly correct it.`);
-        if (confirmed === false) return null;
-    }
-
-    // A dead -> living/unknown transition is an explicit erroneous-death correction first.
-    // Reuse the canonical Restore path so correction provenance remains owned by the runtime.
-    if (lifeStateChoice(npc) === 'deceased' && choice !== 'deceased') {
-        if (typeof runtime.restore !== 'function') throw new Error('The canonical death-correction action is unavailable.');
-        const restored = await runtime.restore(npcId);
-        if (restored === false) throw new Error('The canonical death-correction action could not restore this dossier.');
-        await runtime.flush?.();
-        npc = currentNpc(npcId);
-        if (!npc) throw new Error('The dossier disappeared while correcting its death record.');
-    }
-
-    const next = manualLifeStateRecord(npc, choice);
-    const bytes = encodeNpcStateBundle({ npcs: [next], socialGraph: { edges: [], unresolved: [] }, dismissed: [] }, {
-        appVersion: runtime.uiStatus?.()?.version || '0.1.0',
-        chatKey,
-    });
-    const imported = await runtime.importBytes?.(bytes);
-    if (!imported) throw new Error('The canonical dossier importer rejected the life-state correction.');
-    await runtime.flush?.();
+    if (choice === 'deceased' && globalThis.confirm?.(`Mark ${npc.name || 'this NPC'} as deceased? This is terminal until you explicitly correct it.`) === false) return null;
+    if (!runtime.updateLifeState?.(npcId, choice, { chatKey })) throw new Error('The canonical life-state edit rejected its stale target.');
+    const saved = await flushDurably(chatKey, 'manual life state');
+    if (!saved.persisted) throw new Error('Life-state change applied locally, but durable save failed. The change is retained for recovery.');
+    if (activeChatKey() !== chatKey || !editor.isConnected) return null;
     stage1Refresh();
-    return currentNpc(npcId) || next;
+    return currentNpc(npcId);
 }
 
 function ensureLibraryChrome(root) {
@@ -149,7 +100,7 @@ function ensureLibraryChrome(root) {
         heading.className = 'delta-library-heading';
         tools.prepend(heading);
     }
-    const total = api()?.getState?.()?.npcs?.length || 0;
+    const total = root.__npcStateDeltaStage1Ui?.projection?.npcs?.length || 0;
     setNodeTextIfChanged(heading, `DOSSIER LIBRARY · ${total} NPC${total === 1 ? '' : 's'}`);
 
     if (!list.parentElement?.classList?.contains('delta-cast-rail-wrap')) {
@@ -204,17 +155,16 @@ function ensureDossierActions(root) {
             ${lifecycleAction}
           </div>
         </details>
-      </div>
-      <button type="button" class="delta-tools-portrait-button" data-npc-id="${escapeHtml(npcId)}" hidden aria-hidden="true" tabindex="-1"></button>`;
+      </div>`;
 }
 
 function editorNpcId(editor) {
     return plain(editor?.querySelector?.('[data-npc-id]')?.dataset?.npcId);
 }
 
-function syncEditorLifecycle(editor, npc) {
+function syncEditorLifecycle(editor, npc, { preserveChoice = false } = {}) {
     if (!editor || !npc) return;
-    setNodeValueIfChanged(editor.querySelector('[data-delta-life-state]'), lifeStateChoice(npc));
+    if (!preserveChoice) setNodeValueIfChanged(editor.querySelector('[data-delta-life-state]'), lifeStateChoice(npc));
     setNodeTextIfChanged(editor.querySelector('.npc-state-delta-editor-lifecycle span'), lifecycleLabel(npc));
     setNodeTextIfChanged(editor.querySelector('[data-delta-life-status]'), lifeStateChoice(npc) === 'deceased'
         ? 'Deceased is terminal for automatic writers until you explicitly correct it.'
@@ -304,6 +254,7 @@ function ensureEditorStructure(editor) {
     content.append(identity.section, current.section, relationships.section, continuity.section, advanced);
     if (portraitOverrides) content.appendChild(portraitOverrides);
     content.dataset.deltaExperienceStructured = '1';
+    content.dispatchEvent?.(new CustomEvent('npc-state-delta:editor-mounted', { bubbles: true }));
 }
 
 function ensureEditorLifeState(editor) {
@@ -311,6 +262,8 @@ function ensureEditorLifeState(editor) {
     editor.querySelectorAll('.npc-state-delta-copy-image-prompt').forEach(node => node.remove());
     const lifecycle = editor.querySelector('.npc-state-delta-editor-lifecycle');
     const npcId = editorNpcId(editor);
+    const existing = editor.querySelector('.delta-editor-life-control');
+    if (existing?.dataset.npcId === npcId && existing.dataset.chatKey === activeChatKey()) return;
     const npc = currentNpc(npcId);
     if (!lifecycle || !npcId || !npc) return;
 
@@ -327,6 +280,8 @@ function ensureEditorLifeState(editor) {
     }
     const apply = control.querySelector('[data-delta-apply-life]');
     if (apply && apply.dataset.npcId !== npcId) apply.dataset.npcId = npcId;
+    control.dataset.npcId = npcId;
+    control.dataset.chatKey = activeChatKey();
     syncEditorLifecycle(editor, npc);
     ensureEditorStructure(editor);
 }
@@ -459,17 +414,6 @@ function ensureSettingsExperience() {
             const control = legacyActions.querySelector(`#${id}`);
             if (control) maintenanceActions.appendChild(control);
         }
-        // Keep the legacy transfer controls mounted for compatibility but out of the maintained UI.
-        const legacyTransfer = document.createElement('div');
-        legacyTransfer.className = 'delta-settings-legacy-transfer';
-        legacyTransfer.hidden = true;
-        const legacyExport = legacyActions.querySelector('#npc_state_delta_export_bundle');
-        const legacyInput = legacyActions.querySelector('#npc_state_delta_import_bundle_file');
-        const legacyImport = legacyInput ? legacyActions.querySelector(`label[for="${legacyInput.id}"]`) : null;
-        if (legacyExport) legacyTransfer.appendChild(legacyExport);
-        if (legacyInput) legacyTransfer.appendChild(legacyInput);
-        if (legacyImport) legacyTransfer.appendChild(legacyImport);
-        maintenance.body.appendChild(legacyTransfer);
         legacyActions.remove();
     }
 
@@ -486,6 +430,7 @@ function ensureSettingsExperience() {
     const oldGrid = drawer.querySelector(':scope > .npc-state-delta-settings-grid');
     if (oldGrid && !oldGrid.children.length) oldGrid.remove();
     settings.dataset.deltaExperienceStructured = '1';
+    settings.dispatchEvent?.(new CustomEvent('npc-state-delta:settings-mounted', { bubbles: true }));
     return true;
 }
 
@@ -536,10 +481,11 @@ function bindDocumentEvents() {
             const npcId = plain(apply.dataset.npcId || editorNpcId(editor));
             const requested = plain(editor?.querySelector?.('[data-delta-life-state]')?.value || 'unknown');
             apply.disabled = true;
-            void applyManualLifeState(npcId, requested)
+            void applyManualLifeState(npcId, requested, editor)
                 .then(npc => {
                     if (!npc) return;
-                    syncEditorLifecycle(editor, npc);
+                    const preserveChoice = editor.querySelector('[data-delta-life-state]')?.value !== requested;
+                    syncEditorLifecycle(editor, npc, { preserveChoice });
                     toast('success', `NPC State Delta: ${npc.name || 'NPC'} life state set to ${lifeStateChoice(npc)}.`);
                 })
                 .catch(error => toast('error', `NPC State Delta life-state update failed: ${error?.message || error}`))
@@ -564,10 +510,9 @@ function bindDocumentEvents() {
 }
 
 function installRootObserver(root) {
-    if (!root || root[ROOT_OBSERVER_GUARD] || typeof MutationObserver === 'undefined') return;
-    const observer = new MutationObserver(() => scheduleNormalize(root));
-    observer.observe(root, { childList: true, subtree: true });
-    root[ROOT_OBSERVER_GUARD] = observer;
+    if (!root || root[ROOT_OBSERVER_GUARD]) return;
+    root.addEventListener('npc-state-delta:dossier-rendered', () => scheduleNormalize(root));
+    root[ROOT_OBSERVER_GUARD] = true;
 }
 
 function installEditorObserver() {
@@ -640,9 +585,9 @@ function installStyles() {
 #npc_state_delta_dossier_root .delta-dossier-more-menu .delta-btn{text-align:left;width:100%}
 
 /* One editor viewport, one scrollbar. SillyTavern keeps Save/Cancel outside this body. */
-.npc-state-delta-editor-popup{width:min(1320px,97vw)!important;max-width:none!important;height:min(940px,96dvh)!important;max-height:96dvh!important;margin:auto!important;overflow:hidden!important}
+.npc-state-delta-editor-popup{--delta-editor-height:min(940px,96dvh);width:min(1320px,97vw)!important;max-width:none!important;height:var(--delta-editor-height)!important;max-height:96dvh!important;margin:auto!important;overflow:hidden!important}
 .npc-state-delta-editor-popup .popup-content{display:flex!important;flex-direction:column!important;min-height:0!important;max-height:none!important;overflow:hidden!important}
-.npc-state-delta-editor-popup #npc_state_delta_editor_content{flex:1 1 auto!important;min-height:0!important;max-height:calc(96dvh - 112px)!important;overflow-y:auto!important;overflow-x:hidden!important;overscroll-behavior:contain;padding-right:8px;scrollbar-gutter:stable}
+.npc-state-delta-editor-popup #npc_state_delta_editor_content{flex:1 1 auto!important;min-height:0!important;max-height:calc(var(--delta-editor-height) - 112px)!important;overflow-y:auto!important;overflow-x:hidden!important;overscroll-behavior:contain;padding-right:8px;scrollbar-gutter:stable}
 .npc-state-delta-editor-popup .npc-state-delta-editor-head{position:sticky;top:0;z-index:4;margin:-1px -1px 12px;padding:10px 2px 9px;background:color-mix(in srgb,var(--SmartThemeBlurTintColor,#18191d) 96%,black 4%);border-bottom:1px solid rgba(218,193,148,.14)}
 .npc-state-delta-editor-popup .npc-state-delta-editor-tools,.npc-state-delta-editor-popup .npc-state-delta-editor-portrait-overrides{display:none!important}
 .npc-state-delta-editor-popup .delta-editor-section{margin:12px 0;padding:13px;border:1px solid rgba(218,193,148,.16);border-radius:10px;background:rgba(255,255,255,.025)}
@@ -696,7 +641,7 @@ function installStyles() {
   #npc_state_delta_dossier_root .delta-cast-card{flex-basis:106px!important;width:106px!important;min-width:106px!important;height:126px!important}
   #npc_state_delta_dossier_root .delta-dossier-actions-primary{grid-template-columns:1fr 1fr auto}
   #npc_state_delta_dossier_root .delta-dossier-more{min-width:92px}
-  .npc-state-delta-editor-popup{width:100vw!important;height:100dvh!important;max-width:none!important;max-height:none!important;border-radius:0!important}
+  .npc-state-delta-editor-popup{--delta-editor-height:100dvh;width:100vw!important;height:100dvh!important;max-width:none!important;max-height:none!important;border-radius:0!important}
   .npc-state-delta-editor-popup #npc_state_delta_editor_content{max-height:calc(100dvh - 96px)!important;padding-right:4px}
   .npc-state-delta-editor-popup .delta-editor-life-control{grid-template-columns:1fr}
   .npc-state-delta-editor-popup .delta-editor-life-control small{grid-column:1}

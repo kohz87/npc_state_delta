@@ -1,4 +1,4 @@
-"""Produce and verify a deterministic runtime-only Delta development package."""
+"""Produce and verify a deterministic runtime-only Delta installable package."""
 from pathlib import Path
 import hashlib
 import json

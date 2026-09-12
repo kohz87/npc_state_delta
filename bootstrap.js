@@ -1,4 +1,4 @@
-/* NPC State Delta v0.1.0 bootstrap. */
+/* NPC State Delta v1.0.0 bootstrap. */
 import { prepareNpcStateHardening } from './hardening.js';
 
 await prepareNpcStateHardening();
@@ -17,7 +17,6 @@ try {
 }
 try {
     await import('./dossier-tools.js');
-    await import('./dossier-tools-controls.js');
 } catch (error) {
     console.error('[NPC State Delta] supporting tools UI failed to load', error);
 }

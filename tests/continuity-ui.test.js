@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { appearanceDraftRecord, appearanceUiModel } from '../continuity-ui.js';
+import { appearanceUiModel } from '../continuity-ui.js';
+import { appearanceDraftRecord } from '../appearance.js';
 import { normalizeNpcRecord, resolveNpcAppearance } from '../core.js';
 
 function formNpc() {
@@ -93,7 +94,8 @@ test('continuity UI ships dedicated calendar/birthday and appearance-form surfac
     const source = readFileSync(new URL('../continuity-ui.js', import.meta.url), 'utf8');
     const bootstrap = readFileSync(new URL('../bootstrap.js', import.meta.url), 'utf8');
     assert.match(source, /Calendar & birthdays/);
-    assert.match(source, /delta-continuity-birthday-card/);
+    const dossier = readFileSync(new URL('../dossier-ui.js', import.meta.url), 'utf8');
+    assert.match(dossier, /delta-continuity-birthday-card/);
     assert.match(source, /Appearance forms/);
     assert.match(source, /Apply appearance forms/);
     assert.match(bootstrap, /import\('\.\/continuity-ui\.js'\)/);

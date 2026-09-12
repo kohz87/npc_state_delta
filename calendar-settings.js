@@ -143,8 +143,8 @@ function saveCalendar(root) {
     setActiveCalendarConfig(settings.calendarConfig);
     persistHostSettings();
     status(root, validation.currentDateValid
-        ? 'Calendar saved with a manual fallback current date. Structured World State dates take priority when present.'
-        : 'Calendar saved. Birthdays use named months; no birth year or age progression is invented without a grounded current date.', false);
+        ? 'Calendar applied; settings save queued with a manual fallback current date. Structured World State dates take priority when present.'
+        : 'Calendar applied; settings save queued. Birthdays use named months; no birth year or age progression is invented without a grounded current date.', false);
     return true;
 }
 
@@ -162,7 +162,7 @@ function resetCalendar(root) {
     if (months) months.value = '';
     if (day) day.value = '';
     updateMonthOptions(root, '');
-    status(root, 'Custom calendar cleared. Numeric birthday compatibility mode is active.', false);
+    status(root, 'Custom calendar cleared locally; settings save queued. Numeric birthday compatibility mode is active.', false);
 }
 
 function bind(root) {

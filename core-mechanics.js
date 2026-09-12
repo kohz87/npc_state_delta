@@ -5,8 +5,6 @@ import {
     socialGraphLabelsForNpc,
 } from './social.js';
 
-export const NPC_STATE_VERSION = '0.2.18';
-
 export const NPC_LIFE_STATES = Object.freeze(['unknown', 'alive', 'deceased']);
 export const NPC_ARCHIVE_REASONS = Object.freeze(['', 'manual', 'deceased', 'stale']);
 export const NPC_ADMISSION_MODES = Object.freeze(['conservative', 'balanced', 'manual_only']);
@@ -688,12 +686,6 @@ export function filterRelationshipDeltaByEvidence(delta, evidence, context = '')
         key,
         normalized[key] !== 0 && relationshipAxisEvidenceGrounded(key, proof[key], context) ? normalized[key] : 0,
     ]));
-}
-
-function relationshipEvidenceValidForDelta(delta, evidence, context = '') {
-    const normalized = normalizeRelationshipDelta(delta);
-    const filtered = filterRelationshipDeltaByEvidence(normalized, evidence, context);
-    return RELATIONSHIP_KEYS.every(key => normalized[key] === filtered[key]);
 }
 
 export function normalizeRelationshipEventHistory(value = []) {
@@ -3974,20 +3966,6 @@ export function mergeScanResult(state, scanResult, options = {}) {
     });
     next.candidates.sort((a, b) => Number(b.lastSeenTurn || 0) - Number(a.lastSeenTurn || 0));
     return { state: next, report };
-}
-
-function relationshipBand(value) {
-    const n = Math.round(clamp(value, -100, 100));
-    if (n <= -70) return 'strongly negative';
-    if (n <= -30) return 'negative';
-    if (n < 30) return 'neutral/unsettled';
-    if (n < 70) return 'positive';
-    return 'strongly positive';
-}
-
-function signedScore(value) {
-    const n = Math.round(clamp(value, -100, 100));
-    return n > 0 ? `+${n}` : String(n);
 }
 
 export function buildBehaviorGuidance(npc) {

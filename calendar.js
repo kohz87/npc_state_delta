@@ -293,7 +293,7 @@ function dateOrdinal(value, config = null) {
     if (!/^\d{2}$/.test(date.month)) return null;
     const monthNumber = Number(date.month);
     let ordinal = 0;
-    for (let month = 1; month < monthNumber; month += 1) ordinal += legacyMonthDays(month, date.year);
+    for (let month = 1; month < monthNumber; month += 1) ordinal += legacyMonthDays(month, null);
     return ordinal + date.day - 1;
 }
 
@@ -346,19 +346,20 @@ export function currentCalendarDate(config = null) {
 function worldStateBodies(value) {
     const source = String(value || '');
     const bodies = [];
-    for (const match of source.matchAll(/<World_State\b[^>]*>([\s\S]*?)<\/World_State>/gi)) bodies.push(String(match[1] || ''));
+    for (const match of source.matchAll(/<World_State\b[^>]*>([\s\S]*?)<\/World_State>/gi)) bodies.push({ index: match.index, body: String(match[1] || '') });
     for (const details of source.matchAll(/<details\b[^>]*>([\s\S]*?)<\/details>/gi)) {
         const inner = String(details[1] || '');
         const summary = String(inner.match(/<summary\b[^>]*>([\s\S]*?)<\/summary>/i)?.[1] || '')
             .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-        if (/\bworld\s*state\b/i.test(summary)) bodies.push(inner);
+        if (/\bworld\s*state\b/i.test(summary)) bodies.push({ index: details.index, body: inner });
     }
-    return bodies;
+    return bodies.sort((a, b) => a.index - b.index).map(item => item.body);
 }
 
 function dateCandidatesInWorldStateBody(body, config = null) {
     const normalized = normalizeCalendarConfig(config, { requireCurrentDate: false });
-    const text = String(body || '').replace(/<[^>]+>/g, ' ');
+    const text = String(body || '').replace(/<[^>]+>/g, ' ')
+        .split(/\b(?:NPCs?\s+Present|Off[ -]Screen|Player\s+(?:Character|State)|Characters?)\s*[:|]/i)[0];
     const candidates = [];
     if (normalized.calendarValid) {
         const months = [...normalized.config.months].sort((a, b) => b.name.length - a.name.length);

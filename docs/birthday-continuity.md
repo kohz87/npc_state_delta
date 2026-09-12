@@ -115,3 +115,9 @@ The manual current date is a fallback setting, not a second campaign-history dat
 `tests/birthday-continuity.test.js` covers months-only calendar validation, all-or-none manual clock validation, deterministic named-month generation, numeric compatibility fallback, structured World State extraction, guarded birth-year and age arithmetic, deterministic age progression, generated-to-established replacement, correction protection, explicit year authority upgrades, incompatible-date preservation, and conditional prompt wording.
 
 Full repository acceptance still requires the normal exact-candidate CI workflow. Live-provider testing is only needed to evaluate model extraction quality for fantasy-calendar birthday phrasing; it is not required to prove deterministic calendar or structured-date arithmetic.
+
+## Stage 9 integration clarifications
+
+The runtime passes the owning raw assistant message separately to local date extraction before UI-noise stripping can erase its structural boundaries. Model-facing scanner text is unchanged. Mixed supported block formats use source order; only the World State header before NPC sections supplies the current date, not an NPC birth date. Manual actual-age locks and terminal-death state remain protected. An older manual fallback does not reverse an accepted chronological age in a date-less scan or subsequent injection. No independent clock store, narration-based elapsed-time guess or extra model request is introduced.
+
+The dedicated Calendar & birthdays settings section uses the host's existing debounced settings save and reports queued persistence. Dossier birthday/form display is now part of the ordinary read-only projection; it does not require a document-wide observer or full-history copying.

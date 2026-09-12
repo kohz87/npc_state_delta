@@ -49,3 +49,33 @@ export function protectTerminalNpc(previous = {}, candidate = {}) {
     }
     return normalizeTerminalNpc(next);
 }
+
+export function manualLifeStateRecord(npc = {}, requested = 'unknown', now = Date.now()) {
+    const next = structuredClone(npc || {});
+    const choice = ['alive', 'unknown', 'deceased'].includes(requested) ? requested : 'unknown';
+    if (choice === 'deceased') {
+        next.lifeState = 'deceased';
+        next.lifeStateCertainty = 'explicit';
+        next.lifeStateReason = 'Manually marked deceased by the user in the dossier editor.';
+        next.present = false;
+        next.worldActive = false;
+        next.archived = true;
+        next.archiveReason = 'deceased';
+        next.archivedAt = Number(now) || Date.now();
+        next.archiveSourceMessageId = null;
+        return next;
+    }
+
+    next.lifeState = choice;
+    next.lifeStateCertainty = choice === 'alive' ? 'explicit' : '';
+    next.lifeStateReason = choice === 'alive'
+        ? 'Manually confirmed alive by the user in the dossier editor.'
+        : '';
+    if (String(next.archiveReason || '').trim().toLowerCase() === 'deceased') {
+        next.archived = false;
+        next.archiveReason = '';
+        next.archivedAt = null;
+        next.archiveSourceMessageId = null;
+    }
+    return next;
+}

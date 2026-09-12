@@ -115,12 +115,40 @@ export function encodeNpcStateBundle(state, { appVersion = 'unknown', chatKey = 
 }
 
 function validateManifest(manifest) {
+    // Bound subsequent recursive cloning/scrubbing and reject prototype-shaped metadata
+    // before any imported value reaches canonical object maps.
+    const queue = [{ value: manifest, depth: 0 }];
+    while (queue.length) {
+        const { value, depth } = queue.pop();
+        if (!value || typeof value !== 'object') continue;
+        if (depth > 64) throw new Error('NPC State Delta bundle nesting exceeds the 64-level safety limit.');
+        for (const [key, item] of Object.entries(value)) {
+            if (['__proto__', 'constructor', 'prototype'].includes(key)) throw new Error('NPC State Delta bundle contains unsafe object metadata.');
+            if (item && typeof item === 'object') queue.push({ value: item, depth: depth + 1 });
+        }
+    }
     if (!manifest || manifest.format !== 'npc_state_delta_bundle') throw new Error('Not an NPC State Delta bundle.');
     if (manifest.formatVersion !== FORMAT_VERSION) throw new Error(`Unsupported NPC State Delta bundle version: ${manifest.formatVersion}.`);
     if (!manifest.state || !Array.isArray(manifest.state.npcs)) throw new Error('NPC State Delta bundle is missing its dossier registry.');
     const ids = new Set();
     for (const npc of manifest.state.npcs) {
+        if (!npc || typeof npc !== 'object' || Array.isArray(npc)) throw new Error('Every Delta dossier must be an object.');
+        for (const key of ['id', 'name']) {
+            if (key in npc && typeof npc[key] !== 'string') throw new Error(`Dossier ${key} must be text.`);
+        }
+        for (const key of ['relationship', 'relationshipProgress', 'portrait']) {
+            const value = npc[key];
+            if (value != null && (typeof value !== 'object' || Array.isArray(value))) throw new Error(`Dossier ${key} must be an object.`);
+        }
+        for (const key of ['relationship', 'relationshipProgress']) {
+            for (const value of Object.values(npc[key] || {})) {
+                if (!['number', 'string'].includes(typeof value) || !String(value).trim() || !Number.isFinite(Number(value))) {
+                    throw new Error(`Dossier ${key} contains a non-numeric value.`);
+                }
+            }
+        }
         const id = String(npc?.id || '').trim();
+        if (['__proto__', 'constructor', 'prototype'].includes(id)) throw new Error('NPC State Delta dossier id is reserved.');
         if (!id) continue;
         if (ids.has(id)) throw new Error(`NPC State Delta bundle contains duplicate NPC id: ${id}.`);
         ids.add(id);

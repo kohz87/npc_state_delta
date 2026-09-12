@@ -71,7 +71,7 @@ function validatePortableSettings(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('NPC State Delta native bundle has invalid portable settings.');
     const output = {};
     for (const [key, item] of Object.entries(value)) {
-        const rule = PORTABLE_SETTING_SCHEMA[key];
+        const rule = Object.hasOwn(PORTABLE_SETTING_SCHEMA, key) ? PORTABLE_SETTING_SCHEMA[key] : null;
         if (!rule) throw new Error(`NPC State Delta native bundle contains unsupported portable setting: ${key}.`);
         if (rule.type === 'boolean') {
             if (typeof item !== 'boolean') throw new Error(`NPC State Delta native portable setting ${key} must be boolean.`);
@@ -101,13 +101,13 @@ export function buildHistoryArchive(state = {}) {
         policy: 'audit-only-source-history',
         turn: Number(state.turn || 0),
         lastScannedMessageId: Number.isInteger(state.lastScannedMessageId) ? state.lastScannedMessageId : null,
-        lineage: Array.isArray(state.lineage) ? structuredClone(state.lineage) : [],
-        checkpoints: Array.isArray(state.checkpoints) ? structuredClone(state.checkpoints) : [],
+        lineage: Array.isArray(state.lineage) ? state.lineage : [],
+        checkpoints: Array.isArray(state.checkpoints) ? state.checkpoints : [],
         branchLineageVersion: Number(state.branchLineageVersion || 0),
-        branchParent: state.branchParent && typeof state.branchParent === 'object' ? structuredClone(state.branchParent) : null,
+        branchParent: state.branchParent && typeof state.branchParent === 'object' ? state.branchParent : null,
         branchForkMessageId: Number.isInteger(state.branchForkMessageId) ? state.branchForkMessageId : null,
-        branchRootSnapshot: state.branchRootSnapshot && typeof state.branchRootSnapshot === 'object' ? structuredClone(state.branchRootSnapshot) : null,
-        inlineCards: Array.isArray(state.inlineCards) ? structuredClone(state.inlineCards) : [],
+        branchRootSnapshot: state.branchRootSnapshot && typeof state.branchRootSnapshot === 'object' ? state.branchRootSnapshot : null,
+        inlineCards: Array.isArray(state.inlineCards) ? state.inlineCards : [],
     });
 }
 
@@ -157,18 +157,24 @@ function scrubSourceMessageOwnership(value) {
     if (!value || typeof value !== 'object') return value;
     const out = {};
     for (const [key, item] of Object.entries(value)) {
-        if (/^(?:sourceMessageId|archiveSourceMessageId|requestedMessageId)$/i.test(key)) out[key] = null;
+        if (/^(?:.*SourceMessageId|sourceMessageId|requestedMessageId|restoredFromMessageId)$/i.test(key)) out[key] = null;
         else out[key] = scrubSourceMessageOwnership(item);
     }
     return out;
+}
+
+export function nativeStateForTarget(decoded, targetChatKey) {
+    const target = String(targetChatKey || '').trim();
+    if (!target || target === 'no-chat') throw new Error('Open the target chat before importing NPC State Delta data.');
+    return decoded.metadata.sourceChatKey !== target ? scrubSourceMessageOwnership(decoded.state) : decoded.state;
 }
 
 export function prepareNativeImport(input, targetChatKey) {
     const decoded = decodeDeltaNativeBundle(input);
     const target = String(targetChatKey || '').trim();
     if (!target || target === 'no-chat') throw new Error('Open the target chat before importing NPC State Delta data.');
-    const foreignOwnership = Boolean(decoded.metadata.sourceChatKey && decoded.metadata.sourceChatKey !== target);
-    const safeState = foreignOwnership ? scrubSourceMessageOwnership(decoded.state) : structuredClone(decoded.state);
+    const foreignOwnership = decoded.metadata.sourceChatKey !== target;
+    const safeState = nativeStateForTarget(decoded, target);
     const base = encodeNpcStateBundle(safeState, {
         appVersion: decoded.metadata.appVersion || 'unknown',
         chatKey: target,

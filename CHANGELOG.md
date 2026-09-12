@@ -1,5 +1,24 @@
 # NPC State Delta changes
 
+
+## 1.0.0 - 12 September 2026
+
+- Consolidate portrait upload/removal into scoped canonical operations; remove the duplicate supporting-tools portrait manager and superseded controls module, including whole-state completion polling.
+- Correct locked appearance-form switching and explicitly empty unknown presentation without overwriting alternate anatomy, colors or unrelated dossier fields.
+- Apply appearance edits directly through the canonical owner, retaining editor/chat ownership and distinguishing local changes from durable saves.
+- Preserve birthday/aging integration after UI-noise stripping, correct mixed structured-date ordering and leap-year birthday comparison, and retain manual age and terminal-death protections.
+- Validate native dossier shapes before import and remove source-message ownership when the target chat is unproven, including birthday and death-correction provenance.
+- Replace repeated UI history copies with selected-record/lightweight projection reads and owner notifications; simplify history audit copying.
+- Keep diagnostic records bounded and free of exception payloads; report actual current-chat pending writes instead of a placeholder metric.
+- Surface permanent persistence rejection without endless retries while retaining dirty data, transient retry behavior, writer locking and later recovery.
+- Keep retained host-image generation preview-only until explicit application; reject canceled, superseded and stale decode/generation results, and leave newer dialogs untouched.
+- Apply manual life-state changes through the canonical owner without closing the editor, replaying a bundle, or overwriting newer input.
+- Preserve unchanged dossier sections, disclosure state, focus and scroll during portrait and live-state refreshes; fix clipped cast cards, capped editor footers, hidden fields and top-dialog Escape handling.
+- Validate the complete native envelope in the public importer as well as the UI, bound nesting and unsafe object metadata, and report actual added/updated/skipped counts.
+- Prepare coherent Delta 1.0.0 application metadata and the existing deterministic installable ZIP without changing storage, bundle or branch schemas.
+- Remove three uncalled internal evidence/display helpers, a shadowed source-era version export and a no-op editor branch after tracing runtime/test callers.
+- Preserve the working scanner prompt and all measured request bytes, output allowances, reasoning ownership and automatic request counts.
+
 ## Stage 8 supporting tools - 12 September 2026
 
 - Add the primary dossier Portrait workflow with device upload/replacement, removal, editable/copyable positive/negative prompts, explicit dossier rebuild, host Image Generation preview, and explicit preview application through the retained portrait upload/compression path.

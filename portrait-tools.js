@@ -1,26 +1,11 @@
 /* NPC State Delta portrait management: prompt generation plus explicit upload/remove only. */
 import {
     activeChatKey, api, closeOverlay, currentSessionIs, draftKey, escapeHtml, flushDurably,
-    keepPromptDraft, makeSession, mountOverlay, npcById, portraitSignature, promptDrafts,
+    keepPromptDraft, makeSession, mountOverlay, npcById, promptDrafts,
     recordToolEvent, selectedNpcId, setBusy, stage1Refresh, validatePortraitFile,
 } from './dossier-tools-core.js';
 
 function toast(kind, message) { globalThis.toastr?.[kind]?.(message); }
-
-function waitForPortraitChange(chatKey, npcId, before, timeoutMs = 12000) {
-    const started = Date.now();
-    return new Promise((resolve, reject) => {
-        const tick = () => {
-            if (activeChatKey() !== chatKey) return reject(new Error('The active chat changed; stale portrait completion was discarded.'));
-            const npc = npcById(npcId);
-            if (!npc) return reject(new Error('The target NPC no longer exists; stale portrait completion was discarded.'));
-            if (portraitSignature(npc) !== before) return resolve(npc);
-            if (Date.now() - started >= timeoutMs) return reject(new Error('Portrait processing did not complete. The prior portrait was left unchanged.'));
-            setTimeout(tick, 60);
-        };
-        tick();
-    });
-}
 
 function hiddenUploadInput(npcId) {
     return `<input type="file" class="npc-state-delta-inline-portrait-file delta-tools-portrait-file" data-npc-id="${escapeHtml(npcId)}" accept="image/*">`;
@@ -141,15 +126,18 @@ function portraitDialogHtml(npc, draft) {
     </section>`;
 }
 
-async function finishUploadedPortrait(session, before) {
+async function finishUploadedPortrait(session, file) {
     try {
-        const live = await waitForPortraitChange(session.chatKey, session.npcId, before);
+        const applied = await api()?.setPortrait?.(session.npcId, file, { chatKey: session.chatKey, isCurrent: () => currentSessionIs(session) });
+        if (!applied) throw new Error('The portrait target changed; stale image result was rejected.');
+        const live = npcById(session.npcId);
         if (!currentSessionIs(session)) throw new Error('The portrait workflow is no longer current; late completion was rejected from this workflow.');
         const saved = await flushDurably(session.chatKey, 'device portrait');
+        if (!currentSessionIs(session)) return;
         stage1Refresh();
         if (saved.persisted) toast('success', `NPC State Delta: ${live.name} portrait updated and saved.`);
         else toast('warning', `NPC State Delta: portrait applied locally, but durable save failed. ${saved.error?.message || saved.error}`);
-        closeOverlay({ reason: 'portrait-applied' });
+        closeOverlay({ reason: 'portrait-applied', session });
     } catch (error) {
         recordToolEvent('portrait-completion', {
             chatKey: session.chatKey,
@@ -159,7 +147,8 @@ async function finishUploadedPortrait(session, before) {
             stale: /stale|changed|no longer|current/i.test(String(error?.message || error)),
             detail: error?.message || error,
         });
-        if (currentSessionIs(session)) setBusy(session, false, error?.message || String(error));
+        if (!currentSessionIs(session)) return;
+        setBusy(session, false, error?.message || String(error));
         toast('error', `NPC State Delta portrait: ${error?.message || error}`);
     }
 }
@@ -183,6 +172,8 @@ function generatePromptsFromDossier(session, overlay) {
 function wirePortraitDialog(session, overlay) {
     const input = overlay?.querySelector('.delta-tools-portrait-file');
     input?.addEventListener('change', event => {
+        // The canonical API owns this operation. Do not also dispatch the delegated host handler.
+        event.stopImmediatePropagation();
         const file = input.files?.[0];
         const validation = validatePortraitFile(file);
         if (!validation.ok) {
@@ -200,9 +191,9 @@ function wirePortraitDialog(session, overlay) {
             toast('warning', 'NPC State Delta: the portrait target changed while the file picker was open. Reopen Portrait for the current dossier.');
             return;
         }
-        const before = portraitSignature(npcById(session.npcId));
         setBusy(session, true, 'Processing image through the canonical portrait handler…');
-        void finishUploadedPortrait(session, before);
+        input.value = '';
+        void finishUploadedPortrait(session, file);
     });
 
     overlay?.addEventListener('input', event => {
@@ -246,26 +237,19 @@ async function removePortrait(session) {
     if (!currentSessionIs(session) || session.busy) return;
     const npc = npcById(session.npcId);
     if (!npc?.portrait?.dataUrl) return;
-    const before = portraitSignature(npc);
-    setBusy(session, true, 'Removing portrait without changing the dossier…');
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.hidden = true;
-    button.className = 'npc-state-delta-inline-remove-portrait';
-    button.dataset.npcId = session.npcId;
-    document.body.appendChild(button);
-    button.click();
-    button.remove();
+    setBusy(session, true, 'Removing portrait without changing the dossier...');
     try {
-        await waitForPortraitChange(session.chatKey, session.npcId, before, 2500);
+        if (!api()?.removePortrait?.(session.npcId, { chatKey: session.chatKey })) throw new Error('The portrait target is no longer current.');
         const saved = await flushDurably(session.chatKey, 'portrait removal');
+        if (!currentSessionIs(session)) return;
         stage1Refresh();
         toast(saved.persisted ? 'success' : 'warning', saved.persisted
             ? `NPC State Delta: portrait removed from ${npc.name} and saved.`
             : `NPC State Delta: portrait removed locally, but durable save failed. ${saved.error?.message || saved.error}`);
-        closeOverlay({ reason: 'portrait-removed' });
+        closeOverlay({ reason: 'portrait-removed', session });
     } catch (error) {
-        if (currentSessionIs(session)) setBusy(session, false, error?.message || String(error));
+        if (!currentSessionIs(session)) return;
+        setBusy(session, false, error?.message || String(error));
         toast('error', `NPC State Delta portrait removal: ${error?.message || error}`);
     }
 }

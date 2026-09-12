@@ -1,0 +1,40 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Delta synthetic UI verification</title>
+<link rel="stylesheet" href="/delta/style.css"><style>
+*{box-sizing:border-box}body{margin:0;background:#17191c;color:#eee;font:16px Arial,sans-serif}button,input,textarea,select{font:inherit}button{cursor:pointer}.text_pole{width:100%;background:#25282e;color:#eee;border:1px solid #777;padding:8px}#npc_state_delta_settings{max-width:800px;margin:16px auto;padding:12px}dialog{color:inherit;background:#202329}.synthetic-footer{display:flex;justify-content:flex-end;gap:10px;padding:10px}.synthetic-footer button{min-height:44px}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden}
+</style></head><body>
+<div id="npc_state_delta_settings"><div class="npc-state-delta-drawer"><div class="npc-state-delta-intro"></div><div class="npc-state-delta-settings-grid"></div><div id="npc_state_delta_roster_summary"></div></div></div>
+<script type="module">
+import { normalizeNpcRecord, buildNpcPortraitPrompts, appearanceDraftRecord, manualLifeStateRecord } from '/delta/core.js';
+window.counts={getState:0,getNpc:0,projection:0,scan:0,flush:0,applied:0};
+window.settings={npc_state_delta:{calendarConfig:{era:'CR',months:[{name:'Redleaf',days:30},{name:'Sunwane',days:31}]}}};
+window.host={saveSettingsDebounced(){},async saveSettings(){if(window.failSettings)throw new Error('Synthetic settings failure')}};
+window.state={turn:1,npcs:Array.from({length:12},(_,i)=>normalizeNpcRecord({id:`npc-${i}`,name:i?'Surveyor '+i:'Mara',age:'26',apparentAge:'~26',species:'Human',role:'Survey clerk',present:true,location:'Ridge station',mood:'Attentive',goal:'Complete the survey.',personality:'Patient, observant and independent.',speech:'Concise formal sentences.',behaviorProfile:['Keeps firm boundaries.'],background:'An experienced survey clerk.',mannerisms:['Squares the ledger.'],appearanceModelVersion:1,currentForm:'Human',overallAppearance:'Silver pendant.',appearanceForms:[{name:'Human',appearance:'Golden-blue hair, ordinary human ears, blue wool coat.'},{name:'Raven',appearance:'Black feathers, beak and wings.'}],manualProfileLocksExplicit:true,manualProfileFields:['appearance'],birthDate:{era:'',year:null,month:'Redleaf',day:16},birthDateSource:'established'})),checkpoints:Array(20).fill({privateHistory:'NOT FOR UI'})};
+window.chatKey='chat:synthetic:stage9'; window.toasts=[];
+window.toastr=Object.fromEntries(['success','error','info','warning'].map(k=>[k,message=>toasts.push({kind:k,message})]));
+const notify=()=>document.getElementById('npc_state_delta_dossier_root')?.__npcStateDeltaStage1Ui?.scheduleRefresh();
+window.refreshUi=notify;
+window.NPCStateDelta={
+ version:'1.0.0',getState(){counts.getState++;return structuredClone(state)},
+ getNpc(id){counts.getNpc++;return structuredClone(state.npcs.find(n=>n.id===id)||null)},
+ getDossierState(){counts.projection++;return {turn:state.turn,npcs:structuredClone(state.npcs)}},
+ uiStatus(){return {chatKey,hydrationStatus:'ready',version:this.version,scannerRouting:{total:0,inflight:0}}},
+ persistenceStatus(){return {currentChatPending:!!window.failFlush,writeInFlight:false,writeScheduled:false}},
+ scan(){counts.scan++},render:notify,renderInline(){},scanMetrics(){return null},
+ portraitPrompts(id){return buildNpcPortraitPrompts(state.npcs.find(n=>n.id===id))},
+ async flush(){counts.flush++;if(window.flushGate)await window.flushGate;if(window.failFlush)throw new Error('Synthetic denied save')},
+ async setPortrait(id,file,scope){if(scope.chatKey!==chatKey||!scope.isCurrent())return false;const raw=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(file)});if(!scope.isCurrent()||scope.chatKey!==chatKey)return false;const n=state.npcs.find(n=>n.id===id);n.portrait={dataUrl:raw,sourceName:file.name,updatedAt:Date.now()};counts.applied++;notify();return true},
+ removePortrait(id,scope){if(scope.chatKey!==chatKey)return false;state.npcs.find(n=>n.id===id).portrait=null;notify();return true},
+ updateAppearance(id,draft,scope){if(scope.chatKey!==chatKey)return false;const i=state.npcs.findIndex(n=>n.id===id);state.npcs[i]=appearanceDraftRecord(state.npcs[i],draft,scope);notify();return true},
+ updateLifeState(id,choice,scope){if(scope.chatKey!==chatKey)return false;const i=state.npcs.findIndex(n=>n.id===id);state.npcs[i]=manualLifeStateRecord(state.npcs[i],choice);notify();return true},
+ openEditor(id){const n=state.npcs.find(n=>n.id===id);const d=document.createElement('dialog');d.className='npc-state-delta-editor-popup';d.innerHTML=`<div id="npc_state_delta_editor_content"><div class="npc-state-delta-editor-head"><h3>Edit ${n.name}</h3></div><div class="npc-state-delta-editor-lifecycle"><span>Alive</span><button type="button" data-npc-id="${id}">Archive</button></div><div class="npc-state-delta-editor-grid"><label>Name<input id="npc_state_delta_edit_name" class="text_pole" value="${n.name}"></label><label>Appearance<textarea id="npc_state_delta_edit_appearance" class="text_pole">${n.appearance}</textarea></label><label>Goal<textarea id="npc_state_delta_edit_goal" class="text_pole">${n.goal}</textarea></label></div><label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_lock_profile" type="checkbox" checked>Protect edits</label></div><footer class="synthetic-footer"><button type="button" data-test-close>Cancel</button><button type="button">Save</button></footer>`;d.querySelector('[data-test-close]').onclick=()=>{d.close();d.remove()};document.body.append(d);d.showModal();return true}
+};
+await import('/delta/calendar-settings.js');
+await import('/delta/dossier-ui.js');
+await import('/delta/dossier-tools.js');
+await import('/delta/launcher-ui.js');
+await import('/delta/dossier-experience.js');
+await import('/delta/scanner-output-ui.js');
+await import('/delta/continuity-ui.js');
+window.tools=await import('/delta/portrait-tools.js');window.diagnostics=await import('/delta/dossier-tools.js');
+window.ready=true;
+</script></body></html>

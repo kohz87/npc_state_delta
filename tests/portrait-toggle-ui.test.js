@@ -43,8 +43,10 @@ test('settings booleans use CSS-only row status pills with grey and green dots',
     assert.doesNotMatch(source, /input\[type="checkbox"\]::after/);
 });
 
-test('document MutationObserver does not rewrite toggle DOM', () => {
+test('settings owner events replace document observation without rewriting toggle DOM', () => {
     const source = fs.readFileSync(new URL('../scanner-output-ui.js', import.meta.url), 'utf8');
-    assert.match(source, /new MutationObserver\(\(\) => mountControl\(\)\)/);
+    assert.doesNotMatch(source, /new MutationObserver/);
+    assert.match(source, /addEventListener\('npc-state-delta:settings-mounted', mountControl\)/);
+    assert.match(source, /attempt < 40/);
     assert.doesNotMatch(source, /syncTogglePill|enhanceSettingsToggles|pill\.innerHTML|label\.textContent/);
 });

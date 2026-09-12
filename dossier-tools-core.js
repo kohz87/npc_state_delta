@@ -43,7 +43,7 @@ export function estimateLocalTokens(chars) {
 
 export function validatePortraitFile(file) {
     if (!file) return { ok: false, reason: 'No image was selected.' };
-    if (!plain(file.type).toLowerCase().startsWith('image/')) return { ok: false, reason: 'Choose a supported image file.' };
+    if (!/^image\/(?:png|jpeg|webp|gif|avif|bmp)$/i.test(plain(file.type))) return { ok: false, reason: 'Choose a supported image file.' };
     if (safeNumber(file.size, 0) > PORTRAIT_FILE_LIMIT) return { ok: false, reason: 'Image exceeds the 16 MB input safety limit.' };
     return { ok: true, reason: '' };
 }
@@ -106,7 +106,8 @@ function safeToolEvent(type, values = {}) {
     for (const key of ['chatKey', 'npcId', 'action', 'outcome', 'detail', 'persisted', 'stale']) {
         if (!(key in values)) continue;
         const value = values[key];
-        allowed[key] = typeof value === 'boolean' ? value : clampText(value, key === 'detail' ? 240 : 120);
+        if (key === 'detail') continue; // UI may show errors transiently; records never retain private payloads.
+        allowed[key] = typeof value === 'boolean' ? value : clampText(value, 120);
     }
     return { type: clampText(type, 80), at: Date.now(), ...allowed };
 }
@@ -126,7 +127,7 @@ export function activeChatKey() {
     try { return plain(api()?.uiStatus?.()?.chatKey); } catch { return ''; }
 }
 export function npcById(id) {
-    try { return api()?.getState?.()?.npcs?.find?.(npc => String(npc?.id || '') === String(id || '')) || null; }
+    try { return api()?.getNpc?.(id) || null; }
     catch { return null; }
 }
 export function selectedNpcId() {
@@ -160,8 +161,8 @@ export function currentSessionIs(session) {
     return Boolean(session && activeSession === session && activeOverlay?.isConnected && portraitTargetCurrent({
         expectedChatKey: session.chatKey,
         actualChatKey: activeChatKey(),
-        npcId: session.npcId,
-        npcExists: Boolean(npcById(session.npcId)),
+        npcId: session.kind === 'portrait' ? session.npcId : 'workflow',
+        npcExists: session.kind !== 'portrait' || Boolean(npcById(session.npcId)),
         sessionId: session.id,
         activeSessionId: activeSession?.id ?? null,
         cancelled: session.cancelled,
@@ -179,7 +180,8 @@ function restoreFocus(session) {
     try { session?.returnFocus?.focus?.({ preventScroll: true }); } catch {}
 }
 
-export function closeOverlay({ reason = 'closed', restore = true } = {}) {
+export function closeOverlay({ reason = 'closed', restore = true, session: expectedSession = null } = {}) {
+    if (expectedSession && activeSession !== expectedSession) return false;
     const session = activeSession;
     invalidateSession(reason);
     try {
@@ -224,6 +226,15 @@ export function mountOverlay(html, session) {
             closeOverlay({ reason: 'cancelled' });
         }
     });
+    overlay.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        // The top dialog owns Escape, not an underlying dossier or host popup.
+        event.stopPropagation();
+        if (overlay.dataset.deltaOverlayMode === 'fixed-fallback') {
+            event.preventDefault();
+            if (!session.busy || session.cancelableBusy) closeOverlay({ reason: 'escape', session });
+        }
+    });
     overlay.addEventListener('cancel', event => {
         event.preventDefault();
         if (!session.busy || session.cancelableBusy) closeOverlay({ reason: 'escape' });
@@ -255,7 +266,7 @@ export function mountOverlay(html, session) {
 }
 
 export function setBusy(session, busy, status = '', { allowClose = false } = {}) {
-    if (!currentSessionIs(session) && session.kind === 'portrait') return;
+    if (!currentSessionIs(session)) return;
     const nextBusy = Boolean(busy);
     const wasBusy = Boolean(session.busy);
     const controls = activeOverlay?.querySelectorAll?.('[data-delta-tools-close], button, input[type="file"]') || [];

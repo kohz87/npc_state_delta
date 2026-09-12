@@ -1,20 +1,17 @@
 /* NPC State Delta continuity UI adapter for calendar/birthday and appearance-form surfaces. */
-import { encodeNpcStateBundle } from './bundle.js';
 import {
     formatAppearanceForms,
     normalizeAppearanceModel,
     parseAppearanceFormsText,
     resolveNpcAppearance,
 } from './appearance.js';
-import { formatBirthDate } from './birthday.js';
-import { activeChatKey, api, stage1Refresh, uiRoot } from './dossier-tools-core.js';
+import { activeChatKey, api, flushDurably, stage1Refresh } from './dossier-tools-core.js';
 
 const CALENDAR_ROOT_ID = 'npc_state_delta_calendar_settings';
 const CALENDAR_GROUP_ID = 'npc_state_delta_calendar_birthdays_group';
 const STYLE_ID = 'npc_state_delta_continuity_ui_styles';
 const UNKNOWN_FORM = '__unknown__';
 const NO_FORM = '__none__';
-let observer = null;
 let normalizeQueued = false;
 
 function plain(value) { return String(value ?? '').trim(); }
@@ -28,12 +25,8 @@ function escapeHtml(value) {
 }
 function formKey(value) { return plain(value).normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' '); }
 function currentNpc(npcId = '') {
-    try { return api()?.getState?.()?.npcs?.find?.(npc => String(npc?.id || '') === String(npcId || '')) || null; }
+    try { return api()?.getNpc?.(npcId) || null; }
     catch { return null; }
-}
-function selectedNpcId(root = uiRoot()) {
-    return plain(root?.querySelector?.('.delta-hero .delta-edit[data-npc-id]')?.dataset?.npcId
-        || root?.querySelector?.('.delta-cast-card.selected')?.dataset?.npcId);
 }
 function editorNpcId(editor) {
     return plain(editor?.querySelector?.('[data-npc-id]')?.dataset?.npcId);
@@ -50,37 +43,6 @@ export function appearanceUiModel(npc = {}) {
         unclassifiedAppearance: model.unclassifiedAppearance,
         resolvedAppearance: resolveNpcAppearance(npc),
     };
-}
-
-export function appearanceDraftRecord(npc = {}, draft = {}, { lockAppearance = false } = {}) {
-    const forms = parseAppearanceFormsText(draft.formsText ?? formatAppearanceForms(npc?.appearanceForms));
-    const selected = plain(draft.currentForm);
-    const currentFormUnknown = selected === UNKNOWN_FORM || draft.currentFormUnknown === true;
-    const currentForm = currentFormUnknown || selected === NO_FORM ? '' : selected;
-    if (currentForm && !forms.some(form => formKey(form.name) === formKey(currentForm))) {
-        throw new Error(`Current form is not in the appearance-form list: ${currentForm}`);
-    }
-
-    const nextInput = {
-        ...npc,
-        appearanceModelVersion: 1,
-        overallAppearance: plain(draft.overallAppearance).slice(0, 1800),
-        appearanceForms: forms,
-        currentForm,
-        currentFormUnknown,
-    };
-    if (currentFormUnknown) {
-        nextInput.unclassifiedAppearance = plain(draft.unclassifiedAppearance ?? npc?.unclassifiedAppearance ?? npc?.appearance).slice(0, 1800);
-    }
-
-    const normalized = normalizeAppearanceModel(nextInput, { locked: false });
-    const next = { ...npc, ...normalized };
-    next.appearance = resolveNpcAppearance(next);
-    next.manualProfileLocksExplicit = true;
-    const locks = new Set(Array.isArray(npc?.manualProfileFields) ? npc.manualProfileFields : []);
-    if (lockAppearance) locks.add('appearance');
-    next.manualProfileFields = [...locks];
-    return next;
 }
 
 function injectStyles() {
@@ -102,6 +64,7 @@ function injectStyles() {
       .delta-appearance-form-row b { display:flex; gap:7px; align-items:center; }
       .delta-appearance-current-badge { font-size:.72em; border:1px solid currentColor; border-radius:999px; padding:1px 6px; opacity:.72; }
       .delta-editor-appearance-forms .delta-editor-section-grid { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+      .delta-editor-appearance-forms [hidden] { display:none!important; }
       .delta-editor-appearance-forms label { display:flex; flex-direction:column; gap:4px; min-width:0; }
       .delta-editor-appearance-forms .delta-appearance-wide { grid-column:1 / -1; }
       .delta-editor-appearance-forms textarea { resize:vertical; }
@@ -158,66 +121,6 @@ function ensureCalendarDedicatedSection() {
     return true;
 }
 
-function birthDisplay(npc = {}) {
-    return plain(npc?.birthDateDisplay) || formatBirthDate(npc?.birthDate) || '';
-}
-
-function ensureDossierContinuitySurface() {
-    const root = uiRoot();
-    if (!root?.isConnected) return false;
-    const npcId = selectedNpcId(root);
-    const npc = currentNpc(npcId);
-    if (!npcId || !npc) return false;
-
-    const currentGrid = root.querySelector('.delta-document .delta-current-grid');
-    if (currentGrid) {
-        let card = currentGrid.querySelector('.delta-continuity-birthday-card');
-        if (!card) {
-            card = document.createElement('div');
-            card.className = 'delta-current-card delta-continuity-birthday-card';
-            currentGrid.appendChild(card);
-        }
-        const birthday = birthDisplay(npc);
-        const source = plain(npc?.birthDateSource);
-        const sourceLabel = source === 'generated' ? 'Deterministic fallback' : source === 'established' ? 'Story established' : '';
-        const signature = `${birthday}|${sourceLabel}`;
-        if (card.dataset.signature !== signature) {
-            card.innerHTML = `<b>Birthday</b><span>${escapeHtml(birthday || 'Unknown')}</span>${sourceLabel ? `<small class="delta-continuity-source">${escapeHtml(sourceLabel)}</small>` : ''}`;
-            card.dataset.signature = signature;
-        }
-    }
-
-    const appearanceHeading = [...root.querySelectorAll('.delta-document .delta-prose-grid h4')]
-        .find(node => /^Appearance$/i.test(plain(node.textContent)));
-    const appearanceBlock = appearanceHeading?.parentElement;
-    if (!appearanceBlock) return true;
-    const model = appearanceUiModel(npc);
-    const signature = JSON.stringify({
-        currentForm: model.currentForm,
-        currentFormUnknown: model.currentFormUnknown,
-        overallAppearance: model.overallAppearance,
-        forms: model.appearanceForms,
-    });
-    let details = appearanceBlock.querySelector('.delta-appearance-form-summary');
-    if (!details) {
-        details = document.createElement('details');
-        details.className = 'delta-appearance-form-summary';
-        appearanceBlock.appendChild(details);
-    }
-    if (details.dataset.signature !== signature) {
-        const label = model.currentFormUnknown ? 'Unclassified / unknown' : (model.currentForm || 'No selected form');
-        const rows = model.appearanceForms.length
-            ? model.appearanceForms.map(form => {
-                const current = !model.currentFormUnknown && formKey(form.name) === formKey(model.currentForm);
-                return `<div class="delta-appearance-form-row"><b>${escapeHtml(form.name)}${current ? '<span class="delta-appearance-current-badge">Current</span>' : ''}</b><p>${escapeHtml(form.appearance)}</p></div>`;
-            }).join('')
-            : '<p class="delta-muted">No named forms established.</p>';
-        details.innerHTML = `<summary><b>Appearance forms</b><small>Current: ${escapeHtml(label)}</small></summary><div class="delta-appearance-form-list">${model.overallAppearance ? `<div class="delta-appearance-form-row"><b>Shared across forms</b><p>${escapeHtml(model.overallAppearance)}</p></div>` : ''}${rows}</div>`;
-        details.dataset.signature = signature;
-    }
-    return true;
-}
-
 function editorAppearanceSection(editor) {
     return editor?.querySelector?.('.delta-editor-appearance-forms') || null;
 }
@@ -247,6 +150,7 @@ function syncAppearanceEditor(editor, npc = currentNpc(editorNpcId(editor))) {
     if (unclassified) unclassified.value = model.unclassifiedAppearance || '';
     toggleUnclassifiedAppearance(section);
     section.dataset.npcId = String(npc.id || '');
+    section.dataset.chatKey = activeChatKey();
     const status = section.querySelector('[data-delta-appearance-status]');
     if (status) status.textContent = `${model.appearanceForms.length} named form${model.appearanceForms.length === 1 ? '' : 's'} · current ${model.currentFormUnknown ? 'unclassified' : (model.currentForm || 'not selected')}`;
 }
@@ -260,9 +164,11 @@ function toggleUnclassifiedAppearance(section) {
 function ensureAppearanceEditor(editor) {
     const content = editor?.querySelector?.('#npc_state_delta_editor_content');
     const npcId = editorNpcId(editor);
-    const npc = currentNpc(npcId);
-    if (!content || !npcId || !npc) return false;
+    if (!content || !npcId) return false;
     let section = editorAppearanceSection(editor);
+    if (section?.dataset.npcId === npcId && section.dataset.chatKey === activeChatKey()) return true;
+    const npc = currentNpc(npcId);
+    if (!npc) return false;
     if (!section) {
         section = document.createElement('section');
         section.className = 'delta-editor-section delta-editor-appearance-forms';
@@ -281,7 +187,24 @@ function ensureAppearanceEditor(editor) {
             if (appearanceLabel?.parentElement) appearanceLabel.parentElement.insertBefore(section, appearanceLabel.nextSibling);
             else content.appendChild(section);
         }
+        section.addEventListener('input', () => { section.dataset.editRevision = String(Number(section.dataset.editRevision || 0) + 1); });
         section.querySelector('[data-delta-current-form]')?.addEventListener('change', () => toggleUnclassifiedAppearance(section));
+        section.querySelector('[data-delta-appearance-forms]')?.addEventListener('input', () => {
+            try {
+                const forms = parseAppearanceFormsText(section.querySelector('[data-delta-appearance-forms]').value);
+                const select = section.querySelector('[data-delta-current-form]');
+                const selected = select.value;
+                select.innerHTML = appearanceFormOptions({ appearanceForms: forms });
+                if ([...select.options].some(option => option.value === selected)) select.value = selected;
+                else {
+                    const option = document.createElement('option');
+                    option.value = selected;
+                    option.textContent = `${selected} (removed; choose a current form)`;
+                    select.appendChild(option);
+                    select.value = selected;
+                }
+            } catch { /* Incomplete typing is validated on explicit Apply, never erased. */ }
+        });
         syncAppearanceEditor(editor, npc);
     } else if (section.dataset.npcId !== npcId) {
         syncAppearanceEditor(editor, npc);
@@ -296,33 +219,25 @@ async function applyAppearanceEditor(editor) {
     const npc = currentNpc(npcId);
     const section = editorAppearanceSection(editor);
     if (!runtime || !chatKey || chatKey === 'no-chat') throw new Error('Open a chat before editing appearance forms.');
-    if (!npc || !section) throw new Error('The selected NPC is no longer available.');
+    if (!npc || !section || section.dataset.chatKey !== chatKey || !editor.isConnected) throw new Error('The selected NPC is no longer available in this chat.');
+    const revision = section.dataset.editRevision || '0';
 
-    const next = appearanceDraftRecord(npc, {
+    const applied = runtime.updateAppearance?.(npcId, {
         overallAppearance: section.querySelector('[data-delta-overall-appearance]')?.value || '',
         currentForm: section.querySelector('[data-delta-current-form]')?.value || NO_FORM,
         unclassifiedAppearance: section.querySelector('[data-delta-unclassified-appearance]')?.value || '',
         formsText: section.querySelector('[data-delta-appearance-forms]')?.value || '',
-    }, {
-        lockAppearance: Boolean(editor.querySelector('#npc_state_delta_edit_lock_profile')?.checked),
-    });
-
-    const bytes = encodeNpcStateBundle({
-        npcs: [next],
-        socialGraph: { edges: [], unresolved: [] },
-        dismissed: [],
-    }, {
-        appVersion: runtime.uiStatus?.()?.version || '0.1.0',
-        chatKey,
-    });
-    const imported = await runtime.importBytes?.(bytes);
-    if (!imported) throw new Error('The canonical dossier importer rejected the appearance-form edit.');
-    await runtime.flush?.();
+    }, { chatKey, lockAppearance: Boolean(editor.querySelector('#npc_state_delta_edit_lock_profile')?.checked) });
+    if (!applied) throw new Error('The canonical appearance edit was rejected because its target changed.');
+    const saved = await flushDurably(chatKey, 'appearance forms');
+    if (!saved.persisted) throw new Error('Appearance forms applied locally, but durable save failed. Your edits are retained.');
+    if (activeChatKey() !== chatKey || !editor.isConnected || section.dataset.chatKey !== chatKey) return null;
     stage1Refresh();
-    const refreshed = currentNpc(npcId) || next;
+    const refreshed = currentNpc(npcId);
+    if (!refreshed) return null;
     const compatibilityAppearance = editor.querySelector('#npc_state_delta_edit_appearance');
     if (compatibilityAppearance) compatibilityAppearance.value = refreshed.appearance || resolveNpcAppearance(refreshed) || '';
-    syncAppearanceEditor(editor, refreshed);
+    if ((section.dataset.editRevision || '0') === revision) syncAppearanceEditor(editor, refreshed);
     scheduleNormalize();
     return refreshed;
 }
@@ -334,7 +249,6 @@ function scheduleNormalize() {
         normalizeQueued = false;
         try {
             ensureCalendarDedicatedSection();
-            ensureDossierContinuitySurface();
             document.querySelectorAll('.npc-state-delta-editor-popup').forEach(ensureAppearanceEditor);
         } catch (error) {
             console.debug('[NPC State Delta] continuity UI normalization skipped', error);
@@ -355,7 +269,7 @@ function bindEvents() {
         const status = editorAppearanceSection(editor)?.querySelector('[data-delta-appearance-status]');
         if (status) status.textContent = 'Applying…';
         void applyAppearanceEditor(editor)
-            .then(() => globalThis.toastr?.success?.('NPC State Delta: appearance forms updated.'))
+            .then(npc => { if (npc) globalThis.toastr?.success?.('NPC State Delta: appearance forms updated and saved.'); })
             .catch(error => {
                 console.error('[NPC State Delta] appearance-form edit failed', error);
                 if (status) status.textContent = error?.message || String(error);
@@ -370,10 +284,9 @@ function mount() {
     injectStyles();
     bindEvents();
     scheduleNormalize();
-    if (!observer && typeof MutationObserver === 'function' && document.documentElement) {
-        observer = new MutationObserver(scheduleNormalize);
-        observer.observe(document.documentElement, { childList: true, subtree: true });
-    }
+    document.addEventListener('npc-state-delta:dossier-rendered', scheduleNormalize);
+    document.addEventListener('npc-state-delta:editor-mounted', scheduleNormalize);
+    document.addEventListener('npc-state-delta:settings-mounted', scheduleNormalize);
 }
 
 if (typeof document !== 'undefined') {

@@ -98,9 +98,12 @@ function injectStyles() {
     const style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
+/* Fixed card targets must fit the actual remaining rail after controls and safe areas. */
+#npc_state_delta_dossier_root .delta-cast-card{max-height:100%!important}
+
 /* Modern Settings booleans use the row Delta already owns. The real checkbox stays
    semantic and focusable; CSS paints the status pill on the label. No toggle DOM is
-   inserted or synchronized by JavaScript, so the document observer cannot churn it. */
+   inserted or synchronized by JavaScript during settings updates. */
 @supports selector(label:has(> input[type="checkbox"]:checked)) {
   #${SETTINGS_ID} .npc-state-delta-setting-row:has(> input[type="checkbox"]){
     position:relative;cursor:pointer;
@@ -194,8 +197,11 @@ function start() {
     mountControl();
     if (document[GUARD]) return;
     document[GUARD] = true;
-    const observer = new MutationObserver(() => mountControl());
-    observer.observe(document.documentElement, { subtree: true, childList: true });
+    document.addEventListener('npc-state-delta:settings-mounted', mountControl);
+    const retryMount = (attempt = 0) => {
+        if (!mountControl() && attempt < 40) setTimeout(() => retryMount(attempt + 1), 100);
+    };
+    retryMount();
     window.addEventListener?.('focus', () => syncControl(document.getElementById(SETTINGS_ID)));
 }
 

@@ -1,6 +1,6 @@
 # Stage 8 supporting tools review
 
-Status: Stage 8 deterministic implementation is complete; live SillyTavern UI acceptance is being refined from user desktop/tablet feedback. Stage 9 remains separate and pending.
+Status: Stage 8 deterministic implementation is complete; live SillyTavern UI acceptance is being refined from user desktop/tablet feedback. Stage 9 release consolidation is recorded separately in `docs/stage9-review.md`; the following sections retain the Stage 8 implementation/acceptance history.
 
 ## Scope and ownership
 
