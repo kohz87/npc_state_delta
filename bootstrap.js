@@ -25,3 +25,8 @@ try {
 } catch (error) {
     console.error('[NPC State Delta] dossier launcher failed to load', error);
 }
+try {
+    await import('./dossier-experience.js');
+} catch (error) {
+    console.error('[NPC State Delta] consolidated dossier experience failed to load', error);
+}
