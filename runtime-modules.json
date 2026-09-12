@@ -25,6 +25,7 @@
     { "path": "dossier-ui.js", "role": "dossier-ui", "required": true },
     { "path": "dossier-tools-core.js", "role": "supporting-tools-primitives", "required": true },
     { "path": "dossier-tools.js", "role": "supporting-tools-ui", "required": true },
+    { "path": "dossier-tools-controls.js", "role": "supporting-tools-controls", "required": true },
     { "path": "launcher-ui.js", "role": "launcher-ui", "required": true }
   ]
 }
