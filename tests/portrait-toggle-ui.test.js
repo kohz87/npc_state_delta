@@ -43,3 +43,10 @@ test('settings booleans use separate compact status-dot pills so host checkbox t
     assert.doesNotMatch(source, /content:"Enabled"/);
     assert.doesNotMatch(source, /content:"Disabled"/);
 });
+
+test('toggle synchronization is idempotent under the document MutationObserver', () => {
+    const source = fs.readFileSync(new URL('../scanner-output-ui.js', import.meta.url), 'utf8');
+    assert.match(source, /if \(label && label\.textContent !== nextLabel\) label\.textContent = nextLabel;/);
+    assert.match(source, /if \(pill\.dataset\.state !== nextState\) pill\.dataset\.state = nextState;/);
+    assert.doesNotMatch(source, /if \(label\) label\.textContent = enabled \? 'Enabled' : 'Disabled';/);
+});
