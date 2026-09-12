@@ -1,6 +1,6 @@
 # NPC State Delta — core contract
 
-Status: approved direction recorded from the 11 September 2026 discussion; implementation currently at the legacy seed stage. Sections below specify Delta's target behavior. `docs/WORKPLAN.md` identifies changes that remain pending. Inherited behavior is the baseline, not proof that every target feature exists.
+Status: approved behavior authority. Stages 1-4 are implemented and deterministically verified; Stage 4 real-host visual/provider acceptance remains pending. `docs/WORKPLAN.md` tracks remaining work. Inherited behavior is the baseline, not proof that every target feature exists.
 
 ## C01. Foundation and product loop
 
@@ -34,7 +34,7 @@ Retain legacy identity/admission, aliases, role/species, actual/apparent age, li
 
 Retain legacy refinement/evolution rules and the separation of durable identity, transient mood/condition, player-specific dynamics, and profile evidence. Do not silently replace its heuristics with Beta/Alpha's evidence contract during cleanup. Explicit later changes require a recorded behavior decision and tests.
 
-Adopt overall appearance plus named appearance forms and current-form selection. Existing flat appearance becomes a safe baseline without fabricated alternate anatomy. Define one resolver for dossier display, scanner comparison, portrait prompts and roleplay injection. The selected form's accepted anatomy, current outfit/condition and overall description must agree. A form switch does not erase another form's description. An observed undefined form preserves supported current presentation without inventing a form ID or forcing the previous anatomy. Omission does not delete forms. Correcting one named form affects only that form unless the source explicitly supports a broader change.
+Adopt overall appearance plus named appearance forms and current-form selection. Existing flat appearance becomes a safe baseline without fabricated alternate anatomy. Define one resolver for dossier display, scanner comparison, portrait prompts and roleplay injection. The selected form's accepted anatomy, current outfit/condition and overall description must agree. A form switch does not erase another form's description. An observed undefined form preserves supported current presentation in a separate unnamed-current slot without inventing a form ID, duplicating form-independent details, or forcing the previous anatomy. Omission does not delete forms. Correcting one named form affects only that form unless the source explicitly supports a broader change.
 
 Do not automatically add unrelated Beta features such as generated birthdays or altered dossier limits just because a donor module supports them.
 
@@ -42,7 +42,7 @@ Do not automatically add unrelated Beta features such as generated birthdays or 
 
 Retain grounded legacy lifecycle detection but remove automatic narrative reactivation/resurrection. Once confirmed dead, later model/structured/Refresh output cannot make the NPC alive or currently active again. Preserve historical identity, dossiers, memories, relationships and portrait references. Death does not delete the record.
 
-Explicit user correction can repair an erroneous death. Owned-history rollback can remove a death whose source was deleted, edited or abandoned by a swipe. These are corrections of invalid state, not a narrative revival feature. They must not revive unrelated dead NPCs or bypass provenance. All automatic writers obey the same terminal rule.
+An explicit user correction can repair an erroneous death. Delta may use the retained manual Restore control for that correction as long as it records correction provenance and does not infer current presence; it is not narrative resurrection. Owned-history rollback can remove a death whose source was deleted, edited or abandoned by a swipe. These are corrections of invalid state, not a narrative revival feature. They must not revive unrelated dead NPCs or bypass provenance. All automatic writers obey the same terminal rule.
 
 ## C06. Relationship scoring — stage 5
 

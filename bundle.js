@@ -1,4 +1,4 @@
-import { normalizeName, normalizeNpcRecord } from './core.js';
+import { isTerminalNpcDeath, normalizeName, normalizeNpcRecord, protectTerminalNpc } from './core.js';
 import { normalizeSocialGraph, remapSocialGraphNpcId } from './social.js';
 
 const MAGIC = new Uint8Array([0x4e, 0x50, 0x43, 0x53, 0x54, 0x42, 0x30, 0x31]); // NPCSTB01
@@ -305,7 +305,7 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
                 continue;
             }
             usedTargetIndexes.add(index);
-            const merged = {
+            const merged = normalizeNpcRecord({
                 ...old,
                 ...npc,
                 id: targetId,
@@ -313,12 +313,13 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
                     .filter(alias => normalizeName(alias) !== normalizeName(npc.name))
                     .slice(0, 8),
                 portrait: npc.portrait?.dataUrl ? structuredClone(npc.portrait) : old.portrait || npc.portrait || null,
-            };
-            npcs[index] = merged;
-            const isActive = !merged?.archived;
+            });
+            const accepted = isTerminalNpcDeath(old) ? protectTerminalNpc(old, merged) : merged;
+            npcs[index] = accepted;
+            const isActive = !accepted?.archived;
             if (wasActive !== isActive) activeCount += isActive ? 1 : -1;
-            importReport?.updated.push({ sourceId, id: targetId, name: merged.name });
-            importReport?.accepted.push({ sourceId, id: targetId, name: merged.name, status: 'updated' });
+            importReport?.updated.push({ sourceId, id: targetId, name: accepted.name });
+            importReport?.accepted.push({ sourceId, id: targetId, name: accepted.name, status: 'updated' });
             if (sourceId && sourceId !== targetId) importReport?.idRemaps.push({ from: sourceId, to: targetId, reason: 'matched-existing' });
             continue;
         }

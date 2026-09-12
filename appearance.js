@@ -1,0 +1,299 @@
+/* NPC State Delta appearance-form model and shared current-appearance resolver. */
+import { DURABLE_PROFILE_LIMITS, normalizeName } from './core-mechanics.js';
+
+export const APPEARANCE_FORM_LIMIT = 8;
+export const APPEARANCE_MODEL_VERSION = 1;
+
+function clean(value, max = 1800) {
+    return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+function truthy(value) {
+    if (typeof value === 'boolean') return value;
+    return ['1', 'true', 'yes', 'on'].includes(String(value ?? '').trim().toLowerCase());
+}
+function appearanceText(value) { return clean(value, DURABLE_PROFILE_LIMITS?.appearance || 800); }
+function sameAppearance(a, b) { return normalizeName(a) === normalizeName(b); }
+function stripOverallPrefix(value, overall) {
+    const current = appearanceText(value);
+    const shared = appearanceText(overall);
+    if (!current || !shared) return current;
+    if (sameAppearance(current, shared)) return '';
+    const prefix = `${shared}; `;
+    if (current.toLocaleLowerCase().startsWith(prefix.toLocaleLowerCase())) return appearanceText(current.slice(prefix.length));
+    return current;
+}
+function combineAppearance(overall, specific) {
+    const shared = appearanceText(overall);
+    const local = stripOverallPrefix(specific, shared);
+    if (!shared) return local;
+    if (!local) return shared;
+    if (sameAppearance(shared, local)) return shared;
+    return appearanceText(`${shared}; ${local}`);
+}
+function formKey(value) { return clean(value, 120).normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim(); }
+function formState(value) {
+    const state = String(value ?? '').trim().toLowerCase();
+    if (['change', 'evolve', 'correct'].includes(state)) return 'change';
+    if (['refine', 'update', 'learn', 'establish'].includes(state)) return 'refine';
+    return 'keep';
+}
+function hasOwn(object, key) { return Object.prototype.hasOwnProperty.call(object || {}, key); }
+
+const STOPWORDS = new Set([
+    'and', 'the', 'with', 'that', 'this', 'their', 'they', 'them', 'when', 'while', 'from', 'into', 'over', 'under',
+    'very', 'more', 'less', 'than', 'then', 'but', 'for', 'her', 'his', 'its', 'she', 'him', 'who', 'has', 'have', 'had',
+    'uses', 'use', 'often', 'usually', 'still', 'also', 'only', 'toward', 'towards', 'around', 'becomes', 'become', 'being',
+    'a', 'an', 'of', 'to', 'in', 'on', 'at', 'as', 'is', 'are', 'was', 'were', 'be', 'been', 'by', 'or', 'it', 'he',
+]);
+const ALIASES = Object.freeze({
+    telepathy: 'telepath', telepathic: 'telepath', telepathically: 'telepath',
+    connection: 'link', connections: 'link', connected: 'link', channel: 'link', channels: 'link', linked: 'link',
+    thoughts: 'mind', thought: 'mind', minds: 'mind', mental: 'mind',
+    siblings: 'sibling', sisters: 'sister', brothers: 'brother',
+    courteous: 'courtesy', courteously: 'courtesy', politeness: 'polite', politely: 'polite',
+    kindness: 'kind', kindhearted: 'kind', compassionate: 'compassion', compassion: 'compassion',
+    reserved: 'reserve', restraint: 'restrain', restrained: 'restrain',
+    gentleness: 'gentle', gently: 'gentle', motherly: 'maternal',
+    speaks: 'speak', speaking: 'speak', spoken: 'speak', says: 'say', saying: 'say',
+    gestures: 'gesture', gesturing: 'gesture', movements: 'movement',
+    bonded: 'bond', bonding: 'bond', bonds: 'bond',
+});
+function conceptToken(token) {
+    let word = String(token || '').toLowerCase();
+    if (!word) return '';
+    if (ALIASES[word]) return ALIASES[word];
+    if (word.length > 5 && word.endsWith('ies')) word = `${word.slice(0, -3)}y`;
+    else if (word.length > 6 && word.endsWith('ing')) word = word.slice(0, -3);
+    else if (word.length > 5 && word.endsWith('ed')) word = word.slice(0, -2);
+    else if (word.length > 4 && word.endsWith('es')) word = word.slice(0, -2);
+    else if (word.length > 4 && word.endsWith('s')) word = word.slice(0, -1);
+    return ALIASES[word] || word;
+}
+function refinementTokens(value) {
+    return normalizeName(value).split(/\s+/)
+        .filter(token => (token.length >= 2 || /^\d+$/.test(token)) && !STOPWORDS.has(token))
+        .map(conceptToken)
+        .filter(token => (token.length >= 2 || /^\d+$/.test(token)) && !STOPWORDS.has(token));
+}
+function grounded(value, context = '') {
+    const source = String(context || '').trim();
+    if (!source) return true;
+    const proposed = [...new Set(refinementTokens(value))].filter(token => token.length >= 3 && !/^\d+$/.test(token));
+    if (!proposed.length) return false;
+    const sourceTokens = new Set(refinementTokens(source));
+    const overlap = proposed.filter(token => sourceTokens.has(token));
+    return overlap.length >= (proposed.length <= 2 ? 1 : 2);
+}
+function similarity(a, b) {
+    const left = new Set(refinementTokens(a));
+    const right = new Set(refinementTokens(b));
+    if (!left.size || !right.size) return normalizeName(a) === normalizeName(b) ? 1 : 0;
+    let overlap = 0;
+    for (const token of left) if (right.has(token)) overlap += 1;
+    const containment = overlap / Math.min(left.size, right.size);
+    const jaccard = overlap / (left.size + right.size - overlap);
+    return Math.max(jaccard, containment * 0.86, overlap >= 3 && containment >= 0.4 ? 0.62 : 0);
+}
+function safeRefinement(existing, incoming) {
+    const oldTokens = new Set(refinementTokens(existing));
+    const newTokens = new Set(refinementTokens(incoming));
+    if (!oldTokens.size || !newTokens.size || normalizeName(existing) === normalizeName(incoming)) return false;
+    const addsDetail = [...newTokens].some(token => !oldTokens.has(token));
+    const coverage = [...oldTokens].filter(token => newTokens.has(token)).length / oldTokens.size;
+    return addsDetail && (coverage >= 0.62 || similarity(existing, incoming) >= 0.58);
+}
+function mergeRefinement(existing, incoming, maxChars) {
+    const parts = [];
+    for (const raw of `${incoming}; ${existing}`.split(/\n+|\s*;\s*|(?<=[.!?])\s+(?=[A-Z0-9])/)) {
+        const value = String(raw || '').replace(/\s+/g, ' ').trim();
+        if (!value || parts.some(item => normalizeName(item) === normalizeName(value) || similarity(item, value) >= 0.60)) continue;
+        parts.push(value);
+    }
+    return parts.join('; ').slice(0, maxChars);
+}
+
+export function normalizeAppearanceForms(value, { updates = false } = {}) {
+    const source = Array.isArray(value)
+        ? value
+        : (value && typeof value === 'object'
+            ? Object.entries(value).map(([name, form]) => form && typeof form === 'object' ? { name, ...form } : { name, appearance: form })
+            : []);
+    const forms = [];
+    for (const raw of source) {
+        if (!raw || typeof raw !== 'object') continue;
+        const name = clean(raw.name ?? raw.form ?? raw.formName ?? raw.form_name, 120);
+        const appearance = appearanceText(raw.appearance ?? raw.description ?? raw.visual ?? raw.value);
+        if (!name || !appearance) continue;
+        const entry = { name, appearance };
+        if (updates) {
+            entry.state = formState(raw.state ?? raw.appearanceState ?? raw.appearance_state);
+            entry.reason = clean(raw.reason ?? raw.appearanceReason ?? raw.appearance_reason, 500);
+        }
+        const index = forms.findIndex(item => formKey(item.name) === formKey(name));
+        if (index >= 0) forms[index] = entry;
+        else forms.push(entry);
+        if (forms.length >= APPEARANCE_FORM_LIMIT) break;
+    }
+    return forms;
+}
+
+export function formatAppearanceForms(value) {
+    return normalizeAppearanceForms(value).map(form => `${form.name} | ${form.appearance}`).join('\n');
+}
+export function parseAppearanceFormsText(value) {
+    const lines = String(value ?? '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    if (lines.length > APPEARANCE_FORM_LIMIT) throw new Error(`Appearance forms are limited to ${APPEARANCE_FORM_LIMIT}.`);
+    const forms = [];
+    const keys = new Set();
+    for (const line of lines) {
+        const split = line.indexOf('|');
+        if (split <= 0) throw new Error('Each appearance form must use: Form name | Description');
+        const name = clean(line.slice(0, split), 120);
+        const appearance = appearanceText(line.slice(split + 1));
+        const key = formKey(name);
+        if (!name || !appearance) throw new Error('Each appearance form needs both a name and description.');
+        if (!key || keys.has(key)) throw new Error(`Duplicate appearance form: ${name}`);
+        keys.add(key);
+        forms.push({ name, appearance });
+    }
+    return forms;
+}
+export function appearanceFormByName(npc = {}, name = '') {
+    const key = formKey(name);
+    if (!key) return null;
+    return normalizeAppearanceForms(npc.appearanceForms ?? npc.appearance_forms).find(form => formKey(form.name) === key) || null;
+}
+
+export function normalizeAppearanceModel(raw = {}, { locked = false } = {}) {
+    const version = Math.max(0, Math.round(Number(raw.appearanceModelVersion ?? raw.appearance_model_version) || 0));
+    const compatibilityAppearance = locked ? clean(raw.appearance, 1800) : appearanceText(raw.appearance);
+    const explicitOverall = locked ? clean(raw.overallAppearance ?? raw.overall_appearance, 1800) : appearanceText(raw.overallAppearance ?? raw.overall_appearance);
+    let unclassifiedAppearance = locked
+        ? clean(raw.unclassifiedAppearance ?? raw.unclassified_appearance, 1800)
+        : appearanceText(raw.unclassifiedAppearance ?? raw.unclassified_appearance);
+    let appearanceForms = normalizeAppearanceForms(raw.appearanceForms ?? raw.appearance_forms);
+    let currentForm = clean(raw.currentForm ?? raw.current_form, 120);
+    let currentFormUnknown = truthy(raw.currentFormUnknown ?? raw.current_form_unknown);
+    let appearance = compatibilityAppearance;
+
+    // Pre-Stage4 flat appearance becomes one Base presentation. It is not universal anatomy.
+    if (version < APPEARANCE_MODEL_VERSION && appearance && !appearanceForms.length) {
+        appearanceForms = [{ name: 'Base', appearance }];
+        currentForm = currentForm || 'Base';
+        currentFormUnknown = false;
+    }
+    if (currentForm) currentFormUnknown = false;
+    // The retained native editor edits the compatibility appearance scalar. When that
+    // field is explicitly manual-locked, treat it as an edit of the selected form rather
+    // than creating a second appearance authority.
+    if (locked && currentForm && compatibilityAppearance) {
+        const selected = appearanceForms.findIndex(form => formKey(form.name) === formKey(currentForm));
+        const local = stripOverallPrefix(compatibilityAppearance, explicitOverall) || compatibilityAppearance;
+        if (selected >= 0) appearanceForms[selected] = { ...appearanceForms[selected], appearance: local };
+        else if (appearanceForms.length < APPEARANCE_FORM_LIMIT) appearanceForms.push({ name: currentForm, appearance: local });
+    }
+    if (currentFormUnknown && locked && compatibilityAppearance) {
+        unclassifiedAppearance = stripOverallPrefix(compatibilityAppearance, explicitOverall) || compatibilityAppearance;
+    } else if (currentFormUnknown && !unclassifiedAppearance) {
+        unclassifiedAppearance = stripOverallPrefix(appearance, explicitOverall);
+    }
+    return {
+        appearance,
+        overallAppearance: explicitOverall,
+        unclassifiedAppearance,
+        appearanceForms,
+        currentForm,
+        currentFormUnknown,
+        appearanceModelVersion: APPEARANCE_MODEL_VERSION,
+    };
+}
+
+export function resolveNpcAppearance(rawNpc = {}) {
+    const model = normalizeAppearanceModel(rawNpc, {
+        locked: Array.isArray(rawNpc?.manualProfileFields) && rawNpc.manualProfileFields.includes('appearance'),
+    });
+    const current = model.currentForm ? appearanceFormByName(model, model.currentForm) : null;
+    const overall = model.overallAppearance;
+    if (current) return combineAppearance(overall, current.appearance);
+    if (model.currentFormUnknown) return combineAppearance(overall, model.unclassifiedAppearance || model.appearance);
+    if (model.currentForm) return combineAppearance(overall, model.unclassifiedAppearance || model.appearance);
+    return model.appearance || overall || appearanceFormByName(model, 'Base')?.appearance || model.appearanceForms[0]?.appearance || '';
+}
+
+function reconcileFormAppearance(existing, update, context = '') {
+    const current = appearanceText(existing);
+    const incoming = appearanceText(update?.appearance);
+    if (!incoming) return current;
+    if (!current) return context && !grounded(incoming, context) ? '' : incoming;
+    if (normalizeName(current) === normalizeName(incoming)) return current;
+    const state = formState(update?.state);
+    if (state === 'change') {
+        const reason = clean(update?.reason, 500);
+        if (!reason || (context && (!grounded(reason, context) || !grounded(incoming, context)))) return current;
+        return incoming;
+    }
+    if (!safeRefinement(current, incoming) || (context && !grounded(incoming, context))) return current;
+    return mergeRefinement(current, incoming, DURABLE_PROFILE_LIMITS?.appearance || 800);
+}
+
+export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = false, context = '' } = {}) {
+    const next = normalizeAppearanceModel(record, { locked });
+    if (locked || !rawUpdate || typeof rawUpdate !== 'object') return { ...next, appearance: resolveNpcAppearance(next) };
+
+    const overallProvided = hasOwn(rawUpdate, 'overallAppearance') || hasOwn(rawUpdate, 'overall_appearance');
+    if (overallProvided) {
+        const incoming = appearanceText(rawUpdate.overallAppearance ?? rawUpdate.overall_appearance);
+        if (!next.overallAppearance) {
+            if (!context || grounded(incoming, context)) next.overallAppearance = incoming;
+        } else if (incoming && normalizeName(incoming) !== normalizeName(next.overallAppearance)) {
+            const state = formState(rawUpdate.overallAppearanceState ?? rawUpdate.overall_appearance_state);
+            if (state === 'change') {
+                const reason = clean(rawUpdate.overallAppearanceReason ?? rawUpdate.overall_appearance_reason, 500);
+                if (reason && (!context || (grounded(reason, context) && grounded(incoming, context)))) next.overallAppearance = incoming;
+            } else if (safeRefinement(next.overallAppearance, incoming) && (!context || grounded(incoming, context))) {
+                next.overallAppearance = mergeRefinement(next.overallAppearance, incoming, DURABLE_PROFILE_LIMITS?.appearance || 800);
+            }
+        }
+    }
+
+    const formsProvided = hasOwn(rawUpdate, 'appearanceForms') || hasOwn(rawUpdate, 'appearance_forms');
+    if (formsProvided) {
+        for (const form of normalizeAppearanceForms(rawUpdate.appearanceForms ?? rawUpdate.appearance_forms, { updates: true })) {
+            const index = next.appearanceForms.findIndex(item => formKey(item.name) === formKey(form.name));
+            if (index >= 0) {
+                const appearance = reconcileFormAppearance(next.appearanceForms[index].appearance, form, context);
+                if (appearance) next.appearanceForms[index] = { name: next.appearanceForms[index].name || form.name, appearance };
+            } else if (next.appearanceForms.length < APPEARANCE_FORM_LIMIT) {
+                const appearance = reconcileFormAppearance('', form, context);
+                if (appearance) next.appearanceForms.push({ name: form.name, appearance });
+            }
+        }
+    }
+
+    const currentStateRaw = String(rawUpdate.currentFormState ?? rawUpdate.current_form_state ?? '').trim().toLowerCase();
+    const incomingCurrent = clean(rawUpdate.currentForm ?? rawUpdate.current_form, 120);
+    const currentAppearanceProvided = hasOwn(rawUpdate, 'appearance');
+    if (['unknown', 'unspecified', 'clear'].includes(currentStateRaw)) {
+        next.currentForm = '';
+        next.currentFormUnknown = true;
+        const incomingAppearance = appearanceText(rawUpdate.appearance);
+        const reason = clean(rawUpdate.appearanceReason ?? rawUpdate.appearance_reason ?? rawUpdate.currentFormReason ?? rawUpdate.current_form_reason, 500);
+        const explicitChange = formState(rawUpdate.appearanceState ?? rawUpdate.appearance_state) === 'change';
+        next.unclassifiedAppearance = currentAppearanceProvided
+            && incomingAppearance
+            && (!context || grounded(incomingAppearance, context))
+            && (!explicitChange || (reason && (!context || grounded(reason, context))))
+            ? incomingAppearance
+            : '';
+        next.appearance = '';
+    } else if (incomingCurrent || ['select', 'switch', 'change', 'current'].includes(currentStateRaw)) {
+        if (incomingCurrent) next.currentForm = incomingCurrent;
+        next.currentFormUnknown = false;
+        // A named form owns its own anatomy. Do not carry the old compatibility scalar across
+        // a switch, since that scalar may describe the previous form.
+        if (incomingCurrent && !currentAppearanceProvided) next.appearance = '';
+    }
+    next.appearanceModelVersion = APPEARANCE_MODEL_VERSION;
+    next.appearance = resolveNpcAppearance(next);
+    return next;
+}

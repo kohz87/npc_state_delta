@@ -1,6 +1,6 @@
 # NPC State Delta — staged workplan
 
-These are sequential work stages for one source-baseline-derived extension. They are not separate architectures. The seed is complete. Stages 1 and 2 have been requested and implemented; stages 3–9 remain pending until requested. The core contract governs behavior.
+These are sequential work stages for one source-baseline-derived extension. They are not separate architectures. The seed is complete. Stages 1-4 are implemented and deterministically verified; stages 5–9 remain pending until requested. Stage 4 real-host visual/provider acceptance remains pending. The core contract governs behavior.
 
 ## Status
 
@@ -9,8 +9,8 @@ These are sequential work stages for one source-baseline-derived extension. They
 | Seed | Pinned source, Delta isolation, governing documents, reproducible verification | Prepared; see seed provenance for executed results |
 | 1 | Side launcher and Beta-style dossier UI/UX | Accepted after deterministic checks and user tablet/mobile host QA |
 | 2 | Compact code consolidation, active-runtime normalization, and Delta application version | Accepted as Delta `0.1.0`; active-runtime normalization passed exact-candidate PR CI |
-| 3 | Baseline scanner with selectable connection profiles | Pending |
-| 4 | Baseline evolution, appearance forms, terminal automatic death | Pending |
+| 3 | Baseline scanner with selectable connection profiles | Implemented; shared request-scoped dispatcher and post-merge hotfix verified on main |
+| 4 | Baseline evolution, appearance forms, terminal automatic death | Implemented; deterministic verification passed, live host acceptance pending |
 | 5 | Verify and retain accepted relationship scoring | Pending |
 | 6 | Verify accepted evidence and identity-first injection | Pending |
 | 7 | Retained storage/recovery; remove OOC commands | Pending |
@@ -39,7 +39,7 @@ Map entrypoint imports, globals, timers, event bindings, settings, persistence r
 
 Preserve behavior, locks, tombstones, dirty-write retries, branch checkpoints, and unresolved recovery. Remove stale documentation claims or mark them historical. Unused code removal needs caller evidence, not version-looking filenames alone. Verify the full synthetic suite, runtime reachability, duplicate listener prevention, and packaged load. Keep ongoing cleanup in subsequent stages; Stage 2 is not permission to implement later behavior.
 
-Stage 2 establishes Delta application version `0.1.0` in the manifest, core facade, package metadata, README, validation, and package naming while leaving bundle, branch-lineage, and persisted-data schema versions independent. The superseded `enhancements.js` layer and its duplicate dossier-library UI are removed; opt-in full-cast scanning and the retained backfill guard live in the dedicated `full-cast.js` owner. Bootstrap, validation, packaging, and tests are updated around that ownership.
+Stage 2 establishes Delta application version `0.1.0` in the manifest, core facade, package metadata, README, validation, and package naming while leaving bundle, branch-lineage, and persisted-data schema versions independent. The superseded `enhancements.js` layer and its duplicate dossier-library UI are removed; opt-in full-cast scanning initially retained its inherited local backfill guard in the dedicated `full-cast.js` owner. Stage 3 later relocates automatic backfill eligibility ahead of the shared dispatcher so `full-cast.js` no longer patches host model routing. Bootstrap, validation, packaging, and tests are updated around that ownership.
 
 Final Stage 2 normalization applies a stricter classification rule: ancestry does not define an active module. Any implementation executed by Delta is active Delta code. The previously version-labelled core and branch implementation files are therefore normalized into `core-mechanics.js` and `branch-core.js`. Historical source names and versions remain only in Git history, `docs/history/`, and `docs/seed-provenance.*` where they document origin rather than runtime ownership.
 
@@ -51,13 +51,19 @@ Keep accepted message capture, routine/latest-exchange scan, configurable cadenc
 
 Inventory every provider call and assign its route: automatic scan, manual scan, targeted Refresh, focused relationships, retries, and retained backfills. Keep roleplay routing and portrait generation independent. Verify request counts, duplicate completions, busy/superseded scans, missing profile, timeout/cancel, chat switch, and restoration of any temporary host routing state. No trailer, separate Development stage, or next-generation synchronization barrier.
 
+Stage 3 implementation uses `scanner-routing.js` as the single text-model request owner and `scan-context.js` for pure eligibility/participation checks. Redundant automatic backfills are suppressed before dispatch rather than by replacing `generateRaw`, so selected connection profiles receive the same guard behavior as the default route and manual repair remains available. Validation enforces that no other runtime module calls `generateRaw` directly.
+
 ## Stage 4 — appearance and lifecycle
 
 Preserve accepted establishment/evolution and add overall appearance, named forms, and current-form selection using one resolver. Define a Delta-local upgrade for its own earlier flat appearance records; do not add imports from other extension namespaces.
 
-Verify distinct canonical anatomy/colors, clothing-only changes, form switching, unknown/new forms, partial updates, locks, and rollback. Dossier/portrait/injection must agree. Human form must not inherit anatomy from a different form.
+Verify distinct canonical anatomy/colors, clothing-only changes, form switching, unknown/new forms, partial updates, locks, and rollback. Canonical dossier appearance, portrait, and injection must agree. Human form must not inherit anatomy from a different form. The retained editor may remain scalar-facing only if a manual edit is reconciled into the selected form rather than becoming a second authority.
 
 Apply terminal automatic death consistently to scanner, Refresh, backfill, and structured-source paths. Remove automatic alive/reactivation behavior for dead NPCs. Verify retained history, no present/worldActive dead NPC, rejected narrative revival, explicit correction, and rollback after deleting/swiping the death source. Do not change numeric relationship formulas.
+
+Stage 4 implementation preserves pre-form flat appearance as one safe `Base` presentation and keeps canonical `appearance` as the resolved current-display compatibility field, with optional form-independent `overallAppearance`, bounded named forms, current-form selection, and separate unnamed-current presentation. An unidentified transformation cannot fall back to prior-form anatomy, and repeated normalization cannot duplicate form-independent details. One resolver feeds canonical dossier presentation, portrait prompt construction and roleplay injection. The retained native editor remains scalar-facing; a manually locked Appearance edit is reconciled into the selected named/unnamed form rather than becoming a second authority. Appearance locks block scanner changes to overall/current presentation, forms and selection together.
+
+Terminal lifecycle handling treats explicit confirmed death as irreversible by automatic model/structured writers. Scanner, Refresh, retained backfill and structured dossier import may still enrich retained history/profile, but dead records cannot become present/world-active or alive through narration. Manual/stale archive return remains available to living NPCs. A deliberate manual Restore of a terminal-death dossier is treated as explicit erroneous-death correction; the correction is provenance-recorded and does not make the NPC present. Owned branch rollback remains the provenance-safe way to remove a death whose source was deleted, edited or abandoned by swipe. Relationship mechanics are unchanged.
 
 ## Stage 5 — relationship baseline
 
