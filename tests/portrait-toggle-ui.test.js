@@ -27,17 +27,20 @@ test('portrait copying lazy-loads SillyTavern host utility and exposes a selecte
     assert.match(source, /is empty; nothing was copied/);
 });
 
-test('settings booleans are CSS-only status pills with grey and green dots', () => {
+test('settings booleans use CSS-only row status pills with grey and green dots', () => {
     const source = fs.readFileSync(new URL('../scanner-output-ui.js', import.meta.url), 'utf8');
     assert.doesNotMatch(source, /function enhanceSettingsToggles\(/, 'startup must not mutate checkbox sibling DOM');
     assert.doesNotMatch(source, /insertAdjacentElement\('afterend'/, 'startup must not inject toggle siblings from the global observer');
-    assert.doesNotMatch(source, /delta-toggle-native|delta-toggle-pill|delta-toggle-label/, 'runtime toggle enhancer classes must be absent');
-    assert.match(source, /input\[type="checkbox"\][^{]*\{[\s\S]*appearance:none!important/);
-    assert.match(source, /width:82px!important;height:26px!important/);
-    assert.match(source, /input\[type="checkbox"\]::before\{[\s\S]*background:rgba\(190,195,202,\.62\)!important/);
-    assert.match(source, /input\[type="checkbox"\]:checked::before\{[\s\S]*background:#57d17b!important/);
-    assert.match(source, /input\[type="checkbox"\]::after\{[\s\S]*content:"Disabled"!important/);
-    assert.match(source, /input\[type="checkbox"\]:checked::after\{content:"Enabled"!important/);
+    assert.doesNotMatch(source, /delta-toggle-native|delta-toggle-pill|delta-toggle-label/, 'runtime toggle enhancer classes must remain absent');
+    assert.match(source, /@supports selector\(label:has\(> input\[type="checkbox"\]:checked\)\)/);
+    assert.match(source, /\.npc-state-delta-setting-row>input\[type="checkbox"\][^{]*\{[\s\S]*clip-path:inset\(50%\)!important/);
+    assert.match(source, /\.npc-state-delta-setting-row:has\(> input\[type="checkbox"\]\)::after\{[\s\S]*content:"Disabled"!important/s);
+    assert.match(source, /content:"Disabled"!important[\s\S]*radial-gradient\(circle at 10px 50%,rgba\(190,195,202,\.62\)/s);
+    assert.match(source, /:has\(> input\[type="checkbox"\]:checked\)::after\{[\s\S]*content:"Enabled"!important/s);
+    assert.match(source, /content:"Enabled"!important[\s\S]*radial-gradient\(circle at 10px 50%,#57d17b/s);
+    assert.match(source, /:has\(> input\[type="checkbox"\]:focus-visible\)::after/);
+    assert.doesNotMatch(source, /input\[type="checkbox"\]::before/);
+    assert.doesNotMatch(source, /input\[type="checkbox"\]::after/);
 });
 
 test('document MutationObserver does not rewrite toggle DOM', () => {
