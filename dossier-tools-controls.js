@@ -4,6 +4,8 @@ import { openPortraitTools } from './dossier-tools.js';
 
 const STYLE_ID = 'npc_state_delta_tools_controls_style';
 const ROOT_GUARD = '__npcStateDeltaToolsControls';
+const OBSERVER_GUARD = '__npcStateDeltaToolsControlsObserver';
+let normalizeQueued = false;
 
 function toast(kind, message) { globalThis.toastr?.[kind]?.(message); }
 
@@ -24,6 +26,14 @@ function currentHeroNpcId(root) {
         || '').trim();
 }
 
+function setTextIfChanged(node, value) {
+    if (node && node.textContent !== value) node.textContent = value;
+}
+
+function setAttributeIfChanged(node, name, value) {
+    if (node && node.getAttribute(name) !== value) node.setAttribute(name, value);
+}
+
 function normalizeButtons(root) {
     if (!root) return;
 
@@ -38,21 +48,34 @@ function normalizeButtons(root) {
         clean.title = 'Manage portrait, prompts, upload, replacement, removal, and image preview';
         portrait.replaceWith(clean);
     } else if (portrait) {
-        portrait.dataset.npcId = currentHeroNpcId(root);
+        const npcId = currentHeroNpcId(root);
+        if (portrait.dataset.npcId !== npcId) portrait.dataset.npcId = npcId;
+        setAttributeIfChanged(portrait, 'title', 'Manage portrait, prompts, upload, replacement, removal, and image preview');
     }
 
     const data = root.querySelector('.delta-tools-data');
     if (data) {
-        data.textContent = 'Backup';
-        data.title = 'Import or export native NPC State Delta data';
-        data.setAttribute('aria-label', 'Backup and restore Delta data');
+        // IMPORTANT: this must be idempotent. Unconditionally assigning textContent from a
+        // MutationObserver creates another childList mutation and can starve the host UI.
+        setTextIfChanged(data, 'Backup');
+        setAttributeIfChanged(data, 'title', 'Import or export native NPC State Delta data');
+        setAttributeIfChanged(data, 'aria-label', 'Backup and restore Delta data');
     }
 
     const diagnostics = root.querySelector('.delta-tools-diagnostics-button');
     if (diagnostics) {
-        diagnostics.title = 'Open troubleshooting diagnostics; this does not start a scan';
-        diagnostics.setAttribute('aria-label', 'Open NPC State Delta diagnostics');
+        setAttributeIfChanged(diagnostics, 'title', 'Open troubleshooting diagnostics; this does not start a scan');
+        setAttributeIfChanged(diagnostics, 'aria-label', 'Open NPC State Delta diagnostics');
     }
+}
+
+function scheduleNormalize(root) {
+    if (!root || normalizeQueued) return;
+    normalizeQueued = true;
+    queueMicrotask(() => {
+        normalizeQueued = false;
+        if (root.isConnected) normalizeButtons(root);
+    });
 }
 
 function installDelegatedPortraitHandler(root) {
@@ -84,10 +107,10 @@ function start(attempt = 0) {
     }
     installDelegatedPortraitHandler(root);
     normalizeButtons(root);
-    if (!root.__npcStateDeltaToolsControlsObserver) {
-        const observer = new MutationObserver(() => normalizeButtons(root));
+    if (!root[OBSERVER_GUARD]) {
+        const observer = new MutationObserver(() => scheduleNormalize(root));
         observer.observe(root, { childList: true, subtree: true });
-        root.__npcStateDeltaToolsControlsObserver = observer;
+        root[OBSERVER_GUARD] = observer;
     }
 }
 
