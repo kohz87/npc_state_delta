@@ -160,7 +160,11 @@ export async function dispatchScannerRequest(ctx, options = {}, scope = {}) {
             if (typeof ctx?.generateRaw !== 'function') {
                 throw scannerRoutingError('This host does not expose generateRaw().', 'NPC_SCANNER_DEFAULT_UNAVAILABLE');
             }
-            invoke = () => ctx.generateRaw(routedOptions);
+            // Keep the accepted default route byte-for-byte when no override is configured.
+            // Only the explicit scanner output setting creates a request-local clone.
+            invoke = configuredMaxOutputTokens
+                ? () => ctx.generateRaw(routedOptions)
+                : () => ctx.generateRaw(options);
         } else {
             const service = await Promise.race([profileService(ctx), stopped]);
             assertCurrent();
