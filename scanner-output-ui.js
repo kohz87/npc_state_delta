@@ -52,9 +52,14 @@ function syncTogglePill(input) {
     const pill = input?.nextElementSibling;
     if (!pill?.classList?.contains('delta-toggle-pill')) return;
     const enabled = input.checked === true;
-    pill.dataset.state = enabled ? 'enabled' : 'disabled';
+    const nextState = enabled ? 'enabled' : 'disabled';
+    if (pill.dataset.state !== nextState) pill.dataset.state = nextState;
     const label = pill.querySelector('.delta-toggle-label');
-    if (label) label.textContent = enabled ? 'Enabled' : 'Disabled';
+    const nextLabel = enabled ? 'Enabled' : 'Disabled';
+    // This function runs from a document-wide MutationObserver. Reassigning
+    // textContent unconditionally creates another childList mutation and can
+    // starve the SillyTavern UI in an observer feedback loop.
+    if (label && label.textContent !== nextLabel) label.textContent = nextLabel;
 }
 
 function enhanceSettingsToggles(root) {
