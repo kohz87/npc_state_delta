@@ -1,6 +1,11 @@
 # NPC State Delta changes
 
 
+## Unreleased
+
+- Add a Birthday field to Edit Dossier so generated or story-established dates can be corrected manually without editing extension JSON.
+- Validate manual birthday changes against the active calendar and route accepted corrections through the canonical birthday continuity engine without an extra model request; manual corrections clear story-message provenance.
+
 ## 1.0.1 - 12 September 2026
 
 - Require a grounded apparent-age result for new dossier-worthy NPCs whenever the scan has an explicit visual-age cue, while preserving chronological age as a separate field.

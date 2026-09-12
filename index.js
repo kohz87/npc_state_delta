@@ -80,6 +80,7 @@ import {
     buildNpcPortraitPrompts,
     appearanceDraftRecord,
 } from './core.js';
+import { applyNpcBirthdayUpdate, normalizeBirthDate } from './birthday.js';
 import {
     encodeNpcStateBundle,
     mergeImportedDossierState,
@@ -2032,6 +2033,7 @@ function syncOpenNpcEditorFields(npc) {
     set('npc_state_delta_edit_role', npc.role || '');
     set('npc_state_delta_edit_species', npc.species || '');
     set('npc_state_delta_edit_age', npc.age || '');
+    set('npc_state_delta_edit_birthday', npc.birthDateDisplay || '');
     set('npc_state_delta_edit_apparent_age', npc.apparentAge || '');
     set('npc_state_delta_edit_personality', npc.personality || '');
     set('npc_state_delta_edit_speech', npc.speech || '');
@@ -4164,6 +4166,7 @@ function openNpcEditor(npcId) {
         <label>Species / Race<input id="npc_state_delta_edit_species" class="text_pole" maxlength="160" placeholder="Half-elf, dwarf, dwelf, human, custom species..." value="${editorValue(npc.species)}"></label>
         <label>Role<input id="npc_state_delta_edit_role" class="text_pole" value="${editorValue(npc.role)}"></label>
         <label>Chronological age<input id="npc_state_delta_edit_age" class="text_pole" maxlength="80" placeholder="Actual stated age; leave blank if unknown" value="${editorValue(npc.age)}"></label>
+        <label>Birthday <small>${npc.birthDateSource === 'generated' ? 'Generated fallback; editing establishes a manual correction' : (npc.birthDateSource === 'established' ? 'Established date; editing records a manual correction' : 'Uses the active calendar')}</small><input id="npc_state_delta_edit_birthday" class="text_pole" maxlength="180" placeholder="MM-DD / YYYY-MM-DD or configured calendar date" value="${editorValue(npc.birthDateDisplay)}"></label>
         <label>Apparent age<input id="npc_state_delta_edit_apparent_age" class="text_pole" maxlength="80" placeholder="~25, young, middle-aged..." value="${editorValue(npc.apparentAge)}"></label>
         <label>Personality<textarea id="npc_state_delta_edit_personality" class="text_pole" rows="3">${editorValue(npc.personality)}</textarea></label>
         <label class="npc-state-delta-editor-wide">Behavioral profile <small>Max ${BEHAVIOR_PROFILE_LIMIT} compact point-form rules, one per line</small><textarea id="npc_state_delta_edit_behavior_profile" class="text_pole" rows="6" placeholder="Disposition: kind - broadly considerate; avoids needless harm&#10;Expressiveness: low - strong feelings show subtly&#10;Independence: high - keeps own goals and boundaries&#10;Care: practical - helps through actions before reassurance&#10;Conflict: controlled - concise, firm, not gratuitously cruel">${editorValue((npc.behaviorProfile || []).join('\n'))}</textarea></label>
@@ -4584,6 +4587,26 @@ function saveNpcEditor(npcId, { close = true, silent = false } = {}) {
         next.aliases = [...new Set([...(current.aliases || []), current.name])].slice(0, 8);
     }
     Object.assign(next, stableInputs);
+    const birthdayInput = String(editorField('npc_state_delta_edit_birthday')).trim().slice(0, 180);
+    const currentBirthdayDisplay = String(current.birthDateDisplay || '').trim();
+    if (birthdayInput !== currentBirthdayDisplay) {
+        if (!birthdayInput) {
+            globalThis.toastr?.warning?.('NPC State Delta: birthday cannot be cleared here. Enter a valid date or cancel the edit.');
+            return false;
+        }
+        const normalizedBirthday = normalizeBirthDate(birthdayInput);
+        if (!normalizedBirthday) {
+            globalThis.toastr?.warning?.('NPC State Delta: birthday is not valid for the active calendar.');
+            return false;
+        }
+        const correctedBirthday = applyNpcBirthdayUpdate(next, {
+            birthDate: normalizedBirthday,
+            birthDateState: 'correct',
+            birthDateReason: 'Manual dossier birthday correction.',
+        });
+        correctedBirthday.birthDateSourceMessageId = null;
+        Object.assign(next, correctedBirthday);
+    }
     next.portraitPromptPositive = String(editorField('npc_state_delta_edit_portrait_positive')).trim().slice(0, 1800);
     next.portraitPromptNegative = String(editorField('npc_state_delta_edit_portrait_negative')).trim().slice(0, 1800);
     next.portraitPromptReplace = Boolean(document.getElementById('npc_state_delta_edit_portrait_replace')?.checked);
