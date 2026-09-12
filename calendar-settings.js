@@ -32,7 +32,7 @@ function settingsObject({ create = false } = {}) {
 
 function persistedCalendar() {
     const raw = settingsObject()?.calendarConfig;
-    const normalized = normalizeCalendarConfig(raw);
+    const normalized = normalizeCalendarConfig(raw, { requireCurrentDate: false });
     return normalized.valid ? normalized.config : null;
 }
 
@@ -66,12 +66,12 @@ function savedDraft() {
 function shellHtml() {
     const draft = savedDraft();
     return `<div id="${ROOT_ID}" class="npc-state-delta-calendar-settings">
-        <div class="npc-state-delta-calendar-heading"><b>Fantasy calendar & birthdays</b><small>Optional era, mandatory current date, and ordered Month:days definitions. Month order defines the year.</small></div>
-        ${settingRow('npc_state_delta_calendar_era', 'Era / year prefix', `<input id="npc_state_delta_calendar_era" class="text_pole" maxlength="40" placeholder="Optional, e.g. CR" value="${escapeHtml(draft.era)}">`, 'Optional label only. Example: era CR + year 821 displays as CR821.')}
-        ${settingRow('npc_state_delta_calendar_year', 'Current year', `<input id="npc_state_delta_calendar_year" class="text_pole npc-state-delta-number" type="number" step="1" required value="${escapeHtml(draft.currentYear)}">`, 'Mandatory. This is the current in-world year, not the real-world year.')}
-        ${settingRow('npc_state_delta_calendar_months', 'Months', `<textarea id="npc_state_delta_calendar_months" class="text_pole" rows="6" spellcheck="false" placeholder="Redleaf:30&#10;Sunwane:31&#10;Frostwane:30">${escapeHtml(draft.monthsText)}</textarea>`, 'Mandatory. One Month name:days row per month; row order is calendar order.')}
-        ${settingRow('npc_state_delta_calendar_current_month', 'Current month', '<select id="npc_state_delta_calendar_current_month" class="text_pole"></select>', 'Mandatory. Options come from the month list above.')}
-        ${settingRow('npc_state_delta_calendar_current_day', 'Current day', `<input id="npc_state_delta_calendar_current_day" class="text_pole npc-state-delta-number" type="number" min="1" step="1" required value="${escapeHtml(draft.currentDay)}">`, 'Mandatory. Validated against the selected month length.')}
+        <div class="npc-state-delta-calendar-heading"><b>Fantasy calendar & birthdays</b><small>Ordered Month:days definitions are required. Era and the manual campaign clock are optional. Structured World State dates override the manual clock for matching scans.</small></div>
+        ${settingRow('npc_state_delta_calendar_era', 'Era / year prefix', `<input id="npc_state_delta_calendar_era" class="text_pole" maxlength="40" placeholder="Optional, e.g. CR" value="${escapeHtml(draft.era)}">`, 'Optional display/calendar label. Example: era CR + year 821 displays as CR821.')}
+        ${settingRow('npc_state_delta_calendar_months', 'Months', `<textarea id="npc_state_delta_calendar_months" class="text_pole" rows="6" spellcheck="false" placeholder="Redleaf:30&#10;Sunwane:31&#10;Frostwane:30">${escapeHtml(draft.monthsText)}</textarea>`, 'Required. One Month name:days row per month; row order is calendar order.')}
+        ${settingRow('npc_state_delta_calendar_year', 'Manual current year', `<input id="npc_state_delta_calendar_year" class="text_pole npc-state-delta-number" type="number" step="1" value="${escapeHtml(draft.currentYear)}">`, 'Optional fallback clock. Leave year, month, and day all blank if World State supplies the date or if you only need month/day birthdays.')}
+        ${settingRow('npc_state_delta_calendar_current_month', 'Manual current month', '<select id="npc_state_delta_calendar_current_month" class="text_pole"></select>', 'Optional fallback clock. If any manual current-date field is set, all three are required.')}
+        ${settingRow('npc_state_delta_calendar_current_day', 'Manual current day', `<input id="npc_state_delta_calendar_current_day" class="text_pole npc-state-delta-number" type="number" min="1" step="1" value="${escapeHtml(draft.currentDay)}">`, 'Optional fallback clock. Validated against the selected month length.')}
         <div class="npc-state-delta-calendar-actions">
             <button type="button" id="npc_state_delta_save_calendar" class="menu_button">Save calendar</button>
             <button type="button" id="npc_state_delta_reset_calendar" class="menu_button">Use numeric fallback</button>
@@ -87,29 +87,32 @@ function status(root, message, error = false) {
     target.dataset.error = error ? '1' : '0';
 }
 
-function updateMonthOptions(root, preferred = '') {
+function updateMonthOptions(root, preferred = undefined) {
     const textarea = root.querySelector('#npc_state_delta_calendar_months');
     const select = root.querySelector('#npc_state_delta_calendar_current_month');
     const dayInput = root.querySelector('#npc_state_delta_calendar_current_day');
     if (!textarea || !select || !dayInput) return;
     const parsed = parseMonthDefinitions(textarea.value);
-    const existing = preferred || select.value || savedDraft().currentMonth;
+    const existing = preferred !== undefined ? preferred : select.value;
     select.replaceChildren();
+    const blank = document.createElement('option');
+    blank.value = '';
+    blank.textContent = '(No manual current month)';
+    select.appendChild(blank);
     for (const month of parsed.months) {
         const option = document.createElement('option');
         option.value = month.name;
         option.textContent = `${month.name} (${month.days} days)`;
         select.appendChild(option);
     }
-    const match = parsed.months.find(month => month.name.toLocaleLowerCase() === String(existing).toLocaleLowerCase());
-    if (match) select.value = match.name;
-    else if (parsed.months[0]) select.value = parsed.months[0].name;
+    const match = parsed.months.find(month => month.name.toLocaleLowerCase() === String(existing || '').toLocaleLowerCase());
+    select.value = match?.name || '';
     select.disabled = !parsed.months.length;
     const selected = parsed.months.find(month => month.name === select.value);
     if (selected) dayInput.max = String(selected.days);
     else dayInput.removeAttribute('max');
     if (parsed.errors.length) status(root, parsed.errors[0], true);
-    else if (parsed.months.length) status(root, `${parsed.months.length} month${parsed.months.length === 1 ? '' : 's'} parsed.`, false);
+    else if (parsed.months.length) status(root, `${parsed.months.length} month${parsed.months.length === 1 ? '' : 's'} parsed. Manual current date may remain blank.`, false);
     else status(root, 'Enter at least one Month:days row.', true);
 }
 
@@ -124,7 +127,7 @@ function draftFromUi(root) {
 }
 
 function saveCalendar(root) {
-    const validation = normalizeCalendarConfig(draftFromUi(root));
+    const validation = normalizeCalendarConfig(draftFromUi(root), { requireCurrentDate: false });
     if (!validation.valid) {
         status(root, validation.errors[0] || 'Calendar settings are incomplete.', true);
         return false;
@@ -139,7 +142,9 @@ function saveCalendar(root) {
     };
     setActiveCalendarConfig(settings.calendarConfig);
     persistHostSettings();
-    status(root, 'Calendar saved. Birthday and age arithmetic now use this in-world calendar.', false);
+    status(root, validation.currentDateValid
+        ? 'Calendar saved with a manual fallback current date. Structured World State dates take priority when present.'
+        : 'Calendar saved. Birthdays use named months; no birth year or age progression is invented without a grounded current date.', false);
     return true;
 }
 
