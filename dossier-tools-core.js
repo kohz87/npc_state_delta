@@ -1,6 +1,7 @@
 /* NPC State Delta supporting tools: portrait manager, native data transfer, and diagnostics. */
 
 const OVERLAY_ID = 'npc_state_delta_tools_overlay';
+const DOSSIER_ROOT_ID = 'npc_state_delta_dossier_root';
 const TOOL_EVENT_LIMIT = 60;
 const PROMPT_DRAFT_LIMIT = 20;
 const PORTRAIT_FILE_LIMIT = 16 * 1024 * 1024;
@@ -115,7 +116,7 @@ export function recordToolEvent(type, values = {}) {
 }
 
 export function api() { return globalThis.NPCStateDelta || null; }
-export function uiRoot() { return document.getElementById('npc_state_delta_stage1_ui'); }
+export function uiRoot() { return document.getElementById(DOSSIER_ROOT_ID); }
 export function activeChatKey() {
     try { return plain(api()?.uiStatus?.()?.chatKey); } catch { return ''; }
 }
