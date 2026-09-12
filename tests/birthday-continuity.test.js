@@ -183,6 +183,22 @@ test('an explicit full year can upgrade a previously derived year without changi
     assert.equal(sora.birthDate.year, 815);
 });
 
+test('established numeric birthday is preserved when a custom fantasy calendar is enabled', () => {
+    setActiveCalendarConfig(CUSTOM_CALENDAR);
+    const record = normalizeNpcRecord({
+        id: 'npc_old',
+        name: 'Old Record',
+        age: '',
+        birthDate: { era: '', year: null, month: '09', day: 17 },
+        birthDateSource: 'established',
+        birthDateCalendarFingerprint: 'legacy-numeric-v1',
+    });
+    assert.deepEqual(record.birthDate, { era: '', year: null, month: '09', day: 17 });
+    assert.equal(record.birthDateSource, 'established');
+    assert.equal(record.birthDateDisplay, '09-17');
+    assert.equal(record.calendarAge, null);
+});
+
 test('birthday prompt remains conditional and includes configured fantasy calendar only when needed', () => {
     setActiveCalendarConfig(CUSTOM_CALENDAR);
     const ordinary = buildScannerPrompt({
