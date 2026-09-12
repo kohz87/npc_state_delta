@@ -1,6 +1,6 @@
 # NPC State Delta — staged workplan
 
-These are sequential work stages for one source-baseline-derived extension. They are not separate architectures. The seed is complete. Stages 1-7 are implemented and deterministically verified; stages 8-9 remain pending until requested. Real-host visual/provider acceptance for stages 4-7 remains pending. The core contract governs behavior.
+These are sequential work stages for one source-baseline-derived extension. They are not separate architectures. The seed is complete. Stages 1-7 are implemented and deterministically verified. Stage 8 is implemented on its acceptance candidate and becomes accepted only after required CI passes for that exact candidate; Stage 9 remains pending. Real-host visual/provider acceptance for stages 4-8 remains pending where explicitly noted. The core contract governs behavior.
 
 ## Status
 
@@ -14,7 +14,7 @@ These are sequential work stages for one source-baseline-derived extension. They
 | 5 | Verify and retain accepted relationship scoring | Implemented; pinned numerical oracle and integration regressions pass |
 | 6 | Verify accepted evidence and identity-first injection | Implemented; omission, characterization and budgeted appearance checks pass |
 | 7 | Retained storage/recovery; remove OOC commands | Implemented; OOC removed and manual/owned-recovery checks pass |
-| 8 | Portrait tooling, clean native import/export, diagnostics | Pending |
+| 8 | Portrait tooling, clean native import/export, diagnostics | Implemented candidate; required exact-candidate CI and live-host UI/image checks are the remaining acceptance gates |
 | 9 | Prompt/token baseline and final integrated verification | Pending |
 
 ## Seed boundary
@@ -87,11 +87,17 @@ Stages 5-7 completion is recorded in `docs/stages5-7-review.md`: numerical formu
 
 ## Stage 8 — supporting tools
 
-Retain useful controls and implement Beta-style portrait prompt editing/copy/generation using resolved appearance. Avoid two competing portrait workflows. Verify attachment, image-route errors, cancellation, target chat ownership, and positive/negative prompt consistency.
+Stage 8 is implemented as a thin UI/envelope layer over accepted owners. `dossier-tools.js` adds the selected-dossier **Portrait** workflow plus top-level **Data** and **Diagnostics** actions; `dossier-tools-core.js` owns bounded workflow/session diagnostics; `native-transfer.js` extends the existing native manifest without replacing `bundle.js` or adding a second state store.
 
-Finalize one native Delta import/export format with explicit versioning and documented contents. Validate before changing state; preserve or explicitly reconcile supported history/portrait/ownership data. Reject other generations without building converters. Round-trip valid data, reject malformed/foreign bundles, and verify import target ownership.
+Portrait upload/replacement/removal reuse the retained portrait controls and compression/mutation handlers. Positive/negative prompt text comes from the existing `portraitPrompts` resolver, remains editable/copyable, and is only rebuilt through an explicit control. Host Image Generation creates a preview only; explicit application hands the result to the same canonical upload path. Async results are bound to chat/NPC/session/action ownership, and closing is allowed only while a result is still truly cancelable. A successful local portrait mutation is followed by a canonical durable flush; local-only outcomes are reported distinctly from persisted outcomes.
 
-Expose bounded diagnostics for scan requests, failures/retries, stale rejection, persistence, relationship fractions/gates, and prompt estimates. Keep technical evidence hidden in ordinary dossier use. Native export/import UI, diagnostics, and portrait controls must use the same canonical state/settings paths.
+The native format remains the explicit Delta `NPCSTB01` / `npc_state_delta_bundle` version-1 codec. Stage 8 adds declared portable portrait settings and source-history audit data. Complete canonical decoding plus declared metadata/size checks run before mutation. Portrait binaries round-trip through the established codec. Cross-chat imports clear source message ownership and retain the target's existing history baseline; source checkpoints/lineage/inline history remain inside the file for audit and are not replayed into another chat. This is the explicit safe-baseline policy rather than invented provenance. No Alpha/Beta/legacy converter exists.
+
+Diagnostics are separate from ordinary dossier reading and never initiate scans. They surface the dispatcher's actual aggregate request/route/failure counts, current/latest routing result, latest retry/focused-pass flags, character-derived token estimates labelled as estimates, selected-NPC relationship fractional progress/gate audit, and bounded Stage 8 persistence/workflow events. The inherited runtime does not expose an exact historical per-label request breakdown or global pending-write counter, so Stage 8 discloses that limitation instead of fabricating values. Credentials, full prompts, and provider responses are excluded from the bounded event log.
+
+Responsive dialogs use safe-area-aware `100dvh` sizing, bounded internal scrolling, sticky mobile actions, and touch-sized controls. They refresh the affected dossier/cast projection through the existing Stage 1 scheduler instead of replacing selected-NPC/search/scroll/editor state.
+
+Focused synthetic coverage is in `tests/stage8-supporting-tools.test.js`; the detailed implementation and live-host verification boundary is recorded in `docs/stage8-supporting-tools.md`. Required repository test/validation/prompt/package CI must pass on the exact candidate before Stage 8 is marked accepted. Real SillyTavern verification remains required for desktop/tablet/mobile layout, device file picker/touch behavior, host Image Generation preview/application, and update-arrival behavior while the workflow is open.
 
 ## Stage 9 — prompts and integrated acceptance
 
