@@ -10,20 +10,15 @@ Stage 8 remains a thin UI/support layer over canonical Delta owners. It does not
 - `portrait-tools.js` owns the maintained portrait workflow: prompt generation/edit/copy plus explicit device upload/replace/remove. Delta does not call SillyTavern Image Generation from this maintained workflow.
 - `dossier-tools.js` owns native Delta backup/restore and compact diagnostics.
 - `native-transfer.js` extends the existing native bundle manifest without replacing `bundle.js`.
-- `dossier-experience.js` consolidates the live dossier experience: launcher hub, compact cast rail, selected-dossier actions, adaptive editor sizing, and explicit manual life-state correction.
+- `dossier-experience.js` refines the live dossier experience: compact cast rail, selected-dossier actions, adaptive editor sizing, and explicit manual life-state correction. It does not replace the Stage 1 launcher controller.
 
 All UI remains a projection/controller over `NPCStateDelta`; no second dossier store is introduced.
 
 ## Launcher and extension-level tools
 
-The movable NPC State launcher is now the extension-level hub instead of opening the dossier directly. It exposes:
+The movable NPC State launcher opens the dossier directly through the accepted Stage 1 launcher/controller. It is not an extension-tools hub.
 
-- **Dossiers**
-- **Settings**
-- **Backup / Restore**
-- **Diagnostics**
-
-The dossier header therefore no longer needs standalone Settings, Backup, or Diagnostics buttons. Supporting dialogs use native modal `<dialog>` top-layer behavior where supported, so they are not dependent on SillyTavern/dossier z-index stacking contexts.
+**Settings** remains in SillyTavern's Extensions tab and is intentionally not duplicated in the dossier. **Backup** and **Diagnostics** remain dossier-level supporting-tool actions. Supporting dialogs use native modal `<dialog>` top-layer behavior where supported, so they are not dependent on SillyTavern/dossier z-index stacking contexts.
 
 Backup/Restore keeps the versioned native Delta format. Export includes dossiers, portrait assets, declared portable portrait-prompt settings, and audit history. Import validates before mutation, preserves target history ownership, and does not provide Alpha/Beta/legacy converters.
 
@@ -54,21 +49,28 @@ More contains **Scan dossier**, **Portrait**, and the applicable lifecycle/archi
 
 ## Dossier library
 
-The cast library is a compact horizontal portrait rail inspired by the accepted reference layout. It includes a total NPC count, search and existing life-bucket filters, fixed-size portrait cards, selected-card emphasis, horizontal scrolling, and explicit left/right rail controls. The canonical Stage 1 search/filter/selection projection remains the data owner.
+The cast library is a compact horizontal portrait rail inspired by the accepted reference layout. It includes a total NPC count, search and existing life-bucket filters, fixed-size portrait cards, selected-card emphasis, horizontal scrolling, and explicit left/right rail controls. The card CSS explicitly replaces the Stage 1 horizontal two-column card grid with a one-column portrait-over-copy layout; leaving both grid definitions active squeezes portraits and text into the distorted narrow columns observed during live host testing.
+
+The canonical Stage 1 search/filter/selection projection remains the data owner.
 
 ## Adaptive editor and life state
 
-The native dossier editor remains the canonical field editor, but its popup is sized to the same adaptive envelope as the dossier surface: desktop uses the dossier-sized viewport and tablet/mobile becomes full-screen with `100dvh` behavior.
+The native dossier editor remains the canonical field editor, but its popup is sized to the same adaptive envelope as the dossier surface. Desktop uses the dossier-sized viewport and tablet/mobile becomes full-screen with `100dvh` behavior.
 
 The redundant editor **Copy portrait prompts** action is removed from the maintained experience because prompt work belongs to Portrait. Scan, Refresh, and Archive/Restore are likewise presented on the dossier rather than duplicated in Edit.
 
 The editor adds an explicit manual **Life state** control with `Unknown`, `Alive`, and `Deceased` choices. Life state is separate from archive status and current presence.
 
-- Marking **Deceased** is an explicit terminal user decision: present/world-active are cleared and the record enters deceased archival state.
+- Marking **Deceased** writes Delta's canonical `deceased` + `explicit` terminal shape, clears present/world-active, and enters deceased archival state.
 - Correcting a confirmed death first uses Delta's canonical Restore/death-correction path so correction provenance remains owned by the runtime, then applies the explicitly selected living/unknown state.
 - A non-death manual archive is preserved when life state is changed to Alive/Unknown.
+- The short-lived UI-only `dead` + `confirmed` shape is recognized for correction compatibility, but new writes use the canonical terminal shape.
 
 The life-state update uses Delta's canonical native dossier import/flush boundary for the selected record rather than creating another state writer.
+
+## Editor mutation safety
+
+The dossier root and editor now use separate bounded observers. The dossier observer watches only the dossier root. The editor observer reacts only to editor insertion/content changes. Editor text/value synchronization writes only when a displayed value actually changes, preventing the self-triggering `MutationObserver -> textContent mutation -> MutationObserver` loop that could freeze the page immediately after opening Edit.
 
 ## Responsive behavior
 
@@ -78,11 +80,11 @@ Supporting-tool dialogs remain browser top-layer modals with safe-area-aware bou
 
 ## Verification boundary
 
-Deterministic tests cover the existing Stage 8 native-transfer/stale/persistence safety layer plus the consolidated experience's manual life-state transformations and maintained prompt-only portrait behavior. Repository validation and package checks must pass on the exact PR candidate before merge.
+Deterministic tests cover the existing Stage 8 native-transfer/stale/persistence safety layer plus manual life-state transformations, canonical terminal state writes, idempotent editor synchronization, direct-launcher ownership, corrected portrait-card layout, and maintained prompt-only portrait behavior. Repository validation and package checks must pass on the exact PR candidate before merge.
 
 Live SillyTavern checks still matter for:
 
-- launcher hub interaction after dragging;
+- launcher direct-to-dossier interaction after dragging;
 - desktop/tablet/mobile dossier and editor sizing;
 - cast rail scrolling and portrait thumbnail layout;
 - More-menu reachability;
