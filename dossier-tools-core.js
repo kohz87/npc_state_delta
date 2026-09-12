@@ -117,6 +117,11 @@ export function recordToolEvent(type, values = {}) {
 
 export function api() { return globalThis.NPCStateDelta || null; }
 export function uiRoot() { return document.getElementById(DOSSIER_ROOT_ID); }
+export function overlayMountHost() {
+    const root = uiRoot();
+    if (root && root.isConnected !== false && typeof root.appendChild === 'function') return root;
+    return globalThis.document?.body || null;
+}
 export function activeChatKey() {
     try { return plain(api()?.uiStatus?.()?.chatKey); } catch { return ''; }
 }
@@ -217,7 +222,10 @@ export function mountOverlay(html, session) {
             closeOverlay({ reason: 'cancelled' });
         }
     });
-    document.body.appendChild(overlay);
+    const host = overlayMountHost();
+    if (!host) throw new Error('NPC State Delta could not find a safe host for the supporting-tools overlay.');
+    host.appendChild(overlay);
+    overlay.dataset.deltaOverlayHost = host === uiRoot() ? 'dossier-root' : 'body';
     document.documentElement?.classList?.add?.('npc-state-delta-tools-open');
     document.body?.classList?.add?.('npc-state-delta-tools-open');
     activeOverlay = overlay;
