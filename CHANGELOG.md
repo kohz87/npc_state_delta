@@ -1,6 +1,12 @@
 # NPC State Delta changes
 
 
+## 1.0.1 - 12 September 2026
+
+- Require a grounded apparent-age result for new dossier-worthy NPCs whenever the scan has an explicit visual-age cue, while preserving chronological age as a separate field.
+- Recover a missing apparent age deterministically from grounded appearance wording such as `young`, `middle-aged`, `elderly`, `24-year-old`, or `early thirties`; never infer it from species or lifespan.
+- Keep the routine scanner prompt at the same character count and preserve request counts, output allowances, reasoning ownership, injection size, and all non-age scanner semantics.
+
 ## 1.0.0 - 12 September 2026
 
 - Consolidate portrait upload/removal into scoped canonical operations; remove the duplicate supporting-tools portrait manager and superseded controls module, including whole-state completion polling.
