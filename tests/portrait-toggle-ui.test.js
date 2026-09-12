@@ -9,30 +9,37 @@ test('portrait prompt workflow uses a footer Copy Prompt action and preserves no
     assert.doesNotMatch(source, />Generate Prompt<\/button>/);
     assert.match(source, /function combinedPrompt\(draft\)[\s\S]*Positive prompt:/);
     assert.match(source, /Negative prompt:/);
-    assert.match(source, /copyText\(combinedPrompt\(draft\), 'Portrait prompt'\)/);
+    assert.match(source, /copyPromptText\(combinedPrompt\(draft\), 'Portrait prompt', overlay\)/);
 });
 
-test('clipboard fallback runs synchronously before async Clipboard API and empty copies fail closed', () => {
+test('portrait copying lazy-loads SillyTavern host utility and exposes a selected manual fallback', () => {
     const source = fs.readFileSync(new URL('../portrait-tools.js', import.meta.url), 'utf8');
-    assert.match(source, /function fallbackCopyText/);
-    assert.match(source, /execCommand\('copy'\)/);
+    assert.doesNotMatch(source, /^import .*utils\.js/m, 'host-only utils must not be resolved at module load in isolated tests');
+    assert.match(source, /async function hostCopyText\(value\)/);
+    assert.match(source, /await import\('\.\.\/\.\.\/\.\.\/utils\.js'\)/);
+    assert.match(source, /hostUtils\.copyText\(value\)/);
+    assert.match(source, /await hostCopyText\(value\)/);
+    assert.doesNotMatch(source, /function fallbackCopyText/);
+    assert.match(source, /data-delta-tools-manual-copy/);
+    assert.match(source, /data-delta-tools-manual-copy-text/);
+    assert.match(source, /automatic clipboard access was blocked/);
+    assert.match(source, /textarea\.setSelectionRange\(0, textarea\.value\.length\)/);
     assert.match(source, /is empty; nothing was copied/);
-    const fallbackIndex = source.indexOf('if (fallbackCopyText(value))');
-    const clipboardIndex = source.indexOf('navigator?.clipboard?.writeText');
-    assert.ok(fallbackIndex >= 0, 'synchronous fallback must exist');
-    assert.ok(clipboardIndex > fallbackIndex, 'fallback must run before async Clipboard API so click activation is preserved');
 });
 
-test('settings boolean controls render as Enabled or Disabled status pills with no checkbox tick', () => {
+test('settings booleans use separate compact status-dot pills so host checkbox ticks cannot leak through', () => {
     const source = fs.readFileSync(new URL('../scanner-output-ui.js', import.meta.url), 'utf8');
-    assert.match(source, /npc-state-delta-setting-row input\[type="checkbox"\][^{]*\{[\s\S]*appearance:none!important/);
-    assert.match(source, /width:86px!important;height:28px!important/);
-    assert.match(source, /background-image:none!important/);
-    assert.match(source, /input\[type="checkbox"\]::before\{[\s\S]*content:""!important/);
-    assert.match(source, /input\[type="checkbox"\]::after\{[\s\S]*content:"Disabled"!important/);
-    assert.match(source, /input\[type="checkbox"\]:checked::after\{content:"Enabled"!important/);
-    assert.match(source, /input\[type="checkbox"\]:checked::before\{[\s\S]*#57d17b/);
-    assert.match(source, /input\[type="checkbox"\]:focus-visible/);
-    assert.match(source, /input\[type="checkbox"\]:disabled/);
-    assert.doesNotMatch(source, /radial-gradient/);
+    assert.match(source, /function enhanceSettingsToggles\(root\)/);
+    assert.match(source, /input\.classList\.add\('delta-toggle-native'\)/);
+    assert.match(source, /pill\.className = 'delta-toggle-pill'/);
+    assert.match(source, /delta-toggle-dot/);
+    assert.match(source, /enabled \? 'Enabled' : 'Disabled'/);
+    assert.match(source, /input\.delta-toggle-native\[type="checkbox"\][^{]*\{[\s\S]*clip-path:inset\(50%\)!important/);
+    assert.match(source, /delta-toggle-pill[^}]*min-width:74px!important[^}]*height:24px!important/s);
+    assert.match(source, /delta-toggle-dot[^}]*background:rgba\(190,195,202,\.62\)!important/s, 'unchecked/disabled state must show a grey dot');
+    assert.match(source, /:checked \+ \.delta-toggle-pill \.delta-toggle-dot[^}]*background:#57d17b!important/s, 'enabled state must show a green dot');
+    assert.match(source, /:focus-visible \+ \.delta-toggle-pill/);
+    assert.match(source, /:disabled \+ \.delta-toggle-pill/);
+    assert.doesNotMatch(source, /content:"Enabled"/);
+    assert.doesNotMatch(source, /content:"Disabled"/);
 });

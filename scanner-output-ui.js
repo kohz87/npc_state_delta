@@ -48,6 +48,35 @@ function moveFullCastIntoScanning(root) {
     return true;
 }
 
+function syncTogglePill(input) {
+    const pill = input?.nextElementSibling;
+    if (!pill?.classList?.contains('delta-toggle-pill')) return;
+    const enabled = input.checked === true;
+    pill.dataset.state = enabled ? 'enabled' : 'disabled';
+    const label = pill.querySelector('.delta-toggle-label');
+    if (label) label.textContent = enabled ? 'Enabled' : 'Disabled';
+}
+
+function enhanceSettingsToggles(root) {
+    const inputs = root?.querySelectorAll?.('.npc-state-delta-setting-row input[type="checkbox"]') || [];
+    for (const input of inputs) {
+        input.classList.add('delta-toggle-native');
+        let pill = input.nextElementSibling;
+        if (!pill?.classList?.contains('delta-toggle-pill')) {
+            pill = document.createElement('span');
+            pill.className = 'delta-toggle-pill';
+            pill.setAttribute('aria-hidden', 'true');
+            pill.innerHTML = '<span class="delta-toggle-dot"></span><span class="delta-toggle-label"></span>';
+            input.insertAdjacentElement('afterend', pill);
+        }
+        if (!input.dataset.deltaToggleBound) {
+            input.dataset.deltaToggleBound = '1';
+            input.addEventListener('change', () => syncTogglePill(input));
+        }
+        syncTogglePill(input);
+    }
+}
+
 function syncControl(root) {
     const input = root?.querySelector?.(`#${CONTROL_ID}`);
     if (!input || document.activeElement === input) return;
@@ -76,6 +105,7 @@ function mountControl() {
         }
         input = row.querySelector(`#${CONTROL_ID}`);
     }
+    enhanceSettingsToggles(root);
     syncControl(root);
     if (input && !input.dataset.deltaBound) {
         input.dataset.deltaBound = '1';
@@ -98,35 +128,34 @@ function injectStyles() {
     const style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
-/* Settings booleans keep native checkbox semantics but look like compact status pills. */
-#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]{
-  -webkit-appearance:none!important;appearance:none!important;position:relative!important;display:inline-block!important;
-  width:86px!important;height:28px!important;min-width:86px!important;max-width:86px!important;flex:0 0 86px!important;
-  margin:0!important;padding:0!important;border:1px solid rgba(255,255,255,.2)!important;border-radius:999px!important;
-  background:rgba(255,255,255,.055)!important;background-image:none!important;box-shadow:inset 0 1px 1px rgba(0,0,0,.2)!important;
-  color:rgba(255,255,255,.72)!important;cursor:pointer!important;vertical-align:middle!important;overflow:hidden!important;
-  transition:border-color .15s ease,background-color .15s ease,box-shadow .15s ease!important;
+/* Keep the real checkbox accessible but fully out of the visual layout. A separate
+   sibling pill prevents SillyTavern checkbox glyphs/checkmarks from bleeding through. */
+#${SETTINGS_ID} .npc-state-delta-setting-row input.delta-toggle-native[type="checkbox"]{
+  position:absolute!important;width:1px!important;height:1px!important;min-width:1px!important;max-width:1px!important;
+  margin:-1px!important;padding:0!important;border:0!important;clip:rect(0 0 0 0)!important;clip-path:inset(50%)!important;
+  overflow:hidden!important;white-space:nowrap!important;opacity:0!important;box-shadow:none!important;background:none!important;
 }
-#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]::before{
-  content:""!important;position:absolute!important;left:8px!important;top:50%!important;width:8px!important;height:8px!important;
-  border:0!important;border-radius:50%!important;background:rgba(255,255,255,.38)!important;box-shadow:none!important;
-  transform:translateY(-50%)!important;margin:0!important;padding:0!important;
+#${SETTINGS_ID} .npc-state-delta-setting-row .delta-toggle-pill{
+  display:inline-flex!important;align-items:center!important;justify-content:flex-start!important;gap:5px!important;
+  width:auto!important;min-width:74px!important;max-width:100%!important;height:24px!important;flex:0 0 auto!important;
+  margin:0!important;padding:0 7px!important;box-sizing:border-box!important;border:1px solid rgba(255,255,255,.18)!important;
+  border-radius:999px!important;background:rgba(255,255,255,.045)!important;box-shadow:inset 0 1px 1px rgba(0,0,0,.18)!important;
+  color:rgba(255,255,255,.68)!important;font:600 11.5px/1 inherit!important;letter-spacing:.01em!important;white-space:nowrap!important;
+  overflow:hidden!important;cursor:pointer!important;vertical-align:middle!important;
 }
-#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]::after{
-  content:"Disabled"!important;position:absolute!important;left:23px!important;right:8px!important;top:50%!important;
-  transform:translateY(-50%)!important;margin:0!important;padding:0!important;border:0!important;background:none!important;
-  color:rgba(255,255,255,.62)!important;font:600 12px/1.1 inherit!important;letter-spacing:.01em!important;text-align:left!important;white-space:nowrap!important;
+#${SETTINGS_ID} .npc-state-delta-setting-row .delta-toggle-dot{
+  display:block!important;width:7px!important;height:7px!important;min-width:7px!important;flex:0 0 7px!important;border-radius:50%!important;
+  background:rgba(190,195,202,.62)!important;box-shadow:0 0 0 2px rgba(190,195,202,.07)!important;
 }
-#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:checked{
-  border-color:rgba(93,214,124,.45)!important;background:rgba(54,91,64,.32)!important;background-image:none!important;
-  box-shadow:inset 0 1px 1px rgba(0,0,0,.18)!important;
+#${SETTINGS_ID} .npc-state-delta-setting-row .delta-toggle-label{display:block!important;min-width:0!important;overflow:hidden!important;text-overflow:clip!important}
+#${SETTINGS_ID} .npc-state-delta-setting-row input.delta-toggle-native[type="checkbox"]:checked + .delta-toggle-pill{
+  border-color:rgba(87,209,123,.42)!important;background:rgba(54,91,64,.26)!important;color:rgba(239,255,243,.94)!important;
 }
-#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:checked::before{
-  content:""!important;background:#57d17b!important;box-shadow:0 0 0 2px rgba(87,209,123,.12)!important;
+#${SETTINGS_ID} .npc-state-delta-setting-row input.delta-toggle-native[type="checkbox"]:checked + .delta-toggle-pill .delta-toggle-dot{
+  background:#57d17b!important;box-shadow:0 0 0 2px rgba(87,209,123,.12)!important;
 }
-#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:checked::after{content:"Enabled"!important;color:rgba(239,255,243,.94)!important}
-#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:focus-visible{outline:2px solid rgba(111,214,139,.9)!important;outline-offset:2px!important}
-#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:disabled{opacity:.45!important;cursor:not-allowed!important}
+#${SETTINGS_ID} .npc-state-delta-setting-row input.delta-toggle-native[type="checkbox"]:focus-visible + .delta-toggle-pill{outline:2px solid rgba(111,214,139,.9)!important;outline-offset:2px!important}
+#${SETTINGS_ID} .npc-state-delta-setting-row input.delta-toggle-native[type="checkbox"]:disabled + .delta-toggle-pill{opacity:.45!important;cursor:not-allowed!important}
 
 /* Keep the long scanner hint and its numeric control in their own bounded columns. */
 #${SETTINGS_ID} .delta-scanner-output-row{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(150px,180px)!important;column-gap:12px!important;row-gap:7px!important;align-items:center!important;min-width:0}
@@ -170,6 +199,7 @@ function injectStyles() {
 }
 @media(max-width:420px){
   #${SETTINGS_ID} .delta-settings-maintenance-actions{grid-template-columns:minmax(0,1fr)!important}
+  #${SETTINGS_ID} .npc-state-delta-setting-row .delta-toggle-pill{min-width:70px!important;padding-inline:6px!important;font-size:11px!important}
 }
 `;
     document.head.appendChild(style);
@@ -183,7 +213,11 @@ function start() {
     document[GUARD] = true;
     const observer = new MutationObserver(() => mountControl());
     observer.observe(document.documentElement, { subtree: true, childList: true });
-    window.addEventListener?.('focus', () => syncControl(document.getElementById(SETTINGS_ID)));
+    window.addEventListener?.('focus', () => {
+        const root = document.getElementById(SETTINGS_ID);
+        enhanceSettingsToggles(root);
+        syncControl(root);
+    });
 }
 
 if (typeof document !== 'undefined') {
