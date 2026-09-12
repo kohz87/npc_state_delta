@@ -297,3 +297,38 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
     next.appearance = resolveNpcAppearance(next);
     return next;
 }
+
+export function appearanceDraftRecord(npc = {}, draft = {}, { lockAppearance = false } = {}) {
+    const forms = parseAppearanceFormsText(draft.formsText ?? formatAppearanceForms(npc?.appearanceForms));
+    const selected = clean(draft.currentForm);
+    const currentFormUnknown = selected === '__unknown__' || draft.currentFormUnknown === true;
+    const currentForm = currentFormUnknown || selected === '__none__' ? '' : selected;
+    if (currentForm && !forms.some(form => formKey(form.name) === formKey(currentForm))) {
+        throw new Error(`Current form is not in the appearance-form list: ${currentForm}`);
+    }
+
+    const nextInput = {
+        ...npc,
+        appearanceModelVersion: 1,
+        appearance: '',
+        overallAppearance: clean(draft.overallAppearance).slice(0, 1800),
+        appearanceForms: forms,
+        currentForm,
+        currentFormUnknown,
+    };
+    if (currentFormUnknown) {
+        nextInput.unclassifiedAppearance = clean(draft.unclassifiedAppearance ?? npc?.unclassifiedAppearance ?? npc?.appearance).slice(0, 1800);
+    }
+
+    const normalized = normalizeAppearanceModel(nextInput, { locked: false });
+    const next = { ...npc, ...normalized, appearance: '' };
+    const locks = new Set(Array.isArray(npc?.manualProfileFields) ? npc.manualProfileFields : []);
+    // A lock prevents scanner changes; it must not replay old anatomy over a manual form edit.
+    next.manualProfileFields = [...locks].filter(key => key !== 'appearance');
+    next.appearance = resolveNpcAppearance(next);
+    next.manualProfileLocksExplicit = true;
+    if (lockAppearance) locks.add('appearance');
+    else locks.delete('appearance');
+    next.manualProfileFields = [...locks];
+    return next;
+}

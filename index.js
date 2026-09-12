@@ -59,6 +59,7 @@ import {
     applyNpcStateCommand,
     mergeScanResult,
     isTerminalNpcDeath,
+    manualLifeStateRecord,
     protectTerminalNpc,
     parseScanJson,
     npcMatchesLabel,
@@ -77,12 +78,13 @@ import {
     DEFAULT_PORTRAIT_COMPOSITION,
     normalizePortraitPromptFormat,
     buildNpcPortraitPrompts,
+    appearanceDraftRecord,
 } from './core.js';
 import {
-    decodeNpcStateBundle,
     encodeNpcStateBundle,
     mergeImportedDossierState,
 } from './bundle.js';
+import { decodeDeltaNativeBundle, nativeStateForTarget } from './native-transfer.js';
 import {
     BRANCH_LINEAGE_VERSION,
     createScanOperationRegistry,
@@ -1979,6 +1981,7 @@ async function scanNpcDossier(npcId) {
             excludeNames: [...currentExclusions(), ...(latest.dismissed || [])],
             turn: latest.turn,
             sourceMessageId: targetMessageId,
+            calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
             relationshipBaseline: getSettings().relationshipBaseline,
             relationshipCaps: getSettings().relationshipCaps,
             autoArchiveDeaths: getSettings().autoArchiveDeaths !== false,
@@ -2151,6 +2154,7 @@ async function refreshNpcFromChat(npcId) {
             excludeNames: [...currentExclusions(), ...(latest.dismissed || [])],
             turn: latest.turn,
             sourceMessageId: targetMessageId,
+            calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
             relationshipBaseline: settings.relationshipBaseline,
             relationshipCaps: settings.relationshipCaps,
             autoArchiveDeaths: settings.autoArchiveDeaths !== false,
@@ -2373,6 +2377,7 @@ async function backfillNpcFromHistory(request, messageId = null) {
             excludeNames: [...currentExclusions(), ...(latestState.dismissed || [])],
             turn: latestState.turn,
             sourceMessageId: targetMessageId,
+            calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
             relationshipBaseline: settings.relationshipBaseline,
             relationshipCaps: settings.relationshipCaps,
             autoArchiveDeaths: settings.autoArchiveDeaths !== false,
@@ -2897,6 +2902,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
             excludeNames: [...currentExclusions(), ...(state.dismissed || [])],
             turn: state.turn,
             sourceMessageId: targetMessageId,
+            calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
             relationshipBaseline: settings.relationshipBaseline,
             relationshipCaps: settings.relationshipCaps,
             autoArchiveDeaths: settings.autoArchiveDeaths !== false,
@@ -3152,9 +3158,6 @@ function buildSettingsHtml() {
           <div class="npc-state-delta-actions">
             <div id="npc_state_delta_scan_now" class="menu_button"><i class="fa-solid fa-wand-magic-sparkles"></i> Scan dossier now</div>
             <div id="npc_state_delta_add_manual" class="menu_button"><i class="fa-solid fa-user-plus"></i> Add NPC</div>
-            <div id="npc_state_delta_export_bundle" class="menu_button"><i class="fa-solid fa-file-export"></i> Export dossier</div>
-            <input id="npc_state_delta_import_bundle_file" type="file" accept=".npcstatedelta,application/octet-stream" hidden>
-            <label for="npc_state_delta_import_bundle_file" class="menu_button"><i class="fa-solid fa-file-import"></i> Import dossier</label>
             <div id="npc_state_delta_clear_chat" class="menu_button redWarningBG"><i class="fa-solid fa-trash"></i> Clear chat dossier</div>
           </div>
           <div id="npc_state_delta_roster_summary" class="npc-state-delta-roster-summary"></div>
@@ -3975,9 +3978,9 @@ function activateNpcViewerFromEvent(event) {
 }
 
 function handleNpcViewerEscape(event) {
-    if (event?.key !== 'Escape') return false;
+    if (event?.key !== 'Escape' || event.defaultPrevented
+        || document.getElementById?.('npc_state_delta_tools_overlay')) return false;
     if (activePortraitGeneratorOverlay) {
-        if (portraitGenerationBusy) return false;
         event.preventDefault?.();
         event.stopPropagation?.();
         closePortraitGenerator();
@@ -4383,7 +4386,7 @@ function openPortraitGenerator(npcId) {
     overlay.innerHTML = portraitGeneratorHtml(npc, prompts);
     overlay.addEventListener?.('click', event => {
         const closeButton = eventTargetClosest(event, '.npc-state-delta-portrait-generator-close');
-        if ((event.target === overlay || closeButton) && !portraitGenerationBusy) {
+        if (event.target === overlay || closeButton) {
             event.preventDefault?.();
             event.stopPropagation?.();
             closePortraitGenerator();
@@ -4411,7 +4414,8 @@ function setPortraitGeneratorBusy(busy, text = '') {
     const status = overlay.querySelector?.('.npc-state-delta-portrait-generator-status');
     if (run) { run.disabled = portraitGenerationBusy; run.innerHTML = portraitGenerationBusy ? '<i class="fa-solid fa-spinner fa-spin"></i> Generating...' : '<i class="fa-solid fa-wand-magic-sparkles"></i> Generate again'; }
     if (reset) reset.disabled = portraitGenerationBusy;
-    if (close) close.disabled = portraitGenerationBusy;
+    // Closing invalidates this dialog; late generation/decoding cannot apply a result.
+    if (close) close.disabled = false;
     if (use) use.disabled = portraitGenerationBusy || !activePortraitGenerationUrl;
     if (status) {
         status.hidden = !text;
@@ -4444,11 +4448,16 @@ async function generatePortraitFromDialog() {
         globalThis.toastr?.warning?.('NPC State Delta: positive portrait prompt is empty.');
         return false;
     }
+    const revision = Number(stateVersions.get(originChatKey) || 0);
     activePortraitGenerationUrl = '';
     setPortraitGeneratorBusy(true, 'Generating through SillyTavern Image Generation…');
     try {
         const url = await executeNativePortraitGeneration(positive, negative);
-        if (!activePortraitGeneratorOverlay || activePortraitGeneratorNpcId !== npc.id || activePortraitGeneratorChatKey !== originChatKey || getChatKey() !== originChatKey) return false;
+        if (activePortraitGeneratorOverlay !== overlay || activePortraitGeneratorNpcId !== npc.id || activePortraitGeneratorChatKey !== originChatKey || getChatKey() !== originChatKey || !currentNpcById(npc.id)) return false;
+        if (Number(stateVersions.get(originChatKey) || 0) !== revision) {
+            setPortraitGeneratorBusy(false, 'The dossier changed during generation; the stale preview was discarded.');
+            return false;
+        }
         activePortraitGenerationUrl = url;
         const image = activePortraitGeneratorOverlay.querySelector?.('.npc-state-delta-portrait-generator-image');
         const placeholder = activePortraitGeneratorOverlay.querySelector?.('.npc-state-delta-portrait-generator-placeholder');
@@ -4460,6 +4469,7 @@ async function generatePortraitFromDialog() {
         setPortraitGeneratorBusy(false, 'Generation complete. Review the result before applying it.');
         return true;
     } catch (error) {
+        if (activePortraitGeneratorOverlay !== overlay || getChatKey() !== originChatKey) return false;
         console.error('[NPC State Delta] portrait generation failed', error);
         setPortraitGeneratorBusy(false, 'Generation failed.');
         globalThis.toastr?.error?.(`NPC State Delta portrait generation: ${error?.message || error}`);
@@ -4467,46 +4477,51 @@ async function generatePortraitFromDialog() {
     }
 }
 
-async function portraitAssetFromGeneratedUrl(url, npcName = 'npc') {
+async function portraitFileFromGeneratedUrl(url, npcName = 'npc') {
     const raw = String(url || '').trim();
     if (!raw) throw new Error('Generated image URL is empty.');
     const absolute = new URL(raw, globalThis.location?.href || 'http://localhost/').href;
     const response = await fetch(absolute, { credentials: 'same-origin' });
     if (!response.ok) throw new Error(`Could not load generated image (${response.status}).`);
     const blob = await response.blob();
-    if (!blob.type?.startsWith('image/')) throw new Error('Generated URL did not return an image.');
+    if (!blob.type?.startsWith('image/') || blob.size > 16 * 1024 * 1024) throw new Error('Generated URL must return an image no larger than 16 MB.');
     const extension = (blob.type.split('/')[1] || 'png').replace(/[^a-z0-9]/gi, '') || 'png';
     const filename = `${safeFilenamePart(npcName)}-generated.${extension}`;
-    const file = new File([blob], filename, { type: blob.type });
-    const portrait = await compressPortrait(file);
-    portrait.generatedFrom = raw;
-    portrait.sourceName = filename;
-    return portrait;
+    return new File([blob], filename, { type: blob.type });
 }
 
 async function useGeneratedPortrait() {
-    if (!activePortraitGeneratorOverlay || !activePortraitGeneratorNpcId || !activePortraitGenerationUrl || portraitGenerationBusy) return false;
+    const overlay = activePortraitGeneratorOverlay;
+    const npcId = activePortraitGeneratorNpcId;
+    const url = activePortraitGenerationUrl;
     const originChatKey = activePortraitGeneratorChatKey;
-    if (!originChatKey || getChatKey() !== originChatKey || !requireReadyChatMutation('apply a generated portrait', originChatKey)) return false;
-    const npc = currentNpcById(activePortraitGeneratorNpcId);
+    if (!overlay || !npcId || !url || portraitGenerationBusy || getChatKey() !== originChatKey) return false;
+    if (!requireReadyChatMutation('apply a generated portrait', originChatKey)) return false;
+    const npc = currentNpcById(npcId);
     if (!npc) return false;
-    setPortraitGeneratorBusy(true, 'Importing generated image into the NPC dossier…');
+    const revision = Number(stateVersions.get(originChatKey) || 0);
+    const current = () => activePortraitGeneratorOverlay === overlay && getChatKey() === originChatKey
+        && activePortraitGeneratorNpcId === npcId && activePortraitGenerationUrl === url;
+    setPortraitGeneratorBusy(true, 'Importing generated image into the NPC dossier...');
+    let applied = false;
     try {
-        npc.portrait = await portraitAssetFromGeneratedUrl(activePortraitGenerationUrl, npc.name);
-        getChatState().portraitAssets[npc.id] = structuredClone(npc.portrait);
-        npc.updatedAt = Date.now();
-        persistCritical(activePortraitGeneratorChatKey || getChatKey());
-        renderDossier();
+        const file = await portraitFileFromGeneratedUrl(url, npc.name);
+        if (!current() || Number(stateVersions.get(originChatKey) || 0) !== revision) return false;
+        applied = await setNpcPortrait(npcId, file, { chatKey: originChatKey, isCurrent: current, generatedFrom: url });
+        if (!applied) return false;
+        await flushStateFile(originChatKey);
+        if (!current()) return false;
         refreshNpcViewer();
-        const name = npc.name;
         closePortraitGenerator();
-        globalThis.toastr?.success?.(`NPC State Delta: generated portrait applied to ${name}.`);
+        globalThis.toastr?.success?.(`NPC State Delta: generated portrait applied to ${npc.name} and saved.`);
         return true;
     } catch (error) {
-        console.error('[NPC State Delta] generated portrait import failed', error);
-        setPortraitGeneratorBusy(false, 'Could not import the generated result.');
-        globalThis.toastr?.error?.(`NPC State Delta portrait import: ${error?.message || error}`);
+        if (!current()) return false;
+        setPortraitGeneratorBusy(false, applied ? 'Applied locally; durable save failed.' : 'Could not import the generated result.');
+        globalThis.toastr?.[applied ? 'warning' : 'error']?.(`NPC State Delta portrait import: ${error?.message || error}`);
         return false;
+    } finally {
+        if (current()) setPortraitGeneratorBusy(false);
     }
 }
 
@@ -4544,7 +4559,6 @@ function saveNpcEditor(npcId, { close = true, silent = false } = {}) {
     if (index < 0) { if (close) closeNpcEditor(); return false; }
     const current = state.npcs[index];
     const beforeKeyRelationships = [...(current.keyRelationships || [])];
-    const previousCanonicalName = current.name;
     const next = structuredClone(current);
     const oldRelationship = { ...(current.relationship || DEFAULT_RELATIONSHIP) };
     const stableInputs = {
@@ -4639,10 +4653,6 @@ function saveNpcEditor(npcId, { close = true, silent = false } = {}) {
     });
     state.socialGraph = reconciledSocial.socialGraph;
     state.npcs = reconciledSocial.state.npcs;
-    if (previousCanonicalName !== state.npcs.find(item => item.id === npcId)?.name) {
-        // Old canonical name remains an alias, while every structured neighbor reference
-        // now renders the promoted/manual canonical name through the stable NPC id.
-    }
     if (targetMessageId >= 0) commitBranchCheckpoint(state, targetMessageId, 'manual-edit');
     persistCritical(originChatKey);
     if (close) closeNpcEditor();
@@ -4652,6 +4662,94 @@ function saveNpcEditor(npcId, { close = true, silent = false } = {}) {
     return true;
 }
 
+
+function updateNpcAppearance(npcId, draft, { chatKey, lockAppearance = false } = {}) {
+    if (!chatKey || chatKey !== getChatKey() || !requireReadyChatMutation('edit appearance forms', chatKey)) return false;
+    const state = getChatState(chatKey);
+    const index = state.npcs.findIndex(item => item.id === String(npcId || ''));
+    if (index < 0) return false;
+    const next = appearanceDraftRecord(state.npcs[index], draft, { lockAppearance });
+    next.updatedAt = Date.now();
+    state.npcs[index] = normalizeNpcRecord(next);
+    const messageId = latestMessageId(false);
+    if (messageId >= 0) commitBranchCheckpoint(state, messageId, 'manual-edit');
+    persistCritical(chatKey);
+    renderDossier();
+    updateInjection();
+    return true;
+}
+
+function updateNpcLifeState(npcId, choice, { chatKey } = {}) {
+    if (!chatKey || chatKey !== getChatKey() || !['alive', 'unknown', 'deceased'].includes(choice)
+        || !requireReadyChatMutation('edit life state', chatKey)) return false;
+    const state = getChatState(chatKey);
+    const index = state.npcs.findIndex(npc => npc.id === String(npcId || ''));
+    if (index < 0) return false;
+    const current = state.npcs[index];
+    const correctingDeath = isTerminalNpcDeath(current) && choice !== 'deceased';
+    const messageId = latestMessageId(false);
+    const corrected = correctingDeath ? setNpcArchived(current, false, {
+        allowDeathCorrection: true, sourceMessageId: messageId,
+    }) : current;
+    state.npcs[index] = normalizeNpcRecord(manualLifeStateRecord(corrected, choice));
+    if (messageId >= 0) commitBranchCheckpoint(state, messageId, correctingDeath ? 'manual-death-correction' : 'manual-life-state');
+    persistCritical(chatKey);
+    renderDossier();
+    updateInjection();
+    return true;
+}
+
+const portraitActions = new Map();
+function portraitAction(chatKey, npcId) {
+    const key = `${chatKey}::${npcId}`;
+    const action = {};
+    portraitActions.set(key, action);
+    return { key, action };
+}
+
+async function setNpcPortrait(npcId, file, { chatKey, isCurrent = () => true, generatedFrom = '' } = {}) {
+    if (!chatKey || chatKey !== getChatKey() || !isCurrent() || !requireReadyChatMutation('attach a portrait', chatKey)) return false;
+    const npc = getChatState(chatKey).npcs.find(item => item.id === String(npcId || ''));
+    if (!npc || !file) return false;
+    if (!/^image\/(?:png|jpeg|webp|gif|avif|bmp)$/i.test(String(file.type || '')) || file.size > 16 * 1024 * 1024) {
+        throw new Error('Choose a PNG, JPEG, WebP, GIF, AVIF or BMP image no larger than 16 MB.');
+    }
+    const originChatKey = chatKey;
+    const originRevision = Number(stateVersions.get(originChatKey) || 0);
+    const epoch = ownershipEpoch(chatKey);
+    const { key, action } = portraitAction(chatKey, npc.id);
+    try {
+        const portrait = await compressPortrait(file);
+        if (portraitActions.get(key) !== action || !isCurrent() || getChatKey() !== chatKey
+            || !ownershipEpochCurrent(chatKey, epoch) || Number(stateVersions.get(chatKey) || 0) !== originRevision
+            || !requireReadyChatMutation('attach a portrait', chatKey)) return false;
+        const live = getChatState(chatKey).npcs.find(item => item.id === npc.id);
+        if (!live) return false;
+        if (generatedFrom) portrait.generatedFrom = String(generatedFrom);
+        live.portrait = portrait;
+        getChatState(chatKey).portraitAssets[live.id] = structuredClone(portrait);
+        live.updatedAt = Date.now();
+        persistCritical(chatKey);
+        renderDossier();
+        return true;
+    } finally {
+        if (portraitActions.get(key) === action) portraitActions.delete(key);
+    }
+}
+
+function removeNpcPortrait(npcId, { chatKey } = {}) {
+    if (!chatKey || chatKey !== getChatKey() || !requireReadyChatMutation('remove a portrait', chatKey)) return false;
+    const npc = getChatState(chatKey).npcs.find(item => item.id === String(npcId || ''));
+    if (!npc) return false;
+    // Invalidate a prior decode even when there was no portrait to remove yet.
+    portraitActions.delete(`${chatKey}::${npc.id}`);
+    npc.portrait = null;
+    delete getChatState(chatKey).portraitAssets[npc.id];
+    npc.updatedAt = Date.now();
+    persistCritical(chatKey);
+    renderDossier();
+    return true;
+}
 
 function deleteNpcById(npcId, { confirmAction = true } = {}) {
     const id = String(npcId || '').trim();
@@ -4747,6 +4845,7 @@ async function compressPortrait(file) {
         img.onerror = () => reject(new Error('Could not decode image.'));
         img.src = source;
     });
+    if (!Number.isFinite(image.width) || !Number.isFinite(image.height) || image.width <= 0 || image.height <= 0) throw new Error('Could not decode image dimensions.');
     // Keep enough source resolution for the full-screen dossier viewer and high-DPI mobile/tablet displays.
     // The old 512 px cap looked acceptable in roster thumbnails but became visibly pixelated when expanded.
     const maxSide = 1536;
@@ -4756,6 +4855,7 @@ async function compressPortrait(file) {
     canvas.width = Math.max(1, Math.round(image.width * scale));
     canvas.height = Math.max(1, Math.round(image.height * scale));
     const context = canvas.getContext('2d', { alpha: false });
+    if (!context) throw new Error('Image processing is unavailable in this browser.');
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = 'high';
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
@@ -4793,19 +4893,6 @@ function safeFilenamePart(value) {
         .slice(0, 80) || 'chat';
 }
 
-function buildBundleFilename() {
-    const date = new Date();
-    const stamp = [
-        date.getFullYear(),
-        String(date.getMonth() + 1).padStart(2, '0'),
-        String(date.getDate()).padStart(2, '0'),
-        '-',
-        String(date.getHours()).padStart(2, '0'),
-        String(date.getMinutes()).padStart(2, '0'),
-    ].join('');
-    return `npc-state-delta-${safeFilenamePart(getChatKey().replace(/^\w+:/, ''))}-${stamp}.npcstatedelta`;
-}
-
 function exportBundleBytes() {
     if (!requireReadyChatMutation('export a dossier', getChatKey(), { notify: false })) throw new Error('NPC State Delta chat dossier is not loaded.');
     return encodeNpcStateBundle(getChatState(), {
@@ -4814,47 +4901,11 @@ function exportBundleBytes() {
     });
 }
 
-function downloadBundle(bytes, filename = buildBundleFilename()) {
-    const blob = new Blob([bytes], { type: 'application/octet-stream' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function exportDossierBundle() {
-    if (getChatKey() === 'no-chat') {
-        globalThis.toastr?.warning?.('NPC State Delta: open a chat before exporting a dossier.');
-        return null;
-    }
-    if (!requireReadyChatMutation('export a dossier')) return null;
-    const state = getChatState();
-    if (!state.npcs.length && !state.dismissed?.length) {
-        globalThis.toastr?.warning?.('NPC State Delta: this chat dossier is empty.');
-        return null;
-    }
-    try {
-        const bytes = exportBundleBytes();
-        downloadBundle(bytes);
-        const portraitCount = state.npcs.filter(npc => npc.portrait?.dataUrl).length;
-        globalThis.toastr?.success?.(`NPC State Delta: exported ${state.npcs.length} dossier(s) with ${portraitCount} embedded portrait(s).`);
-        return bytes;
-    } catch (error) {
-        console.error('[NPC State Delta] export failed', error);
-        globalThis.toastr?.error?.(`NPC State Delta export failed: ${error?.message || error}`);
-        return null;
-    }
-}
-
 function importBundleBytes(bytes) {
     if (!requireReadyChatMutation('import a dossier')) throw new Error('NPC State Delta chat dossier is not loaded.');
     const settings = getSettings();
-    const decoded = decodeNpcStateBundle(bytes);
+    const decoded = decodeDeltaNativeBundle(bytes);
+    decoded.state = nativeStateForTarget(decoded, getChatKey());
     const before = getChatState();
     const importReport = {};
     const merged = mergeImportedDossierState(before, decoded.state, {
@@ -4879,26 +4930,6 @@ function importBundleBytes(bytes) {
     renderDossier();
     updateInjection();
     return { decoded, merged, importReport };
-}
-
-async function importDossierBundle(file) {
-    if (!file) return;
-    try {
-        if (getChatKey() === 'no-chat') throw new Error('Open a chat before importing a dossier.');
-        if (file.size > 32 * 1024 * 1024) throw new Error('Bundle exceeds the 32 MB safety limit.');
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        const { decoded, importReport } = importBundleBytes(bytes);
-        const total = decoded.state.npcs.length;
-        const accepted = (importReport.accepted || []).length;
-        const skipped = importReport.skipped || [];
-        const portraitCount = decoded.state.npcs.filter(npc => npc.portrait?.dataUrl).length;
-        const capacitySkipped = skipped.filter(item => item.reason === 'capacity').length;
-        globalThis.toastr?.success?.(`NPC State Delta: accepted ${accepted}/${total} dossier(s); bundle contained ${portraitCount} embedded portrait(s).${capacitySkipped ? ` ${capacitySkipped} new active dossier(s) were skipped because the roster is full; existing active dossiers were preserved.` : ''}`);
-        if (skipped.length && !capacitySkipped) globalThis.toastr?.info?.(`NPC State Delta: ${skipped.length} import entr${skipped.length === 1 ? 'y was' : 'ies were'} skipped by identity/exclusion safety checks.`);
-    } catch (error) {
-        console.error('[NPC State Delta] import failed', error);
-        globalThis.toastr?.error?.(`NPC State Delta import failed: ${error?.message || error}`);
-    }
 }
 
 function portraitSettingsSnapshot(source = getSettings()) {
@@ -5139,12 +5170,6 @@ function bindUi() {
     $(document).on('click.npcStateDelta', '.npc-state-delta-retry-hydration', () => { void retryCurrentChatHydration(); });
     $(document).on('click.npcStateDelta', '.npc-state-delta-detach-sidecar', () => { void detachBrokenSidecar(); });
     $(document).on('click.npcStateDelta', '#npc_state_delta_scan_now', () => scanNow({ manual: true, messageId: latestMessageId(true) }));
-    $(document).on('click.npcStateDelta', '#npc_state_delta_export_bundle', () => exportDossierBundle());
-    $(document).on('change.npcStateDelta', '#npc_state_delta_import_bundle_file', async function () {
-        const file = this.files?.[0];
-        this.value = '';
-        await importDossierBundle(file);
-    });
     $(document).on('click.npcStateDelta', '#npc_state_delta_add_manual', () => {
         if (!requireReadyChatMutation('add an NPC')) return;
         const settings = getSettings();
@@ -5195,34 +5220,20 @@ function bindUi() {
         persistCritical(); renderDossier(); updateInjection();
     });
     $(document).on('change.npcStateDelta', '.npc-state-delta-inline-portrait-file', async function () {
-        if (!requireReadyChatMutation('attach a portrait')) { this.value = ''; return; }
-        const originChatKey = getChatKey();
-        const originRevision = Number(stateVersions.get(originChatKey) || 0);
-        const npc = currentNpcById(this.dataset.npcId);
         const file = this.files?.[0];
+        const npcId = this.dataset.npcId;
+        const chatKey = getChatKey();
         this.value = '';
-        if (!npc || !file) return;
+        if (!file) return;
         try {
-            const portrait = await compressPortrait(file);
-            if (getChatKey() !== originChatKey || Number(stateVersions.get(originChatKey) || 0) !== originRevision || !requireReadyChatMutation('attach a portrait', originChatKey)) return;
-            const liveNpc = getChatState(originChatKey).npcs.find(item => item.id === npc.id);
-            if (!liveNpc) return;
-            liveNpc.portrait = portrait;
-            getChatState(originChatKey).portraitAssets[liveNpc.id] = structuredClone(liveNpc.portrait);
-            liveNpc.updatedAt = Date.now();
-            persistCritical(originChatKey); renderDossier();
-            globalThis.toastr?.success?.(`Portrait attached to ${liveNpc.name}.`);
+            const applied = await setNpcPortrait(npcId, file, { chatKey });
+            if (applied) globalThis.toastr?.info?.('NPC State Delta: portrait applied locally; durable save is pending.');
         } catch (error) {
             globalThis.toastr?.error?.(`NPC State Delta portrait: ${error?.message || error}`);
         }
     });
     $(document).on('click.npcStateDelta', '.npc-state-delta-inline-remove-portrait', function () {
-        if (!requireReadyChatMutation('remove a portrait')) return;
-        const npc = currentNpcById(this.dataset.npcId);
-        if (!npc) return;
-        npc.portrait = null;
-        delete getChatState().portraitAssets[npc.id];
-        npc.updatedAt = Date.now(); persistCritical(); renderDossier();
+        removeNpcPortrait(this.dataset.npcId, { chatKey: getChatKey() });
     });
 }
 
@@ -5645,6 +5656,26 @@ window.NPCStateDelta = Object.freeze({
     reconcile: (options = {}) => reconcileCurrentBranch(options),
     scanMetrics: () => lastScanMetrics ? { ...lastScanMetrics } : null,
     getState: () => structuredClone(getChatState()),
+    getNpc: npcId => {
+        const npc = getChatState().npcs.find(item => item.id === String(npcId || ''));
+        return npc ? structuredClone(npc) : null;
+    },
+    getDossierState: () => {
+        const state = getChatState();
+        return { turn: state.turn, npcs: structuredClone(state.npcs), portraitAssets: {} };
+    },
+    persistenceStatus: () => {
+        const key = getChatKey();
+        return {
+            currentChatPending: Number(stateVersions.get(key) || 0) > Number(persistedVersions.get(key) || 0),
+            writeInFlight: stateWritePromises.has(key),
+            writeScheduled: stateWriteTimers.has(key),
+        };
+    },
+    updateAppearance: updateNpcAppearance,
+    updateLifeState: updateNpcLifeState,
+    setPortrait: setNpcPortrait,
+    removePortrait: removeNpcPortrait,
     flush: () => flushStateFile(),
     dataFile: () => structuredClone(getSettings().dataFiles?.[getChatKey()] || null),
     archive: npcId => setNpcArchiveStateById(npcId, true, { reason: 'manual', confirmAction: false }),

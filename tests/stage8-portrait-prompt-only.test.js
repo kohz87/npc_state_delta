@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const portraitToolsUrl = new URL('../portrait-tools.js', import.meta.url);
-const controlsUrl = new URL('../dossier-tools-controls.js', import.meta.url);
+const controlsUrl = new URL('../dossier-tools.js', import.meta.url);
 
 test('maintained Portrait workflow generates prompts but never generates an image', async () => {
     const source = await readFile(portraitToolsUrl, 'utf8');
@@ -19,7 +19,8 @@ test('maintained Portrait workflow generates prompts but never generates an imag
 
 test('dossier Portrait control routes to the prompt-only manager and suppresses legacy image generation actions', async () => {
     const source = await readFile(controlsUrl, 'utf8');
-    assert.match(source, /from '\.\/portrait-tools\.js'/);
+    const experience = await readFile(new URL('../dossier-experience.js', import.meta.url), 'utf8');
+    assert.match(experience, /from '\.\/portrait-tools\.js'/);
     assert.match(source, /npc-state-delta-generate-portrait/);
     assert.match(source, /display:none !important/);
     assert.match(source, /top layer/i);

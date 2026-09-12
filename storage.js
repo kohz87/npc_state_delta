@@ -226,6 +226,9 @@ function retryableWriteError(error) {
     if (error?.code === 'NPC_STATE_LOCK_TIMEOUT') return true;
     const status = Number(error?.status || 0);
     if ([408, 425, 429].includes(status) || status >= 500) return true;
+    // The wrapper says 'write failed' for every response. Do not let that wording
+    // turn authentication, permission, validation or size rejection into endless retries.
+    if (status >= 400 && status < 500) return false;
     return !status || /network|fetch|timeout|temporar|unavailable|failed/i.test(String(error?.message || error));
 }
 

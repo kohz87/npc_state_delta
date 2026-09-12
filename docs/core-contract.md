@@ -1,6 +1,6 @@
 # NPC State Delta — core contract
 
-Status: approved behavior authority. Stages 1-7 are implemented and deterministically verified. Stage 8 is implemented on its acceptance candidate and becomes accepted only after the repository's required CI passes for that exact candidate; real-host visual/image-provider acceptance remains a separate live-host verification boundary. `docs/WORKPLAN.md` tracks remaining work. Inherited behavior is the baseline, not proof that every target feature exists.
+Status: approved behavior authority. Stages 1-8 and subsequent calendar/birthday/form UI amendments are integrated. Stage 9 implementation and the Delta 1.0.0 candidate are locally verified; release acceptance requires the existing CI on the exact candidate before merge. Synthetic browser checks are not live SillyTavern/Gemini/provider acceptance. `docs/stage9-review.md` records the integrated evidence.
 
 ## C01. Foundation and product loop
 
@@ -36,7 +36,9 @@ Retain legacy refinement/evolution rules and the separation of durable identity,
 
 Adopt overall appearance plus named appearance forms and current-form selection. Existing flat appearance becomes a safe baseline without fabricated alternate anatomy. Define one resolver for dossier display, scanner comparison, portrait prompts and roleplay injection. The selected form's accepted anatomy, current outfit/condition and overall description must agree. A form switch does not erase another form's description. An observed undefined form preserves supported current presentation in a separate unnamed-current slot without inventing a form ID, duplicating form-independent details, or forcing the previous anatomy. Omission does not delete forms. Correcting one named form affects only that form unless the source explicitly supports a broader change.
 
-Do not automatically add unrelated Beta features such as generated birthdays or altered dossier limits just because a donor module supports them.
+The user-authorized birthday amendment is Delta-local deterministic metadata, not a donor engine: an ordered month table is required for a custom calendar; era and a complete manual fallback year/month/day are optional. Generate only stable calendar month/day values and label them generated. Grounded story facts may establish/correct dates; exact actual age and a compatible full owned date may derive a provisional birth year. Apparent age, species and lifespan never supply chronology. Raw supported World State headers are passed to local calendar arithmetic separately from unchanged model context. Unknown/incompatible dates do not fabricate chronology; manual age locks, terminal death and owned rollback remain authoritative. An older manual fallback cannot roll accepted age backwards. See `docs/birthday-continuity.md`.
+
+Do not automatically add other donor features or altered dossier limits.
 
 ## C05. Terminal automatic death — stage 4
 
@@ -84,7 +86,7 @@ No automated operations on actual user databases during development. Import/reco
 
 Adopt an Alpha-style side launcher and Beta-style portrait-led dossier, searchable cast rail and readable editing experience. Use lightweight adapters to the legacy state, not a donor engine. Render the selected dossier and affected components; avoid loading/cloning all chat/history for view refresh or regenerating unchanged panel content. Preserve scroll, focus, open controls and unsaved edits during notifications.
 
-The current dossier is the primary Stage 8 entry point. Portrait management must be discoverable beside the selected NPC and work on desktop, tablet and mobile. Upload/replacement/removal reuse the retained portrait validation/compression/mutation path. Positive and negative generation prompts are editable/copyable; rebuilding from accepted appearance is explicit. Generation uses the supported host Image Generation workflow and is independent of scanner routing. A generated image is preview-only until explicit application. Appearance changes never silently replace an uploaded portrait and Delta does not add per-form portrait switching or a gallery.
+The current dossier is the primary supporting-tools entry point. Subsequent accepted UI refinements keep More > Portrait as a prompt/upload/removal surface; the retained native host-image preview/application workflow remains a separate runtime integration. Portrait management must be discoverable beside the selected NPC and work on desktop, tablet and mobile. Upload/replacement/removal reuse the retained portrait validation/compression/mutation path. Positive and negative generation prompts are editable/copyable; rebuilding from accepted appearance is explicit. Generation uses the supported host Image Generation workflow and is independent of scanner routing. A generated image is preview-only until explicit application. Appearance changes never silently replace an uploaded portrait and Delta does not add per-form portrait switching or a gallery.
 
 Portrait prompt composition uses the same accepted appearance resolver as dossier display and roleplay injection. Overall appearance, selected/current form, supported outfit/visible condition and canonical local colors must remain coherent. A human current form cannot inherit wings, horns, tails, feathers, scales or other anatomy from a different form. Manual prompt edits cannot be silently overwritten by later UI refresh; only explicit rebuild may replace the working prompt.
 
@@ -100,16 +102,20 @@ Diagnostics are compact, bounded and separate from ordinary dossier reading. Ope
 
 Stage 8 responsive dialogs keep close/cancel reachable with `dvh`/safe-area-aware bounded scrolling and touch-sized controls. Dossier selection, rail/document scroll, focus and unrelated editor contents remain owned by the existing dossier UI. Stage 8 refreshes affected components through that controller rather than rebuilding unchanged dossier content. See `docs/stage8-supporting-tools.md` for the implementation/verification boundary.
 
-## C10. Compact code and prompt accounting — stages 2 and 9
+## C10. Compact code and prompt accounting: Stage 9
 
-Compactness means one coherent implementation with bounded useful context, not minification or removal of safety. Delete verified superseded runtime paths with callers/tests. Do not maintain multiple master rules/settings or import a new framework solely to wrap legacy code.
+Stage 9 consolidates demonstrably superseded code, dependencies, event handlers, settings and internal execution paths without an architectural rewrite or prompt redesign. Trace dynamic callers, exports, shipping inventory and recovery readers before removal. Preserve one canonical implementation per responsibility; compactness does not justify deleting ownership, locking, dirty-write recovery or evidence protections.
 
-Retain legacy prompt/schema simplicity and output limits as the baseline. Add only necessary form/death/routing wording. Changes to token limits must be explicit and motivated; larger allowances are not proof of better extraction. Measure constructed input, requested output allowance and actual requests separately. Local estimates are not provider usage or pricing.
+Preserve the user's successful Gemini prompt by default. Model-facing semantics, schemas, evidence requirements, context coverage, output allowances and reasoning settings do not change to improve synthetic fixtures. A narrowly justified clarification needs a concrete ambiguity and evidence. Do not increase equivalent-input prompt size, automatic request counts/focused passes/retry budgets, output/thinking allowances or synchronous waits before roleplay. No completeness/self-review model calls, background workers or generation barriers.
 
-Compare the same story segment, initial dossier state, settings/model and settled workload when evaluating alternatives. Include retries, focused passes and any remaining backlog. Report foreground wait, time-to-useful-dossier, browser responsiveness and total usage separately. Never claim the seed has measured live speed or extraction superiority solely from synthetic tests.
+Compare identical fixtures, initial state, settings and measurement methods. Record complete Delta-owned scanner messages including system/wrappers, roleplay injection, requested output, reasoning settings where exposed, actual dispatcher counts including retries, and measured runtime work. Host/provider-added wrappers, live latency and provider usage cannot be inferred from local character counts. Deterministic responses prove handling, not Gemini extraction quality. Paid external model tests require separate authorization.
+
+Perform up to five documented review/fix cycles across capture, routing, dossier merge/injection, scoring, portability/recovery, portraits/diagnostics and UI. Stop early only after all review areas and previous fixes are covered, a complete review finds no actionable in-scope issue, and required verification passes. Blocking findings remaining after five cycles prohibit acceptance/merge. Keep one release changelog and one review record; do not invent changes or versions to fill cycles.
+
+Release preparation uses the existing test/compatibility/runtime/migration, validation, prompt measurement and deterministic package workflows. Verify exact shipping bytes and coherent application metadata independently of storage/bundle formats. Required CI must pass on the latest candidate before merge. Real-host, physical-device and Gemini/image-provider limits remain explicit.
 
 ## C11. Stage acceptance and exclusions
 
 After each stage verify the affected production paths, and preserve the baseline scan -> dossier -> persistence -> injection loop. Maintain representative scenes for first contact, existing profile refinement, temporary-vs-durable state, human/alternate form, off-screen mentions, relationship gates/fractions/replays, death/correction/rollback, chat switching and write failure. Use synthetic fixtures; real-provider/browser checks require their actually available environment and must be labelled separately.
 
-A stage changes only its authorized behavior. No automatic adoption of the donor projects' entire schemas, new call patterns, birthday generation, new relationship mechanics, generational imports or additional agents. Bugs found outside scope should be recorded with evidence; do not hide a behavioral redesign inside consolidation.
+A stage changes only its authorized behavior. No automatic adoption of the donor projects' entire schemas, new call patterns, unapproved birthday behavior, new relationship mechanics, generational imports or additional agents. Bugs found outside scope should be recorded with evidence; do not hide a behavioral redesign inside consolidation.

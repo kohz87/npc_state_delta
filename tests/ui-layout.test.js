@@ -448,7 +448,7 @@ test('native portrait bridge uses quiet SillyTavern imagine command and separate
     assert.match(index, /gallery=\$\{settings\.portraitSaveToGallery/);
     assert.match(index, /negative=\$\{slashQuoted\(negative\)\}/);
     assert.match(index, /result\?\.pipe/);
-    assert.match(index, /portraitAssetFromGeneratedUrl/);
+    assert.match(index, /portraitFileFromGeneratedUrl/);
     assert.match(index, /compressPortrait\(file\)/);
 });
 

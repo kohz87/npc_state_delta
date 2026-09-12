@@ -1,0 +1,290 @@
+{
+  "source": "production functions with synthetic provider responses",
+  "lengths": {
+    "SCAN_RESPONSE_LENGTH": 1800,
+    "FULL_SCAN_RESPONSE_LENGTH": 3200,
+    "RELATIONSHIP_RESPONSE_LENGTH": 900,
+    "BACKFILL_RESPONSE_LENGTH": 3200,
+    "JSON_RETRY_RESPONSE_LENGTH": 5200
+  },
+  "routes": {
+    "default": [
+      {
+        "label": "scanner",
+        "requests": 1,
+        "captures": [
+          {
+            "charsIncludingSystem": 8487,
+            "serializedMessagesChars": 8807,
+            "inputSha256": "b5c38f273572e51d24093a0eb321944ab33f3abca809385912e6b7d7578ec32a",
+            "responseLength": 1800,
+            "options": {
+              "quietToLoud": false,
+              "instructOverride": true,
+              "trimNames": false
+            }
+          }
+        ]
+      },
+      {
+        "label": "full-window",
+        "requests": 1,
+        "captures": [
+          {
+            "charsIncludingSystem": 8615,
+            "serializedMessagesChars": 8937,
+            "inputSha256": "e080a28dbf81d3612d8c908df6c6dce95cd0acb9a68f1d1c7d93697fcce67fd7",
+            "responseLength": 3200,
+            "options": {
+              "quietToLoud": false,
+              "instructOverride": true,
+              "trimNames": false
+            }
+          }
+        ]
+      },
+      {
+        "label": "refresh",
+        "requests": 1,
+        "captures": [
+          {
+            "charsIncludingSystem": 8496,
+            "serializedMessagesChars": 8996,
+            "inputSha256": "120d3cb51f709f65da9595f879a51b9c36c77cc98989c9a57c4e94889512936e",
+            "responseLength": 3200,
+            "options": {
+              "quietToLoud": false,
+              "instructOverride": true,
+              "trimNames": false
+            }
+          }
+        ]
+      },
+      {
+        "label": "backfill",
+        "requests": 1,
+        "captures": [
+          {
+            "charsIncludingSystem": 7272,
+            "serializedMessagesChars": 7634,
+            "inputSha256": "e252681e68b34ad7ba9ffaa872ace4f5678b32a62d2e729988828f0b4d493510",
+            "responseLength": 3200,
+            "options": {
+              "quietToLoud": false,
+              "instructOverride": true,
+              "trimNames": false
+            }
+          }
+        ]
+      },
+      {
+        "label": "dossier-import",
+        "requests": 1,
+        "captures": [
+          {
+            "charsIncludingSystem": 5461,
+            "serializedMessagesChars": 5737,
+            "inputSha256": "008ea479fa4598a01de1e32014ee56d266a637f27fcd001c13dc9f0894b17182",
+            "responseLength": 3200,
+            "options": {
+              "quietToLoud": false,
+              "instructOverride": true,
+              "trimNames": false
+            }
+          }
+        ]
+      },
+      {
+        "label": "focused-relationship",
+        "requests": 1,
+        "captures": [
+          {
+            "charsIncludingSystem": 4108,
+            "serializedMessagesChars": 4280,
+            "inputSha256": "0752c12fb2ebdb8ef175c8d7b5101d8554d950885b657fc229329faa37930aa5",
+            "responseLength": 900,
+            "options": {
+              "quietToLoud": false,
+              "instructOverride": true,
+              "trimNames": false
+            }
+          }
+        ]
+      },
+      {
+        "label": "scanner-retry",
+        "requests": 2,
+        "captures": [
+          {
+            "charsIncludingSystem": 8487,
+            "serializedMessagesChars": 8807,
+            "inputSha256": "b5c38f273572e51d24093a0eb321944ab33f3abca809385912e6b7d7578ec32a",
+            "responseLength": 1800,
+            "options": {
+              "quietToLoud": false,
+              "instructOverride": true,
+              "trimNames": false
+            }
+          },
+          {
+            "charsIncludingSystem": 9311,
+            "serializedMessagesChars": 9633,
+            "inputSha256": "2c3b33f38279505982c47a7aeaf3fcbbf7d7acc8b4212579a5b8c853d7a10fd1",
+            "responseLength": 5200,
+            "options": {
+              "quietToLoud": false,
+              "instructOverride": true,
+              "trimNames": false
+            }
+          }
+        ]
+      }
+    ],
+    "profile": [
+      {
+        "label": "scanner",
+        "requests": 1,
+        "captures": [
+          {
+            "charsIncludingSystem": 8487,
+            "serializedMessagesChars": 8807,
+            "inputSha256": "b5c38f273572e51d24093a0eb321944ab33f3abca809385912e6b7d7578ec32a",
+            "responseLength": 1800,
+            "options": {
+              "stream": false,
+              "extractData": true,
+              "includePreset": true,
+              "includeInstruct": true
+            }
+          }
+        ]
+      },
+      {
+        "label": "full-window",
+        "requests": 1,
+        "captures": [
+          {
+            "charsIncludingSystem": 8615,
+            "serializedMessagesChars": 8937,
+            "inputSha256": "e080a28dbf81d3612d8c908df6c6dce95cd0acb9a68f1d1c7d93697fcce67fd7",
+            "responseLength": 3200,
+            "options": {
+              "stream": false,
+              "extractData": true,
+              "includePreset": true,
+              "includeInstruct": true
+            }
+          }
+        ]
+      },
+      {
+        "label": "refresh",
+        "requests": 1,
+        "captures": [
+          {
+            "charsIncludingSystem": 8496,
+            "serializedMessagesChars": 8996,
+            "inputSha256": "120d3cb51f709f65da9595f879a51b9c36c77cc98989c9a57c4e94889512936e",
+            "responseLength": 3200,
+            "options": {
+              "stream": false,
+              "extractData": true,
+              "includePreset": true,
+              "includeInstruct": true
+            }
+          }
+        ]
+      },
+      {
+        "label": "backfill",
+        "requests": 1,
+        "captures": [
+          {
+            "charsIncludingSystem": 7272,
+            "serializedMessagesChars": 7634,
+            "inputSha256": "e252681e68b34ad7ba9ffaa872ace4f5678b32a62d2e729988828f0b4d493510",
+            "responseLength": 3200,
+            "options": {
+              "stream": false,
+              "extractData": true,
+              "includePreset": true,
+              "includeInstruct": true
+            }
+          }
+        ]
+      },
+      {
+        "label": "dossier-import",
+        "requests": 1,
+        "captures": [
+          {
+            "charsIncludingSystem": 5461,
+            "serializedMessagesChars": 5737,
+            "inputSha256": "008ea479fa4598a01de1e32014ee56d266a637f27fcd001c13dc9f0894b17182",
+            "responseLength": 3200,
+            "options": {
+              "stream": false,
+              "extractData": true,
+              "includePreset": true,
+              "includeInstruct": true
+            }
+          }
+        ]
+      },
+      {
+        "label": "focused-relationship",
+        "requests": 1,
+        "captures": [
+          {
+            "charsIncludingSystem": 4108,
+            "serializedMessagesChars": 4280,
+            "inputSha256": "0752c12fb2ebdb8ef175c8d7b5101d8554d950885b657fc229329faa37930aa5",
+            "responseLength": 900,
+            "options": {
+              "stream": false,
+              "extractData": true,
+              "includePreset": true,
+              "includeInstruct": true
+            }
+          }
+        ]
+      },
+      {
+        "label": "scanner-retry",
+        "requests": 2,
+        "captures": [
+          {
+            "charsIncludingSystem": 8487,
+            "serializedMessagesChars": 8807,
+            "inputSha256": "b5c38f273572e51d24093a0eb321944ab33f3abca809385912e6b7d7578ec32a",
+            "responseLength": 1800,
+            "options": {
+              "stream": false,
+              "extractData": true,
+              "includePreset": true,
+              "includeInstruct": true
+            }
+          },
+          {
+            "charsIncludingSystem": 9311,
+            "serializedMessagesChars": 9633,
+            "inputSha256": "2c3b33f38279505982c47a7aeaf3fcbbf7d7acc8b4212579a5b8c853d7a10fd1",
+            "responseLength": 5200,
+            "options": {
+              "stream": false,
+              "extractData": true,
+              "includePreset": true,
+              "includeInstruct": true
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "injection": {
+    "chars": 1839,
+    "sha256": "1a03bee59efc5d8b2f5e5773b7a38fc5455ab179217633098cfb2802c8423c9a"
+  },
+  "reasoning": "No Delta reasoning/thinking parameter; host/profile preset settings remain host-owned and unmeasured.",
+  "providerUsage": "Unavailable; these are character counts, hashes, options and actual mocked dispatcher invocations, not paid provider usage."
+}

@@ -1,8 +1,9 @@
+import { manualLifeStateRecord } from '../terminal-lifecycle.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { lifeStateChoice, manualLifeStateRecord, setNodeTextIfChanged } from '../dossier-experience.js';
+import { lifeStateChoice, setNodeTextIfChanged } from '../dossier-experience.js';
 
 const source = fs.readFileSync(fileURLToPath(new URL('../dossier-experience.js', import.meta.url)), 'utf8');
 

@@ -21,7 +21,9 @@ test('filename-only chat deletion fails closed instead of borrowing an unrelated
 test('bundle import reports skipped capacity and only clears deletion state for accepted imports',()=>{
   assert.match(source,/report: importReport/);
   assert.match(source,/for \(const accepted of importReport\.accepted \|\| \[\]\)/);
-  assert.match(source,/existing active dossiers were preserved/);
+  const tools = readFileSync(new URL('../dossier-tools.js', import.meta.url), 'utf8');
+  assert.match(tools,/existing active dossiers were preserved/);
+  assert.match(tools,/nativeImportResultSummary\(result\)/);
 });
 
 test('manual trash removes narrative name suppression while explicit host provenance can bypass generic branch heuristics',()=>{

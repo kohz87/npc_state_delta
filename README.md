@@ -1,57 +1,46 @@
-# NPC State Delta v0.1.0
+# NPC State Delta v1.0.0
 
-**Development build.** Delta has its own application-version baseline at `0.1.0`. Upstream source versions are recorded only in Git history and `docs/seed-provenance.*`; they are not runtime identities, module names, or application versions. Stages 1-7 are implemented and deterministically verified; stages 8-9 remain pending. Real-host visual/provider acceptance for stages 4-7 remains unrun.
+Delta is a standalone SillyTavern NPC continuity extension: a completed story exchange is scanned, grounded dossier changes are persisted with chat/branch ownership, and relevant accepted characterization reaches the next roleplay request. It is built forward from the pinned source recorded in `docs/seed-provenance.*`, not from a replacement Beta/Alpha engine.
 
-Delta is a standalone SillyTavern NPC continuity extension built from a pinned NPC State source baseline and developed forward as one Delta codebase. Selected Beta/Alpha presentation ideas are adapted into that foundation; their engines and two-stage architecture are not runtime dependencies.
+Stages 1-9 are implemented. The 1.0.0 release candidate includes integrated deterministic and synthetic-browser verification; publication requires the existing CI to pass on that exact candidate. Live SillyTavern/Gemini extraction quality, provider latency, physical-device file pickers and actual image-provider behavior are separate verification boundaries, not claims made by this release. See [Stage 9 evidence](docs/stage9-review.md).
 
-## Current contents
+## Features and controls
 
-- One canonical Delta runtime whose complete top-level JS inventory is declared in `runtime-modules.json`.
-- Active core mechanics in `core-mechanics.js`, active branch/recovery primitives in `branch-core.js`, and semantic owners for persistence, identity, social state, lifecycle hardening, scanning, dossier UI, and launcher UI.
-- Stage 1 side launcher plus a portrait-led, searchable dossier/cast-rail surface over canonical Delta state.
-- Stage 2 consolidation with coherent `0.1.0` application metadata, a dedicated full-cast scanning owner, removal of the superseded secondary dossier-library enhancement surface, and removal of version-labelled source-era runtime paths.
-- Stage 3 shared scanner request routing with an optional connection profile while leaving ordinary roleplay and portrait routing independent; automatic backfill guards execute before that dispatcher rather than patching the host generation route.
-- Stage 4 appearance continuity with form-independent overall presentation, bounded named forms, explicit current/unnamed-form state, manual current-appearance reconciliation, and one shared resolver across canonical dossier appearance/portrait/injection. Confirmed automatic death is terminal; correction of an erroneous death and owned rollback are the only reversal paths.
-- Stage 5 verified numerical baseline and source-aware relationship integration; Stage 6 identity-first budgeted injection with resolved appearance; Stage 7 owned recovery verification and complete removal of story-text OOC commands.
-- Historical source snapshots, old version labels, and provenance notes segregated under `docs/history/` and `docs/seed-provenance.*`; they are not shipped runtime modules.
-- Existing migration/compatibility behavior that is still required for accepted stored-state shapes remains active Delta compatibility logic inside the current owners. It is not a second engine or a legacy runtime layer.
-- Core behavior contract, staged implementation plan, development commands, and source provenance.
-- Existing repository GPL-3.0 license preserved.
+**Dossiers.** The floating launcher opens a searchable portrait-led cast library. Edit dossier identity, personality, behavior, voice, goals, memories and relationships through the existing editor. Manual Add NPC, archive, removal and correction remain explicit controls. Story-text OOC commands do not execute.
 
-Use the settings **Add NPC** control and the dossier editor for manual changes. OOC-looking text does not execute dossier commands. Automatic death remains terminal; deliberate manual correction is available even when a dead record was not archived, and leaves presence unconfirmed. Manual/stale archive return for living NPCs remains unchanged. The retained appearance editor is scalar-facing, with manually locked edits reconciled into the selected form. Numerical scoring formulas and required historical-state recovery readers remain intact.
+**Appearance forms.** The dossier displays resolved current appearance and named forms. In Edit, Appearance forms exposes shared appearance, the selected form, named `Form name | Description` entries and an unclassified current presentation. Apply appearance forms saves that section independently of unrelated editor drafts. The shared resolver is also used by portrait prompts and roleplay injection; selecting one form does not overwrite another form's anatomy or canonical colors.
 
-The [stages 5-7 review](docs/stages5-7-review.md) records the 41,070-case pinned-source scoring comparison, integration fixes, removals, and verification boundaries. Local verification passed 495 unit tests plus compatibility/runtime/migration smoke checks; live provider/browser performance is not claimed.
+**Calendar & birthdays.** Dedicated settings accept ordered `Month name:days` lines and an optional era. No current year is required for stable deterministic month/day birthdays. A manual year/month/day is an optional all-or-none fallback. Recognized full dates in the owned assistant World State can supply chronology during scanning. Exact actual age may anchor a derived birth year; a compatible full birth date supports local chronological aging. Generated dates remain distinguishable from established dates. Apparent age and fantasy lifespan are never used for chronological deduction. See [birthday continuity](docs/birthday-continuity.md) for supported formats and limits.
 
-## Active runtime ownership
+**Portraits.** Dossier More > Portrait provides device upload/replacement, removal, editable positive/negative prompts, copying and explicit prompt rebuilding. That maintained surface is prompt-and-upload based. The retained runtime host-image workflow uses SillyTavern Image Generation independently of the scanner and keeps generated results preview-only until explicit application. Neither an appearance change nor a generated preview silently replaces an uploaded image. Uploads are bounded and failures/cancellation preserve the previous portrait.
 
-`runtime-modules.json` is the machine-readable shipping inventory. Every top-level runtime `.js` file must appear there exactly once with an explicit role, and the validator rejects undeclared or version/legacy-labelled active paths. Packaging consumes this inventory rather than globbing arbitrary JavaScript files.
+**Scanning and routes.** Settings > Scanning controls cadence, admission, full-window mode and the scanner connection profile. Empty profile retains the host default route; an explicit unavailable profile fails visibly rather than silently falling back. Ordinary roleplay and image generation retain their own routes. Maximum output tokens `0` preserves the built-in per-request allowances; an existing explicit override remains supported. No extra completeness/self-review calls, model worker or generation barrier is added.
 
-Source ancestry belongs in provenance, not in active classification. If inherited code is still called by Delta, it is active Delta code and must live under a current semantic module name. Historical documentation may retain original names and versions because changing those records would falsify provenance.
+**Relationships and lifecycle.** Accepted signed relationship formulas, fractional progress, directional gates, milestones, evidence rules and duplicate handling are preserved. Explicit confirmed death is terminal to automatic writers. A deliberate manual erroneous-death correction or owned rollback can correct invalid death state without fabricating narrative resurrection.
 
-## Governing documents
+**Native data and diagnostics.** Data & maintenance offers the versioned Delta-only native bundle, portraits, opt-in portable portrait settings and source-history audit. Matching dossiers reconcile and unrelated target dossiers remain; skipped records are reported. Imported source history is not replayed across chats: the target retains its safe history baseline and unproven source-message ownership is cleared. Complete validation precedes mutation. Diagnostics show actual dispatcher aggregates and current-chat pending writes, not private prompts or credentials. Token values are labelled local estimates, not provider usage.
 
-1. [AGENTS.md](AGENTS.md)
-2. [Core contract](docs/core-contract.md)
-3. [Workplan and stage status](docs/WORKPLAN.md)
-4. [Development and verification](DEVELOPMENT.md)
-5. [Seed provenance](docs/seed-provenance.md)
+## Installation and updates
 
-Reference history under `docs/history/` describes upstream versions and is not Delta's behavior authority or current validation evidence.
+Use SillyTavern 1.18.0 or a compatible later host. Install this repository through the host extension installer, or unpack `npc_state_delta-1.0.0.zip` so one `npc_state_delta` folder contains `manifest.json` directly. Reload the host after updating. Keep a native Delta backup before changing an existing installation.
 
-## Development installation
+The package is generated by the existing `npm run package` command; its SHA-256 sidecar is written beside it in `dist/`. It contains only the declared runtime JavaScript, stylesheet, manifest, runtime inventory, license and README. Tests, development scripts, Git history and verification artifacts are excluded. CI retains the same installable ZIP and a reproducible verification source bundle through the existing artifact workflow. There is no additional release/tag pipeline.
 
-Use an isolated SillyTavern 1.18.0-compatible test instance with synthetic chats. Install the repository or generated runtime ZIP as one `npc_state_delta` extension folder; `manifest.json` is directly inside it. Namespace separation protects identity, but simultaneous automatic writers from several NPC extensions are not an accepted configuration. Do not use this development build to import another generation's database.
+Do not import Alpha/Beta/other-generation databases. Required historical Delta storage readers remain active for owned recovery; they are not foreign-generation converters. Namespace isolation does not make simultaneous automatic writers from multiple NPC extensions an accepted configuration.
 
-No live user chat or NPC database is required by the verification suite. Browser/provider compatibility, visual layout, and live latency are separate host checks.
+## Ownership and verification
 
-## Verify
+`runtime-modules.json` is the one shipping inventory. Canonical state, settings, scanner dispatch, numerical mechanics, persistence/recovery and appearance resolution each retain one owner. UI projections and editor drafts do not become parallel databases. Application version 1.0.0 is independent of the unchanged storage/bundle/branch format versions. GPL-3.0 and immutable seed/history records are preserved.
 
 ```sh
 npm test
 npm run validate
 npm run measure:prompts
+node scripts/measure-stage9.mjs
 npm run package
 git diff --check
 ```
 
-Node.js 24 and Python 3 are used by the dependency-free verification/package scripts. See `DEVELOPMENT.md` for direct commands when npm is unavailable.
+Node.js 24 and Python 3 are required for the dependency-free core workflow. Optional synthetic-browser checks use an already available Playwright/Chromium installation; they are not runtime dependencies. Commands, evidence and limitations are in [DEVELOPMENT.md](DEVELOPMENT.md) and [the Stage 9 report](docs/stage9-review.md).
+
+Behavior is governed by [AGENTS.md](AGENTS.md), [the core contract](docs/core-contract.md) and [the workplan](docs/WORKPLAN.md). Historical source records describe their original snapshots, not current release acceptance.

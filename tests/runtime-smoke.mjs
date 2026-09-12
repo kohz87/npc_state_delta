@@ -395,7 +395,7 @@ try {
     await import(pathToFileURL(path.join(extRoot, 'index.js')).href + `?t=${Date.now()}`);
     await sleep(30);
     assert.equal(mounted, true, 'settings panel should mount');
-    assert.equal(globalThis.NPCStateDelta?.version, '0.1.0');
+    assert.equal(globalThis.NPCStateDelta?.version, JSON.parse(fs.readFileSync(path.join(sourceRoot, 'manifest.json'), 'utf8')).version);
     assert.ok(mockState.extensionSettings.npc_state_delta, 'settings namespace should initialize');
     assert.equal(mockState.extensionSettings.npc_state_delta.admissionMode, 'conservative');
     assert.equal(mockState.extensionSettings.npc_state_delta.chats, undefined, 'live NPC database should not be stored in extension_settings');

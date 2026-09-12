@@ -1,4 +1,6 @@
-/* NPC State Delta Stage 1 dossier surface: presentation adapter over canonical legacy state. */
+/* NPC State Delta dossier surface: bounded presentation of canonical state. */
+import { normalizeAppearanceModel, resolveNpcAppearance } from './appearance.js';
+import { formatBirthDate } from './birthday.js';
 
 const ROOT_ID = 'npc_state_delta_dossier_root';
 const STYLE_ID = 'npc_state_delta_dossier_stage1_styles';
@@ -81,7 +83,10 @@ export function dossierDetailProjection(npc = {}, portraitAssets = {}) {
     return {
         ...dossierIndexProjection(npc, portraitAssets),
         age: plain(npc?.age),
-        appearance: plain(npc?.appearance),
+        appearance: resolveNpcAppearance(npc),
+        appearanceModel: normalizeAppearanceModel(npc, { locked: Array.isArray(npc?.manualProfileFields) && npc.manualProfileFields.includes('appearance') }),
+        birthday: formatBirthDate(npc?.birthDate),
+        birthdaySource: plain(npc?.birthDateSource),
         personality: plain(npc?.personality),
         behaviorProfile: stringList(npc?.behaviorProfile, 10),
         speech: plain(npc?.speech),
@@ -206,6 +211,42 @@ function currentCard(label, value, fallback = 'Unknown') {
     return `<div class="delta-current-card"><b>${escapeHtml(label)}</b><span>${escapeHtml(plain(value, fallback))}</span></div>`;
 }
 
+function birthdayCard(npc) {
+    const source = npc.birthdaySource === 'generated' ? 'Deterministic fallback'
+        : npc.birthdaySource === 'established' ? 'Story established' : '';
+    return `<div class="delta-current-card delta-continuity-birthday-card"><b>Birthday</b><span>${escapeHtml(npc.birthday || 'Unknown')}</span>${source ? `<small class="delta-continuity-source">${escapeHtml(source)}</small>` : ''}</div>`;
+}
+
+function appearanceFormsHtml(npc) {
+    const model = npc.appearanceModel;
+    const current = model.currentFormUnknown ? 'Unclassified / unknown' : model.currentForm || 'No selected form';
+    const rows = model.appearanceForms.map(form => `<div class="delta-appearance-form-row"><b>${escapeHtml(form.name)}${form.name === model.currentForm ? '<span class="delta-appearance-current-badge">Current</span>' : ''}</b>${proseHtml(form.appearance)}</div>`).join('');
+    return `<details class="delta-appearance-form-summary" data-delta-key="appearance"><summary><b>Appearance forms</b><small>Current: ${escapeHtml(current)}</small></summary><div class="delta-appearance-form-list">${model.overallAppearance ? `<div class="delta-appearance-form-row"><b>Shared across forms</b>${proseHtml(model.overallAppearance)}</div>` : ''}${rows || '<p class="delta-muted">No named forms established.</p>'}</div></details>`;
+}
+
+// Cache only rendered section markup on its DOM node, never canonical state/history.
+// Unchanged sections retain their nodes, selection, focus and open disclosure controls.
+function reconcileDocumentSections(parent, markup, reset = false) {
+    const template = document.createElement('template');
+    template.innerHTML = markup;
+    const children = [...template.content.children];
+    children.forEach((candidate, index) => {
+        const previous = parent.children[index];
+        const signature = candidate.outerHTML;
+        if (!reset && previous?.__deltaSectionMarkup === signature) return;
+        candidate.__deltaSectionMarkup = signature;
+        if (!reset && previous) {
+            for (const detail of previous.querySelectorAll('details[data-delta-key]')) {
+                const next = candidate.querySelector(`details[data-delta-key="${CSS.escape(detail.dataset.deltaKey)}"]`);
+                if (next) next.open = detail.open;
+            }
+        }
+        if (previous) previous.replaceWith(candidate);
+        else parent.appendChild(candidate);
+    });
+    while (parent.children.length > children.length) parent.lastElementChild.remove();
+}
+
 function relationshipAxis(label, value, axis) {
     const score = relationshipValue(value);
     const position = Math.max(0, Math.min(100, (score + 100) / 2));
@@ -240,6 +281,7 @@ class DeltaDossierUi {
         this.lastChatKey = '';
         this.lastRailSignature = '';
         this.lastDetailSignature = '';
+        this.lastHeroSignature = '';
         this.dirtyWhileClosed = true;
         this.refreshQueued = false;
         this.legacyObserver = null;
@@ -384,7 +426,8 @@ class DeltaDossierUi {
     }
 
     onDocumentKeydown(event) {
-        if (!this.panelOpen || event.key !== 'Escape') return;
+        if (!this.panelOpen || event.key !== 'Escape' || event.defaultPrevented
+            || document.getElementById('npc_state_delta_tools_overlay')) return;
         const uiStatus = this.safeUiStatus();
         if (uiStatus?.editorMounted || uiStatus?.portraitGeneratorOpen) return;
         event.preventDefault();
@@ -430,6 +473,7 @@ class DeltaDossierUi {
             if (search) search.value = '';
             this.lastRailSignature = '';
             this.lastDetailSignature = '';
+            this.lastHeroSignature = '';
         }
 
         if (chatKey === 'no-chat') {
@@ -445,7 +489,7 @@ class DeltaDossierUi {
             return;
         }
         try {
-            const state = typeof this.api?.getState === 'function' ? this.api.getState() : { npcs: [] };
+            const state = typeof this.api?.getDossierState === 'function' ? this.api.getDossierState() : this.api?.getState?.() || { npcs: [] };
             this.projection = projectDossierState(state, status);
             this.dirtyWhileClosed = false;
             this.renderFromProjection({ forceRail: force || chatChanged, forceDetail: force || chatChanged });
@@ -465,9 +509,10 @@ class DeltaDossierUi {
         const projection = this.projection;
         const hasChat = projection.chatKey && projection.chatKey !== 'no-chat';
 
-        chatState.textContent = hasChat ? `Turn ${projection.turn}` : 'No chat';
+        const turnLabel = hasChat ? `Turn ${projection.turn}` : 'No chat';
+        if (chatState.textContent !== turnLabel) chatState.textContent = turnLabel;
         notice.hidden = true;
-        notice.textContent = '';
+        if (notice.textContent) notice.textContent = '';
 
         if (!hasChat) {
             empty.hidden = false;
@@ -491,6 +536,7 @@ class DeltaDossierUi {
         this.renderRail(filtered, { force: forceRail });
         this.renderDetail(filtered, { force: forceDetail });
         panel?.setAttribute('data-has-results', filtered.length ? 'true' : 'false');
+        this.root.dispatchEvent?.(new CustomEvent('npc-state-delta:dossier-rendered', { bubbles: true }));
     }
 
     renderFilters(rows) {
@@ -501,13 +547,14 @@ class DeltaDossierUi {
             button.classList.toggle('active', active);
             button.setAttribute('aria-pressed', String(active));
             const count = button.querySelector('[data-count]');
-            if (count) count.textContent = String(counts[key] || 0);
+            const countLabel = String(counts[key] || 0);
+            if (count && count.textContent !== countLabel) count.textContent = countLabel;
         }
     }
 
     renderRail(filtered, { force = false } = {}) {
         const list = this.root.querySelector('.delta-cast-list');
-        const signature = JSON.stringify(filtered.map(row => [row.id, row.name, row.statusLabel, row.role, row.species, row.portrait, row.updatedAt, row.id === this.selectedNpcId]));
+        const signature = JSON.stringify(filtered.map(row => [row.id, row.name, row.statusLabel, row.role, row.species, row.portrait, row.id === this.selectedNpcId]));
         if (!force && signature === this.lastRailSignature) return;
         this.lastRailSignature = signature;
         const scrollLeft = list.scrollLeft;
@@ -533,9 +580,16 @@ class DeltaDossierUi {
         const documentPane = this.root.querySelector('.delta-document');
         const selected = this.projection.npcs.find(npc => npc.id === this.selectedNpcId) || null;
         const selectedVisible = filtered.some(row => row.id === this.selectedNpcId);
-        const signature = selectedVisible && selected ? JSON.stringify(selected) : `empty:${this.filter}:${this.query}`;
-        if (!force && signature === this.lastDetailSignature) return;
+        const subtitle = selected ? identityLine(selected) : '';
+        const signature = selectedVisible && selected
+            ? JSON.stringify({ ...selected, portrait: undefined, updatedAt: undefined }) : `empty:${this.filter}:${this.query}`;
+        const heroSignature = selectedVisible && selected
+            ? JSON.stringify([selected.id, selected.name, subtitle, selected.bucket, selected.statusLabel, selected.portrait]) : signature;
+        const documentChanged = force || signature !== this.lastDetailSignature;
+        const heroChanged = force || heroSignature !== this.lastHeroSignature;
+        if (!documentChanged && !heroChanged) return;
         this.lastDetailSignature = signature;
+        this.lastHeroSignature = heroSignature;
         const documentScroll = documentPane.scrollTop;
 
         if (!selected || !selectedVisible) {
@@ -544,8 +598,7 @@ class DeltaDossierUi {
             return;
         }
 
-        const subtitle = identityLine(selected);
-        hero.innerHTML = `
+        if (heroChanged) hero.innerHTML = `
             <div class="delta-hero-media">${portraitHtml(selected, 'delta-hero-portrait')}
                 <div class="delta-hero-caption">
                     <span class="delta-status delta-status-${escapeHtml(selected.bucket)}">${escapeHtml(selected.statusLabel)}</span>
@@ -555,7 +608,7 @@ class DeltaDossierUi {
             </div>
             <div class="delta-hero-actions"><button type="button" class="delta-btn delta-primary delta-edit" data-npc-id="${escapeHtml(selected.id)}">Edit dossier</button></div>`;
 
-        documentPane.innerHTML = `
+        if (documentChanged) reconcileDocumentSections(documentPane, `
             <div class="delta-document-head">
                 <div><span class="delta-kicker">CURRENT DOSSIER</span><h2>${escapeHtml(selected.name)}</h2><p class="delta-muted">${escapeHtml(subtitle)}</p></div>
                 <button type="button" class="delta-btn delta-edit" data-npc-id="${escapeHtml(selected.id)}">Edit</button>
@@ -563,6 +616,7 @@ class DeltaDossierUi {
             <section class="delta-section">
                 <h3>Current</h3>
                 <div class="delta-current-grid">
+                    ${birthdayCard(selected)}
                     ${currentCard('Mood', selected.mood)}
                     ${currentCard('Location', selected.location)}
                     ${currentCard('Goal', selected.goal)}
@@ -575,7 +629,7 @@ class DeltaDossierUi {
                     <div><h4>Personality</h4>${proseHtml(selected.personality)}</div>
                     <div><h4>Speech</h4>${proseHtml(selected.speech)}</div>
                     <div class="delta-wide"><h4>Behavioral profile</h4>${listHtml(selected.behaviorProfile, 'No compact behavioral profile established yet.')}</div>
-                    <div class="delta-wide"><h4>Appearance</h4>${proseHtml(selected.appearance)}</div>
+                    <div class="delta-wide"><h4>Appearance</h4>${proseHtml(selected.appearance)}${appearanceFormsHtml(selected)}</div>
                     <div class="delta-wide"><h4>Mannerisms</h4>${listHtml(selected.mannerisms)}</div>
                 </div>
             </section>
@@ -595,7 +649,8 @@ class DeltaDossierUi {
             </section>
             <section class="delta-section">
                 <h3>Background</h3>${proseHtml(selected.background, 'No background established yet.')}
-            </section>`;
+            </section>`, documentPane.dataset.npcId !== selected.id);
+        documentPane.dataset.npcId = selected.id;
         documentPane.scrollTop = documentScroll;
     }
 

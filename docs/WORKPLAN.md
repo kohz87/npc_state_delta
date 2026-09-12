@@ -1,21 +1,23 @@
 # NPC State Delta — staged workplan
 
-These are sequential work stages for one source-baseline-derived extension. They are not separate architectures. The seed is complete. Stages 1-7 are implemented and deterministically verified. Stage 8 is implemented on its acceptance candidate and becomes accepted only after required CI passes for that exact candidate; Stage 9 remains pending. Real-host visual/provider acceptance for stages 4-8 remains pending where explicitly noted. The core contract governs behavior.
+These are sequential work stages of one source-derived Delta codebase, not separate architectures. Stages 1-8 and the authorized calendar/birthday/form UI follow-ups are integrated. Stage 9 prepares the Delta 1.0.0 candidate while preserving the working prompt. Exact-candidate CI is the publication gate; live host/provider behavior remains separately qualified.
 
 ## Status
 
 | Stage | Scope | Status |
 | --- | --- | --- |
-| Seed | Pinned source, Delta isolation, governing documents, reproducible verification | Prepared; see seed provenance for executed results |
-| 1 | Side launcher and Beta-style dossier UI/UX | Accepted after deterministic checks and user tablet/mobile host QA |
-| 2 | Compact code consolidation, active-runtime normalization, and Delta application version | Accepted as Delta `0.1.0`; active-runtime normalization passed exact-candidate PR CI |
-| 3 | Baseline scanner with selectable connection profiles | Implemented; shared request-scoped dispatcher and post-merge hotfix verified on main |
-| 4 | Baseline evolution, appearance forms, terminal automatic death | Implemented; deterministic verification passed, live host acceptance pending |
-| 5 | Verify and retain accepted relationship scoring | Implemented; pinned numerical oracle and integration regressions pass |
-| 6 | Verify accepted evidence and identity-first injection | Implemented; omission, characterization and budgeted appearance checks pass |
-| 7 | Retained storage/recovery; remove OOC commands | Implemented; OOC removed and manual/owned-recovery checks pass |
-| 8 | Portrait tooling, clean native import/export, diagnostics | Implemented candidate; required exact-candidate CI and live-host UI/image checks are the remaining acceptance gates |
-| 9 | Prompt/token baseline and final integrated verification | Pending |
+| Seed | Pinned source, isolation, provenance | Preserved; immutable provenance records retained |
+| 1 | Launcher and dossier UI | Integrated; earlier user mobile/tablet feedback plus Stage 9 synthetic browser checks |
+| 2 | Active-runtime consolidation | Integrated; application versions independent of data schemas |
+| 3 | Capture and scanner profiles | Integrated; both routes and request budgets retained |
+| 4 | Evolution, appearance forms, terminal death | Integrated; shared resolver, manual corrections and owned rollback retained |
+| 5 | Accepted relationship scoring | Integrated; pinned 41,070-case numerical oracle retained |
+| 6 | Evidence and identity-first injection | Integrated; working prompt and characterization loop retained |
+| 7 | Storage/recovery and OOC removal | Integrated; required historical-state readers retained |
+| 8 | Portraits, native transfer, diagnostics | Integrated through accepted CI and UI follow-ups; live image-provider checks remain separate |
+| 9 | Consolidation, budget preservation, integrated release review | Implemented/local verification; accept 1.0.0 only after latest-candidate CI passes |
+
+The later calendar/birthday/form UI amendments are part of the accepted baseline, not Stage 9 inventions. The maintained Portrait UI is prompt/upload based; the retained native host-image preview/application integration is also preserved. See `docs/stage9-review.md` for current evidence and the earlier sections below for stage history.
 
 ## Seed boundary
 
@@ -99,11 +101,17 @@ Responsive dialogs use safe-area-aware `100dvh` sizing, bounded internal scrolli
 
 Focused synthetic coverage is in `tests/stage8-supporting-tools.test.js`; the detailed implementation and live-host verification boundary is recorded in `docs/stage8-supporting-tools.md`. Required repository test/validation/prompt/package CI must pass on the exact candidate before Stage 8 is marked accepted. Real SillyTavern verification remains required for desktop/tablet/mobile layout, device file picker/touch behavior, host Image Generation preview/application, and update-arrival behavior while the workflow is open.
 
-## Stage 9 — prompts and integrated acceptance
+## Stage 9: consolidation and integrated release acceptance
 
-Keep prompt simplicity and starting limits. Compare exact constructed prompts for shared scenes with the seed, including request wrappers and any conditional focused passes. Record justified growth from forms/death/routing separately. Never compare a complete scan to only another system's partial extraction pass, or claim deferred work is free.
+The current user instruction supersedes the earlier prompt-optimization plan. Keep the accepted model-facing prompt, schemas, evidence/context coverage, output/reasoning budgets and request counts. Small wording clarification is allowed only for a concrete ambiguity, with no semantic expansion; none is needed in this candidate. Investigate capture/context/request/parsing/merge/persistence/display before blaming extraction.
 
-Run the integrated loop after all earlier stages: completed reply, scan routing, populated dossier, persistence, next-prompt characterization, selected-form portrait, branch recovery, and native export/import. Run the full deterministic suite, validation, prompt measurement, package check, and applicable browser/provider acceptance. Record model/settings, actual request counts, foreground wait, time-to-dossier, and settled backlog where measurable. Report unrun real-host/provider checks explicitly.
+Trace production entrypoints, dynamic handlers, APIs, settings/state, timers, queues, routes, persistence/recovery and packaging. Remove only verified superseded paths, redundant copies/serialization, duplicate listeners, unnecessary writes and rerenders. Do not change numerical formulas, connection profiles, ownership, terminal-death rules or required recovery readers. No replacement engine/framework, duplicate state store, model worker or additional request barrier.
+
+Use at most five review/fix cycles: review with severity and evidence; fix actionable in-scope defects; run affected checks and the complete workflow for a release candidate; update one changelog entry and `docs/stage9-review.md`; review again or stop after a complete clean review. The integrated matrix includes normal/edit/swipe/delete/chat switching, stale/duplicate/canceled requests, both routes, first encounter/refinement/omission, characterization injection, forms/colors/anatomy, death/correction/rollback, relationship gates/fractions/replays, storage locks/recovery, validated native transfer, portraits, diagnostics and responsive editing.
+
+Compare identical baseline/candidate fixtures. `scripts/measure-stage9.mjs` captures production-built Delta-owned messages and actual mocked dispatcher invocations on both routes, including retries; its baseline fixture records hashes and allowances. It does not measure host-added preset text or paid provider usage. Optional browser checks load actual local UI modules with a synthetic host; no live chat/database/provider is touched.
+
+Prepare coherent 1.0.0 manifest, package metadata, displayed version, README, changelog and installable ZIP using existing conventions. Storage, bundle and branch formats do not inherit application version changes. Run all unit/behavior tests, compatibility/runtime/migration smoke, validation, prompt comparison, package integrity and whitespace checks. Commit only the final reviewed candidate; push branch, PR, latest-head CI, then merge and verify main. Unresolved blocking findings prevent release; unrun real-host/Gemini checks must be disclosed, not invented.
 
 ## Working and completion discipline
 
