@@ -3,6 +3,7 @@ import { decodeNpcStateBundle, encodeNpcStateBundle } from './bundle.js';
 
 const MAGIC_BYTES = 8;
 const HEADER_BYTES = 12;
+const MAX_MANIFEST_BYTES = 2 * 1024 * 1024;
 const MAX_NATIVE_BYTES = 32 * 1024 * 1024;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -18,7 +19,7 @@ function parseEnvelope(input) {
     if (value.byteLength < HEADER_BYTES) throw new Error('NPC State Delta bundle is truncated.');
     const manifestLength = new DataView(value.buffer, value.byteOffset, value.byteLength).getUint32(MAGIC_BYTES, true);
     const binaryStart = HEADER_BYTES + manifestLength;
-    if (!manifestLength || binaryStart > value.byteLength) throw new Error('NPC State Delta bundle manifest is truncated.');
+    if (!manifestLength || manifestLength > MAX_MANIFEST_BYTES || binaryStart > value.byteLength) throw new Error('NPC State Delta bundle manifest is truncated or exceeds the 2 MB safety limit.');
     let manifest;
     try { manifest = JSON.parse(textDecoder.decode(value.subarray(HEADER_BYTES, binaryStart))); }
     catch { throw new Error('NPC State Delta bundle manifest is invalid JSON.'); }
@@ -73,6 +74,7 @@ export function augmentNativeBundle(input, { portableSettings = null, historyArc
     if (historyArchive && typeof historyArchive === 'object') manifest.historyArchive = structuredClone(historyArchive);
     else delete manifest.historyArchive;
     const manifestBytes = textEncoder.encode(JSON.stringify(manifest));
+    if (manifestBytes.length > MAX_MANIFEST_BYTES) throw new Error('NPC State Delta native source-history metadata exceeds the 2 MB manifest safety limit. Reduce retained chat history before exporting.');
     const total = HEADER_BYTES + manifestBytes.length + binary.length;
     if (total > MAX_NATIVE_BYTES) throw new Error('NPC State Delta native bundle exceeds the 32 MB safety limit after adding source history.');
     const output = new Uint8Array(total);
