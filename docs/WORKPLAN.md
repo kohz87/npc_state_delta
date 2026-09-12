@@ -1,6 +1,6 @@
 # NPC State Delta — staged workplan
 
-These are sequential work stages for one source-baseline-derived extension. They are not separate architectures. The seed is complete. Stages 1-4 are implemented and deterministically verified; stages 5–9 remain pending until requested. Stage 4 real-host visual/provider acceptance remains pending. The core contract governs behavior.
+These are sequential work stages for one source-baseline-derived extension. They are not separate architectures. The seed is complete. Stages 1-7 are implemented and deterministically verified; stages 8-9 remain pending until requested. Real-host visual/provider acceptance for stages 4-7 remains pending. The core contract governs behavior.
 
 ## Status
 
@@ -11,9 +11,9 @@ These are sequential work stages for one source-baseline-derived extension. They
 | 2 | Compact code consolidation, active-runtime normalization, and Delta application version | Accepted as Delta `0.1.0`; active-runtime normalization passed exact-candidate PR CI |
 | 3 | Baseline scanner with selectable connection profiles | Implemented; shared request-scoped dispatcher and post-merge hotfix verified on main |
 | 4 | Baseline evolution, appearance forms, terminal automatic death | Implemented; deterministic verification passed, live host acceptance pending |
-| 5 | Verify and retain accepted relationship scoring | Pending |
-| 6 | Verify accepted evidence and identity-first injection | Pending |
-| 7 | Retained storage/recovery; remove OOC commands | Pending |
+| 5 | Verify and retain accepted relationship scoring | Implemented; pinned numerical oracle and integration regressions pass |
+| 6 | Verify accepted evidence and identity-first injection | Implemented; omission, characterization and budgeted appearance checks pass |
+| 7 | Retained storage/recovery; remove OOC commands | Implemented; OOC removed and manual/owned-recovery checks pass |
 | 8 | Portrait tooling, clean native import/export, diagnostics | Pending |
 | 9 | Prompt/token baseline and final integrated verification | Pending |
 
@@ -82,6 +82,8 @@ Verify a supported first encounter; proper name established in structured contex
 Retain the accepted sidecar/owner/revision/locking/recovery design under Delta identity. Verify chat rename/delete, identical filenames under different owners, edit/swipe/delete/reload, stale writes, transient upload failure, tombstones, dirty-cache eviction protection, and manual correction retention.
 
 Remove the OOC parser and command-only event wiring, API paths, help text, fixtures, and backfill dependencies. Keep shared functions used by manual controls or scans. Test that OOC-looking story text no longer mutates dossiers, while manual add/edit/remove and relevant repair still work. No real user data operations and no generational migration product surface.
+
+Stages 5-7 completion is recorded in `docs/stages5-7-review.md`: numerical formulas and recovery readers are preserved, scoped integration regressions are corrected, and OOC command entry points are removed. The local workflow passes 495 unit tests plus all three smoke/contract programs, validation, prompt measurement and packaging. Live browser/provider acceptance is not claimed. Stage 8 native format/supporting tools and Stage 9 integrated performance acceptance remain separate work.
 
 ## Stage 8 — supporting tools
 

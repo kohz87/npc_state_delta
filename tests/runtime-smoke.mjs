@@ -354,6 +354,7 @@ globalThis.document = {
 };
 
 let mounted = false;
+const uiHandlers = new Map();
 const makeQuery = (selector) => {
     const isHost = selector === '#extensions_settings2';
     const isLegacyHost = selector === '#extensions_settings' || selector === '#extensionsMenu';
@@ -362,7 +363,12 @@ const makeQuery = (selector) => {
     const q = {
         length: exists ? 1 : 0,
         append(html) { if (String(html).includes('id="npc_state_delta_settings"')) mounted = true; return q; },
-        off() { return q; }, on() { return q; }, prop() { return q; }, val() { return q; },
+        off() { return q; },
+        on(event, target, handler) {
+            if (selector === document && typeof target === 'string' && typeof handler === 'function') uiHandlers.set(`${event}|${target}`, handler);
+            return q;
+        },
+        prop() { return q; }, val() { return q; },
         html() { return q; }, toggleClass() { return q; }, text() { return q; }, attr() { return q; }, data() { return undefined; },
     };
     return q;
@@ -373,6 +379,17 @@ globalThis.$ = (selector) => {
 };
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function manualAddNpc(name) {
+    const previous = globalThis.prompt;
+    globalThis.prompt = () => name;
+    try {
+        const add = uiHandlers.get('click.npcStateDelta|#npc_state_delta_add_manual');
+        assert.equal(typeof add, 'function', 'manual Add must be connected to the production settings handler');
+        add();
+    } finally { globalThis.prompt = previous; }
+}
+
 
 try {
     await import(pathToFileURL(path.join(extRoot, 'index.js')).href + `?t=${Date.now()}`);
@@ -394,12 +411,17 @@ try {
     mockState.extensionSettings.npc_state_delta.memoryCriteria = 'Runtime custom memory rubric.';
     mockState.extensionSettings.npc_state_delta.behaviorCriteria = 'Runtime custom behavior rubric.';
 
-    // OOC add creates the persistent dossier but does not force an off-screen inline card.
+    // Removed text commands are inert. The retained settings Add creates an off-screen dossier.
     mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: '(OOC: NPC State Delta: add Yunyun)' });
     eventSource.emit('message_sent', 0);
     await sleep(20);
+    assert.equal(globalThis.NPCStateDelta.processOoc, undefined, 'removed command API must not remain callable');
+    assert.deepEqual(globalThis.NPCStateDelta.getState().npcs, [], 'OOC add must not mutate dossiers');
+    assert.deepEqual(globalThis.NPCStateDelta.getState().pendingBackfills, [], 'OOC add must not enqueue a scan');
+    assert.equal(mockState.rawCalls.length, 0, 'user text must not create model requests');
+    manualAddNpc('Yunyun');
     assert.deepEqual(globalThis.NPCStateDelta.getState().npcs.map(n => n.name), ['Yunyun']);
-    assert.equal(inlineAnchors.length, 0, 'OOC add should not bypass presence gating');
+    assert.equal(inlineAnchors.length, 0, 'manual Add should not bypass presence gating');
     await globalThis.NPCStateDelta.flush();
     const pointer = globalThis.NPCStateDelta.dataFile();
     assert.ok(pointer?.path, 'chat state should be persisted to an extension-owned JSON sidecar file');
@@ -407,7 +429,7 @@ try {
     const persistedAfterAdd = JSON.parse(mockState.files.get(pointer.path));
     assert.equal(persistedAfterAdd.state.npcs[0].name, 'Yunyun');
     assert.deepEqual(Object.keys(persistedAfterAdd.state.npcs[0].relationship).sort(), ['affection', 'desire', 'tension', 'trust']);
-    assert.deepEqual(persistedAfterAdd.state.npcs[0].relationship, { trust: 0, affection: -12, desire: 0, tension: -7 }, 'manual/OOC add should support a configured bipolar baseline');
+    assert.deepEqual(persistedAfterAdd.state.npcs[0].relationship, { trust: 0, affection: -12, desire: 0, tension: -7 }, 'manual Add should support a configured bipolar baseline');
 
     // Scanner admits proper/dossier-worthy NPCs and only renders the one actually present in the latest scene.
     mockState.quietResponder = async (args = {}) => {
@@ -448,7 +470,7 @@ try {
     assert.match(String(rawBackfillArgs.prompt || ''), /Runtime custom memory rubric/i, 'targeted backfill should use the same memory criteria');
     assert.equal('jsonSchema' in rawBackfillArgs, false, 'backfill must not depend on provider structured-output schemas');
     assert.equal(rawBackfillArgs.responseLength, 3200);
-    assert.equal(globalThis.NPCStateDelta.getState().pendingBackfills.length, 0, 'queued OOC backfill should be consumed after the next assistant reply');
+    assert.equal(globalThis.NPCStateDelta.getState().pendingBackfills.length, 0, 'retained continuity backfill should be consumed after the next assistant reply');
     assert.equal(state.npcs.find(n => n.name === 'Yunyun').age, '18');
     assert.equal(state.npcs.find(n => n.name === 'Yunyun').species, 'Crimson Demon');
     assert.match(state.npcs.find(n => n.name === 'Yunyun').appearance, /crimson eyes/);
@@ -760,8 +782,14 @@ try {
     assert.equal(globalThis.NPCStateDelta.getState().npcs.some(n => n.name === 'Luna'), false);
 
     mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: '(OOC: NPC State Delta: remove Yunyun)' });
+    const beforeRemovedCommand = globalThis.NPCStateDelta.getState();
+    const callsBeforeRemovedCommand = mockState.rawCalls.length;
     eventSource.emit('message_sent', 2);
     await sleep(30);
+    assert.deepEqual(globalThis.NPCStateDelta.getState().npcs, beforeRemovedCommand.npcs, 'OOC remove cannot change dossiers or relationship history');
+    assert.deepEqual(globalThis.NPCStateDelta.getState().dismissed, beforeRemovedCommand.dismissed, 'OOC remove cannot suppress rediscovery');
+    assert.equal(mockState.rawCalls.length, callsBeforeRemovedCommand);
+    assert.equal(globalThis.NPCStateDelta.deleteNpc(yunyunId), true);
     assert.equal(globalThis.NPCStateDelta.getState().npcs.some(n => n.name === 'Yunyun'), false);
     assert.equal(globalThis.NPCStateDelta.getState().inlineCards.some(entry => entry.cards.some(card => card.name === 'Yunyun')), false);
     await globalThis.NPCStateDelta.flush();
@@ -771,10 +799,11 @@ try {
         mes: 'The two receptionists stack the forms. <details><summary>📌 <b>World State</b></summary><b>Myla (Senior Receptionist):</b> Working the Bluewatch guild desk, calm and methodical.<br><b>Toris (Receptionist):</b> Sorting contract ledgers beside her, tired but attentive.</details><details><summary>💭 <b>NPC Inner Chatter</b></summary>Myla: I need to finish the audit before noon.<br>Toris: I still have three ledgers to finish.</details>',
     });
     const backfillStoryId = mockState.context.chat.length - 1;
-    mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: '(OOC: NPC State Delta: add Myla; add Toris)' });
-    const multiOocId = mockState.context.chat.length - 1;
-    eventSource.emit('message_sent', multiOocId);
+    mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'I ask the two receptionists about their work.' });
+    eventSource.emit('message_sent', mockState.context.chat.length - 1);
     await sleep(20);
+    manualAddNpc('Myla');
+    manualAddNpc('Toris');
     mockState.quietResponder = async (args = {}) => {
         if (args.jsonSchema) return '{"npcs":[]}';
         const prompt = String(args.prompt || '');
@@ -798,12 +827,13 @@ try {
         }
         return '{"npcs":[]}';
     };
-    await globalThis.NPCStateDelta.processBackfills(backfillStoryId);
+    await globalThis.NPCStateDelta.scanDossier('Myla');
+    await globalThis.NPCStateDelta.scanDossier('Toris');
     state = globalThis.NPCStateDelta.getState();
     const myla = state.npcs.find(n => n.name === 'Myla');
     const toris = state.npcs.find(n => n.name === 'Toris Vale');
-    assert.ok(myla, 'first target in a semicolon OOC add should backfill');
-    assert.ok(toris, 'second target in a semicolon OOC add should backfill');
+    assert.ok(myla, 'first manual target should backfill');
+    assert.ok(toris, 'second manual target should backfill');
     assert.equal(myla.role, 'Senior Receptionist');
     assert.equal(toris.role, 'Guild Receptionist');
     assert.equal(state.pendingBackfills.length, 0);
@@ -819,10 +849,10 @@ try {
         mes: 'Neris, the guild records clerk, closes a ledger. <details><summary>📌 <b>World State</b></summary><b>Neris (Records Clerk):</b> At the Bluewatch guild archive desk, organizing contract files.</details>',
     });
     const truncStoryId = mockState.context.chat.length - 1;
-    mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: '(OOC: NPC State Delta: add Neris)' });
-    const truncOocId = mockState.context.chat.length - 1;
-    eventSource.emit('message_sent', truncOocId);
+    mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'I approach Neris at the archive desk.' });
+    eventSource.emit('message_sent', mockState.context.chat.length - 1);
     await sleep(20);
+    manualAddNpc('Neris');
     let nerisBackfillAttempt = 0;
     mockState.quietResponder = async (args = {}) => {
         const prompt = String(args.prompt || '');
@@ -842,7 +872,7 @@ try {
         return '{"npcs":[]}';
     };
     const callsBeforeTruncationRetry = mockState.rawCalls.length;
-    await globalThis.NPCStateDelta.processBackfills(truncStoryId);
+    await globalThis.NPCStateDelta.scanDossier('Neris');
     state = globalThis.NPCStateDelta.getState();
     const neris = state.npcs.find(n => n.name === 'Neris');
     assert.ok(neris, 'truncated first backfill response should recover on retry');
@@ -1114,10 +1144,11 @@ try {
         mes: `<Blocks>\n<New_NPC name="Luna">\n**Name:** Luna | **Age:** 24\n**Role:** Guild archivist\n**Where to Find Them:** Bluewatch archive\n**Voice:** Clipped, formal, and precise.\n**Inner Circle:**\n* Mara — younger sister | fiercely protective\n* Dain — old rival | grudging respect\n**Read on the PC:** Wary but curious.\n</New_NPC>\n</Blocks>`,
     });
     const lunaDossierMessageId = mockState.context.chat.length - 1;
-    mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: '(OOC: NPC State Delta: add Luna)' });
+    mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'I read the archivist dossier.' });
     const lunaAddMessageId = mockState.context.chat.length - 1;
     eventSource.emit('message_sent', lunaAddMessageId);
     await sleep(20);
+    manualAddNpc('Luna');
     assert.ok(globalThis.NPCStateDelta.getState().npcs.some(n => n.name === 'Luna'));
     mockState.quietResponder = async (args = {}) => {
         const prompt = String(args.prompt || '');
@@ -1200,12 +1231,13 @@ try {
     assert.equal(lunaAfterRefresh.lastSeenTurn, lunaBeforeRefresh.lastSeenTurn, 'history refresh must not rewrite recency');
     assert.equal(globalThis.NPCStateDelta.scanMetrics()?.label, 'targeted-refresh');
 
-    mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: '(OOC: NPC State Delta: remove Luna)' });
+    mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'I close the archive register.' });
     const lunaRemoveMessageId = mockState.context.chat.length - 1;
     eventSource.emit('message_sent', lunaRemoveMessageId);
     await sleep(20);
+    globalThis.NPCStateDelta.deleteNpc(lunaAfterRefresh.id);
     assert.equal(globalThis.NPCStateDelta.getState().npcs.some(n => n.name === 'Luna'), false, 'test cleanup should remove imported Luna');
-    assert.equal(globalThis.NPCStateDelta.getState().pendingBackfills.some(item => item.label === 'Luna'), false, 'removal should also clear the queued OOC backfill');
+    assert.equal(globalThis.NPCStateDelta.getState().pendingBackfills.some(item => item.label === 'Luna'), false, 'manual removal should also clear queued backfill');
 
     mockState.extensionSettings.npc_state_delta.fullScanEveryTurn = true;
     mockState.extensionSettings.npc_state_delta.scanEvery = 20;
@@ -1249,6 +1281,85 @@ try {
     assert.equal(globalThis.NPCStateDelta.scanMetrics()?.label, 'automatic-full');
     assert.deepEqual(globalThis.NPCStateDelta.getState().npcs.find(n => n.id === fullScanTarget.id).relationship, relationshipBeforeFullScan, 'full-window scans must not replay numeric relationship deltas from older history');
     assert.equal(globalThis.NPCStateDelta.scanMetrics()?.relationshipPass, true, 'full-window existing-NPC relationship scoring should be revalidated against only the current exchange');
+
+    // Stages 5-7: exercise the production focused/Refresh/backfill paths, not facade-only calls.
+    const savedReviewSettings = Object.fromEntries(['autoScan', 'autoArchiveDeaths', 'fullScanEveryTurn', 'relationshipBaseline']
+        .map(key => [key, structuredClone(mockState.extensionSettings.npc_state_delta[key])]));
+    Object.assign(mockState.extensionSettings.npc_state_delta, {
+        autoScan: false, autoArchiveDeaths: false, fullScanEveryTurn: false,
+        relationshipBaseline: { trust: 0, affection: 0, desire: 0, tension: 0 },
+    });
+    manualAddNpc('Sentinel');
+    const sentinelId = globalThis.NPCStateDelta.getState().npcs.find(npc => npc.name === 'Sentinel').id;
+    mockState.context.chat.push({ is_user: true, name: 'Kazuma', mes: 'I introduce myself to Sentinel.' });
+    mockState.context.chat.push({ is_user: false, name: 'Megumin', mes: 'Sentinel regards Kazuma as a new acquaintance.', swipe_id: 0 });
+    const reviewZero = { trust: 0, affection: 0, desire: 0, tension: 0 };
+    const reviewEvidence = { trust: '', affection: '', desire: '', tension: '' };
+    mockState.quietResponder = async args => JSON.stringify({ npcs: [{
+        id: sentinelId, name: 'Sentinel', present: true,
+        ...(/relationship evaluator/i.test(args.systemPrompt) ? {
+            relationshipDelta: reviewZero, relationshipEvidence: reviewEvidence,
+            relationshipImpact: 'none', relationshipChangeReason: '',
+            relationshipSummary: 'She regards Kazuma as a new acquaintance.',
+        } : {}),
+    }] });
+    assert.equal(await globalThis.NPCStateDelta.scan(), true);
+    let sentinel = globalThis.NPCStateDelta.getState().npcs.find(npc => npc.id === sentinelId);
+    assert.deepEqual(sentinel.relationship, reviewZero);
+    assert.equal(sentinel.relationshipSummary, 'She regards Kazuma as a new acquaintance.', 'focused zero decision may initialize an empty description just like the primary merge');
+    assert.equal(sentinel.relationshipEventHistory.length, 0, 'description initialization does not invent a scoring event');
+    assert.equal(sentinel.present, true);
+    const sentinelBeforeDeath = structuredClone(sentinel);
+
+    mockState.context.chat.push({ is_user: true, name: 'Kazuma', mes: 'I call the healer.' });
+    mockState.context.chat.push({ is_user: false, name: 'Megumin', mes: 'The healer explicitly confirms Sentinel is dead.', swipe_id: 0 });
+    mockState.quietResponder = async () => JSON.stringify({ npcs: [{
+        id: sentinelId, name: 'Sentinel', lifeState: 'deceased', lifeStateCertainty: 'explicit',
+        lifeStateReason: 'The healer explicitly confirms Sentinel is dead.', present: true, worldActive: true,
+    }] });
+    assert.equal(await globalThis.NPCStateDelta.refreshFromChat(sentinelId), true);
+    let reviewState = globalThis.NPCStateDelta.getState();
+    sentinel = reviewState.npcs.find(npc => npc.id === sentinelId);
+    assert.equal(sentinel.archived, false, 'terminal safety cannot depend on the archive setting');
+    assert.equal(sentinel.lifeState, 'deceased');
+    assert.equal(sentinel.present, false);
+    assert.equal(sentinel.worldActive, false);
+    const deathCheckpoint = reviewState.checkpoints.at(-1);
+    const checkpointSentinel = deathCheckpoint?.snapshot?.npcs?.find(npc => npc.id === sentinelId);
+    assert.ok(checkpointSentinel, 'Refresh records a canonical source checkpoint');
+    assert.equal(checkpointSentinel.present, false, 'checkpoint cannot capture restored pre-death presence');
+
+    mockState.context.chat.push({ is_user: true, name: 'Kazuma', mes: 'I remember Sentinel.' });
+    mockState.context.chat.push({ is_user: false, name: 'Megumin', mes: 'Sentinel supposedly returns and thanks Kazuma for a rescue.', swipe_id: 0 });
+    const invalidRevival = { id: sentinelId, name: 'Sentinel', lifeState: 'alive', lifeStateCertainty: 'explicit',
+        present: true, worldActive: true, relationshipSummary: 'She relies on Kazuma completely.',
+        relationshipImpact: 'major', relationshipDelta: { ...reviewZero, trust: 5 },
+        relationshipEvidence: { ...reviewEvidence, trust: 'Kazuma rescued Sentinel.' },
+        relationshipChangeReason: 'Kazuma rescued Sentinel.',
+    };
+    const callsBeforeDeadScan = mockState.rawCalls.length;
+    mockState.quietResponder = async () => JSON.stringify({ npcs: [invalidRevival] });
+    assert.equal(await globalThis.NPCStateDelta.scan(), true);
+    const deadScanCalls = mockState.rawCalls.slice(callsBeforeDeadScan).map(call => call[0]);
+    assert.equal(deadScanCalls.some(args => /relationship evaluator/i.test(args.systemPrompt)), false, 'terminal target must not spend a focused relationship request');
+    assert.equal(await globalThis.NPCStateDelta.refreshFromChat(sentinelId), true);
+    assert.equal(await globalThis.NPCStateDelta.scanDossier(sentinelId), true, 'manual fallback backfill remains available for retained historical details');
+    await globalThis.NPCStateDelta.flush();
+    const terminalSaved = JSON.parse(mockState.files.get(globalThis.NPCStateDelta.dataFile().path)).state;
+    const retainedSentinel = terminalSaved.npcs.find(npc => npc.id === sentinelId);
+    for (const field of ['relationship', 'relationshipProgress', 'relationshipMilestones', 'relationshipEventHistory', 'relationshipSummary']) {
+        assert.deepEqual(retainedSentinel[field], sentinelBeforeDeath[field], `automatic post-death ${field} must not advance`);
+    }
+    assert.equal(retainedSentinel.lifeState, 'deceased');
+    assert.equal(retainedSentinel.present, false);
+    assert.equal(retainedSentinel.worldActive, false);
+    assert.equal(globalThis.NPCStateDelta.restore(sentinelId), true, 'explicit manual correction remains usable');
+    sentinel = globalThis.NPCStateDelta.getState().npcs.find(npc => npc.id === sentinelId);
+    assert.equal(sentinel.lifeState, 'alive');
+    assert.equal(sentinel.present, false);
+    assert.ok(sentinel.deathCorrection);
+    globalThis.NPCStateDelta.deleteNpc(sentinelId);
+    Object.assign(mockState.extensionSettings.npc_state_delta, savedReviewSettings);
 
     const persistenceTarget = globalThis.NPCStateDelta.getState().npcs.find(n => !n.archived);
     assert.ok(persistenceTarget, 'runtime should retain an NPC for persistence race validation');

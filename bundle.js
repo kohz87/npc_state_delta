@@ -378,7 +378,6 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
         npcs,
         socialGraph,
         dismissed,
-        processedOocMessageId: null,
         lastScannedMessageId: null,
         assistantSinceScan: 0,
     };

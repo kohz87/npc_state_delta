@@ -1,5 +1,15 @@
 # NPC State Delta changes
 
+## Stages 5-7 relationship, evidence and recovery review - 12 September 2026
+
+- Preserve the pinned numerical scorer, including signed diminishing returns, fractions, gates, configured-cap minima and tied-axis rejection. Add a hash-verified upstream result oracle covering 41,070 cases and end-to-end repeat/persistence/rollback tests.
+- Block focused relationship evaluation/application for confirmed-dead NPCs even when death archiving is disabled. Let a valid zero focused decision initialize an empty relationship description without inventing an event or rewriting an established description.
+- Move resolved appearance into the existing optional injection budget after essential identity and agency; remove duplicate relevance selection and post-assembly slicing from the Stage 4 adapter.
+- Remove the OOC text-command parser, stripper, dispatcher/API, edit hooks, command-only prompt mode/help/bookkeeping and obsolete parser tests. Retain production manual controls, structured add/remove helpers, ordinary backfills and lineage maintenance.
+- Protect terminal state after Refresh/backfill live-field restoration and before checkpoint creation. Enable explicit manual erroneous-death correction for unarchived dead records and clarify the editor/confirmation label.
+- Retain storage, locks, revisions, dirty retries, owner isolation, tombstones, recovery readers and branch algorithms. No cross-generation import/export change or real database operation.
+- Verification: 495 unit tests plus compatibility/runtime/migration smoke checks, validation, prompt measurements, packaging and diff check passed locally. Exact-commit CI remains the publication gate; live browser/provider checks are unrun. See `docs/stages5-7-review.md`.
+
 ## Stage 4 appearance and terminal lifecycle - 12 September 2026
 
 - Add bounded named appearance forms and current-form selection while preserving earlier flat appearance as a safe `Base` compatibility form.

@@ -433,7 +433,7 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null } 
             ? branchCore.restoreSnapshotIntoState(state, checkpoint.snapshot)
             : (state?.branchRootSnapshot && typeof state.branchRootSnapshot === 'object'
                 ? branchCore.restoreSnapshotIntoState(state, state.branchRootSnapshot)
-                : { ...state, processedOocMessageId: null, lastScannedMessageId: null, assistantSinceScan: 0 });
+                : { ...state, lastScannedMessageId: null, assistantSinceScan: 0 });
     }
     restored.npcs = branchCore.preserveUserNpcMetadata(restored.npcs, currentNpcs);
     enforceUserDismissals(restored, state?.userDismissedGroups);
@@ -445,7 +445,6 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null } 
     restored.inlineCards = Array.isArray(state?.inlineCards) ? structuredClone(state.inlineCards) : [];
     if (!exactRestored) {
         if (Number.isInteger(restored.lastScannedMessageId) && restored.lastScannedMessageId >= divergence) restored.lastScannedMessageId = null;
-        if (Number.isInteger(restored.processedOocMessageId) && restored.processedOocMessageId >= divergence) restored.processedOocMessageId = null;
     }
     prunePortraitAssetsInPlace(restored);
     return {

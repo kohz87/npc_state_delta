@@ -1,6 +1,6 @@
 # NPC State Delta v0.1.0
 
-**Development build.** Delta has its own application-version baseline at `0.1.0`. Upstream source versions are recorded only in Git history and `docs/seed-provenance.*`; they are not runtime identities, module names, or application versions. Stages 1-4 are implemented and deterministically verified; stages 5-9 remain pending. Stage 4 still needs real-host visual/provider acceptance.
+**Development build.** Delta has its own application-version baseline at `0.1.0`. Upstream source versions are recorded only in Git history and `docs/seed-provenance.*`; they are not runtime identities, module names, or application versions. Stages 1-7 are implemented and deterministically verified; stages 8-9 remain pending. Real-host visual/provider acceptance for stages 4-7 remains unrun.
 
 Delta is a standalone SillyTavern NPC continuity extension built from a pinned NPC State source baseline and developed forward as one Delta codebase. Selected Beta/Alpha presentation ideas are adapted into that foundation; their engines and two-stage architecture are not runtime dependencies.
 
@@ -12,12 +12,15 @@ Delta is a standalone SillyTavern NPC continuity extension built from a pinned N
 - Stage 2 consolidation with coherent `0.1.0` application metadata, a dedicated full-cast scanning owner, removal of the superseded secondary dossier-library enhancement surface, and removal of version-labelled source-era runtime paths.
 - Stage 3 shared scanner request routing with an optional connection profile while leaving ordinary roleplay and portrait routing independent; automatic backfill guards execute before that dispatcher rather than patching the host generation route.
 - Stage 4 appearance continuity with form-independent overall presentation, bounded named forms, explicit current/unnamed-form state, manual current-appearance reconciliation, and one shared resolver across canonical dossier appearance/portrait/injection. Confirmed automatic death is terminal; correction of an erroneous death and owned rollback are the only reversal paths.
+- Stage 5 verified numerical baseline and source-aware relationship integration; Stage 6 identity-first budgeted injection with resolved appearance; Stage 7 owned recovery verification and complete removal of story-text OOC commands.
 - Historical source snapshots, old version labels, and provenance notes segregated under `docs/history/` and `docs/seed-provenance.*`; they are not shipped runtime modules.
 - Existing migration/compatibility behavior that is still required for accepted stored-state shapes remains active Delta compatibility logic inside the current owners. It is not a second engine or a legacy runtime layer.
 - Core behavior contract, staged implementation plan, development commands, and source provenance.
 - Existing repository GPL-3.0 license preserved.
 
-The runtime still carries the currently accepted OOC commands until their assigned later stage. Scanner connection profiles are delivered by Stage 3. Stage 4 keeps manual/stale archive return behavior for living NPCs but makes confirmed automatic death terminal. The retained dossier editor stays scalar-facing; a manually locked Appearance edit is reconciled into the selected form so it does not become a competing appearance authority. The accepted relationship formulas are unchanged. Stages 5-9 remain pending.
+Use the settings **Add NPC** control and the dossier editor for manual changes. OOC-looking text does not execute dossier commands. Automatic death remains terminal; deliberate manual correction is available even when a dead record was not archived, and leaves presence unconfirmed. Manual/stale archive return for living NPCs remains unchanged. The retained appearance editor is scalar-facing, with manually locked edits reconciled into the selected form. Numerical scoring formulas and required historical-state recovery readers remain intact.
+
+The [stages 5-7 review](docs/stages5-7-review.md) records the 41,070-case pinned-source scoring comparison, integration fixes, removals, and verification boundaries. Local verification passed 495 unit tests plus compatibility/runtime/migration smoke checks; live provider/browser performance is not claimed.
 
 ## Active runtime ownership
 

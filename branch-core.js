@@ -191,7 +191,6 @@ export function snapshotBranchState(state = {}) {
         lastScanAt: Number(state.lastScanAt || 0),
         lastScannedMessageId: Number.isInteger(state.lastScannedMessageId) ? state.lastScannedMessageId : null,
         scanCount: Number(state.scanCount || 0),
-        processedOocMessageId: Number.isInteger(state.processedOocMessageId) ? state.processedOocMessageId : null,
     };
 }
 
@@ -209,7 +208,6 @@ export function restoreSnapshotIntoState(current = {}, snapshot = null) {
         lastScanAt: Number(snapshot.lastScanAt || 0),
         lastScannedMessageId: Number.isInteger(snapshot.lastScannedMessageId) ? snapshot.lastScannedMessageId : null,
         scanCount: Number(snapshot.scanCount || 0),
-        processedOocMessageId: Number.isInteger(snapshot.processedOocMessageId) ? snapshot.processedOocMessageId : null,
     };
 }
 
@@ -623,7 +621,7 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null } 
             ? restoreSnapshotIntoState(state, checkpoint.snapshot)
             : (state?.branchRootSnapshot && typeof state.branchRootSnapshot === 'object'
                 ? restoreSnapshotIntoState(state, state.branchRootSnapshot)
-                : { ...state, processedOocMessageId: null, lastScannedMessageId: null, assistantSinceScan: 0 });
+                : { ...state, lastScannedMessageId: null, assistantSinceScan: 0 });
     }
 
     restored.npcs = preserveUserNpcMetadata(restored.npcs, currentNpcs);
@@ -635,7 +633,6 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null } 
 
     if (!exactRestored) {
         if (Number.isInteger(restored.lastScannedMessageId) && restored.lastScannedMessageId >= divergence) restored.lastScannedMessageId = null;
-        if (Number.isInteger(restored.processedOocMessageId) && restored.processedOocMessageId >= divergence) restored.processedOocMessageId = null;
     }
 
     return {

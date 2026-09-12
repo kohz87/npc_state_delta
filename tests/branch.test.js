@@ -33,7 +33,7 @@ function baseState() {
         npcs: [], dismissed: [], inlineCards: [], checkpoints: [], lineage: [],
         branchLineageVersion: BRANCH_LINEAGE_VERSION,
         turn: 0, assistantSinceScan: 0, lastScanAt: 0, lastScannedMessageId: null,
-        scanCount: 0, processedOocMessageId: null,
+        scanCount: 0,
     };
 }
 

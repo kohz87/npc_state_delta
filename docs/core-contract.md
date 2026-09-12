@@ -1,6 +1,6 @@
 # NPC State Delta — core contract
 
-Status: approved behavior authority. Stages 1-4 are implemented and deterministically verified; Stage 4 real-host visual/provider acceptance remains pending. `docs/WORKPLAN.md` tracks remaining work. Inherited behavior is the baseline, not proof that every target feature exists.
+Status: approved behavior authority. Stages 1-7 are implemented and deterministically verified; real-host visual/provider acceptance for stages 4-7 remains pending. `docs/WORKPLAN.md` tracks remaining work. Inherited behavior is the baseline, not proof that every target feature exists.
 
 ## C01. Foundation and product loop
 

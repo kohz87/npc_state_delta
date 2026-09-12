@@ -257,7 +257,7 @@ test('scanner uses current-exchange auto context and keeps wider history for man
 test('inline card truth follows merged presence and settings roster editor uses direct mobile-safe binding', () => {
     assert.match(index, /function scanInlineNpcIds\(_parsed, merged\)/);
     assert.doesNotMatch(index, /const touched = new Set/);
-    assert.match(index, /recordInlineCardsInState\(nextState, targetMessageId, \[finalNpc\.id\], 'ooc-backfill'\)/);
+    assert.match(index, /recordInlineCardsInState\(nextState, targetMessageId, \[finalNpc\.id\], 'dossier-backfill'\)/);
     assert.match(index, /removeNpcInlineCardAtMessage/);
     assert.match(index, /function wireSettingsRosterEditor/);
     assert.match(index, /querySelectorAll\('\.npc-state-delta-roster-edit'\)/);

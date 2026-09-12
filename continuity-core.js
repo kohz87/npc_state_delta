@@ -186,23 +186,7 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
         ...normalizeTerminalNpc(npc),
         appearance: resolveNpcAppearance(npc),
     }));
-    const present = resolved.filter(npc => npc.present && !npc.archived);
-    const relevant = mechanics.selectRelevantNpcs(present, text, turn, limit, socialGraph, resolved);
-    const appearanceFacts = relevant.filter(npc => npc.appearance).map(npc => `${npc.name}: ${npc.appearance}`);
-    const appearanceLine = appearanceFacts.length
-        ? `CURRENT VISIBLE APPEARANCE (authoritative anatomy; species/race cannot override the selected form): ${appearanceFacts.join(' | ')}`
-        : '';
-    const reserveTokens = appearanceLine ? Math.ceil((appearanceLine.length + 8) / 4) : 0;
-    const baseBudget = Math.max(200, Number(budgetTokens || 1800) - reserveTokens);
-    const base = mechanics.buildInjection(resolved, text, turn, limit, behaviorCriteria, baseBudget, socialGraph);
-    if (!base || !appearanceLine) return base;
-    const included = appearanceFacts.filter(fact => base.includes(`- ${fact.split(':', 1)[0]}:`));
-    if (!included.length) return base;
-    const line = `CURRENT VISIBLE APPEARANCE (authoritative anatomy; species/race cannot override the selected form): ${included.join(' | ')}`;
-    const lines = base.split('\n');
-    const firstNpc = lines.findIndex(item => item.startsWith('- '));
-    lines.splice(firstNpc < 0 ? lines.length : firstNpc, 0, line);
-    return lines.join('\n').slice(0, Math.max(800, Number(budgetTokens || 1800) * 4));
+    return mechanics.buildInjection(resolved, text, turn, limit, behaviorCriteria, budgetTokens, socialGraph, { includeAppearance: true });
 }
 
 const COMPACT_STAGE4_RULE = `\nS4: forms/current; confirmed death terminal.`;

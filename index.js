@@ -58,8 +58,8 @@ import {
     buildProfileRefreshPrompt,
     applyNpcStateCommand,
     mergeScanResult,
-    parseOocNpcStateCommands,
-    stripOocNpcStateControls,
+    isTerminalNpcDeath,
+    protectTerminalNpc,
     parseScanJson,
     npcMatchesLabel,
     normalizeName,
@@ -628,7 +628,6 @@ function freshChatState() {
         lastScannedMessageId: null,
         scanCount: 0,
         dismissed: [],
-        processedOocMessageId: null,
         inlineCards: [],
         portraitAssets: {},
         checkpoints: [],
@@ -1107,7 +1106,6 @@ function mergeBranchOptions(base = {}, incoming = {}) {
     else if (Number.isInteger(a)) next.explicitDivergence = a;
     else if (Number.isInteger(b)) next.explicitDivergence = b;
     next.rescan = Boolean(base.rescan || incoming.rescan);
-    next.processOocMessageId = Number.isInteger(incoming.processOocMessageId) ? incoming.processOocMessageId : base.processOocMessageId;
     return next;
 }
 
@@ -1220,7 +1218,7 @@ async function maybeInheritKnownBranch() {
     }
 }
 
-async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true, processOocMessageId = null, reason = 'branch', chatKey = null } = {}) {
+async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true, reason = 'branch', chatKey = null } = {}) {
     const key = chatKey || getChatKey();
     if (key === 'no-chat' || getChatKey() !== key) return null;
     const ctx = getContext();
@@ -1242,11 +1240,6 @@ async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true
     persist(key);
     renderDossier();
     updateInjection();
-
-    if (Number.isInteger(processOocMessageId) && (ctx.chat || [])[processOocMessageId]?.is_user) {
-        if (getChatKey() !== key) return result;
-        processOocCommands(processOocMessageId);
-    }
 
     const targetAssistant = findLatestAssistantAtOrAfter(result.divergence);
     if (rescan && !result.exactRestored && getSettings().branchRescan !== false && targetAssistant >= 0) {
@@ -1716,7 +1709,7 @@ function flushCurrentChatOnPageHide() {
 function cleanMessage(message) {
     if (!message || message.is_system) return '';
     const speaker = message.name || (message.is_user ? getContext().name1 : getContext().name2) || '';
-    const body = stripUiNoise(stripOocNpcStateControls(message.mes || ''));
+    const body = stripUiNoise(message.mes || '');
     return body ? `${speaker}: ${body}` : '';
 }
 
@@ -2186,6 +2179,7 @@ async function refreshNpcFromChat(npcId) {
         refreshed.lastRelationshipChange = structuredClone(liveBefore.lastRelationshipChange || refreshed.lastRelationshipChange);
         const proposedSummary = String(match?.relationshipSummary ?? match?.relationship_summary ?? '').trim().slice(0, 900);
         if (proposedSummary && !(liveBefore.manualProfileFields || []).includes('relationshipSummary')) refreshed.relationshipSummary = proposedSummary;
+        Object.assign(refreshed, protectTerminalNpc(liveBefore, refreshed));
         if (targetMessageId >= 0) commitBranchCheckpoint(merged.state, targetMessageId, 'chat-refresh');
         setChatState(chatKey, merged.state);
         persist();
@@ -2403,10 +2397,11 @@ async function backfillNpcFromHistory(request, messageId = null) {
             finalNpc.lastSeenTurn = Number(liveBeforeBackfill.lastSeenTurn || 0);
             finalNpc.lastWorldActiveTurn = Number(liveBeforeBackfill.lastWorldActiveTurn || 0);
         }
+        if (finalNpc) Object.assign(finalNpc, protectTerminalNpc(existing, finalNpc));
         if (targetMessageId >= 0 && finalNpc) {
-            if (!finalNpc.archived && finalNpc.present) recordInlineCardsInState(nextState, targetMessageId, [finalNpc.id], 'ooc-backfill');
+            if (!finalNpc.archived && finalNpc.present) recordInlineCardsInState(nextState, targetMessageId, [finalNpc.id], 'dossier-backfill');
             else removeNpcInlineCardAtMessage(nextState, targetMessageId, finalNpc.id);
-            commitBranchCheckpoint(nextState, targetMessageId, 'ooc-backfill');
+            commitBranchCheckpoint(nextState, targetMessageId, 'dossier-backfill');
         }
         setChatState(chatKey, nextState);
         persist();
@@ -2516,7 +2511,7 @@ async function runFocusedRelationshipPass(ctx, parsed, existingNpcs, transcript,
     // dossier scanner happened to return a row. This prevents an NPC who acts early in a long
     // response from being skipped merely because the response ends with another cast/location.
     const targets = (Array.isArray(existingNpcs) ? existingNpcs : [])
-        .filter(npc => !npc?.archived)
+        .filter(npc => !npc?.archived && !isTerminalNpcDeath(npc))
         .filter(npc => {
             const raw = returned.find(item => rawScanMatchesExisting(item, npc));
             if (!currentExchangeRelationshipRelevant(npc, transcript, raw, options)) return false;
@@ -2580,6 +2575,7 @@ async function runFocusedRelationshipPass(ctx, parsed, existingNpcs, transcript,
                     relationshipChangeReason: normalized.relationshipChangeReason,
                     relationshipSummary,
                     relationshipSummaryDecisionProvided,
+                    context: transcript,
                 });
             }
             const missing = batch.filter(target => !decisions.has(target.id));
@@ -2630,7 +2626,7 @@ function applyFocusedRelationshipDecisions(state, decisions, caps, sourceMessage
     if (!decisions?.size) return state;
     for (const [id, decision] of decisions) {
         const npc = state.npcs.find(item => item.id === id);
-        if (!npc) continue;
+        if (!npc || isTerminalNpcDeath(npc)) continue;
         const requestedHasDelta = Object.values(decision.relationshipDelta || {}).some(value => Number(value) !== 0);
         const evidence = normalizeRelationshipEvidence(decision.relationshipEvidence);
         const duplicateAward = requestedHasDelta && relationshipHistoryLooksDuplicate(npc.relationshipEventHistory, decision.relationshipChangeReason, {
@@ -2668,11 +2664,12 @@ function applyFocusedRelationshipDecisions(state, decisions, caps, sourceMessage
             || update.milestoneBlocks.length === 0
         );
         let summaryChanged = false;
-        if (narrativeAdvance
+        const mayInitializeSummary = !String(npc.relationshipSummary || '').trim() && !requestedHasDelta;
+        if ((narrativeAdvance || mayInitializeSummary)
             && decision.relationshipSummaryDecisionProvided
             && !(Array.isArray(npc.manualProfileFields) && npc.manualProfileFields.includes('relationshipSummary'))) {
             const proposedSummary = String(decision.relationshipSummary || '').trim().slice(0, 700);
-            if (relationshipSummaryConsistent(proposedSummary, npc.relationship, '', npc.relationshipMilestones)) {
+            if (relationshipSummaryConsistent(proposedSummary, npc.relationship, decision.context || '', npc.relationshipMilestones)) {
                 const calibrated = calibrateRelationshipSummary(proposedSummary, npc.relationship);
                 if (calibrated && calibrated !== String(npc.relationshipSummary || '').trim()) {
                     npc.relationshipSummary = calibrated;
@@ -3064,15 +3061,15 @@ function buildSettingsHtml() {
           <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content npc-state-delta-drawer">
-          <div class="npc-state-delta-intro">Standalone narrated-NPC dossier tracker. Admission is configurable: Conservative avoids routine transactional extras, Balanced admits direct interactions more eagerly, and Manual only requires explicit promotion. Incidental role-only figures stay lightweight candidates; only NPCs detected as physically present in the latest scene receive a new inline card. Settings Add NPC creates a bare dossier with a per-NPC Scan dossier wand; OOC <code>add</code> still creates/promotes and backfills recent story context; Settings trash or OOC <code>remove</code> hard-deletes/suppresses it.</div>
+          <div class="npc-state-delta-intro">Standalone narrated-NPC dossier tracker. Admission is configurable: Conservative avoids routine transactional extras, Balanced admits direct interactions more eagerly, and Manual only requires explicit promotion. Incidental role-only figures stay lightweight candidates; only NPCs detected as physically present in the latest scene receive a new inline card. Settings Add NPC creates a bare dossier with a per-NPC Scan dossier wand; Settings trash hard-deletes/suppresses it. Story text does not execute dossier commands.</div>
           <div class="npc-state-delta-settings-grid">
             ${settingRow('npc_state_delta_enabled', 'Enable NPC State Delta', '<input id="npc_state_delta_enabled" type="checkbox">')}
             ${settingRow('npc_state_delta_auto', 'Auto scan', '<input id="npc_state_delta_auto" type="checkbox">', 'Runs after assistant replies.')}
             ${settingRow('npc_state_delta_scanner_connection_profile', 'NPC scanner connection profile', '<select id="npc_state_delta_scanner_connection_profile" class="text_pole"></select>', 'Default preserves the current host route. A selected Connection Profile routes all NPC text scans, Refresh, focused passes, and retries without switching roleplay or portrait settings. Changes apply to the next scan; unavailable profiles never fall back silently.')}
             ${settingRow('npc_state_delta_full_scan_every_turn', 'Full scan every turn', '<input id="npc_state_delta_full_scan_every_turn" type="checkbox">', 'When Auto scan is enabled, reconcile the configured recent-story window after every assistant reply instead of scanning only the current exchange. Overrides Scan every. Uses more context/output tokens, but relationship-score deltas still come only from the newest exchange so old events are not replayed.')}
             ${settingRow('npc_state_delta_scan_every', 'Scan every', '<span><input id="npc_state_delta_scan_every" type="number" min="1" max="20" class="text_pole npc-state-delta-number"> replies</span>', 'Quick-scan cadence when Full scan every turn is off.')}
-            ${settingRow('npc_state_delta_scan_depth', 'Full/manual scan context', '<span><input id="npc_state_delta_scan_depth" type="number" min="2" max="30" class="text_pole npc-state-delta-number"> messages</span>', 'History window used by Full scan every turn, global Scan dossier now, OOC Add backfill, per-NPC dossier fallback, and Edit Dossier Refresh from Chat. Quick automatic scans still use only the current user + assistant exchange.')}
-            ${settingRow('npc_state_delta_admission_mode', 'NPC admission', '<select id="npc_state_delta_admission_mode" class="text_pole"><option value="conservative">Conservative</option><option value="balanced">Balanced</option><option value="manual_only">Manual only</option></select>', 'Conservative: proper names immediately; role labels require confirmed recurrence or manual Add. Balanced: meaningful/persistent or directly interactive role NPCs can also admit immediately. Manual only: all new dossiers require OOC/manual Add.')}
+            ${settingRow('npc_state_delta_scan_depth', 'Full/manual scan context', '<span><input id="npc_state_delta_scan_depth" type="number" min="2" max="30" class="text_pole npc-state-delta-number"> messages</span>', 'History window used by Full scan every turn, global Scan dossier now, per-NPC dossier fallback, and Edit Dossier Refresh from Chat. Quick automatic scans still use only the current user + assistant exchange.')}
+            ${settingRow('npc_state_delta_admission_mode', 'NPC admission', '<select id="npc_state_delta_admission_mode" class="text_pole"><option value="conservative">Conservative</option><option value="balanced">Balanced</option><option value="manual_only">Manual only</option></select>', 'Conservative: proper names immediately; role labels require confirmed recurrence or manual Add. Balanced: meaningful/persistent or directly interactive role NPCs can also admit immediately. Manual only: all new dossiers require manual Add.')}
             ${settingRow('npc_state_delta_max', 'Maximum active NPCs', '<input id="npc_state_delta_max" type="number" min="1" max="100" class="text_pole npc-state-delta-number">', 'Cap for active dossiers only. Archived dossiers no longer consume an active roster slot.')}
             ${settingRow('npc_state_delta_auto_prune_stale', 'Auto-manage stale NPCs', '<input id="npc_state_delta_auto_prune_stale" type="checkbox">', 'Two-stage stale lifecycle after successful scans: long-absent active NPCs auto-archive first, then stale auto-archives are deleted later. Manual/death archives and protected NPCs are preserved; deleted stale names are not suppressed and can be rediscovered.')}
             ${settingRow('npc_state_delta_stale_archive_after', 'Auto-archive after', '<span><input id="npc_state_delta_stale_archive_after" type="number" min="10" max="999" class="text_pole npc-state-delta-number"> assistant replies</span>', 'Default 30. Counts NPC State Delta story turns since the NPC was last physically present or explicitly active off-screen. Auto-archive immediately frees an active roster slot.')}
@@ -4157,8 +4154,8 @@ function openNpcEditor(npcId) {
     content.innerHTML = `
       <div class="npc-state-delta-editor-head"><div><span class="npc-state-delta-kicker">LIVE DOSSIER</span><h3 id="npc_state_delta_editor_title">Edit ${editorValue(npc.name)}</h3></div></div>
       <p class="npc-state-delta-muted">Edits save to NPC State Delta's extension-owned JSON data. Relationship numbers are authoritative current values on a -100 to +100 scale where 0 is neutral; future story deltas continue from them.</p>
-      <div class="npc-state-delta-editor-lifecycle"><b>Lifecycle</b><span>${npc.archived ? 'Archived' : (npc.present ? 'Active · Present' : (npc.worldActive ? 'Active · Off-screen' : 'Active'))}${npc.archiveReason === 'deceased' ? ' · Deceased' : (npc.archiveReason === 'stale' ? ' · Stale auto-archive' : '')}</span>${npc.lifeStateReason ? `<small>${editorValue(npc.lifeStateReason)}</small>` : ''}</div>
-      <div class="npc-state-delta-editor-tools"><div class="menu_button npc-state-delta-scan-dossier" role="button" tabindex="0" data-npc-id="${editorValue(npc.id)}" title="Import matching Megumin New NPC / NPC Update dossier blocks; falls back to recent story context"><i class="fa-solid fa-wand-magic-sparkles"></i> Scan dossier</div><div class="menu_button npc-state-delta-refresh-chat" role="button" tabindex="0" data-npc-id="${editorValue(npc.id)}" title="Re-read the configured recent-chat window for this NPC and reconcile every grounded unlocked dossier field without replaying relationship deltas"><i class="fa-solid fa-arrows-rotate"></i> Refresh from Chat</div><div class="menu_button npc-state-delta-copy-image-prompt" role="button" tabindex="0" data-npc-id="${editorValue(npc.id)}"><i class="fa-solid fa-copy"></i> Copy portrait prompts</div>${npc.archived ? `<div class="menu_button npc-state-delta-restore-npc npc-state-delta-editor-archive-toggle" role="button" tabindex="0" data-npc-id="${editorValue(npc.id)}"><i class="fa-solid fa-box-open"></i> Restore active</div>` : `<div class="menu_button npc-state-delta-archive-npc npc-state-delta-editor-archive-toggle" role="button" tabindex="0" data-npc-id="${editorValue(npc.id)}"><i class="fa-solid fa-box-archive"></i> Archive dossier</div>`}</div>
+      <div class="npc-state-delta-editor-lifecycle"><b>Lifecycle</b><span>${isTerminalNpcDeath(npc) ? 'Confirmed deceased' : (npc.archived ? 'Archived' : (npc.present ? 'Active · Present' : (npc.worldActive ? 'Active · Off-screen' : 'Active')))}${npc.archiveReason === 'deceased' ? ' · Deceased' : (npc.archiveReason === 'stale' ? ' · Stale auto-archive' : '')}</span>${npc.lifeStateReason ? `<small>${editorValue(npc.lifeStateReason)}</small>` : ''}</div>
+      <div class="npc-state-delta-editor-tools"><div class="menu_button npc-state-delta-scan-dossier" role="button" tabindex="0" data-npc-id="${editorValue(npc.id)}" title="Import matching Megumin New NPC / NPC Update dossier blocks; falls back to recent story context"><i class="fa-solid fa-wand-magic-sparkles"></i> Scan dossier</div><div class="menu_button npc-state-delta-refresh-chat" role="button" tabindex="0" data-npc-id="${editorValue(npc.id)}" title="Re-read the configured recent-chat window for this NPC and reconcile every grounded unlocked dossier field without replaying relationship deltas"><i class="fa-solid fa-arrows-rotate"></i> Refresh from Chat</div><div class="menu_button npc-state-delta-copy-image-prompt" role="button" tabindex="0" data-npc-id="${editorValue(npc.id)}"><i class="fa-solid fa-copy"></i> Copy portrait prompts</div>${npc.archived || isTerminalNpcDeath(npc) ? `<div class="menu_button npc-state-delta-restore-npc npc-state-delta-editor-archive-toggle" role="button" tabindex="0" data-npc-id="${editorValue(npc.id)}"><i class="fa-solid fa-box-open"></i> ${isTerminalNpcDeath(npc) ? 'Correct death record' : 'Restore active'}</div>` : `<div class="menu_button npc-state-delta-archive-npc npc-state-delta-editor-archive-toggle" role="button" tabindex="0" data-npc-id="${editorValue(npc.id)}"><i class="fa-solid fa-box-archive"></i> Archive dossier</div>`}</div>
       <div class="npc-state-delta-editor-grid npc-state-delta-editor-profile">
         <label>Name<input id="npc_state_delta_edit_name" class="text_pole" value="${editorValue(npc.name)}"></label>
         <label>Species / Race<input id="npc_state_delta_edit_species" class="text_pole" maxlength="160" placeholder="Half-elf, dwarf, dwelf, human, custom species..." value="${editorValue(npc.species)}"></label>
@@ -4676,7 +4673,7 @@ function deleteNpcById(npcId, { confirmAction = true } = {}) {
     });
     const working = result.state;
     if (result.report.status !== 'removed') return false;
-    // applyNpcStateCommand's narrative remove path suppresses by label. Manual UI trash is
+    // The shared add/remove helper suppresses by label. Manual UI trash is
     // identity-specific instead: remove those labels from narrative dismissal and retain an
     // ID-backed tombstone so a future homonym is not blocked.
     const permanentLabels = new Set([current.name, ...(current.aliases || [])].map(normalizeName).filter(Boolean));
@@ -4709,27 +4706,30 @@ function setNpcArchiveStateById(npcId, archived, { reason = 'manual', confirmAct
     const index = state.npcs.findIndex(item => item.id === npcId);
     if (index < 0) return false;
     const current = state.npcs[index];
-    if (Boolean(current.archived) === Boolean(archived)) return false;
-    const action = archived ? 'archive' : 'restore';
+    const correctingDeath = !archived && isTerminalNpcDeath(current);
+    if (Boolean(current.archived) === Boolean(archived) && !correctingDeath) return false;
     if (confirmAction) {
         const message = archived
             ? `Archive ${current.name}? The dossier, portrait, history, and relationship state will be preserved, but it will stop receiving inline cards and prompt injection until restored or clearly returned in the story.`
-            : `Restore ${current.name} to the active roster?`;
+            : (correctingDeath
+                ? `Correct ${current.name}'s death record as erroneous? This is a manual correction, not narrative resurrection. The NPC will remain off-screen until new evidence establishes presence.`
+                : `Restore ${current.name} to the active roster?`);
         if (!window.confirm(message)) return false;
     }
     state.npcs[index] = setNpcArchived(current, archived, {
         reason: archived ? reason : '',
+        allowDeathCorrection: correctingDeath,
         sourceMessageId: latestMessageId(false),
     });
     const targetMessageId = latestMessageId(false);
-    if (targetMessageId >= 0) commitBranchCheckpoint(state, targetMessageId, archived ? 'manual-archive' : 'manual-restore');
+    if (targetMessageId >= 0) commitBranchCheckpoint(state, targetMessageId, archived ? 'manual-archive' : (correctingDeath ? 'manual-death-correction' : 'manual-restore'));
     persistCritical();
     closeNpcEditor();
     renderDossier();
     updateInjection();
     globalThis.toastr?.success?.(archived
         ? `NPC State Delta: archived ${current.name}. Their dossier and history are preserved.`
-        : `NPC State Delta: restored ${current.name} to the active roster.`);
+        : (correctingDeath ? `NPC State Delta: corrected ${current.name}'s erroneous death record; presence remains unconfirmed.` : `NPC State Delta: restored ${current.name} to the active roster.`));
     return true;
 }
 
@@ -5257,76 +5257,6 @@ function scheduleSettingsMountRetries() {
     }, 250);
 }
 
-function processOocCommands(messageId = null) {
-    const settings = getSettings();
-    if (!settings.enabled || getChatKey() === 'no-chat' || !requireReadyChatMutation('process OOC dossier commands', getChatKey(), { notify: false })) return [];
-    const ctx = getContext();
-    const chat = ctx.chat || [];
-    let resolvedId = Number.isInteger(messageId) ? messageId : chat.length - 1;
-    let message = chat[resolvedId];
-    if (!message?.is_user) {
-        resolvedId = -1;
-        for (let i = chat.length - 1; i >= 0; i -= 1) {
-            if (chat[i]?.is_user && !chat[i]?.is_system) { resolvedId = i; message = chat[i]; break; }
-        }
-    }
-    if (!message?.is_user || message?.is_system) return [];
-    const state = getChatState();
-    if (state.processedOocMessageId === resolvedId) return [];
-    const commands = parseOocNpcStateCommands(message.mes || '');
-    if (!commands.length) return [];
-
-    ensureBranchParentAnchor(state, chat, resolvedId, 'ooc-parent');
-    let working = state;
-    const reports = [];
-    for (const command of commands) {
-        const result = applyNpcStateCommand(working, command, {
-            maxNpcs: settings.maxNpcs,
-            excludeNames: currentExclusions(),
-            turn: state.turn,
-            relationshipBaseline: settings.relationshipBaseline,
-        });
-        working = result.state;
-        reports.push(result.report);
-        if (command.action === 'add' && ['added', 'exists', 'restored'].includes(result.report.status) && result.report.npcId) {
-            clearUserDismissedSuppression(working, command.name || result.report.name);
-            queueNpcBackfillInState(working, result.report.npcId, command.name || result.report.name, resolvedId);
-        }
-    }
-    working.processedOocMessageId = resolvedId;
-    for (const report of reports) {
-        if (report.status === 'removed' || report.status === 'suppressed') {
-            const removedNpc = state.npcs.find(item => item.id === report.npcId || npcMatchesLabel(item, report.name));
-            if (removedNpc) {
-                working.socialGraph = removeNpcFromSocialGraph(working.socialGraph, removedNpc.id);
-                purgeNpcStructuredReferences(working.npcs, removedNpc);
-            }
-            purgeInlineCardsInState(working, report.npcId, report.name);
-            const reportKey = normalizeName(report.name);
-            working.pendingBackfills = (working.pendingBackfills || []).filter(item => item.npcId !== report.npcId && normalizeName(item.label) !== reportKey);
-        }
-    }
-    const oocSocial = reconcileSocialState(working, { provenance: 'manual', confidence: 'manual', sourceMessageId: resolvedId, turn: state.turn });
-    working.socialGraph = oocSocial.socialGraph;
-    working.npcs = oocSocial.state.npcs;
-    if (resolvedId >= 0) commitBranchCheckpoint(working, resolvedId, 'ooc');
-    setChatState(getChatKey(), working);
-    persistCritical();
-    renderDossier();
-    updateInjection();
-
-    for (const report of reports) {
-        if (report.status === 'added') globalThis.toastr?.success?.(`NPC State Delta: added ${report.name}; recent-history dossier backfill is queued.`);
-        else if (report.status === 'exists') globalThis.toastr?.info?.(`NPC State Delta: ${report.name} already exists; recent-history backfill is queued.`);
-        else if (report.status === 'restored') globalThis.toastr?.success?.(`NPC State Delta: restored ${report.name}; recent-history backfill is queued.`);
-        else if (report.status === 'removed') globalThis.toastr?.success?.(`NPC State Delta: removed ${report.name} and suppressed rediscovery.`);
-        else if (report.status === 'suppressed') globalThis.toastr?.info?.(`NPC State Delta: ${report.name} is now suppressed.`);
-        else if (report.status === 'excluded') globalThis.toastr?.warning?.(`NPC State Delta: ${report.name} is the player/main character and was not added.`);
-        else if (report.status === 'full') globalThis.toastr?.warning?.(`NPC State Delta: active roster cap is ${settings.maxNpcs}; ${report.name} was not added. Archived dossiers do not count.`);
-    }
-    return reports;
-}
-
 async function handleAssistantMessageReceived(messageId, { bypassSwipeGuard = false, forceBranchRescan = false } = {}) {
     const settings = getSettings();
     if (!settings.enabled) return;
@@ -5451,12 +5381,10 @@ function registerEvents() {
         source.on(events.MESSAGE_SENT, async (messageId) => {
             const key = getChatKey();
             if (key === 'no-chat') return;
-            try { await ensureChatStateLoaded(key); } catch (error) { console.error('[NPC State Delta] OOC command skipped because chat hydration failed.', error); return; }
+            try { await ensureChatStateLoaded(key); } catch (error) { console.error('[NPC State Delta] user-turn lineage update skipped because chat hydration failed.', error); return; }
             if (getChatKey() !== key) return;
-            const reports = processOocCommands(messageId);
-            if (!reports.length && getChatKey() !== 'no-chat') {
-                getChatState().lineage = chatLineage(getContext().chat || []);
-            }
+            // This listener only maintains branch lineage; text never dispatches mutations.
+            getChatState().lineage = chatLineage(getContext().chat || []);
         });
     }
 
@@ -5509,7 +5437,6 @@ function registerEvents() {
             queueBranchReconcile({
                 explicitDivergence: Number.isInteger(messageId) ? messageId : null,
                 rescan: true,
-                processOocMessageId: Number.isInteger(messageId) ? messageId : null,
                 reason: 'message-edited',
             }, 110);
         });
@@ -5664,7 +5591,6 @@ window.NPCStateDelta = Object.freeze({
     scan: () => scanNow({ manual: true }),
     cancelScan: () => { const key = getChatKey(); pendingAutoScans.delete(key); return cancelScanOperation(key, 'user cancelled'); },
     scannerRouting: scannerRoutingMetrics,
-    processOoc: processOocCommands,
     processBackfills: processPendingBackfills,
     scanDossier: value => { const npc = findNpcByIdOrName(value); return npc ? scanNpcDossier(npc.id) : false; },
     refreshFromChat: value => { const npc = findNpcByIdOrName(value); return npc ? refreshNpcFromChat(npc.id) : false; },

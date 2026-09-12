@@ -2,7 +2,7 @@
 
 ## Current baseline
 
-Status: Delta `0.1.0` with Stages 1-4 implemented and deterministically verified. Stage 4 adds resolved appearance forms/current-form continuity and terminal automatic death without changing relationship formulas. Real-host Stage 4 visual/provider acceptance remains pending; stages 5-9 remain pending. The core contract is the sole target behavior authority; work stages are in `docs/WORKPLAN.md`.
+Status: Delta `0.1.0` with Stages 1-7 implemented and deterministically verified. Stage 4 adds resolved appearance forms/current-form continuity and terminal automatic death without changing relationship formulas. Real-host stages 4-7 visual/provider acceptance remains pending; stages 8-9 remain pending. The core contract is the sole target behavior authority; work stages are in `docs/WORKPLAN.md`.
 
 The shipped runtime is one Delta codebase. `runtime-modules.json` is its canonical machine-readable inventory and assigns every top-level JavaScript module a current semantic role. Packaging and validation consume that inventory directly. Source-era versions and filenames are retained only in Git history, `docs/history/`, and `docs/seed-provenance.*`; they are not runtime identities.
 
@@ -22,7 +22,7 @@ Node.js 24 and Python 3; no npm dependencies or install step are required.
 
 | Command | Purpose |
 | --- | --- |
-| `npm test` | Unit tests, host API contract, synthetic runtime and migration-shape smoke checks, Delta isolation tests, UI/active-owner checks, Stage 3 routing checks, and Stage 4 appearance/lifecycle regressions |
+| `npm test` | Unit tests, host API contract, synthetic runtime and migration-shape smoke checks, Delta isolation tests, UI/active-owner checks, Stage 3 routing checks, Stage 4 appearance/lifecycle regressions, and stages 5-7 scoring/evidence/OOC-removal regressions |
 | `npm run validate` | JS syntax, local runtime dependencies, namespace isolation, exact active-runtime inventory, semantic owner checks, and application-version consistency |
 | `npm run measure:prompts` | Two shared scanner fixtures and accepted-characterization injection check; estimated tokens only |
 | `npm run package` | Deterministic runtime-only `npc_state_delta-<version>.zip` built from `runtime-modules.json`, with Delta root folder and checksum; verifies archive entries and JS syntax |
@@ -65,6 +65,14 @@ Stage 4 preserves the flat `appearance` field as a safe compatibility/current-di
 
 Confirmed explicit death is terminal to automatic writers. Scanner, targeted Refresh, backfill and structured dossier import can enrich a dead record but cannot restore `present`, `worldActive`, living state, or post-death relationship progression. Living NPCs archived manually/stale may still reactivate under the accepted policy. A deliberate manual **Restore** of a confirmed-dead dossier is treated as explicit correction of an erroneous death record; it records correction provenance and leaves the NPC off-screen rather than implying narrative resurrection. Branch rollback can restore the pre-death snapshot when the owned death source is deleted/edited/swiped away. The final Stage 4 deterministic run has 488 unit tests plus compatibility/runtime/migration smoke checks; deterministic tests are not a substitute for real-host visual/provider acceptance.
 
+## Stages 5-7 verification boundary
+
+`docs/stages5-7-review.md` records the full production-path trace, scoped fixes and exact upstream oracle provenance. The numerical mechanics match 41,070 fixed cases from the pinned source. The local workflow passes 495 unit tests plus compatibility/runtime/migration smoke checks. Existing evidence selectors and recovery readers remain in place; only OOC-specific parser/dispatch/help/bookkeeping and superseded injection assembly were removed.
+
+Story text no longer executes OOC add/remove commands. Manual controls still own explicit mutations, and the user-turn listener only maintains hydrated lineage. Focused relationship application and post-Refresh/backfill checkpointing enforce terminal death even without archiving. Explicit manual correction works for those unarchived records and retains correction provenance. The actual synthetic host injection is checked; live UI/model behavior remains unrun.
+
+To validate the pinned numerical result, `npm test` consumes `tests/fixtures/scoring-oracle.json` through generated inputs in `scoring-cases.mjs`. This is an offline expected-result fixture, not a shipped reference engine. Do not regenerate it from the implementation under test. Instructions and original blob identity are in the review record.
+
 ## Verification boundaries
 
 The tests create mock host modules, temporary files, and synthetic dossiers. They do not exercise a real provider, live streaming backend, actual SillyTavern database, or image service. Keep those claims separate. Do not call a smaller input estimate a demonstrated latency/semantic improvement.
@@ -75,4 +83,4 @@ The seed baseline and seed results are recorded in `docs/seed-provenance.md`. Do
 
 Use ordinary CI; do not create temporary execution workflows. Before authorized publication inspect current remote main, preserve concurrent commits, run required checks on the exact candidate, and review changed runtime/docs. Never force-push. Verify the resulting remote tree and commit. If a required check cannot execute, complete other authorized work and state the limitation rather than inventing success.
 
-The current user instruction authorizes Stage 4 implementation and publication in this session. It does not authorize Stage 5+, real database modifications, release tagging, or unrelated repositories.
+The current user instruction authorizes stages 5-7 review, implementation, commit, push, PR and merge after required latest-candidate CI passes. It does not authorize stages 8-9, real database modifications, release tagging, or unrelated repositories.

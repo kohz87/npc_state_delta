@@ -72,7 +72,6 @@ test('import merge prioritizes imported dossiers, restores portraits, and lifts 
     const merged = mergeImportedDossierState({
         npcs: [existing, wiz],
         dismissed: ['yunyun', 'luna'],
-        processedOocMessageId: 20,
     }, {
         npcs: [incoming],
         dismissed: [],
@@ -85,7 +84,6 @@ test('import merge prioritizes imported dossiers, restores portraits, and lifts 
     assert.equal(merged.npcs[1].name, 'Wiz');
     assert.ok(!merged.dismissed.includes('yunyun'));
     assert.ok(merged.dismissed.includes('luna'));
-    assert.equal(merged.processedOocMessageId, null);
 });
 
 test('import merge can exclude the current player or main card', () => {
