@@ -1,5 +1,6 @@
 /* NPC State Delta optional full-cast scanning owner. */
 import { extension_settings, getContext } from '../../../extensions.js';
+import { npcParticipatesInExchange } from './scan-context.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
 const FULL_CAST_KEY = 'fullCastScanEveryTurn';
@@ -10,19 +11,12 @@ let initialized = false;
 let sequence = 0;
 let userSnapshot = null;
 let userSnapshotChatKey = '';
-let guardInstalled = false;
-const guardedToasts = new Map();
 
 const api = () => globalThis.NPCStateDelta || null;
 const cfg = () => {
     const root = extension_settings[EXTENSION_NAME] ||= {};
     if (root[FULL_CAST_KEY] === undefined) root[FULL_CAST_KEY] = false;
     return root;
-};
-const norm = value => String(value ?? '').normalize('NFKC').toLowerCase().replace(/<[^>]*>/g, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
-const hasPhrase = (text, phrase) => {
-    const needle = norm(phrase);
-    return Boolean(needle && ` ${norm(text)} `.includes(` ${needle} `));
 };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -93,39 +87,13 @@ function snapshot() {
     }
 }
 
-function uniqueFirstNames(npcs) {
-    const counts = new Map();
-    for (const npc of npcs || []) {
-        for (const label of [npc?.name, ...(npc?.aliases || [])].filter(Boolean)) {
-            const first = norm(label).split(' ')[0] || '';
-            if (first.length >= 3) counts.set(first, (counts.get(first) || 0) + 1);
-        }
-    }
-    return new Set([...counts].filter(([, count]) => count === 1).map(([name]) => name));
-}
-
-function participantLabels(npc, npcs) {
-    const uniqueFirst = uniqueFirstNames(npcs);
-    const labels = new Set();
-    for (const raw of [npc?.name, ...(npc?.aliases || [])]) {
-        const label = norm(raw);
-        if (!label) continue;
-        labels.add(label);
-        const first = label.split(' ')[0] || '';
-        if (uniqueFirst.has(first)) labels.add(first);
-    }
-    const role = norm(npc?.role || '');
-    if (role.length >= 5) labels.add(role);
-    return [...labels];
-}
-
 function fullCastTargets(state, exchangeText, before = null) {
     const npcs = state?.npcs || [];
     const ids = new Set();
     for (const npc of npcs) {
         if (!npc?.id || npc.archived) continue;
         if (npc.present) ids.add(npc.id);
-        if (participantLabels(npc, npcs).some(label => hasPhrase(exchangeText, label))) ids.add(npc.id);
+        if (npcParticipatesInExchange(npc, npcs, exchangeText)) ids.add(npc.id);
         if (before?.has(npc.id) && before.get(npc.id) !== fingerprint(npc)) ids.add(npc.id);
     }
     return [...ids];
@@ -176,57 +144,6 @@ export async function runFullCastScan(messageId = null, before = null, { manual 
     }
     console.info('[NPC State Delta] full exchange/present cast scan complete', { targets: targets.length, refreshed });
     if (manual) globalThis.toastr?.success?.(`NPC State Delta: full-scanned ${targets.length} exchange/present dossier${targets.length === 1 ? '' : 's'}.`);
-    return true;
-}
-
-/* Retained baseline guard: pending-backfill normalization drops deprecated sweep flags.
-   Unrelated automatic sweep requests are answered locally so they cost no model call. */
-function installBackfillGuard() {
-    if (guardInstalled) return true;
-    const ctx = getContext();
-    if (typeof ctx?.generateRaw !== 'function') return false;
-    const original = ctx.generateRaw.bind(ctx);
-    ctx.generateRaw = async (...args) => {
-        const prompt = String(args?.[0]?.prompt || '');
-        if (/targeted dossier backfill extractor/i.test(prompt)) {
-            const target = String(prompt.match(/^Requested NPC:\s*(.+)$/im)?.[1] || '').trim();
-            const state = api()?.getState?.() || { npcs: [] };
-            const query = norm(target);
-            const npc = state.npcs.find(row => [row?.name, ...(row?.aliases || [])].some(label => norm(label) === query));
-            const exchange = currentExchange();
-            const relevant = npc && (npc.present || participantLabels(npc, state.npcs).some(label => hasPhrase(exchange.text, label)));
-            if (npc && !relevant && npc.manual !== true) {
-                guardedToasts.set(norm(npc.name), Date.now() + 10000);
-                return JSON.stringify({ npcs: [{
-                    id: npc.id,
-                    name: npc.name,
-                    relationshipImpact: 'none',
-                    relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 },
-                    relationshipEvidence: { trust: '', affection: '', desire: '', tension: '' },
-                    relationshipChangeReason: '',
-                }] });
-            }
-        }
-        return original(...args);
-    };
-    const toast = globalThis.toastr;
-    if (toast?.success && !toast.success.__npcStateDeltaFullCastGuard) {
-        const originalSuccess = toast.success.bind(toast);
-        const guarded = (...args) => {
-            const text = String(args[0] || '');
-            const name = text.match(/^NPC State Delta:\s*backfilled\s+(.+?)\s+from recent story context\.?$/i)?.[1] || '';
-            const key = norm(name);
-            const until = guardedToasts.get(key) || 0;
-            if (until > Date.now()) {
-                guardedToasts.delete(key);
-                return undefined;
-            }
-            return originalSuccess(...args);
-        };
-        guarded.__npcStateDeltaFullCastGuard = true;
-        toast.success = guarded;
-    }
-    guardInstalled = true;
     return true;
 }
 
@@ -294,13 +211,11 @@ function init() {
     if (initialized) return void mountControls();
     initialized = true;
     cfg();
-    installBackfillGuard();
     registerEvents();
     mountControls();
     let attempts = 0;
     const timer = setInterval(() => {
         attempts += 1;
-        installBackfillGuard();
         if (mountControls() || attempts >= 40) clearInterval(timer);
     }, 250);
 }

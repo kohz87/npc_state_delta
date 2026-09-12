@@ -53,6 +53,7 @@ for (const file of rootRuntimeFiles.map(name => path.join(root, name))) {
   requireCheck(!/(?:from\s*|import\s*\()\s*['"]https?:/.test(source), `${path.basename(file)}: remote runtime import`);
   requireCheck(!/(?:from\s*|import\s*\()\s*['"][^'"]*docs\/history/i.test(source), `${path.basename(file)}: historical documentation imported by runtime`);
   requireCheck(!/(?:from\s*|import\s*\()\s*['"][^'"]*(?:core-v\d|branch-v\d)/i.test(source), `${path.basename(file)}: version-labelled runtime dependency remains`);
+  if (path.basename(file) !== 'scanner-routing.js') requireCheck(!/\bgenerateRaw\b/.test(source), `${path.basename(file)}: direct host text-model routing bypasses scanner-routing.js`);
   for (const match of source.matchAll(/(?:from\s*|import\s*\()\s*['"](\.\/[^'"]+)['"]/g)) {
     requireCheck(fs.existsSync(path.resolve(path.dirname(file), match[1])), `${path.basename(file)}: missing dependency ${match[1]}`);
   }

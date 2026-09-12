@@ -21,7 +21,7 @@ test('full-cast owner parses and loads after the canonical runtime', () => {
 test('full cast scan remains opt-in and targets participation plus physical presence', () => {
   assert.match(source, /fullCastScanEveryTurn/);
   assert.match(source, /if \(npc\.present\) ids\.add\(npc\.id\)/);
-  assert.match(source, /participantLabels\(npc, npcs\)/);
+  assert.match(source, /npcParticipatesInExchange\(npc, npcs, exchangeText\)/);
   assert.match(source, /before\.get\(npc\.id\) !== fingerprint\(npc\)/);
   assert.match(source, /await npcApi\.refreshFromChat\(id\)/);
   assert.match(source, />Full cast scan</);
@@ -33,8 +33,8 @@ test('superseded enhancement dossier library is not retained beside Stage 1 UI',
   assert.doesNotMatch(source, /openLibrary|closeLibrary|renderLibrary/);
 });
 
-test('redundant cast-wide backfills remain guarded locally', () => {
-  assert.match(source, /pending-backfill normalization drops deprecated sweep flags/);
-  assert.match(source, /targeted dossier backfill extractor/i);
-  assert.match(source, /npc\.manual !== true/);
+test('full-cast owner never patches the host text-model route', () => {
+  assert.doesNotMatch(source, /generateRaw/);
+  assert.doesNotMatch(source, /installBackfillGuard/);
+  assert.match(source, /npcParticipatesInExchange/);
 });

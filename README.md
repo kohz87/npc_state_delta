@@ -1,6 +1,6 @@
 # NPC State Delta v0.1.0
 
-**Development build.** Delta has its own application-version baseline at `0.1.0`. Upstream source versions are recorded only in Git history and `docs/seed-provenance.*`; they are not runtime identities, module names, or application versions. Stages 1 and 2 are implemented; stages 3-9 remain pending.
+**Development build.** Delta has its own application-version baseline at `0.1.0`. Upstream source versions are recorded only in Git history and `docs/seed-provenance.*`; they are not runtime identities, module names, or application versions. Stages 1-4 are implemented and deterministically verified; stages 5-9 remain pending. Stage 4 still needs real-host visual/provider acceptance.
 
 Delta is a standalone SillyTavern NPC continuity extension built from a pinned NPC State source baseline and developed forward as one Delta codebase. Selected Beta/Alpha presentation ideas are adapted into that foundation; their engines and two-stage architecture are not runtime dependencies.
 
@@ -10,12 +10,14 @@ Delta is a standalone SillyTavern NPC continuity extension built from a pinned N
 - Active core mechanics in `core-mechanics.js`, active branch/recovery primitives in `branch-core.js`, and semantic owners for persistence, identity, social state, lifecycle hardening, scanning, dossier UI, and launcher UI.
 - Stage 1 side launcher plus a portrait-led, searchable dossier/cast-rail surface over canonical Delta state.
 - Stage 2 consolidation with coherent `0.1.0` application metadata, a dedicated full-cast scanning owner, removal of the superseded secondary dossier-library enhancement surface, and removal of version-labelled source-era runtime paths.
+- Stage 3 shared scanner request routing with an optional connection profile while leaving ordinary roleplay and portrait routing independent; automatic backfill guards execute before that dispatcher rather than patching the host generation route.
+- Stage 4 appearance continuity with form-independent overall presentation, bounded named forms, explicit current/unnamed-form state, manual current-appearance reconciliation, and one shared resolver across canonical dossier appearance/portrait/injection. Confirmed automatic death is terminal; correction of an erroneous death and owned rollback are the only reversal paths.
 - Historical source snapshots, old version labels, and provenance notes segregated under `docs/history/` and `docs/seed-provenance.*`; they are not shipped runtime modules.
 - Existing migration/compatibility behavior that is still required for accepted stored-state shapes remains active Delta compatibility logic inside the current owners. It is not a second engine or a legacy runtime layer.
 - Core behavior contract, staged implementation plan, development commands, and source provenance.
 - Existing repository GPL-3.0 license preserved.
 
-The runtime still carries the currently accepted OOC commands and automatic alive/reactivation behavior until their assigned later stages. Scanner connection profiles, named appearance forms, and terminal automatic death are not yet delivered. Stage 2 is a structure/version cleanup and does not redesign scanner semantics, persistence, relationship scoring, or injection behavior.
+The runtime still carries the currently accepted OOC commands until their assigned later stage. Scanner connection profiles are delivered by Stage 3. Stage 4 keeps manual/stale archive return behavior for living NPCs but makes confirmed automatic death terminal. The retained dossier editor stays scalar-facing; a manually locked Appearance edit is reconciled into the selected form so it does not become a competing appearance authority. The accepted relationship formulas are unchanged. Stages 5-9 remain pending.
 
 ## Active runtime ownership
 
