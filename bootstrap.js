@@ -15,6 +15,11 @@ try {
     console.error('[NPC State Delta] dossier UI failed to load', error);
 }
 try {
+    await import('./dossier-tools.js');
+} catch (error) {
+    console.error('[NPC State Delta] supporting tools UI failed to load', error);
+}
+try {
     await import('./launcher-ui.js');
 } catch (error) {
     console.error('[NPC State Delta] dossier launcher failed to load', error);
