@@ -16,6 +16,7 @@ try {
 }
 try {
     await import('./dossier-tools.js');
+    await import('./dossier-tools-controls.js');
 } catch (error) {
     console.error('[NPC State Delta] supporting tools UI failed to load', error);
 }
