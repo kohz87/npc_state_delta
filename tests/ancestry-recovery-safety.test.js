@@ -14,7 +14,7 @@ function msg(text, isUser = false) {
 }
 
 function ancestorState(chat) {
-    const state = { npcs: [{ id: 'npc_a', name: 'A' }], candidates: [], pendingBackfills: [], socialGraph: { edges: [], unresolved: [] }, dismissed: [], turn: 1, assistantSinceScan: 0, lastScanAt: 0, lastScannedMessageId: null, scanCount: 0, processedOocMessageId: null, checkpoints: [], lineage: [], inlineCards: [] };
+    const state = { npcs: [{ id: 'npc_a', name: 'A' }], candidates: [], pendingBackfills: [], socialGraph: { edges: [], unresolved: [] }, dismissed: [], turn: 1, assistantSinceScan: 0, lastScanAt: 0, lastScannedMessageId: null, scanCount: 0, checkpoints: [], lineage: [], inlineCards: [] };
     recordBranchCheckpoint(state, chat, chat.length - 1, 'test');
     return state;
 }

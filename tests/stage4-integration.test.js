@@ -202,7 +202,7 @@ test('Stage 4 branch rollback restores the owned pre-switch appearance form snap
         npcs: [formNpc()], dismissed: [], inlineCards: [], checkpoints: [], lineage: [],
         branchLineageVersion: BRANCH_LINEAGE_VERSION,
         turn: 0, assistantSinceScan: 0, lastScanAt: 0, lastScannedMessageId: null,
-        scanCount: 0, processedOocMessageId: null,
+        scanCount: 0,
     };
     recordBranchCheckpoint(state, chat, 1, 'scan');
     state.npcs[0].currentForm = 'Stormcrown';

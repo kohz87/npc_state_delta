@@ -1328,49 +1328,13 @@ export function stripUiNoise(text) {
 
 
 
-export function stripOocNpcStateControls(text) {
-    return String(text ?? '')
-        .replace(/(?:\(|\[)\s*OOC\s*:\s*[^\)\]]*\bnpc[\s_-]*state[\s_-]*delta\b[^\)\]]*(?:\)|\])/gi, ' ')
-        .replace(/^\s*OOC\s*:\s*.*\bnpc[\s_-]*state[\s_-]*delta\b.*$/gim, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
-
-export function parseOocNpcStateCommands(text) {
-    const source = String(text ?? '');
-    const blocks = [];
-    const wrapped = /(?:\(|\[)\s*OOC\s*:\s*([\s\S]*?)(?:\)|\])/gi;
-    for (const match of source.matchAll(wrapped)) blocks.push(match[1]);
-    const line = /^\s*OOC\s*:\s*(.+)$/gim;
-    for (const match of source.matchAll(line)) blocks.push(match[1]);
-
-    const commands = [];
-    for (const block of blocks) {
-        if (!/\bnpc[\s_-]*state[\s_-]*delta\b/i.test(block)) continue;
-        const scoped = block.replace(/^\s*npc[\s_-]*state[\s_-]*delta\s*:?\s*/i, '');
-        const parts = scoped.split(/[;\n]+/).map(x => x.trim()).filter(Boolean);
-        for (let part of parts) {
-            part = part.replace(/^\s*npc[\s_-]*state[\s_-]*delta\s*:?\s*/i, '');
-            const match = part.match(/^\s*(add|remove|delete)\s*:?\s*(.+?)\s*$/i);
-            if (!match) continue;
-            let name = match[2]
-                .replace(/^\s*(?:the\s+)?(?:bond\s+card|dossier|npc\s+card)\s+(?:for\s+)?/i, '')
-                .replace(/\s+(?:from\s+)?(?:the\s+)?(?:bond\s+card|dossier|npc\s+card)\s*$/i, '')
-                .replace(/^['\"“”‘’]+|['\"“”‘’.,!?]+$/g, '')
-                .trim();
-            if (!name) continue;
-            commands.push({ action: /^add$/i.test(match[1]) ? 'add' : 'remove', name });
-        }
-    }
-    return commands;
-}
-
 export function npcMatchesLabel(npc, label) {
     const key = normalizeName(label);
     if (!key || !npc) return false;
     return [npc.name, ...(npc.aliases || [])].some(value => normalizeName(value) === key);
 }
 
+// Structured manual add/remove helper shared by the settings UI. Story text is never parsed here.
 export function applyNpcStateCommand(state, command, options = {}) {
     const next = {
         ...(state || {}),
@@ -2593,7 +2557,7 @@ function shouldCreateDossierImmediately(incoming, admissionMode = 'conservative'
     if (incoming.identityKind === 'proper_name') return true;
     if (mode === 'balanced' && (incoming.dossierSignal === 'meaningful' || incoming.dossierSignal === 'persistent' || incoming.directInteraction)) return true;
     // Conservative intentionally ignores model-assigned relevance for a first-seen role label.
-    // Role NPCs must earn promotion through confirmed recurrence or an explicit manual/OOC add.
+    // Role NPCs must earn promotion through confirmed recurrence or an explicit manual add.
     return false;
 }
 
@@ -4219,9 +4183,11 @@ function injectionEssentialBlock(npc, behaviorCap = 160, identityCap = 620, agen
     return `- ${npc.name}: IDENTITY (authoritative): ${identity}; AGENCY/OTHER BONDS: ${agency}; CURRENT STATE: ${currentState}; PLAYER RELATIONSHIP (secondary modifier): ${relationship}`;
 }
 
-function injectionOptionalFields(npc) {
+function injectionOptionalFields(npc, includeAppearance = false) {
     const importantMemories = cleanList(npc.memories, IMPORTANT_MEMORY_LIMIT, 220);
     return [
+        includeAppearance && npc.appearance && `CURRENT VISIBLE APPEARANCE (authoritative anatomy; species/race cannot override the selected form): ${npc.appearance}`,
+        includeAppearance && !npc.appearance && (npc.currentForm || npc.currentFormUnknown) && 'Current visible appearance is not established; do not infer anatomy from species or another form.',
         importantMemories.length && `important memories: ${importantMemories.join(' | ')}`,
         npc.species && `species/race: ${npc.species}`,
         npc.age && `chronological age: ${npc.age}`,
@@ -4239,7 +4205,7 @@ function compactInjectionBehaviorRubric(criteria, maxChars) {
     return truncateInjectionText(raw, maxChars);
 }
 
-export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria = DEFAULT_BEHAVIOR_CRITERIA, budgetTokens = DEFAULT_INJECTION_BUDGET_TOKENS, socialGraph = null) {
+export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria = DEFAULT_BEHAVIOR_CRITERIA, budgetTokens = DEFAULT_INJECTION_BUDGET_TOKENS, socialGraph = null, { includeAppearance = false } = {}) {
     const present = (npcs || []).filter(npc => Boolean(npc?.present) && !npc?.archived);
     let relevant = selectRelevantNpcs(present, text, turn, limit, socialGraph, npcs || []);
     if (!relevant.length) return '';
@@ -4297,7 +4263,9 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
 
     // Optional continuity then fills remaining room round-robin so one verbose dossier cannot
     // starve another. Relationship summary is deliberately late: live identity/state already won priority.
-    const optionalByNpc = relevant.map(injectionOptionalFields);
+    // Resolved appearance uses the same optional budget as other continuity. It must not
+    // shrink the essential identity/agency budget or be spliced ahead of characterization.
+    const optionalByNpc = relevant.map(npc => injectionOptionalFields(npc, includeAppearance));
     const enriched = essentialBlocks.slice();
     const maxPriority = Math.max(0, ...optionalByNpc.map(fields => fields.length));
     for (let priority = 0; priority < maxPriority; priority++) {
@@ -4629,23 +4597,17 @@ export function buildScannerPrompt({
     memoryCriteria = DEFAULT_MEMORY_CRITERIA,
     detailLimit = 4,
     admissionMode = 'conservative',
-    focusNpcName = '',
-    backfillMode = false,
     currentTranscript = '',
     fullScanMode = false,
 }) {
     const baseline = normalizeRelationshipBaseline(relationshipBaseline);
     const caps = normalizeRelationshipCaps(relationshipCaps);
     const admission = normalizeNpcAdmissionMode(admissionMode);
-    const focusName = cleanText(focusNpcName, 120);
     const admissionPolicy = admission === 'manual_only'
-        ? 'MANUAL ONLY: new people stay candidates until OOC/manual add; existing dossiers still update.'
+        ? 'MANUAL ONLY: new people stay candidates until manual add; existing dossiers still update.'
         : admission === 'balanced'
             ? 'BALANCED: admit proper names, meaningful/persistent roles, and roles with direct two-way player interaction.'
-            : 'CONSERVATIVE: proper names admit. First-seen role_label ALWAYS stays candidate regardless of dossierSignal/directInteraction; promote on confirmed same-person recurrence or manual/OOC add.';
-    const focusRule = focusName
-        ? `\nOOC BACKFILL MODE: return only "${focusName}" or {"npcs":[]}; reuse its dossier id, recover grounded facts, and force relationship deltas to 0.`
-        : '';
+            : 'CONSERVATIVE: proper names admit. First-seen role_label ALWAYS stays candidate regardless of dossierSignal/directInteraction; promote on confirmed same-person recurrence or manual add.';
     const identityIndex = [
         ...existingNpcs.map(npc => ({
             id: npc.id,
@@ -4747,7 +4709,7 @@ export function buildScannerPrompt({
         : '';
 
     return `Private NPC dossier scanner. NEW dossier-worthy NPCs get a grounded first-pass profile.
-Admission: ${admissionPolicy}${focusRule}${fullScanRule}
+Admission: ${admissionPolicy}${fullScanRule}
 Rules:
 1. Exclude player (${userName}), main speaker (${charName}), extras.
 2. EXISTING: match id/name/alias/role. Return compact JSON deltas: changed fields only; omitted persist. Identity promotion: role/interim dossier + grounded proper name => MUST reuse id; old label in aliases; identityKind:"proper_name"; never duplicate/downgrade.

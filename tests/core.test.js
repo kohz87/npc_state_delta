@@ -41,7 +41,6 @@ import {
     relationshipAxisEvidenceGrounded,
     relationshipSummaryConsistent,
     parseScanJson,
-    parseOocNpcStateCommands,
     selectRelevantNpcs,
     scoreNpcRelevance,
     selectScannerContextNpcs,
@@ -50,7 +49,6 @@ import {
     extractExplicitKeyRelationshipEdges,
     pruneStaleNpcState,
     applyStaleNpcLifecycle,
-    stripOocNpcStateControls,
     buildNpcPortraitPrompts,
     normalizePortraitPromptFormat,
 } from '../core.js';
@@ -639,7 +637,7 @@ test('stale incidental candidates expire after the candidate TTL', () => {
     assert.deepEqual(expired.report.expired, ['Stablehand']);
 });
 
-test('explicit OOC add promotes a held candidate immediately and preserves lightweight identity hints', () => {
+test('explicit manual add promotes a held candidate immediately and preserves lightweight identity hints', () => {
     const scanned = mergeScanResult({ npcs: [], candidates: [], dismissed: [], turn: 1 }, { npcs: [{
         name: 'Guild Boy', aliases: ['Dock Gopher'], identityKind: 'role_label', dossierSignal: 'incidental', present: true,
         role: 'Guild Apprentice', location: 'Side Dock',
@@ -1917,21 +1915,6 @@ test('scanner identity index includes lightweight candidates without full dossie
     assert.match(prompt, /\"seenCount\":1/);
 });
 
-test('parses explicit NPC State Delta OOC add/remove commands only', () => {
-    assert.deepEqual(parseOocNpcStateCommands('(OOC: NPC State Delta: add Yunyun)'), [{ action: 'add', name: 'Yunyun' }]);
-    assert.deepEqual(parseOocNpcStateCommands('[OOC: NPC_STATE_DELTA: remove bond card for Wiz]'), [{ action: 'remove', name: 'Wiz' }]);
-    assert.deepEqual(parseOocNpcStateCommands('(OOC: NPC State Delta: add Yunyun; remove Wiz)'), [
-        { action: 'add', name: 'Yunyun' },
-        { action: 'remove', name: 'Wiz' },
-    ]);
-    assert.deepEqual(parseOocNpcStateCommands('(OOC: add more romantic tension)'), []);
-});
-
-test('strips NPC State Delta OOC controls from scanner story text', () => {
-    const text = 'I enter the guild. (OOC: NPC State Delta: add Yunyun) Yunyun waves awkwardly.';
-    assert.equal(stripOocNpcStateControls(text), 'I enter the guild. Yunyun waves awkwardly.');
-});
-
 test('ID-targeted remove deletes the exact dossier when duplicate labels exist', () => {
     const first = normalizeNpcRecord({ id: 'npc_same_a', name: 'Stable Hand', aliases: [], role: 'stable hand' });
     const second = normalizeNpcRecord({ id: 'npc_same_b', name: 'Stable Hand', aliases: [], role: 'stable hand' });
@@ -1946,7 +1929,7 @@ test('ID-targeted remove deletes the exact dossier when duplicate labels exist',
     assert.ok(result.state.dismissed.includes('stable hand'));
 });
 
-test('OOC remove suppresses rediscovery and later add restores the dossier', () => {
+test('manual remove suppresses rediscovery and later add restores the dossier', () => {
     const original = createNpcRecord('Yunyun');
     original.aliases = ['Yun-Yun'];
     let result = applyNpcStateCommand({ npcs: [original], turn: 5, dismissed: [] }, { action: 'remove', name: 'Yunyun' }, { turn: 5 });
@@ -2132,7 +2115,7 @@ test('ambiguous or inferred death never triggers automatic archive', () => {
     assert.equal(result.state.npcs[0].present, true);
 });
 
-test('OOC add restores an archived dossier instead of creating a duplicate', () => {
+test('manual add restores an archived dossier instead of creating a duplicate', () => {
     const original = setNpcArchived(createNpcRecord('Wiz'), true, { reason: 'manual' });
     const result = applyNpcStateCommand({ npcs: [original], turn: 5, dismissed: [] }, { action: 'add', name: 'Wiz' }, { turn: 5 });
     assert.equal(result.state.npcs.length, 1);
