@@ -15,6 +15,7 @@
     { "path": "branch.js", "role": "branch-recovery", "required": true },
     { "path": "branch-core.js", "role": "branch-primitives", "required": true },
     { "path": "bundle.js", "role": "bundle-format", "required": true },
+    { "path": "native-transfer.js", "role": "native-transfer-envelope", "required": true },
     { "path": "identity.js", "role": "chat-identity", "required": true },
     { "path": "social.js", "role": "social-graph", "required": true },
     { "path": "storage.js", "role": "persistence", "required": true },
@@ -22,6 +23,8 @@
     { "path": "hardening.js", "role": "lifecycle-hardening", "required": true },
     { "path": "full-cast.js", "role": "optional-full-cast-scan", "required": false },
     { "path": "dossier-ui.js", "role": "dossier-ui", "required": true },
+    { "path": "dossier-tools-core.js", "role": "supporting-tools-primitives", "required": true },
+    { "path": "dossier-tools.js", "role": "supporting-tools-ui", "required": true },
     { "path": "launcher-ui.js", "role": "launcher-ui", "required": true }
   ]
 }
