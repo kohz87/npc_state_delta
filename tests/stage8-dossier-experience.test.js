@@ -9,7 +9,7 @@ const source = fs.readFileSync(fileURLToPath(new URL('../dossier-experience.js',
 test('manual life-state projection distinguishes unknown alive and terminal death', () => {
     assert.equal(lifeStateChoice({ lifeState: 'unknown' }), 'unknown');
     assert.equal(lifeStateChoice({ lifeState: 'alive' }), 'alive');
-    assert.equal(lifeStateChoice({ lifeState: 'dead', lifeStateCertainty: 'confirmed' }), 'deceased');
+    assert.equal(lifeStateChoice({ lifeState: 'deceased', lifeStateCertainty: 'explicit' }), 'deceased');
     assert.equal(lifeStateChoice({ archiveReason: 'deceased', archived: true }), 'deceased');
 });
 
