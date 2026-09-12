@@ -27,7 +27,7 @@ test('delete and hydration use ownership epochs and stale loader cannot clear a 
     assert.match(index, /const ownershipEpochs = new Map\(\)/);
     const lifecycleCache = index.slice(index.indexOf('function clearLifecycleCacheKey'), index.indexOf('async function loadLatestLifecycleState'));
     assert.match(lifecycleCache, /bumpOwnershipEpoch\(key\)/);
-    assert.match(lifecycleCache, /scanOperations\.cancel\(key, reason\)/);
+    assert.match(lifecycleCache, /cancelScanOperation\(key, reason\)/);
     assert.match(index, /clearLifecycleCacheKey\(key, 'chat-deleted'\)/);
     assert.match(index, /assertOwnershipEpoch\(key, epoch\)/);
     assert.match(index, /if \(loadingChatStates\.get\(key\) === task\) loadingChatStates\.delete\(key\)/);

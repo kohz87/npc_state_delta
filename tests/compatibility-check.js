@@ -9,7 +9,8 @@ const bootstrap = fs.readFileSync(path.join(root, 'bootstrap.js'), 'utf8');
 const index = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
 const identity = fs.readFileSync(path.join(root, 'identity.js'), 'utf8');
 const hardening = fs.readFileSync(path.join(root, 'hardening.js'), 'utf8');
-const contextSource = `${index}\n${identity}\n${hardening}`;
+const scannerRouting = fs.readFileSync(path.join(root, 'scanner-routing.js'), 'utf8');
+const contextSource = `${index}\n${identity}\n${hardening}\n${scannerRouting}`;
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
 const runtimeConfig = JSON.parse(fs.readFileSync(path.join(root, 'runtime-modules.json'), 'utf8'));
 
@@ -41,7 +42,7 @@ for (const event of st118Contract.events) {
 for (const event of ['CHARACTER_RENAMED', 'CHARACTER_RENAMED_IN_PAST_CHAT', 'CHARACTER_DELETED']) {
     assert.match(hardening, new RegExp(`events\\.${event}`), `missing lifecycle hardening event ${event}`);
 }
-assert.match(index, /generateRaw\(\s*\{/s, 'generateRaw should use the SillyTavern 1.18 object-parameter signature');
+assert.match(scannerRouting, /ctx\.generateRaw\(options\)/, 'default scanner routing should preserve the SillyTavern generateRaw object-parameter call');
 assert.match(index, /const Popup = ctx\.Popup/);
 assert.match(index, /const POPUP_TYPE = ctx\.POPUP_TYPE/);
 assert.match(index, /const POPUP_RESULT = ctx\.POPUP_RESULT/);

@@ -7,9 +7,11 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
 const index = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
+const scannerRouting = fs.readFileSync(path.join(root, 'scanner-routing.js'), 'utf8');
 
-test('dossier scanner uses raw isolated generation instead of chat-context quiet generation', () => {
-    assert.match(index, /ctx\.generateRaw\(\{[\s\S]*?systemPrompt,[\s\S]*?prompt:[\s\S]*?instructOverride:\s*true,[\s\S]*?responseLength:[\s\S]*?trimNames:\s*false/);
+test('dossier scanner uses the shared isolated dispatcher and default route preserves raw generation', () => {
+    assert.match(index, /dispatchScannerRequest\(ctx,\s*\{[\s\S]*?systemPrompt,[\s\S]*?prompt:[\s\S]*?instructOverride:\s*true,[\s\S]*?responseLength:[\s\S]*?trimNames:\s*false/);
+    assert.match(scannerRouting, /ctx\.generateRaw\(options\)/);
     assert.match(index, /SCAN_RESPONSE_LENGTH = 1800/);
     assert.match(index, /BACKFILL_RESPONSE_LENGTH = 3200/);
     assert.match(index, /JSON_RETRY_RESPONSE_LENGTH = 5200/);
