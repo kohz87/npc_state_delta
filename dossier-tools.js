@@ -3,7 +3,7 @@ import {
     activeChatKey, api, buildPortablePortraitSettings, closeOverlay, currentSessionIs, draftKey,
     escapeHtml, flushDurably, keepPromptDraft, makeSession, mountOverlay, npcById, plain,
     portraitSignature, promptDrafts, recordToolEvent, relationshipDiagnosticRows, selectedNpcId,
-    setBusy, stage1Refresh, summarizeDecodedBundle, toolEvents, validatePortraitFile,
+    setBusy, stage1Refresh, summarizeDecodedBundle, toolEvents, uiRoot, validatePortraitFile,
 } from './dossier-tools-core.js';
 import { augmentNativeBundle, buildHistoryArchive, prepareNativeImport } from './native-transfer.js';
 
@@ -133,8 +133,6 @@ function wirePortraitDialog(session) {
             return;
         }
         const before = portraitSignature(npcById(session.npcId));
-        // Once an upload has entered the inherited compression/mutation handler, closing is disabled.
-        // This prevents a user cancellation from pretending it can cancel a mutation already handed off.
         setBusy(session, true, 'Processing image through the canonical portrait handler…');
         void finishUploadedPortrait(session, before, file?.name?.includes('-generated.') ? 'generated portrait' : 'device portrait');
     });
@@ -226,8 +224,6 @@ async function applyPreview(session) {
         const transfer = new DataTransfer();
         transfer.items.add(file);
         input.files = transfer.files;
-        // Reset the cancellable fetch state. The synchronous change listener immediately takes
-        // ownership and disables closing before the event bubbles to the canonical upload handler.
         setBusy(session, false, '');
         input.dispatchEvent(new Event('change', { bubbles: true }));
     } catch (error) {
@@ -432,7 +428,7 @@ function openDataMenu(anchor) {
 }
 
 function injectButtons() {
-    const root = document.getElementById('npc_state_delta_stage1_ui');
+    const root = uiRoot();
     if (!root) return false;
     const top = root.querySelector('.delta-top-actions');
     if (top && !top.querySelector('.delta-tools-data')) {
@@ -470,7 +466,7 @@ function start(attempt = 0) {
     if (typeof document === 'undefined') return;
     installStyles();
     if (injectButtons()) {
-        const root = document.getElementById('npc_state_delta_stage1_ui');
+        const root = uiRoot();
         if (!root?.__npcStateDeltaToolsObserver) {
             const observer = new MutationObserver(() => injectButtons());
             observer.observe(root, { childList: true, subtree: true });
