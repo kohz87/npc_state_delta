@@ -6,6 +6,7 @@
     { "path": "bootstrap.js", "role": "bootstrap", "required": true },
     { "path": "index.js", "role": "runtime-controller", "required": true },
     { "path": "scanner-routing.js", "role": "scanner-request-routing", "required": true },
+    { "path": "scanner-output-ui.js", "role": "scanner-output-setting-and-ui-polish", "required": true },
     { "path": "scan-context.js", "role": "scan-context-eligibility", "required": true },
     { "path": "core.js", "role": "core-facade", "required": true },
     { "path": "core-mechanics.js", "role": "core-mechanics", "required": true },
