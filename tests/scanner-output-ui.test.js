@@ -78,7 +78,8 @@ test('scanner output UI keeps settings bounded, groups full cast with scanning, 
     assert.match(source, /FULL_CAST_CONTROL_ID = 'npc_state_delta_full_cast_scan'/);
     assert.match(source, /function moveFullCastIntoScanning/);
     assert.match(source, /npc_state_delta_full_scan_every_turn/);
-    assert.match(source, /npc-state-delta-actions:not\(\.delta-settings-maintenance-actions\)[^}]*flex-wrap:wrap/s);
+    assert.match(source, /npc-state-delta-actions:not\(\.delta-settings-maintenance-actions\)/);
+    assert.match(source, /npc-state-delta-tuning-actions\{display:flex!important;flex-wrap:wrap!important/);
     assert.match(source, /delta-settings-maintenance-actions\{display:grid!important;grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/s);
     assert.match(source, /delta-settings-maintenance-actions>\.menu_button[^}]*width:100%!important/s);
     assert.match(source, /delta-scanner-output-row[^}]*grid-template-columns:minmax\(0,1fr\) minmax\(150px,180px\)/s);
