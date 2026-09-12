@@ -27,6 +27,7 @@
     { "path": "dossier-tools.js", "role": "supporting-tools-ui", "required": true },
     { "path": "portrait-tools.js", "role": "portrait-prompt-and-image-management", "required": true },
     { "path": "dossier-tools-controls.js", "role": "supporting-tools-controls", "required": true },
-    { "path": "launcher-ui.js", "role": "launcher-ui", "required": true }
+    { "path": "launcher-ui.js", "role": "launcher-ui", "required": true },
+    { "path": "dossier-experience.js", "role": "dossier-experience-refinement", "required": true }
   ]
 }
