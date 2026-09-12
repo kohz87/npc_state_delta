@@ -8,6 +8,7 @@ import {
 const EXTENSION_NAME = 'npc_state_delta';
 const SETTINGS_ID = 'npc_state_delta_settings';
 const CONTROL_ID = 'npc_state_delta_scanner_max_output_tokens';
+const FULL_CAST_CONTROL_ID = 'npc_state_delta_full_cast_scan';
 const STYLE_ID = 'npc_state_delta_scanner_output_ui_styles';
 const GUARD = '__npcStateDeltaScannerOutputUi';
 
@@ -36,6 +37,17 @@ function scanningGroup(root) {
         .find(group => group.querySelector(':scope > summary b')?.textContent?.trim() === 'Scanning') || null;
 }
 
+function moveFullCastIntoScanning(root) {
+    const row = root?.querySelector?.(`.npc-state-delta-setting-row[for="${FULL_CAST_CONTROL_ID}"]`);
+    const body = scanningGroup(root)?.querySelector?.('.delta-settings-group-body');
+    if (!row || !body) return false;
+    const anchor = body.querySelector('.npc-state-delta-setting-row[for="npc_state_delta_full_scan_every_turn"]');
+    if (row.parentElement === body && anchor?.nextElementSibling === row) return true;
+    if (anchor) body.insertBefore(row, anchor.nextElementSibling);
+    else body.prepend(row);
+    return true;
+}
+
 function syncControl(root) {
     const input = root?.querySelector?.(`#${CONTROL_ID}`);
     if (!input || document.activeElement === input) return;
@@ -45,6 +57,7 @@ function syncControl(root) {
 function mountControl() {
     const root = document.getElementById(SETTINGS_ID);
     if (!root) return false;
+    moveFullCastIntoScanning(root);
     let input = root.querySelector(`#${CONTROL_ID}`);
     if (!input) {
         const row = settingRow();
@@ -85,18 +98,24 @@ function injectStyles() {
     const style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
-#${SETTINGS_ID} .delta-scanner-output-control{display:flex;align-items:center;justify-content:flex-end;gap:6px;min-width:0}
-#${SETTINGS_ID} .delta-scanner-output-control input{width:min(132px,100%)}
-#${SETTINGS_ID} .delta-scanner-output-control small{opacity:.6;white-space:nowrap}
+/* Keep the long scanner hint and its numeric control in their own bounded columns. */
+#${SETTINGS_ID} .delta-scanner-output-row{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(150px,180px)!important;column-gap:12px!important;row-gap:7px!important;align-items:center!important;min-width:0}
+#${SETTINGS_ID} .delta-scanner-output-row>span:first-child{display:block;min-width:0;max-width:100%}
+#${SETTINGS_ID} .delta-scanner-output-row>span:first-child small{display:block;max-width:100%;white-space:normal;word-break:normal;overflow-wrap:break-word}
+#${SETTINGS_ID} .delta-scanner-output-control{display:flex;align-items:center;justify-content:flex-end;gap:6px;width:100%;min-width:0;box-sizing:border-box}
+#${SETTINGS_ID} .delta-scanner-output-control input{flex:1 1 auto;width:100%!important;min-width:0;box-sizing:border-box}
+#${SETTINGS_ID} .delta-scanner-output-control small{flex:0 0 auto;opacity:.6;white-space:nowrap}
 
-/* Action rows must wrap inside the Extensions drawer instead of leaking sideways. */
-#${SETTINGS_ID} .npc-state-delta-actions,
+/* Ordinary action rows may wrap, but the maintenance grid owns its own layout. */
+#${SETTINGS_ID} .npc-state-delta-actions:not(.delta-settings-maintenance-actions),
 #${SETTINGS_ID} .npc-state-delta-tuning-actions{display:flex!important;flex-wrap:wrap!important;align-items:center;gap:7px;min-width:0}
-#${SETTINGS_ID} .npc-state-delta-actions>.menu_button,
-#${SETTINGS_ID} .npc-state-delta-tuning-actions>.menu_button{flex:1 1 170px;min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:center;justify-content:center}
+#${SETTINGS_ID} .npc-state-delta-actions:not(.delta-settings-maintenance-actions)>.menu_button,
+#${SETTINGS_ID} .npc-state-delta-tuning-actions>.menu_button{flex:1 1 170px;min-width:0;max-width:100%;white-space:normal;word-break:normal;overflow-wrap:break-word;text-align:center;justify-content:center}
 #${SETTINGS_ID} .npc-state-delta-tuning-actions>#npc_state_delta_portrait_settings_status{flex:1 0 100%;min-width:0}
-#${SETTINGS_ID} .delta-settings-maintenance-actions{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr))!important;gap:7px!important;min-width:0}
-#${SETTINGS_ID} .delta-settings-maintenance-actions>.menu_button{min-width:0!important;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+
+/* Data & maintenance is a real grid: buttons stretch to their cells instead of shrinking to min-content letters. */
+#${SETTINGS_ID} .delta-settings-maintenance-actions{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:8px!important;width:100%;min-width:0;max-width:100%;box-sizing:border-box}
+#${SETTINGS_ID} .delta-settings-maintenance-actions>.menu_button{display:flex!important;align-items:center;justify-content:center;width:100%!important;min-width:0!important;max-width:100%!important;min-height:42px;box-sizing:border-box;white-space:normal!important;word-break:normal!important;overflow-wrap:break-word!important;line-height:1.25;text-align:center}
 
 /* Give portrait-led cast cards enough vertical room for face + metadata instead of cropping them into tiles. */
 #npc_state_delta_dossier_root .delta-library{grid-template-rows:minmax(0,1fr) 226px!important}
@@ -107,13 +126,20 @@ function injectStyles() {
   #npc_state_delta_dossier_root .delta-library{grid-template-rows:minmax(0,1fr) 236px!important}
   #npc_state_delta_dossier_root .delta-cast-card{flex-basis:124px!important;width:124px!important;min-width:124px!important;height:160px!important}
 }
-@media(max-width:650px){
+@media(max-width:760px){
+  #${SETTINGS_ID} .delta-scanner-output-row{grid-template-columns:minmax(0,1fr)!important;align-items:start!important}
+  #${SETTINGS_ID} .delta-scanner-output-control{width:min(220px,100%);justify-content:flex-start}
+}
+@media(max-width:620px){
+  #${SETTINGS_ID} .delta-settings-maintenance-actions{grid-template-columns:repeat(2,minmax(0,1fr))!important}
   #${SETTINGS_ID} .npc-state-delta-setting-row{align-items:flex-start}
-  #${SETTINGS_ID} .delta-scanner-output-control{width:100%;justify-content:flex-start;flex-wrap:wrap}
-  #${SETTINGS_ID} .npc-state-delta-actions>.menu_button,
+  #${SETTINGS_ID} .npc-state-delta-actions:not(.delta-settings-maintenance-actions)>.menu_button,
   #${SETTINGS_ID} .npc-state-delta-tuning-actions>.menu_button{flex-basis:100%}
   #npc_state_delta_dossier_root .delta-library{grid-template-rows:minmax(0,1fr) 258px!important}
   #npc_state_delta_dossier_root .delta-cast-card{flex-basis:116px!important;width:116px!important;min-width:116px!important;height:150px!important}
+}
+@media(max-width:420px){
+  #${SETTINGS_ID} .delta-settings-maintenance-actions{grid-template-columns:minmax(0,1fr)!important}
 }
 `;
     document.head.appendChild(style);
