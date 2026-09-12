@@ -81,7 +81,7 @@ export function calendarYearLength(config = null) {
     return normalized.config.months.reduce((total, month) => total + month.days, 0);
 }
 
-export function normalizeCalendarConfig(raw = {}, { requireCurrentDate = true } = {}) {
+export function normalizeCalendarConfig(raw = {}, { requireCurrentDate = false } = {}) {
     const source = raw && typeof raw === 'object' ? raw : {};
     const monthSource = source.months ?? source.monthDefinitions ?? source.month_definitions ?? source.monthsText ?? source.months_text;
     const parsed = parseMonthDefinitions(monthSource);
@@ -89,18 +89,28 @@ export function normalizeCalendarConfig(raw = {}, { requireCurrentDate = true } 
     const calendarValid = parsed.months.length > 0 && parsed.errors.length === 0;
 
     const era = cleanText(source.era, 40);
-    const currentYear = parseInteger(source.currentYear ?? source.current_year ?? source.year);
-    const requestedMonth = cleanText(source.currentMonth ?? source.current_month ?? source.month, 80);
+    const yearRaw = source.currentYear ?? source.current_year ?? source.year;
+    const monthRaw = source.currentMonth ?? source.current_month ?? source.month;
+    const dayRaw = source.currentDay ?? source.current_day ?? source.day;
+    const yearProvided = yearRaw !== null && yearRaw !== undefined && String(yearRaw).trim() !== '';
+    const requestedMonth = cleanText(monthRaw, 80);
+    const monthProvided = Boolean(requestedMonth);
+    const dayProvided = dayRaw !== null && dayRaw !== undefined && String(dayRaw).trim() !== '';
+    const anyCurrentDatePart = yearProvided || monthProvided || dayProvided;
+
+    const currentYear = yearProvided ? parseInteger(yearRaw) : null;
     const requestedMonthKey = normalizeMonthKey(requestedMonth);
     const currentMonthRecord = parsed.months.find(month => normalizeMonthKey(month.name) === requestedMonthKey) || null;
-    const currentDayRaw = Number(source.currentDay ?? source.current_day ?? source.day);
+    const currentDayRaw = dayProvided ? Number(dayRaw) : null;
     const currentDay = Number.isInteger(currentDayRaw) ? currentDayRaw : null;
 
-    if (requireCurrentDate) {
-        if (currentYear === null) errors.push('Current year is required and must be an integer.');
-        if (!requestedMonth) errors.push('Current month is required.');
+    if (requireCurrentDate || anyCurrentDatePart) {
+        if (!yearProvided) errors.push('Current year is required when a manual current date is set.');
+        else if (currentYear === null) errors.push('Current year must be an integer.');
+        if (!requestedMonth) errors.push('Current month is required when a manual current date is set.');
         else if (calendarValid && !currentMonthRecord) errors.push(`Current month is not in the configured month list: ${requestedMonth}.`);
-        if (currentDay === null) errors.push('Current day is required and must be an integer.');
+        if (!dayProvided) errors.push('Current day is required when a manual current date is set.');
+        else if (currentDay === null) errors.push('Current day must be an integer.');
         else if (currentMonthRecord && (currentDay < 1 || currentDay > currentMonthRecord.days)) {
             errors.push(`${currentMonthRecord.name} has days 1-${currentMonthRecord.days}; ${currentDay} is invalid.`);
         }
@@ -114,9 +124,10 @@ export function normalizeCalendarConfig(raw = {}, { requireCurrentDate = true } 
         && currentDay <= currentMonthRecord.days;
 
     return {
-        valid: calendarValid && (!requireCurrentDate || currentDateValid) && errors.length === 0,
+        valid: calendarValid && errors.length === 0 && (!requireCurrentDate || currentDateValid),
         calendarValid,
         currentDateValid,
+        currentDateConfigured: anyCurrentDatePart,
         errors,
         config: {
             era,
@@ -133,7 +144,7 @@ export function setActiveCalendarConfig(raw = null) {
         activeCalendarConfig = null;
         return null;
     }
-    const normalized = normalizeCalendarConfig(raw);
+    const normalized = normalizeCalendarConfig(raw, { requireCurrentDate: false });
     activeCalendarConfig = normalized.valid ? Object.freeze({
         ...normalized.config,
         months: Object.freeze(normalized.config.months.map(month => Object.freeze({ ...month }))),
@@ -215,6 +226,10 @@ function parseYearLabel(value, config = null) {
     return year === null ? { era: '', year: null } : { era: cleanText(match[1], 40), year };
 }
 
+function escapeRegex(value) {
+    return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export function normalizeCalendarDate(value, config = null) {
     const fromObject = normalizeDateObject(value, config);
     if (fromObject) return fromObject;
@@ -228,6 +243,14 @@ export function normalizeCalendarDate(value, config = null) {
             const datePart = parseConfiguredMonthDay(text.slice(comma + 1).trim(), normalized.config);
             const yearPart = parseYearLabel(text.slice(0, comma).trim(), normalized.config);
             if (datePart && yearPart.year !== null) return { ...yearPart, ...datePart };
+        }
+        const sorted = [...normalized.config.months].sort((a, b) => b.name.length - a.name.length);
+        for (const month of sorted) {
+            const match = text.match(new RegExp(`^(.*?)\\s*,?\\s*${escapeRegex(month.name)}\\s+(\\d{1,4})$`, 'iu'));
+            if (!match) continue;
+            const yearPart = parseYearLabel(match[1].trim(), normalized.config);
+            const day = Number(match[2]);
+            if (yearPart.year !== null && day >= 1 && day <= month.days) return { ...yearPart, month: month.name, day };
         }
         const datePart = parseConfiguredMonthDay(text, normalized.config);
         if (datePart) return { era: '', year: null, ...datePart };
@@ -310,14 +333,58 @@ export function deterministicCalendarBirthday(seed, config = null) {
 }
 
 export function currentCalendarDate(config = null) {
-    const normalized = normalizeCalendarConfig(config);
-    if (!normalized.valid) return null;
+    const normalized = normalizeCalendarConfig(config, { requireCurrentDate: false });
+    if (!normalized.valid || !normalized.currentDateValid) return null;
     return {
         era: normalized.config.era,
         year: normalized.config.currentYear,
         month: normalized.config.currentMonth,
         day: normalized.config.currentDay,
     };
+}
+
+function worldStateBodies(value) {
+    const source = String(value || '');
+    const bodies = [];
+    for (const match of source.matchAll(/<World_State\b[^>]*>([\s\S]*?)<\/World_State>/gi)) bodies.push(String(match[1] || ''));
+    for (const details of source.matchAll(/<details\b[^>]*>([\s\S]*?)<\/details>/gi)) {
+        const inner = String(details[1] || '');
+        const summary = String(inner.match(/<summary\b[^>]*>([\s\S]*?)<\/summary>/i)?.[1] || '')
+            .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        if (/\bworld\s*state\b/i.test(summary)) bodies.push(inner);
+    }
+    return bodies;
+}
+
+function dateCandidatesInWorldStateBody(body, config = null) {
+    const normalized = normalizeCalendarConfig(config, { requireCurrentDate: false });
+    const text = String(body || '').replace(/<[^>]+>/g, ' ');
+    const candidates = [];
+    if (normalized.calendarValid) {
+        const months = [...normalized.config.months].sort((a, b) => b.name.length - a.name.length);
+        const monthAlternation = months.map(month => escapeRegex(month.name)).join('|');
+        const era = normalized.config.era;
+        const yearLabel = era
+            ? `${escapeRegex(era)}\\s*-?\\d{1,7}`
+            : `(?:[\\p{L}][\\p{L}\\p{N}_-]{0,15})?-?\\d{1,7}`;
+        const regex = new RegExp(`(${yearLabel}\\s*,?\\s*(?:${monthAlternation})\\s+\\d{1,4})`, 'giu');
+        for (const match of text.matchAll(regex)) candidates.push(match[1]);
+    } else {
+        for (const match of text.matchAll(/(-?\d{1,7}[-/]\d{1,2}[-/]\d{1,2})/g)) candidates.push(match[1]);
+    }
+    return candidates;
+}
+
+export function extractStructuredWorldDate(value, config = null) {
+    let latest = null;
+    for (const body of worldStateBodies(value)) {
+        for (const raw of dateCandidatesInWorldStateBody(body, config)) {
+            const date = normalizeCalendarDate(raw, config);
+            if (!date || date.year === null) continue;
+            latest = { raw: cleanText(raw, 180), date, source: 'world-state' };
+        }
+    }
+    return latest;
 }
 
 export function deriveBirthDateFromAgeParts(birthDate, age, referenceDate = null, config = null) {
@@ -346,8 +413,9 @@ export function deriveAgeFromBirthDate(birthDate, referenceDate = null, config =
     return Number.isInteger(age) && age >= 0 ? age : null;
 }
 
-export function calendarPromptContext(config = null) {
-    const normalized = normalizeCalendarConfig(config);
-    if (!normalized.valid) return '';
-    return `Configured current world date=${formatCalendarDate(currentCalendarDate(normalized.config), normalized.config)}.`;
+export function calendarPromptContext(config = null, referenceDate = null) {
+    const normalized = normalizeCalendarConfig(config, { requireCurrentDate: false });
+    if (!normalized.calendarValid) return '';
+    const current = normalizeCalendarDate(referenceDate, normalized.config) || currentCalendarDate(normalized.config);
+    return current ? `Current grounded world date=${formatCalendarDate(current, normalized.config)}.` : '';
 }
