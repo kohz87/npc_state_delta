@@ -1,10 +1,11 @@
 # NPC State Delta changes
 
 
-## Unreleased
+## 1.0.2 - 12 September 2026
 
 - Add a Birthday field to Edit Dossier so generated or story-established dates can be corrected manually without editing extension JSON.
 - Validate manual birthday changes against the active calendar and route accepted corrections through the canonical birthday continuity engine without an extra model request; manual corrections clear story-message provenance.
+- Keep scanner prompt semantics, automatic scan routing, request counts, retry budgets and relationship behavior unchanged.
 
 ## 1.0.1 - 12 September 2026
 
