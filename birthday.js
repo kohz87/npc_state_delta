@@ -148,10 +148,10 @@ export function applyNpcBirthdayUpdate(npc = {}, rawUpdate = null, options = {})
     const precisionUpgrade = sameDay && birthDatePrecision(next.birthDate) === 'month-day' && birthDatePrecision(incoming) === 'full';
     if (currentEstablished && state === 'keep' && sameExactDate) return next;
 
-    const mayEstablish = !currentEstablished || !next.birthDate || precisionUpgrade || sameExactDate;
+    const mayEstablish = state === 'establish'
+        && (!currentEstablished || !next.birthDate || precisionUpgrade || sameExactDate);
     const mayCorrect = state === 'correct';
     if (!mayCorrect && !mayEstablish) return next;
-    if (currentEstablished && state === 'keep' && !precisionUpgrade) return next;
 
     return {
         ...next,
