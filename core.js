@@ -5,6 +5,12 @@ export * from './calendar.js';
 import * as continuity from './continuity-core.js';
 import * as mechanics from './core-mechanics.js';
 import {
+    currentCalendarDate,
+    extractStructuredWorldDate,
+    getActiveCalendarConfig,
+    normalizeCalendarDate,
+} from './calendar.js';
+import {
     applyNpcBirthdayUpdate,
     birthdayEvidenceInText,
     birthdayPromptRule,
@@ -40,27 +46,39 @@ function matchingPrevious(npc, source = []) {
 }
 
 function birthdayPromptSource(options = {}) {
-    return String(options?.transcript || options?.dossierText || '');
+    return String(options?.transcript || options?.dossierText || options?.developmentContext || '');
 }
 
-function calendarNpcProjection(raw = null) {
+function calendarReference(options = {}, calendar = getActiveCalendarConfig()) {
+    const extracted = extractStructuredWorldDate(birthdayPromptSource(options), calendar);
+    return {
+        extracted,
+        date: extracted?.date || normalizeCalendarDate(options?.referenceDate, calendar) || currentCalendarDate(calendar),
+    };
+}
+
+function calendarNpcProjection(raw = null, referenceDate = null) {
     if (!raw || typeof raw !== 'object') return raw;
-    const npc = normalizeNpcBirthday(raw);
-    return { ...npc, age: effectiveChronologicalAge(npc) };
+    const calendar = getActiveCalendarConfig();
+    const npc = normalizeNpcBirthday(raw, calendar, referenceDate);
+    return { ...npc, age: effectiveChronologicalAge(npc, calendar, referenceDate) };
 }
 
 function calendarPromptOptions(options = {}) {
     const next = { ...options };
-    if (Array.isArray(options.existingNpcs)) next.existingNpcs = options.existingNpcs.map(calendarNpcProjection);
-    if (options.existingNpc) next.existingNpc = calendarNpcProjection(options.existingNpc);
-    if (options.targetNpc) next.targetNpc = calendarNpcProjection(options.targetNpc);
+    const calendar = getActiveCalendarConfig();
+    const referenceDate = calendarReference(options, calendar).date;
+    if (Array.isArray(options.existingNpcs)) next.existingNpcs = options.existingNpcs.map(npc => calendarNpcProjection(npc, referenceDate));
+    if (options.existingNpc) next.existingNpc = calendarNpcProjection(options.existingNpc, referenceDate);
+    if (options.targetNpc) next.targetNpc = calendarNpcProjection(options.targetNpc, referenceDate);
     return next;
 }
 
 function appendBirthdayRule(prompt, options = {}) {
-    return birthdayEvidenceInText(birthdayPromptSource(options))
-        ? `${String(prompt)}${birthdayPromptRule()}`
-        : String(prompt);
+    if (!birthdayEvidenceInText(birthdayPromptSource(options))) return String(prompt);
+    const calendar = getActiveCalendarConfig();
+    const referenceDate = calendarReference(options, calendar).date;
+    return `${String(prompt)}${birthdayPromptRule(calendar, referenceDate)}`;
 }
 
 export function normalizeNpcRecord(raw = {}) {
@@ -82,22 +100,41 @@ export function applyNpcStateCommand(state, command, options = {}) {
 }
 
 export function mergeScanResult(state, scanResult, options = {}) {
-    const previous = (state?.npcs || []).map(normalizeNpcRecord);
+    const calendar = getActiveCalendarConfig();
+    const reference = calendarReference(options, calendar);
+    const referenceDate = reference.date;
+    const previous = (state?.npcs || []).map(raw => normalizeNpcBirthday(continuity.normalizeNpcRecord(raw), calendar, referenceDate));
     const result = continuity.mergeScanResult(state, scanResult, options);
     const ordinary = Array.isArray(scanResult?.npcs) ? scanResult.npcs : [];
 
     result.state.npcs = (result.state.npcs || []).map(rawNpc => {
         const sources = matchingPrevious(rawNpc, previous);
         const ordinaryUpdate = ordinary.find(raw => sameNpc(raw, rawNpc));
-        let npc = normalizeNpcBirthday(rawNpc);
-        if (ordinaryUpdate) npc = applyNpcBirthdayUpdate(npc, ordinaryUpdate, options);
+        let npc = normalizeNpcBirthday(rawNpc, calendar, referenceDate);
+        if (ordinaryUpdate) npc = applyNpcBirthdayUpdate(npc, ordinaryUpdate, { ...options, calendarConfig: calendar, referenceDate });
         const ageState = String(ordinaryUpdate?.ageState ?? ordinaryUpdate?.age_state ?? '').trim().toLowerCase();
         if ((ageState === 'advance' || ageState === 'correct') && npc.birthDateYearSource === 'derived') {
-            npc = reanchorDerivedBirthYearFromAge(npc);
+            npc = reanchorDerivedBirthYearFromAge(npc, calendar, referenceDate);
         }
-        if (sources.length) npc = mergeNpcBirthdayKnowledge(sources, npc);
+        if (sources.length) npc = mergeNpcBirthdayKnowledge(sources, npc, calendar, referenceDate);
+
+        // A grounded full current date turns a full birth date into deterministic chronology.
+        // This updates actual age locally; apparentAge remains an unrelated visual field.
+        if (referenceDate && Number.isInteger(npc.calendarAge) && normalizeCalendarDate(npc.birthDate, calendar)?.year !== null) {
+            npc.age = String(npc.calendarAge);
+        }
         return npc;
     });
+    if (reference.extracted) {
+        result.report = {
+            ...(result.report || {}),
+            calendarReference: {
+                source: 'world-state',
+                raw: reference.extracted.raw,
+                date: structuredClone(reference.extracted.date),
+            },
+        };
+    }
     return result;
 }
 
@@ -106,7 +143,7 @@ export function buildNpcPortraitPrompts(rawNpc = {}, options = {}) {
 }
 
 export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria = mechanics.DEFAULT_BEHAVIOR_CRITERIA, budgetTokens = 1800, socialGraph = null) {
-    const projected = (Array.isArray(npcs) ? npcs : []).map(calendarNpcProjection);
+    const projected = (Array.isArray(npcs) ? npcs : []).map(npc => calendarNpcProjection(npc));
     return continuity.buildInjection(projected, text, turn, limit, behaviorCriteria, budgetTokens, socialGraph);
 }
 
