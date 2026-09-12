@@ -66,27 +66,48 @@ test('editor synchronization is idempotent so MutationObserver refresh cannot se
     assert.equal(writes, 1);
 });
 
-test('launcher returns to direct dossier ownership while settings stays in Extensions', () => {
+test('launcher remains direct-to-dossier and is presented as a circular 48px floating control', () => {
     assert.doesNotMatch(source, /openLauncherHub|data-hub-action|delta-experience-hub/);
-    assert.match(source, /\.delta-open-settings\{display:none!important\}/);
+    assert.match(source, /npc_state_delta_dossier_launcher\{border-radius:50%!important\}/);
+    assert.match(source, /delta-open-settings/);
 });
 
-test('dossier library uses a real one-column portrait card instead of squeezing the legacy two-column card', () => {
-    assert.match(source, /\.delta-cast-card\{[^}]*grid-template-columns:1fr!important/);
-    assert.match(source, /\.delta-cast-portrait\{[^}]*width:100%!important[^}]*height:68px!important/);
+test('dossier library is a full-portrait cast carousel with overlaid text and hidden scrollbar', () => {
+    assert.match(source, /\.delta-cast-card\{position:relative!important[^}]*height:132px!important/);
+    assert.match(source, /\.delta-cast-portrait\{position:absolute!important[^}]*inset:0!important[^}]*height:100%!important/);
+    assert.match(source, /\.delta-cast-copy\{position:absolute!important[^}]*bottom:0[^}]*linear-gradient/);
+    assert.match(source, /\.delta-cast-list::-webkit-scrollbar\{display:none!important/);
     assert.match(source, /delta-cast-rail-wrap/);
 });
 
-test('cohesive experience keeps dossier actions adaptive editor and manual life-state control', () => {
+test('editor uses one scroll body and task-grouped form sections', () => {
+    assert.match(source, /\.npc-state-delta-editor-popup \.popup-content\{[^}]*overflow:hidden!important/);
+    assert.match(source, /#npc_state_delta_editor_content\{[^}]*overflow-y:auto!important/);
+    assert.match(source, /editorSection\('Identity & profile'/);
+    assert.match(source, /editorSection\('Current state'/);
+    assert.match(source, /editorSection\('Relationships'/);
+    assert.match(source, /editorSection\('Continuity'/);
+    assert.match(source, /Advanced NPC options/);
+    assert.match(source, /npc-state-delta-editor-portrait-overrides\{display:none!important/);
+    assert.match(source, /data-delta-life-state/);
+});
+
+test('settings are grouped by task and extension-wide backup diagnostics live in Settings', () => {
+    for (const label of ['General', 'Scanning', 'Continuity & injection', 'Roster & cleanup', 'Portrait prompts', 'Relationship tuning', 'Memory & behavior rules', 'Data & maintenance']) {
+        assert.match(source, new RegExp(label.replace(/[&]/g, '\\&')));
+    }
+    assert.match(source, /data-delta-settings-backup/);
+    assert.match(source, /data-delta-settings-restore/);
+    assert.match(source, /data-delta-settings-diagnostics/);
+    assert.match(source, /delta-tools-data,[\s\S]*delta-tools-diagnostics-button\{display:none!important\}/);
+    assert.match(source, /Image generation is not performed by the maintained Delta portrait workflow/);
+});
+
+test('cohesive experience keeps selected dossier actions and prompt-only portrait ownership', () => {
     assert.match(source, /delta-dossier-actions-primary/);
     assert.match(source, /npc-state-delta-refresh-chat/);
     assert.match(source, /npc-state-delta-scan-dossier/);
     assert.match(source, /Archive dossier/);
-    assert.match(source, /npc-state-delta-editor-popup\{width:min\(1320px,97vw\)/);
-    assert.match(source, /data-delta-life-state/);
-    assert.match(source, /npc-state-delta-copy-image-prompt/);
-});
-
-test('cohesive experience does not add a portrait image-generation path', () => {
+    assert.match(source, /openPortraitTools/);
     assert.doesNotMatch(source, /generatePortraitUrl|Generate preview|Apply preview|\/imagine/);
 });
