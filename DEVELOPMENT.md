@@ -2,7 +2,7 @@
 
 ## Current release candidate
 
-Delta 1.0.0 completes the nine-stage implementation and integrated consolidation. Stages 1-8 and calendar/birthday/form UI follow-ups were already integrated at baseline `fde5b35671337106cfe68341941c746707c7d7b3`. Stage 9 preserves the user's working scanner prompt and request budgets. The exact candidate must pass the existing CI before release acceptance and merge. Current results and remaining live-host limits are in `docs/stage9-review.md`; immutable seed records and earlier stage reports retain their historical results.
+Delta 1.0.1 is a bounded post-release hotfix on the completed nine-stage 1.0.0 line. It strengthens grounded visual-age capture without adding scanner requests, retries, output allowance, reasoning settings, or prompt characters. Stage 9 evidence remains in `docs/stage9-review.md`; immutable seed records and earlier stage reports retain their historical results.
 
 ## Canonical owners
 
@@ -45,7 +45,7 @@ The package-layout check expects the checkout directory itself to be named `npc_
 
 `validate` checks syntax, imports, namespaces, semantic ownership, exact runtime inventory and application metadata. Prompt measurement uses production builders with fixed fixtures; the additional Stage 9 capture checks complete Delta-owned system/user message bytes and options for both routes and a malformed-response retry against `tests/fixtures/stage9-budgets.json`. This baseline must not be regenerated from a changed candidate to conceal differences. Supply a baseline checkout path as an argument to measure that checkout with the same fixture.
 
-`package` deterministically creates `dist/npc_state_delta-1.0.0.zip` and its SHA-256 sidecar. It verifies exact inventory, archive contents, CRC, byte identity and JS syntax. Only declared runtime JS, CSS, manifest, inventory, license and README ship; tests, scripts, history, source bundles and browser artifacts do not.
+`package` deterministically creates `dist/npc_state_delta-1.0.1.zip` and its SHA-256 sidecar. It verifies exact inventory, archive contents, CRC, byte identity and JS syntax. Only declared runtime JS, CSS, manifest, inventory, license and README ship; tests, scripts, history, source bundles and browser artifacts do not.
 
 ## Optional synthetic browser verification
 

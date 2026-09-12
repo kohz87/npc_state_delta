@@ -31,6 +31,43 @@ export {
     normalizeBirthDateState,
 } from './birthday.js';
 
+const ROUTINE_APPARENT_AGE_RULE = '11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue, compact ~N, never prose; species literal; no species-aging inference. Birthday/exact elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual aging/growth/rejuvenation=>apparentAgeState:"evolve"+reason. Appearance must not repeat explicit age. Vague time skip insufficient.';
+const ROUTINE_APPARENT_AGE_RULE_FIXED = '11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue ~N. NEW dossier + cue => MUST return apparentAge when age unknown. species literal; no species-aging inference. Birthday/exact elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual change=>apparentAgeState:"evolve"+reason. Appearance:no age; vague time skip insufficient.';
+
+function strengthenRoutineApparentAgeRule(prompt) {
+    return String(prompt).replace(ROUTINE_APPARENT_AGE_RULE, ROUTINE_APPARENT_AGE_RULE_FIXED);
+}
+
+function explicitVisualAgeCueFromAppearance(value) {
+    const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+    if (!text) return '';
+
+    const exactYears = text.match(/\b(\d{1,3})[-\s]+years?[-\s]+old\b/i);
+    if (exactYears) return exactYears[1];
+
+    const decadeWords = 'twenties|thirties|forties|fifties|sixties|seventies|eighties|nineties';
+    const band = text.match(new RegExp(String.raw`\b(?:in\s+(?:his|her|their)\s+)?((?:early|mid|middle|late)\s+(?:[1-9]\d?s|${decadeWords}))\b`, 'i'));
+    if (band) return band[1];
+
+    const broadDecade = text.match(new RegExp(String.raw`\b(?:in\s+(?:his|her|their)\s+|about\s+|around\s+|approximately\s+)?(${decadeWords})\b`, 'i'));
+    if (broadDecade) return broadDecade[1];
+
+    const looksNumeric = text.match(/\b(?:looks?|appears?)(?:\s+to\s+be)?\s+(?:about\s+|around\s+|approximately\s+)?(\d{1,3}(?:\s*(?:-|to)\s*\d{1,3})?)(?:\s*(?:years?|yrs?)\s*(?:old)?)?\b/i);
+    if (looksNumeric) return looksNumeric[1];
+
+    const descriptor = text.match(/\b(young adult|middle[- ]aged|older adult|newborn|infant|toddler|pre[- ]?teen|adolescent|teenager|teen|elderly|senior|child|young)\b/i);
+    return descriptor ? descriptor[1] : '';
+}
+
+function withAppearanceDerivedApparentAge(npc = {}, sourceAppearance = '') {
+    if (!npc || typeof npc !== 'object' || String(npc.apparentAge ?? '').trim()) return npc;
+    const cue = explicitVisualAgeCueFromAppearance(sourceAppearance || npc.appearance);
+    if (!cue) return npc;
+    const seed = npc.id || npc.name || npc.species || '';
+    const apparentAge = mechanics.normalizeApparentAge(cue, seed);
+    return apparentAge ? { ...npc, apparentAge } : npc;
+}
+
 function sameNpc(raw = {}, npc = {}) {
     if (raw?.id && String(raw.id) === String(npc?.id)) return true;
     if (raw?.name && mechanics.npcMatchesLabel(npc, raw.name)) return true;
@@ -67,7 +104,7 @@ function calendarNpcProjection(raw = null, referenceDate = null, fallback = true
     const protectedAge = isTerminalNpcDeath(raw) || (Array.isArray(raw.manualProfileFields) && raw.manualProfileFields.includes('age'));
     const computedAge = referenceDate && !protectedAge ? effectiveChronologicalAge(npc, calendar, referenceDate) : acceptedAge;
     const staleFallback = fallback && /^\d+$/.test(acceptedAge) && /^\d+$/.test(computedAge) && Number(computedAge) < Number(acceptedAge);
-    return { ...npc, age: staleFallback ? acceptedAge : computedAge };
+    return withAppearanceDerivedApparentAge({ ...npc, age: staleFallback ? acceptedAge : computedAge }, raw.appearance || npc.appearance);
 }
 
 function calendarPromptOptions(options = {}) {
@@ -89,11 +126,11 @@ function appendBirthdayRule(prompt, options = {}) {
 }
 
 export function normalizeNpcRecord(raw = {}) {
-    return normalizeNpcBirthday(continuity.normalizeNpcRecord(raw));
+    return withAppearanceDerivedApparentAge(normalizeNpcBirthday(continuity.normalizeNpcRecord(raw)), raw.appearance);
 }
 
 export function normalizeScanNpc(raw = {}, options = {}) {
-    return { ...continuity.normalizeScanNpc(raw, options), ...normalizeScanBirthday(raw) };
+    return withAppearanceDerivedApparentAge({ ...continuity.normalizeScanNpc(raw, options), ...normalizeScanBirthday(raw) }, raw.appearance);
 }
 
 export function setNpcArchived(npc, archived, options = {}) {
@@ -133,7 +170,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
             && !(reference.fallback && /^\d+$/.test(String(npc.age)) && npc.calendarAge < Number(npc.age))) {
             npc.age = String(npc.calendarAge);
         }
-        return npc;
+        return withAppearanceDerivedApparentAge(npc, ordinaryUpdate?.appearance || rawNpc.appearance);
     });
     if (reference.extracted) {
         result.report = {
@@ -158,7 +195,8 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
 }
 
 export function buildScannerPrompt(options = {}) {
-    return appendBirthdayRule(continuity.buildScannerPrompt(calendarPromptOptions(options)), options);
+    const prompt = strengthenRoutineApparentAgeRule(continuity.buildScannerPrompt(calendarPromptOptions(options)));
+    return appendBirthdayRule(prompt, options);
 }
 export function buildBackfillPrompt(options = {}) {
     return appendBirthdayRule(continuity.buildBackfillPrompt(calendarPromptOptions(options)), options);
@@ -171,4 +209,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.0';
+export const NPC_STATE_VERSION = '1.0.1';
