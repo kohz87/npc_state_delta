@@ -1,4 +1,5 @@
 /* NPC State Delta portrait management: prompt generation plus explicit upload/remove only. */
+import { copyText as hostCopyText } from '../../../utils.js';
 import {
     activeChatKey, api, closeOverlay, currentSessionIs, draftKey, escapeHtml, flushDurably,
     keepPromptDraft, makeSession, mountOverlay, npcById, portraitSignature, promptDrafts,
@@ -41,69 +42,55 @@ function saveDraftFromOverlay(session, overlay) {
     return { positive: positive.trim(), negative: negative.trim() };
 }
 
-function fallbackCopyText(text) {
-    const doc = globalThis.document;
-    if (!doc?.body || typeof doc.execCommand !== 'function') return false;
-    const value = String(text ?? '');
-    if (!value) return false;
-    const active = doc.activeElement;
-    const textarea = doc.createElement('textarea');
+function hideManualCopy(overlay) {
+    const box = overlay?.querySelector?.('[data-delta-tools-manual-copy]');
+    const textarea = overlay?.querySelector?.('[data-delta-tools-manual-copy-text]');
+    if (box) box.hidden = true;
+    if (textarea) textarea.value = '';
+}
+
+function revealManualCopy(overlay, value, label) {
+    const box = overlay?.querySelector?.('[data-delta-tools-manual-copy]');
+    const textarea = overlay?.querySelector?.('[data-delta-tools-manual-copy-text]');
+    if (!box || !textarea) return false;
     textarea.value = value;
-    textarea.setAttribute('aria-hidden', 'true');
-    textarea.style.position = 'fixed';
-    textarea.style.left = '0';
-    textarea.style.top = '0';
-    textarea.style.width = '1px';
-    textarea.style.height = '1px';
-    textarea.style.padding = '0';
-    textarea.style.border = '0';
-    textarea.style.opacity = '0.01';
-    textarea.style.pointerEvents = 'none';
-    doc.body.appendChild(textarea);
-    let copied = false;
+    box.hidden = false;
     try {
         textarea.focus({ preventScroll: true });
         textarea.select();
         textarea.setSelectionRange(0, textarea.value.length);
-        copied = doc.execCommand('copy') === true;
     } catch {
-        copied = false;
-    } finally {
-        textarea.remove();
-        try { active?.focus?.({ preventScroll: true }); }
-        catch { try { active?.focus?.(); } catch {} }
+        try { textarea.focus(); textarea.select(); } catch {}
     }
-    return copied;
+    toast('warning', `NPC State Delta: automatic clipboard access was blocked. ${label} is selected below; press Ctrl+C to copy it.`);
+    return true;
 }
 
-async function copyText(text, label) {
+async function copyPromptText(text, label, overlay) {
     const value = String(text ?? '').trim();
     if (!value) {
         toast('warning', `NPC State Delta: ${label.toLowerCase()} is empty; nothing was copied.`);
         return false;
     }
 
-    // Keep the synchronous fallback inside the original click activation. On
-    // local/non-secure hosts an async Clipboard API rejection can consume the
-    // activation before execCommand gets a chance to run.
-    if (fallbackCopyText(value)) {
+    hideManualCopy(overlay);
+    try {
+        // Use SillyTavern's own clipboard helper. It owns the host-compatible
+        // Clipboard API / textarea fallback rather than duplicating it here.
+        await hostCopyText(value);
         toast('success', `NPC State Delta: ${label} copied.`);
         return true;
-    }
-
-    try {
-        if (typeof globalThis.navigator?.clipboard?.writeText === 'function') {
-            await globalThis.navigator.clipboard.writeText(value);
-            toast('success', `NPC State Delta: ${label} copied.`);
-            return true;
-        }
     } catch (error) {
+        recordToolEvent('portrait-prompt-copy', {
+            chatKey: activeChatKey(),
+            action: label,
+            outcome: 'clipboard-blocked',
+            detail: error?.message || error,
+        });
+        if (revealManualCopy(overlay, value, label)) return false;
         toast('error', `NPC State Delta: could not copy ${label.toLowerCase()}. ${error?.message || error}`);
         return false;
     }
-
-    toast('error', `NPC State Delta: could not copy ${label.toLowerCase()}. Clipboard access is unavailable in this browser context.`);
-    return false;
 }
 
 function combinedPrompt(draft) {
@@ -132,6 +119,10 @@ function portraitDialogHtml(npc, draft) {
           <label>Negative prompt<textarea id="npc_state_delta_tools_negative" rows="6">${escapeHtml(draft.negative)}</textarea></label>
           <div class="delta-tools-copy-row"><button type="button" data-copy="negative">Copy negative</button></div>
           <small>Manual edits are kept for this chat session. “Generate prompts from dossier” replaces them with a fresh resolved-appearance prompt. “Copy Prompt” copies the currently edited positive + negative prompt pair.</small>
+          <div class="delta-tools-manual-copy" data-delta-tools-manual-copy hidden>
+            <small>Clipboard access is blocked by this browser context. The prompt is selected below; press Ctrl+C.</small>
+            <textarea data-delta-tools-manual-copy-text rows="4" readonly aria-label="Prompt ready for manual copy"></textarea>
+          </div>
         </section>
       </div>
       <footer>
@@ -215,8 +206,8 @@ function wirePortraitDialog(session, overlay) {
         const copy = event.target.closest?.('[data-copy]')?.dataset?.copy;
         if (copy) {
             const draft = saveDraftFromOverlay(session, overlay);
-            if (copy === 'positive') void copyText(draft.positive, 'Positive prompt');
-            else void copyText(draft.negative, 'Negative prompt');
+            if (copy === 'positive') void copyPromptText(draft.positive, 'Positive prompt', overlay);
+            else void copyPromptText(draft.negative, 'Negative prompt', overlay);
             return;
         }
         if (event.target.closest?.('[data-generate-prompts]')) {
@@ -225,7 +216,7 @@ function wirePortraitDialog(session, overlay) {
         }
         if (event.target.closest?.('[data-copy-final-prompt]')) {
             const draft = saveDraftFromOverlay(session, overlay);
-            void copyText(combinedPrompt(draft), 'Portrait prompt');
+            void copyPromptText(combinedPrompt(draft), 'Portrait prompt', overlay);
             return;
         }
         if (event.target.closest?.('[data-remove-portrait]')) void removePortrait(session);
