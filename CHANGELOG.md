@@ -1,5 +1,14 @@
 # NPC State Delta changes
 
+## Stage 8 supporting tools - 12 September 2026
+
+- Add the primary dossier Portrait workflow with device upload/replacement, removal, editable/copyable positive/negative prompts, explicit dossier rebuild, host Image Generation preview, and explicit preview application through the retained portrait upload/compression path.
+- Bind asynchronous portrait work to chat/NPC/session/action ownership; reject stale generation, preserve the prior portrait on cancellation/failed decoding/generation, and report local mutation separately from durable flush success.
+- Extend the existing versioned Delta native bundle with declared portable portrait settings and source-history audit metadata while retaining `bundle.js` as the canonical codec/import merge. Cross-chat import clears source message ownership and keeps target lineage/checkpoints as the safe baseline; no Alpha/Beta/legacy converter is added.
+- Add compact diagnostics for actual dispatcher aggregates/routes/failures, latest retry/focused-pass state, labelled prompt estimates, relationship signed fractions/gate audit, and bounded Stage 8 persistence/workflow events without credentials or full private prompts/responses.
+- Add safe-area/dynamic-viewport responsive dialogs with touch targets and bounded scrolling, and refresh only affected dossier/cast projections through the existing Stage 1 controller.
+- Add focused synthetic Stage 8 regressions and `docs/stage8-supporting-tools.md`; exact-candidate CI is the deterministic acceptance gate because the continuation environment cannot resolve GitHub for a conventional local checkout. Real SillyTavern/file-picker/Image Generation/desktop-tablet-mobile visual acceptance remains unrun.
+
 ## Stages 5-7 relationship, evidence and recovery review - 12 September 2026
 
 - Preserve the pinned numerical scorer, including signed diminishing returns, fractions, gates, configured-cap minima and tied-axis rejection. Add a hash-verified upstream result oracle covering 41,070 cases and end-to-end repeat/persistence/rollback tests.
