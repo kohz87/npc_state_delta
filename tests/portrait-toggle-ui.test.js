@@ -27,26 +27,21 @@ test('portrait copying lazy-loads SillyTavern host utility and exposes a selecte
     assert.match(source, /is empty; nothing was copied/);
 });
 
-test('settings booleans use separate compact status-dot pills so host checkbox ticks cannot leak through', () => {
+test('settings booleans are CSS-only status pills with grey and green dots', () => {
     const source = fs.readFileSync(new URL('../scanner-output-ui.js', import.meta.url), 'utf8');
-    assert.match(source, /function enhanceSettingsToggles\(root\)/);
-    assert.match(source, /input\.classList\.add\('delta-toggle-native'\)/);
-    assert.match(source, /pill\.className = 'delta-toggle-pill'/);
-    assert.match(source, /delta-toggle-dot/);
-    assert.match(source, /enabled \? 'Enabled' : 'Disabled'/);
-    assert.match(source, /input\.delta-toggle-native\[type="checkbox"\][^{]*\{[\s\S]*clip-path:inset\(50%\)!important/);
-    assert.match(source, /delta-toggle-pill[^}]*min-width:74px!important[^}]*height:24px!important/s);
-    assert.match(source, /delta-toggle-dot[^}]*background:rgba\(190,195,202,\.62\)!important/s, 'unchecked/disabled state must show a grey dot');
-    assert.match(source, /:checked \+ \.delta-toggle-pill \.delta-toggle-dot[^}]*background:#57d17b!important/s, 'enabled state must show a green dot');
-    assert.match(source, /:focus-visible \+ \.delta-toggle-pill/);
-    assert.match(source, /:disabled \+ \.delta-toggle-pill/);
-    assert.doesNotMatch(source, /content:"Enabled"/);
-    assert.doesNotMatch(source, /content:"Disabled"/);
+    assert.doesNotMatch(source, /function enhanceSettingsToggles\(/, 'startup must not mutate checkbox sibling DOM');
+    assert.doesNotMatch(source, /insertAdjacentElement\('afterend'/, 'startup must not inject toggle siblings from the global observer');
+    assert.doesNotMatch(source, /delta-toggle-native|delta-toggle-pill|delta-toggle-label/, 'runtime toggle enhancer classes must be absent');
+    assert.match(source, /input\[type="checkbox"\][^{]*\{[\s\S]*appearance:none!important/);
+    assert.match(source, /width:82px!important;height:26px!important/);
+    assert.match(source, /input\[type="checkbox"\]::before\{[\s\S]*background:rgba\(190,195,202,\.62\)!important/);
+    assert.match(source, /input\[type="checkbox"\]:checked::before\{[\s\S]*background:#57d17b!important/);
+    assert.match(source, /input\[type="checkbox"\]::after\{[\s\S]*content:"Disabled"!important/);
+    assert.match(source, /input\[type="checkbox"\]:checked::after\{content:"Enabled"!important/);
 });
 
-test('toggle synchronization is idempotent under the document MutationObserver', () => {
+test('document MutationObserver does not rewrite toggle DOM', () => {
     const source = fs.readFileSync(new URL('../scanner-output-ui.js', import.meta.url), 'utf8');
-    assert.match(source, /if \(label && label\.textContent !== nextLabel\) label\.textContent = nextLabel;/);
-    assert.match(source, /if \(pill\.dataset\.state !== nextState\) pill\.dataset\.state = nextState;/);
-    assert.doesNotMatch(source, /if \(label\) label\.textContent = enabled \? 'Enabled' : 'Disabled';/);
+    assert.match(source, /new MutationObserver\(\(\) => mountControl\(\)\)/);
+    assert.doesNotMatch(source, /syncTogglePill|enhanceSettingsToggles|pill\.innerHTML|label\.textContent/);
 });
