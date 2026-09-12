@@ -114,15 +114,24 @@ async function finishUploadedPortrait(session, before, label) {
 function wirePortraitDialog(session) {
     const overlay = document.getElementById('npc_state_delta_tools_overlay');
     const input = overlay?.querySelector('.delta-tools-portrait-file');
-    input?.addEventListener('change', () => {
+    input?.addEventListener('change', event => {
         const file = input.files?.[0];
         const validation = validatePortraitFile(file);
         if (!validation.ok) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
             if (file) toast('warning', `NPC State Delta: ${validation.reason}`);
             input.value = '';
             return;
         }
-        if (!currentSessionIs(session)) return;
+        if (!currentSessionIs(session)) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            input.value = '';
+            recordToolEvent('portrait-upload', { chatKey: session.chatKey, npcId: session.npcId, action: 'file-selected', outcome: 'stale-rejected', stale: true });
+            toast('warning', 'NPC State Delta: the portrait target changed while the file picker was open. Reopen Portrait for the current dossier.');
+            return;
+        }
         const before = portraitSignature(npcById(session.npcId));
         // Once an upload has entered the inherited compression/mutation handler, closing is disabled.
         // This prevents a user cancellation from pretending it can cancel a mutation already handed off.
@@ -275,7 +284,15 @@ async function chooseImportFile() {
     input.hidden = true;
     document.body.appendChild(input);
     return new Promise(resolve => {
-        input.addEventListener('change', () => { const file = input.files?.[0] || null; input.remove(); resolve(file); }, { once: true });
+        let settled = false;
+        const finish = file => {
+            if (settled) return;
+            settled = true;
+            input.remove();
+            resolve(file || null);
+        };
+        input.addEventListener('change', () => finish(input.files?.[0] || null), { once: true });
+        input.addEventListener('cancel', () => finish(null), { once: true });
         input.click();
     });
 }
@@ -285,12 +302,15 @@ export async function openImportTools() {
     if (!chatKey || chatKey === 'no-chat') return toast('warning', 'NPC State Delta: open the target chat before importing.');
     const file = await chooseImportFile();
     if (!file) return;
+    if (activeChatKey() !== chatKey) return toast('warning', 'NPC State Delta: the target chat changed while the import picker was open. Reopen Data and choose the file again.');
     let raw;
     try { raw = new Uint8Array(await file.arrayBuffer()); }
     catch (error) { return toast('error', `NPC State Delta import: could not read file. ${error?.message || error}`); }
+    if (activeChatKey() !== chatKey) return toast('warning', 'NPC State Delta: the target chat changed while the import file was being read. No import was applied.');
     let prepared;
     try { prepared = prepareNativeImport(raw, chatKey); }
     catch (error) { return toast('error', `NPC State Delta import rejected before mutation: ${error?.message || error}`); }
+    if (activeChatKey() !== chatKey) return toast('warning', 'NPC State Delta: the target chat changed during import validation. No import was applied.');
     const summary = summarizeDecodedBundle(prepared.decoded);
     const session = makeSession('import');
     session.importBytes = prepared.importBytes;
@@ -303,25 +323,40 @@ export async function openImportTools() {
 async function applyImport(session) {
     if (session.busy || activeChatKey() !== session.chatKey || !session.importBytes) return;
     setBusy(session, true, 'Applying validated native Delta import through the canonical importer…');
+    let dossierApplied = false;
     try {
         const result = api()?.importBytes?.(session.importBytes);
         if (!result) throw new Error('Canonical importer rejected the validated bundle.');
+        dossierApplied = true;
+        const saved = await flushDurably(session.chatKey, 'native import');
+        let settingsWarning = '';
         const restoreSettings = Boolean(document.querySelector('[data-import-settings]')?.checked);
         if (restoreSettings && session.importDecoded?.portableSettings) {
-            const savedSettings = await api()?.savePortraitSettings?.(session.importDecoded.portableSettings);
-            if (savedSettings === false) throw new Error('Dossiers imported, but portable portrait settings were rejected. Dossier persistence will still be reported separately.');
+            try {
+                const savedSettings = await api()?.savePortraitSettings?.(session.importDecoded.portableSettings);
+                if (savedSettings === false) settingsWarning = ' Portable portrait settings were not restored.';
+            } catch (error) {
+                settingsWarning = ` Portable portrait settings were not restored: ${error?.message || error}`;
+                recordToolEvent('native-import-settings', { chatKey: session.chatKey, action: 'restore-settings', outcome: 'failed', detail: error?.message || error });
+            }
         }
-        const saved = await flushDurably(session.chatKey, 'native import');
         stage1Refresh();
         recordToolEvent('native-import', { chatKey: session.chatKey, action: 'apply', outcome: saved.persisted ? 'saved' : 'local-only', persisted: saved.persisted });
-        toast(saved.persisted ? 'success' : 'warning', saved.persisted
-            ? `NPC State Delta: imported ${session.importSummary?.dossiers || 0} dossier record(s) and saved the target chat.`
-            : `NPC State Delta: import applied locally, but durable save failed. ${saved.error?.message || saved.error}`);
+        const fullySuccessful = saved.persisted && !settingsWarning;
+        toast(fullySuccessful ? 'success' : 'warning', saved.persisted
+            ? `NPC State Delta: imported ${session.importSummary?.dossiers || 0} dossier record(s) and saved the target chat.${settingsWarning}`
+            : `NPC State Delta: import applied locally, but durable save failed. ${saved.error?.message || saved.error}${settingsWarning}`);
         closeOverlay({ reason: 'imported' });
     } catch (error) {
-        if (document.getElementById('npc_state_delta_tools_overlay')) setBusy(session, false, `Import failed: ${error?.message || error}`);
-        recordToolEvent('native-import', { chatKey: session.chatKey, action: 'apply', outcome: 'failed', detail: error?.message || error });
-        toast('error', `NPC State Delta import: ${error?.message || error}`);
+        if (dossierApplied) {
+            recordToolEvent('native-import', { chatKey: session.chatKey, action: 'apply', outcome: 'local-only', persisted: false, detail: error?.message || error });
+            toast('warning', `NPC State Delta: the validated import was applied locally, but durable confirmation failed: ${error?.message || error}`);
+            closeOverlay({ reason: 'import-local-only' });
+            return;
+        }
+        if (document.getElementById('npc_state_delta_tools_overlay')) setBusy(session, false, `Import failed before canonical mutation: ${error?.message || error}`);
+        recordToolEvent('native-import', { chatKey: session.chatKey, action: 'apply', outcome: 'failed-before-mutation', detail: error?.message || error });
+        toast('error', `NPC State Delta import rejected before canonical mutation: ${error?.message || error}`);
     }
 }
 
