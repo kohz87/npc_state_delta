@@ -1,0 +1,47 @@
+name: Stage 9 candidate transport
+
+on:
+  push:
+    branches: [tmp/stage9-upload2]
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct exact reviewed candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=fde5b35671337106cfe68341941c746707c7d7b3
+          EXPECTED_PATCH=97c1f775887be59419781a92f6d5a063d39447453550ea257e7b9e3f6b2d0243
+          EXPECTED_TREE=b589e25788abf9df96b9a2a99210550fcffa4fa3
+          EXPECTED_COMMIT=644762784ee9962ac04259f71afea1fcfbb320cc
+
+          cat .stage9-upload/patch.xz.b64.* | base64 -d > /tmp/stage9.patch.xz
+          xz -dc /tmp/stage9.patch.xz > /tmp/stage9.patch
+          echo "$EXPECTED_PATCH  /tmp/stage9.patch" | sha256sum -c -
+
+          git checkout --detach "$BASE"
+          git apply --check /tmp/stage9.patch
+          git apply /tmp/stage9.patch
+          git add -A
+          TREE="$(git write-tree)"
+          test "$TREE" = "$EXPECTED_TREE"
+
+          export GIT_AUTHOR_NAME=OpenAI
+          export GIT_AUTHOR_EMAIL=noreply@openai.com
+          export GIT_AUTHOR_DATE='2026-09-12T11:25:29Z'
+          export GIT_COMMITTER_NAME=OpenAI
+          export GIT_COMMITTER_EMAIL=noreply@openai.com
+          export GIT_COMMITTER_DATE='2026-09-12T11:25:29Z'
+          COMMIT="$(printf '%s\n' 'release: complete Stage 9 consolidation for Delta 1.0.0' | git commit-tree "$TREE" -p "$BASE")"
+          test "$COMMIT" = "$EXPECTED_COMMIT"
+
+          git push origin "$COMMIT":refs/heads/release/stage9-delta-1.0.0
