@@ -32,6 +32,11 @@ try {
     console.error('[NPC State Delta] consolidated dossier experience failed to load', error);
 }
 try {
+    await import('./continuity-ui.js');
+} catch (error) {
+    console.error('[NPC State Delta] continuity UI failed to load', error);
+}
+try {
     await import('./scanner-output-ui.js');
 } catch (error) {
     console.error('[NPC State Delta] scanner output/UI refinement failed to load', error);
