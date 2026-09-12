@@ -44,19 +44,25 @@ function saveDraftFromOverlay(session, overlay) {
 function fallbackCopyText(text) {
     const doc = globalThis.document;
     if (!doc?.body || typeof doc.execCommand !== 'function') return false;
+    const value = String(text ?? '');
+    if (!value) return false;
     const active = doc.activeElement;
     const textarea = doc.createElement('textarea');
-    textarea.value = String(text || '');
-    textarea.setAttribute('readonly', '');
+    textarea.value = value;
     textarea.setAttribute('aria-hidden', 'true');
     textarea.style.position = 'fixed';
-    textarea.style.left = '-9999px';
+    textarea.style.left = '0';
     textarea.style.top = '0';
-    textarea.style.opacity = '0';
+    textarea.style.width = '1px';
+    textarea.style.height = '1px';
+    textarea.style.padding = '0';
+    textarea.style.border = '0';
+    textarea.style.opacity = '0.01';
+    textarea.style.pointerEvents = 'none';
     doc.body.appendChild(textarea);
     let copied = false;
     try {
-        textarea.focus();
+        textarea.focus({ preventScroll: true });
         textarea.select();
         textarea.setSelectionRange(0, textarea.value.length);
         copied = doc.execCommand('copy') === true;
@@ -71,8 +77,20 @@ function fallbackCopyText(text) {
 }
 
 async function copyText(text, label) {
-    const value = String(text || '');
-    let clipboardError = null;
+    const value = String(text ?? '').trim();
+    if (!value) {
+        toast('warning', `NPC State Delta: ${label.toLowerCase()} is empty; nothing was copied.`);
+        return false;
+    }
+
+    // Keep the synchronous fallback inside the original click activation. On
+    // local/non-secure hosts an async Clipboard API rejection can consume the
+    // activation before execCommand gets a chance to run.
+    if (fallbackCopyText(value)) {
+        toast('success', `NPC State Delta: ${label} copied.`);
+        return true;
+    }
+
     try {
         if (typeof globalThis.navigator?.clipboard?.writeText === 'function') {
             await globalThis.navigator.clipboard.writeText(value);
@@ -80,19 +98,21 @@ async function copyText(text, label) {
             return true;
         }
     } catch (error) {
-        clipboardError = error;
+        toast('error', `NPC State Delta: could not copy ${label.toLowerCase()}. ${error?.message || error}`);
+        return false;
     }
-    if (fallbackCopyText(value)) {
-        toast('success', `NPC State Delta: ${label} copied.`);
-        return true;
-    }
-    const detail = clipboardError?.message || 'Clipboard access is unavailable in this browser context.';
-    toast('error', `NPC State Delta: could not copy ${label.toLowerCase()}. ${detail}`);
+
+    toast('error', `NPC State Delta: could not copy ${label.toLowerCase()}. Clipboard access is unavailable in this browser context.`);
     return false;
 }
 
 function combinedPrompt(draft) {
-    return `Positive:\n${draft.positive}\n\nNegative:\n${draft.negative}`;
+    const positive = String(draft?.positive || '').trim();
+    const negative = String(draft?.negative || '').trim();
+    const blocks = [];
+    if (positive) blocks.push(`Positive prompt:\n${positive}`);
+    if (negative) blocks.push(`Negative prompt:\n${negative}`);
+    return blocks.join('\n\n');
 }
 
 function portraitDialogHtml(npc, draft) {
@@ -111,13 +131,13 @@ function portraitDialogHtml(npc, draft) {
           <div class="delta-tools-copy-row"><button type="button" data-copy="positive">Copy positive</button><button type="button" data-generate-prompts>Generate prompts from dossier</button></div>
           <label>Negative prompt<textarea id="npc_state_delta_tools_negative" rows="6">${escapeHtml(draft.negative)}</textarea></label>
           <div class="delta-tools-copy-row"><button type="button" data-copy="negative">Copy negative</button></div>
-          <small>Manual edits are kept for this chat session. “Generate prompts from dossier” replaces them with a fresh resolved-appearance prompt. “Generate Prompt” assembles and copies the edited positive + negative prompt pair.</small>
+          <small>Manual edits are kept for this chat session. “Generate prompts from dossier” replaces them with a fresh resolved-appearance prompt. “Copy Prompt” copies the currently edited positive + negative prompt pair.</small>
         </section>
       </div>
       <footer>
         <label class="delta-tools-file-button">${portrait ? 'Replace from device' : 'Upload from device'}${hiddenUploadInput(npc.id)}</label>
         <button type="button" data-remove-portrait ${portrait ? '' : 'disabled'}>Remove portrait</button>
-        <button type="button" data-generate-final-prompt>Generate Prompt</button>
+        <button type="button" data-copy-final-prompt>Copy Prompt</button>
         <span data-delta-tools-status hidden></span>
       </footer>
     </section>`;
@@ -203,9 +223,9 @@ function wirePortraitDialog(session, overlay) {
             generatePromptsFromDossier(session, overlay);
             return;
         }
-        if (event.target.closest?.('[data-generate-final-prompt]')) {
+        if (event.target.closest?.('[data-copy-final-prompt]')) {
             const draft = saveDraftFromOverlay(session, overlay);
-            void copyText(combinedPrompt(draft), 'Generated prompt');
+            void copyText(combinedPrompt(draft), 'Portrait prompt');
             return;
         }
         if (event.target.closest?.('[data-remove-portrait]')) void removePortrait(session);

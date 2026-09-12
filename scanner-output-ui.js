@@ -98,21 +98,34 @@ function injectStyles() {
     const style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
-/* Settings booleans stay native checkboxes semantically but render as compact toggle switches. */
+/* Settings booleans keep native checkbox semantics but look like compact status pills. */
 #${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]{
-  -webkit-appearance:none!important;appearance:none!important;
-  width:46px!important;height:26px!important;min-width:46px!important;max-width:46px!important;flex:0 0 46px!important;
-  margin:0!important;padding:0!important;border:1px solid rgba(255,255,255,.22)!important;border-radius:999px!important;
-  background:radial-gradient(circle at 13px 50%,rgba(245,245,245,.98) 0 9px,rgba(0,0,0,.18) 9.5px 10px,transparent 10.5px),rgba(255,255,255,.12)!important;
-  box-shadow:inset 0 1px 2px rgba(0,0,0,.28)!important;cursor:pointer!important;vertical-align:middle;
-  transition:background-color .16s ease,border-color .16s ease,box-shadow .16s ease!important;
+  -webkit-appearance:none!important;appearance:none!important;position:relative!important;display:inline-block!important;
+  width:86px!important;height:28px!important;min-width:86px!important;max-width:86px!important;flex:0 0 86px!important;
+  margin:0!important;padding:0!important;border:1px solid rgba(255,255,255,.2)!important;border-radius:999px!important;
+  background:rgba(255,255,255,.055)!important;background-image:none!important;box-shadow:inset 0 1px 1px rgba(0,0,0,.2)!important;
+  color:rgba(255,255,255,.72)!important;cursor:pointer!important;vertical-align:middle!important;overflow:hidden!important;
+  transition:border-color .15s ease,background-color .15s ease,box-shadow .15s ease!important;
+}
+#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]::before{
+  content:""!important;position:absolute!important;left:8px!important;top:50%!important;width:8px!important;height:8px!important;
+  border:0!important;border-radius:50%!important;background:rgba(255,255,255,.38)!important;box-shadow:none!important;
+  transform:translateY(-50%)!important;margin:0!important;padding:0!important;
+}
+#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]::after{
+  content:"Disabled"!important;position:absolute!important;left:23px!important;right:8px!important;top:50%!important;
+  transform:translateY(-50%)!important;margin:0!important;padding:0!important;border:0!important;background:none!important;
+  color:rgba(255,255,255,.62)!important;font:600 12px/1.1 inherit!important;letter-spacing:.01em!important;text-align:left!important;white-space:nowrap!important;
 }
 #${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:checked{
-  border-color:rgba(79,211,113,.9)!important;
-  background:radial-gradient(circle at calc(100% - 13px) 50%,#fff 0 9px,rgba(0,0,0,.16) 9.5px 10px,transparent 10.5px),rgba(66,199,102,.88)!important;
-  box-shadow:inset 0 1px 2px rgba(0,0,0,.2),0 0 0 1px rgba(66,199,102,.08)!important;
+  border-color:rgba(93,214,124,.45)!important;background:rgba(54,91,64,.32)!important;background-image:none!important;
+  box-shadow:inset 0 1px 1px rgba(0,0,0,.18)!important;
 }
-#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:focus-visible{outline:2px solid currentColor!important;outline-offset:2px!important}
+#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:checked::before{
+  content:""!important;background:#57d17b!important;box-shadow:0 0 0 2px rgba(87,209,123,.12)!important;
+}
+#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:checked::after{content:"Enabled"!important;color:rgba(239,255,243,.94)!important}
+#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:focus-visible{outline:2px solid rgba(111,214,139,.9)!important;outline-offset:2px!important}
 #${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:disabled{opacity:.45!important;cursor:not-allowed!important}
 
 /* Keep the long scanner hint and its numeric control in their own bounded columns. */
