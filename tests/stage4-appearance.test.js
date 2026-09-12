@@ -181,4 +181,3 @@ test('Stage 4 portrait and roleplay injection resolve the same current form', ()
     assert.match(injection, /CURRENT VISIBLE APPEARANCE \(authoritative anatomy; species\/race cannot override the selected form\)/i);
     assert.equal((injection.match(/ordinary human ears/gi) || []).length, 1, 'resolved current appearance should be injected once, not duplicated after the budgeted dossier');
 });
-

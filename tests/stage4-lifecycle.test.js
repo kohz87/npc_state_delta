@@ -160,4 +160,3 @@ test('Stage 4 inferred death does not become terminal', () => {
     assert.equal(result.state.npcs[0].archived, false);
     assert.equal(result.state.npcs[0].present, true);
 });
-
