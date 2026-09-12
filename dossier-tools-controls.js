@@ -1,6 +1,6 @@
 /* Stable post-render controls for the Stage 8 dossier tools surface. */
 import { selectedNpcId, uiRoot } from './dossier-tools-core.js';
-import { openPortraitTools } from './dossier-tools.js';
+import { openPortraitTools } from './portrait-tools.js';
 
 const STYLE_ID = 'npc_state_delta_tools_controls_style';
 const ROOT_GUARD = '__npcStateDeltaToolsControls';
@@ -16,6 +16,14 @@ function installStyles() {
     style.textContent = `
 #npc_state_delta_dossier_root .delta-hero-actions { gap: 12px; }
 #npc_state_delta_dossier_root .delta-tools-portrait-button { margin-top: 2px; }
+/* Native modal dialogs enter the browser top layer, which is above every ordinary z-index
+   stacking context used by SillyTavern and the dossier panel. */
+dialog.npc-state-delta-tools-overlay { width:100vw; max-width:none; height:100dvh; max-height:none; margin:0; border:0; box-sizing:border-box; }
+dialog.npc-state-delta-tools-overlay:not([open]) { display:none !important; }
+dialog.npc-state-delta-tools-overlay[open] { display:grid !important; }
+dialog.npc-state-delta-tools-overlay::backdrop { background:transparent; }
+/* Delta's maintained portrait surface is prompt generation + explicit image management only. */
+.npc-state-delta-generate-portrait, .npc-state-delta-portrait-run, .npc-state-delta-portrait-use { display:none !important; }
 `;
     document.head.appendChild(style);
 }
@@ -38,6 +46,7 @@ function normalizeButtons(root) {
     if (!root) return;
 
     const portrait = root.querySelector('.delta-tools-portrait-button');
+    const portraitTitle = 'Manage portrait and prompts: generate prompts, copy/edit them, or upload, replace, and remove the portrait';
     if (portrait && portrait.dataset.deltaDelegated !== '1') {
         // Stage 8 originally attached a listener directly to a button that lives inside a
         // re-rendered hero action row. Replace it with a clean node and let the dossier root
@@ -45,12 +54,12 @@ function normalizeButtons(root) {
         const clean = portrait.cloneNode(true);
         clean.dataset.deltaDelegated = '1';
         clean.dataset.npcId = currentHeroNpcId(root);
-        clean.title = 'Manage portrait, prompts, upload, replacement, removal, and image preview';
+        clean.title = portraitTitle;
         portrait.replaceWith(clean);
     } else if (portrait) {
         const npcId = currentHeroNpcId(root);
         if (portrait.dataset.npcId !== npcId) portrait.dataset.npcId = npcId;
-        setAttributeIfChanged(portrait, 'title', 'Manage portrait, prompts, upload, replacement, removal, and image preview');
+        setAttributeIfChanged(portrait, 'title', portraitTitle);
     }
 
     const data = root.querySelector('.delta-tools-data');
