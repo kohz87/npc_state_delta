@@ -98,6 +98,23 @@ function injectStyles() {
     const style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
+/* Settings booleans stay native checkboxes semantically but render as compact toggle switches. */
+#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]{
+  -webkit-appearance:none!important;appearance:none!important;
+  width:46px!important;height:26px!important;min-width:46px!important;max-width:46px!important;flex:0 0 46px!important;
+  margin:0!important;padding:0!important;border:1px solid rgba(255,255,255,.22)!important;border-radius:999px!important;
+  background:radial-gradient(circle at 13px 50%,rgba(245,245,245,.98) 0 9px,rgba(0,0,0,.18) 9.5px 10px,transparent 10.5px),rgba(255,255,255,.12)!important;
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.28)!important;cursor:pointer!important;vertical-align:middle;
+  transition:background-color .16s ease,border-color .16s ease,box-shadow .16s ease!important;
+}
+#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:checked{
+  border-color:rgba(79,211,113,.9)!important;
+  background:radial-gradient(circle at calc(100% - 13px) 50%,#fff 0 9px,rgba(0,0,0,.16) 9.5px 10px,transparent 10.5px),rgba(66,199,102,.88)!important;
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.2),0 0 0 1px rgba(66,199,102,.08)!important;
+}
+#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:focus-visible{outline:2px solid currentColor!important;outline-offset:2px!important}
+#${SETTINGS_ID} .npc-state-delta-setting-row input[type="checkbox"]:disabled{opacity:.45!important;cursor:not-allowed!important}
+
 /* Keep the long scanner hint and its numeric control in their own bounded columns. */
 #${SETTINGS_ID} .delta-scanner-output-row{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(150px,180px)!important;column-gap:12px!important;row-gap:7px!important;align-items:center!important;min-width:0}
 #${SETTINGS_ID} .delta-scanner-output-row>span:first-child{display:block;min-width:0;max-width:100%}
