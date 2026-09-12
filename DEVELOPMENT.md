@@ -2,7 +2,7 @@
 
 ## Current release candidate
 
-Delta 1.0.1 is a bounded post-release hotfix on the completed nine-stage 1.0.0 line. It strengthens grounded visual-age capture without adding scanner requests, retries, output allowance, reasoning settings, or prompt characters. Stage 9 evidence remains in `docs/stage9-review.md`; immutable seed records and earlier stage reports retain their historical results.
+Delta 1.0.2 is a bounded post-release hotfix on the completed nine-stage 1.0.0 line. It retains the 1.0.1 grounded apparent-age correction and adds manual Birthday editing through the canonical calendar/birthday engine, with active-calendar validation and no extra scanner request, retry, output allowance, reasoning setting, or prompt change. Stage 9 evidence remains in `docs/stage9-review.md`; immutable seed records and earlier stage reports retain their historical results.
 
 ## Canonical owners
 
@@ -45,7 +45,7 @@ The package-layout check expects the checkout directory itself to be named `npc_
 
 `validate` checks syntax, imports, namespaces, semantic ownership, exact runtime inventory and application metadata. Prompt measurement uses production builders with fixed fixtures; the additional Stage 9 capture checks complete Delta-owned system/user message bytes and options for both routes and a malformed-response retry against `tests/fixtures/stage9-budgets.json`. This baseline must not be regenerated from a changed candidate to conceal differences. Supply a baseline checkout path as an argument to measure that checkout with the same fixture.
 
-`package` deterministically creates `dist/npc_state_delta-1.0.1.zip` and its SHA-256 sidecar. It verifies exact inventory, archive contents, CRC, byte identity and JS syntax. Only declared runtime JS, CSS, manifest, inventory, license and README ship; tests, scripts, history, source bundles and browser artifacts do not.
+`package` deterministically creates `dist/npc_state_delta-1.0.2.zip` and its SHA-256 sidecar. It verifies exact inventory, archive contents, CRC, byte identity and JS syntax. Only declared runtime JS, CSS, manifest, inventory, license and README ship; tests, scripts, history, source bundles and browser artifacts do not.
 
 ## Optional synthetic browser verification
 
@@ -69,6 +69,6 @@ Permanent nonretryable HTTP save rejection is surfaced while dirty data remains 
 
 ## Publication
 
-Use the existing CI, package command and artifact retention. No temporary execution workflow, new release pipeline, automatic tag or empty verification commit is needed. The current instruction authorizes Stage 9 commit, branch push, PR and merge only after required checks pass on the latest candidate. It does not authorize real user databases, other repositories, force pushes or paid model calls.
+Use the existing CI, package command and artifact retention. No temporary execution workflow, new release pipeline, automatic tag or empty verification commit is needed. For post-release hotfixes, publish only an explicitly authorized candidate after required checks pass on its latest head; do not operate on real user databases, other repositories, force pushes or paid model calls.
 
 Review the final diff and file set before committing. Re-read main/PR state before publication and merge; preserve concurrent work and reverify a materially changed candidate. Resolve blocking reviews and verify the merge reached main. CI retains the installable ZIP and reproducible source bundle through its existing artifact step. Do not relabel local/synthetic evidence as live-host acceptance or older-commit CI as current evidence.
