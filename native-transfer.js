@@ -93,6 +93,7 @@ function validateHistoryArchive(value) {
     if ('branchRootSnapshot' in value && value.branchRootSnapshot !== null && (typeof value.branchRootSnapshot !== 'object' || Array.isArray(value.branchRootSnapshot))) {
         throw new Error('NPC State Delta native branchRootSnapshot is invalid.');
     }
+    if ('truncated' in value && typeof value.truncated !== 'boolean') throw new Error('NPC State Delta native history truncated flag must be boolean.');
     return structuredClone(value);
 }
 
@@ -111,11 +112,31 @@ export function buildHistoryArchive(state = {}) {
     });
 }
 
-export function augmentNativeBundle(input, { portableSettings = null, historyArchive = null } = {}) {
-    const { value, manifest, binary } = parseEnvelope(input);
-    decodeNpcStateBundle(value);
-    const checkedSettings = portableSettings === null ? null : validatePortableSettings(portableSettings);
-    const checkedHistory = historyArchive === null ? null : validateHistoryArchive(historyArchive);
+function compactHistoryArchive(historyArchive) {
+    const checked = validateHistoryArchive(historyArchive);
+    if (!checked) return null;
+    return {
+        policy: 'audit-only-source-history',
+        turn: Number(checked.turn || 0),
+        lastScannedMessageId: Number.isInteger(checked.lastScannedMessageId) ? checked.lastScannedMessageId : null,
+        lineage: [],
+        checkpoints: [],
+        branchLineageVersion: Number(checked.branchLineageVersion || 0),
+        branchParent: null,
+        branchForkMessageId: Number.isInteger(checked.branchForkMessageId) ? checked.branchForkMessageId : null,
+        branchRootSnapshot: null,
+        inlineCards: [],
+        truncated: true,
+        truncationReason: 'export-size-limit',
+        omittedCounts: {
+            lineage: Array.isArray(checked.lineage) ? checked.lineage.length : 0,
+            checkpoints: Array.isArray(checked.checkpoints) ? checked.checkpoints.length : 0,
+            inlineCards: Array.isArray(checked.inlineCards) ? checked.inlineCards.length : 0,
+            branchRootSnapshot: checked.branchRootSnapshot ? 1 : 0,
+        },
+    };
+}
+function writeOptionalManifestFields(manifest, checkedSettings, checkedHistory) {
     manifest.declaredContents = {
         dossiers: true,
         portraits: true,
@@ -129,16 +150,39 @@ export function augmentNativeBundle(input, { portableSettings = null, historyArc
     else delete manifest.portableSettings;
     if (checkedHistory) manifest.historyArchive = checkedHistory;
     else delete manifest.historyArchive;
+}
+function encodeAugmentedEnvelope(value, manifest, binary) {
     const manifestBytes = textEncoder.encode(JSON.stringify(manifest));
-    if (manifestBytes.length > MAX_MANIFEST_BYTES) throw new Error('NPC State Delta native source-history metadata exceeds the 2 MB manifest safety limit. Reduce retained chat history before exporting.');
     const total = HEADER_BYTES + manifestBytes.length + binary.length;
-    if (total > MAX_NATIVE_BYTES) throw new Error('NPC State Delta native bundle exceeds the 32 MB safety limit after adding source history.');
-    const output = new Uint8Array(total);
-    output.set(value.subarray(0, MAGIC_BYTES), 0);
-    new DataView(output.buffer).setUint32(MAGIC_BYTES, manifestBytes.length, true);
-    output.set(manifestBytes, HEADER_BYTES);
-    output.set(binary, HEADER_BYTES + manifestBytes.length);
-    return output;
+    return { manifestBytes, total, build() {
+        const output = new Uint8Array(total);
+        output.set(value.subarray(0, MAGIC_BYTES), 0);
+        new DataView(output.buffer).setUint32(MAGIC_BYTES, manifestBytes.length, true);
+        output.set(manifestBytes, HEADER_BYTES);
+        output.set(binary, HEADER_BYTES + manifestBytes.length);
+        return output;
+    } };
+}
+
+export function augmentNativeBundle(input, { portableSettings = null, historyArchive = null } = {}) {
+    const { value, manifest, binary } = parseEnvelope(input);
+    decodeNpcStateBundle(value);
+    const checkedSettings = portableSettings === null ? null : validatePortableSettings(portableSettings);
+    const checkedHistory = historyArchive === null ? null : validateHistoryArchive(historyArchive);
+    const historyCandidates = checkedHistory
+        ? [checkedHistory, compactHistoryArchive(checkedHistory), null]
+        : [null];
+    let lastManifestBytes = 0;
+    let lastTotal = 0;
+    for (const candidate of historyCandidates) {
+        writeOptionalManifestFields(manifest, checkedSettings, candidate);
+        const encoded = encodeAugmentedEnvelope(value, manifest, binary);
+        lastManifestBytes = encoded.manifestBytes.length;
+        lastTotal = encoded.total;
+        if (lastManifestBytes <= MAX_MANIFEST_BYTES && lastTotal <= MAX_NATIVE_BYTES) return encoded.build();
+    }
+    if (lastManifestBytes > MAX_MANIFEST_BYTES) throw new Error('NPC State Delta native bundle manifest exceeds the 2 MB safety limit even without source-history audit data.');
+    throw new Error('NPC State Delta native bundle exceeds the 32 MB safety limit even without source-history audit data.');
 }
 
 export function decodeDeltaNativeBundle(input) {
