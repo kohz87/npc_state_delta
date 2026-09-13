@@ -1,6 +1,16 @@
 # NPC State Delta changes
 
 
+## 1.0.7 - 13 September 2026
+
+- Add a bounded reversible rollback journal beside the existing byte-bounded full branch checkpoints. Journal entries store compact canonical-state undo deltas plus exact lineage/sequence ownership, not transcript text or portrait binaries.
+- Make large tail deletion independent of whether the exact surviving full checkpoint remains inside the 2 MB snapshot budget. The active journal can walk backward deterministically through recent mutations and marks the restore exact without another scanner/model request.
+- Cover structural rollback as well as scalar fields: NPCs first introduced only in deleted history disappear, downstream social edges/key-relationship references, candidates and pending backfills are cleaned up, while surviving NPC memories, relationship state, appearance/lifecycle and Speech-development evidence return to their earlier values.
+- Preserve existing user-owned metadata overlay rules during rollback. A manual portrait/profile override on a surviving NPC remains, but user metadata cannot resurrect an NPC whose narrative existence was rolled away.
+- If a scanner fails before its normal checkpoint, immediate tail deletion restores from the prior journal head and the next assistant parent-anchor settles the surviving uncheckpointed turn before advancing. Keep full checkpoints for swipe/sibling/recovery safety and record each checkpoint's journal sequence for branch rebasing.
+- Bound the journal to 1,024 recent mutation entries with a contiguous active-history priority and a 12 MB soft budget while retaining at least 384 active entries. Add regressions for an exact 100-message tail deletion after the full-checkpoint target is pruned, plus two successive 50-message deletion batches. Scanner prompts, request counts/retries, relationship formulas, bundle schema and branch-lineage version are unchanged.
+- Existing pre-1.0.7 histories establish their journal baseline when loaded; the new journal cannot reconstruct full snapshots that an older build had already discarded before upgrade.
+
 ## 1.0.6 - 13 September 2026
 
 - Add a bounded deterministic Speech development ledger inside each canonical NPC record, tracking up to four pending speech concepts with recent turn/source-message provenance rather than retaining transcript history.
