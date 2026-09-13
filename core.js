@@ -33,6 +33,11 @@ export {
 
 const ROUTINE_APPARENT_AGE_RULE = '11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue, compact ~N, never prose; species literal; no species-aging inference. Birthday/exact elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual aging/growth/rejuvenation=>apparentAgeState:"evolve"+reason. Appearance must not repeat explicit age. Vague time skip insufficient.';
 const ROUTINE_APPARENT_AGE_RULE_FIXED = '11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue ~N. NEW dossier + cue => MUST return apparentAge when age unknown. species literal; no species-aging inference. Birthday/exact elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual change=>apparentAgeState:"evolve"+reason. Appearance:no age; vague time skip insufficient.';
+const SPEECH_DEVELOPMENT_VERSION = 1;
+const SPEECH_DEVELOPMENT_CONCEPT_LIMIT = 4;
+const SPEECH_DEVELOPMENT_OBSERVATION_LIMIT = 4;
+const SPEECH_DEVELOPMENT_READY_COUNT = 3;
+const SPEECH_DEVELOPMENT_MIN_TURN_SPAN = 2;
 
 function strengthenRoutineApparentAgeRule(prompt) {
     return String(prompt).replace(ROUTINE_APPARENT_AGE_RULE, ROUTINE_APPARENT_AGE_RULE_FIXED);
@@ -107,6 +112,293 @@ function calendarNpcProjection(raw = null, referenceDate = null, fallback = true
     return withAppearanceDerivedApparentAge({ ...npc, age: staleFallback ? acceptedAge : computedAge }, raw.appearance || npc.appearance);
 }
 
+function speechText(value, maxChars = mechanics.DURABLE_PROFILE_LIMITS.speech) {
+    return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, Math.max(1, Number(maxChars) || mechanics.DURABLE_PROFILE_LIMITS.speech));
+}
+
+function speechTurn(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(0, Math.round(number)) : null;
+}
+
+function speechSourceMessageId(value) {
+    return Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function speechEvidence(raw = {}) {
+    const evidence = raw?.evidence ?? raw?.profileEvidence ?? raw?.profile_evidence ?? raw?.observations ?? {};
+    const values = Array.isArray(evidence?.speech) ? evidence.speech : [];
+    return values.map(item => speechText(item, mechanics.DURABLE_PROFILE_LIMITS.evidence)).filter(Boolean).slice(0, 8);
+}
+
+function speechConceptLabel(value) {
+    const text = speechText(value, mechanics.DURABLE_PROFILE_LIMITS.evidence);
+    const match = text.match(/^([\p{L}\p{N}][\p{L}\p{N} _\-/]{1,48})\s*:\s*(.+)$/u);
+    return match ? mechanics.normalizeName(match[1]).slice(0, 60) : '';
+}
+
+function normalizeSpeechConcept(raw = {}) {
+    const concept = mechanics.normalizeName(raw?.concept).slice(0, 60);
+    if (!concept) return null;
+    const sourceMessageIds = [...new Set((Array.isArray(raw?.sourceMessageIds) ? raw.sourceMessageIds : [])
+        .map(speechSourceMessageId).filter(value => value !== null))].slice(-SPEECH_DEVELOPMENT_OBSERVATION_LIMIT);
+    const turns = [...new Set((Array.isArray(raw?.turns) ? raw.turns : [])
+        .map(speechTurn).filter(value => value !== null))].sort((a, b) => a - b).slice(-SPEECH_DEVELOPMENT_OBSERVATION_LIMIT);
+    const firstTurn = speechTurn(raw?.firstTurn);
+    const lastTurn = speechTurn(raw?.lastTurn);
+    const observationCount = Math.max(
+        0,
+        Math.min(9, Math.round(Number(raw?.observationCount) || 0)),
+        sourceMessageIds.length,
+        turns.length,
+    );
+    return {
+        concept,
+        firstTurn: firstTurn ?? (turns.length ? Math.min(...turns) : null),
+        lastTurn: lastTurn ?? (turns.length ? Math.max(...turns) : null),
+        observationCount,
+        sourceMessageIds,
+        turns,
+        latestEvidence: speechText(raw?.latestEvidence, mechanics.DURABLE_PROFILE_LIMITS.evidence),
+    };
+}
+
+function legacySpeechConcepts(npc = {}) {
+    const seen = new Set();
+    const concepts = [];
+    for (const evidence of speechEvidence({ evidence: npc?.profileEvidence || {} })) {
+        const concept = speechConceptLabel(evidence);
+        if (!concept || seen.has(concept)) continue;
+        seen.add(concept);
+        concepts.push({
+            concept,
+            firstTurn: null,
+            lastTurn: null,
+            observationCount: 1,
+            sourceMessageIds: [],
+            turns: [],
+            latestEvidence: evidence,
+        });
+        if (concepts.length >= SPEECH_DEVELOPMENT_CONCEPT_LIMIT) break;
+    }
+    return concepts;
+}
+
+function emptySpeechDevelopment(npc = {}, concepts = []) {
+    return {
+        version: SPEECH_DEVELOPMENT_VERSION,
+        epoch: 0,
+        baselineSpeech: speechText(npc?.speech),
+        baselineTurn: null,
+        baselineSourceMessageId: null,
+        concepts: concepts.map(normalizeSpeechConcept).filter(Boolean).slice(-SPEECH_DEVELOPMENT_CONCEPT_LIMIT),
+    };
+}
+
+function normalizeSpeechDevelopment(raw, npc = {}, { seedLegacy = false } = {}) {
+    const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null;
+    if (!source) {
+        const seeded = seedLegacy ? legacySpeechConcepts(npc) : [];
+        return seeded.length ? emptySpeechDevelopment(npc, seeded) : null;
+    }
+    const concepts = [];
+    const byConcept = new Map();
+    for (const item of Array.isArray(source.concepts) ? source.concepts : []) {
+        const normalized = normalizeSpeechConcept(item);
+        if (!normalized) continue;
+        if (byConcept.has(normalized.concept)) concepts[byConcept.get(normalized.concept)] = normalized;
+        else {
+            byConcept.set(normalized.concept, concepts.length);
+            concepts.push(normalized);
+        }
+    }
+    return {
+        version: SPEECH_DEVELOPMENT_VERSION,
+        epoch: Math.max(0, Math.round(Number(source.epoch) || 0)),
+        baselineSpeech: speechText(source.baselineSpeech ?? npc?.speech),
+        baselineTurn: speechTurn(source.baselineTurn),
+        baselineSourceMessageId: speechSourceMessageId(source.baselineSourceMessageId),
+        concepts: concepts.slice(-SPEECH_DEVELOPMENT_CONCEPT_LIMIT),
+    };
+}
+
+function resetSpeechDevelopment(ledger, speech, options = {}) {
+    return {
+        version: SPEECH_DEVELOPMENT_VERSION,
+        epoch: Math.max(0, Math.round(Number(ledger?.epoch) || 0)) + 1,
+        baselineSpeech: speechText(speech),
+        baselineTurn: speechTurn(options.turn),
+        baselineSourceMessageId: speechSourceMessageId(options.sourceMessageId),
+        concepts: [],
+    };
+}
+
+function rebaseSpeechDevelopment(ledger, speech) {
+    return { ...ledger, baselineSpeech: speechText(speech) };
+}
+
+function speechDevelopmentForNpc(npc = {}, { seedLegacy = false } = {}) {
+    let ledger = normalizeSpeechDevelopment(npc?.speechDevelopment, npc, { seedLegacy });
+    if (!ledger) return null;
+    const current = speechText(npc?.speech);
+    if (mechanics.normalizeName(ledger.baselineSpeech) !== mechanics.normalizeName(current)) {
+        ledger = resetSpeechDevelopment(ledger, current);
+    }
+    return ledger;
+}
+
+function observeSpeechDevelopment(ledger, rawUpdate = {}, options = {}) {
+    const evidence = speechEvidence(rawUpdate);
+    if (!ledger || !evidence.length) return ledger;
+    const turn = speechTurn(options.turn);
+    const sourceMessageId = speechSourceMessageId(options.sourceMessageId);
+    const next = structuredClone(ledger);
+    for (const item of evidence) {
+        const concept = speechConceptLabel(item);
+        if (!concept) continue;
+        let record = next.concepts.find(entry => entry.concept === concept);
+        if (!record) {
+            if (next.concepts.length >= SPEECH_DEVELOPMENT_CONCEPT_LIMIT) next.concepts.shift();
+            record = normalizeSpeechConcept({ concept }) || { concept, firstTurn: null, lastTurn: null, observationCount: 0, sourceMessageIds: [], turns: [], latestEvidence: '' };
+            next.concepts.push(record);
+        }
+        const duplicate = sourceMessageId !== null
+            ? record.sourceMessageIds.includes(sourceMessageId)
+            : (turn !== null ? record.turns.includes(turn) : record.observationCount > 0);
+        record.latestEvidence = item;
+        if (duplicate) continue;
+        record.observationCount = Math.min(9, Number(record.observationCount || 0) + 1);
+        if (sourceMessageId !== null) {
+            record.sourceMessageIds = [...record.sourceMessageIds, sourceMessageId].slice(-SPEECH_DEVELOPMENT_OBSERVATION_LIMIT);
+        }
+        if (turn !== null) {
+            record.turns = [...new Set([...record.turns, turn])].sort((a, b) => a - b).slice(-SPEECH_DEVELOPMENT_OBSERVATION_LIMIT);
+            record.firstTurn = record.firstTurn === null ? turn : Math.min(record.firstTurn, turn);
+            record.lastTurn = record.lastTurn === null ? turn : Math.max(record.lastTurn, turn);
+        }
+    }
+    return next;
+}
+
+function speechConceptReady(record = {}) {
+    if (Number(record.observationCount || 0) < SPEECH_DEVELOPMENT_READY_COUNT) return false;
+    const firstTurn = speechTurn(record.firstTurn);
+    const lastTurn = speechTurn(record.lastTurn);
+    if (firstTurn !== null || lastTurn !== null || (record.turns || []).length) {
+        return firstTurn !== null && lastTurn !== null && lastTurn - firstTurn >= SPEECH_DEVELOPMENT_MIN_TURN_SPAN;
+    }
+    return (record.sourceMessageIds || []).length >= SPEECH_DEVELOPMENT_READY_COUNT;
+}
+
+function gradualSpeechDevelopmentReady(ledger, rawUpdate = {}) {
+    const concepts = new Set(speechEvidence(rawUpdate).map(speechConceptLabel).filter(Boolean));
+    if (!concepts.size) return false;
+    return (ledger?.concepts || []).some(record => concepts.has(record.concept) && speechConceptReady(record));
+}
+
+function normalizedSpeechUpdate(raw = {}) {
+    return continuity.normalizeScanNpc(raw || {});
+}
+
+function speechUpdateForNpc(scanResult, npc) {
+    const profile = Array.isArray(scanResult?.profileUpdates) ? scanResult.profileUpdates
+        : (Array.isArray(scanResult?.profile_updates) ? scanResult.profile_updates : []);
+    const ordinary = Array.isArray(scanResult?.npcs) ? scanResult.npcs : [];
+    for (const raw of [...profile, ...ordinary]) {
+        if (!raw || typeof raw !== 'object') continue;
+        if (raw.id && String(raw.id) === String(npc?.id)) return raw;
+        if (raw.name && mechanics.npcMatchesLabel(npc, raw.name)) return raw;
+    }
+    return null;
+}
+
+function prepareSpeechDevelopmentState(state, scanResult, options = {}) {
+    const plans = new Map();
+    const npcs = (Array.isArray(state?.npcs) ? state.npcs : []).map(rawNpc => {
+        const update = speechUpdateForNpc(scanResult, rawNpc);
+        const locked = Array.isArray(rawNpc?.manualProfileFields) && rawNpc.manualProfileFields.includes('speech');
+        let ledger = speechDevelopmentForNpc(rawNpc, { seedLegacy: true });
+        const hasLabeledEvidence = speechEvidence(update || {}).some(item => speechConceptLabel(item));
+        if (!ledger && hasLabeledEvidence && !locked) ledger = emptySpeechDevelopment(rawNpc);
+        if (ledger && update && !locked) ledger = observeSpeechDevelopment(ledger, update, options);
+        if (ledger) {
+            plans.set(String(rawNpc.id || ''), {
+                update,
+                ledger,
+                ready: !locked && gradualSpeechDevelopmentReady(ledger, update || {}),
+                locked,
+                beforeSpeech: speechText(rawNpc.speech),
+            });
+            return { ...rawNpc, speechDevelopment: ledger };
+        }
+        return rawNpc;
+    });
+    return { state: { ...(state || {}), npcs }, plans };
+}
+
+function clearSpeechProfileEvidence(npc) {
+    const profileEvidence = npc?.profileEvidence && typeof npc.profileEvidence === 'object' && !Array.isArray(npc.profileEvidence)
+        ? npc.profileEvidence
+        : {};
+    npc.profileEvidence = { ...profileEvidence, speech: [] };
+}
+
+function markSpeechProfileApplied(report, npcId) {
+    if (!report || !npcId) return;
+    report.updated = Array.isArray(report.updated) ? report.updated : [];
+    report.profileUpdated = Array.isArray(report.profileUpdated) ? report.profileUpdated : [];
+    if (!report.updated.includes(npcId)) report.updated.push(npcId);
+    const alreadyApplied = report.profileUpdated.includes(npcId);
+    if (!alreadyApplied) report.profileUpdated.push(npcId);
+    report.profileUpdateStats = report.profileUpdateStats && typeof report.profileUpdateStats === 'object'
+        ? report.profileUpdateStats
+        : { provided: 0, applied: 0, evidenceAdded: 0 };
+    if (!alreadyApplied) report.profileUpdateStats.applied = Number(report.profileUpdateStats.applied || 0) + 1;
+}
+
+function finalizeSpeechDevelopment(npc, plan, options = {}, report = null) {
+    if (!plan?.ledger) return npc;
+    const update = plan.update;
+    let ledger = plan.ledger;
+    const beforeSpeech = speechText(plan.beforeSpeech);
+    let currentSpeech = speechText(npc.speech);
+    if (!update) {
+        npc.speechDevelopment = rebaseSpeechDevelopment(ledger, currentSpeech);
+        return npc;
+    }
+
+    const normalized = normalizedSpeechUpdate(update);
+    const state = String(normalized.speechState || 'keep');
+    const scale = String(normalized.developmentScale || 'gradual');
+    const proposedSpeech = speechText(normalized.speech);
+    const speechReason = speechText(normalized.speechReason, 500);
+    const changedByContinuity = state === 'evolve'
+        && mechanics.normalizeName(beforeSpeech) !== mechanics.normalizeName(currentSpeech);
+
+    if (changedByContinuity) {
+        clearSpeechProfileEvidence(npc);
+        npc.speechDevelopment = resetSpeechDevelopment(ledger, currentSpeech, options);
+        return npc;
+    }
+
+    if (state === 'evolve' && scale === 'gradual' && plan.ready && !plan.locked && speechReason && proposedSpeech
+        && mechanics.normalizeName(proposedSpeech) !== mechanics.normalizeName(currentSpeech)) {
+        npc.speech = proposedSpeech;
+        currentSpeech = proposedSpeech;
+        clearSpeechProfileEvidence(npc);
+        npc.speechDevelopment = resetSpeechDevelopment(ledger, currentSpeech, options);
+        npc.updatedAt = Date.now();
+        markSpeechProfileApplied(report, npc.id);
+        return npc;
+    }
+
+    if (mechanics.normalizeName(beforeSpeech) !== mechanics.normalizeName(currentSpeech)) {
+        ledger = rebaseSpeechDevelopment(ledger, currentSpeech);
+    }
+    npc.speechDevelopment = ledger;
+    return npc;
+}
+
 function calendarPromptOptions(options = {}) {
     const next = { ...options };
     const calendar = getActiveCalendarConfig();
@@ -126,7 +418,10 @@ function appendBirthdayRule(prompt, options = {}) {
 }
 
 export function normalizeNpcRecord(raw = {}) {
-    return withAppearanceDerivedApparentAge(normalizeNpcBirthday(continuity.normalizeNpcRecord(raw)), raw.appearance);
+    const npc = withAppearanceDerivedApparentAge(normalizeNpcBirthday(continuity.normalizeNpcRecord(raw)), raw.appearance);
+    const speechDevelopment = speechDevelopmentForNpc(npc);
+    if (speechDevelopment) npc.speechDevelopment = speechDevelopment;
+    return npc;
 }
 
 export function normalizeScanNpc(raw = {}, options = {}) {
@@ -144,11 +439,13 @@ export function applyNpcStateCommand(state, command, options = {}) {
 }
 
 export function mergeScanResult(state, scanResult, options = {}) {
+    const speechPrepared = prepareSpeechDevelopmentState(state, scanResult, options);
+    const sourceState = speechPrepared.state;
     const calendar = getActiveCalendarConfig();
     const reference = calendarReference(options, calendar);
     const referenceDate = reference.date;
-    const previous = (state?.npcs || []).map(raw => normalizeNpcBirthday(continuity.normalizeNpcRecord(raw), calendar, referenceDate));
-    const result = continuity.mergeScanResult(state, scanResult, options);
+    const previous = (sourceState?.npcs || []).map(raw => normalizeNpcBirthday(continuity.normalizeNpcRecord(raw), calendar, referenceDate));
+    const result = continuity.mergeScanResult(sourceState, scanResult, options);
     const ordinary = Array.isArray(scanResult?.npcs) ? scanResult.npcs : [];
 
     result.state.npcs = (result.state.npcs || []).map(rawNpc => {
@@ -170,6 +467,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
             && !(reference.fallback && /^\d+$/.test(String(npc.age)) && npc.calendarAge < Number(npc.age))) {
             npc.age = String(npc.calendarAge);
         }
+        npc = finalizeSpeechDevelopment(npc, speechPrepared.plans.get(String(npc.id || '')), options, result.report);
         return withAppearanceDerivedApparentAge(npc, ordinaryUpdate?.appearance || rawNpc.appearance);
     });
     if (reference.extracted) {
@@ -209,4 +507,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.5';
+export const NPC_STATE_VERSION = '1.0.6';
