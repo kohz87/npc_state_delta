@@ -148,6 +148,17 @@ export function retainedPortraitAssetIds(state = {}) {
     addNpcs(state.npcs);
     for (const checkpoint of Array.isArray(state.checkpoints) ? state.checkpoints : []) addNpcs(checkpoint?.snapshot?.npcs);
     addNpcs(state.branchRootSnapshot?.npcs);
+    // The reversible rollback journal can be the only remaining proof that an NPC
+    // existed before a deep tail deletion once byte-budgeted full checkpoints have
+    // been pruned. Keep that NPC's portrait asset reachable until the journal entry
+    // itself expires; the journal stores no portrait binary.
+    for (const entry of Array.isArray(state.rollbackJournal) ? state.rollbackJournal : []) {
+        const npcUndo = entry?.undo?.npcs;
+        addNpcs(npcUndo?.full);
+        for (const change of Array.isArray(npcUndo?.changes) ? npcUndo.changes : []) {
+            if (change?.restore && typeof change.restore === 'object') addNpcs([change.restore]);
+        }
+    }
     const blocked = new Set((Array.isArray(state.userDismissedGroups) ? state.userDismissedGroups : [])
         .flatMap(group => [...(Array.isArray(group?.ids) ? group.ids : []), group?.npcId])
         .map(value => String(value || '').trim()).filter(Boolean));
