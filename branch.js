@@ -10,6 +10,10 @@ export const BRANCH_LINEAGE_VERSION = 4;
 export const BRANCH_SNAPSHOT_BUDGET_BYTES = 2_000_000;
 export const BRANCH_SNAPSHOT_BUDGET_CHARS = BRANCH_SNAPSHOT_BUDGET_BYTES;
 export const BRANCH_SNAPSHOT_MAX_BYTES = 750_000;
+export const ROLLBACK_JOURNAL_VERSION = 1;
+export const ROLLBACK_JOURNAL_LIMIT = 1024;
+export const ROLLBACK_JOURNAL_BUDGET_BYTES = 12_000_000;
+export const ROLLBACK_JOURNAL_MIN_ACTIVE_ENTRIES = 384;
 
 let provenanceHint = Object.freeze({ mainChat: '', ownerScope: '', currentKey: '' });
 
@@ -94,6 +98,330 @@ function utf8Bytes(value) {
 
 function checkpointBytes(item) {
     return utf8Bytes(item?.snapshot || {}) + 256;
+}
+
+const ROLLBACK_SCALAR_KEYS = Object.freeze([
+    'turn',
+    'assistantSinceScan',
+    'lastScanAt',
+    'lastScannedMessageId',
+    'scanCount',
+]);
+
+function jsonEqual(a, b) {
+    if (a === b) return true;
+    try { return JSON.stringify(a) === JSON.stringify(b); }
+    catch { return false; }
+}
+
+function rollbackSnapshot(state) {
+    return branchCore.snapshotBranchState(state || {});
+}
+
+function rollbackNpcMap(npcs = []) {
+    const map = new Map();
+    for (const npc of Array.isArray(npcs) ? npcs : []) {
+        const id = String(npc?.id || '').trim();
+        if (!id || map.has(id)) return null;
+        map.set(id, npc);
+    }
+    return map;
+}
+
+function buildNpcUndo(beforeNpcs = [], afterNpcs = []) {
+    const beforeMap = rollbackNpcMap(beforeNpcs);
+    const afterMap = rollbackNpcMap(afterNpcs);
+    if (!beforeMap || !afterMap) {
+        return jsonEqual(beforeNpcs, afterNpcs) ? null : { full: structuredClone(beforeNpcs) };
+    }
+
+    const changes = [];
+    const ids = new Set([...beforeMap.keys(), ...afterMap.keys()]);
+    for (const id of ids) {
+        const before = beforeMap.get(id);
+        const after = afterMap.get(id);
+        if (!before && after) {
+            changes.push({ id, remove: true });
+            continue;
+        }
+        if (before && !after) {
+            changes.push({ id, restore: structuredClone(before) });
+            continue;
+        }
+        if (!before || !after || jsonEqual(before, after)) continue;
+
+        const fields = {};
+        const deleteFields = [];
+        const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+        for (const key of keys) {
+            const beforeHas = Object.prototype.hasOwnProperty.call(before, key);
+            const afterHas = Object.prototype.hasOwnProperty.call(after, key);
+            if (beforeHas && afterHas && jsonEqual(before[key], after[key])) continue;
+            if (!beforeHas && afterHas) deleteFields.push(key);
+            else if (beforeHas) fields[key] = structuredClone(before[key]);
+        }
+        if (Object.keys(fields).length || deleteFields.length) changes.push({ id, fields, deleteFields });
+    }
+
+    const beforeOrder = [...beforeMap.keys()];
+    const afterOrder = [...afterMap.keys()];
+    const order = jsonEqual(beforeOrder, afterOrder) ? null : beforeOrder;
+    if (!changes.length && !order) return null;
+    return { changes, order };
+}
+
+export function buildRollbackUndo(beforeSnapshot = {}, afterSnapshot = {}) {
+    const undo = {};
+    const npcUndo = buildNpcUndo(beforeSnapshot?.npcs || [], afterSnapshot?.npcs || []);
+    if (npcUndo) undo.npcs = npcUndo;
+
+    for (const key of ['candidates', 'pendingBackfills', 'socialGraph', 'dismissed']) {
+        if (!jsonEqual(beforeSnapshot?.[key], afterSnapshot?.[key])) undo[key] = structuredClone(beforeSnapshot?.[key]);
+    }
+
+    const scalars = {};
+    for (const key of ROLLBACK_SCALAR_KEYS) {
+        if (!jsonEqual(beforeSnapshot?.[key], afterSnapshot?.[key])) scalars[key] = structuredClone(beforeSnapshot?.[key]);
+    }
+    if (Object.keys(scalars).length) undo.scalars = scalars;
+    return Object.keys(undo).length ? undo : null;
+}
+
+function applyNpcUndo(currentNpcs = [], npcUndo = null) {
+    if (!npcUndo) return { npcs: cloneNpcList(currentNpcs), removed: [] };
+    if (Array.isArray(npcUndo.full)) {
+        const next = cloneNpcList(npcUndo.full);
+        const nextIds = new Set(next.map(npc => String(npc?.id || '')).filter(Boolean));
+        const removed = cloneNpcList(currentNpcs).filter(npc => npc?.id && !nextIds.has(String(npc.id)));
+        return { npcs: next, removed };
+    }
+
+    const working = cloneNpcList(currentNpcs);
+    const removed = [];
+    for (const change of Array.isArray(npcUndo.changes) ? npcUndo.changes : []) {
+        const id = String(change?.id || '').trim();
+        if (!id) continue;
+        const index = working.findIndex(npc => String(npc?.id || '') === id);
+        if (change.remove === true) {
+            if (index >= 0) removed.push(...working.splice(index, 1));
+            continue;
+        }
+        if (change.restore && typeof change.restore === 'object') {
+            if (index >= 0) working[index] = structuredClone(change.restore);
+            else working.push(structuredClone(change.restore));
+            continue;
+        }
+        if (index < 0) continue;
+        const npc = { ...working[index] };
+        for (const key of Array.isArray(change.deleteFields) ? change.deleteFields : []) delete npc[key];
+        for (const [key, value] of Object.entries(change.fields || {})) npc[key] = structuredClone(value);
+        working[index] = npc;
+    }
+
+    if (Array.isArray(npcUndo.order)) {
+        const rank = new Map(npcUndo.order.map((id, index) => [String(id), index]));
+        working.sort((a, b) => {
+            const ai = rank.has(String(a?.id || '')) ? rank.get(String(a.id)) : Number.MAX_SAFE_INTEGER;
+            const bi = rank.has(String(b?.id || '')) ? rank.get(String(b.id)) : Number.MAX_SAFE_INTEGER;
+            return ai - bi;
+        });
+    }
+    return { npcs: working, removed };
+}
+
+export function applyRollbackUndo(state = {}, undo = null) {
+    if (!undo || typeof undo !== 'object') return { state: { ...state }, removedNpcs: [] };
+    const restored = branchCore.restoreSnapshotIntoState(state, rollbackSnapshot(state));
+    const npcResult = applyNpcUndo(restored.npcs, undo.npcs);
+    restored.npcs = npcResult.npcs;
+    for (const key of ['candidates', 'pendingBackfills', 'socialGraph', 'dismissed']) {
+        if (Object.prototype.hasOwnProperty.call(undo, key)) restored[key] = structuredClone(undo[key]);
+    }
+    for (const [key, value] of Object.entries(undo.scalars || {})) restored[key] = structuredClone(value);
+
+    for (const removedNpc of npcResult.removed) {
+        restored.socialGraph = removeNpcFromSocialGraph(restored.socialGraph, removedNpc.id);
+        purgeNpcStructuredReferences(restored.npcs, removedNpc);
+        restored.pendingBackfills = (Array.isArray(restored.pendingBackfills) ? restored.pendingBackfills : [])
+            .filter(item => String(item?.npcId || '') !== String(removedNpc.id || ''));
+        restored.candidates = (Array.isArray(restored.candidates) ? restored.candidates : [])
+            .filter(item => String(item?.id || '') !== String(removedNpc.id || ''));
+    }
+    restored.socialGraph = normalizeSocialGraph(restored.socialGraph);
+    return { state: restored, removedNpcs: npcResult.removed };
+}
+
+function normalizeRollbackJournalEntry(raw) {
+    if (!raw || typeof raw !== 'object' || !raw.undo || typeof raw.undo !== 'object') return null;
+    const seq = Number(raw.seq);
+    const prevSeq = Number(raw.prevSeq);
+    const messageId = Number(raw.messageId);
+    const beforeMessageId = Number(raw.beforeMessageId);
+    if (!Number.isInteger(seq) || seq <= 0 || !Number.isInteger(prevSeq) || prevSeq < 0) return null;
+    if (!Number.isInteger(messageId) || messageId < 0) return null;
+    return {
+        ...raw,
+        seq,
+        prevSeq,
+        messageId,
+        beforeMessageId: Number.isInteger(beforeMessageId) ? beforeMessageId : Math.max(-1, messageId - 1),
+        lineageKey: String(raw.lineageKey || ''),
+        parentLineageKey: String(raw.parentLineageKey || ''),
+        reason: String(raw.reason || 'state'),
+        createdAt: Number(raw.createdAt || 0) || Date.now(),
+    };
+}
+
+function normalizeRollbackJournal(entries = []) {
+    const bySeq = new Map();
+    for (const raw of Array.isArray(entries) ? entries : []) {
+        const entry = normalizeRollbackJournalEntry(raw);
+        if (!entry) continue;
+        const existing = bySeq.get(entry.seq);
+        if (!existing || entry.createdAt >= existing.createdAt) bySeq.set(entry.seq, entry);
+    }
+    return [...bySeq.values()].sort((a, b) => a.seq - b.seq);
+}
+
+function rollbackEntryBytes(entry) {
+    return utf8Bytes(entry) + 96;
+}
+
+export function pruneRollbackJournal(entries = [], headSeq = 0, limit = ROLLBACK_JOURNAL_LIMIT) {
+    const cap = Math.max(64, Number(limit) || ROLLBACK_JOURNAL_LIMIT);
+    const normalized = normalizeRollbackJournal(entries);
+    if (!normalized.length) return [];
+    const bySeq = new Map(normalized.map(entry => [entry.seq, entry]));
+    const active = [];
+    const activeSeqs = new Set();
+    let cursor = Number(headSeq) || 0;
+    while (cursor > 0 && active.length < cap) {
+        const entry = bySeq.get(cursor);
+        if (!entry || activeSeqs.has(entry.seq)) break;
+        active.push(entry);
+        activeSeqs.add(entry.seq);
+        cursor = entry.prevSeq;
+    }
+
+    let activeBytes = active.reduce((sum, entry) => sum + rollbackEntryBytes(entry), 0);
+    while (active.length > ROLLBACK_JOURNAL_MIN_ACTIVE_ENTRIES && activeBytes > ROLLBACK_JOURNAL_BUDGET_BYTES) {
+        activeBytes -= rollbackEntryBytes(active.pop());
+    }
+
+    const keep = [...active];
+    const remaining = normalized
+        .filter(entry => !activeSeqs.has(entry.seq))
+        .sort((a, b) => b.seq - a.seq);
+    let used = keep.reduce((sum, entry) => sum + rollbackEntryBytes(entry), 0);
+    for (const entry of remaining) {
+        if (keep.length >= cap) break;
+        const size = rollbackEntryBytes(entry);
+        if (used + size > ROLLBACK_JOURNAL_BUDGET_BYTES) continue;
+        keep.push(entry);
+        used += size;
+    }
+    return keep.sort((a, b) => a.seq - b.seq);
+}
+
+export function ensureRollbackJournalBaseline(state, lineage = []) {
+    if (!state || typeof state !== 'object') return state;
+    const sourceLineage = Array.isArray(lineage) ? lineage : [];
+    const keys = lineageCheckpointKeys(sourceLineage);
+    state.rollbackJournalVersion = ROLLBACK_JOURNAL_VERSION;
+    state.rollbackJournal = normalizeRollbackJournal(state.rollbackJournal);
+    state.rollbackJournalSequence = Math.max(
+        Number.isInteger(state.rollbackJournalSequence) ? state.rollbackJournalSequence : 0,
+        ...state.rollbackJournal.map(entry => entry.seq),
+        0,
+    );
+
+    const head = state.rollbackHead;
+    if (!head || typeof head !== 'object' || !head.snapshot || typeof head.snapshot !== 'object') {
+        const messageId = sourceLineage.length - 1;
+        state.rollbackHead = {
+            seq: 0,
+            messageId,
+            lineageKey: messageId >= 0 ? keys[messageId] : 'root',
+            snapshot: rollbackSnapshot(state),
+        };
+        state.rollbackJournalFloorMessageId = messageId;
+        state.rollbackJournal = [];
+        return state;
+    }
+
+    state.rollbackHead = {
+        seq: Math.max(0, Number.isInteger(head.seq) ? head.seq : 0),
+        messageId: Number.isInteger(head.messageId) ? head.messageId : sourceLineage.length - 1,
+        lineageKey: String(head.lineageKey || ''),
+        snapshot: structuredClone(head.snapshot),
+    };
+    state.rollbackJournalFloorMessageId = Number.isInteger(state.rollbackJournalFloorMessageId)
+        ? state.rollbackJournalFloorMessageId
+        : state.rollbackHead.messageId;
+    state.rollbackJournal = pruneRollbackJournal(state.rollbackJournal, state.rollbackHead.seq);
+    return state;
+}
+
+function appendRollbackMutation(state, lineage, messageId, reason, afterSnapshot) {
+    ensureRollbackJournalBaseline(state, Array.isArray(state.lineage) ? state.lineage : lineage);
+    const head = state.rollbackHead;
+    const beforeSnapshot = head?.snapshot && typeof head.snapshot === 'object' ? head.snapshot : rollbackSnapshot(state);
+    const undo = buildRollbackUndo(beforeSnapshot, afterSnapshot);
+    const keys = lineageCheckpointKeys(lineage);
+    if (undo) {
+        const seq = Math.max(Number(state.rollbackJournalSequence || 0), ...state.rollbackJournal.map(entry => entry.seq), 0) + 1;
+        const entry = {
+            seq,
+            prevSeq: Math.max(0, Number(head?.seq || 0)),
+            messageId,
+            beforeMessageId: Number.isInteger(head?.messageId) ? head.messageId : Math.max(-1, messageId - 1),
+            fingerprint: lineage[messageId] || '',
+            lineageKey: keys[messageId] || '',
+            parentLineageKey: messageId > 0 ? keys[messageId - 1] : 'root',
+            reason: String(reason || 'state'),
+            createdAt: Date.now(),
+            undo,
+        };
+        state.rollbackJournal.push(entry);
+        state.rollbackJournalSequence = seq;
+        state.rollbackHead = {
+            seq,
+            messageId,
+            lineageKey: entry.lineageKey,
+            snapshot: structuredClone(afterSnapshot),
+        };
+    } else {
+        state.rollbackHead = {
+            seq: Math.max(0, Number(head?.seq || 0)),
+            messageId,
+            lineageKey: keys[messageId] || String(head?.lineageKey || ''),
+            snapshot: structuredClone(afterSnapshot),
+        };
+    }
+    state.rollbackJournal = pruneRollbackJournal(state.rollbackJournal, state.rollbackHead.seq);
+    return state.rollbackHead.seq;
+}
+
+function settleRollbackHead(state, lineage = [], reason = 'turn-settled') {
+    if (!state || typeof state !== 'object' || !Array.isArray(lineage) || !lineage.length) return state;
+    ensureRollbackJournalBaseline(state, lineage);
+    const tailId = lineage.length - 1;
+    const keys = lineageCheckpointKeys(lineage);
+    const head = state.rollbackHead;
+    if (Number.isInteger(head?.messageId) && head.messageId >= 0 && head.messageId < lineage.length
+        && head.lineageKey && head.lineageKey !== keys[head.messageId]) return state;
+    const currentSnapshot = rollbackSnapshot(state);
+    if (buildRollbackUndo(head?.snapshot || {}, currentSnapshot)) {
+        appendRollbackMutation(state, lineage, tailId, reason, currentSnapshot);
+    } else if (head && (head.messageId !== tailId || head.lineageKey !== keys[tailId])) {
+        state.rollbackHead = {
+            seq: Math.max(0, Number(head.seq || 0)),
+            messageId: tailId,
+            lineageKey: keys[tailId] || 'root',
+            snapshot: structuredClone(currentSnapshot),
+        };
+    }
+    return state;
 }
 
 function ensureBranchFamilyId(state, seed = '') {
@@ -284,6 +612,9 @@ export function rebaseBranchStateForHostRename(state, chat, limit = branchCore.B
 export function ensureBranchParentAnchor(state, chat, messageId, reason = 'parent-anchor', limit = branchCore.BRANCH_HISTORY_LIMIT) {
     if (!state || typeof state !== 'object' || !Number.isInteger(messageId) || messageId < 0) return state;
     const lineage = chatLineage(chat);
+    const previousLineage = Array.isArray(state.lineage) ? state.lineage : [];
+    ensureRollbackJournalBaseline(state, previousLineage.length ? previousLineage : lineage.slice(0, Math.max(0, messageId)));
+    if (previousLineage.length) settleRollbackHead(state, previousLineage, 'turn-settled');
     state.lineage = lineage;
     state.branchLineageVersion = BRANCH_LINEAGE_VERSION;
     ensureBranchFamilyId(state, lineage.slice(0, 4).join('|'));
@@ -309,6 +640,7 @@ export function ensureBranchParentAnchor(state, chat, messageId, reason = 'paren
             parentLineageKey: parentId > 0 ? keys[parentId - 1] : 'root',
             reason: String(reason || 'parent-anchor'),
             createdAt: Date.now(),
+            rollbackSeq: Math.max(0, Number(state.rollbackHead?.seq || 0)),
             snapshot,
         });
     }
@@ -320,15 +652,19 @@ export function ensureBranchParentAnchor(state, chat, messageId, reason = 'paren
 export function recordBranchCheckpoint(state, chat, messageId, reason = 'state', limit = branchCore.BRANCH_HISTORY_LIMIT) {
     if (!state || typeof state !== 'object') return state;
     const lineage = chatLineage(chat);
-    state.lineage = lineage;
-    state.branchLineageVersion = BRANCH_LINEAGE_VERSION;
-    ensureBranchFamilyId(state, lineage.slice(0, 4).join('|'));
     if (!Number.isInteger(messageId) || messageId < 0 || messageId >= lineage.length) {
+        state.lineage = lineage;
+        state.branchLineageVersion = BRANCH_LINEAGE_VERSION;
+        ensureBranchFamilyId(state, lineage.slice(0, 4).join('|'));
         prunePortraitAssetsInPlace(state);
         return state;
     }
     const keys = lineageCheckpointKeys(lineage);
     const snapshot = branchCore.snapshotBranchState(state);
+    const rollbackSeq = appendRollbackMutation(state, lineage, messageId, reason, snapshot);
+    state.lineage = lineage;
+    state.branchLineageVersion = BRANCH_LINEAGE_VERSION;
+    ensureBranchFamilyId(state, lineage.slice(0, 4).join('|'));
     if (utf8Bytes(snapshot) <= BRANCH_SNAPSHOT_MAX_BYTES) {
         const checkpoint = {
             messageId,
@@ -337,6 +673,7 @@ export function recordBranchCheckpoint(state, chat, messageId, reason = 'state',
             parentLineageKey: messageId > 0 ? keys[messageId - 1] : 'root',
             reason: String(reason || 'state'),
             createdAt: Date.now(),
+            rollbackSeq,
             snapshot,
         };
         const checkpoints = normalizeBranchCheckpointsV3(state.checkpoints, lineage);
@@ -350,6 +687,7 @@ export function recordBranchCheckpoint(state, chat, messageId, reason = 'state',
     prunePortraitAssetsInPlace(state);
     return state;
 }
+
 
 function cloneNpcList(npcs) {
     return Array.isArray(npcs) ? structuredClone(npcs) : [];
@@ -402,10 +740,54 @@ function matchingCheckpoints(checkpoints, lineage) {
         .sort((a, b) => a.messageId - b.messageId || a.createdAt - b.createdAt);
 }
 
+function isStrictTailDeletion(previousLineage = [], currentLineage = [], divergence = -1) {
+    if (!Array.isArray(previousLineage) || !Array.isArray(currentLineage)) return false;
+    if (currentLineage.length >= previousLineage.length || divergence !== currentLineage.length) return false;
+    for (let i = 0; i < currentLineage.length; i += 1) {
+        if (previousLineage[i] !== currentLineage[i]) return false;
+    }
+    return true;
+}
+
+function restoreTailDeletionFromJournal(state, previousLineage, currentLineage, divergence) {
+    if (!isStrictTailDeletion(previousLineage, currentLineage, divergence)) return null;
+    ensureRollbackJournalBaseline(state, previousLineage);
+    const head = state.rollbackHead;
+    if (!head?.snapshot || typeof head.snapshot !== 'object') return null;
+
+    const previousKeys = lineageCheckpointKeys(previousLineage);
+    if (Number.isInteger(head.messageId) && head.messageId >= 0 && head.messageId < previousKeys.length
+        && head.lineageKey && head.lineageKey !== previousKeys[head.messageId]) return null;
+
+    const entries = normalizeRollbackJournal(state.rollbackJournal);
+    const bySeq = new Map(entries.map(entry => [entry.seq, entry]));
+    let cursorSeq = Math.max(0, Number(head.seq || 0));
+    let cursorMessageId = Number.isInteger(head.messageId) ? head.messageId : previousLineage.length - 1;
+    let working = branchCore.restoreSnapshotIntoState(state, head.snapshot);
+    let applied = 0;
+
+    while (cursorMessageId >= divergence) {
+        if (cursorSeq <= 0) return null;
+        const entry = bySeq.get(cursorSeq);
+        if (!entry) return null;
+        if (entry.messageId < divergence) break;
+        if (entry.messageId >= previousKeys.length || entry.lineageKey !== previousKeys[entry.messageId]) return null;
+        const reverted = applyRollbackUndo(working, entry.undo);
+        working = reverted.state;
+        cursorSeq = entry.prevSeq;
+        cursorMessageId = entry.beforeMessageId;
+        applied += 1;
+    }
+
+    if (cursorMessageId >= divergence) return null;
+    return { state: working, headSeq: cursorSeq, applied };
+}
+
 export function reconcileBranchState(state, chat, { explicitDivergence = null } = {}) {
     migrateLegacyBranchState(state, chat);
     const currentLineage = chatLineage(chat);
     const previousLineage = Array.isArray(state?.lineage) ? state.lineage : [];
+    ensureRollbackJournalBaseline(state, previousLineage.length ? previousLineage : currentLineage);
     let divergence = branchCore.firstLineageDivergence(previousLineage, currentLineage);
     if (Number.isInteger(explicitDivergence) && explicitDivergence >= 0) divergence = divergence < 0 ? explicitDivergence : Math.min(divergence, explicitDivergence);
     if (divergence < 0) {
@@ -420,10 +802,18 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null } 
     const deepestMatch = matches.at(-1) || null;
     const lastAssistantId = latestAssistantMessageId(chat);
     const exactCheckpoint = deepestMatch && deepestMatch.messageId >= lastAssistantId ? deepestMatch : null;
+    const journalRestore = restoreTailDeletionFromJournal(state, previousLineage, currentLineage, divergence);
     let restored;
     let checkpoint;
     let exactRestored = false;
-    if (exactCheckpoint) {
+    let restoredFromJournal = false;
+    let journalHeadSeq = null;
+    if (journalRestore) {
+        restored = journalRestore.state;
+        exactRestored = true;
+        restoredFromJournal = true;
+        journalHeadSeq = journalRestore.headSeq;
+    } else if (exactCheckpoint) {
         checkpoint = exactCheckpoint;
         restored = branchCore.restoreSnapshotIntoState(state, checkpoint.snapshot);
         exactRestored = true;
@@ -436,6 +826,13 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null } 
                 : { ...state, lastScannedMessageId: null, assistantSinceScan: 0 });
     }
     restored.npcs = branchCore.preserveUserNpcMetadata(restored.npcs, currentNpcs);
+    // A journal/checkpoint snapshot intentionally omits portrait binaries. When an NPC
+    // is restored after having disappeared from the current cast, reattach any retained
+    // user-owned asset before ordinary portrait GC runs.
+    for (const npc of Array.isArray(restored.npcs) ? restored.npcs : []) {
+        const asset = state?.portraitAssets?.[npc?.id];
+        if (!npc?.portrait?.dataUrl && asset?.dataUrl) npc.portrait = structuredClone(asset);
+    }
     enforceUserDismissals(restored, state?.userDismissedGroups);
     restored.lineage = currentLineage;
     restored.branchLineageVersion = BRANCH_LINEAGE_VERSION;
@@ -443,6 +840,28 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null } 
     ensureBranchFamilyId(restored, currentLineage.slice(0, 4).join('|'));
     restored.checkpoints = pruneBranchCheckpoints(checkpoints, currentLineage);
     restored.inlineCards = Array.isArray(state?.inlineCards) ? structuredClone(state.inlineCards) : [];
+    restored.rollbackJournalVersion = ROLLBACK_JOURNAL_VERSION;
+    restored.rollbackJournalSequence = Math.max(0, Number(state?.rollbackJournalSequence || 0));
+    restored.rollbackJournal = normalizeRollbackJournal(state?.rollbackJournal);
+    const restoredTailId = currentLineage.length - 1;
+    const restoredKeys = lineageCheckpointKeys(currentLineage);
+    let restoredHeadSeq = 0;
+    if (restoredFromJournal) restoredHeadSeq = Math.max(0, Number(journalHeadSeq || 0));
+    else if (Number.isInteger(checkpoint?.rollbackSeq)
+        && checkpoint.rollbackSeq >= 0
+        && (checkpoint.rollbackSeq === 0 || restored.rollbackJournal.some(entry => entry.seq === checkpoint.rollbackSeq))) {
+        restoredHeadSeq = checkpoint.rollbackSeq;
+    }
+    restored.rollbackHead = {
+        seq: restoredHeadSeq,
+        messageId: restoredTailId,
+        lineageKey: restoredTailId >= 0 ? restoredKeys[restoredTailId] : 'root',
+        snapshot: rollbackSnapshot(restored),
+    };
+    restored.rollbackJournalFloorMessageId = restoredHeadSeq > 0
+        ? Number(state?.rollbackJournalFloorMessageId ?? -1)
+        : restoredTailId;
+    restored.rollbackJournal = pruneRollbackJournal(restored.rollbackJournal, restoredHeadSeq);
     if (!exactRestored) {
         if (Number.isInteger(restored.lastScannedMessageId) && restored.lastScannedMessageId >= divergence) restored.lastScannedMessageId = null;
     }
@@ -450,12 +869,13 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null } 
     return {
         state: restored,
         divergence,
-        restoredFromMessageId: checkpoint?.messageId ?? null,
-        restoredLineageKey: checkpoint?.lineageKey || '',
+        restoredFromMessageId: restoredFromJournal ? restoredTailId : (checkpoint?.messageId ?? null),
+        restoredLineageKey: restoredFromJournal ? (restored.rollbackHead?.lineageKey || '') : (checkpoint?.lineageKey || ''),
         invalidated: true,
         exactRestored,
-        restoredFromRoot: !checkpoint && Boolean(state?.branchRootSnapshot),
-        legacyFallback: !checkpoint && checkpoints.length === 0 && !state?.branchRootSnapshot,
+        restoredFromJournal,
+        restoredFromRoot: !restoredFromJournal && !checkpoint && Boolean(state?.branchRootSnapshot),
+        legacyFallback: !restoredFromJournal && !checkpoint && checkpoints.length === 0 && !state?.branchRootSnapshot,
     };
 }
 
