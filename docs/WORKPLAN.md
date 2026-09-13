@@ -81,7 +81,7 @@ Verify a supported first encounter; proper name established in structured contex
 
 ## Stage 7 — storage and OOC removal
 
-Retain the accepted sidecar/owner/revision/locking/recovery design under Delta identity. Verify chat rename/delete, identical filenames under different owners, edit/swipe/delete/reload, stale writes, transient upload failure, tombstones, dirty-cache eviction protection, and manual correction retention.
+Retain the accepted sidecar/owner/revision/locking/recovery design under Delta identity. Delta 1.0.7 extends the accepted rollback owner with a bounded reversible journal beside the existing full branch checkpoints so deep tail deletion remains exact even when an intermediate full snapshot was byte-pruned. Verify chat rename/delete, identical filenames under different owners, edit/swipe/delete/reload, 100-message tail deletion, structural NPC/reference cleanup, stale writes, transient upload failure, tombstones, dirty-cache eviction protection, and manual correction retention.
 
 Remove the OOC parser and command-only event wiring, API paths, help text, fixtures, and backfill dependencies. Keep shared functions used by manual controls or scans. Test that OOC-looking story text no longer mutates dossiers, while manual add/edit/remove and relevant repair still work. No real user data operations and no generational migration product surface.
 
