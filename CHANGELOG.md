@@ -1,6 +1,14 @@
 # NPC State Delta changes
 
 
+## 1.0.4 - 13 September 2026
+
+- Give direct per-NPC Refresh the same Stage 4 appearance-form output contract already used by the accepted appearance model, including `overallAppearance`, `appearanceForms`, `currentForm` and `currentFormState`.
+- Carry the selected NPC's established appearance-form context into Refresh reconciliation and explicitly treat natural anatomical transitions as current-presentation/form evidence even when narration never says `form` or `transform`.
+- Preserve alternate anatomy when Refresh observes a visibly different presentation without a stable form name by routing it through the existing unclassified-current presentation instead of overwriting the prior form.
+- Keep Refresh strictly one-NPC and one-request: no extra scanner call, completeness pass, relationship scoring change, retry-budget change, persistence owner, or bundle-schema change.
+- Add focused regressions for the demonstrated horn/wing/tail disappearance path and preservation of the prior chimeric presentation.
+
 ## 1.0.3 - 13 September 2026
 
 - Make Stage 4 appearance-form fields part of the detailed routine scanner return contract instead of relying only on an appended side instruction.
