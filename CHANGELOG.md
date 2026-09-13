@@ -1,6 +1,14 @@
 # NPC State Delta changes
 
 
+## 1.0.6 - 13 September 2026
+
+- Add a bounded deterministic Speech development ledger inside each canonical NPC record, tracking up to four pending speech concepts with recent turn/source-message provenance rather than retaining transcript history.
+- Let three independent observations of the same stable speech concept across a minimum turn span authorize gradual Speech evolution, while replay of the same source message cannot advance the counter and unrelated concepts cannot combine.
+- Preserve existing grounded `explicit` and `batch` Speech evolution. When a full Speech replacement is accepted, clear old speech profile evidence and begin a new speech epoch so pre-change observations cannot resurrect obsolete habits.
+- Keep a bare time skip non-destructive: without grounded speech development, current Speech and pending evidence remain unchanged. A manual/unlocked Speech baseline change also clears stale pending concepts before later scans.
+- Preserve manual Speech locks, native bundle/checkpoint ownership, scanner prompt bytes, request/retry counts, output allowances, numerical relationship formulas and persisted format versions. Add regressions for replay rejection, concept isolation, gradual thresholding, batch reset, bare-time-skip preservation, manual baseline reset and bundle round-trip.
+
 ## 1.0.5 - 13 September 2026
 
 - Make manual Key Relationships / Important Bond edits authoritative over the edited NPC's hidden social-graph direction instead of enriching a stale graph edge and projecting old prose back into the dossier.
