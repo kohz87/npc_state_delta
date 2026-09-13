@@ -34,15 +34,15 @@ test('v1.0.4 targeted Refresh declares appearance-form output and natural transi
         charName: 'Narrator',
     });
 
-    assert.match(prompt, /TARGETED REFRESH APPEARANCE/);
-    assert.match(prompt, /Natural anatomical transitions/i);
+    assert.match(prompt, /REFRESH: visible anatomy changes are form evidence/i);
+    assert.match(prompt, /"appearanceState":"refine\|change","appearance":"","appearanceReason":"","overallAppearance":""/);
     assert.match(prompt, /"appearanceForms":\[\{"name":"stable established form name"/);
     assert.match(prompt, /"currentFormState":"keep\|select\|unknown"/);
     assert.match(prompt, /Established Stage 4 appearance forms/);
     assert.match(prompt, /"name":"Chimeric"/);
 });
 
-test('v1.0.4 targeted Refresh can switch to an unnamed current presentation without erasing alternate anatomy', () => {
+test('v1.0.4 targeted Refresh profile update can switch to an unnamed current presentation without erasing alternate anatomy', () => {
     const targetNpc = ryuChimericRecord();
     const initialState = {
         npcs: [targetNpc],
@@ -55,6 +55,12 @@ test('v1.0.4 targeted Refresh can switch to an unnamed current presentation with
         npcs: [{
             id: targetNpc.id,
             name: 'Ryu',
+            relationshipImpact: 'none',
+            relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 },
+        }],
+        profileUpdates: [{
+            id: targetNpc.id,
+            evidence: { appearance: ['horns dissolved; wings vanished; tail retracted'] },
             appearance: 'Long silver hair and grey-blue eyes; smooth forehead with no horns, no wings, and no tail.',
             appearanceState: 'change',
             appearanceReason: 'Her horns dissolved, wings vanished into her shoulders, and tail retracted into her lower back.',
@@ -62,7 +68,6 @@ test('v1.0.4 targeted Refresh can switch to an unnamed current presentation with
             currentFormState: 'unknown',
             currentFormReason: 'The story visibly changes her anatomy but does not establish a stable name for this presentation.',
         }],
-        profileUpdates: [],
         keyRelationshipEdges: [],
     };
 
