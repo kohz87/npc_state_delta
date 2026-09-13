@@ -364,7 +364,7 @@ function parseScanEdges(scanResult = {}, npcs = [], meta = {}) {
         const b = resolveNpcReference(npcs, item?.bId ?? item?.b_id ?? item?.b ?? item?.to ?? item?.target ?? '');
         if (!a || !b || a.id === b.id) continue;
         const aToB = clean(item?.aToB ?? item?.a_to_b ?? item?.fromTo ?? item?.from_to ?? item?.relation ?? item?.relationship, 180);
-        const bToA = clean(item?.bToB ?? item?.b_to_a ?? item?.toFrom ?? item?.to_from ?? item?.reverseRelation ?? item?.reverse_relation, 180) || inverseSocialRelation(aToB);
+        const bToA = clean(item?.bToA ?? item?.b_to_a ?? item?.toFrom ?? item?.to_from ?? item?.reverseRelation ?? item?.reverse_relation, 180) || inverseSocialRelation(aToB);
         if (!aToB && !bToA) continue;
         out.push({
             aId: a.id, bId: b.id, aToB, bToA,
