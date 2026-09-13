@@ -2,7 +2,7 @@
 
 ## Current release candidate
 
-Delta 1.0.2 is a bounded post-release hotfix on the completed nine-stage 1.0.0 line. It retains the 1.0.1 grounded apparent-age correction and adds manual Birthday editing through the canonical calendar/birthday engine, with active-calendar validation and no extra scanner request, retry, output allowance, reasoning setting, or prompt change. Stage 9 evidence remains in `docs/stage9-review.md`; immutable seed records and earlier stage reports retain their historical results.
+Delta 1.0.3 is a bounded post-release hotfix on the completed nine-stage 1.0.0 line. It retains the 1.0.1 grounded apparent-age correction and 1.0.2 manual Birthday editing, makes Stage 4 form fields part of the detailed routine-scan output contract, recognizes grounded implicit anatomical transitions, and makes audit-only source-history metadata fail-soft during native export. It does not add scanner requests, retries, output allowance, a model worker, or a new persistence authority. Stage 9 evidence remains in `docs/stage9-review.md`; immutable seed records and earlier stage reports retain their historical results.
 
 ## Canonical owners
 
@@ -10,10 +10,10 @@ Delta 1.0.2 is a bounded post-release hotfix on the completed nine-stage 1.0.0 l
 
 - `index.js`: canonical per-chat state, completed-message capture, scan orchestration, persistence scheduling/checkpoints, explicit scoped manual and portrait mutations, host editor and retained native image workflow.
 - `scanner-routing.js`: only NPC provider dispatcher, including selected profiles, counts, abort/timeouts and output override. `scan-context.js` supplies eligibility before dispatch; `full-cast.js` does not patch host generation.
-- `core-mechanics.js`, `continuity-core.js`, `core.js`: retained numerical/evidence mechanics and the application facade. `appearance.js` resolves named/current/shared appearance and manual form drafts; `terminal-lifecycle.js` owns terminal policy and manual life-state shaping.
+- `core-mechanics.js`, `continuity-core.js`, `core.js`: retained numerical/evidence mechanics and the application facade. `appearance.js` resolves named/current/shared appearance and manual form drafts; `continuity-core.js` extends detailed scan contracts with form fields and detects explicit or implicit anatomical transitions; `terminal-lifecycle.js` owns terminal policy and manual life-state shaping.
 - `calendar.js`/`birthday.js`: deterministic calendar and birthday policy. `calendar-settings.js` stores only the existing canonical settings slice; no independent campaign-clock database or timer is added.
 - `storage.js`, `identity.js`, `hardening*.js`, `branch.js`/`branch-core.js`: owner-qualified files, writer locks/revisions, dirty recovery, tombstones and branch snapshots. Required historical-shape readers are active compatibility behavior, not foreign converters.
-- `bundle.js` plus `native-transfer.js`: one native binary codec with validated portable metadata, portrait binaries and source-history audit. The public importer validates the complete envelope and clears unproven source ownership before mutation; target history remains the safe baseline.
+- `bundle.js` plus `native-transfer.js`: one native binary codec with validated portable metadata, portrait binaries and source-history audit. The public importer validates the complete envelope and clears unproven source ownership before mutation; target history remains the safe baseline. Export prioritizes canonical dossiers/portraits over audit-only history: oversized audit metadata is reduced to a compact truncation summary and may be omitted only if needed to keep the actual backup within the established envelope limits.
 - `dossier-ui.js`: lightweight rendered-state projection, selected dossier/cast and keyed unchanged sections. `dossier-experience.js`, `continuity-ui.js`, `scanner-output-ui.js` and `launcher-ui.js`: retained presentation/interaction adapters using owner notifications and scoped record reads. No second canonical state.
 - `dossier-tools.js`/`dossier-tools-core.js` and `portrait-tools.js`: maintained native transfer/diagnostics and prompt/upload/removal workflow. Superseded `dossier-tools-controls.js` and duplicate portrait-manager/polling paths are removed. The native host-image preview/application route remains in its canonical owner, independent from NPC text scanning.
 
@@ -43,9 +43,9 @@ node --import ./tests/active-runtime-test-setup.mjs tests/migration-smoke.mjs
 
 The package-layout check expects the checkout directory itself to be named `npc_state_delta`, just like the install directory. Do not weaken that check to accommodate an arbitrarily named worktree. The source-era test import aliases are handled by the development-only `active-runtime-test-setup.mjs`; those names never re-enter the shipping inventory.
 
-`validate` checks syntax, imports, namespaces, semantic ownership, exact runtime inventory and application metadata. Prompt measurement uses production builders with fixed fixtures; the additional Stage 9 capture checks complete Delta-owned system/user message bytes and options for both routes and a malformed-response retry against `tests/fixtures/stage9-budgets.json`. This baseline must not be regenerated from a changed candidate to conceal differences. Supply a baseline checkout path as an argument to measure that checkout with the same fixture.
+`validate` checks syntax, imports, namespaces, semantic ownership, exact runtime inventory and application metadata. Prompt measurement uses production builders with fixed fixtures; the additional Stage 9 capture checks complete Delta-owned system/user message bytes and options for both routes and a malformed-response retry against `tests/fixtures/stage9-budgets.json`. This baseline must not be regenerated from a changed candidate to conceal differences. Supply a baseline checkout path as an argument to measure that checkout with the same fixture. The 1.0.3 Stage 4 change is conditional: ordinary scans without a form/death/anatomical-transition signal retain the compact base scanner shape, while detailed form scans expose the form fields in their concrete return contract.
 
-`package` deterministically creates `dist/npc_state_delta-1.0.2.zip` and its SHA-256 sidecar. It verifies exact inventory, archive contents, CRC, byte identity and JS syntax. Only declared runtime JS, CSS, manifest, inventory, license and README ship; tests, scripts, history, source bundles and browser artifacts do not.
+`package` deterministically creates `dist/npc_state_delta-1.0.3.zip` and its SHA-256 sidecar. It verifies exact inventory, archive contents, CRC, byte identity and JS syntax. Only declared runtime JS, CSS, manifest, inventory, license and README ship; tests, scripts, history, source bundles and browser artifacts do not.
 
 ## Optional synthetic browser verification
 
@@ -65,7 +65,7 @@ All tests use temporary synthetic data. The full runtime harness exercises produ
 
 Actual provider latency, model extraction quality and provider-reported token use are not available from deterministic fixtures or another model's review. Delta-owned request bytes exclude host/provider additions not exposed by the harness. No thinking budget is introduced or increased. Do not add paid Gemini tests without explicit authorization.
 
-Permanent nonretryable HTTP save rejection is surfaced while dirty data remains available for later recovery; transient/network/408/425/429/5xx behavior retains existing retries and writer guards. Portrait/form/lifecycle/native operations distinguish local mutation from successful durable flush. Calendar settings use the host's normal debounced persistence and say queued, not falsely durable.
+Permanent nonretryable HTTP save rejection is surfaced while dirty data remains available for later recovery; transient/network/408/425/429/5xx behavior retains existing retries and writer guards. Portrait/form/lifecycle/native operations distinguish local mutation from successful durable flush. Calendar settings use the host's normal debounced persistence and say queued, not falsely durable. Native export retains the 2 MB manifest and 32 MB total-envelope ceilings; only audit-only source-history detail is compacted or omitted to keep canonical backup data exportable within those limits.
 
 ## Publication
 
