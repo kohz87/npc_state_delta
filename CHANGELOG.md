@@ -1,6 +1,14 @@
 # NPC State Delta changes
 
 
+## 1.0.5 - 13 September 2026
+
+- Make manual Key Relationships / Important Bond edits authoritative over the edited NPC's hidden social-graph direction instead of enriching a stale graph edge and projecting old prose back into the dossier.
+- Preserve a compatible reverse-side relationship/dynamic for the counterpart while replacing the manually edited owner-side relation and dynamic exactly.
+- Normalize `Name — relation; dynamic` into the canonical `Name — relation | dynamic` shape when the relation prefix is a recognized social relation.
+- Remove an unstructured orphan line when its full text is already contained in a structured bond entry, preventing duplicated dynamic-only lines from surviving canonicalization.
+- Add focused regressions for the demonstrated Ryu/Sora duplicate-line case, same-counterpart manual rewrite, and reverse-side preservation. Scanner prompts, request counts, relationship scoring formulas, persistence formats and bundle schemas are unchanged.
+
 ## 1.0.4 - 13 September 2026
 
 - Give direct per-NPC Refresh the same Stage 4 appearance-form output contract already used by the accepted appearance model, including `overallAppearance`, `appearanceForms`, `currentForm` and `currentFormState`.
