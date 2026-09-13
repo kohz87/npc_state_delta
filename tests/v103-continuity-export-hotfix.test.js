@@ -4,7 +4,7 @@ import { buildScannerPrompt, createNpcRecord } from '../core.js';
 import { encodeNpcStateBundle } from '../bundle.js';
 import { augmentNativeBundle, decodeDeltaNativeBundle } from '../native-transfer.js';
 
-test('v1.0.3 scanner exposes form fields for implicit anatomical transitions without explicit form wording', () => {
+test('v1.0.3 implicit anatomical transitions activate the existing Stage 4 form contract without explicit form wording', () => {
     const prompt = buildScannerPrompt({
         transcript: `Ryu's silver horns dissolved into pale vapor. Her wings broke into cool silver dust and her tail retracted into her lower back. Beside her, Sora's plumage melted into sparks and her pointed feathered ears smoothed into rounded ordinary ears.`,
         existingNpcs: [],
@@ -12,21 +12,21 @@ test('v1.0.3 scanner exposes form fields for implicit anatomical transitions wit
         charName: 'Narrator',
     });
     assert.match(prompt, /STAGE 4 APPEARANCE/);
-    assert.match(prompt, /Natural anatomical transitions count/i);
-    assert.match(prompt, /"appearance":"grounded prompt-ready visual description","overallAppearance":/);
-    assert.match(prompt, /"appearanceForms":\[\{"name":"stable established form name"/);
-    assert.match(prompt, /"currentFormState":"keep\|select\|unknown"/);
+    assert.match(prompt, /appearanceForms:\[\{name,appearance,state:"refine\|change",reason\}\]/);
+    assert.match(prompt, /currentForm\/currentFormState:"select"/);
+    assert.match(prompt, /currentFormState:"unknown"/);
+    assert.match(prompt, /never reuse another form's anatomy/i);
 });
 
-test('v1.0.3 ordinary scans do not pay the detailed form-schema cost without a form signal', () => {
+test('v1.0.3 ordinary scans keep the compact Stage 4 path when no form signal exists', () => {
     const prompt = buildScannerPrompt({
         transcript: 'Mira sits beside the hearth and asks Lucien about supper.',
         existingNpcs: [],
         userName: 'Lucien',
         charName: 'Narrator',
     });
-    assert.doesNotMatch(prompt, /Natural anatomical transitions count/i);
-    assert.doesNotMatch(prompt, /"appearance":"grounded prompt-ready visual description","overallAppearance":/);
+    assert.doesNotMatch(prompt, /STAGE 4 APPEARANCE/);
+    assert.match(prompt, /S4: forms\/current; confirmed death terminal/);
 });
 
 test('v1.0.3 oversized source history compacts instead of blocking native backup', () => {
