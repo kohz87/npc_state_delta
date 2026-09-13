@@ -63,6 +63,11 @@ export function socialRelationFamily(value) {
     return rel;
 }
 
+const KNOWN_SOCIAL_RELATION_FAMILIES = new Set([
+    'child', 'parent', 'sibling', 'partner', 'mentor', 'student', 'guardian', 'ward',
+    'friend', 'rival', 'cousin', 'aunt-uncle', 'niece-nephew', 'grandparent', 'grandchild',
+]);
+
 export function inverseSocialRelation(value) {
     const rel = clean(value, 180);
     const family = socialRelationFamily(rel);
@@ -119,8 +124,20 @@ export function parseKeyRelationshipEntry(value) {
     const rest = clean(match[2], 280);
     if (!subject || !rest) return null;
     const pipe = rest.indexOf('|');
-    const relation = clean(pipe >= 0 ? rest.slice(0, pipe) : rest, 180);
-    const dynamic = clean(pipe >= 0 ? rest.slice(pipe + 1) : '', 220);
+    let relationText = pipe >= 0 ? rest.slice(0, pipe) : rest;
+    let dynamicText = pipe >= 0 ? rest.slice(pipe + 1) : '';
+    if (pipe < 0) {
+        const semicolon = rest.indexOf(';');
+        if (semicolon > 0) {
+            const candidateRelation = clean(rest.slice(0, semicolon), 180);
+            if (KNOWN_SOCIAL_RELATION_FAMILIES.has(socialRelationFamily(candidateRelation))) {
+                relationText = candidateRelation;
+                dynamicText = rest.slice(semicolon + 1);
+            }
+        }
+    }
+    const relation = clean(relationText, 180);
+    const dynamic = clean(dynamicText, 220);
     if (!relation) return null;
     return { subject, relation, dynamic };
 }
@@ -320,11 +337,15 @@ export function canonicalizeNpcKeyRelationships(npcs = [], { includeLocked = fal
             }
         }
         for (const { counterpart, relation, dynamic } of byCounterpart.values()) entries.push(formatKeyRelationship(counterpart.name, relation, dynamic, counterpart));
+        const structuredBodies = entries.map(parseKeyRelationshipEntry).filter(Boolean)
+            .map(item => norm(`${item.relation} ${item.dynamic}`)).filter(Boolean);
         const deduped = [];
         const seen = new Set();
         for (const entry of entries) {
             const key = norm(entry);
             if (!entry || seen.has(key)) continue;
+            const parsed = parseKeyRelationshipEntry(entry);
+            if (!parsed && key.length >= 24 && structuredBodies.some(body => body.includes(key))) continue;
             seen.add(key);
             deduped.push(entry);
         }
@@ -453,7 +474,7 @@ export function extractUnresolvedSocialFacts(transcript, npcs = [], meta = {}) {
             if (family) pushFact(npc, numberWord(family[1]), family[3], family[2] ? 'twins' : '', [], family[0]);
             const twinFamily = background.match(new RegExp(`\\b(?:mother|father|parent|guardian)\\s+of\\s+twin\\s+${pluralRel}\\b`, 'iu'));
             if (twinFamily) pushFact(npc, 2, twinFamily[1], 'twins', [], twinFamily[0]);
-            const singleFamily = background.match(/\\b(?:mother|father|parent|guardian)\\s+of\\s+(?:a|an|one)\\s+(daughter|son|child)\\b/iu);
+            const singleFamily = background.match(/\b(?:mother|father|parent|guardian)\s+of\s+(?:a|an|one)\s+(daughter|son|child)\b/iu);
             if (singleFamily) pushFact(npc, 1, singleFamily[1], '', [], singleFamily[0]);
         }
     }
@@ -638,6 +659,56 @@ export function socialGraphLabelsForNpc(rawGraph, npcId, npcs = []) {
     return uniq(labels);
 }
 
+function pairConnects(edge, aId, bId) {
+    return (edge.aId === aId && edge.bId === bId) || (edge.aId === bId && edge.bId === aId);
+}
+
+function explicitReverseRelationship(counterpart, owner, npcs = []) {
+    for (const raw of Array.isArray(counterpart?.keyRelationships) ? counterpart.keyRelationships : []) {
+        const parsed = parseKeyRelationshipEntry(raw);
+        if (!parsed) continue;
+        const target = resolveNpcReference(npcs, parsed.subject);
+        if (target?.id === owner.id) return parsed;
+    }
+    return null;
+}
+
+function replaceManualRelationshipEdge(graph, owner, parsed, npcs = [], meta = {}) {
+    const counterpart = resolveNpcReference(npcs, parsed.subject);
+    if (!counterpart || counterpart.id === owner.id) return null;
+    const pairEdges = graph.edges.filter(edge => pairConnects(edge, owner.id, counterpart.id));
+    const priorView = pairEdges.map(edge => relationFromPerspective(edge, owner.id)).find(Boolean) || null;
+    const desiredReverse = inverseSocialRelation(parsed.relation);
+    const explicitReverse = explicitReverseRelationship(counterpart, owner, npcs);
+    const explicitReverseCompatible = explicitReverse
+        && socialRelationFamily(explicitReverse.relation) === socialRelationFamily(desiredReverse);
+    const priorReverseCompatible = priorView?.reverse
+        && socialRelationFamily(priorView.reverse) === socialRelationFamily(desiredReverse);
+    const reverseRelation = explicitReverseCompatible
+        ? explicitReverse.relation
+        : (priorReverseCompatible ? priorView.reverse : desiredReverse);
+    const reverseDynamic = explicitReverseCompatible
+        ? explicitReverse.dynamic
+        : (priorReverseCompatible ? priorView.reverseDynamic : '');
+    const priorEdge = pairEdges[0] || null;
+    graph.edges = graph.edges.filter(edge => !pairConnects(edge, owner.id, counterpart.id));
+    return addEdge(graph, {
+        aId: owner.id,
+        bId: counterpart.id,
+        aToB: parsed.relation,
+        bToA: reverseRelation,
+        aDynamic: parsed.dynamic,
+        bDynamic: reverseDynamic,
+        provenance: 'manual',
+        confidence: 'manual',
+        reason: 'manual key relationship edit',
+        sourceMessageId: meta.sourceMessageId,
+        turn: meta.turn,
+        groupId: priorEdge?.groupId || '',
+        sharedDescriptor: priorEdge?.sharedDescriptor || '',
+    });
+}
+
 export function applyManualKeyRelationshipEdit(state, npcId, beforeList = [], afterList = [], meta = {}) {
     const next = state && typeof state === 'object' ? state : {};
     const npcs = Array.isArray(next.npcs) ? next.npcs : [];
@@ -649,16 +720,9 @@ export function applyManualKeyRelationshipEdit(state, npcId, beforeList = [], af
     const afterIds = new Set(afterEntries.map(item => resolveNpcReference(npcs, item.subject)?.id).filter(Boolean));
     for (const removedId of beforeIds) {
         if (afterIds.has(removedId)) continue;
-        graph.edges = graph.edges.filter(edge => {
-            if (edge.aId === owner.id && edge.bId === removedId) return false;
-            if (edge.bId === owner.id && edge.aId === removedId) return false;
-            return true;
-        });
+        graph.edges = graph.edges.filter(edge => !pairConnects(edge, owner.id, removedId));
     }
-    for (const parsed of afterEntries) {
-        const edge = edgeFromKeyRelationship(owner, parsed, npcs, { provenance: 'manual', confidence: 'manual', reason: 'manual key relationship edit', sourceMessageId: meta.sourceMessageId, turn: meta.turn });
-        if (edge) addEdge(graph, edge);
-    }
+    for (const parsed of afterEntries) replaceManualRelationshipEdge(graph, owner, parsed, npcs, meta);
     next.socialGraph = normalizeSocialGraph(graph);
     return next;
 }
