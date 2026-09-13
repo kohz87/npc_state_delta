@@ -192,6 +192,9 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
 const COMPACT_STAGE4_RULE = `\nS4: forms/current; confirmed death terminal.`;
 const APPEARANCE_RULES = `\nSTAGE 4 APPEARANCE: appearance is the current visible presentation. overallAppearance is only form-independent visual detail. Named anatomical presentations use appearanceForms:[{name,appearance,state:"refine|change",reason}] plus currentForm/currentFormState:"select". A switch preserves other forms. If transformation is visible but its stable form name is unknown, use currentFormState:"unknown" and grounded current appearance only; never reuse another form's anatomy. Omission preserves forms/selection. Locked Appearance protects overall/current presentation, forms and selection.`;
 const DEATH_RULES = `\nSTAGE 4 DEATH: explicit confirmed death uses lifeState:"deceased"+lifeStateCertainty:"explicit" and is terminal to automatic writers. Later narrative/model output cannot return that NPC to alive/present/worldActive; only explicit player correction or owned-history rollback may reverse an erroneous death.`;
+const PROFILE_REFRESH_FORM_SHAPE_ANCHOR = '"age":"","apparentAge":"","appearance":"","personality":""';
+const PROFILE_REFRESH_FORM_SHAPE = '"age":"","apparentAge":"","appearance":"","overallAppearance":"","overallAppearanceState":"keep|refine|change","overallAppearanceReason":"","appearanceForms":[{"name":"stable established form name","appearance":"form-specific visible anatomy","state":"refine|change","reason":""}],"currentForm":"stable established form name or empty","currentFormState":"keep|select|unknown","currentFormReason":"","personality":""';
+const PROFILE_REFRESH_APPEARANCE_RULE = `\nTARGETED REFRESH APPEARANCE: Natural anatomical transitions such as horns, wings, tails, feathers/plumage, scales, talons or ears dissolving, retracting, vanishing, appearing, growing or emerging count as current-presentation/form evidence even when narration never says "form" or "transform". Reconcile only the target NPC. Preserve omitted alternate forms; if no stable form name is established, keep currentForm empty and use currentFormState:"unknown" with appearance as the grounded current presentation.`;
 function hasImplicitAnatomicalTransition(transcript = '') {
     const text = String(transcript || '');
     const anatomy = /\b(horns?|wings?|tails?|ears?|feathers?|plumage|quills?|scales?|talons?|claws?|beaks?|fins?|gills?|antlers?)\b/i.test(text);
@@ -227,7 +230,14 @@ function appendRules(prompt, options = {}, detailed = true) {
     const context = establishedAppearanceContext(options);
     return detailed ? `${sanitized}${COMPACT_STAGE4_RULE}${APPEARANCE_RULES}${DEATH_RULES}${context}` : `${sanitized}${COMPACT_STAGE4_RULE}${context}`;
 }
+function profileRefreshFormContract(prompt = '') {
+    const source = String(prompt);
+    const shaped = source.includes(PROFILE_REFRESH_FORM_SHAPE_ANCHOR)
+        ? source.replace(PROFILE_REFRESH_FORM_SHAPE_ANCHOR, PROFILE_REFRESH_FORM_SHAPE)
+        : source;
+    return `${shaped}${PROFILE_REFRESH_APPEARANCE_RULE}`;
+}
 export function buildScannerPrompt(options = {}) { return appendRules(mechanics.buildScannerPrompt(options), options, needsDetailedStage4(options)); }
 export function buildBackfillPrompt(options = {}) { return appendRules(mechanics.buildBackfillPrompt(options), options); }
 export function buildDossierImportPrompt(options = {}) { return appendRules(mechanics.buildDossierImportPrompt(options), options); }
-export function buildProfileRefreshPrompt(options = {}) { return appendRules(mechanics.buildProfileRefreshPrompt(options), options); }
+export function buildProfileRefreshPrompt(options = {}) { return appendRules(profileRefreshFormContract(mechanics.buildProfileRefreshPrompt(options)), options); }
