@@ -190,13 +190,22 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
 }
 
 const COMPACT_STAGE4_RULE = `\nS4: forms/current; confirmed death terminal.`;
-const APPEARANCE_RULES = `\nSTAGE 4 APPEARANCE: appearance is the current visible presentation. overallAppearance is only form-independent visual detail. Named anatomical presentations use appearanceForms:[{name,appearance,state:"refine|change",reason}] plus currentForm/currentFormState:"select". A switch preserves other forms. If transformation is visible but its stable form name is unknown, use currentFormState:"unknown" and grounded current appearance only; never reuse another form's anatomy. Omission preserves forms/selection. Locked Appearance protects overall/current presentation, forms and selection.`;
+const APPEARANCE_RULES = `\nSTAGE 4 APPEARANCE: appearance is the current visible presentation. overallAppearance is only form-independent visual detail. Named anatomical presentations use appearanceForms:[{name,appearance,state:"refine|change",reason}] plus currentForm/currentFormState:"select". A switch preserves other forms. If transformation is visible but its stable form name is unknown, use currentFormState:"unknown" and grounded current appearance only; never reuse another form's anatomy. Natural anatomical transitions count even when narration never says "form" or "transform". Omission preserves forms/selection. Locked Appearance protects overall/current presentation, forms and selection.`;
 const DEATH_RULES = `\nSTAGE 4 DEATH: explicit confirmed death uses lifeState:"deceased"+lifeStateCertainty:"explicit" and is terminal to automatic writers. Later narrative/model output cannot return that NPC to alive/present/worldActive; only explicit player correction or owned-history rollback may reverse an erroneous death.`;
+const SCANNER_FORM_SHAPE_ANCHOR = '"appearance":"grounded prompt-ready visual description"';
+const SCANNER_FORM_SHAPE = '"appearance":"grounded prompt-ready visual description","overallAppearance":"form-independent visual details or empty","overallAppearanceState":"keep|refine|change","overallAppearanceReason":"","appearanceForms":[{"name":"stable established form name","appearance":"form-specific visible anatomy","state":"refine|change","reason":""}],"currentForm":"stable established form name or empty","currentFormState":"keep|select|unknown","currentFormReason":""';
+function hasImplicitAnatomicalTransition(transcript = '') {
+    const text = String(transcript || '');
+    const anatomy = /\b(horns?|wings?|tails?|ears?|feathers?|plumage|quills?|scales?|talons?|claws?|beaks?|fins?|gills?|antlers?)\b/i.test(text);
+    const transition = /\b(dissolv(?:e|ed|es|ing)?|retract(?:ed|s|ing)?|withdraw(?:n|s|ing)?|vanish(?:ed|es|ing)?|disappear(?:ed|s|ing)?|melt(?:ed|s|ing)?|smooth(?:ed|s|ing)?|emerg(?:e|ed|es|ing)|sprout(?:ed|s|ing)?|grow(?:n|s|ing)?|manifest(?:ed|s|ing)?|materializ(?:e|ed|es|ing)|fade(?:d|s|ing)?|recede(?:d|s|ing)?|absorb(?:ed|s|ing)?|sink(?:s|ing)?\s+(?:back|into)|draw(?:n|s|ing)?\s+(?:back|into))\b/i.test(text);
+    return anatomy && transition;
+}
 function needsDetailedStage4(options = {}) {
     const transcript = String(options?.transcript || '');
     const existing = Array.isArray(options?.existingNpcs) ? options.existingNpcs : [];
     return existing.some(npc => (npc?.appearanceForms?.length || npc?.currentForm || isTerminalNpcDeath(npc)))
-        || /\b(transform(?:s|ed|ing|ation)?|form|shape-?shift|metamorph|human form|beast form|dragon form|dies|died|dead|deceased|killed|death)\b/i.test(transcript);
+        || /\b(transform(?:s|ed|ing|ation)?|form|shape-?shift|metamorph|human form|beast form|dragon form|dies|died|dead|deceased|killed|death)\b/i.test(transcript)
+        || hasImplicitAnatomicalTransition(transcript);
 }
 function establishedAppearanceContext(options = {}) {
     const transcriptKey = mechanics.normalizeName(options?.transcript || options?.dossierText || '');
@@ -216,7 +225,8 @@ function establishedAppearanceContext(options = {}) {
     return records.length ? `\nEstablished Stage 4 appearance forms (preserve omissions): ${JSON.stringify(records)}` : '';
 }
 function appendRules(prompt, options = {}, detailed = true) {
-    const sanitized = String(prompt).replace('deceased+explicit=death; explicit alive=reactivate.', 'deceased+explicit=terminal death; alive output cannot revive.');
+    let sanitized = String(prompt).replace('deceased+explicit=death; explicit alive=reactivate.', 'deceased+explicit=terminal death; alive output cannot revive.');
+    if (detailed && sanitized.includes(SCANNER_FORM_SHAPE_ANCHOR)) sanitized = sanitized.replace(SCANNER_FORM_SHAPE_ANCHOR, SCANNER_FORM_SHAPE);
     const context = establishedAppearanceContext(options);
     return detailed ? `${sanitized}${COMPACT_STAGE4_RULE}${APPEARANCE_RULES}${DEATH_RULES}${context}` : `${sanitized}${COMPACT_STAGE4_RULE}${context}`;
 }
