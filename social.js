@@ -364,7 +364,7 @@ function parseScanEdges(scanResult = {}, npcs = [], meta = {}) {
         const b = resolveNpcReference(npcs, item?.bId ?? item?.b_id ?? item?.b ?? item?.to ?? item?.target ?? '');
         if (!a || !b || a.id === b.id) continue;
         const aToB = clean(item?.aToB ?? item?.a_to_b ?? item?.fromTo ?? item?.from_to ?? item?.relation ?? item?.relationship, 180);
-        const bToA = clean(item?.bToA ?? item?.b_to_a ?? item?.toFrom ?? item?.to_from ?? item?.reverseRelation ?? item?.reverse_relation, 180) || inverseSocialRelation(aToB);
+        const bToA = clean(item?.bToB ?? item?.b_to_a ?? item?.toFrom ?? item?.to_from ?? item?.reverseRelation ?? item?.reverse_relation, 180) || inverseSocialRelation(aToB);
         if (!aToB && !bToA) continue;
         out.push({
             aId: a.id, bId: b.id, aToB, bToA,
@@ -474,7 +474,7 @@ export function extractUnresolvedSocialFacts(transcript, npcs = [], meta = {}) {
             if (family) pushFact(npc, numberWord(family[1]), family[3], family[2] ? 'twins' : '', [], family[0]);
             const twinFamily = background.match(new RegExp(`\\b(?:mother|father|parent|guardian)\\s+of\\s+twin\\s+${pluralRel}\\b`, 'iu'));
             if (twinFamily) pushFact(npc, 2, twinFamily[1], 'twins', [], twinFamily[0]);
-            const singleFamily = background.match(/\b(?:mother|father|parent|guardian)\s+of\s+(?:a|an|one)\s+(daughter|son|child)\b/iu);
+            const singleFamily = background.match(/\\b(?:mother|father|parent|guardian)\\s+of\\s+(?:a|an|one)\\s+(daughter|son|child)\\b/iu);
             if (singleFamily) pushFact(npc, 1, singleFamily[1], '', [], singleFamily[0]);
         }
     }
