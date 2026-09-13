@@ -146,7 +146,7 @@ function normalizeSpeechConcept(raw = {}) {
     const turns = [...new Set((Array.isArray(raw?.turns) ? raw.turns : [])
         .map(speechTurn).filter(value => value !== null))].sort((a, b) => a - b).slice(-SPEECH_DEVELOPMENT_OBSERVATION_LIMIT);
     const firstTurn = speechTurn(raw?.firstTurn);
-    const lastTurn = speechTurn(raw/.lastTurn);
+    const lastTurn = speechTurn(raw?.lastTurn);
     const observationCount = Math.max(
         0,
         Math.min(9, Math.round(Number(raw?.observationCount) || 0)),
@@ -241,7 +241,7 @@ function rebaseSpeechDevelopment(ledger, speech) {
 function speechDevelopmentForNpc(npc = {}, { seedLegacy = false } = {}) {
     let ledger = normalizeSpeechDevelopment(npc?.speechDevelopment, npc, { seedLegacy });
     if (!ledger) return null;
-    const current = speechText(npc/.speech);
+    const current = speechText(npc?.speech);
     if (mechanics.normalizeName(ledger.baselineSpeech) !== mechanics.normalizeName(current)) {
         ledger = resetSpeechDevelopment(ledger, current);
     }
