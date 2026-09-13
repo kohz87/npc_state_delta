@@ -1,6 +1,15 @@
 # NPC State Delta changes
 
 
+## 1.0.3 - 13 September 2026
+
+- Make Stage 4 appearance-form fields part of the detailed routine scanner return contract instead of relying only on an appended side instruction.
+- Recognize grounded implicit anatomical transformations such as horns, wings, tails, plumage, scales, talons or ears visibly dissolving, retracting, appearing, growing or otherwise changing even when narration never says `form` or `transform`.
+- Preserve established alternate forms and route visibly different but unnamed presentations through the existing unclassified-current-form path instead of overwriting unrelated anatomy or inventing a stable form name.
+- Keep ordinary scans compact: the expanded form schema is added only when existing form/lifecycle state or an explicit/implicit transformation signal requires detailed Stage 4 handling.
+- Prevent large audit-only source history from blocking native backup. Full audit history is attempted first; if it exceeds the existing 2 MB manifest or 32 MB total envelope budget, Delta writes a compact truncation summary and, only if necessary, omits audit history while preserving canonical dossiers, portraits and portable settings.
+- Add focused regressions for natural-language anatomical transitions and oversized-history native export without changing relationship formulas, scanner request counts, retries, persistence ownership or bundle schema version.
+
 ## 1.0.2 - 12 September 2026
 
 - Add a Birthday field to Edit Dossier so generated or story-established dates can be corrected manually without editing extension JSON.
