@@ -46,6 +46,8 @@ Do not silently loosen or tighten accepted evidence interpretation under cleanup
 
 ## Verification and publication
 
+Verify retry-to-permanent-failure transitions through cache eviction, undurable hydration and later flush, including newer in-flight mutations, cancellation and revision conflicts. Exercise failed/skipped/busy scan receipt boundaries through the synthetic host, plus sibling revisits, net-zero same-message coalescing and deep/sequential deletion with predecessor retention. These checks enforce C03/C05/C08 of `docs/core-contract.md`; they do not create separate behavior rules.
+
 Follow `DEVELOPMENT.md` for executable commands. Test changed behavior through production functions and the existing synthetic host harness. When storage, identity, scan scheduling, or scoring changes, exercise relevant stale-result, duplicate, swipe/edit/delete, failure, and recovery cases.
 
 Distinguish deterministic tests, synthetic host checks, actual browser/provider checks, estimated tokens, and provider-reported usage. Mocked success is not proof of live extraction quality, latency, or UI responsiveness. Do not use a test count alone as acceptance evidence.

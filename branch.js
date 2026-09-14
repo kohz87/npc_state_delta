@@ -389,6 +389,7 @@ export function pruneRollbackJournal(
     limit = ROLLBACK_JOURNAL_LIMIT,
     headMessageId = null,
     floorMessageId = null,
+    checkpointSeqs = [],
 ) {
     const cap = Math.max(64, Number(limit) || ROLLBACK_JOURNAL_LIMIT);
     const normalized = normalizeRollbackJournal(entries);
@@ -416,6 +417,16 @@ export function pruneRollbackJournal(
         : (resolvedHeadMessageId >= 0 ? resolvedHeadMessageId - ROLLBACK_JOURNAL_WINDOW_MESSAGES : -1);
     const keep = active.filter(entry => entry.messageId >= resolvedFloorMessageId);
     const keptSeqs = new Set(keep.map(entry => entry.seq));
+    // Retained full checkpoints own their undo predecessors too. Their required history is
+    // diagnostic-budgeted like the active chain; optional extras must not strand a revisit.
+    for (const seq of checkpointSeqs) {
+        let entry = bySeq.get(seq);
+        while (entry && !keptSeqs.has(entry.seq) && entry.messageId >= resolvedFloorMessageId) {
+            keep.push(entry);
+            keptSeqs.add(entry.seq);
+            entry = bySeq.get(entry.prevSeq);
+        }
+    }
     let used = keep.reduce((sum, entry) => sum + rollbackEntryBytes(entry), 0);
 
     // Recent sibling entries are opportunistic. They may improve branch revisits but can never
@@ -426,9 +437,19 @@ export function pruneRollbackJournal(
         .sort((a, b) => b.createdAt - a.createdAt || b.seq - a.seq);
     for (const entry of remaining) {
         if (keep.length >= cap) break;
-        const size = rollbackEntryBytes(entry);
-        if (used + size > ROLLBACK_JOURNAL_BUDGET_BYTES) continue;
-        keep.push(entry);
+        const chain = [];
+        const seen = new Set();
+        let candidate = entry;
+        while (candidate && !keptSeqs.has(candidate.seq) && !seen.has(candidate.seq)
+            && candidate.messageId >= resolvedFloorMessageId) {
+            chain.push(candidate);
+            seen.add(candidate.seq);
+            candidate = bySeq.get(candidate.prevSeq);
+        }
+        const size = chain.reduce((sum, item) => sum + rollbackEntryBytes(item), 0);
+        if (keep.length + chain.length > cap || used + size > ROLLBACK_JOURNAL_BUDGET_BYTES) continue;
+        keep.push(...chain);
+        for (const item of chain) keptSeqs.add(item.seq);
         used += size;
     }
     return keep.sort((a, b) => a.seq - b.seq);
@@ -449,6 +470,7 @@ function refreshRollbackJournalRetention(state) {
         ROLLBACK_JOURNAL_LIMIT,
         headMessageId,
         floorMessageId,
+        (state.checkpoints || []).map(checkpoint => checkpoint.rollbackSeq),
     );
     // If the last actual mutation aged out while the head advanced only across unchanged raw
     // messages, its sequence pointer must not dangle. The current head snapshot is a valid
@@ -519,9 +541,16 @@ function appendRollbackMutation(state, lineage, messageId, reason, afterSnapshot
         if (existing && existing.messageId === messageId && existing.lineageKey === head.lineageKey) {
             const earliest = applyRollbackUndo(head.snapshot, existing.undo).state;
             const combinedUndo = buildRollbackUndo(rollbackSnapshot(earliest), afterSnapshot);
+            // The checkpoint at this exact lineage will be replaced below. Any other
+            // checkpoint or descendant still owns the old version, including net-zero revisits.
+            const referenced = state.rollbackJournal.some(entry => entry.prevSeq === existing.seq)
+                || (state.checkpoints || []).some(checkpoint => checkpoint.rollbackSeq === existing.seq
+                    && checkpoint.lineageKey !== head.lineageKey);
+            let seq = existing.prevSeq;
             if (combinedUndo) {
-                state.rollbackJournal[index] = {
-                    ...existing,
+                seq = referenced ? state.rollbackJournalSequence + 1 : existing.seq;
+                const combined = {
+                    ...existing, seq,
                     fingerprint: lineage[messageId] || existing.fingerprint || '',
                     lineageKey: keys[messageId] || existing.lineageKey || '',
                     parentLineageKey: messageId > 0 ? keys[messageId - 1] : 'root',
@@ -529,15 +558,18 @@ function appendRollbackMutation(state, lineage, messageId, reason, afterSnapshot
                     createdAt: Date.now(),
                     undo: combinedUndo,
                 };
-                state.rollbackHead = {
-                    seq: existing.seq,
-                    messageId,
-                    lineageKey: keys[messageId] || '',
-                    snapshot: structuredClone(afterSnapshot),
-                };
-                refreshRollbackJournalRetention(state);
-                return state.rollbackHead.seq;
+                if (referenced) state.rollbackJournal.push(combined);
+                else state.rollbackJournal[index] = combined;
+                state.rollbackJournalSequence = Math.max(state.rollbackJournalSequence, seq);
+            } else if (!referenced) {
+                state.rollbackJournal.splice(index, 1);
             }
+            state.rollbackHead = {
+                seq, messageId, lineageKey: keys[messageId] || '',
+                snapshot: structuredClone(afterSnapshot),
+            };
+            refreshRollbackJournalRetention(state);
+            return seq;
         }
     }
 
