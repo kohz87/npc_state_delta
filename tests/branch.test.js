@@ -155,8 +155,10 @@ test('v0.2.11 sibling identity survives swipe-index renumbering after an alterna
     recordBranchCheckpoint(state, original, 1, 'scan');
 
     const renumbered = [user('Choose.'), assistant('Myla nods.', 0)];
-    const restored = reconcileBranchState(state, renumbered, { explicitDivergence: 1 });
-    assert.equal(restored.exactRestored, true);
+    const restored = reconcileBranchState(state, renumbered, { explicitDivergence: 1, operation: 'swipe' });
+    assert.equal(restored.exactRestored, false, 'identical narrative content needs no destructive sibling restore');
+    assert.equal(restored.invalidated, false);
+    assert.equal(restored.recoveryAction, 'content-unchanged');
     assert.equal(restored.state.npcs[0].relationship.affection, 44);
 });
 
@@ -439,8 +441,9 @@ test('v0.2.11 permanent UI deletion suppression survives exact sibling restore a
     state.userDismissedGroups = addUserDismissedGroup([], brina);
     state.npcs = [];
     state.dismissed = ['brina hael', 'the innkeeper', 'brina'];
-    const restored = reconcileBranchState(state, chat, { explicitDivergence: 1 });
-    assert.equal(restored.exactRestored, true);
+    const restored = reconcileBranchState(state, chat, { explicitDivergence: 1, operation: 'swipe' });
+    assert.equal(restored.exactRestored, false, 'identical narrative content does not need a destructive sibling restore');
+    assert.equal(restored.invalidated, false);
     assert.equal(restored.state.npcs.length, 0, 'an old sibling snapshot cannot resurrect a dossier explicitly deleted in the UI');
     assert.ok(!restored.state.dismissed.includes('brina hael'), 'modern ID tombstones must not globally suppress future homonyms by label');
 

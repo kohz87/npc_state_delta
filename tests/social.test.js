@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createNpcRecord, mergeScanResult, scoreNpcRelevance } from '../core.js';
 import {
     normalizeSocialGraph,
+    socialRelationFamily,
     reconcileSocialState,
     applyManualKeyRelationshipEdit,
     removeNpcFromSocialGraph,
@@ -124,6 +125,66 @@ test('v0.2.12 manual key relationship edits update and remove graph edges determ
     assert.equal(state.socialGraph.edges.length, 1);
     applyManualKeyRelationshipEdit(state, brina.id, ['Liza Hael — daughter'], [], { turn: 3 });
     assert.equal(state.socialGraph.edges.length, 0);
+});
+
+test('v1.0.11 malformed Important Bonds self-clean sentence fragments, inverse relation slashes, and duplicate dynamics', () => {
+    const mother = createNpcRecord('Elira');
+    const maren = createNpcRecord('Maren', [mother.id]);
+    mother.keyRelationships = [
+        'Late husband — Surviving widow',
+        'former Rhunwald trade factor who died of lung rot two winters ago.',
+        'supports and dresses her observant daughter using salvaged family goods. — supports and dresses her observant daughter using salvaged family goods.',
+        'provides for and guides her observant daughter.',
+        'Maren — Daughter / Mother | Twin daughter whom she raises, feeds, and guides at the trade post.; Twin daughter whom she raises and provides for at the trade post.',
+    ];
+    const state = reconcileSocialState(stateWith(mother, maren), { provenance: 'migration', confidence: 'migration' }).state;
+    const saved = state.npcs.find(npc => npc.id === mother.id);
+    assert.deepEqual(saved.keyRelationships, [
+        'Late husband — spouse',
+        'Maren — Daughter | Twin daughter whom she raises, feeds, and guides at the trade post.',
+    ]);
+    assert.doesNotMatch(saved.keyRelationships.join('\n'), /former Rhunwald|supports and dresses|provides for and guides|Daughter \/ Mother|; Twin daughter/i);
+    const edge = state.socialGraph.edges.find(item => [item.aId, item.bId].includes(mother.id) && [item.aId, item.bId].includes(maren.id));
+    assert.ok(edge);
+    const motherRelation = edge.aId === mother.id ? edge.aToB : edge.bToA;
+    const marenRelation = edge.aId === maren.id ? edge.aToB : edge.bToA;
+    assert.equal(socialRelationFamily(motherRelation), 'child');
+    assert.equal(socialRelationFamily(marenRelation), 'parent');
+});
+
+test('v1.0.11 dynamic dedupe preserves distinct bond facts that merely share boilerplate', () => {
+    const mother = createNpcRecord('Elira');
+    const maren = createNpcRecord('Maren', [mother.id]);
+    mother.keyRelationships = ['Maren — daughter | She lives at the trade post; She works at the trade post'];
+    const state = reconcileSocialState(stateWith(mother, maren), { provenance: 'migration', confidence: 'migration' }).state;
+    const saved = state.npcs.find(npc => npc.id === mother.id);
+    assert.equal(saved.keyRelationships.length, 1);
+    assert.match(saved.keyRelationships[0], /lives at the trade post; She works at the trade post/i);
+});
+
+test('v1.0.11 scanner social edge direction is anchored to an established Important Bond', () => {
+    const mother = createNpcRecord('Elira');
+    const maren = createNpcRecord('Maren', [mother.id]);
+    mother.keyRelationships = ['Maren — daughter | Twin daughter whom she raises at the trade post.'];
+    const state = reconcileSocialState(stateWith(mother, maren), {
+        provenance: 'scanner', confidence: 'explicit',
+        scanResult: { keyRelationshipEdges: [{
+            aId: mother.id, bId: maren.id,
+            aToB: 'mother', bToA: 'daughter',
+            aDynamic: 'Raises Maren at the trade post.',
+            bDynamic: 'Relies on her mother at the trade post.',
+        }] },
+    }).state;
+    const saved = state.npcs.find(npc => npc.id === mother.id);
+    assert.equal(saved.keyRelationships.length, 1);
+    assert.match(saved.keyRelationships[0], /^Maren — daughter\b/i);
+    assert.doesNotMatch(saved.keyRelationships[0], /daughter\s*\/\s*mother/i);
+    const edge = state.socialGraph.edges.find(item => [item.aId, item.bId].includes(mother.id) && [item.aId, item.bId].includes(maren.id));
+    assert.ok(edge);
+    const motherRelation = edge.aId === mother.id ? edge.aToB : edge.bToA;
+    const marenRelation = edge.aId === maren.id ? edge.aToB : edge.bToA;
+    assert.equal(socialRelationFamily(motherRelation), 'child');
+    assert.equal(socialRelationFamily(marenRelation), 'parent');
 });
 
 test('v0.2.12 hard deletion removes graph edges and stale structured references', () => {

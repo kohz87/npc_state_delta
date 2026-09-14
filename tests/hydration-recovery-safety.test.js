@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const core = fs.readFileSync(new URL('../core.js', import.meta.url), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(new URL('../manifest.json', import.meta.url), 'utf8'));
 
@@ -54,10 +54,10 @@ test('editor and portrait workflows are chat-affine', () => {
     assert.match(index, /closePortraitGenerator\(\);\n\s*closeNpcViewer\(\);\n\s*closeNpcEditor\(\);/);
 });
 
-test('Delta application metadata is v1.0.10 and active core ownership is semantic', () => {
-    assert.match(core, /NPC_STATE_VERSION = '1\.0\.10'/);
+test('Delta application metadata is v1.0.11 and active core ownership is semantic', () => {
+    assert.match(core, /NPC_STATE_VERSION = '1\.0\.11'/);
     assert.match(core, /export \* from '\.\/core-mechanics\.js'/);
     assert.doesNotMatch(core, /NPC_STATE_SOURCE_ENGINE_VERSION|core-v0218/);
-    assert.equal(manifest.version, '1.0.10');
+    assert.equal(manifest.version, '1.0.11');
     assert.equal(manifest.author, 'kohz87');
 });

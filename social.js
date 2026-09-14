@@ -31,9 +31,47 @@ function confidenceRank(value) {
     return ({ inferred: 0, migration: 1, 'strong-context': 2, explicit: 3, manual: 4 }[String(value || '').toLowerCase()] ?? 0);
 }
 
+const SOCIAL_SEMANTIC_STOPWORDS = new Set([
+    'the', 'and', 'for', 'with', 'from', 'into', 'that', 'this', 'her', 'his', 'their', 'they', 'them',
+    'she', 'him', 'who', 'whom', 'at', 'in', 'on', 'to', 'of', 'as', 'is', 'was', 'are', 'were', 'been',
+]);
+
+function semanticWords(value) {
+    return new Set(norm(value).split(/\s+/)
+        .filter(token => token.length > 2 && !SOCIAL_SEMANTIC_STOPWORDS.has(token)));
+}
+
+function semanticOverlap(a, b) {
+    const left = semanticWords(a);
+    const right = semanticWords(b);
+    if (!left.size || !right.size) return 0;
+    let shared = 0;
+    for (const token of left) if (right.has(token)) shared += 1;
+    return shared / Math.min(left.size, right.size);
+}
+
+function nearDuplicateText(a, b) {
+    const left = norm(a);
+    const right = norm(b);
+    if (!left || !right) return false;
+    return left === right || left.includes(right) || right.includes(left) || semanticOverlap(left, right) >= 0.72;
+}
+
+function cleanDynamic(value, max = 220) {
+    const raw = clean(value, Math.max(max * 3, max));
+    if (!raw) return '';
+    const kept = [];
+    for (const part of raw.split(/\s*;\s*/).map(item => clean(item, max)).filter(Boolean)) {
+        const duplicateIndex = kept.findIndex(existing => nearDuplicateText(existing, part));
+        if (duplicateIndex >= 0) continue;
+        kept.push(part);
+    }
+    return clean(kept.join('; '), max);
+}
+
 function richer(a, b, max = 220) {
-    const left = clean(a, max);
-    const right = clean(b, max);
+    const left = cleanDynamic(a, max);
+    const right = cleanDynamic(b, max);
     if (!left) return right;
     if (!right) return left;
     const ln = norm(left);
@@ -41,7 +79,8 @@ function richer(a, b, max = 220) {
     if (ln === rn) return right.length >= left.length ? right : left;
     if (ln.includes(rn)) return left;
     if (rn.includes(ln)) return right;
-    return clean(right.length >= left.length ? `${right}; ${left}` : `${left}; ${right}`, max);
+    if (nearDuplicateText(left, right)) return right.length >= left.length ? right : left;
+    return cleanDynamic(right.length >= left.length ? `${right}; ${left}` : `${left}; ${right}`, max);
 }
 
 export function socialRelationFamily(value) {
@@ -67,6 +106,46 @@ const KNOWN_SOCIAL_RELATION_FAMILIES = new Set([
     'child', 'parent', 'sibling', 'partner', 'mentor', 'student', 'guardian', 'ward',
     'friend', 'rival', 'cousin', 'aunt-uncle', 'niece-nephew', 'grandparent', 'grandchild',
 ]);
+
+const INVERSE_SOCIAL_RELATION_FAMILIES = new Map([
+    ['child', 'parent'], ['parent', 'child'], ['mentor', 'student'], ['student', 'mentor'],
+    ['guardian', 'ward'], ['ward', 'guardian'], ['aunt-uncle', 'niece-nephew'], ['niece-nephew', 'aunt-uncle'],
+    ['grandparent', 'grandchild'], ['grandchild', 'grandparent'],
+]);
+
+function inverseRelationFamilies(a, b) {
+    const left = KNOWN_SOCIAL_RELATION_FAMILIES.has(a) ? a : socialRelationFamily(a);
+    const right = KNOWN_SOCIAL_RELATION_FAMILIES.has(b) ? b : socialRelationFamily(b);
+    return Boolean(left && right && INVERSE_SOCIAL_RELATION_FAMILIES.get(left) === right);
+}
+
+function relationshipSubjectLooksStructured(value) {
+    const subject = clean(value, 120);
+    if (!subject || /[.!?]\s*$/.test(subject)) return false;
+    const words = norm(subject).split(/\s+/).filter(Boolean);
+    if (!words.length || words.length > 8) return false;
+    return !/^(?:supports?|provides?|raises?|feeds?|dresses?|guides?|works?|serves?|helps?|keeps?|uses?|lives?|died|dies|has|had|is|was|were|remains?|cares?)\b/i.test(subject);
+}
+
+function preserveUnstructuredRelationshipText(value) {
+    const text = clean(value, 420);
+    if (!text || /[.!?]\s*$/.test(text)) return false;
+    if (/^(?:supports?|provides?|raises?|feeds?|dresses?|guides?|works?|serves?|helps?|keeps?|uses?|lives?|died|dies|has|had|is|was|were|remains?|cares?)\b/i.test(text)) return false;
+    const words = norm(text).split(/\s+/).filter(Boolean);
+    return words.length > 0 && words.length <= 8;
+}
+
+function sanitizeRelationshipRelation(subject, value) {
+    let relation = clean(value, 180);
+    if (!relation) return '';
+    const slash = relation.split(/\s*\/\s*/).map(item => clean(item, 180)).filter(Boolean);
+    if (slash.length === 2 && inverseRelationFamilies(slash[0], slash[1])) relation = slash[0];
+    const subjectKey = norm(subject);
+    const relationKey = norm(relation);
+    if (/^late husband\b/.test(subjectKey) && /^(?:surviving )?widow\b/.test(relationKey)) return 'spouse';
+    if (/^late wife\b/.test(subjectKey) && /^(?:surviving )?widower\b/.test(relationKey)) return 'spouse';
+    return relation;
+}
 
 export function inverseSocialRelation(value) {
     const rel = clean(value, 180);
@@ -112,6 +191,7 @@ function mergeRelations(a, b) {
     const lf = socialRelationFamily(left);
     const rf = socialRelationFamily(right);
     if (lf && lf === rf) return relationSpecificity(right) >= relationSpecificity(left) ? right : left;
+    if (inverseRelationFamilies(lf, rf)) return left;
     return clean(`${left} / ${right}`, 180);
 }
 
@@ -122,7 +202,7 @@ export function parseKeyRelationshipEntry(value) {
     if (!match) return null;
     const subject = clean(match[1], 120);
     const rest = clean(match[2], 280);
-    if (!subject || !rest) return null;
+    if (!subject || !rest || !relationshipSubjectLooksStructured(subject)) return null;
     const pipe = rest.indexOf('|');
     let relationText = pipe >= 0 ? rest.slice(0, pipe) : rest;
     let dynamicText = pipe >= 0 ? rest.slice(pipe + 1) : '';
@@ -136,18 +216,20 @@ export function parseKeyRelationshipEntry(value) {
             }
         }
     }
-    const relation = clean(relationText, 180);
-    const dynamic = clean(dynamicText, 220);
+    const relation = sanitizeRelationshipRelation(subject, relationText);
+    const dynamic = cleanDynamic(dynamicText, 220);
     if (!relation) return null;
     return { subject, relation, dynamic };
 }
 
 function formatKeyRelationship(subject, relation, dynamic = '', counterpart = null) {
-    let dyn = clean(dynamic, 220);
-    if (counterpart?.lifeState === 'deceased' && !/\b(?:deceased|dead|late)\b/i.test(`${relation} ${dyn}`)) {
-        dyn = clean(dyn ? `${dyn}; deceased` : 'deceased', 220);
+    const rel = sanitizeRelationshipRelation(subject, relation);
+    if (!rel) return '';
+    let dyn = cleanDynamic(dynamic, 220);
+    if (counterpart?.lifeState === 'deceased' && !/\b(?:deceased|dead|late)\b/i.test(`${rel} ${dyn}`)) {
+        dyn = cleanDynamic(dyn ? `${dyn}; deceased` : 'deceased', 220);
     }
-    return clean(`${clean(subject, 120)} — ${clean(relation, 180)}${dyn ? ` | ${dyn}` : ''}`, 420);
+    return clean(`${clean(subject, 120)} — ${rel}${dyn ? ` | ${dyn}` : ''}`, 420);
 }
 
 export function resolveNpcReference(npcs = [], labelOrId = '') {
@@ -173,8 +255,9 @@ function normalizeEdge(raw = {}) {
     const aId = clean(raw.aId ?? raw.a_id, 100);
     const bId = clean(raw.bId ?? raw.b_id, 100);
     if (!aId || !bId || aId === bId) return null;
-    const aToB = clean(raw.aToB ?? raw.a_to_b ?? raw.relation, 180);
-    const bToA = clean(raw.bToA ?? raw.b_to_a ?? raw.reverseRelation, 180) || inverseSocialRelation(aToB);
+    const aToB = sanitizeRelationshipRelation('', raw.aToB ?? raw.a_to_b ?? raw.relation);
+    const bToAInput = raw.bToA ?? raw.b_to_a ?? raw.reverseRelation;
+    const bToA = sanitizeRelationshipRelation('', bToAInput) || inverseSocialRelation(aToB);
     if (!aToB && !bToA) return null;
     return {
         id: clean(raw.id, 120) || `edge_${slug(`${aId}-${bId}-${socialRelationFamily(aToB)}-${socialRelationFamily(bToA)}`)}`,
@@ -182,8 +265,8 @@ function normalizeEdge(raw = {}) {
         bId,
         aToB,
         bToA,
-        aDynamic: clean(raw.aDynamic ?? raw.a_dynamic, 220),
-        bDynamic: clean(raw.bDynamic ?? raw.b_dynamic, 220),
+        aDynamic: cleanDynamic(raw.aDynamic ?? raw.a_dynamic, 220),
+        bDynamic: cleanDynamic(raw.bDynamic ?? raw.b_dynamic, 220),
         provenance: clean(raw.provenance, 40) || 'migration',
         confidence: clean(raw.confidence, 40) || 'migration',
         reason: clean(raw.reason ?? raw.evidence, 300),
@@ -321,7 +404,11 @@ export function canonicalizeNpcKeyRelationships(npcs = [], { includeLocked = fal
         const byCounterpart = new Map();
         for (const raw of Array.isArray(owner.keyRelationships) ? owner.keyRelationships : []) {
             const parsed = parseKeyRelationshipEntry(raw);
-            if (!parsed) { entries.push(clean(raw, 420)); continue; }
+            if (!parsed) {
+                const fallback = clean(raw, 420);
+                if (preserveUnstructuredRelationshipText(fallback)) entries.push(fallback);
+                continue;
+            }
             const counterpart = resolveNpcReference(records, parsed.subject);
             if (!counterpart || counterpart.id === owner.id) {
                 entries.push(formatKeyRelationship(parsed.subject, parsed.relation, parsed.dynamic));
@@ -356,6 +443,44 @@ export function canonicalizeNpcKeyRelationships(npcs = [], { includeLocked = fal
     return updatedIds;
 }
 
+function establishedCounterpartRelation(owner, counterpart, npcs = []) {
+    if (!owner?.id || !counterpart?.id) return '';
+    for (const raw of Array.isArray(owner.keyRelationships) ? owner.keyRelationships : []) {
+        const parsed = parseKeyRelationshipEntry(raw);
+        if (!parsed) continue;
+        const target = resolveNpcReference(npcs, parsed.subject);
+        if (target?.id === counterpart.id) return parsed.relation;
+    }
+    return '';
+}
+
+function relationAgreement(established, candidate) {
+    const establishedFamily = socialRelationFamily(established);
+    const candidateFamily = socialRelationFamily(candidate);
+    if (!establishedFamily || !candidateFamily) return 0;
+    return establishedFamily === candidateFamily ? 1 : 0;
+}
+
+function alignGraphWithCanonicalRelationships(graph, npcs = []) {
+    for (const edge of graph.edges || []) {
+        const a = npcs.find(npc => npc?.id === edge.aId);
+        const b = npcs.find(npc => npc?.id === edge.bId);
+        if (!a || !b) continue;
+        const aEstablished = establishedCounterpartRelation(a, b, npcs);
+        const bEstablished = establishedCounterpartRelation(b, a, npcs);
+        if (aEstablished && inverseRelationFamilies(aEstablished, edge.aToB)) {
+            edge.aToB = aEstablished;
+            edge.bToA = bEstablished || inverseSocialRelation(aEstablished);
+            continue;
+        }
+        if (bEstablished && inverseRelationFamilies(bEstablished, edge.bToA)) {
+            edge.bToA = bEstablished;
+            edge.aToB = aEstablished || inverseSocialRelation(bEstablished);
+        }
+    }
+    return normalizeSocialGraph(graph);
+}
+
 function parseScanEdges(scanResult = {}, npcs = [], meta = {}) {
     const raw = scanResult?.keyRelationshipEdges ?? scanResult?.key_relationship_edges ?? scanResult?.socialRelationships ?? scanResult?.social_relationships ?? [];
     const out = [];
@@ -363,13 +488,22 @@ function parseScanEdges(scanResult = {}, npcs = [], meta = {}) {
         const a = resolveNpcReference(npcs, item?.aId ?? item?.a_id ?? item?.a ?? item?.from ?? item?.source ?? '');
         const b = resolveNpcReference(npcs, item?.bId ?? item?.b_id ?? item?.b ?? item?.to ?? item?.target ?? '');
         if (!a || !b || a.id === b.id) continue;
-        const aToB = clean(item?.aToB ?? item?.a_to_b ?? item?.fromTo ?? item?.from_to ?? item?.relation ?? item?.relationship, 180);
-        const bToA = clean(item?.bToA ?? item?.b_to_a ?? item?.toFrom ?? item?.to_from ?? item?.reverseRelation ?? item?.reverse_relation, 180) || inverseSocialRelation(aToB);
+        let aToB = sanitizeRelationshipRelation(a.name, item?.aToB ?? item?.a_to_b ?? item?.fromTo ?? item?.from_to ?? item?.relation ?? item?.relationship);
+        let bToA = sanitizeRelationshipRelation(b.name, item?.bToA ?? item?.b_to_a ?? item?.toFrom ?? item?.to_from ?? item?.reverseRelation ?? item?.reverse_relation) || inverseSocialRelation(aToB);
+        let aDynamic = cleanDynamic(item?.aDynamic ?? item?.a_dynamic ?? item?.fromDynamic ?? item?.dynamic, 220);
+        let bDynamic = cleanDynamic(item?.bDynamic ?? item?.b_dynamic ?? item?.toDynamic, 220);
         if (!aToB && !bToA) continue;
+        const aEstablished = establishedCounterpartRelation(a, b, npcs);
+        const bEstablished = establishedCounterpartRelation(b, a, npcs);
+        const asGiven = relationAgreement(aEstablished, aToB) + relationAgreement(bEstablished, bToA);
+        const swapped = relationAgreement(aEstablished, bToA) + relationAgreement(bEstablished, aToB);
+        if (swapped > asGiven) {
+            [aToB, bToA] = [bToA, aToB];
+            [aDynamic, bDynamic] = [bDynamic, aDynamic];
+        }
         out.push({
             aId: a.id, bId: b.id, aToB, bToA,
-            aDynamic: clean(item?.aDynamic ?? item?.a_dynamic ?? item?.fromDynamic ?? item?.dynamic, 220),
-            bDynamic: clean(item?.bDynamic ?? item?.b_dynamic ?? item?.toDynamic, 220),
+            aDynamic, bDynamic,
             reason: clean(item?.reason ?? item?.evidence, 300) || 'scanner social edge',
             provenance: meta.provenance || 'scanner', confidence: 'explicit', sourceMessageId: meta.sourceMessageId, turn: meta.turn,
         });
@@ -577,7 +711,11 @@ function projectGraphToKeyRelationships(npcs, graph) {
         const unresolvedText = [];
         for (const entry of Array.isArray(owner.keyRelationships) ? owner.keyRelationships : []) {
             const parsed = parseKeyRelationshipEntry(entry);
-            if (!parsed) { unresolvedText.push(clean(entry, 420)); continue; }
+            if (!parsed) {
+                const fallback = clean(entry, 420);
+                if (preserveUnstructuredRelationshipText(fallback)) unresolvedText.push(fallback);
+                continue;
+            }
             const counterpart = resolveNpcReference(npcs, parsed.subject);
             if (!counterpart || counterpart.id === owner.id) unresolvedText.push(formatKeyRelationship(parsed.subject, parsed.relation, parsed.dynamic));
             else existingParsed.push({ counterpartId: counterpart.id, relation: parsed.relation, dynamic: parsed.dynamic, score: 100 });
@@ -735,6 +873,7 @@ export function reconcileSocialState(state = {}, options = {}) {
     const npcIds = new Set(npcs.map(npc => clean(npc?.id, 100)).filter(Boolean));
     graph.edges = graph.edges.filter(edge => npcIds.has(edge.aId) && npcIds.has(edge.bId));
     graph.unresolved = graph.unresolved.filter(slot => npcIds.has(slot.ownerId));
+    graph = alignGraphWithCanonicalRelationships(graph, npcs);
     const meta = { provenance: options.provenance || 'scanner', sourceMessageId: options.sourceMessageId, turn: options.turn };
 
     for (const edge of parseScanEdges(options.scanResult || {}, npcs, meta)) addEdge(graph, edge);
