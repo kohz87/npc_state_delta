@@ -88,7 +88,9 @@ import {
 import { decodeDeltaNativeBundle, nativeStateForTarget } from './native-transfer.js';
 import {
     BRANCH_LINEAGE_VERSION,
+    BRANCH_HISTORY_COMPACTION_VERSION,
     BRANCH_SNAPSHOT_BUDGET_BYTES,
+    BRANCH_SNAPSHOT_MAX_BYTES,
     ROLLBACK_JOURNAL_BUDGET_BYTES,
     createScanOperationRegistry,
     deletedChatStateKey,
@@ -100,12 +102,14 @@ import {
     legacyChatLineageV0210,
     addUserDismissedGroup,
     clearUserDismissedGroupsFor,
+    compactLegacyBranchHistory,
     ensureBranchParentAnchor,
     migrateLegacyBranchState,
     normalizeUserDismissedGroups,
     promoteLegacyUserDismissedGroups,
     recordBranchCheckpoint,
     reconcileBranchState,
+    snapshotBranchState,
 } from './branch.js';
 import {
     normalizeSocialGraph,
@@ -640,6 +644,8 @@ function freshChatState() {
         checkpoints: [],
         lineage: [],
         branchLineageVersion: BRANCH_LINEAGE_VERSION,
+        branchHistoryCompactionVersion: BRANCH_HISTORY_COMPACTION_VERSION,
+        branchHistoryCompaction: null,
         branchParent: null,
         branchForkMessageId: null,
         branchRootSnapshot: null,
@@ -656,6 +662,13 @@ function normalizeChatState(raw = {}) {
     state.branchLineageVersion = hasLegacyBranchData
         ? 0
         : Math.max(0, Number(state.branchLineageVersion || 0));
+    state.branchHistoryCompactionVersion = raw && typeof raw === 'object'
+        && Object.prototype.hasOwnProperty.call(raw, 'branchHistoryCompactionVersion')
+        ? Math.max(0, Number(raw.branchHistoryCompactionVersion || 0))
+        : 0;
+    state.branchHistoryCompaction = raw?.branchHistoryCompaction && typeof raw.branchHistoryCompaction === 'object'
+        ? structuredClone(raw.branchHistoryCompaction)
+        : null;
     state.npcs = Array.isArray(state.npcs) ? state.npcs.map(normalizeNpcRecord) : [];
     state.candidates = Array.isArray(state.candidates) ? state.candidates.map(normalizeNpcCandidate).filter(Boolean) : [];
     state.socialGraph = normalizeSocialGraph(state.socialGraph);
@@ -1080,13 +1093,20 @@ function commitBranchCheckpoint(state, messageId, reason = 'state') {
 
 function seedBranchTracking(state = getChatState()) {
     const chat = getContext().chat || [];
-    if (Number(state?.branchLineageVersion || 0) < BRANCH_LINEAGE_VERSION) {
-        migrateLegacyBranchState(state, chat);
-        return state;
-    }
+    if (Number(state?.branchLineageVersion || 0) < BRANCH_LINEAGE_VERSION) migrateLegacyBranchState(state, chat);
     const lineage = chatLineage(chat);
     if (!Array.isArray(state.lineage) || state.lineage.length === 0) state.lineage = lineage;
     if (!Array.isArray(state.checkpoints)) state.checkpoints = [];
+
+    if (Number(state.branchHistoryCompactionVersion || 0) < BRANCH_HISTORY_COMPACTION_VERSION) {
+        const compaction = compactLegacyBranchHistory(state, chat);
+        const key = getChatKey();
+        if (!compaction.deferred && key !== 'no-chat' && loadedChatKeys.has(key) && chatStateCache.get(key) === state) {
+            // Persist the one-time marker even when there was nothing to remove. Otherwise every
+            // reload would repeat the same legacy proof walk and branch-size accounting.
+            queueStateFileWrite(key, 0);
+        }
+    }
     return state;
 }
 
@@ -1219,12 +1239,20 @@ function branchHistoryDiagnostic(state) {
     if (!state || typeof state !== 'object') return null;
     const checkpoints = Array.isArray(state.checkpoints) ? state.checkpoints : [];
     const rollbackJournal = Array.isArray(state.rollbackJournal) ? state.rollbackJournal : [];
+    const checkpointSizes = checkpoints.map(item => diagnosticSerializedBytes(item?.snapshot || {}) + 256);
     return {
         lineageVersion: Number(state.branchLineageVersion || 0),
         lineageMessages: Array.isArray(state.lineage) ? state.lineage.length : 0,
+        historyCompactionVersion: Number(state.branchHistoryCompactionVersion || 0),
+        lastCompaction: state.branchHistoryCompaction && typeof state.branchHistoryCompaction === 'object'
+            ? structuredClone(state.branchHistoryCompaction)
+            : null,
+        currentNarrativeSnapshotBytes: diagnosticSerializedBytes(snapshotBranchState(state)),
         checkpointCount: checkpoints.length,
-        checkpointBytes: checkpoints.reduce((sum, item) => sum + diagnosticSerializedBytes(item?.snapshot || {}) + 256, 0),
+        checkpointBytes: checkpointSizes.reduce((sum, size) => sum + size, 0),
+        largestCheckpointBytes: checkpointSizes.length ? Math.max(...checkpointSizes) : 0,
         checkpointBudgetBytes: BRANCH_SNAPSHOT_BUDGET_BYTES,
+        checkpointMaxBytes: BRANCH_SNAPSHOT_MAX_BYTES,
         rollbackJournalEntries: rollbackJournal.length,
         rollbackJournalBytes: Number(state.rollbackJournalBytes || 0) || diagnosticSerializedBytes(rollbackJournal),
         rollbackJournalBudgetBytes: ROLLBACK_JOURNAL_BUDGET_BYTES,
@@ -1309,6 +1337,9 @@ async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true
     const lineageBefore = chatLineage(ctx.chat || []);
     const result = reconcileBranchState(before, ctx.chat || [], { explicitDivergence, operation });
     if (getChatKey() !== key || firstLineageDivergence(lineageBefore, chatLineage(getContext().chat || [])) !== -1) return null;
+    if (Number(result.state?.branchHistoryCompactionVersion || 0) < BRANCH_HISTORY_COMPACTION_VERSION) {
+        compactLegacyBranchHistory(result.state, ctx.chat || []);
+    }
     recordBranchReconciliationEvent({
         key, reason, operation, result, beforeNpcCount,
         previousLength, currentLength: lineageBefore.length,

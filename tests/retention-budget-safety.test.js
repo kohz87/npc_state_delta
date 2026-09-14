@@ -15,7 +15,7 @@ test('branch snapshots obey a bounded character budget while retaining useful an
     const lineage = chatLineage(chat);
     const checkpoints = lineage.map((fingerprint, i) => ({
         messageId: i, fingerprint, lineageKey: '', parentLineageKey: '', createdAt: i + 1,
-        snapshot: { npcs: [{ id: `npc-${i}`, personality: 'x'.repeat(180000) }] },
+        snapshot: { npcs: [{ id: `npc-${i}`, personality: 'x'.repeat(320000) }] },
     }));
     const pruned = pruneBranchCheckpoints(checkpoints, lineage, 160);
     const size = pruned.reduce((sum, item) => sum + JSON.stringify(item.snapshot || {}).length + 256, 0);
