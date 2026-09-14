@@ -223,6 +223,58 @@ async function additionalChecks(mockState, eventSource, manualAddNpc, sleep, ext
         const persisted = JSON.parse(mockState.files.get(runtime.dataFile().path));
         assert.equal(persisted.state.portraitAssets[npc.id].sourceName, 'local-only.png');
 
+        // A permanently rejected write may survive cache eviction through storage's undurable
+        // shadow. Rehydrating that shadow must remain locally dirty until a later write really
+        // reaches the sidecar; hydration must never promote it to a false durable version.
+        const persistenceIdentity = {
+            groupId: mockState.context.groupId,
+            characterId: mockState.context.characterId,
+            chatId: mockState.context.chatId,
+            getCurrentChatId: mockState.context.getCurrentChatId,
+            chat: structuredClone(mockState.context.chat),
+        };
+        const durableFetch = globalThis.fetch;
+        globalThis.fetch = (url, options) => url === '/api/files/upload'
+            ? Promise.resolve({ ok: false, status: 413, text: async () => 'Synthetic payload too large' })
+            : durableFetch(url, options);
+        try {
+            assert.equal(runtime.archive(npc.id), true);
+            await assert.rejects(runtime.flush(), error => Number(error?.status) === 413);
+            assert.equal(runtime.persistenceStatus().currentChatPending, true);
+            assert.equal(runtime.getNpc(npc.id).archived, true);
+        } finally {
+            globalThis.fetch = durableFetch;
+        }
+
+        for (let index = 0; index < 8; index += 1) {
+            mockState.context.groupId = null;
+            mockState.context.characterId = persistenceIdentity.characterId;
+            mockState.context.chatId = `undurable-evict-${index}`;
+            mockState.context.getCurrentChatId = () => mockState.context.chatId;
+            mockState.context.chat = [{ is_user: false, is_system: false, name: 'Narrator', mes: `eviction-${index}` }];
+            eventSource.emit('chat_changed');
+            await sleep(90);
+        }
+
+        mockState.context.groupId = persistenceIdentity.groupId;
+        mockState.context.characterId = persistenceIdentity.characterId;
+        mockState.context.chatId = persistenceIdentity.chatId;
+        mockState.context.getCurrentChatId = persistenceIdentity.getCurrentChatId;
+        mockState.context.chat = persistenceIdentity.chat;
+        eventSource.emit('chat_changed');
+        await sleep(160);
+        assert.equal(runtime.uiStatus().chatKey, chatKey);
+        assert.equal(runtime.getNpc(npc.id).archived, true, 'undurable state must win over the older sidecar after cache eviction');
+        assert.equal(runtime.persistenceStatus().currentChatPending, true,
+            'rehydrated undurable state must remain pending until it is actually written');
+        await runtime.flush();
+        assert.equal(runtime.persistenceStatus().currentChatPending, false);
+        const persistedAfterRehydrate = JSON.parse(mockState.files.get(runtime.dataFile().path));
+        assert.equal(persistedAfterRehydrate.state.npcs.find(item => item.id === npc.id).archived, true);
+        assert.equal(runtime.restore(npc.id), true);
+        await runtime.flush();
+        assert.equal(runtime.getNpc(npc.id).archived, false);
+
         const beforeRemoval = runtime.getNpc(npc.id);
         const removePending = runtime.setPortrait(npc.id, file('after-removal.png', { hold: true }), { chatKey });
         assert.equal(runtime.removePortrait(npc.id, { chatKey }), true);

@@ -1,6 +1,12 @@
 # NPC State Delta changes
 
 
+## 1.0.9 - 14 September 2026
+
+- Preserve undurable persistence ownership through bounded chat-cache eviction and rehydration. A snapshot recovered after a permanent sidecar rejection now remains locally pending until a later successful flush instead of being incorrectly promoted to durable.
+- Add a production-runtime regression for permanent HTTP 413 rejection -> cache eviction through eight other chats -> same-session rehydration -> pending durability -> successful later flush.
+- Preserve all 1.0.8 recovery behavior, scanner prompts, request/retry/output budgets, relationship formulas, bundle schema, sidecar format version and branch-lineage version.
+
 ## 1.0.8 - 14 September 2026
 
 - Separate recovery lineage classification from strict asynchronous equality checks. A persisted lineage that is an exact prefix of the live SillyTavern chat is now a non-destructive forward extension and cannot restore an older checkpoint/root dossier.

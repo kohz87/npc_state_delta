@@ -807,6 +807,7 @@ async function ensureChatStateLoaded(key = getChatKey()) {
         const settings = getSettings();
         let pointer = settings.dataFiles?.[key] || null;
         let recoveredState = null;
+        let loadedUndurable = false;
         const tombstone = settings.sidecarTombstones?.[key] || null;
         const tombstoned = Boolean(tombstone);
         if (tombstoned && pointer?.path) {
@@ -827,6 +828,7 @@ async function ensureChatStateLoaded(key = getChatKey()) {
                     persistSettings();
                 } else if (recovered?.state) {
                     recoveredState = recovered.state;
+                    loadedUndurable = recovered.undurable === true;
                     pointer = recoveryPointer;
                     settings.dataFiles[key] = recoveryPointer;
                     persistSettings();
@@ -851,8 +853,10 @@ async function ensureChatStateLoaded(key = getChatKey()) {
                         persistSettings();
                         break;
                     }
-                    if (payload?.state) loaded = payload.state;
-                    else throw new Error('NPC State Delta sidecar returned no state payload.');
+                    if (payload?.state) {
+                        loaded = payload.state;
+                        loadedUndurable = payload.undurable === true;
+                    } else throw new Error('NPC State Delta sidecar returned no state payload.');
                 } catch (error) {
                     if (error?.code === 'NPC_STATE_STALE_OWNERSHIP') throw error;
                     lastError = error;
@@ -874,7 +878,7 @@ async function ensureChatStateLoaded(key = getChatKey()) {
         const needsDurableCompactionWrite = Boolean(loaded)
             && Number(sourceState?.durableCompactionVersion || 0) < DURABLE_COMPACTION_VERSION;
         const state = setChatState(key, sourceState, { markLoaded: true });
-        if (loaded && !needsDurableCompactionWrite) persistedVersions.set(key, Number(stateVersions.get(key) || 0));
+        if (loaded && !loadedUndurable && !needsDurableCompactionWrite) persistedVersions.set(key, Number(stateVersions.get(key) || 0));
         if (recordBranchIndex(key, state)) persistSettings();
         if ((!loaded && legacy) || needsDurableCompactionWrite) {
             try {
