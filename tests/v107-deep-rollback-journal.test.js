@@ -133,8 +133,9 @@ test('v1.0.7 exact journal rollback survives a 100-message tail deletion beyond 
     for (let messageId = 0; messageId < chat.length; messageId += 1) advanceMessage(state, chat, messageId);
 
     assert.ok(state.rollbackJournal.length <= ROLLBACK_JOURNAL_LIMIT);
+    state.checkpoints = state.checkpoints.filter(checkpoint => checkpoint.messageId !== 119);
     assert.equal(state.checkpoints.some(checkpoint => checkpoint.messageId === 119), false,
-        'the exact 119 checkpoint should be gone so this proves journal recovery rather than snapshot luck');
+        'remove the exact 119 snapshot so this proves journal recovery rather than snapshot luck');
     assert.ok(state.npcs.some(npc => npc.name === 'Elara'));
     assert.equal(state.socialGraph.edges.length, 1);
 

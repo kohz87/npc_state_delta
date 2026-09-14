@@ -1,6 +1,14 @@
 # NPC State Delta changes
 
 
+## 1.0.12 - 14 September 2026
+
+- Run a one-time legacy branch-history compaction on existing sidecars after lineage is proven safe. Retain the current active lineage plus SillyTavern-retained swipe alternatives, and remove unreachable pre-1.0.11 sibling checkpoints, inline-card branch residue and rollback-journal chains that are no longer owned by the live head or a retained checkpoint.
+- Defer compaction while a destructive lineage divergence is unresolved, then retry after reconciliation, so cleanup never races delete/edit/swipe recovery. Persist a versioned compaction marker and bounded before/after accounting so each sidecar is compacted at most once per compaction version.
+- Harden v4-to-v5 branch migration by mapping legacy checkpoint keys only when they match the active host branch or a swipe SillyTavern still retains, preventing old delete/regenerate siblings from collapsing onto the current v5 key while preserving provable swipe alternatives.
+- Raise the aggregate full-checkpoint budget from 2 MB to 8 MB and the single full-checkpoint ceiling from 750 KB to 2 MB. The separate 256-raw-message rollback-journal contract and 12 MB diagnostic target are unchanged.
+- Expand Compact Diagnostics with current narrative snapshot size, largest checkpoint size, aggregate/max checkpoint limits and the most recent compaction summary. Scanner prompts, request counts/retries/output allowances, relationship scoring, sidecar format and bundle format remain unchanged.
+
 ## 1.0.11 - 14 September 2026
 
 - Treat ordinary message deletion/regeneration and edits as linear history replacement: restore the surviving parent boundary, discard descendant recovery artifacts, and do not retain deleted generations as sibling branches. Preserve sibling checkpoints only for explicit SillyTavern swipe events.

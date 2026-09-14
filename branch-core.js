@@ -2,7 +2,7 @@ import { normalizeName } from './core.js';
 import { normalizeSocialGraph, removeNpcFromSocialGraph, purgeNpcStructuredReferences } from './social.js';
 
 export const BRANCH_HISTORY_LIMIT = 160;
-export const BRANCH_SNAPSHOT_BUDGET_CHARS = 2_000_000;
+export const BRANCH_SNAPSHOT_BUDGET_CHARS = 8_000_000;
 export const BRANCH_LINEAGE_VERSION = 2;
 
 export const DEFAULT_SCAN_OPERATION_TIMEOUT_MS = 5 * 60 * 1000;

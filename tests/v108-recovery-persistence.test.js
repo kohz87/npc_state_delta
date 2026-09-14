@@ -108,8 +108,9 @@ test('v1.0.8 journal crosses unchanged user boundaries for a 100-message deletio
     ensureRollbackJournalBaseline(state, []);
     for (let messageId = 0; messageId < chat.length; messageId += 1) advanceAlternating(state, chat, messageId);
 
+    state.checkpoints = state.checkpoints.filter(checkpoint => checkpoint.messageId !== 119);
     assert.equal(state.checkpoints.some(checkpoint => checkpoint.messageId === 119), false,
-        'the surviving-tail checkpoint must be pruned so this proves journal traversal');
+        'remove the surviving-tail checkpoint so this proves journal traversal');
     const result = reconcileBranchState(state, chat.slice(0, 120));
     assert.equal(result.exactRestored, true);
     assert.equal(result.restoredFromJournal, true);
