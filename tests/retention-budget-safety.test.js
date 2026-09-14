@@ -50,8 +50,8 @@ test('tombstones override stale live pointers before hydration', () => {
     assert.match(index, /delete settings\.dataFiles\[key\];\n\s*pointer = null/);
 });
 
-test('successful hydration starts clean instead of forcing an unload rewrite', () => {
-    assert.match(index, /if \(loaded && !needsDurableCompactionWrite\) persistedVersions\.set/);
+test('durable hydration starts clean while an undurable recovery remains pending', () => {
+    assert.match(index, /if \(loaded && !loadedUndurable && !needsDurableCompactionWrite\) persistedVersions\.set/);
 });
 
 test('chat cache has bounded eviction and refuses to evict active work', () => {
