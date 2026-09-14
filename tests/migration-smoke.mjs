@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { legacyChatLineageV0210 } from '../branch.js';
+import { BRANCH_LINEAGE_VERSION, legacyChatLineageV0210 } from '../branch.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sourceRoot = path.resolve(here, '..');
@@ -135,7 +135,7 @@ try {
     assert.ok(migratedMilestones.some(item => item.axis === 'trust' && item.polarity === 1 && item.threshold === 50));
     assert.ok(migratedMilestones.some(item => item.axis === 'affection' && item.polarity === 1 && item.threshold === 25));
     assert.ok(!migratedMilestones.some(item => item.axis === 'trust' && item.polarity === 1 && item.threshold === 75), 'legacy visible depth must not unlock a milestone it never reached');
-    assert.equal(payload.state.branchLineageVersion, 4);
+    assert.equal(payload.state.branchLineageVersion, BRANCH_LINEAGE_VERSION);
     assert.equal('respect' in payload.state.npcs[0].relationship, false);
     assert.equal('thoughts' in payload.state.npcs[0], false, 'legacy Current Thoughts should be removed during v0.1.15 normalization');
     assert.equal(payload.state.inlineCards.length, 1, 'verified legacy inline-card history should migrate to content lineage');

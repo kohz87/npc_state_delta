@@ -737,7 +737,11 @@ try {
     assert.match(state.npcs.find(n => n.name === 'Yunyun').appearance, /crimson eyes/);
     assert.equal('thoughts' in state.npcs.find(n => n.name === 'Yunyun'), false);
     assert.equal(state.npcs.find(n => n.name === 'Wiz').present, false);
-    assert.equal(state.inlineCards.some(entry => entry.messageId === 2), true, 'inactive sibling inline snapshot stays stored for exact branch revisit');
+    assert.equal(state.inlineCards.some(entry => entry.messageId === 2), false, 'linear delete must discard the deleted continuation instead of retaining it as a sibling branch');
+    const deleteReconcile = globalThis.NPCStateDelta.uiStatus().branchReconciliations.at(-1);
+    assert.equal(deleteReconcile?.operation, 'delete');
+    assert.equal(deleteReconcile?.linearHistoryPruned, true);
+    assert.equal(deleteReconcile?.restoredFromRoot, false, 'ordinary delete must never fall back to the branch root');
     assert.equal(inlineAnchors.length, 1, 'rollback should remount one live present-cast roster');
     assert.equal(inlineAnchors[0].dataset.npcStateDeltaMessageId, '1');
     assert.match(inlineAnchors[0].innerHTML, /Yunyun/);

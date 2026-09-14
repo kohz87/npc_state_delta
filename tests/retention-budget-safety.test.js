@@ -5,7 +5,7 @@ import { BRANCH_SNAPSHOT_BUDGET_CHARS, chatLineage, pruneBranchCheckpoints } fro
 import { prunePortraitAssetsForState } from '../storage.js';
 import { buildQualifiedChatKey } from '../identity.js';
 
-const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const ci = fs.readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
 
 function msg(text, isUser = false) { return { mes: text, is_user: isUser, is_system: false, name: isUser ? 'User' : 'Character' }; }
@@ -47,7 +47,7 @@ test('branch discovery and inheritance are owner scoped', () => {
 
 test('tombstones override stale live pointers before hydration', () => {
     assert.match(index, /ignored live sidecar pointer for tombstoned/);
-    assert.match(index, /delete settings\.dataFiles\[key\];\n\s*pointer = null/);
+    assert.match(index, /delete settings\.dataFiles\[key\];\r?\n\s*pointer = null/);
 });
 
 test('durable hydration starts clean while an undurable recovery remains pending', () => {
@@ -76,7 +76,7 @@ test('legacy ownership proof accepts both content lineage and pre-v0.2.11 lineag
 test('high-value manual mutations use immediate persistence', () => {
     assert.match(index, /function persistCritical/);
     assert.match(index, /persistCritical\(originChatKey\)/);
-    assert.match(index, /persistCritical\(\);\n\s*closeNpcEditor/);
+    assert.match(index, /persistCritical\(\);\r?\n\s*closeNpcEditor/);
 });
 
 test('legacy ownership migration is lineage-gated and owner-qualified', () => {

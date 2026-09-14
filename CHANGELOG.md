@@ -1,6 +1,15 @@
 # NPC State Delta changes
 
 
+## 1.0.11 - 14 September 2026
+
+- Treat ordinary message deletion/regeneration and edits as linear history replacement: restore the surviving parent boundary, discard descendant recovery artifacts, and do not retain deleted generations as sibling branches. Preserve sibling checkpoints only for explicit SillyTavern swipe events.
+- Advance destructive branch lineage to v5 using narrative role/content only. Mutable host `send_date`, generation ids and swipe indexes can no longer manufacture a destructive divergence; v4 sidecars and explicit v4 parent branches retain guarded compatibility during upgrade.
+- Fail closed when a divergence has no proven recovery target: keep the accepted canonical dossier and rebase ownership instead of walking backward to an older checkpoint or branch root. First-message explicit swipes retain their intentional root-anchor behavior.
+- Add bounded branch-reconciliation diagnostics with operation/relation/action, recovery source, fail-closed state, NPC counts, checkpoint bytes and rollback-journal pressure, without retaining story text.
+- Self-clean malformed Important Bonds: reject sentence-like orphan prose, normalize inverse owner/counterpart relation collisions, deduplicate near-identical dynamics, align incoming social-edge direction to established bonds, and preserve manually locked relationships.
+- Add stress coverage for scattered delete/regenerate cycles across 20 live messages under full-checkpoint byte pressure, explicit swipe siblings, v4-to-v5 migration/ancestry, passive unexplained divergence and edit replacement. Scanner prompts, request counts, output allowances and relationship scoring remain unchanged.
+
 ## 1.0.10 - 14 September 2026
 
 - Retain the newest accepted unsaved state across transient-to-permanent persistence failure, cache eviction and rehydration until a successful durable flush; preserve cancellation, retirement, ownership and revision guards.

@@ -7,6 +7,7 @@ import {
     chatLineage,
     fingerprintMessage,
     legacyChatLineageV3,
+    legacyChatLineageV4,
     lineageCheckpointKeys,
     migrateLegacyBranchState,
     setBranchProvenanceHint,
@@ -18,15 +19,17 @@ const user = (mes, send_date = '') => ({ is_user: true, is_system: false, name: 
 const bot = (name, mes, send_date = '') => ({ is_user: false, is_system: false, name, mes, send_date });
 const emptySnapshot = npcs => ({ npcs, candidates: [], pendingBackfills: [], socialGraph: { edges: [], unresolved: [] }, dismissed: [], turn: 0, assistantSinceScan: 0, lastScanAt: 0, lastScannedMessageId: null, scanCount: 0, processedOocMessageId: null });
 
-test('v4 branch identity distinguishes identical text by stable message instance while ignoring renamed speaker labels', () => {
+test('v5 destructive lineage ignores mutable host instance metadata and display-name changes', () => {
     const a = bot('Astra', 'Yes.', '2026-09-02T01:02:03.100Z');
     const b = bot('Kiri', 'Yes.', '2026-09-02T01:02:03.200Z');
-    assert.notEqual(fingerprintMessage(a), fingerprintMessage(b));
+    b.extra = { gen_id: 'replacement-generation' };
+    assert.equal(fingerprintMessage(a), fingerprintMessage(b));
+    assert.notEqual(legacyChatLineageV4([a])[0], legacyChatLineageV4([b])[0]);
     const renamed = { ...a, name: 'Astra Vale', original_avatar: 'new-avatar.png' };
     assert.equal(fingerprintMessage(a), fingerprintMessage(renamed));
 });
 
-test('stored v3 text lineage migrates to v4 without discarding a proven checkpoint', () => {
+test('stored v3 text lineage migrates to v5 without discarding a proven checkpoint', () => {
     const chat = [user('A', '1'), bot('NPC', 'B', '2'), user('C', '3'), bot('NPC', 'D', '4')];
     const v3 = legacyChatLineageV3(chat);
     const v3Keys = lineageCheckpointKeys(v3);
@@ -37,10 +40,28 @@ test('stored v3 text lineage migrates to v4 without discarding a proven checkpoi
         inlineCards: [], portraitAssets: {}, userDismissedGroups: [], npcs: [], candidates: [], socialGraph: { edges: [], unresolved: [] }, dismissed: [],
     };
     migrateLegacyBranchState(state, chat);
-    assert.equal(BRANCH_LINEAGE_VERSION, 4);
-    assert.equal(state.branchLineageVersion, 4);
+    assert.equal(BRANCH_LINEAGE_VERSION, 5);
+    assert.equal(state.branchLineageVersion, 5);
     assert.deepEqual(state.lineage, chatLineage(chat));
     assert.equal(state.checkpoints.length, 1);
+});
+
+test('stored v4 instance lineage upgrades fail-closed when only host timestamps changed', () => {
+    const original = [user('A', '1'), bot('NPC', 'B', '2'), user('C', '3'), bot('NPC', 'D', '4')];
+    const v4 = legacyChatLineageV4(original);
+    const v4Keys = lineageCheckpointKeys(v4);
+    const state = {
+        branchLineageVersion: 4,
+        lineage: v4,
+        checkpoints: [{ messageId: 1, fingerprint: v4[1], lineageKey: v4Keys[1], parentLineageKey: v4Keys[0], createdAt: 1, snapshot: emptySnapshot([{ id: 'npc-1', name: 'NPC' }]) }],
+        inlineCards: [], portraitAssets: {}, userDismissedGroups: [], npcs: [{ id: 'npc-live', name: 'Live NPC' }], candidates: [], socialGraph: { edges: [], unresolved: [] }, dismissed: [],
+    };
+    const reloaded = original.map((message, index) => ({ ...message, send_date: `changed-${index}`, extra: { gen_id: `new-${index}` } }));
+    migrateLegacyBranchState(state, reloaded);
+    assert.equal(state.branchLineageVersion, 5);
+    assert.deepEqual(state.lineage, chatLineage(reloaded));
+    assert.equal(state.npcs[0].name, 'Live NPC');
+    assert.equal(state.checkpoints.length, 0, 'unproven v4 checkpoint is dropped rather than relabeled');
 });
 
 test('explicit host parent can inherit the branch root before the old 4-message heuristic', () => {
@@ -48,7 +69,7 @@ test('explicit host parent can inherit the branch root before the old 4-message 
     const childKey = buildQualifiedChatKey('chat', 'card.png', 'Child');
     const parentChat = [bot('NPC', 'Original greeting', '1')];
     const parent = {
-        branchLineageVersion: 4,
+        branchLineageVersion: 5,
         lineage: chatLineage(parentChat),
         checkpoints: [],
         branchRootSnapshot: emptySnapshot([{ id: 'npc-root', name: 'Root NPC' }]),
@@ -59,6 +80,36 @@ test('explicit host parent can inherit the branch root before the old 4-message 
     assert.ok(inherited);
     assert.equal(inherited.npcs[0].name, 'Root NPC');
     assert.equal(inherited.branchForkMessageId, -1);
+    setBranchProvenanceHint({});
+});
+
+test('explicit host parent can inherit a proven v4 checkpoint during the v5 upgrade', () => {
+    const parentKey = buildQualifiedChatKey('chat', 'card.png', 'Parent-v4');
+    const childKey = buildQualifiedChatKey('chat', 'card.png', 'Child-v5');
+    const parentChat = [user('A', '1'), bot('NPC', 'B', '2'), user('C', '3'), bot('NPC', 'D', '4')];
+    const v4 = legacyChatLineageV4(parentChat);
+    const v4Keys = lineageCheckpointKeys(v4);
+    const parent = {
+        branchLineageVersion: 4,
+        lineage: v4,
+        checkpoints: [{
+            messageId: 1,
+            fingerprint: v4[1],
+            lineageKey: v4Keys[1],
+            parentLineageKey: v4Keys[0],
+            createdAt: 1,
+            snapshot: emptySnapshot([{ id: 'npc-v4', name: 'V4 NPC' }]),
+        }],
+        branchRootSnapshot: emptySnapshot([]),
+        inlineCards: [], portraitAssets: {}, userDismissedGroups: [], branchFamilyId: 'family-v4',
+    };
+    const childChat = [parentChat[0], parentChat[1], user('Changed continuation', '5')];
+    setBranchProvenanceHint({ mainChat: 'Parent-v4', currentKey: childKey });
+    const inherited = bestAncestorState({ [parentKey]: parent }, childKey, childChat);
+    assert.ok(inherited);
+    assert.equal(inherited.npcs[0].name, 'V4 NPC');
+    assert.equal(inherited.branchForkMessageId, 1);
+    assert.equal(inherited.branchLineageVersion, 5);
     setBranchProvenanceHint({});
 });
 

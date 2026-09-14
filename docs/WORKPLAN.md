@@ -1,6 +1,6 @@
 # NPC State Delta — staged workplan
 
-These are sequential work stages of one source-derived Delta codebase, not separate architectures. Stages 1-8 and the authorized calendar/birthday/form UI follow-ups are integrated. Stage 9 is integrated in the released baseline through Delta 1.0.9. The focused 1.0.10 recovery/persistence hotfix preserves the working prompt. Exact-candidate CI is the publication gate; live host/provider behavior remains separately qualified.
+These are sequential work stages of one source-derived Delta codebase, not separate architectures. Stages 1-8 and the authorized calendar/birthday/form UI follow-ups are integrated. Stage 9 is integrated in the released baseline through Delta 1.0.10. The focused 1.0.11 branch-recovery and Important-Bonds hardening preserves the working prompt. Exact-candidate CI is the publication gate; live host/provider behavior remains separately qualified.
 
 ## Status
 
@@ -15,9 +15,9 @@ These are sequential work stages of one source-derived Delta codebase, not separ
 | 6 | Evidence and identity-first injection | Integrated; working prompt and characterization loop retained |
 | 7 | Storage/recovery and OOC removal | Integrated; required historical-state readers retained |
 | 8 | Portraits, native transfer, diagnostics | Integrated through accepted CI and UI follow-ups; live image-provider checks remain separate |
-| 9 | Consolidation, budget preservation, integrated release review | Integrated; historical evidence in stage9-review.md; 1.0.10 hotfix requires latest-candidate CI |
+| 9 | Consolidation, budget preservation, integrated release review | Integrated; historical evidence in stage9-review.md; 1.0.11 hardening requires latest-candidate CI |
 
-The later calendar/birthday/form UI amendments are part of the accepted baseline, not Stage 9 inventions. The maintained Portrait UI is prompt/upload based; the retained native host-image preview/application integration is also preserved. See `docs/v1.0.10-review.md` for current hotfix evidence and `docs/stage9-review.md` for historical integrated evidence and the earlier sections below for stage history.
+The later calendar/birthday/form UI amendments are part of the accepted baseline, not Stage 9 inventions. The maintained Portrait UI is prompt/upload based; the retained native host-image preview/application integration is also preserved. Delta 1.0.11 keeps delete/regenerate and edits linear, reserves sibling history for explicit host swipes, advances destructive lineage to v5 and fails closed on unproven recovery while retaining the 1.0.10 persistence protections. See `CHANGELOG.md`, `docs/v1.0.10-review.md` for prior hotfix evidence, and `docs/stage9-review.md` for historical integrated evidence and the earlier sections below for stage history.
 
 ## Seed boundary
 
@@ -81,7 +81,7 @@ Verify a supported first encounter; proper name established in structured contex
 
 ## Stage 7 — storage and OOC removal
 
-Retain the accepted sidecar/owner/revision/locking/recovery design under Delta identity. Delta 1.0.8 hardens the existing reversible journal beside the byte-bounded full branch checkpoints: recovery distinguishes harmless forward extension from true invalidation, preserves a 256 raw-message horizon from the trustworthy baseline, traverses unchanged user/system boundaries, coalesces same-message commits and uses structure-specific social-graph undo. Verify chat rename/delete, identical filenames under different owners, edit/swipe/delete/reload, alternating user/assistant 100-message tail deletion, repeated 50+50 deletion, failed-scan boundaries, structural NPC/reference/portrait cleanup, stale/permanent write failure, undurable-state recovery across bounded cache eviction, tombstones and manual correction retention.
+Retain the accepted sidecar/owner/revision/locking/recovery design under Delta identity. Delta 1.0.8 hardens the existing reversible journal beside the byte-bounded full branch checkpoints: recovery distinguishes harmless forward extension from true invalidation, preserves a 256 raw-message horizon from the trustworthy baseline, traverses unchanged user/system boundaries, coalesces same-message commits and uses structure-specific social-graph undo. Delta 1.0.11 makes host delete/regenerate and edit linear replacements, preserves sibling history only for explicit swipe events, uses narrative-content destructive lineage v5 with guarded v4 readers, and keeps canonical state when recovery ownership is unproven instead of falling back to older/root snapshots. Verify chat rename/delete, identical filenames under different owners, edit/swipe/delete/reload, scattered delete/regenerate replacements under checkpoint-byte pressure, alternating user/assistant 100-message tail deletion, repeated 50+50 deletion, failed-scan boundaries, structural NPC/reference/portrait cleanup, stale/permanent write failure, undurable-state recovery across bounded cache eviction, tombstones and manual correction retention.
 
 Remove the OOC parser and command-only event wiring, API paths, help text, fixtures, and backfill dependencies. Keep shared functions used by manual controls or scans. Test that OOC-looking story text no longer mutates dossiers, while manual add/edit/remove and relevant repair still work. No real user data operations and no generational migration product surface.
 

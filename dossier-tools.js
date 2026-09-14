@@ -157,6 +157,8 @@ function diagnosticsHtml(npc) {
     const status = api()?.uiStatus?.() || {};
     const routing = status.scannerRouting || api()?.scannerRouting?.() || {};
     const scan = status.lastScan || api()?.scanMetrics?.() || null;
+    const branchHistory = status.branchHistory || { available: false };
+    const branchReconciliations = Array.isArray(status.branchReconciliations) ? status.branchReconciliations : [];
     const rel = npc ? relationshipDiagnosticRows(npc) : [];
     const actual = {
         totalProviderRequests: Number(routing.total || 0),
@@ -186,6 +188,7 @@ function diagnosticsHtml(npc) {
         <section><h3>Request routing</h3><pre>${escapeHtml(JSON.stringify({ actual, lastRequest: routing.last || null }, null, 2))}</pre></section>
         <section><h3>Latest scan accounting</h3><pre>${escapeHtml(JSON.stringify(latest || { available: false }, null, 2))}</pre><small>Retry/focused flags describe the latest scan. The dispatcher aggregate above is the authoritative actual request count; Delta does not fabricate a per-pass provider count it does not expose.</small></section>
         <section><h3>Persistence</h3><pre>${escapeHtml(JSON.stringify({ currentChat: api()?.persistenceStatus?.() || { available: false }, recentStage8Failures: recentPersistenceFailures }, null, 2))}</pre><small>Stage 8 waits for canonical flush and distinguishes local mutation from durable save. Pending and in-flight write flags describe this chat only, not a global database counter.</small></section>
+        <section><h3>Branch reconciliation</h3><pre>${escapeHtml(JSON.stringify({ history: branchHistory, recent: branchReconciliations }, null, 2))}</pre><small>Delete/edit operations are linear replacements; explicit SillyTavern swipes retain sibling history. Reconciliation records contain no story text. A fail-closed action keeps canonical dossier state instead of falling back to an older root.</small></section>
         ${npc ? `<section><h3>Relationship fractions / gate audit · ${escapeHtml(npc.name)}</h3><pre>${escapeHtml(JSON.stringify(rel, null, 2))}</pre></section>` : ''}
         <section><h3>Recent Stage 8 events</h3><pre>${escapeHtml(JSON.stringify(toolEvents.slice(-12).reverse(), null, 2))}</pre><small>Bounded records exclude credentials, full prompts, and provider responses.</small></section>
       </div><footer><button type="button" data-delta-tools-close data-delta-tools-autofocus>Close</button></footer>

@@ -88,6 +88,8 @@ import {
 import { decodeDeltaNativeBundle, nativeStateForTarget } from './native-transfer.js';
 import {
     BRANCH_LINEAGE_VERSION,
+    BRANCH_SNAPSHOT_BUDGET_BYTES,
+    ROLLBACK_JOURNAL_BUDGET_BYTES,
     createScanOperationRegistry,
     deletedChatStateKey,
     bestAncestorState,
@@ -166,6 +168,8 @@ let lastEditorActivation = { npcId: '', at: 0 };
 let lastScanMetrics = null;
 let branchReconcileTimer = null;
 let branchReconcilePending = null;
+const branchReconciliationEvents = [];
+const BRANCH_RECONCILIATION_EVENT_LIMIT = 16;
 let swipeSettlementTimer = null;
 let swipeSettlementPending = null;
 let deferredSwipeMessageId = null;
@@ -1107,6 +1111,10 @@ function isHostSwipeActive() {
     return hostSwipeState() !== 'none';
 }
 
+function branchOperationPriority(value) {
+    return ({ auto: 0, edit: 1, delete: 2, swipe: 3 })[String(value || 'auto').toLowerCase()] ?? 0;
+}
+
 function mergeBranchOptions(base = {}, incoming = {}) {
     const next = { ...base, ...incoming };
     const a = base.explicitDivergence;
@@ -1114,6 +1122,11 @@ function mergeBranchOptions(base = {}, incoming = {}) {
     if (Number.isInteger(a) && Number.isInteger(b)) next.explicitDivergence = Math.min(a, b);
     else if (Number.isInteger(a)) next.explicitDivergence = a;
     else if (Number.isInteger(b)) next.explicitDivergence = b;
+    const baseOperation = String(base.operation || 'auto').toLowerCase();
+    const incomingOperation = String(incoming.operation || 'auto').toLowerCase();
+    next.operation = branchOperationPriority(incomingOperation) >= branchOperationPriority(baseOperation)
+        ? incomingOperation
+        : baseOperation;
     next.rescan = Boolean(base.rescan || incoming.rescan);
     return next;
 }
@@ -1121,7 +1134,7 @@ function mergeBranchOptions(base = {}, incoming = {}) {
 function queueSettledSwipeReconcile(options = {}) {
     const originKey = options.chatKey || getChatKey();
     if (originKey === 'no-chat') return;
-    let next = { reason: 'message-swiped', rescan: true, ...options, chatKey: originKey };
+    let next = { reason: 'message-swiped', rescan: true, ...options, operation: 'swipe', chatKey: originKey };
 
     // A normal branch timer must never be allowed to fire inside SillyTavern's swipe window.
     // Fold it into the swipe settlement instead.
@@ -1193,6 +1206,62 @@ function queueSettledSwipeReconcile(options = {}) {
     swipeSettlementTimer = setTimeout(poll, 0);
 }
 
+function diagnosticSerializedBytes(value) {
+    try {
+        const text = JSON.stringify(value ?? null);
+        return typeof TextEncoder === 'function' ? new TextEncoder().encode(text).byteLength : text.length;
+    } catch {
+        return 0;
+    }
+}
+
+function branchHistoryDiagnostic(state) {
+    if (!state || typeof state !== 'object') return null;
+    const checkpoints = Array.isArray(state.checkpoints) ? state.checkpoints : [];
+    const rollbackJournal = Array.isArray(state.rollbackJournal) ? state.rollbackJournal : [];
+    return {
+        lineageVersion: Number(state.branchLineageVersion || 0),
+        lineageMessages: Array.isArray(state.lineage) ? state.lineage.length : 0,
+        checkpointCount: checkpoints.length,
+        checkpointBytes: checkpoints.reduce((sum, item) => sum + diagnosticSerializedBytes(item?.snapshot || {}) + 256, 0),
+        checkpointBudgetBytes: BRANCH_SNAPSHOT_BUDGET_BYTES,
+        rollbackJournalEntries: rollbackJournal.length,
+        rollbackJournalBytes: Number(state.rollbackJournalBytes || 0) || diagnosticSerializedBytes(rollbackJournal),
+        rollbackJournalBudgetBytes: ROLLBACK_JOURNAL_BUDGET_BYTES,
+        rollbackJournalCoverageMessages: Number(state.rollbackJournalCoverageMessages || 0),
+        rollbackJournalBudgetExceeded: state.rollbackJournalBudgetExceeded === true,
+    };
+}
+
+function recordBranchReconciliationEvent({ key, reason, operation, result, beforeNpcCount, previousLength, currentLength }) {
+    if (!result) return;
+    const state = result.state || null;
+    branchReconciliationEvents.push({
+        at: Date.now(),
+        chatKey: key,
+        reason: String(reason || 'branch'),
+        operation: String(result.recoveryOperation || operation || 'auto'),
+        relation: String(result.lineageRelation || 'unknown'),
+        divergence: Number.isInteger(result.divergence) ? result.divergence : null,
+        action: String(result.recoveryAction || (result.invalidated ? 'reconciled' : 'none')),
+        invalidated: Boolean(result.invalidated),
+        exactRestored: Boolean(result.exactRestored),
+        restoredFromMessageId: Number.isInteger(result.restoredFromMessageId) ? result.restoredFromMessageId : null,
+        restoredFromJournal: Boolean(result.restoredFromJournal),
+        restoredFromRoot: Boolean(result.restoredFromRoot),
+        failClosed: Boolean(result.failClosed),
+        linearHistoryPruned: Boolean(result.linearHistoryPruned),
+        previousLength: Math.max(0, Number(previousLength || 0)),
+        currentLength: Math.max(0, Number(currentLength || 0)),
+        npcCountBefore: Math.max(0, Number(beforeNpcCount || 0)),
+        npcCountAfter: Array.isArray(state?.npcs) ? state.npcs.length : 0,
+        history: branchHistoryDiagnostic(state),
+    });
+    if (branchReconciliationEvents.length > BRANCH_RECONCILIATION_EVENT_LIMIT) {
+        branchReconciliationEvents.splice(0, branchReconciliationEvents.length - BRANCH_RECONCILIATION_EVENT_LIMIT);
+    }
+}
+
 async function maybeInheritKnownBranch() {
     const key = getChatKey();
     if (key === 'no-chat' || !isCanonicalChatKey(key)) return false;
@@ -1227,7 +1296,7 @@ async function maybeInheritKnownBranch() {
     }
 }
 
-async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true, reason = 'branch', chatKey = null } = {}) {
+async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true, reason = 'branch', chatKey = null, operation = 'auto' } = {}) {
     const key = chatKey || getChatKey();
     if (key === 'no-chat' || getChatKey() !== key) return null;
     const ctx = getContext();
@@ -1235,9 +1304,15 @@ async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true
     if (getChatKey() !== key) return null;
     const before = getChatState(key);
     seedBranchTracking(before);
+    const beforeNpcCount = Array.isArray(before.npcs) ? before.npcs.length : 0;
+    const previousLength = Array.isArray(before.lineage) ? before.lineage.length : 0;
     const lineageBefore = chatLineage(ctx.chat || []);
-    const result = reconcileBranchState(before, ctx.chat || [], { explicitDivergence });
+    const result = reconcileBranchState(before, ctx.chat || [], { explicitDivergence, operation });
     if (getChatKey() !== key || firstLineageDivergence(lineageBefore, chatLineage(getContext().chat || [])) !== -1) return null;
+    recordBranchReconciliationEvent({
+        key, reason, operation, result, beforeNpcCount,
+        previousLength, currentLength: lineageBefore.length,
+    });
     if (!result.invalidated) {
         before.lineage = result.state.lineage;
         return result;
@@ -5451,14 +5526,20 @@ function registerEvents() {
     });
 
     if (events.MESSAGE_DELETED) {
-        source.on(events.MESSAGE_DELETED, () => {
-            queueBranchReconcile({ rescan: true, reason: 'message-deleted' }, 70);
+        source.on(events.MESSAGE_DELETED, (messageId) => {
+            queueBranchReconcile({
+                explicitDivergence: Number.isInteger(messageId) ? messageId : null,
+                operation: 'delete',
+                rescan: true,
+                reason: 'message-deleted',
+            }, 70);
         });
     }
     if (events.MESSAGE_SWIPED) {
         source.on(events.MESSAGE_SWIPED, (messageId) => {
             queueSettledSwipeReconcile({
                 explicitDivergence: Number.isInteger(messageId) ? messageId : null,
+                operation: 'swipe',
                 rescan: true,
                 reason: 'message-swiped',
             });
@@ -5468,6 +5549,7 @@ function registerEvents() {
         source.on(events.MESSAGE_SWIPE_DELETED, (messageId) => {
             queueSettledSwipeReconcile({
                 explicitDivergence: Number.isInteger(messageId) ? messageId : null,
+                operation: 'swipe',
                 rescan: true,
                 reason: 'swipe-deleted',
             });
@@ -5477,6 +5559,7 @@ function registerEvents() {
         source.on(events.MESSAGE_EDITED, (messageId) => {
             queueBranchReconcile({
                 explicitDivergence: Number.isInteger(messageId) ? messageId : null,
+                operation: 'edit',
                 rescan: true,
                 reason: 'message-edited',
             }, 110);
@@ -5678,6 +5761,11 @@ window.NPCStateDelta = Object.freeze({
         inlineObserver: Boolean(inlineObserver && inlineObserverChat),
         inlineNeedsRepair: inlineMountNeedsRepair(),
         lastScan: lastScanMetrics ? { ...lastScanMetrics } : null,
+        branchHistory: chatHydrationStatus(getChatKey()) === 'ready' ? branchHistoryDiagnostic(getChatState()) : null,
+        branchReconciliations: branchReconciliationEvents
+            .filter(event => event.chatKey === getChatKey())
+            .slice(-8)
+            .map(event => structuredClone(event)),
         swipeState: hostSwipeState(),
         swipeSettlementPending: Boolean(swipeSettlementPending || swipeSettlementTimer),
     }),

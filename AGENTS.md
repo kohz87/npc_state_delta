@@ -46,7 +46,7 @@ Do not silently loosen or tighten accepted evidence interpretation under cleanup
 
 ## Verification and publication
 
-Verify retry-to-permanent-failure transitions through cache eviction, undurable hydration and later flush, including newer in-flight mutations, cancellation and revision conflicts. Exercise failed/skipped/busy scan receipt boundaries through the synthetic host, plus sibling revisits, net-zero same-message coalescing and deep/sequential deletion with predecessor retention. These checks enforce C03/C05/C08 of `docs/core-contract.md`; they do not create separate behavior rules.
+Verify retry-to-permanent-failure transitions through cache eviction, undurable hydration and later flush, including newer in-flight mutations, cancellation and revision conflicts. Exercise failed/skipped/busy scan receipt boundaries through the synthetic host, explicit swipe-sibling revisits, net-zero same-message coalescing, deep/sequential deletion with predecessor retention, and scattered delete/regenerate replacements under checkpoint-byte pressure. Delete/edit replacements must remain linear, while only explicit host swipes retain sibling history; unproven divergence must fail closed without restoring an older root. These checks enforce C03/C05/C08 of `docs/core-contract.md`; they do not create separate behavior rules.
 
 Follow `DEVELOPMENT.md` for executable commands. Test changed behavior through production functions and the existing synthetic host harness. When storage, identity, scan scheduling, or scoring changes, exercise relevant stale-result, duplicate, swipe/edit/delete, failure, and recovery cases.
 
