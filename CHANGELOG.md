@@ -1,6 +1,14 @@
 # NPC State Delta changes
 
 
+## 1.0.10 - 14 September 2026
+
+- Retain the newest accepted unsaved state across transient-to-permanent persistence failure, cache eviction and rehydration until a successful durable flush; preserve cancellation, retirement, ownership and revision guards.
+- Keep referenced journal versions immutable during same-message consolidation, including net-zero revisits, and retain required predecessors for branch checkpoints and sibling chains.
+- Checkpoint deterministic assistant receipt changes at their own message boundary before scanning, so failed/skipped/busy scans cannot move turn ownership to a later user message.
+- Protect explicitly confirmed-dead dossiers from stale archive/deletion even when automatic death archiving is disabled; preserve ordinary living 30/50-turn cleanup.
+- Add production-function and synthetic-host regressions, clarify the governing contract, and preserve scanner prompts/budgets, scoring, the 256 raw-message horizon, Speech behavior and persisted formats.
+
 ## 1.0.9 - 14 September 2026
 
 - Preserve undurable persistence ownership through bounded chat-cache eviction and rehydration. A snapshot recovered after a permanent sidecar rejection now remains locally pending until a later successful flush instead of being incorrectly promoted to durable.

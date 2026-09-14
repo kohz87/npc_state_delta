@@ -1,6 +1,6 @@
 # NPC State Delta — staged workplan
 
-These are sequential work stages of one source-derived Delta codebase, not separate architectures. Stages 1-8 and the authorized calendar/birthday/form UI follow-ups are integrated. Stage 9 prepares the Delta 1.0.0 candidate while preserving the working prompt. Exact-candidate CI is the publication gate; live host/provider behavior remains separately qualified.
+These are sequential work stages of one source-derived Delta codebase, not separate architectures. Stages 1-8 and the authorized calendar/birthday/form UI follow-ups are integrated. Stage 9 is integrated in the released baseline through Delta 1.0.9. The focused 1.0.10 recovery/persistence hotfix preserves the working prompt. Exact-candidate CI is the publication gate; live host/provider behavior remains separately qualified.
 
 ## Status
 
@@ -15,9 +15,9 @@ These are sequential work stages of one source-derived Delta codebase, not separ
 | 6 | Evidence and identity-first injection | Integrated; working prompt and characterization loop retained |
 | 7 | Storage/recovery and OOC removal | Integrated; required historical-state readers retained |
 | 8 | Portraits, native transfer, diagnostics | Integrated through accepted CI and UI follow-ups; live image-provider checks remain separate |
-| 9 | Consolidation, budget preservation, integrated release review | Implemented/local verification; accept 1.0.0 only after latest-candidate CI passes |
+| 9 | Consolidation, budget preservation, integrated release review | Integrated; historical evidence in stage9-review.md; 1.0.10 hotfix requires latest-candidate CI |
 
-The later calendar/birthday/form UI amendments are part of the accepted baseline, not Stage 9 inventions. The maintained Portrait UI is prompt/upload based; the retained native host-image preview/application integration is also preserved. See `docs/stage9-review.md` for current evidence and the earlier sections below for stage history.
+The later calendar/birthday/form UI amendments are part of the accepted baseline, not Stage 9 inventions. The maintained Portrait UI is prompt/upload based; the retained native host-image preview/application integration is also preserved. See `docs/v1.0.10-review.md` for current hotfix evidence and `docs/stage9-review.md` for historical integrated evidence and the earlier sections below for stage history.
 
 ## Seed boundary
 
@@ -111,7 +111,7 @@ Use at most five review/fix cycles: review with severity and evidence; fix actio
 
 Compare identical baseline/candidate fixtures. `scripts/measure-stage9.mjs` captures production-built Delta-owned messages and actual mocked dispatcher invocations on both routes, including retries; its baseline fixture records hashes and allowances. It does not measure host-added preset text or paid provider usage. Optional browser checks load actual local UI modules with a synthetic host; no live chat/database/provider is touched.
 
-Prepare coherent 1.0.0 manifest, package metadata, displayed version, README, changelog and installable ZIP using existing conventions. Storage, bundle and branch formats do not inherit application version changes. Run all unit/behavior tests, compatibility/runtime/migration smoke, validation, prompt comparison, package integrity and whitespace checks. Commit only the final reviewed candidate; push branch, PR, latest-head CI, then merge and verify main. Unresolved blocking findings prevent release; unrun real-host/Gemini checks must be disclosed, not invented.
+The historical Stage 9 release prepared a coherent 1.0.0 manifest, package metadata, displayed version, README, changelog and installable ZIP using existing conventions. Storage, bundle and branch formats do not inherit application version changes. Run all unit/behavior tests, compatibility/runtime/migration smoke, validation, prompt comparison, package integrity and whitespace checks. Commit only the final reviewed candidate; push branch, PR, latest-head CI, then merge and verify main. Unresolved blocking findings prevent release; unrun real-host/Gemini checks must be disclosed, not invented.
 
 ## Working and completion discipline
 

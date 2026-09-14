@@ -1,3 +1,4 @@
+import { isTerminalNpcDeath } from './terminal-lifecycle.js';
 import {
     reconcileSocialState,
     remapSocialGraphNpcId,
@@ -2835,7 +2836,7 @@ export function applyStaleNpcLifecycle(state = {}, options = {}) {
 
     for (const raw of (Array.isArray(state?.npcs) ? state.npcs : [])) {
         let npc = normalizeNpcRecord(raw);
-        if (npc.present || npc.worldActive || npc.retentionProtected || protectedIds.has(npc.id)) {
+        if (isTerminalNpcDeath(npc) || npc.present || npc.worldActive || npc.retentionProtected || protectedIds.has(npc.id)) {
             next.npcs.push(npc);
             continue;
         }

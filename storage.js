@@ -234,7 +234,7 @@ export function decodeStateFilePayload(text) {
 }
 
 function retryableWriteError(error) {
-    if (error?.code === 'NPC_STATE_WRITE_CONFLICT') return false;
+    if (['NPC_STATE_WRITE_CONFLICT', 'NPC_STATE_WRITE_CANCELLED'].includes(error?.code)) return false;
     if (error?.code === 'NPC_STATE_LOCK_TIMEOUT') return true;
     const status = Number(error?.status || 0);
     if ([408, 425, 429].includes(status) || status >= 500) return true;
@@ -280,8 +280,9 @@ async function remoteRevision(pointer, chatKey, fetchFn) {
     return { revision: payload.revision, writerId: payload.writerId, exists: true, retired: payload.retired };
 }
 
-async function guardedWriteOnce({ chatKey, state, appVersion, pointer, fetchFn, headers }) {
+async function guardedWriteOnce({ chatKey, state, appVersion, pointer, fetchFn, headers, assertCurrent = () => {} }) {
     return withWriterLock(chatKey, async () => {
+        assertCurrent();
         const expectedRevision = Number.isFinite(Number(pointer?.revision)) ? Math.max(0, Math.trunc(Number(pointer.revision))) : null;
         let current = { revision: expectedRevision ?? 0, writerId: '', exists: false };
         if (pointer?.path) current = await remoteRevision(pointer, chatKey, fetchFn);
@@ -302,6 +303,7 @@ async function guardedWriteOnce({ chatKey, state, appVersion, pointer, fetchFn, 
         const revision = Math.max(current.revision, expectedRevision ?? 0) + 1;
         const name = pointer?.name || makeNpcStateDataFileName(chatKey);
         const json = encodeStateFilePayload(chatKey, state, appVersion, { revision, writerId });
+        assertCurrent();
         const result = await uploadPayload({ name, json, fetchFn, headers });
         return { name, path: result.path, updatedAt: Date.now(), revision, writerId };
     });
@@ -338,8 +340,7 @@ function rememberUndurableSnapshot({ chatKey, state, appVersion = '', pointer = 
     });
 }
 
-export async function writeNpcStateDataFile({ chatKey, state, appVersion = '', pointer = null, operationKey = '', fetchFn = globalThis.fetch, headers = {}, sleepFn = globalThis.setTimeout, continuousRetry = true }) {
-    if (typeof fetchFn !== 'function') throw new Error('fetch() is unavailable for NPC State Delta data-file persistence.');
+export async function writeNpcStateDataFile({ chatKey, state, appVersion = '', pointer = null, operationKey = '', fetchFn = globalThis.fetch, headers = {}, sleepFn = globalThis.setTimeout, continuousRetry = true, recoveryState = () => state, isCurrent = () => true }) {
     const key = String(chatKey || '');
     const durabilityKey = String(operationKey || key);
     if (durabilityQueue.has(durabilityKey)) {
@@ -347,43 +348,43 @@ export async function writeNpcStateDataFile({ chatKey, state, appVersion = '', p
         error.code = 'NPC_STATE_WRITE_IN_PROGRESS';
         throw error;
     }
-    let lastError = null;
-    const retryDelays = continuousRetry ? NPC_STATE_WRITE_RETRY_DELAYS_MS : [0, 250, 750, 1500];
-    for (const delay of retryDelays) {
-        if (delay) await wait(delay, sleepFn);
-        try {
-            const written = await guardedWriteOnce({ chatKey: key, state, appVersion, pointer, fetchFn, headers });
-            undurableSnapshots.delete(key);
-            return written;
-        } catch (error) {
-            lastError = error;
-            if (!retryableWriteError(error)) {
-                if (continuousRetry) rememberUndurableSnapshot({ chatKey: key, state, appVersion, pointer, error });
-                throw error;
-            }
-        }
-    }
-    if (!continuousRetry) throw lastError || new Error(`NPC State Delta bounded sidecar write failed for ${key}.`);
     const job = {
-        chatKey: key,
-        durabilityKey,
-        state: structuredClone(state || {}),
-        appVersion,
-        pointer,
-        fetchFn,
-        headers,
-        cancelled: false,
-        attempt: 0,
-        lastError,
+        chatKey: key, durabilityKey, state, appVersion, pointer, fetchFn, headers,
+        cancelled: false, attempt: 0, lastError: null, recoveryState,
+        assertCurrent() {
+            if (!job.cancelled && isCurrent()) return;
+            const error = new Error(`NPC State Delta durability retry for ${key} was cancelled.`);
+            error.code = 'NPC_STATE_WRITE_CANCELLED';
+            throw error;
+        },
     };
+    // Track cancellation from the first attempt, including failures while acquiring the lock
+    // or checking the remote revision. Every terminal failure shares one recovery exit.
     durabilityQueue.set(durabilityKey, job);
-    console.warn(`[NPC State Delta] sidecar write for ${key} is still dirty after bounded retries; retaining the active write lock and retrying every ${NPC_STATE_DURABILITY_RETRY_CAP_MS / 1000}s until it is durable.`);
     try {
-        while (!job.cancelled) {
-            await wait(NPC_STATE_DURABILITY_RETRY_CAP_MS, sleepFn);
-            if (job.cancelled) break;
+        if (typeof fetchFn !== 'function') throw new Error('fetch() is unavailable for NPC State Delta data-file persistence.');
+        const retryDelays = continuousRetry ? NPC_STATE_WRITE_RETRY_DELAYS_MS : [0, 250, 750, 1500];
+        for (const delay of retryDelays) {
+            if (delay) await wait(delay, sleepFn);
+            job.assertCurrent();
             try {
                 const written = await guardedWriteOnce(job);
+                job.assertCurrent();
+                undurableSnapshots.delete(key);
+                return written;
+            } catch (error) {
+                job.lastError = error;
+                if (!retryableWriteError(error)) throw error;
+            }
+        }
+        if (!continuousRetry) throw job.lastError || new Error(`NPC State Delta bounded sidecar write failed for ${key}.`);
+        console.warn(`[NPC State Delta] sidecar write for ${key} is still dirty after bounded retries; retaining the active write lock and retrying every ${NPC_STATE_DURABILITY_RETRY_CAP_MS / 1000}s until it is durable.`);
+        while (true) {
+            await wait(NPC_STATE_DURABILITY_RETRY_CAP_MS, sleepFn);
+            job.assertCurrent();
+            try {
+                const written = await guardedWriteOnce(job);
+                job.assertCurrent();
                 undurableSnapshots.delete(key);
                 if (pointer && typeof pointer === 'object') Object.assign(pointer, written);
                 console.info(`[NPC State Delta] recovered a previously failed sidecar write for ${key} at revision ${written.revision}.`);
@@ -394,8 +395,10 @@ export async function writeNpcStateDataFile({ chatKey, state, appVersion = '', p
                 if (!retryableWriteError(error)) throw error;
             }
         }
-        const error = new Error(`NPC State Delta durability retry for ${key} was cancelled.`);
-        error.code = 'NPC_STATE_WRITE_CANCELLED';
+    } catch (error) {
+        if (continuousRetry && !job.cancelled && isCurrent()) {
+            rememberUndurableSnapshot({ chatKey: key, state: recoveryState(), appVersion, pointer, error });
+        }
         throw error;
     } finally {
         if (durabilityQueue.get(durabilityKey) === job) durabilityQueue.delete(durabilityKey);
@@ -448,8 +451,8 @@ export async function readNpcStateDataFile(pointer, { fetchFn = globalThis.fetch
             reason: '',
             revision: Math.max(0, Math.trunc(Number(pointer?.revision) || 0)),
             writerId,
-            state: structuredClone(resident.state || {}),
-            undurable: Boolean(shadow && resident === shadow),
+            state: structuredClone(resident.recoveryState ? resident.recoveryState() : (resident.state || {})),
+            undurable: true,
         };
     }
     if (!pointer?.path) return null;

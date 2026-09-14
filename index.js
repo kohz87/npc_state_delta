@@ -1013,6 +1013,8 @@ async function flushStateFile(key = getChatKey()) {
             const written = await writeNpcStateDataFile({
                 chatKey: key,
                 state: snapshot,
+                recoveryState: () => chatStateCache.get(key) || snapshot,
+                isCurrent: () => ownershipEpochCurrent(key, epoch),
                 appVersion: NPC_STATE_VERSION,
                 pointer: settings.dataFiles?.[key] || pointer,
                 headers: requestHeaders(),
@@ -5344,8 +5346,9 @@ async function handleAssistantMessageReceived(messageId, { bypassSwipeGuard = fa
     const shouldForceBranchScan = forceBranchRescan && settings.branchRescan !== false;
     const autoScanDue = settings.autoScan && (settings.fullScanEveryTurn || state.assistantSinceScan >= settings.scanEvery);
     const scanExpected = shouldForceBranchScan || autoScanDue;
-    if (Number.isInteger(messageId) && !scanExpected) commitBranchCheckpoint(state, messageId, 'turn');
-    else state.lineage = chatLineage(getContext().chat || []);
+    // Receipt state belongs to this assistant even if scanning fails, skips or is busy.
+    // A successful scan coalesces its changes into this same owned boundary.
+    commitBranchCheckpoint(state, messageId, 'turn');
     persist();
     renderDossier();
     updateInjection();
