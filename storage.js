@@ -4,6 +4,7 @@ export const NPC_STATE_WRITE_RETRY_DELAYS_MS = Object.freeze([0, 1000, 2000, 500
 export const NPC_STATE_DURABILITY_RETRY_CAP_MS = 30000;
 
 const durabilityQueue = new Map();
+const undurableSnapshots = new Map();
 const writerLocks = new Map();
 const READ_CONCURRENCY_LIMIT = 4;
 const CROSS_TAB_LOCK_LEASE_MS = 15_000;
@@ -127,14 +128,14 @@ export function makeNpcStateRecoveryFileName(chatKey, generation = nextRecoveryG
 function bytesToBase64(bytes) {
     const input = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
     const chunkSize = 0x8000;
-    let binary = '';
+    const parts = [];
     for (let i = 0; i < input.length; i += chunkSize) {
         const chunk = input.subarray(i, Math.min(i + chunkSize, input.length));
         let part = '';
         for (let j = 0; j < chunk.length; j += 1) part += String.fromCharCode(chunk[j]);
-        binary += part;
+        parts.push(part);
     }
-    return globalThis.btoa(binary);
+    return globalThis.btoa(parts.join(''));
 }
 
 export function retainedPortraitAssetIds(state = {}) {
@@ -200,7 +201,7 @@ export function encodeStateFilePayload(chatKey, state, appVersion = '', metadata
         writerId: String(metadata?.writerId || writerId),
         state: compactStateForFile(state),
     };
-    return JSON.stringify(payload, null, 2);
+    return JSON.stringify(payload);
 }
 
 export function encodeRetiredStateFilePayload(chatKey, reason = 'retired', appVersion = '', metadata = {}) {
@@ -309,14 +310,32 @@ async function guardedWriteOnce({ chatKey, state, appVersion, pointer, fetchFn, 
 export function cancelPendingNpcStateWrite(chatKey) {
     const key = String(chatKey || '');
     const job = durabilityQueue.get(key);
-    if (!job) return false;
-    job.cancelled = true;
-    durabilityQueue.delete(key);
-    return true;
+    if (job) job.cancelled = true;
+    const removedQueued = durabilityQueue.delete(key);
+    const removedShadow = undurableSnapshots.delete(key);
+    return removedQueued || removedShadow;
 }
 
 export function pendingNpcStateDurabilityKeys() {
-    return [...durabilityQueue.keys()];
+    return [...new Set([...durabilityQueue.keys(), ...undurableSnapshots.keys()])];
+}
+
+export function undurableNpcStateSnapshot(chatKey) {
+    const entry = undurableSnapshots.get(String(chatKey || ''));
+    return entry ? structuredClone(entry) : null;
+}
+
+function rememberUndurableSnapshot({ chatKey, state, appVersion = '', pointer = null, error = null }) {
+    const key = String(chatKey || '');
+    if (!key) return;
+    undurableSnapshots.set(key, {
+        chatKey: key,
+        state: structuredClone(state || {}),
+        appVersion: String(appVersion || ''),
+        pointer: pointer && typeof pointer === 'object' ? structuredClone(pointer) : null,
+        errorCode: String(error?.code || ''),
+        rememberedAt: Date.now(),
+    });
 }
 
 export async function writeNpcStateDataFile({ chatKey, state, appVersion = '', pointer = null, operationKey = '', fetchFn = globalThis.fetch, headers = {}, sleepFn = globalThis.setTimeout, continuousRetry = true }) {
@@ -333,10 +352,15 @@ export async function writeNpcStateDataFile({ chatKey, state, appVersion = '', p
     for (const delay of retryDelays) {
         if (delay) await wait(delay, sleepFn);
         try {
-            return await guardedWriteOnce({ chatKey: key, state, appVersion, pointer, fetchFn, headers });
+            const written = await guardedWriteOnce({ chatKey: key, state, appVersion, pointer, fetchFn, headers });
+            undurableSnapshots.delete(key);
+            return written;
         } catch (error) {
             lastError = error;
-            if (!retryableWriteError(error)) throw error;
+            if (!retryableWriteError(error)) {
+                if (continuousRetry) rememberUndurableSnapshot({ chatKey: key, state, appVersion, pointer, error });
+                throw error;
+            }
         }
     }
     if (!continuousRetry) throw lastError || new Error(`NPC State Delta bounded sidecar write failed for ${key}.`);
@@ -360,6 +384,7 @@ export async function writeNpcStateDataFile({ chatKey, state, appVersion = '', p
             if (job.cancelled) break;
             try {
                 const written = await guardedWriteOnce(job);
+                undurableSnapshots.delete(key);
                 if (pointer && typeof pointer === 'object') Object.assign(pointer, written);
                 console.info(`[NPC State Delta] recovered a previously failed sidecar write for ${key} at revision ${written.revision}.`);
                 return written;
@@ -410,18 +435,21 @@ export async function retireNpcStateDataFile({ chatKey, pointer = null, reason =
 export async function readNpcStateDataFile(pointer, { fetchFn = globalThis.fetch, expectedChatKey = '' } = {}) {
     const pendingKey = String(expectedChatKey || '');
     const pending = pendingKey ? durabilityQueue.get(pendingKey) : null;
-    if (pending && !pending.cancelled) {
+    const shadow = pendingKey ? undurableSnapshots.get(pendingKey) : null;
+    const resident = pending && !pending.cancelled ? pending : shadow;
+    if (resident) {
         return {
             format: NPC_STATE_FILE_FORMAT,
             version: NPC_STATE_FILE_FORMAT_VERSION,
-            appVersion: String(pending.appVersion || ''),
+            appVersion: String(resident.appVersion || ''),
             chatKey: pendingKey,
-            updatedAt: Date.now(),
+            updatedAt: new Date(Number(resident.rememberedAt || Date.now())).toISOString(),
             retired: false,
             reason: '',
             revision: Math.max(0, Math.trunc(Number(pointer?.revision) || 0)),
             writerId,
-            state: structuredClone(pending.state || {}),
+            state: structuredClone(resident.state || {}),
+            undurable: Boolean(shadow && resident === shadow),
         };
     }
     if (!pointer?.path) return null;

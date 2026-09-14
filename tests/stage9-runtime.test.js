@@ -254,7 +254,7 @@ test('Stage 9 APIs execute inside the complete synthetic host, including failed 
     const marker = "    console.log('Runtime smoke:";
     if (!source.includes(marker)) throw new Error('Runtime smoke cleanup marker changed; review this integrated fixture.');
     source = source.replace(marker, `    await (${additionalChecks.toString()})(mockState, eventSource, manualAddNpc, sleep, extRoot, uiHandlers, emitDocumentEvent);\n${marker}`);
-    execFileSync(process.execPath, ['--import', fileURLToPath(new URL('./active-runtime-test-setup.mjs', import.meta.url)), '--input-type=module'], {
+    execFileSync(process.execPath, ['--import', new URL('./active-runtime-test-setup.mjs', import.meta.url).href, '--input-type=module'], {
         input: source, encoding: 'utf8', timeout: 30000, maxBuffer: 8 * 1024 * 1024,
     });
 });

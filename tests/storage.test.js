@@ -7,6 +7,8 @@ import {
     readNpcStateDataFile,
     writeNpcStateDataFile,
     deleteNpcStateDataFile,
+    cancelPendingNpcStateWrite,
+    undurableNpcStateSnapshot,
 } from '../storage.js';
 import { createNpcRecord } from '../core.js';
 
@@ -24,6 +26,7 @@ test('extension-owned JSON payload round-trips full chat state', () => {
     npc.mannerisms = ['boasts when embarrassed'];
     npc.species = 'Crimson Demon';
     const text = encodeStateFilePayload('chat:test', { npcs: [npc], checkpoints: [{ messageId: 9 }] }, '0.1.7');
+    assert.equal(text.includes('\n'), false, 'active sidecar payload should use compact JSON encoding');
     const decoded = decodeStateFilePayload(text);
     assert.equal(decoded.chatKey, 'chat:test');
     assert.equal(decoded.state.npcs[0].relationship.desire, 27);
@@ -155,4 +158,34 @@ test('v0.2.12 sidecar round-trips social graph edges and unresolved family slots
     assert.equal(decoded.state.socialGraph.edges.length, 1);
     assert.equal(decoded.state.socialGraph.unresolved.length, 1);
     assert.equal(decoded.state.socialGraph.unresolved[0].descriptor, 'younger');
+});
+
+
+test('v1.0.8 permanent write rejection keeps the newest undurable snapshot recoverable after cache eviction', async () => {
+    const chatKey = 'chat:permanent-write-shadow';
+    const pointer = { name: makeNpcStateDataFileName(chatKey), path: `/user/files/${makeNpcStateDataFileName(chatKey)}`, revision: 0 };
+    const state = { turn: 56, npcs: [createNpcRecord('Ryu')], lineage: ['a', 'b', 'c'] };
+    const rejectUpload = async (url) => {
+        if (url === pointer.path) return { ok: false, status: 404, text: async () => '' };
+        if (url === '/api/files/upload') return { ok: false, status: 413, text: async () => 'payload too large' };
+        return { ok: false, status: 404, text: async () => '' };
+    };
+
+    await assert.rejects(
+        () => writeNpcStateDataFile({ chatKey, state, appVersion: '1.0.8', pointer, fetchFn: rejectUpload }),
+        error => Number(error?.status) === 413,
+    );
+    assert.equal(undurableNpcStateSnapshot(chatKey)?.state?.turn, 56);
+
+    let networkReads = 0;
+    const recovered = await readNpcStateDataFile(pointer, {
+        expectedChatKey: chatKey,
+        fetchFn: async () => { networkReads += 1; throw new Error('disk should not win over the undurable shadow'); },
+    });
+    assert.equal(networkReads, 0);
+    assert.equal(recovered.undurable, true);
+    assert.equal(recovered.state.turn, 56);
+    assert.equal(recovered.state.npcs[0].name, 'Ryu');
+    assert.equal(cancelPendingNpcStateWrite(chatKey), true);
+    assert.equal(undurableNpcStateSnapshot(chatKey), null);
 });

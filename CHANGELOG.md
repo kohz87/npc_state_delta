@@ -1,6 +1,16 @@
 # NPC State Delta changes
 
 
+## 1.0.8 - 14 September 2026
+
+- Separate recovery lineage classification from strict asynchronous equality checks. A persisted lineage that is an exact prefix of the live SillyTavern chat is now a non-destructive forward extension and cannot restore an older checkpoint/root dossier.
+- Change the active journal contract to a contiguous 256 raw-message horizon from a trustworthy baseline, including unchanged user/system boundaries. Add normal alternating-chat regressions for exact 100-message deletion, repeated 50+50 deletion, the 256-message boundary, and failed-scan deletion across a preceding user turn.
+- Coalesce repeated canonical checkpoints owned by the same message and replace whole-social-graph journal copies with changed edge/slot undo records while preserving a reader for v1.0.7 full-graph entries. Stress coverage with 40 NPCs/240 edges keeps journal growth bounded by changed data rather than graph size.
+- Preserve the newest locally dirty state after a permanent durable-write rejection in the persistence owner, so bounded chat-cache eviction and later same-session hydration cannot silently replace it with an older sidecar; successful later persistence or explicit cancellation clears that recovery shadow.
+- Complete stale-removal cleanup by purging owned structured relationship references and delaying portrait-asset garbage collection until checkpoints/journal history can no longer restore the removed NPC.
+- Compact active sidecar JSON and build base64 input from chunks instead of repeated giant-string concatenation. Persisted data-file format version, bundle schema and branch-lineage version remain unchanged.
+- Preserve scanner prompts, request/retry/output budgets, connection-profile routing, numerical relationship formulas, Speech-development semantics and RP injection. No additional model request or background worker is introduced.
+
 ## 1.0.7 - 13 September 2026
 
 - Add a bounded reversible rollback journal beside the existing byte-bounded full branch checkpoints. Journal entries store compact canonical-state undo deltas plus exact lineage/sequence ownership, not transcript text or portrait binaries.
