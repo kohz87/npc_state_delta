@@ -5,6 +5,7 @@ export * from './calendar.js';
 import * as continuity from './continuity-core.js';
 import * as mechanics from './core-mechanics.js';
 import { isTerminalNpcDeath } from './terminal-lifecycle.js';
+import { removeNpcFromSocialGraph, purgeNpcStructuredReferences } from './social.js';
 import {
     currentCalendarDate,
     extractStructuredWorldDate,
@@ -418,6 +419,30 @@ function appendBirthdayRule(prompt, options = {}) {
     return `${String(prompt)}${birthdayPromptRule(calendar, referenceDate)}`;
 }
 
+export function applyStaleNpcLifecycle(state = {}, options = {}) {
+    const beforeNpcs = new Map((Array.isArray(state?.npcs) ? state.npcs : [])
+        .filter(npc => npc?.id)
+        .map(npc => [String(npc.id), structuredClone(npc)]));
+    const result = mechanics.applyStaleNpcLifecycle(state, options);
+    const removed = Array.isArray(result?.removed) ? result.removed : [];
+    if (!removed.length) return result;
+
+    // Complete stale-removal cleanup at the public mechanics facade while preserving
+    // portrait bytes until branch/history pruning proves the NPC is no longer rollback-reachable.
+    const next = result.state;
+    for (const item of removed) {
+        const id = String(item?.id || '');
+        if (!id) continue;
+        next.socialGraph = removeNpcFromSocialGraph(next.socialGraph, id);
+        const removedNpc = beforeNpcs.get(id);
+        if (removedNpc) purgeNpcStructuredReferences(next.npcs, removedNpc);
+    }
+    if (state?.portraitAssets && typeof state.portraitAssets === 'object') {
+        next.portraitAssets = { ...structuredClone(state.portraitAssets), ...(next.portraitAssets || {}) };
+    }
+    return result;
+}
+
 export function normalizeNpcRecord(raw = {}) {
     const npc = withAppearanceDerivedApparentAge(normalizeNpcBirthday(continuity.normalizeNpcRecord(raw)), raw.appearance);
     const speechDevelopment = speechDevelopmentForNpc(npc);
@@ -508,4 +533,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.7';
+export const NPC_STATE_VERSION = '1.0.8';

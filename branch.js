@@ -10,10 +10,15 @@ export const BRANCH_LINEAGE_VERSION = 4;
 export const BRANCH_SNAPSHOT_BUDGET_BYTES = 2_000_000;
 export const BRANCH_SNAPSHOT_BUDGET_CHARS = BRANCH_SNAPSHOT_BUDGET_BYTES;
 export const BRANCH_SNAPSHOT_MAX_BYTES = 750_000;
-export const ROLLBACK_JOURNAL_VERSION = 1;
+export const ROLLBACK_JOURNAL_VERSION = 2;
+export const ROLLBACK_JOURNAL_WINDOW_MESSAGES = 256;
 export const ROLLBACK_JOURNAL_LIMIT = 1024;
+// Diagnostic target only. The guaranteed raw-message rollback window is never silently
+// shortened to satisfy this value; structure-specific undo keeps ordinary journals below it.
 export const ROLLBACK_JOURNAL_BUDGET_BYTES = 12_000_000;
-export const ROLLBACK_JOURNAL_MIN_ACTIVE_ENTRIES = 384;
+// Kept as a compatibility export for older diagnostics/tests. v1.0.8 no longer uses an
+// entry-count floor to override the raw-message retention contract.
+export const ROLLBACK_JOURNAL_MIN_ACTIVE_ENTRIES = 0;
 
 let provenanceHint = Object.freeze({ mainChat: '', ownerScope: '', currentKey: '' });
 
@@ -170,14 +175,102 @@ function buildNpcUndo(beforeNpcs = [], afterNpcs = []) {
     return { changes, order };
 }
 
+
+function keyedRecordUndo(beforeItems = [], afterItems = []) {
+    const before = Array.isArray(beforeItems) ? beforeItems : [];
+    const after = Array.isArray(afterItems) ? afterItems : [];
+    const beforeMap = new Map();
+    const afterMap = new Map();
+    for (const item of before) {
+        const id = String(item?.id || '').trim();
+        if (!id || beforeMap.has(id)) return jsonEqual(before, after) ? null : { full: structuredClone(before) };
+        beforeMap.set(id, item);
+    }
+    for (const item of after) {
+        const id = String(item?.id || '').trim();
+        if (!id || afterMap.has(id)) return jsonEqual(before, after) ? null : { full: structuredClone(before) };
+        afterMap.set(id, item);
+    }
+
+    const changes = [];
+    for (const id of new Set([...beforeMap.keys(), ...afterMap.keys()])) {
+        const beforeItem = beforeMap.get(id);
+        const afterItem = afterMap.get(id);
+        if (!beforeItem && afterItem) changes.push({ id, remove: true });
+        else if (beforeItem && !afterItem) changes.push({ id, restore: structuredClone(beforeItem) });
+        else if (beforeItem && afterItem && !jsonEqual(beforeItem, afterItem)) changes.push({ id, restore: structuredClone(beforeItem) });
+    }
+    const beforeOrder = [...beforeMap.keys()];
+    const afterOrder = [...afterMap.keys()];
+    const order = jsonEqual(beforeOrder, afterOrder) ? null : beforeOrder;
+    if (!changes.length && !order) return null;
+    return { changes, order };
+}
+
+function applyKeyedRecordUndo(currentItems = [], undo = null) {
+    if (!undo) return Array.isArray(currentItems) ? structuredClone(currentItems) : [];
+    if (Array.isArray(undo.full)) return structuredClone(undo.full);
+    const working = Array.isArray(currentItems) ? structuredClone(currentItems) : [];
+    for (const change of Array.isArray(undo.changes) ? undo.changes : []) {
+        const id = String(change?.id || '').trim();
+        if (!id) continue;
+        const index = working.findIndex(item => String(item?.id || '') === id);
+        if (change.remove === true) {
+            if (index >= 0) working.splice(index, 1);
+            continue;
+        }
+        if (change.restore && typeof change.restore === 'object') {
+            if (index >= 0) working[index] = structuredClone(change.restore);
+            else working.push(structuredClone(change.restore));
+        }
+    }
+    if (Array.isArray(undo.order)) {
+        const rank = new Map(undo.order.map((id, index) => [String(id), index]));
+        working.sort((a, b) => {
+            const ai = rank.has(String(a?.id || '')) ? rank.get(String(a.id)) : Number.MAX_SAFE_INTEGER;
+            const bi = rank.has(String(b?.id || '')) ? rank.get(String(b.id)) : Number.MAX_SAFE_INTEGER;
+            return ai - bi;
+        });
+    }
+    return working;
+}
+
+function buildSocialGraphUndo(beforeGraph = {}, afterGraph = {}) {
+    const before = normalizeSocialGraph(beforeGraph);
+    const after = normalizeSocialGraph(afterGraph);
+    if (jsonEqual(before, after)) return null;
+    const edges = keyedRecordUndo(before.edges, after.edges);
+    const unresolved = keyedRecordUndo(before.unresolved, after.unresolved);
+    const undo = { kind: 'delta' };
+    if (before.version !== after.version) undo.version = before.version;
+    if (edges) undo.edges = edges;
+    if (unresolved) undo.unresolved = unresolved;
+    return Object.keys(undo).length > 1 ? undo : null;
+}
+
+function applySocialGraphUndo(currentGraph = {}, undo = null) {
+    if (!undo) return normalizeSocialGraph(currentGraph);
+    // v1.0.7 stored the complete previous graph. Preserve that reader during the in-place
+    // journal upgrade rather than making old rollback entries unusable.
+    if (undo.kind !== 'delta') return normalizeSocialGraph(undo);
+    const current = normalizeSocialGraph(currentGraph);
+    return normalizeSocialGraph({
+        version: Object.prototype.hasOwnProperty.call(undo, 'version') ? undo.version : current.version,
+        edges: applyKeyedRecordUndo(current.edges, undo.edges),
+        unresolved: applyKeyedRecordUndo(current.unresolved, undo.unresolved),
+    });
+}
+
 export function buildRollbackUndo(beforeSnapshot = {}, afterSnapshot = {}) {
     const undo = {};
     const npcUndo = buildNpcUndo(beforeSnapshot?.npcs || [], afterSnapshot?.npcs || []);
     if (npcUndo) undo.npcs = npcUndo;
 
-    for (const key of ['candidates', 'pendingBackfills', 'socialGraph', 'dismissed']) {
+    for (const key of ['candidates', 'pendingBackfills', 'dismissed']) {
         if (!jsonEqual(beforeSnapshot?.[key], afterSnapshot?.[key])) undo[key] = structuredClone(beforeSnapshot?.[key]);
     }
+    const socialGraphUndo = buildSocialGraphUndo(beforeSnapshot?.socialGraph, afterSnapshot?.socialGraph);
+    if (socialGraphUndo) undo.socialGraph = socialGraphUndo;
 
     const scalars = {};
     for (const key of ROLLBACK_SCALAR_KEYS) {
@@ -234,8 +327,11 @@ export function applyRollbackUndo(state = {}, undo = null) {
     const restored = branchCore.restoreSnapshotIntoState(state, rollbackSnapshot(state));
     const npcResult = applyNpcUndo(restored.npcs, undo.npcs);
     restored.npcs = npcResult.npcs;
-    for (const key of ['candidates', 'pendingBackfills', 'socialGraph', 'dismissed']) {
+    for (const key of ['candidates', 'pendingBackfills', 'dismissed']) {
         if (Object.prototype.hasOwnProperty.call(undo, key)) restored[key] = structuredClone(undo[key]);
+    }
+    if (Object.prototype.hasOwnProperty.call(undo, 'socialGraph')) {
+        restored.socialGraph = applySocialGraphUndo(restored.socialGraph, undo.socialGraph);
     }
     for (const [key, value] of Object.entries(undo.scalars || {})) restored[key] = structuredClone(value);
 
@@ -287,7 +383,13 @@ function rollbackEntryBytes(entry) {
     return utf8Bytes(entry) + 96;
 }
 
-export function pruneRollbackJournal(entries = [], headSeq = 0, limit = ROLLBACK_JOURNAL_LIMIT) {
+export function pruneRollbackJournal(
+    entries = [],
+    headSeq = 0,
+    limit = ROLLBACK_JOURNAL_LIMIT,
+    headMessageId = null,
+    floorMessageId = null,
+) {
     const cap = Math.max(64, Number(limit) || ROLLBACK_JOURNAL_LIMIT);
     const normalized = normalizeRollbackJournal(entries);
     if (!normalized.length) return [];
@@ -295,7 +397,10 @@ export function pruneRollbackJournal(entries = [], headSeq = 0, limit = ROLLBACK
     const active = [];
     const activeSeqs = new Set();
     let cursor = Number(headSeq) || 0;
-    while (cursor > 0 && active.length < cap) {
+    // The active chain is authoritative. Never shorten the advertised raw-message rollback
+    // window merely because its serialized bytes exceed a target; only stale/sibling extras
+    // are byte-budgeted. A cycle or missing predecessor still terminates safely.
+    while (cursor > 0) {
         const entry = bySeq.get(cursor);
         if (!entry || activeSeqs.has(entry.seq)) break;
         active.push(entry);
@@ -303,16 +408,22 @@ export function pruneRollbackJournal(entries = [], headSeq = 0, limit = ROLLBACK
         cursor = entry.prevSeq;
     }
 
-    let activeBytes = active.reduce((sum, entry) => sum + rollbackEntryBytes(entry), 0);
-    while (active.length > ROLLBACK_JOURNAL_MIN_ACTIVE_ENTRIES && activeBytes > ROLLBACK_JOURNAL_BUDGET_BYTES) {
-        activeBytes -= rollbackEntryBytes(active.pop());
-    }
-
-    const keep = [...active];
-    const remaining = normalized
-        .filter(entry => !activeSeqs.has(entry.seq))
-        .sort((a, b) => b.seq - a.seq);
+    const resolvedHeadMessageId = Number.isInteger(headMessageId)
+        ? headMessageId
+        : (active[0]?.messageId ?? -1);
+    const resolvedFloorMessageId = Number.isInteger(floorMessageId)
+        ? floorMessageId
+        : (resolvedHeadMessageId >= 0 ? resolvedHeadMessageId - ROLLBACK_JOURNAL_WINDOW_MESSAGES : -1);
+    const keep = active.filter(entry => entry.messageId >= resolvedFloorMessageId);
+    const keptSeqs = new Set(keep.map(entry => entry.seq));
     let used = keep.reduce((sum, entry) => sum + rollbackEntryBytes(entry), 0);
+
+    // Recent sibling entries are opportunistic. They may improve branch revisits but can never
+    // displace the contiguous active chain needed for the guaranteed chronological window.
+    const remaining = normalized
+        .filter(entry => !activeSeqs.has(entry.seq) && !keptSeqs.has(entry.seq))
+        .filter(entry => entry.messageId >= resolvedFloorMessageId)
+        .sort((a, b) => b.createdAt - a.createdAt || b.seq - a.seq);
     for (const entry of remaining) {
         if (keep.length >= cap) break;
         const size = rollbackEntryBytes(entry);
@@ -321,6 +432,38 @@ export function pruneRollbackJournal(entries = [], headSeq = 0, limit = ROLLBACK
         used += size;
     }
     return keep.sort((a, b) => a.seq - b.seq);
+}
+
+function refreshRollbackJournalRetention(state) {
+    if (!state || typeof state !== 'object') return state;
+    const headMessageId = Number.isInteger(state.rollbackHead?.messageId) ? state.rollbackHead.messageId : -1;
+    const baselineFloor = Number.isInteger(state.rollbackJournalFloorMessageId)
+        ? state.rollbackJournalFloorMessageId
+        : headMessageId;
+    const rollingFloor = headMessageId >= 0 ? headMessageId - ROLLBACK_JOURNAL_WINDOW_MESSAGES : -1;
+    const floorMessageId = Math.max(baselineFloor, rollingFloor);
+    state.rollbackJournalFloorMessageId = floorMessageId;
+    state.rollbackJournal = pruneRollbackJournal(
+        state.rollbackJournal,
+        state.rollbackHead?.seq,
+        ROLLBACK_JOURNAL_LIMIT,
+        headMessageId,
+        floorMessageId,
+    );
+    // If the last actual mutation aged out while the head advanced only across unchanged raw
+    // messages, its sequence pointer must not dangle. The current head snapshot is a valid
+    // baseline for the retained window because no canonical mutation occurred after that entry.
+    if (Number(state.rollbackHead?.seq || 0) > 0
+        && !state.rollbackJournal.some(entry => entry.seq === state.rollbackHead.seq)) {
+        state.rollbackHead.seq = 0;
+    }
+    const bytes = state.rollbackJournal.reduce((sum, entry) => sum + rollbackEntryBytes(entry), 0);
+    state.rollbackJournalBytes = bytes;
+    state.rollbackJournalBudgetExceeded = bytes > ROLLBACK_JOURNAL_BUDGET_BYTES;
+    state.rollbackJournalCoverageMessages = headMessageId >= floorMessageId
+        ? Math.max(0, headMessageId - floorMessageId)
+        : 0;
+    return state;
 }
 
 export function ensureRollbackJournalBaseline(state, lineage = []) {
@@ -344,9 +487,10 @@ export function ensureRollbackJournalBaseline(state, lineage = []) {
             lineageKey: messageId >= 0 ? keys[messageId] : 'root',
             snapshot: rollbackSnapshot(state),
         };
+        // This is the trustworthy baseline. Older history cannot be invented during an upgrade.
         state.rollbackJournalFloorMessageId = messageId;
         state.rollbackJournal = [];
-        return state;
+        return refreshRollbackJournalRetention(state);
     }
 
     state.rollbackHead = {
@@ -358,16 +502,47 @@ export function ensureRollbackJournalBaseline(state, lineage = []) {
     state.rollbackJournalFloorMessageId = Number.isInteger(state.rollbackJournalFloorMessageId)
         ? state.rollbackJournalFloorMessageId
         : state.rollbackHead.messageId;
-    state.rollbackJournal = pruneRollbackJournal(state.rollbackJournal, state.rollbackHead.seq);
-    return state;
+    return refreshRollbackJournalRetention(state);
 }
 
 function appendRollbackMutation(state, lineage, messageId, reason, afterSnapshot) {
     ensureRollbackJournalBaseline(state, Array.isArray(state.lineage) ? state.lineage : lineage);
     const head = state.rollbackHead;
+    const keys = lineageCheckpointKeys(lineage);
+
+    // Multiple deterministic writers can checkpoint the same raw SillyTavern message (for
+    // example scan then backfill). Coalesce them into one message-owned undo record by rebuilding
+    // the delta from the earliest before-state to the latest accepted after-state.
+    if (head?.seq > 0 && head.messageId === messageId && head.lineageKey === (keys[messageId] || '')) {
+        const index = state.rollbackJournal.findIndex(entry => entry.seq === head.seq);
+        const existing = index >= 0 ? state.rollbackJournal[index] : null;
+        if (existing && existing.messageId === messageId && existing.lineageKey === head.lineageKey) {
+            const earliest = applyRollbackUndo(head.snapshot, existing.undo).state;
+            const combinedUndo = buildRollbackUndo(rollbackSnapshot(earliest), afterSnapshot);
+            if (combinedUndo) {
+                state.rollbackJournal[index] = {
+                    ...existing,
+                    fingerprint: lineage[messageId] || existing.fingerprint || '',
+                    lineageKey: keys[messageId] || existing.lineageKey || '',
+                    parentLineageKey: messageId > 0 ? keys[messageId - 1] : 'root',
+                    reason: String(reason || existing.reason || 'state'),
+                    createdAt: Date.now(),
+                    undo: combinedUndo,
+                };
+                state.rollbackHead = {
+                    seq: existing.seq,
+                    messageId,
+                    lineageKey: keys[messageId] || '',
+                    snapshot: structuredClone(afterSnapshot),
+                };
+                refreshRollbackJournalRetention(state);
+                return state.rollbackHead.seq;
+            }
+        }
+    }
+
     const beforeSnapshot = head?.snapshot && typeof head.snapshot === 'object' ? head.snapshot : rollbackSnapshot(state);
     const undo = buildRollbackUndo(beforeSnapshot, afterSnapshot);
-    const keys = lineageCheckpointKeys(lineage);
     if (undo) {
         const seq = Math.max(Number(state.rollbackJournalSequence || 0), ...state.rollbackJournal.map(entry => entry.seq), 0) + 1;
         const entry = {
@@ -398,7 +573,7 @@ function appendRollbackMutation(state, lineage, messageId, reason, afterSnapshot
             snapshot: structuredClone(afterSnapshot),
         };
     }
-    state.rollbackJournal = pruneRollbackJournal(state.rollbackJournal, state.rollbackHead.seq);
+    refreshRollbackJournalRetention(state);
     return state.rollbackHead.seq;
 }
 
@@ -420,6 +595,7 @@ function settleRollbackHead(state, lineage = [], reason = 'turn-settled') {
             lineageKey: keys[tailId] || 'root',
             snapshot: structuredClone(currentSnapshot),
         };
+        refreshRollbackJournalRetention(state);
     }
     return state;
 }
@@ -754,6 +930,11 @@ function restoreTailDeletionFromJournal(state, previousLineage, currentLineage, 
     ensureRollbackJournalBaseline(state, previousLineage);
     const head = state.rollbackHead;
     if (!head?.snapshot || typeof head.snapshot !== 'object') return null;
+    const targetTailId = currentLineage.length - 1;
+    const floorMessageId = Number.isInteger(state.rollbackJournalFloorMessageId)
+        ? state.rollbackJournalFloorMessageId
+        : head.messageId;
+    if (targetTailId < floorMessageId) return null;
 
     const previousKeys = lineageCheckpointKeys(previousLineage);
     if (Number.isInteger(head.messageId) && head.messageId >= 0 && head.messageId < previousKeys.length
@@ -767,10 +948,22 @@ function restoreTailDeletionFromJournal(state, previousLineage, currentLineage, 
     let applied = 0;
 
     while (cursorMessageId >= divergence) {
-        if (cursorSeq <= 0) return null;
+        if (cursorSeq <= 0) {
+            // The head can legitimately advance across raw user/system messages that caused no
+            // canonical mutation. With no remaining mutation record at/after the deleted range,
+            // the current working state already equals the requested surviving boundary.
+            cursorMessageId = divergence - 1;
+            break;
+        }
         const entry = bySeq.get(cursorSeq);
         if (!entry) return null;
-        if (entry.messageId < divergence) break;
+        if (entry.messageId < divergence) {
+            // Same case with an older surviving mutation: unchanged raw-message boundaries lie
+            // between that mutation and the requested tail. Do not undo the surviving mutation.
+            cursorMessageId = divergence - 1;
+            break;
+        }
+        if (entry.messageId > cursorMessageId) return null;
         if (entry.messageId >= previousKeys.length || entry.lineageKey !== previousKeys[entry.messageId]) return null;
         const reverted = applyRollbackUndo(working, entry.undo);
         working = reverted.state;
@@ -780,7 +973,7 @@ function restoreTailDeletionFromJournal(state, previousLineage, currentLineage, 
     }
 
     if (cursorMessageId >= divergence) return null;
-    return { state: working, headSeq: cursorSeq, applied };
+    return { state: working, headSeq: cursorSeq, applied, floorMessageId };
 }
 
 export function reconcileBranchState(state, chat, { explicitDivergence = null } = {}) {
@@ -788,12 +981,30 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null } 
     const currentLineage = chatLineage(chat);
     const previousLineage = Array.isArray(state?.lineage) ? state.lineage : [];
     ensureRollbackJournalBaseline(state, previousLineage.length ? previousLineage : currentLineage);
-    let divergence = branchCore.firstLineageDivergence(previousLineage, currentLineage);
-    if (Number.isInteger(explicitDivergence) && explicitDivergence >= 0) divergence = divergence < 0 ? explicitDivergence : Math.min(divergence, explicitDivergence);
-    if (divergence < 0) {
+    const relation = branchCore.classifyLineageRelationship(previousLineage, currentLineage);
+
+    // Recovery semantics are deliberately distinct from strict async ownership checks. A loaded
+    // sidecar whose lineage is an exact prefix of the live chat is merely behind; restoring an
+    // older checkpoint here destroys valid canonical state. Explicit event indexes cannot turn a
+    // same/forward lineage into invalidation unless the actual fingerprints prove divergence.
+    const hasExplicitDivergence = Number.isInteger(explicitDivergence) && explicitDivergence >= 0;
+    if (relation.kind === 'forward-extension' || (relation.kind === 'same' && !hasExplicitDivergence)) {
+        settleRollbackHead(state, currentLineage, relation.kind);
         state.lineage = currentLineage;
         prunePortraitAssetsInPlace(state);
-        return { state: { ...state, lineage: currentLineage }, divergence: -1, restoredFromMessageId: null, invalidated: false, exactRestored: false };
+        return {
+            state: { ...state, lineage: currentLineage },
+            divergence: relation.kind === 'same' ? -1 : relation.divergence,
+            lineageRelation: relation.kind,
+            restoredFromMessageId: null,
+            invalidated: false,
+            exactRestored: false,
+        };
+    }
+
+    let divergence = relation.kind === 'same' ? explicitDivergence : relation.divergence;
+    if (hasExplicitDivergence && relation.kind !== 'same') {
+        divergence = Math.min(divergence, explicitDivergence);
     }
 
     const currentNpcs = cloneNpcList(state?.npcs);
@@ -852,6 +1063,9 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null } 
         && (checkpoint.rollbackSeq === 0 || restored.rollbackJournal.some(entry => entry.seq === checkpoint.rollbackSeq))) {
         restoredHeadSeq = checkpoint.rollbackSeq;
     }
+    // If the predecessor entry fell just outside the retained message window, this restored
+    // boundary becomes the new safe baseline instead of retaining a dangling sequence pointer.
+    if (restoredHeadSeq > 0 && !restored.rollbackJournal.some(entry => entry.seq === restoredHeadSeq)) restoredHeadSeq = 0;
     restored.rollbackHead = {
         seq: restoredHeadSeq,
         messageId: restoredTailId,
@@ -859,9 +1073,9 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null } 
         snapshot: rollbackSnapshot(restored),
     };
     restored.rollbackJournalFloorMessageId = restoredHeadSeq > 0
-        ? Number(state?.rollbackJournalFloorMessageId ?? -1)
+        ? Math.min(restoredTailId, Number(state?.rollbackJournalFloorMessageId ?? restoredTailId))
         : restoredTailId;
-    restored.rollbackJournal = pruneRollbackJournal(restored.rollbackJournal, restoredHeadSeq);
+    refreshRollbackJournalRetention(restored);
     if (!exactRestored) {
         if (Number.isInteger(restored.lastScannedMessageId) && restored.lastScannedMessageId >= divergence) restored.lastScannedMessageId = null;
     }
@@ -869,6 +1083,7 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null } 
     return {
         state: restored,
         divergence,
+        lineageRelation: relation.kind,
         restoredFromMessageId: restoredFromJournal ? restoredTailId : (checkpoint?.messageId ?? null),
         restoredLineageKey: restoredFromJournal ? (restored.rollbackHead?.lineageKey || '') : (checkpoint?.lineageKey || ''),
         invalidated: true,
