@@ -201,8 +201,18 @@ function scrubSourceMessageOwnership(value) {
     if (!value || typeof value !== 'object') return value;
     const out = {};
     for (const [key, item] of Object.entries(value)) {
-        if (/^(?:.*SourceMessageId|sourceMessageId|requestedMessageId|restoredFromMessageId)$/i.test(key)) out[key] = null;
-        else out[key] = scrubSourceMessageOwnership(item);
+        const normalizedKey = String(key || '').replace(/_/g, '').toLowerCase();
+        if (normalizedKey === 'speechdevelopment' && item && typeof item === 'object' && !Array.isArray(item)) {
+            const ledger = scrubSourceMessageOwnership(item);
+            // Pending speech-development observations are chronological source-chat evidence,
+            // not portable characterization. Keep the accepted speech epoch/baseline text but
+            // rebase its pending provenance onto the target chat's safe history baseline.
+            out[key] = { ...ledger, baselineTurn: null, baselineSourceMessageId: null, concepts: [] };
+            continue;
+        }
+        if (/^(?:.*SourceMessageIds?|requestedMessageId|restoredFromMessageId)$/i.test(key)) {
+            out[key] = Array.isArray(item) ? [] : null;
+        } else out[key] = scrubSourceMessageOwnership(item);
     }
     return out;
 }

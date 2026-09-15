@@ -1794,6 +1794,15 @@ function isSafeUnmarkedDurableRefinement(existing, incoming) {
     return addsGroundedDetail && (durableTokenCoverage(oldText, newText) >= 0.62 || durableSemanticSimilarity(oldText, newText) >= 0.58);
 }
 
+function isSafeUnmarkedDurableReplacement(existing, incoming) {
+    if (!isSafeUnmarkedDurableRefinement(existing, incoming)) return false;
+    const oldText = compactDurableText(existing, DURABLE_PROFILE_LIMITS.appearance, 10);
+    const newText = compactDurableText(incoming, DURABLE_PROFILE_LIMITS.appearance, 10);
+    // Missing/keep state has no omission-as-deletion authority. It may adopt an enrichment
+    // only when every established durable concept remains represented in the incoming summary.
+    return durableTokenCoverage(oldText, newText) >= 1;
+}
+
 function mergeDurableTextRefinement(existing, incoming, maxChars) {
     const clauseCap = maxChars <= DURABLE_PROFILE_LIMITS.speech ? 5
         : (maxChars <= DURABLE_PROFILE_LIMITS.personality ? 6 : 10);
@@ -1915,7 +1924,7 @@ function behaviorProfileFamily(value) {
     if (!key) return '';
     if (/^(?:disposition|kindness|empathy|morality|social baseline)$/.test(key)) return 'disposition';
     if (/cruelty|mercy|harm/.test(key)) return 'cruelty';
-    if (/independence|agency|boundar/.test(key)) return 'independence';
+    if (/independence|agency|boundar|autonom|obedien|compliance|compliant|submission|submissive|deference/.test(key)) return 'independence';
     if (/^(?:care|affection|care style)$/.test(key)) return 'care';
     if (/express/.test(key)) return 'expressiveness';
     if (/conflict|anger|composure|restraint/.test(key)) return 'conflict';
@@ -2030,6 +2039,31 @@ function moralityPolarity(value) {
     return kind && !cruel ? 1 : cruel && !kind ? -1 : 0;
 }
 
+function behaviorAgencyPolarity(value) {
+    const text = normalizeName(`${behaviorProfileKey(value)} ${behaviorProfileBody(value)}`);
+    if (!text) return 0;
+    const independent = /\b(independence|independent|autonomy|autonomous|self directed|self direction|own judgment|own judgement|own decisions|personal judgment|personal judgement)\b/.test(text);
+    const compliant = /\b(obedience|obedient|compliance|compliant|submission|submissive)\b/.test(text)
+        || /\bdefer(?:s|red|ring)?\b.{0,24}\b(?:authority|orders?|instructions?|others?)\b/.test(text)
+        || /\bfollows?\b.{0,16}\b(?:orders?|instructions?)\b/.test(text);
+    return independent && !compliant ? 1 : compliant && !independent ? -1 : 0;
+}
+
+function aggregateBehaviorPolarity(entries, classifier) {
+    const values = new Set((Array.isArray(entries) ? entries : []).map(classifier).filter(Boolean));
+    return values.size === 1 ? [...values][0] : 0;
+}
+
+function behaviorProfileRefinementConflict(current, updates) {
+    if ((updates || []).some(entry => containsEvolutionLanguage(behaviorProfileBody(entry)))) return true;
+    const oldMorality = aggregateBehaviorPolarity(current, moralityPolarity);
+    const newMorality = aggregateBehaviorPolarity(updates, moralityPolarity);
+    if (oldMorality && newMorality && oldMorality !== newMorality) return true;
+    const oldAgency = aggregateBehaviorPolarity(current, behaviorAgencyPolarity);
+    const newAgency = aggregateBehaviorPolarity(updates, behaviorAgencyPolarity);
+    return Boolean(oldAgency && newAgency && oldAgency !== newAgency);
+}
+
 function isSafeBehaviorProfileRefinement(existing, incoming) {
     const oldText = cleanText(existing, DURABLE_PROFILE_LIMITS.behaviorProfile);
     const newText = cleanText(incoming, DURABLE_PROFILE_LIMITS.behaviorProfile);
@@ -2052,6 +2086,10 @@ function mergeBehaviorProfileRefinements(existing, incoming) {
     const current = normalizeBehaviorProfile(existing);
     const updates = normalizeBehaviorProfile(incoming);
     if (!updates.length) return current;
+    // Refine is a full current summary, but it is not an evolution channel. Evaluate
+    // protected identity/morality direction across the whole proposal before category-by-
+    // category replacement so relabeling cannot bypass the existing atomic safety gate.
+    if (behaviorProfileRefinementConflict(current, updates)) return current;
     const next = [];
     for (const entry of updates) {
         const key = behaviorProfileKey(entry);
@@ -3021,7 +3059,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
             const mode = String(incoming.appearanceState || 'keep');
             if (mode === 'change') {
                 if (!String(incoming.appearanceReason || '').trim() || !directEvolutionReady()) continue;
-            } else if (mode !== 'refine' && !isSafeUnmarkedDurableRefinement(existing.appearance, value)) {
+            } else if (mode !== 'refine' && !isSafeUnmarkedDurableReplacement(existing.appearance, value)) {
                 continue;
             }
             if (mode === 'refine') {
@@ -3037,7 +3075,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
             const mode = String(incoming.personalityState || 'keep');
             if (mode === 'evolve') {
                 if (!String(incoming.personalityReason || '').trim() || !directEvolutionReady()) continue;
-            } else if (mode !== 'refine' && !isSafeUnmarkedDurableRefinement(existing.personality, value)) {
+            } else if (mode !== 'refine' && !isSafeUnmarkedDurableReplacement(existing.personality, value)) {
                 continue;
             }
             if (mode === 'refine') {
@@ -3052,7 +3090,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
             const mode = String(incoming.speechState || 'keep');
             if (mode === 'evolve') {
                 if (!String(incoming.speechReason || '').trim() || !directEvolutionReady()) continue;
-            } else if (mode !== 'refine' && !isSafeUnmarkedDurableRefinement(existing.speech, value)) {
+            } else if (mode !== 'refine' && !isSafeUnmarkedDurableReplacement(existing.speech, value)) {
                 continue;
             }
             if (mode === 'refine') {
@@ -3569,7 +3607,10 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
             return;
         }
         const safeRefinement = field === 'personality' ? isSafeIdentityTextRefinement(current, value) : (field === 'speech' ? isSafeSpeechRefinement(current, value) : isSafeUnmarkedDurableRefinement(current, value));
-        if ((state === refineState && safeRefinement) || (state !== evolveState && safeRefinement)) {
+        const explicitRefinement = state === refineState && safeRefinement;
+        const unmarkedRecovery = state !== refineState && state !== evolveState
+            && isSafeUnmarkedDurableReplacement(current, value);
+        if (explicitRefinement || unmarkedRecovery) {
             const merged = mergeDurableTextRefinement(current, value, maxChars);
             if (normalizeName(merged) !== normalizeName(current)) { npc[field] = merged; changed = true; }
             // Preserve older pending change evidence, but consume evidence used only to justify
