@@ -1,6 +1,14 @@
 # NPC State Delta changes
 
 
+## 1.0.21 - 15 September 2026
+
+- Fix the live time-skip false negative where Gemini correctly returned `developmentScale: "batch"` and `speechState: "evolve"`, but deterministic validation still rejected natural elapsed phrasing such as `in two months`, `over the past month`, `the past seventy days`, `for two months`, or `one season under ...` as `waiting-for-explicit-gate`.
+- Generalize elapsed-duration parsing across day/week/month/year/decade/season units, larger spelled-out quantities, past/previous/last windows, qualified spans and contextual residence/training spans. Keep age statements and bare passage non-authoritative.
+- Strengthen batch grounding so the elapsed-time clause or an explicit temporal continuation must carry sustained-development evidence and sufficiently ground the supplied development reason. Weak generic transitions such as unrelated weather `changed` cannot lend their duration to a later one-off behavior.
+- Add scoped deterministic development aliases for conservative paraphrases such as schooling/study and training/practice without changing global durable-profile similarity or adding any model request. Verify the same grounded time-compressed Refresh can carry safe Personality, Mannerisms and Behavioral Profile refinements alongside Speech under their existing field gates.
+- Add production `mergeScanResult` reproduction of the reported Ryu payload shape plus unit guards for months, years, seasons, past-day spans, comma-separated `in two months` phrasing, age statements, unrelated elapsed events and semantic development wording. Scanner prompt bytes, request counts/retries, output allowances, relationship mechanics, persistence schemas, branch lineage and native bundle format remain unchanged.
+
 ## 1.0.20 - 15 September 2026
 
 - Make time-compressed durable development deterministic instead of depending on the provider to emit the exact `batch` + `evolve` combination. When a Personality or Speech candidate is returned as `gradual`/`refine` or `gradual`/`keep`, Delta may infer the existing batch path only when the supplied story context itself proves an elapsed span, sustained development during that span, and a grounded development reason.
