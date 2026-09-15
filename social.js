@@ -1,9 +1,34 @@
 export const SOCIAL_GRAPH_VERSION = 1;
 export const SOCIAL_GRAPH_EDGE_LIMIT = 240;
 export const SOCIAL_GRAPH_UNRESOLVED_LIMIT = 120;
+export const SOCIAL_KEY_RELATIONSHIP_MAX_CHARS = 360;
+export const SOCIAL_DYNAMIC_MAX_CHARS = 260;
 
 function clean(value, max = 500) {
     return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+function normalizedWhitespace(value) {
+    return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function cleanBoundary(value, max = 500, { ellipsis = true } = {}) {
+    const text = normalizedWhitespace(value);
+    const cap = Math.max(0, Math.floor(Number(max) || 0));
+    if (!text || cap <= 0) return '';
+    if (text.length <= cap) return text;
+    const reserve = ellipsis && cap > 1 ? 1 : 0;
+    const prefix = text.slice(0, Math.max(1, cap - reserve));
+    let sentenceCut = -1;
+    for (const match of prefix.matchAll(/[.!?](?=\s|$)/g)) sentenceCut = match.index + 1;
+    if (sentenceCut >= Math.floor(cap * 0.45)) return prefix.slice(0, sentenceCut).trim();
+    let clauseCut = -1;
+    for (const match of prefix.matchAll(/[;,](?=\s|$)/g)) clauseCut = match.index;
+    if (clauseCut >= Math.floor(cap * 0.45)) return prefix.slice(0, clauseCut).replace(/[|/;,\s]+$/g, '').trim();
+    const wordCut = prefix.lastIndexOf(' ');
+    if (wordCut <= 0) return '';
+    const clipped = prefix.slice(0, wordCut).replace(/[|/;,\s]+$/g, '').trim();
+    return clipped && ellipsis ? `${clipped}…` : clipped;
 }
 
 function norm(value) {
@@ -57,11 +82,13 @@ function nearDuplicateText(a, b) {
     return left === right || left.includes(right) || right.includes(left) || semanticOverlap(left, right) >= 0.72;
 }
 
-function cleanDynamic(value, max = 220) {
-    const raw = clean(value, Math.max(max * 4, max));
+function cleanDynamic(value, max = SOCIAL_DYNAMIC_MAX_CHARS) {
+    const raw = normalizedWhitespace(value);
     if (!raw) return '';
     const kept = [];
-    const parts = raw.split(/\s*(?:;|\|)\s*|\s+\/\s+/).map(item => clean(item, max)).filter(Boolean);
+    const parts = raw.split(/\s*(?:;|\|)\s*|\s+\/\s+/)
+        .map(item => cleanBoundary(item, max))
+        .filter(Boolean);
     for (const part of parts) {
         const key = norm(part);
         if (!key || (key.length < 4 && !/\d/.test(key))) continue;
@@ -69,10 +96,20 @@ function cleanDynamic(value, max = 220) {
         if (duplicateIndex >= 0) continue;
         kept.push(part);
     }
-    return clean(kept.join('; '), max);
+    let out = '';
+    for (const part of kept) {
+        const candidate = out ? `${out}; ${part}` : part;
+        if (candidate.length <= max) {
+            out = candidate;
+            continue;
+        }
+        if (!out) out = cleanBoundary(part, max);
+        break;
+    }
+    return out.replace(/[|/;,\s]+$/g, '').trim();
 }
 
-function richer(a, b, max = 220) {
+function richer(a, b, max = SOCIAL_DYNAMIC_MAX_CHARS) {
     const left = cleanDynamic(a, max);
     const right = cleanDynamic(b, max);
     if (!left) return right;
@@ -139,18 +176,18 @@ function preserveUnstructuredRelationshipText(value) {
 }
 
 function sanitizeRelationshipRelation(subject, value) {
-    let relation = clean(value, 180);
+    let relation = cleanBoundary(value, 180, { ellipsis: false });
     if (!relation) return '';
     const slash = [];
     const seen = new Set();
-    for (const part of relation.split(/\s*\/\s*/).map(item => clean(item, 180)).filter(Boolean)) {
+    for (const part of relation.split(/\s*\/\s*/).map(item => cleanBoundary(item, 180, { ellipsis: false })).filter(Boolean)) {
         const key = norm(part);
         if (!key || seen.has(key)) continue;
         seen.add(key);
         slash.push(part);
     }
     if (slash.length === 2 && inverseRelationFamilies(slash[0], slash[1])) relation = slash[0];
-    else if (slash.length) relation = clean(slash.join(' / '), 180);
+    else if (slash.length) relation = cleanBoundary(slash.join(' / '), 180, { ellipsis: false });
     const subjectKey = norm(subject);
     const relationKey = norm(relation);
     if (/^late husband\b/.test(subjectKey) && /^(?:surviving )?widow\b/.test(relationKey)) return 'spouse';
@@ -190,8 +227,8 @@ function relationSpecificity(value) {
 }
 
 function mergeRelations(a, b) {
-    const left = clean(a, 180);
-    const right = clean(b, 180);
+    const left = cleanBoundary(a, 180, { ellipsis: false });
+    const right = cleanBoundary(b, 180, { ellipsis: false });
     if (!left) return right;
     if (!right) return left;
     const ln = norm(left);
@@ -203,16 +240,16 @@ function mergeRelations(a, b) {
     const rf = socialRelationFamily(right);
     if (lf && lf === rf) return relationSpecificity(right) >= relationSpecificity(left) ? right : left;
     if (inverseRelationFamilies(lf, rf)) return left;
-    return clean(`${left} / ${right}`, 180);
+    return cleanBoundary(`${left} / ${right}`, 180, { ellipsis: false });
 }
 
 export function parseKeyRelationshipEntry(value) {
-    const text = clean(value, 420);
+    const text = normalizedWhitespace(value);
     if (!text) return null;
     const match = text.match(/^(.+?)(?:\s+[—–-]\s+|\s*:\s+)([\s\S]*)$/);
     if (!match) return null;
-    const subject = clean(match[1], 120);
-    const rest = clean(match[2], 280);
+    const subject = cleanBoundary(match[1], 120, { ellipsis: false });
+    const rest = normalizedWhitespace(match[2]);
     if (!subject || !rest || !relationshipSubjectLooksStructured(subject)) return null;
     const pipe = rest.indexOf('|');
     let relationText = pipe >= 0 ? rest.slice(0, pipe) : rest;
@@ -220,7 +257,7 @@ export function parseKeyRelationshipEntry(value) {
     if (pipe < 0) {
         const semicolon = rest.indexOf(';');
         if (semicolon > 0) {
-            const candidateRelation = clean(rest.slice(0, semicolon), 180);
+            const candidateRelation = cleanBoundary(rest.slice(0, semicolon), 180, { ellipsis: false });
             if (KNOWN_SOCIAL_RELATION_FAMILIES.has(socialRelationFamily(candidateRelation))) {
                 relationText = candidateRelation;
                 dynamicText = rest.slice(semicolon + 1);
@@ -228,19 +265,30 @@ export function parseKeyRelationshipEntry(value) {
         }
     }
     const relation = sanitizeRelationshipRelation(subject, relationText);
-    const dynamic = cleanDynamic(dynamicText, 220);
+    const dynamic = cleanDynamic(dynamicText, SOCIAL_DYNAMIC_MAX_CHARS);
     if (!relation) return null;
     return { subject, relation, dynamic };
 }
 
 function formatKeyRelationship(subject, relation, dynamic = '', counterpart = null) {
-    const rel = sanitizeRelationshipRelation(subject, relation);
-    if (!rel) return '';
-    let dyn = cleanDynamic(dynamic, 220);
+    const who = cleanBoundary(subject, 120, { ellipsis: false });
+    const rel = sanitizeRelationshipRelation(who, relation);
+    if (!who || !rel) return '';
+    const base = `${who} — ${rel}`;
+    const availableDynamic = Math.max(0, Math.min(SOCIAL_DYNAMIC_MAX_CHARS, SOCIAL_KEY_RELATIONSHIP_MAX_CHARS - base.length - 3));
+    let dyn = availableDynamic > 0 ? cleanDynamic(dynamic, availableDynamic) : '';
     if (counterpart?.lifeState === 'deceased' && !/\b(?:deceased|dead|late)\b/i.test(`${rel} ${dyn}`)) {
-        dyn = cleanDynamic(dyn ? `${dyn}; deceased` : 'deceased', 220);
+        dyn = cleanDynamic(dyn ? `${dyn}; deceased` : 'deceased', availableDynamic);
     }
-    return clean(`${clean(subject, 120)} — ${rel}${dyn ? ` | ${dyn}` : ''}`, 420);
+    return dyn ? `${base} | ${dyn}` : base;
+}
+
+export function compactSocialKeyRelationship(value) {
+    const text = normalizedWhitespace(value);
+    if (!text) return '';
+    const parsed = parseKeyRelationshipEntry(text);
+    if (!parsed) return cleanBoundary(text, SOCIAL_KEY_RELATIONSHIP_MAX_CHARS);
+    return formatKeyRelationship(parsed.subject, parsed.relation, parsed.dynamic);
 }
 
 export function resolveNpcReference(npcs = [], labelOrId = '') {
@@ -277,8 +325,8 @@ function normalizeEdge(raw = {}) {
         bId,
         aToB,
         bToA,
-        aDynamic: cleanDynamic(raw.aDynamic ?? raw.a_dynamic, 220),
-        bDynamic: cleanDynamic(raw.bDynamic ?? raw.b_dynamic, 220),
+        aDynamic: cleanDynamic(raw.aDynamic ?? raw.a_dynamic, SOCIAL_DYNAMIC_MAX_CHARS),
+        bDynamic: cleanDynamic(raw.bDynamic ?? raw.b_dynamic, SOCIAL_DYNAMIC_MAX_CHARS),
         provenance: clean(raw.provenance, 40) || 'migration',
         confidence,
         reason: clean(raw.reason ?? raw.evidence, 300),
@@ -515,8 +563,8 @@ function parseScanEdges(scanResult = {}, npcs = [], meta = {}) {
         if (!a || !b || a.id === b.id) continue;
         let aToB = sanitizeRelationshipRelation(a.name, item?.aToB ?? item?.a_to_b ?? item?.fromTo ?? item?.from_to ?? item?.relation ?? item?.relationship);
         let bToA = sanitizeRelationshipRelation(b.name, item?.bToA ?? item?.b_to_a ?? item?.toFrom ?? item?.to_from ?? item?.reverseRelation ?? item?.reverse_relation) || inverseSocialRelation(aToB);
-        let aDynamic = cleanDynamic(item?.aDynamic ?? item?.a_dynamic ?? item?.fromDynamic ?? item?.dynamic, 220);
-        let bDynamic = cleanDynamic(item?.bDynamic ?? item?.b_dynamic ?? item?.toDynamic, 220);
+        let aDynamic = cleanDynamic(item?.aDynamic ?? item?.a_dynamic ?? item?.fromDynamic ?? item?.dynamic, SOCIAL_DYNAMIC_MAX_CHARS);
+        let bDynamic = cleanDynamic(item?.bDynamic ?? item?.b_dynamic ?? item?.toDynamic, SOCIAL_DYNAMIC_MAX_CHARS);
         if (!aToB && !bToA) continue;
         const aEstablished = establishedCounterpartRelation(a, b, npcs);
         const bEstablished = establishedCounterpartRelation(b, a, npcs);

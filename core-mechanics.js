@@ -4,6 +4,9 @@ import {
     remapSocialGraphNpcId,
     canonicalizeNpcKeyRelationships,
     socialGraphLabelsForNpc,
+    compactSocialKeyRelationship,
+    SOCIAL_KEY_RELATIONSHIP_MAX_CHARS,
+    SOCIAL_DYNAMIC_MAX_CHARS,
 } from './social.js';
 
 export const NPC_LIFE_STATES = Object.freeze(['unknown', 'alive', 'deceased']);
@@ -21,7 +24,7 @@ export const DURABLE_PROFILE_LIMITS = Object.freeze({
     relationshipSummary: 320,
     mannerism: 160,
     behaviorProfile: 180,
-    keyRelationship: 220,
+    keyRelationship: SOCIAL_KEY_RELATIONSHIP_MAX_CHARS,
     memory: 220,
     evidence: 160,
 });
@@ -1580,6 +1583,25 @@ function cleanText(value, max = 1200) {
     return value.replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
+function cleanTextBoundary(value, max = 1200, { ellipsis = true } = {}) {
+    const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+    const cap = Math.max(0, Math.floor(Number(max) || 0));
+    if (!text || cap <= 0) return '';
+    if (text.length <= cap) return text;
+    const reserve = ellipsis && cap > 1 ? 1 : 0;
+    const prefix = text.slice(0, Math.max(1, cap - reserve));
+    let sentenceCut = -1;
+    for (const match of prefix.matchAll(/[.!?](?=\s|$)/g)) sentenceCut = match.index + 1;
+    if (sentenceCut >= Math.floor(cap * 0.45)) return prefix.slice(0, sentenceCut).trim();
+    let clauseCut = -1;
+    for (const match of prefix.matchAll(/[;,](?=\s|$)/g)) clauseCut = match.index;
+    if (clauseCut >= Math.floor(cap * 0.45)) return prefix.slice(0, clauseCut).replace(/[|/;,\s]+$/g, '').trim();
+    const wordCut = prefix.lastIndexOf(' ');
+    if (wordCut <= 0) return '';
+    const clipped = prefix.slice(0, wordCut).replace(/[|/;,\s]+$/g, '').trim();
+    return clipped && ellipsis ? `${clipped}…` : clipped;
+}
+
 function cleanList(value, maxItems = 8, maxChars = 240) {
     if (!Array.isArray(value)) return [];
     const seen = new Set();
@@ -2229,20 +2251,20 @@ function gradualProfileEvolutionReady(field, beforeEvidence, incomingEvidence) {
 }
 
 function compactKeyRelationshipEntry(value) {
-    const text = cleanText(value, DURABLE_PROFILE_LIMITS.keyRelationship);
+    const text = String(value ?? '').replace(/\s+/g, ' ').trim();
     if (!text) return '';
     const match = text.match(/^(.+?)(?:\s+[—–-]\s+|\s*\|\s*|\s*:\s+)([\s\S]*)$/);
-    if (!match) return compactDurableText(text, DURABLE_PROFILE_LIMITS.keyRelationship, 3);
-    const subject = cleanText(match[1], 120);
-    let rest = compactDurableText(match[2], Math.max(80, DURABLE_PROFILE_LIMITS.keyRelationship - subject.length - 3), 3);
+    if (!match) return compactSocialKeyRelationship(text);
+    const subject = cleanTextBoundary(match[1], 120, { ellipsis: false });
+    let rest = String(match[2] ?? '').replace(/\s+/g, ' ').trim();
     const ambiguousDeath = /\s*\((?:deceased|dead)\)\.?\s*$/i.test(rest);
     if (ambiguousDeath) {
         rest = rest.replace(/\s*\((?:deceased|dead)\)\.?\s*$/i, '').trim();
         if (/^widow\b/i.test(rest)) rest = rest.replace(/^widow\b/i, 'Surviving widow');
         else if (/^widower\b/i.test(rest)) rest = rest.replace(/^widower\b/i, 'Surviving widower');
-        else rest = cleanText(`${rest}; deceased`, Math.max(80, DURABLE_PROFILE_LIMITS.keyRelationship - subject.length - 3));
+        else rest = `${rest}; deceased`;
     }
-    return cleanText(`${subject} — ${rest}`, DURABLE_PROFILE_LIMITS.keyRelationship);
+    return compactSocialKeyRelationship(`${subject} — ${rest}`);
 }
 
 function keyRelationshipSubject(value) {
@@ -2267,9 +2289,9 @@ function keyRelationshipSubjectsEquivalent(a, b) {
 }
 
 function mergeKeyRelationshipUpdates(existing, incoming) {
-    const current = cleanList(existing, KEY_RELATIONSHIP_LIMIT * 2, DURABLE_PROFILE_LIMITS.keyRelationship)
+    const current = (Array.isArray(existing) ? existing : []).slice(0, KEY_RELATIONSHIP_LIMIT * 2)
         .map(compactKeyRelationshipEntry).filter(Boolean).slice(0, KEY_RELATIONSHIP_LIMIT);
-    const updates = cleanList(incoming, KEY_RELATIONSHIP_LIMIT * 2, DURABLE_PROFILE_LIMITS.keyRelationship)
+    const updates = (Array.isArray(incoming) ? incoming : []).slice(0, KEY_RELATIONSHIP_LIMIT * 2)
         .map(compactKeyRelationshipEntry).filter(Boolean);
     for (const entry of updates) {
         const exact = normalizeName(entry);
@@ -2287,10 +2309,10 @@ function normalizeKeyRelationshipEdge(raw = {}) {
     const bId = cleanText(raw.bId ?? raw.b_id ?? raw.toId ?? raw.to_id ?? raw.targetId ?? raw.target_id, 100);
     const a = cleanText(raw.a ?? raw.from ?? raw.source ?? raw.personA ?? raw.person_a, 120);
     const b = cleanText(raw.b ?? raw.to ?? raw.target ?? raw.personB ?? raw.person_b, 120);
-    const aToB = cleanText(raw.aToB ?? raw.a_to_b ?? raw.fromTo ?? raw.from_to ?? raw.relation ?? raw.relationship, 180);
-    const bToA = cleanText(raw.bToA ?? raw.b_to_a ?? raw.toFrom ?? raw.to_from ?? raw.reverseRelation ?? raw.reverse_relation, 180);
-    const aDynamic = cleanText(raw.aDynamic ?? raw.a_dynamic ?? raw.fromDynamic ?? raw.from_dynamic ?? raw.dynamic, 220);
-    const bDynamic = cleanText(raw.bDynamic ?? raw.b_dynamic ?? raw.toDynamic ?? raw.to_dynamic, 220);
+    const aToB = cleanTextBoundary(raw.aToB ?? raw.a_to_b ?? raw.fromTo ?? raw.from_to ?? raw.relation ?? raw.relationship, 180, { ellipsis: false });
+    const bToA = cleanTextBoundary(raw.bToA ?? raw.b_to_a ?? raw.toFrom ?? raw.to_from ?? raw.reverseRelation ?? raw.reverse_relation, 180, { ellipsis: false });
+    const aDynamic = cleanTextBoundary(raw.aDynamic ?? raw.a_dynamic ?? raw.fromDynamic ?? raw.from_dynamic ?? raw.dynamic, SOCIAL_DYNAMIC_MAX_CHARS);
+    const bDynamic = cleanTextBoundary(raw.bDynamic ?? raw.b_dynamic ?? raw.toDynamic ?? raw.to_dynamic, SOCIAL_DYNAMIC_MAX_CHARS);
     const reason = cleanText(raw.reason ?? raw.evidence, 300);
     if ((!a && !aId) || (!b && !bId) || (!aToB && !bToA)) return null;
     return { aId, a, bId, b, aToB, bToA, aDynamic, bDynamic, reason };
@@ -2330,11 +2352,11 @@ function relationshipEdgeNpc(npcs, id, label) {
 }
 
 function relationshipEdgeEntry(counterpart, relation, dynamic = '') {
-    const who = cleanText(counterpart, 120);
-    const rel = cleanText(relation, 180);
-    const current = cleanText(dynamic, 220);
+    const who = cleanTextBoundary(counterpart, 120, { ellipsis: false });
+    const rel = cleanTextBoundary(relation, 180, { ellipsis: false });
+    const current = cleanTextBoundary(dynamic, SOCIAL_DYNAMIC_MAX_CHARS);
     if (!who || !rel) return '';
-    return `${who} — ${rel}${current ? ` | ${current}` : ''}`;
+    return compactSocialKeyRelationship(`${who} — ${rel}${current ? ` | ${current}` : ''}`);
 }
 
 function applyKeyRelationshipEdges(next, scanResult, excludeNames, report) {
@@ -2748,7 +2770,10 @@ export function normalizeNpcRecord(raw = {}) {
         ? cleanList(raw.behaviorProfile ?? raw.behavior_profile, BEHAVIOR_PROFILE_LIMIT, 320)
         : normalizeBehaviorProfile(raw.behaviorProfile ?? raw.behavior_profile);
     npc.keyRelationships = locked.has('keyRelationships')
-        ? cleanList(raw.keyRelationships ?? raw.key_relationships ?? raw.innerCircle ?? raw.inner_circle ?? raw.family, KEY_RELATIONSHIP_LIMIT, 420)
+        ? (Array.isArray(raw.keyRelationships ?? raw.key_relationships ?? raw.innerCircle ?? raw.inner_circle ?? raw.family)
+            ? (raw.keyRelationships ?? raw.key_relationships ?? raw.innerCircle ?? raw.inner_circle ?? raw.family)
+                .map(compactKeyRelationshipEntry).filter(Boolean).slice(0, KEY_RELATIONSHIP_LIMIT)
+            : [])
         : mergeKeyRelationshipUpdates([], raw.keyRelationships ?? raw.key_relationships ?? raw.innerCircle ?? raw.inner_circle ?? raw.family);
     npc.profileEvidence = normalizeProfileEvidence(raw.profileEvidence ?? raw.profile_evidence);
     // v0.1.15: legacy Current Thoughts are intentionally discarded. NPC Inner Chatter is the ephemeral source of internal voice.
