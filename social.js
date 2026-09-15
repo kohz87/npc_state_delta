@@ -270,6 +270,7 @@ function normalizeEdge(raw = {}) {
     const bToAInput = raw.bToA ?? raw.b_to_a ?? raw.reverseRelation;
     const bToA = sanitizeRelationshipRelation('', bToAInput) || inverseSocialRelation(aToB);
     if (!aToB && !bToA) return null;
+    const confidence = clean(raw.confidence, 40) || 'migration';
     return {
         id: clean(raw.id, 120) || `edge_${slug(`${aId}-${bId}-${socialRelationFamily(aToB)}-${socialRelationFamily(bToA)}`)}`,
         aId,
@@ -279,13 +280,13 @@ function normalizeEdge(raw = {}) {
         aDynamic: cleanDynamic(raw.aDynamic ?? raw.a_dynamic, 220),
         bDynamic: cleanDynamic(raw.bDynamic ?? raw.b_dynamic, 220),
         provenance: clean(raw.provenance, 40) || 'migration',
-        confidence: clean(raw.confidence, 40) || 'migration',
+        confidence,
         reason: clean(raw.reason ?? raw.evidence, 300),
         sourceMessageId: Number.isInteger(raw.sourceMessageId) ? raw.sourceMessageId : null,
         turn: Number.isFinite(Number(raw.turn)) ? Number(raw.turn) : null,
         groupId: clean(raw.groupId ?? raw.group_id, 120),
         sharedDescriptor: clean(raw.sharedDescriptor ?? raw.shared_descriptor, 120),
-        inferred: raw.inferred === true,
+        inferred: raw.inferred === true && confidenceRank(confidence) < confidenceRank('explicit'),
     };
 }
 
@@ -335,6 +336,7 @@ export function normalizeSocialGraph(raw = {}) {
                 current.reason = edge.reason || current.reason;
                 current.sourceMessageId = edge.sourceMessageId ?? current.sourceMessageId;
                 current.turn = edge.turn ?? current.turn;
+                current.inferred = edge.inferred;
             }
             current.groupId ||= edge.groupId;
             current.sharedDescriptor ||= edge.sharedDescriptor;
@@ -380,19 +382,20 @@ function addEdge(graph, raw) {
             current.reason = edge.reason || current.reason;
             current.sourceMessageId = edge.sourceMessageId ?? current.sourceMessageId;
             current.turn = edge.turn ?? current.turn;
+            current.inferred = edge.inferred;
         }
         current.groupId ||= edge.groupId;
         current.sharedDescriptor ||= edge.sharedDescriptor;
         return current;
     }
     if (graph.edges.length >= SOCIAL_GRAPH_EDGE_LIMIT) {
-        const incomingRank = edge.inferred ? confidenceRank('inferred') : confidenceRank(edge.confidence);
+        const incomingRank = confidenceRank(edge.confidence);
         if (incomingRank <= confidenceRank('inferred')) return null;
         let evictionIndex = -1;
         let evictionRank = Infinity;
         for (let i = 0; i < graph.edges.length; i += 1) {
             const current = graph.edges[i];
-            const rank = current.inferred ? confidenceRank('inferred') : confidenceRank(current.confidence);
+            const rank = confidenceRank(current.confidence);
             if (rank >= incomingRank || rank >= evictionRank) continue;
             evictionRank = rank;
             evictionIndex = i;

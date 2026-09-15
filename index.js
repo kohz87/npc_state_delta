@@ -5051,13 +5051,16 @@ function importBundleBytes(bytes) {
     if (!requireReadyChatMutation('import a dossier')) throw new Error('NPC State Delta chat dossier is not loaded.');
     const settings = getSettings();
     const decoded = decodeDeltaNativeBundle(bytes);
-    decoded.state = nativeStateForTarget(decoded, getChatKey());
+    const targetChatKey = getChatKey();
+    const foreignOwnership = decoded.metadata.sourceChatKey !== targetChatKey;
+    decoded.state = nativeStateForTarget(decoded, targetChatKey);
     const before = getChatState();
     const importReport = {};
     const merged = mergeImportedDossierState(before, decoded.state, {
         maxNpcs: settings.maxNpcs,
         excludeNames: currentExclusions(),
         report: importReport,
+        foreignOwnership,
     });
     // Only an actually accepted import can deliberately resurrect an ID-backed deleted
     // identity. Capacity/exclusion/duplicate skips must not weaken tombstones.

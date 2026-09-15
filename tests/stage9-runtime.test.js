@@ -39,6 +39,7 @@ async function additionalChecks(mockState, eventSource, manualAddNpc, sleep, ext
 
     // The public importer cannot bypass complete native-envelope validation.
     const { encodeNpcStateBundle } = await import(pathToFileURL(path.join(extRoot, 'bundle.js')).href);
+    const { prepareNativeImport } = await import(pathToFileURL(path.join(extRoot, 'native-transfer.js')).href);
     const bundleBytes = manifest => {
         const text = new TextEncoder().encode(JSON.stringify(manifest));
         const bytes = new Uint8Array(12 + text.length);
@@ -53,6 +54,52 @@ async function additionalChecks(mockState, eventSource, manualAddNpc, sleep, ext
     const foreign = { ...runtime.getNpc(npc.id), birthDateSourceMessageId: 1234 };
     runtime.importBytes(encodeNpcStateBundle({ npcs: [foreign] }, { chatKey: 'chat:foreign:source' }));
     assert.equal(runtime.getNpc(npc.id).birthDateSourceMessageId, null);
+
+    // Foreign activity counters are source-chat clocks. Matching target dossiers keep their
+    // target chronology, while newly admitted foreign dossiers start at the target import turn.
+    const targetActivity = runtime.getNpc(npc.id);
+    for (const sourceTurn of [2, 9999]) {
+        const foreignMatch = {
+            ...runtime.getNpc(npc.id),
+            lastSeenTurn: sourceTurn,
+            lastWorldActiveTurn: sourceTurn,
+        };
+        runtime.importBytes(encodeNpcStateBundle({ npcs: [foreignMatch] }, { chatKey: `chat:foreign:${sourceTurn}` }));
+        assert.equal(runtime.getNpc(npc.id).lastSeenTurn, targetActivity.lastSeenTurn);
+        assert.equal(runtime.getNpc(npc.id).lastWorldActiveTurn, targetActivity.lastWorldActiveTurn);
+    }
+    const targetImportTurn = runtime.getState().turn;
+    const directForeign = {
+        ...runtime.getNpc(npc.id),
+        id: 'npc_direct_foreign_activity',
+        name: 'Direct Foreign Activity',
+        aliases: [],
+        keyRelationships: [],
+        lastSeenTurn: 2,
+        lastWorldActiveTurn: 2,
+        present: false,
+        worldActive: false,
+        archived: false,
+        archiveReason: '',
+    };
+    runtime.importBytes(encodeNpcStateBundle({ npcs: [directForeign] }, { chatKey: 'chat:foreign:direct' }));
+    assert.equal(runtime.getNpc('npc_direct_foreign_activity').lastSeenTurn, targetImportTurn);
+    assert.equal(runtime.getNpc('npc_direct_foreign_activity').lastWorldActiveTurn, targetImportTurn);
+
+    const preparedForeign = {
+        ...directForeign,
+        id: 'npc_prepared_foreign_activity',
+        name: 'Prepared Foreign Activity',
+        lastSeenTurn: 9999,
+        lastWorldActiveTurn: 9999,
+    };
+    const prepared = prepareNativeImport(
+        encodeNpcStateBundle({ npcs: [preparedForeign] }, { chatKey: 'chat:foreign:prepared' }),
+        chatKey,
+    );
+    runtime.importBytes(prepared.importBytes);
+    assert.equal(runtime.getNpc('npc_prepared_foreign_activity').lastSeenTurn, targetImportTurn);
+    assert.equal(runtime.getNpc('npc_prepared_foreign_activity').lastWorldActiveTurn, targetImportTurn);
     await runtime.flush();
 
     // Raw World State survives the real scanner's UI-noise stripping and reaches next injection.

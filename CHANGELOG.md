@@ -1,6 +1,14 @@
 # NPC State Delta changes
 
 
+## 1.0.17 - 15 September 2026 (unpublished candidate)
+
+- Rebase foreign-import activity chronology at the canonical bundle merge boundary. New foreign dossiers begin their inactivity clock at the target chat's current turn, while matching target dossiers preserve their existing target-owned `lastSeenTurn` / `lastWorldActiveTurn`; low or high source-chat counters can therefore neither trigger immediate stale deletion nor grant excessive retention. Prepared/UI imports retain their original source-chat identity until the canonical importer applies this rebasing, without inventing source-message provenance.
+- Make missing/`keep` Personality, Speech and Appearance recovery satisfy the same field-specific safety gates as explicit refinement in addition to preserving all established durable concepts. Morality reversals and Speech evolution language such as `no longer` cannot pass merely because old words remain lexically present; legitimate additive keep recovery and explicit accepted full-current `refine` remain supported.
+- Preserve mixed protected Behavioral Profile directions instead of collapsing them to neutral. Full-profile refinement now rejects agency or morality reversals atomically across renamed categories, including the bounded `not independent` negation case, while ordinary cooperation with authority is not treated as obedience by itself.
+- Clear stale inferred status when a social edge gains explicit/manual authority, keep duplicate/reversed-edge normalization consistent with that promotion, and rank capacity by canonical confidence. At the 240-edge limit, weaker/equal arrivals cannot evict equal- or higher-authority established bonds.
+- Promote the deep-scan reproductions into tracked regression coverage, including direct and prepared foreign imports, low/high source clocks, matching/new dossiers, both ordinary and `profileUpdates` profile paths, mixed/negated Behavioral Profile cases, explicit/manual social promotion, mirrored projections, repeated normalization and later capacity pressure. Scanner prompts, request/retry/output budgets, routing, numerical relationship scoring, persisted schemas, branch recovery and native bundle format remain unchanged.
+
 ## 1.0.16 - 15 September 2026
 
 - Keep the 1.0.15 full-current `refine` contract explicit: missing/`keep` lifecycle markers use non-destructive compatibility recovery that may add grounded detail but preserves omitted established Personality, Speech or Appearance clauses instead of treating omission as deletion authority.
