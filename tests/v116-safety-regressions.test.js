@@ -118,8 +118,25 @@ test('v1.0.16 behavior-profile refine rejects morality reversal hidden behind a 
     assert.deepEqual(updated.behaviorProfile, npc.behaviorProfile);
 });
 
-test('v1.0.16 cross-chat native import rebases pending Speech-development provenance', () => {
+test('v1.0.19 cross-chat native import rebases pending Personality/Speech development provenance', () => {
     const npc = createNpcRecord('Ryu');
+    npc.personality = 'Reserved, observant, and quietly protective.';
+    npc.personalityDevelopment = {
+        version: 1,
+        epoch: 2,
+        baselinePersonality: npc.personality,
+        baselineTurn: 16,
+        baselineSourceMessageId: 32,
+        concepts: [{
+            concept: 'confidence',
+            firstTurn: 16,
+            lastTurn: 20,
+            observationCount: 3,
+            sourceMessageIds: [32, 36, 40],
+            turns: [16, 18, 20],
+            latestEvidence: 'confidence: speaks before groups without prompting',
+        }],
+    };
     npc.speech = 'Soft, formal, and precise.';
     npc.speechDevelopment = {
         version: 1,
@@ -143,6 +160,11 @@ test('v1.0.16 cross-chat native import rebases pending Speech-development proven
     const prepared = prepareNativeImport(native, 'chat:target');
     const imported = decodeDeltaNativeBundle(prepared.importBytes).state.npcs[0];
 
+    assert.equal(imported.personalityDevelopment.baselinePersonality, npc.personality);
+    assert.equal(imported.personalityDevelopment.epoch, 2);
+    assert.equal(imported.personalityDevelopment.baselineTurn, null);
+    assert.equal(imported.personalityDevelopment.baselineSourceMessageId, null);
+    assert.deepEqual(imported.personalityDevelopment.concepts, []);
     assert.equal(imported.speechDevelopment.baselineSpeech, npc.speech);
     assert.equal(imported.speechDevelopment.epoch, 3);
     assert.equal(imported.speechDevelopment.baselineTurn, null);

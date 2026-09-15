@@ -202,11 +202,12 @@ function scrubSourceMessageOwnership(value) {
     const out = {};
     for (const [key, item] of Object.entries(value)) {
         const normalizedKey = String(key || '').replace(/_/g, '').toLowerCase();
-        if (normalizedKey === 'speechdevelopment' && item && typeof item === 'object' && !Array.isArray(item)) {
+        if (['speechdevelopment', 'personalitydevelopment'].includes(normalizedKey)
+            && item && typeof item === 'object' && !Array.isArray(item)) {
             const ledger = scrubSourceMessageOwnership(item);
-            // Pending speech-development observations are chronological source-chat evidence,
-            // not portable characterization. Keep the accepted speech epoch/baseline text but
-            // rebase its pending provenance onto the target chat's safe history baseline.
+            // Pending durable-profile observations are chronological source-chat evidence,
+            // not portable characterization. Keep the accepted epoch/baseline text but rebase
+            // pending Personality/Speech provenance onto the target chat's safe history baseline.
             out[key] = { ...ledger, baselineTurn: null, baselineSourceMessageId: null, concepts: [] };
             continue;
         }
