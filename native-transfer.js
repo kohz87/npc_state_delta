@@ -231,7 +231,10 @@ export function prepareNativeImport(input, targetChatKey) {
     const safeState = nativeStateForTarget(decoded, target);
     const base = encodeNpcStateBundle(safeState, {
         appVersion: decoded.metadata.appVersion || 'unknown',
-        chatKey: target,
+        // Preserve the declared source identity until the canonical importer applies the
+        // prepared bundle. Re-labeling it as the target here would erase the proof that
+        // activity counters and other chronology came from a different chat.
+        chatKey: decoded.metadata.sourceChatKey || target,
     });
     const importBytes = augmentNativeBundle(base, {
         portableSettings: decoded.portableSettings,

@@ -1795,12 +1795,21 @@ function isSafeUnmarkedDurableRefinement(existing, incoming) {
 }
 
 function isSafeUnmarkedDurableReplacement(existing, incoming) {
-    if (!isSafeUnmarkedDurableRefinement(existing, incoming)) return false;
+    if (containsEvolutionLanguage(incoming) || !isSafeUnmarkedDurableRefinement(existing, incoming)) return false;
     const oldText = compactDurableText(existing, DURABLE_PROFILE_LIMITS.appearance, 10);
     const newText = compactDurableText(incoming, DURABLE_PROFILE_LIMITS.appearance, 10);
     // Missing/keep state has no omission-as-deletion authority. It may adopt an enrichment
     // only when every established durable concept remains represented in the incoming summary.
+    // Explicit evolution language such as "no longer" is rejected above so lexical retention
+    // inside a negation cannot masquerade as preservation of the established meaning.
     return durableTokenCoverage(oldText, newText) >= 1;
+}
+
+function isSafeUnmarkedDurableFieldReplacement(field, existing, incoming) {
+    if (!isSafeUnmarkedDurableReplacement(existing, incoming)) return false;
+    if (field === 'personality') return isSafeIdentityTextRefinement(existing, incoming);
+    if (field === 'speech') return isSafeSpeechRefinement(existing, incoming);
+    return isSafeUnmarkedDurableRefinement(existing, incoming);
 }
 
 function mergeDurableTextRefinement(existing, incoming, maxChars) {
@@ -2034,34 +2043,64 @@ function reconcileBehaviorProfileWithPersonality(profile, personality) {
     });
 }
 
-function moralityPolarity(value) {
+const BEHAVIOR_DIRECTION_POSITIVE = 1;
+const BEHAVIOR_DIRECTION_NEGATIVE = 2;
+
+function moralityDirectionMask(value) {
     const { kind, cruel } = identityMoralityMarkers(behaviorProfileBody(value));
-    return kind && !cruel ? 1 : cruel && !kind ? -1 : 0;
+    return (kind ? BEHAVIOR_DIRECTION_POSITIVE : 0) | (cruel ? BEHAVIOR_DIRECTION_NEGATIVE : 0);
+}
+
+function moralityPolarity(value) {
+    const mask = moralityDirectionMask(value);
+    return mask === BEHAVIOR_DIRECTION_POSITIVE ? 1 : mask === BEHAVIOR_DIRECTION_NEGATIVE ? -1 : 0;
+}
+
+function behaviorAgencyDirectionMask(value) {
+    const text = normalizeName(`${behaviorProfileKey(value)} ${behaviorProfileBody(value)}`);
+    if (!text) return 0;
+    // Bounded negation handling for the protected agency axis. "Not independent" is itself
+    // negative-agency evidence, while "not obedient" must not be misread as compliance merely
+    // because the word obedient is present.
+    const negatedIndependence = /\b(?:not|never)\s+(?:fully\s+|truly\s+)?(?:independent|autonomous|self directed)\b/.test(text);
+    const positiveText = text.replace(/\b(?:not|never)\s+(?:fully\s+|truly\s+)?(?:independent|autonomous|self directed)\b/g, ' ');
+    const complianceText = text.replace(/\b(?:not|never)\s+(?:blindly\s+|fully\s+)?(?:obedient|compliant|submissive)\b/g, ' ');
+    const independent = /\b(independence|independent|autonomy|autonomous|self directed|self direction|own judgment|own judgement|own decisions|personal judgment|personal judgement)\b/.test(positiveText);
+    const compliant = negatedIndependence
+        || /\b(obedience|obedient|compliance|compliant|submission|submissive)\b/.test(complianceText)
+        || /\bdefer(?:s|red|ring)?\b.{0,24}\b(?:authority|orders?|instructions?|others?)\b/.test(complianceText)
+        || /\bfollows?\b.{0,16}\b(?:orders?|instructions?)\b/.test(complianceText);
+    return (independent ? BEHAVIOR_DIRECTION_POSITIVE : 0) | (compliant ? BEHAVIOR_DIRECTION_NEGATIVE : 0);
 }
 
 function behaviorAgencyPolarity(value) {
-    const text = normalizeName(`${behaviorProfileKey(value)} ${behaviorProfileBody(value)}`);
-    if (!text) return 0;
-    const independent = /\b(independence|independent|autonomy|autonomous|self directed|self direction|own judgment|own judgement|own decisions|personal judgment|personal judgement)\b/.test(text);
-    const compliant = /\b(obedience|obedient|compliance|compliant|submission|submissive)\b/.test(text)
-        || /\bdefer(?:s|red|ring)?\b.{0,24}\b(?:authority|orders?|instructions?|others?)\b/.test(text)
-        || /\bfollows?\b.{0,16}\b(?:orders?|instructions?)\b/.test(text);
-    return independent && !compliant ? 1 : compliant && !independent ? -1 : 0;
+    const mask = behaviorAgencyDirectionMask(value);
+    return mask === BEHAVIOR_DIRECTION_POSITIVE ? 1 : mask === BEHAVIOR_DIRECTION_NEGATIVE ? -1 : 0;
 }
 
-function aggregateBehaviorPolarity(entries, classifier) {
-    const values = new Set((Array.isArray(entries) ? entries : []).map(classifier).filter(Boolean));
-    return values.size === 1 ? [...values][0] : 0;
+function aggregateBehaviorDirections(entries, classifier) {
+    return (Array.isArray(entries) ? entries : []).reduce((mask, entry) => mask | classifier(entry), 0);
+}
+
+function behaviorDirectionConflict(existingMask, incomingMask) {
+    const establishedPositive = Boolean(existingMask & BEHAVIOR_DIRECTION_POSITIVE);
+    const establishedNegative = Boolean(existingMask & BEHAVIOR_DIRECTION_NEGATIVE);
+    // Protect an established one-way direction from a proposal that introduces its opposite.
+    // If the accepted profile is already contextually mixed, do not freeze it merely because
+    // both old and new summaries retain mixed evidence; matching-category safety still applies.
+    if (establishedPositive && !establishedNegative) return Boolean(incomingMask & BEHAVIOR_DIRECTION_NEGATIVE);
+    if (establishedNegative && !establishedPositive) return Boolean(incomingMask & BEHAVIOR_DIRECTION_POSITIVE);
+    return false;
 }
 
 function behaviorProfileRefinementConflict(current, updates) {
     if ((updates || []).some(entry => containsEvolutionLanguage(behaviorProfileBody(entry)))) return true;
-    const oldMorality = aggregateBehaviorPolarity(current, moralityPolarity);
-    const newMorality = aggregateBehaviorPolarity(updates, moralityPolarity);
-    if (oldMorality && newMorality && oldMorality !== newMorality) return true;
-    const oldAgency = aggregateBehaviorPolarity(current, behaviorAgencyPolarity);
-    const newAgency = aggregateBehaviorPolarity(updates, behaviorAgencyPolarity);
-    return Boolean(oldAgency && newAgency && oldAgency !== newAgency);
+    const oldMorality = aggregateBehaviorDirections(current, moralityDirectionMask);
+    const newMorality = aggregateBehaviorDirections(updates, moralityDirectionMask);
+    if (behaviorDirectionConflict(oldMorality, newMorality)) return true;
+    const oldAgency = aggregateBehaviorDirections(current, behaviorAgencyDirectionMask);
+    const newAgency = aggregateBehaviorDirections(updates, behaviorAgencyDirectionMask);
+    return behaviorDirectionConflict(oldAgency, newAgency);
 }
 
 function isSafeBehaviorProfileRefinement(existing, incoming) {
@@ -3059,7 +3098,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
             const mode = String(incoming.appearanceState || 'keep');
             if (mode === 'change') {
                 if (!String(incoming.appearanceReason || '').trim() || !directEvolutionReady()) continue;
-            } else if (mode !== 'refine' && !isSafeUnmarkedDurableReplacement(existing.appearance, value)) {
+            } else if (mode !== 'refine' && !isSafeUnmarkedDurableFieldReplacement('appearance', existing.appearance, value)) {
                 continue;
             }
             if (mode === 'refine') {
@@ -3075,7 +3114,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
             const mode = String(incoming.personalityState || 'keep');
             if (mode === 'evolve') {
                 if (!String(incoming.personalityReason || '').trim() || !directEvolutionReady()) continue;
-            } else if (mode !== 'refine' && !isSafeUnmarkedDurableReplacement(existing.personality, value)) {
+            } else if (mode !== 'refine' && !isSafeUnmarkedDurableFieldReplacement('personality', existing.personality, value)) {
                 continue;
             }
             if (mode === 'refine') {
@@ -3090,7 +3129,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
             const mode = String(incoming.speechState || 'keep');
             if (mode === 'evolve') {
                 if (!String(incoming.speechReason || '').trim() || !directEvolutionReady()) continue;
-            } else if (mode !== 'refine' && !isSafeUnmarkedDurableReplacement(existing.speech, value)) {
+            } else if (mode !== 'refine' && !isSafeUnmarkedDurableFieldReplacement('speech', existing.speech, value)) {
                 continue;
             }
             if (mode === 'refine') {
@@ -3609,7 +3648,7 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
         const safeRefinement = field === 'personality' ? isSafeIdentityTextRefinement(current, value) : (field === 'speech' ? isSafeSpeechRefinement(current, value) : isSafeUnmarkedDurableRefinement(current, value));
         const explicitRefinement = state === refineState && safeRefinement;
         const unmarkedRecovery = state !== refineState && state !== evolveState
-            && isSafeUnmarkedDurableReplacement(current, value);
+            && isSafeUnmarkedDurableFieldReplacement(field, current, value);
         if (explicitRefinement || unmarkedRecovery) {
             const merged = mergeDurableTextRefinement(current, value, maxChars);
             if (normalizeName(merged) !== normalizeName(current)) { npc[field] = merged; changed = true; }

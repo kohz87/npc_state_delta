@@ -287,10 +287,12 @@ function initImportReport(report) {
     return report;
 }
 
-export function mergeImportedDossierState(currentState, importedState, { maxNpcs = 40, excludeNames = [], report = null } = {}) {
+export function mergeImportedDossierState(currentState, importedState, { maxNpcs = 40, excludeNames = [], report = null, foreignOwnership = false } = {}) {
     const current = currentState && typeof currentState === 'object' ? currentState : {};
     const incoming = importedState && typeof importedState === 'object' ? importedState : {};
     const existing = Array.isArray(current.npcs) ? current.npcs.map(normalizeNpcRecord) : [];
+    const targetTurn = Math.max(0, Math.round(Number(current.turn) || 0));
+    const foreignActivity = foreignOwnership === true;
     const excluded = new Set((Array.isArray(excludeNames) ? excludeNames : []).map(normalizeName).filter(Boolean));
     const allImported = (Array.isArray(incoming.npcs) ? incoming.npcs : []).map(normalizeNpcRecord);
     const importReport = initImportReport(report);
@@ -341,6 +343,13 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
                     .filter(alias => normalizeName(alias) !== normalizeName(npc.name))
                     .slice(0, 8),
                 portrait: npc.portrait?.dataUrl ? structuredClone(npc.portrait) : old.portrait || npc.portrait || null,
+                // Activity counters are chat-local clocks. A foreign dossier may update durable
+                // characterization, but cannot move an existing target record backward or forward
+                // on an unrelated source turn axis.
+                ...(foreignActivity ? {
+                    lastSeenTurn: old.lastSeenTurn,
+                    lastWorldActiveTurn: old.lastWorldActiveTurn,
+                } : {}),
             });
             const accepted = isTerminalNpcDeath(old) ? protectTerminalNpc(old, merged) : merged;
             npcs[index] = accepted;
@@ -361,6 +370,13 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
             importReport?.idRemaps.push({ from: sourceId, to: targetId, reason: sourceId ? 'id-collision' : 'missing-id' });
         }
         npc.id = targetId;
+        if (foreignActivity) {
+            // A newly admitted foreign dossier starts its inactivity clock at the target import
+            // boundary. This is target-owned chronology only; no source-message provenance is
+            // invented or copied across chats.
+            npc.lastSeenTurn = targetTurn;
+            npc.lastWorldActiveTurn = targetTurn;
+        }
 
         if (!npc.archived && activeCount >= cap) {
             if (sourceId) rejectedSourceIds.add(sourceId);
