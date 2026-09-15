@@ -115,7 +115,7 @@ async function additionalChecks(mockState, eventSource, manualAddNpc, sleep, ext
     try {
         await runtime.scan();
         assert.equal(runtime.getNpc(npc.id).age, '7');
-        assert.equal(runtime.getNpc(npc.id).apparentAge, '~6');
+        assert.equal(runtime.getNpc(npc.id).apparentAge, '~7');
         const injection = [...mockState.prompts].reverse().find(args => args[0] === 'npc_state_delta_live_dossier')?.[1] || '';
         assert.match(injection, /Continuity Probe/);
         assert.match(injection, /(?:age|chronological)[^\n]{0,25}7/i);

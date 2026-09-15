@@ -267,7 +267,7 @@ export function mergeNpcBirthdayKnowledge(sources = [], current = {}, config = u
 }
 
 export function birthdayEvidenceInText(value) {
-    return /\b(birth(?:day|date)?|born|hatched|turn(?:s|ed|ing)?\s+\d{1,3}|date\s+of\s+birth)\b/i.test(String(value || ''));
+    return /\b(birth(?:day|date)?|name\s*day|nameday|born|hatched|turn(?:s|ed|ing)?\s+\d{1,3}|date\s+of\s+birth)\b/i.test(String(value || ''));
 }
 
 export function birthdayPromptRule(config = undefined, referenceDate = null) {

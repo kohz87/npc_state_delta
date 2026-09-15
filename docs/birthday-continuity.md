@@ -92,13 +92,15 @@ Without a grounded current date, the same NPC remains simply `Age: 6` and `Birth
 
 `birthDateYearSource: "derived"` distinguishes an arithmetic year from a story-established year. Once a full birth date and grounded current date exist, `calendarAge` is recalculated locally. During an owned scan merge, the canonical chronological `age` can advance from this deterministic result, so a World State moving from `CR821, Redleaf 16` to `CR822, Redleaf 16` advances a `CR815, Redleaf 16` NPC from age 6 to 7 without model arithmetic.
 
-`apparentAge` is always visual presentation. It is never used to derive a birth year or chronological age. Fantasy race/species and lifespan are likewise irrelevant to calendar arithmetic.
+Delta 1.0.22 also closes the first-birthday ambiguity for an existing dossier whose birthday month/day was already known but whose year had never been anchored. If the grounded current date exactly matches that stored birthday and the owned story source explicitly presents the occasion as a birthday or nameday, the existing chronological age is treated as the pre-birthday baseline once, advanced by one, and the derived year is anchored to the resulting age. Repeating Refresh on the same day is then idempotent. A birthday first established in that same scan does not receive this compatibility increment, because Delta cannot know whether the newly reported age is pre- or post-birthday.
+
+`apparentAge` remains visual presentation and is never used to derive chronology. When deterministic birthday arithmetic actually advances an existing NPC's exact chronological age, Delta may advance an already-compact numeric apparent-age estimate such as `~12` by the same integer delta. This preserves the established chronological/apparent offset without consulting species, lifespan, or fantasy-aging assumptions. A provider-explicit chronological correction is not second-guessed by the yearless-birthday compatibility increment. A manual Apparent age lock or an explicit provider `apparentAgeState: "evolve"` remains authoritative, and non-numeric apparent-age descriptions are never advanced automatically. Fantasy race/species and lifespan remain irrelevant to calendar arithmetic.
 
 Arithmetic is only performed when the birth date and current date use a compatible configured calendar/era. Delta does not guess across different eras.
 
 ## Scanner impact
 
-Ordinary scanner prompts remain unchanged. A compact birthday rule is appended only when the current source contains birthday/birth-date evidence such as `birthday`, `born`, `hatched`, or an explicit age-turning statement.
+The ordinary birthday rule text remains unchanged. A compact birthday rule is appended only when the current source contains birthday/birth-date evidence such as `birthday`, `nameday` / `name day`, `born`, `hatched`, or an explicit age-turning statement. Delta 1.0.22 adds nameday recognition to that existing conditional trigger, so a nameday scene may now correctly include the already-defined birthday rule where older builds omitted it.
 
 When a grounded current date is available, the conditional birthday rule may include only that date, for example `CR821, Redleaf 16`. It does not paste the month table into every prompt. If no current date is available, the rule tells the model to preserve grounded fantasy month/era names and not invent a missing year.
 
@@ -112,7 +114,7 @@ The manual current date is a fallback setting, not a second campaign-history dat
 
 ## Verification boundary
 
-`tests/birthday-continuity.test.js` covers months-only calendar validation, all-or-none manual clock validation, deterministic named-month generation, numeric compatibility fallback, structured World State extraction, guarded birth-year and age arithmetic, deterministic age progression, generated-to-established replacement, correction protection, explicit year authority upgrades, incompatible-date preservation, and conditional prompt wording.
+`tests/birthday-continuity.test.js` covers months-only calendar validation, all-or-none manual clock validation, deterministic named-month generation, numeric compatibility fallback, structured World State extraction, guarded birth-year and age arithmetic, deterministic chronological/apparent-age birthday rollover, same-day idempotence, existing yearless nameday compatibility, manual/explicit apparent-age authority, generated-to-established replacement, correction protection, explicit year authority upgrades, incompatible-date preservation, and conditional prompt wording including nameday activation.
 
 Full repository acceptance still requires the normal exact-candidate CI workflow. Live-provider testing is only needed to evaluate model extraction quality for fantasy-calendar birthday phrasing; it is not required to prove deterministic calendar or structured-date arithmetic.
 

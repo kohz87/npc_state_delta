@@ -36,8 +36,19 @@ test('v1.0.6 gradual speech evolution counts independent same-concept observatio
     assert.equal(state.npcs[0].speech, npc.speech);
     assert.equal(state.npcs[0].speechDevelopment.concepts[0].observationCount, 1);
 
-    state = scan(state, gradualSpeechUpdate(npc, evidence), 11, 100).state;
+    state = scan(state, {
+        npcs: [],
+        profileUpdates: [{
+            id: npc.id,
+            evidence: { speech: ['directness: replies with blunt clarity and no hedging'] },
+            speechState: 'keep',
+            speech: npc.speech,
+            developmentScale: 'gradual',
+        }],
+    }, 11, 100).state;
     assert.equal(state.npcs[0].speechDevelopment.concepts[0].observationCount, 1, 'replaying the same source message must not count twice');
+    assert.equal(state.npcs[0].speechDevelopment.concepts[0].evidenceSamples.length, 1, 'a replay must not manufacture a second historical evidence sample');
+    assert.match(state.npcs[0].speechDevelopment.concepts[0].evidenceSamples[0], /answers plainly/i);
     assert.equal(state.npcs[0].speech, npc.speech);
 
     state = scan(state, gradualSpeechUpdate(npc, evidence), 12, 101).state;
@@ -157,10 +168,110 @@ test('v1.0.6 speech development ledger survives normalization and native bundle 
     );
     const normalized = normalizeNpcRecord(result.state.npcs[0]);
     assert.equal(normalized.speechDevelopment.concepts[0].observationCount, 1);
+    assert.equal(normalized.speechDevelopment.concepts[0].evidenceSamples.length, 1);
+    assert.match(normalized.speechDevelopment.concepts[0].evidenceSamples[0], /answers plainly.*without hedging/i);
 
     const bytes = encodeNpcStateBundle({ npcs: [normalized], socialGraph: { version: 1, edges: [], unresolved: [] }, dismissed: [] }, { appVersion: '1.0.6' });
     const decoded = decodeNpcStateBundle(bytes);
     assert.deepEqual(decoded.state.npcs[0].speechDevelopment, normalized.speechDevelopment);
+});
+
+test('v1.0.22 gradual Speech grounding uses bounded historical evidence samples instead of only the latest paraphrase', () => {
+    const npc = createNpcRecord('Marris');
+    npc.speech = 'Clipped and blunt.';
+    let state = { npcs: [npc], candidates: [], turn: 9 };
+    const payload = (evidence, speech = npc.speech) => ({
+        npcs: [],
+        profileUpdates: [{
+            id: npc.id,
+            evidence: { speech: [evidence] },
+            speechState: 'refine',
+            speech,
+            developmentScale: 'gradual',
+            developmentReason: 'Repeated later scenes show the same evolving register.',
+        }],
+    });
+
+    state = scan(state, payload('register: measured cadence becomes steady in formal conversation'), 10, 100).state;
+    state = scan(state, payload('register: uses formal honorifics throughout official conversations'), 12, 101).state;
+    const result = scan(
+        state,
+        payload('register: quiet tone remains controlled at the reception', 'Measured formal cadence with recurring honorifics.'),
+        14,
+        102,
+    );
+
+    assert.equal(result.state.npcs[0].speech, 'Measured formal cadence with recurring honorifics.');
+    assert.equal(result.state.npcs[0].speechDevelopment.epoch, 1);
+    assert.deepEqual(result.state.npcs[0].speechDevelopment.concepts, []);
+    const diagnostic = result.report.profileDevelopment.find(item => item.field === 'speech');
+    assert.equal(diagnostic?.outcome, 'applied');
+    assert.equal(diagnostic?.ready, true);
+});
+
+test('v1.0.22 gradual Personality grounding also aggregates bounded historical samples', () => {
+    const npc = createNpcRecord('Marris');
+    npc.personality = 'Quiet and reserved, usually waiting for others to lead.';
+    let state = { npcs: [npc], candidates: [], turn: 9 };
+    const payload = (evidence, personality = npc.personality) => ({
+        npcs: [],
+        profileUpdates: [{
+            id: npc.id,
+            evidence: { personality: [evidence] },
+            personalityState: 'refine',
+            personality,
+            developmentScale: 'gradual',
+            developmentReason: 'Repeated later scenes show the same confidence pattern.',
+        }],
+    });
+
+    state = scan(state, payload('confidence: takes initiative during planning without waiting for direction'), 10, 100).state;
+    state = scan(state, payload('confidence: asserts her own judgment under pressure'), 12, 101).state;
+    const result = scan(
+        state,
+        payload('confidence: remains calm while others hesitate', 'Confident and self-directed, taking initiative and asserting her own judgment under pressure.'),
+        14,
+        102,
+    );
+
+    assert.equal(result.state.npcs[0].personality, 'Confident and self-directed, taking initiative and asserting her own judgment under pressure.');
+    const diagnostic = result.report.profileDevelopment.find(item => item.field === 'personality');
+    assert.equal(diagnostic?.outcome, 'applied');
+    assert.equal(diagnostic?.ready, true);
+});
+
+test('v1.0.22 gradual development samples stay bounded while preserving independent provenance', () => {
+    const npc = createNpcRecord('Marris');
+    npc.speech = 'Soft and formal.';
+    let state = { npcs: [npc], candidates: [], turn: 9 };
+    const payload = evidence => ({
+        npcs: [],
+        profileUpdates: [{
+            id: npc.id,
+            evidence: { speech: [`cadence: ${evidence}`] },
+            speechState: 'refine',
+            speech: npc.speech,
+            developmentScale: 'gradual',
+        }],
+    });
+
+    const samples = [
+        'measured phrasing in the council room',
+        'formal titles during guild intake',
+        'careful diction in a public lesson',
+        'polite cadence during negotiations',
+        'level delivery while briefing officers',
+    ];
+    for (let i = 0; i < samples.length; i += 1) {
+        state = scan(state, payload(samples[i]), 10 + i * 2, 100 + i).state;
+    }
+
+    const record = state.npcs[0].speechDevelopment.concepts[0];
+    assert.equal(record.observationCount, 5);
+    assert.equal(record.evidenceSamples.length, 4);
+    assert.equal(record.sourceMessageIds.length, 4);
+    assert.equal(record.evidenceSamples.includes(samples[0]), false);
+    assert.equal(record.evidenceSamples.at(-1), samples.at(-1));
 });
 
 test('v1.0.19 unlabeled Speech evidence accumulates across independent scans and can promote a grounded refine candidate', () => {
