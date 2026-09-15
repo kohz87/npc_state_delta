@@ -3100,7 +3100,7 @@ test('v0.2.8 ambiguous deceased Key Relationship wording is rewritten with an ex
     assert.deepEqual(jonas.keyRelationships, ['Brina Hael — Surviving widow and mother of his daughters']);
 
     const living = normalizeNpcRecord({ name: 'Marris', keyRelationships: ['Rook — mentor (deceased)'] });
-    assert.deepEqual(living.keyRelationships, ['Rook — mentor; deceased']);
+    assert.deepEqual(living.keyRelationships, ['Rook — mentor | deceased'], 'legacy deceased wording should migrate into the canonical relation | dynamic shape');
 });
 
 test('v0.2.8 scanner cannot rewrite manual Importance and new scanned dossiers keep neutral default importance', () => {

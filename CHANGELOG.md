@@ -1,7 +1,14 @@
 # NPC State Delta changes
 
 
-## 1.0.17 - 15 September 2026 (unpublished candidate)
+## 1.0.18 - 15 September 2026
+
+- Make Important Bonds / Key Relationships boundary-safe end to end. Canonical stored bonds now use one 360-character budget and social dynamics use 260 characters, with subject/relation/dynamic parsed before limiting instead of raw slicing a preformatted line.
+- Compact dynamics by whole deduplicated fragments. If another fragment will not fit, drop that whole fragment; if a single unavoidable fragment itself exceeds the available space, shorten it at a sentence, clause, or word boundary and mark word-boundary truncation with an ellipsis. Never persist a severed word or dangling `|`, `/`, or `;`.
+- Route scanner-edge normalization, hidden social-graph storage, graph projection, ordinary dossier merging, legacy normalization, and manually locked bonds through the same canonical representation so repeated reconciliation cannot progressively shorten a bond. Preserve the existing smaller scanner/injection projections, request counts, prompt bytes and output allowances.
+- Add regressions for the reported `telepathic bon` / `authority she resp` failure shape, canonical storage beyond the former 220-character ceiling, over-budget fragment dropping, graph projection and manual-lock idempotence. Persisted schemas, bundle format, branch recovery, relationship scoring and model routing remain unchanged.
+
+## 1.0.17 - 15 September 2026
 
 - Rebase foreign-import activity chronology at the canonical bundle merge boundary. New foreign dossiers begin their inactivity clock at the target chat's current turn, while matching target dossiers preserve their existing target-owned `lastSeenTurn` / `lastWorldActiveTurn`; low or high source-chat counters can therefore neither trigger immediate stale deletion nor grant excessive retention. Prepared/UI imports retain their original source-chat identity until the canonical importer applies this rebasing, without inventing source-message provenance.
 - Make missing/`keep` Personality, Speech and Appearance recovery satisfy the same field-specific safety gates as explicit refinement in addition to preserving all established durable concepts. Morality reversals and Speech evolution language such as `no longer` cannot pass merely because old words remain lexically present; legitimate additive keep recovery and explicit accepted full-current `refine` remain supported.
