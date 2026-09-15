@@ -471,6 +471,11 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
     const scale = String(normalized.developmentScale || 'gradual');
     const proposed = profileDevelopmentText(field, normalized[field]);
     const reason = profileDevelopmentText(field, normalized[`${field}Reason`], 500);
+    const batchReady = (scale === 'gradual' || scale === 'batch')
+        && Boolean(proposed)
+        && mechanics.developmentScaleReady('batch', normalized.developmentReason, options.developmentContext);
+    const inferredBatch = scale === 'gradual' && batchReady;
+    const effectiveScale = batchReady ? 'batch' : scale;
 
     if (changedByContinuity) {
         if (state === 'evolve') {
@@ -482,6 +487,30 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
             recordProfileDevelopmentDiagnostic(report, npc.id, field, state === 'refine' ? 'applied-refine' : 'applied-recovery', plan, { modelState: state, scale });
         }
         if (ledger) npc[config.ledgerKey] = ledger;
+        return npc;
+    }
+
+    if (batchReady) {
+        if (!proposed || mechanics.normalizeName(proposed) === mechanics.normalizeName(currentValue)) {
+            recordProfileDevelopmentDiagnostic(report, npc.id, field, 'waiting-for-candidate', plan, { modelState: state, scale, effectiveScale });
+            if (ledger) npc[config.ledgerKey] = ledger;
+            return npc;
+        }
+        const groundingEvidence = [
+            ...plan.evidence.map(item => item.body).filter(Boolean),
+            String(options.developmentContext || '').trim(),
+        ].filter(Boolean);
+        if (!mechanics.durableProfileEvolutionCandidateGrounded(field, currentValue, proposed, groundingEvidence)) {
+            recordProfileDevelopmentDiagnostic(report, npc.id, field, 'candidate-ungrounded', plan, { modelState: state, scale, effectiveScale });
+            if (ledger) npc[config.ledgerKey] = ledger;
+            return npc;
+        }
+        npc[field] = proposed;
+        clearProfileEvidence(npc, field);
+        npc[config.ledgerKey] = resetProfileDevelopment(field, ledger || emptyProfileDevelopment(field, npc), proposed, options);
+        npc.updatedAt = Date.now();
+        markProfileApplied(report, npc.id);
+        recordProfileDevelopmentDiagnostic(report, npc.id, field, 'applied-batch', plan, { modelState: state, scale, effectiveScale, inferredScale: inferredBatch });
         return npc;
     }
 
@@ -670,4 +699,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.19';
+export const NPC_STATE_VERSION = '1.0.20';
