@@ -1,6 +1,15 @@
 # NPC State Delta changes
 
 
+## 1.0.13 - 15 September 2026
+
+- Make destructive linear recovery exact-boundary only. Delete/edit may restore the requested surviving parent from the rollback journal or an exact checkpoint, but an older checkpoint can never substitute for a missing parent and generic root fallback is forbidden.
+- Extend journal recovery to near-tail replacement divergence, so an edited/regenerated latest assistant can reconstruct its exact parent even after that full checkpoint was pruned; keep the rollback head owned by the restored parent until the replacement is rescanned.
+- Fail closed for deep edits with multiple retained assistant descendants instead of rewinding and discarding later accepted continuity. Preserve the current canonical dossiers, rebase unsafe recovery ownership, and rescan without replacing the retained suffix.
+- Preserve swipe semantics: an exact known sibling restores without another scan; an unseen sibling may restore only its exact parent/root anchor and must then be scanned. No arbitrary ancestor checkpoint is accepted.
+- Expand bounded reconciliation diagnostics with requested recovery boundary, affected assistant count, journal/checkpoint availability, rejected older checkpoint/distance, retained-descendant blocking, and rescan requirement. Add the observed 123-message regression where edit divergence 99 previously restored message 3 and collapsed 26 NPCs to one.
+- Keep the 8 MB / 2 MB full-checkpoint limits, 256-message journal horizon, scanner prompts/request budgets, relationship scoring, storage schema and native bundle format unchanged.
+
 ## 1.0.12 - 14 September 2026
 
 - Run a one-time legacy branch-history compaction on existing sidecars after lineage is proven safe. Retain the current active lineage plus SillyTavern-retained swipe alternatives, and remove unreachable pre-1.0.11 sibling checkpoints, inline-card branch residue and rollback-journal chains that are no longer owned by the live head or a retained checkpoint.

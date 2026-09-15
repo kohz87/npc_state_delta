@@ -1119,6 +1119,13 @@ function latestAssistantMessageId(chat = []) {
     return -1;
 }
 
+function assistantMessageCountAtOrAfter(chat = [], messageId = 0) {
+    const start = Math.max(0, Number.isInteger(messageId) ? messageId : 0);
+    return (Array.isArray(chat) ? chat : []).slice(start).filter(message => (
+        message && !message.is_user && !message.is_system && String(message.mes || '').trim()
+    )).length;
+}
+
 function matchingCheckpoints(checkpoints, lineage) {
     const keys = lineageCheckpointKeys(lineage);
     return checkpoints
@@ -1127,25 +1134,22 @@ function matchingCheckpoints(checkpoints, lineage) {
         .sort((a, b) => a.messageId - b.messageId || a.createdAt - b.createdAt);
 }
 
-function isStrictTailDeletion(previousLineage = [], currentLineage = [], divergence = -1) {
-    if (!Array.isArray(previousLineage) || !Array.isArray(currentLineage)) return false;
-    if (currentLineage.length >= previousLineage.length || divergence !== currentLineage.length) return false;
-    for (let i = 0; i < currentLineage.length; i += 1) {
-        if (previousLineage[i] !== currentLineage[i]) return false;
+function restoreLinearBoundaryFromJournal(state, previousLineage, currentLineage, divergence) {
+    if (!Number.isInteger(divergence) || divergence < 0) return null;
+    if (!Array.isArray(previousLineage) || !Array.isArray(currentLineage)) return null;
+    if (divergence > previousLineage.length || divergence > currentLineage.length) return null;
+    for (let i = 0; i < divergence; i += 1) {
+        if (previousLineage[i] !== currentLineage[i]) return null;
     }
-    return true;
-}
 
-function restoreTailDeletionFromJournal(state, previousLineage, currentLineage, divergence) {
-    if (!isStrictTailDeletion(previousLineage, currentLineage, divergence)) return null;
     ensureRollbackJournalBaseline(state, previousLineage);
     const head = state.rollbackHead;
     if (!head?.snapshot || typeof head.snapshot !== 'object') return null;
-    const targetTailId = currentLineage.length - 1;
+    const targetMessageId = divergence - 1;
     const floorMessageId = Number.isInteger(state.rollbackJournalFloorMessageId)
         ? state.rollbackJournalFloorMessageId
         : head.messageId;
-    if (targetTailId < floorMessageId) return null;
+    if (targetMessageId < floorMessageId) return null;
 
     const previousKeys = lineageCheckpointKeys(previousLineage);
     if (Number.isInteger(head.messageId) && head.messageId >= 0 && head.messageId < previousKeys.length
@@ -1160,18 +1164,18 @@ function restoreTailDeletionFromJournal(state, previousLineage, currentLineage, 
 
     while (cursorMessageId >= divergence) {
         if (cursorSeq <= 0) {
-            // The head can legitimately advance across raw user/system messages that caused no
-            // canonical mutation. With no remaining mutation record at/after the deleted range,
-            // the current working state already equals the requested surviving boundary.
-            cursorMessageId = divergence - 1;
+            // The head can legitimately advance across raw messages that caused no canonical
+            // mutation. If no mutation remains at/after the replacement boundary, the working
+            // snapshot already equals the requested parent boundary.
+            cursorMessageId = targetMessageId;
             break;
         }
         const entry = bySeq.get(cursorSeq);
         if (!entry) return null;
         if (entry.messageId < divergence) {
-            // Same case with an older surviving mutation: unchanged raw-message boundaries lie
-            // between that mutation and the requested tail. Do not undo the surviving mutation.
-            cursorMessageId = divergence - 1;
+            // Unchanged raw-message boundaries may sit between the surviving mutation and the
+            // requested parent. Do not undo a mutation owned by the surviving prefix.
+            cursorMessageId = targetMessageId;
             break;
         }
         if (entry.messageId > cursorMessageId) return null;
@@ -1184,7 +1188,7 @@ function restoreTailDeletionFromJournal(state, previousLineage, currentLineage, 
     }
 
     if (cursorMessageId >= divergence) return null;
-    return { state: working, headSeq: cursorSeq, applied, floorMessageId };
+    return { state: working, headSeq: cursorSeq, applied, floorMessageId, targetMessageId };
 }
 
 function retainLinearPrefixHistory(target, source, checkpoints, currentLineage, divergence) {
@@ -1236,6 +1240,7 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
             lineageRelation: relation.kind,
             recoveryOperation,
             recoveryAction: relation.kind === 'same' ? 'content-unchanged' : 'forward-extension',
+            requiresRescan: false,
             restoredFromMessageId: null,
             invalidated: false,
             exactRestored: false,
@@ -1253,10 +1258,35 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
     const matches = matchingCheckpoints(checkpoints, currentLineage);
     const deepestMatch = matches.at(-1) || null;
     const lastAssistantId = latestAssistantMessageId(chat);
-    const exactCheckpoint = deepestMatch && deepestMatch.messageId >= lastAssistantId ? deepestMatch : null;
-    const prefixCheckpoint = matches.filter(item => item.messageId < divergence).at(-1) || null;
-    const journalRestore = relation.kind === 'tail-truncation'
-        ? restoreTailDeletionFromJournal(state, previousLineage, currentLineage, divergence)
+    const requestedRecoveryMessageId = Number.isInteger(divergence) ? divergence - 1 : null;
+    const exactBoundaryCheckpoint = Number.isInteger(requestedRecoveryMessageId) && requestedRecoveryMessageId >= 0
+        ? matches.filter(item => item.messageId === requestedRecoveryMessageId).at(-1) || null
+        : null;
+    const nearestOlderCheckpoint = Number.isInteger(requestedRecoveryMessageId) && requestedRecoveryMessageId >= 0
+        ? matches.filter(item => item.messageId < requestedRecoveryMessageId).at(-1) || null
+        : null;
+    const explicitSwipeLike = recoveryOperation === 'swipe' || (recoveryOperation === 'auto' && hasExplicitDivergence);
+    // A checkpoint whose full lineage matches the live chat through the latest assistant is an
+    // exact sibling/current-branch restore regardless of which host path surfaced the change.
+    const exactCurrentCheckpoint = deepestMatch && deepestMatch.messageId >= lastAssistantId
+        ? deepestMatch
+        : null;
+    const affectedAssistantMessages = assistantMessageCountAtOrAfter(chat, divergence);
+    // A single affected assistant exchange can be rebuilt immediately after restoring its exact
+    // parent. Multiple retained assistant descendants cannot be deterministically replayed by the
+    // routine scanner, so rewinding them would destroy accepted continuity; preserve canonical
+    // state and fail closed instead.
+    const linearSuffixReplaySafe = !linearReplacement || affectedAssistantMessages <= 1;
+    const recoveryBlockedByRetainedDescendants = linearReplacement && !linearSuffixReplaySafe;
+    const tailTruncationRecovery = relation.kind === 'tail-truncation';
+    const journalRestore = tailTruncationRecovery || (linearReplacement && linearSuffixReplaySafe)
+        ? restoreLinearBoundaryFromJournal(state, previousLineage, currentLineage, divergence)
+        : null;
+    const journalTargetReachable = Boolean(journalRestore);
+    const exactCheckpointAvailable = Boolean(exactBoundaryCheckpoint);
+    const olderCheckpointRejected = Boolean(nearestOlderCheckpoint && !journalRestore && !exactBoundaryCheckpoint);
+    const recoveryDistance = olderCheckpointRejected
+        ? Math.max(0, requestedRecoveryMessageId - nearestOlderCheckpoint.messageId)
         : null;
     let restored;
     let checkpoint;
@@ -1266,30 +1296,35 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
     let failClosed = false;
     let journalHeadSeq = null;
     let recoveryAction = 'fail-closed';
-    if (journalRestore) {
+    if ((linearReplacement || tailTruncationRecovery) && journalRestore) {
         restored = journalRestore.state;
         exactRestored = true;
         restoredFromJournal = true;
         journalHeadSeq = journalRestore.headSeq;
         recoveryAction = 'rollback-journal';
-    } else if (exactCheckpoint) {
-        checkpoint = exactCheckpoint;
+    } else if ((tailTruncationRecovery || (linearReplacement && linearSuffixReplaySafe)) && exactBoundaryCheckpoint) {
+        checkpoint = exactBoundaryCheckpoint;
         restored = branchCore.restoreSnapshotIntoState(state, checkpoint.snapshot);
         exactRestored = true;
         recoveryAction = 'exact-checkpoint';
-    } else if ((linearReplacement || recoveryOperation === 'swipe' || hasExplicitDivergence) && prefixCheckpoint) {
-        checkpoint = prefixCheckpoint;
+    } else if (exactCurrentCheckpoint) {
+        checkpoint = exactCurrentCheckpoint;
         restored = branchCore.restoreSnapshotIntoState(state, checkpoint.snapshot);
-        recoveryAction = 'explicit-ancestor-checkpoint';
-    } else if ((linearReplacement || recoveryOperation === 'swipe' || hasExplicitDivergence) && divergence === 0
+        exactRestored = true;
+        recoveryAction = 'exact-checkpoint';
+    } else if (explicitSwipeLike && exactBoundaryCheckpoint) {
+        checkpoint = exactBoundaryCheckpoint;
+        restored = branchCore.restoreSnapshotIntoState(state, checkpoint.snapshot);
+        recoveryAction = 'exact-parent-checkpoint';
+    } else if (explicitSwipeLike && divergence === 0
         && state?.branchRootSnapshot && typeof state.branchRootSnapshot === 'object') {
         restored = branchCore.restoreSnapshotIntoState(state, state.branchRootSnapshot);
         restoredFromRoot = true;
         recoveryAction = 'explicit-root';
     } else {
-        // Missing recovery evidence must never authorize a destructive walk back to an older
-        // checkpoint/root. Keep accepted canonical state, rebase ownership to the live content,
-        // and let a later scan repair any stale descendant facts rather than resetting dossiers.
+        // Recovery is exact-boundary only. An older checkpoint is evidence about an older story,
+        // never permission to substitute that story for the requested parent. Keep canonical
+        // state and rebase ownership when the exact journal/checkpoint proof is unavailable.
         restored = { ...state };
         failClosed = true;
         recoveryAction = 'fail-closed-keep-current';
@@ -1320,6 +1355,10 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
     }
     const restoredTailId = currentLineage.length - 1;
     const restoredKeys = lineageCheckpointKeys(currentLineage);
+    const restoredBoundaryMessageId = restoredFromJournal
+        ? journalRestore.targetMessageId
+        : (restoredFromRoot ? -1 : (checkpoint?.messageId ?? null));
+    const restoredHistoricalBoundary = restoredFromJournal || restoredFromRoot || Boolean(checkpoint);
     let restoredHeadSeq = 0;
     if (restoredFromJournal) restoredHeadSeq = Math.max(0, Number(journalHeadSeq || 0));
     else if (Number.isInteger(checkpoint?.rollbackSeq)
@@ -1330,28 +1369,44 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
     // If the predecessor entry fell just outside the retained message window, this restored
     // boundary becomes the new safe baseline instead of retaining a dangling sequence pointer.
     if (restoredHeadSeq > 0 && !restored.rollbackJournal.some(entry => entry.seq === restoredHeadSeq)) restoredHeadSeq = 0;
+    const rollbackHeadMessageId = restoredHistoricalBoundary && Number.isInteger(restoredBoundaryMessageId)
+        ? restoredBoundaryMessageId
+        : restoredTailId;
     restored.rollbackHead = {
         seq: restoredHeadSeq,
-        messageId: restoredTailId,
-        lineageKey: restoredTailId >= 0 ? restoredKeys[restoredTailId] : 'root',
+        messageId: rollbackHeadMessageId,
+        lineageKey: rollbackHeadMessageId >= 0 ? restoredKeys[rollbackHeadMessageId] : 'root',
         snapshot: rollbackSnapshot(restored),
     };
     restored.rollbackJournalFloorMessageId = restoredHeadSeq > 0
-        ? Math.min(restoredTailId, Number(state?.rollbackJournalFloorMessageId ?? restoredTailId))
-        : restoredTailId;
+        ? Math.min(rollbackHeadMessageId, Number(state?.rollbackJournalFloorMessageId ?? rollbackHeadMessageId))
+        : rollbackHeadMessageId;
     refreshRollbackJournalRetention(restored);
     if (!exactRestored) {
         if (Number.isInteger(restored.lastScannedMessageId) && restored.lastScannedMessageId >= divergence) restored.lastScannedMessageId = null;
     }
     prunePortraitAssetsInPlace(restored);
+    const requiresRescan = linearReplacement
+        ? affectedAssistantMessages > 0
+        : (explicitSwipeLike ? recoveryAction !== 'exact-checkpoint' : !exactRestored);
     return {
         state: restored,
         divergence,
         lineageRelation: relation.kind,
         recoveryOperation,
         recoveryAction,
-        restoredFromMessageId: restoredFromJournal ? restoredTailId : (restoredFromRoot ? -1 : (checkpoint?.messageId ?? null)),
-        restoredLineageKey: restoredFromJournal ? (restored.rollbackHead?.lineageKey || '') : (restoredFromRoot ? 'root' : (checkpoint?.lineageKey || '')),
+        requestedRecoveryMessageId,
+        affectedAssistantMessages,
+        linearSuffixReplaySafe,
+        recoveryBlockedByRetainedDescendants,
+        journalTargetReachable,
+        exactCheckpointAvailable,
+        nearestOlderCheckpointMessageId: nearestOlderCheckpoint?.messageId ?? null,
+        olderCheckpointRejected,
+        recoveryDistance,
+        requiresRescan,
+        restoredFromMessageId: restoredHistoricalBoundary ? restoredBoundaryMessageId : null,
+        restoredLineageKey: restoredHistoricalBoundary ? (restored.rollbackHead?.lineageKey || '') : '',
         invalidated: true,
         exactRestored,
         restoredFromJournal,
