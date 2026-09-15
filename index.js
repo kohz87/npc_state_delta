@@ -1201,7 +1201,7 @@ function queueSettledSwipeReconcile(options = {}) {
 
         try {
             const reconciliation = await reconcileCurrentBranch({ ...pending, rescan: false, reason: `${pending.reason || 'message-swiped'}-settled` });
-            if (reconciliation?.exactRestored) return;
+            if (reconciliation?.requiresRescan === false) return;
             const chat = getContext().chat || [];
             const received = Number.isInteger(receivedMessageId) ? chat[receivedMessageId] : null;
             if (received && !received.is_user && !received.is_system && String(received.mes || '').trim()) {
@@ -1274,6 +1274,16 @@ function recordBranchReconciliationEvent({ key, reason, operation, result, befor
         action: String(result.recoveryAction || (result.invalidated ? 'reconciled' : 'none')),
         invalidated: Boolean(result.invalidated),
         exactRestored: Boolean(result.exactRestored),
+        requestedRecoveryMessageId: Number.isInteger(result.requestedRecoveryMessageId) ? result.requestedRecoveryMessageId : null,
+        affectedAssistantMessages: Math.max(0, Number(result.affectedAssistantMessages || 0)),
+        linearSuffixReplaySafe: result.linearSuffixReplaySafe !== false,
+        recoveryBlockedByRetainedDescendants: Boolean(result.recoveryBlockedByRetainedDescendants),
+        journalTargetReachable: Boolean(result.journalTargetReachable),
+        exactCheckpointAvailable: Boolean(result.exactCheckpointAvailable),
+        nearestOlderCheckpointMessageId: Number.isInteger(result.nearestOlderCheckpointMessageId) ? result.nearestOlderCheckpointMessageId : null,
+        olderCheckpointRejected: Boolean(result.olderCheckpointRejected),
+        recoveryDistance: Number.isInteger(result.recoveryDistance) ? result.recoveryDistance : null,
+        requiresRescan: Boolean(result.requiresRescan),
         restoredFromMessageId: Number.isInteger(result.restoredFromMessageId) ? result.restoredFromMessageId : null,
         restoredFromJournal: Boolean(result.restoredFromJournal),
         restoredFromRoot: Boolean(result.restoredFromRoot),
@@ -1357,7 +1367,8 @@ async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true
     updateInjection();
 
     const targetAssistant = findLatestAssistantAtOrAfter(result.divergence);
-    if (rescan && !result.exactRestored && getSettings().branchRescan !== false && targetAssistant >= 0) {
+    const shouldRescan = result.requiresRescan !== undefined ? Boolean(result.requiresRescan) : !result.exactRestored;
+    if (rescan && shouldRescan && getSettings().branchRescan !== false && targetAssistant >= 0) {
         if (getChatKey() !== key) return result;
         if (isScanBusy(key)) queueBranchRescan(targetAssistant, 0, key);
         else await scanNow({ manual: false, messageId: targetAssistant });
