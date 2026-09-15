@@ -1,6 +1,14 @@
 # NPC State Delta changes
 
 
+## 1.0.14 - 15 September 2026
+
+- Make Important Bond normalization idempotent when older data already contains repeated structural pipes or spaced slash fragments. Canonical dynamics split legacy `;`, extra `|`, and spaced ` / ` separators, discard tiny truncation debris, deduplicate semantically repeated fragments, and render one structural `|` only.
+- Deduplicate repeated relation fragments such as `Host / Caretaker / Host / Caretaker` without collapsing legitimate distinct relation labels.
+- Make manual Important Bond deletion authoritative over the shared social edge: remove the hidden pair and the counterpart's mirrored structured bond in the same transaction so reconciliation cannot immediately recreate the deleted entry from the reverse dossier.
+- Recover counterpart identity from the structured subject prefix even when the rest of an old bond is malformed/truncated, so corrupted entries can still be deleted cleanly.
+- Add the reported Mistress Hilde corruption as a repeated-reconciliation regression plus delete -> reconcile -> still-deleted coverage. Scanner prompts, request budgets, relationship scoring, persistence formats, branch recovery and bundle schema remain unchanged.
+
 ## 1.0.13 - 15 September 2026
 
 - Make destructive linear recovery exact-boundary only. Delete/edit may restore the requested surviving parent from the rollback journal or an exact checkpoint, but an older checkpoint can never substitute for a missing parent and generic root fallback is forbidden.
