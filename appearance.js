@@ -103,13 +103,13 @@ function safeRefinement(existing, incoming) {
     return addsDetail && (coverage >= 0.62 || similarity(existing, incoming) >= 0.58);
 }
 function mergeRefinement(existing, incoming, maxChars) {
-    const parts = [];
-    for (const raw of `${incoming}; ${existing}`.split(/\n+|\s*;\s*|(?<=[.!?])\s+(?=[A-Z0-9])/)) {
-        const value = String(raw || '').replace(/\s+/g, ' ').trim();
-        if (!value || parts.some(item => normalizeName(item) === normalizeName(value) || similarity(item, value) >= 0.60)) continue;
-        parts.push(value);
-    }
-    return parts.join('; ').slice(0, maxChars);
+    const current = clean(existing, maxChars);
+    const next = clean(incoming, maxChars);
+    if (!current) return next;
+    if (!next || sameAppearance(current, next)) return current;
+    // The caller has already passed safeRefinement/grounding. `refine` is a full current
+    // summary for this exact appearance slot, so omitted old clauses are retired here.
+    return next;
 }
 
 export function normalizeAppearanceForms(value, { updates = false } = {}) {

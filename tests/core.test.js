@@ -896,7 +896,7 @@ test('mannerisms are keep-by-default and grounded evolution replaces the current
     assert.ok(!evolved.state.npcs[0].mannerisms.some(item => /Twists her sleeves/i.test(item)), 'obsolete mannerisms should retire instead of lingering');
 });
 
-test('unlocked mannerisms can refine with newly established habits without replacing the current set', () => {
+test('unlocked mannerism refine accepts a full current set instead of retaining omitted old habits', () => {
     const npc = createNpcRecord('Toris');
     npc.mannerisms = ['Scratches his beard before answering.'];
     const refined = mergeScanResult({ npcs: [npc], turn: 1 }, { npcs: [{
@@ -904,7 +904,6 @@ test('unlocked mannerisms can refine with newly established habits without repla
         mannerisms: ['Habitually squares his shoulders before delivering bad news.'],
     }] }, { turn: 2 });
     assert.deepEqual(refined.state.npcs[0].mannerisms, [
-        'Scratches his beard before answering.',
         'Habitually squares his shoulders before delivering bad news.',
     ]);
 });
