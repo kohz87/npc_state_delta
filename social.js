@@ -58,10 +58,13 @@ function nearDuplicateText(a, b) {
 }
 
 function cleanDynamic(value, max = 220) {
-    const raw = clean(value, Math.max(max * 3, max));
+    const raw = clean(value, Math.max(max * 4, max));
     if (!raw) return '';
     const kept = [];
-    for (const part of raw.split(/\s*;\s*/).map(item => clean(item, max)).filter(Boolean)) {
+    const parts = raw.split(/\s*(?:;|\|)\s*|\s+\/\s+/).map(item => clean(item, max)).filter(Boolean);
+    for (const part of parts) {
+        const key = norm(part);
+        if (!key || (key.length < 4 && !/\d/.test(key))) continue;
         const duplicateIndex = kept.findIndex(existing => nearDuplicateText(existing, part));
         if (duplicateIndex >= 0) continue;
         kept.push(part);
@@ -138,8 +141,16 @@ function preserveUnstructuredRelationshipText(value) {
 function sanitizeRelationshipRelation(subject, value) {
     let relation = clean(value, 180);
     if (!relation) return '';
-    const slash = relation.split(/\s*\/\s*/).map(item => clean(item, 180)).filter(Boolean);
+    const slash = [];
+    const seen = new Set();
+    for (const part of relation.split(/\s*\/\s*/).map(item => clean(item, 180)).filter(Boolean)) {
+        const key = norm(part);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        slash.push(part);
+    }
     if (slash.length === 2 && inverseRelationFamilies(slash[0], slash[1])) relation = slash[0];
+    else if (slash.length) relation = clean(slash.join(' / '), 180);
     const subjectKey = norm(subject);
     const relationKey = norm(relation);
     if (/^late husband\b/.test(subjectKey) && /^(?:surviving )?widow\b/.test(relationKey)) return 'spouse';
@@ -801,6 +812,37 @@ function pairConnects(edge, aId, bId) {
     return (edge.aId === aId && edge.bId === bId) || (edge.aId === bId && edge.bId === aId);
 }
 
+function relationshipSubjectCandidate(value) {
+    const text = clean(value, 420);
+    if (!text) return '';
+    const match = text.match(/^(.+?)(?:\s+[—–-]\s+|\s*:\s+)/);
+    const subject = clean(match?.[1], 120);
+    return relationshipSubjectLooksStructured(subject) ? subject : '';
+}
+
+function relationshipCounterpartId(npcs = [], value = '') {
+    const parsed = parseKeyRelationshipEntry(value);
+    const subject = parsed?.subject || relationshipSubjectCandidate(value);
+    return resolveNpcReference(npcs, subject)?.id || '';
+}
+
+function relationshipTargetsNpc(value, target, npcs = []) {
+    if (!target?.id) return false;
+    const parsed = parseKeyRelationshipEntry(value);
+    const subject = parsed?.subject || relationshipSubjectCandidate(value);
+    if (!subject) return false;
+    const resolved = resolveNpcReference(npcs, subject);
+    if (resolved?.id === target.id) return true;
+    const labels = new Set(npcLabels(target).map(norm).filter(Boolean));
+    return labels.has(norm(subject));
+}
+
+function removeMirroredRelationship(counterpart, owner, npcs = []) {
+    if (!counterpart || !owner) return;
+    counterpart.keyRelationships = (Array.isArray(counterpart.keyRelationships) ? counterpart.keyRelationships : [])
+        .filter(entry => !relationshipTargetsNpc(entry, owner, npcs));
+}
+
 function explicitReverseRelationship(counterpart, owner, npcs = []) {
     for (const raw of Array.isArray(counterpart?.keyRelationships) ? counterpart.keyRelationships : []) {
         const parsed = parseKeyRelationshipEntry(raw);
@@ -853,12 +895,14 @@ export function applyManualKeyRelationshipEdit(state, npcId, beforeList = [], af
     const owner = npcs.find(npc => npc?.id === npcId);
     if (!owner) return next;
     let graph = normalizeSocialGraph(next.socialGraph);
-    const beforeIds = new Set((beforeList || []).map(parseKeyRelationshipEntry).filter(Boolean).map(item => resolveNpcReference(npcs, item.subject)?.id).filter(Boolean));
+    const beforeIds = new Set((beforeList || []).map(item => relationshipCounterpartId(npcs, item)).filter(Boolean));
     const afterEntries = (afterList || []).map(parseKeyRelationshipEntry).filter(Boolean);
-    const afterIds = new Set(afterEntries.map(item => resolveNpcReference(npcs, item.subject)?.id).filter(Boolean));
+    const afterIds = new Set((afterList || []).map(item => relationshipCounterpartId(npcs, item)).filter(Boolean));
     for (const removedId of beforeIds) {
         if (afterIds.has(removedId)) continue;
         graph.edges = graph.edges.filter(edge => !pairConnects(edge, owner.id, removedId));
+        const counterpart = npcs.find(npc => npc?.id === removedId);
+        removeMirroredRelationship(counterpart, owner, npcs);
     }
     for (const parsed of afterEntries) replaceManualRelationshipEdge(graph, owner, parsed, npcs, meta);
     next.socialGraph = normalizeSocialGraph(graph);
