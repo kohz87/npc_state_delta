@@ -162,3 +162,179 @@ test('v1.0.6 speech development ledger survives normalization and native bundle 
     const decoded = decodeNpcStateBundle(bytes);
     assert.deepEqual(decoded.state.npcs[0].speechDevelopment, normalized.speechDevelopment);
 });
+
+test('v1.0.19 unlabeled Speech evidence accumulates across independent scans and can promote a grounded refine candidate', () => {
+    const npc = createNpcRecord('Ryu');
+    npc.speech = 'Developing verbal speech, carefully testing words with measured syllables; communicates non-verbally through territorial hisses, wails, and affectionate gestures.';
+    let state = { npcs: [npc], candidates: [], turn: 9 };
+    const stale = npc.speech;
+    const payload = (evidence, speech = stale) => ({
+        npcs: [],
+        profileUpdates: [{
+            id: npc.id,
+            evidence: { speech: [evidence] },
+            speechState: 'refine',
+            speech,
+            speechReason: '',
+            developmentScale: 'gradual',
+            developmentReason: 'Repeated later scenes show the same speech habit.',
+        }],
+    });
+
+    state = scan(state, payload('Speaks in clear, measured, matter-of-fact statements about practical details.'), 10, 100).state;
+    assert.equal(state.npcs[0].speech, stale);
+    assert.equal(state.npcs[0].speechDevelopment.concepts[0].observationCount, 1);
+
+    state = scan(state, payload('Again speaks in clear, measured, matter-of-fact statements while explaining practical equipment details.'), 12, 101).state;
+    assert.equal(state.npcs[0].speech, stale);
+    assert.equal(state.npcs[0].speechDevelopment.concepts.length, 1);
+    assert.equal(state.npcs[0].speechDevelopment.concepts[0].observationCount, 2);
+
+    const result = scan(
+        state,
+        payload(
+            'Uses clear, measured, matter-of-fact statements when reporting technical and practical details.',
+            'Clear, measured, and matter-of-fact; gives concise practical or technical statements.',
+        ),
+        14,
+        102,
+    );
+    assert.equal(result.state.npcs[0].speech, 'Clear, measured, and matter-of-fact; gives concise practical or technical statements.');
+    assert.equal(result.state.npcs[0].speechDevelopment.epoch, 1);
+    assert.deepEqual(result.state.npcs[0].speechDevelopment.concepts, []);
+    assert.equal(result.report.profileDevelopment.at(-1)?.outcome, 'applied');
+});
+
+test('v1.0.19 semantically equivalent Speech labels share one deterministic concept bucket', () => {
+    const npc = createNpcRecord('Marris');
+    npc.speech = 'Soft, hesitant, and prone to trailing off when challenged.';
+    let state = { npcs: [npc], candidates: [], turn: 9 };
+    const payload = (evidence, speech = npc.speech) => ({
+        npcs: [],
+        profileUpdates: [{
+            id: npc.id,
+            evidence: { speech: [evidence] },
+            speechState: 'refine',
+            speech,
+            developmentScale: 'gradual',
+        }],
+    });
+
+    state = scan(state, payload('directness: answers plainly and directly without hedging'), 10, 100).state;
+    state = scan(state, payload('direct speech: answers plainly and directly without hedging when challenged'), 12, 101).state;
+    assert.equal(state.npcs[0].speechDevelopment.concepts.length, 1);
+    assert.equal(state.npcs[0].speechDevelopment.concepts[0].observationCount, 2);
+
+    const result = scan(
+        state,
+        payload('assertiveness: answers plainly and directly without hedging during planning', 'Direct and concise; answers plainly without habitual hedging.'),
+        14,
+        102,
+    );
+    assert.equal(result.state.npcs[0].speech, 'Direct and concise; answers plainly without habitual hedging.');
+});
+
+test('v1.0.19 one Refresh can count distinct tagged messages for gradual Personality development', () => {
+    const npc = createNpcRecord('Marris');
+    npc.personality = 'Quiet and reserved, avoiding public attention.';
+    const result = mergeScanResult(
+        { npcs: [npc], candidates: [], turn: 40 },
+        {
+            npcs: [],
+            profileUpdates: [{
+                id: npc.id,
+                evidence: { personality: [
+                    '[m10] confidence: speaks before the group and states her own view without prompting',
+                    '[m12] confidence: speaks before the group again and defends her own view calmly',
+                    '[m14] confidence: takes the floor before the group and states her view during debate',
+                ] },
+                personalityState: 'refine',
+                personality: 'Reserved with strangers, but speaks before groups and states her own views when needed.',
+                personalityReason: '',
+                developmentScale: 'gradual',
+            }],
+        },
+        {
+            turn: 40,
+            sourceMessageId: 20,
+            developmentSourceMessageIds: [10, 11, 12, 13, 14],
+            developmentContext: '[m10] Marris speaks before the group.\n[m12] Marris defends her view.\n[m14] Marris takes the floor again.',
+        },
+    );
+
+    assert.equal(result.state.npcs[0].personality, 'Reserved with strangers, but speaks before groups and states her own views when needed.');
+    assert.equal(result.state.npcs[0].personalityDevelopment.epoch, 1);
+    assert.deepEqual(result.state.npcs[0].personalityDevelopment.concepts, []);
+    const diagnostic = result.report.profileDevelopment.find(item => item.field === 'personality');
+    assert.equal(diagnostic?.outcome, 'applied');
+    assert.equal(diagnostic?.ready, true);
+});
+
+test('v1.0.19 a ready Speech ledger reports waiting-for-candidate when Refresh copies the stale summary', () => {
+    const npc = createNpcRecord('Ryu');
+    npc.speech = 'Developing verbal speech, carefully testing words with measured syllables; communicates non-verbally through territorial hisses, wails, and affectionate gestures.';
+    const result = mergeScanResult(
+        { npcs: [npc], candidates: [], turn: 40 },
+        {
+            npcs: [],
+            profileUpdates: [{
+                id: npc.id,
+                evidence: { speech: [
+                    '[m20] directness: speaks in clear, measured, matter-of-fact statements about practical details',
+                    '[m22] directness: again speaks in clear, measured, matter-of-fact statements about equipment',
+                    '[m24] directness: uses clear, measured, matter-of-fact statements while reporting technical details',
+                ] },
+                speechState: 'refine',
+                speech: npc.speech,
+                speechReason: '',
+                developmentScale: 'gradual',
+            }],
+        },
+        {
+            turn: 40,
+            sourceMessageId: 30,
+            developmentSourceMessageIds: [20, 21, 22, 23, 24],
+            developmentContext: '[m20] Ryu speaks clearly.\n[m22] Ryu speaks clearly again.\n[m24] Ryu reports technical details clearly.',
+        },
+    );
+
+    assert.equal(result.state.npcs[0].speech, npc.speech);
+    assert.equal(result.state.npcs[0].speechDevelopment.concepts[0].observationCount, 3);
+    const diagnostic = result.report.profileDevelopment.find(item => item.field === 'speech');
+    assert.equal(diagnostic?.outcome, 'waiting-for-candidate');
+    assert.equal(diagnostic?.ready, true);
+});
+
+test('v1.0.19 Refresh source tags count only when they belong to the supplied window', () => {
+    const npc = createNpcRecord('Marris');
+    npc.speech = 'Soft and hesitant.';
+    const result = mergeScanResult(
+        { npcs: [npc], candidates: [], turn: 40 },
+        {
+            npcs: [],
+            profileUpdates: [{
+                id: npc.id,
+                evidence: { speech: [
+                    '[m100] directness: answers plainly without hedging',
+                    '[m102] directness: again answers plainly without hedging',
+                    '[m104] directness: answers plainly without hedging in public',
+                ] },
+                speechState: 'refine',
+                speech: 'Direct and concise; answers plainly without habitual hedging.',
+                developmentScale: 'gradual',
+            }],
+        },
+        {
+            turn: 40,
+            sourceMessageId: 30,
+            developmentSourceMessageIds: [20, 21, 22],
+            developmentContext: '[m20] Actual supplied story line.\n[m21] Actual supplied story line.\n[m22] Actual supplied story line.',
+        },
+    );
+
+    assert.equal(result.state.npcs[0].speech, npc.speech);
+    assert.equal(result.state.npcs[0].speechDevelopment.concepts[0].observationCount, 1);
+    const diagnostic = result.report.profileDevelopment.find(item => item.field === 'speech');
+    assert.equal(diagnostic?.outcome, 'waiting-for-evidence');
+    assert.equal(diagnostic?.ready, false);
+});

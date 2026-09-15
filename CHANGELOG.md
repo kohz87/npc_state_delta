@@ -1,6 +1,15 @@
 # NPC State Delta changes
 
 
+## 1.0.19 - 15 September 2026
+
+- Replace the Speech-only exact-label development gate with bounded deterministic Personality/Speech ledgers. Unlabeled evidence and conservative semantic concept variants can accumulate without depending on Gemini to repeat one exact label spelling; three independent related observations across the existing minimum provenance span remain required for gradual promotion.
+- Make targeted Refresh source-aware inside its configured recent-story window. Refresh lines carry raw `[mN]` message IDs, Gemini may return up to four tagged gradual Personality/Speech observations, and Delta counts a tag only when that raw message actually belonged to the supplied window. Multiple qualifying messages inside one Refresh can therefore contribute independently without pretending they all occurred on the Refresh boundary.
+- Let deterministic gradual readiness own the final lifecycle decision: once a ledger is ready, a changed full current Personality/Speech candidate may be promoted even when the provider labels it `refine`/`keep`, but only when the new concepts are grounded in the accumulated evidence. Delta never invents replacement prose when the provider copies the stale current summary; diagnostics report `waiting-for-candidate` instead.
+- Preserve accepted v1.0.6 model-authorized `evolve` behavior, explicit/batch gates, manual locks, full-summary safety, rollback and native-bundle cloning. Cross-chat native transfer now rebases pending Personality chronology alongside Speech and cannot carry source-chat message/turn evidence into the target.
+- Expose `profileUpdates`, `profileApplied`, `profileEvidenceAdded` and bounded per-field development outcomes in Compact Diagnostics. Add regression coverage for the reported Ryu stale-Speech shape, unlabeled evidence, semantic label variants, multi-message Refresh accumulation, forged source tags and cross-chat Personality/Speech rebasing.
+- Deliberately clarify only the targeted Refresh prompt so it asks for tagged independent gradual observations and the best full current candidate instead of blindly copying a stale summary. The measured Refresh request grows by 322 characters; scanner/full-window/backfill/import/relationship/retry request counts, output allowances and roleplay injection remain unchanged. Persisted schemas, branch lineage, numerical relationship scoring and native bundle version remain unchanged.
+
 ## 1.0.18 - 15 September 2026
 
 - Make Important Bonds / Key Relationships boundary-safe end to end. Canonical stored bonds now use one 360-character budget and social dynamics use 260 characters, with subject/relation/dynamic parsed before limiting instead of raw slicing a preformatted line.

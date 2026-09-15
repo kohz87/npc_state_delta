@@ -1839,7 +1839,7 @@ function cleanMessage(message) {
     return body ? `${speaker}: ${body}` : '';
 }
 
-function recentTranscript(limit = null) {
+function recentTranscript(limit = null, { messageIds = false } = {}) {
     const settings = getSettings();
     const chat = getContext().chat || [];
     const count = Math.max(2, Math.min(30, Number(limit ?? settings.scanDepth) || 6));
@@ -1849,7 +1849,7 @@ function recentTranscript(limit = null) {
     for (let i = chat.length - 1; i >= 0 && lines.length < count; i -= 1) {
         if (!chat[i] || chat[i].is_system) continue;
         const line = cleanMessage(chat[i]);
-        if (line) lines.push(line);
+        if (line) lines.push(messageIds ? `[m${i}] ${line}` : line);
     }
     return lines.reverse().join('\n');
 }
@@ -2201,7 +2201,9 @@ async function refreshNpcFromChat(npcId) {
     const state = getChatState(chatKey);
     const existing = state.npcs.find(npc => npc.id === id);
     if (!existing) return false;
-    const transcript = recentTranscript(settings.scanDepth);
+    const transcript = recentTranscript(settings.scanDepth, { messageIds: true });
+    const developmentSourceMessageIds = [...transcript.matchAll(/^\[m(\d+)\]/gm)]
+        .map(match => Number(match[1])).filter(Number.isInteger);
     if (!transcript) {
         globalThis.toastr?.info?.(`NPC State Delta: no recent story text is available to refresh ${existing.name}.`);
         return false;
@@ -2289,6 +2291,7 @@ async function refreshNpcFromChat(npcId) {
             skipRelationshipUpdate: true,
             memoryInputLimit: IMPORTANT_MEMORY_LIMIT,
             allowTargetedDurableSeed: true,
+            developmentSourceMessageIds,
             developmentContext: transcript,
         });
         // A targeted refresh may use social-edge machinery internally, but it must never
@@ -2332,6 +2335,7 @@ async function refreshNpcFromChat(npcId) {
             profileUpdates: (parsed.profileUpdates || []).length,
             profileApplied: Number(merged.report?.profileUpdateStats?.applied || 0),
             profileEvidenceAdded: Number(merged.report?.profileUpdateStats?.evidenceAdded || 0),
+            profileDevelopment: Array.isArray(merged.report?.profileDevelopment) ? structuredClone(merged.report.profileDevelopment) : [],
             at: Date.now(),
         };
         console.info('[NPC State Delta] targeted refresh metrics', lastScanMetrics);
@@ -3086,6 +3090,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         if (lastScanMetrics) {
             lastScanMetrics.profileApplied = Number(merged.report?.profileUpdateStats?.applied || 0);
             lastScanMetrics.profileEvidenceAdded = Number(merged.report?.profileUpdateStats?.evidenceAdded || 0);
+            lastScanMetrics.profileDevelopment = Array.isArray(merged.report?.profileDevelopment) ? structuredClone(merged.report.profileDevelopment) : [];
             console.info('[NPC State Delta] dossier scan metrics', lastScanMetrics);
         }
         applyFocusedRelationshipDecisions(merged.state, relationshipPass.decisions, settings.relationshipCaps, targetMessageId, merged.report);

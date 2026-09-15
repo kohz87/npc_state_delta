@@ -2237,6 +2237,28 @@ function profileEvidenceRelated(a, b) {
     return durableSemanticSimilarity(a, b) >= 0.48;
 }
 
+export function durableProfileEvidenceRelated(a, b) {
+    return profileEvidenceRelated(a, b);
+}
+
+export function durableProfileEvolutionCandidateGrounded(field, existing, incoming, evidenceItems = []) {
+    const key = field === 'personality' ? 'personality' : field === 'speech' ? 'speech' : '';
+    if (!key) return false;
+    const maxChars = DURABLE_PROFILE_LIMITS[key];
+    const oldText = compactDurableText(existing, maxChars, key === 'speech' ? 5 : 6);
+    const newText = compactDurableText(incoming, maxChars, key === 'speech' ? 5 : 6);
+    if (!oldText || !newText || normalizeName(oldText) === normalizeName(newText)) return false;
+    if (containsEvolutionLanguage(newText)) return false;
+    if (key === 'personality' && identityMoralityConflict(oldText, newText)) return false;
+    const oldTokens = new Set(durableRefinementTokens(oldText));
+    const changedTokens = [...new Set(durableRefinementTokens(newText))].filter(token => !oldTokens.has(token));
+    if (!changedTokens.length) return false;
+    const evidenceTokens = new Set(durableRefinementTokens((Array.isArray(evidenceItems) ? evidenceItems : []).join(' ')));
+    const supported = changedTokens.filter(token => evidenceTokens.has(token)).length;
+    const required = changedTokens.length <= 2 ? 1 : Math.max(2, Math.ceil(changedTokens.length * 0.4));
+    return supported >= required;
+}
+
 function newProfileEvidence(prior = [], incoming = []) {
     const before = cleanList(prior, PROFILE_EVIDENCE_LIMIT * 2, DURABLE_PROFILE_LIMITS.evidence);
     return cleanList(incoming, PROFILE_EVIDENCE_LIMIT * 2, DURABLE_PROFILE_LIMITS.evidence).filter(item =>
@@ -4656,7 +4678,7 @@ Rules:
 4. LOCKS: never rewrite fields listed in lockedProfileFields. Omit them from profileUpdates and ordinary dossier changes.
 5. DURABLE PROFILE: CURRENT COMPACT SUMMARY only. Personality/Speech/Appearance mention each durable concept once; Appearance does not repeat explicit age. behaviorProfile=max6 target-general rules translating identity, not a second essay; player-specific patterns belong relationshipSummary. refine returns FULL field; lasting personality/speech/mannerism/behaviorProfile change uses evolve+reason, Appearance uses change+reason. Mannerisms=max4 DISTINCT recurring patterns, not separate animations. One transient beat is not durable.
 6. IDENTITY FIREWALL: temporary mood, fear, stress, intoxication, intimacy, or behavior unique to ${userName} must not become global Personality, Speech, Mannerisms, or behaviorProfile. A generally kind NPC remains generally kind toward other people unless narration establishes a broader change. Necessary force is not cruelty by itself.
-7. DEVELOPMENT SPEED: ordinary continuity changes durable identity gradually across separate scans. For gradual evidence prefix a stable concept label, e.g. "reserve: initiates public discussion", so later evidence can confirm the SAME pattern. Use developmentScale:"gradual"; "explicit" only for a direct lasting-change statement; "batch" only when a time skip explicitly summarizes sustained development. Mere passage of time does nothing. Include developmentReason for evolve/change.
+7. DEVELOPMENT SPEED: ordinary continuity changes durable identity gradually. Recent lines may start with [mN] source tags. For gradual Personality/Speech evidence, return up to 4 independent observations and preserve each source tag, e.g. "[m42] reserve: initiates public discussion"; use one stable concept label for the same pattern. If repeated evidence makes the existing Personality/Speech stale, return the best FULL CURRENT candidate summary now instead of copying the stale baseline, even if you mark it refine; Delta decides whether evidence is sufficient. Use developmentScale:"gradual"; "explicit" only for a direct lasting-change statement; "batch" only when a time skip explicitly summarizes sustained development. Mere passage of time does nothing. Include developmentReason for evolve/change.
 8. ROLE/SPECIES/BACKGROUND may update when this window establishes or clarifies them. Species is literal only. Background is durable history, not current mood/status.
 9. AGE=chronology only. Birthday/exact elapsed years=>advance+reason; correction=>correct+reason. apparentAge=visual and should be compact ~N, not prose; visual aging/growth/rejuvenation=>evolve+reason. No species-lifespan inference.
 10. KEY RELATIONSHIPS: one unambiguous entry/non-player counterpart. Merge relation+durable dynamic; use "late husband"/"surviving widow" rather than dangling "(deceased)". update/keyRelationshipEdges for discovery; evolve+reason for lasting social change. Omission NEVER erases unrelated ties. Never put ${userName} there.
