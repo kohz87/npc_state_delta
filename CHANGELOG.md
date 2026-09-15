@@ -1,6 +1,13 @@
 # NPC State Delta changes
 
 
+## 1.0.20 - 15 September 2026
+
+- Make time-compressed durable development deterministic instead of depending on the provider to emit the exact `batch` + `evolve` combination. When a Personality or Speech candidate is returned as `gradual`/`refine` or `gradual`/`keep`, Delta may infer the existing batch path only when the supplied story context itself proves an elapsed span, sustained development during that span, and a grounded development reason.
+- Generalize elapsed-span recognition to named seasons and seasonal ranges such as spring through summer, plus ordinary day/week/month/year/season spans expressed with `during`, `throughout`, or `across`. Expand sustained-development cues around learning, practice, training, study, apprenticeship, progression and mastery without treating bare time passage as development.
+- Require an inferred/declared batch recovery candidate to be materially changed and grounded against the supplied field evidence and development context before replacement. Manual locks, Personality morality safety, existing provider-authorized explicit/batch evolution, gradual three-observation ledgers, rollback ownership and native transfer remain authoritative. No extra model request is added and scanner prompts remain byte-stable.
+- Add regressions from the reported seasonal Speech transition, prove that seasonal passage alone cannot bypass gradual evidence, and verify the same grounded elapsed-development recovery for Personality so the behavior is field-general rather than character- or Speech-specific.
+
 ## 1.0.19 - 15 September 2026
 
 - Replace the Speech-only exact-label development gate with bounded deterministic Personality/Speech ledgers. Unlabeled evidence and conservative semantic concept variants can accumulate without depending on Gemini to repeat one exact label spelling; three independent related observations across the existing minimum provenance span remain required for gradual promotion.

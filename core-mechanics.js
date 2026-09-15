@@ -3571,16 +3571,18 @@ function isBareTimePassageDevelopmentReason(value) {
 }
 
 const DEVELOPMENT_TIME_TOKENS = new Set([
-    'time', 'day', 'week', 'month', 'year', 'decade', 'later', 'pass', 'elapse', 'next', 'during', 'after', 'over',
+    'time', 'day', 'week', 'month', 'year', 'decade', 'season', 'spring', 'summer', 'autumn', 'fall', 'winter', 'later', 'pass', 'elapse', 'next', 'during', 'after', 'over', 'throughout', 'across', 'through', 'into',
     'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'several', 'many', 'few',
 ]);
 
 function hasNarratedTimeSkip(value) {
     const text = normalizeName(value);
     if (!text) return false;
-    return /\b(?:day|week|month|year|decade)s?\b[^.!?\n]{0,48}\b(?:pass|passed|elapse|elapsed|later|afterward|afterwards)\b/.test(text)
-        || /\b(?:after|over|during)\s+(?:the\s+)?(?:next\s+)?(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|several|many|few|\d+)\s+(?:day|week|month|year|decade)s?\b/.test(text)
-        || /\b(?:months|years|weeks|days)\s+later\b/.test(text);
+    return /\b(?:day|week|month|year|decade|season)s?\b[^.!?\n]{0,48}\b(?:pass|passed|elapse|elapsed|later|afterward|afterwards)\b/.test(text)
+        || /\b(?:after|over|during|throughout|across)\s+(?:the\s+)?(?:next\s+)?(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|several|many|few|\d+)\s+(?:day|week|month|year|decade|season)s?\b/.test(text)
+        || /\b(?:months|years|weeks|days|seasons)\s+later\b/.test(text)
+        || /\b(?:over|during|throughout|across)\s+(?:the\s+)?(?:spring|summer|autumn|fall|winter)(?:\s+(?:and|through|into)\s+(?:the\s+)?(?:spring|summer|autumn|fall|winter))?\b/.test(text)
+        || /\b(?:spring|summer|autumn|fall|winter)\s+(?:through|into)\s+(?:the\s+)?(?:spring|summer|autumn|fall|winter)\b/.test(text);
 }
 
 function developmentContentTokens(value) {
@@ -3600,7 +3602,7 @@ function developmentReasonGrounded(reason, context) {
 }
 
 const EXPLICIT_DEVELOPMENT_CUE_RE = /\b(?:no longer|formerly|used to|ceased|stopped being|became|become|grown|grew|increasingly|decreasingly|changed|from then on|henceforth|ever since|second nature|true nature|habitual|habitually|permanent|permanently|lasting|now (?:always|usually|routinely|consistently|more|less)|contrary to|actually|in fact|has always|had always|never was|never had been|mistaken|misunderstood)\b/;
-const BATCH_DEVELOPMENT_CUE_RE = /\b(?:gradually|repeatedly|consistently|routinely|throughout|eventually|over time|during that time|by then|became|become|grown|grew|learned|practiced|practised|habitual|second nature|true nature|changed)\b/;
+const BATCH_DEVELOPMENT_CUE_RE = /\b(?:gradually|repeatedly|consistently|routinely|throughout|eventually|over time|during that time|by then|became|become|grown|grew|learned|learning|practiced|practised|practicing|practising|progressed|progressing|developed|developing|improved|improving|trained|training|studied|studying|apprenticed|apprenticeship|schooling|education|mastered|mastering|habitual|second nature|true nature|changed)\b/;
 
 function developmentContextSegments(value) {
     return String(value || '').replace(/\r/g, '\n').split(/\n+|(?<=[.!?])\s+/)
@@ -3637,7 +3639,7 @@ function batchDevelopmentContextGrounded(reason, context) {
     return false;
 }
 
-function developmentScaleReady(scale, reason, context) {
+export function developmentScaleReady(scale, reason, context) {
     const mode = ['gradual', 'explicit', 'batch'].includes(String(scale || '')) ? String(scale) : 'gradual';
     if (mode === 'gradual') return false;
     if (!developmentReasonGrounded(reason, context)) return false;

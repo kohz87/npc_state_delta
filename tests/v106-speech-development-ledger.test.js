@@ -338,3 +338,97 @@ test('v1.0.19 Refresh source tags count only when they belong to the supplied wi
     assert.equal(diagnostic?.outcome, 'waiting-for-evidence');
     assert.equal(diagnostic?.ready, false);
 });
+
+test('v1.0.20 grounded seasonal development can promote a Speech candidate even when the provider says gradual refine', () => {
+    const npc = createNpcRecord('Ryu');
+    npc.speech = 'Developing verbal speech, carefully testing words with measured syllables; communicates non-verbally through territorial hisses, wails, and affectionate gestures.';
+    const result = mergeScanResult(
+        { npcs: [npc], candidates: [], turn: 204 },
+        {
+            npcs: [],
+            profileUpdates: [{
+                id: npc.id,
+                evidence: { speech: [
+                    '[m202] Speaks in firm, measured, and matter-of-fact statements regarding anatomy and tinctures',
+                    '[m204] Delivers smooth, level, and polished sentences copying guildhall intake decorum',
+                ] },
+                speechState: 'refine',
+                speech: 'Speaks in smooth, level, and impeccably polite cadences, carefully measured with academic precision and deliberately mimicking guild-intake decorum.',
+                speechReason: '',
+                developmentScale: 'gradual',
+                developmentReason: 'Progressing through parish academics, chirurgery apprenticeship, and social mimicry across the spring and summer seasons.',
+            }],
+        },
+        {
+            turn: 204,
+            sourceMessageId: 204,
+            developmentSourceMessageIds: [202, 203, 204],
+            developmentContext: 'Across the spring and summer seasons, Ryu progressed through parish academics and chirurgery apprenticeship, repeatedly practicing spoken anatomy explanations and social mimicry. By the summer banquet she speaks in smooth, level, impeccably polite cadences, carefully measured with academic precision while deliberately mimicking guildhall intake decorum.',
+        },
+    );
+
+    assert.equal(result.state.npcs[0].speech, 'Speaks in smooth, level, and impeccably polite cadences, carefully measured with academic precision and deliberately mimicking guild-intake decorum.');
+    assert.equal(result.state.npcs[0].speechDevelopment.epoch, 1);
+    assert.deepEqual(result.state.npcs[0].speechDevelopment.concepts, []);
+    const diagnostic = result.report.profileDevelopment.find(item => item.field === 'speech');
+    assert.equal(diagnostic?.outcome, 'applied-batch');
+    assert.equal(diagnostic?.effectiveScale, 'batch');
+    assert.equal(diagnostic?.inferredScale, true);
+});
+
+test('v1.0.20 seasonal passage alone cannot bypass gradual Speech evidence', () => {
+    const npc = createNpcRecord('Marris');
+    npc.speech = 'Soft and hesitant.';
+    const result = mergeScanResult(
+        { npcs: [npc], candidates: [], turn: 40 },
+        {
+            npcs: [],
+            profileUpdates: [{
+                id: npc.id,
+                speechState: 'refine',
+                speech: 'Direct and concise in public discussion.',
+                developmentScale: 'gradual',
+                developmentReason: 'Spring and summer passed before she returned.',
+            }],
+        },
+        {
+            turn: 40,
+            sourceMessageId: 140,
+            developmentContext: 'Spring and summer passed. Marris returned to the city and greeted the gatekeeper.',
+        },
+    );
+
+    assert.equal(result.state.npcs[0].speech, 'Soft and hesitant.');
+    const diagnostic = result.report.profileDevelopment.find(item => item.field === 'speech');
+    assert.equal(diagnostic?.outcome, 'waiting-for-evidence');
+});
+
+test('v1.0.20 grounded elapsed development recovery is field-general and applies to Personality', () => {
+    const npc = createNpcRecord('Marris');
+    npc.personality = 'Quiet and deferential, avoiding leadership decisions.';
+    const result = mergeScanResult(
+        { npcs: [npc], candidates: [], turn: 50 },
+        {
+            npcs: [],
+            profileUpdates: [{
+                id: npc.id,
+                evidence: { personality: ['Takes command decisions independently and remains calm under pressure.'] },
+                personalityState: 'refine',
+                personality: 'Confident and decisive under pressure, independently taking responsibility for difficult command decisions.',
+                personalityReason: '',
+                developmentScale: 'gradual',
+                developmentReason: 'Across two years of command training she developed confidence and independent decision-making.',
+            }],
+        },
+        {
+            turn: 50,
+            sourceMessageId: 150,
+            developmentContext: 'Across two years of command training, Marris repeatedly trained under pressure and developed confidence and independent decision-making. She is now confident and decisive under pressure, independently taking responsibility for difficult command decisions.',
+        },
+    );
+
+    assert.equal(result.state.npcs[0].personality, 'Confident and decisive under pressure, independently taking responsibility for difficult command decisions.');
+    const diagnostic = result.report.profileDevelopment.find(item => item.field === 'personality');
+    assert.equal(diagnostic?.outcome, 'applied-batch');
+    assert.equal(diagnostic?.effectiveScale, 'batch');
+});
