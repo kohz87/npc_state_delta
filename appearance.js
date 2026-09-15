@@ -102,6 +102,13 @@ function safeRefinement(existing, incoming) {
     const coverage = [...oldTokens].filter(token => newTokens.has(token)).length / oldTokens.size;
     return addsDetail && (coverage >= 0.62 || similarity(existing, incoming) >= 0.58);
 }
+function safeUnmarkedReplacement(existing, incoming) {
+    if (!safeRefinement(existing, incoming)) return false;
+    const oldTokens = new Set(refinementTokens(existing));
+    const newTokens = new Set(refinementTokens(incoming));
+    const coverage = [...oldTokens].filter(token => newTokens.has(token)).length / oldTokens.size;
+    return coverage >= 1;
+}
 function mergeRefinement(existing, incoming, maxChars) {
     const current = clean(existing, maxChars);
     const next = clean(incoming, maxChars);
@@ -232,7 +239,10 @@ function reconcileFormAppearance(existing, update, context = '') {
         if (!reason || (context && (!grounded(reason, context) || !grounded(incoming, context)))) return current;
         return incoming;
     }
-    if (!safeRefinement(current, incoming) || (context && !grounded(incoming, context))) return current;
+    const compatible = state === 'refine'
+        ? safeRefinement(current, incoming)
+        : safeUnmarkedReplacement(current, incoming);
+    if (!compatible || (context && !grounded(incoming, context))) return current;
     return mergeRefinement(current, incoming, DURABLE_PROFILE_LIMITS?.appearance || 800);
 }
 
@@ -250,8 +260,13 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
             if (state === 'change') {
                 const reason = clean(rawUpdate.overallAppearanceReason ?? rawUpdate.overall_appearance_reason, 500);
                 if (reason && (!context || (grounded(reason, context) && grounded(incoming, context)))) next.overallAppearance = incoming;
-            } else if (safeRefinement(next.overallAppearance, incoming) && (!context || grounded(incoming, context))) {
-                next.overallAppearance = mergeRefinement(next.overallAppearance, incoming, DURABLE_PROFILE_LIMITS?.appearance || 800);
+            } else {
+                const compatible = state === 'refine'
+                    ? safeRefinement(next.overallAppearance, incoming)
+                    : safeUnmarkedReplacement(next.overallAppearance, incoming);
+                if (compatible && (!context || grounded(incoming, context))) {
+                    next.overallAppearance = mergeRefinement(next.overallAppearance, incoming, DURABLE_PROFILE_LIMITS?.appearance || 800);
+                }
             }
         }
     }

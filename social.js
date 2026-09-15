@@ -386,10 +386,21 @@ function addEdge(graph, raw) {
         return current;
     }
     if (graph.edges.length >= SOCIAL_GRAPH_EDGE_LIMIT) {
-        if (edge.inferred || confidenceRank(edge.confidence) <= confidenceRank('inferred')) return null;
-        const inferredIndex = graph.edges.findIndex(item => item.inferred || confidenceRank(item.confidence) <= confidenceRank('inferred'));
-        if (inferredIndex >= 0) graph.edges.splice(inferredIndex, 1);
-        else graph.edges.shift();
+        const incomingRank = edge.inferred ? confidenceRank('inferred') : confidenceRank(edge.confidence);
+        if (incomingRank <= confidenceRank('inferred')) return null;
+        let evictionIndex = -1;
+        let evictionRank = Infinity;
+        for (let i = 0; i < graph.edges.length; i += 1) {
+            const current = graph.edges[i];
+            const rank = current.inferred ? confidenceRank('inferred') : confidenceRank(current.confidence);
+            if (rank >= incomingRank || rank >= evictionRank) continue;
+            evictionRank = rank;
+            evictionIndex = i;
+        }
+        // Capacity pressure may discard weaker inferred/migration continuity, but a new edge
+        // never evicts an equal- or higher-authority explicit/manual relationship.
+        if (evictionIndex < 0) return null;
+        graph.edges.splice(evictionIndex, 1);
     }
     graph.edges.push(edge);
     return edge;

@@ -1,6 +1,15 @@
 # NPC State Delta changes
 
 
+## 1.0.16 - 15 September 2026
+
+- Keep the 1.0.15 full-current `refine` contract explicit: missing/`keep` lifecycle markers use non-destructive compatibility recovery that may add grounded detail but preserves omitted established Personality, Speech or Appearance clauses instead of treating omission as deletion authority.
+- Apply the same keep-vs-refine distinction to form-independent overall appearance and named appearance forms. Explicit accepted `refine` still replaces that exact current slot and retires omitted superseded visual clauses.
+- Make Behavioral Profile refinement atomic across protected identity directions, not only matching category labels. Agency/autonomy versus obedience/compliance and kindness versus cruelty reversals cannot bypass refinement safety by renaming the category.
+- Rebase pending Speech-development chronology on cross-chat native import: preserve accepted Speech/epoch/baseline text, clear source-chat message/turn provenance and pending concepts, and keep same-chat ownership unchanged.
+- Make social-graph capacity authority-aware. New edges may evict only strictly weaker continuity and can never displace equal- or higher-confidence explicit/manual relationships merely because the 240-edge cap is full.
+- Add focused regressions for ordinary/profile-update unmarked summaries, keep-state appearance forms, renamed Behavioral Profile reversals, cross-chat Speech provenance and full-cap social graphs. Scanner prompts/request budgets, numerical relationship scoring, persistence/storage formats, branch recovery and native bundle schema remain unchanged.
+
 ## 1.0.15 - 15 September 2026
 
 - Make accepted durable-profile `refine` results authoritative full CURRENT summaries instead of additive history. Personality, Speech and flat/current Appearance now retire omitted superseded clauses after the existing safety gates accept the incoming full field.
