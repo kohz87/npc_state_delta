@@ -1,6 +1,14 @@
 # NPC State Delta changes
 
 
+## 1.0.15 - 15 September 2026
+
+- Make accepted durable-profile `refine` results authoritative full CURRENT summaries instead of additive history. Personality, Speech and flat/current Appearance now retire omitted superseded clauses after the existing safety gates accept the incoming full field.
+- Treat Mannerisms and Behavioral Profile `refine` payloads as full current bounded lists: omitted old habits/rules retire instead of accumulating forever. Unsafe Behavioral Profile refinements reject atomically and preserve the established profile.
+- Apply the same current-summary rule inside named appearance forms and form-independent overall appearance while preserving unrelated named forms. Updating Human Form no longer carries an older Human Form outfit forward into the new presentation.
+- Keep evidence/history in `profileEvidence`, memories and their existing histories rather than copying history back into current dossier summaries. Existing evolution/development gates, manual locks and identity/morality firewalls remain authoritative.
+- Add regressions for the reported blue-gold-hair school-outfit -> flax-smock/vest/skirt stacking case plus Personality, Speech, Mannerisms, Behavioral Profile and named-form replacement. Scanner prompts/request budgets, relationship scoring, persistence formats, branch recovery and bundle schema remain unchanged.
+
 ## 1.0.14 - 15 September 2026
 
 - Make Important Bond normalization idempotent when older data already contains repeated structural pipes or spaced slash fragments. Canonical dynamics split legacy `;`, extra `|`, and spaced ` / ` separators, discard tiny truncation debris, deduplicate semantically repeated fragments, and render one structural `|` only.

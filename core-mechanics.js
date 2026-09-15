@@ -1802,11 +1802,10 @@ function mergeDurableTextRefinement(existing, incoming, maxChars) {
     if (!oldText) return newText;
     if (!newText || normalizeName(oldText) === normalizeName(newText)) return oldText;
 
-    // Reconciliation is summary-based, never append-only. Prefer the scanner's current
-    // compact field, then restore only established clauses it genuinely omitted.
-    const incomingClauses = splitDurableClauses(newText);
-    const oldClauses = splitDurableClauses(oldText);
-    return compactDurableText([...incomingClauses, ...oldClauses].join('; '), maxChars, clauseCap);
+    // `refine` is a full CURRENT summary contract. Safety/admission is decided by the caller;
+    // once accepted, omitted old clauses are intentionally retired instead of appended back.
+    // Historical evidence belongs in profileEvidence, not inside the current dossier field.
+    return newText;
 }
 
 function mannerismPatternFamily(value) {
@@ -2051,26 +2050,33 @@ function isSafeBehaviorProfileRefinement(existing, incoming) {
 
 function mergeBehaviorProfileRefinements(existing, incoming) {
     const current = normalizeBehaviorProfile(existing);
-    for (const entry of normalizeBehaviorProfile(incoming)) {
+    const updates = normalizeBehaviorProfile(incoming);
+    if (!updates.length) return current;
+    const next = [];
+    for (const entry of updates) {
         const key = behaviorProfileKey(entry);
         const family = behaviorProfileFamily(entry);
         let index = current.findIndex(item => behaviorProfileKey(item) === key);
         if (index < 0 && family) index = current.findIndex(item => behaviorProfileFamily(item) === family);
         if (index >= 0) {
-            if (isSafeBehaviorProfileRefinement(current[index], entry)) {
-                current[index] = family ? mergeBehaviorFamilyEntries(current[index], entry, family) : entry;
-            }
-        } else if (current.length < BEHAVIOR_PROFILE_LIMIT) {
-            const incomingPolarity = behaviorProfileMoralityRelevant(entry) ? moralityPolarity(entry) : 0;
-            const conflicts = incomingPolarity && current.some(item => {
-                if (!behaviorProfileMoralityRelevant(item)) return false;
-                const existingPolarity = moralityPolarity(item);
-                return existingPolarity && existingPolarity !== incomingPolarity;
-            });
-            if (!conflicts) current.push(entry);
+            // A full-summary refine is atomic for safety. If any replacement fails its existing
+            // identity/morality gate, reject the proposed summary rather than partially clearing it.
+            if (!isSafeBehaviorProfileRefinement(current[index], entry)) return current;
+            next.push(entry);
+            continue;
         }
+        const incomingPolarity = behaviorProfileMoralityRelevant(entry) ? moralityPolarity(entry) : 0;
+        const conflicts = incomingPolarity && current.some(item => {
+            if (!behaviorProfileMoralityRelevant(item)) return false;
+            const existingPolarity = moralityPolarity(item);
+            return existingPolarity && existingPolarity !== incomingPolarity;
+        });
+        if (conflicts) return current;
+        next.push(entry);
     }
-    return normalizeBehaviorProfile(current);
+    // Omitted old rules are retired because the scanner contract says refine is a FULL field.
+    // Longitudinal support remains in profileEvidence rather than being copied back into the list.
+    return normalizeBehaviorProfile(next);
 }
 
 const PROFILE_EVIDENCE_FIELDS = Object.freeze(['personality', 'speech', 'appearance', 'mannerisms', 'behaviorProfile']);
@@ -3119,7 +3125,9 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
             merged.mannerisms = normalizeMannerisms(incoming.mannerisms || []);
         } else if (incoming.mannerismState === 'refine' && incoming.mannerismsProvided) {
             const safe = filterSafeMannerismRefinements(existing.mannerisms, incoming.mannerisms, false, lifecycleOptions.developmentContext);
-            merged.mannerisms = mergeMannerismRefinements(existing.mannerisms, safe);
+            // Refine is a full current list. If nothing in the proposed list survives the
+            // existing safety gate, preserve the established set instead of clearing it.
+            merged.mannerisms = safe.length ? normalizeMannerisms(safe) : [...(existing.mannerisms || [])];
         } else {
             merged.mannerisms = [...(existing.mannerisms || [])];
         }
@@ -3595,7 +3603,7 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
             const allowNewPattern = gradualProfileEvolutionReady('mannerisms', beforeEvidence, incomingEvidence)
                 || developmentScaleReady(incoming.developmentScale, incoming.developmentReason, options.developmentContext);
             const safe = filterSafeMannerismRefinements(current, incoming.mannerisms, allowNewPattern, options.developmentContext);
-            const refined = mergeMannerismRefinements(current, safe);
+            const refined = safe.length ? normalizeMannerisms(safe) : current;
             if (JSON.stringify(refined) !== JSON.stringify(current)) { npc.mannerisms = refined; changed = true; }
             evidence.mannerisms = [...(beforeEvidence.mannerisms || [])];
         }
