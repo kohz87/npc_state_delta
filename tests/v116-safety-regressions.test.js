@@ -122,7 +122,7 @@ test('v1.0.19 cross-chat native import rebases pending Personality/Speech develo
     const npc = createNpcRecord('Ryu');
     npc.personality = 'Reserved, observant, and quietly protective.';
     npc.personalityDevelopment = {
-        version: 1,
+        version: 2,
         epoch: 2,
         baselinePersonality: npc.personality,
         baselineTurn: 16,
@@ -134,12 +134,17 @@ test('v1.0.19 cross-chat native import rebases pending Personality/Speech develo
             observationCount: 3,
             sourceMessageIds: [32, 36, 40],
             turns: [16, 18, 20],
+            evidenceSamples: [
+                'confidence: volunteers her view in a small group',
+                'confidence: defends her own decision calmly',
+                'confidence: speaks before groups without prompting',
+            ],
             latestEvidence: 'confidence: speaks before groups without prompting',
         }],
     };
     npc.speech = 'Soft, formal, and precise.';
     npc.speechDevelopment = {
-        version: 1,
+        version: 2,
         epoch: 3,
         baselineSpeech: npc.speech,
         baselineTurn: 18,
@@ -151,6 +156,11 @@ test('v1.0.19 cross-chat native import rebases pending Personality/Speech develo
             observationCount: 3,
             sourceMessageIds: [36, 38, 40],
             turns: [18, 19, 20],
+            evidenceSamples: [
+                'technical vocabulary: names surgical instruments precisely',
+                'technical vocabulary: uses formal medical terms',
+                'technical vocabulary: uses exact anatomical terminology',
+            ],
             latestEvidence: 'technical vocabulary: uses exact anatomical terminology',
         }],
     };

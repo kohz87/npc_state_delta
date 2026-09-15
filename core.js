@@ -34,7 +34,7 @@ export {
 
 const ROUTINE_APPARENT_AGE_RULE = '11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue, compact ~N, never prose; species literal; no species-aging inference. Birthday/exact elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual aging/growth/rejuvenation=>apparentAgeState:"evolve"+reason. Appearance must not repeat explicit age. Vague time skip insufficient.';
 const ROUTINE_APPARENT_AGE_RULE_FIXED = '11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue ~N. NEW dossier + cue => MUST return apparentAge when age unknown. species literal; no species-aging inference. Birthday/exact elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual change=>apparentAgeState:"evolve"+reason. Appearance:no age; vague time skip insufficient.';
-const PROFILE_DEVELOPMENT_VERSION = 1;
+const PROFILE_DEVELOPMENT_VERSION = 2;
 const PROFILE_DEVELOPMENT_CONCEPT_LIMIT = 4;
 const PROFILE_DEVELOPMENT_OBSERVATION_LIMIT = 4;
 const PROFILE_DEVELOPMENT_READY_COUNT = 3;
@@ -106,6 +106,75 @@ function calendarReference(options = {}, calendar = getActiveCalendarConfig()) {
     };
 }
 
+function exactStoredAge(value) {
+    const text = String(value ?? '').trim();
+    return /^\d{1,3}$/.test(text) ? Number(text) : null;
+}
+
+function compactApparentAgeNumber(value) {
+    const match = String(value ?? '').trim().match(/^~?(\d{1,3})$/);
+    return match ? Number(match[1]) : null;
+}
+
+function sameCalendarBirthday(a, b, calendar) {
+    const left = normalizeCalendarDate(a, calendar);
+    const right = normalizeCalendarDate(b, calendar);
+    if (!left || !right) return false;
+    if (left.era && right.era && mechanics.normalizeName(left.era) !== mechanics.normalizeName(right.era)) return false;
+    return mechanics.normalizeName(left.month) === mechanics.normalizeName(right.month) && left.day === right.day;
+}
+
+function applyDeterministicBirthdayRollover(npc, previousRaw, ordinaryUpdate, options, calendar, referenceDate) {
+    if (!npc || !previousRaw || !referenceDate || isTerminalNpcDeath(npc)) return npc;
+    const manualFields = Array.isArray(npc.manualProfileFields) ? npc.manualProfileFields : [];
+    if (manualFields.includes('age')) return npc;
+    if (!sameCalendarBirthday(npc.birthDate, referenceDate, calendar)) return npc;
+
+    const previousAge = exactStoredAge(previousRaw.age);
+    if (previousAge === null) return npc;
+    const currentAge = exactStoredAge(npc.age);
+    const calendarAge = Number.isInteger(npc.calendarAge) ? npc.calendarAge : null;
+    let targetAge = calendarAge !== null && calendarAge > previousAge ? calendarAge : currentAge;
+
+    const previousBirthDate = normalizeCalendarDate(
+        previousRaw.birthDate ?? previousRaw.birth_date ?? previousRaw.birthday,
+        calendar,
+    );
+    const previousHadYear = previousBirthDate?.year !== null && previousBirthDate?.year !== undefined;
+    const incomingBirthday = ordinaryUpdate?.birthDate ?? ordinaryUpdate?.birth_date ?? ordinaryUpdate?.birthday;
+    const birthdayEstablishedNow = Boolean(incomingBirthday)
+        && ['establish', 'set', 'update', 'refine', 'correct', 'correction']
+            .includes(String(ordinaryUpdate?.birthDateState ?? ordinaryUpdate?.birth_date_state ?? '').trim().toLowerCase());
+    const ageState = String(ordinaryUpdate?.ageState ?? ordinaryUpdate?.age_state ?? '').trim().toLowerCase();
+    const correctedAge = ageState === 'correct' || ageState === 'correction';
+    const narratedBirthday = birthdayEvidenceInText(birthdayPromptSource(options));
+
+    // Compatibility recovery for an existing yearless birthday: if the story has reached that
+    // exact stored birthday and explicitly presents it as a birthday/nameday, the accepted age
+    // is the pre-birthday baseline. Advance once, then anchor the derived year so repeated scans
+    // on the same day are idempotent. A birthday first established in this same scan is excluded.
+    if (!previousHadYear && !birthdayEstablishedNow && !correctedAge && narratedBirthday
+        && (targetAge === null || targetAge <= previousAge)) {
+        targetAge = previousAge + 1;
+    }
+
+    if (targetAge === null || targetAge <= previousAge) return npc;
+    const delta = targetAge - previousAge;
+    let next = { ...npc, age: String(targetAge), updatedAt: Date.now() };
+    if (next.birthDateYearSource === 'derived'
+        && (!Number.isInteger(next.calendarAge) || next.calendarAge < targetAge)) {
+        next = reanchorDerivedBirthYearFromAge(next, calendar, referenceDate);
+        next.age = String(targetAge);
+    }
+
+    const apparentState = String(ordinaryUpdate?.apparentAgeState ?? ordinaryUpdate?.apparent_age_state ?? '').trim().toLowerCase();
+    if (!manualFields.includes('apparentAge') && apparentState !== 'evolve') {
+        const apparent = compactApparentAgeNumber(previousRaw.apparentAge ?? npc.apparentAge);
+        if (apparent !== null) next.apparentAge = `~${Math.max(0, apparent + delta)}`;
+    }
+    return normalizeNpcBirthday(next, calendar, referenceDate);
+}
+
 function calendarNpcProjection(raw = null, referenceDate = null, fallback = true) {
     if (!raw || typeof raw !== 'object') return raw;
     const calendar = getActiveCalendarConfig();
@@ -171,6 +240,14 @@ function normalizeProfileDevelopmentConcept(raw = {}) {
         sourceMessageIds.length,
         turns.length,
     );
+    const evidenceSamples = [...new Set((Array.isArray(raw?.evidenceSamples) ? raw.evidenceSamples : [])
+        .map(item => profileDevelopmentText('speech', item, mechanics.DURABLE_PROFILE_LIMITS.evidence)).filter(Boolean))]
+        .slice(-PROFILE_DEVELOPMENT_OBSERVATION_LIMIT);
+    const latestEvidence = profileDevelopmentText('speech', raw?.latestEvidence, mechanics.DURABLE_PROFILE_LIMITS.evidence)
+        || evidenceSamples.at(-1) || '';
+    // v1 records had only latestEvidence. Seed one bounded sample during normalization, but once
+    // v2 samples exist do not let a replayed source manufacture another historical observation.
+    if (!evidenceSamples.length && latestEvidence) evidenceSamples.push(latestEvidence);
     return {
         concept,
         firstTurn: firstTurn ?? (turns.length ? Math.min(...turns) : null),
@@ -178,7 +255,8 @@ function normalizeProfileDevelopmentConcept(raw = {}) {
         observationCount,
         sourceMessageIds,
         turns,
-        latestEvidence: profileDevelopmentText('speech', raw?.latestEvidence, mechanics.DURABLE_PROFILE_LIMITS.evidence),
+        evidenceSamples,
+        latestEvidence,
     };
 }
 
@@ -196,6 +274,7 @@ function legacyProfileDevelopmentConcepts(field, npc = {}) {
             observationCount: 1,
             sourceMessageIds: [],
             turns: [],
+            evidenceSamples: [parsed.body],
             latestEvidence: parsed.body,
         });
         if (concepts.length >= PROFILE_DEVELOPMENT_CONCEPT_LIMIT) break;
@@ -277,12 +356,14 @@ function profileDevelopmentForNpc(field, npc = {}, { seedLegacy = false } = {}) 
 function developmentRecordMatches(record, parsed) {
     if (!record || !parsed) return false;
     if (parsed.explicitConcept && record.concept === parsed.explicitConcept) return true;
-    if (record.latestEvidence && mechanics.durableProfileEvidenceRelated(record.latestEvidence, parsed.body)) return true;
+    const samples = [...(Array.isArray(record.evidenceSamples) ? record.evidenceSamples : []), record.latestEvidence]
+        .filter(Boolean);
+    if (samples.some(sample => mechanics.durableProfileEvidenceRelated(sample, parsed.body))) return true;
     if (!parsed.explicitConcept || !record.concept) return false;
-    return mechanics.durableProfileEvidenceRelated(
-        `${record.concept}: ${record.latestEvidence || ''}`,
+    return samples.some(sample => mechanics.durableProfileEvidenceRelated(
+        `${record.concept}: ${sample}`,
         `${parsed.explicitConcept}: ${parsed.body}`,
-    );
+    ));
 }
 
 function findDevelopmentRecordIndex(concepts, parsed) {
@@ -328,6 +409,9 @@ function observeProfileDevelopment(field, ledger, rawUpdate = {}, options = {}) 
             : (turn !== null ? record.turns.includes(turn) : record.observationCount > 0);
         record.latestEvidence = parsed.body;
         if (duplicate) continue;
+        record.evidenceSamples = [...(Array.isArray(record.evidenceSamples) ? record.evidenceSamples : [])
+            .filter(item => mechanics.normalizeName(item) !== mechanics.normalizeName(parsed.body)), parsed.body]
+            .slice(-PROFILE_DEVELOPMENT_OBSERVATION_LIMIT);
         record.observationCount = Math.min(9, Number(record.observationCount || 0) + 1);
         if (sourceMessageId !== null) {
             record.sourceMessageIds = [...new Set([...record.sourceMessageIds, sourceMessageId])]
@@ -532,7 +616,12 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
     }
 
     const groundingEvidence = [
-        ...plan.readyRecords.map(record => record.latestEvidence).filter(Boolean),
+        ...plan.readyRecords.flatMap(record => {
+            const samples = Array.isArray(record.evidenceSamples) && record.evidenceSamples.length
+                ? record.evidenceSamples
+                : [record.latestEvidence];
+            return samples.filter(Boolean);
+        }),
         ...plan.evidence.map(item => item.body).filter(Boolean),
     ];
     // Preserve the accepted v1.0.6 path: a ledger-ready gradual proposal explicitly marked
@@ -636,12 +725,14 @@ export function mergeScanResult(state, scanResult, options = {}) {
     const calendar = getActiveCalendarConfig();
     const reference = calendarReference(options, calendar);
     const referenceDate = reference.date;
-    const previous = (sourceState?.npcs || []).map(raw => normalizeNpcBirthday(continuity.normalizeNpcRecord(raw), calendar, referenceDate));
+    const previousRaw = Array.isArray(sourceState?.npcs) ? sourceState.npcs : [];
+    const previous = previousRaw.map(raw => normalizeNpcBirthday(continuity.normalizeNpcRecord(raw), calendar, referenceDate));
     const result = continuity.mergeScanResult(sourceState, scanResult, options);
     const ordinary = Array.isArray(scanResult?.npcs) ? scanResult.npcs : [];
 
     result.state.npcs = (result.state.npcs || []).map(rawNpc => {
         const sources = matchingPrevious(rawNpc, previous);
+        const rawSources = matchingPrevious(rawNpc, previousRaw);
         const ordinaryUpdate = ordinary.find(raw => sameNpc(raw, rawNpc));
         let npc = normalizeNpcBirthday(rawNpc, calendar, referenceDate);
         if (ordinaryUpdate) npc = applyNpcBirthdayUpdate(npc, ordinaryUpdate, { ...options, calendarConfig: calendar, referenceDate });
@@ -653,12 +744,21 @@ export function mergeScanResult(state, scanResult, options = {}) {
         if (sources.length) npc = mergeNpcBirthdayKnowledge(sources, npc, calendar, referenceDate);
 
         // A grounded full current date turns a full birth date into deterministic chronology.
-        // This updates actual age locally; apparentAge remains an unrelated visual field.
+        // Chronological age is local arithmetic; the birthday rollover below may carry an already-numeric
+        // apparent-age estimate by the same proven delta without using it to derive chronology.
         if (!(npc.manualProfileFields || []).includes('age') && !isTerminalNpcDeath(npc)
             && referenceDate && Number.isInteger(npc.calendarAge) && normalizeCalendarDate(npc.birthDate, calendar)?.year !== null
             && !(reference.fallback && /^\d+$/.test(String(npc.age)) && npc.calendarAge < Number(npc.age))) {
             npc.age = String(npc.calendarAge);
         }
+        npc = applyDeterministicBirthdayRollover(
+            npc,
+            rawSources[0] || null,
+            ordinaryUpdate,
+            options,
+            calendar,
+            referenceDate,
+        );
         npc = finalizeProfileDevelopment(npc, profilePrepared.plans.get(String(npc.id || '')), options, result.report);
         return withAppearanceDerivedApparentAge(npc, ordinaryUpdate?.appearance || rawNpc.appearance);
     });
@@ -699,4 +799,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.21';
+export const NPC_STATE_VERSION = '1.0.22';

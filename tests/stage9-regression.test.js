@@ -94,7 +94,7 @@ test('raw owned calendar source survives production UI-noise stripping without c
     assert.doesNotMatch(text, /<World_State>/);
     const result = mergeScanResult({ npcs: [npc] }, { npcs: [] }, { developmentContext: text, calendarSource: source, sourceMessageId: 2 });
     assert.equal(result.state.npcs[0].age, '7');
-    assert.equal(result.state.npcs[0].apparentAge, '~6');
+    assert.equal(result.state.npcs[0].apparentAge, '~7');
     assert.equal(result.report.calendarReference.date.year, 822);
 });
 test('calendar update honors manual age locks and terminal automatic death', () => {

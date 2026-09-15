@@ -215,7 +215,7 @@ test('World State date can anchor a missing birth year and later advance chronol
     sora = second.state.npcs.find(npc => npc.id === 'npc_sora');
     assert.equal(sora.calendarAge, 7);
     assert.equal(sora.age, '7');
-    assert.equal(sora.apparentAge, '~6');
+    assert.equal(sora.apparentAge, '~7');
 });
 
 test('an explicit full year can upgrade a previously derived year without changing the established birthday day', () => {
@@ -278,6 +278,112 @@ test('birthday prompt works without any current clock and does not invent a year
     assert.equal(birthday.includes('BIRTHDAY:'), true);
     assert.equal(birthday.includes('Current grounded world date='), false);
     assert.equal(birthday.includes('Never invent a missing year or birthday'), true);
+});
+
+test('v1.0.22 an existing yearless birthday rolls age and compact apparent age exactly once on a narrated nameday', () => {
+    setActiveCalendarConfig(CUSTOM_CALENDAR);
+    const existing = normalizeNpcRecord({
+        id: 'npc_ryu', name: 'Ryu', age: '13', apparentAge: '~12',
+        birthDate: { month: 'Redleaf', day: 16 }, birthDateSource: 'established',
+    });
+    assert.equal(existing.birthDate.year, null);
+
+    const options = {
+        sourceMessageId: 204,
+        developmentContext: '<World_State>Time | CR822, Redleaf 16 | evening</World_State> Ryu attends her formal nameday feast after months of growth and study.',
+    };
+    const payload = {
+        npcs: [{
+            id: 'npc_ryu', name: 'Ryu',
+            age: '13', ageState: 'keep',
+            apparentAge: '~12', apparentAgeState: 'keep',
+        }],
+    };
+    const first = mergeScanResult({
+        turn: 203, npcs: [existing], candidates: [], socialGraph: { version: 1, edges: [], unresolved: [] },
+    }, payload, options);
+    let ryu = first.state.npcs.find(npc => npc.id === 'npc_ryu');
+    assert.equal(ryu.age, '14');
+    assert.equal(ryu.apparentAge, '~13');
+    assert.equal(ryu.birthDateYearSource, 'derived');
+    assert.equal(ryu.calendarAge, 14);
+
+    const repeated = mergeScanResult(first.state, payload, { ...options, sourceMessageId: 205 });
+    ryu = repeated.state.npcs.find(npc => npc.id === 'npc_ryu');
+    assert.equal(ryu.age, '14', 'repeating Refresh on the same nameday must not age twice');
+    assert.equal(ryu.apparentAge, '~13');
+    assert.equal(ryu.calendarAge, 14);
+});
+
+test('v1.0.22 birthday rollover respects apparent-age authority and does not guess on newly established birthdays', () => {
+    setActiveCalendarConfig(CUSTOM_CALENDAR);
+    const base = normalizeNpcRecord({
+        id: 'npc_ryu', name: 'Ryu', age: '13', apparentAge: '~12',
+        birthDate: { month: 'Redleaf', day: 16 }, birthDateSource: 'established',
+    });
+
+    const explicitVisual = mergeScanResult({
+        turn: 20, npcs: [structuredClone(base)], candidates: [], socialGraph: { version: 1, edges: [], unresolved: [] },
+    }, { npcs: [{
+        id: 'npc_ryu', name: 'Ryu', age: '13', ageState: 'keep',
+        apparentAge: '~15', apparentAgeState: 'evolve', apparentAgeReason: 'Visible maturation is explicitly established.',
+    }] }, {
+        sourceMessageId: 21,
+        developmentContext: '<World_State>Time | CR822, Redleaf 16 | evening</World_State> Ryu celebrates her nameday; the narration explicitly describes visible maturation.',
+    });
+    let ryu = explicitVisual.state.npcs[0];
+    assert.equal(ryu.age, '14');
+    assert.equal(ryu.apparentAge, '~15', 'explicit visual-age evolution must beat deterministic offset rollover');
+
+    const locked = structuredClone(base);
+    locked.manualProfileLocksExplicit = true;
+    locked.manualProfileFields = ['apparentAge'];
+    const lockedResult = mergeScanResult({
+        turn: 20, npcs: [locked], candidates: [], socialGraph: { version: 1, edges: [], unresolved: [] },
+    }, { npcs: [{ id: 'npc_ryu', name: 'Ryu', age: '13', ageState: 'keep', apparentAge: '~12', apparentAgeState: 'keep' }] }, {
+        sourceMessageId: 21,
+        developmentContext: '<World_State>Time | CR822, Redleaf 16 | evening</World_State> Ryu celebrates her nameday.',
+    });
+    ryu = lockedResult.state.npcs[0];
+    assert.equal(ryu.age, '14');
+    assert.equal(ryu.apparentAge, '~12');
+
+    const corrected = mergeScanResult({
+        turn: 20, npcs: [structuredClone(base)], candidates: [], socialGraph: { version: 1, edges: [], unresolved: [] },
+    }, { npcs: [{
+        id: 'npc_ryu', name: 'Ryu', age: '13', ageState: 'correct', ageReason: 'The prior chronological age was mistaken.',
+        apparentAge: '~12', apparentAgeState: 'keep',
+    }] }, {
+        sourceMessageId: 21,
+        developmentContext: '<World_State>Time | CR822, Redleaf 16 | evening</World_State> Ryu celebrates her nameday.',
+    });
+    ryu = corrected.state.npcs[0];
+    assert.equal(ryu.age, '13', 'an explicit chronological correction must not be second-guessed by yearless birthday compatibility');
+    assert.equal(ryu.apparentAge, '~12');
+
+    const unknownBirthday = normalizeNpcRecord({ id: 'npc_new', name: 'New', age: '13', apparentAge: '~12' });
+    const establishedNow = mergeScanResult({
+        turn: 20, npcs: [unknownBirthday], candidates: [], socialGraph: { version: 1, edges: [], unresolved: [] },
+    }, { npcs: [{
+        id: 'npc_new', name: 'New', age: '13', ageState: 'keep', apparentAge: '~12', apparentAgeState: 'keep',
+        birthDate: { month: 'Redleaf', day: 16 }, birthDateState: 'establish', birthDateReason: 'The nameday establishes the birthday.',
+    }] }, {
+        sourceMessageId: 21,
+        developmentContext: '<World_State>Time | CR822, Redleaf 16 | evening</World_State> Today is New\'s nameday.',
+    });
+    const newlyEstablished = establishedNow.state.npcs[0];
+    assert.equal(newlyEstablished.age, '13', 'a birthday first established today must not assume the stored age is pre-birthday');
+    assert.equal(newlyEstablished.apparentAge, '~12');
+});
+
+test('v1.0.22 nameday language activates the birthday scanner rule', () => {
+    setActiveCalendarConfig(CUSTOM_CALENDAR);
+    const prompt = buildScannerPrompt({
+        transcript: `${WORLD_STATE_821}\nToday is Sora's nameday feast.`,
+        existingNpcs: [], candidates: [],
+    });
+    assert.equal(prompt.includes('BIRTHDAY:'), true);
+    assert.equal(prompt.includes('Current grounded world date=CR821, Redleaf 16'), true);
 });
 
 test('custom calendar date validation rejects unknown months and impossible days', () => {

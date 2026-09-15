@@ -1,6 +1,14 @@
 # NPC State Delta changes
 
 
+## 1.0.22 - 15 September 2026
+
+- Fix deterministic birthday rollover for an existing dossier when the grounded calendar reaches its stored birthday. Full-year calendar arithmetic now advances chronological age and a compact numeric apparent-age estimate by the same confirmed delta, while manual age/apparent-age locks, provider-explicit chronological corrections, terminal death and provider-explicit apparent-age evolution remain authoritative.
+- Recover existing yearless month/day birthdays on their exact narrated birthday or nameday once: advance the accepted chronological age, reanchor the derived birth year, and make repeated same-day scans idempotent. Do not assume a rollover when the birthday is first established in that same scan. Recognize `nameday` / `name day` as birthday evidence for the existing conditional scanner rule.
+- Advance Personality/Speech development ledgers to internal version 2 with up to four bounded evidence samples per concept. Three independent observations and the existing provenance span remain required, while candidate grounding can aggregate support across retained samples instead of depending only on `latestEvidence`.
+- Prevent replayed source messages from manufacturing historical sample support; v1 ledgers seed one sample from their old `latestEvidence`, cross-chat import clears pending samples with chronology, and accepted evolution still resets the ledger epoch.
+- Add regressions for Ryu-style age `13` / apparent `~12` to `14` / `~13` nameday rollover, same-day idempotence, manual/explicit apparent-age authority, new-birthday ambiguity, nameday prompt activation, accumulated Speech and Personality gradual grounding, bounded sample retention, replay protection and cross-chat scrubbing. No extra model request, relationship change, persistence schema, bundle format, or branch-lineage change is introduced.
+
 ## 1.0.21 - 15 September 2026
 
 - Fix the live time-skip false negative where Gemini correctly returned `developmentScale: "batch"` and `speechState: "evolve"`, but deterministic validation still rejected natural elapsed phrasing such as `in two months`, `over the past month`, `the past seventy days`, `for two months`, or `one season under ...` as `waiting-for-explicit-gate`.
