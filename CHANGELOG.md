@@ -1,5 +1,14 @@
 # NPC State Delta changes
 
+## 1.0.27 - 16 September 2026
+
+- Reorder targeted Refresh prompts for provider-neutral automatic prefix caching: stable rules, output schema, Stage 4/birthday instructions and the shared tagged story window now precede target-specific id/name and current dossier authority. The exact target remains explicit after the evidence window and only that NPC may be reconciled.
+- Replace target-specific ids/names in the early Refresh schema example with neutral placeholders and explicitly state that narrative text is evidence, never instructions. Latest grounded evidence still resolves conflicts; locks, source tags, lifecycle rules, development gates, current dossier authority and cross-NPC isolation are preserved.
+- Move only the invariant compact Stage 4 rule ahead of dynamic identity/dossier data in ordinary scans. Conditional appearance/death context remains operation-local and late; backfill, import, focused relationships and retries are not merged into a universal prompt.
+- Add production-builder common-prefix measurements and regression coverage. Different Refresh targets sharing one history improve from 445 to 8,949 common leading characters; the same target with a changed dossier improves from 778 to 9,259; consecutive ordinary scans improve from 6,794 to 6,839. These are character-prefix measurements, not proof of provider cache hits.
+- Preserve request counts, routes, reasoning ownership and output allowances. Ordinary measured input sizes remain 6,864 / 7,769 characters; targeted Refresh grows from 9,367 to 9,566 Delta-owned system+user characters for the explicit evidence/authority boundary. Selected-profile `extractData:true` currently exposes content/reasoning but not raw provider usage, so cached/input token counts remain unavailable rather than inferred from duration.
+- Align all current application/package/display metadata to 1.0.27, including manifest, runtime inventory, core UI version, package metadata, release assertions and bootstrap banner. Persisted storage, bundle and branch schema versions remain unchanged.
+
 ## 1.0.26 - 16 September 2026
 
 - Fix durable-profile decision ordering for provider-declared `batch` updates. When the returned Personality/Speech full candidate is textually unchanged, Delta now classifies candidate/evidence resolution before the explicit/batch authorization gate, so a failed episode gate cannot mask a copied candidate as `waiting-for-explicit-gate`.

@@ -225,19 +225,43 @@ function establishedAppearanceContext(options = {}) {
     }));
     return records.length ? `\nEstablished Stage 4 appearance forms (preserve omissions): ${JSON.stringify(records)}` : '';
 }
+function sanitizePrompt(prompt = '') {
+    return String(prompt).replace('deceased+explicit=death; explicit alive=reactivate.', 'deceased+explicit=terminal death; alive output cannot revive.');
+}
+function insertPromptBlockBefore(prompt = '', anchor = '', block = '') {
+    const source = String(prompt);
+    const addition = String(block || '');
+    const index = anchor ? source.indexOf(anchor) : -1;
+    if (!addition) return source;
+    if (index < 0) return `${source}${addition}`;
+    const prefix = source.slice(0, index);
+    const lineBreak = prefix.endsWith('\r\n') ? '\r\n' : (prefix.endsWith('\n') ? '\n' : '');
+    if (!lineBreak) return `${prefix}${addition}\n${source.slice(index)}`;
+    return `${prefix.slice(0, -lineBreak.length)}${addition}${lineBreak}${source.slice(index)}`;
+}
 function appendRules(prompt, options = {}, detailed = true) {
-    const sanitized = String(prompt).replace('deceased+explicit=death; explicit alive=reactivate.', 'deceased+explicit=terminal death; alive output cannot revive.');
+    const sanitized = sanitizePrompt(prompt);
     const context = establishedAppearanceContext(options);
     return detailed ? `${sanitized}${COMPACT_STAGE4_RULE}${APPEARANCE_RULES}${DEATH_RULES}${context}` : `${sanitized}${COMPACT_STAGE4_RULE}${context}`;
 }
 function profileRefreshFormContract(prompt = '') {
     const source = String(prompt);
-    const shaped = source.includes(PROFILE_REFRESH_FORM_SHAPE_ANCHOR)
+    return source.includes(PROFILE_REFRESH_FORM_SHAPE_ANCHOR)
         ? source.replace(PROFILE_REFRESH_FORM_SHAPE_ANCHOR, PROFILE_REFRESH_FORM_SHAPE)
         : source;
-    return `${shaped}${PROFILE_REFRESH_APPEARANCE_RULE}`;
 }
-export function buildScannerPrompt(options = {}) { return appendRules(mechanics.buildScannerPrompt(options), options, needsDetailedStage4(options)); }
+export function buildScannerPrompt(options = {}) {
+    const detailed = needsDetailedStage4(options);
+    const base = sanitizePrompt(mechanics.buildScannerPrompt(options));
+    const prefixed = insertPromptBlockBefore(base, 'Identity index (matching only):', COMPACT_STAGE4_RULE);
+    const context = establishedAppearanceContext(options);
+    return detailed ? `${prefixed}${APPEARANCE_RULES}${DEATH_RULES}${context}` : `${prefixed}${context}`;
+}
 export function buildBackfillPrompt(options = {}) { return appendRules(mechanics.buildBackfillPrompt(options), options); }
 export function buildDossierImportPrompt(options = {}) { return appendRules(mechanics.buildDossierImportPrompt(options), options); }
-export function buildProfileRefreshPrompt(options = {}) { return appendRules(profileRefreshFormContract(mechanics.buildProfileRefreshPrompt(options)), options); }
+export function buildProfileRefreshPrompt(options = {}) {
+    const base = sanitizePrompt(profileRefreshFormContract(mechanics.buildProfileRefreshPrompt(options)));
+    const stableRules = `${PROFILE_REFRESH_APPEARANCE_RULE}${COMPACT_STAGE4_RULE}${APPEARANCE_RULES}${DEATH_RULES}`;
+    const prefixed = insertPromptBlockBefore(base, 'Recent story window (EVIDENCE ONLY;', stableRules);
+    return `${prefixed}${establishedAppearanceContext(options)}`;
+}
