@@ -1651,7 +1651,7 @@ function durableConceptToken(token) {
     return DURABLE_CONCEPT_ALIASES[word] || word;
 }
 
-function durableRefinementTokens(value) {
+export function durableRefinementTokens(value) {
     return normalizeName(value).split(/\s+/)
         .filter(token => (token.length >= 2 || /^\d+$/.test(token)) && !DURABLE_REFINEMENT_STOPWORDS.has(token))
         .map(durableConceptToken)
@@ -1665,7 +1665,7 @@ function durableTokenCoverage(existing, incoming) {
     return oldTokens.filter(token => newTokens.has(token)).length / oldTokens.length;
 }
 
-function durableSeedGrounded(value, context = '') {
+export function durableSeedGrounded(value, context = '') {
     const source = String(context || '').trim();
     if (!source) return true; // structured import/API compatibility when no source narration is available.
     const proposed = [...new Set(durableRefinementTokens(value))]
@@ -1689,7 +1689,7 @@ function durableEvidenceGroundsValue(value, evidenceItems = []) {
     return overlap >= required;
 }
 
-function durableSemanticSimilarity(a, b) {
+export function durableSemanticSimilarity(a, b) {
     const left = new Set(durableRefinementTokens(a));
     const right = new Set(durableRefinementTokens(b));
     if (!left.size || !right.size) return normalizeName(a) === normalizeName(b) ? 1 : 0;
@@ -1722,6 +1722,19 @@ function splitDurableClauses(value) {
     return source.split(/\n+|\s*;\s*|(?<=[.!?])\s+(?=[A-Z0-9])/)
         .map(part => cleanText(part, 520))
         .filter(Boolean);
+}
+
+function splitDurableClaimUnits(value) {
+    const out = [];
+    for (const clause of splitDurableClauses(value)) {
+        const units = clause
+            .split(/\s*,\s*|\s+\b(?:and|but|while|yet)\b\s+/iu)
+            .map(part => cleanText(part, 520))
+            .filter(part => durableRefinementTokens(part).some(token => token.length >= 3 && !/^\d+$/.test(token)));
+        if (units.length > 1) out.push(...units);
+        else out.push(clause);
+    }
+    return out.filter(Boolean);
 }
 
 function semanticDedupeItems(items, { maxItems = 8, maxChars = 320, similarity = 0.62 } = {}) {
@@ -1797,69 +1810,103 @@ function containsEvolutionLanguage(value) {
     return /\b(no longer|formerly|used to|ceased|stopped being|replaced by|rather than|instead of|became|has become|have become|grown more|grown less|increasingly|decreasingly)\b/.test(text);
 }
 
-function durableRefinementSupportText(context = '', evidenceItems = []) {
+function durableRefinementSupportText(context = '', evidenceItems = [], binding = null) {
+    const rawContext = String(context || '').trim();
+    const effectiveBinding = binding?.npc || (binding && typeof binding === 'object' && binding.name ? binding : null);
+    const scopedContext = (effectiveBinding && rawContext) ? scopedEpisodeText(rawContext, binding) : rawContext;
+    const targetLabels = binding ? developmentBindingLabels(binding) : [];
+    const otherLabels = (Array.isArray(binding?.otherLabels) ? binding.otherLabels : []).map(normalizeName).filter(Boolean);
     const evidence = (Array.isArray(evidenceItems) ? evidenceItems : [])
+        .filter(value => {
+            const attributed = cleanText(String(value || '').replace(/^\[m\d+\]\s*/i, ''), DURABLE_PROFILE_LIMITS.evidence);
+            if (!attributed) return false;
+            if (otherLabels.length && episodeContainsLabel(attributed, otherLabels) && !episodeContainsLabel(attributed, targetLabels)) return false;
+            const prefix = cleanText(attributed.match(/^([^:]{1,52}):\s+/)?.[1], 52);
+            const prefixKey = normalizeName(prefix);
+            const targetPrefix = targetLabels.some(label => prefixKey && normalizeName(label) === prefixKey);
+            const properNamePrefix = /^[\p{Lu}][\p{L}\p{M}'’.-]*(?:\s+[\p{Lu}][\p{L}\p{M}'’.-]*){0,2}$/u.test(prefix);
+            if (prefix && !targetPrefix && properNamePrefix && normalizedPhrasePresent(rawContext, prefix)) return false;
+            return true;
+        })
         .map(value => cleanText(String(value || '')
             .replace(/^\[m\d+\]\s*/i, '')
             .replace(/^[^:]{1,52}:\s*/, ''), DURABLE_PROFILE_LIMITS.evidence))
-        .filter(Boolean);
-    return [String(context || '').trim(), ...evidence].filter(Boolean).join(' ');
+        .filter(item => {
+            if (!item) return false;
+            if (otherLabels.length && episodeContainsLabel(item, otherLabels) && !episodeContainsLabel(item, targetLabels)) {
+                return false;
+            }
+            return true;
+        });
+    return [scopedContext, ...evidence].filter(Boolean).join(' ');
 }
 
-function durableRefinementCandidateGrounded(field, existing, incoming, context = '', evidenceItems = []) {
+export function durableRefinementCandidateGrounded(field, existing, incoming, context = '', evidenceItems = [], binding = null) {
     const maxChars = DURABLE_PROFILE_LIMITS[field] || DURABLE_PROFILE_LIMITS.appearance;
     const oldText = compactDurableText(existing, maxChars, field === 'speech' ? 5 : (field === 'personality' ? 6 : 10));
     const newText = compactDurableText(incoming, maxChars, field === 'speech' ? 5 : (field === 'personality' ? 6 : 10));
     if (!newText) return false;
+    const support = durableRefinementSupportText(context, evidenceItems, binding);
     if (!oldText) {
-        const support = durableRefinementSupportText(context, evidenceItems);
-        return !support || durableSeedGrounded(newText, support);
+        if (!support) return true;
+        const clauses = splitDurableClaimUnits(newText);
+        const supportTokens = new Set(durableRefinementTokens(support));
+        return clauses.length > 0 && clauses.every(clause => {
+            const tokens = [...new Set(durableRefinementTokens(clause))]
+                .filter(token => token.length >= 3 && !/^\d+$/.test(token));
+            if (!tokens.length) return false;
+            const supported = tokens.filter(token => supportTokens.has(token)).length;
+            const required = tokens.length <= 2 ? 1 : Math.max(2, Math.ceil(tokens.length * 0.55));
+            return supported >= required;
+        });
     }
     if (normalizeName(oldText) === normalizeName(newText)) return true;
     if (field === 'personality' && identityMoralityConflict(oldText, newText)) return false;
 
-    const support = durableRefinementSupportText(context, evidenceItems);
     // Structured import/API compatibility: callers without source narration retain the
     // established direct-refinement behavior. Runtime scanner paths always supply context.
     if (!support) return true;
 
     const oldTokens = new Set(durableRefinementTokens(oldText));
-    const changedTokens = [...new Set(durableRefinementTokens(newText))]
-        .filter(token => !oldTokens.has(token) && token.length >= 3 && !/^\d+$/.test(token));
-    if (!changedTokens.length) return durableSemanticSimilarity(oldText, newText) >= 0.72;
     const supportTokens = new Set(durableRefinementTokens(support));
-    const supported = changedTokens.filter(token => supportTokens.has(token)).length;
-    const required = changedTokens.length <= 2 ? 1 : Math.max(2, Math.ceil(changedTokens.length * 0.55));
-    if (supported >= required) return true;
 
-    // Clause-level fallback handles grounded paraphrase while still evaluating only clauses
-    // that introduce meaning absent from the accepted current summary.
-    const oldClauses = splitDurableClauses(oldText);
-    const novelClauses = splitDurableClauses(newText).filter(clause => !oldClauses.some(oldClause =>
+    // Identify novel clauses that introduce meaning absent from the accepted current summary.
+    const oldClauses = splitDurableClaimUnits(oldText);
+    const newClauses = splitDurableClaimUnits(newText);
+    const novelClauses = newClauses.filter(clause => !oldClauses.some(oldClause =>
         normalizeName(oldClause) === normalizeName(clause)
         || durableSemanticSimilarity(oldClause, clause) >= 0.72));
-    return novelClauses.length > 0 && novelClauses.every(clause => {
-        const clauseTokens = [...new Set(durableRefinementTokens(clause))].filter(token => !oldTokens.has(token));
+
+    if (!novelClauses.length) {
+        return durableSemanticSimilarity(oldText, newText) >= 0.72;
+    }
+
+    // Every substantive newly introduced clause must be independently grounded in support.
+    // A supported clause cannot authorize unrelated additions.
+    return novelClauses.every(clause => {
+        const clauseTokens = [...new Set(durableRefinementTokens(clause))]
+            .filter(token => !oldTokens.has(token) && token.length >= 3 && !/^\d+$/.test(token));
         if (!clauseTokens.length) return true;
         const clauseSupported = clauseTokens.filter(token => supportTokens.has(token)).length;
-        return clauseSupported >= (clauseTokens.length <= 2 ? 1 : Math.max(2, Math.ceil(clauseTokens.length * 0.55)));
+        const required = clauseTokens.length <= 2 ? 1 : Math.max(2, Math.ceil(clauseTokens.length * 0.55));
+        return clauseSupported >= required;
     });
 }
 
-function isSafeIdentityTextRefinement(existing, incoming, context = '', evidenceItems = []) {
+function isSafeIdentityTextRefinement(existing, incoming, context = '', evidenceItems = [], binding = null) {
     return !containsEvolutionLanguage(incoming)
         && !identityMoralityConflict(existing, incoming)
         && isSafeUnmarkedDurableRefinement(existing, incoming)
-        && durableRefinementCandidateGrounded('personality', existing, incoming, context, evidenceItems);
+        && durableRefinementCandidateGrounded('personality', existing, incoming, context, evidenceItems, binding);
 }
 
-function isSafeSpeechRefinement(existing, incoming, context = '', evidenceItems = []) {
+function isSafeSpeechRefinement(existing, incoming, context = '', evidenceItems = [], binding = null) {
     return !containsEvolutionLanguage(incoming)
         && isSafeUnmarkedDurableRefinement(existing, incoming)
-        && durableRefinementCandidateGrounded('speech', existing, incoming, context, evidenceItems);
+        && durableRefinementCandidateGrounded('speech', existing, incoming, context, evidenceItems, binding);
 }
 
-function isSafeUnmarkedDurableRefinement(existing, incoming) {
+export function isSafeUnmarkedDurableRefinement(existing, incoming) {
     const oldText = compactDurableText(existing, DURABLE_PROFILE_LIMITS.appearance, 10);
     const newText = compactDurableText(incoming, DURABLE_PROFILE_LIMITS.appearance, 10);
     if (!oldText || !newText || normalizeName(oldText) === normalizeName(newText)) return false;
@@ -1869,7 +1916,7 @@ function isSafeUnmarkedDurableRefinement(existing, incoming) {
     return addsGroundedDetail && (durableTokenCoverage(oldText, newText) >= 0.62 || durableSemanticSimilarity(oldText, newText) >= 0.58);
 }
 
-function isSafeUnmarkedDurableReplacement(existing, incoming) {
+export function isSafeUnmarkedDurableReplacement(existing, incoming) {
     if (containsEvolutionLanguage(incoming) || !isSafeUnmarkedDurableRefinement(existing, incoming)) return false;
     const oldText = compactDurableText(existing, DURABLE_PROFILE_LIMITS.appearance, 10);
     const newText = compactDurableText(incoming, DURABLE_PROFILE_LIMITS.appearance, 10);
@@ -2196,7 +2243,7 @@ function isSafeBehaviorProfileRefinement(existing, incoming) {
         || durableSemanticSimilarity(behaviorProfileBody(oldText), behaviorProfileBody(newText)) >= 0.55;
 }
 
-function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evidenceItems = [] } = {}) {
+function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evidenceItems = [], binding = null } = {}) {
     const current = normalizeBehaviorProfile(existing);
     const updates = normalizeBehaviorProfile(incoming);
     if (!updates.length) return current;
@@ -2214,7 +2261,7 @@ function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evi
             // A full-summary refine is atomic for safety. If any replacement fails its existing
             // identity/morality gate, reject the proposed summary rather than partially clearing it.
             if (!isSafeBehaviorProfileRefinement(current[index], entry)) return current;
-            if (!durableRefinementCandidateGrounded('behaviorProfile', current[index], entry, context, evidenceItems)) return current;
+            if (!durableRefinementCandidateGrounded('behaviorProfile', current[index], entry, context, evidenceItems, binding)) return current;
             next.push(entry);
             continue;
         }
@@ -2225,7 +2272,7 @@ function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evi
             return existingPolarity && existingPolarity !== incomingPolarity;
         });
         if (conflicts) return current;
-        if (!durableRefinementCandidateGrounded('behaviorProfile', '', entry, context, evidenceItems)) return current;
+        if (!durableRefinementCandidateGrounded('behaviorProfile', '', entry, context, evidenceItems, binding)) return current;
         next.push(entry);
     }
     // Omitted old rules are retired because the scanner contract says refine is a FULL field.
@@ -2363,14 +2410,40 @@ function durableClaimWithoutNegation(value) {
         .trim();
 }
 
-function durableClaimPolarityConflict(claim, target) {
-    if (identityMoralityConflict(claim, target) || identityMoralityConflict(target, claim)) return true;
-    const claimNegated = durableClaimHasNegation(claim);
-    const targetNegated = durableClaimHasNegation(target);
-    if (claimNegated === targetNegated) return false;
+function singleClausePolarityConflict(claim, targetClause) {
+    if (identityMoralityConflict(claim, targetClause) || identityMoralityConflict(targetClause, claim)) return true;
     const claimCore = durableClaimWithoutNegation(claim);
-    const targetCore = durableClaimWithoutNegation(target);
-    return Boolean(claimCore && targetCore && durableSemanticSimilarity(claimCore, targetCore) >= 0.48);
+    const targetCore = durableClaimWithoutNegation(targetClause);
+    if (!claimCore || !targetCore) return false;
+    const coreSimilarity = durableSemanticSimilarity(claimCore, targetCore);
+    const coreTokensClaim = new Set(durableRefinementTokens(claimCore));
+    const coreTokensTarget = new Set(durableRefinementTokens(targetCore));
+    let overlap = 0;
+    for (const t of coreTokensClaim) if (coreTokensTarget.has(t)) overlap += 1;
+    const relevant = coreSimilarity >= 0.48 || (overlap >= 2 && overlap / Math.min(coreTokensClaim.size, coreTokensTarget.size) >= 0.6);
+    if (!relevant) return false;
+
+    const claimNegated = durableClaimHasNegation(claim);
+    const targetNegated = durableClaimHasNegation(targetClause);
+    if (claimNegated !== targetNegated) return true;
+    if (claimNegated && targetNegated) {
+        const claimPol = moralityPolarity(claim);
+        const targetPol = moralityPolarity(targetClause);
+        if (claimPol && targetPol && claimPol !== targetPol) return true;
+        if (identityMoralityConflict(claim, targetClause)) return true;
+    }
+    return false;
+}
+
+function durableClaimPolarityConflict(claim, target) {
+    const claimClauses = splitDurableClaimUnits(claim);
+    const targetClauses = splitDurableClaimUnits(target);
+    for (const cClause of claimClauses) {
+        for (const tClause of targetClauses) {
+            if (singleClausePolarityConflict(cClause, tClause)) return true;
+        }
+    }
+    return false;
 }
 
 function durableDevelopmentClaimRepresented(claim, target) {
@@ -2378,13 +2451,22 @@ function durableDevelopmentClaimRepresented(claim, target) {
     const accepted = cleanText(target, DURABLE_PROFILE_LIMITS.behaviorProfile * 6);
     if (!source || !accepted) return false;
     if (durableClaimPolarityConflict(source, accepted)) return false;
-    const claimTokens = [...new Set(durableRefinementTokens(source))]
-        .filter(token => token.length >= 3 && !/^\d+$/.test(token));
-    if (!claimTokens.length) return false;
+    const claimClauses = splitDurableClaimUnits(source);
+    const acceptedClauses = splitDurableClaimUnits(accepted);
     const acceptedTokens = new Set(durableRefinementTokens(accepted));
-    const overlap = claimTokens.filter(token => acceptedTokens.has(token)).length;
-    const required = claimTokens.length <= 2 ? claimTokens.length : Math.max(2, Math.ceil(claimTokens.length * 0.6));
-    return overlap >= required || durableSemanticSimilarity(source, accepted) >= 0.58;
+
+    return claimClauses.every(cClause => {
+        const cText = cleanText(cClause, DURABLE_PROFILE_LIMITS.evidence);
+        const cTokens = [...new Set(durableRefinementTokens(cText))].filter(t => t.length >= 3 && !/^\d+$/.test(t));
+        if (!cTokens.length) return true;
+        if (acceptedClauses.some(tClause => singleClausePolarityConflict(cClause, tClause))) return false;
+
+        const overlap = cTokens.filter(t => acceptedTokens.has(t)).length;
+        const required = cTokens.length <= 2
+            ? cTokens.length
+            : (cTokens.length === 3 ? 2 : Math.max(2, Math.ceil(cTokens.length * 0.5)));
+        return overlap >= required;
+    });
 }
 
 export function durableProfileEvidenceAlreadyRepresented(field, current, evidenceItems = []) {
@@ -2424,10 +2506,11 @@ export function durableProfileCollectionEquivalent(field, left, right) {
     return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
-function unresolvedCollectionEvidence(field, accepted, prior = [], incoming = []) {
+function unresolvedProfileEvidence(field, accepted, prior = [], incoming = []) {
     return mergeRecentProfileEvidence(prior, incoming).filter(item =>
         !durableProfileEvidenceAlreadyRepresented(field, accepted, [item]));
 }
+const unresolvedCollectionEvidence = unresolvedProfileEvidence;
 
 export function durableProfileCollectionCandidateGrounded(field, existing, incoming, evidenceItems = []) {
     const isMannerisms = field === 'mannerisms';
@@ -3312,6 +3395,11 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
     const targetedDurableSeedAllowed = lifecycleOptions.allowTargetedDurableSeed === true
         && exactIdContinuity
         && Boolean(String(lifecycleOptions.developmentContext || '').trim());
+    const incomingBinding = {
+        npc: existing,
+        targeted: targetedDurableSeedAllowed,
+        otherLabels: lifecycleOptions.otherLabels || [],
+    };
     const roleContinuity = Boolean(incoming.role && (identityLabelsRelated(existing.role, incoming.role) || identityLabelsRelated(existingName, incoming.role)));
     const interimIdentity = isInterimNpcLabel(existingName, existing.identityKind);
     const canPromoteIdentity = incomingKind === 'proper_name' && interimIdentity
@@ -3351,12 +3439,12 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
             if (mode === 'change') {
                 if (!String(incoming.appearanceReason || '').trim() || !directEvolutionReady()) continue;
             } else if (mode !== 'refine' && (!isSafeUnmarkedDurableFieldReplacement('appearance', existing.appearance, value)
-                || !durableRefinementCandidateGrounded('appearance', existing.appearance, value, lifecycleOptions.developmentContext))) {
+                || !durableRefinementCandidateGrounded('appearance', existing.appearance, value, lifecycleOptions.developmentContext, [], incomingBinding))) {
                 continue;
             }
             if (mode === 'refine') {
                 if (!isSafeUnmarkedDurableRefinement(existing.appearance, value)
-                    || !durableRefinementCandidateGrounded('appearance', existing.appearance, value, lifecycleOptions.developmentContext)) continue;
+                    || !durableRefinementCandidateGrounded('appearance', existing.appearance, value, lifecycleOptions.developmentContext, [], incomingBinding)) continue;
                 merged.appearance = mergeDurableTextRefinement(existing.appearance, value, DURABLE_PROFILE_LIMITS.appearance);
                 continue;
             }
@@ -3369,11 +3457,11 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
             if (mode === 'evolve') {
                 if (!String(incoming.personalityReason || '').trim() || !directEvolutionReady()) continue;
             } else if (mode !== 'refine' && (!isSafeUnmarkedDurableFieldReplacement('personality', existing.personality, value)
-                || !durableRefinementCandidateGrounded('personality', existing.personality, value, lifecycleOptions.developmentContext))) {
+                || !durableRefinementCandidateGrounded('personality', existing.personality, value, lifecycleOptions.developmentContext, [], incomingBinding))) {
                 continue;
             }
             if (mode === 'refine') {
-                if (!isSafeIdentityTextRefinement(existing.personality, value, lifecycleOptions.developmentContext)) continue;
+                if (!isSafeIdentityTextRefinement(existing.personality, value, lifecycleOptions.developmentContext, [], incomingBinding)) continue;
                 merged.personality = mergeDurableTextRefinement(existing.personality, value, DURABLE_PROFILE_LIMITS.personality);
                 continue;
             }
@@ -3385,11 +3473,11 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
             if (mode === 'evolve') {
                 if (!String(incoming.speechReason || '').trim() || !directEvolutionReady()) continue;
             } else if (mode !== 'refine' && (!isSafeUnmarkedDurableFieldReplacement('speech', existing.speech, value)
-                || !durableRefinementCandidateGrounded('speech', existing.speech, value, lifecycleOptions.developmentContext))) {
+                || !durableRefinementCandidateGrounded('speech', existing.speech, value, lifecycleOptions.developmentContext, [], incomingBinding))) {
                 continue;
             }
             if (mode === 'refine') {
-                if (!isSafeSpeechRefinement(existing.speech, value, lifecycleOptions.developmentContext)) continue;
+                if (!isSafeSpeechRefinement(existing.speech, value, lifecycleOptions.developmentContext, [], incomingBinding)) continue;
                 merged.speech = mergeDurableTextRefinement(existing.speech, value, DURABLE_PROFILE_LIMITS.speech);
                 continue;
             }
@@ -4042,6 +4130,8 @@ function scopedEpisodeText(window, binding = null) {
         if (carryPronoun && pronounContinuation) {
             selected.push(segment);
             carryPronoun = false;
+        } else {
+            carryPronoun = false;
         }
     }
     return cleanText(selected.join(' '), BATCH_EPISODE_MAX_CHARS);
@@ -4155,22 +4245,26 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
             return;
         }
         const fieldEvidence = [...(beforeEvidence[field] || []), ...(incomingEvidence[field] || [])];
+        const binding = {
+            npc,
+            evidence: fieldEvidence,
+            targeted: options.targeted === true,
+            otherLabels: options.otherLabels || [],
+        };
         const safeRefinement = field === 'personality'
-            ? isSafeIdentityTextRefinement(current, value, options.developmentContext, fieldEvidence)
+            ? isSafeIdentityTextRefinement(current, value, options.developmentContext, fieldEvidence, binding)
             : (field === 'speech'
-                ? isSafeSpeechRefinement(current, value, options.developmentContext, fieldEvidence)
+                ? isSafeSpeechRefinement(current, value, options.developmentContext, fieldEvidence, binding)
                 : (isSafeUnmarkedDurableRefinement(current, value)
-                    && durableRefinementCandidateGrounded(field, current, value, options.developmentContext, fieldEvidence)));
+                    && durableRefinementCandidateGrounded(field, current, value, options.developmentContext, fieldEvidence, binding)));
         const explicitRefinement = state === refineState && safeRefinement;
         const unmarkedRecovery = state !== refineState && state !== evolveState
             && isSafeUnmarkedDurableFieldReplacement(field, current, value)
-            && durableRefinementCandidateGrounded(field, current, value, options.developmentContext, fieldEvidence);
+            && durableRefinementCandidateGrounded(field, current, value, options.developmentContext, fieldEvidence, binding);
         if (explicitRefinement || unmarkedRecovery) {
             const merged = mergeDurableTextRefinement(current, value, maxChars);
             if (normalizeName(merged) !== normalizeName(current)) { npc[field] = merged; changed = true; }
-            // Preserve older pending change evidence, but consume evidence used only to justify
-            // this harmless refinement so it cannot later unlock an unrelated evolution.
-            evidence[field] = [...(beforeEvidence[field] || [])];
+            evidence[field] = unresolvedProfileEvidence(field, merged, beforeEvidence[field] || [], incomingEvidence[field] || []);
         }
     };
 
@@ -4226,6 +4320,12 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
             const proposedRefined = mergeBehaviorProfileRefinements(current, incoming.behaviorProfile, {
                 context: options.developmentContext,
                 evidenceItems: [...(beforeEvidence.behaviorProfile || []), ...(incomingEvidence.behaviorProfile || [])],
+                binding: {
+                    npc,
+                    evidence: [...(beforeEvidence.behaviorProfile || []), ...(incomingEvidence.behaviorProfile || [])],
+                    targeted: options.targeted === true,
+                    otherLabels: options.otherLabels || [],
+                },
             });
             const refined = durableProfileCollectionEquivalent('behaviorProfile', current, proposedRefined) ? current : proposedRefined;
             if (JSON.stringify(refined) !== JSON.stringify(current)) { npc.behaviorProfile = refined; changed = true; }
@@ -4257,7 +4357,11 @@ function applyDurableProfileUpdates(state, scanResult, excludeNames, report, opt
         if (index < 0) continue;
         const npc = state.npcs[index];
         if (excludeNames.has(normalizeName(npc.name))) continue;
-        const result = applyDurableProfileUpdate(npc, raw, options);
+        const otherLabels = (Array.isArray(state.npcs) ? state.npcs : [])
+            .filter(other => String(other?.id || '') !== String(npc?.id || ''))
+            .flatMap(other => [other?.name, ...(Array.isArray(other?.aliases) ? other.aliases : [])])
+            .filter(Boolean);
+        const result = applyDurableProfileUpdate(npc, raw, { ...options, otherLabels });
         evidenceAdded += result.evidenceAdded;
         if (result.changed) {
             applied += 1;
