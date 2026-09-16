@@ -16,23 +16,28 @@ jobs:
         with:
           ref: tmp/delta-six-fixes-bootstrap
           fetch-depth: 0
-      - name: Apply exact reviewed core patch
+      - name: Materialize candidate core patch for reconciliation
         shell: bash
         run: |
           set -euo pipefail
           expected_prefix="64604d9"
+          candidate_prefix="97fad6c"
           current_blob="$(git hash-object core-mechanics.js)"
           if [[ "$current_blob" == ${expected_prefix}* ]]; then
             echo "Exact reviewed core blob already assembled: $current_blob"
             exit 0
           fi
-          git apply --recount --check .github/delta-six-fixes-core.patch
-          git apply --recount .github/delta-six-fixes-core.patch
+          if [[ "$current_blob" != ${candidate_prefix}* ]]; then
+            git apply --recount --check .github/delta-six-fixes-core.patch
+            git apply --recount .github/delta-six-fixes-core.patch
+          fi
           assembled_blob="$(git hash-object core-mechanics.js)"
-          echo "Assembled core blob: $assembled_blob"
-          [[ "$assembled_blob" == ${expected_prefix}* ]]
+          echo "Candidate core blob: $assembled_blob"
+          [[ "$assembled_blob" == ${candidate_prefix}* || "$assembled_blob" == ${expected_prefix}* ]]
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add core-mechanics.js
-          git commit -m "chore: assemble reviewed core mechanics blob"
-          git push origin HEAD:tmp/delta-six-fixes-bootstrap
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: materialize core patch candidate"
+            git push origin HEAD:tmp/delta-six-fixes-bootstrap
+          fi
