@@ -3,7 +3,7 @@
  * deliberately allowlists fields so prompts, full narration, credentials and provider payloads
  * cannot leak into the diagnostic bundle by accident.
  */
-export const DIAGNOSTIC_BUNDLE_VERSION = 1;
+export const DIAGNOSTIC_BUNDLE_VERSION = 2;
 export const DEFAULT_DIAGNOSTIC_OPERATION_LIMIT = 40;
 
 function clean(value, max = 320) {
@@ -43,6 +43,16 @@ function sanitizeEpisode(raw = null) {
         segmentCount: Math.max(0, finiteInt(raw.segmentCount, 0)),
     };
 }
+function sanitizeCalendarDate(raw = null) {
+    if (!raw || typeof raw !== 'object') return null;
+    const year = raw.year === null || raw.year === undefined || raw.year === '' ? null : finiteInt(raw.year);
+    return {
+        era: clean(raw.era, 24),
+        year,
+        month: clean(raw.month, 40),
+        day: finiteInt(raw.day),
+    };
+}
 function sanitizeEvidence(raw = []) {
     return (Array.isArray(raw) ? raw : []).slice(0, 8).map(item => ({
         sourceMessageId: finiteInt(item?.sourceMessageId),
@@ -66,8 +76,14 @@ export function sanitizeProfileDiagnostic(raw = {}) {
         observations: Math.max(0, finiteInt(raw.observations, 0)),
         aggregateObservations: Math.max(0, finiteInt(raw.aggregateObservations, 0)),
         locked: Boolean(raw.locked),
+        candidateChanged: raw.candidateChanged === undefined ? null : Boolean(raw.candidateChanged),
+        candidateAlreadyRepresented: Boolean(raw.candidateAlreadyRepresented),
+        evidenceResolved: Boolean(raw.evidenceResolved),
         candidateGrounded: raw.candidateGrounded === undefined ? null : Boolean(raw.candidateGrounded),
         reasonGrounded: raw.reasonGrounded === undefined ? null : Boolean(raw.reasonGrounded),
+        providerReasonPresent: Boolean(raw.providerReasonPresent),
+        effectiveReasonSource: clean(raw.effectiveReasonSource, 24),
+        effectiveReason: clean(raw.effectiveReason, 500),
         previous: clean(raw.previous, 720),
         candidate: clean(raw.candidate, 720),
         developmentReason: clean(raw.developmentReason, 500),
@@ -83,7 +99,10 @@ export function sanitizeBirthdayDiagnostic(raw = {}) {
         reason: clean(raw.reason, 120),
         birthdayMatched: Boolean(raw.birthdayMatched),
         establishedNow: Boolean(raw.establishedNow),
+        birthdaySupplied: Boolean(raw.birthdaySupplied),
+        birthDateState: clean(raw.birthDateState, 24),
         narratedBirthday: Boolean(raw.narratedBirthday),
+        ageState: clean(raw.ageState, 24),
         ageLocked: Boolean(raw.ageLocked),
         apparentAgeLocked: Boolean(raw.apparentAgeLocked),
         previousAge: clean(raw.previousAge, 12),
@@ -91,6 +110,11 @@ export function sanitizeBirthdayDiagnostic(raw = {}) {
         previousApparentAge: clean(raw.previousApparentAge, 16),
         apparentAge: clean(raw.apparentAge, 16),
         delta: finiteInt(raw.delta, 0),
+        previousBirthDate: sanitizeCalendarDate(raw.previousBirthDate),
+        birthDate: sanitizeCalendarDate(raw.birthDate),
+        birthDateYearSource: clean(raw.birthDateYearSource, 32),
+        calendarAge: finiteInt(raw.calendarAge),
+        referenceDate: sanitizeCalendarDate(raw.referenceDate),
     };
 }
 export function sanitizeDiagnosticOperation(raw = {}) {
