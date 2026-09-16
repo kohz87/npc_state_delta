@@ -1,0 +1,289 @@
+diff --git a/appearance.js b/appearance.js
+index cf58ba9..963b08c 100644
+--- a/appearance.js
++++ b/appearance.js
+@@ -1,5 +1,11 @@
+-/* NPC State Delta appearance-form model and shared current-appearance resolver. */
+-import { DURABLE_PROFILE_LIMITS, normalizeName } from './core-mechanics.js';
++import {
++    DURABLE_PROFILE_LIMITS,
++    normalizeName,
++    durableSeedGrounded,
++    durableRefinementCandidateGrounded,
++    isSafeUnmarkedDurableRefinement,
++    isSafeUnmarkedDurableReplacement,
++} from './core-mechanics.js';
+ 
+ export const APPEARANCE_FORM_LIMIT = 8;
+ export const APPEARANCE_MODEL_VERSION = 1;
+@@ -37,7 +43,13 @@ function stripOverallPrefix(value, overall) {
+         const separator = `${boundary}+`;
+         const trailing = `${boundary}*`;
+         const prefix = new RegExp(`^\\s*${words.map(regexEscape).join(separator)}(?=$|${boundary})${trailing}`, 'iu');
+-        if (prefix.test(current)) return appearanceText(current.replace(prefix, ''));
++        const match = prefix.exec(current);
++        if (match) {
++            const remainder = current.slice(match[0].length);
++            if (!/^\s*(?:is|are|was|were|be|been|being|not|never|no|hidden|covered|concealed|veiled|beneath|under|obscured)\b/i.test(remainder)) {
++                return appearanceText(remainder);
++            }
++        }
+     }
+     return current;
+ }
+@@ -47,6 +59,7 @@ function combineAppearance(overall, specific) {
+     if (!shared) return local;
+     if (!local) return shared;
+     if (sameAppearance(shared, local)) return shared;
++    if (normalizeName(local).startsWith(normalizeName(shared))) return local;
+     return appearanceText(`${shared}; ${local}`);
+ }
+ function formKey(value) { return clean(value, 120).normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim(); }
+@@ -250,18 +263,18 @@ function reconcileFormAppearance(existing, update, context = '') {
+     const current = appearanceText(existing);
+     const incoming = appearanceText(update?.appearance);
+     if (!incoming) return current;
+-    if (!current) return context && !grounded(incoming, context) ? '' : incoming;
++    if (!current) return context && !durableSeedGrounded(incoming, context) ? '' : incoming;
+     if (normalizeName(current) === normalizeName(incoming)) return current;
+     const state = formState(update?.state);
+     if (state === 'change') {
+         const reason = clean(update?.reason, 500);
+-        if (!reason || (context && (!grounded(reason, context) || !grounded(incoming, context)))) return current;
++        if (!reason || (context && (!durableSeedGrounded(reason, context) || !durableSeedGrounded(incoming, context)))) return current;
+         return incoming;
+     }
+     const compatible = state === 'refine'
+-        ? safeRefinement(current, incoming)
+-        : safeUnmarkedReplacement(current, incoming);
+-    if (!compatible || (context && !grounded(incoming, context))) return current;
++        ? isSafeUnmarkedDurableRefinement(current, incoming)
++        : isSafeUnmarkedDurableReplacement(current, incoming);
++    if (!compatible || (context && !durableRefinementCandidateGrounded('appearance', current, incoming, context))) return current;
+     return mergeRefinement(current, incoming, DURABLE_PROFILE_LIMITS?.appearance || 800);
+ }
+ 
+@@ -273,17 +286,17 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = false, context = '' } = {}) {
+     if (overallProvided) {
+         const incoming = appearanceText(rawUpdate.overallAppearance ?? rawUpdate.overall_appearance);
+         if (!next.overallAppearance) {
+-            if (!context || grounded(incoming, context)) next.overallAppearance = incoming;
++            if (!context || durableSeedGrounded(incoming, context)) next.overallAppearance = incoming;
+         } else if (incoming && normalizeName(incoming) !== normalizeName(next.overallAppearance)) {
+             const state = formState(rawUpdate.overallAppearanceState ?? rawUpdate.overall_appearance_state);
+             if (state === 'change') {
+                 const reason = clean(rawUpdate.overallAppearanceReason ?? rawUpdate.overall_appearance_reason, 500);
+-                if (reason && (!context || (grounded(reason, context) && grounded(incoming, context)))) next.overallAppearance = incoming;
++                if (reason && (!context || (durableSeedGrounded(reason, context) && durableSeedGrounded(incoming, context)))) next.overallAppearance = incoming;
+             } else {
+                 const compatible = state === 'refine'
+-                    ? safeRefinement(next.overallAppearance, incoming)
+-                    : safeUnmarkedReplacement(next.overallAppearance, incoming);
+-                if (compatible && (!context || grounded(incoming, context))) {
++                    ? isSafeUnmarkedDurableRefinement(next.overallAppearance, incoming)
++                    : isSafeUnmarkedDurableReplacement(next.overallAppearance, incoming);
++                if (compatible && (!context || durableRefinementCandidateGrounded('appearance', next.overallAppearance, incoming, context))) {
+                     next.overallAppearance = mergeRefinement(next.overallAppearance, incoming, DURABLE_PROFILE_LIMITS?.appearance || 800);
+                 }
+             }
+@@ -315,8 +328,8 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = false, context = '' } = {}) {
+         const explicitChange = formState(rawUpdate.appearanceState ?? rawUpdate.appearance_state) === 'change';
+         next.unclassifiedAppearance = currentAppearanceProvided
+             && incomingAppearance
+-            && (!context || grounded(incomingAppearance, context))
+-            && (!explicitChange || (reason && (!context || grounded(reason, context))))
++            && (!context || durableSeedGrounded(incomingAppearance, context))
++            && (!explicitChange || (reason && (!context || durableSeedGrounded(reason, context))))
+             ? incomingAppearance
+             : '';
+         next.appearance = '';
+diff --git a/continuity-core.js b/continuity-core.js
+index 1371eb7..6aaa64a 100644
+--- a/continuity-core.js
++++ b/continuity-core.js
+@@ -154,12 +154,37 @@ export function mergeScanResult(state, scanResult, options = {}) {
+ 
+     result.state.npcs = (result.state.npcs || []).map(rawNpc => {
+         const sources = matchingPrevious(rawNpc, previous);
+-        const ordinaryUpdate = ordinary.find(raw => sameNpc(raw, rawNpc));
++        let ordinaryUpdate = ordinary.find(raw => sameNpc(raw, rawNpc));
++        let profileUpdate = profiles.find(raw => sameNpc(raw, rawNpc));
+         const rawForms = ordinaryUpdate && (ordinaryUpdate.appearanceForms ?? ordinaryUpdate.appearance_forms);
+         const seed = !sources.length && rawForms ? { ...rawNpc, appearanceModelVersion: 1 } : rawNpc;
++
++        const formSwitch = Boolean(
++            ordinaryUpdate?.currentForm || ordinaryUpdate?.currentFormState
++            || profileUpdate?.currentForm || profileUpdate?.currentFormState
++            || (ordinaryUpdate && (ordinaryUpdate.appearanceForms ?? ordinaryUpdate.appearance_forms))
++            || (profileUpdate && (profileUpdate.appearanceForms ?? profileUpdate.appearance_forms))
++        );
++        const appearanceRejected = !formSwitch && (sources.length
++            ? (sources[0]?.appearance ? mechanics.normalizeName(rawNpc.appearance) === mechanics.normalizeName(sources[0]?.appearance) : !rawNpc.appearance)
++            : (!rawNpc.appearance));
++        if (appearanceRejected) {
++            if (ordinaryUpdate && (ordinaryUpdate.appearance || ordinaryUpdate.appearanceState)) {
++                ordinaryUpdate = { ...ordinaryUpdate };
++                delete ordinaryUpdate.appearance;
++                delete ordinaryUpdate.appearanceState;
++                delete ordinaryUpdate.appearanceReason;
++            }
++            if (profileUpdate && (profileUpdate.appearance || profileUpdate.appearanceState)) {
++                profileUpdate = { ...profileUpdate };
++                delete profileUpdate.appearance;
++                delete profileUpdate.appearanceState;
++                delete profileUpdate.appearanceReason;
++            }
++        }
++
+         let npc = applyModel(seed);
+         if (ordinaryUpdate) npc = applyModel(npc, ordinaryUpdate, options);
+-        const profileUpdate = profiles.find(raw => sameNpc(raw, npc));
+         if (profileUpdate) npc = applyModel(npc, profileUpdate, options);
+         if (sources.length) npc = mergeAppearanceKnowledge(sources, npc);
+ 
+diff --git a/social.js b/social.js
+index 04e1f56..6958faf 100644
+--- a/social.js
++++ b/social.js
+@@ -536,6 +536,7 @@ function relationAgreement(established, candidate) {
+ 
+ function alignGraphWithCanonicalRelationships(graph, npcs = []) {
+     for (const edge of graph.edges || []) {
++        if (edge.confidence === 'explicit') continue;
+         const a = npcs.find(npc => npc?.id === edge.aId);
+         const b = npcs.find(npc => npc?.id === edge.bId);
+         if (!a || !b) continue;
+@@ -554,6 +555,42 @@ function alignGraphWithCanonicalRelationships(graph, npcs = []) {
+     return normalizeSocialGraph(graph);
+ }
+ 
++function edgeDirectionGrounded(a, b, aToB, bToA, text = '') {
++    const source = norm(text);
++    if (!source) return 0;
++    const aLabels = npcLabels(a).map(norm).filter(Boolean);
++    const bLabels = npcLabels(b).map(norm).filter(Boolean);
++    const aRel = norm(aToB);
++    const bRel = norm(bToA);
++    let givenScore = 0;
++    let swappedScore = 0;
++    for (const bName of bLabels) {
++        for (const aName of aLabels) {
++            if (aRel && (source.includes(`${bName} is ${aName}'s ${aRel}`)
++                || source.includes(`${bName} is ${aName}s ${aRel}`)
++                || source.includes(`${bName} is the ${aRel} of ${aName}`))) {
++                givenScore += 2;
++            }
++            if (bRel && (source.includes(`${aName} is ${bName}'s ${bRel}`)
++                || source.includes(`${aName} is ${bName}s ${bRel}`)
++                || source.includes(`${aName} is the ${bRel} of ${bName}`))) {
++                givenScore += 2;
++            }
++            if (bRel && (source.includes(`${bName} is ${aName}'s ${bRel}`)
++                || source.includes(`${bName} is ${aName}s ${bRel}`)
++                || source.includes(`${bName} is the ${bRel} of ${aName}`))) {
++                swappedScore += 2;
++            }
++            if (aRel && (source.includes(`${aName} is ${bName}'s ${aRel}`)
++                || source.includes(`${aName} is ${bName}s ${aRel}`)
++                || source.includes(`${aName} is the ${aRel} of ${bName}`))) {
++                swappedScore += 2;
++            }
++        }
++    }
++    return givenScore - swappedScore;
++}
++
+ function parseScanEdges(scanResult = {}, npcs = [], meta = {}) {
+     const raw = scanResult?.keyRelationshipEdges ?? scanResult?.key_relationship_edges ?? scanResult?.socialRelationships ?? scanResult?.social_relationships ?? [];
+     const out = [];
+@@ -570,14 +607,16 @@ function parseScanEdges(scanResult = {}, npcs = [], meta = {}) {
+         const bEstablished = establishedCounterpartRelation(b, a, npcs);
+         const asGiven = relationAgreement(aEstablished, aToB) + relationAgreement(bEstablished, bToA);
+         const swapped = relationAgreement(aEstablished, bToA) + relationAgreement(bEstablished, aToB);
+-        if (swapped > asGiven) {
++        const reasonText = clean(item?.reason ?? item?.evidence, 300);
++        const edgeGrounded = edgeDirectionGrounded(a, b, aToB, bToA, reasonText || meta.developmentContext || '');
++        if (swapped > asGiven && edgeGrounded <= 0) {
+             [aToB, bToA] = [bToA, aToB];
+             [aDynamic, bDynamic] = [bDynamic, aDynamic];
+         }
+         out.push({
+             aId: a.id, bId: b.id, aToB, bToA,
+             aDynamic, bDynamic,
+-            reason: clean(item?.reason ?? item?.evidence, 300) || 'scanner social edge',
++            reason: reasonText || 'scanner social edge',
+             provenance: meta.provenance || 'scanner', confidence: 'explicit', sourceMessageId: meta.sourceMessageId, turn: meta.turn,
+         });
+     }
+@@ -684,24 +723,56 @@ export function extractUnresolvedSocialFacts(transcript, npcs = [], meta = {}) {
+             const singleFamily = background.match(/\b(?:mother|father|parent|guardian)\s+of\s+(?:a|an|one)\s+(daughter|son|child)\b/iu);
+             if (singleFamily) pushFact(npc, 1, singleFamily[1], '', [], singleFamily[0]);
+         }
++        for (const raw of Array.isArray(npc?.keyRelationships) ? npc.keyRelationships : []) {
++            const parsed = parseKeyRelationshipEntry(raw);
++            if (!parsed) continue;
++            const shape = collectiveRelationshipShape(parsed);
++            if (shape) {
++                pushFact(npc, shape.expectedCount, parsed.relation, shape.sharedDescriptor, [], raw);
++            }
++        }
+     }
+     return facts;
+ }
+ 
++function collectiveDescriptorGrounded(value, descriptor) {
++    const text = norm(value);
++    const shared = norm(descriptor);
++    if (!shared) return true;
++    if (shared === 'twins' || shared === 'twin') return /\btwins?\b/.test(text);
++    return text.includes(shared);
++}
++
++function existingEdgeProvesCollectiveMembership(edge, ownerId, fact) {
++    const view = relationFromPerspective(edge, ownerId);
++    if (!view) return false;
++    if (fact.sharedDescriptor && collectiveDescriptorGrounded(edge.sharedDescriptor, fact.sharedDescriptor)) return true;
++    if (confidenceRank(edge.confidence) < confidenceRank('explicit')) return false;
++    return collectiveDescriptorGrounded(`${view.relation} ${view.reverse} ${edge.reason}`, fact.sharedDescriptor);
++}
++
+ function ensureUnresolvedFacts(graph, facts = []) {
+     for (const fact of facts) {
+         const ownerId = clean(fact.ownerId, 100);
+         const relation = clean(fact.relation, 180);
+         if (!ownerId || !relation) continue;
+         const family = socialRelationFamily(relation);
+-        const existingResolved = graph.edges.filter(edge => {
++        const existingEdges = graph.edges.filter(edge => {
+             const view = relationFromPerspective(edge, ownerId);
+             return view && socialRelationFamily(view.relation) === family;
+-        }).length;
++        });
++        const existingResolved = existingEdges.length;
+         const existingSlots = graph.unresolved.filter(slot => slot.ownerId === ownerId && socialRelationFamily(slot.relation) === family);
+         const desiredOpen = Math.max(0, Number(fact.count || 0) - existingResolved);
+         const toAdd = Math.max(0, desiredOpen - existingSlots.length);
+         const groupId = existingSlots[0]?.groupId || `group_${slug(`${ownerId}-${family}-${fact.sharedDescriptor || ''}`)}`;
++        if (!existingSlots.length && fact.count >= 2 && existingEdges.length === fact.count
++            && existingEdges.every(edge => existingEdgeProvesCollectiveMembership(edge, ownerId, fact))) {
++            for (const edge of existingEdges) {
++                edge.groupId ||= groupId;
++                if (fact.sharedDescriptor) edge.sharedDescriptor ||= fact.sharedDescriptor;
++            }
++        }
+         for (let i = 0; i < toAdd; i += 1) {
+             const slotIndex = existingSlots.length + i;
+             const descriptor = clean(fact.descriptors?.[slotIndex] || '', 180);
+@@ -853,7 +924,11 @@ function projectGraphToKeyRelationships(npcs, graph) {
+             const score = (counterpart.present ? 40 : 0) + (counterpart.worldActive ? 10 : 0) + (counterpart.lifeState === 'deceased' ? 3 : 0) + confidenceRank(edge.confidence) * 3;
+             if (byCounterpart.has(counterpart.id)) {
+                 const item = byCounterpart.get(counterpart.id);
+-                item.relation = mergeRelations(item.relation, view.relation);
++                if (edge.confidence === 'explicit' && inverseRelationFamilies(socialRelationFamily(item.relation), socialRelationFamily(view.relation))) {
++                    item.relation = view.relation;
++                } else {
++                    item.relation = mergeRelations(item.relation, view.relation);
++                }
+                 item.dynamic = richer(item.dynamic, view.dynamic);
+                 item.score = Math.max(item.score, score);
+             } else byCounterpart.set(counterpart.id, { counterpartId: counterpart.id, relation: view.relation, dynamic: view.dynamic, score });
