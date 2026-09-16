@@ -26,9 +26,49 @@ jobs:
           social="$(git hash-object social.js)"
           [[ "$core" == 64604d9* ]]
           if [[ "$appearance" != 963b08c* || "$continuity" != 6aaa64a* || "$social" != 6958faf* ]]; then
-            git apply --recount --check .github/delta-six-fixes-runtime.patch
-            git apply --recount .github/delta-six-fixes-runtime.patch
-          fi
+            python3 - <<'PY'
+          from pathlib import Path
+          src = Path('.github/delta-six-fixes-runtime.patch').read_text(encoding='utf-8').splitlines(True)
+          out = []
+          skipping = False
+          for line in src:
+              if line.startswith('@@ -684,24 +723,56 @@'):
+                  skipping = True
+                  continue
+              if skipping and line.startswith('@@ -853,7 +924,11 @@'):
+                  skipping = False
+                  out.append(line)
+                  continue
+              if not skipping:
+                  out.append(line)
+          Path('/tmp/runtime-safe.patch').write_text(''.join(out), encoding='utf-8')
+          PY
+            git apply --recount --check /tmp/runtime-safe.patch
+            git apply --recount /tmp/runtime-safe.patch
+            python3 - <<'PY'
+          from pathlib import Path
+          path = Path('social.js')
+          text = path.read_text(encoding='utf-8')
+
+          end_anchor = """        }\n    }\n    return facts;\n}\n\nfunction ensureUnresolvedFacts(graph, facts = []) {\n"""
+          end_replacement = """        }\n        for (const raw of Array.isArray(npc?.keyRelationships) ? npc.keyRelationships : []) {\n            const parsed = parseKeyRelationshipEntry(raw);\n            if (!parsed) continue;\n            const shape = collectiveRelationshipShape(parsed);\n            if (shape) {\n                pushFact(npc, shape.expectedCount, parsed.relation, shape.sharedDescriptor, [], raw);\n            }\n        }\n    }\n    return facts;\n}\n\nfunction collectiveDescriptorGrounded(value, descriptor) {\n    const text = norm(value);\n    const shared = norm(descriptor);\n    if (!shared) return true;\n    if (shared === 'twins' || shared === 'twin') return /\\btwins?\\b/.test(text);\n    return text.includes(shared);\n}\n\nfunction existingEdgeProvesCollectiveMembership(edge, ownerId, fact) {\n    const view = relationFromPerspective(edge, ownerId);\n    if (!view) return false;\n    if (fact.sharedDescriptor && collectiveDescriptorGrounded(edge.sharedDescriptor, fact.sharedDescriptor)) return true;\n    if (confidenceRank(edge.confidence) < confidenceRank('explicit')) return false;\n    return collectiveDescriptorGrounded(`${view.relation} ${view.reverse} ${edge.reason}`, fact.sharedDescriptor);\n}\n\nfunction ensureUnresolvedFacts(graph, facts = []) {\n"""
+          if end_anchor not in text:
+              raise SystemExit('social extract-facts anchor not found')
+          text = text.replace(end_anchor, end_replacement, 1)
+
+          resolved_anchor = """        const existingResolved = graph.edges.filter(edge => {\n            const view = relationFromPerspective(edge, ownerId);\n            return view && socialRelationFamily(view.relation) === family;\n        }).length;\n"""
+          resolved_replacement = """        const existingEdges = graph.edges.filter(edge => {\n            const view = relationFromPerspective(edge, ownerId);\n            return view && socialRelationFamily(view.relation) === family;\n        });\n        const existingResolved = existingEdges.length;\n"""
+          if resolved_anchor not in text:
+              raise SystemExit('social resolved-edge anchor not found')
+          text = text.replace(resolved_anchor, resolved_replacement, 1)
+
+          group_anchor = """        const groupId = existingSlots[0]?.groupId || `group_${slug(`${ownerId}-${family}-${fact.sharedDescriptor || ''}`)}`;\n"""
+          group_replacement = group_anchor + """        if (!existingSlots.length && fact.count >= 2 && existingEdges.length === fact.count\n            && existingEdges.every(edge => existingEdgeProvesCollectiveMembership(edge, ownerId, fact))) {\n            for (const edge of existingEdges) {\n                edge.groupId ||= groupId;\n                if (fact.sharedDescriptor) edge.sharedDescriptor ||= fact.sharedDescriptor;\n            }\n        }\n"""
+          if group_anchor not in text:
+              raise SystemExit('social group anchor not found')
+          text = text.replace(group_anchor, group_replacement, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
           core="$(git hash-object core-mechanics.js)"
           appearance="$(git hash-object appearance.js)"
           continuity="$(git hash-object continuity-core.js)"
