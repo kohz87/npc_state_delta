@@ -1,0 +1,38 @@
+name: Delta six-fix bootstrap
+
+on:
+  push:
+    branches:
+      - tmp/delta-six-fixes-bootstrap
+
+permissions:
+  contents: write
+
+jobs:
+  assemble-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tmp/delta-six-fixes-bootstrap
+          fetch-depth: 0
+      - name: Apply exact reviewed core patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_prefix="64604d9"
+          current_blob="$(git hash-object core-mechanics.js)"
+          if [[ "$current_blob" == ${expected_prefix}* ]]; then
+            echo "Exact reviewed core blob already assembled: $current_blob"
+            exit 0
+          fi
+          git apply --check .github/delta-six-fixes-core.patch
+          git apply .github/delta-six-fixes-core.patch
+          assembled_blob="$(git hash-object core-mechanics.js)"
+          echo "Assembled core blob: $assembled_blob"
+          [[ "$assembled_blob" == ${expected_prefix}* ]]
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add core-mechanics.js
+          git commit -m "chore: assemble reviewed core mechanics blob"
+          git push origin HEAD:tmp/delta-six-fixes-bootstrap
