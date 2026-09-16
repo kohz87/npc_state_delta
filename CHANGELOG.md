@@ -1,5 +1,13 @@
 # NPC State Delta changes
 
+## 1.0.26 - 16 September 2026
+
+- Fix durable-profile decision ordering for provider-declared `batch` updates. When the returned Personality/Speech full candidate is textually unchanged, Delta now classifies candidate/evidence resolution before the explicit/batch authorization gate, so a failed episode gate cannot mask a copied candidate as `waiting-for-explicit-gate`.
+- Preserve novel copied-candidate evidence as `waiting-for-revised-candidate` and resolve only genuinely redundant evidence as `evidence-already-reflected`. Candidate equality, evidence coverage and resolution flags are populated consistently even when later development gates fail.
+- Add a targeted Refresh episode resolver that uses validated `[mN]` provenance. The nearest prior tagged elapsed-time anchor may bridge through the target's cited source messages even when a long montage exceeds the generic 12-segment episode cap; each evidence claim must still ground in its own cited message and the development reason must ground in the tagged episode.
+- Keep ordinary/multi-NPC scanning on the existing strict bounded episode path. The targeted source-tag bridge does not enlarge the generic episode window, does not let another NPC's evidence authorize the target, and makes no extra model request.
+- Add regressions for the live Sora copied-candidate gate-order shape, redundant-evidence resolution, and a targeted `[m202]` to `[m204]` development episode containing more than twenty intervening sentence segments. No scanner/Refresh prompt text, output allowance, persistence schema, native bundle, branch lineage or relationship formula changes are introduced.
+
 ## 1.0.25 - 16 September 2026
 
 - Fix the copied-candidate false resolution exposed by live Sora diagnostics. An unchanged Personality/Speech candidate can no longer consume a ready batch/aggregate evidence epoch merely because the provider labelled it `refine`/`batch`; Delta now proves that every bounded evidence claim is already represented by the accepted current field before reporting `evidence-already-reflected`.

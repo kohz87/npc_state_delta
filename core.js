@@ -795,6 +795,10 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
         effectiveReason,
         effectiveReasonSource,
         candidateChanged,
+        candidateAlreadyRepresented: Boolean(proposed) && !candidateChanged,
+        evidenceAlreadyRepresented: Boolean(proposed) && !candidateChanged ? evidenceAlreadyRepresented : null,
+        evidenceResolved: false,
+        candidateGrounded: null,
         episode,
         reasonGrounded: batchReady ? true : (effectiveReason ? episode.grounded : null),
     };
@@ -809,6 +813,33 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
             recordProfileDevelopmentDiagnostic(report, npc.id, field, state === 'refine' ? 'applied-refine' : 'applied-recovery', plan, { modelState: state, scale });
         }
         if (ledger) npc[config.ledgerKey] = ledger;
+        return npc;
+    }
+
+    // A copied full candidate cannot be applied. Classify it before explicit/batch
+    // authorization so a failed episode gate cannot hide the real candidate state or
+    // discard novel evidence. This is intentionally limited to provider-declared batch
+    // development; ordinary gradual concept ledgers keep their existing readiness rules.
+    if (scale === 'batch' && proposed && !candidateChanged) {
+        if (!evidenceAlreadyRepresented) {
+            recordProfileDevelopmentDiagnostic(report, npc.id, field, 'waiting-for-revised-candidate', plan, {
+                ...diagnosticBase,
+                candidateAlreadyRepresented: true,
+                evidenceAlreadyRepresented: false,
+                evidenceResolved: false,
+            });
+            if (ledger) npc[config.ledgerKey] = ledger;
+            return npc;
+        }
+        clearProfileEvidence(npc, field);
+        npc[config.ledgerKey] = resetProfileDevelopment(field, ledger || emptyProfileDevelopment(field, npc), currentValue, options);
+        npc.updatedAt = Date.now();
+        recordProfileDevelopmentDiagnostic(report, npc.id, field, 'evidence-already-reflected', plan, {
+            ...diagnosticBase,
+            candidateAlreadyRepresented: true,
+            evidenceAlreadyRepresented: true,
+            evidenceResolved: true,
+        });
         return npc;
     }
 
@@ -1121,4 +1152,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.25';
+export const NPC_STATE_VERSION = '1.0.26';

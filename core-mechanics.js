@@ -3809,6 +3809,55 @@ function developmentEpisodeNpcBound(window, binding = null) {
     return false;
 }
 
+function taggedDevelopmentMessages(context) {
+    return String(context || '').split(/\n+/).map(line => {
+        const match = String(line || '').match(/^\[m(\d+)\]\s*([\s\S]*)$/i);
+        return match ? { id: Number(match[1]), text: cleanText(match[2], 12000) } : null;
+    }).filter(item => item && Number.isInteger(item.id) && item.text);
+}
+
+function targetedDevelopmentEpisode(reason, context, binding = null) {
+    if (binding?.targeted !== true) return null;
+    const evidence = Array.isArray(binding?.evidence) ? binding.evidence : [];
+    const evidenceItems = evidence.map(value => {
+        const text = String(value || '');
+        const marker = text.match(/^\[m(\d+)\]\s*/i);
+        const sourceMessageId = marker ? Number(marker[1]) : null;
+        const body = cleanText(text.replace(/^\[m\d+\]\s*/i, '').replace(/^[^:]{1,52}:\s*/, ''), DURABLE_PROFILE_LIMITS.evidence);
+        return { sourceMessageId, body };
+    }).filter(item => Number.isInteger(item.sourceMessageId) && item.body);
+    if (!evidenceItems.length) return null;
+    const messages = taggedDevelopmentMessages(context);
+    if (!messages.length) return null;
+    const evidenceIds = [...new Set(evidenceItems.map(item => item.sourceMessageId))].sort((a, b) => a - b);
+    const firstEvidenceId = evidenceIds[0];
+    const lastEvidenceId = evidenceIds[evidenceIds.length - 1];
+    let anchorIndex = -1;
+    for (let i = 0; i < messages.length; i += 1) {
+        if (messages[i].id > firstEvidenceId) break;
+        if (hasNarratedTimeSkip(messages[i].text)) anchorIndex = i;
+    }
+    if (anchorIndex < 0) return null;
+    let lastIndex = messages.findIndex(item => item.id === lastEvidenceId);
+    if (lastIndex < anchorIndex) lastIndex = anchorIndex;
+    const selected = messages.slice(anchorIndex, Math.min(messages.length, lastIndex + 1));
+    const window = cleanText(selected.map(item => `[m${item.id}] ${item.text}`).join(' '), 18000);
+    const hasDevelopment = selected.some(item => BATCH_DEVELOPMENT_CUE_RE.test(normalizeName(item.text)));
+    const evidenceGrounded = evidenceItems.some(item => {
+        const source = messages.find(message => message.id === item.sourceMessageId)?.text || '';
+        return source && developmentEvidenceOwnsScope(item.body, source);
+    });
+    const reasonGrounded = hasDevelopment && contextWindowGroundsReason(reason, window, true);
+    return {
+        detected: true,
+        grounded: Boolean(reasonGrounded && evidenceGrounded),
+        npcBound: Boolean(evidenceGrounded),
+        anchorIndex: messages[anchorIndex].id,
+        segmentCount: selected.length,
+        window,
+    };
+}
+
 function boundedDevelopmentEpisode(segments, anchorIndex) {
     const selected = [];
     let chars = 0;
@@ -3831,6 +3880,11 @@ export function developmentEpisodeDiagnostic(reason, context, binding = null) {
     const source = String(context || '').trim();
     const diagnostic = { detected: false, grounded: false, npcBound: binding ? false : null, anchorIndex: null, segmentCount: 0 };
     if (!source) return { ...diagnostic, grounded: true, npcBound: binding ? Boolean(binding?.targeted) : null };
+    const targeted = targetedDevelopmentEpisode(reason, source, binding);
+    if (targeted?.grounded) {
+        const { window: _window, ...details } = targeted;
+        return details;
+    }
     const segments = developmentContextSegments(source);
     for (let i = 0; i < segments.length; i += 1) {
         if (!hasNarratedTimeSkip(segments[i])) continue;
@@ -3899,6 +3953,8 @@ function scopedEpisodeText(window, binding = null) {
 export function developmentEpisodeEvidence(reason, context, binding = null) {
     const source = String(context || '').trim();
     if (!source) return '';
+    const targeted = targetedDevelopmentEpisode(reason, source, binding);
+    if (targeted?.grounded && targeted.window) return targeted.window;
     const segments = developmentContextSegments(source);
     for (let i = 0; i < segments.length; i += 1) {
         if (!hasNarratedTimeSkip(segments[i])) continue;
