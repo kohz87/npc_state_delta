@@ -632,10 +632,17 @@ function recordSecondaryProfileDiagnostics(report, beforeNpc, afterNpc, rawUpdat
         const changed = mechanics.normalizeName(previousValue) !== mechanics.normalizeName(currentValue);
         const candidateAlreadyRepresented = Boolean(candidateValue)
             && mechanics.normalizeName(previousValue) === mechanics.normalizeName(candidateValue);
+        const evidenceAlreadyRepresented = mechanics.durableProfileEvidenceAlreadyRepresented(
+            field,
+            beforeNpc?.[field] || [],
+            rawEvidence,
+        );
         const outcome = locked ? 'locked'
             : (changed && inferredBatch ? 'applied-inferred-batch'
                 : (changed ? `applied-${normalized[stateField] || 'update'}`
-                    : (candidateAlreadyRepresented ? 'evidence-already-reflected' : 'unchanged-or-gated')));
+                    : (candidateAlreadyRepresented
+                        ? (evidenceAlreadyRepresented ? 'evidence-already-reflected' : 'waiting-for-revised-candidate')
+                        : 'unchanged-or-gated')));
         const evidence = rawEvidence.slice(0, PROFILE_DEVELOPMENT_OBSERVATION_LIMIT).map(item => {
             const parsed = parseProfileDevelopmentEvidence('speech', item);
             return {
@@ -663,6 +670,8 @@ function recordSecondaryProfileDiagnostics(report, beforeNpc, afterNpc, rawUpdat
             effectiveReasonSource,
             candidateChanged,
             candidateAlreadyRepresented,
+            evidenceAlreadyRepresented,
+            evidenceResolved: candidateAlreadyRepresented ? evidenceAlreadyRepresented : changed,
             candidateGrounded: candidateChanged ? candidateSpecificGrounding : null,
             reasonGrounded: effectiveReason ? episode.grounded : null,
             episode,
@@ -771,6 +780,11 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
     const inferredBatch = scale === 'gradual' && batchReady;
     const effectiveScale = batchReady ? 'batch' : scale;
     const candidateChanged = Boolean(proposed) && mechanics.normalizeName(proposed) !== mechanics.normalizeName(currentValue);
+    const resolutionEvidence = [
+        ...(Array.isArray(plan.aggregateEvidence?.groups) ? plan.aggregateEvidence.groups : []),
+        ...rawDevelopmentEvidence,
+    ];
+    const evidenceAlreadyRepresented = mechanics.durableProfileEvidenceAlreadyRepresented(field, currentValue, resolutionEvidence);
     const diagnosticBase = {
         modelState: state,
         scale,
@@ -804,13 +818,24 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
             if (ledger) npc[config.ledgerKey] = ledger;
             return npc;
         }
-        if (!candidateChanged) {
+        if (!candidateChanged && !evidenceAlreadyRepresented) {
+        recordProfileDevelopmentDiagnostic(report, npc.id, field, 'waiting-for-revised-candidate', plan, {
+            ...diagnosticBase,
+            candidateAlreadyRepresented: true,
+            evidenceAlreadyRepresented: false,
+            evidenceResolved: false,
+        });
+        if (ledger) npc[config.ledgerKey] = ledger;
+        return npc;
+    }
+    if (!candidateChanged) {
             clearProfileEvidence(npc, field);
             npc[config.ledgerKey] = resetProfileDevelopment(field, ledger || emptyProfileDevelopment(field, npc), currentValue, options);
             npc.updatedAt = Date.now();
             recordProfileDevelopmentDiagnostic(report, npc.id, field, 'evidence-already-reflected', plan, {
                 ...diagnosticBase,
                 candidateAlreadyRepresented: true,
+                evidenceAlreadyRepresented: true,
                 evidenceResolved: true,
                 inferredScale: inferredBatch,
                 inferredEffectiveScale: inferredBatch ? 'batch' : '',
@@ -860,6 +885,16 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
         npc[config.ledgerKey] = ledger;
         return npc;
     }
+    if (!candidateChanged && !evidenceAlreadyRepresented) {
+        recordProfileDevelopmentDiagnostic(report, npc.id, field, 'waiting-for-revised-candidate', plan, {
+            ...diagnosticBase,
+            candidateAlreadyRepresented: true,
+            evidenceAlreadyRepresented: false,
+            evidenceResolved: false,
+        });
+        if (ledger) npc[config.ledgerKey] = ledger;
+        return npc;
+    }
     if (!candidateChanged) {
         if (aggregateFallback) {
             clearProfileEvidence(npc, field);
@@ -869,6 +904,7 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
                 ...diagnosticBase,
                 aggregateFallback: true,
                 candidateAlreadyRepresented: true,
+                evidenceAlreadyRepresented: true,
                 evidenceResolved: true,
             });
             return npc;
@@ -1085,4 +1121,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.24';
+export const NPC_STATE_VERSION = '1.0.25';

@@ -111,9 +111,9 @@ test('v1.0.24 aggregate fragmented evidence already reflected by the current Spe
         },
         { turn: sourceMessageId, sourceMessageId },
     );
-    state = scan('[m202] analytical: measured delivery remains steady during analysis', 202).state;
-    state = scan('[m203] soft-spoken: soft-spoken delivery stays gentle in public', 203).state;
-    const final = scan('[m204] melodic: melodic polite cadence recurs at formal gatherings', 204);
+    state = scan('[m202] measured: measured delivery remains steady in formal company', 202).state;
+    state = scan('[m203] soft-spoken: soft-spoken delivery stays gentle in formal company', 203).state;
+    const final = scan('[m204] melodic: melodic cadence recurs in formal company', 204);
     const row = final.report.profileDevelopment.find(item => item.field === 'speech');
     assert.equal(row?.aggregateReady, true);
     assert.equal(row?.aggregateFallback, true);
