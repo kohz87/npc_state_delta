@@ -56,6 +56,63 @@ test('unsupported durable meaning cannot ride through refine while directly grou
 
     assert.match(grounded.state.npcs[0].personality, /prepares tea for nervous guests/i);
     assert.match(grounded.state.npcs[0].speech, /formal phrase Good evening/i);
+
+    const mixed = merge(npc, {
+        personalityState: 'refine',
+        personality: `${npc.personality}; carefully prepares tea for nervous guests; secretly delights in torture and pain.`,
+        evidence: { personality: ['Mira carefully prepares tea for nervous guests.'] },
+    }, 'Mira carefully prepares tea for nervous guests.');
+    assert.equal(mixed.state.npcs[0].personality, npc.personality);
+
+    const mixedSpeech = merge(npc, {
+        speechState: 'refine',
+        speech: `${npc.speech}; uses formal honorifics and precise salutations; fluent in ancient Celestial.`,
+        evidence: { speech: ['Mira uses formal honorifics and precise salutations when greeting visitors.'] },
+    }, 'Mira uses formal honorifics and precise salutations when greeting visitors.');
+    assert.equal(mixedSpeech.state.npcs[0].speech, npc.speech);
+
+    const mixedSpeechSingleClause = merge(npc, {
+        speechState: 'refine',
+        speech: `${npc.speech}; uses formal honorifics, precise salutations, and is fluent in ancient Celestial.`,
+        evidence: { speech: ['Mira uses formal honorifics and precise salutations when greeting visitors.'] },
+    }, 'Mira uses formal honorifics and precise salutations when greeting visitors.');
+    assert.equal(mixedSpeechSingleClause.state.npcs[0].speech, npc.speech);
+
+    const crossSpeech = mergeScanResult(
+        state(npc, createNpcRecord('Bram')),
+        {
+            npcs: [],
+            profileUpdates: [{
+                id: npc.id,
+                speechState: 'refine',
+                speech: `${npc.speech}; fluent in ancient Celestial.`,
+            }],
+        },
+        { turn: 2, sourceMessageId: 2, developmentContext: 'Bram is fluent in ancient Celestial. Mira says hello softly.' },
+    );
+    assert.equal(crossSpeech.state.npcs[0].speech, npc.speech);
+
+    const mislabeledEvidence = merge(npc, {
+        speechState: 'refine',
+        speech: `${npc.speech}; fluent in ancient Celestial.`,
+        evidence: { speech: ['Bram: fluent in ancient Celestial.'] },
+    }, 'Mira says hello softly while Bram watches.');
+    assert.equal(mislabeledEvidence.state.npcs[0].speech, npc.speech);
+
+    const crossNpc = mergeScanResult(
+        state(npc, createNpcRecord('Lucien')),
+        {
+            npcs: [],
+            profileUpdates: [{
+                id: npc.id,
+                personalityState: 'refine',
+                personality: `${npc.personality}; shoots targets with lethal precision.`,
+                evidence: { personality: ['Lucien shoots targets with lethal precision.'] },
+            }],
+        },
+        { turn: 2, sourceMessageId: 2, developmentContext: 'Lucien practices archery and shoots targets with lethal precision. Mira watches quietly.' },
+    );
+    assert.equal(crossNpc.state.npcs[0].personality, npc.personality);
 });
 
 test('Behavioral Profile refinement is atomic and rejects unsupported new agency', () => {
@@ -121,6 +178,58 @@ test('accepted flat current appearance updates the selected canonical form and e
     assert.equal(changed.report.profileUpdateStats.applied, 1);
 });
 
+test('unsupported appearance proposal is rejected across dossier, injection, portrait, and update stats', () => {
+    const npc = normalizeNpcRecord({
+        ...createNpcRecord('Mira'),
+        appearanceModelVersion: 1,
+        overallAppearance: 'Silver hair and blue eyes.',
+        currentForm: 'Human',
+        appearanceForms: [
+            { name: 'Human', appearance: 'Silver hair and blue eyes. Wears a green dress.' },
+            { name: 'Dragon', appearance: 'Mirror-steel scales, silver wings, and a long tail.' },
+        ],
+    });
+    const context = 'Mira pours a cup of tea for her guests and smiles warmly.';
+    const rejected = merge(npc, {
+        appearance: 'Silver hair and blue eyes. Wears a green dress; has curved obsidian horns and bat wings.',
+        appearanceState: 'refine',
+        evidence: { appearance: ['Mira pours a cup of tea.'] },
+    }, context);
+    const current = rejected.state.npcs[0];
+    const human = current.appearanceForms.find(form => form.name === 'Human');
+
+    assert.doesNotMatch(human.appearance, /horns|wings/i);
+    assert.doesNotMatch(resolveNpcAppearance(current), /horns|wings/i);
+    const injection = buildInjection([{ ...current, present: true }], 'Mira is here.', 2, 3, undefined, 2000);
+    const portrait = buildNpcPortraitPrompts(current).positive;
+    assert.doesNotMatch(injection, /horns|wings/i);
+    assert.doesNotMatch(portrait, /horns|wings/i);
+    assert.equal(rejected.report.profileUpdateStats.applied, 0);
+});
+
+test('simultaneous form selection cannot carry rejected flat anatomy into the selected form', () => {
+    const npc = normalizeNpcRecord({
+        ...createNpcRecord('Mira'),
+        appearanceModelVersion: 1,
+        currentForm: 'Human',
+        appearanceForms: [
+            { name: 'Human', appearance: 'Silver hair and blue eyes; wears a green dress.' },
+            { name: 'Travel', appearance: 'Silver hair and blue eyes; wears a brown cloak.' },
+        ],
+    });
+    const rejected = merge(npc, {
+        currentForm: 'Travel',
+        currentFormState: 'select',
+        appearance: 'Silver hair and blue eyes; wears a brown cloak; obsidian horns and jeweled wings.',
+        appearanceState: 'refine',
+        evidence: { appearance: ['Mira pulls her brown cloak tighter and continues down the road.'] },
+    }, 'Mira pulls her brown cloak tighter and continues down the road.');
+    const current = rejected.state.npcs[0];
+    assert.equal(current.currentForm, 'Travel');
+    assert.doesNotMatch(resolveNpcAppearance(current), /horns|wings/i);
+    assert.doesNotMatch(current.appearanceForms.find(form => form.name === 'Travel').appearance, /horns|wings/i);
+});
+
 test('form selection and flat appearance update target the newly selected form without old-form leakage', () => {
     const npc = normalizeNpcRecord({
         ...createNpcRecord('Mira'),
@@ -173,6 +282,18 @@ test('Shared appearance is deduplicated at clause boundaries in resolved, inject
     assert.match(distinctResolved, /Silver hair and blue eyes/i);
     assert.match(distinctResolved, /not visible beneath an opaque black veil/i);
     assert.equal(resolveNpcAppearance(normalizeNpcRecord(distinct)), distinctResolved);
+
+    const veiledPrefix = normalizeNpcRecord({
+        ...createNpcRecord('Vera'),
+        appearanceModelVersion: 1,
+        overallAppearance: 'Silver hair and blue eyes.',
+        currentForm: 'Veiled',
+        appearanceForms: [{ name: 'Veiled', appearance: 'Silver hair and blue eyes are not visible beneath an opaque black veil.' }],
+    });
+    const veiledResolved = resolveNpcAppearance(veiledPrefix);
+    assert.equal(veiledResolved, 'Silver hair and blue eyes are not visible beneath an opaque black veil.');
+    assert.doesNotMatch(veiledResolved, /;\s*are not visible/i);
+    assert.equal((veiledResolved.match(/silver hair and blue eyes/gi) || []).length, 1);
 });
 
 test('fully proven collective bonds retire into named members while partial groups and unrelated unresolved bonds remain', () => {
@@ -206,6 +327,111 @@ test('fully proven collective bonds retire into named members while partial grou
     const stable = structuredClone(family.npcs[0].keyRelationships);
     family = reconcileSocialState(family, { provenance: 'scanner' }).state;
     assert.deepEqual(family.npcs[0].keyRelationships, stable);
+
+    const ambigParent = createNpcRecord('Mira Hest');
+    ambigParent.background = 'Mother of two twin daughters.';
+    ambigParent.keyRelationships = [
+        'Twin Daughters — daughters | Raising and supervising her two twelve-year-old daughters.',
+    ];
+    let ambigFamily = state(ambigParent);
+    ambigFamily.npcs.push(createNpcRecord('Elda Hest'), createNpcRecord('Tessa Hest'), createNpcRecord('Jane Hest'));
+    ambigFamily.npcs[0].keyRelationships.push('Elda Hest — daughter', 'Tessa Hest — daughter', 'Jane Hest — daughter');
+    ambigFamily = reconcileSocialState(ambigFamily, { provenance: 'scanner' }).state;
+    assert.equal(ambigFamily.socialGraph.edges.some(edge => edge.aToB === 'twin sibling' || edge.bToA === 'twin sibling'), false);
+});
+
+test('collective twin label alone does not assign already-known daughters to the twin group', () => {
+    const parent = createNpcRecord('Mira Hest');
+    const elda = createNpcRecord('Elda Hest');
+    const tessa = createNpcRecord('Tessa Hest');
+    parent.keyRelationships = [
+        'Twin Daughters — daughters | Raising and supervising her twins.',
+        'Elda Hest — daughter',
+        'Tessa Hest — daughter',
+    ];
+
+    const family = reconcileSocialState(state(parent, elda, tessa), {
+        provenance: 'scanner',
+        transcript: '',
+    }).state;
+    const parentBonds = family.npcs.find(npc => npc.id === parent.id).keyRelationships;
+    assert.ok(parentBonds.some(item => item.startsWith('Twin Daughters')));
+    const childEdges = family.socialGraph.edges.filter(edge => {
+        const ids = new Set([edge.aId, edge.bId]);
+        return ids.has(parent.id) && (ids.has(elda.id) || ids.has(tessa.id));
+    });
+    assert.equal(childEdges.length, 2);
+    assert.ok(childEdges.every(edge => !edge.groupId && !edge.sharedDescriptor));
+    assert.equal(family.socialGraph.edges.some(edge =>
+        [elda.id, tessa.id].includes(edge.aId)
+        && [elda.id, tessa.id].includes(edge.bId)
+        && /twin sibling/i.test(`${edge.aToB} ${edge.bToA}`)), false);
+});
+
+test('already-identified same-scan twins recover collective membership and retire the generic bond', () => {
+    const parent = createNpcRecord('Mira Hest');
+    const elda = createNpcRecord('Elda Hest');
+    const tessa = createNpcRecord('Tessa Hest');
+    parent.background = 'Mother of two twin daughters.';
+    parent.keyRelationships = [
+        'Twin Daughters — daughters | Raising and supervising her two daughters.',
+        'Elda Hest — daughter',
+        'Tessa Hest — daughter',
+        'Late Husband — deceased spouse | Died in a scree fall during the previous winter.',
+    ];
+
+    let family = mergeScanResult(state(parent, elda, tessa), {
+        npcs: [],
+        keyRelationshipEdges: [
+            {
+                aId: parent.id,
+                bId: elda.id,
+                aToB: 'daughter',
+                bToA: 'mother',
+                reason: "Elda is one of Mira Hest's twin daughters.",
+            },
+            {
+                aId: parent.id,
+                bId: tessa.id,
+                aToB: 'daughter',
+                bToA: 'mother',
+                reason: "Tessa is one of Mira Hest's twin daughters.",
+            },
+        ],
+    }, {
+        turn: 2,
+        sourceMessageId: 2,
+        developmentContext: 'Mira Hest has two twin daughters. They are Elda Hest and Tessa Hest.',
+    }).state;
+    family = reconcileSocialState(family, {
+        provenance: 'scanner',
+        transcript: 'Mira Hest has two twin daughters. They are Elda Hest and Tessa Hest.',
+    }).state;
+
+    const parentBonds = family.npcs.find(npc => npc.id === parent.id).keyRelationships;
+    assert.equal(parentBonds.some(item => item.startsWith('Twin Daughters')), false);
+    assert.ok(parentBonds.some(item => /^Elda Hest — daughter/i.test(item)));
+    assert.ok(parentBonds.some(item => /^Tessa Hest — daughter/i.test(item)));
+    assert.ok(parentBonds.some(item => item.startsWith('Late Husband')));
+
+    const childEdges = family.socialGraph.edges.filter(edge => edge.aId === parent.id || edge.bId === parent.id);
+    const namedChildEdges = childEdges.filter(edge => [elda.id, tessa.id].includes(edge.aId) || [elda.id, tessa.id].includes(edge.bId));
+    assert.equal(namedChildEdges.length, 2);
+    assert.ok(namedChildEdges.every(edge => edge.groupId));
+    assert.ok(namedChildEdges.every(edge => /twin/i.test(edge.sharedDescriptor)));
+    assert.ok(family.socialGraph.edges.some(edge =>
+        [elda.id, tessa.id].includes(edge.aId)
+        && [elda.id, tessa.id].includes(edge.bId)
+        && /twin sibling/i.test(`${edge.aToB} ${edge.bToA}`)));
+
+    const stableBonds = structuredClone(parentBonds);
+    const stableGraph = structuredClone(family.socialGraph);
+    family = reconcileSocialState(family, {
+        provenance: 'scanner',
+        transcript: 'Mira Hest has two twin daughters. They are Elda Hest and Tessa Hest.',
+    }).state;
+    assert.deepEqual(family.npcs.find(npc => npc.id === parent.id).keyRelationships, stableBonds);
+    assert.deepEqual(family.socialGraph, stableGraph);
 });
 
 test('explicit scanner edges still correct mother/daughter direction', () => {
@@ -306,6 +532,70 @@ test('evidence coverage requires the claim body and polarity rather than a match
     assert.equal(durableProfileEvidenceAlreadyRepresented('personality', 'Kind and compassionate.', [
         '[m2] kind: abandons compassion and delights in cruelty',
     ]), false);
+    assert.equal(durableProfileEvidenceAlreadyRepresented('personality', 'Kind and gentle.', [
+        '[m2] kind: kind to animals while actively poisoning rivals and plotting murders',
+    ]), false);
+    assert.equal(durableProfileEvidenceAlreadyRepresented('personality', 'Honest and dependable in public.', [
+        '[m2] honest: not honest with colleagues and hides critical information',
+    ]), false);
+    assert.equal(durableProfileEvidenceAlreadyRepresented('personality', 'Never cruel in conflict.', [
+        '[m2] cruel: overtly cruel to prisoners during interrogation',
+    ]), false);
+    assert.equal(durableProfileEvidenceAlreadyRepresented('personality', 'Not cruel and avoids violence.', [
+        '[m2] peaceful: avoids violence in disputes',
+    ]), true);
+    assert.equal(durableProfileEvidenceAlreadyRepresented('speech', 'Speaks softly with measured cadence in public.', [
+        '[m2] cadence: Speaks softly with measured cadence in public and uses archaic honorifics.',
+    ]), false);
+});
+
+test('copied Speech candidate keeps novel directional evidence pending while unrelated negation does not block redundancy', () => {
+    const speaker = createNpcRecord('Mira');
+    speaker.speech = 'Soft, melodic speech in public.';
+    const novelEvidence = '[m2] cadence: Soft, melodic speech in public, fluent in ancient Celestial and precise legal terminology.';
+    const novel = merge(speaker, {
+        speech: speaker.speech,
+        speechState: 'refine',
+        developmentScale: 'batch',
+        developmentReason: 'Over three months Mira studied ancient Celestial and precise legal terminology.',
+        evidence: { speech: [novelEvidence] },
+    }, '[m1] Over three months Mira studied ancient Celestial and legal terminology. [m2] Mira uses soft melodic speech in public, fluent in ancient Celestial and precise legal terminology.', { allowTargetedDurableSeed: true });
+    const novelRow = profileRow(novel, 'speech');
+    assert.equal(novelRow.outcome, 'waiting-for-revised-candidate');
+    assert.equal(novelRow.evidenceAlreadyRepresented, false);
+    assert.ok(novel.state.npcs[0].speechDevelopment.concepts.some(concept =>
+        concept.evidenceSamples.some(sample => /ancient Celestial|legal terminology/i.test(sample))));
+
+    assert.equal(durableProfileEvidenceAlreadyRepresented(
+        'speech',
+        'Soft, melodic speech in public, fluent in ancient Celestial and precise legal terminology.',
+        ['[m2] cadence: Soft melodic public speech; fluent in ancient Celestial with precise legal terminology.'],
+    ), true);
+    assert.equal(durableProfileEvidenceAlreadyRepresented(
+        'speech',
+        'Soft, melodic speech in public.',
+        [novelEvidence],
+    ), false);
+
+    const polite = createNpcRecord('Vera');
+    polite.speech = 'Speaks softly with measured cadence; never swears.';
+    const redundant = merge(polite, {
+        speech: polite.speech,
+        speechState: 'refine',
+        developmentScale: 'batch',
+        developmentReason: 'Over three months Vera practiced measured public delivery.',
+        evidence: { speech: ['[m2] delivery: Speaks softly with measured cadence.'] },
+    }, 'Over three months Vera practiced measured public delivery. Vera speaks softly with measured cadence.', { allowTargetedDurableSeed: true });
+    const redundantRow = profileRow(redundant, 'speech');
+    assert.equal(redundantRow.outcome, 'evidence-already-reflected');
+    assert.equal(redundantRow.evidenceAlreadyRepresented, true);
+    assert.equal(redundant.state.npcs[0].speechDevelopment.concepts.length, 0);
+
+    assert.equal(durableProfileEvidenceAlreadyRepresented(
+        'speech',
+        'Speaks softly; never swears.',
+        ['Never speaks softly; swears freely.'],
+    ), false);
 });
 
 test('Speech copied-candidate negative control still retains novel body and waits for a revised candidate', () => {
