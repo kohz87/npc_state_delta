@@ -1,5 +1,13 @@
 # NPC State Delta changes
 
+## 1.0.30 - 16 September 2026
+
+- Fix destructive message rollback when SillyTavern emits `MESSAGE_DELETED` or `MESSAGE_EDITED` before its in-memory chat lineage has finished changing. Delta now keeps the destructive event pending until the host exposes the committed narrative mutation instead of consuming the event against the stale latest lineage.
+- Derive the rollback boundary from the observed post-mutation narrative lineage before invoking the existing branch reconciler. Tail/middle deletion and edit therefore reach the established exact journal/checkpoint recovery path without relying on fixed 70/110 ms delays or callback message-index timing.
+- Preserve fail-closed recovery semantics: if the host never exposes a matching destructive lineage mutation within the bounded settlement window, keep canonical dossier state rather than rolling back against stale or ambiguous chat data. Chat switches cancel pending settlement.
+- Add runtime regression coverage for the real event order: deletion event first, unchanged host chat for 120 ms, then host truncation. The test proves no premature rollback before mutation and exact state restoration afterward; focused settlement tests cover both host event orders, edits, rapid destructive events, timeouts and chat switches.
+- Keep the 1.0.29 dossier-evolution fixes, 1.0.27 prompt arrangement, request counts, response allowances, provider routing, relationship scoring, and persisted storage/bundle/diagnostic/rollback/branch schemas unchanged.
+
 ## 1.0.29 - 16 September 2026
 
 - Close the six remaining dossier-evolution defects found after the 1.0.28 review while preserving the existing scanner/Refresh request architecture and prompt bytes.
@@ -150,7 +158,7 @@
 
 ## 1.0.12 - 14 September 2026
 
-- Run a one-time legacy branch-history compaction on existing sidecars after lineage is proven safe. Retain the current active lineage plus SillyTavern-retained swipes, and remove unreachable pre-1.0.11 sibling checkpoints, inline-card branch residue and rollback-journal chains that are no longer owned by the live head or a retained checkpoint.
+- Run a one-time legacy branch-history compaction on existing sidecars after lineage is proven safe. Retain the current active lineage plus SillyTavern-retained swipe alternatives, and remove unreachable pre-1.0.11 sibling checkpoints, inline-card branch residue and rollback-journal chains that are no longer owned by the live head or a retained checkpoint.
 - Defer compaction while a destructive lineage divergence is unresolved, then retry after reconciliation, so cleanup never races delete/edit/swipe recovery. Persist a versioned compaction marker and bounded before/after accounting so each sidecar is compacted at most once per compaction version.
 - Harden v4-to-v5 branch migration by mapping legacy checkpoint keys only when they match the active host branch or a swipe SillyTavern still retains, preventing old delete/regenerate siblings from collapsing onto the current v5 key while preserving provable swipe alternatives.
 - Raise the aggregate full-checkpoint budget from 2 MB to 8 MB and the single full-checkpoint ceiling from 750 KB to 2 MB. The separate 256-raw-message rollback-journal contract and 12 MB diagnostic target are unchanged.
