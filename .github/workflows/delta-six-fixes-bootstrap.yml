@@ -9,56 +9,42 @@ permissions:
   contents: write
 
 jobs:
-  assemble-core:
+  assemble-runtime:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: tmp/delta-six-fixes-bootstrap
           fetch-depth: 0
-      - name: Reconcile exact reviewed core blob
+      - name: Assemble exact reviewed runtime blobs
         shell: bash
         run: |
           set -euo pipefail
-          expected_prefix="64604d9"
-          candidate_prefix="97fad6c"
-          current_blob="$(git hash-object core-mechanics.js)"
-          if [[ "$current_blob" == ${expected_prefix}* ]]; then
-            echo "Exact reviewed core blob already assembled: $current_blob"
-            exit 0
+          core="$(git hash-object core-mechanics.js)"
+          appearance="$(git hash-object appearance.js)"
+          continuity="$(git hash-object continuity-core.js)"
+          social="$(git hash-object social.js)"
+          [[ "$core" == 64604d9* ]]
+          if [[ "$appearance" != 963b08c* || "$continuity" != 6aaa64a* || "$social" != 6958faf* ]]; then
+            git apply --recount --check .github/delta-six-fixes-runtime.patch
+            git apply --recount .github/delta-six-fixes-runtime.patch
           fi
-          if [[ "$current_blob" == ${candidate_prefix}* ]]; then
-            python3 - <<'PY'
-          from pathlib import Path
-          path = Path('core-mechanics.js')
-          text = path.read_text(encoding='utf-8')
-          needle = "    if (durableClaimPolarityConflict(source, accepted)) return false;\n    const claimClauses = splitDurableClaimUnits(source);"
-          replacement = "    if (durableClaimPolarityConflict(source, accepted)) return false;\n\n    const claimClauses = splitDurableClaimUnits(source);"
-          if needle not in text:
-              raise SystemExit('expected reconciliation anchor not found')
-          path.write_text(text.replace(needle, replacement, 1), encoding='utf-8')
-          PY
-          else
-            git apply --recount --check .github/delta-six-fixes-core.patch
-            git apply --recount .github/delta-six-fixes-core.patch
-            python3 - <<'PY'
-          from pathlib import Path
-          path = Path('core-mechanics.js')
-          text = path.read_text(encoding='utf-8')
-          needle = "    if (durableClaimPolarityConflict(source, accepted)) return false;\n    const claimClauses = splitDurableClaimUnits(source);"
-          replacement = "    if (durableClaimPolarityConflict(source, accepted)) return false;\n\n    const claimClauses = splitDurableClaimUnits(source);"
-          if needle not in text:
-              raise SystemExit('expected reconciliation anchor not found')
-          path.write_text(text.replace(needle, replacement, 1), encoding='utf-8')
-          PY
-          fi
-          assembled_blob="$(git hash-object core-mechanics.js)"
-          echo "Reconciled core blob: $assembled_blob"
-          [[ "$assembled_blob" == ${expected_prefix}* ]]
+          core="$(git hash-object core-mechanics.js)"
+          appearance="$(git hash-object appearance.js)"
+          continuity="$(git hash-object continuity-core.js)"
+          social="$(git hash-object social.js)"
+          echo "core=$core"
+          echo "appearance=$appearance"
+          echo "continuity=$continuity"
+          echo "social=$social"
+          [[ "$core" == 64604d9* ]]
+          [[ "$appearance" == 963b08c* ]]
+          [[ "$continuity" == 6aaa64a* ]]
+          [[ "$social" == 6958faf* ]]
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add core-mechanics.js
+          git add appearance.js continuity-core.js social.js
           if ! git diff --cached --quiet; then
-            git commit -m "chore: reconcile reviewed core mechanics blob"
+            git commit -m "chore: assemble reviewed runtime blobs"
             git push origin HEAD:tmp/delta-six-fixes-bootstrap
           fi
