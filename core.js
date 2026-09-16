@@ -1014,6 +1014,17 @@ function appendBirthdayRule(prompt, options = {}) {
     return `${String(prompt)}${birthdayPromptRule(calendar, referenceDate)}`;
 }
 
+function insertRefreshBirthdayRule(prompt, options = {}) {
+    if (!birthdayEvidenceInText(birthdayPromptSource(options))) return String(prompt);
+    const calendar = getActiveCalendarConfig();
+    const referenceDate = calendarReference(options, calendar).date;
+    const rule = birthdayPromptRule(calendar, referenceDate);
+    const source = String(prompt);
+    const anchor = 'Recent story window (EVIDENCE ONLY;';
+    const index = source.indexOf(anchor);
+    return index >= 0 ? `${source.slice(0, index)}${rule}\n${source.slice(index)}` : `${source}${rule}`;
+}
+
 export function applyStaleNpcLifecycle(state = {}, options = {}) {
     const beforeNpcs = new Map((Array.isArray(state?.npcs) ? state.npcs : [])
         .filter(npc => npc?.id)
@@ -1148,8 +1159,8 @@ export function buildDossierImportPrompt(options = {}) {
     return appendBirthdayRule(continuity.buildDossierImportPrompt(calendarPromptOptions(options)), options);
 }
 export function buildProfileRefreshPrompt(options = {}) {
-    return appendBirthdayRule(continuity.buildProfileRefreshPrompt(calendarPromptOptions(options)), options);
+    return insertRefreshBirthdayRule(continuity.buildProfileRefreshPrompt(calendarPromptOptions(options)), options);
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.26';
+export const NPC_STATE_VERSION = '1.0.27';
