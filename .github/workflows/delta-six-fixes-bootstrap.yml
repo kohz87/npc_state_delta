@@ -26,8 +26,8 @@ jobs:
             echo "Exact reviewed core blob already assembled: $current_blob"
             exit 0
           fi
-          git apply --check .github/delta-six-fixes-core.patch
-          git apply .github/delta-six-fixes-core.patch
+          git apply --recount --check .github/delta-six-fixes-core.patch
+          git apply --recount .github/delta-six-fixes-core.patch
           assembled_blob="$(git hash-object core-mechanics.js)"
           echo "Assembled core blob: $assembled_blob"
           [[ "$assembled_blob" == ${expected_prefix}* ]]
