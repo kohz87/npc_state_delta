@@ -2451,6 +2451,7 @@ function durableDevelopmentClaimRepresented(claim, target) {
     const accepted = cleanText(target, DURABLE_PROFILE_LIMITS.behaviorProfile * 6);
     if (!source || !accepted) return false;
     if (durableClaimPolarityConflict(source, accepted)) return false;
+
     const claimClauses = splitDurableClaimUnits(source);
     const acceptedClauses = splitDurableClaimUnits(accepted);
     const acceptedTokens = new Set(durableRefinementTokens(accepted));
