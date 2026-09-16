@@ -1,5 +1,11 @@
-/* NPC State Delta appearance-form model and shared current-appearance resolver. */
-import { DURABLE_PROFILE_LIMITS, normalizeName } from './core-mechanics.js';
+import {
+    DURABLE_PROFILE_LIMITS,
+    normalizeName,
+    durableSeedGrounded,
+    durableRefinementCandidateGrounded,
+    isSafeUnmarkedDurableRefinement,
+    isSafeUnmarkedDurableReplacement,
+} from './core-mechanics.js';
 
 export const APPEARANCE_FORM_LIMIT = 8;
 export const APPEARANCE_MODEL_VERSION = 1;
@@ -37,7 +43,13 @@ function stripOverallPrefix(value, overall) {
         const separator = `${boundary}+`;
         const trailing = `${boundary}*`;
         const prefix = new RegExp(`^\\s*${words.map(regexEscape).join(separator)}(?=$|${boundary})${trailing}`, 'iu');
-        if (prefix.test(current)) return appearanceText(current.replace(prefix, ''));
+        const match = prefix.exec(current);
+        if (match) {
+            const remainder = current.slice(match[0].length);
+            if (!/^\s*(?:is|are|was|were|be|been|being|not|never|no|hidden|covered|concealed|veiled|beneath|under|obscured)\b/i.test(remainder)) {
+                return appearanceText(remainder);
+            }
+        }
     }
     return current;
 }
@@ -47,6 +59,7 @@ function combineAppearance(overall, specific) {
     if (!shared) return local;
     if (!local) return shared;
     if (sameAppearance(shared, local)) return shared;
+    if (normalizeName(local).startsWith(normalizeName(shared))) return local;
     return appearanceText(`${shared}; ${local}`);
 }
 function formKey(value) { return clean(value, 120).normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim(); }
@@ -250,18 +263,18 @@ function reconcileFormAppearance(existing, update, context = '') {
     const current = appearanceText(existing);
     const incoming = appearanceText(update?.appearance);
     if (!incoming) return current;
-    if (!current) return context && !grounded(incoming, context) ? '' : incoming;
+    if (!current) return context && !durableSeedGrounded(incoming, context) ? '' : incoming;
     if (normalizeName(current) === normalizeName(incoming)) return current;
     const state = formState(update?.state);
     if (state === 'change') {
         const reason = clean(update?.reason, 500);
-        if (!reason || (context && (!grounded(reason, context) || !grounded(incoming, context)))) return current;
+        if (!reason || (context && (!durableSeedGrounded(reason, context) || !durableSeedGrounded(incoming, context)))) return current;
         return incoming;
     }
     const compatible = state === 'refine'
-        ? safeRefinement(current, incoming)
-        : safeUnmarkedReplacement(current, incoming);
-    if (!compatible || (context && !grounded(incoming, context))) return current;
+        ? isSafeUnmarkedDurableRefinement(current, incoming)
+        : isSafeUnmarkedDurableReplacement(current, incoming);
+    if (!compatible || (context && !durableRefinementCandidateGrounded('appearance', current, incoming, context))) return current;
     return mergeRefinement(current, incoming, DURABLE_PROFILE_LIMITS?.appearance || 800);
 }
 
@@ -273,17 +286,17 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
     if (overallProvided) {
         const incoming = appearanceText(rawUpdate.overallAppearance ?? rawUpdate.overall_appearance);
         if (!next.overallAppearance) {
-            if (!context || grounded(incoming, context)) next.overallAppearance = incoming;
+            if (!context || durableSeedGrounded(incoming, context)) next.overallAppearance = incoming;
         } else if (incoming && normalizeName(incoming) !== normalizeName(next.overallAppearance)) {
             const state = formState(rawUpdate.overallAppearanceState ?? rawUpdate.overall_appearance_state);
             if (state === 'change') {
                 const reason = clean(rawUpdate.overallAppearanceReason ?? rawUpdate.overall_appearance_reason, 500);
-                if (reason && (!context || (grounded(reason, context) && grounded(incoming, context)))) next.overallAppearance = incoming;
+                if (reason && (!context || (durableSeedGrounded(reason, context) && durableSeedGrounded(incoming, context)))) next.overallAppearance = incoming;
             } else {
                 const compatible = state === 'refine'
-                    ? safeRefinement(next.overallAppearance, incoming)
-                    : safeUnmarkedReplacement(next.overallAppearance, incoming);
-                if (compatible && (!context || grounded(incoming, context))) {
+                    ? isSafeUnmarkedDurableRefinement(next.overallAppearance, incoming)
+                    : isSafeUnmarkedDurableReplacement(next.overallAppearance, incoming);
+                if (compatible && (!context || durableRefinementCandidateGrounded('appearance', next.overallAppearance, incoming, context))) {
                     next.overallAppearance = mergeRefinement(next.overallAppearance, incoming, DURABLE_PROFILE_LIMITS?.appearance || 800);
                 }
             }
@@ -315,8 +328,8 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
         const explicitChange = formState(rawUpdate.appearanceState ?? rawUpdate.appearance_state) === 'change';
         next.unclassifiedAppearance = currentAppearanceProvided
             && incomingAppearance
-            && (!context || grounded(incomingAppearance, context))
-            && (!explicitChange || (reason && (!context || grounded(reason, context))))
+            && (!context || durableSeedGrounded(incomingAppearance, context))
+            && (!explicitChange || (reason && (!context || durableSeedGrounded(reason, context))))
             ? incomingAppearance
             : '';
         next.appearance = '';
