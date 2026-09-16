@@ -1,6 +1,15 @@
 # NPC State Delta changes
 
 
+## 1.0.23 - 16 September 2026
+
+- Replace sentence-pair-only time-skip grounding with a bounded development episode. Natural elapsed spans may now carry a contiguous montage across later sentences/paragraphs, while a later explicit elapsed anchor, present-scene transition, segment cap or character cap ends the episode. Bare time passage remains non-destructive.
+- Make shared elapsed chronology NPC-aware. Each evaluated NPC must ground its own development from name/alias ownership, bounded source-tagged evidence and at most one conservative pronoun continuation; another NPC's evidence cannot authorize the target. Targeted Refresh remains one-NPC and normal multi-NPC scans may independently evolve several NPCs inside the same episode.
+- Complete ordinary gradual Personality/Speech development with an aggregate field-level fallback. Three independent provenance-bearing observations across the existing minimum span may collectively ground the changed candidate even when the provider uses different concept labels; concept buckets remain separate, replayed sources do not count twice and unrelated observations remain blocked.
+- Extend deterministic inferred time-compressed development to the existing Mannerism and Behavioral Profile gates as well as Personality/Speech, without moving Appearance, relationships or current-state fields onto that lifecycle.
+- Add always-on bounded operation diagnostics outside canonical dossier/story state. Per-NPC dossier Show/Hide is presentation-only; Data & Maintenance Diagnostics can display, clear and export a versioned compact JSON bundle containing bounded profile/birthday gate decisions while excluding full story text, prompts, credentials and provider payloads.
+- Add birthday/aging decision receipts for deterministic advance/hold, including same-day idempotence and the first-establishment guard, without changing v1.0.22 calendar mechanics. Add generalized multi-NPC, cross-NPC isolation, episode-boundary, aggregate-gradual, Mannerism/Behavior, diagnostic privacy/export and birthday-diagnostic regressions. No extra model request, prompt change, storage-schema bump, native-bundle change or branch-lineage change is introduced.
+
 ## 1.0.22 - 15 September 2026
 
 - Fix deterministic birthday rollover for an existing dossier when the grounded calendar reaches its stored birthday. Full-year calendar arithmetic now advances chronological age and a compact numeric apparent-age estimate by the same confirmed delta, while manual age/apparent-age locks, provider-explicit chronological corrections, terminal death and provider-explicit apparent-age evolution remain authoritative.

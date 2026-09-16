@@ -23,6 +23,18 @@ function downloadBytes(data, name) {
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 0);
 }
+function downloadJson(data, name) {
+    const text = JSON.stringify(data, null, 2);
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+}
 function importDialogHtml(summary, prepared) {
     return `<section class="delta-tools-dialog" role="dialog" aria-modal="true" aria-label="Import NPC State Delta data">
       <header><div><span class="delta-tools-kicker">NATIVE DELTA IMPORT</span><h2>Review before applying</h2></div><button type="button" class="delta-tools-close" data-delta-tools-close aria-label="Close">×</button></header>
@@ -159,6 +171,8 @@ function diagnosticsHtml(npc) {
     const scan = status.lastScan || api()?.scanMetrics?.() || null;
     const branchHistory = status.branchHistory || { available: false };
     const branchReconciliations = Array.isArray(status.branchReconciliations) ? status.branchReconciliations : [];
+    const diagnosticSummary = api()?.diagnosticsSummary?.() || { operationCount: 0, profileRows: 0, birthdayRows: 0, npcCount: 0, limit: 0 };
+    const diagnosticRecords = api()?.diagnosticsRecords?.({ limit: 20 }) || [];
     const rel = npc ? relationshipDiagnosticRows(npc) : [];
     const actual = {
         totalProviderRequests: Number(routing.total || 0),
@@ -194,13 +208,30 @@ function diagnosticsHtml(npc) {
         <section><h3>Persistence</h3><pre>${escapeHtml(JSON.stringify({ currentChat: api()?.persistenceStatus?.() || { available: false }, recentStage8Failures: recentPersistenceFailures }, null, 2))}</pre><small>Stage 8 waits for canonical flush and distinguishes local mutation from durable save. Pending and in-flight write flags describe this chat only, not a global database counter.</small></section>
         <section><h3>Branch reconciliation</h3><pre>${escapeHtml(JSON.stringify({ history: branchHistory, recent: branchReconciliations }, null, 2))}</pre><small>Delete/edit recovery is exact-boundary only: journal or exact-parent checkpoint, never an older ancestor. Deep edits with a retained assistant suffix fail closed and keep canonical dossiers. Exact SillyTavern swipe siblings restore directly; unseen siblings rebuild from their exact parent/root. Reconciliation records contain no story text.</small></section>
         ${npc ? `<section><h3>Relationship fractions / gate audit · ${escapeHtml(npc.name)}</h3><pre>${escapeHtml(JSON.stringify(rel, null, 2))}</pre></section>` : ''}
+        <section><h3>Always-on NPC decision diagnostics</h3><pre>${escapeHtml(JSON.stringify({ summary: diagnosticSummary, recentOperations: diagnosticRecords }, null, 2))}</pre><small>These bounded records are collected regardless of per-NPC display visibility. Export includes all retained NPC traces but excludes full story text, prompts, credentials, and provider payloads.</small></section>
         <section><h3>Recent Stage 8 events</h3><pre>${escapeHtml(JSON.stringify(toolEvents.slice(-12).reverse(), null, 2))}</pre><small>Bounded records exclude credentials, full prompts, and provider responses.</small></section>
-      </div><footer><button type="button" data-delta-tools-close data-delta-tools-autofocus>Close</button></footer>
+      </div><footer><button type="button" data-export-diagnostics>Export diagnostics</button><button type="button" data-clear-diagnostics>Clear diagnostic history</button><button type="button" data-delta-tools-close data-delta-tools-autofocus>Close</button></footer>
     </section>`;
 }
 export function openDiagnostics() {
     const npc = npcById(selectedNpcId());
-    mountOverlay(diagnosticsHtml(npc), makeSession('diagnostics', { npcId: npc?.id || '' }));
+    const session = makeSession('diagnostics', { npcId: npc?.id || '' });
+    const overlay = mountOverlay(diagnosticsHtml(npc), session);
+    overlay.addEventListener('click', event => {
+        if (event.target.closest?.('[data-export-diagnostics]')) {
+            const bundle = api()?.diagnosticBundle?.();
+            if (!bundle) return toast('warning', 'NPC State Delta: diagnostic bundle is unavailable for this chat.');
+            downloadJson(bundle, `npc-state-delta-diagnostics-${Date.now()}.json`);
+            recordToolEvent('diagnostic-export', { chatKey: activeChatKey(), action: 'export', outcome: 'downloaded' });
+            toast('success', 'NPC State Delta: compact diagnostic bundle exported.');
+        }
+        if (event.target.closest?.('[data-clear-diagnostics]')) {
+            const count = Number(api()?.clearDiagnostics?.() || 0);
+            recordToolEvent('diagnostic-clear', { chatKey: activeChatKey(), action: 'clear', outcome: 'cleared', detail: `${count} operations` });
+            toast('success', `NPC State Delta: cleared ${count} retained diagnostic operations.`);
+            closeOverlay({ reason: 'diagnostics-cleared', session });
+        }
+    });
 }
 
 function installStyles() {

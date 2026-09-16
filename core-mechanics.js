@@ -2259,6 +2259,34 @@ export function durableProfileEvolutionCandidateGrounded(field, existing, incomi
     return supported >= required;
 }
 
+// Aggregate gradual readiness deliberately does not merge concept buckets. The proposed full
+// candidate is the semantic bridge: at least three independent evidence groups must each support
+// some newly proposed characterization, while their union must ground enough of the changed
+// candidate to pass the ordinary candidate-grounding threshold.
+export function durableProfileAggregateCandidateGrounded(field, existing, incoming, evidenceGroups = []) {
+    const key = field === 'personality' ? 'personality' : field === 'speech' ? 'speech' : '';
+    if (!key) return false;
+    const maxChars = DURABLE_PROFILE_LIMITS[key];
+    const oldText = compactDurableText(existing, maxChars, key === 'speech' ? 5 : 6);
+    const newText = compactDurableText(incoming, maxChars, key === 'speech' ? 5 : 6);
+    if (!oldText || !newText || normalizeName(oldText) === normalizeName(newText)) return false;
+    if (containsEvolutionLanguage(newText)) return false;
+    if (key === 'personality' && identityMoralityConflict(oldText, newText)) return false;
+
+    const oldTokens = new Set(durableRefinementTokens(oldText));
+    const changedTokens = [...new Set(durableRefinementTokens(newText))].filter(token => !oldTokens.has(token));
+    if (!changedTokens.length) return false;
+    const groups = (Array.isArray(evidenceGroups) ? evidenceGroups : [])
+        .map(value => cleanText(value, DURABLE_PROFILE_LIMITS.evidence))
+        .filter(Boolean);
+    if (groups.length < 3) return false;
+
+    const changedSet = new Set(changedTokens);
+    const supportingGroups = groups.filter(value => durableRefinementTokens(value).some(token => changedSet.has(token))).length;
+    if (supportingGroups < 3) return false;
+    return durableProfileEvolutionCandidateGrounded(key, oldText, newText, groups);
+}
+
 function newProfileEvidence(prior = [], incoming = []) {
     const before = cleanList(prior, PROFILE_EVIDENCE_LIMIT * 2, DURABLE_PROFILE_LIMITS.evidence);
     return cleanList(incoming, PROFILE_EVIDENCE_LIMIT * 2, DURABLE_PROFILE_LIMITS.evidence).filter(item =>
@@ -3647,37 +3675,169 @@ function explicitDevelopmentContextGrounded(reason, context) {
 
 const BATCH_TEMPORAL_CONTINUATION_RE = /\b(?:during that time|during this time|over that period|over this period|throughout that time|throughout this period|by then|over the interval|during the interval)\b/;
 const BATCH_WEAK_TRANSITION_CUE_RE = /\b(?:chang(?:e|ed|es|ing)|adopt(?:ed|ing)|replac(?:ed|ing)|discard(?:ed|ing)|transition(?:ed|ing)|shift(?:ed|ing))\b/;
+const BATCH_EPISODE_MAX_SEGMENTS = 12;
+const BATCH_EPISODE_MAX_CHARS = 5200;
+const BATCH_EPISODE_END_RE = /\b(?:back in the present|back to the present|returned to the present|returning to the present|the present scene|later that evening|later that night|the next morning|the following morning)\b/;
+const BATCH_EPISODE_NEW_ANCHOR_RE = /^(?:m\d+\s+)?(?:another\s+)?(?:(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|\d+)(?:\s+(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|\d+))?\s+)?(?:day|week|month|year|decade|season)s?\s+(?:passed|later)\b/;
 
-function batchDevelopmentContextGrounded(reason, context) {
-    const source = String(context || '').trim();
-    if (!source) return true;
-    const segments = developmentContextSegments(source);
-    for (let i = 0; i < segments.length; i += 1) {
-        if (!hasNarratedTimeSkip(segments[i])) continue;
-        // Development may be summarized in the time-skip sentence itself or the immediately
-        // following sentence ("Three years passed. During that time, she..."). Do not let an
-        // unrelated present-day sentence elsewhere in the transcript authorize the batch jump.
-        const anchor = segments[i];
-        const next = segments[i + 1] || '';
-        const anchorText = normalizeName(anchor);
-        const anchorHasDevelopmentCue = BATCH_DEVELOPMENT_CUE_RE.test(anchorText)
-            && (!BATCH_WEAK_TRANSITION_CUE_RE.test(anchorText) || contextWindowGroundsReason(reason, anchor));
+function startsNewDevelopmentEpisode(segment) {
+    return BATCH_EPISODE_NEW_ANCHOR_RE.test(normalizeName(segment));
+}
 
-        const nextText = normalizeName(next);
-        const continuationHasDevelopmentCue = BATCH_TEMPORAL_CONTINUATION_RE.test(nextText)
-            && BATCH_DEVELOPMENT_CUE_RE.test(nextText)
-            && (!BATCH_WEAK_TRANSITION_CUE_RE.test(nextText) || contextWindowGroundsReason(reason, next));
+function developmentBindingLabels(binding = null) {
+    const npc = binding?.npc && typeof binding.npc === 'object' ? binding.npc : null;
+    if (!npc) return [];
+    return [npc.name, ...(Array.isArray(npc.aliases) ? npc.aliases : [])]
+        .map(normalizeName).filter(Boolean)
+        .filter((value, index, all) => all.indexOf(value) === index);
+}
 
-        const window = (anchorHasDevelopmentCue || continuationHasDevelopmentCue)
-            ? [anchor, next].filter(Boolean).join(' ')
-            : '';
-        if (!BATCH_DEVELOPMENT_CUE_RE.test(normalizeName(window))) continue;
-        if (contextWindowGroundsReason(reason, window, true)) return true;
-    }
+function normalizedPhrasePresent(text, phrase) {
+    const source = ` ${normalizeName(text)} `;
+    const needle = ` ${normalizeName(phrase)} `;
+    return Boolean(needle.trim()) && source.includes(needle);
+}
+
+function developmentEvidenceOwnsScope(evidence, scoped) {
+    const evidenceTokens = [...new Set(durableRefinementTokens(evidence))];
+    const scopeTokens = new Set(durableRefinementTokens(scoped));
+    if (!evidenceTokens.length || !scopeTokens.size) return false;
+    const overlap = evidenceTokens.filter(token => scopeTokens.has(token)).length;
+    const required = evidenceTokens.length <= 2 ? 1 : 2;
+    return overlap >= required && contextWindowGroundsReason(evidence, scoped, false);
+}
+
+function developmentEpisodeNpcBound(window, binding = null) {
+    if (!binding) return true;
+    const labels = developmentBindingLabels(binding);
+    const evidence = Array.isArray(binding?.evidence) ? binding.evidence : [];
+    const targetMentioned = labels.some(label => normalizedPhrasePresent(window, label));
+    const scoped = targetMentioned ? scopedEpisodeText(window, binding) : window;
+    const groundedEvidence = evidence
+        .map(value => cleanText(String(value || '').replace(/^\[m\d+\]\s*/i, '').replace(/^[^:]{1,52}:\s*/, ''), DURABLE_PROFILE_LIMITS.evidence))
+        .filter(Boolean)
+        .some(value => developmentEvidenceOwnsScope(value, scoped));
+    if (targetMentioned) return evidence.length ? groundedEvidence : true;
+    if (binding?.targeted === true) return evidence.length ? groundedEvidence : true;
     return false;
 }
 
-export function developmentScaleReady(scale, reason, context) {
+function boundedDevelopmentEpisode(segments, anchorIndex) {
+    const selected = [];
+    let chars = 0;
+    let sawDevelopment = false;
+    for (let i = anchorIndex; i < segments.length && selected.length < BATCH_EPISODE_MAX_SEGMENTS; i += 1) {
+        const segment = segments[i];
+        if (i > anchorIndex && sawDevelopment && startsNewDevelopmentEpisode(segment)) break;
+        const normalized = normalizeName(segment);
+        if (i > anchorIndex && sawDevelopment && BATCH_EPISODE_END_RE.test(normalized)
+            && !BATCH_TEMPORAL_CONTINUATION_RE.test(normalized)) break;
+        if (chars + segment.length > BATCH_EPISODE_MAX_CHARS) break;
+        selected.push(segment);
+        chars += segment.length;
+        if (BATCH_DEVELOPMENT_CUE_RE.test(normalized)) sawDevelopment = true;
+    }
+    return selected.join(' ');
+}
+
+export function developmentEpisodeDiagnostic(reason, context, binding = null) {
+    const source = String(context || '').trim();
+    const diagnostic = { detected: false, grounded: false, npcBound: binding ? false : null, anchorIndex: null, segmentCount: 0 };
+    if (!source) return { ...diagnostic, grounded: true, npcBound: binding ? Boolean(binding?.targeted) : null };
+    const segments = developmentContextSegments(source);
+    for (let i = 0; i < segments.length; i += 1) {
+        if (!hasNarratedTimeSkip(segments[i])) continue;
+        diagnostic.detected = true;
+        const window = boundedDevelopmentEpisode(segments, i);
+        const segmentCount = developmentContextSegments(window).length;
+        const hasDevelopment = developmentContextSegments(window).some(segment => {
+            const normalized = normalizeName(segment);
+            if (!BATCH_DEVELOPMENT_CUE_RE.test(normalized)) return false;
+            if (BATCH_WEAK_TRANSITION_CUE_RE.test(normalized) && !contextWindowGroundsReason(reason, segment)) return false;
+            return true;
+        });
+        const npcBound = developmentEpisodeNpcBound(window, binding);
+        const reasonGrounded = hasDevelopment && npcBound && contextWindowGroundsReason(reason, window, true);
+        if (reasonGrounded && npcBound) {
+            return { detected: true, grounded: true, npcBound: binding ? true : null, anchorIndex: i, segmentCount };
+        }
+        if (reasonGrounded) diagnostic.grounded = true;
+        if (npcBound && binding) diagnostic.npcBound = true;
+        if (diagnostic.anchorIndex === null) {
+            diagnostic.anchorIndex = i;
+            diagnostic.segmentCount = segmentCount;
+        }
+    }
+    return diagnostic;
+}
+
+function episodeContainsLabel(segment, labels = []) {
+    return labels.some(label => normalizedPhrasePresent(segment, label));
+}
+
+function scopedEpisodeText(window, binding = null) {
+    if (!binding) return cleanText(window, BATCH_EPISODE_MAX_CHARS);
+    const targetLabels = developmentBindingLabels(binding);
+    const otherLabels = (Array.isArray(binding?.otherLabels) ? binding.otherLabels : []).map(normalizeName).filter(Boolean);
+    const segments = developmentContextSegments(window);
+    const targetMentioned = segments.some(segment => episodeContainsLabel(segment, targetLabels));
+    const otherMentioned = segments.some(segment => episodeContainsLabel(segment, otherLabels));
+    if (!targetMentioned && binding?.targeted === true && !otherMentioned) return cleanText(window, BATCH_EPISODE_MAX_CHARS);
+
+    const selected = [];
+    let carryPronoun = false;
+    for (const segment of segments) {
+        const targetHere = episodeContainsLabel(segment, targetLabels);
+        const otherHere = episodeContainsLabel(segment, otherLabels);
+        if (otherHere && !targetHere) {
+            carryPronoun = false;
+            continue;
+        }
+        if (targetHere) {
+            selected.push(segment);
+            carryPronoun = true;
+            continue;
+        }
+        const normalized = normalizeName(segment).replace(/^m\d+\s+/, '');
+        const pronounContinuation = /^(?:(?:when\s+)?(?:she|he|they)|her|his|their|by then|during that time|during this time|throughout that time|throughout this period)\b/.test(normalized)
+            || /^by\b.{0,72}\b(?:she|he|they)\b/.test(normalized);
+        if (carryPronoun && pronounContinuation) {
+            selected.push(segment);
+            carryPronoun = false;
+        }
+    }
+    return cleanText(selected.join(' '), BATCH_EPISODE_MAX_CHARS);
+}
+
+export function developmentEpisodeEvidence(reason, context, binding = null) {
+    const source = String(context || '').trim();
+    if (!source) return '';
+    const segments = developmentContextSegments(source);
+    for (let i = 0; i < segments.length; i += 1) {
+        if (!hasNarratedTimeSkip(segments[i])) continue;
+        const window = boundedDevelopmentEpisode(segments, i);
+        const hasDevelopment = developmentContextSegments(window).some(segment => {
+            const normalized = normalizeName(segment);
+            if (!BATCH_DEVELOPMENT_CUE_RE.test(normalized)) return false;
+            if (BATCH_WEAK_TRANSITION_CUE_RE.test(normalized) && !contextWindowGroundsReason(reason, segment)) return false;
+            return true;
+        });
+        if (!hasDevelopment || !developmentEpisodeNpcBound(window, binding)) continue;
+        const scoped = scopedEpisodeText(window, binding);
+        if (!scoped || !contextWindowGroundsReason(reason, window, true)) continue;
+        return scoped;
+    }
+    return '';
+}
+
+function batchDevelopmentContextGrounded(reason, context, binding = null) {
+    const source = String(context || '').trim();
+    if (!source) return true;
+    const diagnostic = developmentEpisodeDiagnostic(reason, source, binding);
+    return diagnostic.grounded && (!binding || diagnostic.npcBound === true);
+}
+
+export function developmentScaleReady(scale, reason, context, binding = null) {
     const mode = ['gradual', 'explicit', 'batch'].includes(String(scale || '')) ? String(scale) : 'gradual';
     if (mode === 'gradual') return false;
     if (!developmentReasonGrounded(reason, context, { strong: mode === 'batch' })) return false;
@@ -3685,7 +3845,7 @@ export function developmentScaleReady(scale, reason, context) {
     if (mode === 'explicit' && source && !explicitDevelopmentContextGrounded(reason, source)) return false;
     if (mode === 'batch') {
         if (isBareTimePassageDevelopmentReason(reason)) return false;
-        if (source && (!hasNarratedTimeSkip(source) || !batchDevelopmentContextGrounded(reason, source))) return false;
+        if (source && (!hasNarratedTimeSkip(source) || !batchDevelopmentContextGrounded(reason, source, binding))) return false;
     }
     return true;
 }
@@ -3702,8 +3862,17 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
 
     const evolutionReady = field => {
         const scale = incoming.developmentScale || 'gradual';
-        if (scale === 'gradual') return gradualProfileEvolutionReady(field, beforeEvidence, incomingEvidence);
-        return developmentScaleReady(scale, incoming.developmentReason, options.developmentContext);
+        const binding = {
+            npc,
+            evidence: incomingEvidence[field] || [],
+            targeted: options.targeted === true,
+        };
+        if (scale === 'gradual') {
+            const hasDevelopmentContext = Boolean(String(options.developmentContext || '').trim());
+            return gradualProfileEvolutionReady(field, beforeEvidence, incomingEvidence)
+                || (hasDevelopmentContext && developmentScaleReady('batch', incoming.developmentReason, options.developmentContext, binding));
+        }
+        return developmentScaleReady(scale, incoming.developmentReason, options.developmentContext, binding);
     };
 
     const applyText = (field, stateField, reasonField, refineState, evolveState, maxChars) => {
@@ -3767,8 +3936,7 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
             if (JSON.stringify(replacement) !== JSON.stringify(current)) { npc.mannerisms = replacement; changed = true; }
             evidence.mannerisms = [];
         } else if (incoming.mannerismState === 'refine') {
-            const allowNewPattern = gradualProfileEvolutionReady('mannerisms', beforeEvidence, incomingEvidence)
-                || developmentScaleReady(incoming.developmentScale, incoming.developmentReason, options.developmentContext);
+            const allowNewPattern = evolutionReady('mannerisms');
             const safe = filterSafeMannerismRefinements(current, incoming.mannerisms, allowNewPattern, options.developmentContext);
             const refined = safe.length ? normalizeMannerisms(safe) : current;
             if (JSON.stringify(refined) !== JSON.stringify(current)) { npc.mannerisms = refined; changed = true; }
@@ -4102,7 +4270,10 @@ export function mergeScanResult(state, scanResult, options = {}) {
     // Durable-profile decisions are independent of ordinary NPC delta admission. This lets
     // Personality/Speech/Appearance/Mannerisms accumulate evidence and refine even when the
     // scanner had no live-state delta worth returning for that NPC.
-    report.profileUpdateStats = applyDurableProfileUpdates(next, scanResult, excludeNames, report, { developmentContext: options.developmentContext || '' });
+    report.profileUpdateStats = applyDurableProfileUpdates(next, scanResult, excludeNames, report, {
+        developmentContext: options.developmentContext || '',
+        targeted: options.allowTargetedDurableSeed === true || options.developmentSingleTarget === true,
+    });
 
     // Social edges are independent of NPC delta admission. This lets an explicit relationship
     // reveal update a stored dossier even when the scanner returned no ordinary NPC object.
