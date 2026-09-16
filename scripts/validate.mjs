@@ -64,6 +64,8 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 const facade = fs.readFileSync(path.join(root, 'core.js'), 'utf8');
 const branch = fs.readFileSync(path.join(root, 'branch.js'), 'utf8');
 const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
+const changelog = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
+const development = fs.readFileSync(path.join(root, 'DEVELOPMENT.md'), 'utf8');
 const bootstrap = fs.readFileSync(path.join(root, 'bootstrap.js'), 'utf8');
 const runtime = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
 const scannerRouting = fs.readFileSync(path.join(root, 'scanner-routing.js'), 'utf8');
@@ -73,12 +75,17 @@ requireCheck(manifest.js === 'bootstrap.js' && manifest.css === 'style.css', 'ma
 requireCheck(runtimeConfig.entrypoint === manifest.js, 'active runtime inventory/manifest entrypoint mismatch');
 requireCheck(runtimeConfig.applicationVersion === manifest.version, 'active runtime inventory/manifest version mismatch');
 requireCheck(facade.includes(`NPC_STATE_VERSION = '${manifest.version}'`), 'core facade/manifest version mismatch');
+requireCheck(bootstrap.startsWith(`/* NPC State Delta v${manifest.version} bootstrap. */`), 'bootstrap/manifest version mismatch');
 requireCheck(facade.includes("export * from './core-mechanics.js'"), 'core facade must expose canonical core-mechanics owner');
 requireCheck(!facade.includes('SOURCE_ENGINE_VERSION') && !facade.includes('core-v0218'), 'core facade still exposes source-version compatibility identity');
 requireCheck(branch.includes("from './branch-core.js'"), 'branch owner must use canonical branch-core module');
 requireCheck(!branch.includes("from './branch-v") && !branch.includes("export * from './branch-v"), 'branch owner still references version-labelled branch implementation');
 requireCheck(pkg.version === manifest.version, 'package/manifest version mismatch');
 requireCheck(readme.startsWith(`# NPC State Delta v${manifest.version}`), 'README/manifest version mismatch');
+const changelogVersion = changelog.match(/^##\s+(\d+\.\d+\.\d+)\b/m)?.[1] || '';
+requireCheck(changelogVersion === manifest.version, 'CHANGELOG current release/manifest version mismatch');
+const currentRelease = development.match(/## Current release candidate([\s\S]*?)(?=\n## )/)?.[1] || '';
+requireCheck(currentRelease.includes(`Delta ${manifest.version}`), 'DEVELOPMENT current release/manifest version mismatch');
 requireCheck(!fs.existsSync(path.join(root, 'enhancements.js')), 'superseded enhancements.js remains');
 requireCheck(!fs.existsSync(path.join(root, 'core-v0218.js')), 'superseded version-labelled core path remains');
 requireCheck(!fs.existsSync(path.join(root, 'branch-v0218.js')), 'superseded version-labelled branch path remains');

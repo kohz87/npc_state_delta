@@ -619,7 +619,7 @@ function recordSecondaryProfileDiagnostics(report, beforeNpc, afterNpc, rawUpdat
         const evidenceReason = mechanics.durableProfileEvidenceReason(field, beforeNpc?.[field] || [], normalized?.[field] || [], rawEvidence);
         const effectiveReason = developmentReason || fieldReason || evidenceReason;
         const effectiveReasonSource = developmentReason ? 'provider' : (fieldReason ? 'field' : (evidenceReason ? 'evidence' : 'none'));
-        const candidateChanged = mechanics.normalizeName(previousValue) !== mechanics.normalizeName(candidateValue);
+        const candidateChanged = !mechanics.durableProfileCollectionEquivalent(field, beforeNpc?.[field] || [], normalized?.[field] || []);
         const candidateSpecificGrounding = candidateChanged
             && mechanics.durableProfileCollectionCandidateGrounded(field, beforeNpc?.[field] || [], normalized?.[field] || [], rawEvidence);
         const episode = mechanics.developmentEpisodeDiagnostic(effectiveReason, options.developmentContext, binding);
@@ -629,12 +629,12 @@ function recordSecondaryProfileDiagnostics(report, beforeNpc, afterNpc, rawUpdat
             && Boolean(effectiveReason)
             && Boolean(String(options.developmentContext || '').trim())
             && mechanics.developmentScaleReady('batch', effectiveReason, options.developmentContext, binding);
-        const changed = mechanics.normalizeName(previousValue) !== mechanics.normalizeName(currentValue);
+        const changed = !mechanics.durableProfileCollectionEquivalent(field, beforeNpc?.[field] || [], afterNpc?.[field] || []);
         const candidateAlreadyRepresented = Boolean(candidateValue)
-            && mechanics.normalizeName(previousValue) === mechanics.normalizeName(candidateValue);
+            && mechanics.durableProfileCollectionEquivalent(field, beforeNpc?.[field] || [], normalized?.[field] || []);
         const evidenceAlreadyRepresented = mechanics.durableProfileEvidenceAlreadyRepresented(
             field,
-            beforeNpc?.[field] || [],
+            afterNpc?.[field] || [],
             rawEvidence,
         );
         const outcome = locked ? 'locked'
@@ -671,7 +671,7 @@ function recordSecondaryProfileDiagnostics(report, beforeNpc, afterNpc, rawUpdat
             candidateChanged,
             candidateAlreadyRepresented,
             evidenceAlreadyRepresented,
-            evidenceResolved: candidateAlreadyRepresented ? evidenceAlreadyRepresented : changed,
+            evidenceResolved: rawEvidence.length ? evidenceAlreadyRepresented : false,
             candidateGrounded: candidateChanged ? candidateSpecificGrounding : null,
             reasonGrounded: effectiveReason ? episode.grounded : null,
             episode,
@@ -1163,4 +1163,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.27';
+export const NPC_STATE_VERSION = '1.0.28';

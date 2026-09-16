@@ -1,5 +1,16 @@
 # NPC State Delta changes
 
+## 1.0.28 - 16 September 2026
+
+- Harden durable `refine` so preserving established wording no longer authorizes unsupported new Personality, Speech, Appearance, or Behavioral Profile meaning. Newly introduced claims must be grounded in supplied story/evidence; directly supported clarification still applies immediately without forcing gradual-development thresholds, and morality/agency protections remain authoritative.
+- Reconcile accepted flat current Appearance output into the canonical selected presentation before display resolution, preventing an unchanged named form from restoring stale clothing/anatomy. Preserve named-form isolation, unnamed-current handling, Shared traits, locks, and simultaneous form-selection safety.
+- Deduplicate repeated Shared appearance clauses across ordinary punctuation/whitespace boundaries with exact semantic phrase matching rather than loose keyword overlap, preserving negation and genuinely distinct form detail across dossier, portrait, scanner-context, and roleplay projections.
+- Consolidate fully proven collective Important Bonds into their resolved named counterparts while carrying useful group dynamics onto those graph edges. Partial resolution keeps the remaining collective entry, unrelated unresolved bonds remain intact, and explicit scanner daughter/mother direction repair stays authoritative.
+- Make Mannerism and Behavioral Profile collection comparison order-insensitive and resolve evidence only when the accepted final collection represents the claim. Pure reorder cannot consume novel evidence, and partial refinement retains unrelated pending claims.
+- Require evidence-body coverage rather than matching concept labels alone, including polarity checks. Add focused production-function regressions for all six reviewed defects plus grounded-success controls, Speech-ledger retention, Stage 4 appearance grounding, social direction correction, partial collective resolution, and idempotence.
+- Add an application-version synchronization contract and validation checks for manifest/package/runtime/core/bootstrap plus current README/CHANGELOG/DEVELOPMENT markers. Historical reviews, provenance, migration fixtures, and old-version regression labels remain immutable evidence. Persisted storage, bundle, diagnostics, rollback, and branch schema versions remain unchanged.
+- Preserve the 1.0.27 scanner prompt arrangement and request architecture byte-for-byte: scanner/full-window/Refresh/backfill/import/focused-relationship/retry hashes, request counts, route options, response allowances, and roleplay injection remain unchanged.
+
 ## 1.0.27 - 16 September 2026
 
 - Reorder targeted Refresh prompts for provider-neutral automatic prefix caching: stable rules, output schema, Stage 4/birthday instructions and the shared tagged story window now precede target-specific id/name and current dossier authority. The exact target remains explicit after the evidence window and only that NPC may be reconciled.
