@@ -3,7 +3,7 @@
  * deliberately allowlists fields so prompts, full narration, credentials and provider payloads
  * cannot leak into the diagnostic bundle by accident.
  */
-export const DIAGNOSTIC_BUNDLE_VERSION = 2;
+export const DIAGNOSTIC_BUNDLE_VERSION = 3;
 export const DEFAULT_DIAGNOSTIC_OPERATION_LIMIT = 40;
 
 function clean(value, max = 320) {
@@ -78,6 +78,7 @@ export function sanitizeProfileDiagnostic(raw = {}) {
         locked: Boolean(raw.locked),
         candidateChanged: raw.candidateChanged === undefined ? null : Boolean(raw.candidateChanged),
         candidateAlreadyRepresented: Boolean(raw.candidateAlreadyRepresented),
+        evidenceAlreadyRepresented: raw.evidenceAlreadyRepresented === undefined ? null : Boolean(raw.evidenceAlreadyRepresented),
         evidenceResolved: Boolean(raw.evidenceResolved),
         candidateGrounded: raw.candidateGrounded === undefined ? null : Boolean(raw.candidateGrounded),
         reasonGrounded: raw.reasonGrounded === undefined ? null : Boolean(raw.reasonGrounded),

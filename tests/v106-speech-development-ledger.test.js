@@ -381,7 +381,7 @@ test('v1.0.19 one Refresh can count distinct tagged messages for gradual Persona
     assert.equal(diagnostic?.ready, true);
 });
 
-test('v1.0.19 a ready Speech ledger reports waiting-for-candidate when Refresh copies the stale summary', () => {
+test('v1.0.25 a ready Speech ledger reports waiting-for-revised-candidate when Refresh copies the stale summary', () => {
     const npc = createNpcRecord('Ryu');
     npc.speech = 'Developing verbal speech, carefully testing words with measured syllables; communicates non-verbally through territorial hisses, wails, and affectionate gestures.';
     const result = mergeScanResult(
@@ -412,7 +412,7 @@ test('v1.0.19 a ready Speech ledger reports waiting-for-candidate when Refresh c
     assert.equal(result.state.npcs[0].speech, npc.speech);
     assert.equal(result.state.npcs[0].speechDevelopment.concepts[0].observationCount, 3);
     const diagnostic = result.report.profileDevelopment.find(item => item.field === 'speech');
-    assert.equal(diagnostic?.outcome, 'waiting-for-candidate');
+    assert.equal(diagnostic?.outcome, 'waiting-for-revised-candidate');
     assert.equal(diagnostic?.ready, true);
 });
 

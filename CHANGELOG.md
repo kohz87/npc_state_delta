@@ -1,5 +1,14 @@
 # NPC State Delta changes
 
+## 1.0.25 - 16 September 2026
+
+- Fix the copied-candidate false resolution exposed by live Sora diagnostics. An unchanged Personality/Speech candidate can no longer consume a ready batch/aggregate evidence epoch merely because the provider labelled it `refine`/`batch`; Delta now proves that every bounded evidence claim is already represented by the accepted current field before reporting `evidence-already-reflected`.
+- When an unchanged candidate still omits supported development, preserve its Personality/Speech ledger and profile evidence and report `waiting-for-revised-candidate`. Mannerism/Behavioral Profile refinement likewise retains novel field evidence when the returned full list is unchanged, instead of discarding that evidence during refinement cleanup.
+- Tighten the scanner/Refresh provider contract without another request: `refine`/`evolve` must return a changed full candidate when durable development is genuinely new, while evidence that only reinforces the current profile should be omitted/kept. Batch chronology does not force cosmetic wording churn.
+- Advance compact diagnostic export to version 3 with `evidenceAlreadyRepresented`, keeping `candidateAlreadyRepresented` separate from evidence coverage so copied stale candidates are directly distinguishable from genuinely redundant evidence.
+- Add live-shape regressions for copied Sora Personality/Speech batch candidates, collection evidence retention, genuinely redundant evidence, and the provider consistency rule. The reviewed Stage 9 scanner fixture is one character smaller than 1.0.24 and targeted Refresh is 17 characters smaller; request counts, output allowances and roleplay injection are unchanged. No persistence schema, native bundle, branch lineage or relationship formula changes are introduced.
+
+
 
 ## 1.0.24 - 16 September 2026
 
