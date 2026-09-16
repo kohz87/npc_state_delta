@@ -1,6 +1,6 @@
 # NPC State Delta profile-evolution integrity follow-up
 
-Status: implementation and deterministic verification complete on the local unreleased 1.0.27 tree. This document does not declare a release, publication, live-provider acceptance, or application-version bump.
+Status: implementation and deterministic verification complete for the authorized NPC State Delta 1.0.28 release candidate. Publication still requires exact-candidate CI and merge verification; this document does not claim live-provider acceptance.
 
 ## Reviewed baseline
 
@@ -68,7 +68,7 @@ Current application-version authorities are:
 
 Release-facing current markers include the README title/package instructions, top changelog release entry, DEVELOPMENT current-release section, package name, and current-version tests. Validation now additionally checks the bootstrap banner, top changelog version, and DEVELOPMENT current-release version against the manifest. Persisted bundle/storage/branch/diagnostic/journal versions remain independent. Historical reviews, provenance records, migration fixtures, and old-version regressions retain the versions they actually describe and must not be globally rewritten.
 
-This implementation remains application version 1.0.27 because publication/release/version-bump authority was not granted.
+Publication authority was granted after the implementation review, so this candidate advances the synchronized application version to 1.0.28 while keeping all independently governed persisted schema/version families unchanged.
 
 ## Verification
 
@@ -82,7 +82,7 @@ Final changed-tree checks:
 - runtime smoke: PASS
 - migration smoke: PASS
 - `npm run validate`: PASS, 31 declared runtime JavaScript modules, including strengthened current-version consistency checks
-- `npm run measure:prompts`: PASS with the released 1.0.27 measurements unchanged
+- `npm run measure:prompts`: PASS with the reviewed 1.0.27 measurements unchanged
   - minimal-one-npc: 6,864 chars / estimated 1,962 tokens
   - rich-first-encounter: 7,769 / 2,222
   - Refresh two-target common prefix: 8,949 chars
@@ -91,10 +91,10 @@ Final changed-tree checks:
   - accepted characterization injection: 1,637 chars / estimated 468 tokens
 - `node scripts/measure-stage9.mjs`: PASS through the same production capture harness; scanner/full-window/Refresh/backfill/import/focused-relationship/retry hashes, request counts, route options, and response allowances remain unchanged from 1.0.27
 - `npm run package`: PASS using a temporary untracked Windows `python3.cmd` forwarding to installed `py -3`; shim deleted immediately
-  - archive: `npc_state_delta-1.0.27.zip`
+  - archive: `npc_state_delta-1.0.28.zip`
   - runtime modules: 31
-  - bytes: 337,181
-  - SHA-256: `a41865af1b0db9d7c09786e6b75f6fee9702fc3dc7c204b2a0658e2a7e055ca7`
+  - bytes: 337,152
+  - SHA-256: `a1e54320e58e0aecd989bafb68cbc5afe31bdc67cff2c4f6c709772a6f830908`
   - contents, CRC, JavaScript syntax, byte identity, and runtime inventory verified
 
 No scanner/Refresh prompt wording, stable-prefix ordering, request count, retry count, output allowance, reasoning ownership, persistence schema, branch lineage, native bundle format, or relationship scoring formula was changed.
