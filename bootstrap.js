@@ -1,10 +1,15 @@
-/* NPC State Delta v1.0.29 bootstrap. */
+/* NPC State Delta v1.0.30 bootstrap. */
 import { prepareNpcStateHardening } from './hardening.js';
 
 await prepareNpcStateHardening();
 await import('./scanner-routing.js');
 await import('./calendar-settings.js');
 await import('./index.js');
+try {
+    await import('./destructive-settlement.js');
+} catch (error) {
+    console.error('[NPC State Delta] destructive history settlement failed to load', error);
+}
 try {
     await import('./full-cast.js');
 } catch (error) {
