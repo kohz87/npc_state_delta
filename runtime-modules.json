@@ -1,10 +1,12 @@
 {
   "schemaVersion": 1,
-  "applicationVersion": "1.0.29",
+  "applicationVersion": "1.0.30",
   "entrypoint": "bootstrap.js",
   "modules": [
     { "path": "bootstrap.js", "role": "bootstrap", "required": true },
     { "path": "index.js", "role": "runtime-controller", "required": true },
+    { "path": "destructive-settlement.js", "role": "destructive-host-settlement", "required": true },
+    { "path": "destructive-settlement-core.js", "role": "destructive-settlement-primitives", "required": true },
     { "path": "scanner-routing.js", "role": "scanner-request-routing", "required": true },
     { "path": "scanner-output-ui.js", "role": "scanner-output-setting-and-ui-polish", "required": true },
     { "path": "scan-context.js", "role": "scan-context-eligibility", "required": true },
