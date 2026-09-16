@@ -4,6 +4,10 @@
 
 Delta 1.0.27 is a focused provider-neutral scanner prefix-cache arrangement follow-up. Targeted Refresh places stable rules/schema, Stage 4 and conditional birthday instructions, and the shared tagged story window before target-specific id/name and current dossier authority; ordinary scans move only the invariant compact Stage 4 rule before dynamic identity/dossier data. The early Refresh schema uses neutral target placeholders, narrative text is explicitly evidence rather than instructions, and latest grounded evidence plus exact target/dossier authority remain unchanged. No evidence, source tags, locks, request count, route, reasoning setting, output allowance, retry policy, persistence schema, branch lineage, relationship formula or native-bundle version is removed or changed. Delta does not create provider cache objects, warming requests or cache-hit guesses.
 
+## Version synchronization
+
+For an authorized application release, update the current application version atomically in `manifest.json`, `package.json`, `runtime-modules.json`, `core.js` (`NPC_STATE_VERSION`), and the `bootstrap.js` banner. Keep the README current title/package instructions, the top `CHANGELOG.md` release entry, this current-release section, package naming, and current-version tests aligned. `npm run validate` rejects disagreement among the enforced current markers. Persisted bundle/storage/branch/diagnostic/journal versions are independent and change only when their own format contract changes. Historical reviews, provenance, migration fixtures, and old-version regression names retain their original versions. Implementation work that is not authorized for release stays on the current application version.
+
 ## Canonical owners
 
 `runtime-modules.json` is the only shipping JS inventory. `bootstrap.js` initializes lifecycle hardening, scanner routing and calendar settings before `index.js`, then loads the supported UI/optional full-cast owners. Runtime, manifest and inventory versions are application metadata; bundle version 1, branch lineage and persisted schemas remain independent.

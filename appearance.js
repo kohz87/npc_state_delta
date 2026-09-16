@@ -13,13 +13,32 @@ function truthy(value) {
 }
 function appearanceText(value) { return clean(value, DURABLE_PROFILE_LIMITS?.appearance || 800); }
 function sameAppearance(a, b) { return normalizeName(a) === normalizeName(b); }
+function regexEscape(value) { return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function appearanceClauses(value) {
+    return appearanceText(value).split(/\s*;\s*|(?<=[.!?])\s+/).map(part => appearanceText(part)).filter(Boolean);
+}
 function stripOverallPrefix(value, overall) {
     const current = appearanceText(value);
     const shared = appearanceText(overall);
     if (!current || !shared) return current;
     if (sameAppearance(current, shared)) return '';
-    const prefix = `${shared}; `;
-    if (current.toLocaleLowerCase().startsWith(prefix.toLocaleLowerCase())) return appearanceText(current.slice(prefix.length));
+
+    const sharedClauses = appearanceClauses(shared);
+    const currentClauses = appearanceClauses(current);
+    const remaining = currentClauses.filter(clause => !sharedClauses.some(sharedClause => sameAppearance(clause, sharedClause)));
+    if (remaining.length !== currentClauses.length) return appearanceText(remaining.join('; '));
+
+    // Some providers repeat the shared phrase before a comma/colon rather than as a complete
+    // sentence. Match the exact normalized word sequence only, never loose keyword overlap, so
+    // negated or genuinely different form anatomy remains intact.
+    const words = normalizeName(shared).split(/\s+/).filter(Boolean);
+    if (words.length) {
+        const boundary = String.raw`[\s,.;:!?()\[\]{}\-–—/]`;
+        const separator = `${boundary}+`;
+        const trailing = `${boundary}*`;
+        const prefix = new RegExp(`^\\s*${words.map(regexEscape).join(separator)}(?=$|${boundary})${trailing}`, 'iu');
+        if (prefix.test(current)) return appearanceText(current.replace(prefix, ''));
+    }
     return current;
 }
 function combineAppearance(overall, specific) {
@@ -308,6 +327,39 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
         // a switch, since that scalar may describe the previous form.
         if (incomingCurrent && !currentAppearanceProvided) next.appearance = '';
     }
+    // A valid flat appearance update describes the CURRENT presentation. Reconcile it into
+    // that canonical slot before resolving the compatibility/display scalar, so a selected
+    // named form cannot replay stale clothing or anatomy over an accepted current update.
+    if (currentAppearanceProvided) {
+        const incomingAppearance = appearanceText(rawUpdate.appearance);
+        if (incomingAppearance) {
+            const localAppearance = stripOverallPrefix(incomingAppearance, next.overallAppearance) || incomingAppearance;
+            const update = {
+                appearance: localAppearance,
+                state: rawUpdate.appearanceState ?? rawUpdate.appearance_state,
+                reason: rawUpdate.appearanceReason ?? rawUpdate.appearance_reason,
+            };
+            if (next.currentForm) {
+                const index = next.appearanceForms.findIndex(form => formKey(form.name) === formKey(next.currentForm));
+                if (index >= 0) {
+                    const existingResolved = combineAppearance(next.overallAppearance, next.appearanceForms[index].appearance);
+                    const resolved = reconcileFormAppearance(existingResolved, { ...update, appearance: incomingAppearance }, context);
+                    const appearance = stripOverallPrefix(resolved, next.overallAppearance) || resolved;
+                    if (appearance) next.appearanceForms[index] = { ...next.appearanceForms[index], appearance };
+                } else {
+                    // A flat presentation may describe a selected-but-not-yet-established form,
+                    // but it cannot fabricate that named form after its own form detail failed
+                    // grounding. Keep the accepted current presentation in the compatibility slot.
+                    next.appearance = reconcileFormAppearance('', { ...update, appearance: incomingAppearance }, context);
+                }
+            } else if (next.currentFormUnknown) {
+                next.unclassifiedAppearance = reconcileFormAppearance(next.unclassifiedAppearance, update, context);
+            } else {
+                next.appearance = reconcileFormAppearance(next.appearance, update, context);
+            }
+        }
+    }
+
     next.appearanceModelVersion = APPEARANCE_MODEL_VERSION;
     next.appearance = resolveNpcAppearance(next);
     return next;

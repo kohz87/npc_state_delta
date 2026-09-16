@@ -776,6 +776,51 @@ function inferSiblingEdges(graph) {
     }
 }
 
+function collectiveRelationshipShape(parsed) {
+    if (!parsed) return null;
+    const subject = norm(parsed.subject);
+    const relationFamily = socialRelationFamily(singularRelation(parsed.relation));
+    const plural = subject.match(/\b(daughters|sons|children|sisters|brothers|siblings)\b/);
+    if (!plural) return null;
+    const subjectFamily = socialRelationFamily(singularRelation(plural[1]));
+    if (!subjectFamily || subjectFamily !== relationFamily) return null;
+    const twin = /\btwins?\b/.test(subject);
+    let expectedCount = twin ? 2 : 0;
+    if (!expectedCount) {
+        const countToken = subject.split(/\s+/).find(token => numberWord(token) > 0);
+        if (countToken) expectedCount = numberWord(countToken);
+    }
+    if (expectedCount < 2) return null;
+    return { family: relationFamily, expectedCount, sharedDescriptor: twin ? 'twins' : '' };
+}
+
+function resolvedCollectiveGroup(ownerId, parsed, graph) {
+    const shape = collectiveRelationshipShape(parsed);
+    if (!shape) return null;
+    const byGroup = new Map();
+    for (const edge of graph.edges || []) {
+        const view = relationFromPerspective(edge, ownerId);
+        if (!view || socialRelationFamily(view.relation) !== shape.family || !edge.groupId) continue;
+        if (shape.sharedDescriptor && norm(edge.sharedDescriptor) !== norm(shape.sharedDescriptor)) continue;
+        const list = byGroup.get(edge.groupId) || [];
+        if (!list.some(item => item.view.counterpartId === view.counterpartId)) list.push({ edge, view });
+        byGroup.set(edge.groupId, list);
+    }
+    const matches = [...byGroup.entries()].filter(([groupId, members]) => {
+        if (members.length !== shape.expectedCount) return false;
+        return !(graph.unresolved || []).some(slot => slot.ownerId === ownerId && slot.groupId === groupId);
+    });
+    return matches.length === 1 ? { groupId: matches[0][0], members: matches[0][1] } : null;
+}
+
+function enrichCollectiveDynamic(ownerId, group, dynamic) {
+    if (!group || !dynamic) return;
+    for (const { edge } of group.members) {
+        if (edge.aId === ownerId) edge.aDynamic = richer(edge.aDynamic, dynamic);
+        else if (edge.bId === ownerId) edge.bDynamic = richer(edge.bDynamic, dynamic);
+    }
+}
+
 function projectGraphToKeyRelationships(npcs, graph) {
     const updatedIds = [];
     for (const owner of npcs || []) {
@@ -790,8 +835,14 @@ function projectGraphToKeyRelationships(npcs, graph) {
                 continue;
             }
             const counterpart = resolveNpcReference(npcs, parsed.subject);
-            if (!counterpart || counterpart.id === owner.id) unresolvedText.push(formatKeyRelationship(parsed.subject, parsed.relation, parsed.dynamic));
-            else existingParsed.push({ counterpartId: counterpart.id, relation: parsed.relation, dynamic: parsed.dynamic, score: 100 });
+            if (!counterpart || counterpart.id === owner.id) {
+                const collective = resolvedCollectiveGroup(owner.id, parsed, graph);
+                if (collective) {
+                    enrichCollectiveDynamic(owner.id, collective, parsed.dynamic);
+                    continue;
+                }
+                unresolvedText.push(formatKeyRelationship(parsed.subject, parsed.relation, parsed.dynamic));
+            } else existingParsed.push({ counterpartId: counterpart.id, relation: parsed.relation, dynamic: parsed.dynamic, score: 100 });
         }
         const byCounterpart = new Map(existingParsed.map(item => [item.counterpartId, item]));
         for (const edge of graph.edges) {
