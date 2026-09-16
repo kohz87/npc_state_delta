@@ -536,6 +536,7 @@ function relationAgreement(established, candidate) {
 
 function alignGraphWithCanonicalRelationships(graph, npcs = []) {
     for (const edge of graph.edges || []) {
+        if (edge.confidence === 'explicit') continue;
         const a = npcs.find(npc => npc?.id === edge.aId);
         const b = npcs.find(npc => npc?.id === edge.bId);
         if (!a || !b) continue;
@@ -554,6 +555,42 @@ function alignGraphWithCanonicalRelationships(graph, npcs = []) {
     return normalizeSocialGraph(graph);
 }
 
+function edgeDirectionGrounded(a, b, aToB, bToA, text = '') {
+    const source = norm(text);
+    if (!source) return 0;
+    const aLabels = npcLabels(a).map(norm).filter(Boolean);
+    const bLabels = npcLabels(b).map(norm).filter(Boolean);
+    const aRel = norm(aToB);
+    const bRel = norm(bToA);
+    let givenScore = 0;
+    let swappedScore = 0;
+    for (const bName of bLabels) {
+        for (const aName of aLabels) {
+            if (aRel && (source.includes(`${bName} is ${aName}'s ${aRel}`)
+                || source.includes(`${bName} is ${aName}s ${aRel}`)
+                || source.includes(`${bName} is the ${aRel} of ${aName}`))) {
+                givenScore += 2;
+            }
+            if (bRel && (source.includes(`${aName} is ${bName}'s ${bRel}`)
+                || source.includes(`${aName} is ${bName}s ${bRel}`)
+                || source.includes(`${aName} is the ${bRel} of ${bName}`))) {
+                givenScore += 2;
+            }
+            if (bRel && (source.includes(`${bName} is ${aName}'s ${bRel}`)
+                || source.includes(`${bName} is ${aName}s ${bRel}`)
+                || source.includes(`${bName} is the ${bRel} of ${aName}`))) {
+                swappedScore += 2;
+            }
+            if (aRel && (source.includes(`${aName} is ${bName}'s ${aRel}`)
+                || source.includes(`${aName} is ${bName}s ${aRel}`)
+                || source.includes(`${aName} is the ${aRel} of ${bName}`))) {
+                swappedScore += 2;
+            }
+        }
+    }
+    return givenScore - swappedScore;
+}
+
 function parseScanEdges(scanResult = {}, npcs = [], meta = {}) {
     const raw = scanResult?.keyRelationshipEdges ?? scanResult?.key_relationship_edges ?? scanResult?.socialRelationships ?? scanResult?.social_relationships ?? [];
     const out = [];
@@ -570,14 +607,16 @@ function parseScanEdges(scanResult = {}, npcs = [], meta = {}) {
         const bEstablished = establishedCounterpartRelation(b, a, npcs);
         const asGiven = relationAgreement(aEstablished, aToB) + relationAgreement(bEstablished, bToA);
         const swapped = relationAgreement(aEstablished, bToA) + relationAgreement(bEstablished, aToB);
-        if (swapped > asGiven) {
+        const reasonText = clean(item?.reason ?? item?.evidence, 300);
+        const edgeGrounded = edgeDirectionGrounded(a, b, aToB, bToA, reasonText || meta.developmentContext || '');
+        if (swapped > asGiven && edgeGrounded <= 0) {
             [aToB, bToA] = [bToA, aToB];
             [aDynamic, bDynamic] = [bDynamic, aDynamic];
         }
         out.push({
             aId: a.id, bId: b.id, aToB, bToA,
             aDynamic, bDynamic,
-            reason: clean(item?.reason ?? item?.evidence, 300) || 'scanner social edge',
+            reason: reasonText || 'scanner social edge',
             provenance: meta.provenance || 'scanner', confidence: 'explicit', sourceMessageId: meta.sourceMessageId, turn: meta.turn,
         });
     }
@@ -684,8 +723,32 @@ export function extractUnresolvedSocialFacts(transcript, npcs = [], meta = {}) {
             const singleFamily = background.match(/\\b(?:mother|father|parent|guardian)\\s+of\\s+(?:a|an|one)\\s+(daughter|son|child)\\b/iu);
             if (singleFamily) pushFact(npc, 1, singleFamily[1], '', [], singleFamily[0]);
         }
+        for (const raw of Array.isArray(npc?.keyRelationships) ? npc.keyRelationships : []) {
+            const parsed = parseKeyRelationshipEntry(raw);
+            if (!parsed) continue;
+            const shape = collectiveRelationshipShape(parsed);
+            if (shape) {
+                pushFact(npc, shape.expectedCount, parsed.relation, shape.sharedDescriptor, [], raw);
+            }
+        }
     }
     return facts;
+}
+
+function collectiveDescriptorGrounded(value, descriptor) {
+    const text = norm(value);
+    const shared = norm(descriptor);
+    if (!shared) return true;
+    if (shared === 'twins' || shared === 'twin') return /\btwins?\b/.test(text);
+    return text.includes(shared);
+}
+
+function existingEdgeProvesCollectiveMembership(edge, ownerId, fact) {
+    const view = relationFromPerspective(edge, ownerId);
+    if (!view) return false;
+    if (fact.sharedDescriptor && collectiveDescriptorGrounded(edge.sharedDescriptor, fact.sharedDescriptor)) return true;
+    if (confidenceRank(edge.confidence) < confidenceRank('explicit')) return false;
+    return collectiveDescriptorGrounded(`${view.relation} ${view.reverse} ${edge.reason}`, fact.sharedDescriptor);
 }
 
 function ensureUnresolvedFacts(graph, facts = []) {
@@ -694,14 +757,22 @@ function ensureUnresolvedFacts(graph, facts = []) {
         const relation = clean(fact.relation, 180);
         if (!ownerId || !relation) continue;
         const family = socialRelationFamily(relation);
-        const existingResolved = graph.edges.filter(edge => {
+        const existingEdges = graph.edges.filter(edge => {
             const view = relationFromPerspective(edge, ownerId);
             return view && socialRelationFamily(view.relation) === family;
-        }).length;
+        });
+        const existingResolved = existingEdges.length;
         const existingSlots = graph.unresolved.filter(slot => slot.ownerId === ownerId && socialRelationFamily(slot.relation) === family);
         const desiredOpen = Math.max(0, Number(fact.count || 0) - existingResolved);
         const toAdd = Math.max(0, desiredOpen - existingSlots.length);
         const groupId = existingSlots[0]?.groupId || `group_${slug(`${ownerId}-${family}-${fact.sharedDescriptor || ''}`)}`;
+        if (!existingSlots.length && fact.count >= 2 && existingEdges.length === fact.count
+            && existingEdges.every(edge => existingEdgeProvesCollectiveMembership(edge, ownerId, fact))) {
+            for (const edge of existingEdges) {
+                edge.groupId ||= groupId;
+                if (fact.sharedDescriptor) edge.sharedDescriptor ||= fact.sharedDescriptor;
+            }
+        }
         for (let i = 0; i < toAdd; i += 1) {
             const slotIndex = existingSlots.length + i;
             const descriptor = clean(fact.descriptors?.[slotIndex] || '', 180);
@@ -853,7 +924,11 @@ function projectGraphToKeyRelationships(npcs, graph) {
             const score = (counterpart.present ? 40 : 0) + (counterpart.worldActive ? 10 : 0) + (counterpart.lifeState === 'deceased' ? 3 : 0) + confidenceRank(edge.confidence) * 3;
             if (byCounterpart.has(counterpart.id)) {
                 const item = byCounterpart.get(counterpart.id);
-                item.relation = mergeRelations(item.relation, view.relation);
+                if (edge.confidence === 'explicit' && inverseRelationFamilies(socialRelationFamily(item.relation), socialRelationFamily(view.relation))) {
+                    item.relation = view.relation;
+                } else {
+                    item.relation = mergeRelations(item.relation, view.relation);
+                }
                 item.dynamic = richer(item.dynamic, view.dynamic);
                 item.score = Math.max(item.score, score);
             } else byCounterpart.set(counterpart.id, { counterpartId: counterpart.id, relation: view.relation, dynamic: view.dynamic, score });

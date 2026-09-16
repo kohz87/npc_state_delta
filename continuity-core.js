@@ -154,12 +154,37 @@ export function mergeScanResult(state, scanResult, options = {}) {
 
     result.state.npcs = (result.state.npcs || []).map(rawNpc => {
         const sources = matchingPrevious(rawNpc, previous);
-        const ordinaryUpdate = ordinary.find(raw => sameNpc(raw, rawNpc));
+        let ordinaryUpdate = ordinary.find(raw => sameNpc(raw, rawNpc));
+        let profileUpdate = profiles.find(raw => sameNpc(raw, rawNpc));
         const rawForms = ordinaryUpdate && (ordinaryUpdate.appearanceForms ?? ordinaryUpdate.appearance_forms);
         const seed = !sources.length && rawForms ? { ...rawNpc, appearanceModelVersion: 1 } : rawNpc;
+
+        const formSwitch = Boolean(
+            ordinaryUpdate?.currentForm || ordinaryUpdate?.currentFormState
+            || profileUpdate?.currentForm || profileUpdate?.currentFormState
+            || (ordinaryUpdate && (ordinaryUpdate.appearanceForms ?? ordinaryUpdate.appearance_forms))
+            || (profileUpdate && (profileUpdate.appearanceForms ?? profileUpdate.appearance_forms))
+        );
+        const appearanceRejected = !formSwitch && (sources.length
+            ? (sources[0]?.appearance ? mechanics.normalizeName(rawNpc.appearance) === mechanics.normalizeName(sources[0]?.appearance) : !rawNpc.appearance)
+            : (!rawNpc.appearance));
+        if (appearanceRejected) {
+            if (ordinaryUpdate && (ordinaryUpdate.appearance || ordinaryUpdate.appearanceState)) {
+                ordinaryUpdate = { ...ordinaryUpdate };
+                delete ordinaryUpdate.appearance;
+                delete ordinaryUpdate.appearanceState;
+                delete ordinaryUpdate.appearanceReason;
+            }
+            if (profileUpdate && (profileUpdate.appearance || profileUpdate.appearanceState)) {
+                profileUpdate = { ...profileUpdate };
+                delete profileUpdate.appearance;
+                delete profileUpdate.appearanceState;
+                delete profileUpdate.appearanceReason;
+            }
+        }
+
         let npc = applyModel(seed);
         if (ordinaryUpdate) npc = applyModel(npc, ordinaryUpdate, options);
-        const profileUpdate = profiles.find(raw => sameNpc(raw, npc));
         if (profileUpdate) npc = applyModel(npc, profileUpdate, options);
         if (sources.length) npc = mergeAppearanceKnowledge(sources, npc);
 
