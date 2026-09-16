@@ -9,6 +9,7 @@ import {
     scannerProfileOptions,
 } from './scanner-routing.js';
 import { backfillNeedsRequest } from './scan-context.js';
+import { createDiagnosticStore } from './diagnostics-core.js';
 import {
     NPC_STATE_VERSION,
     DEFAULT_RELATIONSHIP,
@@ -170,6 +171,36 @@ let portraitSettingsSaveBusy = false;
 let lastViewerActivation = { npcId: '', at: 0 };
 let lastEditorActivation = { npcId: '', at: 0 };
 let lastScanMetrics = null;
+const diagnosticStore = createDiagnosticStore({ limit: 40 });
+function diagnosticNpcIds(scanResult = {}, report = null) {
+    const values = [];
+    for (const row of Array.isArray(scanResult?.npcs) ? scanResult.npcs : []) if (row?.id) values.push(String(row.id));
+    const profile = Array.isArray(scanResult?.profileUpdates) ? scanResult.profileUpdates
+        : (Array.isArray(scanResult?.profile_updates) ? scanResult.profile_updates : []);
+    for (const row of profile) if (row?.id) values.push(String(row.id));
+    for (const row of Array.isArray(report?.profileDevelopment) ? report.profileDevelopment : []) if (row?.npcId) values.push(String(row.npcId));
+    for (const row of Array.isArray(report?.birthdayDiagnostics) ? report.birthdayDiagnostics : []) if (row?.npcId) values.push(String(row.npcId));
+    return [...new Set(values)].slice(0, 64);
+}
+function recordScanDiagnostics(chatKey, metrics = {}, scanResult = {}, report = null, extra = {}) {
+    return diagnosticStore.record(chatKey, {
+        type: metrics?.label || extra?.type || 'scan',
+        at: metrics?.at || Date.now(),
+        durationMs: metrics?.durationMs || 0,
+        sourceMessageId: extra?.sourceMessageId,
+        retried: metrics?.retried,
+        targeted: extra?.targeted,
+        npcIds: extra?.npcIds?.length ? extra.npcIds : diagnosticNpcIds(scanResult, report),
+        profileUpdates: metrics?.profileUpdates || 0,
+        profileApplied: metrics?.profileApplied || 0,
+        profileEvidenceAdded: metrics?.profileEvidenceAdded || 0,
+        relationshipApplied: Number(report?.relationshipEvents?.length || 0),
+        promptEstimateTokens: Math.ceil(Number(metrics?.promptChars || 0) / 4),
+        responseEstimateTokens: Math.ceil(Number(metrics?.responseChars || 0) / 4),
+        profileDevelopment: report?.profileDevelopment || metrics?.profileDevelopment || [],
+        birthdayDiagnostics: report?.birthdayDiagnostics || [],
+    });
+}
 let branchReconcileTimer = null;
 let branchReconcilePending = null;
 const branchReconciliationEvents = [];
@@ -2269,6 +2300,29 @@ async function refreshNpcFromChat(npcId) {
         const modelEdges = (Array.isArray(parsed.keyRelationshipEdges) ? parsed.keyRelationshipEdges : []).filter(edgeTouchesTarget);
         parsed.keyRelationshipEdges = [...modelEdges, ...localEdges];
         if (!parsed.npcs.length && !(parsed.profileUpdates || []).length && !parsed.keyRelationshipEdges.length) {
+            lastScanMetrics = {
+                label: 'targeted-refresh',
+                durationMs: Math.max(0, Math.round((performance.now?.() ?? Date.now()) - refreshStartedAt)),
+                promptChars: prompt.length,
+                responseChars: String(raw ?? '').length,
+                retried: Boolean(retried),
+                relationshipPass: false,
+                relationshipTargets: 0,
+                relationshipResponseChars: 0,
+                relationshipRetried: false,
+                relationshipEdges: 0,
+                relationshipEdgeFallbacks: localEdges.length,
+                profileUpdates: 0,
+                profileApplied: 0,
+                profileEvidenceAdded: 0,
+                profileDevelopment: [],
+                at: Date.now(),
+            };
+            recordScanDiagnostics(chatKey, lastScanMetrics, parsed, null, {
+                targeted: true,
+                npcIds: [id],
+                sourceMessageId: latestMessageId(true),
+            });
             globalThis.toastr?.info?.(`NPC State Delta: no grounded dossier changes found for ${existing.name} in the last ${settings.scanDepth} messages.`);
             return true;
         }
@@ -2338,6 +2392,11 @@ async function refreshNpcFromChat(npcId) {
             profileDevelopment: Array.isArray(merged.report?.profileDevelopment) ? structuredClone(merged.report.profileDevelopment) : [],
             at: Date.now(),
         };
+        recordScanDiagnostics(chatKey, lastScanMetrics, parsed, merged.report, {
+            targeted: true,
+            npcIds: [id],
+            sourceMessageId: targetMessageId,
+        });
         console.info('[NPC State Delta] targeted refresh metrics', lastScanMetrics);
         globalThis.toastr?.success?.(changed.length
             ? `NPC State Delta: refreshed ${saved?.name || existing.name} from the last ${settings.scanDepth} messages (${changed.join(', ')}).`
@@ -3106,6 +3165,10 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
             lastScanMetrics.staleArchived = staleArchived.length;
             lastScanMetrics.stalePruned = stalePruned.length;
         }
+        recordScanDiagnostics(scanChatKey, lastScanMetrics || {}, parsedForMerge, merged.report, {
+            sourceMessageId: targetMessageId,
+            targeted: false,
+        });
         const chatKey = scanChatKey;
         const nextState = {
             ...merged.state,
@@ -5823,6 +5886,11 @@ window.NPCStateDelta = Object.freeze({
     importBytes: importBundleBytes,
     reconcile: (options = {}) => reconcileCurrentBranch(options),
     scanMetrics: () => lastScanMetrics ? { ...lastScanMetrics } : null,
+    diagnosticsSummary: () => diagnosticStore.summary(getChatKey()),
+    diagnosticsRecords: options => diagnosticStore.records(getChatKey(), options || {}),
+    diagnosticsForNpc: npcId => diagnosticStore.records(getChatKey(), { npcId: String(npcId || '') }),
+    diagnosticBundle: () => diagnosticStore.bundle(getChatKey(), { applicationVersion: NPC_STATE_VERSION }),
+    clearDiagnostics: () => diagnosticStore.clear(getChatKey()),
     getState: () => structuredClone(getChatState()),
     getNpc: npcId => {
         const npc = getChatState().npcs.find(item => item.id === String(npcId || ''));

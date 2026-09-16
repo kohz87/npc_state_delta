@@ -307,12 +307,17 @@ test('v1.0.22 an existing yearless birthday rolls age and compact apparent age e
     assert.equal(ryu.apparentAge, '~13');
     assert.equal(ryu.birthDateYearSource, 'derived');
     assert.equal(ryu.calendarAge, 14);
+    assert.deepEqual(first.report.birthdayDiagnostics?.map(row => ({ npcId: row.npcId, outcome: row.outcome, reason: row.reason, delta: row.delta })), [
+        { npcId: 'npc_ryu', outcome: 'advance', reason: 'calendar-rollover', delta: 1 },
+    ]);
 
     const repeated = mergeScanResult(first.state, payload, { ...options, sourceMessageId: 205 });
     ryu = repeated.state.npcs.find(npc => npc.id === 'npc_ryu');
     assert.equal(ryu.age, '14', 'repeating Refresh on the same nameday must not age twice');
     assert.equal(ryu.apparentAge, '~13');
     assert.equal(ryu.calendarAge, 14);
+    assert.equal(repeated.report.birthdayDiagnostics?.[0]?.outcome, 'hold');
+    assert.equal(repeated.report.birthdayDiagnostics?.[0]?.reason, 'birthday-held');
 });
 
 test('v1.0.22 birthday rollover respects apparent-age authority and does not guess on newly established birthdays', () => {
@@ -374,6 +379,8 @@ test('v1.0.22 birthday rollover respects apparent-age authority and does not gue
     const newlyEstablished = establishedNow.state.npcs[0];
     assert.equal(newlyEstablished.age, '13', 'a birthday first established today must not assume the stored age is pre-birthday');
     assert.equal(newlyEstablished.apparentAge, '~12');
+    assert.equal(establishedNow.report.birthdayDiagnostics?.[0]?.outcome, 'hold');
+    assert.equal(establishedNow.report.birthdayDiagnostics?.[0]?.reason, 'first-establishment-guard');
 });
 
 test('v1.0.22 nameday language activates the birthday scanner rule', () => {

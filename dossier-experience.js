@@ -13,6 +13,7 @@ const EDITOR_OBSERVER_GUARD = '__npcStateDeltaDossierExperienceEditorObserver';
 const DOSSIER_GUARD = '__npcStateDeltaDossierExperienceEvents';
 const DOCUMENT_GUARD = '__npcStateDeltaDossierExperienceDocumentEvents';
 const SETTINGS_ID = 'npc_state_delta_settings';
+const diagnosticVisibleNpcIds = new Set();
 let normalizeQueued = false;
 
 function toast(kind, message) { globalThis.toastr?.[kind]?.(message); }
@@ -124,7 +125,24 @@ function ensureLibraryChrome(root) {
 }
 
 function actionSignature(npc) {
-    return npc ? `${npc.id}:${Boolean(npc.archived)}:${lifeStateChoice(npc)}` : '';
+    return npc ? `${npc.id}:${Boolean(npc.archived)}:${lifeStateChoice(npc)}:${diagnosticVisibleNpcIds.has(String(npc.id))}` : '';
+}
+
+function renderNpcDiagnostics(root) {
+    const hero = root?.querySelector?.('.delta-hero');
+    if (!hero) return;
+    hero.querySelectorAll(':scope > .delta-npc-diagnostics').forEach(node => node.remove());
+    const npcId = selectedNpcId(root);
+    if (!npcId || !diagnosticVisibleNpcIds.has(npcId)) return;
+    const records = api()?.diagnosticsForNpc?.(npcId) || [];
+    const recent = records.slice(-8).reverse();
+    const section = document.createElement('section');
+    section.className = 'delta-npc-diagnostics';
+    section.innerHTML = `<header><b>Diagnostics</b><small>${recent.length} recent operation${recent.length === 1 ? '' : 's'}</small></header>
+      ${recent.length ? recent.map(row => `<details><summary>${escapeHtml(row.type || 'scan')} · ${escapeHtml(String(row.sourceMessageId ?? 'no source'))}</summary><pre>${escapeHtml(JSON.stringify({ profile: row.profile || [], birthdays: row.birthdays || [], accounting: row.accounting || {} }, null, 2))}</pre></details>`).join('') : '<p>No retained diagnostic operations for this NPC yet.</p>'}`;
+    const actions = hero.querySelector('.delta-hero-actions');
+    if (actions) actions.insertAdjacentElement('afterend', section);
+    else hero.appendChild(section);
 }
 
 function ensureDossierActions(root) {
@@ -152,6 +170,7 @@ function ensureDossierActions(root) {
           <div class="delta-dossier-more-menu">
             <button type="button" class="delta-btn npc-state-delta-scan-dossier" data-npc-id="${escapeHtml(npcId)}">Scan dossier</button>
             <button type="button" class="delta-btn delta-experience-portrait" data-npc-id="${escapeHtml(npcId)}">Portrait</button>
+            <button type="button" class="delta-btn delta-experience-diagnostics" data-npc-id="${escapeHtml(npcId)}">${diagnosticVisibleNpcIds.has(npcId) ? 'Hide diagnostics' : 'Show diagnostics'}</button>
             ${lifecycleAction}
           </div>
         </details>
@@ -438,6 +457,7 @@ function normalizeRoot(root = uiRoot()) {
     if (!root?.isConnected) return;
     ensureLibraryChrome(root);
     ensureDossierActions(root);
+    renderNpcDiagnostics(root);
 }
 
 function scheduleNormalize(root = uiRoot()) {
@@ -458,6 +478,18 @@ function bindDossierEvents(root) {
             event.preventDefault();
             event.stopPropagation();
             openPortraitTools(plain(portrait.dataset.npcId));
+            return;
+        }
+        const diagnostics = event.target.closest?.('.delta-experience-diagnostics');
+        if (diagnostics) {
+            event.preventDefault();
+            event.stopPropagation();
+            const npcId = plain(diagnostics.dataset.npcId);
+            if (diagnosticVisibleNpcIds.has(npcId)) diagnosticVisibleNpcIds.delete(npcId);
+            else diagnosticVisibleNpcIds.add(npcId);
+            const actions = root.querySelector('.delta-hero-actions');
+            if (actions) actions.dataset.deltaExperienceActions = '';
+            normalizeRoot(root);
             return;
         }
         const arrow = event.target.closest?.('[data-rail-direction]');
@@ -583,6 +615,12 @@ function installStyles() {
 #npc_state_delta_dossier_root .delta-dossier-more>summary::-webkit-details-marker{display:none}
 #npc_state_delta_dossier_root .delta-dossier-more-menu{position:absolute;right:0;bottom:calc(100% + 7px);z-index:30;width:210px;display:grid;gap:6px;padding:8px;border:1px solid var(--delta-line);border-radius:10px;background:color-mix(in srgb,var(--delta-bg) 96%,black 4%);box-shadow:0 12px 34px rgba(0,0,0,.46)}
 #npc_state_delta_dossier_root .delta-dossier-more-menu .delta-btn{text-align:left;width:100%}
+#npc_state_delta_dossier_root .delta-npc-diagnostics{margin:0 9px 9px;padding:9px;border:1px solid var(--delta-line);border-radius:9px;background:rgba(0,0,0,.16);max-height:330px;overflow:auto}
+#npc_state_delta_dossier_root .delta-npc-diagnostics>header{display:flex;justify-content:space-between;gap:8px;align-items:baseline;margin-bottom:7px;color:var(--delta-accent-soft)}
+#npc_state_delta_dossier_root .delta-npc-diagnostics>header small{color:var(--delta-muted)}
+#npc_state_delta_dossier_root .delta-npc-diagnostics details{border-top:1px solid rgba(255,255,255,.07);padding:5px 0}
+#npc_state_delta_dossier_root .delta-npc-diagnostics summary{cursor:pointer;font-size:.76rem}
+#npc_state_delta_dossier_root .delta-npc-diagnostics pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.68rem;max-height:220px;overflow:auto;margin:5px 0 0;padding:7px;background:rgba(0,0,0,.2);border-radius:6px}
 
 /* One editor viewport, one scrollbar. SillyTavern keeps Save/Cancel outside this body. */
 .npc-state-delta-editor-popup{--delta-editor-height:min(940px,96dvh);width:min(1320px,97vw)!important;max-width:none!important;height:var(--delta-editor-height)!important;max-height:96dvh!important;margin:auto!important;overflow:hidden!important}
