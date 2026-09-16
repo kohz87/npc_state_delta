@@ -1,5 +1,16 @@
 # NPC State Delta changes
 
+## 1.0.29 - 16 September 2026
+
+- Close the six remaining dossier-evolution defects found after the 1.0.28 review while preserving the existing scanner/Refresh request architecture and prompt bytes.
+- Route accepted flat Appearance updates through the same durable grounding/admission protections as the canonical mechanics owner, so a rejected unsupported candidate cannot be revived by facade reconciliation while valid form selection remains supported.
+- Make durable refinement grounding claim-complete and target-NPC-specific: unsupported clauses cannot piggyback on a supported clause, and another NPC's evidence cannot authorize the target through shared wording or stripped labels.
+- Make evidence coverage directional and clause-polarity aware, so a shorter accepted summary cannot erase a longer novel observation and unrelated negation cannot poison or falsely satisfy a separate predicate. Copied Personality/Speech candidates keep unresolved evidence until it is genuinely represented.
+- Require explicit per-member proof before already-resolved Important Bonds inherit collective semantics such as twins; preserve edge direction repair, partial/ambiguous groups, unrelated bonds and idempotent graph projection.
+- Preserve Shared appearance grammar when removing duplicated prefixes, including visibility, copular and negation predicates such as `are not visible`, rather than emitting detached fragments.
+- Add regression coverage for the repaired appearance, refinement-scoping, evidence-directionality, polarity, collective-bond and Shared-prefix cases. Persisted storage, bundle, diagnostics, rollback, branch schemas, relationship scoring and provider request budgets remain unchanged.
+- Advance synchronized application/package/display metadata and current-version assertions to 1.0.29; retain all 1.0.28 review/provenance material as historical evidence.
+
 ## 1.0.28 - 16 September 2026
 
 - Harden durable `refine` so preserving established wording no longer authorizes unsupported new Personality, Speech, Appearance, or Behavioral Profile meaning. Newly introduced claims must be grounded in supplied story/evidence; directly supported clarification still applies immediately without forcing gradual-development thresholds, and morality/agency protections remain authoritative.
@@ -139,7 +150,7 @@
 
 ## 1.0.12 - 14 September 2026
 
-- Run a one-time legacy branch-history compaction on existing sidecars after lineage is proven safe. Retain the current active lineage plus SillyTavern-retained swipe alternatives, and remove unreachable pre-1.0.11 sibling checkpoints, inline-card branch residue and rollback-journal chains that are no longer owned by the live head or a retained checkpoint.
+- Run a one-time legacy branch-history compaction on existing sidecars after lineage is proven safe. Retain the current active lineage plus SillyTavern-retained swipes, and remove unreachable pre-1.0.11 sibling checkpoints, inline-card branch residue and rollback-journal chains that are no longer owned by the live head or a retained checkpoint.
 - Defer compaction while a destructive lineage divergence is unresolved, then retry after reconciliation, so cleanup never races delete/edit/swipe recovery. Persist a versioned compaction marker and bounded before/after accounting so each sidecar is compacted at most once per compaction version.
 - Harden v4-to-v5 branch migration by mapping legacy checkpoint keys only when they match the active host branch or a swipe SillyTavern still retains, preventing old delete/regenerate siblings from collapsing onto the current v5 key while preserving provable swipe alternatives.
 - Raise the aggregate full-checkpoint budget from 2 MB to 8 MB and the single full-checkpoint ceiling from 750 KB to 2 MB. The separate 256-raw-message rollback-journal contract and 12 MB diagnostic target are unchanged.
