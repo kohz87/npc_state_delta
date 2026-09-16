@@ -615,14 +615,27 @@ function recordSecondaryProfileDiagnostics(report, beforeNpc, afterNpc, rawUpdat
             otherLabels,
         };
         const developmentReason = profileDevelopmentText(field, normalized.developmentReason, 500);
-        const episode = mechanics.developmentEpisodeDiagnostic(developmentReason, options.developmentContext, binding);
+        const fieldReason = profileDevelopmentText(field, normalized[reasonField], 500);
+        const evidenceReason = mechanics.durableProfileEvidenceReason(field, beforeNpc?.[field] || [], normalized?.[field] || [], rawEvidence);
+        const effectiveReason = developmentReason || fieldReason || evidenceReason;
+        const effectiveReasonSource = developmentReason ? 'provider' : (fieldReason ? 'field' : (evidenceReason ? 'evidence' : 'none'));
+        const candidateChanged = mechanics.normalizeName(previousValue) !== mechanics.normalizeName(candidateValue);
+        const candidateSpecificGrounding = candidateChanged
+            && mechanics.durableProfileCollectionCandidateGrounded(field, beforeNpc?.[field] || [], normalized?.[field] || [], rawEvidence);
+        const episode = mechanics.developmentEpisodeDiagnostic(effectiveReason, options.developmentContext, binding);
         const inferredBatch = normalized.developmentScale === 'gradual'
+            && candidateChanged
+            && candidateSpecificGrounding
+            && Boolean(effectiveReason)
             && Boolean(String(options.developmentContext || '').trim())
-            && mechanics.developmentScaleReady('batch', developmentReason, options.developmentContext, binding);
+            && mechanics.developmentScaleReady('batch', effectiveReason, options.developmentContext, binding);
         const changed = mechanics.normalizeName(previousValue) !== mechanics.normalizeName(currentValue);
+        const candidateAlreadyRepresented = Boolean(candidateValue)
+            && mechanics.normalizeName(previousValue) === mechanics.normalizeName(candidateValue);
         const outcome = locked ? 'locked'
             : (changed && inferredBatch ? 'applied-inferred-batch'
-                : (changed ? `applied-${normalized[stateField] || 'update'}` : 'unchanged-or-gated'));
+                : (changed ? `applied-${normalized[stateField] || 'update'}`
+                    : (candidateAlreadyRepresented ? 'evidence-already-reflected' : 'unchanged-or-gated')));
         const evidence = rawEvidence.slice(0, PROFILE_DEVELOPMENT_OBSERVATION_LIMIT).map(item => {
             const parsed = parseProfileDevelopmentEvidence('speech', item);
             return {
@@ -644,7 +657,14 @@ function recordSecondaryProfileDiagnostics(report, beforeNpc, afterNpc, rawUpdat
             previous: profileDevelopmentText('appearance', previousValue, 720),
             candidate: profileDevelopmentText('appearance', candidateValue, 720),
             developmentReason,
-            fieldReason: profileDevelopmentText(field, normalized[reasonField], 500),
+            fieldReason,
+            providerReasonPresent: Boolean(developmentReason),
+            effectiveReason,
+            effectiveReasonSource,
+            candidateChanged,
+            candidateAlreadyRepresented,
+            candidateGrounded: candidateChanged ? candidateSpecificGrounding : null,
+            reasonGrounded: effectiveReason ? episode.grounded : null,
             episode,
             evidence,
         });
@@ -656,11 +676,10 @@ function recordBirthdayDiagnostic(report, beforeNpc, afterNpc, ordinaryUpdate, o
     if (!report || !beforeNpc || !afterNpc || !referenceDate) return;
     const birthdayMatched = sameCalendarBirthday(afterNpc.birthDate, referenceDate, calendar);
     const incomingBirthday = ordinaryUpdate?.birthDate ?? ordinaryUpdate?.birth_date ?? ordinaryUpdate?.birthday;
+    const birthDateState = String(ordinaryUpdate?.birthDateState ?? ordinaryUpdate?.birth_date_state ?? '').trim().toLowerCase();
     const establishedNow = Boolean(incomingBirthday)
-        && ['establish', 'set', 'update', 'refine', 'correct', 'correction']
-            .includes(String(ordinaryUpdate?.birthDateState ?? ordinaryUpdate?.birth_date_state ?? '').trim().toLowerCase());
+        && ['establish', 'set', 'update', 'refine', 'correct', 'correction'].includes(birthDateState);
     const narratedBirthday = birthdayEvidenceInText(birthdayPromptSource(options));
-    if (!birthdayMatched && !establishedNow && !narratedBirthday) return;
     const manualFields = Array.isArray(afterNpc.manualProfileFields) ? afterNpc.manualProfileFields : [];
     const previousAge = String(beforeNpc.age ?? '').trim();
     const age = String(afterNpc.age ?? '').trim();
@@ -669,11 +688,18 @@ function recordBirthdayDiagnostic(report, beforeNpc, afterNpc, ordinaryUpdate, o
     const oldExact = exactStoredAge(previousAge);
     const newExact = exactStoredAge(age);
     const delta = oldExact !== null && newExact !== null ? newExact - oldExact : 0;
+    const ageState = String(ordinaryUpdate?.ageState ?? ordinaryUpdate?.age_state ?? '').trim().toLowerCase();
+    const birthdaySupplied = Boolean(incomingBirthday);
+    if (!birthdayMatched && !birthdaySupplied && !['advance', 'correct', 'correction'].includes(ageState) && delta === 0) return;
+
     let reason = 'no-rollover';
     if (manualFields.includes('age')) reason = 'manual-age-lock';
     else if (delta > 0) reason = 'calendar-rollover';
     else if (establishedNow && birthdayMatched) reason = 'first-establishment-guard';
     else if (birthdayMatched && narratedBirthday) reason = 'birthday-held';
+    else if (ageState === 'correct' || ageState === 'correction') reason = 'age-correction-held';
+    else if (ageState === 'advance') reason = 'age-advance-held';
+
     report.birthdayDiagnostics = Array.isArray(report.birthdayDiagnostics) ? report.birthdayDiagnostics : [];
     report.birthdayDiagnostics.push({
         npcId: String(afterNpc.id || ''),
@@ -681,7 +707,10 @@ function recordBirthdayDiagnostic(report, beforeNpc, afterNpc, ordinaryUpdate, o
         reason,
         birthdayMatched,
         establishedNow,
+        birthdaySupplied,
+        birthDateState,
         narratedBirthday,
+        ageState,
         ageLocked: manualFields.includes('age'),
         apparentAgeLocked: manualFields.includes('apparentAge'),
         previousAge,
@@ -689,6 +718,11 @@ function recordBirthdayDiagnostic(report, beforeNpc, afterNpc, ordinaryUpdate, o
         previousApparentAge,
         apparentAge,
         delta,
+        previousBirthDate: normalizeCalendarDate(beforeNpc.birthDate, calendar),
+        birthDate: normalizeCalendarDate(afterNpc.birthDate, calendar),
+        birthDateYearSource: String(afterNpc.birthDateYearSource || ''),
+        calendarAge: Number.isInteger(afterNpc.calendarAge) ? afterNpc.calendarAge : null,
+        referenceDate: normalizeCalendarDate(referenceDate, calendar),
     });
     if (report.birthdayDiagnostics.length > 32) report.birthdayDiagnostics.splice(0, report.birthdayDiagnostics.length - 32);
 }
@@ -718,20 +752,38 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
     const proposed = profileDevelopmentText(field, normalized[field]);
     const reason = profileDevelopmentText(field, normalized[`${field}Reason`], 500);
     const developmentReason = profileDevelopmentText(field, normalized.developmentReason, 500);
+    const rawDevelopmentEvidence = profileDevelopmentEvidence(field, plan.update || {});
+    const evidenceReason = mechanics.durableProfileEvidenceReason(field, currentValue, proposed, rawDevelopmentEvidence);
+    const effectiveReason = developmentReason || reason || evidenceReason;
+    const effectiveReasonSource = developmentReason ? 'provider' : (reason ? 'field' : (evidenceReason ? 'evidence' : 'none'));
     const developmentBinding = {
         npc,
-        evidence: profileDevelopmentEvidence(field, plan.update || {}),
+        evidence: rawDevelopmentEvidence,
         targeted: options.allowTargetedDurableSeed === true || plan.singleTargetUpdate === true,
         otherLabels: plan.otherLabels || [],
     };
-    const episode = mechanics.developmentEpisodeDiagnostic(developmentReason, options.developmentContext, developmentBinding);
+    const episode = mechanics.developmentEpisodeDiagnostic(effectiveReason, options.developmentContext, developmentBinding);
     const inferredBatchEligible = scale === 'gradual' && Boolean(String(options.developmentContext || '').trim());
     const batchReady = (scale === 'batch' || inferredBatchEligible)
         && Boolean(proposed)
-        && mechanics.developmentScaleReady('batch', developmentReason, options.developmentContext, developmentBinding);
+        && Boolean(effectiveReason)
+        && mechanics.developmentScaleReady('batch', effectiveReason, options.developmentContext, developmentBinding);
     const inferredBatch = scale === 'gradual' && batchReady;
     const effectiveScale = batchReady ? 'batch' : scale;
-    const diagnosticBase = { modelState: state, scale, effectiveScale, developmentReason, fieldReason: reason, episode };
+    const candidateChanged = Boolean(proposed) && mechanics.normalizeName(proposed) !== mechanics.normalizeName(currentValue);
+    const diagnosticBase = {
+        modelState: state,
+        scale,
+        effectiveScale,
+        developmentReason,
+        fieldReason: reason,
+        providerReasonPresent: Boolean(developmentReason),
+        effectiveReason,
+        effectiveReasonSource,
+        candidateChanged,
+        episode,
+        reasonGrounded: batchReady ? true : (effectiveReason ? episode.grounded : null),
+    };
 
     if (changedByContinuity) {
         if (state === 'evolve') {
@@ -747,9 +799,22 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
     }
 
     if (batchReady) {
-        if (!proposed || mechanics.normalizeName(proposed) === mechanics.normalizeName(currentValue)) {
+        if (!proposed) {
             recordProfileDevelopmentDiagnostic(report, npc.id, field, 'waiting-for-candidate', plan, diagnosticBase);
             if (ledger) npc[config.ledgerKey] = ledger;
+            return npc;
+        }
+        if (!candidateChanged) {
+            clearProfileEvidence(npc, field);
+            npc[config.ledgerKey] = resetProfileDevelopment(field, ledger || emptyProfileDevelopment(field, npc), currentValue, options);
+            npc.updatedAt = Date.now();
+            recordProfileDevelopmentDiagnostic(report, npc.id, field, 'evidence-already-reflected', plan, {
+                ...diagnosticBase,
+                candidateAlreadyRepresented: true,
+                evidenceResolved: true,
+                inferredScale: inferredBatch,
+                inferredEffectiveScale: inferredBatch ? 'batch' : '',
+            });
             return npc;
         }
         const groundingEvidence = [
@@ -786,12 +851,33 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
     const aggregateReady = Boolean(plan.aggregateEvidence?.ready);
     const aggregateFallback = !plan.readyRecords?.length && aggregateReady;
     if (!ledger || (!plan.readyRecords?.length && !aggregateReady)) {
-        recordProfileDevelopmentDiagnostic(report, npc.id, field, 'waiting-for-evidence', plan, diagnosticBase);
+        recordProfileDevelopmentDiagnostic(report, npc.id, field, 'waiting-for-evidence', plan, { ...diagnosticBase, aggregateFallback });
         if (ledger) npc[config.ledgerKey] = ledger;
         return npc;
     }
-    if (!proposed || mechanics.normalizeName(proposed) === mechanics.normalizeName(currentValue)) {
-        recordProfileDevelopmentDiagnostic(report, npc.id, field, 'waiting-for-candidate', plan, diagnosticBase);
+    if (!proposed) {
+        recordProfileDevelopmentDiagnostic(report, npc.id, field, 'waiting-for-candidate', plan, { ...diagnosticBase, aggregateFallback });
+        npc[config.ledgerKey] = ledger;
+        return npc;
+    }
+    if (!candidateChanged) {
+        if (aggregateFallback) {
+            clearProfileEvidence(npc, field);
+            npc[config.ledgerKey] = resetProfileDevelopment(field, ledger, currentValue, options);
+            npc.updatedAt = Date.now();
+            recordProfileDevelopmentDiagnostic(report, npc.id, field, 'evidence-already-reflected', plan, {
+                ...diagnosticBase,
+                aggregateFallback: true,
+                candidateAlreadyRepresented: true,
+                evidenceResolved: true,
+            });
+            return npc;
+        }
+        recordProfileDevelopmentDiagnostic(report, npc.id, field, 'waiting-for-candidate', plan, {
+            ...diagnosticBase,
+            aggregateFallback: false,
+            candidateAlreadyRepresented: true,
+        });
         npc[config.ledgerKey] = ledger;
         return npc;
     }
@@ -999,4 +1085,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.23';
+export const NPC_STATE_VERSION = '1.0.24';

@@ -1,6 +1,15 @@
 # NPC State Delta changes
 
 
+## 1.0.24 - 16 September 2026
+
+- Fix the remaining time-compressed `refine` gap exposed by live Sora diagnostics. Refresh/routine prompts now require `developmentReason` when a refine/evolve/change relies on elapsed sustained development, while the backend can deterministically recover an effective reason from field-specific evidence when the provider still omits it.
+- Keep that recovery candidate-specific. Mannerisms and Behavioral Profile must ground each newly proposed entry from their own evidence before inferred-batch semantics can authorize it; unrelated evidence in the same field or shared episode cannot license a different new habit/rule.
+- Resolve fragmented aggregate Personality/Speech evidence that is already represented by the accepted current candidate. Only the aggregate-fallback case is consumed/reset; ordinary concept-ledger readiness keeps the existing `waiting-for-candidate` behavior until a materially changed candidate arrives.
+- Expand profile diagnostics with candidate-changed/already-represented state, provider/effective reason source, resolved-evidence state, and candidate/reason grounding. Secondary Mannerism/Behavior diagnostics use the same effective-reason and candidate-specific checks as application.
+- Reduce birthday diagnostic noise by omitting unrelated NPCs that merely share a transcript containing birthday language. Relevant rows now include previous/current birth date, birth-year source, calendar age, reference date, age/birth-date state and supplied-date flags for easier chronology debugging.
+- Add regressions for the reported Sora missing-reason Mannerism case, unrelated-evidence rejection, aggregate already-reflected cleanup, Refresh contract wording and birthday diagnostic filtering/details. No extra model request, storage-schema bump, native-bundle change, branch-lineage change or relationship-formula change is introduced.
+
 ## 1.0.23 - 16 September 2026
 
 - Replace sentence-pair-only time-skip grounding with a bounded development episode. Natural elapsed spans may now carry a contiguous montage across later sentences/paragraphs, while a later explicit elapsed anchor, present-scene transition, segment cap or character cap ends the episode. Bare time passage remains non-destructive.

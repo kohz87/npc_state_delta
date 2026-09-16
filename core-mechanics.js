@@ -2287,6 +2287,47 @@ export function durableProfileAggregateCandidateGrounded(field, existing, incomi
     return durableProfileEvolutionCandidateGrounded(key, oldText, newText, groups);
 }
 
+function strippedDevelopmentEvidence(value) {
+    return cleanText(String(value || '')
+        .replace(/^\[m\d+\]\s*/i, '')
+        .replace(/^[^:]{1,52}:\s*/, ''), DURABLE_PROFILE_LIMITS.evidence);
+}
+
+export function durableProfileCollectionCandidateGrounded(field, existing, incoming, evidenceItems = []) {
+    const isMannerisms = field === 'mannerisms';
+    const isBehavior = field === 'behaviorProfile';
+    if (!isMannerisms && !isBehavior) return false;
+    const current = isMannerisms ? normalizeMannerisms(existing) : normalizeBehaviorProfile(existing);
+    const proposed = isMannerisms ? normalizeMannerisms(incoming) : normalizeBehaviorProfile(incoming);
+    if (!proposed.length || JSON.stringify(current) === JSON.stringify(proposed)) return false;
+    const changed = proposed.filter(entry => {
+        if (isMannerisms) return !current.some(old => mannerismSimilarity(old, entry) >= 0.55);
+        const key = behaviorProfileKey(entry);
+        const family = behaviorProfileFamily(entry);
+        const matched = current.find(old => behaviorProfileKey(old) === key
+            || (family && behaviorProfileFamily(old) === family));
+        return !matched || normalizeName(matched) !== normalizeName(entry);
+    });
+    if (!changed.length) return false;
+    const evidence = (Array.isArray(evidenceItems) ? evidenceItems : [])
+        .map(strippedDevelopmentEvidence).filter(Boolean);
+    if (!evidence.length) return false;
+    return changed.every(entry => evidence.some(sample =>
+        durableSeedGrounded(entry, sample)
+        || durableSemanticSimilarity(entry, sample) >= 0.34
+        || (isBehavior && durableSemanticSimilarity(behaviorProfileBody(entry), sample) >= 0.34)));
+}
+
+export function durableProfileEvidenceReason(field, existing, incoming, evidenceItems = []) {
+    const evidence = (Array.isArray(evidenceItems) ? evidenceItems : [])
+        .map(strippedDevelopmentEvidence).filter(Boolean);
+    if (!evidence.length) return '';
+    const grounded = field === 'personality' || field === 'speech'
+        ? durableProfileEvolutionCandidateGrounded(field, existing, incoming, evidence)
+        : durableProfileCollectionCandidateGrounded(field, existing, incoming, evidence);
+    return grounded ? cleanText(evidence.join(' '), 500) : '';
+}
+
 function newProfileEvidence(prior = [], incoming = []) {
     const before = cleanList(prior, PROFILE_EVIDENCE_LIMIT * 2, DURABLE_PROFILE_LIMITS.evidence);
     return cleanList(incoming, PROFILE_EVIDENCE_LIMIT * 2, DURABLE_PROFILE_LIMITS.evidence).filter(item =>
@@ -3862,17 +3903,30 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
 
     const evolutionReady = field => {
         const scale = incoming.developmentScale || 'gradual';
+        const fieldReason = field === 'mannerisms' ? incoming.mannerismReason
+            : field === 'behaviorProfile' ? incoming.behaviorProfileReason
+                : field === 'personality' ? incoming.personalityReason
+                    : field === 'speech' ? incoming.speechReason : '';
+        const currentValue = field === 'mannerisms' || field === 'behaviorProfile' ? npc[field] || [] : npc[field] || '';
+        const candidateValue = field === 'mannerisms' || field === 'behaviorProfile' ? incoming[field] || [] : incoming[field] || '';
+        const evidenceReason = durableProfileEvidenceReason(field, currentValue, candidateValue, incomingEvidence[field] || []);
+        const effectiveReason = cleanText(incoming.developmentReason || fieldReason || evidenceReason, 500);
         const binding = {
             npc,
             evidence: incomingEvidence[field] || [],
             targeted: options.targeted === true,
         };
+        const candidateSpecificGrounding = field === 'mannerisms' || field === 'behaviorProfile'
+            ? durableProfileCollectionCandidateGrounded(field, currentValue, candidateValue, incomingEvidence[field] || [])
+            : true;
         if (scale === 'gradual') {
             const hasDevelopmentContext = Boolean(String(options.developmentContext || '').trim());
             return gradualProfileEvolutionReady(field, beforeEvidence, incomingEvidence)
-                || (hasDevelopmentContext && developmentScaleReady('batch', incoming.developmentReason, options.developmentContext, binding));
+                || (hasDevelopmentContext && effectiveReason && candidateSpecificGrounding
+                    && developmentScaleReady('batch', effectiveReason, options.developmentContext, binding));
         }
-        return developmentScaleReady(scale, incoming.developmentReason, options.developmentContext, binding);
+        return Boolean(effectiveReason) && candidateSpecificGrounding
+            && developmentScaleReady(scale, effectiveReason, options.developmentContext, binding);
     };
 
     const applyText = (field, stateField, reasonField, refineState, evolveState, maxChars) => {
@@ -4889,7 +4943,7 @@ Rules:
 4. LOCKS: never rewrite fields listed in lockedProfileFields. Omit them from profileUpdates and ordinary dossier changes.
 5. DURABLE PROFILE: CURRENT COMPACT SUMMARY only. Personality/Speech/Appearance mention each durable concept once; Appearance does not repeat explicit age. behaviorProfile=max6 target-general rules translating identity, not a second essay; player-specific patterns belong relationshipSummary. refine returns FULL field; lasting personality/speech/mannerism/behaviorProfile change uses evolve+reason, Appearance uses change+reason. Mannerisms=max4 DISTINCT recurring patterns, not separate animations. One transient beat is not durable.
 6. IDENTITY FIREWALL: temporary mood, fear, stress, intoxication, intimacy, or behavior unique to ${userName} must not become global Personality, Speech, Mannerisms, or behaviorProfile. A generally kind NPC remains generally kind toward other people unless narration establishes a broader change. Necessary force is not cruelty by itself.
-7. DEVELOPMENT SPEED: ordinary continuity changes durable identity gradually. Recent lines may start with [mN] source tags. For gradual Personality/Speech evidence, return up to 4 independent observations and preserve each source tag, e.g. "[m42] reserve: initiates public discussion"; use one stable concept label for the same pattern. If repeated evidence makes the existing Personality/Speech stale, return the best FULL CURRENT candidate summary now instead of copying the stale baseline, even if you mark it refine; Delta decides whether evidence is sufficient. Use developmentScale:"gradual"; "explicit" only for a direct lasting-change statement; "batch" only when a time skip explicitly summarizes sustained development. Mere passage of time does nothing. Include developmentReason for evolve/change.
+7. DEVELOPMENT SPEED: ordinary continuity changes durable identity gradually. Recent lines may start with [mN] source tags. For gradual Personality/Speech evidence, return up to 4 independent observations and preserve each source tag, e.g. "[m42] reserve: initiates public discussion"; use one stable concept label for the same pattern. If repeated evidence makes the existing Personality/Speech stale, return the best FULL CURRENT candidate summary now instead of copying the stale baseline, even if you mark it refine; Delta decides whether evidence is sufficient. Use developmentScale:"gradual" for ordinary continuity; "explicit" only for a direct lasting-change statement; "batch" when an elapsed interval explicitly summarizes sustained development. Any refine/evolve/change that relies on time-compressed development MUST include developmentReason, even when state is refine. Mere passage of time does nothing.
 8. ROLE/SPECIES/BACKGROUND may update when this window establishes or clarifies them. Species is literal only. Background is durable history, not current mood/status.
 9. AGE=chronology only. Birthday/exact elapsed years=>advance+reason; correction=>correct+reason. apparentAge=visual and should be compact ~N, not prose; visual aging/growth/rejuvenation=>evolve+reason. No species-lifespan inference.
 10. KEY RELATIONSHIPS: one unambiguous entry/non-player counterpart. Merge relation+durable dynamic; use "late husband"/"surviving widow" rather than dangling "(deceased)". update/keyRelationshipEdges for discovery; evolve+reason for lasting social change. Omission NEVER erases unrelated ties. Never put ${userName} there.
@@ -5044,7 +5098,7 @@ Rules:
 6. Goal/status/mood/location are LIVE: output goal,goalState,status,statusState,mood,moodState,location,locationState as needed; actively reassess each returned EXISTING NPC every scan. Unchanged -> omit; changed -> replace; ended mood/goal/status -> matching *State:"clear". Location=current/last reliable; locationState:"clear" only when old place explicitly obsolete and replacement unknown. Off-screen/no evidence alone never clears it. Never use "Unknown".
 7. DURABLE PROFILE CHANNEL: ALWAYS emit one top-level profileUpdates item for durable facts even without npc delta. COMPACT duplicates. Empty != infer: seed only direct/recurring stable evidence. matching *State:"refine" returns FULL field; lasting personality/speech/mannerism "evolve"+reason; appearance "change"+reason. behaviorProfile FULL max6 target-general; Mannerisms FULL max4 DISTINCT patterns. PC/one-scene behavior -> relationshipSummary/live state/Memory. lockedProfileFields never rewrite.
 8. IDENTITY FIREWALL: Ignore transient visual state. mood/stress/intimacy/injury/relationship-specific behavior never becomes global Personality/Speech/Mannerisms/behaviorProfile. Player-specific durable stance -> relationshipSummary. Kindness stays general unless broader change established; necessary force != cruelty. High scores alone never imply jealousy/clinginess/blushing/stammering/possessiveness/tsundere denial.
-9. DEVELOPMENT SPEED: ordinary identity change is gradual across separate scans. Gradual evidence uses stable concept labels reused later. developmentScale=gradual|explicit|batch; explicit=direct lasting change; batch=time skip explicitly summarizing sustained development. Mere passage changes nothing; time skip alone invents nothing. Include developmentReason.
+9. DEVELOPMENT SPEED: ordinary durable change is gradual; reuse stable concept labels. developmentScale=gradual|explicit|batch; explicit=direct lasting change; batch=elapsed interval with sustained development. Time-compressed refine/evolve/change MUST include developmentReason. Time passage changes nothing; time skip alone invents nothing.
 10. SOCIAL: grounded non-player kin/friend/rival/mentor/partner => ALWAYS top-level keyRelationshipEdges {aId,a,bId,b,aToB,bToA,reason}; one clear counterpart entry. Use late/surviving, never dangling "(deceased)". Social change may evolve+reason; omission NEVER erases other bonds.
 11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue, compact ~N, never prose; species literal; no species-aging inference. Birthday/exact elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual aging/growth/rejuvenation=>apparentAgeState:"evolve"+reason. Appearance must not repeat explicit age. Vague time skip insufficient.
 12. RELATIONSHIP -100..+100 DELTA-ONLY; currentRelationship read-only. Return relationshipDelta+relationshipEvidence (all 4 keys). NEW only; continuation/aftermath=>0. Raw max 1/2/5/10; axis max 1/2/3/4. EVERY non-zero axis needs grounded CURRENT-exchange evidence. Desire needs explicit attraction/intimacy narration; rescue/gratitude/affection/trust/proximity=>0. Secondary to identity. Trust!=obedience; Affection!=devotion; Tension!=jealousy.
