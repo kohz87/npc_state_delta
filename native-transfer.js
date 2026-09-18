@@ -1,5 +1,6 @@
 /* NPC State Delta native transfer envelope. Keeps the established binary codec and adds declared Stage 8 metadata. */
 import { decodeNpcStateBundle, encodeNpcStateBundle } from './bundle.js';
+import { PORTRAIT_STYLE_PROMPT_LIMIT, PORTRAIT_COMPOSITION_PROMPT_LIMIT } from './core-mechanics.js';
 
 const MAGIC_BYTES = 8;
 const HEADER_BYTES = 12;
@@ -10,9 +11,9 @@ const textDecoder = new TextDecoder();
 const PORTABLE_SETTING_SCHEMA = Object.freeze({
     portraitGenerationEnabled: { type: 'boolean' },
     portraitThemePreset: { type: 'string', max: 80 },
-    portraitStylePositive: { type: 'string', max: 2400 },
-    portraitStyleNegative: { type: 'string', max: 2400 },
-    portraitComposition: { type: 'string', max: 1200 },
+    portraitStylePositive: { type: 'string', max: PORTRAIT_STYLE_PROMPT_LIMIT },
+    portraitStyleNegative: { type: 'string', max: PORTRAIT_STYLE_PROMPT_LIMIT },
+    portraitComposition: { type: 'string', max: PORTRAIT_COMPOSITION_PROMPT_LIMIT },
     portraitPromptFormat: { type: 'string', max: 40 },
     portraitUseMood: { type: 'boolean' },
     portraitUseLocation: { type: 'boolean' },

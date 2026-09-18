@@ -1,5 +1,13 @@
 # NPC State Delta changes
 
+## 1.0.33 - 18 September 2026
+
+- Fix portrait prompts being silently truncated at several independent layers: 2,400-character global style settings, 1,800-character builder/override limits, 800/1,200-character composition limits, and final 6,000-positive / 4,000-negative assembly caps.
+- Raise global positive/negative style and per-NPC portrait override safety limits to 12,000 characters and composition to 6,000 characters, with the same limits used by settings persistence, dossier normalization, portable native settings, and UI inputs.
+- Remove the redundant final assembled-prompt truncation so all bounded prompt components reach the portrait editor, clipboard workflow, and native `/imagine` handoff intact; provider/backend limits remain owned by SillyTavern Image Generation.
+- Add regressions proving positive prompts beyond 6,000 characters, negative prompts beyond 4,000 characters, long per-NPC overrides, and portable prompt settings preserve their tail content.
+- Advance synchronized application/package/display metadata to 1.0.33; persisted storage, bundle, branch, rollback-journal and diagnostic schema versions remain unchanged.
+
 ## 1.0.32 - 18 September 2026
 
 - Fix automatic established-NPC continuity repair treating names inside World State, NPC Inner Chatter, roster/status blocks, and other structured evidence listings as narrative participation.

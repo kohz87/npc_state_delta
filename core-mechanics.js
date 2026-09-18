@@ -32,6 +32,9 @@ export const DURABLE_PROFILE_LIMITS = Object.freeze({
 export const DEFAULT_PORTRAIT_STYLE_POSITIVE = 'fantasy anime character illustration, refined clean linework, soft cel shading, detailed expressive eyes, elegant character design, cinematic soft lighting';
 export const DEFAULT_PORTRAIT_STYLE_NEGATIVE = 'low quality, blurry, pixelated, bad anatomy, malformed hands, extra limbs, duplicate character, multiple heads, cropped face, obscured eyes, text, watermark, logo, photorealistic, 3d render';
 export const DEFAULT_PORTRAIT_COMPOSITION = 'solo character portrait, upper body, centered composition, face clearly visible, portrait orientation';
+export const PORTRAIT_STYLE_PROMPT_LIMIT = 12000;
+export const PORTRAIT_COMPOSITION_PROMPT_LIMIT = 6000;
+export const PORTRAIT_NPC_PROMPT_LIMIT = 12000;
 export const PORTRAIT_PROMPT_FORMATS = Object.freeze(['hybrid', 'tags', 'natural']);
 
 export function normalizePortraitPromptFormat(value) {
@@ -2980,13 +2983,13 @@ function shouldPromoteCandidate(candidate, incoming, admissionMode = 'conservati
 export function buildNpcPortraitPrompts(rawNpc = {}, options = {}) {
     const npc = rawNpc && typeof rawNpc === 'object' ? rawNpc : {};
     const format = normalizePortraitPromptFormat(options.format);
-    const stylePositive = cleanText(options.stylePositive ?? DEFAULT_PORTRAIT_STYLE_POSITIVE, 1800);
-    const styleNegative = cleanText(options.styleNegative ?? DEFAULT_PORTRAIT_STYLE_NEGATIVE, 1800);
-    const composition = cleanText(options.composition ?? DEFAULT_PORTRAIT_COMPOSITION, 800);
+    const stylePositive = cleanText(options.stylePositive ?? DEFAULT_PORTRAIT_STYLE_POSITIVE, PORTRAIT_STYLE_PROMPT_LIMIT);
+    const styleNegative = cleanText(options.styleNegative ?? DEFAULT_PORTRAIT_STYLE_NEGATIVE, PORTRAIT_STYLE_PROMPT_LIMIT);
+    const composition = cleanText(options.composition ?? DEFAULT_PORTRAIT_COMPOSITION, PORTRAIT_COMPOSITION_PROMPT_LIMIT);
     const useMood = options.useMood !== false;
     const useLocation = options.useLocation === true;
-    const extraPositive = cleanText(npc.portraitPromptPositive ?? npc.portrait_prompt_positive, 1800);
-    const extraNegative = cleanText(npc.portraitPromptNegative ?? npc.portrait_prompt_negative, 1800);
+    const extraPositive = cleanText(npc.portraitPromptPositive ?? npc.portrait_prompt_positive, PORTRAIT_NPC_PROMPT_LIMIT);
+    const extraNegative = cleanText(npc.portraitPromptNegative ?? npc.portrait_prompt_negative, PORTRAIT_NPC_PROMPT_LIMIT);
     const replaceAutomatic = Boolean(npc.portraitPromptReplace ?? npc.portrait_prompt_replace);
 
     const visualAge = cleanText(npc.apparentAge, 80) || cleanText(npc.age, 80);
@@ -3028,8 +3031,8 @@ export function buildNpcPortraitPrompts(rawNpc = {}, options = {}) {
 
     const negative = [styleNegative, extraNegative].filter(Boolean).join(', ');
     return {
-        positive: cleanText(positive, 6000),
-        negative: cleanText(negative, 4000),
+        positive: String(positive || '').replace(/\s+/g, ' ').trim(),
+        negative: String(negative || '').replace(/\s+/g, ' ').trim(),
         format,
         replaceAutomatic,
     };
@@ -3069,8 +3072,8 @@ export function normalizeNpcRecord(raw = {}) {
     npc.location = cleanText(raw.location, 300);
     npc.goal = cleanText(raw.goal, 500);
     npc.status = cleanText(raw.status, 500);
-    npc.portraitPromptPositive = cleanText(raw.portraitPromptPositive ?? raw.portrait_prompt_positive, 1800);
-    npc.portraitPromptNegative = cleanText(raw.portraitPromptNegative ?? raw.portrait_prompt_negative, 1800);
+    npc.portraitPromptPositive = cleanText(raw.portraitPromptPositive ?? raw.portrait_prompt_positive, PORTRAIT_NPC_PROMPT_LIMIT);
+    npc.portraitPromptNegative = cleanText(raw.portraitPromptNegative ?? raw.portrait_prompt_negative, PORTRAIT_NPC_PROMPT_LIMIT);
     npc.portraitPromptReplace = normalizeBoolean(raw.portraitPromptReplace ?? raw.portrait_prompt_replace);
     npc.aliases = cleanList(raw.aliases, 8, 120);
     npc.memories = normalizeStoredMemories(raw.memories);
@@ -4475,8 +4478,8 @@ function mergeAliasLinkedNpcPair(a, b) {
     const lifecycleSource = Number(a?.updatedAt || 0) >= Number(b?.updatedAt || 0) ? a : b;
     for (const field of ['present','worldActive','lifeState','lifeStateCertainty','archived','archiveReason','archivedAt','archiveSourceMessageId']) merged[field] = structuredClone(lifecycleSource?.[field]);
     merged.portrait = a?.portrait?.dataUrl ? structuredClone(a.portrait) : (b?.portrait?.dataUrl ? structuredClone(b.portrait) : (a?.portrait || b?.portrait || null));
-    merged.portraitPromptPositive = cleanText(newer?.portraitPromptPositive || older?.portraitPromptPositive, 1800);
-    merged.portraitPromptNegative = cleanText(newer?.portraitPromptNegative || older?.portraitPromptNegative, 1800);
+    merged.portraitPromptPositive = cleanText(newer?.portraitPromptPositive || older?.portraitPromptPositive, PORTRAIT_NPC_PROMPT_LIMIT);
+    merged.portraitPromptNegative = cleanText(newer?.portraitPromptNegative || older?.portraitPromptNegative, PORTRAIT_NPC_PROMPT_LIMIT);
     merged.portraitPromptReplace = Boolean(newer?.portraitPromptReplace || older?.portraitPromptReplace);
     merged.importance = Math.max(Number(a?.importance || 0), Number(b?.importance || 0));
     merged.seenCount = Math.max(Number(a?.seenCount || 0), Number(b?.seenCount || 0));

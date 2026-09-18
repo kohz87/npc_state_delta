@@ -77,6 +77,9 @@ import {
     DEFAULT_PORTRAIT_STYLE_POSITIVE,
     DEFAULT_PORTRAIT_STYLE_NEGATIVE,
     DEFAULT_PORTRAIT_COMPOSITION,
+    PORTRAIT_STYLE_PROMPT_LIMIT,
+    PORTRAIT_COMPOSITION_PROMPT_LIMIT,
+    PORTRAIT_NPC_PROMPT_LIMIT,
     normalizePortraitPromptFormat,
     buildNpcPortraitPrompts,
     appearanceDraftRecord,
@@ -483,9 +486,9 @@ function getSettings() {
     assign('scannerConnectionProfile', typeof settings.scannerConnectionProfile === 'string' ? settings.scannerConnectionProfile.trim() : '');
     assign('portraitGenerationEnabled', settings.portraitGenerationEnabled !== false);
     assign('portraitThemePreset', PORTRAIT_THEME_PRESETS[settings.portraitThemePreset] ? settings.portraitThemePreset : 'custom');
-    assign('portraitStylePositive', String(settings.portraitStylePositive ?? DEFAULT_PORTRAIT_STYLE_POSITIVE).slice(0, 2400));
-    assign('portraitStyleNegative', String(settings.portraitStyleNegative ?? DEFAULT_PORTRAIT_STYLE_NEGATIVE).slice(0, 2400));
-    assign('portraitComposition', String(settings.portraitComposition ?? DEFAULT_PORTRAIT_COMPOSITION).slice(0, 1200));
+    assign('portraitStylePositive', String(settings.portraitStylePositive ?? DEFAULT_PORTRAIT_STYLE_POSITIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT));
+    assign('portraitStyleNegative', String(settings.portraitStyleNegative ?? DEFAULT_PORTRAIT_STYLE_NEGATIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT));
+    assign('portraitComposition', String(settings.portraitComposition ?? DEFAULT_PORTRAIT_COMPOSITION).slice(0, PORTRAIT_COMPOSITION_PROMPT_LIMIT));
     assign('portraitPromptFormat', normalizePortraitPromptFormat(settings.portraitPromptFormat));
     assign('portraitUseMood', settings.portraitUseMood !== false);
     assign('portraitUseLocation', settings.portraitUseLocation === true);
@@ -3293,11 +3296,11 @@ function buildSettingsHtml() {
               <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_theme_preset"><b>Theme preset</b><small>Choosing a preset replaces the global positive/negative style fields below. Choose Custom before hand-editing them.</small></label>
               <select id="npc_state_delta_portrait_theme_preset" class="text_pole">${Object.entries(PORTRAIT_THEME_PRESETS).map(([key, item]) => `<option value="${key}">${escapeHtml(item.label)}</option>`).join('')}</select>
               <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_style_positive"><b>Positive style / theme</b><small>Use this for a house style such as anime key visual, painterly fantasy, dark medieval, or your own model-specific style keywords.</small></label>
-              <textarea id="npc_state_delta_portrait_style_positive" class="text_pole npc-state-delta-rubric-textarea" rows="4" maxlength="2400"></textarea>
+              <textarea id="npc_state_delta_portrait_style_positive" class="text_pole npc-state-delta-rubric-textarea" rows="4" maxlength="${PORTRAIT_STYLE_PROMPT_LIMIT}"></textarea>
               <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_style_negative"><b>Global negative prompt</b><small>Quality, anatomy, composition, or style exclusions applied to every generated NPC portrait.</small></label>
-              <textarea id="npc_state_delta_portrait_style_negative" class="text_pole npc-state-delta-rubric-textarea" rows="4" maxlength="2400"></textarea>
+              <textarea id="npc_state_delta_portrait_style_negative" class="text_pole npc-state-delta-rubric-textarea" rows="4" maxlength="${PORTRAIT_STYLE_PROMPT_LIMIT}"></textarea>
               <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_composition"><b>Portrait composition</b><small>Kept separate from appearance so you can change framing without rewriting dossiers.</small></label>
-              <textarea id="npc_state_delta_portrait_composition" class="text_pole npc-state-delta-rubric-textarea" rows="3" maxlength="1200"></textarea>
+              <textarea id="npc_state_delta_portrait_composition" class="text_pole npc-state-delta-rubric-textarea" rows="3" maxlength="${PORTRAIT_COMPOSITION_PROMPT_LIMIT}"></textarea>
               <div class="npc-state-delta-portrait-settings-grid">
                 ${settingRow('npc_state_delta_portrait_prompt_format', 'Prompt format', '<select id="npc_state_delta_portrait_prompt_format" class="text_pole"><option value="hybrid">Structured hybrid</option><option value="tags">Comma tags</option><option value="natural">Natural language</option></select>', 'Hybrid keeps theme tags while grouping dossier facts; Tags favors SD/anime checkpoints; Natural is useful for instruction-oriented image models.')}
                 ${settingRow('npc_state_delta_portrait_use_mood', 'Use current mood', '<input id="npc_state_delta_portrait_use_mood" type="checkbox">', 'Adds current mood as expression/bearing. Stable Personality and Background are never dumped into the image prompt.')}
@@ -4377,8 +4380,8 @@ function openNpcEditor(npcId) {
         <summary><b>Portrait prompt overrides</b> <small>Optional per-NPC additions</small></summary>
         <div class="npc-state-delta-editor-portrait-overrides-body">
           <p class="npc-state-delta-muted">These are appended only when building image prompts. They are never injected into roleplay generation and never rewritten by the NPC scanner.</p>
-          <label>Additional positive prompt<textarea id="npc_state_delta_edit_portrait_positive" class="text_pole" rows="4" maxlength="1800" placeholder="black ceremonial ribbon, winter uniform, gold ear cuff...">${editorValue(npc.portraitPromptPositive)}</textarea></label>
-          <label>Additional negative prompt<textarea id="npc_state_delta_edit_portrait_negative" class="text_pole" rows="4" maxlength="1800" placeholder="helmet, hood, short hair...">${editorValue(npc.portraitPromptNegative)}</textarea></label>
+          <label>Additional positive prompt<textarea id="npc_state_delta_edit_portrait_positive" class="text_pole" rows="4" maxlength="${PORTRAIT_NPC_PROMPT_LIMIT}" placeholder="black ceremonial ribbon, winter uniform, gold ear cuff...">${editorValue(npc.portraitPromptPositive)}</textarea></label>
+          <label>Additional negative prompt<textarea id="npc_state_delta_edit_portrait_negative" class="text_pole" rows="4" maxlength="${PORTRAIT_NPC_PROMPT_LIMIT}" placeholder="helmet, hood, short hair...">${editorValue(npc.portraitPromptNegative)}</textarea></label>
           <label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_portrait_replace" type="checkbox" ${npc.portraitPromptReplace ? 'checked' : ''}> Replace the automatic positive prompt entirely <small>Use only when this NPC needs a hand-authored model-specific prompt. The global negative prompt still applies.</small></label>
         </div>
       </details>
@@ -4804,8 +4807,8 @@ function saveNpcEditor(npcId, { close = true, silent = false } = {}) {
         correctedBirthday.birthDateSourceMessageId = null;
         Object.assign(next, correctedBirthday);
     }
-    next.portraitPromptPositive = String(editorField('npc_state_delta_edit_portrait_positive')).trim().slice(0, 1800);
-    next.portraitPromptNegative = String(editorField('npc_state_delta_edit_portrait_negative')).trim().slice(0, 1800);
+    next.portraitPromptPositive = String(editorField('npc_state_delta_edit_portrait_positive')).trim().slice(0, PORTRAIT_NPC_PROMPT_LIMIT);
+    next.portraitPromptNegative = String(editorField('npc_state_delta_edit_portrait_negative')).trim().slice(0, PORTRAIT_NPC_PROMPT_LIMIT);
     next.portraitPromptReplace = Boolean(document.getElementById('npc_state_delta_edit_portrait_replace')?.checked);
     next.identityKind = inferNpcIdentityKind(stableInputs.name);
     next.relationshipSummary = String(editorField('npc_state_delta_edit_relationship_summary')).trim().slice(0, 900);
@@ -5159,9 +5162,9 @@ function portraitSettingsSnapshot(source = getSettings()) {
     return {
         portraitGenerationEnabled: source.portraitGenerationEnabled !== false,
         portraitThemePreset: PORTRAIT_THEME_PRESETS[source.portraitThemePreset] ? source.portraitThemePreset : 'custom',
-        portraitStylePositive: String(source.portraitStylePositive ?? DEFAULT_PORTRAIT_STYLE_POSITIVE).slice(0, 2400),
-        portraitStyleNegative: String(source.portraitStyleNegative ?? DEFAULT_PORTRAIT_STYLE_NEGATIVE).slice(0, 2400),
-        portraitComposition: String(source.portraitComposition ?? DEFAULT_PORTRAIT_COMPOSITION).slice(0, 1200),
+        portraitStylePositive: String(source.portraitStylePositive ?? DEFAULT_PORTRAIT_STYLE_POSITIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT),
+        portraitStyleNegative: String(source.portraitStyleNegative ?? DEFAULT_PORTRAIT_STYLE_NEGATIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT),
+        portraitComposition: String(source.portraitComposition ?? DEFAULT_PORTRAIT_COMPOSITION).slice(0, PORTRAIT_COMPOSITION_PROMPT_LIMIT),
         portraitPromptFormat: normalizePortraitPromptFormat(source.portraitPromptFormat),
         portraitUseMood: source.portraitUseMood !== false,
         portraitUseLocation: source.portraitUseLocation === true,
@@ -5176,9 +5179,9 @@ function normalizePortraitSettingsDraft(raw = {}) {
     const next = {
         portraitGenerationEnabled: raw.portraitGenerationEnabled !== undefined ? Boolean(raw.portraitGenerationEnabled) : current.portraitGenerationEnabled,
         portraitThemePreset: key,
-        portraitStylePositive: String(raw.portraitStylePositive ?? current.portraitStylePositive).slice(0, 2400),
-        portraitStyleNegative: String(raw.portraitStyleNegative ?? current.portraitStyleNegative).slice(0, 2400),
-        portraitComposition: String(raw.portraitComposition ?? current.portraitComposition).slice(0, 1200),
+        portraitStylePositive: String(raw.portraitStylePositive ?? current.portraitStylePositive).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT),
+        portraitStyleNegative: String(raw.portraitStyleNegative ?? current.portraitStyleNegative).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT),
+        portraitComposition: String(raw.portraitComposition ?? current.portraitComposition).slice(0, PORTRAIT_COMPOSITION_PROMPT_LIMIT),
         portraitPromptFormat: normalizePortraitPromptFormat(raw.portraitPromptFormat ?? current.portraitPromptFormat),
         portraitUseMood: raw.portraitUseMood !== undefined ? Boolean(raw.portraitUseMood) : current.portraitUseMood,
         portraitUseLocation: raw.portraitUseLocation !== undefined ? Boolean(raw.portraitUseLocation) : current.portraitUseLocation,

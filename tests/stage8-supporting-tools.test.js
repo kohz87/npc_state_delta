@@ -168,8 +168,16 @@ test('native Delta envelope round-trips portraits, portable settings and source 
         branchRootSnapshot: { npcs: [npc] },
     };
     const base = encodeNpcStateBundle(state, { appVersion: '0.1.0', chatKey: 'chat:source' });
+    const longPositive = `${'portable positive prompt detail, '.repeat(120)}PORTABLE_POSITIVE_SENTINEL`;
+    const longNegative = `${'portable negative prompt detail, '.repeat(120)}PORTABLE_NEGATIVE_SENTINEL`;
+    const longComposition = `${'portable composition detail, '.repeat(55)}PORTABLE_COMPOSITION_SENTINEL`;
     const native = augmentNativeBundle(base, {
-        portableSettings: buildPortablePortraitSettings({ portraitThemePreset: 'custom', portraitStylePositive: 'anime' }),
+        portableSettings: buildPortablePortraitSettings({
+            portraitThemePreset: 'custom',
+            portraitStylePositive: longPositive,
+            portraitStyleNegative: longNegative,
+            portraitComposition: longComposition,
+        }),
         historyArchive: buildHistoryArchive(state),
     });
     const decoded = decodeDeltaNativeBundle(native);
@@ -178,6 +186,9 @@ test('native Delta envelope round-trips portraits, portable settings and source 
     assert.equal(decoded.state.npcs[0].relationshipProgress.trust, 0.5);
     assert.equal(decoded.state.npcs[0].lifeState, 'deceased');
     assert.equal(decoded.portableSettings.portraitThemePreset, 'custom');
+    assert.match(decoded.portableSettings.portraitStylePositive, /PORTABLE_POSITIVE_SENTINEL/);
+    assert.match(decoded.portableSettings.portraitStyleNegative, /PORTABLE_NEGATIVE_SENTINEL/);
+    assert.match(decoded.portableSettings.portraitComposition, /PORTABLE_COMPOSITION_SENTINEL/);
     assert.equal(decoded.historyArchive.checkpoints.length, 1);
     assert.equal(decoded.historyArchive.checkpoints[0].snapshot.npcs[0].portrait.dataUrl, undefined, 'history audit must not duplicate portrait binary payloads');
     assert.equal(decoded.historyArchive.checkpoints[0].snapshot.portraitAssets, undefined);
