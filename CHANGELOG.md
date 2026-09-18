@@ -1,5 +1,13 @@
 # NPC State Delta changes
 
+## 1.0.34 - 18 September 2026
+
+- Fix automatic per-NPC backfill storms resurfacing after update/reload because pre-1.0.34 unscoped `pendingBackfills` could remain persisted and were drained after later assistant receipts even when no new scan was due.
+- Version and reason-scope automatic backfill work as `missed-participant` or `new-admission`; discard legacy/unversioned pending backfill entries during hydration instead of replaying obsolete cast-wide work.
+- Revalidate automatic missed-participant retries against the exact owning exchange before dispatch. Manual Scan dossier/history repair remains explicitly available and is not subject to automatic-queue provenance rules.
+- Bound omitted-established-participant automatic continuity repair to at most one target per broad scan. If multiple apparent omissions are detected, suppress that per-NPC fallback rather than allowing an implicit Full Cast fan-out; newly admitted dossiers retain their own targeted enrichment.
+- Advance synchronized application/package/display metadata to 1.0.34; scanner prompt bytes and persisted dossier/bundle/branch/rollback-journal/diagnostic schema versions remain unchanged.
+
 ## 1.0.33 - 18 September 2026
 
 - Fix portrait prompts being silently truncated at several independent layers: 2,400-character global style settings, 1,800-character builder/override limits, 800/1,200-character composition limits, and final 6,000-positive / 4,000-negative assembly caps.
