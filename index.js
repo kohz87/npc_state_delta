@@ -8,7 +8,7 @@ import {
     scannerRoutingMetrics,
     scannerProfileOptions,
 } from './scanner-routing.js';
-import { backfillNeedsRequest } from './scan-context.js';
+import { backfillNeedsRequest, npcParticipatesInExchange } from './scan-context.js';
 import { createDiagnosticStore } from './diagnostics-core.js';
 import {
     NPC_STATE_VERSION,
@@ -3191,7 +3191,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
             for (const raw of Array.isArray(resolvedParsed?.npcs) ? resolvedParsed.npcs : []) markBroadScanTarget(raw);
             for (const raw of Array.isArray(resolvedParsed?.profileUpdates) ? resolvedParsed.profileUpdates : []) markBroadScanTarget(raw);
             for (const npc of nextState.npcs || []) {
-                if (npc.archived || touchedIds.has(npc.id) || !transcriptMentionsNpcRecord(currentTranscript || '', npc)) continue;
+                if (npc.archived || touchedIds.has(npc.id) || !npcParticipatesInExchange(npc, nextState.npcs || [], currentTranscript || '', { includeRole: false })) continue;
                 queueNpcBackfillInState(nextState, npc.id, npc.name, targetMessageId, {
                     preserveLiveState: true,
                     silent: true,
