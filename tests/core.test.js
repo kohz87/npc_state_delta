@@ -2355,6 +2355,42 @@ test('portrait prompt builder supports optional location, per-NPC overrides, and
     assert.equal(replaced.replaceAutomatic, true);
 });
 
+test('portrait prompt builder preserves long style, composition, and per-NPC prompt text beyond the former caps', () => {
+    const stylePositive = `${'polished fantasy anime detail, '.repeat(220)}POSITIVE_STYLE_SENTINEL`;
+    const styleNegative = `${'negative exclusion detail, '.repeat(180)}NEGATIVE_STYLE_SENTINEL`;
+    const composition = `${'portrait composition instruction, '.repeat(70)}COMPOSITION_SENTINEL`;
+    const extraPositive = `${'character-specific positive detail, '.repeat(110)}EXTRA_POSITIVE_SENTINEL`;
+    const extraNegative = `${'character-specific negative detail, '.repeat(110)}EXTRA_NEGATIVE_SENTINEL`;
+    const prompts = buildNpcPortraitPrompts({
+        species: 'Half-elf',
+        apparentAge: '~12',
+        appearance: 'Amber-gold and deep-indigo hair, bright electric-gold eyes, long pointed ears.',
+        portraitPromptPositive: extraPositive,
+        portraitPromptNegative: extraNegative,
+    }, {
+        stylePositive,
+        styleNegative,
+        composition,
+        format: 'hybrid',
+    });
+
+    assert.ok(prompts.positive.length > 6000, 'assembled positive prompt should exceed the former 6000-character cap without truncation');
+    assert.ok(prompts.negative.length > 4000, 'assembled negative prompt should exceed the former 4000-character cap without truncation');
+    assert.match(prompts.positive, /POSITIVE_STYLE_SENTINEL/);
+    assert.match(prompts.positive, /COMPOSITION_SENTINEL/);
+    assert.match(prompts.positive, /EXTRA_POSITIVE_SENTINEL/);
+    assert.match(prompts.negative, /NEGATIVE_STYLE_SENTINEL/);
+    assert.match(prompts.negative, /EXTRA_NEGATIVE_SENTINEL/);
+
+    const normalized = normalizeNpcRecord({
+        name: 'Sora',
+        portraitPromptPositive: `${'override positive, '.repeat(180)}NORMALIZED_POSITIVE_SENTINEL`,
+        portraitPromptNegative: `${'override negative, '.repeat(180)}NORMALIZED_NEGATIVE_SENTINEL`,
+    });
+    assert.match(normalized.portraitPromptPositive, /NORMALIZED_POSITIVE_SENTINEL/);
+    assert.match(normalized.portraitPromptNegative, /NORMALIZED_NEGATIVE_SENTINEL/);
+});
+
 test('portrait prompt format normalization is conservative', () => {
     assert.equal(normalizePortraitPromptFormat('tags'), 'tags');
     assert.equal(normalizePortraitPromptFormat('natural'), 'natural');

@@ -225,6 +225,12 @@ test('dossier exposes species/race, age, prompt-ready appearance, and portrait g
     assert.match(index, /Age:/);
     assert.match(index, /npcImagePromptText/);
     assert.match(index, /buildNpcPortraitPrompts/);
+    assert.match(index, /npc_state_delta_portrait_style_positive[^\n]+maxlength=\"\$\{PORTRAIT_STYLE_PROMPT_LIMIT\}\"/);
+    assert.match(index, /npc_state_delta_portrait_style_negative[^\n]+maxlength=\"\$\{PORTRAIT_STYLE_PROMPT_LIMIT\}\"/);
+    assert.match(index, /npc_state_delta_portrait_composition[^\n]+maxlength=\"\$\{PORTRAIT_COMPOSITION_PROMPT_LIMIT\}\"/);
+    assert.match(index, /npc_state_delta_edit_portrait_positive[^\n]+maxlength=\"\$\{PORTRAIT_NPC_PROMPT_LIMIT\}\"/);
+    assert.match(index, /npc_state_delta_edit_portrait_negative[^\n]+maxlength=\"\$\{PORTRAIT_NPC_PROMPT_LIMIT\}\"/);
+    assert.doesNotMatch(index, /npc_state_delta_portrait_style_(?:positive|negative)[^\n]+maxlength=\"2400\"/);
     assert.match(index, /Generate portrait/);
     assert.doesNotMatch(index, /<b>Current thoughts<\/b>|Thought basis|npc_state_delta_edit_thought/i);
 });

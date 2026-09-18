@@ -1,4 +1,5 @@
 /* NPC State Delta supporting tools: portrait manager, native data transfer, and diagnostics. */
+import { PORTRAIT_STYLE_PROMPT_LIMIT, PORTRAIT_COMPOSITION_PROMPT_LIMIT } from './core-mechanics.js';
 
 const OVERLAY_ID = 'npc_state_delta_tools_overlay';
 const DOSSIER_ROOT_ID = 'npc_state_delta_dossier_root';
@@ -91,9 +92,9 @@ export function buildPortablePortraitSettings(raw = {}) {
     return {
         portraitGenerationEnabled: raw?.portraitGenerationEnabled !== false,
         portraitThemePreset: clampText(raw?.portraitThemePreset || 'custom', 80),
-        portraitStylePositive: clampText(raw?.portraitStylePositive || '', 2400),
-        portraitStyleNegative: clampText(raw?.portraitStyleNegative || '', 2400),
-        portraitComposition: clampText(raw?.portraitComposition || '', 1200),
+        portraitStylePositive: clampText(raw?.portraitStylePositive || '', PORTRAIT_STYLE_PROMPT_LIMIT),
+        portraitStyleNegative: clampText(raw?.portraitStyleNegative || '', PORTRAIT_STYLE_PROMPT_LIMIT),
+        portraitComposition: clampText(raw?.portraitComposition || '', PORTRAIT_COMPOSITION_PROMPT_LIMIT),
         portraitPromptFormat: clampText(raw?.portraitPromptFormat || 'hybrid', 40),
         portraitUseMood: raw?.portraitUseMood !== false,
         portraitUseLocation: raw?.portraitUseLocation === true,
