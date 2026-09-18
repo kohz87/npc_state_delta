@@ -1,5 +1,11 @@
 # NPC State Delta changes
 
+## Unreleased
+
+- Narrow automatic new-NPC enrichment to the newly created/promoted dossiers instead of treating admission as a cast-wide deep-reconciliation checkpoint. Established NPCs are no longer individually backfilled merely because another NPC was admitted.
+- Preserve silent targeted continuity repair for established NPCs that the broad current-exchange scan actually omitted, plus manual Refresh/Scan and the separately opt-in current-cast workflow.
+- Remove the retired `deepSweep` queue flag and add regression/contract coverage so new admission cannot reintroduce per-NPC fan-out across the established cast.
+
 ## 1.0.30 - 16 September 2026
 
 - Fix destructive message rollback when SillyTavern emits `MESSAGE_DELETED` or `MESSAGE_EDITED` before its in-memory chat lineage has finished changing. Delta now keeps the destructive event pending until the host exposes the committed narrative mutation instead of consuming the event against the stale latest lineage.

@@ -32,6 +32,8 @@ Add a scanner connection-profile setting. An empty/default selection uses the ex
 
 A missing/unavailable selected profile produces a clear recoverable error; never silently route to a different provider/model. Prefer request-scoped routing. Any temporary host setting changes must restore reliably and cannot redirect concurrent roleplay. One shared dispatcher should account for actual request counts, timeouts and cancellation. Do not add automatic completeness calls or additional passes solely to compensate for a larger contract.
 
+Automatic post-scan repair is target-scoped. If the broad scan explicitly misses an existing NPC involved in the current exchange, Delta may queue that dossier for silent continuity repair. A newly created or promoted dossier may receive its own targeted recent-history enrichment. New admission alone must never fan out targeted backfill requests across unrelated established active dossiers; the inherited v0.2.23 cast-wide topology sweep is intentionally retired. Manual Refresh/Scan and the separately opt-in current-cast scan remain explicit operations with their own scope.
+
 ## C04. Dossier establishment and evolution — stage 4
 
 Retain legacy identity/admission, aliases, role/species, actual/apparent age, live state, personality, behavior profile, characteristic speech, mannerisms, background, memories, non-player ties and bounded profile-evidence evolution. Supported new facts can populate the first scan. Unknown fields stay unknown; do not infer merely because a field is blank. Omitted fields preserve accepted values.

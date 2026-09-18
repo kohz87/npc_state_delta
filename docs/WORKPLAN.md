@@ -53,7 +53,7 @@ Keep accepted message capture, routine/latest-exchange scan, configurable cadenc
 
 Inventory every provider call and assign its route: automatic scan, manual scan, targeted Refresh, focused relationships, retries, and retained backfills. Keep roleplay routing and portrait generation independent. Verify request counts, duplicate completions, busy/superseded scans, missing profile, timeout/cancel, chat switch, and restoration of any temporary host routing state. No trailer, separate Development stage, or next-generation synchronization barrier.
 
-Stage 3 implementation uses `scanner-routing.js` as the single text-model request owner and `scan-context.js` for pure eligibility/participation checks. Redundant automatic backfills are suppressed before dispatch rather than by replacing `generateRaw`, so selected connection profiles receive the same guard behavior as the default route and manual repair remains available. Validation enforces that no other runtime module calls `generateRaw` directly.
+Stage 3 implementation uses `scanner-routing.js` as the single text-model request owner and `scan-context.js` for pure eligibility/participation checks. Redundant automatic backfills are suppressed before dispatch rather than by replacing `generateRaw`, so selected connection profiles receive the same guard behavior as the default route and manual repair remains available. Automatic repair is target-scoped: omitted current-exchange NPCs may receive continuity repair and newly admitted dossiers may receive their own history enrichment, but admission of one NPC must not trigger per-NPC backfills across the established active cast. Validation enforces that no other runtime module calls `generateRaw` directly.
 
 ## Stage 4 — appearance and lifecycle
 

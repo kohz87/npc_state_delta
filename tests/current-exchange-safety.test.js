@@ -16,12 +16,15 @@ test('v0.2.23 relationship repair targets current-exchange NPCs even when broad 
     assert.doesNotMatch(relationshipPassSource, /\.slice\(0,\s*4\)/);
 });
 
-test('v0.2.23 new NPC admission queues a deep active-cast reconciliation and omitted participants get continuity repair', () => {
-    assert.match(source, /deepSweep: true/);
+test('new NPC admission enriches only the newly admitted dossiers while omitted current participants still get continuity repair', () => {
+    assert.doesNotMatch(source, /deepSweep: true/);
     assert.match(source, /state\.pendingBackfills\.length > 100/);
     assert.match(source, /touchedIds = new Set/);
     assert.match(source, /!transcriptMentionsNpcRecord\(currentTranscript \|\| '', npc\)/);
-    assert.match(source, /One failed dossier must not starve the rest of a cast reconciliation sweep/);
+    assert.match(source, /for \(const id of newlyAdmittedIds\)/);
+    assert.match(source, /const admitted = nextState\.npcs\.find\(npc => npc\.id === id && !npc\.archived\)/);
+    assert.match(source, /queueNpcBackfillInState\(nextState, admitted\.id, admitted\.name, targetMessageId/);
+    assert.doesNotMatch(source, /cast topology change is a natural checkpoint for a deeper continuity sweep/i);
 });
 
 test('v0.2.23 manual and full-window scans scrub rolling relationship output and evaluate only the current exchange', () => {
