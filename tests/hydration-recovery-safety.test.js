@@ -37,11 +37,13 @@ test('scan timeout drains coalesced automatic work', () => {
     assert.match(block, /drainPendingAutoScan\(operation\.key\)/);
 });
 
-test('automatic backfill retries are durable cooled down and bounded', () => {
+test('automatic backfill retries are durable cooled down bounded and version-scoped', () => {
     assert.match(index, /BACKFILL_MAX_ATTEMPTS = 3/);
     assert.match(index, /BACKFILL_RETRY_COOLDOWN_MS = 60 \* 1000/);
-    assert.match(index, /attempts: Math\.max\(0, Math\.min\(BACKFILL_MAX_ATTEMPTS/);
-    assert.match(index, /lastAttemptAt: Math\.max\(0/);
+    assert.match(index, /\.map\(normalizeAutomaticBackfillRequest\)/);
+    assert.match(index, /attempts: Math\.max\(0, Math\.min\(BACKFILL_MAX_ATTEMPTS, item\.attempts\)\)/);
+    assert.match(index, /queueVersion: AUTOMATIC_BACKFILL_QUEUE_VERSION/);
+    assert.match(index, /automaticBackfillStillRelevant\(request, target, state\.npcs, owningExchange\)/);
     assert.match(index, /stopped automatic backfill retries/);
 });
 
@@ -54,10 +56,10 @@ test('editor and portrait workflows are chat-affine', () => {
     assert.match(index, /closePortraitGenerator\(\);\n\s*closeNpcViewer\(\);\n\s*closeNpcEditor\(\);/);
 });
 
-test('Delta application metadata is v1.0.33 and active core ownership is semantic', () => {
-    assert.match(core, /NPC_STATE_VERSION = '1\.0\.33'/);
+test('Delta application metadata is v1.0.34 and active core ownership is semantic', () => {
+    assert.match(core, /NPC_STATE_VERSION = '1\.0\.34'/);
     assert.match(core, /export \* from '\.\/core-mechanics\.js'/);
     assert.doesNotMatch(core, /NPC_STATE_SOURCE_ENGINE_VERSION|core-v0218/);
-    assert.equal(manifest.version, '1.0.33');
+    assert.equal(manifest.version, '1.0.34');
     assert.equal(manifest.author, 'kohz87');
 });

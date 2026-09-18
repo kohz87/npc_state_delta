@@ -8,7 +8,14 @@ import {
     scannerRoutingMetrics,
     scannerProfileOptions,
 } from './scanner-routing.js';
-import { backfillNeedsRequest, npcParticipatesInExchange } from './scan-context.js';
+import {
+    AUTOMATIC_BACKFILL_QUEUE_VERSION,
+    AUTOMATIC_MISSED_PARTICIPANT_REPAIR_LIMIT,
+    automaticBackfillStillRelevant,
+    backfillNeedsRequest,
+    normalizeAutomaticBackfillRequest,
+    npcParticipatesInExchange,
+} from './scan-context.js';
 import { createDiagnosticStore } from './diagnostics-core.js';
 import {
     NPC_STATE_VERSION,
@@ -706,15 +713,16 @@ function normalizeChatState(raw = {}) {
     state.npcs = Array.isArray(state.npcs) ? state.npcs.map(normalizeNpcRecord) : [];
     state.candidates = Array.isArray(state.candidates) ? state.candidates.map(normalizeNpcCandidate).filter(Boolean) : [];
     state.socialGraph = normalizeSocialGraph(state.socialGraph);
-    state.pendingBackfills = Array.isArray(state.pendingBackfills) ? state.pendingBackfills.map(item => ({
-        npcId: String(item?.npcId || '').slice(0, 100),
-        label: String(item?.label || '').trim().slice(0, 120),
-        requestedMessageId: Number.isInteger(item?.requestedMessageId) ? item.requestedMessageId : null,
-        preserveLiveState: item?.preserveLiveState === true,
-        requestedAt: Number(item?.requestedAt || 0) || Date.now(),
-        attempts: Math.max(0, Math.min(BACKFILL_MAX_ATTEMPTS, Math.round(Number(item?.attempts) || 0))),
-        lastAttemptAt: Math.max(0, Number(item?.lastAttemptAt || 0) || 0),
-    })).filter(item => item.npcId && item.label) : [];
+    state.pendingBackfills = Array.isArray(state.pendingBackfills)
+        ? state.pendingBackfills
+            .map(normalizeAutomaticBackfillRequest)
+            .filter(Boolean)
+            .map(item => ({
+                ...item,
+                requestedAt: item.requestedAt || Date.now(),
+                attempts: Math.max(0, Math.min(BACKFILL_MAX_ATTEMPTS, item.attempts)),
+            }))
+        : [];
     state.dismissed = Array.isArray(state.dismissed) ? [...state.dismissed] : [];
     state.userDismissedGroups = normalizeUserDismissedGroups(state.userDismissedGroups);
     state.inlineCards = Array.isArray(state.inlineCards) ? state.inlineCards.map(entry => ({
@@ -1938,11 +1946,14 @@ function updateInjection() {
 }
 
 function queueNpcBackfillInState(state, npcId, label, requestedMessageId = null, options = {}) {
-    if (!state || !npcId || !String(label || '').trim()) return state;
+    const reason = String(options?.reason || '').trim();
+    if (!state || !npcId || !String(label || '').trim() || !['missed-participant', 'new-admission'].includes(reason)) return state;
     if (!Array.isArray(state.pendingBackfills)) state.pendingBackfills = [];
     const cleanLabel = String(label || '').trim().slice(0, 120);
     state.pendingBackfills = state.pendingBackfills.filter(item => item?.npcId !== npcId);
     state.pendingBackfills.push({
+        queueVersion: AUTOMATIC_BACKFILL_QUEUE_VERSION,
+        reason,
         npcId: String(npcId).slice(0, 100),
         label: cleanLabel,
         requestedMessageId: Number.isInteger(requestedMessageId) ? requestedMessageId : null,
@@ -2481,7 +2492,7 @@ async function generateParsedNpcJson(ctx, {
     return invoke(false);
 }
 
-async function backfillNpcFromHistory(request, messageId = null) {
+async function backfillNpcFromHistory(request, messageId = null, { automatic = false } = {}) {
     const settings = getSettings();
     const ctx = getContext();
     const chatKey = getChatKey();
@@ -2492,7 +2503,11 @@ async function backfillNpcFromHistory(request, messageId = null) {
     if (!existing) return false;
     const transcript = recentTranscript(settings.scanDepth);
     if (!transcript) return false;
-    if (!backfillNeedsRequest(existing, state.npcs, currentExchangeTranscript())) return true;
+    if (automatic) {
+        if (!automaticBackfillStillRelevant(request, existing, state.npcs, currentExchangeTranscript(request.requestedMessageId))) return true;
+    } else if (!backfillNeedsRequest(existing, state.npcs)) {
+        return true;
+    }
     const scanLineage = chatLineage(ctx.chat || []);
     const prompt = buildBackfillPrompt({
         transcript,
@@ -2624,6 +2639,13 @@ async function processPendingBackfills(messageId = null) {
         const request = state.pendingBackfills.find(item => item?.npcId && !attemptedNpcIds.has(item.npcId));
         if (!request) break;
         attemptedNpcIds.add(request.npcId);
+        const target = state.npcs.find(npc => npc.id === request.npcId);
+        const owningExchange = Number.isInteger(request.requestedMessageId) ? currentExchangeTranscript(request.requestedMessageId) : '';
+        if (!automaticBackfillStillRelevant(request, target, state.npcs, owningExchange)) {
+            state.pendingBackfills = state.pendingBackfills.filter(item => item.npcId !== request.npcId);
+            persist();
+            continue;
+        }
         const attempts = Math.max(0, Math.round(Number(request.attempts) || 0));
         if (attempts >= BACKFILL_MAX_ATTEMPTS) {
             state.pendingBackfills = state.pendingBackfills.filter(item => item.npcId !== request.npcId);
@@ -2634,7 +2656,7 @@ async function processPendingBackfills(messageId = null) {
         const lastAttemptAt = Math.max(0, Number(request.lastAttemptAt || 0) || 0);
         if (attempts > 0 && lastAttemptAt && Date.now() - lastAttemptAt < BACKFILL_RETRY_COOLDOWN_MS) continue;
 
-        const succeeded = await backfillNpcFromHistory(request, messageId);
+        const succeeded = await backfillNpcFromHistory(request, messageId, { automatic: true });
         if (succeeded === null) break;
         if (getChatKey() !== chatKey || !requireReadyChatMutation('settle queued dossier backfill', chatKey, { notify: false })) break;
         const latest = getChatState(chatKey);
@@ -3193,11 +3215,23 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
             };
             for (const raw of Array.isArray(resolvedParsed?.npcs) ? resolvedParsed.npcs : []) markBroadScanTarget(raw);
             for (const raw of Array.isArray(resolvedParsed?.profileUpdates) ? resolvedParsed.profileUpdates : []) markBroadScanTarget(raw);
+            const missedParticipants = [];
             for (const npc of nextState.npcs || []) {
                 if (npc.archived || touchedIds.has(npc.id) || !npcParticipatesInExchange(npc, nextState.npcs || [], currentTranscript || '', { includeRole: false })) continue;
-                queueNpcBackfillInState(nextState, npc.id, npc.name, targetMessageId, {
-                    preserveLiveState: true,
-                    silent: true,
+                missedParticipants.push(npc);
+            }
+            if (missedParticipants.length <= AUTOMATIC_MISSED_PARTICIPANT_REPAIR_LIMIT) {
+                for (const npc of missedParticipants) {
+                    queueNpcBackfillInState(nextState, npc.id, npc.name, targetMessageId, {
+                        reason: 'missed-participant',
+                        preserveLiveState: true,
+                        silent: true,
+                    });
+                }
+            } else {
+                console.warn('[NPC State Delta] suppressed automatic per-NPC continuity fan-out after broad scan omitted multiple apparent participants.', {
+                    omittedParticipants: missedParticipants.length,
+                    limit: AUTOMATIC_MISSED_PARTICIPANT_REPAIR_LIMIT,
                 });
             }
 
@@ -3208,6 +3242,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
                 const admitted = nextState.npcs.find(npc => npc.id === id && !npc.archived);
                 if (!admitted) continue;
                 queueNpcBackfillInState(nextState, admitted.id, admitted.name, targetMessageId, {
+                    reason: 'new-admission',
                     preserveLiveState: true,
                     silent: true,
                 });

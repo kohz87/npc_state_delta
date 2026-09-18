@@ -150,7 +150,8 @@ test('runtime wires targeted new-NPC enrichment and post-admission relationship 
     assert.doesNotMatch(source, /deepSweep: true/);
     assert.match(source, /silent: true/);
     assert.match(source, /for \(let offset = 0; offset < newTargets\.length; offset \+= 4\)/);
-    assert.match(source, /preserveLiveState: item\?\.preserveLiveState === true/);
+    assert.match(source, /preserveLiveState: options\?\.preserveLiveState === true/);
+    assert.match(source, /queueVersion: AUTOMATIC_BACKFILL_QUEUE_VERSION/);
     assert.match(source, /discarded stale dossier scan after new-NPC relationship evaluation/);
     assert.match(source, /prepareFullWindowRelationshipPayload/);
     assert.match(source, /memoryInputLimit: IMPORTANT_MEMORY_LIMIT/);
