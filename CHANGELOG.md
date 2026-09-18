@@ -1,5 +1,12 @@
 # NPC State Delta changes
 
+## 1.0.32 - 18 September 2026
+
+- Fix automatic established-NPC continuity repair treating names inside World State, NPC Inner Chatter, roster/status blocks, and other structured evidence listings as narrative participation.
+- Keep structured evidence fully available to the broad scanner and targeted backfill prompts, but require real narrative participation before an omitted established dossier can be auto-backfilled.
+- Add regression coverage for raw `<World_State>` blocks, World State `<details>` blocks, and mixed narrative-plus-structured exchanges; retain targeted new-dossier enrichment and explicit current-participant repair.
+- Advance synchronized application/package/display metadata to 1.0.32; persisted storage, bundle, branch, rollback-journal and diagnostic schema versions remain unchanged.
+
 ## 1.0.31 - 18 September 2026
 
 - Narrow automatic new-NPC enrichment to the newly created/promoted dossiers instead of treating admission as a cast-wide deep-reconciliation checkpoint. Established NPCs are no longer individually backfilled merely because another NPC was admitted.

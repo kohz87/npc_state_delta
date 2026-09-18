@@ -20,7 +20,7 @@ test('new NPC admission enriches only the newly admitted dossiers while omitted 
     assert.doesNotMatch(source, /deepSweep: true/);
     assert.match(source, /state\.pendingBackfills\.length > 100/);
     assert.match(source, /touchedIds = new Set/);
-    assert.match(source, /!transcriptMentionsNpcRecord\(currentTranscript \|\| '', npc\)/);
+    assert.match(source, /!npcParticipatesInExchange\(npc, nextState\.npcs \|\| \[\], currentTranscript \|\| '', \{ includeRole: false \}\)/);
     assert.match(source, /for \(const id of newlyAdmittedIds\)/);
     assert.match(source, /const admitted = nextState\.npcs\.find\(npc => npc\.id === id && !npc\.archived\)/);
     assert.match(source, /queueNpcBackfillInState\(nextState, admitted\.id, admitted\.name, targetMessageId/);
