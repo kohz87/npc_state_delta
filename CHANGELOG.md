@@ -1,10 +1,11 @@
 # NPC State Delta changes
 
-## Unreleased
+## 1.0.31 - 18 September 2026
 
 - Narrow automatic new-NPC enrichment to the newly created/promoted dossiers instead of treating admission as a cast-wide deep-reconciliation checkpoint. Established NPCs are no longer individually backfilled merely because another NPC was admitted.
 - Preserve silent targeted continuity repair for established NPCs that the broad current-exchange scan actually omitted, plus manual Refresh/Scan and the separately opt-in current-cast workflow.
 - Remove the retired `deepSweep` queue flag and add regression/contract coverage so new admission cannot reintroduce per-NPC fan-out across the established cast.
+- Advance synchronized application/package/display metadata to 1.0.31; persisted storage, bundle, branch, rollback-journal and diagnostic schema versions remain unchanged.
 
 ## 1.0.30 - 16 September 2026
 
