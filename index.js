@@ -1944,7 +1944,6 @@ function queueNpcBackfillInState(state, npcId, label, requestedMessageId = null,
         label: cleanLabel,
         requestedMessageId: Number.isInteger(requestedMessageId) ? requestedMessageId : null,
         preserveLiveState: options?.preserveLiveState === true,
-        deepSweep: options?.deepSweep === true,
         silent: options?.silent === true,
         requestedAt: Date.now(),
         attempts: 0,
@@ -2490,10 +2489,6 @@ async function backfillNpcFromHistory(request, messageId = null) {
     if (!existing) return false;
     const transcript = recentTranscript(settings.scanDepth);
     if (!transcript) return false;
-    // Cast-wide deep sweeps consider every active dossier, but an NPC with no name/alias
-    // anywhere in the configured history window has no evidence that this pass can safely
-    // reconcile. Treat it as a clean no-op rather than spending a model call or creating a retry.
-    if (request.deepSweep === true && !transcriptMentionsNpcRecord(transcript, existing)) return true;
     if (!backfillNeedsRequest(existing, state.npcs, currentExchangeTranscript())) return true;
     const scanLineage = chatLineage(ctx.chat || []);
     const prompt = buildBackfillPrompt({
@@ -2653,7 +2648,7 @@ async function processPendingBackfills(messageId = null) {
                 }
             }
             persist();
-            // One failed dossier must not starve the rest of a cast reconciliation sweep.
+            // One failed dossier must not starve other queued targeted repairs.
             continue;
         }
         latest.pendingBackfills = (latest.pendingBackfills || []).filter(item => item.npcId !== request.npcId);
@@ -3181,7 +3176,20 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
             // If the broad scanner omitted an NPC explicitly involved anywhere in the current
             // exchange, schedule a silent targeted continuity repair so memories/profile changes
             // get the same second chance as relationship scoring.
-            const touchedIds = new Set([...(merged.report?.updated || []), ...newlyAdmittedIds]);
+            const touchedIds = new Set(newlyAdmittedIds);
+            const markBroadScanTarget = raw => {
+                const id = String(raw?.id || '').trim();
+                if (id && nextState.npcs.some(npc => npc.id === id)) {
+                    touchedIds.add(id);
+                    return;
+                }
+                const name = String(raw?.name || '').trim();
+                if (!name) return;
+                const matched = nextState.npcs.find(npc => npcMatchesLabel(npc, name));
+                if (matched) touchedIds.add(matched.id);
+            };
+            for (const raw of Array.isArray(resolvedParsed?.npcs) ? resolvedParsed.npcs : []) markBroadScanTarget(raw);
+            for (const raw of Array.isArray(resolvedParsed?.profileUpdates) ? resolvedParsed.profileUpdates : []) markBroadScanTarget(raw);
             for (const npc of nextState.npcs || []) {
                 if (npc.archived || touchedIds.has(npc.id) || !transcriptMentionsNpcRecord(currentTranscript || '', npc)) continue;
                 queueNpcBackfillInState(nextState, npc.id, npc.name, targetMessageId, {
@@ -3190,18 +3198,16 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
                 });
             }
 
-            // A cast topology change is a natural checkpoint for a deeper continuity sweep.
-            // Consider every active dossier; the backfill worker turns dossiers with no evidence
-            // in the configured history window into clean no-ops instead of spending model calls.
-            if (newlyAdmittedIds.length) {
-                for (const npc of nextState.npcs || []) {
-                    if (npc.archived) continue;
-                    queueNpcBackfillInState(nextState, npc.id, npc.name, targetMessageId, {
-                        preserveLiveState: true,
-                        deepSweep: true,
-                        silent: true,
-                    });
-                }
+            // Newly admitted dossiers may need richer recent-history enrichment than the broad
+            // first pass provides. Repair only those new/promoted dossiers; admitting one NPC must
+            // never fan out into targeted model calls for unrelated established cast members.
+            for (const id of newlyAdmittedIds) {
+                const admitted = nextState.npcs.find(npc => npc.id === id && !npc.archived);
+                if (!admitted) continue;
+                queueNpcBackfillInState(nextState, admitted.id, admitted.name, targetMessageId, {
+                    preserveLiveState: true,
+                    silent: true,
+                });
             }
         }
         const inlineIds = scanInlineNpcIds(resolvedParsed, merged);

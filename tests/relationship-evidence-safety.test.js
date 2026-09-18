@@ -143,10 +143,11 @@ test('rolling full-window relationships are scrubbed for new and existing NPCs',
     assert.equal('relationshipDelta' in result.evaluation.npcs[1], false);
 });
 
-test('runtime wires auto enrichment and post-admission relationship repair', () => {
+test('runtime wires targeted new-NPC enrichment and post-admission relationship repair', () => {
     const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
-    assert.match(source, /queueNpcBackfillInState\(nextState, npc\.id, npc\.name, targetMessageId/);
-    assert.match(source, /deepSweep: true/);
+    assert.match(source, /for \(const id of newlyAdmittedIds\)/);
+    assert.match(source, /queueNpcBackfillInState\(nextState, admitted\.id, admitted\.name, targetMessageId/);
+    assert.doesNotMatch(source, /deepSweep: true/);
     assert.match(source, /silent: true/);
     assert.match(source, /for \(let offset = 0; offset < newTargets\.length; offset \+= 4\)/);
     assert.match(source, /preserveLiveState: item\?\.preserveLiveState === true/);
