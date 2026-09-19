@@ -1,5 +1,13 @@
 # NPC State Delta changes
 
+## 1.0.35 - 19 September 2026
+
+- Recover a narrowly safe Behavioral Profile refinement when the provider returns a changed full candidate but leaves `behaviorProfileState` at `keep`: every established rule must still be present verbatim, only additive target-general rules may be admitted, every new rule must be grounded by that field's evidence, and existing agency/morality conflict guards remain authoritative.
+- Preserve rejected/unsupported Behavioral Profile evidence for later scans rather than treating `keep` as replacement authority. Diagnostics label accepted recovery as `applied-recovered-refine`.
+- Clarify routine scanner and targeted Refresh prompts that one story observation may independently support multiple durable fields, so a scene can emit both Speech evidence and Behavioral Profile evidence when cadence/wording and a target-general behavioral strategy are both grounded.
+- Record the intentional prompt-budget change: routine/full-window requests are +30 Delta-owned characters, targeted Refresh is +120, request counts/output allowances/routes are unchanged, and reviewed Stage 9 hashes are updated accordingly.
+- Advance synchronized application/package/display metadata to 1.0.35; persisted storage, bundle, branch, rollback-journal and diagnostic schema versions remain unchanged.
+
 ## 1.0.34 - 18 September 2026
 
 - Fix automatic per-NPC backfill storms resurfacing after update/reload because pre-1.0.34 unscoped `pendingBackfills` could remain persisted and were drained after later assistant receipts even when no new scan was due.
