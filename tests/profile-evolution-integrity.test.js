@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
     buildInjection,
     buildNpcPortraitPrompts,
+    buildProfileRefreshPrompt,
+    buildScannerPrompt,
     createNpcRecord,
     durableProfileEvidenceAlreadyRepresented,
     mergeScanResult,
@@ -21,6 +23,50 @@ const merge = (npc, update, context = '', extra = {}) => mergeScanResult(
 function profileRow(result, field) {
     return result.report?.profileDevelopment?.find(row => row.field === field) || null;
 }
+
+test('grounded additive Behavioral Profile candidates recover safely when provider leaves state at keep', () => {
+    const sora = createNpcRecord('Sora');
+    sora.behaviorProfile = ['Disposition: Rapidly mimics and adapts to demonstrated behavior and language.'];
+    const newRule = 'Care style: Uses bright, fatalistic banter and energetic optimism to distract wounded patients during painful surgeries.';
+    const result = merge(sora, {
+        behaviorProfile: [...sora.behaviorProfile, newRule],
+        evidence: { behaviorProfile: ['uses cheerful, fatalistic banter to distract patients and ease panic during intense medical procedures'] },
+        developmentScale: 'gradual',
+    }, 'Sora uses cheerful, fatalistic banter and energetic optimism to distract wounded patients and ease panic during intense medical procedures.');
+
+    const updated = result.state.npcs[0];
+    assert.equal(updated.behaviorProfile[0], sora.behaviorProfile[0], 'keep recovery must preserve established rules verbatim');
+    assert.ok(updated.behaviorProfile.some(entry => /fatalistic banter/i.test(entry)), 'grounded additive behavior should be recovered');
+    assert.equal(profileRow(result, 'behaviorProfile')?.outcome, 'applied-recovered-refine');
+});
+
+test('Behavioral Profile keep recovery cannot retire established rules or admit unsupported additions', () => {
+    const sora = createNpcRecord('Sora');
+    sora.behaviorProfile = ['Disposition: Rapidly mimics and adapts to demonstrated behavior and language.'];
+    const missingBaseline = merge(sora, {
+        behaviorProfile: ['Care style: Uses bright banter to distract wounded patients during painful surgeries.'],
+        evidence: { behaviorProfile: ['uses bright banter to distract wounded patients during painful surgeries'] },
+    }, 'Sora uses bright banter to distract wounded patients during painful surgeries.');
+    assert.deepEqual(missingBaseline.state.npcs[0].behaviorProfile, sora.behaviorProfile, 'keep cannot retire an omitted established rule');
+    assert.ok((missingBaseline.state.npcs[0].profileEvidence?.behaviorProfile || []).length > 0, 'rejected evidence remains pending');
+
+    const unsupported = merge(sora, {
+        behaviorProfile: [...sora.behaviorProfile, 'Strategy: Silently maps every building before entering it.'],
+        evidence: { behaviorProfile: ['uses bright banter to distract wounded patients during painful surgeries'] },
+    }, 'Sora uses bright banter to distract wounded patients during painful surgeries.');
+    assert.deepEqual(unsupported.state.npcs[0].behaviorProfile, sora.behaviorProfile, 'unrelated unsupported additions stay rejected');
+});
+
+test('scanner and targeted Refresh explicitly allow one scene to contribute evidence to multiple durable fields', () => {
+    const sora = createNpcRecord('Sora');
+    const scanner = buildScannerPrompt({ transcript: 'Sora speaks gently while joking to calm a patient.', existingNpcs: [sora] });
+    const refresh = buildProfileRefreshPrompt({ transcript: '[m1] Sora speaks gently while joking to calm a patient.', targetNpc: sora });
+    for (const prompt of [scanner, refresh]) {
+        assert.match(prompt, /One scene may support multiple fields/i);
+        assert.match(prompt, /speech\+behaviorProfile allowed/i);
+        assert.match(prompt, /emit each grounded/i);
+    }
+});
 
 test('unsupported durable meaning cannot ride through refine while directly grounded clarification still can', () => {
     const npc = createNpcRecord('Mira');

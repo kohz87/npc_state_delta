@@ -637,12 +637,16 @@ function recordSecondaryProfileDiagnostics(report, beforeNpc, afterNpc, rawUpdat
             afterNpc?.[field] || [],
             rawEvidence,
         );
+        const recoveredKeepRefinement = field === 'behaviorProfile'
+            && changed
+            && (normalized[stateField] || 'keep') === 'keep';
         const outcome = locked ? 'locked'
             : (changed && inferredBatch ? 'applied-inferred-batch'
-                : (changed ? `applied-${normalized[stateField] || 'update'}`
+                : (recoveredKeepRefinement ? 'applied-recovered-refine'
+                    : (changed ? `applied-${normalized[stateField] || 'update'}`
                     : (candidateAlreadyRepresented
                         ? (evidenceAlreadyRepresented ? 'evidence-already-reflected' : 'waiting-for-revised-candidate')
-                        : 'unchanged-or-gated')));
+                        : 'unchanged-or-gated'))));
         const evidence = rawEvidence.slice(0, PROFILE_DEVELOPMENT_OBSERVATION_LIMIT).map(item => {
             const parsed = parseProfileDevelopmentEvidence('speech', item);
             return {
@@ -1163,4 +1167,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.34';
+export const NPC_STATE_VERSION = '1.0.35';

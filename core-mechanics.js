@@ -2283,6 +2283,38 @@ function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evi
     return normalizeBehaviorProfile(next);
 }
 
+function recoverBehaviorProfileKeepAdditions(existing, incoming, { evidenceItems = [] } = {}) {
+    const current = normalizeBehaviorProfile(existing);
+    const updates = normalizeBehaviorProfile(incoming);
+    if (!current.length || updates.length <= current.length) return current;
+    if (behaviorProfileRefinementConflict(current, updates)) return current;
+    if (!durableProfileCollectionCandidateGrounded('behaviorProfile', current, updates, evidenceItems)) return current;
+
+    // A missing/keep lifecycle marker may recover only an additive refinement. The provider must
+    // still carry every established rule forward; keep never gains authority to retire or rewrite it.
+    const represented = new Set();
+    for (let i = 0; i < current.length; i += 1) {
+        const old = current[i];
+        const match = updates.findIndex((entry, index) => !represented.has(index)
+            && normalizeName(entry) === normalizeName(old));
+        if (match < 0) return current;
+        represented.add(match);
+    }
+
+    const additions = updates.filter((_, index) => !represented.has(index));
+    if (!additions.length) return current;
+    const next = [...current];
+    for (const entry of additions) {
+        const key = behaviorProfileKey(entry);
+        const family = behaviorProfileFamily(entry);
+        const overlapsEstablished = current.some(item => behaviorProfileKey(item) === key
+            || (family && behaviorProfileFamily(item) === family));
+        if (overlapsEstablished) return current;
+        if (next.length < BEHAVIOR_PROFILE_LIMIT) next.push(entry);
+    }
+    return normalizeBehaviorProfile(next);
+}
+
 const PROFILE_EVIDENCE_FIELDS = Object.freeze(['personality', 'speech', 'appearance', 'mannerisms', 'behaviorProfile']);
 
 function emptyProfileEvidence() {
@@ -4336,8 +4368,21 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
             const refinedChanged = JSON.stringify(refined) !== JSON.stringify(current);
             const acceptedBehaviorProfile = refinedChanged ? refined : current;
             evidence.behaviorProfile = unresolvedCollectionEvidence('behaviorProfile', acceptedBehaviorProfile, beforeEvidence.behaviorProfile || [], incomingEvidence.behaviorProfile || []);
-
-
+        } else if (incoming.behaviorProfileState === 'keep') {
+            const behaviorEvidence = [...(beforeEvidence.behaviorProfile || []), ...(incomingEvidence.behaviorProfile || [])];
+            const recovered = recoverBehaviorProfileKeepAdditions(current, incoming.behaviorProfile, {
+                context: options.developmentContext,
+                evidenceItems: behaviorEvidence,
+                binding: {
+                    npc,
+                    evidence: behaviorEvidence,
+                    targeted: options.targeted === true,
+                    otherLabels: options.otherLabels || [],
+                },
+            });
+            if (JSON.stringify(recovered) !== JSON.stringify(current)) { npc.behaviorProfile = recovered; changed = true; }
+            const acceptedBehaviorProfile = JSON.stringify(recovered) !== JSON.stringify(current) ? recovered : current;
+            evidence.behaviorProfile = unresolvedCollectionEvidence('behaviorProfile', acceptedBehaviorProfile, beforeEvidence.behaviorProfile || [], incomingEvidence.behaviorProfile || []);
         }
     }
 
@@ -5268,7 +5313,7 @@ Rules:
 4. LOCKS: never rewrite fields listed in lockedProfileFields. Omit them from profileUpdates and ordinary dossier changes.
 5. DURABLE PROFILE: CURRENT COMPACT SUMMARY only. Personality/Speech/Appearance mention each durable concept once; Appearance does not repeat explicit age. behaviorProfile=max6 target-general rules translating identity, not a second essay; player-specific patterns belong relationshipSummary. refine returns FULL field; lasting personality/speech/mannerism/behaviorProfile change uses evolve+reason, Appearance uses change+reason. Mannerisms=max4 DISTINCT recurring patterns, not separate animations. One transient beat is not durable.
 6. IDENTITY FIREWALL: temporary mood, fear, stress, intoxication, intimacy, or behavior unique to ${userName} must not become global Personality, Speech, Mannerisms, or behaviorProfile. A generally kind NPC remains generally kind toward other people unless narration establishes a broader change. Necessary force is not cruelty by itself.
-7. DEVELOPMENT SPEED: ordinary continuity changes durable identity gradually. Recent lines may start with [mN] source tags. For gradual Personality/Speech evidence, return up to 4 independent observations and preserve each source tag, e.g. "[m42] reserve: initiates public discussion"; use one stable concept label for the same pattern. If evidence makes existing Personality/Speech stale, return a changed FULL CURRENT candidate containing it; never claim refine/evolve with a copied field. Reinforcement only=>omit/keep. Delta decides sufficiency. Use developmentScale:"gradual" for ordinary continuity; "explicit" only for a direct lasting-change statement; "batch" when an elapsed interval explicitly summarizes sustained development. Any refine/evolve/change that relies on time-compressed development MUST include developmentReason, even when state is refine. Mere passage of time does nothing.
+7. DEVELOPMENT SPEED: ordinary continuity changes durable identity gradually. Recent lines may start with [mN] source tags. One scene may support multiple fields; emit each grounded evidence item independently (speech+behaviorProfile allowed). For gradual Personality/Speech evidence, return up to 4 independent observations and preserve each source tag, e.g. "[m42] reserve: initiates public discussion"; use one stable concept label for the same pattern. If evidence makes existing Personality/Speech stale, return a changed FULL CURRENT candidate containing it; never claim refine/evolve with a copied field. Reinforcement only=>omit/keep. Delta decides sufficiency. Use developmentScale:"gradual" for ordinary continuity; "explicit" only for a direct lasting-change statement; "batch" when an elapsed interval explicitly summarizes sustained development. Any refine/evolve/change that relies on time-compressed development MUST include developmentReason, even when state is refine. Mere passage of time does nothing.
 8. ROLE/SPECIES/BACKGROUND may update when this window establishes or clarifies them. Species is literal only. Background is durable history, not current mood/status.
 9. AGE=chronology only. Birthday/exact elapsed years=>advance+reason; correction=>correct+reason. apparentAge=visual and should be compact ~N, not prose; visual aging/growth/rejuvenation=>evolve+reason. No species-lifespan inference.
 10. KEY RELATIONSHIPS: one unambiguous entry/non-player counterpart. Merge relation+durable dynamic; use "late husband"/"surviving widow" rather than dangling "(deceased)". update/keyRelationshipEdges for discovery; evolve+reason for lasting social change. Omission NEVER erases unrelated ties. Never put ${userName} there.
@@ -5425,7 +5470,7 @@ Rules:
 4. Candidates are not dossiers. sameIndividual=true only when proven. Use narration, World State, durable Inner Chatter; proper names there MUST be returned even when prose uses role.
 5. Return ONLY observed/new/meaningfully changed NPCs; new grounded durable profile facts count as changes. present=true only latest-scene physical presence; World State/Inner Chatter alone never presence. worldActive=true only explicit current off-screen activity. Inner Chatter supports durable facts, not transient monologue.
 6. Goal/status/mood/location are LIVE: output goal,goalState,status,statusState,mood,moodState,location,locationState as needed; actively reassess each returned EXISTING NPC every scan. Unchanged -> omit; changed -> replace; ended mood/goal/status -> matching *State:"clear". Location=current/last reliable; locationState:"clear" only when old place explicitly obsolete and replacement unknown. Off-screen/no evidence alone never clears it. Never use "Unknown".
-7. DURABLE PROFILE CHANNEL: ALWAYS emit one top-level profileUpdates item for durable facts even without npc delta. COMPACT duplicates. Empty != infer: seed only direct/recurring stable evidence. matching *State:"refine" returns FULL field; lasting personality/speech/mannerism "evolve"+reason; appearance "change"+reason. behaviorProfile FULL max6 target-general; Mannerisms FULL max4 DISTINCT patterns. PC/one-scene behavior -> relationshipSummary/live state/Memory. lockedProfileFields never rewrite.
+7. DURABLE PROFILE CHANNEL: ALWAYS emit one top-level profileUpdates item for durable facts even without npc delta. No duplicate/inferred. One scene may support multiple fields; emit each grounded item independently (speech+behaviorProfile allowed). matching *State:"refine" returns FULL field; lasting personality/speech/mannerism "evolve"+reason; appearance "change"+reason. behaviorProfile FULL max6; Mannerisms FULL max4 DISTINCT. PC/one-scene behavior -> relationshipSummary/live state/Memory. lockedProfileFields never rewrite.
 8. IDENTITY FIREWALL: Ignore transient visual state. mood/stress/intimacy/injury/relationship-specific behavior never becomes global Personality/Speech/Mannerisms/behaviorProfile. Player-specific durable stance -> relationshipSummary. Kindness stays general unless broader change established; necessary force != cruelty. High scores alone never imply jealousy/clinginess/blushing/stammering/possessiveness/tsundere denial.
 9. DEVELOPMENT SPEED: ordinary=gradual; reuse concept labels. developmentScale=gradual|explicit|batch; explicit=direct lasting change; batch=elapsed interval+sustained development. Time-compressed refine/evolve/change MUST include developmentReason + changed FULL candidate; unchanged/reinforcing=>omit/keep. Time skip alone invents nothing.
 10. SOCIAL: grounded non-player kin/friend/rival/mentor/partner => ALWAYS top-level keyRelationshipEdges {aId,a,bId,b,aToB,bToA,reason}; one clear counterpart entry. Use late/surviving, never dangling "(deceased)". Social change may evolve+reason; omission NEVER erases other bonds.
