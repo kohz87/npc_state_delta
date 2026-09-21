@@ -826,7 +826,7 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
         evidenceResolved: false,
         candidateGrounded: null,
         episode,
-        reasonGrounded: batchReady ? true : (effectiveReason ? episode.grounded : null),
+        reasonGrounded: (batchReady || explicitReady) ? true : (effectiveReason ? episode.grounded : null),
     };
 
     if (changedByContinuity) {
@@ -846,7 +846,7 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
     // authorization so a failed episode gate cannot hide the real candidate state or
     // discard novel evidence. This is intentionally limited to provider-declared batch
     // development; ordinary gradual concept ledgers keep their existing readiness rules.
-    if (scale === 'batch' && proposed && !candidateChanged) {
+    if (batchReady && proposed && !candidateChanged) {
         if (!evidenceAlreadyRepresented) {
             recordProfileDevelopmentDiagnostic(report, npc.id, field, 'waiting-for-revised-candidate', plan, {
                 ...diagnosticBase,
@@ -969,7 +969,7 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
             ...plan.evidence.map(item => item.body).filter(Boolean),
             reason,
             developmentReason,
-            mechanics.developmentEpisodeEvidence(developmentReason, options.developmentContext, developmentBinding),
+            mechanics.developmentEpisodeEvidence(developmentReason, authoritativeContext, developmentBinding),
         ].filter(Boolean);
         if (!mechanics.durableProfileEvolutionCandidateGrounded(field, currentValue, proposed, groundingEvidence)) {
             recordProfileDevelopmentDiagnostic(report, npc.id, field, 'candidate-ungrounded', plan, { ...diagnosticBase, candidateGrounded: false });
