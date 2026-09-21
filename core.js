@@ -805,7 +805,9 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
         && Boolean(effectiveReason)
         && mechanics.developmentScaleReady('batch', effectiveReason, authoritativeContext, developmentBinding);
     const inferredBatch = scale !== 'batch' && batchReady;
-    const observationalScale = (scale === 'explicit' || scale === 'batch') && !explicitReady && !batchReady;
+    const observationalScale = authorityProvenanceSupplied
+        && (scale === 'explicit' || scale === 'batch')
+        && !explicitReady && !batchReady;
     const effectiveScale = batchReady ? 'batch' : (explicitReady ? 'explicit' : (observationalScale ? 'gradual' : scale));
     const candidateChanged = Boolean(proposed) && mechanics.normalizeName(proposed) !== mechanics.normalizeName(currentValue);
     const resolutionEvidence = [
@@ -836,7 +838,20 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
         if (state === 'evolve') {
             clearProfileEvidence(npc, field);
             if (ledger) ledger = resetProfileDevelopment(field, ledger, currentValue, options);
-            recordProfileDevelopmentDiagnostic(report, npc.id, field, 'applied-model-evolve', plan, { modelState: state, scale });
+            const authorityApplied = authorityProvenanceSupplied && (explicitReady || batchReady);
+            const outcome = authorityApplied
+                ? (explicitReady ? 'applied-explicit' : 'applied-batch')
+                : 'applied-model-evolve';
+            recordProfileDevelopmentDiagnostic(report, npc.id, field, outcome, plan, {
+                ...diagnosticBase,
+                candidateGrounded: authorityApplied ? true : null,
+                readinessPath: authorityApplied
+                    ? (explicitReady ? 'authoritative-narrative' : 'batch')
+                    : 'continuity',
+                requiredObservations: authorityApplied ? 1 : null,
+                inferredScale: inferredBatch,
+                inferredEffectiveScale: inferredBatch ? 'batch' : '',
+            });
         } else {
             if (ledger) ledger = rebaseProfileDevelopment(field, ledger, currentValue);
             recordProfileDevelopmentDiagnostic(report, npc.id, field, state === 'refine' ? 'applied-refine' : 'applied-recovery', plan, { modelState: state, scale });
@@ -849,7 +864,7 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
     // authorization so a failed episode gate cannot hide the real candidate state or
     // discard novel evidence. This is intentionally limited to provider-declared batch
     // development; ordinary gradual concept ledgers keep their existing readiness rules.
-    if (batchReady && proposed && !candidateChanged) {
+    if (scale === 'batch' && proposed && !candidateChanged) {
         if (!evidenceAlreadyRepresented) {
             recordProfileDevelopmentDiagnostic(report, npc.id, field, 'waiting-for-revised-candidate', plan, {
                 ...diagnosticBase,
