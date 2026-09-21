@@ -4034,11 +4034,28 @@ function contextWindowGroundsReason(reason, value, strong = false) {
     return matches >= required;
 }
 
-function explicitDevelopmentContextGrounded(reason, context) {
+const USER_CANON_NONDECLARATIVE_RE = /^(?:m\d+\s+)?(?:["'“‘]|(?:i|we)\s+(?:wonder|wish|want|hope|ask|suggest|imagine|think|guess|suppose)|(?:please|let(?:'s| us)|maybe|perhaps|possibly|could|would|should|might|what if|if only|can you|could you|would you|make\b|have\b))/i;
+const USER_CANON_SPECULATIVE_RE = /\b(?:maybe|perhaps|possibly|might|could become|would become|should become|may become|i wonder|i think|i guess|i suppose|i hope|i want|i wish)\b/i;
+
+function declarativeUserDevelopmentSegment(segment) {
+    const source = cleanText(segment, 1200);
+    if (!source || /\?\s*$/.test(source)) return false;
+    const body = source.replace(/^\[m\d+\]\s*/i, '').replace(/^[^:]{1,80}:\s*/, '').trim();
+    if (!body || USER_CANON_NONDECLARATIVE_RE.test(normalizeName(body)) || USER_CANON_SPECULATIVE_RE.test(normalizeName(body))) return false;
+    // A line that is entirely quoted speech is dialogue, not narrator/player canon.
+    const quoted = body.match(/^(?:["“‘'])([\s\S]*)(?:["”’'])$/);
+    if (quoted) return false;
+    return true;
+}
+
+function explicitDevelopmentContextGrounded(reason, context, { requireDeclarativeUser = false } = {}) {
     const source = String(context || '').trim();
     if (!source) return true;
-    return developmentContextSegments(source).some(segment => EXPLICIT_DEVELOPMENT_CUE_RE.test(normalizeName(segment))
-        && contextWindowGroundsReason(reason, segment));
+    return developmentContextSegments(source).some(segment => {
+        if (requireDeclarativeUser && !declarativeUserDevelopmentSegment(segment)) return false;
+        return EXPLICIT_DEVELOPMENT_CUE_RE.test(normalizeName(segment))
+            && contextWindowGroundsReason(reason, segment);
+    });
 }
 
 const BATCH_TEMPORAL_CONTINUATION_RE = /\b(?:during that time|during this time|over that period|over this period|throughout that time|throughout this period|by then|over the interval|during the interval)\b/;
@@ -4269,7 +4286,9 @@ export function developmentScaleReady(scale, reason, context, binding = null) {
     const source = String(context || '').trim();
     if (binding?.sourceAuthority === 'user' && !source) return false;
     if (!developmentReasonGrounded(reason, context, { strong: mode === 'batch' })) return false;
-    if (mode === 'explicit' && source && !explicitDevelopmentContextGrounded(reason, source)) return false;
+    if (mode === 'explicit' && source && !explicitDevelopmentContextGrounded(reason, source, {
+        requireDeclarativeUser: binding?.sourceAuthority === 'user',
+    })) return false;
     if (mode === 'batch') {
         if (isBareTimePassageDevelopmentReason(reason)) return false;
         if (source && (!hasNarratedTimeSkip(source) || !batchDevelopmentContextGrounded(reason, source, binding))) return false;
