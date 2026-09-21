@@ -170,6 +170,51 @@ test('assistant-declared explicit change is evidence, not one-turn authority', (
     assert.equal(diagnostic?.outcome, 'waiting-for-evidence');
 });
 
+test('user-authored elapsed development can use batch authority while assistant-only batch cannot', () => {
+    const makeNpc = () => {
+        const npc = createNpcRecord('Marris');
+        npc.speech = 'Soft and hesitant.';
+        return npc;
+    };
+    const candidate = 'Crisp and authoritative; gives short decisive instructions.';
+    const batchPayload = npc => speechUpdate(
+        npc,
+        'command voice: gives crisp authoritative and decisive instructions',
+        candidate,
+        {
+            scale: 'batch',
+            reason: 'Over three years Marris gradually became a practiced commander and consistently gave decisive instructions.',
+            developmentReason: 'Over three years Marris gradually became a practiced commander and consistently gave decisive instructions.',
+        },
+    );
+    const canon = '[m50] Lucien: Three years passed. During that time, Marris gradually became a practiced commander and consistently gave crisp, authoritative, decisive instructions.';
+
+    const userNpc = makeNpc();
+    const accepted = scan(
+        { npcs: [userNpc], candidates: [], turn: 20 },
+        batchPayload(userNpc),
+        21,
+        51,
+        { developmentContext: canon, userDevelopmentContext: canon },
+    );
+    assert.equal(accepted.state.npcs[0].speech, candidate);
+    assert.equal(accepted.report.profileDevelopment.find(item => item.field === 'speech')?.authority, 'user-batch');
+
+    const modelNpc = makeNpc();
+    const observed = scan(
+        { npcs: [modelNpc], candidates: [], turn: 20 },
+        batchPayload(modelNpc),
+        21,
+        51,
+        {
+            developmentContext: 'Narrator: Three years passed. Marris gradually became a practiced commander and consistently gave crisp, authoritative, decisive instructions.',
+            userDevelopmentContext: '',
+        },
+    );
+    assert.equal(observed.state.npcs[0].speech, 'Soft and hesitant.');
+    assert.equal(observed.report.profileDevelopment.find(item => item.field === 'speech')?.authority, 'model-observed');
+});
+
 test('user question containing change language does not gain explicit authority', () => {
     const npc = createNpcRecord('Marris');
     npc.speech = 'Soft and hesitant.';
