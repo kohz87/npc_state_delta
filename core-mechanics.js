@@ -3486,14 +3486,15 @@ function mergeImportantMemories(oldList, newList, retentionList = [], incomingLi
 function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELATIONSHIP_CAPS, sourceMessageId = null, lifecycleOptions = {}) {
     const merged = { ...existing };
     const manualFields = new Set(Array.isArray(existing.manualProfileFields) ? existing.manualProfileFields : []);
-    const directEvolutionReady = () => {
+    const directEvolutionReady = (field = '') => {
         // Existing durable identity must not leap merely because a weaker scanner omitted
         // developmentScale. Gradual evolution is evidence-gated through profileUpdates.
-        // Story-level explicit/batch authority belongs to user-authored canon, never to
-        // assistant prose that happens to describe its own characterization as permanent.
+        // Runtime Personality/Speech authority is finalized later from role-aware provenance,
+        // so this ordinary-delta layer must not pre-apply it.
         const scale = incoming.developmentScale || 'gradual';
         if (scale === 'gradual') return false;
         const authorityProvenanceSupplied = Object.prototype.hasOwnProperty.call(lifecycleOptions, 'userDevelopmentContext');
+        if (authorityProvenanceSupplied && (field === 'personality' || field === 'speech')) return false;
         const authoritativeContext = String(authorityProvenanceSupplied
             ? (lifecycleOptions.userDevelopmentContext || '')
             : (lifecycleOptions.developmentContext || '')).trim();
@@ -3556,7 +3557,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
             // baseline does not behave like a hidden lock when the scanner forgets the marker.
             const mode = String(incoming.appearanceState || 'keep');
             if (mode === 'change') {
-                if (!String(incoming.appearanceReason || '').trim() || !directEvolutionReady()) continue;
+                if (!String(incoming.appearanceReason || '').trim() || !directEvolutionReady('appearance')) continue;
             } else if (mode !== 'refine' && (!isSafeUnmarkedDurableFieldReplacement('appearance', existing.appearance, value)
                 || !durableRefinementCandidateGrounded('appearance', existing.appearance, value, lifecycleOptions.developmentContext, [], incomingBinding))) {
                 continue;
@@ -3574,7 +3575,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
             // unlocked baseline, and a clearly additive unmarked result is recovered conservatively.
             const mode = String(incoming.personalityState || 'keep');
             if (mode === 'evolve') {
-                if (!String(incoming.personalityReason || '').trim() || !directEvolutionReady()) continue;
+                if (!String(incoming.personalityReason || '').trim() || !directEvolutionReady('personality')) continue;
             } else if (mode !== 'refine' && (!isSafeUnmarkedDurableFieldReplacement('personality', existing.personality, value)
                 || !durableRefinementCandidateGrounded('personality', existing.personality, value, lifecycleOptions.developmentContext, [], incomingBinding))) {
                 continue;
@@ -3590,7 +3591,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
             // habits become established. Enduring register change remains evolution + reason.
             const mode = String(incoming.speechState || 'keep');
             if (mode === 'evolve') {
-                if (!String(incoming.speechReason || '').trim() || !directEvolutionReady()) continue;
+                if (!String(incoming.speechReason || '').trim() || !directEvolutionReady('speech')) continue;
             } else if (mode !== 'refine' && (!isSafeUnmarkedDurableFieldReplacement('speech', existing.speech, value)
                 || !durableRefinementCandidateGrounded('speech', existing.speech, value, lifecycleOptions.developmentContext, [], incomingBinding))) {
                 continue;
@@ -4338,6 +4339,8 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
 
     const evolutionReady = field => {
         const scale = incoming.developmentScale || 'gradual';
+        const authorityProvenanceSupplied = Object.prototype.hasOwnProperty.call(options, 'userDevelopmentContext');
+        if (authorityProvenanceSupplied && (field === 'personality' || field === 'speech')) return false;
         const fieldReason = field === 'mannerisms' ? incoming.mannerismReason
             : field === 'behaviorProfile' ? incoming.behaviorProfileReason
                 : field === 'personality' ? incoming.personalityReason
@@ -4346,7 +4349,6 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
         const candidateValue = field === 'mannerisms' || field === 'behaviorProfile' ? incoming[field] || [] : incoming[field] || '';
         const evidenceReason = durableProfileEvidenceReason(field, currentValue, candidateValue, incomingEvidence[field] || []);
         const effectiveReason = cleanText(incoming.developmentReason || fieldReason || evidenceReason, 500);
-        const authorityProvenanceSupplied = Object.prototype.hasOwnProperty.call(options, 'userDevelopmentContext');
         const authoritativeContext = String(authorityProvenanceSupplied
             ? (options.userDevelopmentContext || '')
             : (options.developmentContext || '')).trim();
