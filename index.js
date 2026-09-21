@@ -1896,6 +1896,40 @@ function recentTranscript(limit = null, { messageIds = false } = {}) {
     return lines.reverse().join('\n');
 }
 
+function recentUserDevelopmentContext(limit = null, { messageIds = true } = {}) {
+    const settings = getSettings();
+    const chat = getContext().chat || [];
+    const count = Math.max(2, Math.min(30, Number(limit ?? settings.scanDepth) || 6));
+    const selected = [];
+    let meaningful = 0;
+    for (let i = chat.length - 1; i >= 0 && meaningful < count; i -= 1) {
+        const message = chat[i];
+        if (!message || message.is_system) continue;
+        const line = cleanMessage(message);
+        if (!line) continue;
+        meaningful += 1;
+        if (message.is_user) selected.push(messageIds ? `[m${i}] ${line}` : line);
+    }
+    return selected.reverse().join('\n');
+}
+
+function currentExchangeUserDevelopmentContext(messageId = null) {
+    const ctx = getContext();
+    const chat = ctx.chat || [];
+    let assistantId = Number.isInteger(messageId) ? messageId : chat.length - 1;
+    while (assistantId >= 0 && (chat[assistantId]?.is_system || chat[assistantId]?.is_user)) assistantId -= 1;
+    if (assistantId < 0) return '';
+    for (let i = assistantId - 1; i >= 0; i -= 1) {
+        if (chat[i]?.is_system) continue;
+        if (chat[i]?.is_user) {
+            const line = cleanMessage(chat[i]);
+            return line ? `[m${i}] ${line}` : '';
+        }
+        break;
+    }
+    return '';
+}
+
 function currentExchangeTranscript(messageId = null) {
     const ctx = getContext();
     const chat = ctx.chat || [];
@@ -2158,6 +2192,7 @@ async function scanNpcDossier(npcId) {
             preservePresence: true,
             skipRelationshipUpdate: true,
             developmentContext: sourceText,
+            userDevelopmentContext: sourceText,
         });
         const nextState = merged.state;
         if (targetMessageId >= 0) commitBranchCheckpoint(nextState, targetMessageId, 'dossier-import');
@@ -2360,6 +2395,7 @@ async function refreshNpcFromChat(npcId) {
             allowTargetedDurableSeed: true,
             developmentSourceMessageIds,
             developmentContext: transcript,
+            userDevelopmentContext: recentUserDevelopmentContext(settings.scanDepth, { messageIds: true }),
         });
         // A targeted refresh may use social-edge machinery internally, but it must never
         // mutate a second dossier as a side effect. Restore every non-target record verbatim.
@@ -2589,6 +2625,7 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
             memoryInputLimit: IMPORTANT_MEMORY_LIMIT,
             allowTargetedDurableSeed: true,
             developmentContext: transcript,
+            userDevelopmentContext: recentUserDevelopmentContext(settings.scanDepth, { messageIds: true }),
         });
         const nextState = merged.state;
         const finalNpc = nextState.npcs.find(npc => npc.id === request.npcId);
@@ -2979,6 +3016,9 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
     const currentTranscript = currentExchangeTranscript(messageId);
     const fullWindowScan = Boolean(!manual && settings.fullScanEveryTurn);
     const transcript = (manual || fullWindowScan) ? recentTranscript(settings.scanDepth) : currentTranscript;
+    const userDevelopmentContext = (manual || fullWindowScan)
+        ? recentUserDevelopmentContext(settings.scanDepth, { messageIds: true })
+        : currentExchangeUserDevelopmentContext(messageId);
     if (!transcript) {
         if (manual) globalThis.toastr?.warning?.('NPC State Delta: no story text to scan yet.');
         return false;
@@ -3118,6 +3158,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
             admissionMode: settings.admissionMode,
             preserveWorldActive: compactWorldStateTurn,
             developmentContext: transcript,
+            userDevelopmentContext,
         });
         const newlyAdmittedIds = [...new Set([...(merged.report?.created || []), ...(merged.report?.promoted || [])])];
         let newNpcRelationshipPass = { decisions: new Map(), used: false, targetCount: 0, responseChars: 0, retried: false };
