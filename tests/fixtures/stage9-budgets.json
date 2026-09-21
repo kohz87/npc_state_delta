@@ -16,7 +16,7 @@
           {
             "charsIncludingSystem": 8495,
             "serializedMessagesChars": 8815,
-            "inputSha256": "b5553c838257967327a1f973977bb16a1a1c3ae11c53cf64f15b14f1a3fefb0e",
+            "inputSha256": "1ab246262cfbc8d4843b51b9a3cc32c24620f56b6e3096b817d2236f364288ea",
             "responseLength": 1800,
             "options": {
               "quietToLoud": false,
@@ -33,7 +33,7 @@
           {
             "charsIncludingSystem": 8623,
             "serializedMessagesChars": 8945,
-            "inputSha256": "2f3a39b7977b870e192d8c6b2fe890feeac6161ab875f08918070fdd032dcaea",
+            "inputSha256": "5148ba599f6c79455180ab513f86f5120e2cd79affa416eb014d1347b26f3a76",
             "responseLength": 3200,
             "options": {
               "quietToLoud": false,
@@ -48,9 +48,9 @@
         "requests": 1,
         "captures": [
           {
-            "charsIncludingSystem": 9686,
-            "serializedMessagesChars": 10235,
-            "inputSha256": "310a7fd7c39ba61524ecbb79d8b7da6901e3b960830646a78bd044e12a31e8ce",
+            "charsIncludingSystem": 9404,
+            "serializedMessagesChars": 9945,
+            "inputSha256": "f0422a851c8bba31eed55c31a28d1306809aef161a4bc42d1065d9528d08887c",
             "responseLength": 3200,
             "options": {
               "quietToLoud": false,
@@ -118,7 +118,7 @@
           {
             "charsIncludingSystem": 8495,
             "serializedMessagesChars": 8815,
-            "inputSha256": "b5553c838257967327a1f973977bb16a1a1c3ae11c53cf64f15b14f1a3fefb0e",
+            "inputSha256": "1ab246262cfbc8d4843b51b9a3cc32c24620f56b6e3096b817d2236f364288ea",
             "responseLength": 1800,
             "options": {
               "quietToLoud": false,
@@ -129,7 +129,7 @@
           {
             "charsIncludingSystem": 9319,
             "serializedMessagesChars": 9641,
-            "inputSha256": "4128e0156ad4d69940d5a93b8d1cdede4fa06dbbbc9094bf67412026a8259cf7",
+            "inputSha256": "085bc7223ff8e48b943cd169a81a20307390ba39b84fb4471597000d720b6b0f",
             "responseLength": 5200,
             "options": {
               "quietToLoud": false,
@@ -148,7 +148,7 @@
           {
             "charsIncludingSystem": 8495,
             "serializedMessagesChars": 8815,
-            "inputSha256": "b5553c838257967327a1f973977bb16a1a1c3ae11c53cf64f15b14f1a3fefb0e",
+            "inputSha256": "1ab246262cfbc8d4843b51b9a3cc32c24620f56b6e3096b817d2236f364288ea",
             "responseLength": 1800,
             "options": {
               "stream": false,
@@ -166,7 +166,7 @@
           {
             "charsIncludingSystem": 8623,
             "serializedMessagesChars": 8945,
-            "inputSha256": "2f3a39b7977b870e192d8c6b2fe890feeac6161ab875f08918070fdd032dcaea",
+            "inputSha256": "5148ba599f6c79455180ab513f86f5120e2cd79affa416eb014d1347b26f3a76",
             "responseLength": 3200,
             "options": {
               "stream": false,
@@ -182,9 +182,9 @@
         "requests": 1,
         "captures": [
           {
-            "charsIncludingSystem": 9686,
-            "serializedMessagesChars": 10235,
-            "inputSha256": "310a7fd7c39ba61524ecbb79d8b7da6901e3b960830646a78bd044e12a31e8ce",
+            "charsIncludingSystem": 9404,
+            "serializedMessagesChars": 9945,
+            "inputSha256": "f0422a851c8bba31eed55c31a28d1306809aef161a4bc42d1065d9528d08887c",
             "responseLength": 3200,
             "options": {
               "stream": false,
@@ -256,7 +256,7 @@
           {
             "charsIncludingSystem": 8495,
             "serializedMessagesChars": 8815,
-            "inputSha256": "b5553c838257967327a1f973977bb16a1a1c3ae11c53cf64f15b14f1a3fefb0e",
+            "inputSha256": "1ab246262cfbc8d4843b51b9a3cc32c24620f56b6e3096b817d2236f364288ea",
             "responseLength": 1800,
             "options": {
               "stream": false,
@@ -268,7 +268,7 @@
           {
             "charsIncludingSystem": 9319,
             "serializedMessagesChars": 9641,
-            "inputSha256": "4128e0156ad4d69940d5a93b8d1cdede4fa06dbbbc9094bf67412026a8259cf7",
+            "inputSha256": "085bc7223ff8e48b943cd169a81a20307390ba39b84fb4471597000d720b6b0f",
             "responseLength": 5200,
             "options": {
               "stream": false,
@@ -282,8 +282,8 @@
     ]
   },
   "injection": {
-    "chars": 1839,
-    "sha256": "1a03bee59efc5d8b2f5e5773b7a38fc5455ab179217633098cfb2802c8423c9a"
+    "chars": 2122,
+    "sha256": "053ccc9090c07496a6d96405d7498a06434542dd54bb89ad72396265426bea43"
   },
   "reasoning": "No Delta reasoning/thinking parameter; host/profile preset settings remain host-owned and unmeasured.",
   "providerUsage": "Unavailable; these are character counts, hashes, options and actual mocked dispatcher invocations, not paid provider usage."
