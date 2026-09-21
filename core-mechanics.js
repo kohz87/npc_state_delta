@@ -3473,12 +3473,15 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
         // assistant prose that happens to describe its own characterization as permanent.
         const scale = incoming.developmentScale || 'gradual';
         if (scale === 'gradual') return false;
-        const authoritativeContext = String(lifecycleOptions.userDevelopmentContext || '').trim();
+        const authorityProvenanceSupplied = Object.prototype.hasOwnProperty.call(lifecycleOptions, 'userDevelopmentContext');
+        const authoritativeContext = String(authorityProvenanceSupplied
+            ? (lifecycleOptions.userDevelopmentContext || '')
+            : (lifecycleOptions.developmentContext || '')).trim();
         if (!authoritativeContext) return false;
         return developmentScaleReady(scale, incoming.developmentReason, authoritativeContext, {
             npc: existing,
             targeted: lifecycleOptions.allowTargetedDurableSeed === true,
-            sourceAuthority: 'user',
+            sourceAuthority: authorityProvenanceSupplied ? 'user' : null,
         });
     };
     const existingName = cleanText(existing.name, 120);
@@ -4323,12 +4326,15 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
         const candidateValue = field === 'mannerisms' || field === 'behaviorProfile' ? incoming[field] || [] : incoming[field] || '';
         const evidenceReason = durableProfileEvidenceReason(field, currentValue, candidateValue, incomingEvidence[field] || []);
         const effectiveReason = cleanText(incoming.developmentReason || fieldReason || evidenceReason, 500);
-        const authoritativeContext = String(options.userDevelopmentContext || '').trim();
+        const authorityProvenanceSupplied = Object.prototype.hasOwnProperty.call(options, 'userDevelopmentContext');
+        const authoritativeContext = String(authorityProvenanceSupplied
+            ? (options.userDevelopmentContext || '')
+            : (options.developmentContext || '')).trim();
         const binding = {
             npc,
             evidence: incomingEvidence[field] || [],
             targeted: options.targeted === true,
-            sourceAuthority: 'user',
+            sourceAuthority: authorityProvenanceSupplied ? 'user' : null,
         };
         const candidateSpecificGrounding = field === 'mannerisms' || field === 'behaviorProfile'
             ? durableProfileCollectionCandidateGrounded(field, currentValue, candidateValue, incomingEvidence[field] || [])
