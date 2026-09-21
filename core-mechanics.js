@@ -4684,6 +4684,9 @@ export function mergeScanResult(state, scanResult, options = {}) {
         allowTargetedDurableSeed: options.allowTargetedDurableSeed === true,
         memoryInputLimit,
     };
+    if (Object.prototype.hasOwnProperty.call(options, 'userDevelopmentContext')) {
+        lifecycleOptions.userDevelopmentContext = String(options.userDevelopmentContext || '');
+    }
     const incomingList = Array.isArray(scanResult?.npcs) ? scanResult.npcs : [];
     const normalizedCandidates = (Array.isArray(state?.candidates) ? state.candidates : [])
         .map(normalizeNpcCandidate)
@@ -4790,10 +4793,14 @@ export function mergeScanResult(state, scanResult, options = {}) {
     // Durable-profile decisions are independent of ordinary NPC delta admission. This lets
     // Personality/Speech/Appearance/Mannerisms accumulate evidence and refine even when the
     // scanner had no live-state delta worth returning for that NPC.
-    report.profileUpdateStats = applyDurableProfileUpdates(next, scanResult, excludeNames, report, {
+    const profileUpdateOptions = {
         developmentContext: options.developmentContext || '',
         targeted: options.allowTargetedDurableSeed === true || options.developmentSingleTarget === true,
-    });
+    };
+    if (Object.prototype.hasOwnProperty.call(options, 'userDevelopmentContext')) {
+        profileUpdateOptions.userDevelopmentContext = String(options.userDevelopmentContext || '');
+    }
+    report.profileUpdateStats = applyDurableProfileUpdates(next, scanResult, excludeNames, report, profileUpdateOptions);
 
     // Social edges are independent of NPC delta admission. This lets an explicit relationship
     // reveal update a stored dossier even when the scanner returned no ordinary NPC object.
