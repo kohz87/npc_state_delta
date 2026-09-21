@@ -794,15 +794,17 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
         sourceAuthority: authorityProvenanceSupplied ? 'user' : null,
     };
     const episode = mechanics.developmentEpisodeDiagnostic(effectiveReason, authoritativeContext, developmentBinding);
+    const authorityContextReady = !authorityProvenanceSupplied || Boolean(authoritativeContext);
     const explicitReady = scale === 'explicit'
         && Boolean(proposed)
         && Boolean(effectiveReason)
-        && Boolean(authoritativeContext)
+        && authorityContextReady
         && mechanics.developmentScaleReady('explicit', effectiveReason, authoritativeContext, developmentBinding);
     const inferredBatchEligible = (scale === 'gradual' || scale === 'batch') && Boolean(authoritativeContext);
     const batchReady = (scale === 'batch' || inferredBatchEligible)
         && Boolean(proposed)
         && Boolean(effectiveReason)
+        && authorityContextReady
         && mechanics.developmentScaleReady('batch', effectiveReason, authoritativeContext, developmentBinding);
     const inferredBatch = scale !== 'batch' && batchReady;
     const observationalScale = authorityProvenanceSupplied
