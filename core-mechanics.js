@@ -2473,7 +2473,27 @@ export function durableProfileCandidateSupport(field, existing, incoming, eviden
 }
 
 export function durableProfileAggregateCandidateGrounded(field, existing, incoming, evidenceGroups = []) {
-    return durableProfileCandidateSupport(field, existing, incoming, evidenceGroups, 3).ready;
+    const key = field === 'personality' ? 'personality' : field === 'speech' ? 'speech' : '';
+    if (!key) return false;
+    const maxChars = DURABLE_PROFILE_LIMITS[key];
+    const oldText = compactDurableText(existing, maxChars, key === 'speech' ? 5 : 6);
+    const newText = compactDurableText(incoming, maxChars, key === 'speech' ? 5 : 6);
+    if (!oldText || !newText || normalizeName(oldText) === normalizeName(newText)) return false;
+    if (containsEvolutionLanguage(newText)) return false;
+    if (key === 'personality' && identityMoralityConflict(oldText, newText)) return false;
+
+    const oldTokens = new Set(durableRefinementTokens(oldText));
+    const changedTokens = [...new Set(durableRefinementTokens(newText))].filter(token => !oldTokens.has(token));
+    if (!changedTokens.length) return false;
+    const groups = (Array.isArray(evidenceGroups) ? evidenceGroups : [])
+        .map(value => cleanText(value, DURABLE_PROFILE_LIMITS.evidence))
+        .filter(Boolean);
+    if (groups.length < 3) return false;
+
+    const changedSet = new Set(changedTokens);
+    const supportingGroups = groups.filter(value => durableRefinementTokens(value).some(token => changedSet.has(token))).length;
+    if (supportingGroups < 3) return false;
+    return durableProfileEvolutionCandidateGrounded(key, oldText, newText, groups);
 }
 
 function developmentEvidenceClaim(value) {
