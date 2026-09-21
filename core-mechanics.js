@@ -2400,28 +2400,80 @@ export function durableProfileEvolutionCandidateGrounded(field, existing, incomi
 // candidate is the semantic bridge: at least three independent evidence groups must each support
 // some newly proposed characterization, while their union must ground enough of the changed
 // candidate to pass the ordinary candidate-grounding threshold.
-export function durableProfileAggregateCandidateGrounded(field, existing, incoming, evidenceGroups = []) {
+function durableProfileClaimsEquivalent(left, right) {
+    if (!left || !right || durableClaimPolarityConflict(left, right)) return false;
+    return durableDevelopmentClaimRepresented(left, right)
+        || durableDevelopmentClaimRepresented(right, left)
+        || durableSemanticSimilarity(left, right) >= 0.42;
+}
+
+function durableEvidenceSupportsProfileClaim(claim, evidence) {
+    const sample = strippedDevelopmentEvidence(evidence);
+    if (!claim || !sample || durableClaimPolarityConflict(claim, sample)) return false;
+    return durableDevelopmentClaimRepresented(claim, sample)
+        || durableSeedGrounded(claim, sample)
+        || durableSemanticSimilarity(claim, sample) >= 0.28;
+}
+
+export function durableProfileCandidateSupport(field, existing, incoming, evidenceGroups = [], requiredObservations = null) {
     const key = field === 'personality' ? 'personality' : field === 'speech' ? 'speech' : '';
-    if (!key) return false;
+    const empty = {
+        ready: false,
+        grounded: false,
+        changeClass: 'none',
+        requiredObservations: Math.max(1, Number(requiredObservations) || 3),
+        supportingGroups: 0,
+        introducedClaims: [],
+        retiredClaims: [],
+        supportCounts: [],
+    };
+    if (!key) return empty;
+
     const maxChars = DURABLE_PROFILE_LIMITS[key];
     const oldText = compactDurableText(existing, maxChars, key === 'speech' ? 5 : 6);
     const newText = compactDurableText(incoming, maxChars, key === 'speech' ? 5 : 6);
-    if (!oldText || !newText || normalizeName(oldText) === normalizeName(newText)) return false;
-    if (containsEvolutionLanguage(newText)) return false;
-    if (key === 'personality' && identityMoralityConflict(oldText, newText)) return false;
+    if (!oldText || !newText || normalizeName(oldText) === normalizeName(newText)) return empty;
+    if (containsEvolutionLanguage(newText)) return empty;
+    if (key === 'personality' && identityMoralityConflict(oldText, newText)) return empty;
 
-    const oldTokens = new Set(durableRefinementTokens(oldText));
-    const changedTokens = [...new Set(durableRefinementTokens(newText))].filter(token => !oldTokens.has(token));
-    if (!changedTokens.length) return false;
+    const oldClaims = splitDurableClaimUnits(oldText);
+    const newClaims = splitDurableClaimUnits(newText);
+    const introducedClaims = newClaims.filter(claim =>
+        !oldClaims.some(previous => durableProfileClaimsEquivalent(previous, claim)));
+    const retiredClaims = oldClaims.filter(claim =>
+        !newClaims.some(next => durableProfileClaimsEquivalent(claim, next)));
+    const polarityReversal = oldClaims.some(previous =>
+        newClaims.some(next => durableClaimPolarityConflict(previous, next)));
+    const changeClass = retiredClaims.length || polarityReversal ? 'reversal' : 'additive';
+    const required = Math.max(1, Number(requiredObservations)
+        || (key === 'speech' && changeClass === 'additive' ? 2 : 3));
     const groups = (Array.isArray(evidenceGroups) ? evidenceGroups : [])
-        .map(value => cleanText(value, DURABLE_PROFILE_LIMITS.evidence))
+        .map(strippedDevelopmentEvidence)
         .filter(Boolean);
-    if (groups.length < 3) return false;
+    if (!introducedClaims.length || !groups.length) {
+        return { ...empty, changeClass, requiredObservations: required, introducedClaims, retiredClaims };
+    }
 
-    const changedSet = new Set(changedTokens);
-    const supportingGroups = groups.filter(value => durableRefinementTokens(value).some(token => changedSet.has(token))).length;
-    if (supportingGroups < 3) return false;
-    return durableProfileEvolutionCandidateGrounded(key, oldText, newText, groups);
+    const supportCounts = introducedClaims.map(claim =>
+        groups.filter(group => durableEvidenceSupportsProfileClaim(claim, group)).length);
+    const supportingGroups = groups.filter(group =>
+        introducedClaims.some(claim => durableEvidenceSupportsProfileClaim(claim, group))).length;
+    const grounded = supportCounts.every(count => count >= 1)
+        && durableProfileEvolutionCandidateGrounded(key, oldText, newText, groups);
+    return {
+        ready: grounded && supportCounts.every(count => count >= required),
+        grounded,
+        changeClass,
+        requiredObservations: required,
+        supportingGroups,
+        introducedClaims,
+        retiredClaims,
+        supportCounts,
+    };
+}
+
+export function durableProfileAggregateCandidateGrounded(field, existing, incoming, evidenceGroups = []) {
+    return durableProfileCandidateSupport(field, existing, incoming, evidenceGroups, 3).ready;
 }
 
 function developmentEvidenceClaim(value) {
@@ -3417,9 +3469,17 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
     const directEvolutionReady = () => {
         // Existing durable identity must not leap merely because a weaker scanner omitted
         // developmentScale. Gradual evolution is evidence-gated through profileUpdates.
+        // Story-level explicit/batch authority belongs to user-authored canon, never to
+        // assistant prose that happens to describe its own characterization as permanent.
         const scale = incoming.developmentScale || 'gradual';
         if (scale === 'gradual') return false;
-        return developmentScaleReady(scale, incoming.developmentReason, lifecycleOptions.developmentContext);
+        const authoritativeContext = String(lifecycleOptions.userDevelopmentContext || '').trim();
+        if (!authoritativeContext) return false;
+        return developmentScaleReady(scale, incoming.developmentReason, authoritativeContext, {
+            npc: existing,
+            targeted: lifecycleOptions.allowTargetedDurableSeed === true,
+            sourceAuthority: 'user',
+        });
     };
     const existingName = cleanText(existing.name, 120);
     const incomingName = cleanText(incoming.name, 120);
@@ -4206,8 +4266,9 @@ function batchDevelopmentContextGrounded(reason, context, binding = null) {
 export function developmentScaleReady(scale, reason, context, binding = null) {
     const mode = ['gradual', 'explicit', 'batch'].includes(String(scale || '')) ? String(scale) : 'gradual';
     if (mode === 'gradual') return false;
-    if (!developmentReasonGrounded(reason, context, { strong: mode === 'batch' })) return false;
     const source = String(context || '').trim();
+    if (binding?.sourceAuthority === 'user' && !source) return false;
+    if (!developmentReasonGrounded(reason, context, { strong: mode === 'batch' })) return false;
     if (mode === 'explicit' && source && !explicitDevelopmentContextGrounded(reason, source)) return false;
     if (mode === 'batch') {
         if (isBareTimePassageDevelopmentReason(reason)) return false;
@@ -4236,22 +4297,23 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
         const candidateValue = field === 'mannerisms' || field === 'behaviorProfile' ? incoming[field] || [] : incoming[field] || '';
         const evidenceReason = durableProfileEvidenceReason(field, currentValue, candidateValue, incomingEvidence[field] || []);
         const effectiveReason = cleanText(incoming.developmentReason || fieldReason || evidenceReason, 500);
+        const authoritativeContext = String(options.userDevelopmentContext || '').trim();
         const binding = {
             npc,
             evidence: incomingEvidence[field] || [],
             targeted: options.targeted === true,
+            sourceAuthority: 'user',
         };
         const candidateSpecificGrounding = field === 'mannerisms' || field === 'behaviorProfile'
             ? durableProfileCollectionCandidateGrounded(field, currentValue, candidateValue, incomingEvidence[field] || [])
             : true;
         if (scale === 'gradual') {
-            const hasDevelopmentContext = Boolean(String(options.developmentContext || '').trim());
             return gradualProfileEvolutionReady(field, beforeEvidence, incomingEvidence)
-                || (hasDevelopmentContext && effectiveReason && candidateSpecificGrounding
-                    && developmentScaleReady('batch', effectiveReason, options.developmentContext, binding));
+                || (authoritativeContext && effectiveReason && candidateSpecificGrounding
+                    && developmentScaleReady('batch', effectiveReason, authoritativeContext, binding));
         }
-        return Boolean(effectiveReason) && candidateSpecificGrounding
-            && developmentScaleReady(scale, effectiveReason, options.developmentContext, binding);
+        return Boolean(authoritativeContext) && Boolean(effectiveReason) && candidateSpecificGrounding
+            && developmentScaleReady(scale, effectiveReason, authoritativeContext, binding);
     };
 
     const applyText = (field, stateField, reasonField, refineState, evolveState, maxChars) => {
@@ -4895,7 +4957,7 @@ function injectionIdentityCore(npc, identityCap = 540) {
     const parts = [
         npc.personality && `personality: ${npc.personality}`,
         npc.behaviorProfile?.length && `behavioral profile: ${compactBehaviorProfileForInjection(npc.behaviorProfile, 220)}`,
-        npc.speech && `established speech: ${npc.speech}`,
+        npc.speech && `VOICE (dialogue wording/delivery): ${npc.speech}`,
         npc.mannerisms?.length && `established mannerisms: ${npc.mannerisms.join(', ')}`,
     ].filter(Boolean);
     return fairInjectionParts(parts, identityCap) || 'not yet established; do not invent an archetype to fill the gap';
@@ -4966,6 +5028,7 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
     const header = [
         'NPC STATE DELTA DOSSIER. Only confirmed-present NPCs are included. Treat these as established story facts; never mention the dossier or numeric values.',
         'IDENTITY FIRST / DOMINATES: personality, behavioral profile, speech, mannerisms, goals, duties, morality, independence, other bonds, and CURRENT mood/status determine behavior first.',
+        'VOICE FIDELITY: established Speech constrains actual dialogue wording and delivery. Preserve its sentence shape, vocabulary, formality, directness, hedging, cadence, question/explanation style, and recurring verbal habits; do not flatten distinct voices into generic polished prose.',
         'PLAYER RELATIONSHIP IS SECONDARY: it may bias attention, interpretation, openness, tolerance, or willingness toward the player, but need not surface every scene. High scores never mean obedience, universal prioritization, clinginess, jealousy, tsundere behavior, or cruelty toward others.',
         'Temporary mood, stress, intimacy, or player-specific behavior is not global identity. Durable identity changes gradually unless narration explicitly establishes lasting development or a developmental time skip.',
     ].join('\n');
@@ -5313,7 +5376,7 @@ Rules:
 4. LOCKS: never rewrite fields listed in lockedProfileFields. Omit them from profileUpdates and ordinary dossier changes.
 5. DURABLE PROFILE: CURRENT COMPACT SUMMARY only. Personality/Speech/Appearance mention each durable concept once; Appearance does not repeat explicit age. behaviorProfile=max6 target-general rules translating identity, not a second essay; player-specific patterns belong relationshipSummary. refine returns FULL field; lasting personality/speech/mannerism/behaviorProfile change uses evolve+reason, Appearance uses change+reason. Mannerisms=max4 DISTINCT recurring patterns, not separate animations. One transient beat is not durable.
 6. IDENTITY FIREWALL: temporary mood, fear, stress, intoxication, intimacy, or behavior unique to ${userName} must not become global Personality, Speech, Mannerisms, or behaviorProfile. A generally kind NPC remains generally kind toward other people unless narration establishes a broader change. Necessary force is not cruelty by itself.
-7. DEVELOPMENT SPEED: ordinary continuity changes durable identity gradually. Recent lines may start with [mN] source tags. One scene may support multiple fields; emit each grounded evidence item independently (speech+behaviorProfile allowed). For gradual Personality/Speech evidence, return up to 4 independent observations and preserve each source tag, e.g. "[m42] reserve: initiates public discussion"; use one stable concept label for the same pattern. If evidence makes existing Personality/Speech stale, return a changed FULL CURRENT candidate containing it; never claim refine/evolve with a copied field. Reinforcement only=>omit/keep. Delta decides sufficiency. Use developmentScale:"gradual" for ordinary continuity; "explicit" only for a direct lasting-change statement; "batch" when an elapsed interval explicitly summarizes sustained development. Any refine/evolve/change that relies on time-compressed development MUST include developmentReason, even when state is refine. Mere passage of time does nothing.
+7. DEVELOPMENT SPEED: ordinary assistant/main-speaker behavior is gradual evidence, even when its prose describes itself as permanent. User-authored Player lines may use explicit/batch authority only when they declaratively establish lasting NPC canon; quoted dialogue, questions, speculation, requests, conditionals, and future wishes do not. Recent lines may start with [mN] source tags. One scene may support multiple fields; emit each grounded evidence item independently (speech+behaviorProfile allowed). For gradual Personality/Speech evidence, return up to 4 independent observations and preserve each source tag. Reuse a stable concept label when obvious, but do not force differently worded observations into one label: Delta may converge independent evidence through the changed candidate itself. Speech evidence/candidates should prefer observable voice production (sentence shape, vocabulary, formality, directness, hedging, cadence, question/explanation style, recurring verbal habits) over generic personality adjectives. If evidence makes existing Personality/Speech stale, return a changed FULL CURRENT candidate containing it; never claim refine/evolve with a copied field. Reinforcement only=>omit/keep. Delta decides sufficiency. Use developmentScale:"gradual" for ordinary continuity; "explicit" only for user-authored direct lasting change; "batch" only for user-authored elapsed sustained development. Any refine/evolve/change that relies on time-compressed development MUST include developmentReason, even when state is refine. Mere passage of time does nothing.
 8. ROLE/SPECIES/BACKGROUND may update when this window establishes or clarifies them. Species is literal only. Background is durable history, not current mood/status.
 9. AGE=chronology only. Birthday/exact elapsed years=>advance+reason; correction=>correct+reason. apparentAge=visual and should be compact ~N, not prose; visual aging/growth/rejuvenation=>evolve+reason. No species-lifespan inference.
 10. KEY RELATIONSHIPS: one unambiguous entry/non-player counterpart. Merge relation+durable dynamic; use "late husband"/"surviving widow" rather than dangling "(deceased)". update/keyRelationshipEdges for discovery; evolve+reason for lasting social change. Omission NEVER erases unrelated ties. Never put ${userName} there.
@@ -5472,7 +5535,7 @@ Rules:
 6. Goal/status/mood/location are LIVE: output goal,goalState,status,statusState,mood,moodState,location,locationState as needed; actively reassess each returned EXISTING NPC every scan. Unchanged -> omit; changed -> replace; ended mood/goal/status -> matching *State:"clear". Location=current/last reliable; locationState:"clear" only when old place explicitly obsolete and replacement unknown. Off-screen/no evidence alone never clears it. Never use "Unknown".
 7. DURABLE PROFILE CHANNEL: ALWAYS emit one top-level profileUpdates item for durable facts even without npc delta. No duplicate/inferred. One scene may support multiple fields; emit each grounded item independently (speech+behaviorProfile allowed). matching *State:"refine" returns FULL field; lasting personality/speech/mannerism "evolve"+reason; appearance "change"+reason. behaviorProfile FULL max6; Mannerisms FULL max4 DISTINCT. PC/one-scene behavior -> relationshipSummary/live state/Memory. lockedProfileFields never rewrite.
 8. IDENTITY FIREWALL: Ignore transient visual state. mood/stress/intimacy/injury/relationship-specific behavior never becomes global Personality/Speech/Mannerisms/behaviorProfile. Player-specific durable stance -> relationshipSummary. Kindness stays general unless broader change established; necessary force != cruelty. High scores alone never imply jealousy/clinginess/blushing/stammering/possessiveness/tsundere denial.
-9. DEVELOPMENT SPEED: ordinary=gradual; reuse concept labels. developmentScale=gradual|explicit|batch; explicit=direct lasting change; batch=elapsed interval+sustained development. Time-compressed refine/evolve/change MUST include developmentReason + changed FULL candidate; unchanged/reinforcing=>omit/keep. Time skip alone invents nothing.
+9. DEVELOPMENT SPEED: ordinary assistant/main-speaker behavior is gradual evidence even if its prose says "permanent", "no longer", or similar. User-authored Player lines may use explicit/batch authority only when they declaratively establish lasting NPC canon; quoted dialogue, questions, speculation, requests, conditionals, and future wishes do not. developmentScale=gradual|explicit|batch; explicit=user-authored direct lasting change; batch=user-authored elapsed interval+sustained development. For Speech evidence/candidates prefer observable voice production (sentence shape, vocabulary, formality, directness, hedging, cadence, question/explanation style, recurring verbal habits) over generic personality adjectives. Time-compressed refine/evolve/change MUST include developmentReason + changed FULL candidate; unchanged/reinforcing=>omit/keep. Time skip alone invents nothing.
 10. SOCIAL: grounded non-player kin/friend/rival/mentor/partner => ALWAYS top-level keyRelationshipEdges {aId,a,bId,b,aToB,bToA,reason}; one clear counterpart entry. Use late/surviving, never dangling "(deceased)". Social change may evolve+reason; omission NEVER erases other bonds.
 11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue, compact ~N, never prose; species literal; no species-aging inference. Birthday/exact elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual aging/growth/rejuvenation=>apparentAgeState:"evolve"+reason. Appearance must not repeat explicit age. Vague time skip insufficient.
 12. RELATIONSHIP -100..+100 DELTA-ONLY; currentRelationship read-only. Return relationshipDelta+relationshipEvidence (all 4 keys). NEW only; continuation/aftermath=>0. Raw max 1/2/5/10; axis max 1/2/3/4. EVERY non-zero axis needs grounded CURRENT-exchange evidence. Desire needs explicit attraction/intimacy narration; rescue/gratitude/affection/trust/proximity=>0. Secondary to identity. Trust!=obedience; Affection!=devotion; Tension!=jealousy.
