@@ -2396,10 +2396,10 @@ export function durableProfileEvolutionCandidateGrounded(field, existing, incomi
     return supported >= required;
 }
 
-// Aggregate gradual readiness deliberately does not merge concept buckets. The proposed full
-// candidate is the semantic bridge: at least three independent evidence groups must each support
-// some newly proposed characterization, while their union must ground enough of the changed
-// candidate to pass the ordinary candidate-grounding threshold.
+// Gradual candidate support deliberately does not merge concept buckets. The proposed full
+// candidate is the semantic bridge: independent evidence groups must each support newly proposed
+// characterization, while their union must ground enough of the changed candidate to pass the
+// ordinary candidate-grounding threshold. Field/change class decides whether two or three are needed.
 function durableProfileClaimsEquivalent(left, right) {
     if (!left || !right || durableClaimPolarityConflict(left, right)) return false;
     return durableDevelopmentClaimRepresented(left, right)
@@ -4291,6 +4291,13 @@ export function developmentScaleReady(scale, reason, context, binding = null) {
     })) return false;
     if (mode === 'batch') {
         if (isBareTimePassageDevelopmentReason(reason)) return false;
+        if (binding?.sourceAuthority === 'user' && source) {
+            const declarativeDevelopment = developmentContextSegments(source).some(segment =>
+                declarativeUserDevelopmentSegment(segment)
+                && BATCH_DEVELOPMENT_CUE_RE.test(normalizeName(segment))
+                && contextWindowGroundsReason(reason, segment));
+            if (!declarativeDevelopment) return false;
+        }
         if (source && (!hasNarratedTimeSkip(source) || !batchDevelopmentContextGrounded(reason, source, binding))) return false;
     }
     return true;
