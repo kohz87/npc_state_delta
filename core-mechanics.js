@@ -4976,7 +4976,7 @@ function injectionIdentityCore(npc, identityCap = 540) {
     const parts = [
         npc.personality && `personality: ${npc.personality}`,
         npc.behaviorProfile?.length && `behavioral profile: ${compactBehaviorProfileForInjection(npc.behaviorProfile, 220)}`,
-        npc.speech && `VOICE (dialogue wording/delivery): ${npc.speech}`,
+        npc.speech && `established speech: ${npc.speech}`,
         npc.mannerisms?.length && `established mannerisms: ${npc.mannerisms.join(', ')}`,
     ].filter(Boolean);
     return fairInjectionParts(parts, identityCap) || 'not yet established; do not invent an archetype to fill the gap';
