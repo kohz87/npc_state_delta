@@ -782,13 +782,16 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
     const evidenceReason = mechanics.durableProfileEvidenceReason(field, currentValue, proposed, rawDevelopmentEvidence);
     const effectiveReason = developmentReason || reason || evidenceReason;
     const effectiveReasonSource = developmentReason ? 'provider' : (reason ? 'field' : (evidenceReason ? 'evidence' : 'none'));
-    const authoritativeContext = String(options.userDevelopmentContext || '').trim();
+    const authorityProvenanceSupplied = Object.prototype.hasOwnProperty.call(options, 'userDevelopmentContext');
+    const authoritativeContext = String(authorityProvenanceSupplied
+        ? (options.userDevelopmentContext || '')
+        : (options.developmentContext || '')).trim();
     const developmentBinding = {
         npc,
         evidence: rawDevelopmentEvidence,
         targeted: options.allowTargetedDurableSeed === true || plan.singleTargetUpdate === true,
         otherLabels: plan.otherLabels || [],
-        sourceAuthority: 'user',
+        sourceAuthority: authorityProvenanceSupplied ? 'user' : null,
     };
     const episode = mechanics.developmentEpisodeDiagnostic(effectiveReason, authoritativeContext, developmentBinding);
     const explicitReady = scale === 'explicit'
@@ -1001,7 +1004,8 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
     const candidateSupport = field === 'speech' && proposed && candidateChanged
         ? mechanics.durableProfileCandidateSupport(field, currentValue, proposed, plan.aggregateEvidence?.groups || [])
         : null;
-    const candidateBridgeReady = Boolean(candidateSupport?.ready)
+    const candidateBridgeReady = !plan.readyRecords?.length && !aggregateReady
+        && Boolean(candidateSupport?.ready)
         && profileDevelopmentProvenanceReady(plan.aggregateEvidence, candidateSupport.requiredObservations);
     if (!ledger || (!plan.readyRecords?.length && !aggregateReady && !candidateBridgeReady)) {
         recordProfileDevelopmentDiagnostic(report, npc.id, field, 'waiting-for-evidence', plan, {
