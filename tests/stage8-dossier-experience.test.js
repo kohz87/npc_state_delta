@@ -94,7 +94,7 @@ test('editor uses one scroll body and task-grouped form sections', () => {
 });
 
 test('settings are grouped by task and extension-wide backup diagnostics live in Settings', () => {
-    for (const label of ['General', 'Scanning', 'Continuity & injection', 'Roster & cleanup', 'Portrait prompts', 'Relationship tuning', 'Memory & behavior rules', 'Data & maintenance']) {
+    for (const label of ['General', 'Scanning', 'Continuity & injection', 'Roster & cleanup', 'Portrait generation', 'Relationship tuning', 'Memory & behavior rules', 'Data & maintenance']) {
         assert.match(source, new RegExp(label.replace(/[&]/g, '\\&')));
     }
     assert.match(source, /data-delta-settings-backup/);
