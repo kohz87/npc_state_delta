@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add native portrait generation to the maintained Portrait tool through SillyTavern Image Generation. The edited dossier-derived positive/negative prompts are handed to the existing host `/imagine` bridge, so ComfyUI/A1111/other configured backends remain owned by SillyTavern rather than Delta.
+- Keep generated images preview-only until explicit **Use as Portrait**. Closing/switching chats or superseding an in-flight action invalidates late results; accepted previews reuse the canonical portrait validation/compression/persistence path and retain the existing 16 MB input boundary.
 - Retire the obsolete dossier `importance` field and generic per-NPC `manual` boolean. Historical values are accepted as input only long enough to normalize them away; current story salience, scoped profile locks, and typed manual provenance remain authoritative.
 - Add durable Home Base / Usual Location as ongoing-life geography distinct from live Location. An established Home Base is keep-by-default and requires a grounded explicit update/reason to relocate.
 - Consolidate appearance ownership: the flat `appearance` scalar remains a compatibility/resolved projection for historical records and scanner interoperability, while new manual editing and dossier presentation use Shared Appearance, named forms, Current Form, and unclassified current presentation without a duplicate flat editor/display.

@@ -1,4 +1,4 @@
-/* NPC State Delta portrait management: prompt generation plus explicit upload/remove only. */
+/* NPC State Delta portrait management: dossier prompts, native host-image preview, and explicit application. */
 import {
     activeChatKey, api, closeOverlay, currentSessionIs, draftKey, escapeHtml, flushDurably,
     keepPromptDraft, makeSession, mountOverlay, npcById, promptDrafts,
@@ -94,23 +94,35 @@ function combinedPrompt(draft) {
     return blocks.join('\n\n');
 }
 
+function portraitGenerationAvailable() {
+    const runtime = api();
+    if (typeof runtime?.generatePortraitUrl !== 'function') return false;
+    try { return runtime?.portraitSettings?.()?.portraitGenerationEnabled !== false; }
+    catch { return true; }
+}
+
 function portraitDialogHtml(npc, draft) {
     const portrait = npc?.portrait?.dataUrl || '';
+    const canGenerate = portraitGenerationAvailable();
     return `<section class="delta-tools-dialog delta-tools-portrait" role="document" aria-label="Portrait management for ${escapeHtml(npc.name)}">
       <header>
-        <div><span class="delta-tools-kicker">PORTRAIT + PROMPTS</span><h2>${escapeHtml(npc.name)}</h2><small>Generate prompts from the accepted dossier, edit or copy them, then manage the portrait explicitly from your device. Delta does not generate an image here.</small></div>
+        <div><span class="delta-tools-kicker">PORTRAIT + PROMPTS</span><h2>${escapeHtml(npc.name)}</h2><small>Build prompts from the accepted dossier or generate through SillyTavern Image Generation. Generated images stay preview-only until you explicitly choose Use as Portrait.</small></div>
         <button type="button" class="delta-tools-close" data-delta-tools-close aria-label="Close">×</button>
       </header>
       <div class="delta-tools-body delta-tools-portrait-grid">
         <section class="delta-tools-preview">
           <div class="delta-tools-current">${portrait ? `<img src="${escapeHtml(portrait)}" alt="Current portrait of ${escapeHtml(npc.name)}">` : '<div class="delta-tools-placeholder">No current portrait</div>'}</div>
+          <div class="delta-tools-generated" data-generated-preview hidden>
+            <div class="delta-tools-generated-placeholder" data-generated-placeholder>Generated preview will appear here. It will not change the dossier until applied.</div>
+            <img data-generated-image alt="Generated portrait preview for ${escapeHtml(npc.name)}" hidden>
+          </div>
         </section>
         <section class="delta-tools-prompts">
           <label>Positive prompt<textarea id="npc_state_delta_tools_positive" rows="8" data-delta-tools-autofocus>${escapeHtml(draft.positive)}</textarea></label>
           <div class="delta-tools-copy-row"><button type="button" data-copy="positive">Copy positive</button><button type="button" data-generate-prompts>Generate prompts from dossier</button></div>
           <label>Negative prompt<textarea id="npc_state_delta_tools_negative" rows="6">${escapeHtml(draft.negative)}</textarea></label>
           <div class="delta-tools-copy-row"><button type="button" data-copy="negative">Copy negative</button></div>
-          <small>Manual edits are kept for this chat session. “Generate prompts from dossier” replaces them with a fresh resolved-appearance prompt. “Copy Prompt” copies the currently edited positive + negative prompt pair.</small>
+          <small>Manual edits are kept for this chat session. Generation uses the currently edited positive + negative prompts and SillyTavern's configured Image Generation backend, including ComfyUI when selected there.</small>
           <div class="delta-tools-manual-copy" data-delta-tools-manual-copy hidden>
             <small>Clipboard access is blocked by this browser context. The prompt is selected below; press Ctrl+C.</small>
             <textarea data-delta-tools-manual-copy-text rows="4" readonly aria-label="Prompt ready for manual copy"></textarea>
@@ -121,6 +133,8 @@ function portraitDialogHtml(npc, draft) {
         <label class="delta-tools-file-button">${portrait ? 'Replace from device' : 'Upload from device'}${hiddenUploadInput(npc.id)}</label>
         <button type="button" data-remove-portrait ${portrait ? '' : 'disabled'}>Remove portrait</button>
         <button type="button" data-copy-final-prompt>Copy Prompt</button>
+        <button type="button" data-generate-portrait ${canGenerate ? '' : 'disabled title="Enable Portrait generation in NPC State Delta settings and configure SillyTavern Image Generation."'}>Generate Portrait</button>
+        <button type="button" data-use-generated-portrait disabled>Use as Portrait</button>
         <span data-delta-tools-status hidden></span>
       </footer>
     </section>`;
@@ -169,6 +183,133 @@ function generatePromptsFromDossier(session, overlay) {
     toast('info', 'NPC State Delta: portrait prompts generated from the current accepted dossier.');
 }
 
+function generatedPreview(session, overlay, url) {
+    if (!currentSessionIs(session)) return false;
+    const value = String(url || '').trim();
+    if (!value) return false;
+    session.generatedPortraitUrl = value;
+    const box = overlay?.querySelector?.('[data-generated-preview]');
+    const image = overlay?.querySelector?.('[data-generated-image]');
+    const placeholder = overlay?.querySelector?.('[data-generated-placeholder]');
+    const use = overlay?.querySelector?.('[data-use-generated-portrait]');
+    if (box) box.hidden = false;
+    if (image) {
+        image.src = value;
+        image.hidden = false;
+    }
+    if (placeholder) placeholder.hidden = true;
+    if (use) use.disabled = false;
+    return true;
+}
+
+async function generatedPortraitFile(url, npcId = 'npc') {
+    const raw = String(url || '').trim();
+    if (!raw) throw new Error('Generated image URL is empty.');
+    const absolute = new URL(raw, globalThis.location?.href || 'http://localhost/').href;
+    const response = await fetch(absolute, { credentials: 'same-origin' });
+    if (!response.ok) throw new Error(`Could not load generated image (${response.status}).`);
+    const blob = await response.blob();
+    if (!blob.type?.startsWith('image/') || blob.size > 16 * 1024 * 1024) throw new Error('Generated result must be an image no larger than 16 MB.');
+    const validation = validatePortraitFile({ type: blob.type, size: blob.size });
+    if (!validation.ok) throw new Error(validation.reason);
+    const extension = (blob.type.split('/')[1] || 'png').replace(/[^a-z0-9]/gi, '') || 'png';
+    const safeId = String(npcId || 'npc').replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '') || 'npc';
+    return new File([blob], `${safeId}-generated.${extension}`, { type: blob.type });
+}
+
+async function generatePortrait(session, overlay) {
+    if (!currentSessionIs(session) || session.busy) return false;
+    const runtime = api();
+    if (typeof runtime?.generatePortraitUrl !== 'function') {
+        toast('warning', 'NPC State Delta: SillyTavern Image Generation is unavailable in this runtime.');
+        return false;
+    }
+    try {
+        if (runtime?.portraitSettings?.()?.portraitGenerationEnabled === false) {
+            toast('info', 'NPC State Delta: enable Portrait generation in settings first.');
+            return false;
+        }
+    } catch {}
+    const draft = saveDraftFromOverlay(session, overlay);
+    if (!draft.positive) {
+        toast('warning', 'NPC State Delta: positive portrait prompt is empty.');
+        return false;
+    }
+    const actionSeq = ++session.actionSeq;
+    session.generatedPortraitUrl = '';
+    const use = overlay?.querySelector?.('[data-use-generated-portrait]');
+    if (use) use.disabled = true;
+    setBusy(session, true, 'Generating through SillyTavern Image Generation…', { allowClose: true });
+    try {
+        const url = await runtime.generatePortraitUrl(session.npcId, { positive: draft.positive, negative: draft.negative });
+        if (!currentSessionIs(session) || session.actionSeq !== actionSeq) return false;
+        const value = String(url || '').trim();
+        if (!value) throw new Error('SillyTavern Image Generation returned no image URL.');
+        setBusy(session, false, 'Generation complete. Review the preview before applying it.');
+        if (!generatedPreview(session, overlay, value)) return false;
+        recordToolEvent('portrait-generation', {
+            chatKey: session.chatKey,
+            npcId: session.npcId,
+            action: 'generate-preview',
+            outcome: 'generated',
+        });
+        return true;
+    } catch (error) {
+        if (!currentSessionIs(session) || session.actionSeq !== actionSeq) return false;
+        recordToolEvent('portrait-generation', {
+            chatKey: session.chatKey,
+            npcId: session.npcId,
+            action: 'generate-preview',
+            outcome: 'failed',
+            detail: error?.message || error,
+        });
+        setBusy(session, false, 'Generation failed.');
+        toast('error', `NPC State Delta portrait generation: ${error?.message || error}`);
+        return false;
+    }
+}
+
+async function useGeneratedPortrait(session, overlay) {
+    const url = String(session.generatedPortraitUrl || '').trim();
+    if (!currentSessionIs(session) || session.busy || !url) return false;
+    const actionSeq = ++session.actionSeq;
+    const live = npcById(session.npcId);
+    if (!live) return false;
+    setBusy(session, true, 'Applying generated preview through the canonical portrait handler…', { allowClose: true });
+    let applied = false;
+    try {
+        const file = await generatedPortraitFile(url, session.npcId);
+        if (!currentSessionIs(session) || session.actionSeq !== actionSeq) return false;
+        applied = await api()?.setPortrait?.(session.npcId, file, {
+            chatKey: session.chatKey,
+            isCurrent: () => currentSessionIs(session) && session.actionSeq === actionSeq,
+            generatedFrom: url,
+        });
+        if (!applied) throw new Error('The portrait target changed; stale generated image was rejected.');
+        if (!currentSessionIs(session) || session.actionSeq !== actionSeq) return false;
+        const saved = await flushDurably(session.chatKey, 'generated portrait');
+        if (!currentSessionIs(session) || session.actionSeq !== actionSeq) return false;
+        stage1Refresh();
+        recordToolEvent('portrait-generation', {
+            chatKey: session.chatKey,
+            npcId: session.npcId,
+            action: 'apply-preview',
+            outcome: saved.persisted ? 'saved' : 'local-only',
+            persisted: saved.persisted,
+        });
+        toast(saved.persisted ? 'success' : 'warning', saved.persisted
+            ? `NPC State Delta: generated portrait applied to ${live.name} and saved.`
+            : `NPC State Delta: generated portrait applied locally, but durable save failed. ${saved.error?.message || saved.error}`);
+        closeOverlay({ reason: 'generated-portrait-applied', session });
+        return true;
+    } catch (error) {
+        if (!currentSessionIs(session) || session.actionSeq !== actionSeq) return false;
+        setBusy(session, false, applied ? 'Applied locally; durable save failed.' : 'Could not apply generated preview.');
+        toast(applied ? 'warning' : 'error', `NPC State Delta portrait import: ${error?.message || error}`);
+        return false;
+    }
+}
+
 function wirePortraitDialog(session, overlay) {
     const input = overlay?.querySelector('.delta-tools-portrait-file');
     input?.addEventListener('change', event => {
@@ -215,6 +356,14 @@ function wirePortraitDialog(session, overlay) {
         if (event.target.closest?.('[data-copy-final-prompt]')) {
             const draft = saveDraftFromOverlay(session, overlay);
             void copyPromptText(combinedPrompt(draft), 'Portrait prompt', overlay);
+            return;
+        }
+        if (event.target.closest?.('[data-generate-portrait]')) {
+            void generatePortrait(session, overlay);
+            return;
+        }
+        if (event.target.closest?.('[data-use-generated-portrait]')) {
+            void useGeneratedPortrait(session, overlay);
             return;
         }
         if (event.target.closest?.('[data-remove-portrait]')) void removePortrait(session);
