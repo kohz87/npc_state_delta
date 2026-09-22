@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.0.44 - 22 September 2026
+
+- Add an optional persisted per-NPC Portrait seed in the maintained Portrait tool. Blank keeps SillyTavern default/random behavior; a saved non-negative safe integer is passed through the native `/imagine seed=<n>` argument, including ComfyUI workflows that consume `%seed%`.
+- Keep seed state outside roleplay/scanner prompts and preserve host ownership of checkpoint, workflow, sampler, resolution and other image settings; fixed seeds improve repeatability but do not guarantee identity if those inputs change.
+- Stabilize the Data & maintenance action order as `Scan dossier now` → `Full scan current cast` → `Clear chat dossier`, add seed/order regressions, and advance synchronized application/package/display metadata to 1.0.44 with persisted format versions unchanged.
+
 ## 1.0.43 - 22 September 2026
 
 - Fix the remaining full-cast settings race by re-homing an already-rendered `Full scan current cast` button into Data & maintenance after cohesive settings normalization, instead of only choosing the correct container at first creation.
