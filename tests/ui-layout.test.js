@@ -158,9 +158,9 @@ test('present-only behavior injection and manual dossier editor controls are exp
     assert.match(index, /npc_state_delta_edit_tension/);
     assert.match(index, /npc_state_delta_edit_behavior_profile/);
     assert.match(index, /Behavioral Levers/);
-    assert.match(index, /Max \\${BEHAVIOR_PROFILE_LIMIT} compact target-general response\\/decision rules/);
+    assert.match(index, /Max \${BEHAVIOR_PROFILE_LIMIT} compact target-general response\/decision rules/);
     assert.match(index, /Player Dynamic/);
-    assert.match(index, /Condition \\/ Activity/);
+    assert.match(index, /Condition \/ Activity/);
     assert.doesNotMatch(index, /npc_state_delta_edit_importance/);
     assert.match(index, /const Popup = ctx\.Popup/);
     assert.match(index, /allowVerticalScrolling: true/);
