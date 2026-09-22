@@ -227,14 +227,15 @@ function ensureEditorStructure(editor) {
     const identity = editorSection('Identity & profile', 'delta-editor-identity');
     for (const [id, wide] of [
         ['npc_state_delta_edit_name', false], ['npc_state_delta_edit_species', false],
-        ['npc_state_delta_edit_role', false], ['npc_state_delta_edit_age', false],
+        ['npc_state_delta_edit_role', false], ['npc_state_delta_edit_home_base', false],
+        ['npc_state_delta_edit_age', false], ['npc_state_delta_edit_birthday', false],
         ['npc_state_delta_edit_apparent_age', false], ['npc_state_delta_edit_personality', false],
         ['npc_state_delta_edit_behavior_profile', true], ['npc_state_delta_edit_speech', false],
-        ['npc_state_delta_edit_appearance', true], ['npc_state_delta_edit_background', true],
+        ['npc_state_delta_edit_background', true],
     ]) moveEditorLabel(content, id, identity.body, { wide });
 
     const current = editorSection('Current state', 'delta-editor-current');
-    for (const id of ['npc_state_delta_edit_mood', 'npc_state_delta_edit_location', 'npc_state_delta_edit_goal', 'npc_state_delta_edit_status', 'npc_state_delta_edit_importance']) {
+    for (const id of ['npc_state_delta_edit_mood', 'npc_state_delta_edit_location', 'npc_state_delta_edit_goal', 'npc_state_delta_edit_status']) {
         moveEditorLabel(content, id, current.body);
     }
 
@@ -251,7 +252,7 @@ function ensureEditorStructure(editor) {
     const advanced = document.createElement('details');
     advanced.className = 'delta-editor-advanced';
     const summary = document.createElement('summary');
-    summary.innerHTML = '<b>Advanced NPC options</b><small>Life state, profile protection, stale cleanup and Minor NPC controls</small>';
+    summary.innerHTML = '<b>Advanced NPC options</b><small>Life state, profile protection, stale cleanup and present-card visibility</small>';
     const advancedBody = document.createElement('div');
     advancedBody.className = 'delta-editor-advanced-body';
     advanced.append(summary, advancedBody);
