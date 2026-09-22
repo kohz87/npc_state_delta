@@ -2324,7 +2324,9 @@ test('portrait prompt builder uses visual dossier fields and excludes nonvisual 
     assert.doesNotMatch(prompts.positive, /northern marches/);
     assert.doesNotMatch(prompts.positive, /winter siege/);
     assert.doesNotMatch(prompts.positive, /Deeply bonded/);
-    assert.equal(prompts.negative, 'blurry, watermark');
+    assert.match(prompts.negative, /blurry, watermark/);
+    assert.match(prompts.negative, /blonde hair/);
+    assert.doesNotMatch(prompts.negative, /silver hair/);
 });
 
 test('portrait prompt builder supports optional location, per-NPC overrides, and replacement mode', () => {
@@ -2342,7 +2344,10 @@ test('portrait prompt builder supports optional location, per-NPC overrides, and
     assert.match(normal.positive, /Moonlit courtyard/);
     assert.match(normal.positive, /black ceremonial ribbon/);
     assert.doesNotMatch(normal.positive, /wary/);
-    assert.equal(normal.negative, 'low quality, helmet, hood');
+    assert.match(normal.negative, /low quality/);
+    assert.match(normal.negative, /helmet, hood/);
+    assert.match(normal.negative, /blonde hair/);
+    assert.doesNotMatch(normal.negative, /^white hair(?:,|$)/i);
 
     const replaced = buildNpcPortraitPrompts({ ...npc, portraitPromptReplace: true }, {
         stylePositive: 'ignored style', styleNegative: 'low quality', composition: 'ignored composition',
