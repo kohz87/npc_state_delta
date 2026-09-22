@@ -3179,6 +3179,7 @@ const PORTRAIT_HAIR_FORM_RULES = Object.freeze([
     { pattern: /\bstraight\b/i, tag: 'straight hair' },
     { pattern: /\b(?:braid|braids|braided)\b/i, tag: 'braided hair' },
     { pattern: /\b(?:tangled|messy|disheveled)\b/i, tag: 'tangled hair' },
+    { pattern: /\b(?:coming\s+loose|loose)\b/i, tag: 'loose hair' },
     { pattern: /\bshoulder[- ]length\b/i, tag: 'shoulder-length hair' },
     { pattern: /\bwaist[- ]length\b/i, tag: 'waist-length hair' },
     { pattern: /\bthigh[- ]length\b/i, tag: 'thigh-length hair' },
@@ -3190,6 +3191,7 @@ const PORTRAIT_EYE_COLOR_PATTERN = /\b((?:(?:pale|light|dark|deep|bright|icy|sof
 const PORTRAIT_DIRECT_VISUAL_ANCHORS = Object.freeze([
     { pattern: /\bpointed ears?\b/i, tag: 'pointed ears' },
     { pattern: /\bordinary human ears?\b/i, tag: 'ordinary human ears' },
+    { pattern: /\bhair ribbons?\b/i, tag: 'hair ribbons' },
     { pattern: /\b(?:ample|full|large)\s+bust\b/i, sourceTag: true },
     { pattern: /\b(?:slim|slender|athletic|muscular|stocky|curvy)\s+(?:figure|build)\b/i, sourceTag: true },
 ]);
@@ -3236,6 +3238,22 @@ function extractPortraitVisualAnchorTags(value) {
     }
 
     return uniquePortraitParts(tags);
+}
+
+
+function portraitTagFallbackParts(values = []) {
+    const fallback = [];
+    for (const value of values) {
+        const segments = String(value || '')
+            .split(/,/)
+            .map(item => item.replace(/^\s*(?:and|with)\s+/i, '').trim())
+            .filter(Boolean);
+        for (const segment of segments) {
+            if (extractPortraitVisualAnchorTags(segment).length) continue;
+            fallback.push(segment);
+        }
+    }
+    return uniquePortraitParts(fallback);
 }
 
 function portraitPartKey(value) {
@@ -3401,10 +3419,13 @@ export function buildNpcPortraitPrompts(rawNpc = {}, options = {}) {
         positive = sentences.join(' ');
     } else {
         const visualAnchors = format === 'tags' ? extractPortraitVisualAnchorTags(appearance) : [];
+        const coreAppearance = format === 'tags'
+            ? portraitTagFallbackParts(appearanceGroups.core)
+            : appearanceGroups.core;
         const subjectParts = uniquePortraitParts([
             ...identity,
             ...visualAnchors,
-            ...appearanceGroups.core,
+            ...coreAppearance,
             roleTag,
             ...appearanceGroups.clothing,
             moodTag,
