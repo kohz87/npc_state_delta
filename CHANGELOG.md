@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.0.40 - 22 September 2026
+
+- Restore the manual `Scan dossier now` action to Data & maintenance for follow-up/recovery use, while keeping the optional `Full scan current cast` action in Scanning and Portrait generation free of unrelated controls.
+- Add focused settings-group ownership regression coverage and advance synchronized application/package/display metadata to 1.0.40 with persisted format versions unchanged.
+
 ## 1.0.39 - 22 September 2026
 
 - Make Comma tags genuinely tag-oriented: omit appearance prose fragments already represented by extracted visual anchors while retaining unparsed appearance fragments, and add `loose hair` / `hair ribbons` coverage for common hair-state wording.
