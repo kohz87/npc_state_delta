@@ -4945,8 +4945,7 @@ export function scoreNpcRelevance(npc, text, turn = 0, socialGraph = null, allNp
     if (memoryMatch) score += 1;
     const age = Math.max(0, Number(turn) - Number(npc.lastSeenTurn || 0));
     score += Math.max(0, 4 - age);
-    // Importance remains durable/manual metadata. Runtime prompt-space selection uses
-    // calculated salience from the current story context instead of mutating or scoring by it.
+    // Runtime prompt-space selection is calculated from current story salience only.
     return score;
 }
 
