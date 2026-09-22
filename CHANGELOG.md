@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.0.42 - 22 September 2026
+
+- Move the settings-level manual `Full scan current cast` action into Data & maintenance beside `Scan dossier now`, instead of mounting it as a standalone row outside the section.
+- Keep automatic full-cast configuration under Scanning and the delegated Diagnostics shortcut intact; add focused ownership regression coverage.
+- Advance synchronized application/package/display metadata to 1.0.42 with persisted format versions unchanged.
+
 ## 1.0.41 - 22 September 2026
 
 - Restore the manual `Full scan current cast` follow-up action to the Diagnostics modal. Diagnostics emits a small internal request event; `full-cast.js` remains the only owner of full-cast scan execution.
