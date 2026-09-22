@@ -4576,6 +4576,11 @@ async function executeNativePortraitGeneration(positive, negative) {
     const command = [
         '/imagine',
         'quiet=true',
+        // Delta already supplies the complete portrait prompt. Prevent SillyTavern's
+        // optional free-mode LLM extension/refine layers from rewriting grounded traits
+        // (for example hair color) before the configured image backend receives them.
+        'extend=false',
+        'edit=false',
         `gallery=${settings.portraitSaveToGallery ? 'true' : 'false'}`,
         negative ? `negative=${slashQuoted(negative)}` : '',
         slashQuoted(prompt),
