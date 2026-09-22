@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.0.39 - 22 September 2026
+
+- Make Comma tags genuinely tag-oriented: omit appearance prose fragments already represented by extracted visual anchors while retaining unparsed appearance fragments, and add `loose hair` / `hair ribbons` coverage for common hair-state wording.
+- Fix optional `Full scan current cast` UI ownership so it mounts into the Scanning action group instead of the first generic settings action container, preventing it from appearing under Portrait generation.
+- Add focused regressions for pure tag output, retained unparsed fragments and full-cast Scanning ownership; advance synchronized application/package/display metadata to 1.0.39 with persisted format versions unchanged.
+
 ## 1.0.38 - 22 September 2026
 
 - Strengthen Comma tags portrait prompts by promoting explicit visual anchors from accepted appearance prose into standalone subject-first tags before the prose fallback. Hair color/form, eye color, pointed/human ears and bounded direct body/build traits are extracted conservatively without replacing the accepted appearance source.
