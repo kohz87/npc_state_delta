@@ -35,7 +35,14 @@ export const DEFAULT_PORTRAIT_COMPOSITION = 'solo character portrait, upper body
 export const PORTRAIT_STYLE_PROMPT_LIMIT = 12000;
 export const PORTRAIT_COMPOSITION_PROMPT_LIMIT = 6000;
 export const PORTRAIT_NPC_PROMPT_LIMIT = 12000;
+export const PORTRAIT_SEED_MAX = Number.MAX_SAFE_INTEGER;
 export const PORTRAIT_PROMPT_FORMATS = Object.freeze(['hybrid', 'tags', 'natural']);
+
+export function normalizePortraitSeed(value) {
+    if (value === null || value === undefined || String(value).trim() === '') return null;
+    const seed = Number(value);
+    return Number.isSafeInteger(seed) && seed >= 0 && seed <= PORTRAIT_SEED_MAX ? seed : null;
+}
 
 export function normalizePortraitPromptFormat(value) {
     const mode = String(value ?? '').trim().toLowerCase();
@@ -3486,6 +3493,7 @@ export function normalizeNpcRecord(raw = {}) {
     npc.portraitPromptPositive = cleanText(raw.portraitPromptPositive ?? raw.portrait_prompt_positive, PORTRAIT_NPC_PROMPT_LIMIT);
     npc.portraitPromptNegative = cleanText(raw.portraitPromptNegative ?? raw.portrait_prompt_negative, PORTRAIT_NPC_PROMPT_LIMIT);
     npc.portraitPromptReplace = normalizeBoolean(raw.portraitPromptReplace ?? raw.portrait_prompt_replace);
+    npc.portraitSeed = normalizePortraitSeed(raw.portraitSeed ?? raw.portrait_seed);
     npc.aliases = cleanList(raw.aliases, 8, 120);
     npc.memories = normalizeStoredMemories(raw.memories);
     npc.mannerisms = locked.has('mannerisms')
@@ -3605,6 +3613,7 @@ export function createNpcRecord(name, existingIds = [], baseline = DEFAULT_RELAT
         portraitPromptPositive: '',
         portraitPromptNegative: '',
         portraitPromptReplace: false,
+        portraitSeed: null,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         lastSeenTurn: 0,
@@ -4957,6 +4966,7 @@ function mergeAliasLinkedNpcPair(a, b) {
     merged.portraitPromptPositive = cleanText(newer?.portraitPromptPositive || older?.portraitPromptPositive, PORTRAIT_NPC_PROMPT_LIMIT);
     merged.portraitPromptNegative = cleanText(newer?.portraitPromptNegative || older?.portraitPromptNegative, PORTRAIT_NPC_PROMPT_LIMIT);
     merged.portraitPromptReplace = Boolean(newer?.portraitPromptReplace || older?.portraitPromptReplace);
+    merged.portraitSeed = normalizePortraitSeed(newer?.portraitSeed) ?? normalizePortraitSeed(older?.portraitSeed);
     merged.seenCount = Math.max(Number(a?.seenCount || 0), Number(b?.seenCount || 0));
     merged.lastSeenTurn = Math.max(Number(a?.lastSeenTurn || 0), Number(b?.lastSeenTurn || 0));
     merged.lastWorldActiveTurn = Math.max(Number(a?.lastWorldActiveTurn || 0), Number(b?.lastWorldActiveTurn || 0));
