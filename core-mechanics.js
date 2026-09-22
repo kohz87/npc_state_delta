@@ -3400,8 +3400,10 @@ export function buildNpcPortraitPrompts(rawNpc = {}, options = {}) {
         if (stylePositive) sentences.push('Visual style: ' + stylePositive + '.');
         positive = sentences.join(' ');
     } else {
+        const visualAnchors = format === 'tags' ? extractPortraitVisualAnchorTags(appearance) : [];
         const subjectParts = uniquePortraitParts([
             ...identity,
+            ...visualAnchors,
             ...appearanceGroups.core,
             roleTag,
             ...appearanceGroups.clothing,
