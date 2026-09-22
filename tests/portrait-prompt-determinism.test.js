@@ -94,6 +94,56 @@ test('resolved human form excludes alternate-form anatomy and turns explicit abs
     assert.doesNotMatch(prompts.negative, /\bblue hair\b/i, 'explicit blue pigmentation must never be negated');
 });
 
+test('comma tags promote explicit visual anchors from prose without dropping the accepted appearance', () => {
+    const prompts = buildNpcPortraitPrompts({
+        species: 'Half-elf',
+        apparentAge: '~18',
+        role: 'Civilian Guild Intake Clerk',
+        appearance: 'A young half-elf with tangled auburn curls coming loose from lost hair ribbons, pointed ears, pale hazel eyes, and an ample bust. Wears a slightly crooked rough wool tunic beneath a leather vest pinned with an Ardelian registration badge.',
+        mood: 'Harried, observant, practical',
+        location: 'Adventurer Guildhall, Rimecross Waystation',
+    }, {
+        stylePositive: 'STYLE_SENTINEL',
+        styleNegative: 'BASE_NEGATIVE',
+        composition: '',
+        format: 'tags',
+        useMood: true,
+        useLocation: true,
+    });
+
+    assert.ok(indexOfOrFail(prompts.positive, 'auburn hair') < indexOfOrFail(prompts.positive, 'A young half-elf with tangled auburn curls'));
+    assert.match(prompts.positive, /curly hair/i);
+    assert.match(prompts.positive, /tangled hair/i);
+    assert.match(prompts.positive, /pointed ears/i);
+    assert.match(prompts.positive, /pale hazel eyes/i);
+    assert.match(prompts.positive, /ample bust/i);
+    assert.match(prompts.positive, /rough wool tunic/i);
+    assert.ok(indexOfOrFail(prompts.positive, 'auburn hair') < indexOfOrFail(prompts.positive, 'STYLE_SENTINEL'));
+
+    assert.match(prompts.negative, /white hair/i);
+    assert.match(prompts.negative, /silver hair/i);
+    assert.match(prompts.negative, /blonde hair/i);
+    assert.match(prompts.negative, /blue hair/i);
+    assert.match(prompts.negative, /purple hair/i);
+    assert.doesNotMatch(prompts.negative, /(?:^|,\s*)auburn hair(?:,|$)/i);
+});
+
+test('comma tags preserve explicit multicolor hair as one standalone anchor and do not negate its components', () => {
+    const prompts = buildNpcPortraitPrompts({
+        species: 'Human',
+        appearance: 'shoulder-length distinctly golden-blue hair with warm gold and blue pigmentation; silvery-gray eyes',
+    }, {
+        stylePositive: 'STYLE_LAST',
+        styleNegative: '',
+        composition: '',
+        format: 'tags',
+    });
+
+    assert.match(prompts.positive, /golden-blue hair/i);
+    assert.match(prompts.positive, /shoulder-length hair/i);
+    assert.doesNotMatch(prompts.negative, /\b(?:golden|blue) hair\b/i);
+});
+
 test('natural portrait format keeps subject evidence ahead of style while retaining readable labels', () => {
     const prompts = buildNpcPortraitPrompts({
         species: 'Half-elf',
