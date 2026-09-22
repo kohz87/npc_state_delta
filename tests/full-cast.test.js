@@ -40,6 +40,11 @@ test('full-cast manual action mounts only in the Scanning action group', () => {
   assert.doesNotMatch(source, /panel\.querySelector\('\.npc-state-delta-actions'\)/);
 });
 
+test('Diagnostics can request the manual full-cast scan without owning scanner logic', () => {
+  assert.match(source, /npc-state-delta:request-full-cast-scan/);
+  assert.match(source, /runFullCastScan\(latestAssistantId\(\), snapshot\(\), \{ manual: true \}\)/);
+});
+
 test('full-cast owner never patches the host text-model route', () => {
   assert.doesNotMatch(source, /generateRaw/);
   assert.doesNotMatch(source, /installBackfillGuard/);
