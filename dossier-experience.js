@@ -351,13 +351,6 @@ function ensureSettingsExperience() {
         'npc_state_delta_auto', 'npc_state_delta_scanner_connection_profile', 'npc_state_delta_full_scan_every_turn',
         'npc_state_delta_scan_every', 'npc_state_delta_scan_depth', 'npc_state_delta_admission_mode',
     ], scanning.body);
-    const scanNow = drawer.querySelector('#npc_state_delta_scan_now');
-    if (scanNow) {
-        const scanningActions = document.createElement('div');
-        scanningActions.className = 'npc-state-delta-actions delta-settings-scanning-actions';
-        scanningActions.appendChild(scanNow);
-        scanning.body.appendChild(scanningActions);
-    }
     layout.appendChild(scanning.details);
 
     const continuity = settingsDetails('Continuity & injection', 'Generation context and branch behavior');
@@ -441,6 +434,8 @@ function ensureSettingsExperience() {
       <button type="button" class="menu_button" data-delta-settings-diagnostics><i class="fa-solid fa-stethoscope"></i> Diagnostics</button>`;
     maintenance.body.appendChild(maintenanceActions);
 
+    const scanNow = drawer.querySelector('#npc_state_delta_scan_now');
+    if (scanNow) maintenanceActions.appendChild(scanNow);
     const clearChat = drawer.querySelector('#npc_state_delta_clear_chat');
     if (clearChat) maintenanceActions.appendChild(clearChat);
 
