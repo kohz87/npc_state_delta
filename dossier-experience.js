@@ -371,13 +371,13 @@ function ensureSettingsExperience() {
     if (portrait) {
         portrait.classList.add('delta-settings-group', 'delta-settings-portrait-prompts');
         const summary = portrait.querySelector(':scope > summary');
-        if (summary) summary.innerHTML = '<b>Portrait prompts</b><small>Global style and prompt construction</small>';
+        if (summary) summary.innerHTML = '<b>Portrait generation</b><small>SillyTavern Image Generation + prompt construction</small>';
         const copy = portrait.querySelector('.npc-state-delta-portrait-settings-body > p.npc-state-delta-muted');
-        if (copy) setNodeTextIfChanged(copy, 'Configure how Delta builds positive and negative portrait prompts. Image generation is not performed by the maintained Delta portrait workflow.');
+        if (copy) setNodeTextIfChanged(copy, 'Configure dossier-derived portrait prompts and the native SillyTavern Image Generation handoff. The active SillyTavern backend, including ComfyUI when selected there, remains host-owned.');
         const generationRow = settingsRow(settings, 'npc_state_delta_portrait_generation_enabled');
         const galleryRow = settingsRow(settings, 'npc_state_delta_portrait_save_gallery');
-        if (generationRow) generationRow.hidden = true;
-        if (galleryRow) galleryRow.hidden = true;
+        if (generationRow) generationRow.hidden = false;
+        if (galleryRow) galleryRow.hidden = false;
         const reset = portrait.querySelector('#npc_state_delta_reset_portrait_theme');
         if (reset) reset.innerHTML = '<i class="fa-solid fa-rotate-left"></i> Reset Fantasy Anime prompt style';
         const save = portrait.querySelector('#npc_state_delta_save_portrait_settings');

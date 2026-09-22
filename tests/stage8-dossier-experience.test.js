@@ -94,21 +94,25 @@ test('editor uses one scroll body and task-grouped form sections', () => {
 });
 
 test('settings are grouped by task and extension-wide backup diagnostics live in Settings', () => {
-    for (const label of ['General', 'Scanning', 'Continuity & injection', 'Roster & cleanup', 'Portrait prompts', 'Relationship tuning', 'Memory & behavior rules', 'Data & maintenance']) {
+    for (const label of ['General', 'Scanning', 'Continuity & injection', 'Roster & cleanup', 'Portrait generation', 'Relationship tuning', 'Memory & behavior rules', 'Data & maintenance']) {
         assert.match(source, new RegExp(label.replace(/[&]/g, '\\&')));
     }
     assert.match(source, /data-delta-settings-backup/);
     assert.match(source, /data-delta-settings-restore/);
     assert.match(source, /data-delta-settings-diagnostics/);
     assert.match(source, /delta-tools-data,[\s\S]*delta-tools-diagnostics-button\{display:none!important\}/);
-    assert.match(source, /Image generation is not performed by the maintained Delta portrait workflow/);
+    assert.match(source, /native SillyTavern Image Generation handoff/);
+    assert.match(source, /npc_state_delta_portrait_generation_enabled/);
+    assert.match(source, /npc_state_delta_portrait_save_gallery/);
+    assert.match(source, /generationRow\.hidden = false/);
+    assert.match(source, /galleryRow\.hidden = false/);
 });
 
-test('cohesive experience keeps selected dossier actions and prompt-only portrait ownership', () => {
+test('cohesive experience keeps selected dossier actions routed through the maintained Portrait tool', () => {
     assert.match(source, /delta-dossier-actions-primary/);
     assert.match(source, /npc-state-delta-refresh-chat/);
     assert.match(source, /npc-state-delta-scan-dossier/);
     assert.match(source, /Archive dossier/);
     assert.match(source, /openPortraitTools/);
-    assert.doesNotMatch(source, /generatePortraitUrl|Generate preview|Apply preview|\/imagine/);
+    assert.doesNotMatch(source, /\/imagine/);
 });
