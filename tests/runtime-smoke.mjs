@@ -491,6 +491,8 @@ try {
     const portraitCommand = String(mockState.slashCalls[0][0] || '');
     assert.match(portraitCommand, /^\/imagine\s/);
     assert.match(portraitCommand, /\bquiet=true\b/);
+    assert.match(portraitCommand, /\bextend=false\b/, 'Delta portrait handoff must not let ST auto-extend/rewrite the grounded prompt');
+    assert.match(portraitCommand, /\bedit=false\b/, 'Delta portrait handoff must not invoke ST prompt refinement');
     assert.match(portraitCommand, /\bgallery=false\b/);
     assert.match(portraitCommand, /negative="[^"]+/);
     assert.match(portraitCommand, /Crimson Demon/);

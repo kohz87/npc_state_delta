@@ -122,7 +122,7 @@ function portraitDialogHtml(npc, draft) {
           <div class="delta-tools-copy-row"><button type="button" data-copy="positive">Copy positive</button><button type="button" data-generate-prompts>Generate prompts from dossier</button></div>
           <label>Negative prompt<textarea id="npc_state_delta_tools_negative" rows="6">${escapeHtml(draft.negative)}</textarea></label>
           <div class="delta-tools-copy-row"><button type="button" data-copy="negative">Copy negative</button></div>
-          <small>Manual edits are kept for this chat session. Generation uses the currently edited positive + negative prompts and SillyTavern's configured Image Generation backend, including ComfyUI when selected there.</small>
+          <small>Manual edits are kept for this chat session. Delta disables SillyTavern's free-prompt auto-extension/refinement for this handoff so the edited traits reach the image backend unchanged. SillyTavern's global Image Generation Prompt Prefix / Negative Prompt and configured backend settings still apply.</small>
           <div class="delta-tools-manual-copy" data-delta-tools-manual-copy hidden>
             <small>Clipboard access is blocked by this browser context. The prompt is selected below; press Ctrl+C.</small>
             <textarea data-delta-tools-manual-copy-text rows="4" readonly aria-label="Prompt ready for manual copy"></textarea>
