@@ -33,10 +33,10 @@ test('superseded enhancement dossier library is not retained beside Stage 1 UI',
   assert.doesNotMatch(source, /openLibrary|closeLibrary|renderLibrary/);
 });
 
-test('full-cast manual action mounts only in the Scanning action group', () => {
-  assert.match(source, /delta-settings-scanning-actions/);
-  assert.match(source, /npc_state_delta_full_scan_every_turn/);
+test('full-cast manual action mounts in the Data & maintenance action group', () => {
+  assert.match(source, /delta-settings-maintenance-actions/);
   assert.match(source, /legacyScan\?\.closest\?\.\('\.npc-state-delta-actions'\)/);
+  assert.doesNotMatch(source, /delta-settings-scanning-actions/);
   assert.doesNotMatch(source, /panel\.querySelector\('\.npc-state-delta-actions'\)/);
 });
 
