@@ -51,6 +51,7 @@ import {
     applyStaleNpcLifecycle,
     buildNpcPortraitPrompts,
     normalizePortraitPromptFormat,
+    normalizePortraitSeed,
 } from '../core.js';
 
 test('normalizes names across punctuation and casing', () => {
@@ -2392,6 +2393,21 @@ test('portrait prompt builder preserves long style, composition, and per-NPC pro
     });
     assert.match(normalized.portraitPromptPositive, /NORMALIZED_POSITIVE_SENTINEL/);
     assert.match(normalized.portraitPromptNegative, /NORMALIZED_NEGATIVE_SENTINEL/);
+});
+
+test('portrait seed normalization is optional, bounded, and integer-only', () => {
+    assert.equal(normalizePortraitSeed(null), null);
+    assert.equal(normalizePortraitSeed(''), null);
+    assert.equal(normalizePortraitSeed('123456789'), 123456789);
+    assert.equal(normalizePortraitSeed(0), 0);
+    assert.equal(normalizePortraitSeed(-1), null);
+    assert.equal(normalizePortraitSeed(1.5), null);
+    assert.equal(normalizePortraitSeed(Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER);
+    assert.equal(normalizePortraitSeed(Number.MAX_SAFE_INTEGER + 1), null);
+
+    const npc = normalizeNpcRecord({ name: 'Seeded', portraitSeed: '424242' });
+    assert.equal(npc.portraitSeed, 424242);
+    assert.equal(createNpcRecord('Unseeded').portraitSeed, null);
 });
 
 test('portrait prompt format normalization is conservative', () => {
