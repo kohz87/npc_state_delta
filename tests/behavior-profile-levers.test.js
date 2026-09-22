@@ -48,13 +48,7 @@ test('scanner and reconciliation prompts define behaviorProfile as behavioral le
         transcript: 'Marris checks the wound, compares two possible causes, then calmly explains the safer treatment.',
         existingNpcs: [npc],
     });
-    assert.match(scanner, /target-general response\/decision levers/i);
-    assert.match(scanner, /not action summaries/i);
-    assert.match(scanner, /actions are evidence for levers/i);
-    assert.match(scanner, /Threat Sensitivity/i);
-    assert.match(scanner, /Analytical Style/i);
-    assert.match(scanner, /Social Presentation/i);
-    assert.match(scanner, /do not fill unsupported labels/i);
+    assert.match(scanner, /compact behaviorProfile rules=general levers, not action logs/i);
 
     const refresh = buildProfileRefreshPrompt({
         transcript: 'Over several months Marris consistently checks evidence before committing to a conclusion.',
