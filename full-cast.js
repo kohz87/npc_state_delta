@@ -189,6 +189,9 @@ function mountControls() {
 }
 
 function registerEvents() {
+    document.addEventListener('npc-state-delta:request-full-cast-scan', () => {
+        void runFullCastScan(latestAssistantId(), snapshot(), { manual: true });
+    });
     const ctx = getContext();
     const source = ctx?.eventSource;
     const events = ctx?.eventTypes || ctx?.event_types || {};

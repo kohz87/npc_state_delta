@@ -210,7 +210,7 @@ function diagnosticsHtml(npc) {
         ${npc ? `<section><h3>Relationship fractions / gate audit · ${escapeHtml(npc.name)}</h3><pre>${escapeHtml(JSON.stringify(rel, null, 2))}</pre></section>` : ''}
         <section><h3>Always-on NPC decision diagnostics</h3><pre>${escapeHtml(JSON.stringify({ summary: diagnosticSummary, recentOperations: diagnosticRecords }, null, 2))}</pre><small>These bounded records are collected regardless of per-NPC display visibility. Export includes all retained NPC traces but excludes full story text, prompts, credentials, and provider payloads.</small></section>
         <section><h3>Recent Stage 8 events</h3><pre>${escapeHtml(JSON.stringify(toolEvents.slice(-12).reverse(), null, 2))}</pre><small>Bounded records exclude credentials, full prompts, and provider responses.</small></section>
-      </div><footer><button type="button" data-export-diagnostics>Export diagnostics</button><button type="button" data-clear-diagnostics>Clear diagnostic history</button><button type="button" data-delta-tools-close data-delta-tools-autofocus>Close</button></footer>
+      </div><footer><button type="button" data-run-full-cast-scan><i class="fa-solid fa-users-viewfinder"></i> Full scan current cast</button><button type="button" data-export-diagnostics>Export diagnostics</button><button type="button" data-clear-diagnostics>Clear diagnostic history</button><button type="button" data-delta-tools-close data-delta-tools-autofocus>Close</button></footer>
     </section>`;
 }
 export function openDiagnostics() {
@@ -218,6 +218,11 @@ export function openDiagnostics() {
     const session = makeSession('diagnostics', { npcId: npc?.id || '' });
     const overlay = mountOverlay(diagnosticsHtml(npc), session);
     overlay.addEventListener('click', event => {
+        if (event.target.closest?.('[data-run-full-cast-scan]')) {
+            document.dispatchEvent(new CustomEvent('npc-state-delta:request-full-cast-scan'));
+            recordToolEvent('diagnostic-full-cast-scan', { chatKey: activeChatKey(), action: 'run', outcome: 'requested' });
+            return;
+        }
         if (event.target.closest?.('[data-export-diagnostics]')) {
             const bundle = api()?.diagnosticBundle?.();
             if (!bundle) return toast('warning', 'NPC State Delta: diagnostic bundle is unavailable for this chat.');
