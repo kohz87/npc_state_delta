@@ -819,7 +819,7 @@ export function calibrateRelationshipSummary(value, relationship = DEFAULT_RELAT
 
 
 const TEXT_FIELDS = [
-    'role', 'species', 'age', 'apparentAge', 'appearance', 'personality', 'speech', 'background',
+    'role', 'species', 'homeBase', 'age', 'apparentAge', 'appearance', 'personality', 'speech', 'background',
     'relationshipSummary', 'mood', 'location', 'goal', 'status',
 ];
 
@@ -1395,7 +1395,6 @@ export function applyNpcStateCommand(state, command, options = {}) {
             if (!npc.role && promotedCandidate.role) npc.role = promotedCandidate.role;
             if (!npc.location && promotedCandidate.location) npc.location = promotedCandidate.location;
         }
-        npc.manual = true;
         npc.lastSeenTurn = Math.max(Number(npc.lastSeenTurn || 0), turn);
         npc.updatedAt = Date.now();
         report.npcId = npc.id;
@@ -1413,10 +1412,8 @@ export function applyNpcStateCommand(state, command, options = {}) {
             .filter(alias => normalizeName(alias) !== normalizeName(record.name));
         record.role = promotedCandidate.role || '';
         record.location = promotedCandidate.location || '';
-        record.importance = promotedCandidate.importance || 0;
     }
     record.lastSeenTurn = turn;
-    record.manual = true;
     next.npcs.push(record);
     report.npcId = record.id;
     report.name = record.name;
@@ -2930,6 +2927,12 @@ export function normalizeScanNpc(raw = {}, options = {}) {
         aliases: cleanList(raw.aliases, 8, 120),
         role: cleanText(raw.role, 300),
         species: cleanText(raw.species ?? raw.race ?? raw.ancestry ?? raw.speciesRace ?? raw.species_race, 160),
+        homeBase: cleanText(raw.homeBase ?? raw.home_base ?? raw.usualLocation ?? raw.usual_location ?? raw.whereToFind ?? raw.where_to_find, 300),
+        homeBaseState: (() => {
+            const state = String(raw.homeBaseState ?? raw.home_base_state ?? raw.usualLocationState ?? raw.usual_location_state ?? '').trim().toLowerCase();
+            return ['update', 'change', 'move', 'relocate', 'establish', 'refine'].includes(state) ? 'update' : 'keep';
+        })(),
+        homeBaseReason: cleanText(raw.homeBaseReason ?? raw.home_base_reason ?? raw.usualLocationReason ?? raw.usual_location_reason, 500),
         age: ageFields.age,
         ageState: (() => {
             const state = String(raw.ageState ?? raw.age_state ?? '').trim().toLowerCase();
@@ -3018,7 +3021,6 @@ export function normalizeScanNpc(raw = {}, options = {}) {
         lifeState: normalizeLifeState(raw.lifeState ?? raw.life_status ?? raw.lifeStatus),
         lifeStateCertainty: normalizeLifeStateCertainty(raw.lifeStateCertainty ?? raw.life_status_certainty ?? raw.lifeStatusCertainty),
         lifeStateReason: cleanText(raw.lifeStateReason ?? raw.lifeStatusReason, 500),
-        importance: (() => { const number = Number(raw.importance); return raw.importance === undefined || raw.importance === null || raw.importance === '' || !Number.isFinite(number) ? null : clamp(number); })(),
         identityKind: inferNpcIdentityKind(raw.name, raw.identityKind ?? raw.identity_kind),
         dossierSignal: normalizeDossierSignal(raw.dossierSignal ?? raw.dossier_signal ?? raw.persistenceSignal ?? raw.persistence_signal),
         dossierReason: cleanText(raw.dossierReason ?? raw.dossier_reason, 360),
@@ -3051,7 +3053,6 @@ export function normalizeNpcCandidate(raw = {}) {
         seenCount: Math.max(1, Math.min(99, Math.round(Number(raw.seenCount) || 1))),
         firstSeenTurn: Math.max(0, Math.round(Number(raw.firstSeenTurn) || 0)),
         lastSeenTurn: Math.max(0, Math.round(Number(raw.lastSeenTurn) || 0)),
-        importance: clamp(raw.importance ?? 0),
     };
 }
 
@@ -3078,7 +3079,6 @@ function makeNpcCandidate(incoming, turn, existingIds = []) {
         seenCount: 1,
         firstSeenTurn: turn,
         lastSeenTurn: turn,
-        importance: clamp(incoming.importance ?? 0),
     };
 }
 
@@ -3171,6 +3171,7 @@ export function normalizeNpcRecord(raw = {}) {
     npc.identityKind = inferNpcIdentityKind(npc.name, raw.identityKind ?? raw.identity_kind);
     npc.role = cleanText(raw.role, 300);
     npc.species = cleanText(raw.species ?? raw.race ?? raw.ancestry ?? raw.speciesRace ?? raw.species_race, 160);
+    npc.homeBase = cleanText(raw.homeBase ?? raw.home_base ?? raw.usualLocation ?? raw.usual_location ?? raw.whereToFind ?? raw.where_to_find, 300);
     const ageFields = normalizeStoredAgeFields(raw);
     npc.age = ageFields.age;
     npc.apparentAge = ageFields.apparentAge;
@@ -3261,10 +3262,10 @@ export function normalizeNpcRecord(raw = {}) {
     npc.lastSeenTurn = Math.max(0, Math.round(Number(raw.lastSeenTurn) || 0));
     npc.lastWorldActiveTurn = Math.max(0, Math.round(Number(raw.lastWorldActiveTurn) || 0));
     npc.seenCount = Math.max(0, Math.round(Number(raw.seenCount) || 0));
-    { const number = Number(raw.importance); npc.importance = Number.isFinite(number) ? clamp(number) : 50; }
     npc.createdAt = Number.isFinite(Number(raw.createdAt)) ? Number(raw.createdAt) : Date.now();
     npc.updatedAt = Number.isFinite(Number(raw.updatedAt)) ? Number(raw.updatedAt) : npc.createdAt;
-    npc.manual = normalizeBoolean(raw.manual, false);
+    delete npc.importance;
+    delete npc.manual;
     if (npc.archived) { npc.present = false; npc.worldActive = false; }
     return npc;
 }
@@ -3277,6 +3278,7 @@ export function createNpcRecord(name, existingIds = [], baseline = DEFAULT_RELAT
         aliases: [],
         role: '',
         species: '',
+        homeBase: '',
         age: '',
         apparentAge: '',
         appearance: '',
@@ -3293,7 +3295,6 @@ export function createNpcRecord(name, existingIds = [], baseline = DEFAULT_RELAT
         behaviorProfile: [],
         keyRelationships: [],
         profileEvidence: emptyProfileEvidence(),
-        importance: 50,
         present: false,
         worldActive: false,
         lastWorldActiveTurn: 0,
@@ -3317,7 +3318,6 @@ export function createNpcRecord(name, existingIds = [], baseline = DEFAULT_RELAT
         updatedAt: Date.now(),
         lastSeenTurn: 0,
         seenCount: 0,
-        manual: true,
         manualProfileFields: [],
         manualProfileLocksExplicit: false,
         retentionProtected: false,
@@ -3559,6 +3559,16 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
         if (manualFields.has(field)) continue;
         if (field === 'relationshipSummary') continue; // gated after relationship evidence is accepted
         if (typeof value !== 'string' || !value.trim()) continue;
+        if (field === 'homeBase') {
+            const prior = String(existing.homeBase || '').trim();
+            const context = String(lifecycleOptions.developmentContext || '').trim();
+            if (prior) {
+                if (incoming.homeBaseState !== 'update' || !String(incoming.homeBaseReason || '').trim()) continue;
+                if (context && !durableSeedGrounded(value, context)) continue;
+            } else if (context && !durableSeedGrounded(value, context)) {
+                continue;
+            }
+        }
         if (['personality', 'speech', 'appearance'].includes(field)
             && !String(existing[field] || '').trim()
             && !targetedDurableSeedAllowed
@@ -3757,7 +3767,6 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
     } else {
         merged.keyRelationships = mergeKeyRelationshipUpdates([], incoming.keyRelationships || []);
     }
-    merged.importance = Number.isFinite(Number(existing.importance)) ? clamp(existing.importance) : 50;
     let relationshipEventAccepted = false;
     let relationshipNarrativeAdvance = false;
     if (!lifecycleOptions.skipRelationshipUpdate) {
@@ -3904,7 +3913,6 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
     if (merged.worldActive) merged.lastWorldActiveTurn = turn;
     // A scanner update must never erase a portrait or user/manual metadata.
     merged.portrait = existing.portrait || null;
-    merged.manual = Boolean(existing.manual);
     merged.manualProfileFields = [...manualFields];
     merged.manualProfileLocksExplicit = existing.manualProfileLocksExplicit === true;
     return merged;
@@ -4658,13 +4666,11 @@ function mergeAliasLinkedNpcPair(a, b) {
     merged.portraitPromptPositive = cleanText(newer?.portraitPromptPositive || older?.portraitPromptPositive, PORTRAIT_NPC_PROMPT_LIMIT);
     merged.portraitPromptNegative = cleanText(newer?.portraitPromptNegative || older?.portraitPromptNegative, PORTRAIT_NPC_PROMPT_LIMIT);
     merged.portraitPromptReplace = Boolean(newer?.portraitPromptReplace || older?.portraitPromptReplace);
-    merged.importance = Math.max(Number(a?.importance || 0), Number(b?.importance || 0));
     merged.seenCount = Math.max(Number(a?.seenCount || 0), Number(b?.seenCount || 0));
     merged.lastSeenTurn = Math.max(Number(a?.lastSeenTurn || 0), Number(b?.lastSeenTurn || 0));
     merged.lastWorldActiveTurn = Math.max(Number(a?.lastWorldActiveTurn || 0), Number(b?.lastWorldActiveTurn || 0));
     merged.createdAt = Math.min(Number(a?.createdAt || Date.now()), Number(b?.createdAt || Date.now()));
     merged.updatedAt = Math.max(Number(a?.updatedAt || 0), Number(b?.updatedAt || 0), Date.now());
-    merged.manual = Boolean(a?.manual || b?.manual);
     merged.manualProfileLocksExplicit = Boolean(a?.manualProfileLocksExplicit || b?.manualProfileLocksExplicit);
     merged.manualProfileFields = [...new Set([...(a?.manualProfileFields || []), ...(b?.manualProfileFields || [])])];
     merged.retentionProtected = Boolean(a?.retentionProtected || b?.retentionProtected);
@@ -4749,7 +4755,6 @@ export function mergeScanResult(state, scanResult, options = {}) {
         }
         const ids = next.npcs.map(n => n.id);
         const record = createNpcRecord(incoming.name, ids, relationshipBaseline);
-        record.manual = false;
         const merged = applyIncoming(record, incoming, turn, relationshipCaps, sourceMessageId, lifecycleOptions);
         next.npcs.push(merged);
         report.created.push(merged.id);
@@ -4807,8 +4812,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
                 candidate.location = cleanText(incoming.location || candidate.location, 220);
                 candidate.seenCount = Math.min(99, Number(candidate.seenCount || 1) + 1);
                 candidate.lastSeenTurn = turn;
-                candidate.importance = Math.max(Number(candidate.importance || 0), Number(incoming.importance || 0));
-                if (shouldPromoteCandidate(candidate, incoming, admissionMode)) {
+                        if (shouldPromoteCandidate(candidate, incoming, admissionMode)) {
                     next.candidates.splice(candidateIndex, 1);
                     const created = createFromIncoming(incoming);
                     if (created) report.promoted.push(created.id);
@@ -4871,11 +4875,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
         return normalizeNpcRecord(current);
     });
 
-    next.npcs.sort((a, b) => {
-        const seen = Number(b.lastSeenTurn || 0) - Number(a.lastSeenTurn || 0);
-        if (seen !== 0) return seen;
-        return Number(b.importance || 0) - Number(a.importance || 0);
-    });
+    next.npcs.sort((a, b) => Number(b.lastSeenTurn || 0) - Number(a.lastSeenTurn || 0));
     next.candidates.sort((a, b) => Number(b.lastSeenTurn || 0) - Number(a.lastSeenTurn || 0));
     return { state: next, report };
 }
@@ -5083,6 +5083,7 @@ function injectionOptionalFields(npc, includeAppearance = false) {
         npc.age && `chronological age: ${npc.age}`,
         npc.apparentAge && `apparent age: ${npc.apparentAge}`,
         npc.location && `location: ${npc.location}`,
+        npc.homeBase && `home base / usual location: ${npc.homeBase}`,
     ].filter(Boolean);
 }
 
@@ -5314,6 +5315,7 @@ export function buildBackfillPrompt({
         aliases: cleanList(existingNpc.aliases, 8, 120),
         role: cleanText(existingNpc.role, 300),
         species: cleanText(existingNpc.species, 160),
+        homeBase: cleanText(existingNpc.homeBase, 300),
         age: cleanText(existingNpc.age, 80),
         apparentAge: cleanText(existingNpc.apparentAge, 80),
         appearance: cleanText(existingNpc.appearance, 500),
@@ -5348,14 +5350,14 @@ Rules:
 8. PRESENT is current-scene state, not historical presence. Set present=true only if the requested NPC physically appears or actively participates in the MOST RECENT ASSISTANT STORY MESSAGE contained in this history. An older appearance does not count. A World State mention alone does not establish presence. Set worldActive=true only for explicit current off-screen activity in the latest World State; present and worldActive are mutually exclusive.
 9. This is historical backfill. relationshipImpact MUST be "none" and every relationshipDelta value MUST be 0. Do not numerically replay old relationship events.
 10. Do not create a dossier for ${userName} or ${charName}.
-11. Keep the JSON compact enough to finish reliably: appearance<=500; personality<=280; speech<=240; background<=320; relationshipSummary<=280; mannerism<=140; behaviorProfile max6/180; keyRelationship/memory<=180. Merge overlaps rather than append. Unknown facts may be empty. Importance is manual metadata; do not infer/change it.
+11. HOME BASE / USUAL LOCATION is durable home, workplace, headquarters, or regular haunt, not the current scene location. Establish it only from grounded ongoing-life evidence; changing an established homeBase requires homeBaseState:"update"+homeBaseReason. Keep the JSON compact enough to finish reliably: homeBase<=300; appearance<=500; personality<=280; speech<=240; background<=320; relationshipSummary<=280; mannerism<=140; behaviorProfile max6/180; keyRelationship/memory<=180. Merge overlaps rather than append. Unknown facts may be empty.
 12. Output JSON only. No markdown, no code fence, no commentary. Finish and close every quoted string, array, and object before stopping.
 
 Memory criteria:
 ${memoryRubric || '(none configured; store only clearly durable story-relevant events)'}
 
 Return this shape:
-{"npcs":[{"id":"existing id if supplied","name":"canonical personal name or stable requested label","aliases":["known alias or requested label when name expands"],"identityKind":"proper_name|role_label","dossierSignal":"incidental|meaningful|persistent","dossierReason":"brief grounded note","sameIndividual":true,"directInteraction":false,"role":"occupation/story role","species":"literal species/race","age":"chronological age only or empty","apparentAge":"visual age cue or empty","appearance":"grounded prompt-ready visual description","personality":"established traits","speech":"established speech habits","behaviorProfile":["Disposition: grounded target-general behavior"],"background":"established background","keyRelationships":["Name — relationship | durable current dynamic"],"relationshipSummary":"brief durable stance toward ${userName}","mood":"current/last established mood","location":"current/last known location","goal":"current/last established goal","status":"condition/immediate state","lifeState":"unknown|alive|deceased","lifeStateCertainty":"explicit|inferred|","lifeStateReason":"brief grounded reason","relationshipImpact":"none","relationshipDelta":{"trust":0,"affection":0,"desire":0,"tension":0},"relationshipEvidence":{"trust":"","affection":"","desire":"","tension":""},"relationshipChangeReason":"","mannerisms":["established habit"],"memories":["important established event"],"importance":0,"present":false,"worldActive":false}]}
+{"npcs":[{"id":"existing id if supplied","name":"canonical personal name or stable requested label","aliases":["known alias or requested label when name expands"],"identityKind":"proper_name|role_label","dossierSignal":"incidental|meaningful|persistent","dossierReason":"brief grounded note","sameIndividual":true,"directInteraction":false,"role":"occupation/story role","species":"literal species/race","homeBase":"durable usual home/workplace or empty","homeBaseState":"keep|update","homeBaseReason":"","age":"chronological age only or empty","apparentAge":"visual age cue or empty","appearance":"grounded prompt-ready visual description","personality":"established traits","speech":"established speech habits","behaviorProfile":["Disposition: grounded target-general behavior"],"background":"established background","keyRelationships":["Name — relationship | durable current dynamic"],"relationshipSummary":"brief durable stance toward ${userName}","mood":"current/last established mood","location":"current/last known location","goal":"current/last established goal","status":"condition/immediate state","lifeState":"unknown|alive|deceased","lifeStateCertainty":"explicit|inferred|","lifeStateReason":"brief grounded reason","relationshipImpact":"none","relationshipDelta":{"trust":0,"affection":0,"desire":0,"tension":0},"relationshipEvidence":{"trust":"","affection":"","desire":"","tension":""},"relationshipChangeReason":"","mannerisms":["established habit"],"memories":["important established event"],"present":false,"worldActive":false}]}
 
 Recent story history:
 ${String(transcript || '').trim()}`;
@@ -5373,7 +5375,7 @@ export function buildDossierImportPrompt({
     const existing = existingNpc ? {
         id: cleanText(existingNpc.id, 100), name: cleanText(existingNpc.name, 120),
         aliases: cleanList(existingNpc.aliases, 8, 120), role: cleanText(existingNpc.role, 240),
-        species: cleanText(existingNpc.species, 160), age: cleanText(existingNpc.age, 80),
+        species: cleanText(existingNpc.species, 160), homeBase: cleanText(existingNpc.homeBase, 300), age: cleanText(existingNpc.age, 80),
         apparentAge: cleanText(existingNpc.apparentAge, 80), appearance: cleanText(existingNpc.appearance, 500),
         personality: cleanText(existingNpc.personality, 280), speech: cleanText(existingNpc.speech, 240),
         behaviorProfile: normalizeBehaviorProfile(existingNpc.behaviorProfile),
@@ -5391,14 +5393,14 @@ Mapping/rules:
 1. Inner Circle / family / close allies / rivals / mentors / partners => keyRelationships, max ${KEY_RELATIONSHIP_LIMIT}, one concise unambiguous "Name — relation | durable dynamic" entry each. Never dangling "(deceased)"; state who is late/surviving. Never put ${userName} there; player stance belongs relationshipSummary.
 2. Voice=>speech; Personality=>personality; Appearance=>appearance; Background=>background; Role=>role; explicit chronological Age=>age. Apparent Age should be compact ~N when inferable; Appearance must not duplicate an explicit age. behaviorProfile translates EXPLICIT stable identity into max6 target-general response/decision levers, not action summaries. Supported labels may include Disposition, Care/Warmth, Expressiveness, Independence/Agency, Conflict/Assertiveness, Threat Sensitivity, Analytical Style, Social Presentation, Cruelty/Mercy; do not create unsupported slots. Player-specific/one-scene behavior does not belong there. Do not infer species/age from stereotypes.
 3. Read on the PC/current stance toward ${userName} may initialize relationshipSummary, but relationshipImpact="none" and every relationshipDelta key MUST be 0. Never invent numeric Trust/Affection/Desire/Tension from prose.
-4. Agenda may initialize goal only when the dossier presents it as the NPC's current ongoing agenda. "Where to Find Them" is NOT current Location; do not map home/work/hangout into live location unless the dossier explicitly says they are there now. Do not invent Mood/Status/current presence.
+4. Agenda may initialize goal only when the dossier presents it as the NPC's current ongoing agenda. "Where to Find Them", home, workplace, headquarters, or regular haunt => homeBase, NOT current Location. Changing an established homeBase requires homeBaseState:"update"+homeBaseReason. Do not map home/work/hangout into live location unless the dossier explicitly says they are there now. Do not invent Mood/Status/current presence.
 5. A durable Tell may become a mannerism. One-scene/emotional/stress/player-specific behavior does not. Merge multiple animations of one recurring pattern into one mannerism. Important memories only from explicit consequential past events, max3 new.
 6. Existing unlocked durable fields may refine from established facts. Empty != permission to guess from one act: seed only direct description, recurrence, or stable cross-context evidence. Return FULL CURRENT COMPACT fields; merge duplicate concepts first. personality/speech/appearance use refine; behaviorProfile refine/evolve; lasting change uses evolve/change+reason. behaviorProfile must be target-general; route player-specific behavior to relationshipSummary. Social update/evolve merges named counterparts; omission never erases others.
 7. KeyRelationships update/evolve merge by named counterpart and never erase unrelated ties by omission. Estrangement, death, reconciliation, or rivalry changes that counterpart entry; otherwise omit unchanged fields.
 8. JSON only. Compact limits: appearance<=500; personality<=280; speech<=240; behaviorProfile max6/180 each; background<=320; relationshipSummary<=280; keyRelationships max5/180 each; mannerisms max4/140 each. Never repeat a fact just to preserve wording.
 
 Return shape:
-{"npcs":[{"id":"existing id","name":"canonical name","aliases":[],"role":"","species":"","age":"","apparentAge":"","appearance":"","personality":"","speech":"","behaviorProfile":["Disposition: compact grounded behavior"],"background":"","keyRelationships":["Name — relation | durable current dynamic"],"relationshipSummary":"","goal":"","mannerisms":[],"memories":[],"relationshipImpact":"none","relationshipDelta":{"trust":0,"affection":0,"desire":0,"tension":0},"present":false,"worldActive":false}]}
+{"npcs":[{"id":"existing id","name":"canonical name","aliases":[],"role":"","species":"","homeBase":"","homeBaseState":"keep|update","homeBaseReason":"","age":"","apparentAge":"","appearance":"","personality":"","speech":"","behaviorProfile":["Disposition: compact grounded behavior"],"background":"","keyRelationships":["Name — relation | durable current dynamic"],"relationshipSummary":"","goal":"","mannerisms":[],"memories":[],"relationshipImpact":"none","relationshipDelta":{"trust":0,"affection":0,"desire":0,"tension":0},"present":false,"worldActive":false}]}
 
 Structured dossier text:
 ${String(dossierText || '').trim()}`;
@@ -5419,6 +5421,7 @@ export function buildProfileRefreshPrompt({
         aliases: cleanList(npc.aliases, 8, 120),
         role: cleanText(npc.role, 240),
         species: cleanText(npc.species, 160),
+        homeBase: cleanText(npc.homeBase, 300),
         age: cleanText(npc.age, 80),
         apparentAge: cleanText(npc.apparentAge, 80),
         appearance: cleanText(npc.appearance, 900),
@@ -5435,7 +5438,6 @@ export function buildProfileRefreshPrompt({
         lifeState: normalizeLifeState(npc.lifeState),
         mannerisms: cleanList(npc.mannerisms, 4, 240),
         memories: cleanList(npc.memories, IMPORTANT_MEMORY_LIMIT, 260),
-        importance: Math.round(clamp(npc.importance ?? 0, 0, 100)),
         currentRelationship: normalizeRelationshipBaseline(npc.relationship || DEFAULT_RELATIONSHIP),
         recentProfileEvidence: normalizeProfileEvidence(npc.profileEvidence),
         lockedProfileFields: locked,
@@ -5454,19 +5456,19 @@ Rules:
 5. DURABLE PROFILE: CURRENT COMPACT SUMMARY only. Personality/Speech/Appearance mention each durable concept once; Appearance does not repeat explicit age. behaviorProfile=max6 target-general behavioral levers translating identity into response/decision tendencies, not action-history summaries or a second essay. Actions are evidence for a lever; labels are soft, optional, and only used when supported (e.g. Disposition, Care/Warmth, Expressiveness, Independence/Agency, Conflict/Assertiveness, Threat Sensitivity, Analytical Style, Social Presentation). Player-specific patterns belong relationshipSummary. refine returns FULL field; lasting personality/speech/mannerism/behaviorProfile change uses evolve+reason, Appearance uses change+reason. Mannerisms=max4 DISTINCT recurring patterns, not separate animations. One transient beat is not durable.
 6. IDENTITY FIREWALL: temporary mood, fear, stress, intoxication, intimacy, or behavior unique to ${userName} must not become global Personality, Speech, Mannerisms, or behaviorProfile. A generally kind NPC remains generally kind toward other people unless narration establishes a broader change. Necessary force is not cruelty by itself.
 7. DEVELOPMENT SPEED: assistant/main-speaker=gradual; Player explicit/batch only for declarative canon, not quotes/questions/speculation/requests/conditionals/wishes. [mN]=source. One scene may support multiple fields; emit each grounded item independently (speech+behaviorProfile allowed). Gradual Personality/Speech: up to 4 tagged observations; reuse a concept label when obvious, wording may vary. Speech evidence/candidate=voice behavior, not personality. If evidence makes Personality/Speech stale, return changed FULL CURRENT candidate; never claim refine/evolve with a copied field. Reinforcement=>omit/keep. Time-compressed development MUST include developmentReason, even when state is refine. Mere passage of time does nothing.
-8. ROLE/SPECIES/BACKGROUND may update when this window establishes or clarifies them. Species is literal only. Background is durable history, not current mood/status.
+8. ROLE/SPECIES/BACKGROUND may update when this window establishes or clarifies them. HOME BASE / USUAL LOCATION is durable home, workplace, headquarters, or regular haunt, never the temporary current scene location; establish only from grounded ongoing-life evidence, and changing an established value requires homeBaseState:"update"+homeBaseReason. Species is literal only. Background is durable history, not current mood/status.
 9. AGE=chronology only. Birthday/exact elapsed years=>advance+reason; correction=>correct+reason. apparentAge=visual and should be compact ~N, not prose; visual aging/growth/rejuvenation=>evolve+reason. No species-lifespan inference.
 10. KEY RELATIONSHIPS: one unambiguous entry/non-player counterpart. Merge relation+durable dynamic; use "late husband"/"surviving widow" rather than dangling "(deceased)". update/keyRelationshipEdges for discovery; evolve+reason for lasting social change. Omission NEVER erases unrelated ties. Never put ${userName} there.
 11. RELATIONSHIP SUMMARY toward ${userName}: replace only when clearly stale/incomplete; keep intensity proportional to evidence/currentRelationship and avoid absolute devotion/dependence language unless truly established. This prose reconciliation does NOT change numeric stats.
 12. LIVE FIELDS Mood/Goal/Status/Location: use the latest reliable evidence in the window. Replace when changed. Use matching *State:"clear" only when the old state/place/goal is explicitly ended or obsolete and no replacement is known. Absence alone never clears Location.
 13. LIFE STATE: change only from explicit/dependable evidence. Death requires lifeState:"deceased", lifeStateCertainty:"explicit". Do not infer death from disappearance.
 14. MEMORIES: return only NEW consequential events not already represented; max3 new/max5 stored. Treat paraphrases as the same memory. If curation is needed, memoryRetention contains five DISTINCT events.
-15. Importance is manual metadata: do not infer/change it. Before JSON compact: appearance<=500; personality<=280; speech<=240; behaviorProfile max6/180; background<=320; relationshipSummary<=280; mannerism<=140; keyRelationship/memory<=180. JSON only.
+15. Before JSON compact: homeBase<=300; appearance<=500; personality<=280; speech<=240; behaviorProfile max6/180; background<=320; relationshipSummary<=280; mannerism<=140; keyRelationship/memory<=180. JSON only.
 
 Memory criteria: ${memoryRubric || '(none configured; store only clearly durable story-relevant events)'}
 
 Return shape:
-{"npcs":[{"id":"<target id>","name":"<target name>","aliases":[],"role":"","species":"","age":"","ageState":"keep|advance|correct","ageReason":"","apparentAge":"","apparentAgeState":"keep|evolve","apparentAgeReason":"","background":"","keyRelationships":[],"keyRelationshipsState":"keep|update|evolve","keyRelationshipsReason":"","relationshipSummary":"","mood":"","moodState":"keep|clear","location":"","locationState":"keep|clear","goal":"","goalState":"keep|clear","status":"","statusState":"keep|clear","lifeState":"unknown|alive|deceased","lifeStateCertainty":"explicit|inferred|","lifeStateReason":"","memories":[],"memoryRetention":[],"importance":0,"relationshipImpact":"none","relationshipDelta":{"trust":0,"affection":0,"desire":0,"tension":0},"relationshipEvidence":{"trust":"","affection":"","desire":"","tension":""},"relationshipChangeReason":"","present":false,"worldActive":false}],"profileUpdates":[{"id":"<target id>","evidence":{"personality":[],"speech":[],"appearance":[],"mannerisms":[],"behaviorProfile":[]},"personalityState":"refine|evolve","personality":"","personalityReason":"","speechState":"refine|evolve","speech":"","speechReason":"","appearanceState":"refine|change","appearance":"","appearanceReason":"","mannerismState":"refine|evolve","mannerisms":[],"mannerismReason":"","behaviorProfileState":"refine|evolve","behaviorProfile":[],"behaviorProfileReason":"","developmentScale":"gradual|explicit|batch","developmentReason":""}],"keyRelationshipEdges":[]}
+{"npcs":[{"id":"<target id>","name":"<target name>","aliases":[],"role":"","species":"","homeBase":"","homeBaseState":"keep|update","homeBaseReason":"","age":"","ageState":"keep|advance|correct","ageReason":"","apparentAge":"","apparentAgeState":"keep|evolve","apparentAgeReason":"","background":"","keyRelationships":[],"keyRelationshipsState":"keep|update|evolve","keyRelationshipsReason":"","relationshipSummary":"","mood":"","moodState":"keep|clear","location":"","locationState":"keep|clear","goal":"","goalState":"keep|clear","status":"","statusState":"keep|clear","lifeState":"unknown|alive|deceased","lifeStateCertainty":"explicit|inferred|","lifeStateReason":"","memories":[],"memoryRetention":[],"relationshipImpact":"none","relationshipDelta":{"trust":0,"affection":0,"desire":0,"tension":0},"relationshipEvidence":{"trust":"","affection":"","desire":"","tension":""},"relationshipChangeReason":"","present":false,"worldActive":false}],"profileUpdates":[{"id":"<target id>","evidence":{"personality":[],"speech":[],"appearance":[],"mannerisms":[],"behaviorProfile":[]},"personalityState":"refine|evolve","personality":"","personalityReason":"","speechState":"refine|evolve","speech":"","speechReason":"","appearanceState":"refine|change","appearance":"","appearanceReason":"","mannerismState":"refine|evolve","mannerisms":[],"mannerismReason":"","behaviorProfileState":"refine|evolve","behaviorProfile":[],"behaviorProfileReason":"","developmentScale":"gradual|explicit|batch","developmentReason":""}],"keyRelationshipEdges":[]}
 
 Recent story window (EVIDENCE ONLY; preserve [mN] order):
 ${String(transcript || '').trim()}
@@ -5566,6 +5568,7 @@ export function buildScannerPrompt({
         .filter(npc => profileIds.has(npc.id))
         .map(npc => {
             const species = cleanText(npc.species, 120);
+            const homeBase = cleanText(npc.homeBase, 240);
             const appearance = cleanText(npc.appearance, 500);
             const personality = cleanText(npc.personality, 280);
             const speech = cleanText(npc.speech, 240);
@@ -5580,6 +5583,7 @@ export function buildScannerPrompt({
                 id: npc.id,
                 name: npc.name,
                 ...(species ? { species } : {}),
+                ...(homeBase ? { homeBase } : {}),
                 ...(appearance ? { appearance } : {}),
                 ...(personality ? { personality } : {}),
                 ...(speech ? { speech } : {}),
@@ -5606,7 +5610,7 @@ Admission: ${admissionPolicy}${fullScanRule}
 Rules:
 1. Exclude player (${userName}), main speaker (${charName}), extras.
 2. EXISTING: match id/name/alias/role. Return compact JSON deltas: changed fields only; omitted persist. Identity promotion: role/interim dossier + grounded proper name => MUST reuse id; old label in aliases; identityKind:"proper_name"; never duplicate/downgrade.
-3. NEW/CANDIDATE: include name,identityKind,dossierSignal,dossierReason,sameIndividual,directInteraction,present,worldActive. Dossier-worthy NEW: populate every grounded field now; compact behaviorProfile rules=general levers, not action logs. directInteraction affects admission/relationship only, NEVER enrichment. Incidental role candidates may stay lightweight.
+3. NEW/CANDIDATE: include name,identityKind,dossierSignal,dossierReason,sameIndividual,directInteraction,present,worldActive. Dossier-worthy NEW: populate every grounded field now; homeBase means durable usual home/workplace/headquarters/regular haunt, never a temporary scene location; compact behaviorProfile rules=general levers, not action logs. directInteraction affects admission/relationship only, NEVER enrichment. Incidental role candidates may stay lightweight.
 4. Candidates are not dossiers. sameIndividual=true only when proven. Use narration, World State, durable Inner Chatter; proper names there MUST be returned even when prose uses role.
 5. Return ONLY observed/new/meaningfully changed NPCs; new grounded durable profile facts count as changes. present=true only latest-scene physical presence; World State/Inner Chatter alone never presence. worldActive=true only explicit current off-screen activity. Inner Chatter supports durable facts, not transient monologue.
 6. Goal/status/mood/location are LIVE: output goal,goalState,status,statusState,mood,moodState,location,locationState as needed; actively reassess each returned EXISTING NPC every scan. Unchanged -> omit; changed -> replace; ended mood/goal/status -> matching *State:"clear". Location=current/last reliable; locationState:"clear" only when old place explicitly obsolete and replacement unknown. Off-screen/no evidence alone never clears it. Never use "Unknown".
@@ -5617,7 +5621,7 @@ Rules:
 11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue, compact ~N, never prose; species literal; no species-aging inference. Birthday/exact elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual aging/growth/rejuvenation=>apparentAgeState:"evolve"+reason. Appearance must not repeat explicit age. Vague time skip insufficient.
 12. RELATIONSHIP -100..+100 DELTA-ONLY; currentRelationship read-only. Return relationshipDelta+relationshipEvidence (all 4 keys). NEW only; continuation/aftermath=>0. Raw max 1/2/5/10; axis max 1/2/3/4. EVERY non-zero axis needs grounded CURRENT-exchange evidence. Desire needs explicit attraction/intimacy narration; rescue/gratitude/affection/trust/proximity=>0. Secondary to identity. Trust!=obedience; Affection!=devotion; Tension!=jealousy.
 13. lifeState unknown|alive|deceased; deceased+explicit=death; explicit alive=reactivate.
-14. Memories: max3 NEW, cap5 stored; no duplicate/paraphrased memories. If crowded use memoryRetention=top5 consequential/durable; recency=tiebreak only. CAPS appearance500/personality280/speech240/behaviorProfile 6x180/background320/relationshipSummary280/mannerism140/keyRelationship-memory180. Importance manual; do not infer/change. COMPACT; never invent.
+14. Memories: max3 NEW, cap5 stored; no duplicate/paraphrased memories. If crowded use memoryRetention=top5 consequential/durable; recency=tiebreak only. HomeBase is durable keep-by-default; changing an established value requires homeBaseState:"update"+homeBaseReason. CAPS homeBase300/appearance500/personality280/speech240/behaviorProfile 6x180/background320/relationshipSummary280/mannerism140/keyRelationship-memory180. COMPACT; never invent.
 15. JSON only: {"npcs":[...],"profileUpdates":[...],"keyRelationshipEdges":[...]}. profileUpdates example: {"id":"npc_myla","evidence":{"speech":["uses honorifics"]},"speechState":"refine","speech":"Soft, formal; uses honorifics."}. Existing relationship delta example: {"id":"npc_myla","relationshipImpact":"meaningful","relationshipDelta":{"trust":-2,"affection":0,"desire":0,"tension":2},"relationshipEvidence":{"trust":"caught player lying","affection":"","desire":"","tension":"lie caused unresolved conflict"},"relationshipChangeReason":"Player lied to her now."}.
 
 Relationship rubric: ${relationshipRubric || '(none)'}
