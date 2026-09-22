@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.0.45 - 22 September 2026
+
+- Restyle the Portrait seed control as a compact dark-theme panel so the browser-default white number input no longer breaks the Portrait dialog's visual hierarchy.
+- When the seed field is blank, choose a fresh safe-integer generation seed inside Delta before calling SillyTavern Image Generation, display that exact generation seed beside the preview, and offer **Save as NPC seed** for one-click reuse. Existing saved seeds remain fixed and continue to pass through `/imagine seed=<n>`.
+- Keep generated seed provenance preview-scoped and outside scanner/roleplay state until explicitly saved; add focused UI/seed regressions and advance synchronized application/package/display metadata to 1.0.45 with persisted format versions unchanged.
+
 ## 1.0.44 - 22 September 2026
 
 - Add an optional persisted per-NPC Portrait seed in the maintained Portrait tool. Blank keeps SillyTavern default/random behavior; a saved non-negative safe integer is passed through the native `/imagine seed=<n>` argument, including ComfyUI workflows that consume `%seed%`.
