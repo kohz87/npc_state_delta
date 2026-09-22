@@ -1,5 +1,14 @@
 # NPC State Delta changes
 
+## Unreleased
+
+- Retire the obsolete dossier `importance` field and generic per-NPC `manual` boolean. Historical values are accepted as input only long enough to normalize them away; current story salience, scoped profile locks, and typed manual provenance remain authoritative.
+- Add durable Home Base / Usual Location as ongoing-life geography distinct from live Location. An established Home Base is keep-by-default and requires a grounded explicit update/reason to relocate.
+- Consolidate appearance ownership: the flat `appearance` scalar remains a compatibility/resolved projection for historical records and scanner interoperability, while new manual editing and dossier presentation use Shared Appearance, named forms, Current Form, and unclassified current presentation without a duplicate flat editor/display.
+- Clarify dossier presentation labels to Behavioral Levers, Player Dynamic, Condition / Activity, and Hide present-NPC card; group Birthday and Home Base with identity continuity.
+- Keep Important Memories as the bounded five-event episodic continuity channel and preserve relationship event history / last relationship change unchanged.
+- Preserve application version 1.0.35, persisted schemas, request topology, relationship mechanics, evidence gates, rollback ownership, and provider routing pending exact-candidate verification. Prompt-budget/hash deltas will be recorded from deterministic measurements before merge.
+
 ## 1.0.35 - 19 September 2026
 
 - Recover a narrowly safe Behavioral Profile refinement when the provider returns a changed full candidate but leaves `behaviorProfileState` at `keep`: every established rule must still be present verbatim, only additive target-general rules may be admitted, every new rule must be grounded by that field's evidence, and existing agency/morality conflict guards remain authoritative.
