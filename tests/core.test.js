@@ -262,6 +262,7 @@ test('creates new NPC from baseline, applies deltas, and preserves portrait thro
     assert.equal(npc.lastRelationshipChange.impact, 'meaningful');
     assert.equal(npc.lastRelationshipChange.sourceMessageId, 3);
     npc.portrait = { dataUrl: 'data:image/webp;base64,abc' };
+    npc.portraitSeed = 424242;
     const second = mergeScanResult(first.state, { npcs: [{
         id: npc.id, name: 'Yunyun', present: true, mood: 'determined', relationshipImpact: 'ordinary',
         relationshipDelta: { trust: 99, tension: -2 }, relationshipEvidence: { trust: 'The player again proved reliable in a new small matter.', affection: '', desire: '', tension: 'The new reassurance eased some pressure.' }, relationshipChangeReason: 'A new small exchange demonstrated reliability and reassurance.',
@@ -272,6 +273,7 @@ test('creates new NPC from baseline, applies deltas, and preserves portrait thro
     assert.equal(second.state.npcs[0].relationship.tension, 0);
     assert.equal(second.state.npcs[0].lastRelationshipChange.delta.trust, 1);
     assert.equal(second.state.npcs[0].portrait.dataUrl, 'data:image/webp;base64,abc');
+    assert.equal(second.state.npcs[0].portraitSeed, 424242, 'scanner updates must preserve manual portrait seed metadata');
 });
 
 test('zero relationship decisions preserve the last actual relationship change audit', () => {
