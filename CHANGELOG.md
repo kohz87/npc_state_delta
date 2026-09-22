@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.0.37 - 22 September 2026
+
+- Clean up Settings action grouping: move Scan dossier now into Scanning, Add NPC into Roster & cleanup, and Clear chat dossier into Data & maintenance so unrelated controls no longer appear visually attached to Portrait generation.
+- Advance synchronized application/package/display metadata to 1.0.37 while leaving persisted format versions unchanged.
+
 ## 1.0.36 - 22 September 2026
 
 - Make portrait prompt assembly deterministic and subject-first: accepted identity/current appearance lead role, clothing, mood, location and composition, with global positive style last; strip tag-format metadata labels, deduplicate repeated strong-boundary clauses, and derive only explicit safe contradiction negatives for stated hair colors or explicit absent anatomy.
