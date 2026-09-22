@@ -123,11 +123,17 @@ function portraitDialogHtml(npc, draft) {
           <div class="delta-tools-copy-row"><button type="button" data-copy="positive">Copy positive</button><button type="button" data-generate-prompts>Generate prompts from dossier</button></div>
           <label>Negative prompt<textarea id="npc_state_delta_tools_negative" rows="6">${escapeHtml(draft.negative)}</textarea></label>
           <div class="delta-tools-copy-row"><button type="button" data-copy="negative">Copy negative</button></div>
-          <label>Portrait seed
-            <input id="npc_state_delta_tools_seed" type="number" min="0" max="9007199254740991" step="1" value="${escapeHtml(portraitSeed)}" placeholder="Blank = SillyTavern default / random">
-            <small>Optional per-NPC fixed seed. Reusing it improves repeatability when the prompt, checkpoint, workflow, sampler, resolution and other image settings stay the same.</small>
-          </label>
-          <div class="delta-tools-copy-row"><button type="button" data-save-portrait-seed>Save seed</button></div>
+          <div class="delta-tools-seed-card">
+            <label for="npc_state_delta_tools_seed"><b>Portrait seed</b><small>Blank generates a fresh seed for each preview. Save one when you want to reproduce a result with otherwise unchanged image settings.</small></label>
+            <div class="delta-tools-seed-row">
+              <input id="npc_state_delta_tools_seed" class="delta-tools-seed-input" type="number" min="0" max="9007199254740991" step="1" value="${escapeHtml(portraitSeed)}" placeholder="Blank = fresh random seed">
+              <button type="button" data-save-portrait-seed>Save seed</button>
+            </div>
+            <div class="delta-tools-generation-seed" data-generation-seed hidden>
+              <span><small>Generation seed</small><code data-generation-seed-value></code></span>
+              <button type="button" data-use-generation-seed>Save as NPC seed</button>
+            </div>
+          </div>
           <small>Manual edits are kept for this chat session. Delta disables SillyTavern's free-prompt auto-extension/refinement for this handoff so the edited traits reach the image backend unchanged. SillyTavern's global Image Generation Prompt Prefix / Negative Prompt and configured backend settings still apply.</small>
           <div class="delta-tools-manual-copy" data-delta-tools-manual-copy hidden>
             <small>Clipboard access is blocked by this browser context. The prompt is selected below; press Ctrl+C.</small>
@@ -228,9 +234,45 @@ function portraitSeedFromOverlay(overlay) {
     if (!raw) return null;
     const seed = Number(raw);
     if (!Number.isSafeInteger(seed) || seed < 0) {
-        throw new Error('Portrait seed must be a whole number from 0 to 9007199254740991, or blank for SillyTavern default/random behavior.');
+        throw new Error('Portrait seed must be a whole number from 0 to 9007199254740991, or blank to generate a fresh seed for each preview.');
     }
     return seed;
+}
+
+function randomPortraitSeed() {
+    const cryptoApi = globalThis.crypto;
+    if (typeof cryptoApi?.getRandomValues === 'function') {
+        const words = new Uint32Array(2);
+        cryptoApi.getRandomValues(words);
+        return ((words[0] & 0x1fffff) * 0x100000000) + words[1];
+    }
+    return Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+}
+
+function resetGeneratedSeed(session, overlay) {
+    session.generatedPortraitSeed = null;
+    const panel = overlay?.querySelector?.('[data-generation-seed]');
+    const value = overlay?.querySelector?.('[data-generation-seed-value]');
+    if (panel) panel.hidden = true;
+    if (value) value.textContent = '';
+}
+
+function showGeneratedSeed(session, overlay, seed) {
+    if (!currentSessionIs(session) || !Number.isSafeInteger(seed) || seed < 0) return false;
+    session.generatedPortraitSeed = seed;
+    const panel = overlay?.querySelector?.('[data-generation-seed]');
+    const value = overlay?.querySelector?.('[data-generation-seed-value]');
+    if (value) value.textContent = String(seed);
+    if (panel) panel.hidden = false;
+    return true;
+}
+
+async function saveGeneratedPortraitSeed(session, overlay) {
+    const seed = session.generatedPortraitSeed;
+    if (!currentSessionIs(session) || session.busy || !Number.isSafeInteger(seed) || seed < 0) return false;
+    const input = overlay?.querySelector?.('#npc_state_delta_tools_seed');
+    if (input) input.value = String(seed);
+    return savePortraitSeed(session, overlay);
 }
 
 async function savePortraitSeed(session, overlay) {
@@ -281,25 +323,28 @@ async function generatePortrait(session, overlay) {
         toast('warning', 'NPC State Delta: positive portrait prompt is empty.');
         return false;
     }
-    let seed;
+    let requestedSeed;
     try {
-        seed = portraitSeedFromOverlay(overlay);
+        requestedSeed = portraitSeedFromOverlay(overlay);
     } catch (error) {
         toast('warning', `NPC State Delta: ${error?.message || error}`);
         return false;
     }
+    const generationSeed = requestedSeed ?? randomPortraitSeed();
     const actionSeq = ++session.actionSeq;
     session.generatedPortraitUrl = '';
+    resetGeneratedSeed(session, overlay);
     const use = overlay?.querySelector?.('[data-use-generated-portrait]');
     if (use) use.disabled = true;
     setBusy(session, true, 'Generating through SillyTavern Image Generation…', { allowClose: true });
     try {
-        const url = await runtime.generatePortraitUrl(session.npcId, { positive: draft.positive, negative: draft.negative, seed });
+        const url = await runtime.generatePortraitUrl(session.npcId, { positive: draft.positive, negative: draft.negative, seed: generationSeed });
         if (!currentSessionIs(session) || session.actionSeq !== actionSeq) return false;
         const value = String(url || '').trim();
         if (!value) throw new Error('SillyTavern Image Generation returned no image URL.');
         setBusy(session, false, 'Generation complete. Review the preview before applying it.');
         if (!generatedPreview(session, overlay, value)) return false;
+        showGeneratedSeed(session, overlay, generationSeed);
         recordToolEvent('portrait-generation', {
             chatKey: session.chatKey,
             npcId: session.npcId,
@@ -413,6 +458,10 @@ function wirePortraitDialog(session, overlay) {
         }
         if (event.target.closest?.('[data-save-portrait-seed]')) {
             void savePortraitSeed(session, overlay);
+            return;
+        }
+        if (event.target.closest?.('[data-use-generation-seed]')) {
+            void saveGeneratedPortraitSeed(session, overlay);
             return;
         }
         if (event.target.closest?.('[data-generate-portrait]')) {

@@ -14,8 +14,12 @@ test('maintained Portrait workflow uses SillyTavern Image Generation with explic
     assert.match(source, /generatePortraitUrl/);
     assert.match(source, /npc_state_delta_tools_seed/);
     assert.match(source, /data-save-portrait-seed/);
+    assert.match(source, /data-generation-seed/);
+    assert.match(source, /data-use-generation-seed/);
+    assert.match(source, /randomPortraitSeed/);
+    assert.match(source, /generatedPortraitSeed/);
     assert.match(source, /setPortraitSeed/);
-    assert.match(source, /seed \}/);
+    assert.match(source, /seed: generationSeed/);
     assert.match(source, /data-generate-portrait/);
     assert.match(source, /data-use-generated-portrait/);
     assert.match(source, /SillyTavern Image Generation/);
@@ -35,4 +39,12 @@ test('dossier Portrait control routes to the maintained manager and suppresses t
     assert.match(source, /npc-state-delta-generate-portrait/);
     assert.match(source, /display:none !important/);
     assert.match(source, /top layer/i);
+});
+
+
+test('portrait seed controls use the maintained dark dialog styling instead of browser-default number input colors', async () => {
+    const source = await readFile(controlsUrl, 'utf8');
+    assert.match(source, /\.delta-tools-seed-card\{/);
+    assert.match(source, /\.delta-tools-seed-input\{[^}]*background:rgba\(0,0,0,\.28\)[^}]*color:inherit[^}]*color-scheme:dark/s);
+    assert.match(source, /\.delta-tools-generation-seed\{/);
 });
