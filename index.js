@@ -4816,10 +4816,6 @@ function editorField(id) {
     return document.getElementById(id)?.value ?? '';
 }
 
-function clampEditorStat(id) {
-    return Math.max(0, Math.min(100, Math.round(Number(editorField(id)) || 0)));
-}
-
 function clampEditorRelationshipStat(id) {
     const value = Number(editorField(id));
     return Number.isFinite(value) ? Math.max(-100, Math.min(100, Math.round(value))) : 0;
