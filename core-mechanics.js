@@ -3099,6 +3099,169 @@ function shouldPromoteCandidate(candidate, incoming, admissionMode = 'conservati
     return Boolean(incoming.sameIndividual) && Number(candidate?.seenCount || 0) >= 2;
 }
 
+const PORTRAIT_CLOTHING_TERMS = /\b(?:dress|gown|tunic|shirt|blouse|vest|coat|cloak|jacket|robe|skirt|trousers|pants|shorts|boots?|shoes?|stockings?|gloves?|hat|hood|uniform|armou?r|badge|ribbons?|necklace|earrings?|belt|scarf|sweater|wool|leather|silk|linen|cotton|sleeves?|collar)\b/i;
+const PORTRAIT_ANATOMY_TERMS = /\b(?:woman|man|girl|boy|person|face|skin|hair|eyes?|ears?|brows?|lashes?|nose|lips?|mouth|cheeks?|jaw|chin|build|figure|bust|chest|shoulders?|arms?|hands?|legs?|feet|horns?|wings?|tails?|feathers?|plumage|scales?|talons?|claws?|beak|fins?|gills?|antlers?)\b/i;
+const PORTRAIT_NON_HAIR_TRAIT_TERMS = /\b(?:eyes?|skin|ears?|face|brows?|lashes?|dress|gown|tunic|shirt|blouse|vest|coat|cloak|jacket|robe|skirt|trousers|pants|boots?|shoes?|ribbons?|badge|horns?|wings?|tails?|feathers?|scales?)\b/i;
+const PORTRAIT_HAIR_COLOR_TAGS = Object.freeze({
+    black: 'black hair',
+    brown: 'brown hair',
+    red: 'red hair',
+    blonde: 'blonde hair',
+    gold: 'golden hair',
+    white: 'white hair',
+    silver: 'silver hair',
+    gray: 'gray hair',
+    blue: 'blue hair',
+    purple: 'purple hair',
+    pink: 'pink hair',
+    green: 'green hair',
+    orange: 'orange hair',
+});
+const PORTRAIT_HAIR_COLOR_RULES = Object.freeze([
+    { key: 'red', pattern: /\b(?:red|ginger|auburn|crimson)\b/i, contradictions: ['white', 'silver', 'blonde', 'blue', 'purple'] },
+    { key: 'black', pattern: /\bblack\b/i, contradictions: ['white', 'silver', 'blonde', 'red', 'blue'] },
+    { key: 'brown', pattern: /\b(?:brown|brunette)\b/i, contradictions: ['white', 'silver', 'blonde', 'red', 'blue'] },
+    { key: 'blonde', pattern: /\b(?:blond|blonde|yellow)\b/i, contradictions: ['black', 'brown', 'red', 'blue', 'purple'] },
+    { key: 'gold', pattern: /\b(?:gold|golden)\b/i, contradictions: ['white', 'silver', 'gray', 'black', 'brown'] },
+    { key: 'white', pattern: /\b(?:white|ivory|snow-white|platinum)\b/i, contradictions: ['blonde', 'gold', 'black', 'brown', 'red'] },
+    { key: 'silver', pattern: /\b(?:silver|silvery|metallic-white)\b/i, contradictions: ['blonde', 'gold', 'brown', 'red', 'blue'] },
+    { key: 'gray', pattern: /\b(?:gray|grey)\b/i, contradictions: ['blonde', 'gold', 'black', 'brown', 'red'] },
+    { key: 'blue', pattern: /\b(?:blue|cobalt|azure|indigo)\b/i, contradictions: ['white', 'silver', 'blonde', 'red', 'purple'] },
+    { key: 'purple', pattern: /\b(?:purple|violet)\b/i, contradictions: ['white', 'silver', 'blonde', 'blue', 'red'] },
+    { key: 'pink', pattern: /\bpink\b/i, contradictions: ['white', 'silver', 'blonde', 'red', 'purple'] },
+    { key: 'green', pattern: /\b(?:green|emerald)\b/i, contradictions: ['white', 'silver', 'blonde', 'blue', 'red'] },
+    { key: 'orange', pattern: /\borange\b/i, contradictions: ['white', 'silver', 'blonde', 'red', 'purple'] },
+]);
+const PORTRAIT_NEGATED_FEATURE_RULES = Object.freeze([
+    { tag: 'wings', pattern: /\bwings?\b/i },
+    { tag: 'horns', pattern: /\bhorns?\b/i },
+    { tag: 'tail', pattern: /\btails?\b/i },
+    { tag: 'feathers', pattern: /\bfeathers?\b/i },
+    { tag: 'plumage', pattern: /\bplumage\b/i },
+    { tag: 'talons', pattern: /\btalons?\b/i },
+    { tag: 'claws', pattern: /\bclaws?\b/i },
+    { tag: 'animal ears', pattern: /\b(?:animal|beast|avian|feathered)\s+ears?\b/i },
+]);
+
+function portraitPartKey(value) {
+    return normalizeName(value).replace(/\b(?:a|an|the)\b/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function uniquePortraitParts(values = []) {
+    const seen = new Set();
+    const result = [];
+    for (const raw of values) {
+        const value = String(raw ?? '').replace(/\s+/g, ' ').replace(/^[,;:\s]+|[,;:\s]+$/g, '').trim();
+        if (!value) continue;
+        const key = portraitPartKey(value);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        result.push(value);
+    }
+    return result;
+}
+
+function normalizePortraitAppearanceClause(value, clothing = false) {
+    let text = cleanText(value, 1800)
+        .replace(/^(?:appearance|current appearance)\s*:\s*/i, '')
+        .replace(/^[,;:\s]+|[,;:\s]+$/g, '')
+        .trim();
+    if (clothing) {
+        text = text
+            .replace(/^(?:wears?|wearing|dressed in|clad in)\s+/i, '')
+            .replace(/^(?:outfit|clothing)\s*:\s*/i, '')
+            .replace(/^(?:a|an|the)\s+/i, '')
+            .trim();
+    }
+    return text;
+}
+
+function splitPortraitAppearance(value) {
+    const source = cleanText(value, 1800).replace(/\r/g, '');
+    if (!source) return { core: [], clothing: [] };
+    const core = [];
+    const clothing = [];
+    const clauses = source.split(/[;\n]+|\.(?:\s+|$)/).map(item => item.trim()).filter(Boolean);
+    for (const clause of clauses) {
+        const clothingLead = /^(?:wears?|wearing|dressed in|clad in|outfit\s*:|clothing\s*:)/i.test(clause);
+        const hasClothing = PORTRAIT_CLOTHING_TERMS.test(clause);
+        const hasAnatomy = PORTRAIT_ANATOMY_TERMS.test(clause);
+        const clothingOnly = clothingLead || (hasClothing && !hasAnatomy);
+        const normalized = normalizePortraitAppearanceClause(clause, clothingOnly);
+        if (!normalized) continue;
+        (clothingOnly ? clothing : core).push(normalized);
+    }
+    return {
+        core: uniquePortraitParts(core),
+        clothing: uniquePortraitParts(clothing),
+    };
+}
+
+function addHairColorsFromContext(context, found) {
+    for (const rule of PORTRAIT_HAIR_COLOR_RULES) {
+        const matcher = new RegExp(rule.pattern.source, 'ig');
+        let match = null;
+        while ((match = matcher.exec(context))) {
+            const between = context.slice(match.index + match[0].length);
+            if (!PORTRAIT_NON_HAIR_TRAIT_TERMS.test(between)) found.add(rule.key);
+            if (!match[0].length) matcher.lastIndex += 1;
+        }
+    }
+}
+
+function explicitHairColorKeys(value) {
+    const source = String(value || '');
+    const found = new Set();
+    const hair = /\bhairs?\b/gi;
+    let match = null;
+    while ((match = hair.exec(source))) {
+        const before = source.slice(0, match.index);
+        const boundary = Math.max(before.lastIndexOf(','), before.lastIndexOf(';'), before.lastIndexOf('.'), before.lastIndexOf('\n'));
+        addHairColorsFromContext(before.slice(boundary + 1).slice(-120), found);
+
+        const after = source.slice(match.index + match[0].length, match.index + match[0].length + 96);
+        const connector = after.match(/^\s*(?:(?:is|was|looks?|appears?|colored|coloured|color(?:ed)?|colour(?:ed)?)\s*[:=-]?\s*|[:=-]\s*)([^,;.\n]{1,48})/i);
+        if (connector) addHairColorsFromContext(connector[1], found);
+        if (!match[0].length) hair.lastIndex += 1;
+    }
+    return found;
+}
+
+function explicitNegatedFeatureTags(value) {
+    const source = String(value || '');
+    const tags = [];
+    for (const rule of PORTRAIT_NEGATED_FEATURE_RULES) {
+        const afterNo = new RegExp('\\b(?:no|without|lacks?|lacking)\\b[^,;.\\n]{0,48}' + rule.pattern.source, 'i');
+        const notVisible = new RegExp(rule.pattern.source + '[^,;.\\n]{0,32}\\b(?:(?:is|are)\\s+)?(?:not visible|absent|not present)\\b', 'i');
+        if (afterNo.test(source) || notVisible.test(source)) tags.push(rule.tag);
+    }
+    return tags;
+}
+
+function derivePortraitContradictionNegatives(appearance, extraPositive, replaceAutomatic = false) {
+    if (replaceAutomatic) return [];
+    const subjectText = [appearance, extraPositive].filter(Boolean).join('; ');
+    const explicitColors = explicitHairColorKeys(subjectText);
+    const colorNegatives = [];
+    const seenColorKeys = new Set();
+    for (const key of explicitColors) {
+        const rule = PORTRAIT_HAIR_COLOR_RULES.find(item => item.key === key);
+        for (const contradiction of rule?.contradictions || []) {
+            if (explicitColors.has(contradiction) || seenColorKeys.has(contradiction)) continue;
+            const tag = PORTRAIT_HAIR_COLOR_TAGS[contradiction];
+            if (!tag) continue;
+            seenColorKeys.add(contradiction);
+            colorNegatives.push(tag);
+            if (colorNegatives.length >= 8) break;
+        }
+        if (colorNegatives.length >= 8) break;
+    }
+    return uniquePortraitParts([
+        ...colorNegatives,
+        ...explicitNegatedFeatureTags(subjectText),
+    ]);
+}
+
 export function buildNpcPortraitPrompts(rawNpc = {}, options = {}) {
     const npc = rawNpc && typeof rawNpc === 'object' ? rawNpc : {};
     const format = normalizePortraitPromptFormat(options.format);
@@ -3117,38 +3280,48 @@ export function buildNpcPortraitPrompts(rawNpc = {}, options = {}) {
     const appearance = cleanText(npc.appearance, 1800);
     const mood = useMood ? cleanText(npc.mood, 240) : '';
     const location = useLocation ? cleanText(npc.location, 300) : '';
-
-    const subjectTags = [
+    const appearanceGroups = splitPortraitAppearance(appearance);
+    const identity = uniquePortraitParts([
         species,
-        visualAge ? `apparent age ${visualAge}` : '',
-        role ? `role: ${role}` : '',
-        appearance,
-        mood ? `expression / bearing: ${mood}` : '',
-        location ? `background / location: ${location}` : '',
-    ].filter(Boolean);
+        visualAge ? 'apparent age ' + visualAge : '',
+    ]);
+    const roleTag = normalizePortraitAppearanceClause(role);
+    const moodTag = normalizePortraitAppearanceClause(mood);
+    const locationTag = normalizePortraitAppearanceClause(location);
 
     let positive = '';
     if (replaceAutomatic && extraPositive) {
         positive = extraPositive;
     } else if (format === 'natural') {
         const sentences = [];
-        if (stylePositive) sentences.push(`Visual style: ${stylePositive}.`);
-        if (species || visualAge || role) {
-            const identity = [species, visualAge ? `appearing ${visualAge}` : '', role].filter(Boolean).join(', ');
-            if (identity) sentences.push(`Subject: ${identity}.`);
-        }
-        if (appearance) sentences.push(`Appearance: ${appearance}.`);
-        if (mood) sentences.push(`Expression and bearing: ${mood}.`);
-        if (location) sentences.push(`Background: ${location}.`);
-        if (composition) sentences.push(`Composition: ${composition}.`);
-        if (extraPositive) sentences.push(`Additional character instructions: ${extraPositive}.`);
+        if (identity.length) sentences.push('Subject: ' + identity.join(', ') + '.');
+        if (appearanceGroups.core.length) sentences.push('Appearance: ' + appearanceGroups.core.join('; ') + '.');
+        if (roleTag) sentences.push('Role: ' + roleTag + '.');
+        if (appearanceGroups.clothing.length) sentences.push('Clothing: ' + appearanceGroups.clothing.join('; ') + '.');
+        if (moodTag) sentences.push('Expression and bearing: ' + moodTag + '.');
+        if (locationTag) sentences.push('Background: ' + locationTag + '.');
+        if (composition) sentences.push('Composition: ' + composition + '.');
+        if (extraPositive) sentences.push('Additional character instructions: ' + extraPositive + '.');
+        if (stylePositive) sentences.push('Visual style: ' + stylePositive + '.');
         positive = sentences.join(' ');
     } else {
-        const parts = [stylePositive, ...subjectTags, composition, extraPositive].filter(Boolean);
-        positive = parts.join(format === 'tags' ? ', ' : '; ');
+        const subjectParts = uniquePortraitParts([
+            ...identity,
+            ...appearanceGroups.core,
+            roleTag,
+            ...appearanceGroups.clothing,
+            moodTag,
+            locationTag,
+            composition,
+            extraPositive,
+        ]);
+        positive = [...subjectParts, stylePositive].filter(Boolean).join(format === 'tags' ? ', ' : '; ');
     }
 
-    const negative = [styleNegative, extraNegative].filter(Boolean).join(', ');
+    const configuredNegative = normalizeName([styleNegative, extraNegative].filter(Boolean).join(' '));
+    const derivedNegative = derivePortraitContradictionNegatives(appearance, extraPositive, replaceAutomatic)
+        .filter(tag => !configuredNegative.includes(normalizeName(tag)));
+    const negative = [...derivedNegative, styleNegative, extraNegative].filter(Boolean).join(', ');
     return {
         positive: String(positive || '').replace(/\s+/g, ' ').trim(),
         negative: String(negative || '').replace(/\s+/g, ' ').trim(),

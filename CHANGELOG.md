@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Make portrait prompt assembly deterministic and subject-first: accepted identity/current appearance lead role, clothing, mood, location and composition, with global positive style last; strip tag-format metadata labels, deduplicate repeated strong-boundary clauses, and derive only explicit safe contradiction negatives for stated hair colors or explicit absent anatomy.
 - Add native portrait generation to the maintained Portrait tool through SillyTavern Image Generation. The edited dossier-derived positive/negative prompts are handed to the existing host `/imagine` bridge, so ComfyUI/A1111/other configured backends remain owned by SillyTavern rather than Delta. Re-expose the existing generation enable and gallery controls in the cohesive settings surface. Force `extend=false edit=false` for Delta portrait requests so SillyTavern cannot LLM-rewrite grounded appearance traits before backend generation; host-global Prompt Prefix / Negative Prompt and backend settings still apply.
 - Keep generated images preview-only until explicit **Use as Portrait**. Closing/switching chats or superseding an in-flight action invalidates late results; accepted previews reuse the canonical portrait validation/compression/persistence path and retain the existing 16 MB input boundary.
 - Retire the obsolete dossier `importance` field and generic per-NPC `manual` boolean. Historical values are accepted as input only long enough to normalize them away; current story salience, scoped profile locks, and typed manual provenance remain authoritative.
