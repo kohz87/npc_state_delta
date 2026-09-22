@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.0.43 - 22 September 2026
+
+- Fix the remaining full-cast settings race by re-homing an already-rendered `Full scan current cast` button into Data & maintenance after cohesive settings normalization, instead of only choosing the correct container at first creation.
+- Listen to the existing `npc-state-delta:settings-mounted` lifecycle event and add a regression covering the re-home path.
+- Advance synchronized application/package/display metadata to 1.0.43 with persisted format versions unchanged.
+
 ## 1.0.42 - 22 September 2026
 
 - Move the settings-level manual `Full scan current cast` action into Data & maintenance beside `Scan dossier now`, instead of mounting it as a standalone row outside the section.

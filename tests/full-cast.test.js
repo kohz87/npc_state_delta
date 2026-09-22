@@ -33,9 +33,13 @@ test('superseded enhancement dossier library is not retained beside Stage 1 UI',
   assert.doesNotMatch(source, /openLibrary|closeLibrary|renderLibrary/);
 });
 
-test('full-cast manual action mounts in the Data & maintenance action group', () => {
+test('full-cast manual action mounts and rehomes into the Data & maintenance action group', () => {
   assert.match(source, /delta-settings-maintenance-actions/);
   assert.match(source, /legacyScan\?\.closest\?\.\('\.npc-state-delta-actions'\)/);
+  assert.match(source, /button\.parentElement !== actions/);
+  assert.match(source, /actions\.appendChild\(button\)/);
+  assert.match(source, /npc-state-delta:settings-mounted/);
+  assert.match(source, /queueMicrotask\(mountControls\)/);
   assert.doesNotMatch(source, /delta-settings-scanning-actions/);
   assert.doesNotMatch(source, /panel\.querySelector\('\.npc-state-delta-actions'\)/);
 });
