@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.0.38 - 22 September 2026
+
+- Strengthen Comma tags portrait prompts by promoting explicit visual anchors from accepted appearance prose into standalone subject-first tags before the prose fallback. Hair color/form, eye color, pointed/human ears and bounded direct body/build traits are extracted conservatively without replacing the accepted appearance source.
+- Preserve explicit multicolor hair as one combined standalone anchor when the dossier states it that way, and keep contradiction negatives evidence-bound so an explicitly present color component is never negated.
+- Add regression coverage for the live auburn half-elf clerk prompt and golden-blue multicolor hair, then advance synchronized application/package/display metadata to 1.0.38 with persisted format versions unchanged.
+
 ## 1.0.37 - 22 September 2026
 
 - Clean up Settings action grouping: move Scan dossier now into Scanning, Add NPC into Roster & cleanup, and Clear chat dossier into Data & maintenance so unrelated controls no longer appear visually attached to Portrait generation.
