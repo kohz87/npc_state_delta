@@ -176,6 +176,7 @@ test('v0.2.11 branch restore overlays user-owned portrait/profile metadata witho
     state.npcs[0].retentionProtected = true;
     state.npcs[0].minor = true;
     state.npcs[0].importance = 77;
+    state.npcs[0].manual = true;
     state.npcs[0].personality = 'Reserved and dryly humorous.';
     state.npcs[0].manualProfileFields = ['personality'];
     state.npcs[0].manualProfileLocksExplicit = true;
@@ -186,7 +187,8 @@ test('v0.2.11 branch restore overlays user-owned portrait/profile metadata witho
     assert.equal(result.state.npcs[0].portraitPromptPositive, 'custom portrait override');
     assert.equal(result.state.npcs[0].retentionProtected, true);
     assert.equal(result.state.npcs[0].minor, true);
-    assert.equal(result.state.npcs[0].importance, 77);
+    assert.equal(Object.prototype.hasOwnProperty.call(result.state.npcs[0], 'importance'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(result.state.npcs[0], 'manual'), false);
     assert.equal(result.state.npcs[0].personality, 'Reserved and dryly humorous.');
     assert.equal(result.state.npcs[0].relationship.trust, 0, 'relationship remains narrative branch state rather than user-metadata overlay');
 });
