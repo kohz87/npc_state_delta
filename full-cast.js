@@ -168,20 +168,24 @@ function mountControls() {
         const legacyScan = panel.querySelector('#npc_state_delta_scan_now');
         actions = legacyScan?.closest?.('.npc-state-delta-actions') || null;
     }
-    if (actions && !document.getElementById(SCAN_BUTTON_ID)) {
-        const button = document.createElement('div');
+    let button = document.getElementById(SCAN_BUTTON_ID);
+    if (!button && actions) {
+        button = document.createElement('div');
         button.id = SCAN_BUTTON_ID;
         button.className = 'menu_button';
         button.innerHTML = '<i class="fa-solid fa-users-viewfinder"></i> Full scan current cast';
         button.addEventListener('click', () => void runFullCastScan(latestAssistantId(), snapshot(), { manual: true }));
-        actions.appendChild(button);
     }
+    if (actions && button && button.parentElement !== actions) actions.appendChild(button);
     return true;
 }
 
 function registerEvents() {
     document.addEventListener('npc-state-delta:request-full-cast-scan', () => {
         void runFullCastScan(latestAssistantId(), snapshot(), { manual: true });
+    });
+    document.addEventListener('npc-state-delta:settings-mounted', () => {
+        queueMicrotask(mountControls);
     });
     const ctx = getContext();
     const source = ctx?.eventSource;
