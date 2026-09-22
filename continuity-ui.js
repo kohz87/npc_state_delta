@@ -182,11 +182,7 @@ function ensureAppearanceEditor(editor) {
         const identity = content.querySelector('.delta-editor-identity');
         if (identity?.nextSibling) content.insertBefore(section, identity.nextSibling);
         else if (identity) content.appendChild(section);
-        else {
-            const appearanceLabel = content.querySelector('#npc_state_delta_edit_appearance')?.closest?.('label');
-            if (appearanceLabel?.parentElement) appearanceLabel.parentElement.insertBefore(section, appearanceLabel.nextSibling);
-            else content.appendChild(section);
-        }
+        else content.appendChild(section);
         section.addEventListener('input', () => { section.dataset.editRevision = String(Number(section.dataset.editRevision || 0) + 1); });
         section.querySelector('[data-delta-current-form]')?.addEventListener('change', () => toggleUnclassifiedAppearance(section));
         section.querySelector('[data-delta-appearance-forms]')?.addEventListener('input', () => {
@@ -235,8 +231,6 @@ async function applyAppearanceEditor(editor) {
     stage1Refresh();
     const refreshed = currentNpc(npcId);
     if (!refreshed) return null;
-    const compatibilityAppearance = editor.querySelector('#npc_state_delta_edit_appearance');
-    if (compatibilityAppearance) compatibilityAppearance.value = refreshed.appearance || resolveNpcAppearance(refreshed) || '';
     if ((section.dataset.editRevision || '0') === revision) syncAppearanceEditor(editor, refreshed);
     scheduleNormalize();
     return refreshed;
