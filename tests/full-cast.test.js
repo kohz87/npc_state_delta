@@ -33,6 +33,13 @@ test('superseded enhancement dossier library is not retained beside Stage 1 UI',
   assert.doesNotMatch(source, /openLibrary|closeLibrary|renderLibrary/);
 });
 
+test('full-cast manual action mounts only in the Scanning action group', () => {
+  assert.match(source, /delta-settings-scanning-actions/);
+  assert.match(source, /npc_state_delta_full_scan_every_turn/);
+  assert.match(source, /legacyScan\?\.closest\?\.\('\.npc-state-delta-actions'\)/);
+  assert.doesNotMatch(source, /panel\.querySelector\('\.npc-state-delta-actions'\)/);
+});
+
 test('full-cast owner never patches the host text-model route', () => {
   assert.doesNotMatch(source, /generateRaw/);
   assert.doesNotMatch(source, /installBackfillGuard/);

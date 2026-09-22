@@ -111,10 +111,13 @@ test('comma tags promote explicit visual anchors from prose without dropping the
         useLocation: true,
     });
 
-    assert.ok(indexOfOrFail(prompts.positive, 'auburn hair') < indexOfOrFail(prompts.positive, 'A young half-elf with tangled auburn curls'));
+    assert.match(prompts.positive, /auburn hair/i);
     assert.match(prompts.positive, /curly hair/i);
     assert.match(prompts.positive, /tangled hair/i);
+    assert.match(prompts.positive, /loose hair/i);
+    assert.match(prompts.positive, /hair ribbons/i);
     assert.match(prompts.positive, /pointed ears/i);
+    assert.doesNotMatch(prompts.positive, /A young half-elf with tangled auburn curls/i);
     assert.match(prompts.positive, /pale hazel eyes/i);
     assert.match(prompts.positive, /ample bust/i);
     assert.match(prompts.positive, /rough wool tunic/i);
@@ -142,6 +145,24 @@ test('comma tags preserve explicit multicolor hair as one standalone anchor and 
     assert.match(prompts.positive, /golden-blue hair/i);
     assert.match(prompts.positive, /shoulder-length hair/i);
     assert.doesNotMatch(prompts.negative, /\b(?:golden|blue) hair\b/i);
+});
+
+test('comma tags retain unparsed appearance fragments instead of dropping them with parsed anchors', () => {
+    const prompts = buildNpcPortraitPrompts({
+        species: 'Human',
+        appearance: 'long black hair, freckles, a thin scar across the nose',
+    }, {
+        stylePositive: '',
+        styleNegative: '',
+        composition: '',
+        format: 'tags',
+    });
+
+    assert.match(prompts.positive, /black hair/i);
+    assert.match(prompts.positive, /long hair/i);
+    assert.match(prompts.positive, /freckles/i);
+    assert.match(prompts.positive, /thin scar across the nose/i);
+    assert.doesNotMatch(prompts.positive, /long black hair, freckles/i);
 });
 
 test('natural portrait format keeps subject evidence ahead of style while retaining readable labels', () => {

@@ -163,7 +163,20 @@ function mountControls() {
             saveSettings();
         });
     }
-    const actions = panel.querySelector('.npc-state-delta-actions');
+    let actions = panel.querySelector('.delta-settings-scanning-actions');
+    if (!actions) {
+        const scanRow = panel.querySelector('#npc_state_delta_full_scan_every_turn')?.closest?.('.npc-state-delta-setting-row');
+        const scanBody = scanRow?.closest?.('.delta-settings-group-body');
+        if (scanBody) {
+            actions = document.createElement('div');
+            actions.className = 'npc-state-delta-actions delta-settings-scanning-actions';
+            scanBody.appendChild(actions);
+        }
+    }
+    if (!actions) {
+        const legacyScan = panel.querySelector('#npc_state_delta_scan_now');
+        actions = legacyScan?.closest?.('.npc-state-delta-actions') || null;
+    }
     if (actions && !document.getElementById(SCAN_BUTTON_ID)) {
         const button = document.createElement('div');
         button.id = SCAN_BUTTON_ID;
