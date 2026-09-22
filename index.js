@@ -87,6 +87,7 @@ import {
     PORTRAIT_STYLE_PROMPT_LIMIT,
     PORTRAIT_COMPOSITION_PROMPT_LIMIT,
     PORTRAIT_NPC_PROMPT_LIMIT,
+    normalizePortraitSeed,
     normalizePortraitPromptFormat,
     buildNpcPortraitPrompts,
     appearanceDraftRecord,
@@ -4564,7 +4565,7 @@ function slashQuoted(value) {
     return `"${text.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 }
 
-async function executeNativePortraitGeneration(positive, negative) {
+async function executeNativePortraitGeneration(positive, negative, seed = null) {
     const prompt = String(positive || '').trim();
     if (!prompt) throw new Error('Positive portrait prompt is empty.');
     const ctx = getContext();
@@ -4582,6 +4583,7 @@ async function executeNativePortraitGeneration(positive, negative) {
         'extend=false',
         'edit=false',
         `gallery=${settings.portraitSaveToGallery ? 'true' : 'false'}`,
+        normalizePortraitSeed(seed) !== null ? `seed=${normalizePortraitSeed(seed)}` : '',
         negative ? `negative=${slashQuoted(negative)}` : '',
         slashQuoted(prompt),
     ].filter(Boolean).join(' ');
@@ -4734,7 +4736,7 @@ async function generatePortraitFromDialog() {
     activePortraitGenerationUrl = '';
     setPortraitGeneratorBusy(true, 'Generating through SillyTavern Image Generation…');
     try {
-        const url = await executeNativePortraitGeneration(positive, negative);
+        const url = await executeNativePortraitGeneration(positive, negative, npc.portraitSeed);
         if (activePortraitGeneratorOverlay !== overlay || activePortraitGeneratorNpcId !== npc.id || activePortraitGeneratorChatKey !== originChatKey || getChatKey() !== originChatKey || !currentNpcById(npc.id)) return false;
         if (Number(stateVersions.get(originChatKey) || 0) !== revision) {
             setPortraitGeneratorBusy(false, 'The dossier changed during generation; the stale preview was discarded.');
@@ -5031,6 +5033,20 @@ async function setNpcPortrait(npcId, file, { chatKey, isCurrent = () => true, ge
     } finally {
         if (portraitActions.get(key) === action) portraitActions.delete(key);
     }
+}
+
+function setNpcPortraitSeed(npcId, seed, { chatKey } = {}) {
+    if (!chatKey || chatKey !== getChatKey() || !requireReadyChatMutation('edit portrait seed', chatKey)) return false;
+    const npc = getChatState(chatKey).npcs.find(item => item.id === String(npcId || ''));
+    if (!npc) return false;
+    const raw = seed === null || seed === undefined ? '' : String(seed).trim();
+    const normalized = normalizePortraitSeed(seed);
+    if (raw && normalized === null) throw new Error('Portrait seed must be a whole number from 0 to 9007199254740991, or blank for SillyTavern default/random behavior.');
+    npc.portraitSeed = normalized;
+    npc.updatedAt = Date.now();
+    persistCritical(chatKey);
+    renderDossier();
+    return true;
 }
 
 function removeNpcPortrait(npcId, { chatKey } = {}) {
@@ -5921,6 +5937,7 @@ window.NPCStateDelta = Object.freeze({
         return executeNativePortraitGeneration(
             String(overrides?.positive ?? prompts.positive).trim(),
             String(overrides?.negative ?? prompts.negative).trim(),
+            overrides?.seed !== undefined ? overrides.seed : npc.portraitSeed,
         );
     },
     openPortraitGenerator: value => { const npc = findNpcByIdOrName(value); return npc ? openPortraitGenerator(npc.id) : false; },
@@ -5993,6 +6010,7 @@ window.NPCStateDelta = Object.freeze({
     updateAppearance: updateNpcAppearance,
     updateLifeState: updateNpcLifeState,
     setPortrait: setNpcPortrait,
+    setPortraitSeed: setNpcPortraitSeed,
     removePortrait: removeNpcPortrait,
     flush: () => flushStateFile(),
     dataFile: () => structuredClone(getSettings().dataFiles?.[getChatKey()] || null),

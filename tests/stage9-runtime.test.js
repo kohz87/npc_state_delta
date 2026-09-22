@@ -179,6 +179,22 @@ async function additionalChecks(mockState, eventSource, manualAddNpc, sleep, ext
         await runtime.generatePortraitUrl(npc.id);
         assert.deepEqual(runtime.getNpc(npc.id).portrait, portraitBeforePreview);
 
+        // Per-NPC portrait seeds persist independently and are passed through the host /imagine contract.
+        assert.equal(runtime.setPortraitSeed(npc.id, 424242, { chatKey }), true);
+        assert.equal(runtime.getNpc(npc.id).portraitSeed, 424242);
+        let seededCommand = '';
+        const seededExecute = mockState.context.executeSlashCommandsWithOptions;
+        mockState.context.executeSlashCommandsWithOptions = command => {
+            seededCommand = String(command || '');
+            return Promise.resolve({ pipe: '/user/images/seeded.png' });
+        };
+        await runtime.generatePortraitUrl(npc.id);
+        assert.match(seededCommand, /(?:^|\s)seed=424242(?:\s|$)/);
+        mockState.context.executeSlashCommandsWithOptions = seededExecute;
+        assert.throws(() => runtime.setPortraitSeed(npc.id, -1, { chatKey }), /whole number/);
+        assert.equal(runtime.setPortraitSeed(npc.id, null, { chatKey }), true);
+        assert.equal(runtime.getNpc(npc.id).portraitSeed, null);
+
         // Exercise retained native preview/application through its actual registered UI controls.
         const originalAppend = document.body.appendChild;
         const originalExecute = mockState.context.executeSlashCommandsWithOptions;

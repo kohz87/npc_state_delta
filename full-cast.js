@@ -176,7 +176,13 @@ function mountControls() {
         button.innerHTML = '<i class="fa-solid fa-users-viewfinder"></i> Full scan current cast';
         button.addEventListener('click', () => void runFullCastScan(latestAssistantId(), snapshot(), { manual: true }));
     }
-    if (actions && button && button.parentElement !== actions) actions.appendChild(button);
+    if (actions && button) {
+        const clearChat = actions.querySelector?.('#npc_state_delta_clear_chat');
+        if (button.parentElement !== actions || (clearChat && button.nextElementSibling !== clearChat)) {
+            if (clearChat) actions.insertBefore(button, clearChat);
+            else actions.appendChild(button);
+        }
+    }
     return true;
 }
 

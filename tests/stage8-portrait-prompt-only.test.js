@@ -12,6 +12,10 @@ test('maintained Portrait workflow uses SillyTavern Image Generation with explic
     assert.match(source, /Upload from device|Replace from device/);
     assert.match(source, /Remove portrait/);
     assert.match(source, /generatePortraitUrl/);
+    assert.match(source, /npc_state_delta_tools_seed/);
+    assert.match(source, /data-save-portrait-seed/);
+    assert.match(source, /setPortraitSeed/);
+    assert.match(source, /seed \}/);
     assert.match(source, /data-generate-portrait/);
     assert.match(source, /data-use-generated-portrait/);
     assert.match(source, /SillyTavern Image Generation/);

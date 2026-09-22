@@ -104,6 +104,7 @@ function portraitGenerationAvailable() {
 function portraitDialogHtml(npc, draft) {
     const portrait = npc?.portrait?.dataUrl || '';
     const canGenerate = portraitGenerationAvailable();
+    const portraitSeed = Number.isSafeInteger(npc?.portraitSeed) && npc.portraitSeed >= 0 ? String(npc.portraitSeed) : '';
     return `<section class="delta-tools-dialog delta-tools-portrait" role="document" aria-label="Portrait management for ${escapeHtml(npc.name)}">
       <header>
         <div><span class="delta-tools-kicker">PORTRAIT + PROMPTS</span><h2>${escapeHtml(npc.name)}</h2><small>Build prompts from the accepted dossier or generate through SillyTavern Image Generation. Generated images stay preview-only until you explicitly choose Use as Portrait.</small></div>
@@ -122,6 +123,11 @@ function portraitDialogHtml(npc, draft) {
           <div class="delta-tools-copy-row"><button type="button" data-copy="positive">Copy positive</button><button type="button" data-generate-prompts>Generate prompts from dossier</button></div>
           <label>Negative prompt<textarea id="npc_state_delta_tools_negative" rows="6">${escapeHtml(draft.negative)}</textarea></label>
           <div class="delta-tools-copy-row"><button type="button" data-copy="negative">Copy negative</button></div>
+          <label>Portrait seed
+            <input id="npc_state_delta_tools_seed" type="number" min="0" max="9007199254740991" step="1" value="${escapeHtml(portraitSeed)}" placeholder="Blank = SillyTavern default / random">
+            <small>Optional per-NPC fixed seed. Reusing it improves repeatability when the prompt, checkpoint, workflow, sampler, resolution and other image settings stay the same.</small>
+          </label>
+          <div class="delta-tools-copy-row"><button type="button" data-save-portrait-seed>Save seed</button></div>
           <small>Manual edits are kept for this chat session. Delta disables SillyTavern's free-prompt auto-extension/refinement for this handoff so the edited traits reach the image backend unchanged. SillyTavern's global Image Generation Prompt Prefix / Negative Prompt and configured backend settings still apply.</small>
           <div class="delta-tools-manual-copy" data-delta-tools-manual-copy hidden>
             <small>Clipboard access is blocked by this browser context. The prompt is selected below; press Ctrl+C.</small>
@@ -217,6 +223,46 @@ async function generatedPortraitFile(url, npcId = 'npc') {
     return new File([blob], `${safeId}-generated.${extension}`, { type: blob.type });
 }
 
+function portraitSeedFromOverlay(overlay) {
+    const raw = String(overlay?.querySelector?.('#npc_state_delta_tools_seed')?.value ?? '').trim();
+    if (!raw) return null;
+    const seed = Number(raw);
+    if (!Number.isSafeInteger(seed) || seed < 0) {
+        throw new Error('Portrait seed must be a whole number from 0 to 9007199254740991, or blank for SillyTavern default/random behavior.');
+    }
+    return seed;
+}
+
+async function savePortraitSeed(session, overlay) {
+    if (!currentSessionIs(session) || session.busy) return false;
+    let seed;
+    try {
+        seed = portraitSeedFromOverlay(overlay);
+    } catch (error) {
+        toast('warning', `NPC State Delta: ${error?.message || error}`);
+        return false;
+    }
+    setBusy(session, true, 'Saving portrait seed…', { allowClose: true });
+    try {
+        if (!api()?.setPortraitSeed?.(session.npcId, seed, { chatKey: session.chatKey })) {
+            throw new Error('The portrait target is no longer current.');
+        }
+        const saved = await flushDurably(session.chatKey, 'portrait seed');
+        if (!currentSessionIs(session)) return false;
+        stage1Refresh();
+        setBusy(session, false, saved.persisted ? 'Portrait seed saved.' : 'Portrait seed changed locally; durable save failed.');
+        toast(saved.persisted ? 'success' : 'warning', saved.persisted
+            ? `NPC State Delta: portrait seed ${seed === null ? 'cleared' : `saved as ${seed}`}.`
+            : `NPC State Delta: portrait seed changed locally, but durable save failed. ${saved.error?.message || saved.error}`);
+        return saved.persisted;
+    } catch (error) {
+        if (!currentSessionIs(session)) return false;
+        setBusy(session, false, 'Could not save portrait seed.');
+        toast('error', `NPC State Delta portrait seed: ${error?.message || error}`);
+        return false;
+    }
+}
+
 async function generatePortrait(session, overlay) {
     if (!currentSessionIs(session) || session.busy) return false;
     const runtime = api();
@@ -235,13 +281,20 @@ async function generatePortrait(session, overlay) {
         toast('warning', 'NPC State Delta: positive portrait prompt is empty.');
         return false;
     }
+    let seed;
+    try {
+        seed = portraitSeedFromOverlay(overlay);
+    } catch (error) {
+        toast('warning', `NPC State Delta: ${error?.message || error}`);
+        return false;
+    }
     const actionSeq = ++session.actionSeq;
     session.generatedPortraitUrl = '';
     const use = overlay?.querySelector?.('[data-use-generated-portrait]');
     if (use) use.disabled = true;
     setBusy(session, true, 'Generating through SillyTavern Image Generation…', { allowClose: true });
     try {
-        const url = await runtime.generatePortraitUrl(session.npcId, { positive: draft.positive, negative: draft.negative });
+        const url = await runtime.generatePortraitUrl(session.npcId, { positive: draft.positive, negative: draft.negative, seed });
         if (!currentSessionIs(session) || session.actionSeq !== actionSeq) return false;
         const value = String(url || '').trim();
         if (!value) throw new Error('SillyTavern Image Generation returned no image URL.');
@@ -356,6 +409,10 @@ function wirePortraitDialog(session, overlay) {
         if (event.target.closest?.('[data-copy-final-prompt]')) {
             const draft = saveDraftFromOverlay(session, overlay);
             void copyPromptText(combinedPrompt(draft), 'Portrait prompt', overlay);
+            return;
+        }
+        if (event.target.closest?.('[data-save-portrait-seed]')) {
+            void savePortraitSeed(session, overlay);
             return;
         }
         if (event.target.closest?.('[data-generate-portrait]')) {
