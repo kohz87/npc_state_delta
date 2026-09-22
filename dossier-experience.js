@@ -351,6 +351,13 @@ function ensureSettingsExperience() {
         'npc_state_delta_auto', 'npc_state_delta_scanner_connection_profile', 'npc_state_delta_full_scan_every_turn',
         'npc_state_delta_scan_every', 'npc_state_delta_scan_depth', 'npc_state_delta_admission_mode',
     ], scanning.body);
+    const scanNow = drawer.querySelector('#npc_state_delta_scan_now');
+    if (scanNow) {
+        const scanningActions = document.createElement('div');
+        scanningActions.className = 'npc-state-delta-actions delta-settings-scanning-actions';
+        scanningActions.appendChild(scanNow);
+        scanning.body.appendChild(scanningActions);
+    }
     layout.appendChild(scanning.details);
 
     const continuity = settingsDetails('Continuity & injection', 'Generation context and branch behavior');
@@ -365,6 +372,13 @@ function ensureSettingsExperience() {
         'npc_state_delta_max', 'npc_state_delta_auto_prune_stale',
         'npc_state_delta_stale_archive_after', 'npc_state_delta_stale_delete_after',
     ], roster.body);
+    const addNpc = drawer.querySelector('#npc_state_delta_add_manual');
+    if (addNpc) {
+        const rosterActions = document.createElement('div');
+        rosterActions.className = 'npc-state-delta-actions delta-settings-roster-actions';
+        rosterActions.appendChild(addNpc);
+        roster.body.appendChild(rosterActions);
+    }
     layout.appendChild(roster.details);
 
     const portrait = drawer.querySelector('.npc-state-delta-portrait-generation-settings');
@@ -427,13 +441,13 @@ function ensureSettingsExperience() {
       <button type="button" class="menu_button" data-delta-settings-diagnostics><i class="fa-solid fa-stethoscope"></i> Diagnostics</button>`;
     maintenance.body.appendChild(maintenanceActions);
 
-    const legacyActions = [...drawer.querySelectorAll(':scope > .npc-state-delta-actions')]
-        .find(node => node.querySelector('#npc_state_delta_scan_now'));
-    if (legacyActions) {
-        for (const id of ['npc_state_delta_scan_now', 'npc_state_delta_add_manual', 'npc_state_delta_clear_chat']) {
-            const control = legacyActions.querySelector(`#${id}`);
-            if (control) maintenanceActions.appendChild(control);
-        }
+    const clearChat = drawer.querySelector('#npc_state_delta_clear_chat');
+    if (clearChat) maintenanceActions.appendChild(clearChat);
+
+    // The legacy action wrapper may be nested inside the original settings grid.
+    // Remove it only after each action has been placed in its task-specific group.
+    for (const legacyActions of drawer.querySelectorAll('.npc-state-delta-actions')) {
+        if (legacyActions === maintenanceActions || legacyActions.children.length) continue;
         legacyActions.remove();
     }
 
