@@ -55,8 +55,8 @@ test('one-message common prefix is insufficient for cross-chat inheritance',()=>
 test('branch metadata restore prefers exact id and refuses ambiguous homonym label fallback',()=>{
   const original=[user('Shared'),assistant('Scene A')];
   const state=baseState();
-  const oldMina=createNpcRecord('Mina'); oldMina.id='npc_old'; oldMina.importance=99; oldMina.retentionProtected=true;
-  const newMina=createNpcRecord('Mina'); newMina.id='npc_new'; newMina.importance=20; newMina.retentionProtected=false;
+  const oldMina=createNpcRecord('Mina'); oldMina.id='npc_old'; oldMina.retentionProtected=true;
+  const newMina=createNpcRecord('Mina'); newMina.id='npc_new'; newMina.retentionProtected=false;
   state.npcs=[oldMina,newMina];
   recordBranchCheckpoint(state,original,0,'rootish');
   const checkpoint=state.checkpoints.find(x=>x.messageId===0);
@@ -64,7 +64,7 @@ test('branch metadata restore prefers exact id and refuses ambiguous homonym lab
   const changed=[user('Shared'),assistant('Scene B')];
   const result=reconcileBranchState(state,changed,{explicitDivergence:1});
   const restored=result.state.npcs.find(n=>n.id==='npc_new');
-  assert.equal(restored.importance,20);
+  assert.equal(Object.prototype.hasOwnProperty.call(restored,'importance'),false);
   assert.equal(restored.retentionProtected,false);
 });
 
@@ -81,10 +81,11 @@ test('same-name different-id explicit add/import does not clear a modern deletio
 });
 
 test('metadata restore still supports a unique label fallback when an id legitimately changed',()=>{
-  const restored=createNpcRecord('Mina'); restored.id='npc_old'; restored.importance=10;
-  const current=createNpcRecord('Mina'); current.id='npc_new'; current.importance=77; current.retentionProtected=true;
+  const restored=createNpcRecord('Mina'); restored.id='npc_old'; restored.importance=10; restored.manual=true;
+  const current=createNpcRecord('Mina'); current.id='npc_new'; current.importance=77; current.manual=true; current.retentionProtected=true;
   const result=preserveUserNpcMetadata([restored],[current]);
-  assert.equal(result[0].importance,77);
+  assert.equal(Object.prototype.hasOwnProperty.call(result[0],'importance'),false);
+  assert.equal(Object.prototype.hasOwnProperty.call(result[0],'manual'),false);
   assert.equal(result[0].retentionProtected,true);
 });
 

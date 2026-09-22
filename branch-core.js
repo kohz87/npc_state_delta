@@ -363,9 +363,12 @@ export function preserveUserNpcMetadata(restoredNpcs = [], currentNpcs = []) {
     const restored = cloneNpcList(restoredNpcs);
     const globallyPreserved = [
         'portraitPromptPositive', 'portraitPromptNegative', 'portraitPromptReplace',
-        'retentionProtected', 'minor', 'importance',
+        'retentionProtected', 'minor',
     ];
     for (const npc of restored) {
+        // Retired dossier metadata must not be resurrected by historical checkpoints.
+        delete npc.importance;
+        delete npc.manual;
         const current = findNpcForMetadataRestore(npc, currentNpcs);
         if (!current) continue;
         if (current?.portrait?.dataUrl) npc.portrait = structuredClone(current.portrait);

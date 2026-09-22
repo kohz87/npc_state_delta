@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
 const index = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
+const continuityUi = fs.readFileSync(path.join(root, 'continuity-ui.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
 
 test('present NPC pane uses portrait-first cards and a focused dossier viewer', () => {
@@ -156,7 +157,11 @@ test('present-only behavior injection and manual dossier editor controls are exp
     assert.match(index, /npc_state_delta_edit_desire/);
     assert.match(index, /npc_state_delta_edit_tension/);
     assert.match(index, /npc_state_delta_edit_behavior_profile/);
-    assert.match(index, /Max \${BEHAVIOR_PROFILE_LIMIT} compact point-form rules/);
+    assert.match(index, /Behavioral Levers/);
+    assert.match(index, /Max \${BEHAVIOR_PROFILE_LIMIT} compact target-general response\/decision rules/);
+    assert.match(index, /Player Dynamic/);
+    assert.match(index, /Condition \/ Activity/);
+    assert.doesNotMatch(index, /npc_state_delta_edit_importance/);
     assert.match(index, /const Popup = ctx\.Popup/);
     assert.match(index, /allowVerticalScrolling: true/);
     assert.match(css, /npc-state-delta-editor-popup/);
@@ -212,14 +217,19 @@ test('relationship UI is bipolar around neutral zero and legacy audit values are
 });
 
 
-test('dossier exposes species/race, age, prompt-ready appearance, and portrait generation controls', () => {
+test('dossier exposes species/race, age, form-owned appearance, and portrait generation controls', () => {
     assert.match(index, /npc_state_delta_edit_species/);
     assert.match(index, /Species \/ Race/);
+    assert.match(index, /npc_state_delta_edit_home_base/);
+    assert.match(index, /Home Base \/ Usual Location/);
     assert.match(index, /npc_state_delta_edit_age/);
     assert.match(index, /npc_state_delta_edit_apparent_age/);
     assert.match(index, /Apparent age/);
-    assert.match(index, /Prompt-ready visual description/);
-    assert.match(index, /maxlength="1800"/);
+    assert.doesNotMatch(index, /npc_state_delta_edit_appearance/);
+    assert.match(continuityUi, /Appearance forms/);
+    assert.match(continuityUi, /Apply appearance forms/);
+    assert.match(continuityUi, /Shared appearance/);
+    assert.match(continuityUi, /Current form/);
     assert.match(index, /npc-state-delta-copy-image-prompt/);
     assert.match(index, /Copy portrait prompts/);
     assert.match(index, /Age:/);
@@ -401,7 +411,7 @@ test('stale NPC lifecycle is configurable and recurring NPCs can be protected', 
 
 test('minor NPC toggle hides portrait cards without disabling dossier tracking', () => {
     assert.match(index, /npc_state_delta_edit_minor/);
-    assert.match(index, /Minor NPC · hide portrait card/);
+    assert.match(index, /Hide present-NPC card/);
     assert.match(index, /!npc\.minor/);
     assert.match(index, /next\.minor = Boolean/);
     assert.match(index, /still scans, updates, stores memories\/relationships, and injects when present/);

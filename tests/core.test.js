@@ -515,7 +515,7 @@ test('classifies obvious role labels separately from proper names', () => {
 test('holds a first-time incidental role-only NPC as a lightweight candidate', () => {
     const result = mergeScanResult({ npcs: [], candidates: [], turn: 1 }, { npcs: [{
         name: 'Guild Boy', aliases: ['Dock Gopher'], identityKind: 'role_label', dossierSignal: 'incidental', present: true, role: 'Guild Apprentice', location: 'Side Dock',
-        role: 'Guild Apprentice', appearance: 'Young boy wearing a stained leather apron.', importance: 0,
+        role: 'Guild Apprentice', appearance: 'Young boy wearing a stained leather apron.',
     }] }, { turn: 1 });
     assert.equal(result.state.npcs.length, 0);
     assert.equal(result.state.candidates.length, 1);
@@ -1718,7 +1718,6 @@ test('existing scanner deltas may use dossier id without repeating name or uncha
     const npc = createNpcRecord('Myla Fenn');
     npc.id = 'npc_myla';
     npc.appearance = 'Established appearance that must survive a compact delta.';
-    npc.importance = 77;
     const result = mergeScanResult({ npcs: [npc], turn: 4 }, { npcs: [{
         id: 'npc_myla', present: true, worldActive: false, mood: 'terrified',
         relationshipImpact: 'meaningful', relationshipDelta: { tension: 8 },
@@ -1730,7 +1729,7 @@ test('existing scanner deltas may use dossier id without repeating name or uncha
     assert.equal(updated.present, true);
     assert.equal(updated.mood, 'terrified');
     assert.equal(updated.appearance, 'Established appearance that must survive a compact delta.');
-    assert.equal(updated.importance, 77, 'omitting importance in a delta must preserve the stored value');
+    assert.equal(Object.prototype.hasOwnProperty.call(updated, 'importance'), false, 'retired Importance metadata must not survive normalization');
     assert.equal(updated.relationship.tension, 8);
 });
 
@@ -1892,7 +1891,7 @@ test('routine scanner prompt has bounded overhead and delta/profile tiers', () =
     const transcript = `Aris: I ask Myla to step into the alley.\nNarrator: ${'Myla trembles and explains the quota system while begging Aris to keep the tags secret. '.repeat(22)} World State: NPCs Present: Myla Fenn, terrified in the alley. Off-Screen: Toris Vance waits by the hearth. NPC Inner Chatter: Myla Fenn fears Aris.`;
     const prompt = buildScannerPrompt({ transcript, existingNpcs: [toris, myla], userName: 'Aris', charName: 'Narrator' });
     const overhead = prompt.length - transcript.length;
-    assert.ok(overhead < 7200, `routine scanner overhead should stay below 7200 chars, got ${overhead}`);
+    assert.ok(overhead < 7450, `routine scanner overhead should stay below 7450 chars after adding Home Base semantics, got ${overhead}`);
     assert.match(prompt, /Return compact JSON deltas/i);
     assert.match(prompt, /Existing relationship delta example/i);
     assert.match(prompt, /Relevant live context \(dynamic fields only\)/i);
@@ -2228,11 +2227,10 @@ test('scanner keeps species/race separate from appearance and does not persist I
 });
 
 test('generation injection obeys approximate token budget and keeps identity/current state ahead of secondary relationship context', () => {
-    const makeVerbose = (name, score) => {
+    const makeVerbose = (name) => {
         const npc = createNpcRecord(name);
         npc.present = true;
         npc.lastSeenTurn = 20;
-        npc.importance = score;
         npc.role = 'adventurer '.repeat(30);
         npc.personality = 'proud earnest cautious warm competitive '.repeat(40);
         npc.speech = 'formal when nervous and clipped when defensive '.repeat(35);
@@ -2243,7 +2241,7 @@ test('generation injection obeys approximate token budget and keeps identity/cur
         npc.location = 'location '.repeat(50);
         return npc;
     };
-    const npcs = [makeVerbose('Yunyun', 90), makeVerbose('Wiz', 80), makeVerbose('Luna', 70)];
+    const npcs = [makeVerbose('Yunyun'), makeVerbose('Wiz'), makeVerbose('Luna')];
     const budget = 700;
     const injection = buildInjection(npcs, 'Yunyun Wiz Luna are all in the room.', 20, 3, DEFAULT_BEHAVIOR_CRITERIA, budget);
     assert.ok(estimateInjectionTokens(injection) <= budget, `estimated injection should stay <= ${budget} tokens`);
@@ -2252,8 +2250,8 @@ test('generation injection obeys approximate token budget and keeps identity/cur
 });
 
 test('very small injection budget drops lower-ranked present NPCs before corrupting top NPC essentials', () => {
-    const yunyun = createNpcRecord('Yunyun'); yunyun.present = true; yunyun.lastSeenTurn = 10; yunyun.importance = 100;
-    const wiz = createNpcRecord('Wiz'); wiz.present = true; wiz.lastSeenTurn = 1; wiz.importance = 10;
+    const yunyun = createNpcRecord('Yunyun'); yunyun.present = true; yunyun.lastSeenTurn = 10;
+    const wiz = createNpcRecord('Wiz'); wiz.present = true; wiz.lastSeenTurn = 1;
     const injection = buildInjection([yunyun, wiz], 'Yunyun enters. Wiz follows.', 10, 2, DEFAULT_BEHAVIOR_CRITERIA, 512);
     assert.match(injection, /Yunyun/);
     assert.ok(estimateInjectionTokens(injection) <= 512);
@@ -2923,14 +2921,17 @@ test('v0.2.7 malformed relationship scores and caps fall back safely instead of 
         ordinary: 1, meaningful: 2, major: 5, extreme: 10,
     });
 
-    const stored = normalizeNpcRecord({ name: 'Falia', relationship: { trust: 'high' }, importance: 'important' });
+    const stored = normalizeNpcRecord({ name: 'Falia', relationship: { trust: 'high' }, importance: 'important', manual: true });
     assert.equal(stored.relationship.trust, 0);
-    assert.equal(stored.importance, 50);
+    assert.equal(Object.prototype.hasOwnProperty.call(stored, 'importance'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(stored, 'manual'), false);
 
     const existing = createNpcRecord('Falia');
     existing.importance = 77;
-    const merged = mergeScanResult({ npcs: [existing], turn: 1 }, { npcs: [{ id: existing.id, importance: 'important' }] }, { turn: 2 });
-    assert.equal(merged.state.npcs[0].importance, 77, 'invalid optional scanner importance must be ignored');
+    existing.manual = true;
+    const merged = mergeScanResult({ npcs: [existing], turn: 1 }, { npcs: [{ id: existing.id, importance: 100 }] }, { turn: 2 });
+    assert.equal(Object.prototype.hasOwnProperty.call(merged.state.npcs[0], 'importance'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(merged.state.npcs[0], 'manual'), false);
 });
 
 test('v0.2.7 blank durable identity fields require grounded source narration before first seed', () => {
@@ -3139,26 +3140,20 @@ test('v0.2.8 ambiguous deceased Key Relationship wording is rewritten with an ex
     assert.deepEqual(living.keyRelationships, ['Rook — mentor | deceased'], 'legacy deceased wording should migrate into the canonical relation | dynamic shape');
 });
 
-test('v0.2.8 scanner cannot rewrite manual Importance and new scanned dossiers keep neutral default importance', () => {
-    const existing = createNpcRecord('Iria');
-    existing.importance = 77;
-    const updated = mergeScanResult({ npcs: [existing], turn: 1 }, { npcs: [{
-        id: existing.id, name: 'Iria', present: true, importance: 100,
-    }] }, { turn: 2 });
-    assert.equal(updated.state.npcs[0].importance, 77);
+test('retired Importance/manual metadata is stripped while current story salience remains authoritative', () => {
+    const normalized = normalizeNpcRecord({ name: 'Iria', importance: 77, manual: true });
+    assert.equal(Object.prototype.hasOwnProperty.call(normalized, 'importance'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(normalized, 'manual'), false);
 
     const created = mergeScanResult({ npcs: [], turn: 0 }, { npcs: [{
         name: 'Newa', identityKind: 'proper_name', dossierSignal: 'meaningful', present: true, importance: 100,
     }] }, { turn: 1 });
-    assert.equal(created.state.npcs[0].importance, 50);
-});
+    assert.equal(Object.prototype.hasOwnProperty.call(created.state.npcs[0], 'importance'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(created.state.npcs[0], 'manual'), false);
 
-test('v0.2.8 runtime salience favors current story relevance instead of manual Importance', () => {
     const remote = createNpcRecord('Remote Queen');
-    remote.importance = 100;
     remote.lastSeenTurn = 0;
     const mira = createNpcRecord('Mira');
-    mira.importance = 0;
     mira.lastSeenTurn = 0;
     const picked = selectRelevantNpcs([remote, mira], 'Mira enters and takes the empty chair.', 10, 1);
     assert.deepEqual(picked.map(npc => npc.name), ['Mira']);

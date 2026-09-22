@@ -20,7 +20,7 @@ const uiSource = fs.readFileSync(path.join(root, 'dossier-ui.js'), 'utf8');
 const bootstrap = fs.readFileSync(path.join(root, 'bootstrap.js'), 'utf8');
 
 const cast = [
-  { id: 'mira', name: 'Mira', role: 'Scout', species: 'Human', present: false, worldActive: true, location: 'North road' },
+  { id: 'mira', name: 'Mira', role: 'Scout', species: 'Human', homeBase: 'Northwatch Lodge', present: false, worldActive: true, location: 'North road' },
   { id: 'sora', name: 'Sora', aliases: ['Stormcrown'], role: 'Ward', species: 'Chimera', present: true, worldActive: false, mood: 'Curious', relationship: { trust: 12 } },
   { id: 'old', name: 'Old Clerk', role: 'Clerk', archived: true, archiveReason: 'stale' },
   { id: 'fallen', name: 'Fallen Guard', role: 'Guard', archived: true, archiveReason: 'deceased', lifeState: 'dead' },
@@ -45,6 +45,7 @@ test('Stage 1 cast search and lifecycle filters compose', () => {
   const rows = cast.map(npc => dossierIndexProjection(npc));
   assert.deepEqual(filterDossierIndex(rows, { query: 'stormcrown' }).map(row => row.id), ['sora']);
   assert.deepEqual(filterDossierIndex(rows, { query: 'north road', filter: 'active' }).map(row => row.id), ['mira']);
+  assert.deepEqual(filterDossierIndex(rows, { query: 'northwatch lodge', filter: 'active' }).map(row => row.id), ['mira']);
   assert.deepEqual(filterDossierIndex(rows, { filter: 'archived' }).map(row => row.id), ['old']);
   assert.deepEqual(filterDossierIndex(rows, { filter: 'dead' }).map(row => row.id), ['fallen']);
 });
@@ -91,7 +92,7 @@ test('Stage 1 no-chat projection does not create or mutate dossier state', () =>
 
 test('Detail projection preserves editable fields and represents a flat appearance as one safe Base form', () => {
   const projected = dossierDetailProjection({
-    id: 'ryu', name: 'Ryu', species: 'Chimera', age: '6 years', apparentAge: '~6',
+    id: 'ryu', name: 'Ryu', species: 'Chimera', homeBase: 'Towerhouse', age: '6 years', apparentAge: '~6',
     appearance: 'Long silver hair.', personality: 'Composed', speech: 'Precise',
     behaviorProfile: ['Analytical'], mannerisms: ['Studies details'], background: 'Unknown past',
     mood: 'Calm', location: 'Towerhouse', goal: 'Observe', status: 'Well',
@@ -99,6 +100,7 @@ test('Detail projection preserves editable fields and represents a flat appearan
     relationshipSummary: 'Quiet trust', relationship: { trust: 9, affection: 4, desire: 0, tension: -2 },
   });
   assert.equal(projected.appearance, 'Long silver hair.');
+  assert.equal(projected.homeBase, 'Towerhouse');
   assert.deepEqual(projected.behaviorProfile, ['Analytical']);
   assert.equal(projected.relationship.trust, 9);
   assert.deepEqual(projected.appearanceModel.appearanceForms, [{ name: 'Base', appearance: 'Long silver hair.' }]);
@@ -107,6 +109,11 @@ test('Detail projection preserves editable fields and represents a flat appearan
 
 test('Stage 1 UI is a thin adapter over the existing runtime editor/settings owners', () => {
   assert.match(uiSource, /this\.api\.openEditor\(id\)/);
+  assert.match(uiSource, /Behavioral Levers/);
+  assert.match(uiSource, /Player Dynamic/);
+  assert.match(uiSource, /Condition \/ Activity/);
+  assert.match(uiSource, /Home Base \/ Usual Location/);
+  assert.doesNotMatch(uiSource, /proseHtml\(selected\.appearance\)/, 'resolved flat appearance must not be rendered beside the form model');
   assert.match(uiSource, /npc_state_delta_settings/);
   assert.match(uiSource, /MutationObserver/);
   assert.doesNotMatch(uiSource, /persistCritical\s*\(/);

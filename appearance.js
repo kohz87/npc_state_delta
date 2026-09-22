@@ -222,9 +222,10 @@ export function normalizeAppearanceModel(raw = {}, { locked = false } = {}) {
         currentFormUnknown = false;
     }
     if (currentForm) currentFormUnknown = false;
-    // The retained native editor edits the compatibility appearance scalar. When that
-    // field is explicitly manual-locked, treat it as an edit of the selected form rather
-    // than creating a second appearance authority.
+    // Historical flat appearance may still arrive on manually locked pre-form records.
+    // Fold that compatibility input into the selected canonical form during normalization.
+    // New manual edits use the dedicated appearance-form editor, so this never creates a
+    // second live editing authority.
     if (locked && currentForm && compatibilityAppearance) {
         const selected = appearanceForms.findIndex(form => formKey(form.name) === formKey(currentForm));
         const local = stripOverallPrefix(compatibilityAppearance, explicitOverall) || compatibilityAppearance;

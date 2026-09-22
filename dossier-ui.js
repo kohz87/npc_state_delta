@@ -63,6 +63,7 @@ export function dossierIndexProjection(npc = {}, portraitAssets = {}) {
         aliases: stringList(npc?.aliases, 12),
         role: plain(npc?.role),
         species: plain(npc?.species),
+        homeBase: plain(npc?.homeBase),
         apparentAge: plain(npc?.apparentAge),
         location: plain(npc?.location),
         status: plain(npc?.status),
@@ -105,7 +106,6 @@ export function dossierDetailProjection(npc = {}, portraitAssets = {}) {
         goal: plain(npc?.goal),
         lifeStateCertainty: plain(npc?.lifeStateCertainty),
         lifeStateReason: plain(npc?.lifeStateReason),
-        importance: Math.max(0, Math.min(100, Math.round(Number(npc?.importance) || 0))),
     };
 }
 
@@ -130,6 +130,7 @@ export function filterDossierIndex(rows = [], { query = '', filter = 'all' } = {
             row?.role,
             row?.species,
             row?.apparentAge,
+            row?.homeBase,
             row?.location,
             row?.status,
             row?.statusLabel,
@@ -165,6 +166,7 @@ export function projectDossierState(state = {}, status = {}) {
             role: npc.role,
             species: npc.species,
             apparentAge: npc.apparentAge,
+            homeBase: npc.homeBase,
             location: npc.location,
             status: npc.status,
             present: npc.present,
@@ -220,8 +222,11 @@ function birthdayCard(npc) {
 function appearanceFormsHtml(npc) {
     const model = npc.appearanceModel;
     const current = model.currentFormUnknown ? 'Unclassified / unknown' : model.currentForm || 'No selected form';
+    const unclassified = model.currentFormUnknown && model.unclassifiedAppearance
+        ? `<div class="delta-appearance-form-row"><b>Current unclassified presentation<span class="delta-appearance-current-badge">Current</span></b>${proseHtml(model.unclassifiedAppearance)}</div>`
+        : '';
     const rows = model.appearanceForms.map(form => `<div class="delta-appearance-form-row"><b>${escapeHtml(form.name)}${form.name === model.currentForm ? '<span class="delta-appearance-current-badge">Current</span>' : ''}</b>${proseHtml(form.appearance)}</div>`).join('');
-    return `<details class="delta-appearance-form-summary" data-delta-key="appearance"><summary><b>Appearance forms</b><small>Current: ${escapeHtml(current)}</small></summary><div class="delta-appearance-form-list">${model.overallAppearance ? `<div class="delta-appearance-form-row"><b>Shared across forms</b>${proseHtml(model.overallAppearance)}</div>` : ''}${rows || '<p class="delta-muted">No named forms established.</p>'}</div></details>`;
+    return `<details class="delta-appearance-form-summary" data-delta-key="appearance" open><summary><b>Appearance forms</b><small>Current: ${escapeHtml(current)}</small></summary><div class="delta-appearance-form-list">${model.overallAppearance ? `<div class="delta-appearance-form-row"><b>Shared across forms</b>${proseHtml(model.overallAppearance)}</div>` : ''}${unclassified}${rows || (!unclassified ? '<p class="delta-muted">No named forms established.</p>' : '')}</div></details>`;
 }
 
 // Cache only rendered section markup on its DOM node, never canonical state/history.
@@ -614,13 +619,19 @@ class DeltaDossierUi {
                 <button type="button" class="delta-btn delta-edit" data-npc-id="${escapeHtml(selected.id)}">Edit</button>
             </div>
             <section class="delta-section">
-                <h3>Current</h3>
+                <h3>Identity continuity</h3>
                 <div class="delta-current-grid">
                     ${birthdayCard(selected)}
+                    ${currentCard('Home Base / Usual Location', selected.homeBase)}
+                </div>
+            </section>
+            <section class="delta-section">
+                <h3>Current</h3>
+                <div class="delta-current-grid">
                     ${currentCard('Mood', selected.mood)}
                     ${currentCard('Location', selected.location)}
                     ${currentCard('Goal', selected.goal)}
-                    ${currentCard('Status', selected.status, selected.bucket === 'dead' ? 'Deceased' : 'Stable / unknown')}
+                    ${currentCard('Condition / Activity', selected.status, selected.bucket === 'dead' ? 'Deceased' : 'Stable / unknown')}
                 </div>
             </section>
             <section class="delta-section">
@@ -628,8 +639,8 @@ class DeltaDossierUi {
                 <div class="delta-prose-grid">
                     <div><h4>Personality</h4>${proseHtml(selected.personality)}</div>
                     <div><h4>Speech</h4>${proseHtml(selected.speech)}</div>
-                    <div class="delta-wide"><h4>Behavioral profile</h4>${listHtml(selected.behaviorProfile, 'No compact behavioral profile established yet.')}</div>
-                    <div class="delta-wide"><h4>Appearance</h4>${proseHtml(selected.appearance)}${appearanceFormsHtml(selected)}</div>
+                    <div class="delta-wide"><h4>Behavioral Levers</h4>${listHtml(selected.behaviorProfile, 'No behavioral levers established yet.')}</div>
+                    <div class="delta-wide"><h4>Appearance</h4>${appearanceFormsHtml(selected)}</div>
                     <div class="delta-wide"><h4>Mannerisms</h4>${listHtml(selected.mannerisms)}</div>
                 </div>
             </section>
@@ -641,14 +652,14 @@ class DeltaDossierUi {
                     ${relationshipAxis('Desire', selected.relationship.desire, 'desire')}
                     ${relationshipAxis('Tension', selected.relationship.tension, 'tension')}
                 </div>
-                <div class="delta-summary"><h4>Summary</h4>${proseHtml(selected.relationshipSummary, 'No relationship summary established yet.')}</div>
+                <div class="delta-summary"><h4>Player Dynamic</h4>${proseHtml(selected.relationshipSummary, 'No player-specific dynamic established yet.')}</div>
             </section>
             <section class="delta-section delta-two-column">
                 <div><h3>Important bonds</h3>${listHtml(selected.keyRelationships, 'No key relationships established yet.')}</div>
                 <div><h3>Important memories</h3>${listHtml(selected.memories, 'No important memories established yet.')}</div>
             </section>
             <section class="delta-section">
-                <h3>Background</h3>${proseHtml(selected.background, 'No background established yet.')}
+                <h3>Background / History</h3>${proseHtml(selected.background, 'No background established yet.')}
             </section>`, documentPane.dataset.npcId !== selected.id);
         documentPane.dataset.npcId = selected.id;
         documentPane.scrollTop = documentScroll;
