@@ -138,6 +138,8 @@ try {
     assert.equal(payload.state.branchLineageVersion, BRANCH_LINEAGE_VERSION);
     assert.equal('respect' in payload.state.npcs[0].relationship, false);
     assert.equal('thoughts' in payload.state.npcs[0], false, 'legacy Current Thoughts should be removed during v0.1.15 normalization');
+    assert.equal('importance' in payload.state.npcs[0], false, 'legacy Importance metadata should be retired during normalization');
+    assert.equal('manual' in payload.state.npcs[0], false, 'legacy generic manual metadata should be retired during normalization');
     assert.equal(payload.state.inlineCards.length, 1, 'verified legacy inline-card history should migrate to content lineage');
     assert.equal('thoughts' in payload.state.inlineCards[0].cards[0], false, 'legacy snapshot thoughts should be removed during normalization');
     assert.deepEqual(payload.state.inlineCards[0].cards[0].lastRelationshipChange.delta, { trust: 0, affection: 0, desire: 0, tension: 0 }, 'legacy historical audit snapshots should be sanitized during load');
