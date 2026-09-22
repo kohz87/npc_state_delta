@@ -7,7 +7,7 @@
 - Consolidate appearance ownership: the flat `appearance` scalar remains a compatibility/resolved projection for historical records and scanner interoperability, while new manual editing and dossier presentation use Shared Appearance, named forms, Current Form, and unclassified current presentation without a duplicate flat editor/display.
 - Clarify dossier presentation labels to Behavioral Levers, Player Dynamic, Condition / Activity, and Hide present-NPC card; group Birthday and Home Base with identity continuity.
 - Keep Important Memories as the bounded five-event episodic continuity channel and preserve relationship event history / last relationship change unchanged.
-- Preserve application version 1.0.35, persisted schemas, request topology, relationship mechanics, evidence gates, rollback ownership, and provider routing pending exact-candidate verification. Prompt-budget/hash deltas will be recorded from deterministic measurements before merge.
+- Preserve application version 1.0.35, persisted schemas, request topology, relationship mechanics, evidence gates, rollback ownership, and provider routing. Deterministic Stage 9 measurement records the intentional Home Base prompt delta: routine/full-window +193 characters, targeted Refresh +272, backfill +315, dossier import +218; focused relationship and RP injection are unchanged, as are request counts and response allowances.
 
 ## 1.0.35 - 19 September 2026
 
