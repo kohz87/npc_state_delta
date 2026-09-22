@@ -107,6 +107,7 @@ test('settings are grouped by task and extension-wide backup diagnostics live in
     assert.match(source, /generationRow\.hidden = false/);
     assert.match(source, /galleryRow\.hidden = false/);
     assert.match(source, /rosterActions\.appendChild\(addNpc\)/);
+    assert.match(source, /delta-settings-maintenance-actions/);
     assert.match(source, /maintenanceActions\.appendChild\(scanNow\)/);
     assert.match(source, /maintenanceActions\.appendChild\(clearChat\)/);
     assert.doesNotMatch(source, /querySelectorAll\(':scope > \.npc-state-delta-actions'\)/);
