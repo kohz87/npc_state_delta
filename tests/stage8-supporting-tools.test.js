@@ -160,6 +160,7 @@ test('portable settings include portrait workflow settings only', () => {
 test('native Delta envelope round-trips portraits, portable settings and source history audit', () => {
     const npc = createNpcRecord('Ryu');
     npc.portrait = { dataUrl: portraitData(), mime: 'image/png', sourceName: 'ryu.png', updatedAt: 123 };
+    npc.portraitSeed = 777777;
     npc.relationshipProgress = { trust: 0.5, affection: 0.25, desire: 0, tension: 0 };
     npc.lifeState = 'deceased';
     npc.lifeStateCertainty = 'explicit';
@@ -193,6 +194,7 @@ test('native Delta envelope round-trips portraits, portable settings and source 
     const decoded = decodeDeltaNativeBundle(native);
     assert.equal(decoded.state.npcs[0].name, 'Ryu');
     assert.ok(decoded.state.npcs[0].portrait.dataUrl.startsWith('data:image/png;base64,'));
+    assert.equal(decoded.state.npcs[0].portraitSeed, 777777);
     assert.equal(decoded.state.npcs[0].relationshipProgress.trust, 0.5);
     assert.equal(decoded.state.npcs[0].lifeState, 'deceased');
     assert.equal(decoded.portableSettings.portraitThemePreset, 'custom');
