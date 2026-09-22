@@ -2059,9 +2059,12 @@ function behaviorProfileFamily(value) {
     if (/^(?:disposition|kindness|empathy|morality|social baseline)$/.test(key)) return 'disposition';
     if (/cruelty|mercy|harm/.test(key)) return 'cruelty';
     if (/independence|agency|boundar|autonom|obedien|compliance|compliant|submission|submissive|deference/.test(key)) return 'independence';
-    if (/^(?:care|affection|care style)$/.test(key)) return 'care';
-    if (/express/.test(key)) return 'expressiveness';
-    if (/conflict|anger|composure|restraint/.test(key)) return 'conflict';
+    if (/^(?:care|affection|care style|warmth|warm|support style|nurturing style)$/.test(key)) return 'care';
+    if (/express|emotional display/.test(key)) return 'expressiveness';
+    if (/conflict|anger|composure|restraint|assertiv/.test(key)) return 'conflict';
+    if (/^(?:anxiety|threat sensitivity|threat response|risk sensitivity|uncertainty sensitivity)$/.test(key)) return 'threat';
+    if (/^(?:analytical style|analysis|reasoning|reasoning style|decision style|thinking style|evidence style|problem solving)$/.test(key)) return 'analytical';
+    if (/^(?:social presentation|presentation|formality|etiquette|public bearing|social restraint)$/.test(key)) return 'presentation';
     return '';
 }
 
@@ -2085,7 +2088,15 @@ function behaviorProfileTargetSpecific(value) {
 }
 
 const BEHAVIOR_FAMILY_LABEL = Object.freeze({
-    disposition: 'Disposition', cruelty: 'Cruelty', independence: 'Independence', care: 'Care', expressiveness: 'Expressiveness', conflict: 'Conflict',
+    disposition: 'Disposition',
+    cruelty: 'Cruelty',
+    independence: 'Independence',
+    care: 'Care',
+    expressiveness: 'Expressiveness',
+    conflict: 'Conflict',
+    threat: 'Threat Sensitivity',
+    analytical: 'Analytical Style',
+    presentation: 'Social Presentation',
 });
 
 function mergeBehaviorFamilyEntries(existing, incoming, family) {
@@ -2135,14 +2146,19 @@ function groundedBehaviorProfile(value, personality = '', context = '', evidence
 }
 
 function behaviorProfilePriority(value) {
-    const key = behaviorProfileKey(value);
-    if (/^(disposition|kindness|empathy|morality|social baseline)$/.test(key)) return 0;
-    if (/cruelty/.test(key)) return 1;
-    if (/independence|agency|boundary/.test(key)) return 2;
-    if (/care|affection/.test(key)) return 3;
-    if (/express/.test(key)) return 4;
-    if (/conflict/.test(key)) return 5;
-    return 6;
+    const family = behaviorProfileFamily(value);
+    const priority = {
+        disposition: 0,
+        cruelty: 1,
+        independence: 2,
+        care: 3,
+        expressiveness: 4,
+        conflict: 5,
+        threat: 6,
+        analytical: 7,
+        presentation: 8,
+    };
+    return Object.prototype.hasOwnProperty.call(priority, family) ? priority[family] : 9;
 }
 
 function orderedBehaviorProfile(value) {
@@ -2153,8 +2169,7 @@ function orderedBehaviorProfile(value) {
 }
 
 function behaviorProfileMoralityRelevant(value) {
-    const key = behaviorProfileKey(value);
-    return /disposition|cruelty|empathy|kindness|morality|social baseline|care/.test(key);
+    return ['disposition', 'cruelty', 'care'].includes(behaviorProfileFamily(value));
 }
 
 function reconcileBehaviorProfileWithPersonality(profile, personality) {
@@ -5089,7 +5104,7 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
     const budgetChars = budget * APPROX_CHARS_PER_TOKEN;
     const header = [
         'NPC STATE DELTA DOSSIER. Only confirmed-present NPCs are included. Treat these as established story facts; never mention the dossier or numeric values.',
-        'IDENTITY FIRST / DOMINATES: personality, behavioral profile, speech, mannerisms, goals, duties, morality, independence, other bonds, and CURRENT mood/status determine behavior first.',
+        'IDENTITY FIRST / DOMINATES: personality sets identity; behavioral profile translates it into target-general response/decision levers; speech/mannerisms shape expression; goals, duties, morality, independence, other bonds, and CURRENT mood/status determine behavior first.',
         'VOICE FIDELITY: established Speech constrains actual dialogue wording and delivery. Preserve its sentence shape, vocabulary, formality, directness, hedging, cadence, question/explanation style, and recurring verbal habits; do not flatten distinct voices into generic polished prose.',
         'PLAYER RELATIONSHIP IS SECONDARY: it may bias attention, interpretation, openness, tolerance, or willingness toward the player, but need not surface every scene. High scores never mean obedience, universal prioritization, clinginess, jealousy, tsundere behavior, or cruelty toward others.',
         'Temporary mood, stress, intimacy, or player-specific behavior is not global identity. Durable identity changes gradually unless narration explicitly establishes lasting development or a developmental time skip.',
@@ -5328,7 +5343,7 @@ Rules:
 3. If the requested NPC is found, RETURN EXACTLY ONE NPC object. Do not return other NPCs. If the target genuinely does not occur and cannot be linked to a role/alias in this history, return {"npcs":[]}.
 4. Preserve literal Species / Race. AGE is chronology only. APPARENT AGE is visual presentation and should be a compact approximate number like ~6 or ~24 when inferable; never prose such as "around six/twenties". Never infer fantasy lifespan from species.
 5. Appearance contains grounded visible facts only and must not repeat an explicit numeric/word-form age; Apparent Age owns visual age. Do not invent missing face, hair, eyes, body, outfit, or other traits.
-6. Recover CURRENT COMPACT SUMMARIES, not notes. Important Memories are capped at 5. Key relationships=max5, ONE unambiguous entry/counterpart; never use dangling "(deceased)" that could modify the wrong person. Mannerisms=max4 DISTINCT recurring patterns, not separate animations of the same habit. behaviorProfile=max6 target-general rules; route player-specific patterns to relationshipSummary, one-off states to live fields, and consequential incidents to Memories. Do not fill labels without evidence. Memories=max5 distinct events; if crowded return memoryRetention=top5 most consequential/durable.
+6. Recover CURRENT COMPACT SUMMARIES, not notes. Important Memories are capped at 5. Key relationships=max5, ONE unambiguous entry/counterpart; never use dangling "(deceased)" that could modify the wrong person. Mannerisms=max4 DISTINCT recurring patterns, not separate animations of the same habit. behaviorProfile=max6 target-general behavioral levers translating identity into response/decision tendencies; observed actions are evidence, not action-history entries. Supported labels may include Disposition, Care/Warmth, Expressiveness, Independence/Agency, Conflict/Assertiveness, Threat Sensitivity, Analytical Style, Social Presentation; never fill labels without evidence. Route player-specific patterns to relationshipSummary, one-off states to live fields, and consequential incidents to Memories. Memories=max5 distinct events; if crowded return memoryRetention=top5 most consequential/durable.
 7. NPC Inner Chatter may support durable personality, goals, attitude, or relationship-summary evidence, but do not store the moment-to-moment internal monologue itself.
 8. PRESENT is current-scene state, not historical presence. Set present=true only if the requested NPC physically appears or actively participates in the MOST RECENT ASSISTANT STORY MESSAGE contained in this history. An older appearance does not count. A World State mention alone does not establish presence. Set worldActive=true only for explicit current off-screen activity in the latest World State; present and worldActive are mutually exclusive.
 9. This is historical backfill. relationshipImpact MUST be "none" and every relationshipDelta value MUST be 0. Do not numerically replay old relationship events.
@@ -5374,7 +5389,7 @@ Existing NPC State Delta record: ${JSON.stringify(existing)}
 
 Mapping/rules:
 1. Inner Circle / family / close allies / rivals / mentors / partners => keyRelationships, max ${KEY_RELATIONSHIP_LIMIT}, one concise unambiguous "Name — relation | durable dynamic" entry each. Never dangling "(deceased)"; state who is late/surviving. Never put ${userName} there; player stance belongs relationshipSummary.
-2. Voice=>speech; Personality=>personality; Appearance=>appearance; Background=>background; Role=>role; explicit chronological Age=>age. Apparent Age should be compact ~N when inferable; Appearance must not duplicate an explicit age. behaviorProfile may translate EXPLICIT stable identity into max6 target-general rules (Disposition/Expressiveness/Independence/Care/Conflict/Cruelty); player-specific/one-scene behavior does not belong there. Do not infer species/age from stereotypes.
+2. Voice=>speech; Personality=>personality; Appearance=>appearance; Background=>background; Role=>role; explicit chronological Age=>age. Apparent Age should be compact ~N when inferable; Appearance must not duplicate an explicit age. behaviorProfile translates EXPLICIT stable identity into max6 target-general response/decision levers, not action summaries. Supported labels may include Disposition, Care/Warmth, Expressiveness, Independence/Agency, Conflict/Assertiveness, Threat Sensitivity, Analytical Style, Social Presentation, Cruelty/Mercy; do not create unsupported slots. Player-specific/one-scene behavior does not belong there. Do not infer species/age from stereotypes.
 3. Read on the PC/current stance toward ${userName} may initialize relationshipSummary, but relationshipImpact="none" and every relationshipDelta key MUST be 0. Never invent numeric Trust/Affection/Desire/Tension from prose.
 4. Agenda may initialize goal only when the dossier presents it as the NPC's current ongoing agenda. "Where to Find Them" is NOT current Location; do not map home/work/hangout into live location unless the dossier explicitly says they are there now. Do not invent Mood/Status/current presence.
 5. A durable Tell may become a mannerism. One-scene/emotional/stress/player-specific behavior does not. Merge multiple animations of one recurring pattern into one mannerism. Important memories only from explicit consequential past events, max3 new.
@@ -5436,7 +5451,7 @@ Rules:
 2. This is reconciliation, NOT event replay. currentRelationship is READ-ONLY: relationshipImpact MUST be "none" and all four relationshipDelta values MUST be 0. Never re-award Trust/Affection/Desire/Tension from old scenes.
 3. Presence/recency are owned by the live scanner. present/worldActive in your JSON are ignored. Do not infer current physical presence merely because the NPC appeared earlier in this history window.
 4. LOCKS: never rewrite fields listed in lockedProfileFields. Omit them from profileUpdates and ordinary dossier changes.
-5. DURABLE PROFILE: CURRENT COMPACT SUMMARY only. Personality/Speech/Appearance mention each durable concept once; Appearance does not repeat explicit age. behaviorProfile=max6 target-general rules translating identity, not a second essay; player-specific patterns belong relationshipSummary. refine returns FULL field; lasting personality/speech/mannerism/behaviorProfile change uses evolve+reason, Appearance uses change+reason. Mannerisms=max4 DISTINCT recurring patterns, not separate animations. One transient beat is not durable.
+5. DURABLE PROFILE: CURRENT COMPACT SUMMARY only. Personality/Speech/Appearance mention each durable concept once; Appearance does not repeat explicit age. behaviorProfile=max6 target-general behavioral levers translating identity into response/decision tendencies, not action-history summaries or a second essay. Actions are evidence for a lever; labels are soft, optional, and only used when supported (e.g. Disposition, Care/Warmth, Expressiveness, Independence/Agency, Conflict/Assertiveness, Threat Sensitivity, Analytical Style, Social Presentation). Player-specific patterns belong relationshipSummary. refine returns FULL field; lasting personality/speech/mannerism/behaviorProfile change uses evolve+reason, Appearance uses change+reason. Mannerisms=max4 DISTINCT recurring patterns, not separate animations. One transient beat is not durable.
 6. IDENTITY FIREWALL: temporary mood, fear, stress, intoxication, intimacy, or behavior unique to ${userName} must not become global Personality, Speech, Mannerisms, or behaviorProfile. A generally kind NPC remains generally kind toward other people unless narration establishes a broader change. Necessary force is not cruelty by itself.
 7. DEVELOPMENT SPEED: assistant/main-speaker=gradual; Player explicit/batch only for declarative canon, not quotes/questions/speculation/requests/conditionals/wishes. [mN]=source. One scene may support multiple fields; emit each grounded item independently (speech+behaviorProfile allowed). Gradual Personality/Speech: up to 4 tagged observations; reuse a concept label when obvious, wording may vary. Speech evidence/candidate=voice behavior, not personality. If evidence makes Personality/Speech stale, return changed FULL CURRENT candidate; never claim refine/evolve with a copied field. Reinforcement=>omit/keep. Time-compressed development MUST include developmentReason, even when state is refine. Mere passage of time does nothing.
 8. ROLE/SPECIES/BACKGROUND may update when this window establishes or clarifies them. Species is literal only. Background is durable history, not current mood/status.
@@ -5591,7 +5606,7 @@ Admission: ${admissionPolicy}${fullScanRule}
 Rules:
 1. Exclude player (${userName}), main speaker (${charName}), extras.
 2. EXISTING: match id/name/alias/role. Return compact JSON deltas: changed fields only; omitted persist. Identity promotion: role/interim dossier + grounded proper name => MUST reuse id; old label in aliases; identityKind:"proper_name"; never duplicate/downgrade.
-3. NEW/CANDIDATE: include name,identityKind,dossierSignal,dossierReason,sameIndividual,directInteraction,present,worldActive. Dossier-worthy NEW: populate every grounded field now; personality/values may become compact behaviorProfile rules. directInteraction affects admission/relationship only, NEVER enrichment. Incidental role candidates may stay lightweight.
+3. NEW/CANDIDATE: include name,identityKind,dossierSignal,dossierReason,sameIndividual,directInteraction,present,worldActive. Dossier-worthy NEW: populate every grounded field now; compact behaviorProfile rules=general levers, not action logs. directInteraction affects admission/relationship only, NEVER enrichment. Incidental role candidates may stay lightweight.
 4. Candidates are not dossiers. sameIndividual=true only when proven. Use narration, World State, durable Inner Chatter; proper names there MUST be returned even when prose uses role.
 5. Return ONLY observed/new/meaningfully changed NPCs; new grounded durable profile facts count as changes. present=true only latest-scene physical presence; World State/Inner Chatter alone never presence. worldActive=true only explicit current off-screen activity. Inner Chatter supports durable facts, not transient monologue.
 6. Goal/status/mood/location are LIVE: output goal,goalState,status,statusState,mood,moodState,location,locationState as needed; actively reassess each returned EXISTING NPC every scan. Unchanged -> omit; changed -> replace; ended mood/goal/status -> matching *State:"clear". Location=current/last reliable; locationState:"clear" only when old place explicitly obsolete and replacement unknown. Off-screen/no evidence alone never clears it. Never use "Unknown".
