@@ -37,7 +37,8 @@ test('full-cast manual action mounts and rehomes into the Data & maintenance act
   assert.match(source, /delta-settings-maintenance-actions/);
   assert.match(source, /legacyScan\?\.closest\?\.\('\.npc-state-delta-actions'\)/);
   assert.match(source, /button\.parentElement !== actions/);
-  assert.match(source, /actions\.appendChild\(button\)/);
+  assert.match(source, /actions\.insertBefore\(button, clearChat\)/);
+  assert.match(source, /button\.nextElementSibling !== clearChat/);
   assert.match(source, /npc-state-delta:settings-mounted/);
   assert.match(source, /queueMicrotask\(mountControls\)/);
   assert.doesNotMatch(source, /delta-settings-scanning-actions/);
