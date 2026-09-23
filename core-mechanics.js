@@ -3069,6 +3069,7 @@ export function normalizeNpcCandidate(raw = {}) {
         dossierSignal: normalizeDossierSignal(raw.dossierSignal),
         dossierReason: cleanText(raw.dossierReason, 360),
         role: cleanText(raw.role, 180),
+        gender: normalizeGender(raw.gender ?? raw.sex),
         location: cleanText(raw.location, 220),
         seenCount: Math.max(1, Math.min(99, Math.round(Number(raw.seenCount) || 1))),
         firstSeenTurn: Math.max(0, Math.round(Number(raw.firstSeenTurn) || 0)),
@@ -3095,6 +3096,7 @@ function makeNpcCandidate(incoming, turn, existingIds = []) {
         dossierSignal: incoming.dossierSignal || 'incidental',
         dossierReason: incoming.dossierReason || '',
         role: cleanText(incoming.role, 180),
+        gender: normalizeGender(incoming.gender),
         location: cleanText(incoming.location, 220),
         seenCount: 1,
         firstSeenTurn: turn,
@@ -5111,6 +5113,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
         if (shouldCreateDossierImmediately(incoming, admissionMode)) {
             if (candidateIndex >= 0) {
                 const priorCandidate = next.candidates[candidateIndex];
+                if (!incoming.gender && priorCandidate?.gender) incoming.gender = priorCandidate.gender;
                 if (incoming.sameIndividual && inferNpcIdentityKind(incoming.name, incoming.identityKind) === 'proper_name'
                     && normalizeName(priorCandidate?.name) !== normalizeName(incoming.name)) {
                     incoming.aliases = mergeLists([priorCandidate.name, ...(priorCandidate.aliases || [])], incoming.aliases, 8)
@@ -5131,10 +5134,12 @@ export function mergeScanResult(state, scanResult, options = {}) {
                 candidate.dossierSignal = incoming.dossierSignal || candidate.dossierSignal;
                 candidate.dossierReason = incoming.dossierReason || candidate.dossierReason;
                 candidate.role = cleanText(incoming.role || candidate.role, 180);
+                candidate.gender = normalizeGender(incoming.gender || candidate.gender);
                 candidate.location = cleanText(incoming.location || candidate.location, 220);
                 candidate.seenCount = Math.min(99, Number(candidate.seenCount || 1) + 1);
                 candidate.lastSeenTurn = turn;
                         if (shouldPromoteCandidate(candidate, incoming, admissionMode)) {
+                    if (!incoming.gender && candidate.gender) incoming.gender = candidate.gender;
                     next.candidates.splice(candidateIndex, 1);
                     const created = createFromIncoming(incoming);
                     if (created) report.promoted.push(created.id);
@@ -5401,6 +5406,7 @@ function injectionOptionalFields(npc, includeAppearance = false) {
         includeAppearance && !npc.appearance && (npc.currentForm || npc.currentFormUnknown) && 'Current visible appearance is not established; do not infer anatomy from species or another form.',
         importantMemories.length && `important memories: ${importantMemories.join(' | ')}`,
         npc.species && `species/race: ${npc.species}`,
+        npc.gender && `gender: ${normalizeGender(npc.gender)}`,
         npc.age && `chronological age: ${npc.age}`,
         npc.apparentAge && `apparent age: ${npc.apparentAge}`,
         npc.location && `location: ${npc.location}`,
@@ -5843,6 +5849,7 @@ export function buildScannerPrompt({
             registryState: 'candidate',
             seenCount: candidate.seenCount,
             role: candidate.role || '',
+            gender: candidate.gender || '',
             location: candidate.location || '',
             lastSeenTurn: candidate.lastSeenTurn || 0,
         })),
