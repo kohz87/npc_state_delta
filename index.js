@@ -2164,7 +2164,7 @@ async function scanNpcDossier(npcId) {
             return false;
         }
         const returned = Array.isArray(parsed.npcs) ? parsed.npcs : [];
-        const match = returned.find(npc => backfillScanMatchesTarget(npc, { npcId: id, label: existing.name })) || (returned.length === 1 ? returned[0] : null);
+        const match = returned.find(npc => backfillScanMatchesTarget(npc, { npcId: id, label: existing.name })) || null;
         if (!match) {
             globalThis.toastr?.warning?.(`NPC State Delta: the dossier importer did not return ${existing.name}.`);
             return false;
@@ -2194,7 +2194,6 @@ async function scanNpcDossier(npcId) {
             preservePresence: true,
             skipRelationshipUpdate: true,
             developmentContext: sourceText,
-            userDevelopmentContext: sourceText,
         });
         const nextState = merged.state;
         if (targetMessageId >= 0) commitBranchCheckpoint(nextState, targetMessageId, 'dossier-import');
@@ -2325,8 +2324,7 @@ async function refreshNpcFromChat(npcId) {
             return false;
         }
         const returned = Array.isArray(parsed.npcs) ? parsed.npcs : [];
-        let match = returned.find(npc => backfillScanMatchesTarget(npc, { npcId: id, label: existing.name }));
-        if (!match && returned.length === 1) match = returned[0];
+        const match = returned.find(npc => backfillScanMatchesTarget(npc, { npcId: id, label: existing.name })) || null;
         parsed.npcs = match ? [{
             ...match,
             id,
@@ -2339,7 +2337,7 @@ async function refreshNpcFromChat(npcId) {
         }] : [];
         const rawProfileUpdates = Array.isArray(parsed.profileUpdates) ? parsed.profileUpdates : (Array.isArray(parsed.profile_updates) ? parsed.profile_updates : []);
         if (rawProfileUpdates.length) {
-            const profile = rawProfileUpdates.find(item => String(item?.id || '') === id || (item?.name && npcMatchesLabel(existing, item.name))) || (rawProfileUpdates.length === 1 ? rawProfileUpdates[0] : null);
+            const profile = rawProfileUpdates.find(item => String(item?.id || '') === id || (item?.name && npcMatchesLabel(existing, item.name))) || null;
             parsed.profileUpdates = profile ? [{ ...profile, id, name: existing.name }] : [];
         }
         const edgeTouchesTarget = edge => String(edge?.aId || edge?.a_id || '') === id
@@ -2351,6 +2349,7 @@ async function refreshNpcFromChat(npcId) {
         parsed.keyRelationshipEdges = [...modelEdges, ...localEdges];
         if (!parsed.npcs.length && !(parsed.profileUpdates || []).length && !parsed.keyRelationshipEdges.length) {
             lastScanMetrics = {
+                chatKey,
                 label: 'targeted-refresh',
                 durationMs: Math.max(0, Math.round((performance.now?.() ?? Date.now()) - refreshStartedAt)),
                 promptChars: prompt.length,
@@ -2426,6 +2425,7 @@ async function refreshNpcFromChat(npcId) {
         syncOpenNpcEditorFields(saved);
         const changed = refreshChangedFields(before, saved);
         lastScanMetrics = {
+            chatKey,
             label: 'targeted-refresh',
             durationMs: Math.max(0, Math.round((performance.now?.() ?? Date.now()) - refreshStartedAt)),
             promptChars: prompt.length,
@@ -2454,6 +2454,7 @@ async function refreshNpcFromChat(npcId) {
             : `NPC State Delta: ${saved?.name || existing.name} is already consistent with the last ${settings.scanDepth} messages.`);
         return true;
     } catch (error) {
+        lastScanMetrics = { chatKey, label: 'targeted-refresh', failed: true, error: String(error?.message || error).slice(0, 500), at: Date.now() };
         console.error('[NPC State Delta] targeted chat refresh failed', error);
         globalThis.toastr?.warning?.(`NPC State Delta refresh failed for ${existing.name}: ${error?.message || error}`);
         return false;
@@ -3046,6 +3047,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         admissionMode: settings.admissionMode,
         currentTranscript,
         fullScanMode: fullWindowScan,
+        historyScanMode: manual,
     });
 
     let relationshipEdgeCount = 0;
@@ -3064,6 +3066,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         if (!scanOperationCurrent(scanChatKey, operation) || getChatKey() !== scanChatKey || firstLineageDivergence(scanLineage, currentLineage) !== -1 || Number(stateVersions.get(scanChatKey) || 0) !== scanStateVersion) {
             const scanFinishedAt = performance.now?.() ?? Date.now();
             lastScanMetrics = {
+                chatKey: scanChatKey,
                 label: manual ? 'manual' : (fullWindowScan ? 'automatic-full' : 'automatic'),
                 durationMs: Math.max(0, Math.round(scanFinishedAt - scanStartedAt)),
                 promptChars: prompt.length,
@@ -3112,6 +3115,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         );
         const scanFinishedAt = performance.now?.() ?? Date.now();
         lastScanMetrics = {
+            chatKey: scanChatKey,
             label: manual ? 'manual' : (fullWindowScan ? 'automatic-full' : 'automatic'),
             durationMs: Math.max(0, Math.round(scanFinishedAt - scanStartedAt)),
             promptChars: prompt.length,
@@ -3316,6 +3320,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         }
         return true;
     } catch (error) {
+        lastScanMetrics = { chatKey: scanChatKey, label: manual ? 'manual' : (fullWindowScan ? 'automatic-full' : 'automatic'), failed: true, error: String(error?.message || error).slice(0, 500), at: Date.now() };
         console.error('[NPC State Delta] dossier scan failed', error);
         if (manual || (isScannerRoutingError(error) && error.code !== 'NPC_SCANNER_ROUTE_CANCELLED')) globalThis.toastr?.error?.(`NPC State Delta scan failed: ${error?.message || error}`);
         return false;
@@ -5977,7 +5982,7 @@ window.NPCStateDelta = Object.freeze({
         inlineAnchors: document.querySelectorAll?.('.npc-state-delta-inline-anchor')?.length || 0,
         inlineObserver: Boolean(inlineObserver && inlineObserverChat),
         inlineNeedsRepair: inlineMountNeedsRepair(),
-        lastScan: lastScanMetrics ? { ...lastScanMetrics } : null,
+        lastScan: lastScanMetrics?.chatKey === getChatKey() ? { ...lastScanMetrics } : null,
         branchHistory: chatHydrationStatus(getChatKey()) === 'ready' ? branchHistoryDiagnostic(getChatState()) : null,
         branchReconciliations: branchReconciliationEvents
             .filter(event => event.chatKey === getChatKey())
@@ -5989,7 +5994,7 @@ window.NPCStateDelta = Object.freeze({
     exportBytes: exportBundleBytes,
     importBytes: importBundleBytes,
     reconcile: (options = {}) => reconcileCurrentBranch(options),
-    scanMetrics: () => lastScanMetrics ? { ...lastScanMetrics } : null,
+    scanMetrics: () => lastScanMetrics?.chatKey === getChatKey() ? { ...lastScanMetrics } : null,
     diagnosticsSummary: () => diagnosticStore.summary(getChatKey()),
     diagnosticsRecords: options => diagnosticStore.records(getChatKey(), options || {}),
     diagnosticsForNpc: npcId => diagnosticStore.records(getChatKey(), { npcId: String(npcId || '') }),

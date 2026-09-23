@@ -97,6 +97,24 @@ function birthdayPromptSource(options = {}) {
     return String(options?.transcript || options?.dossierText || options?.developmentContext || '');
 }
 
+function birthdayEvidenceForNpc(npc, options = {}) {
+    const source = birthdayPromptSource(options);
+    if (!npc || !birthdayEvidenceInText(source)) return false;
+    const labels = [npc.name, ...(Array.isArray(npc.aliases) ? npc.aliases : [])]
+        .map(mechanics.normalizeName).filter(Boolean);
+    if (!labels.length) return false;
+    const segments = String(source).split(/\r?\n+|(?<=[.!?])\s+/).filter(Boolean);
+    let carryTarget = false;
+    for (const segment of segments) {
+        const normalized = mechanics.normalizeName(segment).replace(/^m\d+\s+/, '');
+        const targetHere = labels.some(label => (` ${normalized} `).includes(` ${label} `));
+        if (targetHere && birthdayEvidenceInText(segment)) return true;
+        if (carryTarget && birthdayEvidenceInText(segment) && /^(?:she|he|they|it|today|this|that)\b/.test(normalized)) return true;
+        carryTarget = targetHere;
+    }
+    return false;
+}
+
 function calendarReference(options = {}, calendar = getActiveCalendarConfig()) {
     const extracted = extractStructuredWorldDate(options.calendarSource ?? birthdayPromptSource(options), calendar);
     return {
@@ -147,7 +165,7 @@ function applyDeterministicBirthdayRollover(npc, previousRaw, ordinaryUpdate, op
             .includes(String(ordinaryUpdate?.birthDateState ?? ordinaryUpdate?.birth_date_state ?? '').trim().toLowerCase());
     const ageState = String(ordinaryUpdate?.ageState ?? ordinaryUpdate?.age_state ?? '').trim().toLowerCase();
     const correctedAge = ageState === 'correct' || ageState === 'correction';
-    const narratedBirthday = birthdayEvidenceInText(birthdayPromptSource(options));
+    const narratedBirthday = birthdayEvidenceForNpc(npc, options);
 
     // Compatibility recovery for an existing yearless birthday: if the story has reached that
     // exact stored birthday and explicitly presents it as a birthday/nameday, the accepted age
@@ -705,7 +723,7 @@ function recordBirthdayDiagnostic(report, beforeNpc, afterNpc, ordinaryUpdate, o
     const birthDateState = String(ordinaryUpdate?.birthDateState ?? ordinaryUpdate?.birth_date_state ?? '').trim().toLowerCase();
     const establishedNow = Boolean(incomingBirthday)
         && ['establish', 'set', 'update', 'refine', 'correct', 'correction'].includes(birthDateState);
-    const narratedBirthday = birthdayEvidenceInText(birthdayPromptSource(options));
+    const narratedBirthday = birthdayEvidenceForNpc(afterNpc, options);
     const manualFields = Array.isArray(afterNpc.manualProfileFields) ? afterNpc.manualProfileFields : [];
     const previousAge = String(beforeNpc.age ?? '').trim();
     const age = String(afterNpc.age ?? '').trim();
@@ -1309,4 +1327,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.46';
+export const NPC_STATE_VERSION = '1.0.47';

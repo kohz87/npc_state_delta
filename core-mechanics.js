@@ -862,6 +862,46 @@ export function normalizeName(value) {
         .trim();
 }
 
+function regexEscape(value) {
+    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function genderEvidenceGrounded(value, context = '', binding = null) {
+    const gender = normalizeGender(value);
+    if (!gender) return false;
+    const source = String(context || '').trim();
+    if (!source) return true;
+
+    const labels = developmentBindingLabels(binding);
+    if (!labels.length) return false;
+    const words = gender === 'female'
+        ? '(?:female|woman|girl|daughter|sister|wife|mother)'
+        : '(?:male|man|boy|son|brother|husband|father)';
+    const subjectPronoun = gender === 'female' ? /^she\b/ : /^he\b/;
+    let carryTarget = false;
+
+    for (const segment of developmentContextSegments(source)) {
+        const normalized = normalizeName(segment).replace(/^m\d+\s+/, '');
+        const matchingLabels = labels.filter(label => normalizedPhrasePresent(segment, label));
+        if (matchingLabels.length) {
+            for (const label of matchingLabels) {
+                const labelPattern = regexEscape(normalizeName(label)).replace(/\s+/g, '\\s+');
+                const after = new RegExp('\\b' + labelPattern + '\\b\\s+(?:(?:is|was|became|remains|identified\\s+as|described\\s+as|known\\s+as|gender|sex|a|an|the)\\s+){0,3}' + words + '\\b', 'i');
+                const before = new RegExp('\\b' + words + '\\b\\s+(?:named\\s+)?' + labelPattern + '\\b', 'i');
+                if (after.test(normalized) || before.test(normalized)) return true;
+            }
+            carryTarget = true;
+            continue;
+        }
+        if (carryTarget) {
+            if (subjectPronoun.test(normalized)) return true;
+            if (new RegExp('^(?:gender|sex)\\s+' + words + '\\b', 'i').test(normalized)) return true;
+        }
+        carryTarget = false;
+    }
+    return false;
+}
+
 export const NPC_CANDIDATE_TTL_TURNS = 15;
 export const NPC_CANDIDATE_LIMIT = 60;
 
@@ -1572,7 +1612,10 @@ function parseWithScannerRepairs(text, firstError) {
 }
 
 export function parseScanJson(raw) {
-    if (raw && typeof raw === 'object') return raw;
+    if (raw && typeof raw === 'object') {
+        if (Array.isArray(raw) || !Array.isArray(raw.npcs)) throw new Error('Scanner response is missing required npcs array.');
+        return raw;
+    }
     let text = String(raw ?? '').trim();
     text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
     const first = text.indexOf('{');
@@ -1588,7 +1631,7 @@ export function parseScanJson(raw) {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
         throw new Error('Scanner response is not a JSON object.');
     }
-    if (!Array.isArray(parsed.npcs)) parsed.npcs = [];
+    if (!Array.isArray(parsed.npcs)) throw new Error('Scanner response is missing required npcs array.');
     return parsed;
 }
 
@@ -1855,7 +1898,7 @@ function durableRefinementSupportText(context = '', evidenceItems = [], binding 
     return [scopedContext, ...evidence].filter(Boolean).join(' ');
 }
 
-export function durableRefinementCandidateGrounded(field, existing, incoming, context = '', evidenceItems = [], binding = null) {
+export function durableRefinementCandidateGrounded(field, existing, incoming, context = '', evidenceItems = [], binding = null, { allowIdentityConflict = false } = {}) {
     const maxChars = DURABLE_PROFILE_LIMITS[field] || DURABLE_PROFILE_LIMITS.appearance;
     const oldText = compactDurableText(existing, maxChars, field === 'speech' ? 5 : (field === 'personality' ? 6 : 10));
     const newText = compactDurableText(incoming, maxChars, field === 'speech' ? 5 : (field === 'personality' ? 6 : 10));
@@ -1875,7 +1918,7 @@ export function durableRefinementCandidateGrounded(field, existing, incoming, co
         });
     }
     if (normalizeName(oldText) === normalizeName(newText)) return true;
-    if (field === 'personality' && identityMoralityConflict(oldText, newText)) return false;
+    if (!allowIdentityConflict && field === 'personality' && identityMoralityConflict(oldText, newText)) return false;
 
     // Structured import/API compatibility: callers without source narration retain the
     // established direct-refinement behavior. Runtime scanner paths always supply context.
@@ -3081,6 +3124,14 @@ function candidateRecordMatches(candidate, incoming) {
     if (!candidate || !incoming) return false;
     const incomingNames = new Set([incoming.name, ...(incoming.aliases || [])].map(normalizeName).filter(Boolean));
     return [candidate.name, ...(candidate.aliases || [])].map(normalizeName).filter(Boolean).some(name => incomingNames.has(name));
+}
+
+function candidateGenderValue(candidate, incoming) {
+    const prior = normalizeGender(candidate?.gender);
+    const next = normalizeGender(incoming?.gender);
+    if (!next) return prior;
+    if (!prior || prior === next) return next;
+    return incoming?.genderState === 'correct' && String(incoming?.genderReason || '').trim() ? next : prior;
 }
 
 function makeNpcCandidate(incoming, turn, existingIds = []) {
@@ -4704,13 +4755,24 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
             targeted: options.targeted === true,
             sourceAuthority: authorityProvenanceSupplied ? 'user' : null,
         };
+        const candidateEvidence = [...(beforeEvidence[field] || []), ...(incomingEvidence[field] || [])];
         const candidateSpecificGrounding = field === 'mannerisms' || field === 'behaviorProfile'
-            ? durableProfileCollectionCandidateGrounded(field, currentValue, candidateValue, incomingEvidence[field] || [])
-            : true;
+            ? durableProfileCollectionCandidateGrounded(field, currentValue, candidateValue, candidateEvidence)
+            : ((field === 'personality' || field === 'speech')
+                ? durableRefinementCandidateGrounded(
+                    field,
+                    currentValue,
+                    candidateValue,
+                    options.developmentContext,
+                    candidateEvidence,
+                    { ...binding, evidence: candidateEvidence, otherLabels: options.otherLabels || [] },
+                    { allowIdentityConflict: true },
+                )
+                : true);
         if (scale === 'gradual') {
-            return gradualProfileEvolutionReady(field, beforeEvidence, incomingEvidence)
-                || (authoritativeContext && effectiveReason && candidateSpecificGrounding
-                    && developmentScaleReady('batch', effectiveReason, authoritativeContext, binding));
+            return candidateSpecificGrounding && (gradualProfileEvolutionReady(field, beforeEvidence, incomingEvidence)
+                || (authoritativeContext && effectiveReason
+                    && developmentScaleReady('batch', effectiveReason, authoritativeContext, binding)));
         }
         return (!authorityProvenanceSupplied || Boolean(authoritativeContext))
             && Boolean(effectiveReason) && candidateSpecificGrounding
@@ -4955,6 +5017,12 @@ function mergeAliasLinkedNpcPair(a, b) {
     const older = Number(a?.createdAt || Infinity) <= Number(b?.createdAt || Infinity) ? a : b;
     const newer = older === a ? b : a;
     const relationshipSource = duplicateRelationshipWeight(a) >= duplicateRelationshipWeight(b) ? a : b;
+    const preferredStableField = field => {
+        const aManual = (a?.manualProfileFields || []).includes(field);
+        const bManual = (b?.manualProfileFields || []).includes(field);
+        if (aManual !== bManual) return aManual ? a?.[field] : b?.[field];
+        return newer?.[field] || older?.[field] || '';
+    };
     const merged = structuredClone(older);
     merged.name = canonicalName;
     merged.identityKind = inferNpcIdentityKind(canonicalName, 'proper_name');
@@ -4967,6 +5035,8 @@ function mergeAliasLinkedNpcPair(a, b) {
         const bv = cleanText(b?.[field], field === 'appearance' ? 1800 : 1200);
         merged[field] = bv.length > av.length ? bv : av;
     }
+    merged.gender = normalizeGender(preferredStableField('gender'));
+    merged.homeBase = cleanText(preferredStableField('homeBase'), 300);
     merged.memories = normalizeStoredMemories([...(a.memories || []), ...(b.memories || [])]);
     merged.mannerisms = normalizeMannerisms([...(a.mannerisms || []), ...(b.mannerisms || [])]);
     merged.behaviorProfile = normalizeBehaviorProfile([...(a.behaviorProfile || []), ...(b.behaviorProfile || [])]);
@@ -4998,7 +5068,7 @@ function mergeAliasLinkedNpcPair(a, b) {
     merged.manualProfileLocksExplicit = Boolean(a?.manualProfileLocksExplicit || b?.manualProfileLocksExplicit);
     merged.manualProfileFields = [...new Set([...(a?.manualProfileFields || []), ...(b?.manualProfileFields || [])])];
     merged.retentionProtected = Boolean(a?.retentionProtected || b?.retentionProtected);
-    merged.minor = Boolean(a?.minor && b?.minor);
+    merged.minor = Boolean(a?.minor || b?.minor);
     return normalizeNpcRecord(merged);
 }
 
@@ -5097,6 +5167,14 @@ export function mergeScanResult(state, scanResult, options = {}) {
 
         if (existingIndex < 0) existingIndex = next.npcs.findIndex(existing => candidateMatches(existing, incoming));
         if (existingIndex < 0) existingIndex = findInterimIdentityPromotionIndex(next.npcs, incoming);
+        if (incoming.gender && lifecycleOptions.developmentContext) {
+            const genderTarget = existingIndex >= 0 ? next.npcs[existingIndex] : incoming;
+            if (!genderEvidenceGrounded(incoming.gender, lifecycleOptions.developmentContext, { npc: genderTarget, targeted: existingIndex >= 0 })) {
+                incoming.gender = '';
+                incoming.genderState = 'keep';
+                incoming.genderReason = '';
+            }
+        }
         if (existingIndex >= 0) {
             const previousName = next.npcs[existingIndex].name;
             next.npcs[existingIndex] = applyIncoming(next.npcs[existingIndex], incoming, turn, relationshipCaps, sourceMessageId, lifecycleOptions);
@@ -5113,7 +5191,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
         if (shouldCreateDossierImmediately(incoming, admissionMode)) {
             if (candidateIndex >= 0) {
                 const priorCandidate = next.candidates[candidateIndex];
-                if (!incoming.gender && priorCandidate?.gender) incoming.gender = priorCandidate.gender;
+                incoming.gender = candidateGenderValue(priorCandidate, incoming);
                 if (incoming.sameIndividual && inferNpcIdentityKind(incoming.name, incoming.identityKind) === 'proper_name'
                     && normalizeName(priorCandidate?.name) !== normalizeName(incoming.name)) {
                     incoming.aliases = mergeLists([priorCandidate.name, ...(priorCandidate.aliases || [])], incoming.aliases, 8)
@@ -5134,7 +5212,8 @@ export function mergeScanResult(state, scanResult, options = {}) {
                 candidate.dossierSignal = incoming.dossierSignal || candidate.dossierSignal;
                 candidate.dossierReason = incoming.dossierReason || candidate.dossierReason;
                 candidate.role = cleanText(incoming.role || candidate.role, 180);
-                candidate.gender = normalizeGender(incoming.gender || candidate.gender);
+                incoming.gender = candidateGenderValue(candidate, incoming);
+                candidate.gender = incoming.gender;
                 candidate.location = cleanText(incoming.location || candidate.location, 220);
                 candidate.seenCount = Math.min(99, Number(candidate.seenCount || 1) + 1);
                 candidate.lastSeenTurn = turn;
@@ -5823,6 +5902,7 @@ export function buildScannerPrompt({
     admissionMode = 'conservative',
     currentTranscript = '',
     fullScanMode = false,
+    historyScanMode = false,
 }) {
     const baseline = normalizeRelationshipBaseline(relationshipBaseline);
     const caps = normalizeRelationshipCaps(relationshipCaps);
@@ -5933,7 +6013,8 @@ export function buildScannerPrompt({
     const impactRubric = compactImpactRubric(impactCriteria);
     const memoryRubric = compactMemoryRubric(memoryCriteria);
     const currentExchange = String(currentTranscript || transcript || '').trim();
-    const fullScanRule = fullScanMode
+    const historyWindowMode = Boolean(fullScanMode || historyScanMode);
+    const fullScanRule = historyWindowMode
         ? `\nFULL-WINDOW RECONCILIATION: Story context contains the configured recent-history window. Use durable evidence anywhere in the supplied recent-history window to recover missed durable facts (identity, role/species/gender/age, profile, background, social ties, memories). Earlier turns are context, NOT new events. For present/worldActive and LIVE mood/location/goal/status, use only the newest CURRENT exchange below; older states must never overwrite newer/established live state. Numeric relationshipImpact/relationshipDelta MUST use only CURRENT exchange, never older window events. Do not replay old deltas.`
         : '';
 
@@ -5971,5 +6052,5 @@ Stable profile context (strongly relevant existing only):
 ${JSON.stringify(profileExisting)}
 
 Story context:
-${String(transcript || '').trim()}${fullScanMode ? `\n\nCURRENT exchange (authoritative for presence/live state and numeric relationship deltas):\n${currentExchange}` : ''}`;
+${String(transcript || '').trim()}${historyWindowMode ? `\n\nCURRENT exchange (authoritative for presence/live state and numeric relationship deltas):\n${currentExchange}` : ''}`;
 }

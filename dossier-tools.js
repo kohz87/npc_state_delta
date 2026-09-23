@@ -189,6 +189,8 @@ function diagnosticsHtml(npc) {
         label: scan.label || '',
         durationMs: Number(scan.durationMs || 0),
         retried: Boolean(scan.retried),
+        failed: Boolean(scan.failed),
+        error: scan.error || '',
         focusedRelationshipPass: Boolean(scan.relationshipPass),
         profileUpdates: Number(scan.profileUpdates || 0),
         profileApplied: Number(scan.profileApplied || 0),
@@ -218,6 +220,12 @@ export function openDiagnostics() {
     const session = makeSession('diagnostics', { npcId: npc?.id || '' });
     const overlay = mountOverlay(diagnosticsHtml(npc), session);
     overlay.addEventListener('click', event => {
+        const diagnosticAction = event.target.closest?.('[data-run-full-cast-scan], [data-export-diagnostics], [data-clear-diagnostics]');
+        if (diagnosticAction && !currentSessionIs(session)) {
+            closeOverlay({ reason: 'diagnostics-chat-changed', session });
+            toast('warning', 'NPC State Delta: diagnostics belonged to the previous chat; reopen Diagnostics for the current chat.');
+            return;
+        }
         if (event.target.closest?.('[data-run-full-cast-scan]')) {
             document.dispatchEvent(new CustomEvent('npc-state-delta:request-full-cast-scan'));
             recordToolEvent('diagnostic-full-cast-scan', { chatKey: activeChatKey(), action: 'run', outcome: 'requested' });

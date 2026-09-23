@@ -49,6 +49,13 @@ function currentExchange(messageId = null) {
     };
 }
 
+function exchangeStillCurrent(chatKey, exchange) {
+    if (!exchange || exchange.assistantId < 0) return false;
+    if (api()?.uiStatus?.().chatKey !== chatKey || latestAssistantId() !== exchange.assistantId) return false;
+    const current = currentExchange(exchange.assistantId);
+    return current.assistantId === exchange.assistantId && current.text === exchange.text;
+}
+
 function fingerprint(npc) {
     try {
         return JSON.stringify({
@@ -57,6 +64,8 @@ function fingerprint(npc) {
             archived: !!npc.archived,
             role: npc.role || '',
             species: npc.species || '',
+            gender: npc.gender || '',
+            homeBase: npc.homeBase || '',
             age: npc.age || '',
             apparentAge: npc.apparentAge || '',
             personality: npc.personality || '',
@@ -127,18 +136,18 @@ export async function runFullCastScan(messageId = null, before = null, { manual 
     const chatKey = initial.chatKey;
     const token = ++sequence;
     if (!await waitIdle(chatKey, token)) return false;
-    if (latestAssistantId() !== exchange.assistantId || api()?.uiStatus?.().chatKey !== chatKey) return false;
+    if (!exchangeStillCurrent(chatKey, exchange)) return false;
     let state = npcApi.getState();
     if (Number(state.lastScannedMessageId) !== exchange.assistantId) {
         await npcApi.scan();
         if (!await waitIdle(chatKey, token)) return false;
-        if (latestAssistantId() !== exchange.assistantId || api()?.uiStatus?.().chatKey !== chatKey) return false;
+        if (!exchangeStillCurrent(chatKey, exchange)) return false;
         state = npcApi.getState();
     }
     const targets = fullCastTargets(state, exchange.text, before);
     let refreshed = 0;
     for (const id of targets) {
-        if (token !== sequence || api()?.uiStatus?.().chatKey !== chatKey || latestAssistantId() !== exchange.assistantId) return false;
+        if (token !== sequence || !exchangeStillCurrent(chatKey, exchange)) return false;
         if (!await waitIdle(chatKey, token)) return false;
         if (await npcApi.refreshFromChat(id)) refreshed += 1;
     }

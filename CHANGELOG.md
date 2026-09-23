@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 1.0.47 - 23 September 2026
+
+- Harden targeted dossier operations so Refresh/import never remap a sole unrelated provider row to the selected NPC, and assistant-authored dossier blocks remain observational evidence rather than receiving user-canon authority.
+- Reject scanner replies that omit the required `npcs` array, retain failure/stale accounting per chat, give manual history scans the same current-exchange live-state boundary as full-window scans, and exclude plain roster/status listings from missed-participant repair.
+- Ground automatic gender establishment/correction in target-specific story evidence, preserve candidate gender through promotion unless an explicit correction is grounded, and retain gender/Home Base/minor metadata during alias-linked dossier consolidation.
+- Require ready Personality/Speech evolution candidates to ground every newly introduced claim so unrelated model additions cannot ride through a legitimate development gate.
+- Bind yearless nameday rollover to the named NPC, reject non-retired partial sidecars missing the canonical NPC roster, and harden full-cast change/edit ownership with gender/Home Base fingerprints plus same-index exchange-text validation.
+- Close Stage 8 ownership/UI gaps: Diagnostics actions reject cross-chat stale sessions, latest scan metrics are chat-owned, canonical portrait/seed mutation cannot be canceled after handoff, diagnostics preserve expanded receipts across rerenders, Gender is grouped with identity, and the dossier modal traps keyboard focus.
+- Add focused audit regressions and advance synchronized application/package/display metadata to 1.0.47 without changing persisted bundle, storage-format, branch-lineage, rollback-journal, or diagnostic schema versions.
+
 ## 1.0.46 - 23 September 2026
 
 - Add canonical NPC gender as optional stable identity metadata with only `male`, `female`, or blank for unknown/not yet established. Scanner, Refresh, backfill, and structured dossier import may establish it only from explicit wording or an unambiguous gendered identity/reference; names, occupations, clothing, body type, species, and generated portraits cannot infer it.

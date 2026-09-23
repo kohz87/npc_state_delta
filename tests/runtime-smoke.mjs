@@ -1156,6 +1156,11 @@ try {
     await sleep(20);
     manualAddNpc('Luna');
     assert.ok(globalThis.NPCStateDelta.getState().npcs.some(n => n.name === 'Luna'));
+    const lunaBeforeWrongImport = structuredClone(globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Luna'));
+    mockState.quietResponder = async () => JSON.stringify({ npcs: [{ name: 'Toris', role: 'WRONG TARGET ROLE' }] });
+    assert.equal(await globalThis.NPCStateDelta.scanDossier('Luna'), false, 'dossier import must reject a sole row that does not match the requested NPC');
+    assert.deepEqual(globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Luna'), lunaBeforeWrongImport, 'wrong-target import must not mutate the selected dossier');
+
     mockState.quietResponder = async (args = {}) => {
         const prompt = String(args.prompt || '');
         if (/explicit DOSSIER IMPORT/i.test(prompt) && /Requested NPC: Luna/i.test(prompt)) {
@@ -1236,6 +1241,18 @@ try {
     assert.equal(lunaAfterRefresh.seenCount, lunaBeforeRefresh.seenCount, 'history refresh must not increment seen count');
     assert.equal(lunaAfterRefresh.lastSeenTurn, lunaBeforeRefresh.lastSeenTurn, 'history refresh must not rewrite recency');
     assert.equal(globalThis.NPCStateDelta.scanMetrics()?.label, 'targeted-refresh');
+
+    const lunaBeforeWrongRefresh = structuredClone(globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Luna'));
+    mockState.quietResponder = async () => JSON.stringify({
+        npcs: [{ name: 'Toris', role: 'WRONG TARGET ROLE', personality: 'Wrong target personality.' }],
+        profileUpdates: [{ name: 'Toris', personalityState: 'refine', personality: 'Wrong target personality.', evidence: { personality: ['Toris changes.'] } }],
+        keyRelationshipEdges: [],
+    });
+    await globalThis.NPCStateDelta.refreshFromChat('Luna');
+    const lunaAfterWrongRefresh = globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Luna');
+    assert.equal(lunaAfterWrongRefresh.role, lunaBeforeWrongRefresh.role, 'wrong-target sole Refresh row must not be rebound onto the requested NPC');
+    assert.equal(lunaAfterWrongRefresh.personality, lunaBeforeWrongRefresh.personality, 'wrong-target sole profile update must not be rebound onto the requested NPC');
+    assert.equal(lunaAfterWrongRefresh.speech, lunaBeforeWrongRefresh.speech);
 
     mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'I close the archive register.' });
     const lunaRemoveMessageId = mockState.context.chat.length - 1;

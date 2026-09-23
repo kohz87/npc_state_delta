@@ -284,7 +284,7 @@ async function savePortraitSeed(session, overlay) {
         toast('warning', `NPC State Delta: ${error?.message || error}`);
         return false;
     }
-    setBusy(session, true, 'Saving portrait seed…', { allowClose: true });
+    setBusy(session, true, 'Saving portrait seed…');
     try {
         if (!api()?.setPortraitSeed?.(session.npcId, seed, { chatKey: session.chatKey })) {
             throw new Error('The portrait target is no longer current.');
@@ -373,11 +373,12 @@ async function useGeneratedPortrait(session, overlay) {
     const actionSeq = ++session.actionSeq;
     const live = npcById(session.npcId);
     if (!live) return false;
-    setBusy(session, true, 'Applying generated preview through the canonical portrait handler…', { allowClose: true });
+    setBusy(session, true, 'Preparing generated preview…', { allowClose: true });
     let applied = false;
     try {
         const file = await generatedPortraitFile(url, session.npcId);
         if (!currentSessionIs(session) || session.actionSeq !== actionSeq) return false;
+        setBusy(session, true, 'Applying generated preview through the canonical portrait handler…');
         applied = await api()?.setPortrait?.(session.npcId, file, {
             chatKey: session.chatKey,
             isCurrent: () => currentSessionIs(session) && session.actionSeq === actionSeq,

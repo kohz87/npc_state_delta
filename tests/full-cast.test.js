@@ -23,6 +23,9 @@ test('full cast scan remains opt-in and targets participation plus physical pres
   assert.match(source, /if \(npc\.present\) ids\.add\(npc\.id\)/);
   assert.match(source, /npcParticipatesInExchange\(npc, npcs, exchangeText\)/);
   assert.match(source, /before\.get\(npc\.id\) !== fingerprint\(npc\)/);
+  assert.match(source, /gender: npc\.gender \|\| ''/);
+  assert.match(source, /homeBase: npc\.homeBase \|\| ''/);
+  assert.match(source, /current\.text === exchange\.text/);
   assert.match(source, /await npcApi\.refreshFromChat\(id\)/);
   assert.match(source, />Full cast scan</);
 });

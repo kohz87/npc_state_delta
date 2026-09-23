@@ -29,6 +29,8 @@ function participationText(value) {
             return /\b(?:world\s*state|npc\s*inner\s*chatter)\b/i.test(label) ? ' ' : whole;
         });
     return source.split(/\r?\n/).map(line => {
+        const rosterLine = String(line || '').replace(/^\s*(?:[-*#>]+\s*)?/, '');
+        if (/^(?:NPCs?\s+Present|Present\s+NPCs?|NPC\s+Roster|NPC\s+Status(?:es)?|Active\s+NPCs?)(?:\s*\([^)]*\))?\s*:/i.test(rosterLine)) return '';
         const marker = line.search(/\b(?:World State|NPC Inner Chatter)\s*:/i);
         return marker >= 0 ? line.slice(0, marker) : line;
     }).join('\n');

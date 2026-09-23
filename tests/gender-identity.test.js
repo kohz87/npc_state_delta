@@ -66,6 +66,54 @@ test('scanner establishes gender but cannot silently flip an established value',
     assert.equal(corrected.gender, 'male');
 });
 
+
+test('gender admission is source-grounded and supports structured dossier fields', () => {
+    const npc = createNpcRecord('Mira');
+    const ungrounded = mergeScanResult({ npcs: [npc], candidates: [], turn: 1 }, {
+        npcs: [{ id: npc.id, name: 'Mira', gender: 'female' }],
+    }, { turn: 2, developmentContext: 'Mira files the evening register at the inn.' }).state.npcs[0];
+    assert.equal(ungrounded.gender, '', 'provider-only gender must not become canonical without story evidence');
+
+    const structured = mergeScanResult({ npcs: [ungrounded], candidates: [], turn: 2 }, {
+        npcs: [{ id: npc.id, name: 'Mira', gender: 'female' }],
+    }, { turn: 3, developmentContext: '<New_NPC name="Mira">\nGender: Female\nRole: Barmaid\n</New_NPC>' }).state.npcs[0];
+    assert.equal(structured.gender, 'female', 'a target-bound structured gender field is valid evidence');
+});
+
+test('candidate gender cannot flip without a grounded explicit correction', () => {
+    const first = mergeScanResult({ npcs: [], candidates: [], turn: 1 }, {
+        npcs: [{ name: 'Gate Clerk', identityKind: 'role_label', dossierSignal: 'incidental', sameIndividual: true, gender: 'female' }],
+    }, { turn: 2, developmentContext: 'Gate Clerk is a woman checking permits.' }).state;
+    assert.equal(first.candidates[0]?.gender, 'female');
+
+    const accidental = mergeScanResult(first, {
+        npcs: [{ name: 'Gate Clerk', identityKind: 'role_label', dossierSignal: 'incidental', sameIndividual: true, gender: 'male' }],
+    }, { turn: 3, developmentContext: 'Gate Clerk checks another permit.' }).state;
+    assert.equal(accidental.candidates[0]?.gender, 'female');
+
+    const corrected = mergeScanResult(accidental, {
+        npcs: [{
+            name: 'Gate Clerk', identityKind: 'role_label', dossierSignal: 'incidental', sameIndividual: true,
+            gender: 'male', genderState: 'correct', genderReason: 'The narration explicitly identifies the clerk as a man.',
+        }],
+    }, { turn: 4, developmentContext: 'Gate Clerk is explicitly identified as a man.' }).state;
+    assert.equal(corrected.candidates[0]?.gender, 'male');
+});
+
+test('alias consolidation preserves newer stable identity fields and conservative minor safety', () => {
+    const older = normalizeNpcRecord({
+        ...createNpcRecord('Guild Clerk'), aliases: ['Mira'], minor: true, createdAt: 10, updatedAt: 10,
+    });
+    const newer = normalizeNpcRecord({
+        ...createNpcRecord('Mira'), aliases: ['Guild Clerk'], gender: 'female', homeBase: 'Fordhouse Inn', createdAt: 20, updatedAt: 30,
+    });
+    const merged = mergeScanResult({ npcs: [older, newer], candidates: [], turn: 5 }, { npcs: [] }, { turn: 6 }).state;
+    assert.equal(merged.npcs.length, 1);
+    assert.equal(merged.npcs[0].name, 'Mira');
+    assert.equal(merged.npcs[0].gender, 'female');
+    assert.equal(merged.npcs[0].homeBase, 'Fordhouse Inn');
+    assert.equal(merged.npcs[0].minor, true);
+});
 test('portrait identity sends species then gender then apparent age before visual details', () => {
     const prompts = buildNpcPortraitPrompts({
         species: 'Human',

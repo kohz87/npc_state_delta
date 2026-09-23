@@ -182,6 +182,11 @@ test('parses fenced scanner JSON', () => {
     assert.equal(parsed.npcs[0].name, 'Yunyun');
 });
 
+
+test('rejects schema-valid JSON that omits the required NPC array', () => {
+    assert.throws(() => parseScanJson('{}'), /required npcs array/i);
+    assert.throws(() => parseScanJson({ profileUpdates: [] }), /required npcs array/i);
+});
 test('repairs common model JSON defects from raw scanner output', () => {
     const trailing = parseScanJson('{\n  "npcs": [ { "name": "Marris", }, ],\n}');
     assert.equal(trailing.npcs[0].name, 'Marris');
