@@ -63,6 +63,7 @@ export function dossierIndexProjection(npc = {}, portraitAssets = {}) {
         aliases: stringList(npc?.aliases, 12),
         role: plain(npc?.role),
         species: plain(npc?.species),
+        gender: plain(npc?.gender),
         homeBase: plain(npc?.homeBase),
         apparentAge: plain(npc?.apparentAge),
         location: plain(npc?.location),
@@ -129,6 +130,7 @@ export function filterDossierIndex(rows = [], { query = '', filter = 'all' } = {
             row?.name,
             row?.role,
             row?.species,
+            row?.gender,
             row?.apparentAge,
             row?.homeBase,
             row?.location,
@@ -165,6 +167,7 @@ export function projectDossierState(state = {}, status = {}) {
             aliases: npc.aliases,
             role: npc.role,
             species: npc.species,
+            gender: npc.gender,
             apparentAge: npc.apparentAge,
             homeBase: npc.homeBase,
             location: npc.location,
@@ -203,6 +206,7 @@ function portraitHtml(npc, className, { alt = true } = {}) {
 function identityLine(npc) {
     return [
         npc?.species,
+        npc?.gender,
         npc?.role,
         npc?.age ? `Age ${npc.age}` : '',
         npc?.apparentAge ? `Looks ${npc.apparentAge}` : '',
@@ -349,7 +353,7 @@ class DeltaDossierUi {
                         </div>
                         <section class="delta-cast" aria-label="NPC cast">
                             <div class="delta-cast-tools">
-                                <label class="delta-search-label"><span class="sr-only">Search NPC dossiers</span><input type="search" class="delta-search" placeholder="Search cast, role, species, location…" autocomplete="off"></label>
+                                <label class="delta-search-label"><span class="sr-only">Search NPC dossiers</span><input type="search" class="delta-search" placeholder="Search cast, role, species, gender, location…" autocomplete="off"></label>
                                 <div class="delta-filters" role="group" aria-label="Dossier filters">
                                     ${['all', 'active', 'archived', 'dead'].map(key => `<button type="button" class="delta-filter${key === 'all' ? ' active' : ''}" data-filter="${key}" aria-pressed="${key === 'all'}">${key.charAt(0).toUpperCase() + key.slice(1)} <span data-count="${key}">0</span></button>`).join('')}
                                 </div>
@@ -559,7 +563,7 @@ class DeltaDossierUi {
 
     renderRail(filtered, { force = false } = {}) {
         const list = this.root.querySelector('.delta-cast-list');
-        const signature = JSON.stringify(filtered.map(row => [row.id, row.name, row.statusLabel, row.role, row.species, row.portrait, row.id === this.selectedNpcId]));
+        const signature = JSON.stringify(filtered.map(row => [row.id, row.name, row.statusLabel, row.role, row.species, row.gender, row.portrait, row.id === this.selectedNpcId]));
         if (!force && signature === this.lastRailSignature) return;
         this.lastRailSignature = signature;
         const scrollLeft = list.scrollLeft;
@@ -569,7 +573,7 @@ class DeltaDossierUi {
             return;
         }
         list.innerHTML = filtered.map(npc => {
-            const meta = [npc.species, npc.role].filter(Boolean).join(' · ') || 'Details pending';
+            const meta = [npc.species, npc.gender, npc.role].filter(Boolean).join(' · ') || 'Details pending';
             const selected = npc.id === this.selectedNpcId;
             return `<button type="button" class="delta-cast-card${selected ? ' selected' : ''}" role="option" aria-selected="${selected}" data-npc-id="${escapeHtml(npc.id)}">
                 ${portraitHtml(npc, 'delta-cast-portrait', { alt: false })}
