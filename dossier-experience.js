@@ -14,6 +14,7 @@ const DOSSIER_GUARD = '__npcStateDeltaDossierExperienceEvents';
 const DOCUMENT_GUARD = '__npcStateDeltaDossierExperienceDocumentEvents';
 const SETTINGS_ID = 'npc_state_delta_settings';
 const diagnosticVisibleNpcIds = new Set();
+const diagnosticOpenSummaryKeys = new Map();
 let normalizeQueued = false;
 
 function toast(kind, message) { globalThis.toastr?.[kind]?.(message); }
@@ -131,18 +132,39 @@ function actionSignature(npc) {
 function renderNpcDiagnostics(root) {
     const hero = root?.querySelector?.('.delta-hero');
     if (!hero) return;
-    hero.querySelectorAll(':scope > .delta-npc-diagnostics').forEach(node => node.remove());
+    const existing = hero.querySelector(':scope > .delta-npc-diagnostics');
     const npcId = selectedNpcId(root);
-    if (!npcId || !diagnosticVisibleNpcIds.has(npcId)) return;
+    if (!npcId || !diagnosticVisibleNpcIds.has(npcId)) {
+        existing?.remove?.();
+        return;
+    }
     const records = api()?.diagnosticsForNpc?.(npcId) || [];
     const recent = records.slice(-8).reverse();
+    const signature = JSON.stringify(recent.map(row => [row.at || 0, row.type || '', row.sourceMessageId ?? null, row.profile || [], row.birthdays || [], row.accounting || {}]));
+    if (existing?.dataset?.deltaDiagnosticsSignature === signature) return;
+
+    const openSummaries = new Set([...(diagnosticOpenSummaryKeys.get(npcId) || []), ...[...existing?.querySelectorAll?.('details[open] > summary') || []].map(node => node.textContent || '')]);
+    const focusedSummary = existing?.contains?.(document.activeElement)
+        ? document.activeElement?.closest?.('summary')?.textContent || ''
+        : '';
     const section = document.createElement('section');
     section.className = 'delta-npc-diagnostics';
+    section.dataset.deltaDiagnosticsSignature = signature;
     section.innerHTML = `<header><b>Diagnostics</b><small>${recent.length} recent operation${recent.length === 1 ? '' : 's'}</small></header>
       ${recent.length ? recent.map(row => `<details><summary>${escapeHtml(row.type || 'scan')} · ${escapeHtml(String(row.sourceMessageId ?? 'no source'))}</summary><pre>${escapeHtml(JSON.stringify({ profile: row.profile || [], birthdays: row.birthdays || [], accounting: row.accounting || {} }, null, 2))}</pre></details>`).join('') : '<p>No retained diagnostic operations for this NPC yet.</p>'}`;
-    const actions = hero.querySelector('.delta-hero-actions');
-    if (actions) actions.insertAdjacentElement('afterend', section);
-    else hero.appendChild(section);
+    for (const details of section.querySelectorAll('details')) {
+        const summary = details.querySelector('summary');
+        if (summary && openSummaries.has(summary.textContent || '')) details.open = true;
+    }
+    if (existing) existing.replaceWith(section);
+    else {
+        const actions = hero.querySelector('.delta-hero-actions');
+        if (actions) actions.insertAdjacentElement('afterend', section);
+        else hero.appendChild(section);
+    }
+    if (focusedSummary) {
+        [...section.querySelectorAll('summary')].find(node => (node.textContent || '') === focusedSummary)?.focus?.({ preventScroll: true });
+    }
 }
 
 function ensureDossierActions(root) {
@@ -227,7 +249,7 @@ function ensureEditorStructure(editor) {
     const identity = editorSection('Identity & profile', 'delta-editor-identity');
     for (const [id, wide] of [
         ['npc_state_delta_edit_name', false], ['npc_state_delta_edit_species', false],
-        ['npc_state_delta_edit_role', false], ['npc_state_delta_edit_home_base', false],
+        ['npc_state_delta_edit_gender', false], ['npc_state_delta_edit_role', false], ['npc_state_delta_edit_home_base', false],
         ['npc_state_delta_edit_age', false], ['npc_state_delta_edit_birthday', false],
         ['npc_state_delta_edit_apparent_age', false], ['npc_state_delta_edit_personality', false],
         ['npc_state_delta_edit_behavior_profile', true], ['npc_state_delta_edit_speech', false],
@@ -554,6 +576,16 @@ function bindDocumentEvents() {
 function installRootObserver(root) {
     if (!root || root[ROOT_OBSERVER_GUARD]) return;
     root.addEventListener('npc-state-delta:dossier-rendered', () => scheduleNormalize(root));
+    root.addEventListener('toggle', event => {
+        const details = event.target?.closest?.('.delta-npc-diagnostics details');
+        if (!details) return;
+        const npcId = selectedNpcId(root);
+        const key = details.querySelector('summary')?.textContent || '';
+        if (!npcId || !key) return;
+        const open = new Set(diagnosticOpenSummaryKeys.get(npcId) || []);
+        if (details.open) open.add(key); else open.delete(key);
+        if (open.size) diagnosticOpenSummaryKeys.set(npcId, open); else diagnosticOpenSummaryKeys.delete(npcId);
+    }, true);
     root[ROOT_OBSERVER_GUARD] = true;
 }
 

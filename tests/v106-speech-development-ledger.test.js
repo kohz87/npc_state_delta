@@ -62,6 +62,24 @@ test('v1.0.6 gradual speech evolution counts independent same-concept observatio
     assert.deepEqual(state.npcs[0].profileEvidence.speech, []);
 });
 
+
+test('gradual speech evolution cannot carry unsupported extra claims once the gate is ready', () => {
+    const npc = createNpcRecord('Marris');
+    npc.speech = 'Soft, hesitant, and prone to trailing off when challenged.';
+    let state = { npcs: [npc], candidates: [], turn: 9 };
+    const supported = 'Confident and direct; speaks in concise sentences without habitual hedging.';
+
+    state = scan(state, gradualSpeechUpdate(npc, 'directness: answers plainly in concise sentences without hedging', supported), 10, 100).state;
+    state = scan(state, gradualSpeechUpdate(npc, 'directness: again gives concise direct answers without hedging', supported), 12, 101).state;
+
+    const poisoned = supported + '; fluently speaks ancient Celestial legal jargon.';
+    state = scan(state, gradualSpeechUpdate(npc, 'directness: once more gives concise direct answers without hedging', poisoned), 14, 102).state;
+    assert.equal(state.npcs[0].speech, npc.speech, 'unsupported extra meaning must block the evolved replacement atomically');
+    assert.ok(state.npcs[0].speechDevelopment.concepts.some(item => item.observationCount >= 3), 'ready evidence should remain available for a corrected candidate');
+
+    state = scan(state, gradualSpeechUpdate(npc, 'directness: again gives concise direct answers without hedging', supported), 16, 103).state;
+    assert.match(state.npcs[0].speech, /Confident and direct/i, 'a later claim-complete grounded candidate may still evolve');
+});
 test('v1.0.6 unrelated speech concepts do not combine to unlock gradual evolution', () => {
     const npc = createNpcRecord('Marris');
     npc.speech = 'Soft and formal.';

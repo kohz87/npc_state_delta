@@ -320,6 +320,29 @@ test('v1.0.22 an existing yearless birthday rolls age and compact apparent age e
     assert.equal(repeated.report.birthdayDiagnostics?.[0]?.reason, 'birthday-held');
 });
 
+
+test('yearless birthday compatibility advances only the NPC whose birthday is narrated', () => {
+    setActiveCalendarConfig(CUSTOM_CALENDAR);
+    const sora = normalizeNpcRecord({
+        id: 'npc_sora', name: 'Sora', age: '13', apparentAge: '~12',
+        birthDate: { month: 'Redleaf', day: 16 }, birthDateSource: 'established',
+    });
+    const ryu = normalizeNpcRecord({
+        id: 'npc_ryu', name: 'Ryu', age: '13', apparentAge: '~12',
+        birthDate: { month: 'Redleaf', day: 16 }, birthDateSource: 'established',
+    });
+    const result = mergeScanResult({
+        turn: 30, npcs: [sora, ryu], candidates: [], socialGraph: { version: 1, edges: [], unresolved: [] },
+    }, { npcs: [
+        { id: 'npc_sora', name: 'Sora', age: '13', ageState: 'keep', apparentAge: '~12', apparentAgeState: 'keep' },
+        { id: 'npc_ryu', name: 'Ryu', age: '13', ageState: 'keep', apparentAge: '~12', apparentAgeState: 'keep' },
+    ] }, {
+        sourceMessageId: 31,
+        developmentContext: '<World_State>Time | CR822, Redleaf 16 | evening</World_State> Sora celebrates her nameday with a cake. Ryu sits beside her at the table.',
+    });
+    assert.equal(result.state.npcs.find(npc => npc.id === 'npc_sora').age, '14');
+    assert.equal(result.state.npcs.find(npc => npc.id === 'npc_ryu').age, '13', 'another NPC sharing the same yearless birthday must not age from Sora\'s nameday narration');
+});
 test('v1.0.22 birthday rollover respects apparent-age authority and does not guess on newly established birthdays', () => {
     setActiveCalendarConfig(CUSTOM_CALENDAR);
     const base = normalizeNpcRecord({

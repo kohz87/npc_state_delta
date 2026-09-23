@@ -227,7 +227,9 @@ export function decodeStateFilePayload(text) {
     if (!payload || payload.format !== NPC_STATE_FILE_FORMAT) throw new Error('Not an NPC State Delta chat data file.');
     if (payload.formatVersion !== NPC_STATE_FILE_FORMAT_VERSION) throw new Error(`Unsupported NPC State Delta data file version: ${payload.formatVersion}.`);
     if (!payload.state || typeof payload.state !== 'object' || Array.isArray(payload.state)) throw new Error('NPC State Delta data file is missing its state object.');
-    payload.retired = payload.retired === true;
+    const retired = payload.retired === true;
+    if (!retired && !Array.isArray(payload.state.npcs)) throw new Error('NPC State Delta data file is missing its canonical NPC roster.');
+    payload.retired = retired;
     payload.revision = Math.max(0, Math.trunc(Number(payload.revision) || 0));
     payload.writerId = String(payload.writerId || '');
     return payload;

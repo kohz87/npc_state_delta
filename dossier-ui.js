@@ -435,12 +435,30 @@ class DeltaDossierUi {
     }
 
     onDocumentKeydown(event) {
-        if (!this.panelOpen || event.key !== 'Escape' || event.defaultPrevented
-            || document.getElementById('npc_state_delta_tools_overlay')) return;
+        if (!this.panelOpen || event.defaultPrevented) return;
         const uiStatus = this.safeUiStatus();
-        if (uiStatus?.editorMounted || uiStatus?.portraitGeneratorOpen) return;
-        event.preventDefault();
-        this.close();
+        if (document.getElementById('npc_state_delta_tools_overlay') || uiStatus?.editorMounted || uiStatus?.portraitGeneratorOpen) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            this.close();
+            return;
+        }
+        if (event.key !== 'Tab') return;
+        const panel = this.root?.querySelector?.('.delta-panel');
+        if (!panel || panel.hidden) return;
+        const focusable = [...panel.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')]
+            .filter(visibleElement);
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const active = document.activeElement;
+        if (event.shiftKey && (active === first || !panel.contains(active))) {
+            event.preventDefault();
+            last.focus?.({ preventScroll: true });
+        } else if (!event.shiftKey && (active === last || !panel.contains(active))) {
+            event.preventDefault();
+            first.focus?.({ preventScroll: true });
+        }
     }
 
     async open() {

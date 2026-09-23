@@ -28,6 +28,8 @@ test('current-exchange participation uses unique names/aliases/roles without fal
     assert.equal(npcParticipatesInExchange(astra, [astra, other], 'The guild registrar signs the ledger.', { includeRole: false }), false, 'automatic repair can require an explicit name/alias rather than a generic role');
     assert.equal(npcParticipatesInExchange(astra, [astra, other], 'The guard leaves.'), false);
     assert.equal(npcParticipatesInExchange(astra, [astra, other], '<World_State>NPCs Present: Astra Vale; Astra Karr</World_State>'), false, 'World State roster mentions alone are not participation');
+    assert.equal(npcParticipatesInExchange(astra, [astra, other], 'NPCs Present: Astra Vale; Astra Karr'), false, 'plain roster/status lines alone are not participation');
+    assert.equal(npcParticipatesInExchange(astra, [astra, other], 'NPC Status: Astra Vale | present'), false, 'plain NPC status lines alone are not participation');
     assert.equal(npcParticipatesInExchange(astra, [astra, other], '<details><summary>World State</summary>Astra Vale | present</details>'), false, 'World State details alone are not participation');
     assert.equal(npcParticipatesInExchange(astra, [astra, other], 'Astra Vale signs the ledger. World State: Astra Karr | gate watch'), true, 'narrative participation before structured state still counts');
 });
