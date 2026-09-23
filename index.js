@@ -72,6 +72,7 @@ import {
     parseScanJson,
     npcMatchesLabel,
     normalizeName,
+    normalizeGender,
     normalizeNpcRecord,
     normalizeNpcCandidate,
     normalizeScanNpc,
@@ -2235,6 +2236,7 @@ function syncOpenNpcEditorFields(npc) {
     set('npc_state_delta_edit_name', npc.name || '');
     set('npc_state_delta_edit_role', npc.role || '');
     set('npc_state_delta_edit_species', npc.species || '');
+    set('npc_state_delta_edit_gender', npc.gender || '');
     set('npc_state_delta_edit_home_base', npc.homeBase || '');
     set('npc_state_delta_edit_age', npc.age || '');
     set('npc_state_delta_edit_birthday', npc.birthDateDisplay || '');
@@ -2260,7 +2262,7 @@ function syncOpenNpcEditorFields(npc) {
 }
 
 function refreshChangedFields(before, after) {
-    const fields = ['name','role','species','homeBase','age','apparentAge','appearance','personality','speech','behaviorProfile','background','keyRelationships','relationshipSummary','mood','location','goal','status','lifeState','mannerisms','memories'];
+    const fields = ['name','role','species','gender','homeBase','age','apparentAge','appearance','personality','speech','behaviorProfile','background','keyRelationships','relationshipSummary','mood','location','goal','status','lifeState','mannerisms','memories'];
     return fields.filter(field => JSON.stringify(before?.[field] ?? null) !== JSON.stringify(after?.[field] ?? null));
 }
 
@@ -3536,6 +3538,7 @@ function snapshotNpc(npc) {
         aliases: [...(npc.aliases || [])],
         role: npc.role || '',
         species: npc.species || '',
+        gender: npc.gender || '',
         homeBase: npc.homeBase || '',
         age: npc.age || '',
         apparentAge: npc.apparentAge || '',
@@ -4440,6 +4443,7 @@ function openNpcEditor(npcId) {
       <div class="npc-state-delta-editor-grid npc-state-delta-editor-profile">
         <label>Name<input id="npc_state_delta_edit_name" class="text_pole" value="${editorValue(npc.name)}"></label>
         <label>Species / Race<input id="npc_state_delta_edit_species" class="text_pole" maxlength="160" placeholder="Half-elf, dwarf, dwelf, human, custom species..." value="${editorValue(npc.species)}"></label>
+        <label>Gender<select id="npc_state_delta_edit_gender" class="text_pole"><option value="" ${!npc.gender ? 'selected' : ''}>Unknown / not established</option><option value="male" ${npc.gender === 'male' ? 'selected' : ''}>Male</option><option value="female" ${npc.gender === 'female' ? 'selected' : ''}>Female</option></select></label>
         <label>Role<input id="npc_state_delta_edit_role" class="text_pole" value="${editorValue(npc.role)}"></label>
         <label>Home Base / Usual Location<input id="npc_state_delta_edit_home_base" class="text_pole" maxlength="300" placeholder="Home, workplace, headquarters, or regular haunt" value="${editorValue(npc.homeBase)}"></label>
         <label>Chronological age<input id="npc_state_delta_edit_age" class="text_pole" maxlength="80" placeholder="Actual stated age; leave blank if unknown" value="${editorValue(npc.age)}"></label>
@@ -4845,6 +4849,7 @@ function saveNpcEditor(npcId, { close = true, silent = false } = {}) {
         name: String(editorField('npc_state_delta_edit_name')).trim().slice(0, 120) || current.name,
         role: String(editorField('npc_state_delta_edit_role')).trim().slice(0, 240),
         species: String(editorField('npc_state_delta_edit_species')).trim().slice(0, 160),
+        gender: normalizeGender(editorField('npc_state_delta_edit_gender')),
         homeBase: String(editorField('npc_state_delta_edit_home_base')).trim().slice(0, 300),
         age: String(editorField('npc_state_delta_edit_age')).trim().slice(0, 80),
         apparentAge: String(editorField('npc_state_delta_edit_apparent_age')).trim().slice(0, 80),
@@ -4921,7 +4926,7 @@ function saveNpcEditor(npcId, { close = true, silent = false } = {}) {
             turn: Number.isFinite(Number(state.turn)) ? Number(state.turn) : null,
         };
     }
-    const stableKeys = ['name', 'role', 'species', 'homeBase', 'age', 'apparentAge', 'personality', 'speech', 'behaviorProfile', 'background', 'mannerisms', 'keyRelationships'];
+    const stableKeys = ['name', 'role', 'species', 'gender', 'homeBase', 'age', 'apparentAge', 'personality', 'speech', 'behaviorProfile', 'background', 'mannerisms', 'keyRelationships'];
     if (document.getElementById('npc_state_delta_edit_lock_profile')?.checked) {
         const locks = new Set(current.manualProfileFields || []);
         for (const key of stableKeys) {
