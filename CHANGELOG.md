@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.0.46 - 23 September 2026
+
+- Add canonical NPC gender as optional stable identity metadata with only `male`, `female`, or blank for unknown/not yet established. Scanner, Refresh, backfill, and structured dossier import may establish it only from explicit wording or an unambiguous gendered identity/reference; names, occupations, clothing, body type, species, and generated portraits cannot infer it.
+- Preserve established gender by default and require explicit correction state/reason before an automatic scan can flip it. Carry the field through candidates, rollback/native bundle state, manual editing, search, and roleplay injection without changing persisted format versions.
+- Show identity as `Species · Gender · Role · Age/Looks` and add gender to the cast rail. Portrait prompts now place gender immediately after species and before apparent age/appearance/role so image generation no longer receives an under-specified subject when gender is known.
+- Add end-to-end regressions and advance synchronized application/package/display metadata to 1.0.46.
+
 ## 1.0.45 - 22 September 2026
 
 - Restyle the Portrait seed control as a compact dark-theme panel so the browser-default white number input no longer breaks the Portrait dialog's visual hierarchy.
