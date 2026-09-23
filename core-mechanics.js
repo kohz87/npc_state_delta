@@ -826,7 +826,7 @@ export function calibrateRelationshipSummary(value, relationship = DEFAULT_RELAT
 
 
 const TEXT_FIELDS = [
-    'role', 'species', 'homeBase', 'age', 'apparentAge', 'appearance', 'personality', 'speech', 'background',
+    'role', 'species', 'gender', 'homeBase', 'age', 'apparentAge', 'appearance', 'personality', 'speech', 'background',
     'relationshipSummary', 'mood', 'location', 'goal', 'status',
 ];
 
@@ -845,6 +845,13 @@ function normalizeBoolean(value, fallback = false) {
         if (['false', 'no', 'n', '0', 'off', ''].includes(text)) return false;
     }
     return Boolean(fallback);
+}
+
+export function normalizeGender(value) {
+    const text = normalizeName(value);
+    if (['male', 'man', 'boy'].includes(text)) return 'male';
+    if (['female', 'woman', 'girl'].includes(text)) return 'female';
+    return '';
 }
 
 export function normalizeName(value) {
@@ -2934,6 +2941,12 @@ export function normalizeScanNpc(raw = {}, options = {}) {
         aliases: cleanList(raw.aliases, 8, 120),
         role: cleanText(raw.role, 300),
         species: cleanText(raw.species ?? raw.race ?? raw.ancestry ?? raw.speciesRace ?? raw.species_race, 160),
+        gender: normalizeGender(raw.gender ?? raw.sex),
+        genderState: (() => {
+            const state = String(raw.genderState ?? raw.gender_state ?? raw.sexState ?? raw.sex_state ?? '').trim().toLowerCase();
+            return state === 'correct' || state === 'correction' ? 'correct' : 'keep';
+        })(),
+        genderReason: cleanText(raw.genderReason ?? raw.gender_reason ?? raw.sexReason ?? raw.sex_reason, 500),
         homeBase: cleanText(raw.homeBase ?? raw.home_base ?? raw.usualLocation ?? raw.usual_location ?? raw.whereToFind ?? raw.where_to_find, 300),
         homeBaseState: (() => {
             const state = String(raw.homeBaseState ?? raw.home_base_state ?? raw.usualLocationState ?? raw.usual_location_state ?? '').trim().toLowerCase();
@@ -3396,6 +3409,7 @@ export function buildNpcPortraitPrompts(rawNpc = {}, options = {}) {
 
     const visualAge = cleanText(npc.apparentAge, 80) || cleanText(npc.age, 80);
     const species = cleanText(npc.species ?? npc.race, 160);
+    const gender = normalizeGender(npc.gender ?? npc.sex);
     const role = cleanText(npc.role, 240);
     const appearance = cleanText(npc.appearance, 1800);
     const mood = useMood ? cleanText(npc.mood, 240) : '';
@@ -3403,6 +3417,7 @@ export function buildNpcPortraitPrompts(rawNpc = {}, options = {}) {
     const appearanceGroups = splitPortraitAppearance(appearance);
     const identity = uniquePortraitParts([
         species,
+        gender,
         visualAge ? 'apparent age ' + visualAge : '',
     ]);
     const roleTag = normalizePortraitAppearanceClause(role);
@@ -3469,6 +3484,7 @@ export function normalizeNpcRecord(raw = {}) {
     npc.identityKind = inferNpcIdentityKind(npc.name, raw.identityKind ?? raw.identity_kind);
     npc.role = cleanText(raw.role, 300);
     npc.species = cleanText(raw.species ?? raw.race ?? raw.ancestry ?? raw.speciesRace ?? raw.species_race, 160);
+    npc.gender = normalizeGender(raw.gender ?? raw.sex);
     npc.homeBase = cleanText(raw.homeBase ?? raw.home_base ?? raw.usualLocation ?? raw.usual_location ?? raw.whereToFind ?? raw.where_to_find, 300);
     const ageFields = normalizeStoredAgeFields(raw);
     npc.age = ageFields.age;
@@ -3577,6 +3593,7 @@ export function createNpcRecord(name, existingIds = [], baseline = DEFAULT_RELAT
         aliases: [],
         role: '',
         species: '',
+        gender: '',
         homeBase: '',
         age: '',
         apparentAge: '',
@@ -3859,6 +3876,10 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
         if (manualFields.has(field)) continue;
         if (field === 'relationshipSummary') continue; // gated after relationship evidence is accepted
         if (typeof value !== 'string' || !value.trim()) continue;
+        if (field === 'gender') {
+            const prior = normalizeGender(existing.gender);
+            if (prior && prior !== value && (incoming.genderState !== 'correct' || !String(incoming.genderReason || '').trim())) continue;
+        }
         if (field === 'homeBase') {
             const prior = String(existing.homeBase || '').trim();
             const context = String(lifecycleOptions.developmentContext || '').trim();
