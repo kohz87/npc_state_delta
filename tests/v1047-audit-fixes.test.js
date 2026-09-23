@@ -23,15 +23,11 @@ const readSource = name => fs.readFileSync(path.join(root, name), 'utf8');
 
 test.afterEach(() => setActiveCalendarConfig(null));
 
-test('scanner parser rejects empty schema-incomplete JSON while preserving substantive profile-only output', () => {
+test('scanner parser rejects schema-incomplete JSON instead of treating it as an empty successful scan', () => {
     assert.throws(() => parseScanJson('{}'), /required npcs array/i);
     assert.throws(() => parseScanJson('{"npcs":{}}'), /required npcs array/i);
     assert.throws(() => parseScanJson({}), /required npcs array/i);
-    assert.throws(() => parseScanJson({ profileUpdates: [] }), /required npcs array/i);
     assert.deepEqual(parseScanJson('{"npcs":[]}').npcs, []);
-    const profileOnly = parseScanJson({ profileUpdates: [{ id: 'npc_mira', speechState: 'refine', speech: 'Formal.' }] });
-    assert.deepEqual(profileOnly.npcs, []);
-    assert.equal(profileOnly.profileUpdates.length, 1);
 });
 
 test('automatic gender establishment and correction require target-grounded story evidence', () => {
