@@ -1612,10 +1612,25 @@ function parseWithScannerRepairs(text, firstError) {
 }
 
 export function parseScanJson(raw) {
-    if (raw && typeof raw === 'object') {
-        if (Array.isArray(raw) || !Array.isArray(raw.npcs)) throw new Error('Scanner response is missing required npcs array.');
-        return raw;
-    }
+    const validateShape = value => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            throw new Error('Scanner response is not a JSON object.');
+        }
+        if (value.npcs !== undefined) {
+            if (!Array.isArray(value.npcs)) throw new Error('Scanner response is missing required npcs array.');
+            return value;
+        }
+        const substantiveProfile = (Array.isArray(value.profileUpdates) && value.profileUpdates.length > 0)
+            || (Array.isArray(value.profile_updates) && value.profile_updates.length > 0);
+        const substantiveEdges = ['keyRelationshipEdges', 'key_relationship_edges', 'socialRelationships', 'social_relationships']
+            .some(key => Array.isArray(value[key]) && value[key].length > 0);
+        if (!substantiveProfile && !substantiveEdges) {
+            throw new Error('Scanner response is missing required npcs array.');
+        }
+        value.npcs = [];
+        return value;
+    };
+    if (raw && typeof raw === 'object') return validateShape(raw);
     let text = String(raw ?? '').trim();
     text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
     const first = text.indexOf('{');
@@ -1628,11 +1643,7 @@ export function parseScanJson(raw) {
     } catch (firstError) {
         parsed = parseWithScannerRepairs(text, firstError);
     }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error('Scanner response is not a JSON object.');
-    }
-    if (!Array.isArray(parsed.npcs)) throw new Error('Scanner response is missing required npcs array.');
-    return parsed;
+    return validateShape(parsed);
 }
 
 function cleanText(value, max = 1200) {
