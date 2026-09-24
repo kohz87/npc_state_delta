@@ -75,8 +75,8 @@ test('scanner requires explicit current Appearance to survive alongside other pr
         transcript: 'Mira washes clean; her hair is revealed as burnished bronze and she changes into a wool smock.',
         existingNpcs: [npc],
     });
-    assert.match(prompt, /MUST emit appearance plus evidence\.appearance/i);
-    assert.match(prompt, /never omit it because other profile fields are also returned/i);
+    assert.match(prompt, /MUST emit appearance\+evidence\.appearance/i);
+    assert.match(prompt, /even with other fields/i);
     assert.match(prompt, /"appearanceState":"refine"/i);
     assert.match(prompt, /"evidence":\{"appearance":\[/i);
 });

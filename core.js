@@ -1374,11 +1374,15 @@ export function mergeScanResult(state, scanResult, options = {}) {
             calendar,
             referenceDate,
         );
-        npc = finalizeProfileDevelopment(npc, profilePrepared.plans.get(String(npc.id || '')), continuityOptions, result.report);
-        const durableUpdate = durableUpdateForNpc(scanResult, npc);
         const appearanceUpdate = appearanceUpdateForNpc(scanResult, npc);
         if (beforeDiagnosticNpc) {
+            // Appearance is resolved by continuity before Personality/Speech finalization. Record
+            // it first so adding observability does not change legacy development-row ordering.
             recordAppearanceDiagnostic(result.report, beforeDiagnosticNpc, npc, appearanceUpdate, continuityOptions, diagnosticNpcRegistry);
+        }
+        npc = finalizeProfileDevelopment(npc, profilePrepared.plans.get(String(npc.id || '')), continuityOptions, result.report);
+        const durableUpdate = durableUpdateForNpc(scanResult, npc);
+        if (beforeDiagnosticNpc) {
             recordSecondaryProfileDiagnostics(result.report, beforeDiagnosticNpc, npc, durableUpdate, continuityOptions, diagnosticNpcRegistry);
             recordBirthdayDiagnostic(result.report, beforeDiagnosticNpc, npc, ordinaryUpdate, options, calendar, referenceDate);
         }
