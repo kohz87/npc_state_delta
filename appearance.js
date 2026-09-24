@@ -374,13 +374,6 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
             } else {
                 next.appearance = reconcileFormAppearance(next.appearance, update, context);
             }
-                if (appearance) {
-                    next.currentForm = '';
-                    next.currentFormUnknown = true;
-                    next.unclassifiedAppearance = appearance;
-                    next.appearance = '';
-                }
-            }
         }
     }
 
