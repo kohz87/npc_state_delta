@@ -8,6 +8,7 @@
 - Add a dedicated Appearance diagnostic row that distinguishes `not-provided`, `candidate-missing`, `locked`, `unchanged`, `unchanged-or-gated`, and applied outcomes.
 - Make Appearance diagnostics search both ordinary `npcs` and `profileUpdates` channels so a profile row cannot hide an Appearance update carried by the ordinary delta.
 - Preserve Appearance as immediate current-visible continuity rather than adding it to the Personality/Speech three-observation development ledger.
+- Record the reviewed model-facing footprint versus 1.0.47: routine scanner/full-window +2 characters and scanner-shaped retry captures +2; targeted Refresh, backfill, dossier import, focused relationship, and RP injection remain unchanged.
 
 
 ## 1.0.47 - 24 September 2026
