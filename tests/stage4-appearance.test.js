@@ -37,6 +37,60 @@ test('Stage 4 flat appearance upgrades to one Base form without fabricating alte
     assert.equal(resolveNpcAppearance(npc), npc.appearance);
 });
 
+
+test('Stage 4 scalar-only current Appearance is promoted to visible unclassified presentation', () => {
+    const text = 'Slender jawline, hazel eyes, pale skin, and thick neck-length waves of burnished bronze hair; developed figure with narrow waist; fitted charcoal-gray wool smock, heavy wool hose, and bull-hide mountain boots.';
+    const npc = normalizeNpcRecord({
+        ...createNpcRecord('Cerys'),
+        appearanceModelVersion: 1,
+        appearance: text,
+        appearanceForms: [],
+        currentForm: '',
+        currentFormUnknown: false,
+    });
+    const projected = dossierDetailProjection(npc);
+
+    assert.equal(npc.currentForm, '');
+    assert.equal(npc.currentFormUnknown, true);
+    assert.equal(npc.appearanceForms.length, 0);
+    assert.match(npc.unclassifiedAppearance, /burnished bronze hair/i);
+    assert.match(npc.unclassifiedAppearance, /charcoal-gray wool smock/i);
+    assert.equal(projected.appearanceModel.currentFormUnknown, true);
+    assert.match(projected.appearanceModel.unclassifiedAppearance, /bull-hide mountain boots/i);
+    assert.match(projected.appearance, /burnished bronze hair/i);
+});
+
+test('Stage 4 flat scanner Appearance on a form-less record becomes canonical unclassified presentation', () => {
+    const base = normalizeNpcRecord({
+        ...createNpcRecord('Cerys'),
+        appearanceModelVersion: 1,
+        appearance: '',
+        appearanceForms: [],
+        currentForm: '',
+        currentFormUnknown: false,
+    });
+    const narration = 'Her hair was not dark at all; thick waves of burnished bronze framed her neck. A fitted charcoal-gray wool smock showed a narrow waist, and she wore heavy hose with greased bull-hide mountain boots.';
+    const currentAppearance = 'Thick waves of burnished bronze hair; developed figure with narrow waist; fitted charcoal-gray wool smock, heavy wool hose, and greased bull-hide mountain boots.';
+    const result = mergeScanResult({ npcs: [base], turn: 1 }, {
+        profileUpdates: [{
+            id: base.id,
+            evidence: { appearance: [narration] },
+            appearance: currentAppearance,
+            appearanceState: 'change',
+            appearanceReason: 'Her cleaned appearance and fitted travel clothing are explicitly revealed.',
+        }],
+    }, { turn: 2, sourceMessageId: 118, developmentContext: narration });
+
+    const npc = result.state.npcs[0];
+    const projected = dossierDetailProjection(npc);
+    assert.equal(npc.currentForm, '');
+    assert.equal(npc.currentFormUnknown, true);
+    assert.equal(npc.appearanceForms.length, 0);
+    assert.match(npc.unclassifiedAppearance, /burnished bronze hair/i);
+    assert.match(projected.appearanceModel.unclassifiedAppearance, /charcoal-gray wool smock/i);
+    assert.match(projected.appearance, /bull-hide mountain boots/i);
+});
+
 test('Stage 4 form identity preserves meaningful punctuation instead of collapsing distinct names', () => {
     const forms = parseAppearanceFormsText(`A-B | First presentation.\nA B | Second presentation.`);
     assert.equal(forms.length, 2);

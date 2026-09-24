@@ -223,6 +223,15 @@ export function normalizeAppearanceModel(raw = {}, { locked = false } = {}) {
         currentFormUnknown = false;
     }
     if (currentForm) currentFormUnknown = false;
+    // Stage 4 scanner-compatible flat Appearance is still the current visible presentation.
+    // When no form is selected, promote it into the canonical unclassified slot so dossier
+    // and editor surfaces do not hide valid captured appearance behind the compatibility scalar.
+    if (version >= APPEARANCE_MODEL_VERSION && !currentForm && !currentFormUnknown && compatibilityAppearance) {
+        unclassifiedAppearance = unclassifiedAppearance
+            || stripOverallPrefix(compatibilityAppearance, explicitOverall)
+            || compatibilityAppearance;
+        currentFormUnknown = true;
+    }
     // Historical flat appearance may still arrive on manually locked pre-form records.
     // Fold that compatibility input into the selected canonical form during normalization.
     // New manual edits use the dedicated appearance-form editor, so this never creates a
@@ -372,7 +381,13 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
             } else if (next.currentFormUnknown) {
                 next.unclassifiedAppearance = reconcileFormAppearance(next.unclassifiedAppearance, update, context);
             } else {
-                next.appearance = reconcileFormAppearance(next.appearance, update, context);
+                const appearance = reconcileFormAppearance(next.unclassifiedAppearance || next.appearance, update, context);
+                if (appearance) {
+                    next.currentForm = '';
+                    next.currentFormUnknown = true;
+                    next.unclassifiedAppearance = appearance;
+                    next.appearance = '';
+                }
             }
         }
     }
