@@ -25,6 +25,51 @@ test('matching existing dossier updates in place even when active roster is full
   assert.equal(report.updated.length,1);
 });
 
+test('matched import preserves target manual locks while retaining portable source locks', () => {
+  const current=createNpcRecord('Cerys');
+  current.gender='female';
+  current.homeBase='The Horn & Flue, Gatefall';
+  current.personality='Quietly resolute and earnest.';
+  current.appearance='Burnished bronze neck-length hair; narrow build; charcoal wool smock.';
+  current.overallAppearance='Burnished bronze neck-length hair.';
+  current.appearanceForms=[{name:'Base',appearance:'Narrow build; charcoal wool smock.'}];
+  current.currentForm='Base';
+  current.appearanceModelVersion=1;
+  current.manualProfileLocksExplicit=true;
+  current.manualProfileFields=['name','gender','homeBase','personality','appearance'];
+
+  const incoming=createNpcRecord('Cerys of Gatefall');
+  incoming.aliases=['Cerys'];
+  incoming.gender='male';
+  incoming.homeBase='Wrong Foreign Address';
+  incoming.personality='Foreign personality replacement.';
+  incoming.appearance='Foreign appearance replacement.';
+  incoming.overallAppearance='Foreign shared appearance.';
+  incoming.appearanceForms=[{name:'Base',appearance:'Foreign base form.'}];
+  incoming.currentForm='Base';
+  incoming.appearanceModelVersion=1;
+  incoming.speech='Soft, raspy, and clipped.';
+  incoming.mood='focused';
+  incoming.manualProfileLocksExplicit=true;
+  incoming.manualProfileFields=['speech'];
+
+  const merged=mergeImportedDossierState(
+    {npcs:[current],dismissed:[],turn:20},
+    {npcs:[incoming],dismissed:[]},
+    {maxNpcs:5,foreignOwnership:true},
+  ).npcs[0];
+  assert.equal(merged.id,current.id);
+  assert.equal(merged.name,'Cerys');
+  assert.ok(merged.aliases.includes('Cerys of Gatefall'));
+  assert.equal(merged.gender,'female');
+  assert.equal(merged.homeBase,'The Horn & Flue, Gatefall');
+  assert.equal(merged.personality,'Quietly resolute and earnest.');
+  assert.match(merged.appearance,/Burnished bronze/i);
+  assert.equal(merged.speech,'Soft, raspy, and clipped.');
+  assert.equal(merged.mood,'focused','unlocked target fields may still accept imported current state');
+  for(const field of ['name','gender','homeBase','personality','appearance','speech']) assert.ok(merged.manualProfileFields.includes(field));
+});
+
 test('unrelated imported stable-id collision is reminted and social graph follows the remap', () => {
   const brina=createNpcRecord('Brina'); brina.id='npc_shared';
   const maren=createNpcRecord('Maren'); maren.id='npc_shared';

@@ -10,7 +10,7 @@ const sourceRoot = path.resolve(here, '..');
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'npc-state-delta-migration-'));
 const extRoot = path.join(tempRoot, 'public', 'scripts', 'extensions', 'third-party', 'npc_state_delta');
 fs.mkdirSync(extRoot, { recursive: true });
-for (const name of ['index.js', 'core.js', 'core-v0218.js', 'bundle.js', 'branch.js', 'branch-v0218.js', 'social.js', 'storage.js', 'identity.js', 'hardening-core.js']) fs.copyFileSync(path.join(sourceRoot, name), path.join(extRoot, name));
+for (const name of ['index.js', 'core.js', 'core-v0218.js', 'bundle.js', 'branch.js', 'branch-v0218.js', 'social.js', 'storage.js', 'identity.js', 'hardening-core.js', 'hardening.js']) fs.copyFileSync(path.join(sourceRoot, name), path.join(extRoot, name));
 fs.writeFileSync(path.join(tempRoot, 'package.json'), JSON.stringify({ type: 'module' }));
 
 const legacyChat = [
@@ -18,6 +18,8 @@ const legacyChat = [
     { is_user: true, is_system: false, name: 'Kazuma', mes: 'I enter the guild.' },
     { is_user: false, is_system: false, name: 'Megumin', mes: 'Yunyun waits beside the notice board.' },
     { is_user: true, is_system: false, name: 'Kazuma', mes: 'I greet Yunyun.' },
+    { is_user: false, is_system: false, name: 'Megumin', mes: 'Yunyun answers with a nervous bow.' },
+    { is_user: true, is_system: false, name: 'Kazuma', mes: 'I ask about the quest board.' },
 ];
 const legacyLineage = legacyChatLineageV0210(legacyChat);
 

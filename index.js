@@ -112,7 +112,6 @@ import {
     fingerprintMessage,
     firstLineageDivergence,
     lineageCheckpointKey,
-    legacyChatLineageV0210,
     addUserDismissedGroup,
     clearUserDismissedGroupsFor,
     compactLegacyBranchHistory,
@@ -156,6 +155,7 @@ import {
     resolveDeletedLifecycleKeyFromPresence,
     resolveOwnedLifecycleKey,
 } from './hardening-core.js';
+import { safeLegacyMigrationForCurrent } from './hardening.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
 const PROMPT_KEY = 'npc_state_delta_live_dossier';
@@ -1859,94 +1859,21 @@ async function moveRenamedChatState(eventData = {}) {
     }
 }
 
-function legacyMigrationMatchesActiveChat(state, chat = getContext().chat || []) {
-    const stored = Array.isArray(state?.lineage) ? state.lineage : [];
-    const messages = Array.isArray(chat) ? chat : [];
-    if (!stored.length || !messages.length) return false;
-    const candidates = [chatLineage(messages), legacyChatLineageV0210(messages)];
-    for (const current of candidates) {
-        const common = firstLineageDivergence(stored, current);
-        const prefix = common < 0 ? Math.min(stored.length, current.length) : common;
-        const required = Math.min(4, stored.length, current.length);
-        const userTurns = messages.slice(0, required).filter(message => message?.is_user).length;
-        if (required >= 4 && prefix >= required && userTurns >= 2) return true;
-    }
-    return false;
-}
-
 async function migrateActiveLegacyNamespace() {
     const identity = getChatIdentity();
     const oldKey = identity.legacyCandidateKey || identity.legacyKey || '';
     if (identity.pending || !isCanonicalChatKey(identity.key) || !oldKey) return false;
-    const newKey = identity.key;
-    const settings = getSettings();
-    if (settings.dataFiles?.[newKey] || chatStateCache.has(newKey)) return false;
-    const oldPointer = settings.dataFiles?.[oldKey] || null;
-    const oldInline = settings.chats?.[oldKey] || null;
-    if (!oldPointer?.path && !oldInline) return false;
-    const existingClaim = settings.legacyOwnershipClaims?.[oldKey];
-    if (existingClaim?.canonicalKey && existingClaim.canonicalKey !== newKey) {
-        console.warn(`[NPC State Delta] refused legacy ownership claim for ${oldKey}; it is already claimed by ${existingClaim.canonicalKey}.`);
-        return false;
-    }
+    // Never claim legacy ownership over a canonical state already resident in this tab, even
+    // when its settings pointer has not become durable yet.
+    if (getSettings().dataFiles?.[identity.key] || chatStateCache.has(identity.key)) return false;
+    const migrated = await safeLegacyMigrationForCurrent();
+    if (!migrated) return false;
 
-    const oldEpoch = bumpOwnershipEpoch(oldKey);
-    const newEpoch = bumpOwnershipEpoch(newKey);
-    try {
-        let rawState = oldInline;
-        if (oldPointer?.path) {
-            const payload = await readNpcStateDataFile(oldPointer, { expectedChatKey: oldKey });
-            assertOwnershipEpoch(oldKey, oldEpoch);
-            if (payload?.retired || !payload?.state) return false;
-            rawState = payload.state;
-        }
-        const state = normalizeChatState(rawState || {});
-        if (!legacyMigrationMatchesActiveChat(state, getContext().chat || [])) {
-            console.warn(`[NPC State Delta] preserved ambiguous legacy sidecar ${oldKey}; active conversation lineage did not prove ownership for ${newKey}.`);
-            return false;
-        }
-        // Ownership proof uses the legacy lineage first. Only after that proof succeeds do we
-        // migrate old swipe-index/checkpoint state against the active conversation, ensuring the
-        // newly qualified sidecar is canonical branch-lineage v2 from its first durable write.
-        seedBranchTracking(state);
-        const newPointer = await writeNpcStateDataFile({ chatKey: newKey, state, appVersion: NPC_STATE_VERSION, pointer: { name: makeNpcStateDataFileName(newKey) }, continuousRetry: false, headers: requestHeaders() });
-        assertOwnershipEpoch(newKey, newEpoch);
-        const verified = await readNpcStateDataFile(newPointer, { expectedChatKey: newKey });
-        assertOwnershipEpoch(newKey, newEpoch);
-        if (!verified?.state || verified.retired) throw new Error('NPC State Delta qualified namespace migration verification failed.');
-
-        const recoveryPointer = await writeNpcStateDataFile({ chatKey: oldKey, state, appVersion: NPC_STATE_VERSION, pointer: { name: makeNpcStateRecoveryFileName(oldKey) }, continuousRetry: false, headers: requestHeaders() });
-        assertOwnershipEpoch(oldKey, oldEpoch);
-        if (oldPointer?.path) await retireNpcStateDataFile({ chatKey: oldKey, pointer: oldPointer, reason: `qualified-namespace-migrated:${newKey}`, appVersion: NPC_STATE_VERSION, headers: requestHeaders() });
-
-        settings.recoveryFiles[oldKey] = { ...recoveryPointer, reason: `qualified-namespace-migrated:${newKey}`, retiredAt: Date.now() };
-        settings.sidecarTombstones[oldKey] = { reason: `qualified-namespace-migrated:${newKey}`, at: Date.now() };
-        settings.legacyOwnershipClaims[oldKey] = { canonicalKey: newKey, ownerId: identity.ownerId, kind: identity.kind, at: Date.now() };
-        settings.dataFiles[newKey] = newPointer;
-        delete settings.dataFiles[oldKey];
-        delete settings.branchIndex[oldKey];
-        if (settings.chats?.[oldKey]) delete settings.chats[oldKey];
-        if (settings.chats && Object.keys(settings.chats).length === 0) delete settings.chats;
-        chatStateCache.delete(oldKey);
-        loadedChatKeys.delete(oldKey);
-        hydrationErrors.delete(oldKey);
-        stateVersions.delete(oldKey);
-        persistedVersions.delete(oldKey);
-        stateWritePromises.delete(oldKey);
-        pendingAutoScans.delete(oldKey);
-        const installed = setChatState(newKey, state, { markLoaded: true });
-        recordBranchIndex(newKey, installed);
-        persistedVersions.set(newKey, Number(stateVersions.get(newKey) || 0));
-        persistSettings();
-        if (oldPointer?.path) {
-            try { await deleteNpcStateDataFile(oldPointer, { headers: requestHeaders() }); } catch {}
-        }
-        console.info(`[NPC State Delta] migrated legacy ownership ${oldKey} -> ${newKey}.`);
-        return true;
-    } catch (error) {
-        if (error?.code !== 'NPC_STATE_STALE_OWNERSHIP') console.warn(`[NPC State Delta] qualified namespace migration failed for ${oldKey}; legacy state remains recoverable.`, error);
-        return false;
-    }
+    // The hardening owner durably moved the canonical pointer/recovery/tombstone mapping.
+    // Drop any pre-migration cache state so hydration reads the verified canonical sidecar.
+    clearLifecycleCacheKey(oldKey, 'legacy-ownership-migrated');
+    clearLifecycleCacheKey(identity.key, 'legacy-ownership-migrated');
+    return true;
 }
 
 async function flushLifecycleOwner(kind = 'chat', ownerId = '') {

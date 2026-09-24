@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 1.0.52 - 24 September 2026
+
+- Consolidate active legacy unqualified-sidecar ownership migration onto one hardened transaction owner. Migration now requires the full stored-lineage proof, refuses an already-resident canonical destination, verifies canonical and recovery writes, persists the ownership mapping synchronously, and only then physically deletes the retired predecessor.
+- Remove the competing weaker four-message-prefix migration path and duplicate `CHAT_CHANGED` migration listener, eliminating both ambiguous legacy claims and two-writer migration races.
+- Harden alias-linked dossier deduplication so the canonical proper-name record retains established Gender/Home Base, manual Name and stable-profile locks remain authoritative, and an Appearance lock preserves the complete Stage 4 form/current/shared presentation state.
+- Harden matched native-bundle imports so target-side manual locks survive imported replacements while portable source locks and unlocked current-state fields still reconcile; stable-id collisions and rejected imports cannot misattach social-graph edges.
+- Correct profile diagnostics: structured/form-only Appearance updates report their resolved applied presentation, Mannerism/Behavioral Profile diagnostics use their own field parser/limits, and unknown numeric provenance remains null without erasing a real message id 0.
+- Expand regression coverage for strong migration ownership, locked alias dedupe, matched-import lock preservation, structured Appearance diagnostics, and diagnostic provenance. Settings schema remains v30; scanner/model-facing prompt bytes, request topology, relationship scoring, and RP injection are unchanged.
+
+
 ## 1.0.51 - 24 September 2026
 
 - Deep-pass harden Custom Preset Library Add/Duplicate/Rename/Delete with immediate SillyTavern host settings persistence, rollback on save failure, and success feedback only after durable save.

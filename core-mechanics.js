@@ -4997,25 +4997,71 @@ function chooseDuplicateCanonicalName(a, b) {
 
 function mergeAliasLinkedNpcPair(a, b) {
     const canonicalName = cleanText(chooseDuplicateCanonicalName(a, b), 120) || a.name || b.name;
+    const canonicalRecord = normalizeName(a?.name) === normalizeName(canonicalName) ? a
+        : (normalizeName(b?.name) === normalizeName(canonicalName) ? b : null);
+    const fallbackRecord = canonicalRecord === a ? b : a;
     const older = Number(a?.createdAt || Infinity) <= Number(b?.createdAt || Infinity) ? a : b;
     const newer = older === a ? b : a;
     const relationshipSource = duplicateRelationshipWeight(a) >= duplicateRelationshipWeight(b) ? a : b;
+    const aLocks = new Set(Array.isArray(a?.manualProfileFields) ? a.manualProfileFields : []);
+    const bLocks = new Set(Array.isArray(b?.manualProfileFields) ? b.manualProfileFields : []);
+    const lockedSourceFor = field => {
+        const aLocked = aLocks.has(field);
+        const bLocked = bLocks.has(field);
+        if (aLocked && bLocked) return older;
+        if (aLocked) return a;
+        if (bLocked) return b;
+        return null;
+    };
+    const lockedNameSource = lockedSourceFor('name');
     const merged = structuredClone(older);
-    merged.name = canonicalName;
-    merged.identityKind = inferNpcIdentityKind(canonicalName, 'proper_name');
+    merged.name = lockedNameSource ? (cleanText(lockedNameSource.name, 120) || canonicalName) : canonicalName;
+    merged.identityKind = inferNpcIdentityKind(merged.name, lockedNameSource?.identityKind || 'proper_name');
+    // Dedupe must not erase stable identity learned on the proper-name record. Prefer
+    // the record whose label became canonical, then preserve a grounded value from its duplicate.
+    const lockedGenderSource = lockedSourceFor('gender');
+    const lockedHomeBaseSource = lockedSourceFor('homeBase');
+    merged.gender = lockedGenderSource
+        ? normalizeGender(lockedGenderSource.gender)
+        : (normalizeGender(canonicalRecord?.gender) || normalizeGender(fallbackRecord?.gender));
+    merged.homeBase = lockedHomeBaseSource
+        ? cleanText(lockedHomeBaseSource.homeBase, 300)
+        : (cleanText(canonicalRecord?.homeBase, 300) || cleanText(fallbackRecord?.homeBase, 300));
+    const lockedAppearanceSource = lockedSourceFor('appearance');
+    if (lockedAppearanceSource) {
+        for (const key of ['appearance', 'overallAppearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'appearanceModelVersion']) {
+            if (Object.prototype.hasOwnProperty.call(lockedAppearanceSource, key)) merged[key] = structuredClone(lockedAppearanceSource[key]);
+            else delete merged[key];
+        }
+    }
     merged.aliases = mergeLists(
         [a.name, ...(a.aliases || []), b.name, ...(b.aliases || [])],
         [], 8,
-    ).filter(alias => normalizeName(alias) !== normalizeName(canonicalName));
+    ).filter(alias => normalizeName(alias) !== normalizeName(merged.name));
     for (const field of ['role','species','age','apparentAge','personality','speech','appearance','background','relationshipSummary','mood','location','goal','status','lifeStateReason']) {
+        if (field === 'appearance' && lockedAppearanceSource) continue;
+        const lockedSource = lockedSourceFor(field);
+        if (lockedSource) {
+            merged[field] = cleanText(lockedSource?.[field], field === 'appearance' ? 1800 : 1200);
+            continue;
+        }
         const av = cleanText(a?.[field], field === 'appearance' ? 1800 : 1200);
         const bv = cleanText(b?.[field], field === 'appearance' ? 1800 : 1200);
         merged[field] = bv.length > av.length ? bv : av;
     }
     merged.memories = normalizeStoredMemories([...(a.memories || []), ...(b.memories || [])]);
-    merged.mannerisms = normalizeMannerisms([...(a.mannerisms || []), ...(b.mannerisms || [])]);
-    merged.behaviorProfile = normalizeBehaviorProfile([...(a.behaviorProfile || []), ...(b.behaviorProfile || [])]);
-    merged.keyRelationships = mergeKeyRelationshipUpdates(a.keyRelationships || [], b.keyRelationships || []);
+    const mannerismLock = lockedSourceFor('mannerisms');
+    const behaviorLock = lockedSourceFor('behaviorProfile');
+    const relationshipLock = lockedSourceFor('keyRelationships');
+    merged.mannerisms = mannerismLock
+        ? structuredClone(mannerismLock.mannerisms || [])
+        : normalizeMannerisms([...(a.mannerisms || []), ...(b.mannerisms || [])]);
+    merged.behaviorProfile = behaviorLock
+        ? structuredClone(behaviorLock.behaviorProfile || [])
+        : normalizeBehaviorProfile([...(a.behaviorProfile || []), ...(b.behaviorProfile || [])]);
+    merged.keyRelationships = relationshipLock
+        ? structuredClone(relationshipLock.keyRelationships || [])
+        : mergeKeyRelationshipUpdates(a.keyRelationships || [], b.keyRelationships || []);
     merged.profileEvidence = normalizeProfileEvidence({
         personality: [...(a.profileEvidence?.personality || []), ...(b.profileEvidence?.personality || [])],
         speech: [...(a.profileEvidence?.speech || []), ...(b.profileEvidence?.speech || [])],

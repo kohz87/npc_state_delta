@@ -643,14 +643,21 @@ function recordAppearanceDiagnostic(report, beforeNpc, afterNpc, rawUpdate, opti
         'currentForm', 'current_form', 'currentFormState', 'current_form_state',
     ].some(key => Object.prototype.hasOwnProperty.call(raw, key));
     const providerEvidencePresent = rawEvidence.length > 0;
+    const structuredAppearancePresent = [
+        'overallAppearance', 'overall_appearance', 'appearanceForms', 'appearance_forms',
+        'currentForm', 'current_form', 'currentFormState', 'current_form_state',
+    ].some(key => Object.prototype.hasOwnProperty.call(raw, key));
     const previousValue = profileDevelopmentText('appearance', beforeNpc.appearance, 720);
     const candidateValue = profileDevelopmentText('appearance', normalized.appearance, 720);
     const currentValue = profileDevelopmentText('appearance', afterNpc.appearance, 720);
     const locked = Array.isArray(beforeNpc?.manualProfileFields) && beforeNpc.manualProfileFields.includes('appearance');
-    const candidateChanged = Boolean(candidateValue)
+    const flatCandidateChanged = Boolean(candidateValue)
         && mechanics.normalizeName(candidateValue) !== mechanics.normalizeName(previousValue);
     const changed = mechanics.normalizeName(currentValue) !== mechanics.normalizeName(previousValue);
-    const candidateAlreadyRepresented = Boolean(candidateValue) && !candidateChanged;
+    const diagnosticCandidate = candidateValue || (structuredAppearancePresent && changed ? currentValue : '');
+    const candidateChanged = Boolean(diagnosticCandidate)
+        && mechanics.normalizeName(diagnosticCandidate) !== mechanics.normalizeName(previousValue);
+    const candidateAlreadyRepresented = Boolean(diagnosticCandidate) && !candidateChanged;
     const otherLabels = (Array.isArray(allNpcs) ? allNpcs : [])
         .filter(other => String(other?.id || '') !== String(afterNpc?.id || ''))
         .flatMap(other => [other?.name, ...(Array.isArray(other?.aliases) ? other.aliases : [])])
@@ -661,7 +668,7 @@ function recordAppearanceDiagnostic(report, beforeNpc, afterNpc, rawUpdate, opti
         targeted: options.allowTargetedDurableSeed === true || options.developmentSingleTarget === true,
         otherLabels,
     };
-    const candidateGrounded = candidateChanged && normalized.appearanceState !== 'change'
+    const candidateGrounded = flatCandidateChanged && normalized.appearanceState !== 'change'
         ? mechanics.durableRefinementCandidateGrounded(
             'appearance',
             previousValue,
@@ -674,8 +681,9 @@ function recordAppearanceDiagnostic(report, beforeNpc, afterNpc, rawUpdate, opti
     const fieldReason = profileDevelopmentText('appearance', normalized.appearanceReason, 500);
     const outcome = !providerFieldPresent && !providerEvidencePresent ? 'not-provided'
         : (locked ? 'locked'
-            : (!candidateValue ? 'candidate-missing'
-                : (changed ? `applied-${normalized.appearanceState || 'update'}`
+            : (changed ? (structuredAppearancePresent && !candidateValue ? 'applied-form-update' : `applied-${normalized.appearanceState || 'update'}`)
+                : (!candidateValue
+                    ? (structuredAppearancePresent ? 'form-update-unchanged-or-gated' : 'candidate-missing')
                     : (candidateAlreadyRepresented ? 'unchanged' : 'unchanged-or-gated'))));
     const evidence = rawEvidence.slice(0, PROFILE_DEVELOPMENT_OBSERVATION_LIMIT).map(item => {
         const parsed = parseProfileDevelopmentEvidence('appearance', item);
@@ -695,7 +703,7 @@ function recordAppearanceDiagnostic(report, beforeNpc, afterNpc, rawUpdate, opti
         effectiveScale: '',
         locked,
         previous: previousValue,
-        candidate: candidateValue,
+        candidate: diagnosticCandidate,
         fieldReason,
         providerReasonPresent: Boolean(fieldReason),
         effectiveReason: fieldReason,
@@ -707,6 +715,7 @@ function recordAppearanceDiagnostic(report, beforeNpc, afterNpc, rawUpdate, opti
         candidateGrounded,
         reasonGrounded: null,
         providerFieldPresent,
+        structuredAppearancePresent,
         providerEvidencePresent,
         evidence,
     });
@@ -771,11 +780,11 @@ function recordSecondaryProfileDiagnostics(report, beforeNpc, afterNpc, rawUpdat
                         ? (evidenceAlreadyRepresented ? 'evidence-already-reflected' : 'waiting-for-revised-candidate')
                         : 'unchanged-or-gated'))));
         const evidence = rawEvidence.slice(0, PROFILE_DEVELOPMENT_OBSERVATION_LIMIT).map(item => {
-            const parsed = parseProfileDevelopmentEvidence('speech', item);
+            const parsed = parseProfileDevelopmentEvidence(field, item);
             return {
                 sourceMessageId: parsed?.sourceMessageId ?? null,
                 concept: parsed?.explicitConcept || parsed?.concept || '',
-                sample: parsed?.body || profileDevelopmentText('speech', item, mechanics.DURABLE_PROFILE_LIMITS.evidence),
+                sample: parsed?.body || profileDevelopmentText(field, item, mechanics.DURABLE_PROFILE_LIMITS.evidence),
             };
         });
         report.profileDevelopment = Array.isArray(report.profileDevelopment) ? report.profileDevelopment : [];
@@ -788,8 +797,8 @@ function recordSecondaryProfileDiagnostics(report, beforeNpc, afterNpc, rawUpdat
             effectiveScale: inferredBatch ? 'batch' : (normalized.developmentScale || 'gradual'),
             inferredScale: inferredBatch,
             locked,
-            previous: profileDevelopmentText('appearance', previousValue, 720),
-            candidate: profileDevelopmentText('appearance', candidateValue, 720),
+            previous: profileDevelopmentText(field, previousValue, 720),
+            candidate: profileDevelopmentText(field, candidateValue, 720),
             developmentReason,
             fieldReason,
             providerReasonPresent: Boolean(developmentReason),
@@ -1425,4 +1434,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.51';
+export const NPC_STATE_VERSION = '1.0.52';

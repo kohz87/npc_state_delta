@@ -44,7 +44,7 @@ test('retired sidecars are explicit durable tombstones', () => {
 });
 
 test('rename uses event groupId and writes a recovery backup before retiring predecessor', () => {
-    const fn = index.slice(index.indexOf('async function moveRenamedChatState'), index.indexOf('function legacyMigrationMatchesActiveChat'));
+    const fn = index.slice(index.indexOf('async function moveRenamedChatState'), index.indexOf('async function migrateActiveLegacyNamespace'));
     assert.match(fn, /eventData\.groupId/);
     const recovery = fn.indexOf('makeNpcStateRecoveryFileName(oldKey)');
     const retire = fn.indexOf('retireNpcStateDataFile');

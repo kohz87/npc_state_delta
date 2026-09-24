@@ -10,6 +10,7 @@ function clean(value, max = 320) {
     return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 function finiteInt(value, fallback = null) {
+    if (value === null || value === undefined || value === '') return fallback;
     const number = Number(value);
     return Number.isFinite(number) ? Math.trunc(number) : fallback;
 }

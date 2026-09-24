@@ -145,7 +145,7 @@ function installBranchProvenanceHint() {
     });
 }
 
-async function safeLegacyMigrationForCurrent() {
+export async function safeLegacyMigrationForCurrent() {
     const ctx = getContext() || {};
     const identity = getChatIdentityFromContext(ctx);
     installBranchProvenanceHint();
@@ -607,13 +607,6 @@ export async function prepareNpcStateHardening() {
     installed = true;
     const on = source.on.bind(source);
 
-    if (events.CHAT_CHANGED) on(events.CHAT_CHANGED, () => {
-        const identity = getChatIdentityFromContext(getContext() || {});
-        return runBoundedHardeningEvent(`legacy:${identity.key}`, 'legacy ownership migration', async () => {
-            installBranchProvenanceHint();
-            await safeLegacyMigrationForCurrent();
-        });
-    });
     if (events.CHARACTER_RENAMED) on(events.CHARACTER_RENAMED, (oldAvatar, newAvatar) => {
         const eventId = ++lifecycleEventSequence;
         return runBoundedHardeningEvent(

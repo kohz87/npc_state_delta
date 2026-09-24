@@ -66,6 +66,106 @@ test('scanner establishes gender but cannot silently flip an established value',
     assert.equal(corrected.gender, 'male');
 });
 
+test('alias dedupe preserves stable identity learned on the canonical proper-name record', () => {
+    const interim = normalizeNpcRecord({
+        ...createNpcRecord('half-elf girl'),
+        id: 'npc_interim',
+        createdAt: 1,
+        updatedAt: 10,
+    });
+    const named = normalizeNpcRecord({
+        ...createNpcRecord('Cerys'),
+        id: 'npc_cerys',
+        aliases: ['half-elf girl'],
+        gender: 'female',
+        homeBase: 'The Horn & Flue, Gatefall',
+        createdAt: 2,
+        updatedAt: 20,
+    });
+    const merged = mergeScanResult({ npcs: [interim, named], turn: 2 }, { npcs: [] }, { turn: 2 });
+    assert.equal(merged.state.npcs.length, 1);
+    assert.equal(merged.state.npcs[0].id, 'npc_interim', 'the older dossier remains the continuity owner');
+    assert.equal(merged.state.npcs[0].name, 'Cerys');
+    assert.equal(merged.state.npcs[0].gender, 'female');
+    assert.equal(merged.state.npcs[0].homeBase, 'The Horn & Flue, Gatefall');
+});
+
+test('alias dedupe cannot overwrite manually locked stable profile fields', () => {
+    const locked = normalizeNpcRecord({
+        ...createNpcRecord('half-elf girl'),
+        id: 'npc_locked_interim',
+        gender: 'female',
+        homeBase: 'Lower Caravan Yard',
+        personality: 'Quiet and wary.',
+        mannerisms: ['Keeps her gaze lowered.'],
+        behaviorProfile: ['Independence: guarded around strangers.'],
+        keyRelationships: ['Varn — cobbler | trusted outfitter'],
+        manualProfileLocksExplicit: true,
+        manualProfileFields: ['gender', 'homeBase', 'personality', 'mannerisms', 'behaviorProfile', 'keyRelationships'],
+        createdAt: 1,
+        updatedAt: 10,
+    });
+    const duplicate = normalizeNpcRecord({
+        ...createNpcRecord('Cerys'),
+        id: 'npc_duplicate_named',
+        aliases: ['half-elf girl'],
+        gender: 'male',
+        homeBase: 'Wrong New Address',
+        personality: 'Verbose automatic text that must not replace the player-locked personality.',
+        mannerisms: ['Automatic replacement gesture.'],
+        behaviorProfile: ['Disposition: automatic replacement.'],
+        keyRelationships: ['Someone Else — friend | automatic duplicate'],
+        createdAt: 2,
+        updatedAt: 20,
+    });
+    const merged = mergeScanResult({ npcs: [locked, duplicate], turn: 3 }, { npcs: [] }, { turn: 3 }).state.npcs[0];
+    assert.equal(merged.name, 'Cerys');
+    assert.equal(merged.gender, 'female');
+    assert.equal(merged.homeBase, 'Lower Caravan Yard');
+    assert.equal(merged.personality, 'Quiet and wary.');
+    assert.deepEqual(merged.mannerisms, ['Keeps her gaze lowered.']);
+    assert.deepEqual(merged.behaviorProfile, ['Independence: guarded around strangers.']);
+    assert.deepEqual(merged.keyRelationships, ['Varn — cobbler | trusted outfitter']);
+    assert.ok(merged.manualProfileFields.includes('personality'));
+});
+
+test('alias dedupe preserves manually locked Name and full Stage 4 Appearance state', () => {
+    const locked = normalizeNpcRecord({
+        ...createNpcRecord('half-elf girl'),
+        id: 'npc_locked_identity',
+        appearanceModelVersion: 1,
+        appearance: 'Burnished bronze hair; charcoal wool smock.',
+        overallAppearance: 'Burnished bronze hair.',
+        appearanceForms: [{ name: 'Base', appearance: 'Charcoal wool smock; greased bull-hide boots.' }],
+        currentForm: 'Base',
+        manualProfileLocksExplicit: true,
+        manualProfileFields: ['name', 'appearance'],
+        createdAt: 1,
+        updatedAt: 10,
+    });
+    const duplicate = normalizeNpcRecord({
+        ...createNpcRecord('Cerys'),
+        id: 'npc_named_duplicate',
+        aliases: ['half-elf girl'],
+        appearanceModelVersion: 1,
+        appearance: 'Wrong silver hair.',
+        overallAppearance: 'Wrong shared appearance.',
+        appearanceForms: [{ name: 'Base', appearance: 'Wrong clothing.' }],
+        currentForm: 'Base',
+        createdAt: 2,
+        updatedAt: 20,
+    });
+    const merged = mergeScanResult({ npcs: [locked, duplicate], turn: 3 }, { npcs: [] }, { turn: 3 }).state.npcs[0];
+    assert.equal(merged.name, 'half-elf girl');
+    assert.ok(merged.aliases.includes('Cerys'));
+    assert.match(merged.overallAppearance, /burnished bronze/i);
+    assert.equal(merged.currentForm, 'Base');
+    assert.match(merged.appearanceForms[0].appearance, /bull-hide boots/i);
+    assert.doesNotMatch(JSON.stringify(merged.appearanceForms), /Wrong clothing/i);
+    assert.ok(merged.manualProfileFields.includes('name'));
+    assert.ok(merged.manualProfileFields.includes('appearance'));
+});
+
 test('portrait identity sends species then gender then apparent age before visual details', () => {
     const prompts = buildNpcPortraitPrompts({
         species: 'Human',

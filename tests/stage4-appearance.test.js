@@ -255,6 +255,28 @@ test('Stage 4 portrait and roleplay injection resolve the same current form', ()
     assert.equal((injection.match(/ordinary human ears/gi) || []).length, 1, 'resolved current appearance should be injected once, not duplicated after the budgeted dossier');
 });
 
+test('Stage 4 form-only switch diagnostics report the applied resolved presentation', () => {
+    const base = formNpc('Mira');
+    const result = mergeScanResult({ npcs: [base], turn: 8 }, {
+        profileUpdates: [{
+            id: base.id,
+            currentForm: 'Stormcrown',
+            currentFormState: 'select',
+        }],
+    }, {
+        turn: 8,
+        sourceMessageId: 808,
+        developmentContext: 'Mira changes from her Human form into her established Stormcrown form.',
+    });
+    const current = result.state.npcs[0];
+    assert.equal(current.currentForm, 'Stormcrown');
+    assert.match(resolveNpcAppearance(current), /storm-blue plumage/i);
+    const diagnostic = result.report.profileDevelopment.find(row => row.field === 'appearance');
+    assert.equal(diagnostic?.outcome, 'applied-form-update');
+    assert.equal(diagnostic?.structuredAppearancePresent, true);
+    assert.match(diagnostic?.candidate || '', /storm-blue plumage/i);
+});
+
 test('Stage 4 accepts a grounded current-presentation change without a development-scale gate', () => {
     const base = normalizeNpcRecord({
         ...createNpcRecord('Mara'),

@@ -287,6 +287,40 @@ function initImportReport(report) {
     return report;
 }
 
+const IMPORT_LOCKED_FIELD_KEYS = Object.freeze({
+    name: ['name', 'identityKind'],
+    role: ['role'],
+    species: ['species'],
+    gender: ['gender'],
+    homeBase: ['homeBase'],
+    age: ['age'],
+    apparentAge: ['apparentAge'],
+    appearance: ['appearance', 'overallAppearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'appearanceModelVersion'],
+    personality: ['personality'],
+    speech: ['speech'],
+    behaviorProfile: ['behaviorProfile'],
+    background: ['background'],
+    mannerisms: ['mannerisms'],
+    keyRelationships: ['keyRelationships'],
+});
+
+function preserveTargetManualLocks(oldNpc, importedNpc) {
+    const targetLocks = new Set(Array.isArray(oldNpc?.manualProfileFields) ? oldNpc.manualProfileFields : []);
+    const sourceLocks = new Set(Array.isArray(importedNpc?.manualProfileFields) ? importedNpc.manualProfileFields : []);
+    const merged = { ...oldNpc, ...importedNpc };
+    for (const field of targetLocks) {
+        for (const key of IMPORT_LOCKED_FIELD_KEYS[field] || []) {
+            if (Object.prototype.hasOwnProperty.call(oldNpc || {}, key)) merged[key] = structuredClone(oldNpc[key]);
+            else delete merged[key];
+        }
+    }
+    merged.manualProfileFields = [...new Set([...targetLocks, ...sourceLocks])];
+    merged.manualProfileLocksExplicit = Boolean(
+        oldNpc?.manualProfileLocksExplicit || importedNpc?.manualProfileLocksExplicit || merged.manualProfileFields.length,
+    );
+    return merged;
+}
+
 export function mergeImportedDossierState(currentState, importedState, { maxNpcs = 40, excludeNames = [], report = null, foreignOwnership = false } = {}) {
     const current = currentState && typeof currentState === 'object' ? currentState : {};
     const incoming = importedState && typeof importedState === 'object' ? importedState : {};
@@ -335,12 +369,19 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
                 continue;
             }
             usedTargetIndexes.add(index);
+            const lockAware = preserveTargetManualLocks(old, npc);
+            const effectiveName = String(lockAware.name || npc.name || old.name || '').trim();
             const merged = normalizeNpcRecord({
-                ...old,
-                ...npc,
+                ...lockAware,
                 id: targetId,
-                aliases: [...new Set([...(old.aliases || []), ...(npc.aliases || []), ...(old.name !== npc.name ? [old.name] : [])])]
-                    .filter(alias => normalizeName(alias) !== normalizeName(npc.name))
+                aliases: [...new Set([
+                    ...(old.aliases || []),
+                    ...(npc.aliases || []),
+                    old.name,
+                    npc.name,
+                ])]
+                    .filter(Boolean)
+                    .filter(alias => normalizeName(alias) !== normalizeName(effectiveName))
                     .slice(0, 8),
                 portrait: npc.portrait?.dataUrl ? structuredClone(npc.portrait) : old.portrait || npc.portrait || null,
                 // Activity counters are chat-local clocks. A foreign dossier may update durable

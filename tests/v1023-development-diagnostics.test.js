@@ -192,6 +192,42 @@ test('v1.0.23 diagnostic store is always bounded, filterable per NPC, and strips
     assert.equal(bundle.operations.length, 8);
 });
 
+test('secondary profile diagnostics use the actual durable field parser and formatter', () => {
+    const core = fs.readFileSync(new URL('../core.js', import.meta.url), 'utf8');
+    const block = core.slice(
+        core.indexOf('function recordSecondaryProfileDiagnostics'),
+        core.indexOf('function recordBirthdayDiagnostic'),
+    );
+    assert.match(block, /parseProfileDevelopmentEvidence\(field, item\)/);
+    assert.match(block, /profileDevelopmentText\(field, item, mechanics\.DURABLE_PROFILE_LIMITS\.evidence\)/);
+    assert.match(block, /profileDevelopmentText\(field, previousValue, 720\)/);
+    assert.match(block, /profileDevelopmentText\(field, candidateValue, 720\)/);
+    assert.doesNotMatch(block, /parseProfileDevelopmentEvidence\('speech', item\)/);
+    assert.doesNotMatch(block, /profileDevelopmentText\('appearance', (?:previousValue|candidateValue), 720\)/);
+});
+
+test('diagnostic sanitizer preserves unknown numeric provenance as null without erasing real message zero', () => {
+    const store = createDiagnosticStore({ limit: 4, now: () => 1234 });
+    store.record('owner:chat', {
+        type: 'scan',
+        npcIds: ['npc_cerys'],
+        profileDevelopment: [{
+            npcId: 'npc_cerys',
+            field: 'appearance',
+            outcome: 'unchanged',
+            episode: { detected: false, grounded: false, npcBound: null, anchorIndex: null, segmentCount: 0 },
+            evidence: [
+                { sourceMessageId: null, concept: 'bronze hair', sample: 'Burnished bronze hair.' },
+                { sourceMessageId: 0, concept: 'opening', sample: 'Opening-message evidence.' },
+            ],
+        }],
+    });
+    const row = store.records('owner:chat')[0].profile[0];
+    assert.equal(row.episode.anchorIndex, null);
+    assert.equal(row.evidence[0].sourceMessageId, null);
+    assert.equal(row.evidence[1].sourceMessageId, 0);
+});
+
 test('v1.0.23 per-NPC diagnostic visibility is presentation-only while Maintenance export uses the runtime store', () => {
     const experience = fs.readFileSync(new URL('../dossier-experience.js', import.meta.url), 'utf8');
     const tools = fs.readFileSync(new URL('../dossier-tools.js', import.meta.url), 'utf8');
