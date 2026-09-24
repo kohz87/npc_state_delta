@@ -56,11 +56,11 @@ test('editor and portrait workflows are chat-affine', () => {
     assert.match(index, /closePortraitGenerator\(\);\n\s*closeNpcViewer\(\);\n\s*closeNpcEditor\(\);/);
 });
 
-test('Delta application metadata is v1.0.50 and active core ownership is semantic', () => {
-    assert.match(core, /NPC_STATE_VERSION = '1\.0\.50'/);
+test('Delta application metadata is v1.0.51 and active core ownership is semantic', () => {
+    assert.match(core, /NPC_STATE_VERSION = '1\.0\.51'/);
     assert.match(core, /export \* from '\.\/core-mechanics\.js'/);
     assert.doesNotMatch(core, /NPC_STATE_SOURCE_ENGINE_VERSION|core-v0218/);
-    assert.equal(manifest.version, '1.0.50');
+    assert.equal(manifest.version, '1.0.51');
     assert.equal(manifest.author, 'kohz87');
 });
 
@@ -92,4 +92,15 @@ test('portrait custom preset library exposes named management and keeps visual c
     assert.match(index, /portraitSaveToGallery: source\.portraitSaveToGallery === true/);
     assert.match(index, /const settings = portraitSettingsSnapshot\(getSettings\(\)\)/);
     assert.match(index, /Custom · \$\{preset\.name\}/);
+});
+
+test('portrait custom preset CRUD is durable, dirty-safe, and name-unambiguous', () => {
+    assert.match(index, /async function persistPortraitCustomPresetLibrary/);
+    assert.match(index, /await saveHostSettings\(\)/);
+    assert.match(index, /custom portrait preset save failed/);
+    assert.match(index, /portraitCustomPresetNameTaken/);
+    assert.match(index, /uniquePortraitCustomPresetName/);
+    assert.match(index, /portraitSettingsDirty && !\(await savePortraitSettingsDraft\(\)\)/);
+    assert.match(index, /operational: snapshot/);
+    assert.match(index, /Math\.min\(Math\.max\(0, targetIndex\), presets\.length - 1\)/);
 });

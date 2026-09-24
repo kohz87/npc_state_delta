@@ -399,6 +399,27 @@ function nextPortraitCustomPresetId(presets = []) {
     return id;
 }
 
+function portraitCustomPresetNameKey(value) {
+    return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function portraitCustomPresetNameTaken(presets, name, excludeId = '') {
+    const key = portraitCustomPresetNameKey(name);
+    if (!key) return false;
+    return (presets || []).some(item => String(item?.id || '') !== String(excludeId || '')
+        && portraitCustomPresetNameKey(item?.name) === key);
+}
+
+function uniquePortraitCustomPresetName(presets, base, excludeId = '') {
+    const root = String(base || 'Custom').trim().slice(0, 72) || 'Custom';
+    if (!portraitCustomPresetNameTaken(presets, root, excludeId)) return root;
+    for (let suffix = 2; suffix < 1000; suffix += 1) {
+        const candidate = `${root} ${suffix}`.slice(0, 80);
+        if (!portraitCustomPresetNameTaken(presets, candidate, excludeId)) return candidate;
+    }
+    return `${root.slice(0, 68)} ${Date.now().toString(36)}`.slice(0, 80);
+}
+
 const DURABLE_COMPACTION_VERSION = 1;
 
 const DEFAULTS = Object.freeze({
@@ -4720,8 +4741,8 @@ function portraitGeneratorHtml(npc, prompts) {
             <div class="npc-state-delta-portrait-generator-status" hidden></div>
           </section>
           <section class="npc-state-delta-portrait-generator-prompts">
-            <label><b>Positive prompt</b><small>Built from the current dossier + global portrait theme. Edit freely for this generation.</small><textarea id="npc_state_delta_portrait_positive" class="text_pole" rows="9">${escapeHtml(prompts.positive)}</textarea></label>
-            <label><b>Negative prompt</b><small>Global exclusions + this NPC's optional negative override.</small><textarea id="npc_state_delta_portrait_negative" class="text_pole" rows="7">${escapeHtml(prompts.negative)}</textarea></label>
+            <label><b>Positive prompt</b><small>Built from the current dossier + selected portrait theme/preset. Edit freely for this generation.</small><textarea id="npc_state_delta_portrait_positive" class="text_pole" rows="9">${escapeHtml(prompts.positive)}</textarea></label>
+            <label><b>Negative prompt</b><small>Selected preset exclusions + this NPC's optional negative override.</small><textarea id="npc_state_delta_portrait_negative" class="text_pole" rows="7">${escapeHtml(prompts.negative)}</textarea></label>
           </section>
         </div>
         <footer class="npc-state-delta-portrait-generator-actions">
@@ -5529,7 +5550,21 @@ async function savePortraitSettingsDraft(explicitDraft = null) {
     }
 }
 
-function persistPortraitCustomPresetLibrary(settings, presets, selectedId, { theme = 'custom' } = {}) {
+async function persistPortraitCustomPresetLibrary(settings, presets, selectedId, { theme = 'custom', operational = null } = {}) {
+    if (portraitSettingsSaveBusy) return null;
+    const before = {
+        portraitGenerationEnabled: settings.portraitGenerationEnabled,
+        portraitThemePreset: settings.portraitThemePreset,
+        portraitCustomPresetId: settings.portraitCustomPresetId,
+        portraitCustomPresets: structuredClone(settings.portraitCustomPresets),
+        portraitStylePositive: settings.portraitStylePositive,
+        portraitStyleNegative: settings.portraitStyleNegative,
+        portraitComposition: settings.portraitComposition,
+        portraitPromptFormat: settings.portraitPromptFormat,
+        portraitUseMood: settings.portraitUseMood,
+        portraitUseLocation: settings.portraitUseLocation,
+        portraitSaveToGallery: settings.portraitSaveToGallery,
+    };
     const normalized = portraitCustomPresetLibrary(presets, settings);
     const id = normalized.some(item => item.id === selectedId) ? selectedId : normalized[0].id;
     settings.portraitCustomPresets = normalized;
@@ -5544,11 +5579,28 @@ function persistPortraitCustomPresetLibrary(settings, presets, selectedId, { the
         settings.portraitUseMood = active.useMood;
         settings.portraitUseLocation = active.useLocation;
     }
-    persistSettings();
-    portraitSettingsDirty = false;
-    syncSettingsControls();
-    refreshNpcViewer();
-    return portraitSettingsSnapshot(settings);
+    if (operational) {
+        settings.portraitGenerationEnabled = operational.portraitGenerationEnabled !== false;
+        settings.portraitSaveToGallery = operational.portraitSaveToGallery === true;
+    }
+    portraitSettingsSaveBusy = true;
+    updatePortraitSettingsSaveUi();
+    try {
+        await saveHostSettings();
+        portraitSettingsDirty = false;
+        portraitSettingsSaveBusy = false;
+        syncSettingsControls();
+        refreshNpcViewer();
+        return portraitSettingsSnapshot(settings);
+    } catch (error) {
+        Object.assign(settings, before);
+        portraitSettingsSaveBusy = false;
+        portraitSettingsDirty = true;
+        updatePortraitSettingsSaveUi();
+        console.error('[NPC State Delta] custom portrait preset save failed', error);
+        globalThis.toastr?.error?.(`NPC State Delta custom portrait preset was not saved: ${error?.message || error}`);
+        return null;
+    }
 }
 
 function bindSettingsCheckbox(selector, key, after = null) {
@@ -5657,7 +5709,8 @@ function bindUi() {
     $(document).on('change.npcStateDelta', '#npc_state_delta_portrait_generation_enabled, #npc_state_delta_portrait_prompt_format, #npc_state_delta_portrait_use_mood, #npc_state_delta_portrait_use_location, #npc_state_delta_portrait_save_gallery', () => {
         markPortraitSettingsDirty();
     });
-    $(document).on('click.npcStateDelta', '#npc_state_delta_portrait_custom_add, #npc_state_delta_portrait_custom_duplicate', function () {
+    $(document).on('click.npcStateDelta', '#npc_state_delta_portrait_custom_add, #npc_state_delta_portrait_custom_duplicate', async function () {
+        if (portraitSettingsSaveBusy) return;
         const settings = getSettings();
         const snapshot = portraitSettingsDraftFromUi();
         const presets = portraitCustomPresetLibrary(settings.portraitCustomPresets, settings);
@@ -5677,43 +5730,72 @@ function bindUi() {
             useMood: snapshot.portraitUseMood,
             useLocation: snapshot.portraitUseLocation,
         });
-        const suggested = duplicate ? `${selected.name} Copy` : `Custom ${presets.length + 1}`;
+        const suggestedRoot = duplicate ? `${selected.name} Copy` : `Custom ${presets.length + 1}`;
+        const suggested = uniquePortraitCustomPresetName(presets, suggestedRoot);
         const name = String(globalThis.window?.prompt?.('Custom portrait preset name:', suggested) || '').trim().slice(0, 80);
         if (!name) return;
+        if (portraitCustomPresetNameTaken(presets, name)) {
+            globalThis.toastr?.warning?.(`NPC State Delta: a custom portrait preset named "${name}" already exists.`);
+            return;
+        }
         const id = nextPortraitCustomPresetId(presets);
         const created = portraitCustomPreset({ ...base, id, name }, presets.length);
-        persistPortraitCustomPresetLibrary(settings, [...presets, created], id);
-        globalThis.toastr?.success?.(`NPC State Delta: saved custom portrait preset ${created.name}.`);
+        const saved = await persistPortraitCustomPresetLibrary(settings, [...presets, created], id, {
+            operational: snapshot,
+        });
+        if (saved) globalThis.toastr?.success?.(`NPC State Delta: saved custom portrait preset ${created.name}.`);
     });
-    $(document).on('click.npcStateDelta', '#npc_state_delta_portrait_custom_rename', function () {
-        const settings = getSettings();
-        const snapshot = portraitSettingsSnapshot(settings);
+    $(document).on('click.npcStateDelta', '#npc_state_delta_portrait_custom_rename', async function () {
+        if (portraitSettingsSaveBusy) return;
+        let settings = getSettings();
+        let snapshot = portraitSettingsSnapshot(settings);
         const id = String($('#npc_state_delta_portrait_custom_preset').val() || snapshot.portraitCustomPresetId);
-        const index = snapshot.portraitCustomPresets.findIndex(item => item.id === id);
+        let index = snapshot.portraitCustomPresets.findIndex(item => item.id === id);
         if (index < 0) return;
-        const current = snapshot.portraitCustomPresets[index];
+        let current = snapshot.portraitCustomPresets[index];
         const name = String(globalThis.window?.prompt?.('Rename custom portrait preset:', current.name) || '').trim().slice(0, 80);
         if (!name || name === current.name) return;
+        if (portraitCustomPresetNameTaken(snapshot.portraitCustomPresets, name, id)) {
+            globalThis.toastr?.warning?.(`NPC State Delta: a custom portrait preset named "${name}" already exists.`);
+            return;
+        }
+        if (portraitSettingsDirty && !(await savePortraitSettingsDraft())) return;
+        settings = getSettings();
+        snapshot = portraitSettingsSnapshot(settings);
+        index = snapshot.portraitCustomPresets.findIndex(item => item.id === id);
+        if (index < 0) return;
+        current = snapshot.portraitCustomPresets[index];
         const presets = structuredClone(snapshot.portraitCustomPresets);
         presets[index] = { ...current, name };
-        persistPortraitCustomPresetLibrary(settings, presets, id, { theme: snapshot.portraitThemePreset });
-        globalThis.toastr?.success?.(`NPC State Delta: renamed portrait preset to ${name}.`);
+        const saved = await persistPortraitCustomPresetLibrary(settings, presets, id, { theme: snapshot.portraitThemePreset });
+        if (saved) globalThis.toastr?.success?.(`NPC State Delta: renamed portrait preset to ${name}.`);
     });
-    $(document).on('click.npcStateDelta', '#npc_state_delta_portrait_custom_delete', function () {
+    $(document).on('click.npcStateDelta', '#npc_state_delta_portrait_custom_delete', async function () {
+        if (portraitSettingsSaveBusy) return;
         const settings = getSettings();
-        const snapshot = portraitSettingsSnapshot(settings);
+        let snapshot = portraitSettingsSnapshot(settings);
         if (snapshot.portraitCustomPresets.length <= 1) {
             globalThis.toastr?.warning?.('NPC State Delta: keep at least one custom portrait preset.');
             return;
         }
-        const id = String($('#npc_state_delta_portrait_custom_preset').val() || snapshot.portraitCustomPresetId);
-        const target = snapshot.portraitCustomPresets.find(item => item.id === id);
+        let id = String($('#npc_state_delta_portrait_custom_preset').val() || snapshot.portraitCustomPresetId);
+        let targetIndex = snapshot.portraitCustomPresets.findIndex(item => item.id === id);
+        let target = snapshot.portraitCustomPresets[targetIndex];
         if (!target) return;
         if (globalThis.window?.confirm?.(`Delete custom portrait preset "${target.name}"?`) === false) return;
+        if (portraitSettingsDirty && !(await savePortraitSettingsDraft())) return;
+        snapshot = portraitSettingsSnapshot(getSettings());
+        id = String($('#npc_state_delta_portrait_custom_preset').val() || id);
+        targetIndex = snapshot.portraitCustomPresets.findIndex(item => item.id === id);
+        target = snapshot.portraitCustomPresets[targetIndex];
+        if (!target || snapshot.portraitCustomPresets.length <= 1) return;
         const presets = snapshot.portraitCustomPresets.filter(item => item.id !== id);
-        const nextId = presets[0].id;
-        persistPortraitCustomPresetLibrary(settings, presets, nextId, { theme: snapshot.portraitThemePreset === 'custom' ? 'custom' : snapshot.portraitThemePreset });
-        globalThis.toastr?.success?.(`NPC State Delta: deleted custom portrait preset ${target.name}.`);
+        const nextIndex = Math.min(Math.max(0, targetIndex), presets.length - 1);
+        const nextId = presets[nextIndex].id;
+        const saved = await persistPortraitCustomPresetLibrary(getSettings(), presets, nextId, {
+            theme: snapshot.portraitThemePreset === 'custom' ? 'custom' : snapshot.portraitThemePreset,
+        });
+        if (saved) globalThis.toastr?.success?.(`NPC State Delta: deleted custom portrait preset ${target.name}.`);
     });
     $(document).on('click.npcStateDelta', '#npc_state_delta_reset_portrait_theme', () => {
         writePortraitSettingsDraftToUi({

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 1.0.51 - 24 September 2026
+
+- Deep-pass harden Custom Preset Library Add/Duplicate/Rename/Delete with immediate SillyTavern host settings persistence, rollback on save failure, and success feedback only after durable save.
+- Preserve pending portrait edits across Rename/Delete management flows; Add/Duplicate preserve unsaved global generation/gallery toggles while materializing the new custom preset.
+- Reject duplicate custom preset names after Unicode/whitespace normalization and generate collision-safe duplicate suggestions.
+- After deleting a preset, select the adjacent surviving preset instead of always jumping to the first entry.
+- Add exact legacy-Custom migration coverage and synthetic-runtime coverage for multiple named presets feeding the live portrait prompt builder.
+- Refresh portrait-generator copy to refer to the selected theme/preset rather than the old single global theme. Settings schema remains v30; scanner/model-facing prompt bytes are unchanged.
+
+
 ## 1.0.50 - 24 September 2026
 
 - Replace the single portrait Custom slot with a persistent named Custom Preset Library, bounded to 24 entries.

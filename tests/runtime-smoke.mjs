@@ -544,6 +544,44 @@ try {
     assert.equal(savedPortraitSettings.portraitUseLocation, true);
     assert.equal(savedPortraitSettings.portraitSaveToGallery, true);
     assert.deepEqual(mockState.extensionSettings.npc_state_delta.portraitStylePositive, savedPortraitSettings.portraitStylePositive);
+    assert.equal(savedPortraitSettings.portraitCustomPresets.length, 1);
+    assert.equal(savedPortraitSettings.portraitCustomPresets[0].name, 'Custom 1');
+    assert.match(savedPortraitSettings.portraitCustomPresets[0].positive, /custom violet key visual/);
+
+    const firstCustom = savedPortraitSettings.portraitCustomPresets[0];
+    const secondCustom = {
+        id: 'custom-runtime-ink',
+        name: 'Runtime Ink',
+        positive: 'runtime inked fantasy portrait, sharp expressive eyes',
+        negative: 'runtime blur, watermark',
+        composition: 'runtime chest-up portrait',
+        promptFormat: 'natural',
+        useMood: true,
+        useLocation: false,
+    };
+    assert.equal(await globalThis.NPCStateDelta.savePortraitSettings({
+        ...savedPortraitSettings,
+        portraitThemePreset: 'custom',
+        portraitCustomPresetId: secondCustom.id,
+        portraitCustomPresets: [firstCustom, secondCustom],
+        portraitStylePositive: secondCustom.positive,
+        portraitStyleNegative: secondCustom.negative,
+        portraitComposition: secondCustom.composition,
+        portraitPromptFormat: secondCustom.promptFormat,
+        portraitUseMood: secondCustom.useMood,
+        portraitUseLocation: secondCustom.useLocation,
+        portraitSaveToGallery: false,
+    }), true);
+    const libraryPortraitSettings = globalThis.NPCStateDelta.portraitSettings();
+    assert.equal(libraryPortraitSettings.portraitCustomPresets.length, 2);
+    assert.equal(libraryPortraitSettings.portraitCustomPresetId, secondCustom.id);
+    assert.equal(libraryPortraitSettings.portraitCustomPresets[1].name, 'Runtime Ink');
+    assert.equal(libraryPortraitSettings.portraitComposition, secondCustom.composition);
+    assert.equal(libraryPortraitSettings.portraitPromptFormat, secondCustom.promptFormat);
+    const libraryPrompt = globalThis.NPCStateDelta.portraitPrompts('Yunyun');
+    assert.match(libraryPrompt.positive, /runtime inked fantasy portrait/i, 'active named custom preset should feed the live portrait prompt builder');
+    assert.doesNotMatch(libraryPrompt.negative, /malformed hands/i, 'switching named presets must not leak the prior custom negative prompt');
+
     await globalThis.NPCStateDelta.savePortraitSettings(originalPortraitSettings);
 
     const yunyunProfileId = state.npcs.find(n => n.name === 'Yunyun').id;

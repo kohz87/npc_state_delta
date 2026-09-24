@@ -32,6 +32,14 @@ const mock = {
         npc_state_delta: {
             enabled: true, autoScan: true, scanEvery: 2, scanDepth: 8, maxNpcs: 6,
             inject: true, injectDepth: 1, injectLimit: 3, branchRescan: true,
+            portraitThemePreset: 'custom',
+            portraitStylePositive: 'legacy unholy anime, luminous eyes',
+            portraitStyleNegative: 'legacy watermark, malformed hands',
+            portraitComposition: 'legacy centered waist-up portrait',
+            portraitPromptFormat: 'tags',
+            portraitUseMood: false,
+            portraitUseLocation: true,
+            portraitSaveToGallery: true,
             relationshipBaseline: { trust: 50, affection: 20, desire: 0, tension: 10 },
             chats: {
                 'chat:legacy-chat': {
@@ -101,14 +109,26 @@ try {
     assert.equal(settings.scanEvery, 1);
     assert.equal(settings.fullScanEveryTurn, false);
     assert.equal(settings.portraitGenerationEnabled, true);
-    assert.equal(settings.portraitThemePreset, 'fantasy_anime');
-    assert.match(settings.portraitStylePositive, /fantasy anime character illustration/i);
-    assert.match(settings.portraitStyleNegative, /bad anatomy/i);
-    assert.match(settings.portraitComposition, /solo character portrait/i);
-    assert.equal(settings.portraitPromptFormat, 'hybrid');
-    assert.equal(settings.portraitUseMood, true);
-    assert.equal(settings.portraitUseLocation, false);
-    assert.equal(settings.portraitSaveToGallery, false);
+    assert.equal(settings.portraitThemePreset, 'custom');
+    assert.equal(settings.portraitStylePositive, 'legacy unholy anime, luminous eyes');
+    assert.equal(settings.portraitStyleNegative, 'legacy watermark, malformed hands');
+    assert.equal(settings.portraitComposition, 'legacy centered waist-up portrait');
+    assert.equal(settings.portraitPromptFormat, 'tags');
+    assert.equal(settings.portraitUseMood, false);
+    assert.equal(settings.portraitUseLocation, true);
+    assert.equal(settings.portraitSaveToGallery, true);
+    assert.equal(settings.portraitCustomPresetId, 'custom-default');
+    assert.equal(settings.portraitCustomPresets.length, 1);
+    assert.deepEqual(settings.portraitCustomPresets[0], {
+        id: 'custom-default',
+        name: 'Custom 1',
+        positive: 'legacy unholy anime, luminous eyes',
+        negative: 'legacy watermark, malformed hands',
+        composition: 'legacy centered waist-up portrait',
+        promptFormat: 'tags',
+        useMood: false,
+        useLocation: true,
+    });
     assert.equal(settings.injectBudgetTokens, 1800);
     assert.deepEqual(settings.relationshipBaseline, { trust: 0, affection: 0, desire: 0, tension: 0 }, 'old stock baseline should migrate to neutral zero');
     assert.deepEqual(settings.relationshipCaps, { ordinary: 1, meaningful: 2, major: 5, extreme: 10 });
