@@ -15,7 +15,7 @@ import {
 } from '../core.js';
 import { BRANCH_LINEAGE_VERSION, recordBranchCheckpoint, reconcileBranchState } from '../branch.js';
 import { mergeImportedDossierState } from '../bundle.js';
-import { dossierDetailProjection } from '../dossier-ui.js';
+import { appearanceFormsHtml, dossierDetailProjection } from '../dossier-ui.js';
 
 function formNpc(name = 'Sora') {
     return normalizeNpcRecord({
@@ -38,7 +38,7 @@ test('Stage 4 flat appearance upgrades to one Base form without fabricating alte
 });
 
 
-test('Stage 4 scalar-only current Appearance is promoted to visible unclassified presentation', () => {
+test('Stage 4 scalar-only current Appearance is rendered as the current dossier presentation', () => {
     const text = 'Slender jawline, hazel eyes, pale skin, and thick neck-length waves of burnished bronze hair; developed figure with narrow waist; fitted charcoal-gray wool smock, heavy wool hose, and bull-hide mountain boots.';
     const npc = normalizeNpcRecord({
         ...createNpcRecord('Cerys'),
@@ -49,18 +49,19 @@ test('Stage 4 scalar-only current Appearance is promoted to visible unclassified
         currentFormUnknown: false,
     });
     const projected = dossierDetailProjection(npc);
+    const html = appearanceFormsHtml(projected);
 
     assert.equal(npc.currentForm, '');
-    assert.equal(npc.currentFormUnknown, true);
+    assert.equal(npc.currentFormUnknown, false);
     assert.equal(npc.appearanceForms.length, 0);
-    assert.match(npc.unclassifiedAppearance, /burnished bronze hair/i);
-    assert.match(npc.unclassifiedAppearance, /charcoal-gray wool smock/i);
-    assert.equal(projected.appearanceModel.currentFormUnknown, true);
-    assert.match(projected.appearanceModel.unclassifiedAppearance, /bull-hide mountain boots/i);
-    assert.match(projected.appearance, /burnished bronze hair/i);
+    assert.match(projected.appearanceModel.appearance, /burnished bronze hair/i);
+    assert.match(projected.appearance, /charcoal-gray wool smock/i);
+    assert.match(html, /Current presentation/i);
+    assert.match(html, /bull-hide mountain boots/i);
+    assert.doesNotMatch(html, /No named forms established/i);
 });
 
-test('Stage 4 flat scanner Appearance on a form-less record becomes canonical unclassified presentation', () => {
+test('Stage 4 flat scanner Appearance on a form-less record is visible without changing form identity', () => {
     const base = normalizeNpcRecord({
         ...createNpcRecord('Cerys'),
         appearanceModelVersion: 1,
@@ -83,12 +84,30 @@ test('Stage 4 flat scanner Appearance on a form-less record becomes canonical un
 
     const npc = result.state.npcs[0];
     const projected = dossierDetailProjection(npc);
+    const html = appearanceFormsHtml(projected);
     assert.equal(npc.currentForm, '');
-    assert.equal(npc.currentFormUnknown, true);
+    assert.equal(npc.currentFormUnknown, false);
     assert.equal(npc.appearanceForms.length, 0);
-    assert.match(npc.unclassifiedAppearance, /burnished bronze hair/i);
-    assert.match(projected.appearanceModel.unclassifiedAppearance, /charcoal-gray wool smock/i);
-    assert.match(projected.appearance, /bull-hide mountain boots/i);
+    assert.match(npc.appearance, /burnished bronze hair/i);
+    assert.match(projected.appearance, /charcoal-gray wool smock/i);
+    assert.match(html, /Current presentation/i);
+    assert.match(html, /bull-hide mountain boots/i);
+});
+
+test('Stage 4 dossier fallback does not suppress species identity in portrait prompts', () => {
+    const npc = normalizeNpcRecord({
+        ...createNpcRecord('Yunyun'),
+        species: 'Crimson Demon',
+        apparentAge: '~23',
+        appearanceModelVersion: 1,
+        appearance: 'Young woman with long dark brown hair, crimson eyes, a slim build, and a black-and-red adventurer outfit.',
+        appearanceForms: [],
+        currentForm: '',
+        currentFormUnknown: false,
+    });
+    const portrait = buildNpcPortraitPrompts(npc).positive;
+    assert.match(portrait, /Crimson Demon/i);
+    assert.match(portrait, /crimson eyes/i);
 });
 
 test('Stage 4 form identity preserves meaningful punctuation instead of collapsing distinct names', () => {

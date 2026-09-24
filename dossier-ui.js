@@ -223,14 +223,20 @@ function birthdayCard(npc) {
     return `<div class="delta-current-card delta-continuity-birthday-card"><b>Birthday</b><span>${escapeHtml(npc.birthday || 'Unknown')}</span>${source ? `<small class="delta-continuity-source">${escapeHtml(source)}</small>` : ''}</div>`;
 }
 
-function appearanceFormsHtml(npc) {
+export function appearanceFormsHtml(npc) {
     const model = npc.appearanceModel;
-    const current = model.currentFormUnknown ? 'Unclassified / unknown' : model.currentForm || 'No selected form';
+    const compatibilityCurrent = !model.currentForm && !model.currentFormUnknown && !model.appearanceForms.length && model.appearance
+        && model.appearance !== model.overallAppearance
+        ? `<div class="delta-appearance-form-row"><b>Current presentation<span class="delta-appearance-current-badge">Current</span></b>${proseHtml(model.appearance)}</div>`
+        : '';
+    const current = model.currentFormUnknown ? 'Unclassified / unknown'
+        : model.currentForm || (compatibilityCurrent ? 'Current presentation' : 'No selected form');
     const unclassified = model.currentFormUnknown && model.unclassifiedAppearance
         ? `<div class="delta-appearance-form-row"><b>Current unclassified presentation<span class="delta-appearance-current-badge">Current</span></b>${proseHtml(model.unclassifiedAppearance)}</div>`
         : '';
     const rows = model.appearanceForms.map(form => `<div class="delta-appearance-form-row"><b>${escapeHtml(form.name)}${form.name === model.currentForm ? '<span class="delta-appearance-current-badge">Current</span>' : ''}</b>${proseHtml(form.appearance)}</div>`).join('');
-    return `<details class="delta-appearance-form-summary" data-delta-key="appearance" open><summary><b>Appearance forms</b><small>Current: ${escapeHtml(current)}</small></summary><div class="delta-appearance-form-list">${model.overallAppearance ? `<div class="delta-appearance-form-row"><b>Shared across forms</b>${proseHtml(model.overallAppearance)}</div>` : ''}${unclassified}${rows || (!unclassified ? '<p class="delta-muted">No named forms established.</p>' : '')}</div></details>`;
+    const empty = !unclassified && !compatibilityCurrent && !rows ? '<p class="delta-muted">No named forms established.</p>' : '';
+    return `<details class="delta-appearance-form-summary" data-delta-key="appearance" open><summary><b>Appearance forms</b><small>Current: ${escapeHtml(current)}</small></summary><div class="delta-appearance-form-list">${model.overallAppearance ? `<div class="delta-appearance-form-row"><b>Shared across forms</b>${proseHtml(model.overallAppearance)}</div>` : ''}${unclassified}${compatibilityCurrent}${rows}${empty}</div></details>`;
 }
 
 // Cache only rendered section markup on its DOM node, never canonical state/history.

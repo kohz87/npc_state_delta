@@ -4,9 +4,9 @@
 
 ## 1.0.49 - 24 September 2026
 
-- Promote form-less Stage 4 flat current Appearance into canonical `unclassifiedAppearance` with `currentFormUnknown=true`, so the dossier renders scanner-captured visual detail instead of hiding it in the compatibility scalar.
-- Lazily repair existing scalar-only Stage 4 records during normalization, making previously captured Appearance visible without another provider scan.
-- Add regressions for both existing scalar-only records and future flat scanner Appearance updates on form-less NPCs.
+- Render scanner-compatible flat current Appearance as a read-only dossier `Current presentation` fallback when no named/unclassified current presentation exists, instead of hiding valid captured detail behind an empty forms panel.
+- Keep form identity unchanged while displaying the fallback, preserving species-aware portrait behavior and existing named/unclassified form semantics.
+- Add regressions for existing scalar-only records, future flat scanner Appearance updates on form-less NPCs, and portrait species preservation.
 - No model-facing prompt bytes or request topology change from 1.0.48.
 
 
