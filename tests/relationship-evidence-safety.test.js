@@ -159,5 +159,5 @@ test('runtime wires targeted new-NPC enrichment and post-admission relationship 
     assert.match(source, /finalNpc\.seenCount = Number\(liveBeforeBackfill\.seenCount \|\| 0\)/);
     assert.match(source, /targetedMemoryLimit = \/\(\?:backfill\|chat refresh\)\/i/);
     assert.match(source, /const reasonPresent = Boolean\(String\(normalized\.relationshipChangeReason/);
-    assert.match(source, /schemaVersion: 29/);
+    assert.match(source, /schemaVersion: 30/);
 });
