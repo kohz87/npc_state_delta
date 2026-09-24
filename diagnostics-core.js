@@ -83,6 +83,8 @@ export function sanitizeProfileDiagnostic(raw = {}) {
         candidateGrounded: raw.candidateGrounded === undefined ? null : Boolean(raw.candidateGrounded),
         reasonGrounded: raw.reasonGrounded === undefined ? null : Boolean(raw.reasonGrounded),
         providerReasonPresent: Boolean(raw.providerReasonPresent),
+        providerFieldPresent: raw.providerFieldPresent === undefined ? null : Boolean(raw.providerFieldPresent),
+        providerEvidencePresent: raw.providerEvidencePresent === undefined ? null : Boolean(raw.providerEvidencePresent),
         effectiveReasonSource: clean(raw.effectiveReasonSource, 24),
         effectiveReason: clean(raw.effectiveReason, 500),
         previous: clean(raw.previous, 720),

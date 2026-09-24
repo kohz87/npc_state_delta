@@ -68,6 +68,72 @@ test('scanner and targeted Refresh explicitly allow one scene to contribute evid
     }
 });
 
+test('scanner requires explicit current Appearance to survive alongside other profile fields', () => {
+    const npc = createNpcRecord('Mira');
+    npc.appearance = 'Dark hair and a weathered green dress.';
+    const prompt = buildScannerPrompt({
+        transcript: 'Mira washes clean; her hair is revealed as burnished bronze and she changes into a wool smock.',
+        existingNpcs: [npc],
+    });
+    assert.match(prompt, /MUST emit appearance plus evidence\.appearance/i);
+    assert.match(prompt, /never omit it because other profile fields are also returned/i);
+    assert.match(prompt, /"appearanceState":"refine"/i);
+    assert.match(prompt, /"evidence":\{"appearance":\[/i);
+});
+
+test('Appearance diagnostics expose provider omission and find Appearance across ordinary/profile channels', () => {
+    const npc = normalizeNpcRecord({
+        ...createNpcRecord('Mira'),
+        appearance: 'Dark hair and a weathered green dress.',
+    });
+
+    const omitted = mergeScanResult(
+        state(npc),
+        {
+            npcs: [],
+            profileUpdates: [{
+                id: npc.id,
+                evidence: { speech: ['Mira speaks softly.'] },
+                speechState: 'refine',
+                speech: 'Soft-spoken.',
+            }],
+        },
+        { turn: 2, sourceMessageId: 2, developmentContext: 'Mira speaks softly.' },
+    );
+    const missingRow = profileRow(omitted, 'appearance');
+    assert.equal(missingRow?.outcome, 'not-provided');
+    assert.equal(missingRow?.providerFieldPresent, false);
+    assert.equal(missingRow?.providerEvidencePresent, false);
+
+    const context = 'Mira washes clean. Her hair is revealed as burnished bronze and she changes into a wool smock.';
+    const updated = mergeScanResult(
+        state(npc),
+        {
+            npcs: [{
+                id: npc.id,
+                name: npc.name,
+                appearance: 'Burnished bronze hair; wears a wool smock.',
+                appearanceState: 'change',
+                appearanceReason: 'Her cleaned hair is revealed as burnished bronze and she changes into a wool smock.',
+                present: true,
+            }],
+            profileUpdates: [{
+                id: npc.id,
+                evidence: { speech: ['Mira answers in a soft voice.'] },
+                speechState: 'refine',
+                speech: 'Soft-spoken.',
+            }],
+        },
+        { turn: 2, sourceMessageId: 2, developmentContext: context },
+    );
+    const row = profileRow(updated, 'appearance');
+    assert.equal(row?.providerFieldPresent, true);
+    assert.equal(row?.outcome, 'applied-change');
+    assert.match(row?.candidate || '', /burnished bronze/i);
+    assert.match(resolveNpcAppearance(updated.state.npcs[0]), /burnished bronze/i);
+    assert.match(resolveNpcAppearance(updated.state.npcs[0]), /wool smock/i);
+});
+
 test('unsupported durable meaning cannot ride through refine while directly grounded clarification still can', () => {
     const npc = createNpcRecord('Mira');
     npc.personality = 'Kind, curious and independent; careful and methodical in public.';

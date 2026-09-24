@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.0.48 - 24 September 2026
+
+- Require existing NPCs with explicit new/corrected/current visual evidence to emit `appearance` and `evidence.appearance` in the same `profileUpdates` row, even when other durable profile fields are returned.
+- Add a dedicated Appearance diagnostic row that distinguishes `not-provided`, `candidate-missing`, `locked`, `unchanged`, `unchanged-or-gated`, and applied outcomes.
+- Make Appearance diagnostics search both ordinary `npcs` and `profileUpdates` channels so a profile row cannot hide an Appearance update carried by the ordinary delta.
+- Preserve Appearance as immediate current-visible continuity rather than adding it to the Personality/Speech three-observation development ledger.
+
+
 ## 1.0.47 - 24 September 2026
 
 - Fix Appearance extraction so grounded current visual presentation includes directly described hair/body traits, current outfit/gear, and relevant visible condition instead of being suppressed by the durable-identity firewall.
