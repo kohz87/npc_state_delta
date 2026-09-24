@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.0.47 - 24 September 2026
+
+- Fix Appearance extraction so grounded current visual presentation includes directly described hair/body traits, current outfit/gear, and relevant visible condition instead of being suppressed by the durable-identity firewall.
+- Treat explicit visual reveal/correction wording, such as an obscured hair color being shown to be different, as a source-grounded Appearance refinement that can replace the mistaken prior impression without requiring high lexical overlap.
+- Allow grounded `appearanceState:"change"` updates for clothing/current-presentation changes without routing them through Personality/Speech development-scale readiness; existing evidence grounding, form ownership, locks, and unsupported-rewrite rejection remain in force.
+- Add regressions for corrective hair-color narration, changed clothing/boots, and scanner prompt guidance. `git diff --check` passes; package `test`/`validate` execution is currently blocked before startup by the local Windows Coding Agent runner returning `spawn EINVAL`.
+
 ## 1.0.46 - 23 September 2026
 
 - Add canonical NPC gender as optional stable identity metadata with only `male`, `female`, or blank for unknown/not yet established. Scanner, Refresh, backfill, and structured dossier import may establish it only from explicit wording or an unambiguous gendered identity/reference; names, occupations, clothing, body type, species, and generated portraits cannot infer it.

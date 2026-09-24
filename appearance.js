@@ -3,6 +3,7 @@ import {
     normalizeName,
     durableSeedGrounded,
     durableRefinementCandidateGrounded,
+    groundedAppearanceCorrection,
     isSafeUnmarkedDurableRefinement,
     isSafeUnmarkedDurableReplacement,
 } from './core-mechanics.js';
@@ -273,7 +274,8 @@ function reconcileFormAppearance(existing, update, context = '') {
         return incoming;
     }
     const compatible = state === 'refine'
-        ? isSafeUnmarkedDurableRefinement(current, incoming)
+        ? (isSafeUnmarkedDurableRefinement(current, incoming)
+            || groundedAppearanceCorrection(current, incoming, context))
         : isSafeUnmarkedDurableReplacement(current, incoming);
     if (!compatible || (context && !durableRefinementCandidateGrounded('appearance', current, incoming, context))) return current;
     return mergeRefinement(current, incoming, DURABLE_PROFILE_LIMITS?.appearance || 800);
@@ -295,7 +297,8 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
                 if (reason && (!context || (durableSeedGrounded(reason, context) && durableSeedGrounded(incoming, context)))) next.overallAppearance = incoming;
             } else {
                 const compatible = state === 'refine'
-                    ? isSafeUnmarkedDurableRefinement(next.overallAppearance, incoming)
+                    ? (isSafeUnmarkedDurableRefinement(next.overallAppearance, incoming)
+                        || groundedAppearanceCorrection(next.overallAppearance, incoming, context))
                     : isSafeUnmarkedDurableReplacement(next.overallAppearance, incoming);
                 if (compatible && (!context || durableRefinementCandidateGrounded('appearance', next.overallAppearance, incoming, context))) {
                     next.overallAppearance = mergeRefinement(next.overallAppearance, incoming, DURABLE_PROFILE_LIMITS?.appearance || 800);

@@ -181,3 +181,69 @@ test('Stage 4 portrait and roleplay injection resolve the same current form', ()
     assert.match(injection, /CURRENT VISIBLE APPEARANCE \(authoritative anatomy; species\/race cannot override the selected form\)/i);
     assert.equal((injection.match(/ordinary human ears/gi) || []).length, 1, 'resolved current appearance should be injected once, not duplicated after the budgeted dossier');
 });
+
+test('Stage 4 accepts a grounded current-presentation change without a development-scale gate', () => {
+    const base = normalizeNpcRecord({
+        ...createNpcRecord('Mara'),
+        appearance: 'Dark hair hidden under frozen muck; loose sheepskin rags and worn boots.',
+    });
+    const narration = 'Her hair, freed from the crust of frozen muck and dried with a rough towel, was not dark at all; it fell in thick, blunt waves of burnished bronze around her slender neck, catching copper highlights from the glowing coals. The new wool smock drew taut across a surprisingly developed chest, accentuating a narrow waist and flare of hip. The greased bull-hide boots gave her posture a firm, grounded stance.';
+    const currentAppearance = 'Thick blunt waves of burnished bronze hair with copper highlights around a slender neck; surprisingly developed chest, narrow waist and flared hips; new wool smock and greased bull-hide boots.';
+    const result = mergeScanResult({ npcs: [base], turn: 9 }, {
+        npcs: [{
+            id: base.id,
+            name: base.name,
+            appearance: currentAppearance,
+            appearanceState: 'change',
+            appearanceReason: 'Her cleaned hair is revealed as burnished bronze and she is now wearing a new wool smock with greased bull-hide boots.',
+            present: true,
+        }],
+        profileUpdates: [{
+            id: base.id,
+            evidence: { appearance: [narration] },
+            appearance: currentAppearance,
+            appearanceState: 'change',
+            appearanceReason: 'Her cleaned hair is revealed as burnished bronze and she is now wearing a new wool smock with greased bull-hide boots.',
+        }],
+    }, { turn: 9, sourceMessageId: 900, developmentContext: narration });
+
+    const npc = result.state.npcs[0];
+    assert.match(resolveNpcAppearance(npc), /burnished bronze/i);
+    assert.match(resolveNpcAppearance(npc), /wool smock/i);
+    assert.match(resolveNpcAppearance(npc), /bull-hide boots/i);
+    assert.doesNotMatch(resolveNpcAppearance(npc), /dark hair|sheepskin rags/i);
+});
+
+test('Stage 4 accepts explicit appearance corrections that replace a misleading earlier impression', () => {
+    const base = normalizeNpcRecord({
+        ...createNpcRecord('Mara'),
+        appearance: 'Dark hair, slender build, weather-stained face.',
+    });
+    const narration = 'Once the frozen muck was washed away, her hair was not dark at all; thick blunt waves of burnished bronze framed her slender neck.';
+    const result = mergeScanResult({ npcs: [base], turn: 10 }, {
+        profileUpdates: [{
+            id: base.id,
+            evidence: { appearance: [narration] },
+            appearanceState: 'refine',
+            appearance: 'Thick blunt waves of burnished bronze hair frame her slender neck; weather-stained face.',
+        }],
+    }, { turn: 10, sourceMessageId: 901, developmentContext: narration });
+
+    const npc = result.state.npcs[0];
+    assert.match(resolveNpcAppearance(npc), /burnished bronze/i);
+    assert.doesNotMatch(resolveNpcAppearance(npc), /dark hair/i);
+});
+
+test('scanner prompt treats current outfit and explicit visual corrections as Appearance evidence', () => {
+    const prompt = buildScannerPrompt({
+        transcript: 'Mara washes clean; her hair was not dark at all. She changes into a wool smock and bull-hide boots.',
+        currentTranscript: 'Mara washes clean; her hair was not dark at all. She changes into a wool smock and bull-hide boots.',
+        existingNpcs: [normalizeNpcRecord({ ...createNpcRecord('Mara'), appearance: 'Dark hair beneath frozen muck; sheepskin rags.' })],
+        userName: 'Lucien',
+        charName: 'Narrator',
+    });
+    assert.match(prompt, /CURRENT VISIBLE PRESENTATION/i);
+    assert.match(prompt, /current outfit\/gear/i);
+    assert.match(prompt, /earlier visual impression was wrong or obscured/i);
+    assert.doesNotMatch(prompt, /Ignore transient visual state/i);
+});

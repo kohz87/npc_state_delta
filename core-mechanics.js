@@ -1920,6 +1920,24 @@ function isSafeSpeechRefinement(existing, incoming, context = '', evidenceItems 
         && durableRefinementCandidateGrounded('speech', existing, incoming, context, evidenceItems, binding);
 }
 
+const APPEARANCE_CORRECTION_CUE_RE = /\b(?:actually|in fact|contrary to|mistaken|misread|misjudged|was not|were not|is not|are not|wasn t|weren t|isn t|aren t|never was|never were|revealed?|uncovered?|exposed?|disguised|concealed|hidden|obscured|freed from|beneath|underneath)\b/i;
+
+export function groundedAppearanceCorrection(existing, incoming, context = '', evidenceItems = [], binding = null) {
+    const current = compactDurableText(existing, DURABLE_PROFILE_LIMITS.appearance, 10);
+    const candidate = compactDurableText(incoming, DURABLE_PROFILE_LIMITS.appearance, 10);
+    if (!current || !candidate || normalizeName(current) === normalizeName(candidate)) return false;
+    const support = durableRefinementSupportText(context, evidenceItems, binding);
+    if (!support || !APPEARANCE_CORRECTION_CUE_RE.test(normalizeName(support))) return false;
+    return durableRefinementCandidateGrounded('appearance', current, candidate, context, evidenceItems, binding);
+}
+
+function groundedAppearanceChange(existing, incoming, reason, context = '', evidenceItems = [], binding = null) {
+    const why = cleanText(reason, 500);
+    const support = durableRefinementSupportText(context, evidenceItems, binding);
+    if (!why || !support || !durableSeedGrounded(why, support)) return false;
+    return durableRefinementCandidateGrounded('appearance', existing, incoming, context, evidenceItems, binding);
+}
+
 export function isSafeUnmarkedDurableRefinement(existing, incoming) {
     const oldText = compactDurableText(existing, DURABLE_PROFILE_LIMITS.appearance, 10);
     const newText = compactDurableText(incoming, DURABLE_PROFILE_LIMITS.appearance, 10);
@@ -3905,14 +3923,30 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
             // baseline does not behave like a hidden lock when the scanner forgets the marker.
             const mode = String(incoming.appearanceState || 'keep');
             if (mode === 'change') {
-                if (!String(incoming.appearanceReason || '').trim() || !directEvolutionReady('appearance')) continue;
+                const directPresentationChange = groundedAppearanceChange(
+                    existing.appearance,
+                    value,
+                    incoming.appearanceReason,
+                    lifecycleOptions.developmentContext,
+                    [],
+                    incomingBinding,
+                );
+                if (!directPresentationChange
+                    && (!String(incoming.appearanceReason || '').trim() || !directEvolutionReady('appearance'))) continue;
             } else if (mode !== 'refine' && (!isSafeUnmarkedDurableFieldReplacement('appearance', existing.appearance, value)
                 || !durableRefinementCandidateGrounded('appearance', existing.appearance, value, lifecycleOptions.developmentContext, [], incomingBinding))) {
                 continue;
             }
             if (mode === 'refine') {
-                if (!isSafeUnmarkedDurableRefinement(existing.appearance, value)
-                    || !durableRefinementCandidateGrounded('appearance', existing.appearance, value, lifecycleOptions.developmentContext, [], incomingBinding)) continue;
+                const directCorrection = groundedAppearanceCorrection(
+                    existing.appearance,
+                    value,
+                    lifecycleOptions.developmentContext,
+                    [],
+                    incomingBinding,
+                );
+                if (!directCorrection && (!isSafeUnmarkedDurableRefinement(existing.appearance, value)
+                    || !durableRefinementCandidateGrounded('appearance', existing.appearance, value, lifecycleOptions.developmentContext, [], incomingBinding))) continue;
                 merged.appearance = mergeDurableTextRefinement(existing.appearance, value, DURABLE_PROFILE_LIMITS.appearance);
                 continue;
             }
@@ -4736,13 +4770,6 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
             changed = true;
             return;
         }
-        if (state === evolveState) {
-            if (!String(incoming[reasonField] || '').trim()) return;
-            if (!evolutionReady(field)) return;
-            if (normalizeName(current) !== normalizeName(value)) { npc[field] = value; changed = true; }
-            evidence[field] = [];
-            return;
-        }
         const fieldEvidence = [...(beforeEvidence[field] || []), ...(incomingEvidence[field] || [])];
         const binding = {
             npc,
@@ -4750,12 +4777,28 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
             targeted: options.targeted === true,
             otherLabels: options.otherLabels || [],
         };
+        if (state === evolveState) {
+            if (!String(incoming[reasonField] || '').trim()) return;
+            const directAppearanceChange = field === 'appearance' && groundedAppearanceChange(
+                current,
+                value,
+                incoming[reasonField],
+                options.developmentContext,
+                fieldEvidence,
+                binding,
+            );
+            if (!directAppearanceChange && !evolutionReady(field)) return;
+            if (normalizeName(current) !== normalizeName(value)) { npc[field] = value; changed = true; }
+            evidence[field] = [];
+            return;
+        }
         const safeRefinement = field === 'personality'
             ? isSafeIdentityTextRefinement(current, value, options.developmentContext, fieldEvidence, binding)
             : (field === 'speech'
                 ? isSafeSpeechRefinement(current, value, options.developmentContext, fieldEvidence, binding)
-                : (isSafeUnmarkedDurableRefinement(current, value)
-                    && durableRefinementCandidateGrounded(field, current, value, options.developmentContext, fieldEvidence, binding)));
+                : (groundedAppearanceCorrection(current, value, options.developmentContext, fieldEvidence, binding)
+                    || (isSafeUnmarkedDurableRefinement(current, value)
+                        && durableRefinementCandidateGrounded(field, current, value, options.developmentContext, fieldEvidence, binding))));
         const explicitRefinement = state === refineState && safeRefinement;
         const unmarkedRecovery = state !== refineState && state !== evolveState
             && isSafeUnmarkedDurableFieldReplacement(field, current, value)
@@ -5672,7 +5715,7 @@ Rules:
 2. World State and NPC Inner Chatter are valid identity/evidence sections. A proper name established there can link nearby prose that calls the same person only by role, such as receptionist, guard, merchant, or clerk.
 3. If the requested NPC is found, RETURN EXACTLY ONE NPC object. Do not return other NPCs. If the target genuinely does not occur and cannot be linked to a role/alias in this history, return {"npcs":[]}.
 4. Preserve literal Species / Race. GENDER=male|female only if explicitly/unambiguously established; never infer. AGE is chronology only. APPARENT AGE is visual presentation and should be a compact approximate number like ~6 or ~24 when inferable; never prose such as "around six/twenties". Never infer fantasy lifespan from species.
-5. Appearance contains grounded visible facts only and must not repeat an explicit numeric/word-form age; Apparent Age owns visual age. Do not invent missing face, hair, eyes, body, outfit, or other traits.
+5. Appearance is the current grounded visible presentation and must not repeat an explicit numeric/word-form age; Apparent Age owns visual age. Capture directly described hair/body traits, current outfit/gear, and relevant visible condition. Latest explicit visual evidence wins when an earlier impression was obscured or corrected. Do not invent missing face, hair, eyes, body, outfit, or other traits.
 6. Recover CURRENT COMPACT SUMMARIES, not notes. Important Memories are capped at 5. Key relationships=max5, ONE unambiguous entry/counterpart; never use dangling "(deceased)" that could modify the wrong person. Mannerisms=max4 DISTINCT recurring patterns, not separate animations of the same habit. behaviorProfile=max6 target-general behavioral levers translating identity into response/decision tendencies; observed actions are evidence, not action-history entries. Supported labels may include Disposition, Care/Warmth, Expressiveness, Independence/Agency, Conflict/Assertiveness, Threat Sensitivity, Analytical Style, Social Presentation; never fill labels without evidence. Route player-specific patterns to relationshipSummary, one-off states to live fields, and consequential incidents to Memories. Memories=max5 distinct events; if crowded return memoryRetention=top5 most consequential/durable.
 7. NPC Inner Chatter may support durable personality, goals, attitude, or relationship-summary evidence, but do not store the moment-to-moment internal monologue itself.
 8. PRESENT is current-scene state, not historical presence. Set present=true only if the requested NPC physically appears or actively participates in the MOST RECENT ASSISTANT STORY MESSAGE contained in this history. An older appearance does not count. A World State mention alone does not establish presence. Set worldActive=true only for explicit current off-screen activity in the latest World State; present and worldActive are mutually exclusive.
@@ -5782,7 +5825,7 @@ Rules:
 2. This is reconciliation, NOT event replay. currentRelationship is READ-ONLY: relationshipImpact MUST be "none" and all four relationshipDelta values MUST be 0. Never re-award Trust/Affection/Desire/Tension from old scenes.
 3. Presence/recency are owned by the live scanner. present/worldActive in your JSON are ignored. Do not infer current physical presence merely because the NPC appeared earlier in this history window.
 4. LOCKS: never rewrite fields listed in lockedProfileFields. Omit them from profileUpdates and ordinary dossier changes.
-5. DURABLE PROFILE: CURRENT COMPACT SUMMARY only. Personality/Speech/Appearance mention each durable concept once; Appearance does not repeat explicit age. behaviorProfile=max6 target-general behavioral levers translating identity into response/decision tendencies, not action-history summaries or a second essay. Actions are evidence for a lever; labels are soft, optional, and only used when supported (e.g. Disposition, Care/Warmth, Expressiveness, Independence/Agency, Conflict/Assertiveness, Threat Sensitivity, Analytical Style, Social Presentation). Player-specific patterns belong relationshipSummary. refine returns FULL field; lasting personality/speech/mannerism/behaviorProfile change uses evolve+reason, Appearance uses change+reason. Mannerisms=max4 DISTINCT recurring patterns, not separate animations. One transient beat is not durable.
+5. DURABLE PROFILE: CURRENT COMPACT SUMMARY only. Personality/Speech mention each durable concept once. Appearance is the CURRENT grounded visible presentation, including directly described hair/body traits, current outfit/gear, and relevant visible condition; it does not repeat explicit age. When newer narration reveals an earlier visual impression was wrong/obscured, refine with the corrected FULL current Appearance. When the presentation itself changes, use Appearance change+reason and return the FULL current Appearance. behaviorProfile=max6 target-general behavioral levers translating identity into response/decision tendencies, not action-history summaries or a second essay. Actions are evidence for a lever; labels are soft, optional, and only used when supported (e.g. Disposition, Care/Warmth, Expressiveness, Independence/Agency, Conflict/Assertiveness, Threat Sensitivity, Analytical Style, Social Presentation). Player-specific patterns belong relationshipSummary. refine returns FULL field; lasting personality/speech/mannerism/behaviorProfile change uses evolve+reason. Mannerisms=max4 DISTINCT recurring patterns, not separate animations. One transient beat is not durable.
 6. IDENTITY FIREWALL: temporary mood, fear, stress, intoxication, intimacy, or behavior unique to ${userName} must not become global Personality, Speech, Mannerisms, or behaviorProfile. A generally kind NPC remains generally kind toward other people unless narration establishes a broader change. Necessary force is not cruelty by itself.
 7. DEVELOPMENT SPEED: assistant/main-speaker=gradual; Player explicit/batch only for declarative canon, not quotes/questions/speculation/requests/conditionals/wishes. [mN]=source. One scene may support multiple fields; emit each grounded item independently (speech+behaviorProfile allowed). Gradual Personality/Speech: up to 4 tagged observations; reuse a concept label when obvious, wording may vary. Speech evidence/candidate=voice behavior, not personality. If evidence makes Personality/Speech stale, return changed FULL CURRENT candidate; never claim refine/evolve with a copied field. Reinforcement=>omit/keep. Time-compressed development MUST include developmentReason, even when state is refine. Mere passage of time does nothing.
 8. ROLE/SPECIES/GENDER/BACKGROUND may update when established/clarified. Gender=male|female only if explicit/unambiguous; never infer; established change=>genderState:"correct"+genderReason. HOME BASE / USUAL LOCATION is durable home, workplace, headquarters, or regular haunt, never the temporary current scene location; establish only from grounded ongoing-life evidence, and changing an established value requires homeBaseState:"update"+homeBaseReason. Species is literal only. Background is durable history, not current mood/status.
@@ -5946,8 +5989,8 @@ Rules:
 4. Candidates are not dossiers. sameIndividual=true only when proven. Use narration, World State, durable Inner Chatter; proper names there MUST be returned even when prose uses role.
 5. Return ONLY observed/new/meaningfully changed NPCs; new grounded durable profile facts count as changes. present=true only latest-scene physical presence; World State/Inner Chatter alone never presence. worldActive=true only explicit current off-screen activity. Inner Chatter supports durable facts, not transient monologue.
 6. Goal/status/mood/location are LIVE: output goal,goalState,status,statusState,mood,moodState,location,locationState as needed; actively reassess each returned EXISTING NPC every scan. Unchanged -> omit; changed -> replace; ended mood/goal/status -> matching *State:"clear". Location=current/last reliable; locationState:"clear" only when old place explicitly obsolete and replacement unknown. Off-screen/no evidence alone never clears it. Never use "Unknown".
-7. DURABLE PROFILE CHANNEL: ALWAYS emit one top-level profileUpdates item for durable facts even without npc delta. No duplicate/inferred. One scene may support multiple fields; emit each grounded item independently (speech+behaviorProfile allowed). matching *State:"refine" returns FULL field; lasting personality/speech/mannerism "evolve"+reason; appearance "change"+reason. behaviorProfile FULL max6; Mannerisms FULL max4 DISTINCT. PC/one-scene behavior -> relationshipSummary/live state/Memory. lockedProfileFields never rewrite.
-8. IDENTITY FIREWALL: Ignore transient visual state. mood/stress/intimacy/injury/relationship-specific behavior never becomes global Personality/Speech/Mannerisms/behaviorProfile. Player-specific durable stance->relationshipSummary. Kindness stays general unless broader change; necessary force != cruelty. Scores don't create tropes.
+7. DURABLE PROFILE CHANNEL: ALWAYS emit one top-level profileUpdates item for durable facts even without npc delta. No duplicate/inferred. One scene may support multiple fields; emit each grounded item independently (speech+behaviorProfile allowed). Appearance is the CURRENT VISIBLE PRESENTATION, including directly described hair/body traits, current outfit/gear, and visible condition. If narration reveals an earlier visual impression was wrong or obscured, use appearanceState:"refine" and return the corrected FULL current Appearance; latest explicit visual evidence wins. If the presentation itself changes, including clothing or form, use appearanceState:"change"+appearanceReason and return the FULL current Appearance. matching *State:"refine" returns FULL field; lasting personality/speech/mannerism "evolve"+reason. behaviorProfile FULL max6; Mannerisms FULL max4 DISTINCT. PC/one-scene behavior -> relationshipSummary/live state/Memory. lockedProfileFields never rewrite.
+8. IDENTITY FIREWALL: mood/stress/intimacy/injury/relationship-specific behavior never becomes global Personality/Speech/Mannerisms/behaviorProfile. This does NOT suppress grounded current Appearance: capture explicit visible traits, current outfit/gear, and relevant visible condition; do not promote a fleeting pose/expression into durable identity. Player-specific durable stance->relationshipSummary. Kindness stays general unless broader change; necessary force != cruelty. Scores don't create tropes.
 9. DEVELOPMENT SPEED: developmentScale=gradual|explicit|batch. assistant/main-speaker=gradual; Player explicit/batch only for declarative canon, not quotes/questions/speculation/requests/conditionals/wishes. Speech evidence/candidate=observable voice, not personality. Time-compressed refine/evolve/change MUST include developmentReason + changed FULL candidate; unchanged/reinforcing=>omit/keep. Time skip alone invents nothing.
 10. SOCIAL: grounded non-player kin/friend/rival/mentor/partner => ALWAYS top-level keyRelationshipEdges {aId,a,bId,b,aToB,bToA,reason}; one clear counterpart entry. Use late/surviving, never dangling "(deceased)". Social change may evolve+reason; omission NEVER erases other bonds.
 11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue, compact ~N, never prose; species literal; no species-aging inference. gender=male|female only if explicit/unambiguous; never guess; change=>genderState:"correct"+reason. Birthday/exact elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual aging/growth/rejuvenation=>apparentAgeState:"evolve"+reason. Appearance must not repeat explicit age. Vague time skip insufficient.
