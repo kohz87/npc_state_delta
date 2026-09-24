@@ -1,37 +1,5 @@
 import { buildQualifiedChatKey, chatOwnerScope, parseQualifiedChatKey } from './identity.js';
 
-function firstDivergence(a = [], b = []) {
-    const left = Array.isArray(a) ? a : [];
-    const right = Array.isArray(b) ? b : [];
-    const common = Math.min(left.length, right.length);
-    for (let i = 0; i < common; i += 1) if (left[i] !== right[i]) return i;
-    return left.length === right.length ? -1 : common;
-}
-
-function prefixLength(a = [], b = []) {
-    const divergence = firstDivergence(a, b);
-    return divergence < 0 ? Math.min(a.length, b.length) : divergence;
-}
-
-export function strongLegacyMigrationMatches(state, chat = [], { lineageV2Fn, lineageV0210Fn } = {}) {
-    const stored = Array.isArray(state?.lineage) ? state.lineage : [];
-    const messages = Array.isArray(chat) ? chat : [];
-    if (stored.length < 6 || messages.length < 6) return false;
-    const candidates = [];
-    if (typeof lineageV2Fn === 'function') candidates.push(lineageV2Fn(messages));
-    if (typeof lineageV0210Fn === 'function') candidates.push(lineageV0210Fn(messages));
-    for (const current of candidates) {
-        // Destructive ownership migration must prove the full stored lineage, not merely
-        // a copied starter prefix. If the active chat is shorter, keep the legacy state
-        // ambiguous instead of claiming it automatically.
-        const required = stored.length;
-        if (required < 6 || current.length < required || prefixLength(stored, current) < required) continue;
-        const userTurns = messages.slice(0, required).filter(message => message?.is_user).length;
-        if (userTurns >= 2) return true;
-    }
-    return false;
-}
-
 export function resolveGroupOwnerId(groups = [], chatId = '') {
     const id = String(chatId ?? '').replace(/\.jsonl$/i, '').trim();
     if (!id) return '';
@@ -44,7 +12,7 @@ export function resolveGroupOwnerId(groups = [], chatId = '') {
 }
 
 export function allSettingsKeys(settings = {}) {
-    const maps = ['dataFiles', 'sidecarTombstones', 'recoveryFiles', 'branchIndex', 'chats'];
+    const maps = ['dataFiles', 'sidecarTombstones', 'recoveryFiles'];
     const keys = new Set();
     for (const mapName of maps) for (const key of Object.keys(settings?.[mapName] || {})) keys.add(key);
     return [...keys];
@@ -74,11 +42,6 @@ export function uniqueQualifiedKeyForChat(settings = {}, kind = 'chat', chatId =
     return '';
 }
 
-export function retargetBranchIndexEntry(entry, newKey) {
-    if (!entry || typeof entry !== 'object') return entry;
-    return { ...structuredClone(entry), ownerScope: chatOwnerScope(newKey), updatedAt: Date.now() };
-}
-
 export function destinationKeyForOwnerRename(oldKey, newOwnerId) {
     const parsed = parseQualifiedChatKey(oldKey);
     if (!parsed || parsed.kind !== 'chat') return '';
@@ -88,7 +51,7 @@ export function destinationKeyForOwnerRename(oldKey, newOwnerId) {
 
 export function applyCanonicalOwnershipMove(config = {}, { oldKey = '', newKey = '', newPointer = null, recoveryPointer = null, reason = 'renamed' } = {}) {
     if (!oldKey || !newKey || oldKey === newKey) return config;
-    for (const name of ['dataFiles', 'sidecarTombstones', 'recoveryFiles', 'branchIndex']) {
+    for (const name of ['dataFiles', 'sidecarTombstones', 'recoveryFiles']) {
         if (!config[name] || typeof config[name] !== 'object') config[name] = {};
     }
     if (recoveryPointer) config.recoveryFiles[oldKey] = recoveryPointer;
@@ -105,11 +68,7 @@ export function applyCanonicalOwnershipMove(config = {}, { oldKey = '', newKey =
             reason: `${String(reason || 'renamed')}-retired:${oldKey}`,
             at: Date.now(),
         };
-    }
-    if (newPointer && config.branchIndex?.[oldKey]) config.branchIndex[newKey] = retargetBranchIndexEntry(config.branchIndex[oldKey], newKey);
-    delete config.dataFiles[oldKey];
-    delete config.branchIndex[oldKey];
-    return config;
+    }    delete config.dataFiles[oldKey];    return config;
 }
 
 
@@ -118,7 +77,6 @@ export function liveLifecycleCandidateKeys(settings = {}, cacheKeys = [], kind =
     if (!id) return [];
     const keys = new Set([
         ...Object.keys(settings?.dataFiles || {}),
-        ...Object.keys(settings?.chats || {}),
         ...(cacheKeys ? [...cacheKeys] : []),
     ]);
     return [...keys].filter(key => {

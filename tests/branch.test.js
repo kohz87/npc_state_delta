@@ -12,12 +12,11 @@ import {
     lineageCheckpointKey,
     lineageCheckpointKeys,
     ensureBranchParentAnchor,
-    migrateLegacyBranchState,
-    normalizeBranchCheckpoints,
     pruneBranchCheckpoints,
     recordBranchCheckpoint,
     reconcileBranchState,
     snapshotBranchState,
+    setBranchProvenanceHint,
 } from '../branch.js';
 import { normalizeSocialGraph } from '../social.js';
 
@@ -35,22 +34,6 @@ function baseState() {
         turn: 0, assistantSinceScan: 0, lastScanAt: 0, lastScannedMessageId: null,
         scanCount: 0,
     };
-}
-
-function legacyFingerprintV0210(message = {}) {
-    let hash = 0x811c9dc5;
-    const input = JSON.stringify({
-        user: Boolean(message.is_user),
-        system: Boolean(message.is_system),
-        name: String(message.name || ''),
-        text: String(message.mes || ''),
-        swipe: Number.isInteger(message.swipe_id) ? message.swipe_id : null,
-    });
-    for (let i = 0; i < input.length; i += 1) {
-        hash ^= input.charCodeAt(i);
-        hash = Math.imul(hash, 0x01000193) >>> 0;
-    }
-    return hash.toString(36);
 }
 
 test('message fingerprint follows narrative content and ignores unstable swipe index numbering', () => {
@@ -218,17 +201,6 @@ test('portrait attachment survives branch rollback when the NPC still exists', (
     assert.equal(result.state.npcs[0].portrait.dataUrl, 'data:image/webp;base64,AAAA');
 });
 
-test('legacy state without checkpoints is not destructively erased on first reconciliation', () => {
-    const original = [user('Hi'), assistant('Yunyun enters.', 0)];
-    const legacy = baseState();
-    legacy.npcs = [createNpcRecord('Yunyun')];
-    legacy.lineage = chatLineage(original);
-    const changed = structuredClone(original);
-    changed[1] = assistant('Wiz enters instead.', 1);
-    const result = reconcileBranchState(legacy, changed, { explicitDivergence: 1 });
-    assert.equal(result.legacyFallback, true);
-    assert.equal(result.state.npcs[0].name, 'Yunyun');
-});
 
 test('new chat branch can inherit the nearest checkpoint from a strongly verified common prefix', () => {
     const parentChat = [user('A'), assistant('B'), user('C'), assistant('D'), user('E')];
@@ -237,9 +209,13 @@ test('new chat branch can inherit the nearest checkpoint from a strongly verifie
     recordBranchCheckpoint(parent, parentChat, 1, 'scan');
     parent.lineage = chatLineage(parentChat);
     const branchChat = [user('A'), assistant('B'), user('C'), assistant('D'), user('Different continuation')];
-    const inherited = bestAncestorState({ 'chat:parent': parent }, 'chat:branch', branchChat);
+    const parentKey = 'chat:card.png:parent';
+    const childKey = 'chat:card.png:branch';
+    setBranchProvenanceHint({ mainChat: 'parent', currentKey: childKey });
+    const inherited = bestAncestorState({ [parentKey]: parent }, childKey, branchChat);
+    setBranchProvenanceHint({});
     assert.ok(inherited);
-    assert.equal(inherited.branchParent, 'chat:parent');
+    assert.equal(inherited.branchParent, parentKey);
     assert.equal(inherited.branchForkMessageId, 1);
     assert.deepEqual(inherited.npcs.map(n => n.name), ['Yunyun']);
 });
@@ -347,48 +323,6 @@ test('v0.2.11 first-message sibling swipes restore from a clean root anchor and 
     assert.equal(backToA.state.npcs[0].relationshipProgress.trust, 0.4);
 });
 
-test('v0.2.11 v0.2.10 swipe-index checkpoints migrate only when their legacy narrative prefix still matches', () => {
-    const original = [user('Wait here.'), assistant('Myla nods.'), user('Continue.')];
-    const legacy = baseState();
-    legacy.branchLineageVersion = 0;
-    legacy.lineage = original.map(legacyFingerprintV0210);
-    const myla = createNpcRecord('Myla');
-    myla.relationship.trust = 12;
-    legacy.npcs = [myla];
-    legacy.checkpoints = [{
-        messageId: 1,
-        fingerprint: legacy.lineage[1],
-        reason: 'legacy-scan',
-        createdAt: 100,
-        snapshot: snapshotBranchState(legacy),
-    }];
-
-    migrateLegacyBranchState(legacy, original);
-    assert.equal(legacy.branchLineageVersion, BRANCH_LINEAGE_VERSION);
-    const normalized = normalizeBranchCheckpoints(legacy.checkpoints, legacy.lineage);
-    assert.equal(normalized.length, 1);
-    assert.equal(normalized[0].lineageKey, lineageCheckpointKey(legacy.lineage, 1));
-
-    const changedTail = [user('Wait here.'), assistant('Myla nods.'), user('Leave instead.')];
-    const restored = reconcileBranchState(legacy, changedTail, { explicitDivergence: 2 });
-    assert.equal(restored.restoredFromMessageId, 1);
-    assert.equal(restored.exactRestored, true);
-    assert.equal(restored.state.npcs[0].relationship.trust, 12);
-
-    const stale = baseState();
-    stale.branchLineageVersion = 0;
-    stale.lineage = original.map(legacyFingerprintV0210);
-    stale.checkpoints = [{
-        messageId: 1,
-        fingerprint: stale.lineage[1],
-        reason: 'legacy-scan',
-        createdAt: 100,
-        snapshot: snapshotBranchState({ ...stale, npcs: [myla] }),
-    }];
-    const editedBeforeLoad = [user('Wait somewhere else.'), assistant('Myla nods.'), user('Continue.')];
-    migrateLegacyBranchState(stale, editedBeforeLoad);
-    assert.equal(stale.checkpoints.length, 0, 'an edited legacy prefix must never be relabeled as an exact current-branch checkpoint');
-});
 
 test('v0.2.11 checkpoint pruning keeps a safe active anchor, recent active state, and recent sibling heads', () => {
     const activeChat = Array.from({ length: 30 }, (_, index) => index % 2 === 0

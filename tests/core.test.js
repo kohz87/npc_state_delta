@@ -6,7 +6,6 @@ import {
     buildBehaviorGuidance,
     DEFAULT_BEHAVIOR_CRITERIA,
     DEFAULT_RELATIONSHIP_CAPS,
-    isLegacyStockBehaviorCriteriaV024,
     DEFAULT_MEMORY_CRITERIA,
     IMPORTANT_MEMORY_LIMIT,
     KEY_RELATIONSHIP_LIMIT,
@@ -1206,20 +1205,13 @@ test('Key Relationships keep one compact entry per counterpart', () => {
     assert.match(npc.keyRelationships[0], /blunt/i);
 });
 
-test('legacy auto-locks migrate to organic baselines while explicit v0.1.57 locks remain authoritative', () => {
-    const legacy = normalizeNpcRecord({
+test('manual profile fields are authoritative without a legacy explicit-lock marker', () => {
+    const npc = normalizeNpcRecord({
         name: 'Marris', personality: 'Reserved.', speech: 'Soft.',
-        manualProfileFields: ['personality', 'speech'],
+        manualProfileFields: ['personality', 'speech', 'personality'],
     });
-    assert.deepEqual(legacy.manualProfileFields, []);
-    assert.equal(legacy.manualProfileLocksExplicit, false);
-
-    const explicit = normalizeNpcRecord({
-        name: 'Marris', personality: 'Reserved.',
-        manualProfileFields: ['personality'], manualProfileLocksExplicit: true,
-    });
-    assert.deepEqual(explicit.manualProfileFields, ['personality']);
-    assert.equal(explicit.manualProfileLocksExplicit, true);
+    assert.deepEqual(npc.manualProfileFields, ['personality', 'speech']);
+    assert.equal(Object.prototype.hasOwnProperty.call(npc, 'manualProfileLocksExplicit'), false);
 });
 
 test('pronoun-only current exchange still supplies one recent stable profile for durable evaluation', () => {
@@ -2260,14 +2252,14 @@ test('very small injection budget drops lower-ranked present NPCs before corrupt
     assert.ok(estimateInjectionTokens(injection) <= 512);
 });
 
-test('legacy v0.1.16 tilde age migrates to apparentAge but new split records stay stable on reload', () => {
-    const legacy = normalizeNpcRecord({ id: 'npc_marris', name: 'Marris', age: '~25' });
-    assert.equal(legacy.age, '');
-    assert.equal(legacy.apparentAge, '~25');
+test('stored age and apparentAge remain separate without old-format migration', () => {
+    const oldShape = normalizeNpcRecord({ id: 'npc_marris', name: 'Marris', age: '~25' });
+    assert.equal(oldShape.age, '~25');
+    assert.equal(oldShape.apparentAge, '');
 
-    const modern = normalizeNpcRecord({ id: 'npc_elaria', name: 'Elaria', age: '~143', apparentAge: '~24' });
-    assert.equal(modern.age, '~143');
-    assert.equal(modern.apparentAge, '~24');
+    const current = normalizeNpcRecord({ id: 'npc_elaria', name: 'Elaria', age: '~143', apparentAge: '~24' });
+    assert.equal(current.age, '~143');
+    assert.equal(current.apparentAge, '~24');
 });
 test('targeted Refresh from Chat prompt reconciles one dossier without replaying relationship stats or presence', () => {
     const prompt = buildProfileRefreshPrompt({
@@ -2573,12 +2565,7 @@ test('v0.2.5 ordinary NPC delta path cannot bypass gradual identity evidence gat
 });
 
 
-test('v0.2.5 recognizes only the untouched v0.2.4 stock behavior rubric for migration', () => {
-    const legacy = 'Use relationship stats as a bipolar -100 to +100 signal with 0 neutral. Modulate the NPC\'s TEMPORARY expression toward the player without replacing established personality, speech habits, or mannerisms. Negative values are meaningful opposites, not merely "low" values.\nTrust: negative trust should read as distrustful, suspicious, guarded, withholding, formal, or watchful; values near 0 are neutral/cautious; positive trust permits increasing candor, reliance, vulnerability, relaxed familiarity, and asking for help.\nAffection: negative affection means dislike, resentment, hostility, or emotional aversion; values near 0 are emotionally neutral; positive affection increases warmth, patience, concern, fondness, protectiveness, and willingness to prioritize the player.\nDesire: negative desire means active aversion to romantic/intimate/physical closeness; values near 0 mean no established attraction; positive desire may add attraction cues with strength proportional to the score when context supports them, but never overrides personality, consent, boundaries, or established facts.\nTension: negative tension means ease, safety, relaxation, and low interpersonal pressure; values near 0 are settled/neutral; positive tension adds strain, awkward pressure, rivalry, resentment, fear, jealousy, defensiveness, or charged restraint according to context.\nInterpret combinations rather than each stat in isolation. Positive trust + positive tension can be familiar but strained. Positive affection + negative trust can care while remaining guarded. Positive desire + negative trust can be attracted without feeling safe. Positive affection + positive trust + negative tension tends toward warm ease. Positive desire + positive tension can feel charged, but do not force romance or sexual behavior. Keep reactions proportional and natural.';
-    assert.equal(isLegacyStockBehaviorCriteriaV024(legacy), true);
-    assert.equal(isLegacyStockBehaviorCriteriaV024(`${legacy}\nCustom: preserve this.`), false);
-    assert.equal(isLegacyStockBehaviorCriteriaV024(DEFAULT_BEHAVIOR_CRITERIA), false);
-});
+
 
 test('v0.2.6 minimum injection budget preserves every established identity channel plus agency', () => {
     const npc = createNpcRecord('Falia');

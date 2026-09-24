@@ -214,16 +214,6 @@ function ensureEditorStructure(editor) {
     const content = editor?.querySelector?.('#npc_state_delta_editor_content');
     if (!content || content.dataset.deltaExperienceStructured === '1') return;
 
-    const portraitOverrides = content.querySelector('.npc-state-delta-editor-portrait-overrides');
-    if (portraitOverrides) {
-        // Keep these legacy inputs mounted so the canonical editor save path preserves existing
-        // per-NPC overrides, but Portrait is now the only maintained prompt-editing surface.
-        portraitOverrides.hidden = true;
-        portraitOverrides.setAttribute('aria-hidden', 'true');
-    }
-    const legacyTools = content.querySelector('.npc-state-delta-editor-tools');
-    if (legacyTools) legacyTools.hidden = true;
-
     const identity = editorSection('Identity & profile', 'delta-editor-identity');
     for (const [id, wide] of [
         ['npc_state_delta_edit_name', false], ['npc_state_delta_edit_species', false],
@@ -272,7 +262,6 @@ function ensureEditorStructure(editor) {
 
     // Keep the editor's own heading/intro at the top, then present a predictable form hierarchy.
     content.append(identity.section, current.section, relationships.section, continuity.section, advanced);
-    if (portraitOverrides) content.appendChild(portraitOverrides);
     content.dataset.deltaExperienceStructured = '1';
     content.dispatchEvent?.(new CustomEvent('npc-state-delta:editor-mounted', { bubbles: true }));
 }
@@ -439,11 +428,10 @@ function ensureSettingsExperience() {
     const clearChat = drawer.querySelector('#npc_state_delta_clear_chat');
     if (clearChat) maintenanceActions.appendChild(clearChat);
 
-    // The legacy action wrapper may be nested inside the original settings grid.
-    // Remove it only after each action has been placed in its task-specific group.
-    for (const legacyActions of drawer.querySelectorAll('.npc-state-delta-actions')) {
-        if (legacyActions === maintenanceActions || legacyActions.children.length) continue;
-        legacyActions.remove();
+    // Remove any emptied source action wrapper after its actions have been rehomed.
+    for (const actionGroup of drawer.querySelectorAll('.npc-state-delta-actions')) {
+        if (actionGroup === maintenanceActions || actionGroup.children.length) continue;
+        actionGroup.remove();
     }
 
     const rosterSummary = drawer.querySelector('#npc_state_delta_roster_summary');
@@ -636,8 +624,8 @@ function installStyles() {
 .npc-state-delta-editor-popup{--delta-editor-height:min(940px,96dvh);width:min(1320px,97vw)!important;max-width:none!important;height:var(--delta-editor-height)!important;max-height:96dvh!important;margin:auto!important;overflow:hidden!important}
 .npc-state-delta-editor-popup .popup-content{display:flex!important;flex-direction:column!important;min-height:0!important;max-height:none!important;overflow:hidden!important}
 .npc-state-delta-editor-popup #npc_state_delta_editor_content{flex:1 1 auto!important;min-height:0!important;max-height:calc(var(--delta-editor-height) - 112px)!important;overflow-y:auto!important;overflow-x:hidden!important;overscroll-behavior:contain;padding-right:8px;scrollbar-gutter:stable}
+.npc-state-delta-editor-popup .npc-state-delta-editor-portrait-overrides{display:none!important}
 .npc-state-delta-editor-popup .npc-state-delta-editor-head{position:sticky;top:0;z-index:4;margin:-1px -1px 12px;padding:10px 2px 9px;background:color-mix(in srgb,var(--SmartThemeBlurTintColor,#18191d) 96%,black 4%);border-bottom:1px solid rgba(218,193,148,.14)}
-.npc-state-delta-editor-popup .npc-state-delta-editor-tools,.npc-state-delta-editor-popup .npc-state-delta-editor-portrait-overrides{display:none!important}
 .npc-state-delta-editor-popup .delta-editor-section{margin:12px 0;padding:13px;border:1px solid rgba(218,193,148,.16);border-radius:10px;background:rgba(255,255,255,.025)}
 .npc-state-delta-editor-popup .delta-editor-section>h4{margin:0 0 11px;color:#e3c985;font-size:.84rem;letter-spacing:.08em;text-transform:uppercase}
 .npc-state-delta-editor-popup .delta-editor-section-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px}

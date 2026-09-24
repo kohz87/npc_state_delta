@@ -65,13 +65,10 @@ test('Delta application metadata is v1.0.52 and active core ownership is semanti
 });
 
 
-test('portrait Custom slot migrates into a named persistent preset library', () => {
+test('portrait custom presets use the current named persistent library without legacy field migration', () => {
     assert.match(index, /schemaVersion: 30/);
-    assert.match(index, /if \(previousSchema < 30\)/);
-    assert.match(index, /Seed the first entry from the exact legacy fields so no existing custom prompt is lost/);
-    assert.match(index, /positive: settings\.portraitStylePositive/);
-    assert.match(index, /negative: settings\.portraitStyleNegative/);
-    assert.match(index, /composition: settings\.portraitComposition/);
+    assert.match(index, /older Delta schemas are unsupported/);
+    assert.doesNotMatch(index, /previousSchema|legacy\.portraitStyle/);
     assert.match(index, /portraitCustomPresets/);
     assert.match(index, /portraitCustomPresetId/);
 });

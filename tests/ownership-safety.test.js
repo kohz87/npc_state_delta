@@ -1,9 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildQualifiedChatKey, getCharacterOwnerId, getChatIdentityFromContext } from '../identity.js';
-import { applyCanonicalOwnershipMove, strongLegacyMigrationMatches } from '../hardening-core.js';
+import { applyCanonicalOwnershipMove } from '../hardening-core.js';
 import { BRANCH_LINEAGE_VERSION, bestAncestorState, recordBranchCheckpoint, setBranchProvenanceHint } from '../branch.js';
-import * as legacy from '../branch-v0218.js';
 import { readNpcStateDataFile, retireNpcStateDataFile, writeNpcStateDataFile } from '../storage.js';
 
 const user = mes => ({ is_user: true, is_system: false, name: 'User', mes });
@@ -25,7 +24,7 @@ test('rename-back supersedes only the verified destination tombstone', () => {
   assert.ok(settings.sidecarTombstones[b]);
 });
 
-test('fresh canonical v3 chats require host branch provenance for cross-chat inheritance', () => {
+test('current canonical chats require explicit host branch provenance for cross-chat inheritance', () => {
   const chat = [user('A'), bot('B'), user('C'), bot('D')];
   const parent = baseState();
   recordBranchCheckpoint(parent, chat, 3, 'scan');
@@ -63,10 +62,3 @@ test('stale writer and stale retirement both fail closed on revision conflict', 
   assert.equal(live.revision, 2);
 });
 
-test('legacy ownership proof requires the entire stored lineage', () => {
-  const chat = Array.from({ length: 8 }, (_, i) => i % 2 ? user(`u${i}`) : bot(`a${i}`));
-  const state = { lineage: legacy.chatLineage(chat) };
-  assert.equal(strongLegacyMigrationMatches(state, chat, { lineageV2Fn: legacy.chatLineage, lineageV0210Fn: legacy.legacyChatLineageV0210 }), true);
-  const diverged = structuredClone(chat); diverged[7].mes = 'different';
-  assert.equal(strongLegacyMigrationMatches(state, diverged, { lineageV2Fn: legacy.chatLineage, lineageV0210Fn: legacy.legacyChatLineageV0210 }), false);
-});

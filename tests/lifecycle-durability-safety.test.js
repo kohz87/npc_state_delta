@@ -46,7 +46,6 @@ test('live lifecycle candidates ignore branch index, recovery and tombstone hist
     const tombstoned = buildQualifiedChatKey('chat', 'Dead.png', 'Adventure');
     const settings = {
         dataFiles: { [keyA]: { path: '/a' }, [tombstoned]: { path: '/dead' } },
-        chats: {},
         branchIndex: { [ghost]: { head: ['x'] } },
         recoveryFiles: { [ghost]: { path: '/recovery' } },
         sidecarTombstones: { [tombstoned]: { reason: 'deleted' } },
@@ -120,12 +119,12 @@ test('runtime wiring uses pure owner-safe helpers and cheap host chat listing', 
     assert.match(source, /runBoundedLifecycleEvent/);
 });
 
-test('hardening owner-wide work is per-key isolated and historical index is bounded', () => {
+test('hardening owner-wide work is per-key isolated and current-only', () => {
     const source = fs.readFileSync(new URL('../hardening.js', import.meta.url), 'utf8');
-    assert.match(source, /HISTORICAL_RENAME_CANDIDATE_LIMIT = 1024/);
     assert.match(source, /character rename preserved .* continued with other chats/);
     assert.match(source, /character deletion preserved .* continued with other chats/);
     assert.match(source, /runBoundedHardeningEvent/);
+    assert.doesNotMatch(source, /CHARACTER_RENAMED_IN_PAST_CHAT|HISTORICAL_RENAME_CANDIDATE_LIMIT|safeLegacyMigrationForCurrent/);
 });
 
 test('historical tombstone replay cannot poison an already-live renamed destination', () => {
@@ -150,11 +149,6 @@ test('lifecycle wrappers schedule retries for late background rejection and owne
     assert.match(hardening, /if \(cachesSettled\)/);
 });
 
-test('historical rename batching processes every tracked candidate instead of truncating after one batch', () => {
-    const hardening = fs.readFileSync(new URL('../hardening.js', import.meta.url), 'utf8');
-    assert.match(hardening, /for \(let offset = 0; offset < allCandidates\.length; offset \+= HISTORICAL_RENAME_CANDIDATE_LIMIT\)/);
-    assert.doesNotMatch(hardening, /allCandidates\.slice\(0, HISTORICAL_RENAME_CANDIDATE_LIMIT\)/);
-});
 
 test('owner-wide partial failures are surfaced to the retry scheduler after successful keys are persisted', () => {
     const hardening = fs.readFileSync(new URL('../hardening.js', import.meta.url), 'utf8');
@@ -167,37 +161,14 @@ test('owner-wide partial failures are surfaced to the retry scheduler after succ
 test('final review protects all rename destination representations and event instances are unique', () => {
     const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
     const hardening = fs.readFileSync(new URL('../hardening.js', import.meta.url), 'utf8');
-    assert.match(index, /destinationRepresentations = \[destinationState, destinationCache, destinationInline\]/);
+    assert.match(index, /destinationRepresentations = \[destinationState, destinationCache\]/);
     assert.match(index, /const eventId = \+\+lifecycleEventSequence/);
     assert.match(index, /delete:chat:\$\{String\(chatId \|\| ''\)\}:\$\{eventId\}/);
-    assert.match(hardening, /historical-rename:[^\n]+\$\{eventId\}/);
+    assert.doesNotMatch(hardening, /historical-rename|CHARACTER_RENAMED_IN_PAST_CHAT/);
     assert.match(hardening, /finally \{ queueActiveCharacterCacheRefresh\(newAvatar\); \}/);
 });
 
-test('final review cleans failed legacy staging and retries operational migration failures', () => {
-    const hardening = fs.readFileSync(new URL('../hardening.js', import.meta.url), 'utf8');
-    const block = hardening.slice(hardening.indexOf('async function safeLegacyMigrationForCurrent'), hardening.indexOf('async function migrateCharacterOwner'));
-    assert.match(block, /legacy-destination-cleanup/);
-    assert.match(block, /legacy-recovery-cleanup/);
-    assert.match(block, /throw error/);
-});
 
-test('active legacy namespace migration has one strong durable owner', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
-    const hardening = fs.readFileSync(new URL('../hardening.js', import.meta.url), 'utf8');
-    const controller = index.slice(index.indexOf('async function migrateActiveLegacyNamespace'), index.indexOf('async function flushLifecycleOwner'));
-    const owner = hardening.slice(hardening.indexOf('export async function safeLegacyMigrationForCurrent'), hardening.indexOf('async function migrateCharacterOwner'));
-
-    assert.match(index, /import \{ safeLegacyMigrationForCurrent \} from '\.\/hardening\.js'/);
-    assert.match(controller, /await safeLegacyMigrationForCurrent\(\)/);
-    assert.match(controller, /getSettings\(\)\.dataFiles\?\.\[identity\.key\] \|\| chatStateCache\.has\(identity\.key\)/);
-    assert.doesNotMatch(index, /function legacyMigrationMatchesActiveChat/);
-    assert.doesNotMatch(index, /Math\.min\(4, stored\.length, current\.length\)/);
-    assert.equal((hardening.match(/events\.CHAT_CHANGED/g) || []).length, 0, 'hardening must not race the controller with a second CHAT_CHANGED migration');
-    assert.match(owner, /strongLegacyMigrationMatches/);
-    assert.match(owner, /await saveSettingsNow\(\)/);
-    assert.ok(owner.indexOf('await saveSettingsNow()') < owner.indexOf('deleteNpcStateDataFile(oldPointer'), 'settings pointer move must be durable before physical predecessor deletion');
-});
 
 test('storage has a cross-tab lease fallback when Web Locks are unavailable', () => {
     const storage = fs.readFileSync(new URL('../storage.js', import.meta.url), 'utf8');

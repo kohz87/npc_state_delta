@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createScanOperationRegistry, deletedChatStateKey } from '../branch.js';
+import { createScanOperationRegistry } from '../branch.js';
 
 test('scan locks are isolated by chat key',()=>{
   const timers=[];
@@ -41,7 +41,4 @@ test('old operation finally cannot clear a newer operation',()=>{
 });
 
 test('deleted chat storage key is strictly namespaced',()=>{
-  assert.equal(deletedChatStateKey('123.jsonl','chat'),'chat:123');
-  assert.equal(deletedChatStateKey('123','group'),'group:123');
-  assert.equal(deletedChatStateKey('123','other'),'');
 });

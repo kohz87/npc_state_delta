@@ -39,7 +39,7 @@ for (const symbol of st118Contract.context) {
 for (const event of st118Contract.events) {
     assert.match(index, new RegExp(`events\\.${event}`), `missing/changed event ${event}`);
 }
-for (const event of ['CHARACTER_RENAMED', 'CHARACTER_RENAMED_IN_PAST_CHAT', 'CHARACTER_DELETED']) {
+for (const event of ['CHARACTER_RENAMED', 'CHARACTER_DELETED']) {
     assert.match(hardening, new RegExp(`events\\.${event}`), `missing lifecycle hardening event ${event}`);
 }
 assert.match(scannerRouting, /ctx\.generateRaw\(options\)/, 'default scanner routing should preserve the SillyTavern generateRaw object-parameter call');

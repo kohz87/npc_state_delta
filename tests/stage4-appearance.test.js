@@ -30,10 +30,10 @@ function formNpc(name = 'Sora') {
     });
 }
 
-test('Stage 4 flat appearance upgrades to one Base form without fabricating alternates', () => {
+test('Stage 4 flat appearance remains a scalar current presentation without old-format Base migration', () => {
     const npc = normalizeNpcRecord({ id: 'npc_ryu', name: 'Ryu', appearance: 'Long silver hair, grey eyes, spruce-green wool dress.' });
-    assert.equal(npc.currentForm, 'Base');
-    assert.deepEqual(npc.appearanceForms, [{ name: 'Base', appearance: 'Long silver hair, grey eyes, spruce-green wool dress.' }]);
+    assert.equal(npc.currentForm, '');
+    assert.deepEqual(npc.appearanceForms, []);
     assert.equal(resolveNpcAppearance(npc), npc.appearance);
 });
 
@@ -165,7 +165,7 @@ test('Stage 4 unnamed form keeps form-independent appearance exactly once across
     assert.doesNotMatch(resolveNpcAppearance(twice), /ordinary human ears|hooked beak/i);
 });
 
-test('Stage 4 unidentified current form never borrows previous or migrated Base anatomy', () => {
+test('Stage 4 unidentified current form never borrows previous or scalar-only anatomy', () => {
     const known = formNpc('Mira');
     const transformed = mergeScanResult({ npcs: [known], turn: 3 }, { npcs: [{
         id: known.id,
@@ -183,13 +183,13 @@ test('Stage 4 unidentified current form never borrows previous or migrated Base 
     assert.match(resolveNpcAppearance(transformed), /silhouette wrapped in pale mist/i);
     assert.doesNotMatch(resolveNpcAppearance(transformed), /hooked beak|ordinary human ears/i);
 
-    const migrated = normalizeNpcRecord({ id: 'legacy', name: 'Legacy', appearance: 'Human face, brown hair, ordinary human ears.' });
-    const unknown = mergeScanResult({ npcs: [migrated], turn: 4 }, { npcs: [{ id: migrated.id, name: migrated.name, currentFormState: 'unknown', present: true }] }, { turn: 4 }).state.npcs[0];
+    const scalarOnly = normalizeNpcRecord({ ...createNpcRecord('Riven'), appearanceModelVersion: 1, appearance: 'Human face, brown hair, ordinary human ears.' });
+    const unknown = mergeScanResult({ npcs: [scalarOnly], turn: 4 }, { npcs: [{ id: scalarOnly.id, name: scalarOnly.name, currentFormState: 'unknown', present: true }] }, { turn: 4 }).state.npcs[0];
     assert.equal(resolveNpcAppearance(unknown), '');
-    assert.equal(unknown.appearanceForms[0].name, 'Base');
+    assert.deepEqual(unknown.appearanceForms, []);
 });
 
-test('Stage 4 selecting a named form without a description never falls back to migrated Base anatomy', () => {
+test('Stage 4 selecting a named form without a description never falls back to prior scalar anatomy', () => {
     const migrated = normalizeNpcRecord({ id: 'npc_shift', name: 'Shift', appearance: 'Human face, brown hair, ordinary human ears.' });
     const switched = mergeScanResult({ npcs: [migrated], turn: 5 }, { npcs: [{
         id: migrated.id,
@@ -225,7 +225,7 @@ test('Stage 4 established form anatomy rejects ungrounded rewrites but accepts g
 });
 
 test('Stage 4 appearance lock protects overall presentation, forms, and selection together', () => {
-    const base = normalizeNpcRecord({ ...formNpc('Astra'), manualProfileLocksExplicit: true, manualProfileFields: ['appearance'] });
+    const base = normalizeNpcRecord({ ...formNpc('Astra'), manualProfileFields: ['appearance'] });
     const result = mergeScanResult({ npcs: [base], turn: 5 }, { npcs: [{
         id: base.id,
         name: base.name,

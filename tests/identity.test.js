@@ -4,7 +4,6 @@ import {
     buildQualifiedChatKey,
     chatOwnerScope,
     getChatIdentityFromContext,
-    isLegacyUnqualifiedChatKey,
     isQualifiedChatKey,
     parseQualifiedChatKey,
     sameChatOwnerScope,
@@ -42,10 +41,4 @@ test('owner scopes separate characters while preserving sibling chats', () => {
     assert.equal(chatOwnerScope(a1), chatOwnerScope(a2));
     assert.equal(sameChatOwnerScope(a1, a2), true);
     assert.equal(sameChatOwnerScope(a1, b1), false);
-});
-
-test('legacy unqualified keys are recognized but are not canonical', () => {
-    assert.equal(isLegacyUnqualifiedChatKey('chat:Eos'), true);
-    assert.equal(isLegacyUnqualifiedChatKey('group:session'), true);
-    assert.equal(isQualifiedChatKey('chat:Eos'), false);
 });

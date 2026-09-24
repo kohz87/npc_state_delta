@@ -7,7 +7,6 @@ import { normalizeSocialGraph, removeNpcFromSocialGraph, purgeNpcStructuredRefer
 export * from './branch-core.js';
 
 export const BRANCH_LINEAGE_VERSION = 5;
-export const BRANCH_HISTORY_COMPACTION_VERSION = 1;
 export const BRANCH_SNAPSHOT_BUDGET_BYTES = 8_000_000;
 export const BRANCH_SNAPSHOT_BUDGET_CHARS = BRANCH_SNAPSHOT_BUDGET_BYTES;
 export const BRANCH_SNAPSHOT_MAX_BYTES = 2_000_000;
@@ -17,9 +16,6 @@ export const ROLLBACK_JOURNAL_LIMIT = 1024;
 // Diagnostic target only. The guaranteed raw-message rollback window is never silently
 // shortened to satisfy this value; structure-specific undo keeps ordinary journals below it.
 export const ROLLBACK_JOURNAL_BUDGET_BYTES = 12_000_000;
-// Kept as a compatibility export for older diagnostics/tests. v1.0.8 no longer uses an
-// entry-count floor to override the raw-message retention contract.
-export const ROLLBACK_JOURNAL_MIN_ACTIVE_ENTRIES = 0;
 
 let provenanceHint = Object.freeze({ mainChat: '', ownerScope: '', currentKey: '' });
 
@@ -46,111 +42,19 @@ function branchHash(text) {
     return `${fnv1a32(input, 0x811c9dc5)}.${fnv1a32(input, 0x9e3779b9)}`;
 }
 
-function legacyV3FingerprintMessage(message = {}) {
-    const payload = JSON.stringify({
-        user: Boolean(message.is_user),
-        system: Boolean(message.is_system),
-        text: String(message.mes || ''),
-    });
-    return branchHash(payload);
-}
-
-export function legacyChatLineageV3(chat = []) {
-    return (Array.isArray(chat) ? chat : []).map(legacyV3FingerprintMessage);
-}
-
-function legacyV4MessageInstanceIdentity(message = {}) {
-    const sendDate = String(message.send_date ?? '').trim();
-    if (sendDate) return `date:${sendDate}`;
-    const generationId = String(message?.extra?.gen_id ?? '').trim();
-    if (generationId) return `gen:${generationId}`;
-    return '';
-}
-
-function legacyV4FingerprintMessage(message = {}) {
-    const payload = JSON.stringify({
-        user: Boolean(message.is_user),
-        system: Boolean(message.is_system),
-        text: String(message.mes || ''),
-        instance: legacyV4MessageInstanceIdentity(message),
-    });
-    return branchHash(payload);
-}
-
-export function legacyChatLineageV4(chat = []) {
-    return (Array.isArray(chat) ? chat : []).map(legacyV4FingerprintMessage);
-}
-
 export function fingerprintMessage(message = {}) {
-    // v5 destructive lineage is narrative-content based. SillyTavern's send_date, gen_id and
-    // swipe indexes are mutable host metadata, so they may help the host identify an alternate
-    // but must never make Delta roll canonical dossier state backward by themselves.
-    return legacyV3FingerprintMessage(message);
+    // Destructive lineage is narrative-content based. SillyTavern send dates, generation IDs,
+    // swipe indexes, and speaker labels are mutable host metadata and never define durable state.
+    const payload = JSON.stringify({
+        user: Boolean(message.is_user),
+        system: Boolean(message.is_system),
+        text: String(message.mes || ''),
+    });
+    return branchHash(payload);
 }
 
 export function chatLineage(chat = []) {
     return (Array.isArray(chat) ? chat : []).map(fingerprintMessage);
-}
-
-function hostBranchDescriptors(chat = []) {
-    const messages = Array.isArray(chat) ? chat : [];
-    const activeLineage = chatLineage(messages);
-    const activeV4Lineage = legacyChatLineageV4(messages);
-    const activeKeys = lineageCheckpointKeys(activeLineage);
-    const activeV4Keys = lineageCheckpointKeys(activeV4Lineage);
-    const byV5Key = new Map();
-    const v4ToV5 = new Map();
-    const activeKeySet = new Set(activeKeys);
-    const swipeKeySet = new Set();
-
-    const remember = (v5Lineage, messageId, v4Key = '') => {
-        const keys = lineageCheckpointKeys(v5Lineage);
-        const lineageKey = keys[messageId] || '';
-        if (!lineageKey) return;
-        const descriptor = {
-            messageId,
-            fingerprint: v5Lineage[messageId] || '',
-            lineageKey,
-            parentLineageKey: messageId > 0 ? keys[messageId - 1] : 'root',
-        };
-        byV5Key.set(lineageKey, descriptor);
-        if (v4Key) v4ToV5.set(v4Key, descriptor);
-    };
-
-    for (let i = 0; i < activeLineage.length; i += 1) remember(activeLineage, i, activeV4Keys[i]);
-
-    for (let messageId = 0; messageId < messages.length; messageId += 1) {
-        const message = messages[messageId] || {};
-        const swipes = Array.isArray(message.swipes) ? message.swipes : [];
-        if (swipes.length < 2) continue;
-        const swipeInfo = Array.isArray(message.swipe_info) ? message.swipe_info : [];
-        const activeSwipeId = Number.isInteger(message.swipe_id) ? message.swipe_id : -1;
-
-        for (let swipeId = 0; swipeId < swipes.length; swipeId += 1) {
-            const swipeText = String(swipes[swipeId] ?? '');
-            const v5Lineage = activeLineage.slice(0, messageId);
-            v5Lineage.push(fingerprintMessage({ ...message, mes: swipeText }));
-            const v5Keys = lineageCheckpointKeys(v5Lineage);
-            const v5Key = v5Keys[messageId] || '';
-            if (!v5Key) continue;
-            if (!activeKeySet.has(v5Key)) swipeKeySet.add(v5Key);
-
-            const info = swipeInfo[swipeId] && typeof swipeInfo[swipeId] === 'object' ? swipeInfo[swipeId] : null;
-            const v4Message = { ...message, mes: swipeText };
-            const isActiveSwipe = swipeId === activeSwipeId || swipeText === String(message.mes ?? '');
-            if (info && Object.prototype.hasOwnProperty.call(info, 'send_date')) v4Message.send_date = info.send_date;
-            else if (!isActiveSwipe) delete v4Message.send_date;
-            if (info?.extra && typeof info.extra === 'object') v4Message.extra = { ...(message.extra || {}), ...info.extra };
-            else if (!isActiveSwipe) v4Message.extra = {};
-
-            const v4Lineage = activeV4Lineage.slice(0, messageId);
-            v4Lineage.push(legacyV4FingerprintMessage(v4Message));
-            const v4Key = lineageCheckpointKey(v4Lineage, messageId);
-            remember(v5Lineage, messageId, v4Key);
-        }
-    }
-
-    return { activeLineage, activeKeys, activeKeySet, swipeKeySet, byV5Key, v4ToV5 };
 }
 
 export function lineageCheckpointKeys(lineage = []) {
@@ -322,10 +226,7 @@ function buildSocialGraphUndo(beforeGraph = {}, afterGraph = {}) {
 }
 
 function applySocialGraphUndo(currentGraph = {}, undo = null) {
-    if (!undo) return normalizeSocialGraph(currentGraph);
-    // v1.0.7 stored the complete previous graph. Preserve that reader during the in-place
-    // journal upgrade rather than making old rollback entries unusable.
-    if (undo.kind !== 'delta') return normalizeSocialGraph(undo);
+    if (!undo || undo.kind !== 'delta') return normalizeSocialGraph(currentGraph);
     const current = normalizeSocialGraph(currentGraph);
     return normalizeSocialGraph({
         version: Object.prototype.hasOwnProperty.call(undo, 'version') ? undo.version : current.version,
@@ -806,191 +707,9 @@ export function pruneBranchCheckpoints(checkpoints = [], activeLineage = [], lim
     return [...budgeted.values()].sort((a, b) => a.messageId - b.messageId || a.createdAt - b.createdAt);
 }
 
-function compactRollbackJournalToOwnedHistory(state, retainedCheckpoints) {
-    const entries = normalizeRollbackJournal(state?.rollbackJournal);
-    if (!entries.length) return [];
-    const bySeq = new Map(entries.map(entry => [entry.seq, entry]));
-    const keep = new Set();
-    const retainChain = rawSeq => {
-        let seq = Math.max(0, Number(rawSeq || 0));
-        const seen = new Set();
-        while (seq > 0 && !seen.has(seq)) {
-            const entry = bySeq.get(seq);
-            if (!entry) break;
-            keep.add(entry.seq);
-            seen.add(entry.seq);
-            seq = entry.prevSeq;
-        }
-    };
-    retainChain(state?.rollbackHead?.seq);
-    for (const checkpoint of retainedCheckpoints) retainChain(checkpoint?.rollbackSeq);
-    return entries.filter(entry => keep.has(entry.seq));
-}
-
-export function compactLegacyBranchHistory(state, chat, { force = false } = {}) {
-    if (!state || typeof state !== 'object') return { state, changed: false, deferred: false, summary: null };
-    if (!force && Number(state.branchHistoryCompactionVersion || 0) >= BRANCH_HISTORY_COMPACTION_VERSION) {
-        return { state, changed: false, deferred: false, summary: state.branchHistoryCompaction || null };
-    }
-
-    const hostBranches = hostBranchDescriptors(chat);
-    const relation = branchCore.classifyLineageRelationship(
-        Array.isArray(state.lineage) ? state.lineage : [],
-        hostBranches.activeLineage,
-    );
-    if (!force && !['same', 'forward-extension'].includes(relation.kind)) {
-        return { state, changed: false, deferred: true, summary: null };
-    }
-
-    const allowedKeys = new Set([...hostBranches.activeKeySet, ...hostBranches.swipeKeySet]);
-    const checkpointsBefore = normalizeBranchCheckpointsV3(state.checkpoints, Array.isArray(state.lineage) ? state.lineage : hostBranches.activeLineage);
-    const checkpointBytesBefore = checkpointsBefore.reduce((sum, item) => sum + checkpointBytes(item), 0);
-    const journalBefore = normalizeRollbackJournal(state.rollbackJournal);
-    const journalBytesBefore = journalBefore.reduce((sum, item) => sum + rollbackEntryBytes(item), 0);
-    const inlineBefore = Array.isArray(state.inlineCards) ? state.inlineCards.length : 0;
-
-    const retainedCheckpoints = checkpointsBefore.filter(item => allowedKeys.has(String(item?.lineageKey || '')));
-    state.checkpoints = pruneBranchCheckpoints(retainedCheckpoints, hostBranches.activeLineage);
-    state.inlineCards = (Array.isArray(state.inlineCards) ? state.inlineCards : []).filter(entry => {
-        const key = String(entry?.lineageKey || '').trim();
-        if (key) return allowedKeys.has(key);
-        const messageId = Number(entry?.messageId);
-        return Number.isInteger(messageId) && messageId >= 0 && messageId < hostBranches.activeLineage.length
-            && String(entry?.fingerprint || '') === String(hostBranches.activeLineage[messageId] || '');
-    });
-    state.rollbackJournal = compactRollbackJournalToOwnedHistory(state, state.checkpoints);
-    refreshRollbackJournalRetention(state);
-    boundRootSnapshot(state);
-    prunePortraitAssetsInPlace(state);
-
-    const checkpointBytesAfter = state.checkpoints.reduce((sum, item) => sum + checkpointBytes(item), 0);
-    const journalBytesAfter = (Array.isArray(state.rollbackJournal) ? state.rollbackJournal : []).reduce((sum, item) => sum + rollbackEntryBytes(item), 0);
-    const summary = {
-        version: BRANCH_HISTORY_COMPACTION_VERSION,
-        at: Date.now(),
-        checkpointsBefore: checkpointsBefore.length,
-        checkpointsAfter: state.checkpoints.length,
-        checkpointBytesBefore,
-        checkpointBytesAfter,
-        inlineCardsBefore: inlineBefore,
-        inlineCardsAfter: state.inlineCards.length,
-        journalEntriesBefore: journalBefore.length,
-        journalEntriesAfter: Array.isArray(state.rollbackJournal) ? state.rollbackJournal.length : 0,
-        journalBytesBefore,
-        journalBytesAfter,
-        provenSwipeCheckpoints: state.checkpoints.filter(item => hostBranches.swipeKeySet.has(item.lineageKey)).length,
-    };
-    state.branchHistoryCompactionVersion = BRANCH_HISTORY_COMPACTION_VERSION;
-    state.branchHistoryCompaction = summary;
-    const changed = summary.checkpointsBefore !== summary.checkpointsAfter
-        || summary.inlineCardsBefore !== summary.inlineCardsAfter
-        || summary.journalEntriesBefore !== summary.journalEntriesAfter
-        || summary.checkpointBytesBefore !== summary.checkpointBytesAfter
-        || summary.journalBytesBefore !== summary.journalBytesAfter;
-    return { state, changed, deferred: false, summary };
-}
-
 function boundRootSnapshot(state) {
     if (!state?.branchRootSnapshot || typeof state.branchRootSnapshot !== 'object') return;
     if (utf8Bytes(state.branchRootSnapshot) > BRANCH_SNAPSHOT_MAX_BYTES) state.branchRootSnapshot = null;
-}
-
-export function migrateLegacyBranchState(state, chat, limit = branchCore.BRANCH_HISTORY_LIMIT) {
-    if (!state || typeof state !== 'object') return state;
-    if (Number(state.branchLineageVersion || 0) >= BRANCH_LINEAGE_VERSION) {
-        state.checkpoints = pruneBranchCheckpoints(state.checkpoints, Array.isArray(state.lineage) ? state.lineage : [], limit);
-        boundRootSnapshot(state);
-        ensureBranchFamilyId(state, (state.lineage || []).slice(0, 4).join('|'));
-        prunePortraitAssetsInPlace(state);
-        return state;
-    }
-    const hostBranches = hostBranchDescriptors(chat);
-    const lineage = hostBranches.activeLineage;
-    const keys = hostBranches.activeKeys;
-    const storedVersion = Number(state.branchLineageVersion || 0);
-    const storedLineage = Array.isArray(state.lineage) ? [...state.lineage] : [];
-    const proofLineage = storedVersion <= 0
-        ? branchCore.legacyChatLineageV0210(chat)
-        : (storedVersion === 3
-            ? legacyChatLineageV3(chat)
-            : (storedVersion === 4 ? legacyChatLineageV4(chat) : branchCore.chatLineage(chat)));
-    const hostRenameRebase = state.hostRenameRebaseAllowed === true;
-    let provenPrefixLength = hostRenameRebase ? Math.min(storedLineage.length, proofLineage.length) : 0;
-    if (!hostRenameRebase) {
-        const common = Math.min(storedLineage.length, proofLineage.length);
-        while (provenPrefixLength < common && storedLineage[provenPrefixLength] === proofLineage[provenPrefixLength]) provenPrefixLength += 1;
-    }
-    const prefixMatches = messageId => {
-        if (hostRenameRebase) return true;
-        if (!Number.isInteger(messageId) || messageId < 0 || messageId >= proofLineage.length) return false;
-        for (let i = 0; i <= messageId; i += 1) if (!storedLineage[i] || storedLineage[i] !== proofLineage[i]) return false;
-        return true;
-    };
-    if (storedVersion < BRANCH_LINEAGE_VERSION) {
-        const descriptorForLegacyItem = (raw, messageId) => {
-            if (!Number.isInteger(messageId) || messageId < 0 || messageId >= lineage.length) return null;
-            const existingKey = String(raw?.lineageKey || raw?.branchKey || '').trim();
-            if (storedVersion === 4 && existingKey) return hostBranches.v4ToV5.get(existingKey) || null;
-            if (storedVersion === 3 && existingKey) return hostBranches.byV5Key.get(existingKey) || null;
-            if (!prefixMatches(messageId)) return null;
-            return hostBranches.byV5Key.get(keys[messageId]) || null;
-        };
-
-        const migrated = [];
-        for (const raw of Array.isArray(state.checkpoints) ? state.checkpoints : []) {
-            const messageId = Number(raw?.messageId);
-            if (!raw?.snapshot || typeof raw.snapshot !== 'object') continue;
-            const descriptor = descriptorForLegacyItem(raw, messageId);
-            if (!descriptor) continue;
-            migrated.push({
-                ...raw,
-                messageId,
-                fingerprint: descriptor.fingerprint,
-                lineageKey: descriptor.lineageKey,
-                parentLineageKey: descriptor.parentLineageKey,
-                reason: String(raw.reason || 'v5-migrated'),
-            });
-        }
-        state.checkpoints = migrated;
-        state.inlineCards = (Array.isArray(state.inlineCards) ? state.inlineCards : []).map(entry => {
-            const messageId = Number(entry?.messageId);
-            const descriptor = descriptorForLegacyItem(entry, messageId);
-            if (!descriptor) return null;
-            return { ...entry, messageId, fingerprint: descriptor.fingerprint, lineageKey: descriptor.lineageKey };
-        }).filter(Boolean);
-    }
-    // Preserve the prior branch shape through the one-time v2 -> v3 conversion. Relabel the
-    // proven common prefix with v3 fingerprints, but use deterministic historical sentinels for
-    // the old suffix. The next reconciliation can therefore still detect a swipe/edit/tail
-    // divergence instead of migration accidentally making old and current lineages identical.
-    if (hostRenameRebase || storedVersion === 4) {
-        // v4 included SillyTavern send_date/gen_id in destructive lineage. Those values can
-        // legitimately change while narrative content remains valid, so a v4 sidecar upgrades
-        // fail-closed onto the live v5 narrative lineage instead of manufacturing a rollback.
-        // Only checkpoints whose old v4 prefix was actually proven above are migrated.
-        state.lineage = lineage;
-    } else {
-        state.lineage = storedLineage.map((storedFingerprint, index) => index < provenPrefixLength && index < lineage.length
-            ? lineage[index]
-            : branchHash(`legacy-lineage-v${storedVersion}:${index}:${storedFingerprint}`));
-    }
-    state.branchLineageVersion = BRANCH_LINEAGE_VERSION;
-    delete state.hostRenameRebaseAllowed;
-    // Migrated checkpoints exist only on the proven current prefix and are keyed to current v3
-    // content. Preserve them against the current lineage even while state.lineage retains the
-    // previous-branch sentinels for one reconciliation cycle.
-    state.checkpoints = pruneBranchCheckpoints(state.checkpoints, lineage, limit);
-    boundRootSnapshot(state);
-    ensureBranchFamilyId(state, lineage.slice(0, 4).join('|'));
-    prunePortraitAssetsInPlace(state);
-    return state;
-}
-
-export function rebaseBranchStateForHostRename(state, chat, limit = branchCore.BRANCH_HISTORY_LIMIT) {
-    if (!state || typeof state !== 'object') return state;
-    if (Number(state.branchLineageVersion || 0) >= BRANCH_LINEAGE_VERSION) return state;
-    state.hostRenameRebaseAllowed = true;
-    return migrateLegacyBranchState(state, chat, limit);
 }
 
 export function ensureBranchParentAnchor(state, chat, messageId, reason = 'parent-anchor', limit = branchCore.BRANCH_HISTORY_LIMIT) {
@@ -1214,7 +933,6 @@ function normalizedRecoveryOperation(value) {
 }
 
 export function reconcileBranchState(state, chat, { explicitDivergence = null, operation = 'auto' } = {}) {
-    migrateLegacyBranchState(state, chat);
     // Permanent UI deletion is external user authority, not narrative branch state. Normalize
     // it before establishing any rollback baseline so an old label tombstone or stale snapshot
     // cannot become a new journal mutation merely because content lineage stayed unchanged.
@@ -1424,63 +1142,28 @@ function candidateMatchesExplicitParent(key) {
 }
 
 export function bestAncestorState(chats = {}, currentKey = '', currentChat = []) {
+    if (!provenanceHint.mainChat) return null;
     const lineage = chatLineage(currentChat);
-    const v4Lineage = legacyChatLineageV4(currentChat);
-    const v3Lineage = legacyChatLineageV3(currentChat);
-    const historicalLineage = branchCore.chatLineage(currentChat);
     const currentKeys = lineageCheckpointKeys(lineage);
-    const historicalCurrentKeys = branchCore.lineageCheckpointKeys(historicalLineage);
     let best = null;
-    const hasExplicitParent = Boolean(provenanceHint.mainChat);
 
     for (const [key, state] of Object.entries(chats || {})) {
-        if (key === currentKey || !state || !Array.isArray(state.lineage) || !Array.isArray(state.checkpoints)) continue;
-        if (hasExplicitParent && !candidateMatchesExplicitParent(key)) continue;
-        const version = Number(state.branchLineageVersion || 0);
-        const isCurrent = version >= BRANCH_LINEAGE_VERSION;
-        const isV4 = version === 4;
-        const isV3 = version === 3;
-        let prefixLength = 0;
-        let sourceCheckpoints = [];
+        if (key === currentKey || !candidateMatchesExplicitParent(key) || !state
+            || Number(state.branchLineageVersion || 0) !== BRANCH_LINEAGE_VERSION
+            || !Array.isArray(state.lineage) || !Array.isArray(state.checkpoints)) continue;
 
-        if (hasExplicitParent) {
-            const comparisonLineage = isCurrent ? lineage : (isV4 ? v4Lineage : (isV3 ? v3Lineage : historicalLineage));
-            prefixLength = branchCore.commonPrefixLength(state.lineage, comparisonLineage);
-            const hasRoot = Boolean(state.branchRootSnapshot && typeof state.branchRootSnapshot === 'object');
-            if (prefixLength < 1 && !hasRoot) continue;
-            sourceCheckpoints = (isCurrent || isV4 || isV3)
-                ? normalizeBranchCheckpointsV3(state.checkpoints, state.lineage)
-                : branchCore.normalizeBranchCheckpoints(state.checkpoints, state.lineage);
-        } else {
-            const canonical = Boolean(parseQualifiedChatKey(key));
-            if (canonical && version >= 3) continue;
-            const comparisonLineage = isCurrent ? lineage : (isV4 ? v4Lineage : (isV3 ? v3Lineage : historicalLineage));
-            prefixLength = branchCore.commonPrefixLength(state.lineage, comparisonLineage);
-            const minPrefix = canonical ? 8 : 4;
-            const minUserTurns = canonical ? 3 : 2;
-            if (prefixLength < minPrefix) continue;
-            const sharedPrefix = (Array.isArray(currentChat) ? currentChat : []).slice(0, prefixLength);
-            if (sharedPrefix.filter(message => message?.is_user).length < minUserTurns) continue;
-            sourceCheckpoints = (isCurrent || isV4 || isV3)
-                ? normalizeBranchCheckpointsV3(state.checkpoints, state.lineage)
-                : branchCore.normalizeBranchCheckpoints(state.checkpoints, state.lineage);
-        }
-
+        const prefixLength = branchCore.commonPrefixLength(state.lineage, lineage);
+        const hasRoot = Boolean(state.branchRootSnapshot && typeof state.branchRootSnapshot === 'object');
+        if (prefixLength < 1 && !hasRoot) continue;
+        const sourceCheckpoints = normalizeBranchCheckpointsV3(state.checkpoints, state.lineage);
         let checkpoint = sourceCheckpoints
             .filter(item => item.messageId < prefixLength)
-            .filter(item => {
-                if (hasExplicitParent) return true;
-                const keys = isCurrent ? currentKeys : historicalCurrentKeys;
-                return item.lineageKey === keys[item.messageId];
-            })
-            .sort((a, b) => a.messageId - b.messageId || a.createdAt - b.createdAt)
+            .sort((left, right) => left.messageId - right.messageId || left.createdAt - right.createdAt)
             .at(-1);
-        if (!checkpoint && hasExplicitParent && state.branchRootSnapshot && typeof state.branchRootSnapshot === 'object') {
-            checkpoint = { messageId: -1, lineageKey: 'root', createdAt: 0, snapshot: state.branchRootSnapshot };
-        }
+        if (!checkpoint && hasRoot) checkpoint = { messageId: -1, lineageKey: 'root', createdAt: 0, snapshot: state.branchRootSnapshot };
         if (!checkpoint) continue;
         if (!best || checkpoint.messageId > best.checkpoint.messageId) {
-            best = { key, state, checkpoint, prefixLength, sourceCheckpoints, isCurrent };
+            best = { key, state, checkpoint, sourceCheckpoints };
         }
     }
 

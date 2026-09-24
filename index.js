@@ -25,17 +25,6 @@ import {
     DEFAULT_IMPACT_CRITERIA,
     DEFAULT_MEMORY_CRITERIA,
     DEFAULT_BEHAVIOR_CRITERIA,
-    isLegacyStockBehaviorCriteriaV024,
-    isLegacyStockRelationshipCapsV028,
-    isLegacyStockRelationshipCriteriaV028,
-    isLegacyStockImpactCriteriaV028,
-    isLegacyStockBehaviorCriteriaV028,
-    isLegacyStockRelationshipCapsV029,
-    isLegacyStockRelationshipCriteriaV029,
-    isLegacyStockImpactCriteriaV029,
-    isLegacyStockBehaviorCriteriaV029,
-    isLegacyStockRelationshipCriteriaV0221,
-    isLegacyStockImpactCriteriaV0221,
     relationshipHistoryLooksDuplicate,
     IMPORTANT_MEMORY_LIMIT,
     KEY_RELATIONSHIP_LIMIT,
@@ -101,12 +90,11 @@ import {
 import { decodeDeltaNativeBundle, nativeStateForTarget } from './native-transfer.js';
 import {
     BRANCH_LINEAGE_VERSION,
-    BRANCH_HISTORY_COMPACTION_VERSION,
     BRANCH_SNAPSHOT_BUDGET_BYTES,
     BRANCH_SNAPSHOT_MAX_BYTES,
     ROLLBACK_JOURNAL_BUDGET_BYTES,
+    ROLLBACK_JOURNAL_VERSION,
     createScanOperationRegistry,
-    deletedChatStateKey,
     bestAncestorState,
     chatLineage,
     fingerprintMessage,
@@ -114,11 +102,8 @@ import {
     lineageCheckpointKey,
     addUserDismissedGroup,
     clearUserDismissedGroupsFor,
-    compactLegacyBranchHistory,
     ensureBranchParentAnchor,
-    migrateLegacyBranchState,
     normalizeUserDismissedGroups,
-    promoteLegacyUserDismissedGroups,
     recordBranchCheckpoint,
     reconcileBranchState,
     snapshotBranchState,
@@ -145,9 +130,7 @@ import {
     getCharacterOwnerId,
     getChatIdentityFromContext,
     isQualifiedChatKey,
-    legacyChatKey,
     parseQualifiedChatKey,
-    sameChatOwnerScope,
 } from './identity.js';
 import {
     lifecycleRenameStateIsEmpty,
@@ -155,7 +138,6 @@ import {
     resolveDeletedLifecycleKeyFromPresence,
     resolveOwnedLifecycleKey,
 } from './hardening-core.js';
-import { safeLegacyMigrationForCurrent } from './hardening.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
 const PROMPT_KEY = 'npc_state_delta_live_dossier';
@@ -238,9 +220,6 @@ const persistedVersions = new Map();
 const ownershipEpochs = new Map();
 const chatCacheTouches = new Map();
 const CHAT_CACHE_LIMIT = 6;
-const BRANCH_INDEX_PREFIX_LIMIT = 12;
-const BRANCH_INDEX_MAX_CANDIDATES = 16;
-const LEGACY_BRANCH_DISCOVERY_LIMIT = 8;
 const SCAN_OPERATION_TIMEOUT_MS = 5 * 60 * 1000;
 const LIFECYCLE_EVENT_WAIT_MS = 12_000;
 const LIFECYCLE_RETRY_DELAY_MS = 30_000;
@@ -348,16 +327,16 @@ function portraitCustomPreset(raw = {}, index = 0) {
     return {
         id,
         name,
-        positive: String(raw.positive ?? raw.portraitStylePositive ?? DEFAULT_PORTRAIT_STYLE_POSITIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT),
-        negative: String(raw.negative ?? raw.portraitStyleNegative ?? DEFAULT_PORTRAIT_STYLE_NEGATIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT),
-        composition: String(raw.composition ?? raw.portraitComposition ?? DEFAULT_PORTRAIT_COMPOSITION).slice(0, PORTRAIT_COMPOSITION_PROMPT_LIMIT),
-        promptFormat: normalizePortraitPromptFormat(raw.promptFormat ?? raw.portraitPromptFormat ?? 'hybrid'),
-        useMood: raw.useMood !== undefined ? Boolean(raw.useMood) : (raw.portraitUseMood !== false),
-        useLocation: raw.useLocation !== undefined ? Boolean(raw.useLocation) : (raw.portraitUseLocation === true),
+        positive: String(raw.positive ?? DEFAULT_PORTRAIT_STYLE_POSITIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT),
+        negative: String(raw.negative ?? DEFAULT_PORTRAIT_STYLE_NEGATIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT),
+        composition: String(raw.composition ?? DEFAULT_PORTRAIT_COMPOSITION).slice(0, PORTRAIT_COMPOSITION_PROMPT_LIMIT),
+        promptFormat: normalizePortraitPromptFormat(raw.promptFormat ?? 'hybrid'),
+        useMood: raw.useMood !== undefined ? Boolean(raw.useMood) : true,
+        useLocation: raw.useLocation !== undefined ? Boolean(raw.useLocation) : false,
     };
 }
 
-function portraitCustomPresetLibrary(raw, legacy = {}) {
+function portraitCustomPresetLibrary(raw) {
     const source = Array.isArray(raw) ? raw : [];
     const seen = new Set();
     const result = [];
@@ -373,19 +352,13 @@ function portraitCustomPresetLibrary(raw, legacy = {}) {
         result.push(portraitCustomPreset({
             id: DEFAULT_CUSTOM_PORTRAIT_PRESET_ID,
             name: 'Custom 1',
-            positive: legacy.portraitStylePositive,
-            negative: legacy.portraitStyleNegative,
-            composition: legacy.portraitComposition,
-            promptFormat: legacy.portraitPromptFormat,
-            useMood: legacy.portraitUseMood,
-            useLocation: legacy.portraitUseLocation,
         }, 0));
     }
     return result;
 }
 
 function portraitCustomPresetFor(source = {}, id = '') {
-    const presets = portraitCustomPresetLibrary(source.portraitCustomPresets, source);
+    const presets = portraitCustomPresetLibrary(source.portraitCustomPresets);
     const selectedId = String(id || source.portraitCustomPresetId || '').trim();
     return presets.find(item => item.id === selectedId) || presets[0];
 }
@@ -420,7 +393,6 @@ function uniquePortraitCustomPresetName(presets, base, excludeId = '') {
     return `${root.slice(0, 68)} ${Date.now().toString(36)}`.slice(0, 80);
 }
 
-const DURABLE_COMPACTION_VERSION = 1;
 
 const DEFAULTS = Object.freeze({
     schemaVersion: 30,
@@ -462,8 +434,6 @@ const DEFAULTS = Object.freeze({
     dataFiles: {},
     sidecarTombstones: {},
     recoveryFiles: {},
-    branchIndex: {},
-    legacyOwnershipClaims: {},
     recoveryHistory: {},
     recoveryGarbage: {},
 });
@@ -491,7 +461,6 @@ function getSettings() {
         dirty = true;
     }
 
-    const previousSchema = Number(settings.schemaVersion || 0);
     const assign = (key, value, equal = Object.is) => {
         if (equal(settings[key], value)) return;
         settings[key] = structuredClone(value);
@@ -508,81 +477,10 @@ function getSettings() {
     if (!settings.dataFiles || typeof settings.dataFiles !== 'object') assign('dataFiles', {});
     if (!settings.sidecarTombstones || typeof settings.sidecarTombstones !== 'object') assign('sidecarTombstones', {});
     if (!settings.recoveryFiles || typeof settings.recoveryFiles !== 'object') assign('recoveryFiles', {});
-    if (!settings.branchIndex || typeof settings.branchIndex !== 'object') assign('branchIndex', {});
-    if (!settings.legacyOwnershipClaims || typeof settings.legacyOwnershipClaims !== 'object') assign('legacyOwnershipClaims', {});
     if (!settings.recoveryHistory || typeof settings.recoveryHistory !== 'object') assign('recoveryHistory', {});
     if (!settings.recoveryGarbage || typeof settings.recoveryGarbage !== 'object') assign('recoveryGarbage', {});
 
-    // One-shot migrations. All changes are saved once at the end rather than once
-    // per historical schema step, which matters on older installations.
-    if (previousSchema < 2) {
-        if (Number(settings.maxNpcs) <= 6) assign('maxNpcs', 40);
-        if (Number(settings.scanEvery) >= 2) assign('scanEvery', 1);
-    }
-    if (previousSchema < 8) {
-        const oldDefault = { trust: 50, affection: 20, desire: 0, tension: 10 };
-        const current = normalizeRelationshipBaseline(settings.relationshipBaseline);
-        if (Object.keys(oldDefault).every(key => current[key] === oldDefault[key])) assign('relationshipBaseline', DEFAULT_RELATIONSHIP, sameJson);
-    }
-    if (previousSchema < 12) assign('admissionMode', normalizeNpcAdmissionMode(settings.admissionMode || 'conservative'));
-    if (previousSchema < 14) {
-        const oldThreshold = Math.max(10, Math.min(1000, Math.round(Number(settings.staleNpcAfter) || 50)));
-        assign('staleDeleteAfter', oldThreshold);
-    }
-    if (previousSchema < 15) {
-        const legacyDelete = Math.max(11, Math.min(1000, Math.round(Number(settings.staleDeleteAfter ?? settings.staleNpcAfter) || 50)));
-        assign('staleDeleteAfter', legacyDelete);
-        assign('staleArchiveAfter', Math.max(10, Math.min(999, Math.round(Number(settings.staleArchiveAfter) || Math.min(30, legacyDelete - 1)))));
-    }
-    if (previousSchema < 19 && isLegacyStockBehaviorCriteriaV024(settings.behaviorCriteria)) {
-        // Upgrade only the untouched v0.2.4 stock rubric. User-customized rubrics are preserved.
-        assign('behaviorCriteria', DEFAULT_BEHAVIOR_CRITERIA);
-    }
-    if (previousSchema < 21) {
-        // v0.2.9 deliberately slows relationship progression. Migrate only untouched v0.2.8
-        // defaults; explicit user tuning remains authoritative.
-        if (isLegacyStockRelationshipCapsV028(settings.relationshipCaps)) assign('relationshipCaps', DEFAULT_RELATIONSHIP_CAPS, sameJson);
-        if (isLegacyStockRelationshipCriteriaV028(settings.relationshipCriteria)) assign('relationshipCriteria', DEFAULT_RELATIONSHIP_CRITERIA);
-        if (isLegacyStockImpactCriteriaV028(settings.relationshipImpactCriteria)) assign('relationshipImpactCriteria', DEFAULT_IMPACT_CRITERIA);
-        if (isLegacyStockBehaviorCriteriaV028(settings.behaviorCriteria)) assign('behaviorCriteria', DEFAULT_BEHAVIOR_CRITERIA);
-    }
-    if (previousSchema < 22) {
-        // v0.2.10 adds fractional evidence accumulation and lowers the untouched v0.2.9 stock
-        // tier weights to 1/2/5/10. User-customized caps/rubrics remain authoritative.
-        if (isLegacyStockRelationshipCapsV029(settings.relationshipCaps)) assign('relationshipCaps', DEFAULT_RELATIONSHIP_CAPS, sameJson);
-        if (isLegacyStockRelationshipCriteriaV029(settings.relationshipCriteria)) assign('relationshipCriteria', DEFAULT_RELATIONSHIP_CRITERIA);
-        if (isLegacyStockImpactCriteriaV029(settings.relationshipImpactCriteria)) assign('relationshipImpactCriteria', DEFAULT_IMPACT_CRITERIA);
-        if (isLegacyStockBehaviorCriteriaV029(settings.behaviorCriteria)) assign('behaviorCriteria', DEFAULT_BEHAVIOR_CRITERIA);
-    }
-    if (previousSchema < 23) {
-        // v0.2.11 stores directional relationship milestone history and exact sibling-swipe
-        // checkpoints in per-chat state. NPC/chat normalization performs the data migration;
-        // no user-tuned relationship settings are rewritten here.
-    }
-
-    // Canonicalize every current setting. This also repairs malformed values from
-    // hand-edited settings without requiring a future schema bump.
-    if (previousSchema < 28) {
-        // v0.2.22 restores low-band mundane progression only for untouched stock rubrics.
-        if (isLegacyStockRelationshipCriteriaV0221(settings.relationshipCriteria)) assign('relationshipCriteria', DEFAULT_RELATIONSHIP_CRITERIA);
-        if (isLegacyStockImpactCriteriaV0221(settings.relationshipImpactCriteria)) assign('relationshipImpactCriteria', DEFAULT_IMPACT_CRITERIA);
-    }
-    if (previousSchema < 30) {
-        // v1.0.50 replaces the single Custom portrait slot with a named library.
-        // Seed the first entry from the exact legacy fields so no existing custom prompt is lost.
-        const migrated = portraitCustomPreset({
-            id: DEFAULT_CUSTOM_PORTRAIT_PRESET_ID,
-            name: 'Custom 1',
-            positive: settings.portraitStylePositive,
-            negative: settings.portraitStyleNegative,
-            composition: settings.portraitComposition,
-            promptFormat: settings.portraitPromptFormat,
-            useMood: settings.portraitUseMood,
-            useLocation: settings.portraitUseLocation,
-        }, 0);
-        assign('portraitCustomPresets', [migrated], sameJson);
-        assign('portraitCustomPresetId', migrated.id);
-    }
+    // Current-format settings are canonicalized in place; older Delta schemas are unsupported.
     assign('relationshipBaseline', normalizeRelationshipBaseline(settings.relationshipBaseline), sameJson);
     assign('relationshipCaps', normalizeRelationshipCaps(settings.relationshipCaps), sameJson);
     assign('relationshipCriteria', typeof settings.relationshipCriteria === 'string' ? settings.relationshipCriteria : DEFAULT_RELATIONSHIP_CRITERIA);
@@ -595,7 +493,7 @@ function getSettings() {
     assign('scannerConnectionProfile', typeof settings.scannerConnectionProfile === 'string' ? settings.scannerConnectionProfile.trim() : '');
     assign('portraitGenerationEnabled', settings.portraitGenerationEnabled !== false);
     assign('portraitThemePreset', PORTRAIT_THEME_PRESETS[settings.portraitThemePreset] ? settings.portraitThemePreset : 'custom');
-    const portraitCustomPresets = portraitCustomPresetLibrary(settings.portraitCustomPresets, settings);
+    const portraitCustomPresets = portraitCustomPresetLibrary(settings.portraitCustomPresets);
     assign('portraitCustomPresets', portraitCustomPresets, sameJson);
     const portraitCustomPresetId = portraitCustomPresets.some(item => item.id === settings.portraitCustomPresetId)
         ? settings.portraitCustomPresetId
@@ -802,31 +700,35 @@ function freshChatState() {
         checkpoints: [],
         lineage: [],
         branchLineageVersion: BRANCH_LINEAGE_VERSION,
-        branchHistoryCompactionVersion: BRANCH_HISTORY_COMPACTION_VERSION,
-        branchHistoryCompaction: null,
         branchParent: null,
         branchForkMessageId: null,
         branchRootSnapshot: null,
         userDismissedGroups: [],
-        durableCompactionVersion: DURABLE_COMPACTION_VERSION,
     };
 }
 
 function normalizeChatState(raw = {}) {
     const state = { ...freshChatState(), ...(raw && typeof raw === 'object' ? structuredClone(raw) : {}) };
-    const hasLegacyBranchData = raw && typeof raw === 'object'
-        && !Object.prototype.hasOwnProperty.call(raw, 'branchLineageVersion')
-        && ((Array.isArray(raw.lineage) && raw.lineage.length) || (Array.isArray(raw.checkpoints) && raw.checkpoints.length));
-    state.branchLineageVersion = hasLegacyBranchData
-        ? 0
-        : Math.max(0, Number(state.branchLineageVersion || 0));
-    state.branchHistoryCompactionVersion = raw && typeof raw === 'object'
-        && Object.prototype.hasOwnProperty.call(raw, 'branchHistoryCompactionVersion')
-        ? Math.max(0, Number(raw.branchHistoryCompactionVersion || 0))
-        : 0;
-    state.branchHistoryCompaction = raw?.branchHistoryCompaction && typeof raw.branchHistoryCompaction === 'object'
-        ? structuredClone(raw.branchHistoryCompaction)
-        : null;
+    const currentBranchFormat = Number(raw?.branchLineageVersion || 0) === BRANCH_LINEAGE_VERSION;
+    state.branchLineageVersion = BRANCH_LINEAGE_VERSION;
+    if (!currentBranchFormat) {
+        state.checkpoints = [];
+        state.lineage = [];
+        state.inlineCards = [];
+        state.branchParent = null;
+        state.branchForkMessageId = null;
+        state.branchRootSnapshot = null;
+    }
+    if (!currentBranchFormat || Number(raw?.rollbackJournalVersion || 0) !== ROLLBACK_JOURNAL_VERSION) {
+        delete state.rollbackJournalVersion;
+        delete state.rollbackJournal;
+        delete state.rollbackJournalSequence;
+        delete state.rollbackHead;
+        delete state.rollbackJournalFloorMessageId;
+        delete state.rollbackJournalBytes;
+        delete state.rollbackJournalBudgetExceeded;
+        delete state.rollbackJournalCoverageMessages;
+    }
     state.npcs = Array.isArray(state.npcs) ? state.npcs.map(normalizeNpcRecord) : [];
     state.candidates = Array.isArray(state.candidates) ? state.candidates.map(normalizeNpcCandidate).filter(Boolean) : [];
     state.socialGraph = normalizeSocialGraph(state.socialGraph);
@@ -865,12 +767,6 @@ function normalizeChatState(raw = {}) {
         state.branchRootSnapshot = null;
     }
     state.lineage = Array.isArray(state.lineage) ? state.lineage : [];
-    state.userDismissedGroups = promoteLegacyUserDismissedGroups(state.userDismissedGroups, [
-        state.npcs,
-        ...(state.checkpoints || []).map(checkpoint => checkpoint?.snapshot?.npcs || []),
-        state.branchRootSnapshot?.npcs || [],
-    ]);
-    state.durableCompactionVersion = DURABLE_COMPACTION_VERSION;
     const socialMigration = reconcileSocialState(state, { provenance: 'migration', confidence: 'migration' });
     state.socialGraph = socialMigration.socialGraph;
     state.npcs = socialMigration.state.npcs;
@@ -956,9 +852,7 @@ async function detachBrokenSidecar() {
     persistedVersions.delete(key);
     stateWritePromises.delete(key);
     const state = setChatState(key, freshChatState(), { markLoaded: true });
-    state.lineage = chatLineage(getContext().chat || []);
-    recordBranchIndex(key, state);
-    persistSettings();
+    state.lineage = chatLineage(getContext().chat || []);    persistSettings();
     renderDossier();
     updateInjection();
     globalThis.toastr?.warning?.('NPC State Delta: broken sidecar detached. The chat now has a fresh dossier; the previous pointer remains in recovery metadata.');
@@ -1049,31 +943,9 @@ async function ensureChatStateLoaded(key = getChatKey()) {
             }
         }
         assertOwnershipEpoch(key, epoch);
-        const legacy = settings.chats && typeof settings.chats === 'object' ? settings.chats[key] : null;
-        const sourceState = loaded || legacy || freshChatState();
-        const needsDurableCompactionWrite = Boolean(loaded)
-            && Number(sourceState?.durableCompactionVersion || 0) < DURABLE_COMPACTION_VERSION;
+        const sourceState = loaded || freshChatState();
         const state = setChatState(key, sourceState, { markLoaded: true });
-        if (loaded && !loadedUndurable && !needsDurableCompactionWrite) persistedVersions.set(key, Number(stateVersions.get(key) || 0));
-        if (recordBranchIndex(key, state)) persistSettings();
-        if ((!loaded && legacy) || needsDurableCompactionWrite) {
-            try {
-                await flushStateFile(key);
-                assertOwnershipEpoch(key, epoch);
-                if (!loaded && legacy) {
-                    delete settings.chats[key];
-                    if (settings.chats && Object.keys(settings.chats).length === 0) delete settings.chats;
-                    persistSettings();
-                    console.info(`[NPC State Delta] migrated ${key} from extension settings into its own JSON data file.`);
-                } else if (needsDurableCompactionWrite) {
-                    console.info(`[NPC State Delta] compacted legacy durable dossier summaries for ${key}.`);
-                }
-            } catch (error) {
-                if (error?.code === 'NPC_STATE_STALE_OWNERSHIP') throw error;
-                const action = !loaded && legacy ? 'legacy state migration' : 'durable dossier compaction migration';
-                console.warn(`[NPC State Delta] ${action} for ${key} could not be written yet.`, error);
-            }
-        }
+        if (loaded && !loadedUndurable) persistedVersions.set(key, Number(stateVersions.get(key) || 0));
         return state;
     })().catch(error => {
         if (error?.code !== 'NPC_STATE_STALE_OWNERSHIP') hydrationErrors.set(key, error);
@@ -1083,66 +955,6 @@ async function ensureChatStateLoaded(key = getChatKey()) {
     });
     loadingChatStates.set(key, task);
     return task;
-}
-
-function branchIndexEntry(key, state) {
-    const lineage = Array.isArray(state?.lineage) ? state.lineage : [];
-    return {
-        ownerScope: chatOwnerScope(key),
-        head: lineage.slice(0, BRANCH_INDEX_PREFIX_LIMIT),
-        checkpointIds: (Array.isArray(state?.checkpoints) ? state.checkpoints : [])
-            .map(item => Number(item?.messageId))
-            .filter(Number.isInteger)
-            .slice(-12),
-        updatedAt: Date.now(),
-    };
-}
-
-function recordBranchIndex(key, state) {
-    if (!isCanonicalChatKey(key)) return false;
-    const settings = getSettings();
-    const next = branchIndexEntry(key, state);
-    const previous = settings.branchIndex?.[key];
-    const stablePrevious = previous ? { ...previous, updatedAt: 0 } : null;
-    const stableNext = { ...next, updatedAt: 0 };
-    if (JSON.stringify(stablePrevious) === JSON.stringify(stableNext)) return false;
-    settings.branchIndex[key] = next;
-    return true;
-}
-
-function likelyAncestorKeys(currentKey, currentChat = []) {
-    const settings = getSettings();
-    const lineage = chatLineage(currentChat);
-    const ownerScope = chatOwnerScope(currentKey);
-    if (!ownerScope || lineage.length < 4) return [];
-    const matches = [];
-    for (const [key, entry] of Object.entries(settings.branchIndex || {})) {
-        if (key === currentKey || !isCanonicalChatKey(key) || !sameChatOwnerScope(key, currentKey) || entry?.ownerScope !== ownerScope || !Array.isArray(entry?.head)) continue;
-        let prefix = 0;
-        const max = Math.min(lineage.length, entry.head.length);
-        while (prefix < max && lineage[prefix] === entry.head[prefix]) prefix += 1;
-        if (prefix >= 4) matches.push({ key, prefix, updatedAt: Number(entry.updatedAt || 0) });
-    }
-    return matches.sort((a, b) => b.prefix - a.prefix || b.updatedAt - a.updatedAt).slice(0, BRANCH_INDEX_MAX_CANDIDATES).map(item => item.key);
-}
-
-async function ensureLikelyAncestorStatesLoaded(currentKey, currentChat = []) {
-    const settings = getSettings();
-    const indexed = likelyAncestorKeys(currentKey, currentChat);
-    const legacy = Object.entries(settings.dataFiles || {})
-        .filter(([key]) => key !== currentKey && isCanonicalChatKey(key) && sameChatOwnerScope(key, currentKey) && !settings.branchIndex?.[key])
-        .sort((a, b) => Number(b[1]?.updatedAt || 0) - Number(a[1]?.updatedAt || 0))
-        .slice(0, LEGACY_BRANCH_DISCOVERY_LIMIT)
-        .map(([key]) => key);
-    const candidates = [...new Set([...indexed, ...legacy])];
-    await Promise.all(candidates.map(key => ensureChatStateLoaded(key).catch(() => null)));
-    return candidates;
-}
-
-async function migrateLegacyChatStates() {
-    // v0.2.17 no longer hydrates unqualified legacy keys globally. Ownership is claimed lazily
-    // by migrateActiveLegacyNamespace() only when active-chat lineage proves the match.
-    return false;
 }
 
 function markStateDirty(key = getChatKey()) {
@@ -1198,9 +1010,7 @@ async function flushStateFile(key = getChatKey()) {
             if (!ownershipEpochCurrent(key, epoch)) return written;
             pointer = written;
             settings.dataFiles[key] = pointer;
-            delete settings.sidecarTombstones[key];
-            recordBranchIndex(key, snapshot);
-            persistedVersions.set(key, writeVersion);
+            delete settings.sidecarTombstones[key];            persistedVersions.set(key, writeVersion);
             persistSettings();
             if (Number(stateVersions.get(key) || 0) <= writeVersion) break;
         }
@@ -1251,21 +1061,10 @@ function commitBranchCheckpoint(state, messageId, reason = 'state') {
 }
 
 function seedBranchTracking(state = getChatState()) {
-    const chat = getContext().chat || [];
-    if (Number(state?.branchLineageVersion || 0) < BRANCH_LINEAGE_VERSION) migrateLegacyBranchState(state, chat);
-    const lineage = chatLineage(chat);
+    const lineage = chatLineage(getContext().chat || []);
     if (!Array.isArray(state.lineage) || state.lineage.length === 0) state.lineage = lineage;
     if (!Array.isArray(state.checkpoints)) state.checkpoints = [];
-
-    if (Number(state.branchHistoryCompactionVersion || 0) < BRANCH_HISTORY_COMPACTION_VERSION) {
-        const compaction = compactLegacyBranchHistory(state, chat);
-        const key = getChatKey();
-        if (!compaction.deferred && key !== 'no-chat' && loadedChatKeys.has(key) && chatStateCache.get(key) === state) {
-            // Persist the one-time marker even when there was nothing to remove. Otherwise every
-            // reload would repeat the same legacy proof walk and branch-size accounting.
-            queueStateFileWrite(key, 0);
-        }
-    }
+    state.branchLineageVersion = BRANCH_LINEAGE_VERSION;
     return state;
 }
 
@@ -1402,10 +1201,6 @@ function branchHistoryDiagnostic(state) {
     return {
         lineageVersion: Number(state.branchLineageVersion || 0),
         lineageMessages: Array.isArray(state.lineage) ? state.lineage.length : 0,
-        historyCompactionVersion: Number(state.branchHistoryCompactionVersion || 0),
-        lastCompaction: state.branchHistoryCompaction && typeof state.branchHistoryCompaction === 'object'
-            ? structuredClone(state.branchHistoryCompaction)
-            : null,
         currentNarrativeSnapshotBytes: diagnosticSerializedBytes(snapshotBranchState(state)),
         checkpointCount: checkpoints.length,
         checkpointBytes: checkpointSizes.reduce((sum, size) => sum + size, 0),
@@ -1476,14 +1271,12 @@ async function maybeInheritKnownBranch() {
         const parsed = parseQualifiedChatKey(key);
         const explicitParentKey = mainChat && parsed ? buildQualifiedChatKey(parsed.kind, parsed.ownerId, mainChat) : '';
         const hasExplicitParent = Boolean(explicitParentKey && explicitParentKey !== key);
-        const userTurns = chat.filter(message => message?.is_user).length;
-        if (!hasExplicitParent && (chat.length < 4 || userTurns < 2)) return false;
+        if (!hasExplicitParent) return false;
 
-        if (hasExplicitParent) await ensureChatStateLoaded(explicitParentKey).catch(error => console.debug(`[NPC State Delta] explicit branch parent ${explicitParentKey} could not be hydrated.`, error));
-        else await ensureLikelyAncestorStatesLoaded(key, chat);
+        await ensureChatStateLoaded(explicitParentKey).catch(error => console.debug(`[NPC State Delta] explicit branch parent ${explicitParentKey} could not be hydrated.`, error));
         if (getChatKey() !== key || firstLineageDivergence(lineageAtStart, chatLineage(getContext().chat || [])) !== -1) return false;
-        const scopedStates = Object.fromEntries([...chatStateCache.entries()].filter(([candidate]) => sameChatOwnerScope(candidate, key)));
-        const inherited = bestAncestorState(scopedStates, key, chat);
+        const parentState = chatStateCache.get(explicitParentKey);
+        const inherited = bestAncestorState(parentState ? { [explicitParentKey]: parentState } : {}, key, chat);
         if (!inherited) return false;
         setChatState(key, { ...freshChatState(), ...inherited });
         queueStateFileWrite(key, 0);
@@ -1506,9 +1299,6 @@ async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true
     const lineageBefore = chatLineage(ctx.chat || []);
     const result = reconcileBranchState(before, ctx.chat || [], { explicitDivergence, operation });
     if (getChatKey() !== key || firstLineageDivergence(lineageBefore, chatLineage(getContext().chat || [])) !== -1) return null;
-    if (Number(result.state?.branchHistoryCompactionVersion || 0) < BRANCH_HISTORY_COMPACTION_VERSION) {
-        compactLegacyBranchHistory(result.state, ctx.chat || []);
-    }
     recordBranchReconciliationEvent({
         key, reason, operation, result, beforeNpcCount,
         previousLength, currentLength: lineageBefore.length,
@@ -1679,7 +1469,7 @@ async function removeDeletedChatState(rawId, kind = 'chat', ownerId = '') {
         pointer = settings.dataFiles?.[key] || pointer;
 
         for (let attempt = 0; attempt < 4; attempt += 1) {
-            const state = await loadLatestLifecycleState(key, pointer, settings.chats?.[key] || null, { fallbackOnMissing: true });
+            const state = await loadLatestLifecycleState(key, pointer, { fallbackOnMissing: true });
             if (recoveryPointer?.path) {
                 try { await deleteNpcStateDataFile(recoveryPointer, { headers: requestHeaders() }); } catch { queueRecoveryGarbagePointer(recoveryPointer, 'chat-lifecycle-temp'); }
                 recoveryPointer = null;
@@ -1718,8 +1508,6 @@ async function removeDeletedChatState(rawId, kind = 'chat', ownerId = '') {
     if (recoveryPointer) settings.recoveryFiles[key] = { ...recoveryPointer, reason: 'chat-deleted', retiredAt: Date.now() };
     settings.sidecarTombstones[key] = { reason: 'chat-deleted', at: Date.now() };
     delete settings.dataFiles[key];
-    delete settings.branchIndex[key];
-    if (settings.chats?.[key]) delete settings.chats[key];
     persistSettings();
     let tombstoneDurable = false;
     try {
@@ -1749,20 +1537,18 @@ async function moveRenamedChatState(eventData = {}) {
 
     const settings = getSettings();
     const oldPointerInitial = settings.dataFiles?.[oldKey] || null;
-    const oldInline = settings.chats?.[oldKey] || null;
-    if (!oldPointerInitial?.path && !oldInline && !chatStateCache.has(oldKey)) return false;
+    if (!oldPointerInitial?.path && !chatStateCache.has(oldKey)) return false;
 
     let destinationPointer = settings.dataFiles?.[newKey] || null;
     let destinationState = null;
     if (destinationPointer?.path) {
-        try { destinationState = await loadLatestLifecycleState(newKey, destinationPointer, settings.chats?.[newKey] || null); }
+        try { destinationState = await loadLatestLifecycleState(newKey, destinationPointer); }
         catch (error) { console.warn(`[NPC State Delta] rename could not verify destination ${newKey}.`, error); return false; }
     }
     const destinationCache = chatStateCache.get(newKey) || null;
-    const destinationInline = settings.chats?.[newKey] || null;
-    const destinationRepresentations = [destinationState, destinationCache, destinationInline].filter(value => value && typeof value === 'object');
+    const destinationRepresentations = [destinationState, destinationCache].filter(value => value && typeof value === 'object');
     const destinationEphemeral = destinationRepresentations.every(stateLooksEmptyForLifecycleRename);
-    if ((destinationPointer?.path || settings.chats?.[newKey] || chatStateCache.has(newKey)) && !destinationEphemeral) {
+    if ((destinationPointer?.path || chatStateCache.has(newKey)) && !destinationEphemeral) {
         console.warn(`[NPC State Delta] refused to rename ${oldKey} onto existing non-empty state ${newKey}.`);
         return false;
     }
@@ -1780,7 +1566,7 @@ async function moveRenamedChatState(eventData = {}) {
         let recoveryPointer = null;
         let retired = false;
         for (let attempt = 0; attempt < 4; attempt += 1) {
-            state = await loadLatestLifecycleState(oldKey, oldPointer, oldInline);
+            state = await loadLatestLifecycleState(oldKey, oldPointer);
             if (!state) throw new Error(`NPC State Delta rename source ${oldKey} has no live state.`);
 
             newPointer = await writeNpcStateDataFile({
@@ -1826,18 +1612,7 @@ async function moveRenamedChatState(eventData = {}) {
         settings.dataFiles[newKey] = newPointer;
         delete settings.sidecarTombstones[newKey];
         delete settings.dataFiles[oldKey];
-        if (settings.branchIndex?.[oldKey]) {
-            settings.branchIndex[newKey] = { ...structuredClone(settings.branchIndex[oldKey]), ownerScope: chatOwnerScope(newKey), updatedAt: Date.now() };
-            delete settings.branchIndex[oldKey];
-        }
-        if (settings.chats?.[oldKey]) {
-            settings.chats[newKey] = settings.chats[oldKey];
-            delete settings.chats[oldKey];
-        }
-        if (settings.chats && Object.keys(settings.chats).length === 0) delete settings.chats;
-        const installed = setChatState(newKey, state, { markLoaded: true });
-        recordBranchIndex(newKey, installed);
-        persistedVersions.set(newKey, Number(stateVersions.get(newKey) || 0));
+        const installed = setChatState(newKey, state, { markLoaded: true });        persistedVersions.set(newKey, Number(stateVersions.get(newKey) || 0));
         persistSettings();
         let renameOwnershipDurable = false;
         try {
@@ -1859,22 +1634,6 @@ async function moveRenamedChatState(eventData = {}) {
     }
 }
 
-async function migrateActiveLegacyNamespace() {
-    const identity = getChatIdentity();
-    const oldKey = identity.legacyCandidateKey || identity.legacyKey || '';
-    if (identity.pending || !isCanonicalChatKey(identity.key) || !oldKey) return false;
-    // Never claim legacy ownership over a canonical state already resident in this tab, even
-    // when its settings pointer has not become durable yet.
-    if (getSettings().dataFiles?.[identity.key] || chatStateCache.has(identity.key)) return false;
-    const migrated = await safeLegacyMigrationForCurrent();
-    if (!migrated) return false;
-
-    // The hardening owner durably moved the canonical pointer/recovery/tombstone mapping.
-    // Drop any pre-migration cache state so hydration reads the verified canonical sidecar.
-    clearLifecycleCacheKey(oldKey, 'legacy-ownership-migrated');
-    clearLifecycleCacheKey(identity.key, 'legacy-ownership-migrated');
-    return true;
-}
 
 async function flushLifecycleOwner(kind = 'chat', ownerId = '') {
     const owner = String(ownerId || '').trim();
@@ -4321,7 +4080,7 @@ function editorIsMounted() {
     if (activeEditorPopup?.dlg) {
         return Boolean(activeEditorPopup.dlg.open || activeEditorPopup.dlg.isConnected || document.body?.contains?.(activeEditorPopup.dlg));
     }
-    return Boolean(document.querySelector?.('.popup.npc-state-delta-editor-popup, #npc_state_delta_editor_overlay'));
+    return Boolean(document.querySelector?.('.popup.npc-state-delta-editor-popup'));
 }
 
 function openNpcEditorSafely(npcId) {
@@ -4482,7 +4241,6 @@ function openNpcEditor(npcId) {
       <div class="npc-state-delta-editor-head"><div><span class="npc-state-delta-kicker">LIVE DOSSIER</span><h3 id="npc_state_delta_editor_title">Edit ${editorValue(npc.name)}</h3></div></div>
       <p class="npc-state-delta-muted">Edits save to NPC State Delta's extension-owned JSON data. Relationship numbers are authoritative current values on a -100 to +100 scale where 0 is neutral; future story deltas continue from them.</p>
       <div class="npc-state-delta-editor-lifecycle"><b>Lifecycle</b><span>${isTerminalNpcDeath(npc) ? 'Confirmed deceased' : (npc.archived ? 'Archived' : (npc.present ? 'Active · Present' : (npc.worldActive ? 'Active · Off-screen' : 'Active')))}${npc.archiveReason === 'deceased' ? ' · Deceased' : (npc.archiveReason === 'stale' ? ' · Stale auto-archive' : '')}</span>${npc.lifeStateReason ? `<small>${editorValue(npc.lifeStateReason)}</small>` : ''}</div>
-      <div class="npc-state-delta-editor-tools"><div class="menu_button npc-state-delta-scan-dossier" role="button" tabindex="0" data-npc-id="${editorValue(npc.id)}" title="Import matching Megumin New NPC / NPC Update dossier blocks; falls back to recent story context"><i class="fa-solid fa-wand-magic-sparkles"></i> Scan dossier</div><div class="menu_button npc-state-delta-refresh-chat" role="button" tabindex="0" data-npc-id="${editorValue(npc.id)}" title="Re-read the configured recent-chat window for this NPC and reconcile every grounded unlocked dossier field without replaying relationship deltas"><i class="fa-solid fa-arrows-rotate"></i> Refresh from Chat</div><div class="menu_button npc-state-delta-copy-image-prompt" role="button" tabindex="0" data-npc-id="${editorValue(npc.id)}"><i class="fa-solid fa-copy"></i> Copy portrait prompts</div>${npc.archived || isTerminalNpcDeath(npc) ? `<div class="menu_button npc-state-delta-restore-npc npc-state-delta-editor-archive-toggle" role="button" tabindex="0" data-npc-id="${editorValue(npc.id)}"><i class="fa-solid fa-box-open"></i> ${isTerminalNpcDeath(npc) ? 'Correct death record' : 'Restore active'}</div>` : `<div class="menu_button npc-state-delta-archive-npc npc-state-delta-editor-archive-toggle" role="button" tabindex="0" data-npc-id="${editorValue(npc.id)}"><i class="fa-solid fa-box-archive"></i> Archive dossier</div>`}</div>
       <div class="npc-state-delta-editor-grid npc-state-delta-editor-profile">
         <label>Name<input id="npc_state_delta_edit_name" class="text_pole" value="${editorValue(npc.name)}"></label>
         <label>Species / Race<input id="npc_state_delta_edit_species" class="text_pole" maxlength="160" placeholder="Half-elf, dwarf, dwelf, human, custom species..." value="${editorValue(npc.species)}"></label>
@@ -4863,7 +4621,6 @@ function closeNpcEditor() {
     if (popup?.completeCancelled) {
         Promise.resolve(popup.completeCancelled()).catch(error => console.debug('[NPC State Delta] editor popup close failed', error));
     }
-    document.querySelector?.('#npc_state_delta_editor_overlay')?.remove();
 }
 
 function editorField(id) {
@@ -4982,7 +4739,6 @@ function saveNpcEditor(npcId, { close = true, silent = false } = {}) {
     } else {
         next.manualProfileFields = [];
     }
-    next.manualProfileLocksExplicit = true;
     next.retentionProtected = Boolean(document.getElementById('npc_state_delta_edit_retention_protected')?.checked);
     next.minor = Boolean(document.getElementById('npc_state_delta_edit_minor')?.checked);
     next.updatedAt = Date.now();
@@ -5312,7 +5068,7 @@ function portraitCustomPresetOptionsHtml(source = getSettings()) {
 }
 
 function portraitSettingsSnapshot(source = getSettings()) {
-    const customPresets = portraitCustomPresetLibrary(source.portraitCustomPresets, source);
+    const customPresets = portraitCustomPresetLibrary(source.portraitCustomPresets);
     const customPresetId = customPresets.some(item => item.id === source.portraitCustomPresetId)
         ? source.portraitCustomPresetId
         : customPresets[0].id;
@@ -5348,7 +5104,7 @@ function normalizePortraitSettingsDraft(raw = {}) {
     const key = PORTRAIT_THEME_PRESETS[raw.portraitThemePreset]
         ? raw.portraitThemePreset
         : (raw.portraitThemePreset === 'custom' ? 'custom' : current.portraitThemePreset);
-    const presets = portraitCustomPresetLibrary(raw.portraitCustomPresets ?? current.portraitCustomPresets, settings);
+    const presets = portraitCustomPresetLibrary(raw.portraitCustomPresets ?? current.portraitCustomPresets);
     const requestedId = String((raw.portraitCustomPresetId ?? current.portraitCustomPresetId) || '').trim();
     const customPresetId = presets.some(item => item.id === requestedId) ? requestedId : presets[0].id;
     const preset = PORTRAIT_THEME_PRESETS[key];
@@ -5640,7 +5396,7 @@ function bindUi() {
         if (portraitSettingsSaveBusy) return;
         const settings = getSettings();
         const snapshot = portraitSettingsDraftFromUi();
-        const presets = portraitCustomPresetLibrary(settings.portraitCustomPresets, settings);
+        const presets = portraitCustomPresetLibrary(settings.portraitCustomPresets);
         if (presets.length >= PORTRAIT_CUSTOM_PRESET_LIMIT) {
             globalThis.toastr?.warning?.(`NPC State Delta: custom portrait preset limit is ${PORTRAIT_CUSTOM_PRESET_LIMIT}.`);
             return;
@@ -6107,10 +5863,6 @@ function registerEvents() {
             closeNpcEditor();
             let key = getChatKey();
             try {
-                if (!getChatIdentity().pending && isCanonicalChatKey(getChatKey())) {
-                    await migrateActiveLegacyNamespace();
-                    key = getChatKey();
-                }
                 if (isCanonicalChatKey(key)) await ensureChatStateLoaded(key);
                 if (getChatKey() !== key) return;
                 const inherited = isCanonicalChatKey(key) ? await maybeInheritKnownBranch() : false;
@@ -6158,7 +5910,7 @@ function registerEvents() {
         const eventId = ++lifecycleEventSequence;
         return runBoundedLifecycleEvent(
             `rename:${owner}:${String(data.oldFileName || '')}->${String(data.newFileName || '')}:${eventId}`,
-            'chat rename migration',
+            'chat rename',
             () => moveRenamedChatState(data),
         );
     });
@@ -6181,12 +5933,6 @@ async function init() {
 
     let key = getChatKey();
     try {
-        await migrateLegacyChatStates();
-        if (getChatKey() !== key) return;
-        if (!getChatIdentity().pending && isCanonicalChatKey(getChatKey())) {
-            await migrateActiveLegacyNamespace();
-            key = getChatKey();
-        }
         if (isCanonicalChatKey(key)) {
             await ensureChatStateLoaded(key);
             if (getChatKey() !== key) return;
@@ -6277,7 +6023,7 @@ window.NPCStateDelta = Object.freeze({
         settingsPanelMounted: Boolean(document.querySelector?.(`#${UI_ID}`)),
         rosterMounted: Boolean(document.querySelector?.('#npc_state_delta_roster_summary')),
         editorMounted: editorIsMounted(),
-        editorMode: activeEditorPopup ? 'sillytavern-popup' : (document.querySelector?.('#npc_state_delta_editor_overlay') ? 'legacy-overlay' : 'closed'),
+        editorMode: activeEditorPopup ? 'sillytavern-popup' : 'closed',
         viewerOpen: Boolean(activeNpcViewerOverlay),
         viewerNpcId: activeNpcViewerId || null,
         portraitGeneratorOpen: Boolean(activePortraitGeneratorOverlay),

@@ -26,13 +26,13 @@ test('same stock greeting alone never proves cross-chat ancestry', () => {
     assert.equal(inherited, null);
 });
 
-test('shared greeting plus two user-authored turns can prove branch ancestry', () => {
+test('shared narrative alone does not prove branch ancestry without an explicit host parent', () => {
     const oldChat = [msg('Welcome, traveler.'), msg('I enter the gate.', true), msg('The guard nods.'), msg('I ask for work.', true), msg('The clerk opens a ledger.')];
     const current = [msg('Welcome, traveler.'), msg('I enter the gate.', true), msg('The guard nods.'), msg('I ask for work.', true), msg('The clerk opens a different ledger.')];
     const state = ancestorState(oldChat.slice(0, 4));
     state.lineage = chatLineage(oldChat);
     const inherited = bestAncestorState({ 'chat:old': state }, 'chat:new', current);
-    assert.ok(inherited);
+    assert.equal(inherited, null);
 });
 
 test('persistence and branch async work are explicitly chat-bound', () => {
@@ -51,8 +51,8 @@ test('queued scans carry branch identity and validate before drain', () => {
 
 test('startup mounts recovery UI machinery before hydration', () => {
     const fn = index.slice(index.indexOf('async function init()'), index.indexOf('async function safeInit()'));
-    assert.ok(fn.indexOf('bindUi();') < fn.indexOf('await migrateLegacyChatStates();'));
-    assert.ok(fn.indexOf('registerEvents();') < fn.indexOf('await migrateLegacyChatStates();'));
+    assert.ok(fn.indexOf('bindUi();') < fn.indexOf('await ensureChatStateLoaded(key)'));
+    assert.ok(fn.indexOf('registerEvents();') < fn.indexOf('await ensureChatStateLoaded(key)'));
     assert.match(fn, /read-only recovery mode/);
 });
 

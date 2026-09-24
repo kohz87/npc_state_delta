@@ -290,18 +290,17 @@ test('v1.0.8 coalesces repeated canonical commits owned by the same raw message'
     assert.equal(reverted.npcs[0].goal, '');
 });
 
-test('v1.0.8 still reads v1.0.7 full-socialGraph undo records', () => {
-    const a = createNpcRecord('A');
-    const b = createNpcRecord('B');
-    const beforeGraph = normalizeSocialGraph({ edges: [{ aId: a.id, bId: b.id, aToB: 'friend', bToA: 'friend', turn: 1 }] });
-    const afterGraph = normalizeSocialGraph({ edges: [{ aId: a.id, bId: b.id, aToB: 'rival', bToA: 'rival', turn: 2 }] });
-    const current = { ...baseState(), npcs: [a, b], socialGraph: afterGraph };
+test('current rollback ignores obsolete full-socialGraph undo records', () => {
+    const aNpc = createNpcRecord('A');
+    const bNpc = createNpcRecord('B');
+    const beforeGraph = normalizeSocialGraph({ edges: [{ aId: aNpc.id, bId: bNpc.id, aToB: 'friend', bToA: 'friend', turn: 1 }] });
+    const afterGraph = normalizeSocialGraph({ edges: [{ aId: aNpc.id, bId: bNpc.id, aToB: 'rival', bToA: 'rival', turn: 2 }] });
+    const current = { ...baseState(), npcs: [aNpc, bNpc], socialGraph: afterGraph };
 
-    // v1.0.7 stored the whole previous graph directly at undo.socialGraph.
     const reverted = applyRollbackUndo(current, { socialGraph: beforeGraph }).state;
     assert.equal(reverted.socialGraph.edges.length, 1);
-    assert.equal(reverted.socialGraph.edges[0].aToB, 'friend');
-    assert.equal(reverted.socialGraph.edges[0].turn, 1);
+    assert.equal(reverted.socialGraph.edges[0].aToB, 'rival');
+    assert.equal(reverted.socialGraph.edges[0].turn, 2);
 });
 
 test('v1.0.8 retained window rebases a journal head after an old mutation ages out across unchanged messages', () => {

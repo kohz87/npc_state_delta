@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import { createNpcRecord } from '../core.js';
 import {
   addUserDismissedGroup, bestAncestorState, chatLineage, clearUserDismissedGroupsFor, normalizeUserDismissedGroups,
-  preserveUserNpcMetadata, promoteLegacyUserDismissedGroups, recordBranchCheckpoint, reconcileBranchState
+  BRANCH_LINEAGE_VERSION, preserveUserNpcMetadata, recordBranchCheckpoint, reconcileBranchState
 } from '../branch.js';
 
 function user(text){return {is_user:true,is_system:false,name:'User',mes:text};}
 function assistant(text){return {is_user:false,is_system:false,name:'AI',mes:text};}
-function baseState(){return {npcs:[],candidates:[],pendingBackfills:[],dismissed:[],inlineCards:[],checkpoints:[],lineage:[],branchLineageVersion:2,socialGraph:{edges:[],unresolved:[]},turn:0,assistantSinceScan:0,lastScanAt:0,lastScannedMessageId:null,scanCount:0,processedOocMessageId:null,userDismissedGroups:[]};}
+function baseState(){return {npcs:[],candidates:[],pendingBackfills:[],dismissed:[],inlineCards:[],checkpoints:[],lineage:[],branchLineageVersion:BRANCH_LINEAGE_VERSION,socialGraph:{edges:[],unresolved:[]},turn:0,assistantSinceScan:0,lastScanAt:0,lastScannedMessageId:null,scanCount:0,processedOocMessageId:null,userDismissedGroups:[]};}
 
 test('modern permanent deletion tombstone is id-based and does not erase a different homonym',()=>{
   const chat=[user('start'),assistant('later')];
@@ -29,16 +29,6 @@ test('historical ids can be attached to one deletion tombstone for old branch sn
   assert.deepEqual(normalizeUserDismissedGroups(groups)[0].ids.sort(),['npc_current','npc_interim']);
 });
 
-test('legacy label-only deletion groups retain legacy suppression behavior',()=>{
-  const chat=[user('start')];
-  const state=baseState();
-  state.npcs=[Object.assign(createNpcRecord('Mina'),{id:'npc_any'})];
-  state.lineage=chatLineage([user('other')]);
-  state.userDismissedGroups=[{primary:'mina',labels:['mina'],createdAt:1}];
-  const result=reconcileBranchState(state,chat,{explicitDivergence:0});
-  assert.equal(result.state.npcs.length,0);
-  assert.ok(result.state.dismissed.includes('mina'));
-});
 
 test('one-message common prefix is insufficient for cross-chat inheritance',()=>{
   const shared=user('Shared opening');
@@ -89,16 +79,8 @@ test('metadata restore still supports a unique label fallback when an id legitim
   assert.equal(result[0].retentionProtected,true);
 });
 
-test('legacy label tombstone upgrades to an id only when branch history proves one identity',()=>{
-  const old=createNpcRecord('Mina'); old.id='npc_old';
-  const upgraded=promoteLegacyUserDismissedGroups([{primary:'mina',labels:['mina'],createdAt:1}],[[old]]);
-  assert.deepEqual(upgraded[0].ids,['npc_old']);
-  const other=createNpcRecord('Mina'); other.id='npc_other';
-  const ambiguous=promoteLegacyUserDismissedGroups([{primary:'mina',labels:['mina'],createdAt:1}],[[old],[other]]);
-  assert.deepEqual(ambiguous[0].ids,[]);
-});
 
-test('public name-based tombstone clearing remains backward compatible for explicit legacy/manual callers',()=>{
+test('explicit manual name-based tombstone clearing remains available',()=>{
   const deleted=createNpcRecord('Mina'); deleted.id='npc_old'; deleted.aliases=['The Innkeeper'];
   const groups=addUserDismissedGroup([],deleted);
   const cleared=clearUserDismissedGroupsFor(groups,'Mina');

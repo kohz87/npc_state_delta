@@ -44,7 +44,7 @@ test('retired sidecars are explicit durable tombstones', () => {
 });
 
 test('rename uses event groupId and writes a recovery backup before retiring predecessor', () => {
-    const fn = index.slice(index.indexOf('async function moveRenamedChatState'), index.indexOf('async function migrateActiveLegacyNamespace'));
+    const fn = index.slice(index.indexOf('async function moveRenamedChatState'), index.indexOf('function flushCurrentChatOnPageHide'));
     assert.match(fn, /eventData\.groupId/);
     const recovery = fn.indexOf('makeNpcStateRecoveryFileName(oldKey)');
     const retire = fn.indexOf('retireNpcStateDataFile');
@@ -59,22 +59,20 @@ test('broken sidecar recovery is explicit rather than silently destructive', () 
     assert.match(index, /settings\.sidecarTombstones\[key\]/);
 });
 
-test('independent chats need two shared user turns before cross-chat inheritance', () => {
+test('independent chats never inherit without explicit host branch provenance', () => {
     const shortA = [msg('Welcome.'), msg('I enter.', true), msg('The guard nods.')];
     const shortB = [msg('Welcome.'), msg('I enter.', true), msg('The guard nods differently.')];
     assert.equal(bestAncestorState({ 'chat:a': stateFor(shortA) }, 'chat:b', shortB), null);
     const longA = [msg('Welcome.'), msg('I enter.', true), msg('The guard nods.'), msg('I ask for work.', true), msg('A ledger opens.')];
     const longB = [msg('Welcome.'), msg('I enter.', true), msg('The guard nods.'), msg('I ask for work.', true), msg('A different ledger opens.')];
     const inherited = bestAncestorState({ 'chat:a': stateFor(longA.slice(0, 4)) }, 'chat:b', longB);
-    assert.ok(inherited);
+    assert.equal(inherited, null);
 });
 
-test('ancestor discovery is bounded by a settings branch index', () => {
-    assert.match(index, /BRANCH_INDEX_MAX_CANDIDATES = 16/);
-    assert.match(index, /LEGACY_BRANCH_DISCOVERY_LIMIT = 8/);
-    assert.match(index, /function likelyAncestorKeys/);
-    assert.match(index, /ensureLikelyAncestorStatesLoaded\(key, chat\)/);
-    assert.doesNotMatch(index, /async function ensureKnownChatStatesLoaded/);
+test('branch inheritance loads only the explicit host parent', () => {
+    assert.match(index, /if \(!hasExplicitParent\) return false/);
+    assert.match(index, /await ensureChatStateLoaded\(explicitParentKey\)/);
+    assert.doesNotMatch(index, /branchIndex|ensureLikelyAncestorStatesLoaded|BRANCH_DISCOVERY_LIMIT/);
 });
 
 test('CI is version-neutral and uses Node 24 actions', () => {

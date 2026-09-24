@@ -30,7 +30,7 @@ test('manual trash removes narrative name suppression while explicit host proven
   assert.match(source,/const permanentLabels = new Set/);
   assert.match(source,/working\.dismissed = .*?working\.dismissed/s);
   assert.match(source,/const mainChat = String\(metadata\?\.main_chat/);
-  assert.match(source,/if \(!hasExplicitParent && \(chat\.length < 4 \|\| userTurns < 2\)\) return false/);
+  assert.match(source,/if \(!hasExplicitParent\) return false/);
 });
 
 

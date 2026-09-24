@@ -1,17 +1,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { getRequestHeaders, saveSettings as saveHostSettings } from '../../../../script.js';
 import { NPC_STATE_VERSION } from './core.js';
-import {
-    chatLineage as legacyV2Lineage,
-    legacyChatLineageV0210,
-} from './branch-core.js';
-import {
-    BRANCH_LINEAGE_VERSION,
-    chatLineage,
-    migrateLegacyBranchState,
-    rebaseBranchStateForHostRename,
-    setBranchProvenanceHint,
-} from './branch.js';
+import { setBranchProvenanceHint } from './branch.js';
 import {
     buildQualifiedChatKey,
     chatOwnerScope,
@@ -32,8 +22,6 @@ import {
     destinationKeyForOwnerRename,
     qualifiedKeysForOwner,
     resolveGroupOwnerId,
-    retargetBranchIndexEntry,
-    strongLegacyMigrationMatches,
     uniqueQualifiedKeyForChat,
 } from './hardening-core.js';
 
@@ -41,19 +29,16 @@ const EXTENSION_NAME = 'npc_state_delta';
 const RECOVERY_HISTORY_LIMIT = 80;
 const LIFECYCLE_EVENT_WAIT_MS = 12_000;
 const LIFECYCLE_RETRY_DELAY_MS = 30_000;
-const HISTORICAL_RENAME_CANDIDATE_LIMIT = 1024;
 const lifecycleEventOperations = new Map();
 const lifecycleRetryTimers = new Map();
 let installed = false;
-let historicalRenameIndexPromise = null;
-let historicalRenamePair = '';
 let lifecycleEventSequence = 0;
 
 function settings() {
     const value = extension_settings[EXTENSION_NAME] && typeof extension_settings[EXTENSION_NAME] === 'object'
         ? extension_settings[EXTENSION_NAME]
         : (extension_settings[EXTENSION_NAME] = {});
-    for (const key of ['dataFiles', 'sidecarTombstones', 'recoveryFiles', 'branchIndex', 'legacyOwnershipClaims', 'recoveryHistory', 'recoveryGarbage']) {
+    for (const key of ['dataFiles', 'sidecarTombstones', 'recoveryFiles', 'recoveryHistory', 'recoveryGarbage']) {
         if (!value[key] || typeof value[key] !== 'object' || Array.isArray(value[key])) value[key] = {};
     }
     return value;
@@ -145,70 +130,7 @@ function installBranchProvenanceHint() {
     });
 }
 
-export async function safeLegacyMigrationForCurrent() {
-    const ctx = getContext() || {};
-    const identity = getChatIdentityFromContext(ctx);
-    installBranchProvenanceHint();
-    if (identity.pending || !identity.key || !identity.legacyCandidateKey) return false;
-    const config = settings();
-    if (config.dataFiles?.[identity.key]) return false;
-    const oldKey = identity.legacyCandidateKey;
-    const oldPointer = config.dataFiles?.[oldKey] || null;
-    const oldInline = config.chats?.[oldKey] || null;
-    if (!oldPointer?.path && !oldInline) return false;
-    const claim = config.legacyOwnershipClaims?.[oldKey];
-    if (claim?.canonicalKey && claim.canonicalKey !== identity.key) {
-        console.warn(`[NPC State Delta] v0.2.21 preserved legacy namespace ${oldKey}; another canonical owner already claimed it.`);
-        return false;
-    }
-
-    const rawState = await stateFromPointer(oldKey, oldPointer, oldInline);
-    if (!rawState) return false;
-    if (!strongLegacyMigrationMatches(rawState, ctx.chat || [], { lineageV2Fn: legacyV2Lineage, lineageV0210Fn: legacyChatLineageV0210 })) {
-        console.warn(`[NPC State Delta] v0.2.21 preserved ambiguous legacy namespace ${oldKey}; the entire stored lineage must prove ownership.`);
-        return false;
-    }
-
-    const migrated = migrateLegacyBranchState(rawState, ctx.chat || []);
-    let newPointer = null;
-    let recoveryPointer = null;
-    try {
-        newPointer = await writeVerifiedState(identity.key, migrated);
-        recoveryPointer = await writeRecovery(oldKey, migrated, `qualified-namespace-migrated:${identity.key}`);
-        if (oldPointer?.path) await retireNpcStateDataFile({ chatKey: oldKey, pointer: oldPointer, reason: `qualified-namespace-migrated:${identity.key}`, appVersion: NPC_STATE_VERSION, headers: headers() });
-    } catch (error) {
-        if (newPointer?.path) {
-            try { await deleteNpcStateDataFile(newPointer, { headers: headers() }); }
-            catch { config.recoveryGarbage[`legacy-destination:${oldKey}:${Date.now()}`] = { ...newPointer, queuedAt: Date.now(), reason: 'legacy-destination-cleanup' }; }
-        }
-        if (recoveryPointer?.path) {
-            try { await deleteNpcStateDataFile(recoveryPointer, { headers: headers() }); }
-            catch { config.recoveryGarbage[`legacy-recovery:${oldKey}:${Date.now()}`] = { ...recoveryPointer, queuedAt: Date.now(), reason: 'legacy-recovery-cleanup' }; }
-        }
-        queueSettingsSave();
-        throw error;
-    }
-
-    archiveRecoveryRecord(config, identity.key, 'canonical-ownership-reestablished');
-    config.recoveryFiles[oldKey] = recoveryPointer;
-    config.sidecarTombstones[oldKey] = { reason: `qualified-namespace-migrated:${identity.key}`, at: Date.now() };
-    config.legacyOwnershipClaims[oldKey] = { canonicalKey: identity.key, ownerId: identity.ownerId, kind: identity.kind, at: Date.now(), proofVersion: 3 };
-    config.dataFiles[identity.key] = newPointer;
-    delete config.sidecarTombstones[identity.key];
-    delete config.dataFiles[oldKey];
-    delete config.branchIndex[oldKey];
-    if (config.chats?.[oldKey]) delete config.chats[oldKey];
-    if (config.chats && Object.keys(config.chats).length === 0) delete config.chats;
-    await saveSettingsNow();
-    if (oldPointer?.path) {
-        try { await deleteNpcStateDataFile(oldPointer, { headers: headers() }); }
-        catch (error) { console.warn(`[NPC State Delta] retired legacy predecessor ${oldKey} could not be physically deleted.`, error); }
-    }
-    await cleanupRecoveryGarbage(config);
-    return true;
-}
-
-async function migrateCharacterOwner(oldAvatar, newAvatar) {
+async function moveCharacterOwnerState(oldAvatar, newAvatar) {
     const oldOwner = String(oldAvatar || '').trim();
     const newOwner = String(newAvatar || '').trim();
     if (!oldOwner || !newOwner || oldOwner === newOwner) return false;
@@ -229,11 +151,10 @@ async function migrateCharacterOwner(oldAvatar, newAvatar) {
             const newKey = destinationKeyForOwnerRename(oldKey, newOwner);
             if (!newKey || newKey === oldKey) continue;
             const oldPointer = config.dataFiles?.[oldKey] || null;
-            const oldInline = config.chats?.[oldKey] || null;
 
             // Preserve historical retirement knowledge without pretending recovery/branch-index
             // records are live state that can be copied into a new canonical owner.
-            if (!oldPointer?.path && !oldInline) {
+            if (!oldPointer?.path) {
                 if (config.sidecarTombstones?.[oldKey]) {
                     applyCanonicalOwnershipMove(config, { oldKey, newKey, reason: 'character-renamed' });
                     moved.set(oldKey, newKey);
@@ -252,7 +173,7 @@ async function migrateCharacterOwner(oldAvatar, newAvatar) {
             let sourceRetired = !oldPointer?.path;
             try {
                 for (let attempt = 0; attempt < 4; attempt += 1) {
-                    state = await stateFromPointer(oldKey, oldPointer, oldInline);
+                    state = await stateFromPointer(oldKey, oldPointer);
                     if (!state) throw new Error(`NPC State Delta character rename could not read live source ${oldKey}.`);
                     newPointer = await writeVerifiedState(newKey, state, newPointer?.path ? newPointer : null);
                     if (recoveryPointer?.path) {
@@ -277,10 +198,6 @@ async function migrateCharacterOwner(oldAvatar, newAvatar) {
 
                 archiveRecoveryRecord(config, newKey, 'canonical-ownership-reestablished');
                 applyCanonicalOwnershipMove(config, { oldKey, newKey, newPointer, recoveryPointer, reason: 'character-renamed' });
-                if (config.chats?.[oldKey]) {
-                    config.chats[newKey] = config.chats[oldKey];
-                    delete config.chats[oldKey];
-                }
                 moved.set(oldKey, newKey);
                 if (oldPointer?.path) retiredPredecessors.push({ key: oldKey, pointer: oldPointer });
                 changed = true;
@@ -299,10 +216,6 @@ async function migrateCharacterOwner(oldAvatar, newAvatar) {
             }
         }
 
-        for (const claim of Object.values(config.legacyOwnershipClaims || {})) {
-            const replacement = moved.get(String(claim?.canonicalKey || ''));
-            if (replacement) claim.canonicalKey = replacement;
-        }
         if (changed) {
             await saveSettingsNow();
             for (const predecessor of retiredPredecessors) {
@@ -337,25 +250,21 @@ async function retireCharacterOwner(avatar, reason = 'character-deleted') {
     try {
         await globalThis.__NPCStateDeltaLifecycle?.flushOwner?.('chat', owner);
         cachesSettled = true;
-        const keys = qualifiedKeysForOwner(config, 'chat', owner).filter(key => config.dataFiles?.[key]?.path || config.chats?.[key]);
+        const keys = qualifiedKeysForOwner(config, 'chat', owner).filter(key => config.dataFiles?.[key]?.path);
         if (!keys.length) return false;
 
         for (const key of keys) {
             const pointer = config.dataFiles?.[key] || null;
-            const inline = config.chats?.[key] || null;
             let recoveryPointer = null;
             try {
-                const state = await stateFromPointer(key, pointer, inline);
+                const state = await stateFromPointer(key, pointer);
                 recoveryPointer = state ? await writeRecovery(key, state, reason) : null;
                 if (pointer?.path) await retireNpcStateDataFile({ chatKey: key, pointer, reason, appVersion: NPC_STATE_VERSION, headers: headers() });
 
                 archiveRecoveryRecord(config, key, 'character-deleted-replaced');
                 if (recoveryPointer) config.recoveryFiles[key] = recoveryPointer;
                 config.sidecarTombstones[key] = { reason, at: Date.now() };
-                delete config.dataFiles[key];
-                delete config.branchIndex[key];
-                if (config.chats?.[key]) delete config.chats[key];
-                if (pointer?.path) retiredPredecessors.push({ key, pointer });
+                delete config.dataFiles[key];                if (pointer?.path) retiredPredecessors.push({ key, pointer });
                 changed = true;
             } catch (error) {
                 if (recoveryPointer?.path) {
@@ -388,145 +297,8 @@ async function retireCharacterOwner(avatar, reason = 'character-deleted') {
     }
 }
 
-async function rebaseActiveStateAfterHostRename(messages) {
-    const ctx = getContext() || {};
-    const active = Array.isArray(ctx.chat) ? ctx.chat : [];
-    const renamed = stripHostChatHeader(messages);
-    if (!active.length || !renamed.length || !sameNarrativeContent(active, renamed)) return false;
-    const identity = getChatIdentityFromContext(ctx);
-    return rebaseCanonicalStateForHostRename(identity.key, renamed);
-}
-
-function stripHostChatHeader(messages) {
-    const source = Array.isArray(messages) ? messages : [];
-    return source.filter((message, index) => !(index === 0 && message && typeof message === 'object' && Object.hasOwn(message, 'chat_metadata')));
-}
-
-function sameNarrativeContent(left, right) {
-    const a = chatLineage(stripHostChatHeader(left));
-    const b = chatLineage(stripHostChatHeader(right));
-    return a.length === b.length && a.every((value, index) => value === b[index]);
-}
-
-function hostChatIntegrity(messages) {
-    const header = Array.isArray(messages) ? messages.find(message => message && typeof message === 'object' && Object.hasOwn(message, 'chat_metadata')) : null;
-    return String(header?.chat_metadata?.integrity || '').trim();
-}
-
-async function loadPersistedGroupChat(chatId) {
-    const response = await globalThis.fetch?.('/api/chats/group/get', {
-        method: 'POST',
-        headers: headers(),
-        body: JSON.stringify({ id: String(chatId || '') }),
-    });
-    if (!response?.ok) throw new Error(`NPC State Delta could not read historical group chat ${chatId}.`);
-    const data = typeof response.json === 'function' ? await response.json() : null;
-    if (!Array.isArray(data)) throw new Error(`NPC State Delta historical group chat ${chatId} returned invalid data.`);
-    return data;
-}
-
-async function rebaseCanonicalStateForHostRename(key, renamedMessages) {
-    if (!key) return false;
-    const config = settings();
-    const pointer = config.dataFiles?.[key];
-    if (!pointer?.path) return false;
-    const state = await stateFromPointer(key, pointer);
-    if (!state || Number(state.branchLineageVersion || 0) >= BRANCH_LINEAGE_VERSION) return false;
-    rebaseBranchStateForHostRename(state, renamedMessages);
-    const written = await writeVerifiedState(key, state, pointer);
-    config.dataFiles[key] = written;
-    queueSettingsSave();
-    return true;
-}
-
-function resetHistoricalRenameIndex() {
-    historicalRenameIndexPromise = null;
-    historicalRenamePair = '';
-}
-
-async function loadPersistedCharacterChat(chatId, avatar = '') {
-    const context = getContext() || {};
-    const character = (Array.isArray(context.characters) ? context.characters : []).find(item => String(item?.avatar || '') === String(avatar || ''));
-    const response = await globalThis.fetch?.('/api/chats/get', {
-        method: 'POST',
-        headers: headers(),
-        body: JSON.stringify({ ch_name: String(character?.name || ''), file_name: String(chatId || ''), avatar_url: String(avatar || '') }),
-    });
-    if (!response?.ok) throw new Error(`NPC State Delta could not read historical character chat ${chatId}.`);
-    const data = typeof response.json === 'function' ? await response.json() : null;
-    if (!Array.isArray(data)) throw new Error(`NPC State Delta historical character chat ${chatId} returned invalid data.`);
-    return data;
-}
-
-function historicalChatSignature(messages) {
-    const integrity = hostChatIntegrity(messages);
-    if (integrity) return `integrity:${integrity}`;
-    const lineage = chatLineage(stripHostChatHeader(messages));
-    return lineage.length ? `lineage:${lineage.join('|')}` : '';
-}
-
-async function buildHistoricalRenameIndex(oldAvatar = '', newAvatar = '') {
-    const oldOwner = String(oldAvatar || '').trim();
-    const newOwner = String(newAvatar || '').trim();
-    const pair = `${oldOwner}->${newOwner}`;
-    if (historicalRenameIndexPromise && historicalRenamePair === pair) return historicalRenameIndexPromise;
-    historicalRenamePair = pair;
-    historicalRenameIndexPromise = (async () => {
-        const context = getContext() || {};
-        const config = settings();
-        const relevantGroups = new Set((Array.isArray(context.groups) ? context.groups : [])
-            .filter(group => {
-                const members = Array.isArray(group?.members) ? group.members : [];
-                return members.includes(oldOwner) || members.includes(newOwner);
-            })
-            .map(group => String(group?.id || '').trim()).filter(Boolean));
-        const allCandidates = Object.keys(config.dataFiles || {}).filter(key => {
-            const parsed = parseQualifiedChatKey(key);
-            if (!parsed) return false;
-            if (parsed.kind === 'chat') return parsed.ownerId === newOwner;
-            return parsed.kind === 'group' && relevantGroups.has(parsed.ownerId);
-        }).sort((a, b) => Number(config.dataFiles?.[b]?.updatedAt || 0) - Number(config.dataFiles?.[a]?.updatedAt || 0));
-        const index = new Map();
-        for (let offset = 0; offset < allCandidates.length; offset += HISTORICAL_RENAME_CANDIDATE_LIMIT) {
-            const candidateKeys = allCandidates.slice(offset, offset + HISTORICAL_RENAME_CANDIDATE_LIMIT);
-            let cursor = 0;
-            const workers = Array.from({ length: Math.min(4, Math.max(1, candidateKeys.length)) }, async () => {
-                while (cursor < candidateKeys.length) {
-                    const key = candidateKeys[cursor++];
-                    const parsed = parseQualifiedChatKey(key);
-                    if (!parsed) continue;
-                    const persisted = parsed.kind === 'group'
-                        ? await loadPersistedGroupChat(parsed.chatId)
-                        : await loadPersistedCharacterChat(parsed.chatId, newOwner);
-                    const signature = historicalChatSignature(persisted);
-                    if (!signature) continue;
-                    const list = index.get(signature) || [];
-                    list.push(key);
-                    index.set(signature, list);
-                }
-            });
-            await Promise.all(workers);
-            await Promise.resolve();
-        }
-        return index;
-    })().catch(error => {
-        resetHistoricalRenameIndex();
-        throw error;
-    });
-    return historicalRenameIndexPromise;
-}
-
-async function rebaseHistoricalState(messages, oldAvatar = '', newAvatar = '') {
-    const signature = historicalChatSignature(messages);
-    if (!signature) return false;
-    const index = await buildHistoricalRenameIndex(oldAvatar, newAvatar);
-    const matches = [...new Set(index.get(signature) || [])];
-    if (matches.length !== 1) return false;
-    return rebaseCanonicalStateForHostRename(matches[0], stripHostChatHeader(messages));
-}
-
 function reportLifecycleError(label, error) {
-    console.error(`[NPC State Delta] v0.2.21 ${label} failed`, error);
+    console.error(`[NPC State Delta] ${label} failed`, error);
     try { globalThis.toastr?.error?.(`NPC State Delta ${label} failed safely. Existing state was preserved or recovery-staged.`, 'NPC State Delta'); } catch { /* noop */ }
 }
 
@@ -611,23 +383,10 @@ export async function prepareNpcStateHardening() {
         const eventId = ++lifecycleEventSequence;
         return runBoundedHardeningEvent(
             `character-rename:${String(oldAvatar || '')}->${String(newAvatar || '')}:${eventId}`,
-            'character owner rename migration',
+            'character owner rename',
             async () => {
-                resetHistoricalRenameIndex();
-                try { await migrateCharacterOwner(oldAvatar, newAvatar); }
+                try { await moveCharacterOwnerState(oldAvatar, newAvatar); }
                 finally { queueActiveCharacterCacheRefresh(newAvatar); }
-            },
-        );
-    });
-    if (events.CHARACTER_RENAMED_IN_PAST_CHAT) on(events.CHARACTER_RENAMED_IN_PAST_CHAT, (messages, oldAvatar, newAvatar) => {
-        const signature = historicalChatSignature(messages) || `len:${Array.isArray(messages) ? messages.length : 0}`;
-        const eventId = ++lifecycleEventSequence;
-        return runBoundedHardeningEvent(
-            `historical-rename:${String(oldAvatar || '')}->${String(newAvatar || '')}:${signature}:${eventId}`,
-            'historical rename lineage rebase',
-            async () => {
-                if (await rebaseActiveStateAfterHostRename(messages)) return;
-                await rebaseHistoricalState(messages, String(oldAvatar || '').trim(), String(newAvatar || '').trim());
             },
         );
     });
@@ -643,7 +402,6 @@ export async function prepareNpcStateHardening() {
     });
 
     installBranchProvenanceHint();
-    // The retained engine performs active legacy migration during its own initialization. Avoid
-    // holding bootstrap hostage to a remote sidecar outage before index.js has even mounted.
+    // Recovery garbage cleanup is best-effort; do not block bootstrap on a sidecar outage.
     void cleanupRecoveryGarbage(settings()).catch(error => console.debug('[NPC State Delta] startup recovery garbage cleanup deferred.', error));
 }

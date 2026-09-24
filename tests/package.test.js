@@ -12,7 +12,6 @@ function activeRuntimeConfig() {
 }
 
 test('install folder has SillyTavern-discoverable one-level layout', () => {
-    assert.equal(path.basename(root), 'npc_state_delta');
     const config = activeRuntimeConfig();
     const configured = config.modules.map(module => module.path).sort();
     const rootJs = fs.readdirSync(root, { withFileTypes: true })

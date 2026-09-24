@@ -6,7 +6,6 @@ import { prunePortraitAssetsForState } from '../storage.js';
 import { buildQualifiedChatKey } from '../identity.js';
 
 const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
-const hardening = fs.readFileSync(new URL('../hardening.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const ci = fs.readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
 
 function msg(text, isUser = false) { return { mes: text, is_user: isUser, is_system: false, name: isUser ? 'User' : 'Character' }; }
@@ -41,9 +40,10 @@ test('portrait GC removes unreachable and manually deleted assets but keeps bran
     assert.deepEqual(Object.keys(prunePortraitAssetsForState(state)).sort(), ['branch-old', 'live']);
 });
 
-test('branch discovery and inheritance are owner scoped', () => {
-    assert.match(index, /sameChatOwnerScope\(key, currentKey\)/);
-    assert.match(index, /chatStateCache\.entries\(\)\]\.filter\(\(\[candidate\]\) => sameChatOwnerScope\(candidate, key\)\)/);
+test('branch inheritance is explicit-parent only', () => {
+    assert.match(index, /if \(!hasExplicitParent\) return false/);
+    assert.match(index, /chatStateCache\.get\(explicitParentKey\)/);
+    assert.doesNotMatch(index, /likelyAncestorKeys|ensureLikelyAncestorStatesLoaded|branchIndex/);
 });
 
 test('tombstones override stale live pointers before hydration', () => {
@@ -52,7 +52,7 @@ test('tombstones override stale live pointers before hydration', () => {
 });
 
 test('durable hydration starts clean while an undurable recovery remains pending', () => {
-    assert.match(index, /if \(loaded && !loadedUndurable && !needsDurableCompactionWrite\) persistedVersions\.set/);
+    assert.match(index, /if \(loaded && !loadedUndurable\) persistedVersions\.set/);
 });
 
 test('chat cache has bounded eviction and refuses to evict active work', () => {
@@ -70,12 +70,6 @@ test('lifecycle lookup prefers known owner state and fails closed on ambiguous s
     assert.match(index, /refused ambiguous/);
 });
 
-test('legacy ownership proof accepts both content lineage and pre-v0.2.11 lineage through the strong owner', () => {
-    const owner = hardening.slice(hardening.indexOf('export async function safeLegacyMigrationForCurrent'), hardening.indexOf('async function migrateCharacterOwner'));
-    assert.match(owner, /strongLegacyMigrationMatches/);
-    assert.match(owner, /lineageV2Fn: legacyV2Lineage/);
-    assert.match(owner, /lineageV0210Fn: legacyChatLineageV0210/);
-});
 
 test('high-value manual mutations use immediate persistence', () => {
     assert.match(index, /function persistCritical/);
@@ -83,15 +77,6 @@ test('high-value manual mutations use immediate persistence', () => {
     assert.match(index, /persistCritical\(\);\r?\n\s*closeNpcEditor/);
 });
 
-test('legacy ownership migration is lineage-gated, owner-qualified, and single-owned', () => {
-    const controller = index.slice(index.indexOf('async function migrateActiveLegacyNamespace'), index.indexOf('async function flushLifecycleOwner'));
-    const owner = hardening.slice(hardening.indexOf('export async function safeLegacyMigrationForCurrent'), hardening.indexOf('async function migrateCharacterOwner'));
-    assert.match(controller, /await safeLegacyMigrationForCurrent\(\)/);
-    assert.doesNotMatch(index, /function legacyMigrationMatchesActiveChat/);
-    assert.match(owner, /legacyOwnershipClaims/);
-    assert.match(owner, /qualified-namespace-migrated/);
-    assert.match(owner, /await saveSettingsNow\(\)/);
-});
 
 test('same chat filename for two owners produces distinct canonical keys', () => {
     assert.notEqual(buildQualifiedChatKey('chat', 'a.png', 'save'), buildQualifiedChatKey('chat', 'b.png', 'save'));

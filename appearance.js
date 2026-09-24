@@ -205,42 +205,23 @@ export function appearanceFormByName(npc = {}, name = '') {
 }
 
 export function normalizeAppearanceModel(raw = {}, { locked = false } = {}) {
-    const version = Math.max(0, Math.round(Number(raw.appearanceModelVersion ?? raw.appearance_model_version) || 0));
-    const compatibilityAppearance = locked ? clean(raw.appearance, 1800) : appearanceText(raw.appearance);
-    const explicitOverall = locked ? clean(raw.overallAppearance ?? raw.overall_appearance, 1800) : appearanceText(raw.overallAppearance ?? raw.overall_appearance);
+    const appearance = locked ? clean(raw.appearance, 1800) : appearanceText(raw.appearance);
+    const overallAppearance = locked
+        ? clean(raw.overallAppearance ?? raw.overall_appearance, 1800)
+        : appearanceText(raw.overallAppearance ?? raw.overall_appearance);
     let unclassifiedAppearance = locked
         ? clean(raw.unclassifiedAppearance ?? raw.unclassified_appearance, 1800)
         : appearanceText(raw.unclassifiedAppearance ?? raw.unclassified_appearance);
-    let appearanceForms = normalizeAppearanceForms(raw.appearanceForms ?? raw.appearance_forms);
-    let currentForm = clean(raw.currentForm ?? raw.current_form, 120);
+    const appearanceForms = normalizeAppearanceForms(raw.appearanceForms ?? raw.appearance_forms);
+    const currentForm = clean(raw.currentForm ?? raw.current_form, 120);
     let currentFormUnknown = truthy(raw.currentFormUnknown ?? raw.current_form_unknown);
-    let appearance = compatibilityAppearance;
-
-    // Pre-Stage4 flat appearance becomes one Base presentation. It is not universal anatomy.
-    if (version < APPEARANCE_MODEL_VERSION && appearance && !appearanceForms.length) {
-        appearanceForms = [{ name: 'Base', appearance }];
-        currentForm = currentForm || 'Base';
-        currentFormUnknown = false;
-    }
     if (currentForm) currentFormUnknown = false;
-    // Historical flat appearance may still arrive on manually locked pre-form records.
-    // Fold that compatibility input into the selected canonical form during normalization.
-    // New manual edits use the dedicated appearance-form editor, so this never creates a
-    // second live editing authority.
-    if (locked && currentForm && compatibilityAppearance) {
-        const selected = appearanceForms.findIndex(form => formKey(form.name) === formKey(currentForm));
-        const local = stripOverallPrefix(compatibilityAppearance, explicitOverall) || compatibilityAppearance;
-        if (selected >= 0) appearanceForms[selected] = { ...appearanceForms[selected], appearance: local };
-        else if (appearanceForms.length < APPEARANCE_FORM_LIMIT) appearanceForms.push({ name: currentForm, appearance: local });
-    }
-    if (currentFormUnknown && locked && compatibilityAppearance) {
-        unclassifiedAppearance = stripOverallPrefix(compatibilityAppearance, explicitOverall) || compatibilityAppearance;
-    } else if (currentFormUnknown && !unclassifiedAppearance) {
-        unclassifiedAppearance = stripOverallPrefix(appearance, explicitOverall);
+    if (currentFormUnknown && !unclassifiedAppearance) {
+        unclassifiedAppearance = stripOverallPrefix(appearance, overallAppearance);
     }
     return {
         appearance,
-        overallAppearance: explicitOverall,
+        overallAppearance,
         unclassifiedAppearance,
         appearanceForms,
         currentForm,
@@ -410,7 +391,6 @@ export function appearanceDraftRecord(npc = {}, draft = {}, { lockAppearance = f
     // A lock prevents scanner changes; it must not replay old anatomy over a manual form edit.
     next.manualProfileFields = [...locks].filter(key => key !== 'appearance');
     next.appearance = resolveNpcAppearance(next);
-    next.manualProfileLocksExplicit = true;
     if (lockAppearance) locks.add('appearance');
     else locks.delete('appearance');
     next.manualProfileFields = [...locks];

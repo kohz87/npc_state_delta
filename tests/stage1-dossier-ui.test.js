@@ -90,7 +90,7 @@ test('Stage 1 no-chat projection does not create or mutate dossier state', () =>
   assert.deepEqual(projected.index, []);
 });
 
-test('Detail projection preserves editable fields and represents a flat appearance as one safe Base form', () => {
+test('Detail projection preserves editable fields and leaves flat current appearance scalar-only', () => {
   const projected = dossierDetailProjection({
     id: 'ryu', name: 'Ryu', species: 'Chimera', homeBase: 'Towerhouse', age: '6 years', apparentAge: '~6',
     appearance: 'Long silver hair.', personality: 'Composed', speech: 'Precise',
@@ -103,8 +103,8 @@ test('Detail projection preserves editable fields and represents a flat appearan
   assert.equal(projected.homeBase, 'Towerhouse');
   assert.deepEqual(projected.behaviorProfile, ['Analytical']);
   assert.equal(projected.relationship.trust, 9);
-  assert.deepEqual(projected.appearanceModel.appearanceForms, [{ name: 'Base', appearance: 'Long silver hair.' }]);
-  assert.equal(projected.appearanceModel.currentForm, 'Base');
+  assert.deepEqual(projected.appearanceModel.appearanceForms, []);
+  assert.equal(projected.appearanceModel.currentForm, '');
 });
 
 test('Stage 1 UI is a thin adapter over the existing runtime editor/settings owners', () => {

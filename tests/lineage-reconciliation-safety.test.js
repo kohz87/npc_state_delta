@@ -6,10 +6,7 @@ import {
     bestAncestorState,
     chatLineage,
     fingerprintMessage,
-    legacyChatLineageV3,
-    legacyChatLineageV4,
     lineageCheckpointKeys,
-    migrateLegacyBranchState,
     setBranchProvenanceHint,
 } from '../branch.js';
 import { buildQualifiedChatKey } from '../identity.js';
@@ -24,45 +21,11 @@ test('v5 destructive lineage ignores mutable host instance metadata and display-
     const b = bot('Kiri', 'Yes.', '2026-09-02T01:02:03.200Z');
     b.extra = { gen_id: 'replacement-generation' };
     assert.equal(fingerprintMessage(a), fingerprintMessage(b));
-    assert.notEqual(legacyChatLineageV4([a])[0], legacyChatLineageV4([b])[0]);
     const renamed = { ...a, name: 'Astra Vale', original_avatar: 'new-avatar.png' };
     assert.equal(fingerprintMessage(a), fingerprintMessage(renamed));
 });
 
-test('stored v3 text lineage migrates to v5 without discarding a proven checkpoint', () => {
-    const chat = [user('A', '1'), bot('NPC', 'B', '2'), user('C', '3'), bot('NPC', 'D', '4')];
-    const v3 = legacyChatLineageV3(chat);
-    const v3Keys = lineageCheckpointKeys(v3);
-    const state = {
-        branchLineageVersion: 3,
-        lineage: v3,
-        checkpoints: [{ messageId: 3, fingerprint: v3[3], lineageKey: v3Keys[3], parentLineageKey: v3Keys[2], createdAt: 1, snapshot: emptySnapshot([{ id: 'npc-1', name: 'NPC' }]) }],
-        inlineCards: [], portraitAssets: {}, userDismissedGroups: [], npcs: [], candidates: [], socialGraph: { edges: [], unresolved: [] }, dismissed: [],
-    };
-    migrateLegacyBranchState(state, chat);
-    assert.equal(BRANCH_LINEAGE_VERSION, 5);
-    assert.equal(state.branchLineageVersion, 5);
-    assert.deepEqual(state.lineage, chatLineage(chat));
-    assert.equal(state.checkpoints.length, 1);
-});
 
-test('stored v4 instance lineage upgrades fail-closed when only host timestamps changed', () => {
-    const original = [user('A', '1'), bot('NPC', 'B', '2'), user('C', '3'), bot('NPC', 'D', '4')];
-    const v4 = legacyChatLineageV4(original);
-    const v4Keys = lineageCheckpointKeys(v4);
-    const state = {
-        branchLineageVersion: 4,
-        lineage: v4,
-        checkpoints: [{ messageId: 1, fingerprint: v4[1], lineageKey: v4Keys[1], parentLineageKey: v4Keys[0], createdAt: 1, snapshot: emptySnapshot([{ id: 'npc-1', name: 'NPC' }]) }],
-        inlineCards: [], portraitAssets: {}, userDismissedGroups: [], npcs: [{ id: 'npc-live', name: 'Live NPC' }], candidates: [], socialGraph: { edges: [], unresolved: [] }, dismissed: [],
-    };
-    const reloaded = original.map((message, index) => ({ ...message, send_date: `changed-${index}`, extra: { gen_id: `new-${index}` } }));
-    migrateLegacyBranchState(state, reloaded);
-    assert.equal(state.branchLineageVersion, 5);
-    assert.deepEqual(state.lineage, chatLineage(reloaded));
-    assert.equal(state.npcs[0].name, 'Live NPC');
-    assert.equal(state.checkpoints.length, 0, 'unproven v4 checkpoint is dropped rather than relabeled');
-});
 
 test('explicit host parent can inherit the branch root before the old 4-message heuristic', () => {
     const parentKey = buildQualifiedChatKey('chat', 'card.png', 'Parent');
@@ -83,35 +46,6 @@ test('explicit host parent can inherit the branch root before the old 4-message 
     setBranchProvenanceHint({});
 });
 
-test('explicit host parent can inherit a proven v4 checkpoint during the v5 upgrade', () => {
-    const parentKey = buildQualifiedChatKey('chat', 'card.png', 'Parent-v4');
-    const childKey = buildQualifiedChatKey('chat', 'card.png', 'Child-v5');
-    const parentChat = [user('A', '1'), bot('NPC', 'B', '2'), user('C', '3'), bot('NPC', 'D', '4')];
-    const v4 = legacyChatLineageV4(parentChat);
-    const v4Keys = lineageCheckpointKeys(v4);
-    const parent = {
-        branchLineageVersion: 4,
-        lineage: v4,
-        checkpoints: [{
-            messageId: 1,
-            fingerprint: v4[1],
-            lineageKey: v4Keys[1],
-            parentLineageKey: v4Keys[0],
-            createdAt: 1,
-            snapshot: emptySnapshot([{ id: 'npc-v4', name: 'V4 NPC' }]),
-        }],
-        branchRootSnapshot: emptySnapshot([]),
-        inlineCards: [], portraitAssets: {}, userDismissedGroups: [], branchFamilyId: 'family-v4',
-    };
-    const childChat = [parentChat[0], parentChat[1], user('Changed continuation', '5')];
-    setBranchProvenanceHint({ mainChat: 'Parent-v4', currentKey: childKey });
-    const inherited = bestAncestorState({ [parentKey]: parent }, childKey, childChat);
-    assert.ok(inherited);
-    assert.equal(inherited.npcs[0].name, 'V4 NPC');
-    assert.equal(inherited.branchForkMessageId, 1);
-    assert.equal(inherited.branchLineageVersion, 5);
-    setBranchProvenanceHint({});
-});
 
 function fileHarness() {
     const files = new Map();
@@ -141,7 +75,7 @@ test('hydration repairs a stale settings revision token from the authoritative s
     assert.equal(third.revision, 3);
 });
 
-test('v0.2.20 lifecycle hardening does not monkey-patch the shared SillyTavern event emitter', () => {
+test('lifecycle hardening does not monkey-patch the shared SillyTavern event emitter', () => {
     const hardening = fs.readFileSync(new URL('../hardening.js', import.meta.url), 'utf8');
     assert.doesNotMatch(hardening, /installLegacyLifecycleRegistrationGuard|source\.on\s*=/);
     assert.doesNotMatch(hardening, /events\.(?:CHAT_RENAMED|CHAT_DELETED|GROUP_CHAT_DELETED)/);
@@ -152,7 +86,7 @@ test('destructive chat lifecycle retires the revision-checked source before publ
     const deletion = index.slice(index.indexOf('async function removeDeletedChatState'), index.indexOf('async function moveRenamedChatState'));
     assert.ok(deletion.indexOf('retireNpcStateDataFile') >= 0);
     assert.ok(deletion.indexOf('retireNpcStateDataFile') < deletion.indexOf('settings.sidecarTombstones[key]'));
-    const rename = index.slice(index.indexOf('async function moveRenamedChatState'), index.indexOf('function legacyMigrationMatchesActiveChat'));
+    const rename = index.slice(index.indexOf('async function moveRenamedChatState'), index.indexOf('function flushCurrentChatOnPageHide'));
     assert.ok(rename.indexOf('retireNpcStateDataFile') >= 0);
     assert.ok(rename.indexOf('retireNpcStateDataFile') < rename.indexOf('settings.dataFiles[newKey] = newPointer'));
     assert.match(index, /removeDeletedChatState\(chatId, 'chat', ''\)/);
@@ -164,24 +98,12 @@ test('retired canonical sidecars are physically removed only after synchronous o
   const settingsSave = deletion.indexOf('await saveHostSettings()');
   const physicalDelete = deletion.indexOf('deleteNpcStateDataFile(pointer');
   assert.ok(settingsSave >= 0 && physicalDelete > settingsSave);
-  const rename = index.slice(index.indexOf('async function moveRenamedChatState'), index.indexOf('function legacyMigrationMatchesActiveChat'));
+  const rename = index.slice(index.indexOf('async function moveRenamedChatState'), index.indexOf('function flushCurrentChatOnPageHide'));
   const renameSave = rename.indexOf('await saveHostSettings()');
   const renameDelete = rename.indexOf('deleteNpcStateDataFile(oldPointer');
   assert.ok(renameSave >= 0 && renameDelete > renameSave);
 });
 
-test('retained legacy migration delegates legacyCandidateKey ownership to the strong full-lineage owner', () => {
-  const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
-  const hardening = fs.readFileSync(new URL('../hardening.js', import.meta.url), 'utf8');
-  const controller = index.slice(index.indexOf('async function migrateActiveLegacyNamespace'), index.indexOf('async function flushLifecycleOwner'));
-  const owner = hardening.slice(hardening.indexOf('export async function safeLegacyMigrationForCurrent'), hardening.indexOf('async function migrateCharacterOwner'));
-  assert.match(controller, /identity\.legacyCandidateKey \|\| identity\.legacyKey/);
-  assert.match(controller, /await safeLegacyMigrationForCurrent\(\)/);
-  assert.doesNotMatch(controller, /required >= 4|prefix >= required/);
-  assert.match(owner, /strongLegacyMigrationMatches/);
-  assert.match(owner, /lineageV2Fn: legacyV2Lineage/);
-  assert.match(owner, /lineageV0210Fn: legacyChatLineageV0210/);
-});
 
 
 test('ambiguous filename deletion uses host ownership proof and never falls back to the active owner', () => {
@@ -203,19 +125,17 @@ test('recovery filenames remain unique across same-millisecond calls', () => {
   }
 });
 
+
+
 test('owner-wide retired canonical predecessors are deleted only after settings become durable', () => {
   const hardening = fs.readFileSync(new URL('../hardening.js', import.meta.url), 'utf8');
-  const legacy = hardening.slice(hardening.indexOf('async function safeLegacyMigrationForCurrent'), hardening.indexOf('async function migrateCharacterOwner'));
-  assert.ok(legacy.indexOf('await saveSettingsNow()') >= 0);
-  assert.ok(legacy.indexOf('deleteNpcStateDataFile(oldPointer') > legacy.indexOf('await saveSettingsNow()'));
-  const rename = hardening.slice(hardening.indexOf('async function migrateCharacterOwner'), hardening.indexOf('async function retireCharacterOwner'));
+  const rename = hardening.slice(hardening.indexOf('async function moveCharacterOwnerState'), hardening.indexOf('async function retireCharacterOwner'));
   assert.ok(rename.indexOf('await saveSettingsNow()') >= 0);
   assert.ok(rename.indexOf('deleteNpcStateDataFile(predecessor.pointer') > rename.indexOf('await saveSettingsNow()'));
-  const deletion = hardening.slice(hardening.indexOf('async function retireCharacterOwner'), hardening.indexOf('async function rebaseActiveStateAfterHostRename'));
+  const deletion = hardening.slice(hardening.indexOf('async function retireCharacterOwner'), hardening.indexOf('function reportLifecycleError'));
   assert.ok(deletion.indexOf('await saveSettingsNow()') >= 0);
   assert.ok(deletion.indexOf('deleteNpcStateDataFile(predecessor.pointer') > deletion.indexOf('await saveSettingsNow()'));
 });
-
 
 test('ambiguous delete proof considers only live ownership and ignores historical tombstone/recovery records', () => {
   const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
@@ -224,7 +144,6 @@ test('ambiguous delete proof considers only live ownership and ignores historica
   const core = fs.readFileSync(new URL('../hardening-core.js', import.meta.url), 'utf8');
   const block = core.slice(core.indexOf('export function liveLifecycleCandidateKeys'), core.indexOf('export function resolveOwnedLifecycleKey'));
   assert.match(block, /settings\?\.dataFiles/);
-  assert.match(block, /settings\?\.chats/);
   assert.doesNotMatch(block, /branchIndex|recoveryFiles/);
   assert.match(block, /sidecarTombstones/);
 });

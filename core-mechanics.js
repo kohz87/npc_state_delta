@@ -113,107 +113,6 @@ Tension: unresolved interpersonal pressure. It may be conflict, awkwardness, fea
 Strong feelings should usually alter small choices, interpretation, openness, attention, or willingness before altering voice or overt behavior. A duty-bound, reserved, kind, blunt, proud, or independent NPC remains recognizably so at every relationship score. Runtime narration receives only a compact qualitative relationship lens; raw meter numbers are bookkeeping, not characterization instructions.`;
 
 
-const LEGACY_V0221_RELATIONSHIP_CRITERIA = `All relationship stats use a bipolar -100 to +100 scale with 0 as neutral. Positive and negative values are durable relationship states, not percentages or per-turn rewards. Routine continuation of an established dynamic normally causes NO numeric movement; score only genuinely new evidence.
-Trust: confidence, reliance, safety, and willingness to be vulnerable. Increase for newly demonstrated dependability, kept promises, costly protection, honest support, entrusted vulnerability, or comparable trust evidence. Decrease for betrayal, deception, abandonment, unreliability, violated confidence, or comparable distrust evidence. Trust is not obedience.
-Affection: fondness, attachment, warmth, and personal care. Increase for newly meaningful kindness, companionship, shared vulnerability, comfort, bonding, or comparable emotional attachment. Decrease for supported dislike, resentment, cruelty, rejection, humiliation, neglect, or emotional injury. Affection is not devotion, clinginess, jealousy, or self-erasure.
-Desire: attraction or pull toward romantic/intimate/physical closeness. Positive Desire REQUIRES explicit attraction/romantic/intimate/physical evidence in the current exchange. Friendliness, gratitude, admiration, rescue, affection, proximity, repeated contact, or trust alone are never Desire evidence. Negative Desire means explicit aversion to that kind of closeness, not mere absence of attraction.
-Tension: unresolved interpersonal pressure, conflict, fear, suspicion, awkward pressure, rivalry, resentment, or exceptional ease/release when negative. Change only when the current exchange actually changes that pressure.
-RELATIONSHIP WEIGHT: the farther an established score is from 0, the harder it becomes to deepen further. New evidence accumulates fractionally behind the integer display. Near-extreme scores therefore require repeated fresh evidence even when each event is valid. Minor contrary evidence also meets some established-relationship resistance; major/extreme betrayal, reconciliation, or comparable turning points can overcome more of it.
-Most ordinary events affect zero or one axis. Meaningful events may affect two axes only with separate evidence. Major events may affect up to three; four axes are reserved for extreme events with distinct support for every moved axis. Every non-zero axis must carry its own grounded evidence.`;
-const LEGACY_V0221_IMPACT_CRITERIA = `none: no NEW relationship-relevant evidence, insufficient evidence, routine continuation, or aftermath of an already-scored event; all deltas must be 0.
-ordinary: a new modest relationship-relevant beat. Maximum raw weight 1 on one axis. Routine conversation, expected companionship, ordinary joking/care, normal transactions, or repeated consequences are usually none.
-meaningful: clearly new evidence with noticeable emotional weight. Maximum raw weight 2 per supported axis, at most two axes.
-major: an important turning point with lasting consequences such as serious betrayal, costly rescue, explicit romantic advance/rejection, major reconciliation, or deep personal revelation. Maximum raw weight 5 per supported axis, at most three axes.
-extreme: a rare relationship-defining event such as catastrophic betrayal, self-sacrifice, irreversible loss, or explicit decisive commitment. Maximum raw weight 10 per supported axis. Extreme is still raw evidence before score resistance, so a near-extreme relationship does not automatically jump ten visible points.`;
-
-export function isLegacyStockRelationshipCriteriaV0221(value) {
-    return String(value ?? '').trim() === String(LEGACY_V0221_RELATIONSHIP_CRITERIA).trim();
-}
-
-export function isLegacyStockImpactCriteriaV0221(value) {
-    return String(value ?? '').trim() === String(LEGACY_V0221_IMPACT_CRITERIA).trim();
-}
-
-const LEGACY_V028_RELATIONSHIP_CAPS = Object.freeze({ ordinary: 4, meaningful: 8, major: 15, extreme: 25 });
-const LEGACY_V028_RELATIONSHIP_CRITERIA = `All relationship stats use a bipolar -100 to +100 scale with 0 as neutral. Positive and negative values are meaningful states, not percentages. Do not move a stat away from 0 without story evidence, and do not treat the mere absence of a positive feeling as a negative feeling.
-Trust: 0 is neutral/undetermined. Positive values mean growing confidence, reliance, safety, and willingness to be vulnerable with the player. Negative values mean active distrust, suspicion, guardedness, or expectation of harm/deception. Increase for dependable help, kept promises, protection, honest support, or entrusted vulnerability. Decrease below 0 only when the story supports distrust, betrayal, deception, abandonment, unreliability, or violated confidence.
-Affection: 0 is emotionally neutral. Positive values mean fondness, attachment, warmth, and personal care. Negative values mean active dislike, resentment, hostility, or emotional aversion. Increase for meaningful kindness, companionship, shared vulnerability, comfort, or bonding. Decrease below 0 only for supported dislike/resentment such as cruelty, rejection, humiliation, neglect, or emotional injury.
-Desire: 0 means no established attraction or desire. Positive values mean wanting the player's closeness, attention, intimacy, romance, or physical/sexual contact when the story supports it. Negative values mean active aversion to that kind of closeness or attraction, not merely lack of interest. Do not infer positive desire from friendliness, gratitude, admiration, or affection alone, and do not infer negative desire merely because attraction is absent.
-Tension: 0 is neutral/settled. Positive values mean interpersonal strain, conflict, fear, suspicion, awkward pressure, rivalry, resentment, or unresolved charged friction. Negative values mean unusually strong ease, safety, comfort, or release of interpersonal pressure. Increase for arguments, threats, distrust, jealousy, embarrassment under pressure, hostility, or unresolved conflict. Decrease below 0 only when the story specifically establishes exceptional ease, reassurance, reconciliation, safety, or relaxed comfort.`;
-const LEGACY_V028_IMPACT_CRITERIA = `none: no relationship-relevant event or insufficient evidence; all deltas must be 0.
-ordinary: routine interaction or small emotional beat; subtle movement only.
-meaningful: clearly relationship-relevant event with noticeable emotional weight, such as meaningful help, a sincere confession, a real argument, or a personal boundary being respected/violated.
-major: important turning point with lasting relationship consequences, such as serious betrayal, rescue at substantial cost, explicit romantic advance/rejection, major reconciliation, or a deeply personal revelation.
-extreme: rare life-changing or relationship-defining event. Reserve for extraordinary cases such as catastrophic betrayal, self-sacrifice, irreversible loss, or an explicit decisive commitment. Do not use extreme merely because a scene is dramatic.`;
-const LEGACY_V028_BEHAVIOR_CRITERIA = `RELATIONSHIP SCOPE: Identity, values, morality, ordinary regard for other people, speech, mannerisms, goals, duties, and boundaries remain authoritative. Relationship scores modify how the NPC weighs and responds to the player; they do not replace the person, make the player a universal priority, or reduce kindness/empathy toward everyone else.
-Trust: measures confidence, safety, reliance, and willingness to expose vulnerability. Positive trust may permit candor or reliance; negative trust supports suspicion and guardedness. Trust is not obedience.
-Affection: measures emotional importance, fondness, attachment, and care. Positive affection may increase attention, patience, concern, voluntary companionship, or willingness to accept some inconvenience through the NPC's established care style. Affection is not devotion, clinginess, jealousy, softness, or self-erasure.
-Desire: measures attraction or pull toward romantic/intimate/physical closeness when established. It does not prescribe flirting, blushing, stammering, possessiveness, or sexual behavior; expression must pass through personality, expressiveness, consent, and context.
-Tension: measures unresolved interpersonal pressure. Positive tension may be conflict, awkwardness, fear, rivalry, uncertainty, resentment, or charged restraint only when context supports that form. Never infer jealousy, embarrassment, hostility, or tsundere-style denial from tension alone.
-Interpret combinations rather than each stat in isolation. Strong feelings should usually change attention, openness, willingness, interpretation, and small choices before they change voice or identity. Relationship-specific behavior stays relationship-specific unless narration independently establishes a broader lasting character change.`;
-
-export function isLegacyStockRelationshipCapsV028(value) {
-    const caps = normalizeRelationshipCaps(value || {});
-    return Object.keys(LEGACY_V028_RELATIONSHIP_CAPS).every(key => caps[key] === LEGACY_V028_RELATIONSHIP_CAPS[key]);
-}
-
-export function isLegacyStockRelationshipCriteriaV028(value) {
-    return String(value ?? '').trim() === String(LEGACY_V028_RELATIONSHIP_CRITERIA).trim();
-}
-
-export function isLegacyStockImpactCriteriaV028(value) {
-    return String(value ?? '').trim() === String(LEGACY_V028_IMPACT_CRITERIA).trim();
-}
-
-export function isLegacyStockBehaviorCriteriaV028(value) {
-    return String(value ?? '').trim() === String(LEGACY_V028_BEHAVIOR_CRITERIA).trim();
-}
-
-const LEGACY_V029_RELATIONSHIP_CAPS = Object.freeze({ ordinary: 1, meaningful: 3, major: 8, extreme: 20 });
-const LEGACY_V029_RELATIONSHIP_CRITERIA = `All relationship stats use a bipolar -100 to +100 scale with 0 as neutral. Positive and negative values are durable relationship states, not percentages or per-turn rewards. Routine continuation of an already-established dynamic normally causes NO numeric movement; change scores only when the current exchange adds genuinely new relationship evidence.
-Trust: 0 is neutral/undetermined. Positive values mean growing confidence, reliance, safety, and willingness to be vulnerable with the player. Negative values mean active distrust, suspicion, guardedness, or expectation of harm/deception. Increase for newly demonstrated dependability, kept promises, costly protection, honest support, or entrusted vulnerability. Decrease below 0 only for supported distrust, betrayal, deception, abandonment, unreliability, or violated confidence. Repeating expected help does not automatically keep raising Trust.
-Affection: 0 is emotionally neutral. Positive values mean fondness, attachment, warmth, and personal care. Negative values mean active dislike, resentment, hostility, or emotional aversion. Increase for newly meaningful kindness, companionship, shared vulnerability, comfort, or bonding. Decrease below 0 only for supported dislike/resentment such as cruelty, rejection, humiliation, neglect, or emotional injury. Familiar warmth that merely continues the existing bond is usually no change.
-Desire: 0 means no established attraction or desire. Positive values mean wanting the player's closeness, attention, intimacy, romance, or physical/sexual contact when the story supports it. Negative values mean active aversion to that kind of closeness or attraction, not merely lack of interest. Do not infer positive desire from friendliness, gratitude, admiration, affection, proximity, or repeated contact alone; do not infer negative desire merely because attraction is absent.
-Tension: 0 is neutral/settled. Positive values mean interpersonal strain, conflict, fear, suspicion, awkward pressure, rivalry, resentment, or unresolved charged friction. Negative values mean unusually strong ease, safety, comfort, or release of interpersonal pressure. Change Tension only when the current exchange actually changes unresolved pressure; simply continuing an already-tense or already-comfortable interaction is normally no change.
-Most ordinary events affect zero or one axis. A meaningful event may affect two axes when each has separate evidence. Three or four axes should be rare and reserved for major/extreme events with distinct support for every moved axis.`;
-const LEGACY_V029_IMPACT_CRITERIA = `none: no NEW relationship-relevant evidence, insufficient evidence, or routine continuation of an already-established dynamic; all deltas must be 0.
-ordinary: a new but modest relationship-relevant beat that changes one aspect of the relationship slightly. Routine conversation, expected companionship, ordinary joking, repeated care, normal transactions, or consequences of an already-scored event are usually none.
-meaningful: clearly new relationship evidence with noticeable emotional weight, such as consequential help, a sincere confession, a real argument, or a personal boundary being respected/violated. Usually one axis, sometimes two with separate evidence.
-major: important turning point with lasting relationship consequences, such as serious betrayal, rescue at substantial cost, explicit romantic advance/rejection, major reconciliation, or a deeply personal revelation. Multiple axes may move when separately supported.
-extreme: rare life-changing or relationship-defining event. Reserve for extraordinary cases such as catastrophic betrayal, self-sacrifice, irreversible loss, or an explicit decisive commitment. Do not use extreme merely because a scene is dramatic.`;
-const LEGACY_V029_BEHAVIOR_CRITERIA = `IDENTITY DOMINANCE: First determine behavior from personality, values, morality, speech, mannerisms, goals, duties, current mood/status, independence, and other bonds. Only then let the player relationship make a secondary adjustment. Relationship scores are a tint on established behavior, never the character's main personality.
-RELATIONSHIP SCOPE: Scores modify how the NPC weighs and responds to the player only; they do not replace the person, make the player a universal priority, reduce kindness/empathy toward others, or need to surface in every scene.
-Trust: confidence, safety, reliance, and willingness to expose vulnerability. Trust can permit candor or reliance when context calls for it; it is not obedience.
-Affection: emotional importance, fondness, attachment, and care. Affection may bias attention, patience, interpretation, or willingness to accept some inconvenience through the NPC's established care style. It is not devotion, clinginess, jealousy, softness, or self-erasure.
-Desire: attraction or pull toward romantic/intimate/physical closeness when established. Desire does not prescribe flirting, blushing, stammering, possessiveness, sexual behavior, or constant romantic attention; expression passes through personality, expressiveness, consent, and context.
-Tension: unresolved interpersonal pressure. It may be conflict, awkwardness, fear, rivalry, uncertainty, resentment, or charged restraint only when context supports that form. Never infer jealousy, embarrassment, hostility, or tsundere-style denial from tension alone.
-Strong feelings should usually alter small choices, interpretation, openness, attention, or willingness before altering voice or overt behavior. A duty-bound, reserved, kind, blunt, proud, or independent NPC remains recognizably so at every relationship score.`;
-
-export function isLegacyStockRelationshipCapsV029(value) {
-    const caps = normalizeRelationshipCaps(value || {});
-    return Object.keys(LEGACY_V029_RELATIONSHIP_CAPS).every(key => caps[key] === LEGACY_V029_RELATIONSHIP_CAPS[key]);
-}
-
-export function isLegacyStockRelationshipCriteriaV029(value) {
-    return String(value ?? '').trim() === String(LEGACY_V029_RELATIONSHIP_CRITERIA).trim();
-}
-
-export function isLegacyStockImpactCriteriaV029(value) {
-    return String(value ?? '').trim() === String(LEGACY_V029_IMPACT_CRITERIA).trim();
-}
-
-export function isLegacyStockBehaviorCriteriaV029(value) {
-    return String(value ?? '').trim() === String(LEGACY_V029_BEHAVIOR_CRITERIA).trim();
-}
-
-export function isLegacyStockBehaviorCriteriaV024(value) {
-    const text = String(value ?? '').trim();
-    return text.length === 1841
-        && text.startsWith('Use relationship stats as a bipolar -100 to +100 signal with 0 neutral. Modulate')
-        && text.includes('willingness to prioritize the player')
-        && text.endsWith('Keep reactions proportional and natural.');
-}
-
 export function normalizeLifeState(value) {
     const state = String(value ?? '').trim().toLowerCase();
     return NPC_LIFE_STATES.includes(state) ? state : 'unknown';
@@ -1200,22 +1099,10 @@ function normalizeAgeFields(raw = {}) {
 
 function normalizeStoredAgeFields(raw = {}) {
     const seed = raw.name || raw.id || raw.species || raw.race || '';
-    const rawAge = cleanText(raw.age, 80);
-    const hasApparentField = Object.prototype.hasOwnProperty.call(raw, 'apparentAge') || Object.prototype.hasOwnProperty.call(raw, 'apparent_age');
-    const explicitApparent = cleanText(raw.apparentAge ?? raw.apparent_age, 80);
-    let age = normalizeAge(rawAge);
-    let apparentAge = normalizeApparentAge(explicitApparent, seed);
-
-    // v0.1.16 stored descriptor-derived visual estimates in age as ~N. On load, move those
-    // legacy estimates to apparentAge. Exact numeric ages remain chronological. Once a v0.1.17
-    // record explicitly has an apparentAge field, do not reinterpret its chronological age.
-    if (!hasApparentField && rawAge && (/^~\d{1,3}$/.test(rawAge) || hasQualitativeAgeCue(rawAge))) {
-        apparentAge = normalizeApparentAge(rawAge, seed);
-        age = '';
-    } else if (rawAge && !age && !apparentAge) {
-        apparentAge = normalizeApparentAge(rawAge, seed);
-    }
-    return { age, apparentAge };
+    return {
+        age: normalizeAge(cleanText(raw.age, 80)),
+        apparentAge: normalizeApparentAge(cleanText(raw.apparentAge ?? raw.apparent_age, 80), seed),
+    };
 }
 
 function plainUiEvidence(value) {
@@ -1286,7 +1173,7 @@ function replaceStandaloneMeguminEvidence(source) {
     }
     // These are model/UI control surfaces, not story evidence. Normally they are inside the
     // master <Blocks> envelope and are removed above; stripping standalone copies keeps custom
-    // or partially migrated Megumin prompts from contaminating dossier scans.
+    // or custom or alternate Megumin prompt layouts from contaminating dossier scans.
     for (const tag of ['Story_Tracker', 'CYOA', 'Bonds', 'Character_Sheet', 'New_NPC', 'NPC_Update']) {
         const re = new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}\\s*>`, 'gi');
         text = text.replace(re, ' ');
@@ -1319,8 +1206,8 @@ export function stripUiNoise(text) {
     source = replaceMeguminMasterBlocks(source);
     source = replaceStandaloneMeguminEvidence(source);
 
-    // Legacy Megumin versions place high-value identity/state evidence inside <details> blocks.
-    // Keep backward compatibility while dropping unrelated collapsible UI.
+    // Some Megumin layouts place high-value identity/state evidence inside <details> blocks.
+    // Preserve those evidence-bearing details while dropping unrelated collapsible UI.
     const withRelevantDetails = source.replace(/<details\b[^>]*>([\s\S]*?)<\/details>/gi, (_whole, inner) => {
         const summaryMatch = String(inner).match(/<summary\b[^>]*>([\s\S]*?)<\/summary>/i);
         const summary = String(summaryMatch?.[1] || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -1771,7 +1658,7 @@ function compactDurableText(value, maxChars, maxClauses = 8) {
     });
     if (clauses.length > maxClauses) {
         // Preserve both the established core and the newest distinct refinements when a
-        // legacy append-only field has more concepts than the compact summary can carry.
+        // oversized append-only field has more concepts than the compact summary can carry.
         const headCount = Math.ceil(maxClauses / 2);
         clauses = [...clauses.slice(0, headCount), ...clauses.slice(-(maxClauses - headCount))];
     }
@@ -2938,8 +2825,7 @@ function normalizeStoredMemories(value) {
         similarity: 0.58,
     });
     if (cleaned.length <= IMPORTANT_MEMORY_LIMIT) return cleaned;
-    // Legacy records do not carry per-memory significance. After semantic dedupe,
-    // recency is the safest deterministic tiebreaker until a future scan curates them.
+    // Keep only the most recent bounded set after semantic dedupe.
     return cleaned.slice(-IMPORTANT_MEMORY_LIMIT);
 }
 
@@ -3496,8 +3382,7 @@ export function normalizeNpcRecord(raw = {}) {
     const npc = { ...raw };
     // Manual profile locks block scanner rewrites. Data hygiene still normalizes whitespace,
     // but semantic compaction is skipped for explicitly locked stable fields.
-    npc.manualProfileLocksExplicit = normalizeBoolean(raw.manualProfileLocksExplicit ?? raw.manual_profile_locks_explicit);
-    npc.manualProfileFields = npc.manualProfileLocksExplicit && Array.isArray(raw.manualProfileFields)
+    npc.manualProfileFields = Array.isArray(raw.manualProfileFields)
         ? [...new Set(raw.manualProfileFields.map(value => String(value || '').trim()).filter(Boolean))]
         : [];
     const locked = new Set(npc.manualProfileFields);
@@ -3547,7 +3432,7 @@ export function normalizeNpcRecord(raw = {}) {
             : [])
         : mergeKeyRelationshipUpdates([], raw.keyRelationships ?? raw.key_relationships ?? raw.innerCircle ?? raw.inner_circle ?? raw.family);
     npc.profileEvidence = normalizeProfileEvidence(raw.profileEvidence ?? raw.profile_evidence);
-    // v0.1.15: legacy Current Thoughts are intentionally discarded. NPC Inner Chatter is the ephemeral source of internal voice.
+    // Current Thoughts are not durable dossier state; NPC Inner Chatter is ephemeral.
     delete npc.thoughts;
     const relationship = raw.relationship && typeof raw.relationship === 'object' ? raw.relationship : {};
     npc.relationship = normalizeRelationshipBaseline(relationship);
@@ -3556,12 +3441,11 @@ export function normalizeNpcRecord(raw = {}) {
     npc.relationshipEventHistory = normalizeRelationshipEventHistory(raw.relationshipEventHistory ?? raw.relationship_event_history);
     npc.relationshipSummary = calibrateRelationshipSummary(npc.relationshipSummary, npc.relationship);
     const lastChange = raw.lastRelationshipChange && typeof raw.lastRelationshipChange === 'object' ? raw.lastRelationshipChange : {};
-    const legacyDelta = lastChange.delta ?? lastChange.appliedDelta ?? lastChange.relationshipDelta ?? {};
-    const normalizedAuditDelta = normalizeRelationshipAuditDelta(legacyDelta);
+    const normalizedAuditDelta = normalizeRelationshipAuditDelta(lastChange.delta ?? {});
     const auditHasDelta = RELATIONSHIP_KEYS.some(key => normalizedAuditDelta[key] !== 0);
-    const auditEvidence = normalizeRelationshipEvidence(lastChange.evidence ?? lastChange.relationshipEvidence);
+    const auditEvidence = normalizeRelationshipEvidence(lastChange.evidence);
     const auditHasEvidence = RELATIONSHIP_KEYS.some(key => auditEvidence[key]);
-    const auditReason = cleanText(lastChange.reason ?? lastChange.relationshipChangeReason, 500);
+    const auditReason = cleanText(lastChange.reason, 500);
     const auditIsManual = String(lastChange.impact || '').toLowerCase() === 'manual';
     npc.lastRelationshipChange = (auditHasDelta || auditHasEvidence) && !auditReason && !auditIsManual
         ? {
@@ -3658,7 +3542,6 @@ export function createNpcRecord(name, existingIds = [], baseline = DEFAULT_RELAT
         lastSeenTurn: 0,
         seenCount: 0,
         manualProfileFields: [],
-        manualProfileLocksExplicit: false,
         retentionProtected: false,
         minor: false,
     };
@@ -4059,7 +3942,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
     } else {
         // A first observed gesture is not yet a mannerism. With source narration available,
         // seed only habits whose recurrence is actually established; structured imports with no
-        // narration keep backward-compatible direct population.
+        // narration permit direct structured population.
         const seed = String(lifecycleOptions.developmentContext || '').trim()
             ? (incoming.mannerisms || []).filter(entry => isExplicitRecurringMannerism(entry, lifecycleOptions.developmentContext))
             : (incoming.mannerisms || []);
@@ -4273,7 +4156,6 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
     // A scanner update must never erase a portrait or user/manual metadata.
     merged.portrait = existing.portrait || null;
     merged.manualProfileFields = [...manualFields];
-    merged.manualProfileLocksExplicit = existing.manualProfileLocksExplicit === true;
     return merged;
 }
 
@@ -5086,7 +4968,6 @@ function mergeAliasLinkedNpcPair(a, b) {
     merged.lastWorldActiveTurn = Math.max(Number(a?.lastWorldActiveTurn || 0), Number(b?.lastWorldActiveTurn || 0));
     merged.createdAt = Math.min(Number(a?.createdAt || Date.now()), Number(b?.createdAt || Date.now()));
     merged.updatedAt = Math.max(Number(a?.updatedAt || 0), Number(b?.updatedAt || 0), Date.now());
-    merged.manualProfileLocksExplicit = Boolean(a?.manualProfileLocksExplicit || b?.manualProfileLocksExplicit);
     merged.manualProfileFields = [...new Set([...(a?.manualProfileFields || []), ...(b?.manualProfileFields || [])])];
     merged.retentionProtected = Boolean(a?.retentionProtected || b?.retentionProtected);
     merged.minor = Boolean(a?.minor && b?.minor);
@@ -5287,9 +5168,6 @@ export function mergeScanResult(state, scanResult, options = {}) {
     // normal NPC deltas or the independent profile/social channels.
     next.npcs = next.npcs.map(npc => {
         const current = { ...npc };
-        // By merge time runtime state has already passed legacy-lock migration. Any
-        // remaining manualProfileFields therefore represent current explicit intent.
-        if (Array.isArray(current.manualProfileFields) && current.manualProfileFields.length) current.manualProfileLocksExplicit = true;
         return normalizeNpcRecord(current);
     });
 
