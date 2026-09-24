@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 1.0.50 - 24 September 2026
+
+- Replace the single portrait Custom slot with a persistent named Custom Preset Library, bounded to 24 entries.
+- Migrate the exact legacy Custom positive/negative/composition/format/mood/location values into `Custom 1` on settings schema v30.
+- Add Add, Duplicate, Rename, Delete, and selector controls; the last custom preset cannot be deleted.
+- Store positive style, negative prompt, composition, prompt format, mood inclusion, and location inclusion per custom preset; keep portrait-generation enablement and SillyTavern gallery saving global.
+- Preserve per-NPC temporary portrait prompt drafts and built-in theme presets. Dirty preset switching asks before discarding unsaved edits.
+- No scanner/provider prompt, relationship, dossier-state, request-topology, or RP-injection changes.
+
+
 ## 1.0.49 - 24 September 2026
 
 - Render scanner-compatible flat current Appearance as a read-only dossier `Current presentation` fallback when no named/unclassified current presentation exists, instead of hiding valid captured detail behind an empty forms panel.

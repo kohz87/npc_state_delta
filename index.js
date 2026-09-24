@@ -335,19 +335,82 @@ const PORTRAIT_THEME_PRESETS = Object.freeze({
         positive: 'semi-realistic fantasy character portrait, natural facial anatomy, detailed eyes and hair, realistic fabric and metal textures, soft cinematic lighting, polished digital illustration',
         negative: 'low quality, blurry, bad anatomy, malformed hands, extra limbs, duplicate character, text, watermark, logo, chibi, super-deformed proportions, cheap 3d render',
     },
-    custom: { label: 'Custom', positive: '', negative: '' },
+    custom: { label: 'Custom Library', positive: '', negative: '' },
 });
+
+const PORTRAIT_CUSTOM_PRESET_LIMIT = 24;
+const DEFAULT_CUSTOM_PORTRAIT_PRESET_ID = 'custom-default';
+
+function portraitCustomPreset(raw = {}, index = 0) {
+    const id = String(raw.id || '').trim().replace(/[^a-zA-Z0-9_-]+/g, '').slice(0, 64)
+        || (index === 0 ? DEFAULT_CUSTOM_PORTRAIT_PRESET_ID : `custom-${index + 1}`);
+    const name = String(raw.name || '').trim().slice(0, 80) || `Custom ${index + 1}`;
+    return {
+        id,
+        name,
+        positive: String(raw.positive ?? raw.portraitStylePositive ?? DEFAULT_PORTRAIT_STYLE_POSITIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT),
+        negative: String(raw.negative ?? raw.portraitStyleNegative ?? DEFAULT_PORTRAIT_STYLE_NEGATIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT),
+        composition: String(raw.composition ?? raw.portraitComposition ?? DEFAULT_PORTRAIT_COMPOSITION).slice(0, PORTRAIT_COMPOSITION_PROMPT_LIMIT),
+        promptFormat: normalizePortraitPromptFormat(raw.promptFormat ?? raw.portraitPromptFormat ?? 'hybrid'),
+        useMood: raw.useMood !== undefined ? Boolean(raw.useMood) : (raw.portraitUseMood !== false),
+        useLocation: raw.useLocation !== undefined ? Boolean(raw.useLocation) : (raw.portraitUseLocation === true),
+    };
+}
+
+function portraitCustomPresetLibrary(raw, legacy = {}) {
+    const source = Array.isArray(raw) ? raw : [];
+    const seen = new Set();
+    const result = [];
+    for (let index = 0; index < source.length && result.length < PORTRAIT_CUSTOM_PRESET_LIMIT; index += 1) {
+        const preset = portraitCustomPreset(source[index], index);
+        let id = preset.id;
+        let suffix = 2;
+        while (seen.has(id)) id = `${preset.id.slice(0, 56)}-${suffix++}`;
+        seen.add(id);
+        result.push({ ...preset, id });
+    }
+    if (!result.length) {
+        result.push(portraitCustomPreset({
+            id: DEFAULT_CUSTOM_PORTRAIT_PRESET_ID,
+            name: 'Custom 1',
+            positive: legacy.portraitStylePositive,
+            negative: legacy.portraitStyleNegative,
+            composition: legacy.portraitComposition,
+            promptFormat: legacy.portraitPromptFormat,
+            useMood: legacy.portraitUseMood,
+            useLocation: legacy.portraitUseLocation,
+        }, 0));
+    }
+    return result;
+}
+
+function portraitCustomPresetFor(source = {}, id = '') {
+    const presets = portraitCustomPresetLibrary(source.portraitCustomPresets, source);
+    const selectedId = String(id || source.portraitCustomPresetId || '').trim();
+    return presets.find(item => item.id === selectedId) || presets[0];
+}
+
+function nextPortraitCustomPresetId(presets = []) {
+    const taken = new Set((presets || []).map(item => String(item?.id || '')));
+    const base = `custom-${Date.now().toString(36)}`;
+    let id = base;
+    let suffix = 2;
+    while (taken.has(id)) id = `${base}-${suffix++}`;
+    return id;
+}
 
 const DURABLE_COMPACTION_VERSION = 1;
 
 const DEFAULTS = Object.freeze({
-    schemaVersion: 29,
+    schemaVersion: 30,
     enabled: true,
     autoScan: true,
     fullScanEveryTurn: false,
     scannerConnectionProfile: '',
     portraitGenerationEnabled: true,
     portraitThemePreset: 'fantasy_anime',
+    portraitCustomPresetId: DEFAULT_CUSTOM_PORTRAIT_PRESET_ID,
+    portraitCustomPresets: [portraitCustomPreset({ id: DEFAULT_CUSTOM_PORTRAIT_PRESET_ID, name: 'Custom 1' })],
     portraitStylePositive: DEFAULT_PORTRAIT_STYLE_POSITIVE,
     portraitStyleNegative: DEFAULT_PORTRAIT_STYLE_NEGATIVE,
     portraitComposition: DEFAULT_PORTRAIT_COMPOSITION,
@@ -483,6 +546,22 @@ function getSettings() {
         if (isLegacyStockRelationshipCriteriaV0221(settings.relationshipCriteria)) assign('relationshipCriteria', DEFAULT_RELATIONSHIP_CRITERIA);
         if (isLegacyStockImpactCriteriaV0221(settings.relationshipImpactCriteria)) assign('relationshipImpactCriteria', DEFAULT_IMPACT_CRITERIA);
     }
+    if (previousSchema < 30) {
+        // v1.0.50 replaces the single Custom portrait slot with a named library.
+        // Seed the first entry from the exact legacy fields so no existing custom prompt is lost.
+        const migrated = portraitCustomPreset({
+            id: DEFAULT_CUSTOM_PORTRAIT_PRESET_ID,
+            name: 'Custom 1',
+            positive: settings.portraitStylePositive,
+            negative: settings.portraitStyleNegative,
+            composition: settings.portraitComposition,
+            promptFormat: settings.portraitPromptFormat,
+            useMood: settings.portraitUseMood,
+            useLocation: settings.portraitUseLocation,
+        }, 0);
+        assign('portraitCustomPresets', [migrated], sameJson);
+        assign('portraitCustomPresetId', migrated.id);
+    }
     assign('relationshipBaseline', normalizeRelationshipBaseline(settings.relationshipBaseline), sameJson);
     assign('relationshipCaps', normalizeRelationshipCaps(settings.relationshipCaps), sameJson);
     assign('relationshipCriteria', typeof settings.relationshipCriteria === 'string' ? settings.relationshipCriteria : DEFAULT_RELATIONSHIP_CRITERIA);
@@ -495,6 +574,21 @@ function getSettings() {
     assign('scannerConnectionProfile', typeof settings.scannerConnectionProfile === 'string' ? settings.scannerConnectionProfile.trim() : '');
     assign('portraitGenerationEnabled', settings.portraitGenerationEnabled !== false);
     assign('portraitThemePreset', PORTRAIT_THEME_PRESETS[settings.portraitThemePreset] ? settings.portraitThemePreset : 'custom');
+    const portraitCustomPresets = portraitCustomPresetLibrary(settings.portraitCustomPresets, settings);
+    assign('portraitCustomPresets', portraitCustomPresets, sameJson);
+    const portraitCustomPresetId = portraitCustomPresets.some(item => item.id === settings.portraitCustomPresetId)
+        ? settings.portraitCustomPresetId
+        : portraitCustomPresets[0].id;
+    assign('portraitCustomPresetId', portraitCustomPresetId);
+    const activeCustomPortraitPreset = portraitCustomPresets.find(item => item.id === portraitCustomPresetId) || portraitCustomPresets[0];
+    if (settings.portraitThemePreset === 'custom') {
+        assign('portraitStylePositive', activeCustomPortraitPreset.positive);
+        assign('portraitStyleNegative', activeCustomPortraitPreset.negative);
+        assign('portraitComposition', activeCustomPortraitPreset.composition);
+        assign('portraitPromptFormat', activeCustomPortraitPreset.promptFormat);
+        assign('portraitUseMood', activeCustomPortraitPreset.useMood);
+        assign('portraitUseLocation', activeCustomPortraitPreset.useLocation);
+    }
     assign('portraitStylePositive', String(settings.portraitStylePositive ?? DEFAULT_PORTRAIT_STYLE_POSITIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT));
     assign('portraitStyleNegative', String(settings.portraitStyleNegative ?? DEFAULT_PORTRAIT_STYLE_NEGATIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT));
     assign('portraitComposition', String(settings.portraitComposition ?? DEFAULT_PORTRAIT_COMPOSITION).slice(0, PORTRAIT_COMPOSITION_PROMPT_LIMIT));
@@ -3371,11 +3465,22 @@ function buildSettingsHtml() {
             <div class="npc-state-delta-portrait-settings-body">
               <p class="npc-state-delta-muted">NPC State Delta builds a positive + negative prompt from the dossier, then calls SillyTavern's native <code>/imagine</code> command with <code>quiet=true</code>. SillyTavern keeps control of the configured image backend, model/checkpoint, sampler, steps, workflow, credentials, and resolution.</p>
               ${settingRow('npc_state_delta_portrait_generation_enabled', 'Enable Generate Portrait', '<input id="npc_state_delta_portrait_generation_enabled" type="checkbox">', 'Shows Generate Portrait in the dossier utility menu. If SillyTavern Image Generation is unavailable or unconfigured, generation fails safely without changing the dossier.')}
-              <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_theme_preset"><b>Theme preset</b><small>Choosing a preset replaces the global positive/negative style fields below. Choose Custom before hand-editing them.</small></label>
+              <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_theme_preset"><b>Theme preset</b><small>Built-ins are fixed starting points. Custom Library uses one of your named saved presets below.</small></label>
               <select id="npc_state_delta_portrait_theme_preset" class="text_pole">${Object.entries(PORTRAIT_THEME_PRESETS).map(([key, item]) => `<option value="${key}">${escapeHtml(item.label)}</option>`).join('')}</select>
+              <div class="npc-state-delta-custom-preset-library">
+                <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_custom_preset"><b>Custom preset</b><small id="npc_state_delta_portrait_custom_preset_count"></small></label>
+                <select id="npc_state_delta_portrait_custom_preset" class="text_pole"></select>
+                <div class="npc-state-delta-actions npc-state-delta-custom-preset-actions">
+                  <div id="npc_state_delta_portrait_custom_add" class="menu_button"><i class="fa-solid fa-plus"></i> Add</div>
+                  <div id="npc_state_delta_portrait_custom_duplicate" class="menu_button"><i class="fa-solid fa-copy"></i> Duplicate</div>
+                  <div id="npc_state_delta_portrait_custom_rename" class="menu_button"><i class="fa-solid fa-pen"></i> Rename</div>
+                  <div id="npc_state_delta_portrait_custom_delete" class="menu_button redWarningBG"><i class="fa-solid fa-trash"></i> Delete</div>
+                </div>
+                <small class="npc-state-delta-muted">Each custom preset stores positive, negative, composition, prompt format, mood, and location. Gallery saving remains global.</small>
+              </div>
               <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_style_positive"><b>Positive style / theme</b><small>Use this for a house style such as anime key visual, painterly fantasy, dark medieval, or your own model-specific style keywords.</small></label>
               <textarea id="npc_state_delta_portrait_style_positive" class="text_pole npc-state-delta-rubric-textarea" rows="4" maxlength="${PORTRAIT_STYLE_PROMPT_LIMIT}"></textarea>
-              <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_style_negative"><b>Global negative prompt</b><small>Quality, anatomy, composition, or style exclusions applied to every generated NPC portrait.</small></label>
+              <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_style_negative"><b>Negative prompt</b><small>Quality, anatomy, composition, or style exclusions applied to every generated NPC portrait.</small></label>
               <textarea id="npc_state_delta_portrait_style_negative" class="text_pole npc-state-delta-rubric-textarea" rows="4" maxlength="${PORTRAIT_STYLE_PROMPT_LIMIT}"></textarea>
               <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_composition"><b>Portrait composition</b><small>Kept separate from appearance so you can change framing without rewriting dossiers.</small></label>
               <textarea id="npc_state_delta_portrait_composition" class="text_pole npc-state-delta-rubric-textarea" rows="3" maxlength="${PORTRAIT_COMPOSITION_PROMPT_LIMIT}"></textarea>
@@ -3474,17 +3579,7 @@ function syncSettingsControls() {
     $('#npc_state_delta_archive_deaths').prop('checked', s.autoArchiveDeaths !== false);
     $('#npc_state_delta_reactivate_archived').prop('checked', s.autoReactivateArchived !== false);
     $('#npc_state_delta_branch_rescan').prop('checked', s.branchRescan !== false);
-    if (!portraitSettingsDirty) {
-        $('#npc_state_delta_portrait_generation_enabled').prop('checked', s.portraitGenerationEnabled !== false);
-        $('#npc_state_delta_portrait_theme_preset').val(s.portraitThemePreset);
-        $('#npc_state_delta_portrait_style_positive').val(s.portraitStylePositive);
-        $('#npc_state_delta_portrait_style_negative').val(s.portraitStyleNegative);
-        $('#npc_state_delta_portrait_composition').val(s.portraitComposition);
-        $('#npc_state_delta_portrait_prompt_format').val(s.portraitPromptFormat);
-        $('#npc_state_delta_portrait_use_mood').prop('checked', s.portraitUseMood !== false);
-        $('#npc_state_delta_portrait_use_location').prop('checked', s.portraitUseLocation === true);
-        $('#npc_state_delta_portrait_save_gallery').prop('checked', s.portraitSaveToGallery === true);
-    }
+    if (!portraitSettingsDirty) writePortraitSettingsDraftToUi(portraitSettingsSnapshot(s));
     updatePortraitSettingsSaveUi();
     $('#npc_state_delta_base_trust').val(s.relationshipBaseline.trust);
     $('#npc_state_delta_base_affection').val(s.relationshipBaseline.affection);
@@ -4513,14 +4608,14 @@ function openNpcEditor(npcId) {
 }
 
 function portraitPromptOptions() {
-    const settings = getSettings();
+    const settings = portraitSettingsSnapshot(getSettings());
     return {
         stylePositive: settings.portraitStylePositive,
         styleNegative: settings.portraitStyleNegative,
         composition: settings.portraitComposition,
         format: settings.portraitPromptFormat,
-        useMood: settings.portraitUseMood !== false,
-        useLocation: settings.portraitUseLocation === true,
+        useMood: settings.portraitUseMood,
+        useLocation: settings.portraitUseLocation,
     };
 }
 
@@ -4611,7 +4706,7 @@ async function executeNativePortraitGeneration(positive, negative, seed = null) 
 }
 
 function portraitGeneratorHtml(npc, prompts) {
-    const theme = PORTRAIT_THEME_PRESETS[getSettings().portraitThemePreset]?.label || 'Custom';
+    const theme = portraitThemeLabel(getSettings());
     return `
       <div class="npc-state-delta-portrait-generator-dialog" role="dialog" aria-modal="true" aria-labelledby="npc_state_delta_portrait_generator_title">
         <header class="npc-state-delta-portrait-generator-header">
@@ -5252,27 +5347,68 @@ function importBundleBytes(bytes) {
     return { decoded, merged, importReport };
 }
 
+function portraitThemeLabel(source = getSettings()) {
+    const snapshot = portraitSettingsSnapshot(source);
+    if (snapshot.portraitThemePreset === 'custom') {
+        const preset = snapshot.portraitCustomPresets.find(item => item.id === snapshot.portraitCustomPresetId);
+        return preset?.name ? `Custom · ${preset.name}` : 'Custom Library';
+    }
+    return PORTRAIT_THEME_PRESETS[snapshot.portraitThemePreset]?.label || 'Custom Library';
+}
+
+function portraitCustomPresetOptionsHtml(source = getSettings()) {
+    const snapshot = portraitSettingsSnapshot(source);
+    return snapshot.portraitCustomPresets
+        .map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`)
+        .join('');
+}
+
 function portraitSettingsSnapshot(source = getSettings()) {
+    const customPresets = portraitCustomPresetLibrary(source.portraitCustomPresets, source);
+    const customPresetId = customPresets.some(item => item.id === source.portraitCustomPresetId)
+        ? source.portraitCustomPresetId
+        : customPresets[0].id;
+    const customPreset = customPresets.find(item => item.id === customPresetId) || customPresets[0];
+    const theme = PORTRAIT_THEME_PRESETS[source.portraitThemePreset] ? source.portraitThemePreset : 'custom';
+    const builtIn = theme !== 'custom' ? PORTRAIT_THEME_PRESETS[theme] : null;
     return {
         portraitGenerationEnabled: source.portraitGenerationEnabled !== false,
-        portraitThemePreset: PORTRAIT_THEME_PRESETS[source.portraitThemePreset] ? source.portraitThemePreset : 'custom',
-        portraitStylePositive: String(source.portraitStylePositive ?? DEFAULT_PORTRAIT_STYLE_POSITIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT),
-        portraitStyleNegative: String(source.portraitStyleNegative ?? DEFAULT_PORTRAIT_STYLE_NEGATIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT),
-        portraitComposition: String(source.portraitComposition ?? DEFAULT_PORTRAIT_COMPOSITION).slice(0, PORTRAIT_COMPOSITION_PROMPT_LIMIT),
-        portraitPromptFormat: normalizePortraitPromptFormat(source.portraitPromptFormat),
-        portraitUseMood: source.portraitUseMood !== false,
-        portraitUseLocation: source.portraitUseLocation === true,
+        portraitThemePreset: theme,
+        portraitCustomPresetId: customPresetId,
+        portraitCustomPresets: structuredClone(customPresets),
+        portraitStylePositive: theme === 'custom'
+            ? customPreset.positive
+            : String(builtIn?.positive ?? source.portraitStylePositive ?? DEFAULT_PORTRAIT_STYLE_POSITIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT),
+        portraitStyleNegative: theme === 'custom'
+            ? customPreset.negative
+            : String(builtIn?.negative ?? source.portraitStyleNegative ?? DEFAULT_PORTRAIT_STYLE_NEGATIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT),
+        portraitComposition: theme === 'custom'
+            ? customPreset.composition
+            : String(source.portraitComposition ?? DEFAULT_PORTRAIT_COMPOSITION).slice(0, PORTRAIT_COMPOSITION_PROMPT_LIMIT),
+        portraitPromptFormat: theme === 'custom'
+            ? customPreset.promptFormat
+            : normalizePortraitPromptFormat(source.portraitPromptFormat),
+        portraitUseMood: theme === 'custom' ? customPreset.useMood : source.portraitUseMood !== false,
+        portraitUseLocation: theme === 'custom' ? customPreset.useLocation : source.portraitUseLocation === true,
         portraitSaveToGallery: source.portraitSaveToGallery === true,
     };
 }
 
 function normalizePortraitSettingsDraft(raw = {}) {
-    const current = portraitSettingsSnapshot(getSettings());
-    const key = PORTRAIT_THEME_PRESETS[raw.portraitThemePreset] ? raw.portraitThemePreset : (raw.portraitThemePreset === 'custom' ? 'custom' : current.portraitThemePreset);
+    const settings = getSettings();
+    const current = portraitSettingsSnapshot(settings);
+    const key = PORTRAIT_THEME_PRESETS[raw.portraitThemePreset]
+        ? raw.portraitThemePreset
+        : (raw.portraitThemePreset === 'custom' ? 'custom' : current.portraitThemePreset);
+    const presets = portraitCustomPresetLibrary(raw.portraitCustomPresets ?? current.portraitCustomPresets, settings);
+    const requestedId = String((raw.portraitCustomPresetId ?? current.portraitCustomPresetId) || '').trim();
+    const customPresetId = presets.some(item => item.id === requestedId) ? requestedId : presets[0].id;
     const preset = PORTRAIT_THEME_PRESETS[key];
     const next = {
         portraitGenerationEnabled: raw.portraitGenerationEnabled !== undefined ? Boolean(raw.portraitGenerationEnabled) : current.portraitGenerationEnabled,
         portraitThemePreset: key,
+        portraitCustomPresetId: customPresetId,
+        portraitCustomPresets: structuredClone(presets),
         portraitStylePositive: String(raw.portraitStylePositive ?? current.portraitStylePositive).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT),
         portraitStyleNegative: String(raw.portraitStyleNegative ?? current.portraitStyleNegative).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT),
         portraitComposition: String(raw.portraitComposition ?? current.portraitComposition).slice(0, PORTRAIT_COMPOSITION_PROMPT_LIMIT),
@@ -5284,14 +5420,30 @@ function normalizePortraitSettingsDraft(raw = {}) {
     if (key !== 'custom' && preset) {
         next.portraitStylePositive = preset.positive;
         next.portraitStyleNegative = preset.negative;
+    } else {
+        const index = next.portraitCustomPresets.findIndex(item => item.id === customPresetId);
+        if (index >= 0) {
+            next.portraitCustomPresets[index] = portraitCustomPreset({
+                ...next.portraitCustomPresets[index],
+                positive: next.portraitStylePositive,
+                negative: next.portraitStyleNegative,
+                composition: next.portraitComposition,
+                promptFormat: next.portraitPromptFormat,
+                useMood: next.portraitUseMood,
+                useLocation: next.portraitUseLocation,
+            }, index);
+        }
     }
     return next;
 }
 
 function portraitSettingsDraftFromUi() {
+    const settings = getSettings();
     return normalizePortraitSettingsDraft({
         portraitGenerationEnabled: $('#npc_state_delta_portrait_generation_enabled').prop('checked'),
         portraitThemePreset: String($('#npc_state_delta_portrait_theme_preset').val() || 'custom'),
+        portraitCustomPresetId: String($('#npc_state_delta_portrait_custom_preset').val() || settings.portraitCustomPresetId || ''),
+        portraitCustomPresets: settings.portraitCustomPresets,
         portraitStylePositive: String($('#npc_state_delta_portrait_style_positive').val() || ''),
         portraitStyleNegative: String($('#npc_state_delta_portrait_style_negative').val() || ''),
         portraitComposition: String($('#npc_state_delta_portrait_composition').val() || ''),
@@ -5302,10 +5454,21 @@ function portraitSettingsDraftFromUi() {
     });
 }
 
+function writePortraitCustomPresetOptions(snapshot) {
+    const control = $('#npc_state_delta_portrait_custom_preset');
+    if (!control.length) return;
+    const html = snapshot.portraitCustomPresets
+        .map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join('');
+    if (control.html() !== html) control.html(html);
+    control.val(snapshot.portraitCustomPresetId);
+    $('#npc_state_delta_portrait_custom_preset_count').text(`${snapshot.portraitCustomPresets.length}/${PORTRAIT_CUSTOM_PRESET_LIMIT} saved`);
+}
+
 function writePortraitSettingsDraftToUi(draft) {
     const next = normalizePortraitSettingsDraft(draft);
     $('#npc_state_delta_portrait_generation_enabled').prop('checked', next.portraitGenerationEnabled);
     $('#npc_state_delta_portrait_theme_preset').val(next.portraitThemePreset);
+    writePortraitCustomPresetOptions(next);
     $('#npc_state_delta_portrait_style_positive').val(next.portraitStylePositive);
     $('#npc_state_delta_portrait_style_negative').val(next.portraitStyleNegative);
     $('#npc_state_delta_portrait_composition').val(next.portraitComposition);
@@ -5313,7 +5476,13 @@ function writePortraitSettingsDraftToUi(draft) {
     $('#npc_state_delta_portrait_use_mood').prop('checked', next.portraitUseMood);
     $('#npc_state_delta_portrait_use_location').prop('checked', next.portraitUseLocation);
     $('#npc_state_delta_portrait_save_gallery').prop('checked', next.portraitSaveToGallery);
+    $('.npc-state-delta-custom-preset-library').toggleClass('delta-custom-active', next.portraitThemePreset === 'custom');
     return next;
+}
+
+function confirmDiscardPortraitDraft() {
+    if (!portraitSettingsDirty) return true;
+    return globalThis.window?.confirm?.('Discard unsaved portrait preset edits and switch?') !== false;
 }
 
 function updatePortraitSettingsSaveUi() {
@@ -5345,7 +5514,9 @@ async function savePortraitSettingsDraft(explicitDraft = null) {
         portraitSettingsSaveBusy = false;
         syncSettingsControls();
         refreshNpcViewer();
-        globalThis.toastr?.success?.('NPC State Delta: portrait settings saved.');
+        globalThis.toastr?.success?.(next.portraitThemePreset === 'custom'
+            ? `NPC State Delta: saved custom portrait preset ${portraitCustomPresetFor(next).name}.`
+            : 'NPC State Delta: portrait settings saved.');
         return true;
     } catch (error) {
         Object.assign(settings, before);
@@ -5356,6 +5527,28 @@ async function savePortraitSettingsDraft(explicitDraft = null) {
         globalThis.toastr?.error?.(`NPC State Delta portrait settings were not saved: ${error?.message || error}`);
         return false;
     }
+}
+
+function persistPortraitCustomPresetLibrary(settings, presets, selectedId, { theme = 'custom' } = {}) {
+    const normalized = portraitCustomPresetLibrary(presets, settings);
+    const id = normalized.some(item => item.id === selectedId) ? selectedId : normalized[0].id;
+    settings.portraitCustomPresets = normalized;
+    settings.portraitCustomPresetId = id;
+    settings.portraitThemePreset = theme;
+    if (theme === 'custom') {
+        const active = normalized.find(item => item.id === id) || normalized[0];
+        settings.portraitStylePositive = active.positive;
+        settings.portraitStyleNegative = active.negative;
+        settings.portraitComposition = active.composition;
+        settings.portraitPromptFormat = active.promptFormat;
+        settings.portraitUseMood = active.useMood;
+        settings.portraitUseLocation = active.useLocation;
+    }
+    persistSettings();
+    portraitSettingsDirty = false;
+    syncSettingsControls();
+    refreshNpcViewer();
+    return portraitSettingsSnapshot(settings);
 }
 
 function bindSettingsCheckbox(selector, key, after = null) {
@@ -5399,25 +5592,132 @@ function bindUi() {
     bindSettingsCheckbox('#npc_state_delta_reactivate_archived', 'autoReactivateArchived');
     bindSettingsCheckbox('#npc_state_delta_branch_rescan', 'branchRescan');
     $(document).on('change.npcStateDelta', '#npc_state_delta_portrait_theme_preset', function () {
+        const settings = getSettings();
+        const saved = portraitSettingsSnapshot(settings);
         const key = PORTRAIT_THEME_PRESETS[this.value] ? this.value : 'custom';
-        const preset = PORTRAIT_THEME_PRESETS[key];
-        if (key !== 'custom' && preset) {
-            $('#npc_state_delta_portrait_style_positive').val(preset.positive);
-            $('#npc_state_delta_portrait_style_negative').val(preset.negative);
+        if (portraitSettingsDirty && key !== saved.portraitThemePreset && !confirmDiscardPortraitDraft()) {
+            this.value = saved.portraitThemePreset;
+            return;
         }
+        portraitSettingsDirty = false;
+        if (key === 'custom') {
+            const custom = portraitCustomPresetFor(settings);
+            writePortraitSettingsDraftToUi({
+                ...saved,
+                portraitThemePreset: 'custom',
+                portraitCustomPresetId: custom.id,
+                portraitStylePositive: custom.positive,
+                portraitStyleNegative: custom.negative,
+                portraitComposition: custom.composition,
+                portraitPromptFormat: custom.promptFormat,
+                portraitUseMood: custom.useMood,
+                portraitUseLocation: custom.useLocation,
+            });
+        } else {
+            const preset = PORTRAIT_THEME_PRESETS[key];
+            writePortraitSettingsDraftToUi({
+                ...saved,
+                portraitThemePreset: key,
+                portraitStylePositive: preset.positive,
+                portraitStyleNegative: preset.negative,
+            });
+        }
+        markPortraitSettingsDirty();
+    });
+    $(document).on('change.npcStateDelta', '#npc_state_delta_portrait_custom_preset', function () {
+        const settings = getSettings();
+        const saved = portraitSettingsSnapshot(settings);
+        const target = saved.portraitCustomPresets.find(item => item.id === String(this.value || ''));
+        if (!target) return writePortraitCustomPresetOptions(saved);
+        if (portraitSettingsDirty && target.id !== saved.portraitCustomPresetId && !confirmDiscardPortraitDraft()) {
+            this.value = saved.portraitCustomPresetId;
+            return;
+        }
+        portraitSettingsDirty = false;
+        writePortraitSettingsDraftToUi({
+            ...saved,
+            portraitThemePreset: 'custom',
+            portraitCustomPresetId: target.id,
+            portraitStylePositive: target.positive,
+            portraitStyleNegative: target.negative,
+            portraitComposition: target.composition,
+            portraitPromptFormat: target.promptFormat,
+            portraitUseMood: target.useMood,
+            portraitUseLocation: target.useLocation,
+        });
         markPortraitSettingsDirty();
     });
     $(document).on('input.npcStateDelta', '#npc_state_delta_portrait_style_positive, #npc_state_delta_portrait_style_negative, #npc_state_delta_portrait_composition', function () {
         if (this.id === 'npc_state_delta_portrait_style_positive' || this.id === 'npc_state_delta_portrait_style_negative') {
             $('#npc_state_delta_portrait_theme_preset').val('custom');
+            $('.npc-state-delta-custom-preset-library').addClass('delta-custom-active');
         }
         markPortraitSettingsDirty();
     });
     $(document).on('change.npcStateDelta', '#npc_state_delta_portrait_generation_enabled, #npc_state_delta_portrait_prompt_format, #npc_state_delta_portrait_use_mood, #npc_state_delta_portrait_use_location, #npc_state_delta_portrait_save_gallery', () => {
         markPortraitSettingsDirty();
     });
+    $(document).on('click.npcStateDelta', '#npc_state_delta_portrait_custom_add, #npc_state_delta_portrait_custom_duplicate', function () {
+        const settings = getSettings();
+        const snapshot = portraitSettingsDraftFromUi();
+        const presets = portraitCustomPresetLibrary(settings.portraitCustomPresets, settings);
+        if (presets.length >= PORTRAIT_CUSTOM_PRESET_LIMIT) {
+            globalThis.toastr?.warning?.(`NPC State Delta: custom portrait preset limit is ${PORTRAIT_CUSTOM_PRESET_LIMIT}.`);
+            return;
+        }
+        const duplicate = this.id.endsWith('_duplicate');
+        const selected = presets.find(item => item.id === String($('#npc_state_delta_portrait_custom_preset').val() || ''))
+            || portraitCustomPresetFor(settings);
+        const base = portraitCustomPreset({
+            ...(duplicate ? selected : {}),
+            positive: snapshot.portraitStylePositive,
+            negative: snapshot.portraitStyleNegative,
+            composition: snapshot.portraitComposition,
+            promptFormat: snapshot.portraitPromptFormat,
+            useMood: snapshot.portraitUseMood,
+            useLocation: snapshot.portraitUseLocation,
+        });
+        const suggested = duplicate ? `${selected.name} Copy` : `Custom ${presets.length + 1}`;
+        const name = String(globalThis.window?.prompt?.('Custom portrait preset name:', suggested) || '').trim().slice(0, 80);
+        if (!name) return;
+        const id = nextPortraitCustomPresetId(presets);
+        const created = portraitCustomPreset({ ...base, id, name }, presets.length);
+        persistPortraitCustomPresetLibrary(settings, [...presets, created], id);
+        globalThis.toastr?.success?.(`NPC State Delta: saved custom portrait preset ${created.name}.`);
+    });
+    $(document).on('click.npcStateDelta', '#npc_state_delta_portrait_custom_rename', function () {
+        const settings = getSettings();
+        const snapshot = portraitSettingsSnapshot(settings);
+        const id = String($('#npc_state_delta_portrait_custom_preset').val() || snapshot.portraitCustomPresetId);
+        const index = snapshot.portraitCustomPresets.findIndex(item => item.id === id);
+        if (index < 0) return;
+        const current = snapshot.portraitCustomPresets[index];
+        const name = String(globalThis.window?.prompt?.('Rename custom portrait preset:', current.name) || '').trim().slice(0, 80);
+        if (!name || name === current.name) return;
+        const presets = structuredClone(snapshot.portraitCustomPresets);
+        presets[index] = { ...current, name };
+        persistPortraitCustomPresetLibrary(settings, presets, id, { theme: snapshot.portraitThemePreset });
+        globalThis.toastr?.success?.(`NPC State Delta: renamed portrait preset to ${name}.`);
+    });
+    $(document).on('click.npcStateDelta', '#npc_state_delta_portrait_custom_delete', function () {
+        const settings = getSettings();
+        const snapshot = portraitSettingsSnapshot(settings);
+        if (snapshot.portraitCustomPresets.length <= 1) {
+            globalThis.toastr?.warning?.('NPC State Delta: keep at least one custom portrait preset.');
+            return;
+        }
+        const id = String($('#npc_state_delta_portrait_custom_preset').val() || snapshot.portraitCustomPresetId);
+        const target = snapshot.portraitCustomPresets.find(item => item.id === id);
+        if (!target) return;
+        if (globalThis.window?.confirm?.(`Delete custom portrait preset "${target.name}"?`) === false) return;
+        const presets = snapshot.portraitCustomPresets.filter(item => item.id !== id);
+        const nextId = presets[0].id;
+        persistPortraitCustomPresetLibrary(settings, presets, nextId, { theme: snapshot.portraitThemePreset === 'custom' ? 'custom' : snapshot.portraitThemePreset });
+        globalThis.toastr?.success?.(`NPC State Delta: deleted custom portrait preset ${target.name}.`);
+    });
     $(document).on('click.npcStateDelta', '#npc_state_delta_reset_portrait_theme', () => {
         writePortraitSettingsDraftToUi({
+            ...portraitSettingsSnapshot(getSettings()),
             portraitGenerationEnabled: true,
             portraitThemePreset: 'fantasy_anime',
             portraitStylePositive: DEFAULT_PORTRAIT_STYLE_POSITIVE,

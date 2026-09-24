@@ -664,6 +664,12 @@ body.npc-state-delta-viewer-open { overflow: hidden !important; overscroll-behav
 .npc-state-delta-portrait-settings-body,
 .npc-state-delta-editor-portrait-overrides-body { padding: 0 10px 10px; }
 .npc-state-delta-portrait-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; margin-top: 8px; }
+.npc-state-delta-custom-preset-library { margin: 9px 0 12px; padding: 10px; border: 1px solid rgba(216,190,145,.14); border-radius: 8px; background: rgba(0,0,0,.08); opacity: .72; transition: opacity .15s ease, border-color .15s ease; }
+.npc-state-delta-custom-preset-library.delta-custom-active { opacity: 1; border-color: rgba(216,190,145,.32); }
+.npc-state-delta-custom-preset-library .npc-state-delta-rubric-label { margin-top: 0; }
+.npc-state-delta-custom-preset-actions { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 6px; margin: 7px 0; }
+.npc-state-delta-custom-preset-actions .menu_button { min-width: 0; justify-content: center; }
+@media (max-width: 700px) { .npc-state-delta-custom-preset-actions { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 .npc-state-delta-editor-portrait-overrides-body > label:not(.npc-state-delta-editor-lock) { display: grid; gap: 5px; margin-top: 10px; }
 .npc-state-delta-editor-portrait-overrides-body textarea { width: 100%; box-sizing: border-box; resize: vertical; line-height: 1.45; }
 

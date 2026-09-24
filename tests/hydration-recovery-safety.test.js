@@ -56,10 +56,40 @@ test('editor and portrait workflows are chat-affine', () => {
     assert.match(index, /closePortraitGenerator\(\);\n\s*closeNpcViewer\(\);\n\s*closeNpcEditor\(\);/);
 });
 
-test('Delta application metadata is v1.0.49 and active core ownership is semantic', () => {
-    assert.match(core, /NPC_STATE_VERSION = '1\.0\.49'/);
+test('Delta application metadata is v1.0.50 and active core ownership is semantic', () => {
+    assert.match(core, /NPC_STATE_VERSION = '1\.0\.50'/);
     assert.match(core, /export \* from '\.\/core-mechanics\.js'/);
     assert.doesNotMatch(core, /NPC_STATE_SOURCE_ENGINE_VERSION|core-v0218/);
-    assert.equal(manifest.version, '1.0.49');
+    assert.equal(manifest.version, '1.0.50');
     assert.equal(manifest.author, 'kohz87');
+});
+
+
+test('portrait Custom slot migrates into a named persistent preset library', () => {
+    assert.match(index, /schemaVersion: 30/);
+    assert.match(index, /if \(previousSchema < 30\)/);
+    assert.match(index, /Seed the first entry from the exact legacy fields so no existing custom prompt is lost/);
+    assert.match(index, /positive: settings\.portraitStylePositive/);
+    assert.match(index, /negative: settings\.portraitStyleNegative/);
+    assert.match(index, /composition: settings\.portraitComposition/);
+    assert.match(index, /portraitCustomPresets/);
+    assert.match(index, /portraitCustomPresetId/);
+});
+
+test('portrait custom preset library exposes named management and keeps visual controls per preset', () => {
+    for (const id of [
+        'npc_state_delta_portrait_custom_preset',
+        'npc_state_delta_portrait_custom_add',
+        'npc_state_delta_portrait_custom_duplicate',
+        'npc_state_delta_portrait_custom_rename',
+        'npc_state_delta_portrait_custom_delete',
+    ]) assert.match(index, new RegExp(id));
+    assert.match(index, /PORTRAIT_CUSTOM_PRESET_LIMIT = 24/);
+    assert.match(index, /promptFormat: next\.portraitPromptFormat/);
+    assert.match(index, /useMood: next\.portraitUseMood/);
+    assert.match(index, /useLocation: next\.portraitUseLocation/);
+    assert.match(index, /composition: next\.portraitComposition/);
+    assert.match(index, /portraitSaveToGallery: source\.portraitSaveToGallery === true/);
+    assert.match(index, /const settings = portraitSettingsSnapshot\(getSettings\(\)\)/);
+    assert.match(index, /Custom · \$\{preset\.name\}/);
 });
