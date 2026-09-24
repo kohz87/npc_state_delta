@@ -170,11 +170,17 @@ test('retired canonical sidecars are physically removed only after synchronous o
   assert.ok(renameSave >= 0 && renameDelete > renameSave);
 });
 
-test('retained legacy migration consumes v0.2.19 legacyCandidateKey only with four-message two-user proof', () => {
+test('retained legacy migration delegates legacyCandidateKey ownership to the strong full-lineage owner', () => {
   const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
-  const block = index.slice(index.indexOf('function legacyMigrationMatchesActiveChat'), index.indexOf('function flushLifecycleOwner'));
-  assert.match(block, /identity\.legacyCandidateKey \|\| identity\.legacyKey/);
-  assert.match(block, /required >= 4 && prefix >= required && userTurns >= 2/);
+  const hardening = fs.readFileSync(new URL('../hardening.js', import.meta.url), 'utf8');
+  const controller = index.slice(index.indexOf('async function migrateActiveLegacyNamespace'), index.indexOf('async function flushLifecycleOwner'));
+  const owner = hardening.slice(hardening.indexOf('export async function safeLegacyMigrationForCurrent'), hardening.indexOf('async function migrateCharacterOwner'));
+  assert.match(controller, /identity\.legacyCandidateKey \|\| identity\.legacyKey/);
+  assert.match(controller, /await safeLegacyMigrationForCurrent\(\)/);
+  assert.doesNotMatch(controller, /required >= 4|prefix >= required/);
+  assert.match(owner, /strongLegacyMigrationMatches/);
+  assert.match(owner, /lineageV2Fn: legacyV2Lineage/);
+  assert.match(owner, /lineageV0210Fn: legacyChatLineageV0210/);
 });
 
 

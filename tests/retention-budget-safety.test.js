@@ -6,6 +6,7 @@ import { prunePortraitAssetsForState } from '../storage.js';
 import { buildQualifiedChatKey } from '../identity.js';
 
 const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const hardening = fs.readFileSync(new URL('../hardening.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const ci = fs.readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
 
 function msg(text, isUser = false) { return { mes: text, is_user: isUser, is_system: false, name: isUser ? 'User' : 'Character' }; }
@@ -69,8 +70,11 @@ test('lifecycle lookup prefers known owner state and fails closed on ambiguous s
     assert.match(index, /refused ambiguous/);
 });
 
-test('legacy ownership proof accepts both content lineage and pre-v0.2.11 lineage', () => {
-    assert.match(index, /legacyChatLineageV0210\(messages\)/);
+test('legacy ownership proof accepts both content lineage and pre-v0.2.11 lineage through the strong owner', () => {
+    const owner = hardening.slice(hardening.indexOf('export async function safeLegacyMigrationForCurrent'), hardening.indexOf('async function migrateCharacterOwner'));
+    assert.match(owner, /strongLegacyMigrationMatches/);
+    assert.match(owner, /lineageV2Fn: legacyV2Lineage/);
+    assert.match(owner, /lineageV0210Fn: legacyChatLineageV0210/);
 });
 
 test('high-value manual mutations use immediate persistence', () => {
@@ -79,10 +83,14 @@ test('high-value manual mutations use immediate persistence', () => {
     assert.match(index, /persistCritical\(\);\r?\n\s*closeNpcEditor/);
 });
 
-test('legacy ownership migration is lineage-gated and owner-qualified', () => {
-    assert.match(index, /legacyMigrationMatchesActiveChat/);
-    assert.match(index, /legacyOwnershipClaims/);
-    assert.match(index, /qualified-namespace-migrated/);
+test('legacy ownership migration is lineage-gated, owner-qualified, and single-owned', () => {
+    const controller = index.slice(index.indexOf('async function migrateActiveLegacyNamespace'), index.indexOf('async function flushLifecycleOwner'));
+    const owner = hardening.slice(hardening.indexOf('export async function safeLegacyMigrationForCurrent'), hardening.indexOf('async function migrateCharacterOwner'));
+    assert.match(controller, /await safeLegacyMigrationForCurrent\(\)/);
+    assert.doesNotMatch(index, /function legacyMigrationMatchesActiveChat/);
+    assert.match(owner, /legacyOwnershipClaims/);
+    assert.match(owner, /qualified-namespace-migrated/);
+    assert.match(owner, /await saveSettingsNow\(\)/);
 });
 
 test('same chat filename for two owners produces distinct canonical keys', () => {

@@ -155,12 +155,27 @@ test('alias dedupe preserves manually locked Name and full Stage 4 Appearance st
         createdAt: 2,
         updatedAt: 20,
     });
+    const expectedAppearance = {
+        appearance: locked.appearance,
+        overallAppearance: locked.overallAppearance,
+        unclassifiedAppearance: locked.unclassifiedAppearance,
+        appearanceForms: structuredClone(locked.appearanceForms),
+        currentForm: locked.currentForm,
+        currentFormUnknown: locked.currentFormUnknown,
+        appearanceModelVersion: locked.appearanceModelVersion,
+    };
     const merged = mergeScanResult({ npcs: [locked, duplicate], turn: 3 }, { npcs: [] }, { turn: 3 }).state.npcs[0];
     assert.equal(merged.name, 'half-elf girl');
     assert.ok(merged.aliases.includes('Cerys'));
-    assert.match(merged.overallAppearance, /burnished bronze/i);
-    assert.equal(merged.currentForm, 'Base');
-    assert.match(merged.appearanceForms[0].appearance, /bull-hide boots/i);
+    assert.deepEqual({
+        appearance: merged.appearance,
+        overallAppearance: merged.overallAppearance,
+        unclassifiedAppearance: merged.unclassifiedAppearance,
+        appearanceForms: merged.appearanceForms,
+        currentForm: merged.currentForm,
+        currentFormUnknown: merged.currentFormUnknown,
+        appearanceModelVersion: merged.appearanceModelVersion,
+    }, expectedAppearance, 'alias dedupe must preserve the normalized Stage 4 state owned by the lock');
     assert.doesNotMatch(JSON.stringify(merged.appearanceForms), /Wrong clothing/i);
     assert.ok(merged.manualProfileFields.includes('name'));
     assert.ok(merged.manualProfileFields.includes('appearance'));
