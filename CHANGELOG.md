@@ -7,7 +7,7 @@
 - Fix Appearance extraction so grounded current visual presentation includes directly described hair/body traits, current outfit/gear, and relevant visible condition instead of being suppressed by the durable-identity firewall.
 - Treat explicit visual reveal/correction wording, such as an obscured hair color being shown to be different, as a source-grounded Appearance refinement that can replace the mistaken prior impression without requiring high lexical overlap.
 - Allow grounded `appearanceState:"change"` updates for clothing/current-presentation changes without routing them through Personality/Speech development-scale readiness; existing evidence grounding, form ownership, locks, and unsupported-rewrite rejection remain in force.
-- Add regressions for corrective hair-color narration, changed clothing/boots, and scanner prompt guidance. `git diff --check` passes; package `test`/`validate` execution is currently blocked before startup by the local Windows Coding Agent runner returning `spawn EINVAL`.
+- Add regressions for corrective hair-color narration, changed clothing/boots, scanner prompt guidance, and bounded roster overhead. Record the reviewed model-facing footprint versus 1.0.46: routine scanner/full-window +102 characters, targeted Refresh +221, backfill +71, dossier import +34, and scanner-shaped retry captures +102; focused relationship and RP injection remain unchanged.
 
 ## 1.0.46 - 23 September 2026
 
