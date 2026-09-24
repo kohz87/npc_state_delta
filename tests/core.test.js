@@ -1134,7 +1134,7 @@ test('durable profile evidence accumulates across turns without requiring an imm
     });
     assert.match(prompt, /recentProfileEvidence/);
     assert.match(prompt, /Uses proper titles when addressing elders/);
-    assert.match(prompt, /ALWAYS emit one top-level profileUpdates item/i);
+    assert.match(prompt, /ALWAYS emit profileUpdates/i);
 });
 
 test('legacy durable summaries semantically compact duplicate concepts during normalization', () => {
@@ -1257,7 +1257,7 @@ test('scanner prompt defines appearance as durable image-ready detail with refin
     });
     assert.match(prompt, /DURABLE PROFILE CHANNEL/i);
     assert.match(prompt, /matching \*State:"refine"/i);
-    assert.match(prompt, /changed clothes\/form\/presentation=>appearanceState:"change"\+reason/i);
+    assert.match(prompt, /clothes\/form\/presentation change=>appearanceState:"change"\+reason/i);
     assert.match(prompt, /fleeting pose\/expression is not identity/i);
     assert.match(prompt, /"appearance":"Young woman with dark hair\."/);
 });
