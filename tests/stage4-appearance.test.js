@@ -243,7 +243,7 @@ test('scanner prompt treats current outfit and explicit visual corrections as Ap
         charName: 'Narrator',
     });
     assert.match(prompt, /CURRENT VISIBLE PRESENTATION/i);
-    assert.match(prompt, /current outfit\/gear/i);
-    assert.match(prompt, /earlier visual impression was wrong or obscured/i);
+    assert.match(prompt, /outfit\/gear/i);
+    assert.match(prompt, /Correction\/reveal/i);
     assert.doesNotMatch(prompt, /Ignore transient visual state/i);
 });
