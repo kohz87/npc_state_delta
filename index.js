@@ -2650,6 +2650,17 @@ function isTruncatedScannerJsonError(error) {
     return /unterminated string|unexpected end of json input|unexpected end of data|end of json input/i.test(text);
 }
 
+// A reply with no JSON object at all is usually a provider/host message or a model refusal rather
+// than broken JSON. Surface a short, whitespace-collapsed excerpt so the cause is visible; never the
+// whole provider response.
+const NON_JSON_REPLY_EXCERPT_CHARS = 200;
+function nonJsonReplyExcerpt(raw) {
+    if (raw && typeof raw === 'object') return '';
+    const text = String(raw ?? '').replace(/\s+/g, ' ').trim();
+    if (!text || text.includes('{')) return '';
+    return text.length > NON_JSON_REPLY_EXCERPT_CHARS ? `${text.slice(0, NON_JSON_REPLY_EXCERPT_CHARS)}…` : text;
+}
+
 function compactRetryPrompt(prompt, label = 'scanner', reason = 'malformed') {
     const cause = reason === 'truncated'
         ? 'Your previous response ended before the JSON was complete.'
@@ -2681,17 +2692,21 @@ async function generateParsedNpcJson(ctx, {
             return { parsed: parseScanJson(raw), raw, retried: retry };
         } catch (error) {
             const truncated = isTruncatedScannerJsonError(error);
+            const reply = nonJsonReplyExcerpt(raw);
             if (!retry) {
                 console.warn(`[NPC State Delta] ${label} returned invalid JSON; retrying once with a compact correction prompt.`, {
                     responseChars: String(raw ?? '').length,
                     truncated,
                     error: error?.message || String(error),
+                    ...(reply ? { textReply: reply } : {}),
                 });
                 return invoke(true, truncated ? 'truncated' : 'malformed');
             }
             const wrapped = new Error(truncated
                 ? `${label} JSON was truncated twice; the model did not finish its JSON response. ${error?.message || error}`
-                : `${label} returned malformed JSON twice; the model did not produce a valid dossier object. ${error?.message || error}`);
+                : reply
+                    ? `${label} received a text reply instead of JSON twice. The provider/model said: "${reply}" This usually means the provider blocked or refused the request, the request exceeded the model's context, or the selected connection profile is not using a chat model that follows JSON instructions.`
+                    : `${label} returned malformed JSON twice; the model did not produce a valid dossier object. ${error?.message || error}`);
             wrapped.cause = error;
             throw wrapped;
         }

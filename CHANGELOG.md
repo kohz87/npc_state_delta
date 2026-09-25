@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- When a scanner reply contains no JSON object at all (a provider/host message or model refusal such as "The prompt ..."), the failure toast and console warning now show a bounded 200-character excerpt of what was returned and name the usual causes (provider block/refusal, context overflow, or a profile not using a chat model that follows JSON instructions), instead of only a ten-character JSON parse error. The existing single JSON retry, request counts, prompt bytes and diagnostics retention are unchanged.
+
 ## 1.0.55 - 25 September 2026
 
 - Fix a cross-session data-loss path in the 1.0.54 server-authority model: a session that hydrated a chat before another session created its sidecar had no pointer, skipped freshness checks and wrote revision 1 blindly over the other session's canonical file. Unpointered guarded writes and freshness checks now probe the deterministic sidecar path; a live file is adopted (dirty local work is preserved as recovery-only) and a write without a revision token is refused. Replacing a retired tombstone for a reused chat name remains allowed.

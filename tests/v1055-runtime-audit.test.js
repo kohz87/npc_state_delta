@@ -67,6 +67,23 @@ async function unpointeredSessionChecks(mockState, eventSource, manualAddNpc, sl
     assert.equal(await saveOpenEditor(), false, 'an editor opened before another session\'s revision cannot overwrite it');
     assert.equal(runtime.getNpc(visitor.id).status, 'edited on another device');
     document.getElementById = previousGetElementById;
+
+    // A provider/host text reply (no JSON object) keeps the single accepted retry, and the failure
+    // shows a bounded excerpt of what was actually returned instead of a ten-character parse error.
+    const errors = [];
+    const previousError = globalThis.toastr.error;
+    globalThis.toastr.error = message => errors.push(String(message));
+    const requestsBefore = mockState.rawCalls.length;
+    const longTail = ' more detail'.repeat(60);
+    mockState.quietResponder = async () => `The prompt was blocked by the provider safety filter (PROHIBITED_CONTENT).${longTail}`;
+    assert.equal(await runtime.scan(), false);
+    mockState.quietResponder = null;
+    globalThis.toastr.error = previousError;
+    assert.equal(mockState.rawCalls.length - requestsBefore, 2, 'one scan request plus the existing single JSON retry');
+    const failure = errors.find(message => /scan failed/.test(message)) || '';
+    assert.match(failure, /text reply instead of JSON twice/);
+    assert.match(failure, /The provider\/model said: "The prompt was blocked by the provider safety filter \(PROHIBITED_CONTENT\)\./);
+    assert.ok(failure.length < 700, 'the excerpt is bounded rather than the whole provider response');
 }
 
 test('a session hydrated before another session created the sidecar adopts it instead of overwriting it', () => {
