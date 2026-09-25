@@ -7,6 +7,10 @@ import { writeNpcStateDataFile, readNpcStateDataFile, undurableNpcStateSnapshot,
 
 const immediate = resolve => resolve();
 const rejection = status => ({ ok: false, status, text: async () => 'synthetic rejection' });
+// Unpointered writes probe the deterministic sidecar path first; a missing file answers 404 as on the host.
+const missingSidecar = fn => async (url, options = {}) => (options.method === 'GET' && String(url).startsWith('/user/files/')
+    ? { ok: false, status: 404, text: async () => '' }
+    : fn(url, options));
 const message = (id, user = false) => ({ mes: `story-${id}`, name: user ? 'User' : 'Narrator', is_user: user, is_system: false });
 function baseline() {
     const npc = createNpcRecord('Ryu');
@@ -22,7 +26,7 @@ for (const transient of [0, 6]) test(`recovery retains turn 56 after ${transient
     let calls = 0;
     const delays = [];
     await assert.rejects(writeNpcStateDataFile({ chatKey, state: { turn: 56 },
-        fetchFn: async () => rejection(++calls <= transient ? 503 : 413),
+        fetchFn: missingSidecar(async () => rejection(++calls <= transient ? 503 : 413)),
         sleepFn: resolve => { delays.push(true); resolve(); },
     }), error => error.status === 413);
     assert.equal(calls, transient + 1);
@@ -33,12 +37,12 @@ for (const transient of [0, 6]) test(`recovery retains turn 56 after ${transient
     assert.equal(recovered.state.turn, 56);
     let durable;
     let durableJson = '';
-    await writeNpcStateDataFile({ chatKey, state: recovered.state, fetchFn: async (url, options = {}) => {
+    await writeNpcStateDataFile({ chatKey, state: recovered.state, fetchFn: missingSidecar(async (url, options = {}) => {
         if (url === '/synthetic') return { ok: true, status: 200, text: async () => durableJson };
         durableJson = Buffer.from(JSON.parse(options.body).data, 'base64').toString();
         durable = JSON.parse(durableJson);
         return { ok: true, status: 200, json: async () => ({ path: '/synthetic' }), text: async () => '' };
-    } });
+    }) });
     assert.equal(durable.state.turn, 56);
     assert.equal(undurableNpcStateSnapshot(chatKey), null);
     assert.equal(pendingNpcStateDurabilityKeys().includes(chatKey), false);
@@ -49,7 +53,7 @@ test('in-flight recovery reads and terminal failure retain newer accepted mutati
     let current = { turn: 56 };
     let reject;
     const task = writeNpcStateDataFile({ chatKey, state: structuredClone(current), recoveryState: () => current,
-        fetchFn: () => new Promise(resolve => { reject = resolve; }) });
+        fetchFn: missingSidecar(() => new Promise(resolve => { reject = resolve; })) });
     while (!reject) await new Promise(resolve => setImmediate(resolve));
     current = { turn: 57, npcs: [{ id: 'new' }] };
     const pending = await readNpcStateDataFile(null, { expectedChatKey: chatKey });
@@ -66,7 +70,7 @@ for (const exit of ['cancel', 'owner', 'retire']) for (const transient of [0, 6]
         const chatKey = `chat:hotfix-${exit}-${transient}`;
         let calls = 0, release, current = true;
         const task = writeNpcStateDataFile({ chatKey, state: { turn: 56 }, isCurrent: () => current, sleepFn: immediate,
-            fetchFn: async () => ++calls <= transient ? rejection(503) : new Promise(resolve => { release = resolve; }) });
+            fetchFn: missingSidecar(async () => ++calls <= transient ? rejection(503) : new Promise(resolve => { release = resolve; })) });
         while (!release) await new Promise(resolve => setImmediate(resolve));
         let retirement;
         if (exit === 'owner') current = false;
@@ -91,7 +95,7 @@ test('revision conflict after retry is recoverable without bypassing the remote 
     const pointer = { path: '/conflict', revision: 1 };
     let uploads = 0;
     const fetchFn = async url => url === pointer.path
-        ? { ok: true, text: async () => encodeStateFilePayload(chatKey, { turn: 1 }, '', { revision: uploads < 6 ? 1 : 2 }) }
+        ? { ok: true, text: async () => encodeStateFilePayload(chatKey, { turn: 1 }, '', { revision: uploads < 6 ? 1 : 2, writerId: 'other-writer' }) }
         : (uploads++, rejection(503));
     await assert.rejects(writeNpcStateDataFile({ chatKey, state: { turn: 56 }, pointer, fetchFn, sleepFn: immediate }), { code: 'NPC_STATE_WRITE_CONFLICT' });
     assert.equal(undurableNpcStateSnapshot(chatKey).state.turn, 56);

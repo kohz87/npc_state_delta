@@ -138,7 +138,7 @@ test('freshness boundaries cover resume, editor, portrait and destructive mutati
     const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
     assert.match(source, /addEventListener\?\.\('pageshow',[\s\S]*refreshCurrentChatFromServer\('pageshow'\)/);
     assert.match(source, /visibilityState === 'visible'[\s\S]*refreshCurrentChatFromServer\('visibility-resume'\)/);
-    assert.match(source, /activeEditorBaseRevision[\s\S]*hydratedRevision\(originChatKey\)/);
+    assert.match(source, /activeEditorBaseRevision[\s\S]*workingCopyAdoption\(originChatKey\)/);
     assert.match(source, /portrait-commit[\s\S]*originCanonicalRevision/);
     assert.match(source, /runFreshMutation\('archive a dossier'/);
     assert.match(source, /runFreshMutation\('delete a dossier'/);
