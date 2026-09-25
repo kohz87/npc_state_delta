@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 1.0.52 - 24 September 2026
+## 1.0.53 - 24 September 2026
 
 - Consolidate active legacy unqualified-sidecar ownership migration onto one hardened transaction owner. Migration now requires the full stored-lineage proof, refuses an already-resident canonical destination, verifies canonical and recovery writes, persists the ownership mapping synchronously, and only then physically deletes the retired predecessor.
 - Remove the competing weaker four-message-prefix migration path and duplicate `CHAT_CHANGED` migration listener, eliminating both ambiguous legacy claims and two-writer migration races.

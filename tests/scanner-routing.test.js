@@ -102,6 +102,36 @@ test('provider failure has an actionable error, no retry/fallback, and redacted 
     assert.equal(calls.host.length, 0);
     assert.doesNotMatch(JSON.stringify(scannerRoutingMetrics()), /secret-key-in-url|scanner payload|scanner system/);
 });
+test('SillyTavern Response not OK failure exposes the known 1.18.0 profile repair hint without leaking arbitrary causes', async () => {
+    const { ctx, calls } = fixture('fast');
+    const provider = new Error('Response not OK');
+    const wrapped = new Error('API request failed', { cause: provider });
+    ctx.ConnectionManagerRequestService.sendRequest = () => { calls.profile.push([]); throw wrapped; };
+    await assert.rejects(dispatchScannerRequest(ctx, payload), error => {
+        assert.equal(error.code, 'NPC_SCANNER_PROFILE_REQUEST_FAILED');
+        assert.match(error.message, /Response not OK/);
+        assert.match(error.message, /1\.18\.0/);
+        assert.match(error.message, /re-save the selected profile/i);
+        return true;
+    });
+    assert.equal(calls.profile.length, 1);
+    assert.equal(calls.host.length, 0);
+    assert.doesNotMatch(JSON.stringify(scannerRoutingMetrics()), /Response not OK|API request failed/);
+});
+
+test('safe provider status classification exposes authorization failures without copying provider text', async () => {
+    const { ctx } = fixture('fast');
+    const cause = new Error('opaque upstream text that must stay private');
+    cause.status = 401;
+    ctx.ConnectionManagerRequestService.sendRequest = () => { throw cause; };
+    await assert.rejects(dispatchScannerRequest(ctx, payload), error => {
+        assert.equal(error.code, 'NPC_SCANNER_PROFILE_REQUEST_FAILED');
+        assert.match(error.message, /authorization \(401\)/);
+        assert.doesNotMatch(error.message, /opaque upstream text/);
+        return true;
+    });
+});
+
 
 for (const value of [null, {}, { content: {} }, () => {}]) test(`invalid profile response ${typeof value} does not coerce to fake JSON`, async () => {
     const { ctx } = fixture('fast');

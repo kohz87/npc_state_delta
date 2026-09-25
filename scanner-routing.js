@@ -91,6 +91,24 @@ function profileSignature(profile) {
     return JSON.stringify(canonical(profile));
 }
 
+function providerFailureHint(error) {
+    let current = error;
+    for (let depth = 0; current && depth < 5; depth += 1, current = current?.cause) {
+        const status = Number(current?.status ?? current?.response?.status);
+        if (status === 401) return ' The provider rejected authorization (401).';
+        if (status === 403) return ' The provider rejected authorization (403).';
+        if (status === 429) return ' The provider rate-limited the request (429).';
+        const message = String(current?.message || '');
+        if (/\b401\b|unauthori[sz]ed/i.test(message)) return ' The provider rejected authorization (401).';
+        if (/\b403\b|forbidden/i.test(message)) return ' The provider rejected authorization (403).';
+        if (/\b429\b|rate.?limit/i.test(message)) return ' The provider rate-limited the request (429).';
+        if (/response not ok/i.test(message)) {
+            return ' SillyTavern reported "Response not OK". On SillyTavern 1.18.0 this can be caused by the Connection Manager secret-id bug; re-save the selected profile while that profile\'s provider is the active main connection, then switch back.';
+        }
+    }
+    return '';
+}
+
 function scannerMessages(options) {
     const messages = [];
     if (options.systemPrompt) messages.push({ role: 'system', content: String(options.systemPrompt) });
@@ -223,7 +241,7 @@ export async function dispatchScannerRequest(ctx, options = {}, scope = {}) {
     } catch (cause) {
         const error = stop || (isScannerRoutingError(cause) ? cause
             : cause?.name === 'AbortError' ? stoppedError()
-                : profileId ? scannerRoutingError(`Request through profile "${profileId}" failed. Check that profile\'s model, credentials, and connection in SillyTavern; no fallback was used.`, 'NPC_SCANNER_PROFILE_REQUEST_FAILED')
+                : profileId ? scannerRoutingError(`Request through profile "${profileId}" failed.${providerFailureHint(cause)} Check that profile's model, credentials, and connection in SillyTavern; no fallback was used.`, 'NPC_SCANNER_PROFILE_REQUEST_FAILED')
                     : cause);
         failureCode = String(error?.code || 'PROVIDER_ERROR');
         outcome = failureCode === 'NPC_SCANNER_ROUTE_TIMEOUT' ? 'timeout'
