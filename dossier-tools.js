@@ -147,11 +147,12 @@ async function applyImport(session) {
     }
 }
 
-export function exportNativeTools() {
+export async function exportNativeTools() {
     const chatKey = activeChatKey();
     if (!chatKey || chatKey === 'no-chat') return toast('warning', 'NPC State Delta: open a chat before exporting.');
     try {
-        const base = api()?.exportBytes?.();
+        await api()?.ensureFresh?.({ reason: 'dossier-export' });
+        const base = await api()?.exportBytes?.();
         if (!base) throw new Error('Canonical export returned no data.');
         const output = augmentNativeBundle(base, {
             portableSettings: buildPortablePortraitSettings(api()?.portraitSettings?.() || {}),

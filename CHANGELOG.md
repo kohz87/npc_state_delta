@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 1.0.54 - 25 September 2026
+
+- Make the SillyTavern server-side NPC State sidecar the sole durable authority across desktop, mobile, tabs, and browser sessions that use the same backend. Hydrated browser state is an ephemeral working copy rather than proof of freshness.
+- Add event/boundary-driven freshness checks for chat load/change, app resume, dossier-open, manual mutation, scanner/provider, portrait, import/export, and destructive lifecycle paths without background polling.
+- Rehydrate clean stale caches directly from the newest server sidecar. When local work is dirty, preserve it as recovery-only state and activate the newer server copy instead of overwriting, silently merging, or discarding the local work.
+- Strengthen `NPC_STATE_WRITE_CONFLICT` with revision + writer-token checks and post-upload ownership verification, including same-revision writer forks that plain revision numbers cannot distinguish.
+- Bind scanner/provider and portrait completions to the durable revision they started from, and reject stale completion after another session advances the canonical sidecar. Manual editor saves also refuse stale snapshots while leaving the draft available for review.
+- Keep durability retries, recovery files, branch reconciliation, rename/delete/retire protections, prompt injection, and bounded diagnostics intact. Separate SillyTavern servers remain independent; no localStorage/IndexedDB/cloud/P2P/device-specific dossier store becomes canonical.
+- Add multi-session regressions for same-revision no-op checks, multi-revision handoff, chat re-entry, stale provider rejection, writer forks, recovery-only conflicts, browser-resume boundaries, and no-polling behavior. Persisted storage/bundle/branch formats remain unchanged.
+
 ## 1.0.53 - 24 September 2026
 
 - Consolidate active legacy unqualified-sidecar ownership migration onto one hardened transaction owner. Migration now requires the full stored-lineage proof, refuses an already-resident canonical destination, verifies canonical and recovery writes, persists the ownership mapping synchronously, and only then physically deletes the retired predecessor.

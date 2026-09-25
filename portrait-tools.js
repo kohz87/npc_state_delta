@@ -286,7 +286,7 @@ async function savePortraitSeed(session, overlay) {
     }
     setBusy(session, true, 'Saving portrait seed…', { allowClose: true });
     try {
-        if (!api()?.setPortraitSeed?.(session.npcId, seed, { chatKey: session.chatKey })) {
+        if (!await api()?.setPortraitSeed?.(session.npcId, seed, { chatKey: session.chatKey })) {
             throw new Error('The portrait target is no longer current.');
         }
         const saved = await flushDurably(session.chatKey, 'portrait seed');
@@ -494,7 +494,7 @@ async function removePortrait(session) {
     if (!npc?.portrait?.dataUrl) return;
     setBusy(session, true, 'Removing portrait without changing the dossier...');
     try {
-        if (!api()?.removePortrait?.(session.npcId, { chatKey: session.chatKey })) throw new Error('The portrait target is no longer current.');
+        if (!await api()?.removePortrait?.(session.npcId, { chatKey: session.chatKey })) throw new Error('The portrait target is no longer current.');
         const saved = await flushDurably(session.chatKey, 'portrait removal');
         if (!currentSessionIs(session)) return;
         stage1Refresh();

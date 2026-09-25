@@ -266,18 +266,46 @@ async function uploadPayload({ name, json, fetchFn, headers }) {
     return result;
 }
 
-async function remoteRevision(pointer, chatKey, fetchFn) {
-    if (!pointer?.path) return { revision: 0, writerId: '', exists: false };
+export async function inspectNpcStateDataFile(pointer, { fetchFn = globalThis.fetch, expectedChatKey = '' } = {}) {
+    if (!pointer?.path) return { revision: 0, writerId: '', exists: false, retired: false, updatedAt: 0, payload: null };
+    if (typeof fetchFn !== 'function') throw new Error('fetch() is unavailable for NPC State Delta data-file inspection.');
     const response = await withReadSlot(() => fetchFn(pointer.path, { method: 'GET', cache: 'no-store' }));
-    if (response?.status === 404) return { revision: 0, writerId: '', exists: false };
+    if (response?.status === 404) return { revision: 0, writerId: '', exists: false, retired: false, updatedAt: 0, payload: null };
     if (!response?.ok) {
         const error = new Error(`NPC State Delta data file revision check failed with HTTP ${response?.status || 'error'}.`);
         error.status = Number(response?.status || 0);
         throw error;
     }
     const payload = decodeStateFilePayload(typeof response.text === 'function' ? await response.text() : '');
-    if (chatKey && String(payload.chatKey || '') !== String(chatKey)) throw new Error('NPC State Delta data file belongs to a different chat.');
-    return { revision: payload.revision, writerId: payload.writerId, exists: true, retired: payload.retired };
+    if (expectedChatKey && String(payload.chatKey || '') !== String(expectedChatKey)) throw new Error('NPC State Delta data file belongs to a different chat.');
+    const parsedUpdatedAt = Date.parse(String(payload.updatedAt || ''));
+    return {
+        revision: payload.revision,
+        writerId: payload.writerId,
+        exists: true,
+        retired: Boolean(payload.retired),
+        updatedAt: Number.isFinite(parsedUpdatedAt) ? parsedUpdatedAt : 0,
+        payload,
+    };
+}
+
+export function adoptNpcStateDataFileMetadata(pointer, inspected) {
+    if (!pointer || typeof pointer !== 'object' || !inspected?.exists) return pointer;
+    pointer.revision = Math.max(0, Math.trunc(Number(inspected.revision) || 0));
+    pointer.writerId = String(inspected.writerId || pointer.writerId || '');
+    pointer.updatedAt = Math.max(0, Number(inspected.updatedAt) || Number(pointer.updatedAt) || Date.now());
+    pointer.retired = Boolean(inspected.retired);
+    return pointer;
+}
+
+async function remoteRevision(pointer, chatKey, fetchFn) {
+    const inspected = await inspectNpcStateDataFile(pointer, { fetchFn, expectedChatKey: chatKey });
+    return {
+        revision: inspected.revision,
+        writerId: inspected.writerId,
+        exists: inspected.exists,
+        retired: inspected.retired,
+    };
 }
 
 async function guardedWriteOnce({ chatKey, state, appVersion, pointer, fetchFn, headers, assertCurrent = () => {} }) {
@@ -298,6 +326,19 @@ async function guardedWriteOnce({ chatKey, state, appVersion, pointer, fetchFn, 
             error.code = 'NPC_STATE_WRITE_CONFLICT';
             error.expectedRevision = expectedRevision;
             error.actualRevision = current.revision;
+            error.expectedWriterId = String(pointer?.writerId || '');
+            error.actualWriterId = String(current.writerId || '');
+            throw error;
+        }
+        const expectedWriterId = String(pointer?.writerId || '');
+        if (expectedRevision !== null && current.exists && current.revision === expectedRevision
+            && expectedWriterId && current.writerId && current.writerId !== expectedWriterId) {
+            const error = new Error(`NPC State Delta sidecar revision ${expectedRevision} belongs to a different writer than this working copy. Reload the chat before saving again.`);
+            error.code = 'NPC_STATE_WRITE_CONFLICT';
+            error.expectedRevision = expectedRevision;
+            error.actualRevision = current.revision;
+            error.expectedWriterId = expectedWriterId;
+            error.actualWriterId = String(current.writerId || '');
             throw error;
         }
         const revision = Math.max(current.revision, expectedRevision ?? 0) + 1;
@@ -305,6 +346,16 @@ async function guardedWriteOnce({ chatKey, state, appVersion, pointer, fetchFn, 
         const json = encodeStateFilePayload(chatKey, state, appVersion, { revision, writerId });
         assertCurrent();
         const result = await uploadPayload({ name, json, fetchFn, headers });
+        const verified = await remoteRevision({ path: result.path }, chatKey, fetchFn);
+        if (!verified.exists || verified.revision !== revision || (verified.writerId && verified.writerId !== writerId)) {
+            const error = new Error(`NPC State Delta sidecar write verification lost ownership at revision ${revision}; another session wrote the canonical file concurrently.`);
+            error.code = 'NPC_STATE_WRITE_CONFLICT';
+            error.expectedRevision = revision;
+            error.actualRevision = verified.exists ? verified.revision : null;
+            error.expectedWriterId = writerId;
+            error.actualWriterId = String(verified.writerId || '');
+            throw error;
+        }
         return { name, path: result.path, updatedAt: Date.now(), revision, writerId };
     });
 }
@@ -327,7 +378,7 @@ export function undurableNpcStateSnapshot(chatKey) {
     return entry ? structuredClone(entry) : null;
 }
 
-function rememberUndurableSnapshot({ chatKey, state, appVersion = '', pointer = null, error = null }) {
+function rememberUndurableSnapshot({ chatKey, state, appVersion = '', pointer = null, error = null, recoveryOnly = false, reason = '' }) {
     const key = String(chatKey || '');
     if (!key) return;
     undurableSnapshots.set(key, {
@@ -336,8 +387,17 @@ function rememberUndurableSnapshot({ chatKey, state, appVersion = '', pointer = 
         appVersion: String(appVersion || ''),
         pointer: pointer && typeof pointer === 'object' ? structuredClone(pointer) : null,
         errorCode: String(error?.code || ''),
+        expectedRevision: Number.isFinite(Number(error?.expectedRevision)) ? Math.max(0, Math.trunc(Number(error.expectedRevision))) : null,
+        actualRevision: Number.isFinite(Number(error?.actualRevision)) ? Math.max(0, Math.trunc(Number(error.actualRevision))) : null,
+        recoveryOnly: recoveryOnly === true,
+        reason: String(reason || '').slice(0, 160),
         rememberedAt: Date.now(),
     });
+}
+
+export function preserveUndurableNpcStateSnapshot({ chatKey, state, appVersion = '', pointer = null, error = null, reason = 'cross-session-conflict' }) {
+    rememberUndurableSnapshot({ chatKey, state, appVersion, pointer, error, recoveryOnly: true, reason });
+    return undurableNpcStateSnapshot(chatKey);
 }
 
 export async function writeNpcStateDataFile({ chatKey, state, appVersion = '', pointer = null, operationKey = '', fetchFn = globalThis.fetch, headers = {}, sleepFn = globalThis.setTimeout, continuousRetry = true, recoveryState = () => state, isCurrent = () => true }) {
@@ -426,11 +486,34 @@ export async function retireNpcStateDataFile({ chatKey, pointer = null, reason =
             error.code = 'NPC_STATE_WRITE_CONFLICT';
             error.expectedRevision = expectedRevision;
             error.actualRevision = current.revision;
+            error.expectedWriterId = String(pointer?.writerId || '');
+            error.actualWriterId = String(current.writerId || '');
+            throw error;
+        }
+        const expectedWriterId = String(pointer?.writerId || '');
+        if (expectedRevision !== null && current.exists && current.revision === expectedRevision
+            && expectedWriterId && current.writerId && current.writerId !== expectedWriterId) {
+            const error = new Error(`NPC State Delta sidecar revision ${expectedRevision} changed writer before retirement.`);
+            error.code = 'NPC_STATE_WRITE_CONFLICT';
+            error.expectedRevision = expectedRevision;
+            error.actualRevision = current.revision;
+            error.expectedWriterId = expectedWriterId;
+            error.actualWriterId = String(current.writerId || '');
             throw error;
         }
         const revision = Math.max(current.revision, expectedRevision ?? 0) + 1;
         const json = encodeRetiredStateFilePayload(key, reason, appVersion, { revision, writerId });
         const result = await uploadPayload({ name, json, fetchFn, headers });
+        const verified = await remoteRevision({ path: result.path }, key, fetchFn);
+        if (!verified.exists || verified.revision !== revision || (verified.writerId && verified.writerId !== writerId) || !verified.retired) {
+            const error = new Error(`NPC State Delta sidecar retirement verification lost ownership at revision ${revision}.`);
+            error.code = 'NPC_STATE_WRITE_CONFLICT';
+            error.expectedRevision = revision;
+            error.actualRevision = verified.exists ? verified.revision : null;
+            error.expectedWriterId = writerId;
+            error.actualWriterId = String(verified.writerId || '');
+            throw error;
+        }
         return { name, path: result.path, updatedAt: Date.now(), retired: true, revision, writerId };
     });
 }
@@ -439,7 +522,7 @@ export async function readNpcStateDataFile(pointer, { fetchFn = globalThis.fetch
     const pendingKey = String(expectedChatKey || '');
     const pending = pendingKey ? durabilityQueue.get(pendingKey) : null;
     const shadow = pendingKey ? undurableSnapshots.get(pendingKey) : null;
-    const resident = pending && !pending.cancelled ? pending : shadow;
+    const resident = pending && !pending.cancelled ? pending : (shadow?.recoveryOnly ? null : shadow);
     if (resident) {
         return {
             format: NPC_STATE_FILE_FORMAT,
@@ -457,23 +540,13 @@ export async function readNpcStateDataFile(pointer, { fetchFn = globalThis.fetch
     }
     if (!pointer?.path) return null;
     if (typeof fetchFn !== 'function') throw new Error('fetch() is unavailable for NPC State Delta data-file persistence.');
-    const response = await withReadSlot(() => fetchFn(pointer.path, { method: 'GET', cache: 'no-store' }));
-    if (response?.status === 404) return null;
-    if (!response?.ok) throw new Error(`NPC State Delta data file read failed with HTTP ${response?.status || 'error'}.`);
-    const text = typeof response.text === 'function' ? await response.text() : '';
-    const payload = decodeStateFilePayload(text);
-    if (expectedChatKey && String(payload.chatKey || '') !== String(expectedChatKey)) throw new Error('NPC State Delta data file belongs to a different chat.');
-    // The sidecar is authoritative for its revision token. A crash can occur after the file
-    // upload but before debounced extension settings persist the returned pointer. Refresh the
-    // caller's pointer in place so the next write cannot remain permanently stuck on N vs N+1.
-    if (pointer && typeof pointer === 'object') {
-        pointer.revision = Math.max(0, Math.trunc(Number(payload.revision) || 0));
-        pointer.writerId = String(payload.writerId || pointer.writerId || '');
-        const parsedUpdatedAt = Date.parse(String(payload.updatedAt || ''));
-        pointer.updatedAt = Number.isFinite(parsedUpdatedAt) ? parsedUpdatedAt : (Number(pointer.updatedAt) || Date.now());
-        pointer.retired = Boolean(payload.retired);
-    }
-    return payload;
+    const inspected = await inspectNpcStateDataFile(pointer, { fetchFn, expectedChatKey });
+    if (!inspected.exists) return null;
+    // Full hydration is the point at which a caller deliberately adopts the durable revision.
+    // A cheap freshness probe uses inspectNpcStateDataFile() directly and never mutates this
+    // token before deciding whether a dirty working copy conflicts with the server.
+    adoptNpcStateDataFileMetadata(pointer, inspected);
+    return inspected.payload;
 }
 
 export async function deleteNpcStateDataFile(pointer, { fetchFn = globalThis.fetch, headers = {} } = {}) {

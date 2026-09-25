@@ -81,7 +81,7 @@ async function applyManualLifeState(npcId, requested, editor) {
     const choice = ['alive', 'unknown', 'deceased'].includes(requested) ? requested : 'unknown';
     if (lifeStateChoice(npc) === choice) return npc;
     if (choice === 'deceased' && globalThis.confirm?.(`Mark ${npc.name || 'this NPC'} as deceased? This is terminal until you explicitly correct it.`) === false) return null;
-    if (!runtime.updateLifeState?.(npcId, choice, { chatKey })) throw new Error('The canonical life-state edit rejected its stale target.');
+    if (!await runtime.updateLifeState?.(npcId, choice, { chatKey })) throw new Error('The canonical life-state edit rejected its stale target.');
     const saved = await flushDurably(chatKey, 'manual life state');
     if (!saved.persisted) throw new Error('Life-state change applied locally, but durable save failed. The change is retained for recovery.');
     if (activeChatKey() !== chatKey || !editor.isConnected) return null;

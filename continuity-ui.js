@@ -218,7 +218,7 @@ async function applyAppearanceEditor(editor) {
     if (!npc || !section || section.dataset.chatKey !== chatKey || !editor.isConnected) throw new Error('The selected NPC is no longer available in this chat.');
     const revision = section.dataset.editRevision || '0';
 
-    const applied = runtime.updateAppearance?.(npcId, {
+    const applied = await runtime.updateAppearance?.(npcId, {
         overallAppearance: section.querySelector('[data-delta-overall-appearance]')?.value || '',
         currentForm: section.querySelector('[data-delta-current-form]')?.value || NO_FORM,
         unclassifiedAppearance: section.querySelector('[data-delta-unclassified-appearance]')?.value || '',

@@ -32,9 +32,12 @@ for (const transient of [0, 6]) test(`recovery retains turn 56 after ${transient
     assert.equal(recovered.undurable, true);
     assert.equal(recovered.state.turn, 56);
     let durable;
-    await writeNpcStateDataFile({ chatKey, state: recovered.state, fetchFn: async (_url, options) => {
-        durable = JSON.parse(Buffer.from(JSON.parse(options.body).data, 'base64').toString());
-        return { ok: true, json: async () => ({ path: '/synthetic' }) };
+    let durableJson = '';
+    await writeNpcStateDataFile({ chatKey, state: recovered.state, fetchFn: async (url, options = {}) => {
+        if (url === '/synthetic') return { ok: true, status: 200, text: async () => durableJson };
+        durableJson = Buffer.from(JSON.parse(options.body).data, 'base64').toString();
+        durable = JSON.parse(durableJson);
+        return { ok: true, status: 200, json: async () => ({ path: '/synthetic' }), text: async () => '' };
     } });
     assert.equal(durable.state.turn, 56);
     assert.equal(undurableNpcStateSnapshot(chatKey), null);
@@ -67,8 +70,14 @@ for (const exit of ['cancel', 'owner', 'retire']) for (const transient of [0, 6]
         while (!release) await new Promise(resolve => setImmediate(resolve));
         let retirement;
         if (exit === 'owner') current = false;
-        else if (exit === 'retire') retirement = retireNpcStateDataFile({ chatKey, fetchFn: async () => ({ ok: true, json: async () => ({ path: '/retired' }) }) });
-        else cancelPendingNpcStateWrite(chatKey);
+        else if (exit === 'retire') {
+            let retiredJson = '';
+            retirement = retireNpcStateDataFile({ chatKey, fetchFn: async (url, options = {}) => {
+                if (url === '/retired') return { ok: true, status: 200, text: async () => retiredJson };
+                retiredJson = Buffer.from(JSON.parse(options.body).data, 'base64').toString();
+                return { ok: true, status: 200, json: async () => ({ path: '/retired' }), text: async () => '' };
+            } });
+        } else cancelPendingNpcStateWrite(chatKey);
         release(rejection(413));
         await assert.rejects(task);
         if (retirement) await retirement;

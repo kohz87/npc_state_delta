@@ -20,7 +20,7 @@ async function hotfixChecks(mockState, eventSource, manualAddNpc, sleep, extRoot
         assert.fail('synthetic runtime did not settle');
     };
     await open('v110-persistence');
-    manualAddNpc('Recovery Probe');
+    await manualAddNpc('Recovery Probe');
     await runtime.flush();
     const npc = runtime.getState().npcs.find(npc => npc.name === 'Recovery Probe');
     const key = runtime.uiStatus().chatKey;
@@ -35,10 +35,10 @@ async function hotfixChecks(mockState, eventSource, manualAddNpc, sleep, extRoot
         return new Promise(resolve => { release = () => resolve({ ok: false, status: 413, text: async () => 'synthetic size rejection' }); });
     };
     try {
-        assert.equal(runtime.archive(npc.id), true);
+        assert.equal(await runtime.archive(npc.id), true);
         const save = runtime.flush();
         await waitUntil(() => release);
-        assert.equal(runtime.updateAppearance(npc.id, { currentForm: 'Human', formsText: 'Human | Newer accepted blue coat.' }, { chatKey: key, lockAppearance: true }), true);
+        assert.equal(await runtime.updateAppearance(npc.id, { currentForm: 'Human', formsText: 'Human | Newer accepted blue coat.' }, { chatKey: key, lockAppearance: true }), true);
         release();
         await assert.rejects(save, error => error.status === 413);
         assert.equal(attempts, 7);

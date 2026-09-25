@@ -7,19 +7,19 @@ import { fileURLToPath } from 'node:url';
 // Inject extra assertions before its cleanup; the production module itself is unmodified.
 async function additionalChecks(mockState, eventSource, manualAddNpc, sleep, extRoot, uiHandlers, emitDocumentEvent) {
     const runtime = globalThis.NPCStateDelta;
-    manualAddNpc('Continuity Probe');
+    await manualAddNpc('Continuity Probe');
     await runtime.flush();
     let npc = runtime.getState().npcs.find(item => item.name === 'Continuity Probe');
     const chatKey = runtime.uiStatus().chatKey;
     const before = runtime.getState();
-    assert.equal(runtime.updateAppearance(npc.id, { currentForm: 'Human', formsText: 'Human | Golden-blue hair, ordinary human ears.\nRaven | Black feathers, beak and wings.' }, { chatKey, lockAppearance: true }), true);
-    assert.equal(runtime.updateAppearance(npc.id, { currentForm: 'Raven' }, { chatKey, lockAppearance: true }), true);
+    assert.equal(await runtime.updateAppearance(npc.id, { currentForm: 'Human', formsText: 'Human | Golden-blue hair, ordinary human ears.\nRaven | Black feathers, beak and wings.' }, { chatKey, lockAppearance: true }), true);
+    assert.equal(await runtime.updateAppearance(npc.id, { currentForm: 'Raven' }, { chatKey, lockAppearance: true }), true);
     npc = runtime.getNpc(npc.id);
     assert.match(npc.appearance, /Black feathers/);
     assert.doesNotMatch(npc.appearance, /human ears/);
     assert.equal(npc.appearanceForms.length, 2);
     assert.deepEqual(npc.relationship, before.npcs.find(item => item.id === npc.id).relationship);
-    assert.equal(runtime.updateAppearance(npc.id, { currentForm: 'Human' }, { chatKey: 'chat:other:owner' }), false);
+    assert.equal(await runtime.updateAppearance(npc.id, { currentForm: 'Human' }, { chatKey: 'chat:other:owner' }), false);
     const projection = runtime.getDossierState();
     assert.equal(projection.checkpoints, undefined);
     assert.equal(projection.lineage, undefined);
@@ -27,15 +27,15 @@ async function additionalChecks(mockState, eventSource, manualAddNpc, sleep, ext
     assert.notEqual(runtime.getState().npcs[0].name, 'Never canonical');
 
     // Manual correction uses the canonical state/checkpoint path and retains unrelated edits.
-    assert.equal(runtime.updateLifeState(npc.id, 'deceased', { chatKey }), true);
+    assert.equal(await runtime.updateLifeState(npc.id, 'deceased', { chatKey }), true);
     assert.equal(runtime.getNpc(npc.id).lifeState, 'deceased');
-    assert.equal(runtime.updateLifeState(npc.id, 'alive', { chatKey: 'chat:other:owner' }), false);
+    assert.equal(await runtime.updateLifeState(npc.id, 'alive', { chatKey: 'chat:other:owner' }), false);
     assert.equal(runtime.getNpc(npc.id).lifeState, 'deceased');
-    assert.equal(runtime.updateLifeState(npc.id, 'alive', { chatKey }), true);
+    assert.equal(await runtime.updateLifeState(npc.id, 'alive', { chatKey }), true);
     assert.equal(runtime.getNpc(npc.id).lifeState, 'alive');
     assert.equal(runtime.getNpc(npc.id).present, false);
     assert.ok(runtime.getNpc(npc.id).deathCorrection);
-    assert.equal(runtime.updateLifeState(npc.id, 'arbitrary', { chatKey }), false);
+    assert.equal(await runtime.updateLifeState(npc.id, 'arbitrary', { chatKey }), false);
 
     // The public importer cannot bypass complete native-envelope validation.
     const { encodeNpcStateBundle } = await import(pathToFileURL(path.join(extRoot, 'bundle.js')).href);
@@ -47,12 +47,12 @@ async function additionalChecks(mockState, eventSource, manualAddNpc, sleep, ext
         new DataView(bytes.buffer).setUint32(8, text.length, true); bytes.set(text, 12); return bytes;
     };
     const beforeImport = runtime.getState();
-    assert.throws(() => runtime.importBytes(bundleBytes({ format: 'npc_state_delta_bundle', formatVersion: 1,
+    await assert.rejects(runtime.importBytes(bundleBytes({ format: 'npc_state_delta_bundle', formatVersion: 1,
         state: { npcs: [{ ...npc, name: 'Must not partially replace' }] }, portableSettings: { scannerConnectionProfile: 'foreign' },
     })), /unsupported portable setting/);
     assert.deepEqual(runtime.getState(), beforeImport);
     const foreign = { ...runtime.getNpc(npc.id), birthDateSourceMessageId: 1234 };
-    runtime.importBytes(encodeNpcStateBundle({ npcs: [foreign] }, { chatKey: 'chat:foreign:source' }));
+    await runtime.importBytes(encodeNpcStateBundle({ npcs: [foreign] }, { chatKey: 'chat:foreign:source' }));
     assert.equal(runtime.getNpc(npc.id).birthDateSourceMessageId, null);
 
     // Foreign activity counters are source-chat clocks. Matching target dossiers keep their
@@ -64,7 +64,7 @@ async function additionalChecks(mockState, eventSource, manualAddNpc, sleep, ext
             lastSeenTurn: sourceTurn,
             lastWorldActiveTurn: sourceTurn,
         };
-        runtime.importBytes(encodeNpcStateBundle({ npcs: [foreignMatch] }, { chatKey: `chat:foreign:${sourceTurn}` }));
+        await runtime.importBytes(encodeNpcStateBundle({ npcs: [foreignMatch] }, { chatKey: `chat:foreign:${sourceTurn}` }));
         assert.equal(runtime.getNpc(npc.id).lastSeenTurn, targetActivity.lastSeenTurn);
         assert.equal(runtime.getNpc(npc.id).lastWorldActiveTurn, targetActivity.lastWorldActiveTurn);
     }
@@ -82,7 +82,7 @@ async function additionalChecks(mockState, eventSource, manualAddNpc, sleep, ext
         archived: false,
         archiveReason: '',
     };
-    runtime.importBytes(encodeNpcStateBundle({ npcs: [directForeign] }, { chatKey: 'chat:foreign:direct' }));
+    await runtime.importBytes(encodeNpcStateBundle({ npcs: [directForeign] }, { chatKey: 'chat:foreign:direct' }));
     assert.equal(runtime.getNpc('npc_direct_foreign_activity').lastSeenTurn, targetImportTurn);
     assert.equal(runtime.getNpc('npc_direct_foreign_activity').lastWorldActiveTurn, targetImportTurn);
 
@@ -97,7 +97,7 @@ async function additionalChecks(mockState, eventSource, manualAddNpc, sleep, ext
         encodeNpcStateBundle({ npcs: [preparedForeign] }, { chatKey: 'chat:foreign:prepared' }),
         chatKey,
     );
-    runtime.importBytes(prepared.importBytes);
+    await runtime.importBytes(prepared.importBytes);
     assert.equal(runtime.getNpc('npc_prepared_foreign_activity').lastSeenTurn, targetImportTurn);
     assert.equal(runtime.getNpc('npc_prepared_foreign_activity').lastWorldActiveTurn, targetImportTurn);
     await runtime.flush();
@@ -106,7 +106,7 @@ async function additionalChecks(mockState, eventSource, manualAddNpc, sleep, ext
     const calendarCore = await import(pathToFileURL(path.join(extRoot, 'core.js')).href);
     const previousResponder = mockState.quietResponder;
     calendarCore.setActiveCalendarConfig({ era: 'CR', months: [{ name: 'Redleaf', days: 30 }, { name: 'Sunwane', days: 31 }] });
-    runtime.importBytes(encodeNpcStateBundle({ npcs: [{ ...runtime.getNpc(npc.id), age: '6', apparentAge: '~6',
+    await runtime.importBytes(encodeNpcStateBundle({ npcs: [{ ...runtime.getNpc(npc.id), age: '6', apparentAge: '~6',
         birthDate: { era: 'CR', year: 815, month: 'Redleaf', day: 16 }, birthDateSource: 'established', birthDateYearSource: 'established',
     }] }, { chatKey }));
     await runtime.flush();
@@ -156,17 +156,21 @@ async function additionalChecks(mockState, eventSource, manualAddNpc, sleep, ext
 
         const older = runtime.setPortrait(npc.id, file('older.png', { hold: true }), { chatKey });
         assert.equal(await runtime.setPortrait(npc.id, file('newer.png'), { chatKey }), true);
+        while (!held.length) await sleep(1);
         held.shift()();
         assert.equal(await older, false);
         assert.equal(runtime.getNpc(npc.id).portrait.sourceName, 'newer.png');
 
         let open = true;
         const cancelled = runtime.setPortrait(npc.id, file('cancelled.png', { hold: true }), { chatKey, isCurrent: () => open });
-        open = false; held.shift()();
+        while (!held.length) await sleep(1);
+        open = false;
+        held.shift()();
         assert.equal(await cancelled, false);
         assert.equal(runtime.getNpc(npc.id).portrait.sourceName, 'newer.png');
 
         const switched = runtime.setPortrait(npc.id, file('other-chat.png', { hold: true }), { chatKey });
+        while (!held.length) await sleep(1);
         const owner = mockState.context.characterId;
         mockState.context.characterId = owner === 0 ? 1 : 0;
         held.shift()();
@@ -180,7 +184,7 @@ async function additionalChecks(mockState, eventSource, manualAddNpc, sleep, ext
         assert.deepEqual(runtime.getNpc(npc.id).portrait, portraitBeforePreview);
 
         // Per-NPC portrait seeds persist independently and are passed through the host /imagine contract.
-        assert.equal(runtime.setPortraitSeed(npc.id, 424242, { chatKey }), true);
+        assert.equal(await runtime.setPortraitSeed(npc.id, 424242, { chatKey }), true);
         assert.equal(runtime.getNpc(npc.id).portraitSeed, 424242);
         let seededCommand = '';
         const seededExecute = mockState.context.executeSlashCommandsWithOptions;
@@ -191,8 +195,8 @@ async function additionalChecks(mockState, eventSource, manualAddNpc, sleep, ext
         await runtime.generatePortraitUrl(npc.id);
         assert.match(seededCommand, /(?:^|\s)seed=424242(?:\s|$)/);
         mockState.context.executeSlashCommandsWithOptions = seededExecute;
-        assert.throws(() => runtime.setPortraitSeed(npc.id, -1, { chatKey }), /whole number/);
-        assert.equal(runtime.setPortraitSeed(npc.id, null, { chatKey }), true);
+        await assert.rejects(runtime.setPortraitSeed(npc.id, -1, { chatKey }), /whole number/);
+        assert.equal(await runtime.setPortraitSeed(npc.id, null, { chatKey }), true);
         assert.equal(runtime.getNpc(npc.id).portraitSeed, null);
 
         // Exercise retained native preview/application through its actual registered UI controls.
@@ -301,7 +305,7 @@ async function additionalChecks(mockState, eventSource, manualAddNpc, sleep, ext
             ? Promise.resolve({ ok: false, status: 413, text: async () => 'Synthetic payload too large' })
             : durableFetch(url, options);
         try {
-            assert.equal(runtime.archive(npc.id), true);
+            assert.equal(await runtime.archive(npc.id), true);
             await assert.rejects(runtime.flush(), error => Number(error?.status) === 413);
             assert.equal(runtime.persistenceStatus().currentChatPending, true);
             assert.equal(runtime.getNpc(npc.id).archived, true);
@@ -334,13 +338,14 @@ async function additionalChecks(mockState, eventSource, manualAddNpc, sleep, ext
         assert.equal(runtime.persistenceStatus().currentChatPending, false);
         const persistedAfterRehydrate = JSON.parse(mockState.files.get(runtime.dataFile().path));
         assert.equal(persistedAfterRehydrate.state.npcs.find(item => item.id === npc.id).archived, true);
-        assert.equal(runtime.restore(npc.id), true);
+        assert.equal(await runtime.restore(npc.id), true);
         await runtime.flush();
         assert.equal(runtime.getNpc(npc.id).archived, false);
 
         const beforeRemoval = runtime.getNpc(npc.id);
         const removePending = runtime.setPortrait(npc.id, file('after-removal.png', { hold: true }), { chatKey });
-        assert.equal(runtime.removePortrait(npc.id, { chatKey }), true);
+        while (!held.length) await sleep(1);
+        assert.equal(await runtime.removePortrait(npc.id, { chatKey }), true);
         held.shift()();
         assert.equal(await removePending, false);
         assert.equal(runtime.getNpc(npc.id).portrait, null);
@@ -349,7 +354,8 @@ async function additionalChecks(mockState, eventSource, manualAddNpc, sleep, ext
         assert.equal(runtime.getState().portraitAssets[npc.id], undefined);
 
         const deletion = runtime.setPortrait(npc.id, file('deleted.png', { hold: true }), { chatKey });
-        runtime.deleteNpc(npc.id);
+        while (!held.length) await sleep(1);
+        await runtime.deleteNpc(npc.id);
         held.shift()();
         assert.equal(await deletion, false);
         assert.equal(runtime.getNpc(npc.id), null);

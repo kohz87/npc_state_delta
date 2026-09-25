@@ -380,13 +380,13 @@ globalThis.$ = (selector) => {
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-function manualAddNpc(name) {
+async function manualAddNpc(name) {
     const previous = globalThis.prompt;
     globalThis.prompt = () => name;
     try {
         const add = uiHandlers.get('click.npcStateDelta|#npc_state_delta_add_manual');
         assert.equal(typeof add, 'function', 'manual Add must be connected to the production settings handler');
-        add();
+        await add();
     } finally { globalThis.prompt = previous; }
 }
 
@@ -419,7 +419,7 @@ try {
     assert.deepEqual(globalThis.NPCStateDelta.getState().npcs, [], 'OOC add must not mutate dossiers');
     assert.deepEqual(globalThis.NPCStateDelta.getState().pendingBackfills, [], 'OOC add must not enqueue a scan');
     assert.equal(mockState.rawCalls.length, 0, 'user text must not create model requests');
-    manualAddNpc('Yunyun');
+    await manualAddNpc('Yunyun');
     assert.deepEqual(globalThis.NPCStateDelta.getState().npcs.map(n => n.name), ['Yunyun']);
     assert.equal(inlineAnchors.length, 0, 'manual Add should not bypass presence gating');
     await globalThis.NPCStateDelta.flush();
@@ -737,6 +737,7 @@ try {
         stopImmediatePropagation() {},
         stopPropagation() {},
     });
+    await sleep(30);
     assert.equal(globalThis.NPCStateDelta.uiStatus().editorMounted, true, 'pointerup roster edit should mount the dossier editor');
     assert.equal(globalThis.NPCStateDelta.uiStatus().editorMode, 'sillytavern-popup');
     assert.equal(mockState.popupCalls.at(-1)?.options?.large, true);
@@ -787,20 +788,20 @@ try {
     assert.match(inlineAnchors[0].innerHTML, /Yunyun/);
 
     const wizIdForDelete = state.npcs.find(n => n.name === 'Wiz').id;
-    assert.equal(globalThis.NPCStateDelta.deleteNpc(wizIdForDelete), true);
+    assert.equal(await globalThis.NPCStateDelta.deleteNpc(wizIdForDelete), true);
     state = globalThis.NPCStateDelta.getState();
     assert.equal(state.npcs.some(n => n.name === 'Wiz'), false);
     assert.ok(state.userDismissedGroups.some(group => group.ids?.includes(wizIdForDelete)), 'settings delete should suppress immediate scanner rediscovery by stable ID');
     assert.ok(!state.dismissed.includes('wiz'), 'modern ID tombstones must not globally suppress future same-name NPCs');
 
     const yunyunId = state.npcs.find(n => n.name === 'Yunyun').id;
-    assert.equal(globalThis.NPCStateDelta.archive(yunyunId), true);
+    assert.equal(await globalThis.NPCStateDelta.archive(yunyunId), true);
     state = globalThis.NPCStateDelta.getState();
     assert.equal(state.npcs.find(n => n.name === 'Yunyun').archived, true);
     assert.equal(state.npcs.find(n => n.name === 'Yunyun').present, false);
     const promptAfterArchive = [...mockState.prompts].reverse().find(args => args?.[0] === 'npc_state_delta_live_dossier')?.[1] || '';
     assert.doesNotMatch(promptAfterArchive, /- Yunyun:/);
-    assert.equal(globalThis.NPCStateDelta.restore(yunyunId), true);
+    assert.equal(await globalThis.NPCStateDelta.restore(yunyunId), true);
     state = globalThis.NPCStateDelta.getState();
     assert.equal(state.npcs.find(n => n.name === 'Yunyun').archived, false);
 
@@ -808,13 +809,13 @@ try {
     mockState.quietResponder = () => new Promise(resolve => { resolveStateStale = resolve; });
     const stateStaleScan = globalThis.NPCStateDelta.scan();
     await sleep(15);
-    assert.equal(globalThis.NPCStateDelta.archive(yunyunId), true);
+    assert.equal(await globalThis.NPCStateDelta.archive(yunyunId), true);
     resolveStateStale(JSON.stringify({ npcs: [{ id: yunyunId, name: 'Yunyun', present: true, mood: 'STALE MODEL MOOD' }] }));
     await stateStaleScan;
     state = globalThis.NPCStateDelta.getState();
     assert.equal(state.npcs.find(n => n.id === yunyunId).archived, true, 'manual dossier mutation must win over an older in-flight scan');
     assert.notEqual(state.npcs.find(n => n.id === yunyunId).mood, 'STALE MODEL MOOD');
-    assert.equal(globalThis.NPCStateDelta.restore(yunyunId), true);
+    assert.equal(await globalThis.NPCStateDelta.restore(yunyunId), true);
 
     let resolveQuiet;
     mockState.quietResponder = () => new Promise(resolve => { resolveQuiet = resolve; });
@@ -833,7 +834,7 @@ try {
     assert.deepEqual(globalThis.NPCStateDelta.getState().npcs, beforeRemovedCommand.npcs, 'OOC remove cannot change dossiers or relationship history');
     assert.deepEqual(globalThis.NPCStateDelta.getState().dismissed, beforeRemovedCommand.dismissed, 'OOC remove cannot suppress rediscovery');
     assert.equal(mockState.rawCalls.length, callsBeforeRemovedCommand);
-    assert.equal(globalThis.NPCStateDelta.deleteNpc(yunyunId), true);
+    assert.equal(await globalThis.NPCStateDelta.deleteNpc(yunyunId), true);
     assert.equal(globalThis.NPCStateDelta.getState().npcs.some(n => n.name === 'Yunyun'), false);
     assert.equal(globalThis.NPCStateDelta.getState().inlineCards.some(entry => entry.cards.some(card => card.name === 'Yunyun')), false);
     await globalThis.NPCStateDelta.flush();
@@ -846,8 +847,8 @@ try {
     mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'I ask the two receptionists about their work.' });
     eventSource.emit('message_sent', mockState.context.chat.length - 1);
     await sleep(20);
-    manualAddNpc('Myla');
-    manualAddNpc('Toris');
+    await manualAddNpc('Myla');
+    await manualAddNpc('Toris');
     mockState.quietResponder = async (args = {}) => {
         if (args.jsonSchema) return '{"npcs":[]}';
         const prompt = String(args.prompt || '');
@@ -896,7 +897,7 @@ try {
     mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'I approach Neris at the archive desk.' });
     eventSource.emit('message_sent', mockState.context.chat.length - 1);
     await sleep(20);
-    manualAddNpc('Neris');
+    await manualAddNpc('Neris');
     let nerisBackfillAttempt = 0;
     mockState.quietResponder = async (args = {}) => {
         const prompt = String(args.prompt || '');
@@ -1192,7 +1193,7 @@ try {
     const lunaAddMessageId = mockState.context.chat.length - 1;
     eventSource.emit('message_sent', lunaAddMessageId);
     await sleep(20);
-    manualAddNpc('Luna');
+    await manualAddNpc('Luna');
     assert.ok(globalThis.NPCStateDelta.getState().npcs.some(n => n.name === 'Luna'));
     mockState.quietResponder = async (args = {}) => {
         const prompt = String(args.prompt || '');
@@ -1279,7 +1280,7 @@ try {
     const lunaRemoveMessageId = mockState.context.chat.length - 1;
     eventSource.emit('message_sent', lunaRemoveMessageId);
     await sleep(20);
-    globalThis.NPCStateDelta.deleteNpc(lunaAfterRefresh.id);
+    await globalThis.NPCStateDelta.deleteNpc(lunaAfterRefresh.id);
     assert.equal(globalThis.NPCStateDelta.getState().npcs.some(n => n.name === 'Luna'), false, 'test cleanup should remove imported Luna');
     assert.equal(globalThis.NPCStateDelta.getState().pendingBackfills.some(item => item.label === 'Luna'), false, 'manual removal should also clear queued backfill');
 
@@ -1333,7 +1334,7 @@ try {
         autoScan: false, autoArchiveDeaths: false, fullScanEveryTurn: false,
         relationshipBaseline: { trust: 0, affection: 0, desire: 0, tension: 0 },
     });
-    manualAddNpc('Sentinel');
+    await manualAddNpc('Sentinel');
     const sentinelId = globalThis.NPCStateDelta.getState().npcs.find(npc => npc.name === 'Sentinel').id;
     mockState.context.chat.push({ is_user: true, name: 'Kazuma', mes: 'I introduce myself to Sentinel.' });
     mockState.context.chat.push({ is_user: false, name: 'Megumin', mes: 'Sentinel regards Kazuma as a new acquaintance.', swipe_id: 0 });
@@ -1397,12 +1398,13 @@ try {
     assert.equal(retainedSentinel.lifeState, 'deceased');
     assert.equal(retainedSentinel.present, false);
     assert.equal(retainedSentinel.worldActive, false);
-    assert.equal(globalThis.NPCStateDelta.restore(sentinelId), true, 'explicit manual correction remains usable');
+    assert.equal(await globalThis.NPCStateDelta.restore(sentinelId), true, 'explicit manual correction remains usable');
     sentinel = globalThis.NPCStateDelta.getState().npcs.find(npc => npc.id === sentinelId);
     assert.equal(sentinel.lifeState, 'alive');
     assert.equal(sentinel.present, false);
     assert.ok(sentinel.deathCorrection);
-    globalThis.NPCStateDelta.deleteNpc(sentinelId);
+    await globalThis.NPCStateDelta.deleteNpc(sentinelId);
+    await globalThis.NPCStateDelta.flush();
     Object.assign(mockState.extensionSettings.npc_state_delta, savedReviewSettings);
 
     const persistenceTarget = globalThis.NPCStateDelta.getState().npcs.find(n => !n.archived);
@@ -1415,10 +1417,10 @@ try {
         promise: new Promise(resolve => { releaseUpload = resolve; }),
     };
     const uploadsBeforeRace = mockState.uploadCalls;
-    globalThis.NPCStateDelta.archive(persistenceTarget.id);
+    await globalThis.NPCStateDelta.archive(persistenceTarget.id);
     await uploadEntered;
     const racingFlush = globalThis.NPCStateDelta.flush();
-    globalThis.NPCStateDelta.restore(persistenceTarget.id);
+    await globalThis.NPCStateDelta.restore(persistenceTarget.id);
     releaseUpload();
     await racingFlush;
     await globalThis.NPCStateDelta.flush();
@@ -1434,7 +1436,7 @@ try {
         entered: markDeleteUploadEntered,
         promise: new Promise(resolve => { releaseDeleteUpload = resolve; }),
     };
-    globalThis.NPCStateDelta.archive(persistenceTarget.id);
+    await globalThis.NPCStateDelta.archive(persistenceTarget.id);
     const pendingDeleteWrite = globalThis.NPCStateDelta.flush();
     await deleteUploadEntered;
     const deletedPointer = globalThis.NPCStateDelta.dataFile();

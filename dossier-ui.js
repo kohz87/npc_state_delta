@@ -454,6 +454,8 @@ class DeltaDossierUi {
         this.panelOpen = true;
         this.root.querySelector('.delta-panel').hidden = false;
         this.root.querySelector('.delta-launcher')?.setAttribute('aria-expanded', 'true');
+        try { await this.api?.ensureFresh?.({ reason: 'dossier-ui-open' }); }
+        catch (error) { console.warn('[NPC State Delta] dossier view freshness check failed safely.', error); }
         await this.refresh({ force: true });
         this.root.querySelector('.delta-search')?.focus?.({ preventScroll: true });
     }
@@ -675,14 +677,14 @@ class DeltaDossierUi {
         documentPane.scrollTop = documentScroll;
     }
 
-    openEditor(npcId) {
+    async openEditor(npcId) {
         const id = plain(npcId);
         if (!id || typeof this.api?.openEditor !== 'function') {
             globalThis.toastr?.warning?.('NPC State Delta: dossier editor is unavailable.');
             return;
         }
         try {
-            const opened = this.api.openEditor(id);
+            const opened = await this.api.openEditor(id);
             if (opened === false) globalThis.toastr?.warning?.('NPC State Delta: dossier editor could not open this NPC.');
         } catch (error) {
             console.error('[NPC State Delta] Stage 1 editor bridge failed', error);

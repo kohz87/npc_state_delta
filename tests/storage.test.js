@@ -8,6 +8,8 @@ import {
     writeNpcStateDataFile,
     deleteNpcStateDataFile,
     cancelPendingNpcStateWrite,
+    inspectNpcStateDataFile,
+    preserveUndurableNpcStateSnapshot,
     undurableNpcStateSnapshot,
 } from '../storage.js';
 import { createNpcRecord } from '../core.js';
@@ -188,4 +190,136 @@ test('v1.0.8 permanent write rejection keeps the newest undurable snapshot recov
     assert.equal(recovered.state.npcs[0].name, 'Ryu');
     assert.equal(cancelPendingNpcStateWrite(chatKey), true);
     assert.equal(undurableNpcStateSnapshot(chatKey), null);
+});
+
+
+test('server freshness inspection observes a newer revision without granting it to the stale local pointer', async () => {
+    const chatKey = 'chat:freshness:inspect';
+    const pointer = { path: '/user/files/npc-state-delta-freshness.json', revision: 10, writerId: 'desktop' };
+    const text = encodeStateFilePayload(chatKey, { turn: 12, npcs: [createNpcRecord('Remote')] }, '1.0.47', {
+        revision: 12,
+        writerId: 'mobile',
+    });
+    const inspected = await inspectNpcStateDataFile(pointer, {
+        expectedChatKey: chatKey,
+        fetchFn: async () => ({ ok: true, status: 200, text: async () => text }),
+    });
+    assert.equal(inspected.revision, 12);
+    assert.equal(inspected.state, undefined);
+    assert.equal(inspected.payload.state.turn, 12);
+    assert.equal(pointer.revision, 10, 'inspection must not adopt the remote token before conflict/freshness policy runs');
+    assert.equal(pointer.writerId, 'desktop');
+});
+
+test('recovery-only conflict snapshot remains recoverable but cannot replace the canonical sidecar on read', async () => {
+    const chatKey = 'chat:freshness:recovery';
+    const pointer = { path: '/user/files/npc-state-delta-recovery-only.json', revision: 4, writerId: 'desktop' };
+    const conflict = Object.assign(new Error('conflict'), { code: 'NPC_STATE_WRITE_CONFLICT', expectedRevision: 4, actualRevision: 5 });
+    preserveUndurableNpcStateSnapshot({
+        chatKey,
+        state: { turn: 4, npcs: [createNpcRecord('Local Draft')] },
+        appVersion: '1.0.47',
+        pointer,
+        error: conflict,
+        reason: 'test-conflict',
+    });
+    const recovery = undurableNpcStateSnapshot(chatKey);
+    assert.equal(recovery.recoveryOnly, true);
+    assert.equal(recovery.state.npcs[0].name, 'Local Draft');
+    assert.equal(recovery.actualRevision, 5);
+
+    const durable = encodeStateFilePayload(chatKey, { turn: 5, npcs: [createNpcRecord('Server Winner')] }, '1.0.47', {
+        revision: 5,
+        writerId: 'mobile',
+    });
+    const loaded = await readNpcStateDataFile(pointer, {
+        expectedChatKey: chatKey,
+        fetchFn: async () => ({ ok: true, status: 200, text: async () => durable }),
+    });
+    assert.equal(loaded.undurable, undefined);
+    assert.equal(loaded.state.npcs[0].name, 'Server Winner');
+    assert.equal(pointer.revision, 5);
+    assert.equal(undurableNpcStateSnapshot(chatKey).state.npcs[0].name, 'Local Draft', 'local conflict draft remains available for explicit recovery');
+    cancelPendingNpcStateWrite(chatKey);
+});
+
+
+test('guarded write rejects a same-revision sidecar owned by a different writer', async () => {
+    const chatKey = 'chat:writer-token-conflict';
+    const pointer = {
+        name: makeNpcStateDataFileName(chatKey),
+        path: `/user/files/${makeNpcStateDataFileName(chatKey)}`,
+        revision: 9,
+        writerId: 'writer-a',
+    };
+    const remote = encodeStateFilePayload(chatKey, { turn: 9, npcs: [createNpcRecord('Remote')] }, '1.0.47', {
+        revision: 9,
+        writerId: 'writer-b',
+    });
+    let uploads = 0;
+    const fetchFn = async (url, options = {}) => {
+        if (url === pointer.path) return { ok: true, status: 200, text: async () => remote };
+        if (url === '/api/files/upload') {
+            uploads += 1;
+            return { ok: true, status: 200, json: async () => ({ path: pointer.path }), text: async () => '' };
+        }
+        return { ok: false, status: 404, text: async () => '' };
+    };
+    await assert.rejects(
+        writeNpcStateDataFile({
+            chatKey,
+            state: { turn: 10, npcs: [createNpcRecord('Local')] },
+            appVersion: '1.0.47',
+            pointer,
+            fetchFn,
+            headers: { 'Content-Type': 'application/json' },
+        }),
+        error => error?.code === 'NPC_STATE_WRITE_CONFLICT'
+            && error.expectedRevision === 9
+            && error.actualRevision === 9
+            && error.expectedWriterId === 'writer-a'
+            && error.actualWriterId === 'writer-b',
+    );
+    assert.equal(uploads, 0, 'same-revision writer mismatch must fail before upload');
+});
+
+test('guarded write verifies writer ownership after upload', async () => {
+    const chatKey = 'chat:post-write-owner';
+    const name = makeNpcStateDataFileName(chatKey);
+    const path = `/user/files/${name}`;
+    let server = encodeStateFilePayload(chatKey, { turn: 2, npcs: [] }, '1.0.47', {
+        revision: 2,
+        writerId: 'base-writer',
+    });
+    let reads = 0;
+    const fetchFn = async (url, options = {}) => {
+        if (url === path) {
+            reads += 1;
+            return { ok: true, status: 200, text: async () => server };
+        }
+        if (url === '/api/files/upload') {
+            const body = JSON.parse(options.body);
+            const uploaded = JSON.parse(Buffer.from(body.data, 'base64').toString('utf8'));
+            uploaded.writerId = 'competing-writer';
+            server = JSON.stringify(uploaded);
+            return { ok: true, status: 200, json: async () => ({ path }), text: async () => '' };
+        }
+        return { ok: false, status: 404, text: async () => '' };
+    };
+    await assert.rejects(
+        writeNpcStateDataFile({
+            chatKey,
+            state: { turn: 3, npcs: [createNpcRecord('Local')] },
+            appVersion: '1.0.47',
+            pointer: { name, path, revision: 2, writerId: 'base-writer' },
+            fetchFn,
+            headers: { 'Content-Type': 'application/json' },
+            continuousRetry: false,
+        }),
+        error => error?.code === 'NPC_STATE_WRITE_CONFLICT'
+            && error.expectedRevision === 3
+            && error.actualRevision === 3
+            && error.actualWriterId === 'competing-writer',
+    );
+    assert.ok(reads >= 2, 'write path must verify the durable owner after upload');
 });

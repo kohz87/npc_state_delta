@@ -116,11 +116,16 @@ import {
     purgeNpcStructuredReferences,
 } from './social.js';
 import {
+    adoptNpcStateDataFileMetadata,
+    cancelPendingNpcStateWrite,
     deleteNpcStateDataFile,
+    inspectNpcStateDataFile,
     makeNpcStateDataFileName,
     makeNpcStateRecoveryFileName,
+    preserveUndurableNpcStateSnapshot,
     readNpcStateDataFile,
     retireNpcStateDataFile,
+    undurableNpcStateSnapshot,
     writeNpcStateDataFile,
 } from './storage.js';
 import {
@@ -152,6 +157,7 @@ let inlineWatchdogTimer = null;
 let uiCaptureBridgeInstalled = false;
 let activeEditorPopup = null;
 let activeEditorChatKey = '';
+let activeEditorBaseRevision = null;
 let activeNpcViewerOverlay = null;
 let activeNpcViewerId = '';
 let activeNpcViewerOpenedAt = 0;
@@ -208,7 +214,11 @@ const SWIPE_SETTLE_TIMEOUT_MS = 120000;
 const INLINE_HISTORY_LIMIT = 80;
 const STATE_WRITE_DELAY = 120;
 const chatStateCache = new Map();
-const loadedChatKeys = new Set();
+const hydratedChatKeys = new Set();
+const hydratedStateMeta = new Map();
+const freshnessChecks = new Map();
+const freshnessEvents = [];
+const FRESHNESS_EVENT_LIMIT = 24;
 const loadingChatStates = new Map();
 const hydrationErrors = new Map();
 const pendingAutoScans = new Map();
@@ -253,7 +263,9 @@ function beginScanOperation(key, label, metadata = {}) {
     const operation = scanOperations.begin(key, label, metadata);
     if (!operation) return null;
     const lineage = chatLineage(getContext().chat || []);
-    const revision = Number(stateVersions.get(key) || 0);
+    const localRevision = Number(stateVersions.get(key) || 0);
+    const canonicalRevision = hydratedRevision(key);
+    operation.canonicalRevision = canonicalRevision;
     operation.requestController = new AbortController();
     operation.requestScope = {
         route: { profileId: getSettings().scannerConnectionProfile },
@@ -263,12 +275,39 @@ function beginScanOperation(key, label, metadata = {}) {
         deadline: operation.startedAt + SCAN_OPERATION_TIMEOUT_MS,
         isCurrent: () => scanOperations.isCurrent(key, operation)
             && getChatKey() === key
-            && Number(stateVersions.get(key) || 0) === revision
+            && Number(stateVersions.get(key) || 0) === localRevision
+            && hydratedRevision(key) === canonicalRevision
             && firstLineageDivergence(lineage, chatLineage(getContext().chat || [])) === -1,
     };
     return operation;
 }
 function scanOperationCurrent(key, operation) { return scanOperations.isCurrent(key, operation); }
+async function scanCanonicalBaseCurrent(key, operation, label = 'scan') {
+    const baseRevision = Math.max(0, Math.trunc(Number(operation?.canonicalRevision) || 0));
+    try {
+        await ensureHydratedStateFresh(key, { reason: `${label}-commit` });
+    } catch (error) {
+        recordFreshnessEvent(key, 'stale-operation-rejected', {
+            reason: label,
+            hydratedRevision: baseRevision,
+            serverRevision: hydratedStateMeta.get(key)?.latestObservedServerRevision ?? hydratedRevision(key),
+            dirty: localWorkingStateDirty(key),
+        });
+        return false;
+    }
+    const currentRevision = hydratedRevision(key);
+    const current = scanOperationCurrent(key, operation) && currentRevision === baseRevision;
+    if (!current) {
+        recordFreshnessEvent(key, 'stale-operation-rejected', {
+            reason: label,
+            hydratedRevision: baseRevision,
+            serverRevision: hydratedStateMeta.get(key)?.latestObservedServerRevision ?? currentRevision,
+            dirty: false,
+        });
+        console.info(`[NPC State Delta] rejected stale ${label} result because the canonical sidecar advanced from revision ${baseRevision} to ${currentRevision}.`);
+    }
+    return current;
+}
 function endScanOperation(key, operation) {
     const ended = scanOperations.end(key, operation);
     operation?.requestController?.abort();
@@ -631,7 +670,9 @@ function forgetCachedChat(key) {
     if (!key || key === getChatKey()) return false;
     if (stateWriteTimers.has(key) || stateWritePromises.has(key) || loadingChatStates.has(key) || isScanBusy(key)) return false;
     chatStateCache.delete(key);
-    loadedChatKeys.delete(key);
+    hydratedChatKeys.delete(key);
+    hydratedStateMeta.delete(key);
+    freshnessChecks.delete(key);
     hydrationErrors.delete(key);
     pendingAutoScans.delete(key);
     assistantReceipts.delete(key);
@@ -789,14 +830,257 @@ function setChatState(key, state, { markLoaded = false } = {}) {
     const normalized = normalizeChatState(state);
     chatStateCache.set(key, normalized);
     touchChatCache(key);
-    if (markLoaded) { loadedChatKeys.add(key); hydrationErrors.delete(key); }
+    if (markLoaded) { hydratedChatKeys.add(key); hydrationErrors.delete(key); }
     stateVersions.set(key, Number(stateVersions.get(key) || 0) + 1);
     return normalized;
 }
+
+function hydratedRevision(key = getChatKey()) {
+    const meta = hydratedStateMeta.get(String(key || ''));
+    if (Number.isFinite(Number(meta?.revision))) return Math.max(0, Math.trunc(Number(meta.revision)));
+    const pointer = getSettings().dataFiles?.[key];
+    return Number.isFinite(Number(pointer?.revision)) ? Math.max(0, Math.trunc(Number(pointer.revision))) : 0;
+}
+
+function updateHydratedStateMeta(key, revision, extra = {}) {
+    const normalized = String(key || '');
+    if (!normalized || normalized === 'no-chat') return null;
+    const previous = hydratedStateMeta.get(normalized) || {};
+    const next = {
+        revision: Math.max(0, Math.trunc(Number(revision) || 0)),
+        writerId: String(extra.writerId ?? previous.writerId ?? ''),
+        hydratedAt: Number(extra.hydratedAt || previous.hydratedAt || Date.now()),
+        lastCheckedAt: Number(extra.lastCheckedAt || previous.lastCheckedAt || 0),
+        latestObservedServerRevision: Math.max(0, Math.trunc(Number(extra.latestObservedServerRevision ?? previous.latestObservedServerRevision ?? revision) || 0)),
+        latestObservedServerWriterId: String(extra.latestObservedServerWriterId ?? previous.latestObservedServerWriterId ?? extra.writerId ?? previous.writerId ?? ''),
+    };
+    hydratedStateMeta.set(normalized, next);
+    return next;
+}
+
+function recordFreshnessEvent(key, type, details = {}) {
+    freshnessEvents.push({
+        at: Date.now(),
+        chatKey: String(key || ''),
+        type: String(type || 'check'),
+        reason: String(details.reason || '').slice(0, 80),
+        hydratedRevision: Math.max(0, Math.trunc(Number(details.hydratedRevision) || 0)),
+        serverRevision: Math.max(0, Math.trunc(Number(details.serverRevision) || 0)),
+        dirty: details.dirty === true,
+    });
+    if (freshnessEvents.length > FRESHNESS_EVENT_LIMIT) freshnessEvents.splice(0, freshnessEvents.length - FRESHNESS_EVENT_LIMIT);
+}
+
+function localWorkingStateDirty(key = getChatKey()) {
+    const normalized = String(key || '');
+    const recovery = undurableNpcStateSnapshot(normalized);
+    return stateWriteTimers.has(normalized)
+        || stateWritePromises.has(normalized)
+        || Number(stateVersions.get(normalized) || 0) > Number(persistedVersions.get(normalized) ?? -1)
+        || Boolean(recovery && recovery.recoveryOnly !== true);
+}
+
+function makeRevisionConflict(key, expectedRevision, actualRevision, message = '') {
+    const error = new Error(message || `NPC State Delta sidecar changed in another session (expected revision ${expectedRevision}, found ${actualRevision}).`);
+    error.code = 'NPC_STATE_WRITE_CONFLICT';
+    error.expectedRevision = Number.isFinite(Number(expectedRevision)) ? Math.max(0, Math.trunc(Number(expectedRevision))) : null;
+    error.actualRevision = Number.isFinite(Number(actualRevision)) ? Math.max(0, Math.trunc(Number(actualRevision))) : null;
+    error.chatKey = String(key || '');
+    return error;
+}
+
+function installCanonicalServerState(key, pointer, inspected, { reason = 'freshness-check', dirtyConflict = false } = {}) {
+    const settings = getSettings();
+    if (!inspected?.exists || !inspected?.payload) throw new Error(`NPC State Delta canonical sidecar for ${key} is unavailable.`);
+    if (inspected.retired) {
+        const error = new Error(`NPC State Delta sidecar for ${key} was retired by another session. Reload or switch chats before making dossier changes.`);
+        error.code = 'NPC_STATE_SIDECAR_RETIRED';
+        settings.sidecarTombstones[key] = { reason: inspected.payload.retireReason || 'retired-file', at: Date.now() };
+        delete settings.dataFiles[key];
+        hydratedChatKeys.delete(key);
+        hydratedStateMeta.delete(key);
+        freshnessChecks.delete(key);
+        hydrationErrors.set(key, error);
+        persistSettings();
+        throw error;
+    }
+    adoptNpcStateDataFileMetadata(pointer, inspected);
+    settings.dataFiles[key] = pointer;
+    delete settings.sidecarTombstones[key];
+    cancelScanOperation(key, dirtyConflict ? 'cross-session conflict' : 'server revision advanced');
+    pendingAutoScans.delete(key);
+    assistantReceipts.delete(key);
+    const installed = setChatState(key, inspected.payload.state, { markLoaded: true });
+    persistedVersions.set(key, Number(stateVersions.get(key) || 0));
+    updateHydratedStateMeta(key, inspected.revision, {
+        hydratedAt: Date.now(),
+        lastCheckedAt: Date.now(),
+        latestObservedServerRevision: inspected.revision,
+        writerId: inspected.writerId,
+        latestObservedServerWriterId: inspected.writerId,
+    });
+    persistSettings();
+    if (getChatKey() === key) {
+        renderDossier();
+        updateInjection();
+        queueInlineRender(0);
+    }
+    recordFreshnessEvent(key, dirtyConflict ? 'cross-session-conflict' : 'stale-cache-refresh', {
+        reason,
+        hydratedRevision: inspected.revision,
+        serverRevision: inspected.revision,
+        dirty: dirtyConflict,
+    });
+    return installed;
+}
+
+async function reconcileCrossSessionWriteConflict(key, error, snapshot, pointer) {
+    const normalized = String(key || '');
+    const inspected = await inspectNpcStateDataFile(pointer, { expectedChatKey: normalized });
+    cancelPendingNpcStateWrite(normalized);
+    preserveUndurableNpcStateSnapshot({
+        chatKey: normalized,
+        state: structuredClone(chatStateCache.get(normalized) || snapshot),
+        appVersion: NPC_STATE_VERSION,
+        pointer,
+        error,
+        reason: 'guarded-write-conflict',
+    });
+    recordFreshnessEvent(normalized, 'cross-session-write-conflict', {
+        reason: 'guarded-write',
+        hydratedRevision: error?.expectedRevision ?? hydratedRevision(normalized),
+        serverRevision: inspected.revision,
+        dirty: true,
+    });
+    if (inspected.exists) {
+        installCanonicalServerState(normalized, pointer, inspected, { reason: 'guarded-write-conflict', dirtyConflict: true });
+        if (getChatKey() === normalized) globalThis.toastr?.warning?.('NPC State Delta: another session saved a newer dossier first. This local change was preserved for recovery and was not allowed to overwrite the server copy.');
+    }
+    return inspected;
+}
+
+async function ensureHydratedStateFresh(key = getChatKey(), { reason = 'boundary', notify = false } = {}) {
+    const normalized = String(key || '');
+    if (!normalized || normalized === 'no-chat' || !isCanonicalChatKey(normalized)) return getChatState(normalized);
+    if (!hydratedChatKeys.has(normalized)) return getChatState(normalized);
+    if (freshnessChecks.has(normalized)) return freshnessChecks.get(normalized);
+
+    let task;
+    task = (async () => {
+        const inFlight = stateWritePromises.get(normalized);
+        if (inFlight) {
+            recordFreshnessEvent(normalized, 'local-write-in-flight', {
+                reason,
+                hydratedRevision: hydratedRevision(normalized),
+                serverRevision: hydratedStateMeta.get(normalized)?.latestObservedServerRevision ?? hydratedRevision(normalized),
+                dirty: true,
+            });
+            return getChatState(normalized);
+        }
+        if (!hydratedChatKeys.has(normalized)) return getChatState(normalized);
+        const settings = getSettings();
+        const pointer = settings.dataFiles?.[normalized] || null;
+        if (!pointer?.path) {
+            updateHydratedStateMeta(normalized, 0, { lastCheckedAt: Date.now(), latestObservedServerRevision: 0 });
+            return getChatState(normalized);
+        }
+
+        const localRevision = hydratedRevision(normalized);
+        const localWriterId = String(hydratedStateMeta.get(normalized)?.writerId || pointer?.writerId || '');
+        const inspected = await inspectNpcStateDataFile(pointer, { expectedChatKey: normalized });
+        const writerFork = Boolean(inspected.exists && inspected.revision === localRevision
+            && localWriterId && inspected.writerId && inspected.writerId !== localWriterId);
+        updateHydratedStateMeta(normalized, localRevision, {
+            lastCheckedAt: Date.now(),
+            latestObservedServerRevision: inspected.revision,
+            latestObservedServerWriterId: inspected.writerId,
+        });
+
+        if (!inspected.exists) {
+            const error = makeRevisionConflict(normalized, localRevision, null, `NPC State Delta canonical sidecar for ${normalized} disappeared from the SillyTavern server. Refusing to recreate it from a cached browser copy.`);
+            recordFreshnessEvent(normalized, 'sidecar-missing', { reason, hydratedRevision: localRevision, serverRevision: 0, dirty: localWorkingStateDirty(normalized) });
+            throw error;
+        }
+        if (!inspected.retired && inspected.revision === localRevision && !writerFork) {
+            recordFreshnessEvent(normalized, 'current', { reason, hydratedRevision: localRevision, serverRevision: inspected.revision, dirty: localWorkingStateDirty(normalized) });
+            return getChatState(normalized);
+        }
+
+        const dirty = localWorkingStateDirty(normalized);
+        const preserveLocal = dirty || writerFork;
+        const localSnapshot = preserveLocal ? structuredClone(getChatState(normalized)) : null;
+        const conflict = preserveLocal
+            ? makeRevisionConflict(
+                normalized,
+                localRevision,
+                inspected.revision,
+                writerFork
+                    ? `NPC State Delta detected a same-revision writer conflict at revision ${localRevision}. Another session replaced that revision with a different writer; this session's working copy was preserved for recovery and was not republished.`
+                    : `NPC State Delta detected newer canonical server revision ${inspected.revision} while this session still had unsaved work based on revision ${localRevision}. The local work was preserved for recovery and was not published.`,
+            )
+            : null;
+
+        if (preserveLocal) {
+            if (stateWriteTimers.has(normalized)) {
+                clearTimeout(stateWriteTimers.get(normalized));
+                stateWriteTimers.delete(normalized);
+            }
+            cancelPendingNpcStateWrite(normalized);
+            preserveUndurableNpcStateSnapshot({
+                chatKey: normalized,
+                state: localSnapshot,
+                appVersion: NPC_STATE_VERSION,
+                pointer,
+                error: conflict,
+                reason: writerFork ? `same-revision-writer:${reason}` : `freshness:${reason}`,
+            });
+        }
+
+        try {
+            const state = installCanonicalServerState(normalized, pointer, inspected, { reason, dirtyConflict: preserveLocal });
+            if (preserveLocal && notify) globalThis.toastr?.warning?.(
+                writerFork
+                    ? 'NPC State Delta: another session replaced the same server revision. This session copy was preserved for recovery; the server copy is now active.'
+                    : 'NPC State Delta: another session advanced this chat. Unsaved local dossier work was preserved for recovery; the server copy is now active.',
+            );
+            if (writerFork) recordFreshnessEvent(normalized, 'same-revision-writer-conflict', { reason, hydratedRevision: localRevision, serverRevision: inspected.revision, dirty: true });
+            return state;
+        } catch (error) {
+            if (preserveLocal) recordFreshnessEvent(normalized, writerFork ? 'same-revision-writer-conflict' : 'cross-session-conflict', { reason, hydratedRevision: localRevision, serverRevision: inspected.revision, dirty: true });
+            throw error;
+        }
+    })().finally(() => {
+        if (freshnessChecks.get(normalized) === task) freshnessChecks.delete(normalized);
+    });
+    freshnessChecks.set(normalized, task);
+    return task;
+}
+
+async function ensureFreshMutationBoundary(action, key = getChatKey(), { notify = true } = {}) {
+    const normalized = String(key || '');
+    if (!normalized || normalized === 'no-chat' || !isCanonicalChatKey(normalized)) {
+        if (notify) globalThis.toastr?.warning?.(`NPC State Delta: open a chat before attempting to ${action}.`);
+        return false;
+    }
+    try {
+        await ensureChatStateLoaded(normalized);
+    } catch (error) {
+        if (notify) globalThis.toastr?.warning?.(`NPC State Delta: cannot ${action} because the canonical server dossier could not be verified. ${error?.message || error}`);
+        return false;
+    }
+    if (getChatKey() !== normalized || !requireReadyChatMutation(action, normalized, { notify })) return false;
+    return true;
+}
+
+async function runFreshMutation(action, key, mutation, options = {}) {
+    if (!await ensureFreshMutationBoundary(action, key, options)) return false;
+    return mutation();
+}
+
 function chatHydrationStatus(key = getChatKey()) {
     if (!key || key === 'no-chat') return 'none';
     if (!isCanonicalChatKey(key)) return 'pending';
-    if (loadedChatKeys.has(key)) return 'ready';
+    if (hydratedChatKeys.has(key)) return 'ready';
     if (loadingChatStates.has(key)) return 'loading';
     if (hydrationErrors.has(key)) return 'error';
     return 'idle';
@@ -804,7 +1088,7 @@ function chatHydrationStatus(key = getChatKey()) {
 function assertChatHydratedForWrite(key = getChatKey()) {
     if (!key || key === 'no-chat') return;
     const pointer = getSettings().dataFiles?.[key];
-    if (pointer?.path && !loadedChatKeys.has(key)) throw new Error('Refusing to overwrite unhydrated NPC State Delta sidecar for ' + key + '.');
+    if (pointer?.path && !hydratedChatKeys.has(key)) throw new Error('Refusing to overwrite unhydrated NPC State Delta sidecar for ' + key + '.');
 }
 
 function requireReadyChatMutation(action = 'modify NPC State Delta', key = getChatKey(), { notify = true } = {}) {
@@ -846,7 +1130,9 @@ async function detachBrokenSidecar() {
     settings.sidecarTombstones[key] = { reason: 'manual-detach', at: Date.now() };
     delete settings.dataFiles[key];
     chatStateCache.delete(key);
-    loadedChatKeys.delete(key);
+    hydratedChatKeys.delete(key);
+    hydratedStateMeta.delete(key);
+    freshnessChecks.delete(key);
     hydrationErrors.delete(key);
     stateVersions.delete(key);
     persistedVersions.delete(key);
@@ -869,7 +1155,7 @@ function requestHeaders() {
 
 async function ensureChatStateLoaded(key = getChatKey()) {
     if (!key || key === 'no-chat' || !isCanonicalChatKey(key)) return freshChatState();
-    if (loadedChatKeys.has(key)) return getChatState(key);
+    if (hydratedChatKeys.has(key)) return ensureHydratedStateFresh(key, { reason: 'hydrate-boundary' });
     if (loadingChatStates.has(key)) return loadingChatStates.get(key);
     const epoch = ownershipEpoch(key);
     let task;
@@ -945,6 +1231,14 @@ async function ensureChatStateLoaded(key = getChatKey()) {
         assertOwnershipEpoch(key, epoch);
         const sourceState = loaded || freshChatState();
         const state = setChatState(key, sourceState, { markLoaded: true });
+        const durableRevision = Number.isFinite(Number(pointer?.revision)) ? Math.max(0, Math.trunc(Number(pointer.revision))) : 0;
+        updateHydratedStateMeta(key, durableRevision, {
+            hydratedAt: Date.now(),
+            lastCheckedAt: loaded ? Date.now() : 0,
+            latestObservedServerRevision: durableRevision,
+            writerId: String(pointer?.writerId || ''),
+            latestObservedServerWriterId: String(pointer?.writerId || ''),
+        });
         if (loaded && !loadedUndurable) persistedVersions.set(key, Number(stateVersions.get(key) || 0));
         return state;
     })().catch(error => {
@@ -998,19 +1292,35 @@ async function flushStateFile(key = getChatKey()) {
             if (Number(persistedVersions.get(key) || -1) >= writeVersion) break;
             const snapshot = structuredClone(getChatState(key));
             const settings = getSettings();
-            const written = await writeNpcStateDataFile({
-                chatKey: key,
-                state: snapshot,
-                recoveryState: () => chatStateCache.get(key) || snapshot,
-                isCurrent: () => ownershipEpochCurrent(key, epoch),
-                appVersion: NPC_STATE_VERSION,
-                pointer: settings.dataFiles?.[key] || pointer,
-                headers: requestHeaders(),
-            });
+            let written;
+            try {
+                written = await writeNpcStateDataFile({
+                    chatKey: key,
+                    state: snapshot,
+                    recoveryState: () => chatStateCache.get(key) || snapshot,
+                    isCurrent: () => ownershipEpochCurrent(key, epoch),
+                    appVersion: NPC_STATE_VERSION,
+                    pointer: settings.dataFiles?.[key] || pointer,
+                    headers: requestHeaders(),
+                });
+            } catch (error) {
+                if (error?.code === 'NPC_STATE_WRITE_CONFLICT' && ownershipEpochCurrent(key, epoch)) {
+                    try { await reconcileCrossSessionWriteConflict(key, error, snapshot, settings.dataFiles?.[key] || pointer); }
+                    catch (reconcileError) { console.warn('[NPC State Delta] write conflict recovery could not hydrate the newer canonical sidecar yet.', reconcileError); }
+                }
+                throw error;
+            }
             if (!ownershipEpochCurrent(key, epoch)) return written;
             pointer = written;
             settings.dataFiles[key] = pointer;
-            delete settings.sidecarTombstones[key];            persistedVersions.set(key, writeVersion);
+            delete settings.sidecarTombstones[key];
+            persistedVersions.set(key, writeVersion);
+            updateHydratedStateMeta(key, written.revision, {
+                lastCheckedAt: Date.now(),
+                latestObservedServerRevision: written.revision,
+                writerId: String(written.writerId || ''),
+                latestObservedServerWriterId: String(written.writerId || ''),
+            });
             persistSettings();
             if (Number(stateVersions.get(key) || 0) <= writeVersion) break;
         }
@@ -1424,7 +1734,9 @@ function clearLifecycleCacheKey(key, reason = 'external-lifecycle') {
         stateWriteTimers.delete(key);
     }
     chatStateCache.delete(key);
-    loadedChatKeys.delete(key);
+    hydratedChatKeys.delete(key);
+    hydratedStateMeta.delete(key);
+    freshnessChecks.delete(key);
     loadingChatStates.delete(key);
     hydrationErrors.delete(key);
     stateVersions.delete(key);
@@ -1447,7 +1759,7 @@ async function loadLatestLifecycleState(key, pointer = null, inlineState = null,
             console.warn(`[NPC State Delta] lifecycle recovery could not read ${pointer.path}; falling back to the settled cache/inline state.`, error);
         }
     }
-    if (loadedChatKeys.has(key) && chatStateCache.has(key)) return structuredClone(getChatState(key));
+    if (hydratedChatKeys.has(key) && chatStateCache.has(key)) return structuredClone(getChatState(key));
     return inlineState && typeof inlineState === 'object' ? structuredClone(inlineState) : null;
 }
 
@@ -1612,7 +1924,15 @@ async function moveRenamedChatState(eventData = {}) {
         settings.dataFiles[newKey] = newPointer;
         delete settings.sidecarTombstones[newKey];
         delete settings.dataFiles[oldKey];
-        const installed = setChatState(newKey, state, { markLoaded: true });        persistedVersions.set(newKey, Number(stateVersions.get(newKey) || 0));
+        const installed = setChatState(newKey, state, { markLoaded: true });
+        updateHydratedStateMeta(newKey, newPointer?.revision || 0, {
+            hydratedAt: Date.now(),
+            lastCheckedAt: Date.now(),
+            latestObservedServerRevision: newPointer?.revision || 0,
+            writerId: String(newPointer?.writerId || ''),
+            latestObservedServerWriterId: String(newPointer?.writerId || ''),
+        });
+        persistedVersions.set(newKey, Number(stateVersions.get(newKey) || 0));
         persistSettings();
         let renameOwnershipDurable = false;
         try {
@@ -1662,7 +1982,7 @@ async function flushLifecycleOwner(kind = 'chat', ownerId = '') {
 function invalidateLifecycleOwner(kind = 'chat', ownerId = '') {
     const owner = String(ownerId || '').trim();
     if (!owner) return 0;
-    const keys = new Set([...chatStateCache.keys(), ...loadedChatKeys, ...loadingChatStates.keys()]);
+    const keys = new Set([...chatStateCache.keys(), ...hydratedChatKeys, ...loadingChatStates.keys()]);
     let count = 0;
     for (const key of keys) {
         const parsed = parseQualifiedChatKey(key);
@@ -1673,7 +1993,7 @@ function invalidateLifecycleOwner(kind = 'chat', ownerId = '') {
 
 function flushCurrentChatOnPageHide() {
     const key = getChatKey();
-    if (key === 'no-chat' || !loadedChatKeys.has(key) || !chatStateCache.has(key)) return;
+    if (key === 'no-chat' || !hydratedChatKeys.has(key) || !chatStateCache.has(key)) return;
     void settleStateFileWrite(key, { flush: true }).catch(error => console.debug('[NPC State Delta] page-hide flush deferred', error));
 }
 
@@ -1913,15 +2233,29 @@ function setNpcDossierScanIndicator(npcId, busy) {
     });
 }
 
+async function prepareCanonicalScanBase(key, label = 'scan') {
+    try {
+        await settleStateFileWrite(key, { flush: true });
+        await ensureHydratedStateFresh(key, { reason: `${label}-start` });
+        return getChatKey() === key && chatHydrationStatus(key) === 'ready';
+    } catch (error) {
+        console.info(`[NPC State Delta] ${label} did not start because its canonical server base could not be established.`, error);
+        return false;
+    }
+}
+
 async function scanNpcDossier(npcId) {
     const id = String(npcId || '').trim();
     const ctx = getContext();
     const chatKey = getChatKey();
-    if (!id || chatKey === 'no-chat' || !requireReadyChatMutation('scan a dossier', chatKey)) return false;
+    if (!id || chatKey === 'no-chat') return false;
+    try { await ensureChatStateLoaded(chatKey); } catch (error) { globalThis.toastr?.warning?.(`NPC State Delta: cannot scan this dossier until the canonical server state is available. ${error?.message || error}`); return false; }
+    if (getChatKey() !== chatKey || !requireReadyChatMutation('scan a dossier', chatKey)) return false;
     if (isScanBusy(chatKey)) {
         globalThis.toastr?.info?.('NPC State Delta: another dossier scan is already running in this chat.');
         return false;
     }
+    if (!await prepareCanonicalScanBase(chatKey, 'dossier import')) return false;
     const state = getChatState(chatKey);
     const existing = state.npcs.find(npc => npc.id === id);
     if (!existing) return false;
@@ -1955,8 +2289,8 @@ async function scanNpcDossier(npcId) {
             label: `dossier import for ${existing.name}`,
             requestScope: operation.requestScope,
         });
-        if (!scanOperationCurrent(chatKey, operation)) {
-            console.info('[NPC State Delta] discarded expired or superseded dossier import.');
+        if (!scanOperationCurrent(chatKey, operation) || !await scanCanonicalBaseCurrent(chatKey, operation, 'dossier import')) {
+            console.info('[NPC State Delta] discarded expired, superseded, or stale-canonical dossier import.');
             return false;
         }
         const currentLineage = chatLineage(getContext().chat || []);
@@ -2071,14 +2405,21 @@ async function refreshNpcFromChat(npcId) {
     const id = String(npcId || '').trim();
     const ctx = getContext();
     const chatKey = getChatKey();
-    if (!id || chatKey === 'no-chat' || !requireReadyChatMutation('refresh a dossier', chatKey)) return false;
+    if (!id || chatKey === 'no-chat') return false;
+    try { await ensureChatStateLoaded(chatKey); } catch (error) { globalThis.toastr?.warning?.(`NPC State Delta: cannot refresh this dossier until the canonical server state is available. ${error?.message || error}`); return false; }
+    if (getChatKey() !== chatKey || !requireReadyChatMutation('refresh a dossier', chatKey)) return false;
     if (isScanBusy(chatKey)) {
         globalThis.toastr?.info?.('NPC State Delta: another dossier scan is already running in this chat.');
         return false;
     }
     // Preserve any edits currently visible in this dossier before reading history. Otherwise
     // the old popup values could overwrite a successful refresh when Save is clicked later.
-    if (editorIsMounted()) saveNpcEditor(id, { close: false, silent: true });
+    if (editorIsMounted()) {
+        const savedEditor = await saveNpcEditor(id, { close: false, silent: true });
+        if (!savedEditor) return false;
+        try { await flushStateFile(chatKey); } catch { return false; }
+    }
+    if (!await prepareCanonicalScanBase(chatKey, 'dossier refresh')) return false;
     const settings = getSettings();
     const state = getChatState(chatKey);
     const existing = state.npcs.find(npc => npc.id === id);
@@ -2116,8 +2457,8 @@ async function refreshNpcFromChat(npcId) {
             label: `chat refresh for ${existing.name}`,
             requestScope: operation.requestScope,
         });
-        if (!scanOperationCurrent(chatKey, operation)) {
-            console.info('[NPC State Delta] discarded expired or superseded dossier refresh.');
+        if (!scanOperationCurrent(chatKey, operation) || !await scanCanonicalBaseCurrent(chatKey, operation, 'dossier refresh')) {
+            console.info('[NPC State Delta] discarded expired, superseded, or stale-canonical dossier refresh.');
             return false;
         }
         const currentLineage = chatLineage(getContext().chat || []);
@@ -2218,6 +2559,10 @@ async function refreshNpcFromChat(npcId) {
         const proposedSummary = String(match?.relationshipSummary ?? match?.relationship_summary ?? '').trim().slice(0, 900);
         if (proposedSummary && !(liveBefore.manualProfileFields || []).includes('relationshipSummary')) refreshed.relationshipSummary = proposedSummary;
         Object.assign(refreshed, protectTerminalNpc(liveBefore, refreshed));
+        if (!await scanCanonicalBaseCurrent(chatKey, operation, 'dossier refresh final commit')) {
+            globalThis.toastr?.info?.('NPC State Delta: another session updated this chat during the refresh; the stale result was discarded.');
+            return false;
+        }
         if (targetMessageId >= 0) commitBranchCheckpoint(merged.state, targetMessageId, 'chat-refresh');
         setChatState(chatKey, merged.state);
         persist();
@@ -2335,8 +2680,11 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
     const settings = getSettings();
     const ctx = getContext();
     const chatKey = getChatKey();
-    if (!request?.npcId || !request?.label || chatKey === 'no-chat' || !requireReadyChatMutation('backfill a dossier', chatKey, { notify: false })) return false;
+    if (!request?.npcId || !request?.label || chatKey === 'no-chat') return false;
+    try { await ensureChatStateLoaded(chatKey); } catch { return false; }
+    if (getChatKey() !== chatKey || !requireReadyChatMutation('backfill a dossier', chatKey, { notify: false })) return false;
     if (isScanBusy(chatKey)) return false;
+    if (!await prepareCanonicalScanBase(chatKey, 'dossier backfill')) return false;
     const state = getChatState(chatKey);
     const existing = state.npcs.find(npc => npc.id === request.npcId);
     if (!existing) return false;
@@ -2369,8 +2717,8 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
             label: `backfill for ${request.label}`,
             requestScope: operation.requestScope,
         });
-        if (!scanOperationCurrent(chatKey, operation)) {
-            console.info('[NPC State Delta] discarded expired or superseded dossier backfill.');
+        if (!scanOperationCurrent(chatKey, operation) || !await scanCanonicalBaseCurrent(chatKey, operation, 'dossier backfill')) {
+            console.info('[NPC State Delta] discarded expired, superseded, or stale-canonical dossier backfill.');
             return false;
         }
         const currentLineage = chatLineage(getContext().chat || []);
@@ -2444,6 +2792,7 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
             finalNpc.lastWorldActiveTurn = Number(liveBeforeBackfill.lastWorldActiveTurn || 0);
         }
         if (finalNpc) Object.assign(finalNpc, protectTerminalNpc(existing, finalNpc));
+        if (!await scanCanonicalBaseCurrent(chatKey, operation, 'dossier backfill final commit')) return false;
         if (targetMessageId >= 0 && finalNpc) {
             if (!finalNpc.archived && finalNpc.present) recordInlineCardsInState(nextState, targetMessageId, [finalNpc.id], 'dossier-backfill');
             else removeNpcInlineCardAtMessage(nextState, targetMessageId, finalNpc.id);
@@ -2815,6 +3164,8 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         else if (Number.isInteger(messageId)) queuePendingAutoScan(scanChatKey, messageId, 'busy-auto-scan');
         return false;
     }
+    if (!await prepareCanonicalScanBase(scanChatKey, manual ? 'manual dossier scan' : 'automatic dossier scan')) return false;
+    if (getChatKey() !== scanChatKey || (sourceFingerprint !== null && sourceFingerprint !== fingerprintMessage(getContext().chat?.[messageId] || {}))) return false;
     const scanLineage = chatLineage(ctx.chat || []);
     const currentTranscript = currentExchangeTranscript(messageId);
     const fullWindowScan = Boolean(!manual && settings.fullScanEveryTurn);
@@ -2862,7 +3213,9 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
             requestScope: operation.requestScope,
         });
         let currentLineage = chatLineage(getContext().chat || []);
-        if (!scanOperationCurrent(scanChatKey, operation) || getChatKey() !== scanChatKey || firstLineageDivergence(scanLineage, currentLineage) !== -1 || Number(stateVersions.get(scanChatKey) || 0) !== scanStateVersion) {
+        if (!await scanCanonicalBaseCurrent(scanChatKey, operation, 'dossier scan')
+            || !scanOperationCurrent(scanChatKey, operation) || getChatKey() !== scanChatKey
+            || firstLineageDivergence(scanLineage, currentLineage) !== -1 || Number(stateVersions.get(scanChatKey) || 0) !== scanStateVersion) {
             const scanFinishedAt = performance.now?.() ?? Date.now();
             lastScanMetrics = {
                 label: manual ? 'manual' : (fullWindowScan ? 'automatic-full' : 'automatic'),
@@ -2932,8 +3285,10 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
             at: Date.now(),
         };
         currentLineage = chatLineage(getContext().chat || []);
-        if (!scanOperationCurrent(scanChatKey, operation) || getChatKey() !== scanChatKey || firstLineageDivergence(scanLineage, currentLineage) !== -1 || Number(stateVersions.get(scanChatKey) || 0) !== scanStateVersion) {
-            console.info('[NPC State Delta] discarded stale dossier scan after chat or dossier state changed during relationship evaluation.');
+        if (!await scanCanonicalBaseCurrent(scanChatKey, operation, 'dossier scan relationship evaluation')
+            || !scanOperationCurrent(scanChatKey, operation) || getChatKey() !== scanChatKey
+            || firstLineageDivergence(scanLineage, currentLineage) !== -1 || Number(stateVersions.get(scanChatKey) || 0) !== scanStateVersion) {
+            console.info('[NPC State Delta] discarded stale dossier scan after chat, dossier, or canonical state changed during relationship evaluation.');
             if (manual) globalThis.toastr?.info?.('NPC State Delta: chat changed during scan; stale result was discarded.');
             return false;
         }
@@ -3002,7 +3357,8 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
             }
         }
         currentLineage = chatLineage(getContext().chat || []);
-        if (!scanOperationCurrent(scanChatKey, operation)
+        if (!await scanCanonicalBaseCurrent(scanChatKey, operation, 'dossier scan new-NPC relationship evaluation')
+            || !scanOperationCurrent(scanChatKey, operation)
             || getChatKey() !== scanChatKey
             || firstLineageDivergence(scanLineage, currentLineage) !== -1
             || Number(stateVersions.get(scanChatKey) || 0) !== scanStateVersion) {
@@ -3096,6 +3452,10 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         if (targetMessageId >= 0) {
             clearInlineCardsAtMessage(nextState, targetMessageId);
             if (inlineIds.length) recordInlineCardsInState(nextState, targetMessageId, inlineIds, 'scan');
+        }
+        if (!await scanCanonicalBaseCurrent(scanChatKey, operation, 'dossier scan final commit')) {
+            if (manual) globalThis.toastr?.info?.('NPC State Delta: another session updated this chat during the scan; the stale result was discarded.');
+            return false;
         }
         if (targetMessageId >= 0) commitBranchCheckpoint(nextState, targetMessageId, 'scan');
         setChatState(chatKey, nextState);
@@ -4083,9 +4443,11 @@ function editorIsMounted() {
     return Boolean(document.querySelector?.('.popup.npc-state-delta-editor-popup'));
 }
 
-function openNpcEditorSafely(npcId) {
+async function openNpcEditorSafely(npcId) {
     const id = String(npcId || '').trim();
     if (!id) return false;
+    const chatKey = getChatKey();
+    if (!await ensureFreshMutationBoundary('open a dossier editor', chatKey)) return false;
     try {
         const npc = currentNpcById(id);
         if (!npc) throw new Error(`NPC id ${id} is not in the active chat state.`);
@@ -4117,7 +4479,7 @@ function activateNpcEditorFromEvent(event) {
     event.stopImmediatePropagation?.();
     event.stopPropagation?.();
     closeNpcViewer();
-    openNpcEditorSafely(npcId);
+    void openNpcEditorSafely(npcId);
     return true;
 }
 
@@ -4225,6 +4587,7 @@ function openNpcEditor(npcId) {
     if (!npc) return null;
     closeNpcEditor();
     activeEditorChatKey = originChatKey;
+    activeEditorBaseRevision = hydratedRevision(originChatKey);
     const ctx = getContext();
     const Popup = ctx.Popup;
     const POPUP_TYPE = ctx.POPUP_TYPE;
@@ -4618,6 +4981,7 @@ function closeNpcEditor() {
     const popup = activeEditorPopup;
     activeEditorPopup = null;
     activeEditorChatKey = '';
+    activeEditorBaseRevision = null;
     if (popup?.completeCancelled) {
         Promise.resolve(popup.completeCancelled()).catch(error => console.debug('[NPC State Delta] editor popup close failed', error));
     }
@@ -4632,10 +4996,14 @@ function clampEditorRelationshipStat(id) {
     return Number.isFinite(value) ? Math.max(-100, Math.min(100, Math.round(value))) : 0;
 }
 
-function saveNpcEditor(npcId, { close = true, silent = false } = {}) {
+async function saveNpcEditor(npcId, { close = true, silent = false } = {}) {
     const originChatKey = activeEditorChatKey || getChatKey();
-    if (getChatKey() !== originChatKey || !requireReadyChatMutation('save dossier edits', originChatKey)) {
+    if (getChatKey() !== originChatKey || !await ensureFreshMutationBoundary('save dossier edits', originChatKey)) {
         globalThis.toastr?.warning?.('NPC State Delta: this editor belongs to a different or unloaded chat. Reopen the dossier in the active chat.');
+        return false;
+    }
+    if (activeEditorBaseRevision !== null && Number(activeEditorBaseRevision) !== hydratedRevision(originChatKey)) {
+        globalThis.toastr?.warning?.('NPC State Delta: this editor was opened on an older server revision. Your typed draft is still open, but it was not applied. Review the newly loaded dossier and reopen the editor before saving.');
         return false;
     }
     const state = getChatState(originChatKey);
@@ -4810,7 +5178,8 @@ function portraitAction(chatKey, npcId) {
 }
 
 async function setNpcPortrait(npcId, file, { chatKey, isCurrent = () => true, generatedFrom = '' } = {}) {
-    if (!chatKey || chatKey !== getChatKey() || !isCurrent() || !requireReadyChatMutation('attach a portrait', chatKey)) return false;
+    if (!chatKey || chatKey !== getChatKey() || !isCurrent() || !await ensureFreshMutationBoundary('attach a portrait', chatKey)) return false;
+    const originCanonicalRevision = hydratedRevision(chatKey);
     const npc = getChatState(chatKey).npcs.find(item => item.id === String(npcId || ''));
     if (!npc || !file) return false;
     if (!/^image\/(?:png|jpeg|webp|gif|avif|bmp)$/i.test(String(file.type || '')) || file.size > 16 * 1024 * 1024) {
@@ -4822,9 +5191,19 @@ async function setNpcPortrait(npcId, file, { chatKey, isCurrent = () => true, ge
     const { key, action } = portraitAction(chatKey, npc.id);
     try {
         const portrait = await compressPortrait(file);
+        try { await ensureHydratedStateFresh(chatKey, { reason: 'portrait-commit' }); } catch { return false; }
         if (portraitActions.get(key) !== action || !isCurrent() || getChatKey() !== chatKey
             || !ownershipEpochCurrent(chatKey, epoch) || Number(stateVersions.get(chatKey) || 0) !== originRevision
-            || !requireReadyChatMutation('attach a portrait', chatKey)) return false;
+            || hydratedRevision(chatKey) !== originCanonicalRevision
+            || !requireReadyChatMutation('attach a portrait', chatKey)) {
+            recordFreshnessEvent(chatKey, 'stale-operation-rejected', {
+                reason: 'portrait-commit',
+                hydratedRevision: originCanonicalRevision,
+                serverRevision: hydratedStateMeta.get(chatKey)?.latestObservedServerRevision ?? hydratedRevision(chatKey),
+                dirty: false,
+            });
+            return false;
+        }
         const live = getChatState(chatKey).npcs.find(item => item.id === npc.id);
         if (!live) return false;
         if (generatedFrom) portrait.generatedFrom = String(generatedFrom);
@@ -5555,8 +5934,8 @@ function bindUi() {
     $(document).on('click.npcStateDelta', '.npc-state-delta-retry-hydration', () => { void retryCurrentChatHydration(); });
     $(document).on('click.npcStateDelta', '.npc-state-delta-detach-sidecar', () => { void detachBrokenSidecar(); });
     $(document).on('click.npcStateDelta', '#npc_state_delta_scan_now', () => scanNow({ manual: true, messageId: latestMessageId(true) }));
-    $(document).on('click.npcStateDelta', '#npc_state_delta_add_manual', () => {
-        if (!requireReadyChatMutation('add an NPC')) return;
+    $(document).on('click.npcStateDelta', '#npc_state_delta_add_manual', async () => {
+        if (!await ensureFreshMutationBoundary('add an NPC')) return;
         const settings = getSettings();
         const state = getChatState();
         if (state.npcs.filter(npc => !npc?.archived).length >= settings.maxNpcs) return globalThis.toastr?.warning?.(`NPC State Delta: active roster cap is ${settings.maxNpcs}. Archived dossiers do not count.`);
@@ -5587,16 +5966,31 @@ function bindUi() {
     $(document).on('click.npcStateDelta', '.npc-state-delta-portrait-reset', function (event) { event.preventDefault?.(); resetPortraitGeneratorFromDossier(); });
     $(document).on('click.npcStateDelta', '.npc-state-delta-portrait-run', function (event) { event.preventDefault?.(); void generatePortraitFromDialog(); });
     $(document).on('click.npcStateDelta', '.npc-state-delta-portrait-use', function (event) { event.preventDefault?.(); void useGeneratedPortrait(); });
-    $(document).on('click.npcStateDelta', '.npc-state-delta-archive-npc', function () { closeNpcViewer(); setNpcArchiveStateById(this.dataset.npcId, true, { reason: 'manual' }); });
-    $(document).on('click.npcStateDelta', '.npc-state-delta-restore-npc', function () { setNpcArchiveStateById(this.dataset.npcId, false); });
-    $(document).on('click.npcStateDelta', '.npc-state-delta-delete-npc', function () { deleteNpcById(this.dataset.npcId); });
-    $(document).on('keydown.npcStateDelta', '.npc-state-delta-delete-npc', function (event) {
-        if (!['Enter', ' '].includes(event.key)) return;
-        event.preventDefault?.();
+    $(document).on('click.npcStateDelta', '.npc-state-delta-archive-npc', async function () {
+        const key = getChatKey();
+        if (!await ensureFreshMutationBoundary('archive a dossier', key)) return;
+        closeNpcViewer();
+        setNpcArchiveStateById(this.dataset.npcId, true, { reason: 'manual' });
+    });
+    $(document).on('click.npcStateDelta', '.npc-state-delta-restore-npc', async function () {
+        const key = getChatKey();
+        if (!await ensureFreshMutationBoundary('restore a dossier', key)) return;
+        setNpcArchiveStateById(this.dataset.npcId, false);
+    });
+    $(document).on('click.npcStateDelta', '.npc-state-delta-delete-npc', async function () {
+        const key = getChatKey();
+        if (!await ensureFreshMutationBoundary('delete a dossier', key)) return;
         deleteNpcById(this.dataset.npcId);
     });
-    $(document).on('click.npcStateDelta', '#npc_state_delta_clear_chat', () => {
-        if (!requireReadyChatMutation('clear this chat dossier')) return;
+    $(document).on('keydown.npcStateDelta', '.npc-state-delta-delete-npc', async function (event) {
+        if (!['Enter', ' '].includes(event.key)) return;
+        event.preventDefault?.();
+        const key = getChatKey();
+        if (!await ensureFreshMutationBoundary('delete a dossier', key)) return;
+        deleteNpcById(this.dataset.npcId);
+    });
+    $(document).on('click.npcStateDelta', '#npc_state_delta_clear_chat', async () => {
+        if (!await ensureFreshMutationBoundary('clear this chat dossier')) return;
         if (!window.confirm('Clear every NPC State Delta dossier for this chat? Portraits and inline dossier cards will also be removed.')) return;
         closePortraitGenerator();
         const cleared = freshChatState();
@@ -5617,8 +6011,10 @@ function bindUi() {
             globalThis.toastr?.error?.(`NPC State Delta portrait: ${error?.message || error}`);
         }
     });
-    $(document).on('click.npcStateDelta', '.npc-state-delta-inline-remove-portrait', function () {
-        removeNpcPortrait(this.dataset.npcId, { chatKey: getChatKey() });
+    $(document).on('click.npcStateDelta', '.npc-state-delta-inline-remove-portrait', async function () {
+        const key = getChatKey();
+        if (!await ensureFreshMutationBoundary('remove a portrait', key)) return;
+        removeNpcPortrait(this.dataset.npcId, { chatKey: key });
     });
 }
 
@@ -5715,6 +6111,21 @@ async function handleAssistantMessageReceived(messageId, { bypassSwipeGuard = fa
     if (getChatKey() !== eventChatKey || latestMessageId(true) !== messageId
         || eventSourceKey !== lineageCheckpointKey(chatLineage(getContext().chat || []), messageId)) return;
     await processPendingBackfills(messageId);
+}
+
+async function refreshCurrentChatFromServer(reason = 'resume') {
+    const key = getChatKey();
+    if (key === 'no-chat' || !isCanonicalChatKey(key)) return false;
+    try {
+        await ensureChatStateLoaded(key);
+        if (getChatKey() !== key) return false;
+        renderDossier();
+        updateInjection();
+        return true;
+    } catch (error) {
+        console.warn(`[NPC State Delta] ${reason} freshness check failed safely; cached state will not be used for mutation until the server can be verified.`, error);
+        return false;
+    }
 }
 
 function scheduleLifecycleRetry(operationKey, label, task) {
@@ -5928,7 +6339,11 @@ async function init() {
     registerEvents();
     startInlineWatchdog();
     globalThis.addEventListener?.('pagehide', flushCurrentChatOnPageHide);
-    globalThis.document?.addEventListener?.('visibilitychange', () => { if (globalThis.document?.visibilityState === 'hidden') flushCurrentChatOnPageHide(); });
+    globalThis.addEventListener?.('pageshow', () => { void refreshCurrentChatFromServer('pageshow'); });
+    globalThis.document?.addEventListener?.('visibilitychange', () => {
+        if (globalThis.document?.visibilityState === 'hidden') flushCurrentChatOnPageHide();
+        else if (globalThis.document?.visibilityState === 'visible') void refreshCurrentChatFromServer('visibility-resume');
+    });
     scheduleSettingsMountRetries();
 
     let key = getChatKey();
@@ -5987,8 +6402,18 @@ window.NPCStateDelta = Object.freeze({
     cancelScan: () => { const key = getChatKey(); pendingAutoScans.delete(key); return cancelScanOperation(key, 'user cancelled'); },
     scannerRouting: scannerRoutingMetrics,
     processBackfills: processPendingBackfills,
-    scanDossier: value => { const npc = findNpcByIdOrName(value); return npc ? scanNpcDossier(npc.id) : false; },
-    refreshFromChat: value => { const npc = findNpcByIdOrName(value); return npc ? refreshNpcFromChat(npc.id) : false; },
+    scanDossier: async value => {
+        const key = getChatKey();
+        if (!await ensureFreshMutationBoundary('scan a dossier', key)) return false;
+        const npc = findNpcByIdOrName(value);
+        return npc ? scanNpcDossier(npc.id) : false;
+    },
+    refreshFromChat: async value => {
+        const key = getChatKey();
+        if (!await ensureFreshMutationBoundary('refresh a dossier', key)) return false;
+        const npc = findNpcByIdOrName(value);
+        return npc ? refreshNpcFromChat(npc.id) : false;
+    },
     portraitPrompts: value => { const npc = findNpcByIdOrName(value); return npc ? npcImagePromptPair(npc) : null; },
     generatePortraitUrl: async (value, overrides = {}) => {
         const npc = findNpcByIdOrName(value);
@@ -6040,9 +6465,31 @@ window.NPCStateDelta = Object.freeze({
             .map(event => structuredClone(event)),
         swipeState: hostSwipeState(),
         swipeSettlementPending: Boolean(swipeSettlementPending || swipeSettlementTimer),
+        hydratedRevision: hydratedRevision(getChatKey()),
+        latestObservedServerRevision: hydratedStateMeta.get(getChatKey())?.latestObservedServerRevision ?? null,
+        freshnessLastCheckedAt: hydratedStateMeta.get(getChatKey())?.lastCheckedAt || null,
+        freshnessEvents: freshnessEvents
+            .filter(event => event.chatKey === getChatKey())
+            .slice(-8)
+            .map(event => structuredClone(event)),
     }),
-    exportBytes: exportBundleBytes,
-    importBytes: importBundleBytes,
+    ensureFresh: async (options = {}) => {
+        const key = getChatKey();
+        if (!key || key === 'no-chat') return false;
+        if (!hydratedChatKeys.has(key)) await ensureChatStateLoaded(key);
+        else await ensureHydratedStateFresh(key, { reason: String(options?.reason || 'public-freshness-check'), notify: options?.notify === true });
+        return getChatKey() === key;
+    },
+    exportBytes: async () => {
+        const key = getChatKey();
+        if (!await ensureFreshMutationBoundary('export a dossier', key, { notify: false })) throw new Error('NPC State Delta canonical server dossier is unavailable.');
+        return exportBundleBytes();
+    },
+    importBytes: async bytes => {
+        const key = getChatKey();
+        if (!await ensureFreshMutationBoundary('import a dossier', key)) return false;
+        return importBundleBytes(bytes);
+    },
     reconcile: (options = {}) => reconcileCurrentBranch(options),
     scanMetrics: () => lastScanMetrics ? { ...lastScanMetrics } : null,
     diagnosticsSummary: () => diagnosticStore.summary(getChatKey()),
@@ -6065,16 +6512,31 @@ window.NPCStateDelta = Object.freeze({
             currentChatPending: Number(stateVersions.get(key) || 0) > Number(persistedVersions.get(key) || 0),
             writeInFlight: stateWritePromises.has(key),
             writeScheduled: stateWriteTimers.has(key),
+            hydratedRevision: hydratedRevision(key),
+            latestObservedServerRevision: hydratedStateMeta.get(key)?.latestObservedServerRevision ?? null,
+            recoverySnapshot: Boolean(undurableNpcStateSnapshot(key)),
         };
     },
-    updateAppearance: updateNpcAppearance,
-    updateLifeState: updateNpcLifeState,
+    updateAppearance: async (npcId, draft, options = {}) => {
+        const key = options.chatKey || getChatKey();
+        return runFreshMutation('edit appearance forms', key, () => updateNpcAppearance(npcId, draft, options));
+    },
+    updateLifeState: async (npcId, choice, options = {}) => {
+        const key = options.chatKey || getChatKey();
+        return runFreshMutation('edit life state', key, () => updateNpcLifeState(npcId, choice, options));
+    },
     setPortrait: setNpcPortrait,
-    setPortraitSeed: setNpcPortraitSeed,
-    removePortrait: removeNpcPortrait,
+    setPortraitSeed: async (npcId, seed, options = {}) => {
+        const key = options.chatKey || getChatKey();
+        return runFreshMutation('edit portrait seed', key, () => setNpcPortraitSeed(npcId, seed, options));
+    },
+    removePortrait: async (npcId, options = {}) => {
+        const key = options.chatKey || getChatKey();
+        return runFreshMutation('remove a portrait', key, () => removeNpcPortrait(npcId, options));
+    },
     flush: () => flushStateFile(),
     dataFile: () => structuredClone(getSettings().dataFiles?.[getChatKey()] || null),
-    archive: npcId => setNpcArchiveStateById(npcId, true, { reason: 'manual', confirmAction: false }),
-    restore: npcId => setNpcArchiveStateById(npcId, false, { confirmAction: false }),
-    deleteNpc: npcId => deleteNpcById(npcId, { confirmAction: false }),
+    archive: npcId => runFreshMutation('archive a dossier', getChatKey(), () => setNpcArchiveStateById(npcId, true, { reason: 'manual', confirmAction: false })),
+    restore: npcId => runFreshMutation('restore a dossier', getChatKey(), () => setNpcArchiveStateById(npcId, false, { confirmAction: false })),
+    deleteNpc: npcId => runFreshMutation('delete a dossier', getChatKey(), () => deleteNpcById(npcId, { confirmAction: false })),
 });
