@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.0.55 - 25 September 2026
+
+- Fix a cross-session data-loss path in the 1.0.54 server-authority model: a session that hydrated a chat before another session created its sidecar had no pointer, skipped freshness checks and wrote revision 1 blindly over the other session's canonical file. Unpointered guarded writes and freshness checks now probe the deterministic sidecar path; a live file is adopted (dirty local work is preserved as recovery-only) and a write without a revision token is refused. Replacing a retired tombstone for a reused chat name remains allowed.
+- Fix a false cross-session conflict after a lost acknowledgement: when an upload became durable but its response or post-upload verification failed, the retry saw its own revision and moved newer local work into recovery-only state. Guarded writes now stamp each upload with a revision/writer/timestamp nonce and adopt exactly that durable revision on retry; any other writer, revision or payload still conflicts.
+- Fix the dossier editor refusing its main Save ("opened on an older server revision") after the editor's own Appearance-form, Life-state or portrait commits advanced the durable revision. The guard now follows a working-copy adoption epoch that changes only when a loaded/server copy replaces the working copy, so another session's installed revision is still refused.
+- Correct DEVELOPMENT.md after the 1.0.53 migration removal: `npm test` runs three programs and no longer references the removed migration smoke.
+- Add storage and synthetic-runtime regressions for unpointered adoption, retired-tombstone replacement, lost-acknowledgement adoption versus a genuinely competing writer, and in-editor commits versus another session's revision. Persisted storage/bundle/branch formats, settings schema v30, model-facing prompt bytes, request topology, relationship scoring and RP injection are unchanged.
+
 ## 1.0.54 - 25 September 2026
 
 - Make the SillyTavern server-side NPC State sidecar the sole durable authority across desktop, mobile, tabs, and browser sessions that use the same backend. Hydrated browser state is an ephemeral working copy rather than proof of freshness.

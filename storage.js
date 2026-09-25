@@ -196,7 +196,7 @@ export function encodeStateFilePayload(chatKey, state, appVersion = '', metadata
         formatVersion: NPC_STATE_FILE_FORMAT_VERSION,
         appVersion: String(appVersion || ''),
         chatKey: String(chatKey || ''),
-        updatedAt: new Date().toISOString(),
+        updatedAt: String(metadata?.updatedAt || new Date().toISOString()),
         revision: Math.max(0, Math.trunc(Number(metadata?.revision) || 0)),
         writerId: String(metadata?.writerId || writerId),
         state: compactStateForFile(state),
@@ -305,16 +305,37 @@ async function remoteRevision(pointer, chatKey, fetchFn) {
         writerId: inspected.writerId,
         exists: inspected.exists,
         retired: inspected.retired,
+        updatedAtText: String(inspected.payload?.updatedAt || ''),
     };
 }
 
-async function guardedWriteOnce({ chatKey, state, appVersion, pointer, fetchFn, headers, assertCurrent = () => {} }) {
+// A pointer is only a cached route to the deterministic sidecar. A session that hydrated before
+// another session created the file has no pointer, so it must still probe the deterministic path
+// instead of treating "no pointer" as "no canonical file".
+export function probeNpcStateDataFilePointer(chatKey, pointer = null) {
+    if (pointer?.path) return pointer;
+    const name = pointer?.name || makeNpcStateDataFileName(chatKey);
+    return { name, path: `/user/files/${name}` };
+}
+
+async function guardedWriteOnce(job) {
+    const { chatKey, state, appVersion, pointer, fetchFn, headers, assertCurrent = () => {} } = job;
     return withWriterLock(chatKey, async () => {
         assertCurrent();
         const expectedRevision = Number.isFinite(Number(pointer?.revision)) ? Math.max(0, Math.trunc(Number(pointer.revision))) : null;
-        let current = { revision: expectedRevision ?? 0, writerId: '', exists: false };
-        if (pointer?.path) current = await remoteRevision(pointer, chatKey, fetchFn);
-        if (expectedRevision === null && current.exists && current.revision > 0) {
+        const probedDeterministicPath = !pointer?.path;
+        const current = await remoteRevision(probeNpcStateDataFilePointer(chatKey, pointer), chatKey, fetchFn);
+        // The previous attempt of this same job may have become durable although its response or
+        // post-upload verification was lost. Only the exact revision/writer/timestamp nonce of that
+        // upload proves ownership; the job's state is immutable, so adopting it is byte-equivalent.
+        const lost = job.lastUpload;
+        if (lost && current.exists && current.revision === lost.revision
+            && current.writerId === writerId && current.updatedAtText === lost.updatedAt) {
+            return { name: lost.name, path: lost.path || pointer?.path || probeNpcStateDataFilePointer(chatKey, pointer).path, updatedAt: Date.now(), revision: lost.revision, writerId };
+        }
+        // An unpointered writer may replace a retired tombstone (for example a reused chat name), but
+        // never a live canonical sidecar that another session created after this one hydrated.
+        if (expectedRevision === null && current.exists && current.revision > 0 && !(probedDeterministicPath && current.retired)) {
             const error = new Error(`NPC State Delta sidecar already has revision ${current.revision}, but this tab has no matching revision token. Reload the chat before saving again.`);
             error.code = 'NPC_STATE_WRITE_CONFLICT';
             error.expectedRevision = null;
@@ -343,9 +364,12 @@ async function guardedWriteOnce({ chatKey, state, appVersion, pointer, fetchFn, 
         }
         const revision = Math.max(current.revision, expectedRevision ?? 0) + 1;
         const name = pointer?.name || makeNpcStateDataFileName(chatKey);
-        const json = encodeStateFilePayload(chatKey, state, appVersion, { revision, writerId });
+        const updatedAt = new Date().toISOString();
+        const json = encodeStateFilePayload(chatKey, state, appVersion, { revision, writerId, updatedAt });
         assertCurrent();
+        job.lastUpload = { name, path: '', revision, updatedAt };
         const result = await uploadPayload({ name, json, fetchFn, headers });
+        job.lastUpload.path = String(result.path || '');
         const verified = await remoteRevision({ path: result.path }, chatKey, fetchFn);
         if (!verified.exists || verified.revision !== revision || (verified.writerId && verified.writerId !== writerId)) {
             const error = new Error(`NPC State Delta sidecar write verification lost ownership at revision ${revision}; another session wrote the canonical file concurrently.`);

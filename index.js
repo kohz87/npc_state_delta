@@ -122,6 +122,7 @@ import {
     inspectNpcStateDataFile,
     makeNpcStateDataFileName,
     makeNpcStateRecoveryFileName,
+    probeNpcStateDataFilePointer,
     preserveUndurableNpcStateSnapshot,
     readNpcStateDataFile,
     retireNpcStateDataFile,
@@ -216,6 +217,7 @@ const STATE_WRITE_DELAY = 120;
 const chatStateCache = new Map();
 const hydratedChatKeys = new Set();
 const hydratedStateMeta = new Map();
+const workingCopyAdoptions = new Map();
 const freshnessChecks = new Map();
 const freshnessEvents = [];
 const FRESHNESS_EVENT_LIMIT = 24;
@@ -830,9 +832,20 @@ function setChatState(key, state, { markLoaded = false } = {}) {
     const normalized = normalizeChatState(state);
     chatStateCache.set(key, normalized);
     touchChatCache(key);
-    if (markLoaded) { hydratedChatKeys.add(key); hydrationErrors.delete(key); }
+    if (markLoaded) {
+        hydratedChatKeys.add(key);
+        hydrationErrors.delete(key);
+        workingCopyAdoptions.set(key, workingCopyAdoption(key) + 1);
+    }
     stateVersions.set(key, Number(stateVersions.get(key) || 0) + 1);
     return normalized;
+}
+
+// Counts how often a loaded/server copy replaced this session's working copy. Unlike the durable
+// revision it does not advance for this session's own saves, so an open editor stays valid across
+// its own Appearance/Life-state/portrait commits but not across another session's installed state.
+function workingCopyAdoption(key = getChatKey()) {
+    return Number(workingCopyAdoptions.get(String(key || '')) || 0);
 }
 
 function hydratedRevision(key = getChatKey()) {
@@ -934,8 +947,9 @@ function installCanonicalServerState(key, pointer, inspected, { reason = 'freshn
     return installed;
 }
 
-async function reconcileCrossSessionWriteConflict(key, error, snapshot, pointer) {
+async function reconcileCrossSessionWriteConflict(key, error, snapshot, knownPointer) {
     const normalized = String(key || '');
+    const pointer = probeNpcStateDataFilePointer(normalized, knownPointer);
     const inspected = await inspectNpcStateDataFile(pointer, { expectedChatKey: normalized });
     cancelPendingNpcStateWrite(normalized);
     preserveUndurableNpcStateSnapshot({
@@ -979,15 +993,24 @@ async function ensureHydratedStateFresh(key = getChatKey(), { reason = 'boundary
         }
         if (!hydratedChatKeys.has(normalized)) return getChatState(normalized);
         const settings = getSettings();
-        const pointer = settings.dataFiles?.[normalized] || null;
-        if (!pointer?.path) {
+        const knownPointer = settings.dataFiles?.[normalized] || null;
+        const unpointered = !knownPointer?.path;
+        if (unpointered && settings.sidecarTombstones?.[normalized]) {
             updateHydratedStateMeta(normalized, 0, { lastCheckedAt: Date.now(), latestObservedServerRevision: 0 });
             return getChatState(normalized);
         }
+        // A session that hydrated before another session created this chat's sidecar has no pointer.
+        // Probe the deterministic path so that session adopts the canonical file instead of later
+        // treating its empty working copy as authoritative.
+        const pointer = unpointered ? probeNpcStateDataFilePointer(normalized, knownPointer) : knownPointer;
 
         const localRevision = hydratedRevision(normalized);
         const localWriterId = String(hydratedStateMeta.get(normalized)?.writerId || pointer?.writerId || '');
         const inspected = await inspectNpcStateDataFile(pointer, { expectedChatKey: normalized });
+        if (unpointered && !inspected.exists) {
+            updateHydratedStateMeta(normalized, 0, { lastCheckedAt: Date.now(), latestObservedServerRevision: 0 });
+            return getChatState(normalized);
+        }
         const writerFork = Boolean(inspected.exists && inspected.revision === localRevision
             && localWriterId && inspected.writerId && inspected.writerId !== localWriterId);
         updateHydratedStateMeta(normalized, localRevision, {
@@ -4587,7 +4610,7 @@ function openNpcEditor(npcId) {
     if (!npc) return null;
     closeNpcEditor();
     activeEditorChatKey = originChatKey;
-    activeEditorBaseRevision = hydratedRevision(originChatKey);
+    activeEditorBaseRevision = workingCopyAdoption(originChatKey);
     const ctx = getContext();
     const Popup = ctx.Popup;
     const POPUP_TYPE = ctx.POPUP_TYPE;
@@ -5002,7 +5025,7 @@ async function saveNpcEditor(npcId, { close = true, silent = false } = {}) {
         globalThis.toastr?.warning?.('NPC State Delta: this editor belongs to a different or unloaded chat. Reopen the dossier in the active chat.');
         return false;
     }
-    if (activeEditorBaseRevision !== null && Number(activeEditorBaseRevision) !== hydratedRevision(originChatKey)) {
+    if (activeEditorBaseRevision !== null && Number(activeEditorBaseRevision) !== workingCopyAdoption(originChatKey)) {
         globalThis.toastr?.warning?.('NPC State Delta: this editor was opened on an older server revision. Your typed draft is still open, but it was not applied. Review the newly loaded dossier and reopen the editor before saving.');
         return false;
     }
