@@ -1818,6 +1818,37 @@ export function groundedAppearanceCorrection(existing, incoming, context = '', e
     return durableRefinementCandidateGrounded('appearance', current, candidate, context, evidenceItems, binding);
 }
 
+// The npcs row carries no evidence quotes, and NPC-scoped story text keeps only sentences that name
+// the NPC, so an outfit change narrated in the next sentence ("A moment later she returns in a
+// sundress") had no support in routine scans. Supply that story text itself: up to two sentences
+// that directly follow a sentence naming only this NPC, stopping at any sentence naming another NPC.
+function presentationContinuationEvidence(context = '', npc = null, otherLabels = []) {
+    const source = String(context || '').trim();
+    const targetLabels = developmentBindingLabels({ npc });
+    if (!source || !targetLabels.length) return [];
+    const others = (Array.isArray(otherLabels) ? otherLabels : []).map(normalizeName).filter(Boolean)
+        .filter(label => !targetLabels.includes(label));
+    const evidence = [];
+    let remaining = 0;
+    for (const segment of developmentContextSegments(source)) {
+        const targetHere = episodeContainsLabel(segment, targetLabels);
+        const otherHere = others.length > 0 && episodeContainsLabel(segment, others);
+        if (targetHere) {
+            remaining = otherHere ? 0 : 2;
+            continue;
+        }
+        if (otherHere) {
+            remaining = 0;
+            continue;
+        }
+        if (remaining > 0) {
+            evidence.push(segment);
+            remaining -= 1;
+        }
+    }
+    return evidence;
+}
+
 function groundedAppearanceChange(existing, incoming, reason, context = '', evidenceItems = [], binding = null) {
     const why = cleanText(reason, 500);
     const support = durableRefinementSupportText(context, evidenceItems, binding);
@@ -3813,7 +3844,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
                     value,
                     incoming.appearanceReason,
                     lifecycleOptions.developmentContext,
-                    [],
+                    presentationContinuationEvidence(lifecycleOptions.developmentContext, existing, lifecycleOptions.presentationOtherLabels),
                     incomingBinding,
                 );
                 if (!directPresentationChange
@@ -4668,7 +4699,7 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
                 value,
                 incoming[reasonField],
                 options.developmentContext,
-                fieldEvidence,
+                [...fieldEvidence, ...presentationContinuationEvidence(options.developmentContext, npc, options.otherLabels)],
                 binding,
             );
             if (!directAppearanceChange && !evolutionReady(field)) return;
@@ -5071,7 +5102,11 @@ export function mergeScanResult(state, scanResult, options = {}) {
         if (existingIndex < 0) existingIndex = findInterimIdentityPromotionIndex(next.npcs, incoming);
         if (existingIndex >= 0) {
             const previousName = next.npcs[existingIndex].name;
-            next.npcs[existingIndex] = applyIncoming(next.npcs[existingIndex], incoming, turn, relationshipCaps, sourceMessageId, lifecycleOptions);
+            const presentationOtherLabels = next.npcs
+                .filter((npc, index) => index !== existingIndex && npc)
+                .flatMap(npc => [npc.name, ...(Array.isArray(npc.aliases) ? npc.aliases : [])])
+                .filter(Boolean);
+            next.npcs[existingIndex] = applyIncoming(next.npcs[existingIndex], incoming, turn, relationshipCaps, sourceMessageId, { ...lifecycleOptions, presentationOtherLabels });
             report.updated.push(next.npcs[existingIndex].id);
             if (normalizeName(previousName) !== normalizeName(next.npcs[existingIndex].name)) {
                 report.renamed.push({ id: next.npcs[existingIndex].id, from: previousName, to: next.npcs[existingIndex].name });
