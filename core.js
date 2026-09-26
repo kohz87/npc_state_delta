@@ -5,6 +5,7 @@ export * from './calendar.js';
 import * as continuity from './continuity-core.js';
 import * as mechanics from './core-mechanics.js';
 import { isTerminalNpcDeath } from './terminal-lifecycle.js';
+import { resolveNpcAppearance } from './appearance.js';
 import { removeNpcFromSocialGraph, purgeNpcStructuredReferences } from './social.js';
 import {
     currentCalendarDate,
@@ -96,6 +97,42 @@ function birthdayUpdateRow(ordinaryRow, profileRow) {
     if (hasBirthdayUpdate(ordinaryRow) || !hasBirthdayUpdate(profileRow)) return ordinaryRow;
     const birthday = Object.fromEntries(BIRTHDAY_UPDATE_KEYS.filter(key => key in profileRow).map(key => [key, profileRow[key]]));
     return { ...(ordinaryRow || {}), ...birthday };
+}
+
+// Deterministic per-field "last changed at turn" markers for the dossier. They are presentation
+// metadata on the canonical record (rolled back with it), never scanner input or prompt content.
+const CHANGE_TRACKED_FIELDS = Object.freeze([
+    'mood', 'location', 'goal', 'status', 'homeBase', 'age', 'apparentAge', 'lifeState',
+    'personality', 'speech', 'behaviorProfile', 'mannerisms', 'appearance',
+    'relationship', 'relationshipSummary', 'background', 'keyRelationships', 'memories', 'birthDate',
+]);
+
+export function normalizeFieldChanges(value) {
+    const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const out = {};
+    for (const field of CHANGE_TRACKED_FIELDS) {
+        const turn = Number(source[field]);
+        if (Number.isInteger(turn) && turn >= 0) out[field] = turn;
+    }
+    return out;
+}
+
+function trackedFieldValue(npc, field) {
+    if (field === 'appearance') return resolveNpcAppearance(npc);
+    if (field === 'relationship') {
+        const rel = npc?.relationship || {};
+        return ['trust', 'affection', 'desire', 'tension'].map(axis => Math.round(Number(rel[axis]) || 0));
+    }
+    return npc?.[field] ?? '';
+}
+
+function stampFieldChanges(before, after, turn) {
+    const changes = normalizeFieldChanges(after?.fieldChanges ?? before?.fieldChanges);
+    if (!before || !Number.isInteger(turn) || turn < 0) return { ...after, fieldChanges: changes };
+    for (const field of CHANGE_TRACKED_FIELDS) {
+        if (JSON.stringify(trackedFieldValue(before, field)) !== JSON.stringify(trackedFieldValue(after, field))) changes[field] = turn;
+    }
+    return { ...after, fieldChanges: changes };
 }
 
 function matchingPrevious(npc, source = []) {
@@ -1330,6 +1367,7 @@ export function applyStaleNpcLifecycle(state = {}, options = {}) {
 
 export function normalizeNpcRecord(raw = {}) {
     const npc = withAppearanceDerivedApparentAge(normalizeNpcBirthday(continuity.normalizeNpcRecord(raw)), raw.appearance);
+    npc.fieldChanges = normalizeFieldChanges(raw.fieldChanges);
     for (const field of Object.keys(PROFILE_DEVELOPMENT_FIELDS)) {
         const config = PROFILE_DEVELOPMENT_FIELDS[field];
         const development = profileDevelopmentForNpc(field, npc);
@@ -1412,7 +1450,9 @@ export function mergeScanResult(state, scanResult, options = {}) {
             recordSecondaryProfileDiagnostics(result.report, beforeDiagnosticNpc, npc, durableUpdate, continuityOptions, diagnosticNpcRegistry);
             recordBirthdayDiagnostic(result.report, beforeDiagnosticNpc, npc, ordinaryUpdate, options, calendar, referenceDate);
         }
-        return withAppearanceDerivedApparentAge(npc, ordinaryUpdate?.appearance || rawNpc.appearance);
+        const finalNpc = withAppearanceDerivedApparentAge(npc, ordinaryUpdate?.appearance || rawNpc.appearance);
+        const changeBase = rawSources[0] ? normalizeNpcRecord(rawSources[0]) : null;
+        return stampFieldChanges(changeBase, finalNpc, Math.trunc(Number(result.state?.turn ?? sourceState?.turn)));
     });
     if (reference.extracted) {
         result.report = {

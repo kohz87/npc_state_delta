@@ -390,6 +390,7 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
                 ...(foreignActivity ? {
                     lastSeenTurn: old.lastSeenTurn,
                     lastWorldActiveTurn: old.lastWorldActiveTurn,
+                    fieldChanges: old.fieldChanges || {},
                 } : {}),
             });
             const accepted = isTerminalNpcDeath(old) ? protectTerminalNpc(old, merged) : merged;
@@ -417,6 +418,8 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
             // invented or copied across chats.
             npc.lastSeenTurn = targetTurn;
             npc.lastWorldActiveTurn = targetTurn;
+            // Dossier change markers are turn-stamped on the source chat's clock.
+            npc.fieldChanges = {};
         }
 
         if (!npc.archived && activeCount >= cap) {

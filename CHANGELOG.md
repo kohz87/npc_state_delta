@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Show what the latest update changed. Every scan, Refresh, backfill and dossier import stamps each changed dossier field (mood, location, goal, condition, home base, age, life state, profile fields, appearance, relationship, Player Dynamic, background, bonds, memories, birthday) with the turn it changed. The dossier header reads "Updated this turn · N fields changed: …" and those fields carry a "• T71" marker. The markers are bounded presentation metadata on the canonical record: they roll back with it, never enter scanner prompts or RP injection, and foreign-chat imports never carry source-turn markers.
+- Flag portraits that no longer match. Attaching or generating a portrait records a fingerprint of the resolved appearance and the current form; when the dossier appearance later moves on, the portrait shows "Appearance changed since portrait" (or "Portrait shows the <form> form" after a form switch). Portraits attached before this release never show a guessed badge.
 - Dossier layout keeps the portrait as the focal element and surfaces the player relationship: a Player relationship card now leads the dossier with the four axis bars plus the last relationship change (impact, signed per-axis deltas, turn and the recorded reason), and Player Dynamic lists earlier changes instead of repeating the bars. Section jump tabs stay pinned at the top of the dossier, the hero portrait opens a full-size view (expand button or click, Escape/Close to dismiss), phones give the portrait up to about 60% of the screen height, and deceased cast members follow the living as compact dimmed tiles after a divider. Presentation only: no canonical state, persistence, scanner or prompt change.
 
 ## 1.0.56 - 26 September 2026

@@ -1,5 +1,5 @@
 /* NPC State Delta dossier surface: bounded presentation of canonical state. */
-import { normalizeAppearanceModel, resolveNpcAppearance } from './appearance.js';
+import { appearanceFingerprint, normalizeAppearanceModel, resolveNpcAppearance } from './appearance.js';
 import { formatBirthDate } from './birthday.js';
 
 const ROOT_ID = 'npc_state_delta_dossier_root';
@@ -44,6 +44,32 @@ function relationshipChangeProjection(change = {}) {
         reason: plain(source.reason),
         turn: Number.isFinite(Number(source.turn)) ? Number(source.turn) : null,
     };
+}
+
+const FIELD_CHANGE_LABELS = Object.freeze({
+    mood: 'Mood', location: 'Location', goal: 'Goal', status: 'Condition', homeBase: 'Home Base', age: 'Age',
+    apparentAge: 'Apparent age', lifeState: 'Life state', personality: 'Personality', speech: 'Speech',
+    behaviorProfile: 'Behavioral Levers', mannerisms: 'Mannerisms', appearance: 'Appearance', relationship: 'Relationship',
+    relationshipSummary: 'Player Dynamic', background: 'Background', keyRelationships: 'Bonds', memories: 'Memories', birthDate: 'Birthday',
+});
+
+function fieldChangesProjection(value) {
+    const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const turns = Object.fromEntries(Object.keys(FIELD_CHANGE_LABELS)
+        .map(field => [field, Number(source[field])])
+        .filter(([, turn]) => Number.isInteger(turn) && turn >= 0));
+    const latestTurn = Object.values(turns).reduce((max, turn) => Math.max(max, turn), -1);
+    return {
+        latestTurn: latestTurn >= 0 ? latestTurn : null,
+        latest: latestTurn >= 0 ? Object.keys(turns).filter(field => turns[field] === latestTurn) : [],
+    };
+}
+
+function portraitAppearanceChanged(npc = {}) {
+    const recorded = plain(npc?.portrait?.appearanceFingerprint);
+    if (!recorded || !plain(npc?.portrait?.dataUrl || npc?.portrait?.url || npc?.portrait?.src)) return false;
+    const current = appearanceFingerprint(npc);
+    return Boolean(current) && current !== recorded;
 }
 
 function portraitSource(npc = {}, portraitAssets = {}) {
@@ -111,6 +137,9 @@ export function dossierDetailProjection(npc = {}, portraitAssets = {}) {
         keyRelationships: stringList(npc?.keyRelationships, 12),
         relationshipSummary: plain(npc?.relationshipSummary),
         lastRelationshipChange: relationshipChangeProjection(npc?.lastRelationshipChange),
+        fieldChanges: fieldChangesProjection(npc?.fieldChanges),
+        portraitAppearanceChanged: portraitAppearanceChanged(npc),
+        portraitForm: plain(npc?.portrait?.appearanceForm),
         recentRelationshipChanges: (Array.isArray(npc?.relationshipEventHistory) ? npc.relationshipEventHistory : [])
             .slice(-4)
             .reverse()
@@ -236,14 +265,28 @@ function identityLine(npc) {
     ].filter(Boolean).join(' · ') || 'Identity details not established';
 }
 
-function currentCard(label, value, fallback = 'Unknown') {
-    return `<div class="delta-current-card"><b>${escapeHtml(label)}</b><span>${escapeHtml(plain(value, fallback))}</span></div>`;
+function changedMark(npc, field) {
+    const changes = npc?.fieldChanges;
+    if (!changes?.latest?.includes(field)) return '';
+    return ` <em class="delta-changed-mark" title="Changed at turn ${escapeHtml(changes.latestTurn)}">• T${escapeHtml(changes.latestTurn)}</em>`;
+}
+
+function currentCard(label, value, fallback = 'Unknown', mark = '') {
+    return `<div class="delta-current-card${mark ? ' delta-changed' : ''}"><b>${escapeHtml(label)}${mark}</b><span>${escapeHtml(plain(value, fallback))}</span></div>`;
+}
+
+function changeSummaryHtml(npc, currentTurn) {
+    const changes = npc?.fieldChanges;
+    if (!changes || changes.latestTurn === null) return '';
+    const when = Number.isInteger(currentTurn) && currentTurn === changes.latestTurn ? 'this turn' : `turn ${changes.latestTurn}`;
+    const labels = changes.latest.map(field => FIELD_CHANGE_LABELS[field]).filter(Boolean);
+    return `<p class="delta-change-line"><span class="delta-changed-dot" aria-hidden="true">•</span> Updated ${escapeHtml(when)} · ${labels.length} field${labels.length === 1 ? '' : 's'} changed${labels.length ? `: ${escapeHtml(labels.join(', '))}` : ''}</p>`;
 }
 
 function birthdayCard(npc) {
     const source = npc.birthdaySource === 'generated' ? 'Deterministic fallback'
         : npc.birthdaySource === 'established' ? 'Story established' : '';
-    return `<div class="delta-current-card delta-continuity-birthday-card"><b>Birthday</b><span>${escapeHtml(npc.birthday || 'Unknown')}</span>${source ? `<small class="delta-continuity-source">${escapeHtml(source)}</small>` : ''}</div>`;
+    return `<div class="delta-current-card delta-continuity-birthday-card"><b>Birthday${changedMark(npc, 'birthDate')}</b><span>${escapeHtml(npc.birthday || 'Unknown')}</span>${source ? `<small class="delta-continuity-source">${escapeHtml(source)}</small>` : ''}</div>`;
 }
 
 export function appearanceFormsHtml(npc) {
@@ -704,7 +747,7 @@ class DeltaDossierUi {
         const signature = selectedVisible && selected
             ? JSON.stringify({ ...selected, portrait: undefined, updatedAt: undefined }) : `empty:${this.filter}:${this.query}`;
         const heroSignature = selectedVisible && selected
-            ? JSON.stringify([selected.id, selected.name, subtitle, selected.bucket, selected.statusLabel, selected.portrait]) : signature;
+            ? JSON.stringify([selected.id, selected.name, subtitle, selected.bucket, selected.statusLabel, selected.portrait, selected.portraitAppearanceChanged, selected.appearanceModel.currentForm]) : signature;
         const documentChanged = force || signature !== this.lastDetailSignature;
         const heroChanged = force || heroSignature !== this.lastHeroSignature;
         if (!documentChanged && !heroChanged) return;
@@ -721,6 +764,7 @@ class DeltaDossierUi {
         if (heroChanged) this.root.querySelector('.delta-lightbox')?.remove();
         if (heroChanged) hero.innerHTML = `
             <div class="delta-hero-media">${portraitHtml(selected, 'delta-hero-portrait')}
+                ${selected.portraitAppearanceChanged ? `<span class="delta-portrait-stale" title="The dossier appearance changed after this portrait was attached. Generate or upload a new portrait to match.">${escapeHtml(selected.portraitForm && selected.portraitForm !== selected.appearanceModel.currentForm ? `Portrait shows the ${selected.portraitForm} form` : 'Appearance changed since portrait')}</span>` : ''}
                 ${selected.portrait ? `<button type="button" class="delta-portrait-expand" data-npc-id="${escapeHtml(selected.id)}" aria-label="View ${escapeHtml(selected.name)} portrait full size" title="View full size">⤢</button>` : ''}
                 <div class="delta-hero-caption">
                     <span class="delta-status delta-status-${escapeHtml(selected.bucket)}">${escapeHtml(selected.statusLabel)}</span>
@@ -732,12 +776,12 @@ class DeltaDossierUi {
 
         if (documentChanged) reconcileDocumentSections(documentPane, `
             <div class="delta-document-head">
-                <div><span class="delta-kicker">CURRENT DOSSIER</span><h2>${escapeHtml(selected.name)}</h2><p class="delta-muted">${escapeHtml(subtitle)}</p></div>
+                <div><span class="delta-kicker">CURRENT DOSSIER</span><h2>${escapeHtml(selected.name)}</h2><p class="delta-muted">${escapeHtml(subtitle)}</p>${changeSummaryHtml(selected, this.projection?.turn)}</div>
                 <button type="button" class="delta-btn delta-edit" data-npc-id="${escapeHtml(selected.id)}">Edit</button>
             </div>
             ${sectionNavHtml()}
             <section class="delta-section delta-player-card" data-delta-section="player">
-                <h3>Player relationship</h3>
+                <h3>Player relationship${changedMark(selected, 'relationship')}</h3>
                 <div class="delta-rel-grid">
                     ${RELATIONSHIP_AXES.map(([axis, label]) => relationshipAxis(label, selected.relationship[axis], axis)).join('')}
                 </div>
@@ -747,39 +791,39 @@ class DeltaDossierUi {
                 <h3>Identity continuity</h3>
                 <div class="delta-current-grid">
                     ${birthdayCard(selected)}
-                    ${currentCard('Home Base / Usual Location', selected.homeBase)}
+                    ${currentCard('Home Base / Usual Location', selected.homeBase, 'Unknown', changedMark(selected, 'homeBase'))}
                 </div>
             </section>
             <section class="delta-section" data-delta-section="current">
                 <h3>Current</h3>
                 <div class="delta-current-grid">
-                    ${currentCard('Mood', selected.mood)}
-                    ${currentCard('Location', selected.location)}
-                    ${currentCard('Goal', selected.goal)}
-                    ${currentCard('Condition / Activity', selected.status, selected.bucket === 'dead' ? 'Deceased' : 'Stable / unknown')}
+                    ${currentCard('Mood', selected.mood, 'Unknown', changedMark(selected, 'mood'))}
+                    ${currentCard('Location', selected.location, 'Unknown', changedMark(selected, 'location'))}
+                    ${currentCard('Goal', selected.goal, 'Unknown', changedMark(selected, 'goal'))}
+                    ${currentCard('Condition / Activity', selected.status, selected.bucket === 'dead' ? 'Deceased' : 'Stable / unknown', changedMark(selected, 'status'))}
                 </div>
             </section>
             <section class="delta-section" data-delta-section="profile">
                 <h3>Profile</h3>
                 <div class="delta-prose-grid">
-                    <div><h4>Personality</h4>${proseHtml(selected.personality)}</div>
-                    <div><h4>Speech</h4>${proseHtml(selected.speech)}</div>
-                    <div class="delta-wide"><h4>Behavioral Levers</h4>${listHtml(selected.behaviorProfile, 'No behavioral levers established yet.')}</div>
-                    <div class="delta-wide"><h4>Appearance</h4>${appearanceFormsHtml(selected)}</div>
-                    <div class="delta-wide"><h4>Mannerisms</h4>${listHtml(selected.mannerisms)}</div>
+                    <div><h4>Personality${changedMark(selected, 'personality')}</h4>${proseHtml(selected.personality)}</div>
+                    <div><h4>Speech${changedMark(selected, 'speech')}</h4>${proseHtml(selected.speech)}</div>
+                    <div class="delta-wide"><h4>Behavioral Levers${changedMark(selected, 'behaviorProfile')}</h4>${listHtml(selected.behaviorProfile, 'No behavioral levers established yet.')}</div>
+                    <div class="delta-wide"><h4>Appearance${changedMark(selected, 'appearance')}</h4>${appearanceFormsHtml(selected)}</div>
+                    <div class="delta-wide"><h4>Mannerisms${changedMark(selected, 'mannerisms')}</h4>${listHtml(selected.mannerisms)}</div>
                 </div>
             </section>
             <section class="delta-section" data-delta-section="dynamic">
-                <h3>Player Dynamic</h3>
+                <h3>Player Dynamic${changedMark(selected, 'relationshipSummary')}</h3>
                 ${proseHtml(selected.relationshipSummary, 'No player-specific dynamic established yet.')}
                 ${relationshipHistoryHtml(selected.recentRelationshipChanges, selected.lastRelationshipChange)}
             </section>
             <section class="delta-section delta-two-column" data-delta-section="bonds">
-                <div><h3>Important bonds</h3>${listHtml(selected.keyRelationships, 'No key relationships established yet.')}</div>
-                <div><h3>Important memories</h3>${listHtml(selected.memories, 'No important memories established yet.')}</div>
+                <div><h3>Important bonds${changedMark(selected, 'keyRelationships')}</h3>${listHtml(selected.keyRelationships, 'No key relationships established yet.')}</div>
+                <div><h3>Important memories${changedMark(selected, 'memories')}</h3>${listHtml(selected.memories, 'No important memories established yet.')}</div>
             </section>
             <section class="delta-section" data-delta-section="history">
-                <h3>Background / History</h3>${proseHtml(selected.background, 'No background established yet.')}
+                <h3>Background / History${changedMark(selected, 'background')}</h3>${proseHtml(selected.background, 'No background established yet.')}
             </section>`, documentPane.dataset.npcId !== selected.id);
         documentPane.dataset.npcId = selected.id;
         documentPane.scrollTop = documentScroll;
@@ -1000,6 +1044,11 @@ const STYLES = `
 #${ROOT_ID} .delta-rel-delta-progress { color:var(--delta-muted); font-weight:400; }
 #${ROOT_ID} .delta-rel-history { margin-top:12px; padding-top:10px; border-top:1px solid rgba(218,193,148,.12); }
 #${ROOT_ID} .delta-rel-history li .delta-rel-impact { margin-right:4px; }
+#${ROOT_ID} .delta-change-line { margin:6px 0 0 !important; font-size:.78rem; color:var(--delta-muted); }
+#${ROOT_ID} .delta-changed-dot, #${ROOT_ID} .delta-changed-mark { color:#9fd8b5; }
+#${ROOT_ID} .delta-changed-mark { margin-left:4px; font-style:normal; font-size:.66rem; letter-spacing:.02em; text-transform:none; font-weight:600; }
+#${ROOT_ID} .delta-current-card.delta-changed { border-color:rgba(113,190,145,.32); }
+#${ROOT_ID} .delta-portrait-stale { position:absolute; z-index:3; top:12px; left:12px; max-width:calc(100% - 70px); padding:4px 9px; border:1px solid rgba(216,188,120,.55); border-radius:999px; color:#ffe2a8; background:rgba(5,6,8,.62); backdrop-filter:blur(3px); font-size:.72rem; }
 #${ROOT_ID} .delta-portrait-expand { position:absolute; z-index:3; top:10px; right:10px; display:grid; place-items:center; width:34px; height:34px; padding:0; border:1px solid rgba(255,255,255,.22); border-radius:9px; color:#fff4d7; background:rgba(5,6,8,.52); backdrop-filter:blur(3px); font-size:1.05rem; cursor:pointer; opacity:.78; }
 #${ROOT_ID} .delta-portrait-expand:hover { opacity:1; background:rgba(5,6,8,.72); }
 #${ROOT_ID} .delta-hero-media img.delta-hero-portrait { cursor:zoom-in; }
