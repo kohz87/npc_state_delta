@@ -2227,7 +2227,7 @@ function isSafeBehaviorProfileRefinement(existing, incoming) {
         || durableSemanticSimilarity(behaviorProfileBody(oldText), behaviorProfileBody(newText)) >= 0.55;
 }
 
-function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evidenceItems = [], binding = null } = {}) {
+function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evidenceItems = [], binding = null, personality = '' } = {}) {
     const current = normalizeBehaviorProfile(existing);
     const updates = normalizeBehaviorProfile(incoming);
     if (!updates.length) return current;
@@ -2235,7 +2235,13 @@ function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evi
     // protected identity/morality direction across the whole proposal before category-by-
     // category replacement so relabeling cannot bypass the existing atomic safety gate.
     if (behaviorProfileRefinementConflict(current, updates)) return current;
+    // A lever that restates a stored non-lever entry adds no new meaning: that accepted entry
+    // grounds it, even when the scene that established it is outside the current window.
+    evidenceItems = [...(Array.isArray(evidenceItems) ? evidenceItems : []), ...current.filter(entry => !isBehaviorLever(entry))];
+    const identity = cleanText(personality, DURABLE_PROFILE_LIMITS.personality);
+    const scopedSupport = String(context || '').trim() ? durableRefinementSupportText(context, [], binding) : '';
     const next = [];
+    let droppedNew = false;
     for (const entry of updates) {
         const key = behaviorProfileKey(entry);
         const family = behaviorProfileFamily(entry);
@@ -2258,11 +2264,35 @@ function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evi
             return existingPolarity && existingPolarity !== incomingPolarity;
         });
         if (conflicts) return current;
-        if (!durableRefinementCandidateGrounded('behaviorProfile', '', behaviorProfileBody(entry), context, evidenceItems, binding)) return current;
+        // A new lever category uses first-profile grounding (story, evidence or accepted
+        // Personality) and is judged on its own: one unsupported addition is dropped instead of
+        // discarding every grounded lever in the proposal.
+        const body = behaviorProfileBody(entry);
+        const grounded = durableRefinementCandidateGrounded('behaviorProfile', '', body, context, evidenceItems, binding)
+            || (!behaviorProfileTargetSpecific(entry) && (
+                Boolean(identity && (durableSemanticSimilarity(body, identity) >= 0.34 || durableSemanticSimilarity(entry, identity) >= 0.34))
+                || Boolean(scopedSupport && durableSeedGrounded(body, scopedSupport))
+                || durableEvidenceGroundsValue(body, evidenceItems)));
+        if (!grounded) {
+            droppedNew = true;
+            continue;
+        }
         next.push(entry);
     }
     // Omitted old rules are retired because the scanner contract says refine is a FULL field.
     // Longitudinal support remains in profileEvidence rather than being copied back into the list.
+    // When an unsupported addition was dropped the proposal is partial, so established levers it
+    // omitted stay; stored non-lever entries still retire.
+    if (droppedNew) {
+        if (!next.length) return current;
+        for (const old of current) {
+            if (!isBehaviorLever(old) || next.length >= BEHAVIOR_PROFILE_LIMIT) continue;
+            const oldKey = behaviorProfileKey(old);
+            const oldFamily = behaviorProfileFamily(old);
+            if (next.some(entry => behaviorProfileKey(entry) === oldKey || (oldFamily && behaviorProfileFamily(entry) === oldFamily))) continue;
+            next.push(old);
+        }
+    }
     return normalizeBehaviorProfile(next);
 }
 
@@ -4019,6 +4049,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
         } else if (incoming.behaviorProfileState === 'refine' && incoming.behaviorProfileProvided) {
             merged.behaviorProfile = mergeBehaviorProfileRefinements(existing.behaviorProfile, incoming.behaviorProfile, {
                 context: lifecycleOptions.developmentContext,
+                personality: merged.personality || existing.personality,
                 evidenceItems: incoming.profileEvidence?.behaviorProfile || [],
             });
         } else {
@@ -4808,6 +4839,7 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
         } else if (incoming.behaviorProfileState === 'refine') {
             const proposedRefined = mergeBehaviorProfileRefinements(current, incoming.behaviorProfile, {
                 context: options.developmentContext,
+                personality: npc.personality,
                 evidenceItems: [...(beforeEvidence.behaviorProfile || []), ...(incomingEvidence.behaviorProfile || [])],
                 binding: {
                     npc,
@@ -5808,6 +5840,12 @@ export function buildProfileRefreshPrompt({
         lockedProfileFields: locked,
     };
     const memoryRubric = compactMemoryRubric(memoryCriteria);
+    // Stored entries that predate the lever check are named only for this target, after the
+    // shared prefix, so the model can replace them with a FULL refine instead of omitting the field.
+    const nonLevers = locked.includes('behaviorProfile') ? [] : existing.behaviorProfile.filter(entry => !isBehaviorLever(entry));
+    const nonLeverHint = nonLevers.length
+        ? `\nStored behaviorProfile entries ${JSON.stringify(nonLevers)} are not levers: return behaviorProfileState:"refine" with the FULL lever list; restate any real response tendency as a labelled lever; habits=>mannerisms.`
+        : '';
     return `NPC State Delta TARGETED REFRESH FROM CHAT. Reconcile exactly one EXISTING NPC dossier against the supplied recent-story window. This is a deliberate user action, so inspect the whole window carefully instead of requiring a current-turn admission signal.
 
 Player: ${userName}
@@ -5839,7 +5877,7 @@ Recent story window (EVIDENCE ONLY; preserve [mN] order):
 ${String(transcript || '').trim()}
 
 Target NPC: ${existing.name} (${existing.id})
-Existing dossier (current authority): ${JSON.stringify(existing)}
+Existing dossier (current authority): ${JSON.stringify(existing)}${nonLeverHint}
 Use the exact id/name above in returned rows; reconcile only this target.`;
 }
 
