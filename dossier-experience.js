@@ -603,6 +603,13 @@ function installStyles() {
 #npc_state_delta_dossier_root .delta-cast-copy b{font-size:.76rem!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff7e3!important;text-shadow:0 1px 2px rgba(0,0,0,.9)}
 #npc_state_delta_dossier_root .delta-cast-copy small{font-size:.61rem!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:rgba(255,255,255,.72)!important}
 #npc_state_delta_dossier_root .delta-cast-copy .delta-status{font-size:.57rem!important;padding:1px 4px!important;margin-top:2px;max-width:100%;overflow:hidden;text-overflow:ellipsis;background:rgba(15,20,20,.74)!important;backdrop-filter:blur(3px)}
+/* Living cast leads the rail; the dead follow as compact, dimmed tiles after a divider. */
+#npc_state_delta_dossier_root .delta-cast-card[data-bucket="dead"]{flex-basis:78px!important;width:78px!important;min-width:78px!important;opacity:.62}
+#npc_state_delta_dossier_root .delta-cast-card[data-bucket="dead"]:hover,#npc_state_delta_dossier_root .delta-cast-card[data-bucket="dead"].selected{opacity:1}
+#npc_state_delta_dossier_root .delta-cast-card[data-bucket="dead"] .delta-cast-portrait{filter:grayscale(.8)}
+#npc_state_delta_dossier_root .delta-cast-card[data-bucket="dead"] .delta-cast-portrait.delta-portrait-placeholder span{font-size:1.6rem!important}
+#npc_state_delta_dossier_root .delta-cast-card[data-bucket="dead"] .delta-cast-copy small{display:none!important}
+#npc_state_delta_dossier_root .delta-cast-card.delta-cast-first-dead{margin-left:14px!important;box-shadow:-9px 0 0 -8px rgba(218,193,148,.45)}
 #npc_state_delta_dossier_root .delta-rail-arrow{appearance:none;border:0;background:transparent;color:var(--delta-muted);font-size:1.9rem;line-height:1;cursor:pointer;border-radius:7px;padding:0}
 #npc_state_delta_dossier_root .delta-rail-arrow:hover{color:var(--delta-accent-soft);background:rgba(255,255,255,.05)}
 
@@ -675,6 +682,7 @@ function installStyles() {
   #npc_state_delta_dossier_root .delta-library-heading,#npc_state_delta_dossier_root .delta-search-label,#npc_state_delta_dossier_root .delta-filters{grid-column:1!important;justify-self:stretch!important}
   #npc_state_delta_dossier_root .delta-filters{overflow-x:auto}
   #npc_state_delta_dossier_root .delta-cast-card{flex-basis:106px!important;width:106px!important;min-width:106px!important;height:126px!important}
+  #npc_state_delta_dossier_root .delta-cast-card[data-bucket="dead"]{flex-basis:70px!important;width:70px!important;min-width:70px!important}
   #npc_state_delta_dossier_root .delta-dossier-actions-primary{grid-template-columns:1fr 1fr auto}
   #npc_state_delta_dossier_root .delta-dossier-more{min-width:92px}
   .npc-state-delta-editor-popup{--delta-editor-height:100dvh;width:100vw!important;height:100dvh!important;max-width:none!important;max-height:none!important;border-radius:0!important}

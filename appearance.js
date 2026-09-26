@@ -428,6 +428,19 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
     return next;
 }
 
+// Compact identity of the resolved current presentation. A portrait records it when attached so
+// the dossier can show that the described appearance moved on after the image was made.
+export function appearanceFingerprint(npc = {}) {
+    const text = normalizeName(resolveNpcAppearance(npc));
+    if (!text) return '';
+    let hash = 0x811c9dc5;
+    for (let index = 0; index < text.length; index += 1) {
+        hash ^= text.charCodeAt(index);
+        hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return `a1:${hash.toString(36)}:${text.length}`;
+}
+
 export function appearanceDraftRecord(npc = {}, draft = {}, { lockAppearance = false } = {}) {
     const forms = parseAppearanceFormsText(draft.formsText ?? formatAppearanceForms(npc?.appearanceForms));
     const selected = clean(draft.currentForm);

@@ -1,5 +1,5 @@
 /* NPC State Delta dossier surface: bounded presentation of canonical state. */
-import { normalizeAppearanceModel, resolveNpcAppearance } from './appearance.js';
+import { appearanceFingerprint, normalizeAppearanceModel, resolveNpcAppearance } from './appearance.js';
 import { formatBirthDate } from './birthday.js';
 
 const ROOT_ID = 'npc_state_delta_dossier_root';
@@ -31,6 +31,45 @@ function stringList(value, limit = 12) {
 
 function relationshipValue(value) {
     return Math.max(-100, Math.min(100, Math.round(Number(value) || 0)));
+}
+
+const RELATIONSHIP_AXES = Object.freeze([['trust', 'Trust'], ['affection', 'Affection'], ['desire', 'Desire'], ['tension', 'Tension']]);
+
+function relationshipChangeProjection(change = {}) {
+    const source = change && typeof change === 'object' ? change : {};
+    const delta = source.delta && typeof source.delta === 'object' ? source.delta : {};
+    return {
+        impact: plain(source.impact, 'none').toLocaleLowerCase(),
+        delta: Object.fromEntries(RELATIONSHIP_AXES.map(([axis]) => [axis, Math.round(Number(delta[axis]) || 0)])),
+        reason: plain(source.reason),
+        turn: Number.isFinite(Number(source.turn)) ? Number(source.turn) : null,
+    };
+}
+
+const FIELD_CHANGE_LABELS = Object.freeze({
+    mood: 'Mood', location: 'Location', goal: 'Goal', status: 'Condition', homeBase: 'Home Base', age: 'Age',
+    apparentAge: 'Apparent age', lifeState: 'Life state', personality: 'Personality', speech: 'Speech',
+    behaviorProfile: 'Behavioral Levers', mannerisms: 'Mannerisms', appearance: 'Appearance', relationship: 'Relationship',
+    relationshipSummary: 'Player Dynamic', background: 'Background', keyRelationships: 'Bonds', memories: 'Memories', birthDate: 'Birthday',
+});
+
+function fieldChangesProjection(value) {
+    const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const turns = Object.fromEntries(Object.keys(FIELD_CHANGE_LABELS)
+        .map(field => [field, Number(source[field])])
+        .filter(([, turn]) => Number.isInteger(turn) && turn >= 0));
+    const latestTurn = Object.values(turns).reduce((max, turn) => Math.max(max, turn), -1);
+    return {
+        latestTurn: latestTurn >= 0 ? latestTurn : null,
+        latest: latestTurn >= 0 ? Object.keys(turns).filter(field => turns[field] === latestTurn) : [],
+    };
+}
+
+function portraitAppearanceChanged(npc = {}) {
+    const recorded = plain(npc?.portrait?.appearanceFingerprint);
+    if (!recorded || !plain(npc?.portrait?.dataUrl || npc?.portrait?.url || npc?.portrait?.src)) return false;
+    const current = appearanceFingerprint(npc);
+    return Boolean(current) && current !== recorded;
 }
 
 function portraitSource(npc = {}, portraitAssets = {}) {
@@ -97,6 +136,19 @@ export function dossierDetailProjection(npc = {}, portraitAssets = {}) {
         memories: stringList(npc?.memories, 8),
         keyRelationships: stringList(npc?.keyRelationships, 12),
         relationshipSummary: plain(npc?.relationshipSummary),
+        lastRelationshipChange: relationshipChangeProjection(npc?.lastRelationshipChange),
+        fieldChanges: fieldChangesProjection(npc?.fieldChanges),
+        portraitAppearanceChanged: portraitAppearanceChanged(npc),
+        portraitForm: plain(npc?.portrait?.appearanceForm),
+        recentRelationshipChanges: (Array.isArray(npc?.relationshipEventHistory) ? npc.relationshipEventHistory : [])
+            .slice(-4)
+            .reverse()
+            .map(event => ({
+                impact: plain(event?.impact, 'ordinary').toLocaleLowerCase(),
+                reason: plain(event?.reason),
+                turn: Number.isFinite(Number(event?.turn)) ? Number(event.turn) : null,
+            }))
+            .filter(event => event.reason),
         relationship: {
             trust: relationshipValue(rel.trust),
             affection: relationshipValue(rel.affection),
@@ -213,14 +265,28 @@ function identityLine(npc) {
     ].filter(Boolean).join(' · ') || 'Identity details not established';
 }
 
-function currentCard(label, value, fallback = 'Unknown') {
-    return `<div class="delta-current-card"><b>${escapeHtml(label)}</b><span>${escapeHtml(plain(value, fallback))}</span></div>`;
+function changedMark(npc, field) {
+    const changes = npc?.fieldChanges;
+    if (!changes?.latest?.includes(field)) return '';
+    return ` <em class="delta-changed-mark" title="Changed at turn ${escapeHtml(changes.latestTurn)}">• T${escapeHtml(changes.latestTurn)}</em>`;
+}
+
+function currentCard(label, value, fallback = 'Unknown', mark = '') {
+    return `<div class="delta-current-card${mark ? ' delta-changed' : ''}"><b>${escapeHtml(label)}${mark}</b><span>${escapeHtml(plain(value, fallback))}</span></div>`;
+}
+
+function changeSummaryHtml(npc, currentTurn) {
+    const changes = npc?.fieldChanges;
+    if (!changes || changes.latestTurn === null) return '';
+    const when = Number.isInteger(currentTurn) && currentTurn === changes.latestTurn ? 'this turn' : `turn ${changes.latestTurn}`;
+    const labels = changes.latest.map(field => FIELD_CHANGE_LABELS[field]).filter(Boolean);
+    return `<p class="delta-change-line"><span class="delta-changed-dot" aria-hidden="true">•</span> Updated ${escapeHtml(when)} · ${labels.length} field${labels.length === 1 ? '' : 's'} changed${labels.length ? `: ${escapeHtml(labels.join(', '))}` : ''}</p>`;
 }
 
 function birthdayCard(npc) {
     const source = npc.birthdaySource === 'generated' ? 'Deterministic fallback'
         : npc.birthdaySource === 'established' ? 'Story established' : '';
-    return `<div class="delta-current-card delta-continuity-birthday-card"><b>Birthday</b><span>${escapeHtml(npc.birthday || 'Unknown')}</span>${source ? `<small class="delta-continuity-source">${escapeHtml(source)}</small>` : ''}</div>`;
+    return `<div class="delta-current-card delta-continuity-birthday-card"><b>Birthday${changedMark(npc, 'birthDate')}</b><span>${escapeHtml(npc.birthday || 'Unknown')}</span>${source ? `<small class="delta-continuity-source">${escapeHtml(source)}</small>` : ''}</div>`;
 }
 
 export function appearanceFormsHtml(npc) {
@@ -269,6 +335,47 @@ function relationshipAxis(label, value, axis) {
         <div class="delta-rel-label"><span>${escapeHtml(label)}</span><b>${score > 0 ? '+' : ''}${score}</b></div>
         <div class="delta-rel-track" aria-label="${escapeHtml(label)} ${score}"><span class="delta-rel-zero"></span><i style="left:${position}%"></i></div>
     </div>`;
+}
+
+function impactLabel(impact) {
+    const value = plain(impact, 'none');
+    if (value === 'manual') return 'Manual edit';
+    return value.charAt(0).toLocaleUpperCase() + value.slice(1);
+}
+
+export function lastRelationshipChangeHtml(change) {
+    if (!change || change.impact === 'none' || (!change.reason && change.impact !== 'manual')) {
+        return `<div class="delta-rel-last"><h4>Last relationship change</h4><p class="delta-muted">No relationship change recorded yet.</p></div>`;
+    }
+    const deltas = RELATIONSHIP_AXES
+        .filter(([axis]) => change.delta[axis] !== 0)
+        .map(([axis, label]) => {
+            const value = change.delta[axis];
+            return `<span class="delta-rel-delta delta-rel-delta-${value > 0 ? 'up' : 'down'} delta-rel-${escapeHtml(axis)}">${escapeHtml(label)} ${value > 0 ? '+' : ''}${value}</span>`;
+        })
+        .join('');
+    return `<div class="delta-rel-last">
+        <div class="delta-rel-last-head"><h4>Last relationship change</h4><span class="delta-rel-impact delta-rel-impact-${escapeHtml(change.impact)}">${escapeHtml(impactLabel(change.impact))}</span>${change.turn !== null ? `<small>Turn ${escapeHtml(change.turn)}</small>` : ''}</div>
+        <div class="delta-rel-deltas">${deltas || '<span class="delta-rel-delta delta-rel-delta-progress">Progress only · no point change</span>'}</div>
+        ${change.reason ? `<p>${escapeHtml(change.reason)}</p>` : ''}
+    </div>`;
+}
+
+function relationshipHistoryHtml(history, latest) {
+    const rows = (Array.isArray(history) ? history : [])
+        .filter((event, index) => !(index === 0 && latest?.reason && event.reason === latest.reason))
+        .slice(0, 3);
+    if (!rows.length) return '';
+    return `<div class="delta-rel-history"><h4>Earlier changes</h4><ul class="delta-list">${rows.map(event => `<li><span class="delta-rel-impact delta-rel-impact-${escapeHtml(event.impact)}">${escapeHtml(impactLabel(event.impact))}</span>${event.turn !== null ? ` <small class="delta-muted">Turn ${escapeHtml(event.turn)}</small>` : ''} ${escapeHtml(event.reason)}</li>`).join('')}</ul></div>`;
+}
+
+const DOSSIER_SECTIONS = Object.freeze([
+    ['player', 'Player'], ['identity', 'Identity'], ['current', 'Current'], ['profile', 'Profile'],
+    ['dynamic', 'Dynamic'], ['bonds', 'Bonds & memories'], ['history', 'History'],
+]);
+
+function sectionNavHtml() {
+    return `<nav class="delta-section-nav" aria-label="Dossier sections">${DOSSIER_SECTIONS.map(([key, label]) => `<button type="button" class="delta-section-jump" data-delta-jump="${key}">${escapeHtml(label)}</button>`).join('')}</nav>`;
 }
 
 function countsFor(rows) {
@@ -389,6 +496,14 @@ class DeltaDossierUi {
                 this.renderFromProjection({ forceRail: true, forceDetail: true });
                 return;
             }
+            if (event.target.closest('.delta-lightbox-close') || event.target.classList?.contains('delta-lightbox')) return void this.closeLightbox();
+            if (event.target.closest('.delta-portrait-expand') || event.target.closest('.delta-hero-media img.delta-hero-portrait')) return void this.openLightbox();
+            const jump = event.target.closest('.delta-section-jump')?.dataset?.deltaJump;
+            if (jump) {
+                const target = this.root.querySelector(`.delta-document [data-delta-section="${CSS.escape(jump)}"]`);
+                target?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+                return;
+            }
             const edit = event.target.closest('.delta-edit');
             if (edit) this.openEditor(edit.dataset.npcId || this.selectedNpcId);
         });
@@ -440,7 +555,36 @@ class DeltaDossierUi {
         });
     }
 
+    // Full-size portrait view: presentation only, reusing the already-projected portrait source.
+    openLightbox() {
+        const selected = this.projection?.npcs?.find(npc => npc.id === this.selectedNpcId);
+        const panel = this.root?.querySelector('.delta-panel');
+        if (!selected?.portrait || !panel) return;
+        this.closeLightbox();
+        const overlay = document.createElement('div');
+        overlay.className = 'delta-lightbox';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-label', `${selected.name} portrait`);
+        overlay.innerHTML = `<img src="${escapeHtml(selected.portrait)}" alt="${escapeHtml(selected.name)} portrait"><button type="button" class="delta-btn delta-lightbox-close">Close</button>`;
+        panel.appendChild(overlay);
+        overlay.querySelector('.delta-lightbox-close')?.focus?.({ preventScroll: true });
+    }
+
+    closeLightbox() {
+        const overlay = this.root?.querySelector('.delta-lightbox');
+        if (!overlay) return false;
+        overlay.remove();
+        this.root.querySelector('.delta-portrait-expand')?.focus?.({ preventScroll: true });
+        return true;
+    }
+
     onDocumentKeydown(event) {
+        if (this.panelOpen && event.key === 'Escape' && !event.defaultPrevented && this.root?.querySelector('.delta-lightbox')) {
+            event.preventDefault();
+            this.closeLightbox();
+            return;
+        }
         if (!this.panelOpen || event.key !== 'Escape' || event.defaultPrevented
             || document.getElementById('npc_state_delta_tools_overlay')) return;
         const uiStatus = this.safeUiStatus();
@@ -461,6 +605,7 @@ class DeltaDossierUi {
     }
 
     close({ restoreFocus = true } = {}) {
+        this.root?.querySelector('.delta-lightbox')?.remove();
         if (!this.root) return;
         this.panelOpen = false;
         this.root.querySelector('.delta-panel').hidden = true;
@@ -580,10 +725,11 @@ class DeltaDossierUi {
             list.innerHTML = `<div class="delta-no-results"><b>No dossiers match this view.</b><span>Change the search or filter to bring the cast back.</span></div>`;
             return;
         }
-        list.innerHTML = filtered.map(npc => {
+        list.innerHTML = filtered.map((npc, index) => {
             const meta = [npc.species, npc.gender, npc.role].filter(Boolean).join(' · ') || 'Details pending';
             const selected = npc.id === this.selectedNpcId;
-            return `<button type="button" class="delta-cast-card${selected ? ' selected' : ''}" role="option" aria-selected="${selected}" data-npc-id="${escapeHtml(npc.id)}">
+            const firstDead = npc.bucket === 'dead' && index > 0 && filtered[index - 1]?.bucket !== 'dead';
+            return `<button type="button" class="delta-cast-card${selected ? ' selected' : ''}${firstDead ? ' delta-cast-first-dead' : ''}" role="option" aria-selected="${selected}" data-npc-id="${escapeHtml(npc.id)}" data-bucket="${escapeHtml(npc.bucket)}" data-has-portrait="${npc.portrait ? 'true' : 'false'}">
                 ${portraitHtml(npc, 'delta-cast-portrait', { alt: false })}
                 <span class="delta-cast-copy"><b>${escapeHtml(npc.name)}</b><small>${escapeHtml(meta)}</small><em class="delta-status delta-status-${escapeHtml(npc.bucket)}">${escapeHtml(npc.statusLabel)}</em></span>
             </button>`;
@@ -601,7 +747,7 @@ class DeltaDossierUi {
         const signature = selectedVisible && selected
             ? JSON.stringify({ ...selected, portrait: undefined, updatedAt: undefined }) : `empty:${this.filter}:${this.query}`;
         const heroSignature = selectedVisible && selected
-            ? JSON.stringify([selected.id, selected.name, subtitle, selected.bucket, selected.statusLabel, selected.portrait]) : signature;
+            ? JSON.stringify([selected.id, selected.name, subtitle, selected.bucket, selected.statusLabel, selected.portrait, selected.portraitAppearanceChanged, selected.appearanceModel.currentForm]) : signature;
         const documentChanged = force || signature !== this.lastDetailSignature;
         const heroChanged = force || heroSignature !== this.lastHeroSignature;
         if (!documentChanged && !heroChanged) return;
@@ -615,8 +761,11 @@ class DeltaDossierUi {
             return;
         }
 
+        if (heroChanged) this.root.querySelector('.delta-lightbox')?.remove();
         if (heroChanged) hero.innerHTML = `
             <div class="delta-hero-media">${portraitHtml(selected, 'delta-hero-portrait')}
+                ${selected.portraitAppearanceChanged ? `<span class="delta-portrait-stale" title="The dossier appearance changed after this portrait was attached. Generate or upload a new portrait to match.">${escapeHtml(selected.portraitForm && selected.portraitForm !== selected.appearanceModel.currentForm ? `Portrait shows the ${selected.portraitForm} form` : 'Appearance changed since portrait')}</span>` : ''}
+                ${selected.portrait ? `<button type="button" class="delta-portrait-expand" data-npc-id="${escapeHtml(selected.id)}" aria-label="View ${escapeHtml(selected.name)} portrait full size" title="View full size">⤢</button>` : ''}
                 <div class="delta-hero-caption">
                     <span class="delta-status delta-status-${escapeHtml(selected.bucket)}">${escapeHtml(selected.statusLabel)}</span>
                     <h2>${escapeHtml(selected.name)}</h2>
@@ -627,51 +776,54 @@ class DeltaDossierUi {
 
         if (documentChanged) reconcileDocumentSections(documentPane, `
             <div class="delta-document-head">
-                <div><span class="delta-kicker">CURRENT DOSSIER</span><h2>${escapeHtml(selected.name)}</h2><p class="delta-muted">${escapeHtml(subtitle)}</p></div>
+                <div><span class="delta-kicker">CURRENT DOSSIER</span><h2>${escapeHtml(selected.name)}</h2><p class="delta-muted">${escapeHtml(subtitle)}</p>${changeSummaryHtml(selected, this.projection?.turn)}</div>
                 <button type="button" class="delta-btn delta-edit" data-npc-id="${escapeHtml(selected.id)}">Edit</button>
             </div>
-            <section class="delta-section">
+            ${sectionNavHtml()}
+            <section class="delta-section delta-player-card" data-delta-section="player">
+                <h3>Player relationship${changedMark(selected, 'relationship')}</h3>
+                <div class="delta-rel-grid">
+                    ${RELATIONSHIP_AXES.map(([axis, label]) => relationshipAxis(label, selected.relationship[axis], axis)).join('')}
+                </div>
+                ${lastRelationshipChangeHtml(selected.lastRelationshipChange)}
+            </section>
+            <section class="delta-section" data-delta-section="identity">
                 <h3>Identity continuity</h3>
                 <div class="delta-current-grid">
                     ${birthdayCard(selected)}
-                    ${currentCard('Home Base / Usual Location', selected.homeBase)}
+                    ${currentCard('Home Base / Usual Location', selected.homeBase, 'Unknown', changedMark(selected, 'homeBase'))}
                 </div>
             </section>
-            <section class="delta-section">
+            <section class="delta-section" data-delta-section="current">
                 <h3>Current</h3>
                 <div class="delta-current-grid">
-                    ${currentCard('Mood', selected.mood)}
-                    ${currentCard('Location', selected.location)}
-                    ${currentCard('Goal', selected.goal)}
-                    ${currentCard('Condition / Activity', selected.status, selected.bucket === 'dead' ? 'Deceased' : 'Stable / unknown')}
+                    ${currentCard('Mood', selected.mood, 'Unknown', changedMark(selected, 'mood'))}
+                    ${currentCard('Location', selected.location, 'Unknown', changedMark(selected, 'location'))}
+                    ${currentCard('Goal', selected.goal, 'Unknown', changedMark(selected, 'goal'))}
+                    ${currentCard('Condition / Activity', selected.status, selected.bucket === 'dead' ? 'Deceased' : 'Stable / unknown', changedMark(selected, 'status'))}
                 </div>
             </section>
-            <section class="delta-section">
+            <section class="delta-section" data-delta-section="profile">
                 <h3>Profile</h3>
                 <div class="delta-prose-grid">
-                    <div><h4>Personality</h4>${proseHtml(selected.personality)}</div>
-                    <div><h4>Speech</h4>${proseHtml(selected.speech)}</div>
-                    <div class="delta-wide"><h4>Behavioral Levers</h4>${listHtml(selected.behaviorProfile, 'No behavioral levers established yet.')}</div>
-                    <div class="delta-wide"><h4>Appearance</h4>${appearanceFormsHtml(selected)}</div>
-                    <div class="delta-wide"><h4>Mannerisms</h4>${listHtml(selected.mannerisms)}</div>
+                    <div><h4>Personality${changedMark(selected, 'personality')}</h4>${proseHtml(selected.personality)}</div>
+                    <div><h4>Speech${changedMark(selected, 'speech')}</h4>${proseHtml(selected.speech)}</div>
+                    <div class="delta-wide"><h4>Behavioral Levers${changedMark(selected, 'behaviorProfile')}</h4>${listHtml(selected.behaviorProfile, 'No behavioral levers established yet.')}</div>
+                    <div class="delta-wide"><h4>Appearance${changedMark(selected, 'appearance')}</h4>${appearanceFormsHtml(selected)}</div>
+                    <div class="delta-wide"><h4>Mannerisms${changedMark(selected, 'mannerisms')}</h4>${listHtml(selected.mannerisms)}</div>
                 </div>
             </section>
-            <section class="delta-section">
-                <h3>Relationship with player</h3>
-                <div class="delta-rel-grid">
-                    ${relationshipAxis('Trust', selected.relationship.trust, 'trust')}
-                    ${relationshipAxis('Affection', selected.relationship.affection, 'affection')}
-                    ${relationshipAxis('Desire', selected.relationship.desire, 'desire')}
-                    ${relationshipAxis('Tension', selected.relationship.tension, 'tension')}
-                </div>
-                <div class="delta-summary"><h4>Player Dynamic</h4>${proseHtml(selected.relationshipSummary, 'No player-specific dynamic established yet.')}</div>
+            <section class="delta-section" data-delta-section="dynamic">
+                <h3>Player Dynamic${changedMark(selected, 'relationshipSummary')}</h3>
+                ${proseHtml(selected.relationshipSummary, 'No player-specific dynamic established yet.')}
+                ${relationshipHistoryHtml(selected.recentRelationshipChanges, selected.lastRelationshipChange)}
             </section>
-            <section class="delta-section delta-two-column">
-                <div><h3>Important bonds</h3>${listHtml(selected.keyRelationships, 'No key relationships established yet.')}</div>
-                <div><h3>Important memories</h3>${listHtml(selected.memories, 'No important memories established yet.')}</div>
+            <section class="delta-section delta-two-column" data-delta-section="bonds">
+                <div><h3>Important bonds${changedMark(selected, 'keyRelationships')}</h3>${listHtml(selected.keyRelationships, 'No key relationships established yet.')}</div>
+                <div><h3>Important memories${changedMark(selected, 'memories')}</h3>${listHtml(selected.memories, 'No important memories established yet.')}</div>
             </section>
-            <section class="delta-section">
-                <h3>Background / History</h3>${proseHtml(selected.background, 'No background established yet.')}
+            <section class="delta-section" data-delta-section="history">
+                <h3>Background / History${changedMark(selected, 'background')}</h3>${proseHtml(selected.background, 'No background established yet.')}
             </section>`, documentPane.dataset.npcId !== selected.id);
         documentPane.dataset.npcId = selected.id;
         documentPane.scrollTop = documentScroll;
@@ -872,6 +1024,37 @@ const STYLES = `
 #${ROOT_ID} .delta-empty p, #${ROOT_ID} .delta-document-empty p { margin:0; max-width:54ch; }
 #${ROOT_ID} .delta-empty-mark { display:grid; place-items:center; width:64px; height:64px; border:1px solid var(--delta-line-strong); border-radius:18px; color:var(--delta-accent); font:700 2rem/1 Georgia,serif; background:rgba(216,188,120,.07); }
 #${ROOT_ID} .delta-error-copy { color:var(--delta-danger); }
+#${ROOT_ID} .delta-section-nav { position:sticky; top:0; z-index:3; display:flex; gap:6px; overflow-x:auto; margin:-4px 0 12px; padding:8px 0; background:var(--delta-bg); scrollbar-width:none; }
+#${ROOT_ID} .delta-section-nav::-webkit-scrollbar { display:none; }
+#${ROOT_ID} .delta-section-jump { appearance:none; flex:0 0 auto; min-height:30px; padding:4px 10px; border:1px solid rgba(218,193,148,.18); border-radius:999px; color:var(--delta-muted); background:rgba(255,255,255,.03); font-size:.74rem; cursor:pointer; }
+#${ROOT_ID} .delta-section-jump:hover { color:var(--delta-accent-soft); border-color:var(--delta-line-strong); background:rgba(216,188,120,.09); }
+#${ROOT_ID} [data-delta-section] { scroll-margin-top:52px; }
+#${ROOT_ID} .delta-player-card { border-color:rgba(218,193,148,.26); background:linear-gradient(180deg,rgba(216,188,120,.07),var(--delta-surface) 60%); }
+#${ROOT_ID} .delta-rel-last { margin-top:12px; padding-top:11px; border-top:1px solid rgba(218,193,148,.12); }
+#${ROOT_ID} .delta-rel-last-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; margin-bottom:7px; }
+#${ROOT_ID} .delta-rel-last-head h4 { margin:0; }
+#${ROOT_ID} .delta-rel-last-head small { color:var(--delta-muted); font-size:.72rem; }
+#${ROOT_ID} .delta-rel-impact { display:inline-flex; padding:1px 7px; border:1px solid rgba(255,255,255,.14); border-radius:999px; font-size:.68rem; letter-spacing:.04em; text-transform:uppercase; color:var(--delta-muted); }
+#${ROOT_ID} .delta-rel-impact-meaningful { color:#d7e6ff; border-color:rgba(138,163,200,.4); }
+#${ROOT_ID} .delta-rel-impact-major, #${ROOT_ID} .delta-rel-impact-extreme { color:#ffe2a8; border-color:rgba(216,188,120,.5); }
+#${ROOT_ID} .delta-rel-deltas { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:7px; }
+#${ROOT_ID} .delta-rel-delta { display:inline-flex; padding:2px 8px; border-radius:6px; font-size:.8rem; font-weight:700; background:rgba(0,0,0,.2); border:1px solid rgba(255,255,255,.08); }
+#${ROOT_ID} .delta-rel-delta-up { color:#bfe8cf; border-color:rgba(113,190,145,.3); }
+#${ROOT_ID} .delta-rel-delta-down { color:#f1bcbc; border-color:rgba(207,118,126,.32); }
+#${ROOT_ID} .delta-rel-delta-progress { color:var(--delta-muted); font-weight:400; }
+#${ROOT_ID} .delta-rel-history { margin-top:12px; padding-top:10px; border-top:1px solid rgba(218,193,148,.12); }
+#${ROOT_ID} .delta-rel-history li .delta-rel-impact { margin-right:4px; }
+#${ROOT_ID} .delta-change-line { margin:6px 0 0 !important; font-size:.78rem; color:var(--delta-muted); }
+#${ROOT_ID} .delta-changed-dot, #${ROOT_ID} .delta-changed-mark { color:#9fd8b5; }
+#${ROOT_ID} .delta-changed-mark { margin-left:4px; font-style:normal; font-size:.66rem; letter-spacing:.02em; text-transform:none; font-weight:600; }
+#${ROOT_ID} .delta-current-card.delta-changed { border-color:rgba(113,190,145,.32); }
+#${ROOT_ID} .delta-portrait-stale { position:absolute; z-index:3; top:12px; left:12px; max-width:calc(100% - 70px); padding:4px 9px; border:1px solid rgba(216,188,120,.55); border-radius:999px; color:#ffe2a8; background:rgba(5,6,8,.62); backdrop-filter:blur(3px); font-size:.72rem; }
+#${ROOT_ID} .delta-portrait-expand { position:absolute; z-index:3; top:10px; right:10px; display:grid; place-items:center; width:34px; height:34px; padding:0; border:1px solid rgba(255,255,255,.22); border-radius:9px; color:#fff4d7; background:rgba(5,6,8,.52); backdrop-filter:blur(3px); font-size:1.05rem; cursor:pointer; opacity:.78; }
+#${ROOT_ID} .delta-portrait-expand:hover { opacity:1; background:rgba(5,6,8,.72); }
+#${ROOT_ID} .delta-hero-media img.delta-hero-portrait { cursor:zoom-in; }
+#${ROOT_ID} .delta-lightbox { position:absolute; inset:0; z-index:40; display:grid; grid-template-rows:minmax(0,1fr); place-items:center; padding:18px 18px 64px; background:rgba(3,4,6,.93); cursor:zoom-out; }
+#${ROOT_ID} .delta-lightbox img { min-height:0; max-width:100%; max-height:100%; object-fit:contain; border-radius:8px; box-shadow:0 18px 60px rgba(0,0,0,.6); cursor:default; }
+#${ROOT_ID} .delta-lightbox-close { position:absolute; left:50%; bottom:16px; transform:translateX(-50%); }
 #${SETTINGS_ID}.npc-state-delta-stage1-settings-target { outline:2px solid #d8bc78; outline-offset:4px; }
 @media (max-width: 900px) {
   #${ROOT_ID} .delta-panel { width:100vw; height:100dvh; border-radius:0; border-left:0; border-right:0; }
@@ -885,7 +1068,7 @@ const STYLES = `
   #${ROOT_ID} .delta-brand .delta-kicker, #${ROOT_ID} .delta-chat-state { display:none; }
   #${ROOT_ID} .delta-topbar { padding-left:10px; }
   #${ROOT_ID} .delta-spread { display:block; overflow:auto; }
-  #${ROOT_ID} .delta-hero { min-height:330px; border-right:0; border-bottom:1px solid rgba(218,193,148,.16); }
+  #${ROOT_ID} .delta-hero { min-height:max(330px,min(62dvh,540px)); border-right:0; border-bottom:1px solid rgba(218,193,148,.16); }
   #${ROOT_ID} .delta-document { overflow:visible; }
   #${ROOT_ID} .delta-current-grid, #${ROOT_ID} .delta-prose-grid, #${ROOT_ID} .delta-two-column, #${ROOT_ID} .delta-rel-grid { grid-template-columns:1fr; }
   #${ROOT_ID} .delta-prose-grid .delta-wide { grid-column:auto; }

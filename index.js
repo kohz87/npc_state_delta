@@ -81,6 +81,7 @@ import {
     normalizePortraitPromptFormat,
     buildNpcPortraitPrompts,
     appearanceDraftRecord,
+    appearanceFingerprint,
 } from './core.js';
 import { applyNpcBirthdayUpdate, normalizeBirthDate } from './birthday.js';
 import {
@@ -5245,6 +5246,9 @@ async function setNpcPortrait(npcId, file, { chatKey, isCurrent = () => true, ge
         const live = getChatState(chatKey).npcs.find(item => item.id === npc.id);
         if (!live) return false;
         if (generatedFrom) portrait.generatedFrom = String(generatedFrom);
+        const fingerprint = appearanceFingerprint(live);
+        if (fingerprint) portrait.appearanceFingerprint = fingerprint;
+        portrait.appearanceForm = String(live.currentForm || '').slice(0, 120);
         live.portrait = portrait;
         getChatState(chatKey).portraitAssets[live.id] = structuredClone(portrait);
         live.updatedAt = Date.now();
