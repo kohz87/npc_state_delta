@@ -72,14 +72,42 @@ test('a refine that replaces stored habit entries with grounded new levers is ac
     assert.ok(levers.some(entry => /^Threat Sensitivity:/.test(entry)));
 });
 
-test('an ungrounded new lever still rejects the whole refine, so stored entries are kept', () => {
+test('an ungrounded new lever is dropped on its own; established levers a partial refine omits stay', () => {
     const disposition = 'Disposition: reserved - practical and guarded with strangers';
-    const result = scan(landlady([disposition, ...HABITS]), {
+    const threat = 'Threat Sensitivity: high - assesses strangers before extending trust';
+    const result = scan(landlady([disposition, threat, ...HABITS]), {
         behaviorProfileState: 'refine',
-        behaviorProfile: [disposition, 'Threat Sensitivity: low - reckless gambler who courts danger for thrills'],
+        behaviorProfile: [
+            disposition,
+            'Conflict/Assertiveness: low - avoids open confrontation, answers challenges with cold politeness',
+            'Analytical Style: reckless - gambles on long odds for the thrill of it',
+        ],
         evidence: { behaviorProfile: ['avoids open confrontation, answering challenges with cold politeness'] },
     });
-    assert.deepEqual(result.state.npcs[0].behaviorProfile, [disposition, ...HABITS]);
+    const levers = result.state.npcs[0].behaviorProfile;
+    assert.ok(levers.some(entry => /^Conflict\/Assertiveness:/.test(entry)), 'grounded addition kept');
+    assert.ok(!levers.some(entry => /reckless/.test(entry)), 'ungrounded addition dropped');
+    assert.ok(levers.includes(threat), 'omitted established lever survives a partial refine');
+    assert.ok(!levers.some(entry => /curfews|boarders/.test(entry)), 'stored habits still retire');
+});
+
+test('an existing list gains the same new levers that seeding an empty list would accept', () => {
+    const disposition = 'Disposition: reserved - practical and guarded';
+    const proposal = [
+        'Threat Sensitivity: high - wary of strangers until they prove themselves',
+        'Conflict/Assertiveness: firm - holds her ground with calm silence when challenged',
+        'Analytical Style: reckless - gambles on long odds for the thrill of it',
+    ];
+    const context = '[m1] Malia studies the stranger from the doorway for a long moment before she unbars the door. [m2] When he argues, Malia simply waits in silence until he pays.';
+    const run = (stored, behaviorProfile) => {
+        const npc = landlady(stored);
+        npc.personality = 'Reserved, shrewd and wary of strangers; pragmatic and unsentimental.';
+        return mergeScanResult({ npcs: [npc], turn: 10 }, { npcs: [], profileUpdates: [{ id: npc.id, name: 'Malia', behaviorProfileState: 'refine', behaviorProfile }] },
+            { developmentContext: context, sourceMessageId: 2, turn: 10 }).state.npcs[0].behaviorProfile;
+    };
+    const seeded = run([], proposal);
+    assert.ok(seeded.length >= 1 && !seeded.some(entry => /reckless/.test(entry)), JSON.stringify(seeded));
+    assert.deepEqual(run([disposition], [disposition, ...proposal]), [disposition, ...seeded]);
 });
 
 const STORED = ['Disposition: reserved - practical and guarded', ...HABITS];
@@ -113,8 +141,8 @@ test('a lever restating a stored habit is grounded by that entry; unrelated leve
     assert.deepEqual(restated.state.npcs[0].behaviorProfile.filter(entry => !isBehaviorLever(entry)), []);
     assert.equal(restated.state.npcs[0].behaviorProfile.length, 3);
     assert.deepEqual(behaviorOutcomes(restated), ['applied-refine']);
-    const unrelated = refresh({ behaviorProfileState: 'refine', behaviorProfile: [STORED[0], 'Threat Sensitivity: low - reckless gambler who courts danger'] });
-    assert.deepEqual(unrelated.state.npcs[0].behaviorProfile, STORED);
+    const unrelated = refresh({ behaviorProfileState: 'refine', behaviorProfile: [STORED[0], 'Analytical Style: reckless - gambles on long odds for the thrill of it'] });
+    assert.deepEqual(unrelated.state.npcs[0].behaviorProfile, [STORED[0]], 'unrelated lever dropped; habits the refine omitted retire');
 });
 
 test('diagnostics explain why stored non-lever entries survived', () => {

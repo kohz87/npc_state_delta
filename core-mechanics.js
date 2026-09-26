@@ -2227,7 +2227,7 @@ function isSafeBehaviorProfileRefinement(existing, incoming) {
         || durableSemanticSimilarity(behaviorProfileBody(oldText), behaviorProfileBody(newText)) >= 0.55;
 }
 
-function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evidenceItems = [], binding = null } = {}) {
+function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evidenceItems = [], binding = null, personality = '' } = {}) {
     const current = normalizeBehaviorProfile(existing);
     const updates = normalizeBehaviorProfile(incoming);
     if (!updates.length) return current;
@@ -2238,7 +2238,10 @@ function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evi
     // A lever that restates a stored non-lever entry adds no new meaning: that accepted entry
     // grounds it, even when the scene that established it is outside the current window.
     evidenceItems = [...(Array.isArray(evidenceItems) ? evidenceItems : []), ...current.filter(entry => !isBehaviorLever(entry))];
+    const identity = cleanText(personality, DURABLE_PROFILE_LIMITS.personality);
+    const scopedSupport = String(context || '').trim() ? durableRefinementSupportText(context, [], binding) : '';
     const next = [];
+    let droppedNew = false;
     for (const entry of updates) {
         const key = behaviorProfileKey(entry);
         const family = behaviorProfileFamily(entry);
@@ -2261,11 +2264,35 @@ function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evi
             return existingPolarity && existingPolarity !== incomingPolarity;
         });
         if (conflicts) return current;
-        if (!durableRefinementCandidateGrounded('behaviorProfile', '', behaviorProfileBody(entry), context, evidenceItems, binding)) return current;
+        // A new lever category uses first-profile grounding (story, evidence or accepted
+        // Personality) and is judged on its own: one unsupported addition is dropped instead of
+        // discarding every grounded lever in the proposal.
+        const body = behaviorProfileBody(entry);
+        const grounded = durableRefinementCandidateGrounded('behaviorProfile', '', body, context, evidenceItems, binding)
+            || (!behaviorProfileTargetSpecific(entry) && (
+                Boolean(identity && (durableSemanticSimilarity(body, identity) >= 0.34 || durableSemanticSimilarity(entry, identity) >= 0.34))
+                || Boolean(scopedSupport && durableSeedGrounded(body, scopedSupport))
+                || durableEvidenceGroundsValue(body, evidenceItems)));
+        if (!grounded) {
+            droppedNew = true;
+            continue;
+        }
         next.push(entry);
     }
     // Omitted old rules are retired because the scanner contract says refine is a FULL field.
     // Longitudinal support remains in profileEvidence rather than being copied back into the list.
+    // When an unsupported addition was dropped the proposal is partial, so established levers it
+    // omitted stay; stored non-lever entries still retire.
+    if (droppedNew) {
+        if (!next.length) return current;
+        for (const old of current) {
+            if (!isBehaviorLever(old) || next.length >= BEHAVIOR_PROFILE_LIMIT) continue;
+            const oldKey = behaviorProfileKey(old);
+            const oldFamily = behaviorProfileFamily(old);
+            if (next.some(entry => behaviorProfileKey(entry) === oldKey || (oldFamily && behaviorProfileFamily(entry) === oldFamily))) continue;
+            next.push(old);
+        }
+    }
     return normalizeBehaviorProfile(next);
 }
 
@@ -4022,6 +4049,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
         } else if (incoming.behaviorProfileState === 'refine' && incoming.behaviorProfileProvided) {
             merged.behaviorProfile = mergeBehaviorProfileRefinements(existing.behaviorProfile, incoming.behaviorProfile, {
                 context: lifecycleOptions.developmentContext,
+                personality: merged.personality || existing.personality,
                 evidenceItems: incoming.profileEvidence?.behaviorProfile || [],
             });
         } else {
@@ -4811,6 +4839,7 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
         } else if (incoming.behaviorProfileState === 'refine') {
             const proposedRefined = mergeBehaviorProfileRefinements(current, incoming.behaviorProfile, {
                 context: options.developmentContext,
+                personality: npc.personality,
                 evidenceItems: [...(beforeEvidence.behaviorProfile || []), ...(incomingEvidence.behaviorProfile || [])],
                 binding: {
                     npc,
