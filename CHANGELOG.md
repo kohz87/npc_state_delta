@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Dossier layout keeps the portrait as the focal element and surfaces the player relationship: a Player relationship card now leads the dossier with the four axis bars plus the last relationship change (impact, signed per-axis deltas, turn and the recorded reason), and Player Dynamic lists earlier changes instead of repeating the bars. Section jump tabs stay pinned at the top of the dossier, the hero portrait opens a full-size view (expand button or click, Escape/Close to dismiss), phones give the portrait up to about 60% of the screen height, and deceased cast members follow the living as compact dimmed tiles after a divider. Presentation only: no canonical state, persistence, scanner or prompt change.
+
 ## 1.0.56 - 26 September 2026
 
 - Keep enduring physical appearance traits through outfit/presentation updates. When an accepted current-appearance update omits hair, eyes, skin, build, height, facial features, scars, tattoos or anatomy (ears, horns, tail, wings, fur, scales and similar), those traits carry forward from the previous presentation; a trait changes only when the incoming presentation itself describes it (a "hood hides her hair" style mention does not count). Clothing, gear and transient condition still follow the full-current-presentation replacement rule, admission/grounding gates are unchanged, and named forms keep their own traits without duplicating Shared appearance.

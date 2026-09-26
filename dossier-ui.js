@@ -33,6 +33,19 @@ function relationshipValue(value) {
     return Math.max(-100, Math.min(100, Math.round(Number(value) || 0)));
 }
 
+const RELATIONSHIP_AXES = Object.freeze([['trust', 'Trust'], ['affection', 'Affection'], ['desire', 'Desire'], ['tension', 'Tension']]);
+
+function relationshipChangeProjection(change = {}) {
+    const source = change && typeof change === 'object' ? change : {};
+    const delta = source.delta && typeof source.delta === 'object' ? source.delta : {};
+    return {
+        impact: plain(source.impact, 'none').toLocaleLowerCase(),
+        delta: Object.fromEntries(RELATIONSHIP_AXES.map(([axis]) => [axis, Math.round(Number(delta[axis]) || 0)])),
+        reason: plain(source.reason),
+        turn: Number.isFinite(Number(source.turn)) ? Number(source.turn) : null,
+    };
+}
+
 function portraitSource(npc = {}, portraitAssets = {}) {
     const direct = npc?.portrait && typeof npc.portrait === 'object' ? npc.portrait : {};
     const asset = portraitAssets?.[npc?.id] && typeof portraitAssets[npc.id] === 'object' ? portraitAssets[npc.id] : {};
@@ -97,6 +110,16 @@ export function dossierDetailProjection(npc = {}, portraitAssets = {}) {
         memories: stringList(npc?.memories, 8),
         keyRelationships: stringList(npc?.keyRelationships, 12),
         relationshipSummary: plain(npc?.relationshipSummary),
+        lastRelationshipChange: relationshipChangeProjection(npc?.lastRelationshipChange),
+        recentRelationshipChanges: (Array.isArray(npc?.relationshipEventHistory) ? npc.relationshipEventHistory : [])
+            .slice(-4)
+            .reverse()
+            .map(event => ({
+                impact: plain(event?.impact, 'ordinary').toLocaleLowerCase(),
+                reason: plain(event?.reason),
+                turn: Number.isFinite(Number(event?.turn)) ? Number(event.turn) : null,
+            }))
+            .filter(event => event.reason),
         relationship: {
             trust: relationshipValue(rel.trust),
             affection: relationshipValue(rel.affection),
@@ -271,6 +294,47 @@ function relationshipAxis(label, value, axis) {
     </div>`;
 }
 
+function impactLabel(impact) {
+    const value = plain(impact, 'none');
+    if (value === 'manual') return 'Manual edit';
+    return value.charAt(0).toLocaleUpperCase() + value.slice(1);
+}
+
+export function lastRelationshipChangeHtml(change) {
+    if (!change || change.impact === 'none' || (!change.reason && change.impact !== 'manual')) {
+        return `<div class="delta-rel-last"><h4>Last relationship change</h4><p class="delta-muted">No relationship change recorded yet.</p></div>`;
+    }
+    const deltas = RELATIONSHIP_AXES
+        .filter(([axis]) => change.delta[axis] !== 0)
+        .map(([axis, label]) => {
+            const value = change.delta[axis];
+            return `<span class="delta-rel-delta delta-rel-delta-${value > 0 ? 'up' : 'down'} delta-rel-${escapeHtml(axis)}">${escapeHtml(label)} ${value > 0 ? '+' : ''}${value}</span>`;
+        })
+        .join('');
+    return `<div class="delta-rel-last">
+        <div class="delta-rel-last-head"><h4>Last relationship change</h4><span class="delta-rel-impact delta-rel-impact-${escapeHtml(change.impact)}">${escapeHtml(impactLabel(change.impact))}</span>${change.turn !== null ? `<small>Turn ${escapeHtml(change.turn)}</small>` : ''}</div>
+        <div class="delta-rel-deltas">${deltas || '<span class="delta-rel-delta delta-rel-delta-progress">Progress only · no point change</span>'}</div>
+        ${change.reason ? `<p>${escapeHtml(change.reason)}</p>` : ''}
+    </div>`;
+}
+
+function relationshipHistoryHtml(history, latest) {
+    const rows = (Array.isArray(history) ? history : [])
+        .filter((event, index) => !(index === 0 && latest?.reason && event.reason === latest.reason))
+        .slice(0, 3);
+    if (!rows.length) return '';
+    return `<div class="delta-rel-history"><h4>Earlier changes</h4><ul class="delta-list">${rows.map(event => `<li><span class="delta-rel-impact delta-rel-impact-${escapeHtml(event.impact)}">${escapeHtml(impactLabel(event.impact))}</span>${event.turn !== null ? ` <small class="delta-muted">Turn ${escapeHtml(event.turn)}</small>` : ''} ${escapeHtml(event.reason)}</li>`).join('')}</ul></div>`;
+}
+
+const DOSSIER_SECTIONS = Object.freeze([
+    ['player', 'Player'], ['identity', 'Identity'], ['current', 'Current'], ['profile', 'Profile'],
+    ['dynamic', 'Dynamic'], ['bonds', 'Bonds & memories'], ['history', 'History'],
+]);
+
+function sectionNavHtml() {
+    return `<nav class="delta-section-nav" aria-label="Dossier sections">${DOSSIER_SECTIONS.map(([key, label]) => `<button type="button" class="delta-section-jump" data-delta-jump="${key}">${escapeHtml(label)}</button>`).join('')}</nav>`;
+}
+
 function countsFor(rows) {
     const counts = { all: 0, active: 0, archived: 0, dead: 0 };
     for (const row of Array.isArray(rows) ? rows : []) {
@@ -389,6 +453,14 @@ class DeltaDossierUi {
                 this.renderFromProjection({ forceRail: true, forceDetail: true });
                 return;
             }
+            if (event.target.closest('.delta-lightbox-close') || event.target.classList?.contains('delta-lightbox')) return void this.closeLightbox();
+            if (event.target.closest('.delta-portrait-expand') || event.target.closest('.delta-hero-media img.delta-hero-portrait')) return void this.openLightbox();
+            const jump = event.target.closest('.delta-section-jump')?.dataset?.deltaJump;
+            if (jump) {
+                const target = this.root.querySelector(`.delta-document [data-delta-section="${CSS.escape(jump)}"]`);
+                target?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+                return;
+            }
             const edit = event.target.closest('.delta-edit');
             if (edit) this.openEditor(edit.dataset.npcId || this.selectedNpcId);
         });
@@ -440,7 +512,36 @@ class DeltaDossierUi {
         });
     }
 
+    // Full-size portrait view: presentation only, reusing the already-projected portrait source.
+    openLightbox() {
+        const selected = this.projection?.npcs?.find(npc => npc.id === this.selectedNpcId);
+        const panel = this.root?.querySelector('.delta-panel');
+        if (!selected?.portrait || !panel) return;
+        this.closeLightbox();
+        const overlay = document.createElement('div');
+        overlay.className = 'delta-lightbox';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-label', `${selected.name} portrait`);
+        overlay.innerHTML = `<img src="${escapeHtml(selected.portrait)}" alt="${escapeHtml(selected.name)} portrait"><button type="button" class="delta-btn delta-lightbox-close">Close</button>`;
+        panel.appendChild(overlay);
+        overlay.querySelector('.delta-lightbox-close')?.focus?.({ preventScroll: true });
+    }
+
+    closeLightbox() {
+        const overlay = this.root?.querySelector('.delta-lightbox');
+        if (!overlay) return false;
+        overlay.remove();
+        this.root.querySelector('.delta-portrait-expand')?.focus?.({ preventScroll: true });
+        return true;
+    }
+
     onDocumentKeydown(event) {
+        if (this.panelOpen && event.key === 'Escape' && !event.defaultPrevented && this.root?.querySelector('.delta-lightbox')) {
+            event.preventDefault();
+            this.closeLightbox();
+            return;
+        }
         if (!this.panelOpen || event.key !== 'Escape' || event.defaultPrevented
             || document.getElementById('npc_state_delta_tools_overlay')) return;
         const uiStatus = this.safeUiStatus();
@@ -461,6 +562,7 @@ class DeltaDossierUi {
     }
 
     close({ restoreFocus = true } = {}) {
+        this.root?.querySelector('.delta-lightbox')?.remove();
         if (!this.root) return;
         this.panelOpen = false;
         this.root.querySelector('.delta-panel').hidden = true;
@@ -580,10 +682,11 @@ class DeltaDossierUi {
             list.innerHTML = `<div class="delta-no-results"><b>No dossiers match this view.</b><span>Change the search or filter to bring the cast back.</span></div>`;
             return;
         }
-        list.innerHTML = filtered.map(npc => {
+        list.innerHTML = filtered.map((npc, index) => {
             const meta = [npc.species, npc.gender, npc.role].filter(Boolean).join(' · ') || 'Details pending';
             const selected = npc.id === this.selectedNpcId;
-            return `<button type="button" class="delta-cast-card${selected ? ' selected' : ''}" role="option" aria-selected="${selected}" data-npc-id="${escapeHtml(npc.id)}">
+            const firstDead = npc.bucket === 'dead' && index > 0 && filtered[index - 1]?.bucket !== 'dead';
+            return `<button type="button" class="delta-cast-card${selected ? ' selected' : ''}${firstDead ? ' delta-cast-first-dead' : ''}" role="option" aria-selected="${selected}" data-npc-id="${escapeHtml(npc.id)}" data-bucket="${escapeHtml(npc.bucket)}" data-has-portrait="${npc.portrait ? 'true' : 'false'}">
                 ${portraitHtml(npc, 'delta-cast-portrait', { alt: false })}
                 <span class="delta-cast-copy"><b>${escapeHtml(npc.name)}</b><small>${escapeHtml(meta)}</small><em class="delta-status delta-status-${escapeHtml(npc.bucket)}">${escapeHtml(npc.statusLabel)}</em></span>
             </button>`;
@@ -615,8 +718,10 @@ class DeltaDossierUi {
             return;
         }
 
+        if (heroChanged) this.root.querySelector('.delta-lightbox')?.remove();
         if (heroChanged) hero.innerHTML = `
             <div class="delta-hero-media">${portraitHtml(selected, 'delta-hero-portrait')}
+                ${selected.portrait ? `<button type="button" class="delta-portrait-expand" data-npc-id="${escapeHtml(selected.id)}" aria-label="View ${escapeHtml(selected.name)} portrait full size" title="View full size">⤢</button>` : ''}
                 <div class="delta-hero-caption">
                     <span class="delta-status delta-status-${escapeHtml(selected.bucket)}">${escapeHtml(selected.statusLabel)}</span>
                     <h2>${escapeHtml(selected.name)}</h2>
@@ -630,14 +735,22 @@ class DeltaDossierUi {
                 <div><span class="delta-kicker">CURRENT DOSSIER</span><h2>${escapeHtml(selected.name)}</h2><p class="delta-muted">${escapeHtml(subtitle)}</p></div>
                 <button type="button" class="delta-btn delta-edit" data-npc-id="${escapeHtml(selected.id)}">Edit</button>
             </div>
-            <section class="delta-section">
+            ${sectionNavHtml()}
+            <section class="delta-section delta-player-card" data-delta-section="player">
+                <h3>Player relationship</h3>
+                <div class="delta-rel-grid">
+                    ${RELATIONSHIP_AXES.map(([axis, label]) => relationshipAxis(label, selected.relationship[axis], axis)).join('')}
+                </div>
+                ${lastRelationshipChangeHtml(selected.lastRelationshipChange)}
+            </section>
+            <section class="delta-section" data-delta-section="identity">
                 <h3>Identity continuity</h3>
                 <div class="delta-current-grid">
                     ${birthdayCard(selected)}
                     ${currentCard('Home Base / Usual Location', selected.homeBase)}
                 </div>
             </section>
-            <section class="delta-section">
+            <section class="delta-section" data-delta-section="current">
                 <h3>Current</h3>
                 <div class="delta-current-grid">
                     ${currentCard('Mood', selected.mood)}
@@ -646,7 +759,7 @@ class DeltaDossierUi {
                     ${currentCard('Condition / Activity', selected.status, selected.bucket === 'dead' ? 'Deceased' : 'Stable / unknown')}
                 </div>
             </section>
-            <section class="delta-section">
+            <section class="delta-section" data-delta-section="profile">
                 <h3>Profile</h3>
                 <div class="delta-prose-grid">
                     <div><h4>Personality</h4>${proseHtml(selected.personality)}</div>
@@ -656,21 +769,16 @@ class DeltaDossierUi {
                     <div class="delta-wide"><h4>Mannerisms</h4>${listHtml(selected.mannerisms)}</div>
                 </div>
             </section>
-            <section class="delta-section">
-                <h3>Relationship with player</h3>
-                <div class="delta-rel-grid">
-                    ${relationshipAxis('Trust', selected.relationship.trust, 'trust')}
-                    ${relationshipAxis('Affection', selected.relationship.affection, 'affection')}
-                    ${relationshipAxis('Desire', selected.relationship.desire, 'desire')}
-                    ${relationshipAxis('Tension', selected.relationship.tension, 'tension')}
-                </div>
-                <div class="delta-summary"><h4>Player Dynamic</h4>${proseHtml(selected.relationshipSummary, 'No player-specific dynamic established yet.')}</div>
+            <section class="delta-section" data-delta-section="dynamic">
+                <h3>Player Dynamic</h3>
+                ${proseHtml(selected.relationshipSummary, 'No player-specific dynamic established yet.')}
+                ${relationshipHistoryHtml(selected.recentRelationshipChanges, selected.lastRelationshipChange)}
             </section>
-            <section class="delta-section delta-two-column">
+            <section class="delta-section delta-two-column" data-delta-section="bonds">
                 <div><h3>Important bonds</h3>${listHtml(selected.keyRelationships, 'No key relationships established yet.')}</div>
                 <div><h3>Important memories</h3>${listHtml(selected.memories, 'No important memories established yet.')}</div>
             </section>
-            <section class="delta-section">
+            <section class="delta-section" data-delta-section="history">
                 <h3>Background / History</h3>${proseHtml(selected.background, 'No background established yet.')}
             </section>`, documentPane.dataset.npcId !== selected.id);
         documentPane.dataset.npcId = selected.id;
@@ -872,6 +980,32 @@ const STYLES = `
 #${ROOT_ID} .delta-empty p, #${ROOT_ID} .delta-document-empty p { margin:0; max-width:54ch; }
 #${ROOT_ID} .delta-empty-mark { display:grid; place-items:center; width:64px; height:64px; border:1px solid var(--delta-line-strong); border-radius:18px; color:var(--delta-accent); font:700 2rem/1 Georgia,serif; background:rgba(216,188,120,.07); }
 #${ROOT_ID} .delta-error-copy { color:var(--delta-danger); }
+#${ROOT_ID} .delta-section-nav { position:sticky; top:0; z-index:3; display:flex; gap:6px; overflow-x:auto; margin:-4px 0 12px; padding:8px 0; background:var(--delta-bg); scrollbar-width:none; }
+#${ROOT_ID} .delta-section-nav::-webkit-scrollbar { display:none; }
+#${ROOT_ID} .delta-section-jump { appearance:none; flex:0 0 auto; min-height:30px; padding:4px 10px; border:1px solid rgba(218,193,148,.18); border-radius:999px; color:var(--delta-muted); background:rgba(255,255,255,.03); font-size:.74rem; cursor:pointer; }
+#${ROOT_ID} .delta-section-jump:hover { color:var(--delta-accent-soft); border-color:var(--delta-line-strong); background:rgba(216,188,120,.09); }
+#${ROOT_ID} [data-delta-section] { scroll-margin-top:52px; }
+#${ROOT_ID} .delta-player-card { border-color:rgba(218,193,148,.26); background:linear-gradient(180deg,rgba(216,188,120,.07),var(--delta-surface) 60%); }
+#${ROOT_ID} .delta-rel-last { margin-top:12px; padding-top:11px; border-top:1px solid rgba(218,193,148,.12); }
+#${ROOT_ID} .delta-rel-last-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; margin-bottom:7px; }
+#${ROOT_ID} .delta-rel-last-head h4 { margin:0; }
+#${ROOT_ID} .delta-rel-last-head small { color:var(--delta-muted); font-size:.72rem; }
+#${ROOT_ID} .delta-rel-impact { display:inline-flex; padding:1px 7px; border:1px solid rgba(255,255,255,.14); border-radius:999px; font-size:.68rem; letter-spacing:.04em; text-transform:uppercase; color:var(--delta-muted); }
+#${ROOT_ID} .delta-rel-impact-meaningful { color:#d7e6ff; border-color:rgba(138,163,200,.4); }
+#${ROOT_ID} .delta-rel-impact-major, #${ROOT_ID} .delta-rel-impact-extreme { color:#ffe2a8; border-color:rgba(216,188,120,.5); }
+#${ROOT_ID} .delta-rel-deltas { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:7px; }
+#${ROOT_ID} .delta-rel-delta { display:inline-flex; padding:2px 8px; border-radius:6px; font-size:.8rem; font-weight:700; background:rgba(0,0,0,.2); border:1px solid rgba(255,255,255,.08); }
+#${ROOT_ID} .delta-rel-delta-up { color:#bfe8cf; border-color:rgba(113,190,145,.3); }
+#${ROOT_ID} .delta-rel-delta-down { color:#f1bcbc; border-color:rgba(207,118,126,.32); }
+#${ROOT_ID} .delta-rel-delta-progress { color:var(--delta-muted); font-weight:400; }
+#${ROOT_ID} .delta-rel-history { margin-top:12px; padding-top:10px; border-top:1px solid rgba(218,193,148,.12); }
+#${ROOT_ID} .delta-rel-history li .delta-rel-impact { margin-right:4px; }
+#${ROOT_ID} .delta-portrait-expand { position:absolute; z-index:3; top:10px; right:10px; display:grid; place-items:center; width:34px; height:34px; padding:0; border:1px solid rgba(255,255,255,.22); border-radius:9px; color:#fff4d7; background:rgba(5,6,8,.52); backdrop-filter:blur(3px); font-size:1.05rem; cursor:pointer; opacity:.78; }
+#${ROOT_ID} .delta-portrait-expand:hover { opacity:1; background:rgba(5,6,8,.72); }
+#${ROOT_ID} .delta-hero-media img.delta-hero-portrait { cursor:zoom-in; }
+#${ROOT_ID} .delta-lightbox { position:absolute; inset:0; z-index:40; display:grid; grid-template-rows:minmax(0,1fr); place-items:center; padding:18px 18px 64px; background:rgba(3,4,6,.93); cursor:zoom-out; }
+#${ROOT_ID} .delta-lightbox img { min-height:0; max-width:100%; max-height:100%; object-fit:contain; border-radius:8px; box-shadow:0 18px 60px rgba(0,0,0,.6); cursor:default; }
+#${ROOT_ID} .delta-lightbox-close { position:absolute; left:50%; bottom:16px; transform:translateX(-50%); }
 #${SETTINGS_ID}.npc-state-delta-stage1-settings-target { outline:2px solid #d8bc78; outline-offset:4px; }
 @media (max-width: 900px) {
   #${ROOT_ID} .delta-panel { width:100vw; height:100dvh; border-radius:0; border-left:0; border-right:0; }
@@ -885,7 +1019,7 @@ const STYLES = `
   #${ROOT_ID} .delta-brand .delta-kicker, #${ROOT_ID} .delta-chat-state { display:none; }
   #${ROOT_ID} .delta-topbar { padding-left:10px; }
   #${ROOT_ID} .delta-spread { display:block; overflow:auto; }
-  #${ROOT_ID} .delta-hero { min-height:330px; border-right:0; border-bottom:1px solid rgba(218,193,148,.16); }
+  #${ROOT_ID} .delta-hero { min-height:max(330px,min(62dvh,540px)); border-right:0; border-bottom:1px solid rgba(218,193,148,.16); }
   #${ROOT_ID} .delta-document { overflow:visible; }
   #${ROOT_ID} .delta-current-grid, #${ROOT_ID} .delta-prose-grid, #${ROOT_ID} .delta-two-column, #${ROOT_ID} .delta-rel-grid { grid-template-columns:1fr; }
   #${ROOT_ID} .delta-prose-grid .delta-wide { grid-column:auto; }
