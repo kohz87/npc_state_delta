@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.64 - 26 September 2026
+
 - Let a Behavioral Profile refine replace stored habit entries with new levers. When a scan or Refresh proposed a lever whose label the dossier did not already have (for example "Threat Sensitivity: high - slow to trust strangers"), the grounding check required the label words themselves to appear in the story. They never do, so the whole proposal was rejected and every stored entry, habits included, stayed. Refine grounding now checks the claim after the label, as first-profile grounding already did. The claim must still be supported by the story or evidence, one ungrounded entry still rejects the whole proposal, and entries omitted from an accepted refine are retired as before. Prompts are unchanged.
 
 ## 1.0.63 - 26 September 2026
