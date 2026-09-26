@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.0.62 - 26 September 2026
+
+- Capture outfit changes in automatic scans. A routine scan grounds an Appearance change only in story text scoped to the NPC, which keeps sentences that name the NPC and pronoun-led follow-ups. Outfit changes are usually narrated in the next sentence ("A moment later she returns in a white sundress"), and the `npcs` row carries no evidence quote, so those changes were dropped until a targeted Refresh (which reads the whole window) picked them up. An Appearance change in either the `npcs` row or `profileUpdates` may now also be grounded by up to two story sentences that directly follow a sentence naming only that NPC, stopping at any sentence that names another NPC. Ungrounded changes and changes narrated for another NPC are still rejected. The shared Personality/Speech evidence scoping and all scanner prompts are unchanged.
+
 ## 1.0.61 - 26 September 2026
 
 - Fix outfit changes still erasing physical appearance. The scanner reports a clothing change as a full `appearanceState: "change"` presentation, and the core merge applied it before the appearance model's 1.0.56 trait protection ran, so hair, eyes, build and scars were already gone when that protection compared old and new text. Omitted physical traits are now carried forward from the pre-scan record at that hand-off, named-form and shared-appearance updates get the same protection, a trait inside a mixed clause ("long silver hair tied back with a ribbon") survives, and a passing changeable mention ("her hair is wet") no longer counts as re-describing the trait. An explicit re-description (dyed, cut) still replaces it. Scanner prompts are unchanged.
