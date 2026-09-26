@@ -218,8 +218,13 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
 }
 
 const COMPACT_STAGE4_RULE = `\nS4: forms/current; confirmed death terminal.`;
-const APPEARANCE_RULES = `\nSTAGE 4 APPEARANCE: appearance=current visible presentation: grounded hair/body, outfit/gear, visible condition. Explicit correction/reveal=>refine corrected FULL appearance; changed clothes/form/presentation=>change+reason FULL appearance. overallAppearance=form-independent only. Named anatomy uses appearanceForms:[{name,appearance,state:"refine|change",reason}]+currentForm/currentFormState:"select"; switches preserve other forms. Unknown transformed form=>currentFormState:"unknown"+grounded current appearance; never reuse another form's anatomy. Omission preserves; Appearance lock protects all appearance state.`;
-const DEATH_RULES = `\nSTAGE 4 DEATH: explicit confirmed death uses lifeState:"deceased"+lifeStateCertainty:"explicit" and is terminal to automatic writers. Later narrative/model output cannot return that NPC to alive/present/worldActive; only explicit player correction or owned-history rollback may reverse an erroneous death.`;
+// Form rules shared by every prompt. The scanner and Refresh already define flat Appearance (current
+// visible presentation; correction=>refine, clothes/form change=>change+reason) in their own rules, so
+// only backfill and dossier import, which do not, get that sentence here.
+const APPEARANCE_FORM_RULES = 'overallAppearance=form-independent only. Named anatomy uses appearanceForms:[{name,appearance,state:"refine|change",reason}]+currentForm/currentFormState:"select"; switches preserve other forms. Unknown transformed form=>currentFormState:"unknown"+grounded current appearance; never reuse another form\'s anatomy. Omission preserves; Appearance lock protects all appearance state.';
+const APPEARANCE_RULES = `\nSTAGE 4 APPEARANCE: ${APPEARANCE_FORM_RULES}`;
+const APPEARANCE_RULES_WITH_FLAT = `\nSTAGE 4 APPEARANCE: appearance=current visible presentation: grounded hair/body, outfit/gear, visible condition. Explicit correction/reveal=>refine corrected FULL appearance; changed clothes/form/presentation=>change+reason FULL appearance. ${APPEARANCE_FORM_RULES}`;
+const DEATH_RULES = `\nSTAGE 4 DEATH: explicit death is terminal: lifeState:"deceased"+lifeStateCertainty:"explicit"; later output cannot return that NPC to alive/present/worldActive.`;
 const PROFILE_REFRESH_FORM_SHAPE_ANCHOR = '"appearanceState":"refine|change","appearance":"","appearanceReason":""';
 const PROFILE_REFRESH_FORM_SHAPE = '"appearanceState":"refine|change","appearance":"","appearanceReason":"","overallAppearance":"","overallAppearanceState":"keep|refine|change","overallAppearanceReason":"","appearanceForms":[{"name":"stable established form name","appearance":"form-specific visible anatomy","state":"refine|change","reason":""}],"currentForm":"stable established form name or empty","currentFormState":"keep|select|unknown","currentFormReason":""';
 const PROFILE_REFRESH_APPEARANCE_RULE = `\nREFRESH: visible anatomy changes are form evidence even without literal "form"/"transform" wording.`;
@@ -270,7 +275,8 @@ function insertPromptBlockBefore(prompt = '', anchor = '', block = '') {
 function appendRules(prompt, options = {}, detailed = true) {
     const sanitized = sanitizePrompt(prompt);
     const context = establishedAppearanceContext(options);
-    return detailed ? `${sanitized}${COMPACT_STAGE4_RULE}${APPEARANCE_RULES}${DEATH_RULES}${context}` : `${sanitized}${COMPACT_STAGE4_RULE}${context}`;
+    // The one-line S4 summary is only needed when the detailed rules are absent.
+    return detailed ? `${sanitized}${APPEARANCE_RULES_WITH_FLAT}${DEATH_RULES}${context}` : `${sanitized}${COMPACT_STAGE4_RULE}${context}`;
 }
 function profileRefreshFormContract(prompt = '') {
     const source = String(prompt);
@@ -289,7 +295,7 @@ export function buildBackfillPrompt(options = {}) { return appendRules(mechanics
 export function buildDossierImportPrompt(options = {}) { return appendRules(mechanics.buildDossierImportPrompt(options), options); }
 export function buildProfileRefreshPrompt(options = {}) {
     const base = sanitizePrompt(profileRefreshFormContract(mechanics.buildProfileRefreshPrompt(options)));
-    const stableRules = `${PROFILE_REFRESH_APPEARANCE_RULE}${COMPACT_STAGE4_RULE}${APPEARANCE_RULES}${DEATH_RULES}`;
+    const stableRules = `${PROFILE_REFRESH_APPEARANCE_RULE}${APPEARANCE_RULES}${DEATH_RULES}`;
     const prefixed = insertPromptBlockBefore(base, 'Recent story window (EVIDENCE ONLY;', stableRules);
     return `${prefixed}${establishedAppearanceContext(options)}`;
 }

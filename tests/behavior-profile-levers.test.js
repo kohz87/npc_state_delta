@@ -48,32 +48,29 @@ test('scanner and reconciliation prompts define behaviorProfile as behavioral le
         transcript: 'Marris checks the wound, compares two possible causes, then calmly explains the safer treatment.',
         existingNpcs: [npc],
     });
-    assert.match(scanner, /compact behaviorProfile rules=general levers, not action logs/i);
+    assert.match(scanner, /behaviorProfile FULL max6 "Label: level - effect" levers, not routines\/duties\/habits \(habits=>mannerisms\)/);
 
     const refresh = buildProfileRefreshPrompt({
         transcript: 'Over several months Marris consistently checks evidence before committing to a conclusion.',
         targetNpc: npc,
     });
-    assert.match(refresh, /behavioral levers translating identity into response\/decision tendencies/i);
-    assert.match(refresh, /not action-history summaries/i);
-    assert.match(refresh, /Actions are evidence for a lever/i);
-    assert.match(refresh, /labels are soft, optional/i);
+    const LEVER = /behaviorProfile=max6 "Label: level - effect" levers: how they generally respond\/decide \(supported labels only[^)]*\)\. Actions are evidence; routines, duties, house rules and habits are not levers \(habits=>mannerisms\)\./;
+    assert.match(refresh, LEVER);
 
     const backfill = buildBackfillPrompt({
         transcript: 'Marris repeatedly favors practical help over verbal reassurance.',
         targetName: 'Marris',
         existingNpc: npc,
     });
-    assert.match(backfill, /target-general behavioral levers/i);
-    assert.match(backfill, /observed actions are evidence, not action-history entries/i);
+    assert.match(backfill, LEVER);
 
     const imported = buildDossierImportPrompt({
         dossierText: 'Marris is evidence-driven, professionally formal, and practical when caring for others.',
         targetName: 'Marris',
         existingNpc: npc,
     });
-    assert.match(imported, /target-general response\/decision levers, not action summaries/i);
-    assert.match(imported, /do not create unsupported slots/i);
+    assert.match(imported, LEVER);
+    assert.match(imported, /supported labels only/i);
 });
 
 test('roleplay injection tells the model to generalize behavioral profile levers to new situations', () => {

@@ -1458,7 +1458,7 @@ test('new dossier-worthy NPCs receive full grounded first-pass enrichment withou
     assert.match(prompt, /NEW\/CANDIDATE: include name,identityKind/i);
     assert.match(prompt, /directInteraction,present,worldActive/i);
     assert.match(prompt, /populate every grounded field now/i);
-    assert.match(prompt, /compact behaviorProfile rules/i);
+    assert.match(prompt, /behaviorProfile FULL max6 "Label: level - effect" levers/i);
 });
 
 test('non-interacting proper-name NPC creation preserves every supplied grounded dossier field', () => {
