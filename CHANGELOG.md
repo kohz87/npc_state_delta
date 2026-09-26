@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.60 - 26 September 2026
+
 - One dossier page. Tapping an NPC in the in-chat Present NPCs block now opens the launcher dossier on that NPC instead of a separate quick-viewer page, so the chat and the launcher show the same dossier with the same form portraits, change markers and actions. The quick viewer, its duplicate Edit/Refresh/portrait buttons and its styles are removed; the public `openViewer`/`closeViewer` API becomes `openDossier(nameOrId)`, and `uiStatus()` reports `presentCastDisplay` instead of the viewer fields. Opening from a card no longer focuses the search box, so phones do not raise the keyboard over the portrait.
 - Add a "Present NPCs in chat" setting (Roster & continuity): Full cards (default, unchanged), Compact strip (a one-line row of small portraits and names) or Off (nothing is added to the chat, and the chat watcher and repair timer stop). Presence tracking, generation injection and the recorded inline history are unaffected by the setting.
 - Rename the block's Megumin dossier-block tab from "NPC State Delta" to "Present NPCs".
