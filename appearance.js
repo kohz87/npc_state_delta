@@ -152,6 +152,65 @@ function mergeRefinement(existing, incoming, maxChars) {
     return next;
 }
 
+// Enduring physical traits (hair, eyes, build, scars, anatomy) survive an accepted current-appearance
+// update that simply omits them, e.g. an outfit change narrated without restating the body. A trait is
+// replaced only when the incoming presentation itself describes that trait (outside a "hidden under"
+// style mention). Clothing, gear and transient condition are never carried forward: they follow the
+// existing full-current-presentation replacement rule.
+const PHYSICAL_TRAITS = Object.freeze([
+    ['hair', /\b(?:hair|haired|braids?|braided|ponytails?|pigtails|bangs|mane)\b/i],
+    ['eyes', /\b(?:eyes?|eyed|irises|iris|pupils)\b/i],
+    ['skin', /\b(?:skin|skinned|complexion|freckles?|freckled)\b/i],
+    ['build', /\b(?:build|frame|figure|physique|muscular|muscles?|slender|slim|lean|lithe|stocky|petite|curvy|lanky|burly|brawny|willowy|broad[- ]shouldered)\b/i],
+    ['height', /\b(?:tall|height|towering|diminutive|statuesque)\b/i],
+    ['face', /\b(?:face|facial|jaw|jawline|cheekbones|nose|lips|beard|bearded|mustache|moustache|stubble)\b/i],
+    ['scar', /\b(?:scars?|scarred)\b/i],
+    ['tattoo', /\b(?:tattoos?|tattooed)\b/i],
+    ['birthmark', /\b(?:birthmarks?|moles?)\b/i],
+    ['ears', /\bears?\b/i],
+    ['horns', /\b(?:horns?|horned)\b/i],
+    ['tail', /\btails?\b/i],
+    ['wings', /\b(?:wings?|winged)\b/i],
+    ['fur', /\b(?:fur|furred)\b/i],
+    ['scales', /\b(?:scales|scaled)\b/i],
+    ['fangs', /\bfangs?\b/i],
+    ['claws', /\bclaws?\b/i],
+    ['antlers', /\bantlers?\b/i],
+    ['tusks', /\btusks?\b/i],
+]);
+const CHANGEABLE_PRESENTATION = /\b(?:wear(?:s|ing)?|worn|dressed|clad|outfit|attire|cloth(?:es|ing)|dress|gown|robes?|cloak|cape|coat|jacket|shirt|blouse|tunic|vest|skirt|trousers|pants|leggings|stockings|boots?|shoes?|sandals|gloves?|gauntlets?|hat|hood(?:ed)?|helmet|mask|armou?r|uniform|apron|scarf|belt|sash|jewel(?:ry|lery)|necklace|pendant|rings?|bracelets?|earrings?|ribbons?|carr(?:y|ies|ying)|hold(?:s|ing)|wield(?:s|ing)|sword|staff|dagger|bag|satchel|pack|wet|damp|soaked|drenched|blood(?:ied|y|stained)|mud(?:dy)?|dirt(?:y)?|bruised?|bleeding|wounded|injured|bandaged|sweat(?:y|ing)|flushed|tear[- ]streaked|disheveled|dishevelled)\b/i;
+const CONCEALED_MENTION = /\b(?:hid(?:e|es|den|ing)|cover(?:s|ed|ing)?|conceal(?:s|ed|ing)?|beneath|under(?:neath)?|obscur(?:e|es|ed|ing)|tucked)\b/i;
+
+function presentationSegments(value) {
+    return appearanceText(value)
+        .split(/\s*;\s*|(?<=[.!?])\s+|\s*,\s*/)
+        .map(part => clean(part.replace(/^(?:and|with)\s+/i, '').replace(/[.!?]+$/, ''), 400))
+        .filter(Boolean);
+}
+function physicalTraitKeys(segment) {
+    return PHYSICAL_TRAITS.filter(([, pattern]) => pattern.test(segment)).map(([key]) => key);
+}
+function preserveOmittedPhysicalTraits(previous, next, { alsoPresent = '' } = {}) {
+    const incoming = appearanceText(next);
+    const prior = appearanceText(previous);
+    if (!incoming || !prior || sameAppearance(prior, incoming)) return incoming;
+    const incomingNormalized = normalizeName(incoming);
+    const presentNormalized = normalizeName(alsoPresent);
+    const addressed = new Set(presentationSegments(incoming)
+        .filter(segment => !CONCEALED_MENTION.test(segment))
+        .flatMap(physicalTraitKeys));
+    const kept = presentationSegments(prior).filter(segment => {
+        const keys = physicalTraitKeys(segment);
+        if (!keys.length || CHANGEABLE_PRESENTATION.test(segment) || keys.some(key => addressed.has(key))) return false;
+        const normalized = normalizeName(segment);
+        return normalized && !incomingNormalized.includes(normalized) && !(presentNormalized && presentNormalized.includes(normalized));
+    });
+    const limit = DURABLE_PROFILE_LIMITS?.appearance || 800;
+    // The incoming presentation is authoritative; if the budget is tight, drop the oldest carried traits whole.
+    while (kept.length && `${kept.join(', ')}; ${incoming}`.length > limit) kept.pop();
+    return kept.length ? appearanceText(`${kept.join(', ')}; ${incoming}`) : incoming;
+}
+
 export function normalizeAppearanceForms(value, { updates = false } = {}) {
     const source = Array.isArray(value)
         ? value
@@ -340,9 +399,11 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
             if (next.currentForm) {
                 const index = next.appearanceForms.findIndex(form => formKey(form.name) === formKey(next.currentForm));
                 if (index >= 0) {
-                    const existingResolved = combineAppearance(next.overallAppearance, next.appearanceForms[index].appearance);
+                    const existingLocal = next.appearanceForms[index].appearance;
+                    const existingResolved = combineAppearance(next.overallAppearance, existingLocal);
                     const resolved = reconcileFormAppearance(existingResolved, { ...update, appearance: incomingAppearance }, context);
-                    const appearance = stripOverallPrefix(resolved, next.overallAppearance) || resolved;
+                    const stripped = stripOverallPrefix(resolved, next.overallAppearance) || resolved;
+                    const appearance = preserveOmittedPhysicalTraits(existingLocal, stripped, { alsoPresent: next.overallAppearance });
                     if (appearance) next.appearanceForms[index] = { ...next.appearanceForms[index], appearance };
                 } else {
                     // A flat presentation may describe a selected-but-not-yet-established form,
@@ -351,9 +412,13 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
                     next.appearance = reconcileFormAppearance('', { ...update, appearance: incomingAppearance }, context);
                 }
             } else if (next.currentFormUnknown) {
-                next.unclassifiedAppearance = reconcileFormAppearance(next.unclassifiedAppearance, update, context);
+                const previous = next.unclassifiedAppearance;
+                next.unclassifiedAppearance = preserveOmittedPhysicalTraits(previous, reconcileFormAppearance(previous, update, context), { alsoPresent: next.overallAppearance });
             } else {
-                next.appearance = reconcileFormAppearance(next.appearance, update, context);
+                // Without a selected/unknown form the compatibility scalar is resolved on its own (shared
+                // appearance is not prepended), so carried traits are checked against it alone.
+                const previous = next.appearance;
+                next.appearance = preserveOmittedPhysicalTraits(previous, reconcileFormAppearance(previous, update, context));
             }
         }
     }

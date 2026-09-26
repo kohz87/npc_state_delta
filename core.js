@@ -84,6 +84,20 @@ function sameNpc(raw = {}, npc = {}) {
     return Array.isArray(raw?.aliases) && raw.aliases.some(alias => mechanics.npcMatchesLabel(npc, alias));
 }
 
+const BIRTHDAY_UPDATE_KEYS = ['birthDate', 'birth_date', 'birthday', 'birthDateState', 'birth_date_state', 'birthDateReason', 'birth_date_reason'];
+function hasBirthdayUpdate(row) {
+    return Boolean(row && typeof row === 'object' && (row.birthDate ?? row.birth_date ?? row.birthday));
+}
+
+// The scanner is told to put grounded durable facts in profileUpdates, so a narrated birthday for an
+// existing NPC can arrive there instead of in its npcs delta. Accept it from either channel; the
+// ordinary delta wins when both carry one, and the same establish/correct gate applies.
+function birthdayUpdateRow(ordinaryRow, profileRow) {
+    if (hasBirthdayUpdate(ordinaryRow) || !hasBirthdayUpdate(profileRow)) return ordinaryRow;
+    const birthday = Object.fromEntries(BIRTHDAY_UPDATE_KEYS.filter(key => key in profileRow).map(key => [key, profileRow[key]]));
+    return { ...(ordinaryRow || {}), ...birthday };
+}
+
 function matchingPrevious(npc, source = []) {
     return (Array.isArray(source) ? source : []).filter(item => item && (
         String(item.id || '') === String(npc?.id || '')
@@ -1356,7 +1370,10 @@ export function mergeScanResult(state, scanResult, options = {}) {
     result.state.npcs = (result.state.npcs || []).map(rawNpc => {
         const sources = matchingPrevious(rawNpc, previous);
         const rawSources = matchingPrevious(rawNpc, previousRaw);
-        const ordinaryUpdate = ordinary.find(raw => sameNpc(raw, rawNpc));
+        const ordinaryUpdate = birthdayUpdateRow(
+            ordinary.find(raw => sameNpc(raw, rawNpc)),
+            profileUpdates.find(raw => sameNpc(raw, rawNpc)),
+        );
         let npc = normalizeNpcBirthday(rawNpc, calendar, referenceDate);
         if (ordinaryUpdate) npc = applyNpcBirthdayUpdate(npc, ordinaryUpdate, { ...options, calendarConfig: calendar, referenceDate });
         const ageState = String(ordinaryUpdate?.ageState ?? ordinaryUpdate?.age_state ?? '').trim().toLowerCase();
