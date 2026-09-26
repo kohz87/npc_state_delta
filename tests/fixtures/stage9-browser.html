@@ -2,7 +2,7 @@
 <link rel="stylesheet" href="/delta/style.css"><style>
 *{box-sizing:border-box}body{margin:0;background:#17191c;color:#eee;font:16px Arial,sans-serif}button,input,textarea,select{font:inherit}button{cursor:pointer}.text_pole{width:100%;background:#25282e;color:#eee;border:1px solid #777;padding:8px}#npc_state_delta_settings{max-width:800px;margin:16px auto;padding:12px}dialog{color:inherit;background:#202329}.synthetic-footer{display:flex;justify-content:flex-end;gap:10px;padding:10px}.synthetic-footer button{min-height:44px}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden}
 </style></head><body>
-<div id="npc_state_delta_settings"><div class="npc-state-delta-drawer"><div class="npc-state-delta-intro"></div><div class="npc-state-delta-settings-grid"></div><div id="npc_state_delta_roster_summary"></div></div></div>
+<div id="npc_state_delta_settings"><div class="npc-state-delta-drawer"><div class="delta-settings-experience"><details class="delta-settings-group" data-delta-settings-group="scanning"><summary><b>Scanning</b></summary><div class="delta-settings-group-body"><div class="delta-settings-slot" data-delta-settings-slot="scanner-output"></div></div></details><details class="delta-settings-group" data-delta-settings-group="calendar"><summary><b>Calendar &amp; birthdays</b></summary><div class="delta-settings-group-body"><div class="delta-settings-slot" data-delta-settings-slot="calendar"></div></div></details><div id="npc_state_delta_roster_summary"></div></div></div></div>
 <script type="module">
 import { normalizeNpcRecord, buildNpcPortraitPrompts, appearanceDraftRecord, manualLifeStateRecord } from '/delta/core.js';
 window.counts={getState:0,getNpc:0,projection:0,scan:0,flush:0,applied:0};

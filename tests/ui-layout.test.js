@@ -115,7 +115,7 @@ test('inline dossier uses trust affection desire tension and strict presence wor
     assert.match(index, /barHtml\('Tension'/);
     assert.doesNotMatch(index, /barHtml\('Respect'/);
     assert.match(index, /filter\(npc => !npc\.archived && npc\.present && !npc\.minor\)/);
-    assert.match(index, /only NPCs detected as physically present/i);
+    assert.match(index, /Only active NPCs present in the latest scanned scene/);
 });
 
 
@@ -131,8 +131,8 @@ test('relationship tuning exposes baseline, caps, editable rubrics, and delta au
 });
 
 test('important memory criteria are editable and resettable from settings', () => {
-    assert.match(index, /Important memory tuning/);
-    assert.match(index, /Important Memory Criteria/);
+    assert.match(index, /<h4>Important memories<\/h4>/);
+    assert.match(index, /Important memory criteria/);
     assert.match(index, /npc_state_delta_memory_criteria/);
     assert.match(index, /npc_state_delta_reset_memory_rules/);
     assert.match(index, /Reset memory criteria/);
@@ -255,9 +255,9 @@ test('scanner uses current-exchange auto context and keeps wider history for man
     assert.match(index, /BACKFILL_RESPONSE_LENGTH = 3200/);
     assert.match(index, /JSON_RETRY_RESPONSE_LENGTH = 5200/);
     assert.match(index, /CRITICAL COMPACT JSON RETRY/);
-    assert.match(index, /Full\/manual scan context/);
+    assert.match(index, /'Scan context'/);
     assert.match(index, /Full scan every turn/);
-    assert.match(index, /Quick automatic scans still use only the current user \+ assistant exchange/);
+    assert.match(index, /Quick automatic scans read only the latest user \+ assistant exchange/);
     assert.match(index, /settings\.fullScanEveryTurn \|\| state\.assistantSinceScan >= settings\.scanEvery/);
     assert.match(index, /prepareFullWindowRelationshipEvaluation\(resolvedParsed, state\.npcs\)/);
     assert.match(index, /runFocusedRelationshipPass\(\s*ctx,\s*fullWindowRelationship\.evaluation,\s*state\.npcs,\s*currentTranscript \|\| transcript,\s*settings,\s*\{ currentExchangeOnly: manual \|\| fullWindowScan, requestScope: operation\.requestScope \},\s*\)/);
@@ -402,7 +402,7 @@ test('stale NPC lifecycle is configurable and recurring NPCs can be protected', 
     assert.match(index, /staleArchiveAfter:\s*30/);
     assert.match(index, /staleDeleteAfter:\s*50/);
     assert.match(index, /applyStaleLifecycleAfterScan/);
-    assert.match(index, /Archived dossiers no longer consume an active roster slot/);
+    assert.match(index, /Archived dossiers do not use an active slot/);
     assert.match(index, /npc_state_delta_edit_retention_protected/);
     assert.match(index, /Keep this NPC from automatic stale cleanup/);
     assert.match(index, /retentionProtected/);

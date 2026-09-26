@@ -66,12 +66,12 @@ function savedDraft() {
 function shellHtml() {
     const draft = savedDraft();
     return `<div id="${ROOT_ID}" class="npc-state-delta-calendar-settings">
-        <div class="npc-state-delta-calendar-heading"><b>Fantasy calendar & birthdays</b><small>Ordered Month:days definitions are required. Era and the manual campaign clock are optional. Structured World State dates override the manual clock for matching scans.</small></div>
-        ${settingRow('npc_state_delta_calendar_era', 'Era / year prefix', `<input id="npc_state_delta_calendar_era" class="text_pole" maxlength="40" placeholder="Optional, e.g. CR" value="${escapeHtml(draft.era)}">`, 'Optional display/calendar label. Example: era CR + year 821 displays as CR821.')}
-        ${settingRow('npc_state_delta_calendar_months', 'Months', `<textarea id="npc_state_delta_calendar_months" class="text_pole" rows="6" spellcheck="false" placeholder="Redleaf:30&#10;Sunwane:31&#10;Frostwane:30">${escapeHtml(draft.monthsText)}</textarea>`, 'Required. One Month name:days row per month; row order is calendar order.')}
-        ${settingRow('npc_state_delta_calendar_year', 'Manual current year', `<input id="npc_state_delta_calendar_year" class="text_pole npc-state-delta-number" type="number" step="1" value="${escapeHtml(draft.currentYear)}">`, 'Optional fallback clock. Leave year, month, and day all blank if World State supplies the date or if you only need month/day birthdays.')}
-        ${settingRow('npc_state_delta_calendar_current_month', 'Manual current month', '<select id="npc_state_delta_calendar_current_month" class="text_pole"></select>', 'Optional fallback clock. If any manual current-date field is set, all three are required.')}
-        ${settingRow('npc_state_delta_calendar_current_day', 'Manual current day', `<input id="npc_state_delta_calendar_current_day" class="text_pole npc-state-delta-number" type="number" min="1" step="1" value="${escapeHtml(draft.currentDay)}">`, 'Optional fallback clock. Validated against the selected month length.')}
+        <p class="npc-state-delta-calendar-heading npc-state-delta-muted">Month:days rows are required; era and the manual campaign clock are optional. Structured World State dates override the manual clock for matching scans.</p>
+        ${settingRow('npc_state_delta_calendar_era', 'Era / year prefix', `<input id="npc_state_delta_calendar_era" class="text_pole" maxlength="40" placeholder="Optional, e.g. CR" value="${escapeHtml(draft.era)}">`, 'Optional label. Era CR + year 821 displays as CR821.')}
+        ${settingRow('npc_state_delta_calendar_months', 'Months', `<textarea id="npc_state_delta_calendar_months" class="text_pole" rows="6" spellcheck="false" placeholder="Redleaf:30&#10;Sunwane:31&#10;Frostwane:30">${escapeHtml(draft.monthsText)}</textarea>`, 'One Month name:days row per month, in calendar order.')}
+        ${settingRow('npc_state_delta_calendar_year', 'Manual current year', `<input id="npc_state_delta_calendar_year" class="text_pole npc-state-delta-number" type="number" step="1" value="${escapeHtml(draft.currentYear)}">`, 'Optional fallback clock. Leave year, month and day blank when World State supplies the date or birthdays are month/day only.')}
+        ${settingRow('npc_state_delta_calendar_current_month', 'Manual current month', '<select id="npc_state_delta_calendar_current_month" class="text_pole"></select>', 'If any manual date field is set, all three are required.')}
+        ${settingRow('npc_state_delta_calendar_current_day', 'Manual current day', `<input id="npc_state_delta_calendar_current_day" class="text_pole npc-state-delta-number" type="number" min="1" step="1" value="${escapeHtml(draft.currentDay)}">`, 'Validated against the selected month length.')}
         <div class="npc-state-delta-calendar-actions">
             <button type="button" id="npc_state_delta_save_calendar" class="menu_button">Save calendar</button>
             <button type="button" id="npc_state_delta_reset_calendar" class="menu_button">Use numeric fallback</button>
@@ -174,33 +174,15 @@ function bind(root) {
     root.querySelector('#npc_state_delta_reset_calendar')?.addEventListener('click', () => resetCalendar(root));
 }
 
-function injectStyles() {
-    if (!document?.head || document.getElementById(`${ROOT_ID}_style`)) return;
-    const style = document.createElement('style');
-    style.id = `${ROOT_ID}_style`;
-    style.textContent = `
-        #${ROOT_ID} { display: contents; }
-        #${ROOT_ID} .npc-state-delta-calendar-heading { grid-column: 1 / -1; display:flex; flex-direction:column; gap:3px; margin-top:8px; padding-top:10px; border-top:1px solid rgba(127,127,127,.28); }
-        #${ROOT_ID} .npc-state-delta-calendar-heading small { opacity:.72; font-size:.82em; }
-        #${ROOT_ID} textarea { min-height:7.5em; resize:vertical; }
-        #${ROOT_ID} .npc-state-delta-calendar-actions { grid-column:1 / -1; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-        #${ROOT_ID} #npc_state_delta_calendar_status { opacity:.78; }
-        #${ROOT_ID} #npc_state_delta_calendar_status[data-error="1"] { font-weight:600; }
-        @media (max-width: 700px) { #${ROOT_ID} .npc-state-delta-calendar-actions > button { min-height:44px; } }
-    `;
-    document.head.appendChild(style);
-}
-
 export function mountCalendarSettings() {
     if (typeof document === 'undefined') return false;
     if (document.getElementById(ROOT_ID)) return true;
-    const grid = document.querySelector(`#${SETTINGS_ID} .npc-state-delta-settings-grid`);
-    if (!grid) return false;
-    injectStyles();
+    const slot = document.querySelector(`#${SETTINGS_ID} [data-delta-settings-slot="calendar"]`);
+    if (!slot) return false;
     const wrapper = document.createElement('div');
     wrapper.innerHTML = shellHtml();
     const root = wrapper.firstElementChild;
-    grid.appendChild(root);
+    slot.appendChild(root);
     bind(root);
     return true;
 }

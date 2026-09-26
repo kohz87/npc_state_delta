@@ -33,16 +33,15 @@ test('superseded enhancement dossier library is not retained beside Stage 1 UI',
   assert.doesNotMatch(source, /openLibrary|closeLibrary|renderLibrary/);
 });
 
-test('full-cast manual action mounts and rehomes into the Data & maintenance action group', () => {
-  assert.match(source, /delta-settings-maintenance-actions/);
-  assert.match(source, /legacyScan\?\.closest\?\.\('\.npc-state-delta-actions'\)/);
-  assert.match(source, /button\.parentElement !== actions/);
-  assert.match(source, /actions\.insertBefore\(button, clearChat\)/);
-  assert.match(source, /button\.nextElementSibling !== clearChat/);
+test('full-cast setting and manual action mount into the settings owner slots', () => {
+  const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  assert.match(index, /settingsSlot\('full-cast'\)/);
+  assert.match(index, /settingsSlot\('full-cast-action'\)/);
+  assert.match(source, /\[data-delta-settings-slot="full-cast"\]/);
+  assert.match(source, /\[data-delta-settings-slot="full-cast-action"\]/);
   assert.match(source, /npc-state-delta:settings-mounted/);
   assert.match(source, /queueMicrotask\(mountControls\)/);
-  assert.doesNotMatch(source, /delta-settings-scanning-actions/);
-  assert.doesNotMatch(source, /panel\.querySelector\('\.npc-state-delta-actions'\)/);
+  assert.doesNotMatch(source, /insertBefore|legacyScan|delta-settings-maintenance-actions/, 'full cast never relocates other settings controls');
 });
 
 test('Diagnostics can request the manual full-cast scan without owning scanner logic', () => {

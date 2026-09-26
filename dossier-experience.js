@@ -1,6 +1,6 @@
 /* NPC State Delta cohesive dossier experience refinement.
  * Keeps canonical state/runtime owners while refining dossier actions, cast carousel,
- * adaptive editing, extension settings presentation, and explicit manual life-state correction.
+ * adaptive editing, extension-wide settings actions, and explicit manual life-state correction.
  */
 import { isTerminalNpcDeath } from './core.js';
 import { activeChatKey, api, flushDurably, stage1Refresh, uiRoot } from './dossier-tools-core.js';
@@ -12,7 +12,6 @@ const ROOT_OBSERVER_GUARD = '__npcStateDeltaDossierExperienceRootObserver';
 const EDITOR_OBSERVER_GUARD = '__npcStateDeltaDossierExperienceEditorObserver';
 const DOSSIER_GUARD = '__npcStateDeltaDossierExperienceEvents';
 const DOCUMENT_GUARD = '__npcStateDeltaDossierExperienceDocumentEvents';
-const SETTINGS_ID = 'npc_state_delta_settings';
 const diagnosticVisibleNpcIds = new Set();
 let normalizeQueued = false;
 
@@ -295,162 +294,6 @@ function ensureEditorLifeState(editor) {
     ensureEditorStructure(editor);
 }
 
-function settingsDetails(title, hint = '', open = false) {
-    const details = document.createElement('details');
-    details.className = 'delta-settings-group';
-    details.open = Boolean(open);
-    const summary = document.createElement('summary');
-    summary.innerHTML = `<b>${escapeHtml(title)}</b>${hint ? `<small>${escapeHtml(hint)}</small>` : ''}`;
-    const body = document.createElement('div');
-    body.className = 'delta-settings-group-body';
-    details.append(summary, body);
-    return { details, body };
-}
-
-function settingsRow(root, id) {
-    return root?.querySelector?.(`.npc-state-delta-setting-row[for="${id}"]`) || null;
-}
-
-function moveSettingsRows(root, ids, destination) {
-    for (const id of ids) {
-        const row = settingsRow(root, id);
-        if (row) destination.appendChild(row);
-    }
-}
-
-function ensureSettingsExperience() {
-    const settings = document.getElementById(SETTINGS_ID);
-    const drawer = settings?.querySelector?.('.npc-state-delta-drawer');
-    if (!settings || !drawer || settings.dataset.deltaExperienceStructured === '1') return Boolean(settings && drawer);
-
-    const intro = drawer.querySelector('.npc-state-delta-intro');
-    if (intro) setNodeTextIfChanged(intro, 'Scanner, continuity, roster, portrait-prompt and maintenance settings for NPC State Delta. The floating launcher opens Dossiers directly.');
-
-    const layout = document.createElement('div');
-    layout.className = 'delta-settings-experience';
-    if (intro) intro.insertAdjacentElement('afterend', layout);
-    else drawer.prepend(layout);
-
-    const general = settingsDetails('General', '', true);
-    moveSettingsRows(settings, ['npc_state_delta_enabled'], general.body);
-    layout.appendChild(general.details);
-
-    const scanning = settingsDetails('Scanning', 'Connection, cadence and admission', true);
-    moveSettingsRows(settings, [
-        'npc_state_delta_auto', 'npc_state_delta_scanner_connection_profile', 'npc_state_delta_full_scan_every_turn',
-        'npc_state_delta_scan_every', 'npc_state_delta_scan_depth', 'npc_state_delta_admission_mode',
-    ], scanning.body);
-    layout.appendChild(scanning.details);
-
-    const continuity = settingsDetails('Continuity & injection', 'Generation context and branch behavior');
-    moveSettingsRows(settings, [
-        'npc_state_delta_inject', 'npc_state_delta_inject_budget', 'npc_state_delta_branch_rescan',
-        'npc_state_delta_archive_deaths', 'npc_state_delta_reactivate_archived',
-    ], continuity.body);
-    layout.appendChild(continuity.details);
-
-    const roster = settingsDetails('Roster & cleanup', 'Capacity and stale lifecycle');
-    moveSettingsRows(settings, [
-        'npc_state_delta_max', 'npc_state_delta_auto_prune_stale',
-        'npc_state_delta_stale_archive_after', 'npc_state_delta_stale_delete_after',
-    ], roster.body);
-    const addNpc = drawer.querySelector('#npc_state_delta_add_manual');
-    if (addNpc) {
-        const rosterActions = document.createElement('div');
-        rosterActions.className = 'npc-state-delta-actions delta-settings-roster-actions';
-        rosterActions.appendChild(addNpc);
-        roster.body.appendChild(rosterActions);
-    }
-    layout.appendChild(roster.details);
-
-    const portrait = drawer.querySelector('.npc-state-delta-portrait-generation-settings');
-    if (portrait) {
-        portrait.classList.add('delta-settings-group', 'delta-settings-portrait-prompts');
-        const summary = portrait.querySelector(':scope > summary');
-        if (summary) summary.innerHTML = '<b>Portrait generation</b><small>SillyTavern Image Generation + prompt construction</small>';
-        const copy = portrait.querySelector('.npc-state-delta-portrait-settings-body > p.npc-state-delta-muted');
-        if (copy) setNodeTextIfChanged(copy, 'Configure dossier-derived portrait prompts and the native SillyTavern Image Generation handoff. The active SillyTavern backend, including ComfyUI when selected there, remains host-owned.');
-        const generationRow = settingsRow(settings, 'npc_state_delta_portrait_generation_enabled');
-        const galleryRow = settingsRow(settings, 'npc_state_delta_portrait_save_gallery');
-        if (generationRow) generationRow.hidden = false;
-        if (galleryRow) galleryRow.hidden = false;
-        const reset = portrait.querySelector('#npc_state_delta_reset_portrait_theme');
-        if (reset) reset.innerHTML = '<i class="fa-solid fa-rotate-left"></i> Reset Fantasy Anime prompt style';
-        const save = portrait.querySelector('#npc_state_delta_save_portrait_settings');
-        if (save) save.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save prompt settings';
-        layout.appendChild(portrait);
-    }
-
-    const relationship = drawer.querySelector('.npc-state-delta-relationship-tuning:not(.npc-state-delta-memory-tuning):not(.npc-state-delta-behavior-tuning)');
-    if (relationship) {
-        relationship.classList.add('delta-settings-group');
-        const summary = relationship.querySelector(':scope > summary');
-        if (summary) summary.innerHTML = '<b>Relationship tuning</b><small>Advanced</small>';
-        layout.appendChild(relationship);
-    }
-
-    const memory = drawer.querySelector('.npc-state-delta-memory-tuning');
-    const behavior = drawer.querySelector('.npc-state-delta-behavior-tuning');
-    if (memory || behavior) {
-        const rules = settingsDetails('Memory & behavior rules', 'Advanced');
-        if (memory) {
-            const block = document.createElement('section');
-            block.className = 'delta-settings-subsection';
-            block.innerHTML = '<h4>Important memory tuning</h4>';
-            const body = memory.querySelector('.npc-state-delta-tuning-body');
-            if (body) block.appendChild(body);
-            rules.body.appendChild(block);
-            memory.remove();
-        }
-        if (behavior) {
-            const block = document.createElement('section');
-            block.className = 'delta-settings-subsection';
-            block.innerHTML = '<h4>Behavior expression</h4>';
-            const body = behavior.querySelector('.npc-state-delta-tuning-body');
-            if (body) block.appendChild(body);
-            rules.body.appendChild(block);
-            behavior.remove();
-        }
-        layout.appendChild(rules.details);
-    }
-
-    const maintenance = settingsDetails('Data & maintenance', 'Backup, diagnostics and current-chat tools');
-    const maintenanceActions = document.createElement('div');
-    maintenanceActions.className = 'npc-state-delta-actions delta-settings-maintenance-actions';
-    maintenanceActions.innerHTML = `
-      <button type="button" class="menu_button" data-delta-settings-backup><i class="fa-solid fa-file-export"></i> Backup / Export</button>
-      <button type="button" class="menu_button" data-delta-settings-restore><i class="fa-solid fa-file-import"></i> Restore / Import</button>
-      <button type="button" class="menu_button" data-delta-settings-diagnostics><i class="fa-solid fa-stethoscope"></i> Diagnostics</button>`;
-    maintenance.body.appendChild(maintenanceActions);
-
-    const scanNow = drawer.querySelector('#npc_state_delta_scan_now');
-    if (scanNow) maintenanceActions.appendChild(scanNow);
-    const clearChat = drawer.querySelector('#npc_state_delta_clear_chat');
-    if (clearChat) maintenanceActions.appendChild(clearChat);
-
-    // Remove any emptied source action wrapper after its actions have been rehomed.
-    for (const actionGroup of drawer.querySelectorAll('.npc-state-delta-actions')) {
-        if (actionGroup === maintenanceActions || actionGroup.children.length) continue;
-        actionGroup.remove();
-    }
-
-    const rosterSummary = drawer.querySelector('#npc_state_delta_roster_summary');
-    if (rosterSummary) {
-        const currentRoster = document.createElement('details');
-        currentRoster.className = 'delta-settings-current-roster';
-        currentRoster.innerHTML = '<summary><b>Current chat roster</b><small>Edit, scan, archive or remove individual records</small></summary>';
-        currentRoster.appendChild(rosterSummary);
-        maintenance.body.appendChild(currentRoster);
-    }
-    layout.appendChild(maintenance.details);
-
-    const oldGrid = drawer.querySelector(':scope > .npc-state-delta-settings-grid');
-    if (oldGrid && !oldGrid.children.length) oldGrid.remove();
-    settings.dataset.deltaExperienceStructured = '1';
-    settings.dispatchEvent?.(new CustomEvent('npc-state-delta:settings-mounted', { bubbles: true }));
-    return true;
-}
-
 function normalizeRoot(root = uiRoot()) {
     if (!root?.isConnected) return;
     ensureLibraryChrome(root);
@@ -535,6 +378,13 @@ function bindDocumentEvents() {
         if (event.target.closest?.('[data-delta-settings-diagnostics]')) {
             event.preventDefault();
             openDiagnostics();
+            return;
+        }
+        if (event.target.closest?.('[data-delta-settings-open-dossiers]')) {
+            event.preventDefault();
+            const controller = uiRoot()?.__npcStateDeltaStage1Ui;
+            if (typeof controller?.open === 'function') void controller.open();
+            else toast('warning', 'NPC State Delta dossier UI is still mounting.');
         }
     });
 }
@@ -563,11 +413,6 @@ function installEditorObserver() {
     observer.observe(document.body, { childList: true, subtree: true });
     document[EDITOR_OBSERVER_GUARD] = observer;
     document.querySelectorAll('.npc-state-delta-editor-popup').forEach(ensureEditorLifeState);
-}
-
-function scheduleSettingsExperience(attempt = 0) {
-    if (ensureSettingsExperience()) return;
-    if (attempt < 80) setTimeout(() => scheduleSettingsExperience(attempt + 1), 100);
 }
 
 function installStyles() {
@@ -649,23 +494,6 @@ function installStyles() {
 .npc-state-delta-editor-popup .delta-editor-life-control small{grid-column:1/-1;opacity:.72}
 
 /* Extension settings: same visual grammar, grouped by task instead of one long wall. */
-#npc_state_delta_settings .npc-state-delta-intro{margin:0 0 10px;padding:10px 12px;border:1px solid rgba(218,193,148,.12);border-radius:9px;background:rgba(255,255,255,.025);opacity:.82}
-#npc_state_delta_settings .delta-settings-experience{display:grid;gap:9px}
-#npc_state_delta_settings .delta-settings-group{margin:0;border:1px solid rgba(218,193,148,.14);border-radius:9px;overflow:hidden;background:rgba(255,255,255,.018)}
-#npc_state_delta_settings .delta-settings-group>summary{display:flex;align-items:baseline;gap:8px;padding:10px 12px;cursor:pointer;background:rgba(255,255,255,.028)}
-#npc_state_delta_settings .delta-settings-group>summary b{font-size:.95rem}
-#npc_state_delta_settings .delta-settings-group>summary small{opacity:.55;font-weight:400}
-#npc_state_delta_settings .delta-settings-group-body,#npc_state_delta_settings .npc-state-delta-portrait-settings-body,#npc_state_delta_settings .npc-state-delta-tuning-body{padding:10px 12px}
-#npc_state_delta_settings .delta-settings-group-body{display:grid;gap:7px}
-#npc_state_delta_settings .npc-state-delta-setting-row{margin:0;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.055)}
-#npc_state_delta_settings .npc-state-delta-setting-row:last-child{border-bottom:0}
-#npc_state_delta_settings .delta-settings-subsection+ .delta-settings-subsection{margin-top:12px;padding-top:12px;border-top:1px solid rgba(218,193,148,.12)}
-#npc_state_delta_settings .delta-settings-subsection>h4{margin:0 0 8px;color:#e3c985}
-#npc_state_delta_settings .delta-settings-maintenance-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:0 0 8px}
-#npc_state_delta_settings .delta-settings-maintenance-actions>.menu_button{display:flex;justify-content:center;align-items:center;gap:6px;min-height:40px;text-align:center}
-#npc_state_delta_settings .delta-settings-current-roster{margin-top:5px;border-top:1px solid rgba(218,193,148,.12);padding-top:8px}
-#npc_state_delta_settings .delta-settings-current-roster>summary{display:flex;gap:8px;align-items:baseline;cursor:pointer;padding:6px 0}
-#npc_state_delta_settings .delta-settings-current-roster>summary small{opacity:.55}
 
 @media(max-width:900px){
   #npc_state_delta_dossier_root .delta-library{grid-template-rows:minmax(0,1fr) 198px!important}
@@ -689,7 +517,6 @@ function installStyles() {
   .npc-state-delta-editor-popup #npc_state_delta_editor_content{max-height:calc(100dvh - 96px)!important;padding-right:4px}
   .npc-state-delta-editor-popup .delta-editor-life-control{grid-template-columns:1fr}
   .npc-state-delta-editor-popup .delta-editor-life-control small{grid-column:1}
-  #npc_state_delta_settings .delta-settings-maintenance-actions{grid-template-columns:1fr}
 }
 `;
     document.head.appendChild(style);
@@ -700,7 +527,6 @@ function start(attempt = 0) {
     installStyles();
     bindDocumentEvents();
     installEditorObserver();
-    scheduleSettingsExperience();
     const root = uiRoot();
     if (!root) {
         if (attempt < 80) setTimeout(() => start(attempt + 1), 100);

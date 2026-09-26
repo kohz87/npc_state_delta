@@ -93,7 +93,11 @@ test('appearance form editor supports an explicitly unclassified current present
 test('continuity UI ships dedicated calendar/birthday and appearance-form surfaces', () => {
     const source = readFileSync(new URL('../continuity-ui.js', import.meta.url), 'utf8');
     const bootstrap = readFileSync(new URL('../bootstrap.js', import.meta.url), 'utf8');
-    assert.match(source, /Calendar & birthdays/);
+    const index = readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const calendar = readFileSync(new URL('../calendar-settings.js', import.meta.url), 'utf8');
+    assert.match(index, /settingsGroup\('calendar', 'Calendar & birthdays'/);
+    assert.match(calendar, /\[data-delta-settings-slot="calendar"\]/);
+    assert.doesNotMatch(source, /ensureCalendarDedicatedSection|npc_state_delta_calendar_birthdays_group/, 'the settings owner places the calendar group; no runtime relocation');
     const dossier = readFileSync(new URL('../dossier-ui.js', import.meta.url), 'utf8');
     assert.match(dossier, /delta-continuity-birthday-card/);
     assert.match(source, /Appearance forms/);

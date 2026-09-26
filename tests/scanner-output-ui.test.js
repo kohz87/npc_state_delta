@@ -72,18 +72,18 @@ test('zero scanner output setting preserves built-in request lengths', async () 
     assert.equal(calls.profile[0][2], 900);
 });
 
-test('scanner output UI keeps settings bounded, groups full cast with scanning, and keeps cast cards taller', () => {
+test('scanner output UI mounts into the Scanning slot, leaves panel styling to style.css, and keeps cast cards taller', () => {
     const source = fs.readFileSync(new URL('../scanner-output-ui.js', import.meta.url), 'utf8');
+    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const css = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
     assert.match(source, /Maximum output tokens/);
-    assert.match(source, /FULL_CAST_CONTROL_ID = 'npc_state_delta_full_cast_scan'/);
-    assert.match(source, /function moveFullCastIntoScanning/);
-    assert.match(source, /npc_state_delta_full_scan_every_turn/);
-    assert.match(source, /npc-state-delta-actions:not\(\.delta-settings-maintenance-actions\)/);
-    assert.match(source, /npc-state-delta-tuning-actions\{display:flex!important;flex-wrap:wrap!important/);
-    assert.match(source, /delta-settings-maintenance-actions\{display:grid!important;grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/s);
-    assert.match(source, /delta-settings-maintenance-actions>\.menu_button[^}]*width:100%!important/s);
-    assert.match(source, /delta-scanner-output-row[^}]*grid-template-columns:minmax\(0,1fr\) minmax\(150px,180px\)/s);
-    assert.match(source, /@media\(max-width:760px\)[\s\S]*delta-scanner-output-row\{grid-template-columns:minmax\(0,1fr\)!important/s);
+    assert.match(source, /\[data-delta-settings-slot="scanner-output"\]/);
+    assert.match(index, /settingsSlot\('full-cast'\)[\s\S]*npc_state_delta_scan_depth[\s\S]*settingsSlot\('scanner-output'\)/, 'full cast and output limit sit inside Scanning');
+    assert.doesNotMatch(source, /moveFullCastIntoScanning|npc_state_delta_full_cast_scan|#\$\{SETTINGS_ID\} \./, 'no relocation or settings CSS outside the settings owner');
+    assert.match(source, /class="delta-setting-number"/);
+    assert.match(css, /\.delta-settings-maintenance-actions \{ display: grid; grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
+    assert.match(css, /\.npc-state-delta-tuning-actions \{ display: flex; flex-wrap: wrap;/);
+    assert.match(css, /@container npc-delta-settings \(max-width: 500px\)/);
     assert.match(source, /delta-cast-card[^}]*height:168px/s);
     assert.match(source, /@media\(max-width:620px\)[\s\S]*height:150px/);
     assert.match(source, /roleplay or image-generation limits/);
