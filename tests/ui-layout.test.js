@@ -477,3 +477,9 @@ test('portrait generator top layer stays above the full-screen dossier on tablet
     assert.ok(Number(generator[1]) > Number(viewer[1]), `portrait generator (${generator[1]}) must sit above dossier (${viewer[1]})`);
     assert.match(index, /overlay\.style\.zIndex\s*=\s*'2147483600'/);
 });
+
+test('settings panel buttons override the host min-content button width', () => {
+    // SillyTavern's .menu_button is width:min-content, which stacks each word of a label inside a grid cell.
+    assert.match(css, /\.delta-settings-quick-actions \.menu_button,\n#npc_state_delta_settings \.npc-state-delta-custom-preset-actions \.menu_button,\n#npc_state_delta_settings \.delta-settings-maintenance-actions > \.menu_button \{ width: 100%; \}/);
+    assert.match(css, /\.npc-state-delta-calendar-actions > \.menu_button,\n#npc_state_delta_settings \.delta-settings-danger > \.menu_button \{ width: auto; white-space: nowrap; \}/);
+});
