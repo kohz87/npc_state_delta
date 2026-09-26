@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.58 - 26 September 2026
+
 - Consolidate the Extensions-tab settings panel. `index.js` now builds the final grouped panel once instead of emitting a flat list that four other modules then moved around at runtime; full cast, scanner output limit and calendar controls mount into named slots, and all panel styling lives in `style.css` (the injected settings CSS in `dossier-experience.js`, `scanner-output-ui.js` and `calendar-settings.js` and the relocation code in `continuity-ui.js` are removed). Nine groups become an always-visible quick bar (Enable, Auto scan, Open dossiers, Scan dossier now, Full scan current cast, Add NPC) plus six groups: Scanning, Roster & continuity, Calendar & birthdays, Portrait generation, Scanner rules and Data & maintenance, with Clear chat dossier separated as a danger action. Hints are shorter, number fields keep their units beside the input, the custom-preset and relationship-tuning controls use compact grids, breakpoints follow the panel width rather than the viewport, and the open/closed state of each group is remembered per browser. Setting IDs, stored settings, handlers, scanner prompts and rubric defaults are unchanged.
 
 ## 1.0.57 - 26 September 2026
