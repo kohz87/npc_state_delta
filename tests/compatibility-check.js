@@ -53,7 +53,7 @@ assert.match(fs.readFileSync(new URL('../native-transfer.js', import.meta.url), 
 assert.match(fs.readFileSync(new URL('../dossier-tools.js', import.meta.url), 'utf8'), /\.npcstatedelta/, 'portable bundle file extension missing');
 assert.match(index, /\.mes\[mesid=/, 'inline cards must target SillyTavern message elements by mesid');
 assert.match(index, /npc-state-delta-present-card/, 'present-NPC portrait card UI missing');
-assert.match(index, /npc-state-delta-viewer-dialog/, 'focused dossier viewer UI missing');
+assert.match(index, /new CustomEvent\('npc-state-delta:open-dossier'/, 'present-NPC cards must open the launcher dossier');
 assert.match(index, /reconcileBranchState/, 'branch reconciliation integration missing');
 assert.match(index, /getContext\(\)\.swipe\?\.state\?\.\(\)/, 'swipe-safe branch handling must use SillyTavern 1.18 swipe.state()');
 assert.match(index, /queueSettledSwipeReconcile/, 'settled swipe reconciliation missing');
@@ -63,7 +63,7 @@ assert.match(index, /writeNpcStateDataFile/, 'extension-owned JSON data-file per
 assert.match(index, /readNpcStateDataFile/, 'extension-owned JSON data-file loading missing');
 assert.match(index, /dataFiles/, 'data-file pointer registry missing');
 assert.match(index, /function inlineRosterHtml/, 'present-only roster renderer missing');
-assert.match(index, /function openNpcViewer/, 'portrait-card dossier viewer missing');
+assert.doesNotMatch(index, /function openNpcViewer/, 'the separate quick viewer must stay retired');
 assert.doesNotMatch(index, /\bnpcBank\b|\blocalProfile\b|from\s+['\"][^'\"]*Megumin|extension_settings\s*\[[^\]]*Megumin-Suite/i, 'standalone build must not import or access Megumin NPC Bank internals');
 
 const configuredRuntime = runtimeConfig.modules.map(module => module.path).sort();

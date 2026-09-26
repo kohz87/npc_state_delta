@@ -82,7 +82,7 @@ The Extensions-tab Settings panel keeps the same canonical inputs and handlers b
 
 - **Quick bar** (always visible): Enable, Auto scan, Open dossiers, Scan dossier now, Full scan current cast, Add NPC.
 - **Scanning**: connection profile, cadence, context, output limit and admission.
-- **Roster & continuity**: generation injection, roster lifecycle and stale cleanup.
+- **Roster & continuity**: in-chat Present NPCs display (Full cards, Compact strip or Off), generation injection, roster lifecycle and stale cleanup.
 - **Calendar & birthdays**
 - **Portrait generation**
 - **Scanner rules** (Advanced): relationship scoring, important memories and behavior expression rubrics.

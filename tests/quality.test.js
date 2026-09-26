@@ -62,6 +62,8 @@ test('retired helper and legacy dossier CSS are absent', () => {
         'npc-state-delta-inline-card',
         'npc-state-delta-inline-layout',
         'npc-state-delta-viewer-columns',
+        'npc-state-delta-viewer-dialog',
+        'npc-state-delta-viewer-overlay',
         'npc-state-delta-editor-scroll',
     ]) assert.doesNotMatch(css, new RegExp(`\\.${selector}(?:\\s|\\{|:|\\.)`));
 });

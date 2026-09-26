@@ -36,8 +36,9 @@ test('dossier Portrait control routes to the maintained manager and suppresses t
     const source = await readFile(controlsUrl, 'utf8');
     const experience = await readFile(new URL('../dossier-experience.js', import.meta.url), 'utf8');
     assert.match(experience, /from '\.\/portrait-tools\.js'/);
-    assert.match(source, /npc-state-delta-generate-portrait/);
-    assert.match(source, /display:none !important/);
+    const index = await readFile(new URL('../index.js', import.meta.url), 'utf8');
+    assert.doesNotMatch(index + source, /npc-state-delta-generate-portrait/, 'the legacy image-generation button is gone, not merely hidden');
+    assert.match(source, /\.npc-state-delta-portrait-run, \.npc-state-delta-portrait-use \{ display:none !important; \}/);
     assert.match(source, /top layer/i);
 });
 

@@ -162,9 +162,6 @@ let uiCaptureBridgeInstalled = false;
 let activeEditorPopup = null;
 let activeEditorChatKey = '';
 let activeEditorBaseRevision = null;
-let activeNpcViewerOverlay = null;
-let activeNpcViewerId = '';
-let activeNpcViewerOpenedAt = 0;
 let activePortraitGeneratorOverlay = null;
 let activePortraitGeneratorChatKey = '';
 let activePortraitGeneratorNpcId = '';
@@ -172,7 +169,7 @@ let activePortraitGenerationUrl = '';
 let portraitGenerationBusy = false;
 let portraitSettingsDirty = false;
 let portraitSettingsSaveBusy = false;
-let lastViewerActivation = { npcId: '', at: 0 };
+let lastPresentCardActivation = { npcId: '', at: 0 };
 let lastEditorActivation = { npcId: '', at: 0 };
 let lastScanMetrics = null;
 const diagnosticStore = createDiagnosticStore({ limit: 40 });
@@ -467,6 +464,7 @@ const DEFAULTS = Object.freeze({
     injectLimit: 3,
     injectBudgetTokens: 1800,
     branchRescan: true,
+    presentCastDisplay: 'full',
     relationshipBaseline: { ...DEFAULT_RELATIONSHIP },
     relationshipCaps: { ...DEFAULT_RELATIONSHIP_CAPS },
     relationshipCriteria: DEFAULT_RELATIONSHIP_CRITERIA,
@@ -532,6 +530,7 @@ function getSettings() {
     assign('memoryCriteria', typeof settings.memoryCriteria === 'string' ? settings.memoryCriteria : DEFAULT_MEMORY_CRITERIA);
     assign('behaviorCriteria', typeof settings.behaviorCriteria === 'string' ? settings.behaviorCriteria : DEFAULT_BEHAVIOR_CRITERIA);
     assign('admissionMode', normalizeNpcAdmissionMode(settings.admissionMode));
+    assign('presentCastDisplay', normalizePresentCastDisplay(settings.presentCastDisplay));
     assign('injectBudgetTokens', Math.max(512, Math.min(6000, Math.round(Number(settings.injectBudgetTokens) || 1800))));
     assign('fullScanEveryTurn', settings.fullScanEveryTurn === true);
     assign('scannerConnectionProfile', typeof settings.scannerConnectionProfile === 'string' ? settings.scannerConnectionProfile.trim() : '');
@@ -3566,6 +3565,8 @@ function buildSettingsHtml() {
         settingRow('npc_state_delta_admission_mode', 'NPC admission', '<select id="npc_state_delta_admission_mode" class="text_pole"><option value="conservative">Conservative</option><option value="balanced">Balanced</option><option value="manual_only">Manual only</option></select>', 'Conservative: proper names immediately, role labels after recurrence. Balanced: also direct or persistent role NPCs. Manual only: every dossier needs Add NPC.'),
     ].join('');
     const roster = `
+        <h4 class="delta-settings-subhead">In-chat display</h4>
+        ${settingRow('npc_state_delta_present_cast_display', 'Present NPCs in chat', '<select id="npc_state_delta_present_cast_display" class="text_pole"><option value="full">Full cards</option><option value="compact">Compact strip</option><option value="off">Off</option></select>', 'Shown under the latest reply (or as a Megumin tab). Tapping an NPC opens its dossier. Off adds nothing to the chat; presence tracking and injection are unaffected.')}
         <h4 class="delta-settings-subhead">Generation injection</h4>
         ${settingRow('npc_state_delta_inject', 'Inject present NPC state', '<input id="npc_state_delta_inject" type="checkbox">', 'Only active NPCs present in the latest scanned scene are injected into generation.')}
         ${settingRow('npc_state_delta_inject_budget', 'Injection budget', numberControl('npc_state_delta_inject_budget', 512, 6000, 'tokens', { step: 100, prefix: '<small>~</small>' }), 'Approximate hard ceiling. Lower-priority fields, then lower-ranked NPCs, are trimmed first.')}
@@ -3580,7 +3581,7 @@ function buildSettingsHtml() {
         ${settingRow('npc_state_delta_stale_delete_after', 'Auto-delete after', numberControl('npc_state_delta_stale_delete_after', 11, 1000, 'replies'), 'Default 50. Applies only to stale auto-archives.')}`;
     const portrait = `
         <p class="npc-state-delta-muted">Builds positive and negative prompts from the dossier for the native SillyTavern Image Generation handoff. The configured image backend (including ComfyUI) stays host-owned.</p>
-        ${settingRow('npc_state_delta_portrait_generation_enabled', 'Enable Generate Portrait', '<input id="npc_state_delta_portrait_generation_enabled" type="checkbox">', 'Adds Generate Portrait to the dossier menu. Fails safely without changing the dossier if Image Generation is unavailable.')}
+        ${settingRow('npc_state_delta_portrait_generation_enabled', 'Enable Generate Portrait', '<input id="npc_state_delta_portrait_generation_enabled" type="checkbox">', 'Enables Generate Portrait in the dossier Portrait tool. Fails safely without changing the dossier if Image Generation is unavailable.')}
         <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_theme_preset"><b>Theme preset</b><small>Built-ins are fixed starting points. Custom Library uses one of your saved presets.</small></label>
         <select id="npc_state_delta_portrait_theme_preset" class="text_pole">${Object.entries(PORTRAIT_THEME_PRESETS).map(([key, item]) => `<option value="${key}">${escapeHtml(item.label)}</option>`).join('')}</select>
         <div class="npc-state-delta-custom-preset-library">
@@ -3747,6 +3748,7 @@ function syncSettingsControls() {
     $('#npc_state_delta_archive_deaths').prop('checked', s.autoArchiveDeaths !== false);
     $('#npc_state_delta_reactivate_archived').prop('checked', s.autoReactivateArchived !== false);
     $('#npc_state_delta_branch_rescan').prop('checked', s.branchRescan !== false);
+    $('#npc_state_delta_present_cast_display').val(presentCastDisplayMode());
     if (!portraitSettingsDirty) writePortraitSettingsDraftToUi(portraitSettingsSnapshot(s));
     updatePortraitSettingsSaveUi();
     $('#npc_state_delta_base_trust').val(s.relationshipBaseline.trust);
@@ -3766,19 +3768,6 @@ function syncSettingsControls() {
 function relationshipNumber(value) {
     const number = Number(value);
     return Number.isFinite(number) ? Math.round(Math.max(-100, Math.min(100, number))) : 0;
-}
-
-function signedRelationship(value) {
-    const number = relationshipNumber(value);
-    return number > 0 ? `+${number}` : String(number);
-}
-
-function barHtml(label, value, kind) {
-    const number = relationshipNumber(value);
-    const width = Math.abs(number) / 2;
-    const left = number >= 0 ? 50 : 50 - width;
-    const polarity = number < 0 ? 'negative' : (number > 0 ? 'positive' : 'neutral');
-    return `<div class="npc-state-delta-bar-row"><div class="npc-state-delta-bar-label"><span>${escapeHtml(label)}</span><b>${signedRelationship(number)}</b></div><div class="npc-state-delta-bar"><i class="npc-state-delta-bar-zero"></i><i class="npc-state-delta-bar-fill npc-state-delta-${kind} npc-state-delta-bar-${polarity}" style="left:${left}%;width:${width}%"></i></div></div>`;
 }
 
 function latestMessageId(preferAssistant = false) {
@@ -3963,199 +3952,28 @@ function inlineCardHtml(npc, messageId) {
       </button>`;
 }
 
+function presentCastChipHtml(npc, messageId) {
+    const displayName = npc.name || 'NPC';
+    const portrait = portraitMarkup(npc, displayName, 'npc-state-delta-present-card-placeholder');
+    return `<button type="button" class="npc-state-delta-present-chip" data-npc-id="${escapeHtml(npc.id)}" data-message-id="${messageId}" aria-label="Open ${escapeHtml(displayName)} dossier"><span class="npc-state-delta-present-chip-portrait">${portrait}</span><span>${escapeHtml(displayName)}</span></button>`;
+}
+
 function inlineRosterHtml(cards, messageId) {
     const currentById = new Map(getChatState().npcs.map(npc => [npc.id, npc]));
     const visible = (cards || []).map(card => currentById.get(card.id)).filter(npc => npc?.present && !npc.archived && !npc.minor);
     if (!visible.length) return '';
+    if (presentCastDisplayMode() === 'compact') {
+        return `
+      <section class="npc-state-delta-present-roster npc-state-delta-present-strip" data-message-id="${messageId}">
+        <span class="npc-state-delta-kicker">PRESENT NPCS</span>
+        <div class="npc-state-delta-present-chips">${visible.map(npc => presentCastChipHtml(npc, messageId)).join('')}</div>
+      </section>`;
+    }
     return `
       <section class="npc-state-delta-present-roster" data-message-id="${messageId}">
         <div class="npc-state-delta-present-roster-head"><span class="npc-state-delta-kicker">PRESENT NPCS</span><small>${visible.length} shown</small></div>
         <div class="npc-state-delta-present-grid">${visible.map(npc => inlineCardHtml(npc, messageId)).join('')}</div>
       </section>`;
-}
-
-function relationshipChangeHtml(card) {
-    const lastChange = normalizeNpcRecord(card).lastRelationshipChange || {};
-    const delta = lastChange.delta || {};
-    const changeParts = [['Trust', delta.trust], ['Affection', delta.affection], ['Desire', delta.desire], ['Tension', delta.tension]]
-        .map(([label, value]) => [label, Number(value)])
-        .filter(([, value]) => Number.isFinite(value) && value !== 0)
-        .map(([label, value]) => `<span class="npc-state-delta-delta-pill">${label} ${value > 0 ? '+' : ''}${Math.round(value)}</span>`);
-    if (!changeParts.length) return '';
-    const impactLabel = String(lastChange.impact || 'ordinary').replace(/[^a-z]/gi, '').toLowerCase();
-    const safeImpact = ['none', 'ordinary', 'meaningful', 'major', 'extreme', 'manual'].includes(impactLabel) ? impactLabel : 'ordinary';
-    return `
-      <section class="npc-state-delta-viewer-section npc-state-delta-relationship-change"><b>Last relationship change</b>
-        <p><span class="npc-state-delta-impact-badge">${escapeHtml(safeImpact)}</span>${changeParts.join('')}</p>
-        ${lastChange.reason ? `<p>${escapeHtml(lastChange.reason)}</p>` : ''}
-      </section>`;
-}
-
-function npcViewerDialogHtml(npc, messageId = -1) {
-    const rel = npc.relationship || {};
-    const displayName = npc.name || 'NPC';
-    const portrait = portraitMarkup(npc, displayName, 'npc-state-delta-viewer-placeholder');
-    const inputId = `npc_state_delta_viewer_portrait_${String(npc.id).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-    const portraitUrl = npc?.portrait?.dataUrl || '';
-    const generatePortraitAction = getSettings().portraitGenerationEnabled !== false
-        ? `<button type="button" class="menu_button npc-state-delta-generate-portrait" data-npc-id="${escapeHtml(npc.id)}"><i class="fa-solid fa-wand-magic-sparkles"></i> Generate portrait</button>`
-        : '';
-    const memories = npc.memories?.length
-        ? `<ul class="npc-state-delta-viewer-list">${npc.memories.map(memory => `<li>${escapeHtml(memory)}</li>`).join('')}</ul>`
-        : `<span class="npc-state-delta-muted">No persistent memory recorded yet.</span>`;
-    const keyRelationships = npc.keyRelationships?.length
-        ? `<ul class="npc-state-delta-viewer-list">${npc.keyRelationships.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
-        : `<span class="npc-state-delta-muted">No key relationships established yet.</span>`;
-    const mannerisms = npc.mannerisms?.length
-        ? `<ul class="npc-state-delta-viewer-list">${npc.mannerisms.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
-        : `<span class="npc-state-delta-muted">None established yet.</span>`;
-    const behaviorProfile = npc.behaviorProfile?.length
-        ? `<ul class="npc-state-delta-viewer-list">${npc.behaviorProfile.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
-        : `<span class="npc-state-delta-muted">No compact behavioral breakdown established yet.</span>`;
-    const identityLine = [
-        npc.species || 'Species unknown',
-        npc.role || 'Role not established',
-        npc.age ? `Age ${npc.age}` : 'Age unknown',
-        npc.apparentAge ? `Looks ${npc.apparentAge}` : '',
-    ].filter(Boolean).join(' · ');
-    const sourceText = Number.isInteger(Number(messageId)) && Number(messageId) >= 0 ? `Current scene · message ${Number(messageId) + 1}` : 'Current live dossier';
-    return `
-      <div class="npc-state-delta-viewer-dialog" role="dialog" aria-modal="true" aria-labelledby="npc_state_delta_viewer_title" tabindex="-1">
-        <header class="npc-state-delta-viewer-header">
-          <span class="npc-state-delta-kicker">NPC DOSSIER</span>
-          <button type="button" class="npc-state-delta-viewer-close" aria-label="Close NPC dossier"><i class="fa-solid fa-xmark"></i></button>
-        </header>
-        <div class="npc-state-delta-viewer-page">
-          <aside class="npc-state-delta-viewer-portrait-rail">
-            <div class="npc-state-delta-viewer-portrait">${portrait}</div>
-            <div class="npc-state-delta-viewer-portrait-caption">
-              <h2 id="npc_state_delta_viewer_title">${escapeHtml(displayName)}</h2>
-              <p>${escapeHtml(identityLine)}</p>
-            </div>
-          </aside>
-
-          <main class="npc-state-delta-viewer-document">
-            <section class="npc-state-delta-viewer-glance npc-state-delta-viewer-glance-top">
-              <div class="npc-state-delta-viewer-glance-title">Current</div>
-              <div class="npc-state-delta-viewer-facts">
-                <div><b>Mood</b><span>${escapeHtml(npc.mood || 'Unknown')}</span></div>
-                <div><b>Location</b><span>${escapeHtml(npc.location || 'Unknown')}</span></div>
-                <div><b>Goal</b><span>${escapeHtml(npc.goal || 'Unknown')}</span></div>
-                <div><b>Status</b><span>${escapeHtml(npc.status || 'Stable / unknown')}</span></div>
-              </div>
-            </section>
-
-            <section class="npc-state-delta-viewer-group">
-              <div class="npc-state-delta-viewer-group-title">Profile</div>
-              <section class="npc-state-delta-viewer-section npc-state-delta-viewer-section-first"><b>Personality</b><p>${escapeHtml(npc.personality || 'Unknown')}</p></section>
-              <section class="npc-state-delta-viewer-section"><b>Behavioral profile</b>${behaviorProfile}</section>
-              <section class="npc-state-delta-viewer-section"><b>Speech</b><p>${escapeHtml(npc.speech || 'Unknown')}</p></section>
-              <section class="npc-state-delta-viewer-section"><b>Appearance</b><p>${escapeHtml(npc.appearance || 'Unknown')}</p></section>
-              <section class="npc-state-delta-viewer-section"><b>Mannerisms</b>${mannerisms}</section>
-            </section>
-
-            <section class="npc-state-delta-viewer-group">
-              <div class="npc-state-delta-viewer-group-title">Relationships</div>
-              <section class="npc-state-delta-viewer-section npc-state-delta-viewer-section-first"><b>With player</b><p>${escapeHtml(npc.relationshipSummary || 'No established relationship summary yet.')}</p>
-                <div class="npc-state-delta-bars npc-state-delta-viewer-bars">
-                  ${barHtml('Trust', rel.trust, 'trust')}
-                  ${barHtml('Affection', rel.affection, 'affection')}
-                  ${barHtml('Desire', rel.desire, 'desire')}
-                  ${barHtml('Tension', rel.tension, 'tension')}
-                </div>
-              </section>
-              ${relationshipChangeHtml(npc)}
-              <section class="npc-state-delta-viewer-section"><b>Key relationships</b>${keyRelationships}</section>
-            </section>
-
-            <section class="npc-state-delta-viewer-group">
-              <div class="npc-state-delta-viewer-group-title">Background</div>
-              <section class="npc-state-delta-viewer-section npc-state-delta-viewer-section-first"><p>${escapeHtml(npc.background || 'Unknown')}</p></section>
-            </section>
-
-            <section class="npc-state-delta-viewer-group">
-              <div class="npc-state-delta-viewer-group-title">Important memories</div>
-              <section class="npc-state-delta-viewer-section npc-state-delta-viewer-section-first">${memories}</section>
-            </section>
-
-            <div class="npc-state-delta-page-foot">${escapeHtml(sourceText)} · ${npc.updatedAt ? new Date(npc.updatedAt).toLocaleString() : 'unknown update time'}</div>
-          </main>
-        </div>
-        <footer class="npc-state-delta-viewer-commandbar" aria-label="NPC dossier actions">
-          <button type="button" class="menu_button npc-state-delta-inline-edit-npc" data-npc-id="${escapeHtml(npc.id)}"><i class="fa-solid fa-pen-to-square"></i> <span>Edit dossier</span></button>
-          <button type="button" class="menu_button npc-state-delta-refresh-chat" data-npc-id="${escapeHtml(npc.id)}" title="Refresh from Chat"><i class="fa-solid fa-arrows-rotate"></i> <span>Refresh</span></button>
-          <details class="npc-state-delta-viewer-more">
-            <summary><i class="fa-solid fa-ellipsis"></i> <span>More</span></summary>
-            <div class="npc-state-delta-viewer-more-menu">
-              ${generatePortraitAction}
-              <input id="${inputId}" class="npc-state-delta-inline-portrait-file" data-npc-id="${escapeHtml(npc.id)}" type="file" accept="image/*" hidden>
-              <label for="${inputId}" class="menu_button npc-state-delta-inline-image-button"><i class="fa-solid fa-image"></i> ${portraitUrl ? 'Change portrait' : 'Attach portrait'}</label>
-              ${portraitUrl ? `<button type="button" class="menu_button npc-state-delta-inline-remove-portrait" data-npc-id="${escapeHtml(npc.id)}"><i class="fa-solid fa-xmark"></i> Remove portrait</button>` : ''}
-              <button type="button" class="menu_button npc-state-delta-copy-image-prompt" data-npc-id="${escapeHtml(npc.id)}"><i class="fa-solid fa-copy"></i> Copy portrait prompts</button>
-            </div>
-          </details>
-        </footer>
-      </div>`;
-}
-
-function closeNpcViewer() {
-    const overlay = activeNpcViewerOverlay;
-    activeNpcViewerOverlay = null;
-    activeNpcViewerId = '';
-    activeNpcViewerOpenedAt = 0;
-    overlay?.remove?.();
-    document.body?.classList?.remove?.('npc-state-delta-viewer-open');
-    document.documentElement?.classList?.remove?.('npc-state-delta-viewer-open');
-}
-
-function refreshNpcViewer() {
-    if (!activeNpcViewerOverlay || !activeNpcViewerId) return false;
-    const npc = currentNpcById(activeNpcViewerId);
-    if (!npc || npc.archived || !npc.present) {
-        closeNpcViewer();
-        return false;
-    }
-    const messageId = Number(activeNpcViewerOverlay.dataset?.messageId ?? -1);
-    const oldPage = activeNpcViewerOverlay.querySelector?.('.npc-state-delta-viewer-page');
-    const oldDocument = activeNpcViewerOverlay.querySelector?.('.npc-state-delta-viewer-document');
-    const pageScrollTop = Number(oldPage?.scrollTop || 0);
-    const documentScrollTop = Number(oldDocument?.scrollTop || 0);
-    activeNpcViewerOverlay.innerHTML = npcViewerDialogHtml(npc, messageId);
-    const nextPage = activeNpcViewerOverlay.querySelector?.('.npc-state-delta-viewer-page');
-    const nextDocument = activeNpcViewerOverlay.querySelector?.('.npc-state-delta-viewer-document');
-    if (nextPage) nextPage.scrollTop = pageScrollTop;
-    if (nextDocument) nextDocument.scrollTop = documentScrollTop;
-    return true;
-}
-
-function openNpcViewer(npcId, messageId = -1) {
-    const id = String(npcId || '').trim();
-    const npc = currentNpcById(id);
-    if (!npc || npc.archived || !npc.present) return false;
-    closeNpcViewer();
-    const overlay = document.createElement('div');
-    overlay.id = 'npc_state_delta_viewer_overlay';
-    overlay.className = 'npc-state-delta-viewer-overlay';
-    overlay.dataset.npcId = id;
-    overlay.dataset.messageId = String(Number.isInteger(Number(messageId)) ? Number(messageId) : -1);
-    overlay.innerHTML = npcViewerDialogHtml(npc, Number(overlay.dataset.messageId));
-    overlay.addEventListener?.('click', event => {
-        const closeButton = eventTargetClosest(event, '.npc-state-delta-viewer-close');
-        const settledBackdropClick = event.target === overlay && Date.now() - activeNpcViewerOpenedAt > 350;
-        if (closeButton || settledBackdropClick) {
-            event.preventDefault?.();
-            event.stopPropagation?.();
-            closeNpcViewer();
-        }
-    });
-    document.body?.appendChild?.(overlay);
-    document.body?.classList?.add?.('npc-state-delta-viewer-open');
-    document.documentElement?.classList?.add?.('npc-state-delta-viewer-open');
-    activeNpcViewerOverlay = overlay;
-    activeNpcViewerId = id;
-    activeNpcViewerOpenedAt = Date.now();
-    globalThis.requestAnimationFrame?.(() => overlay.querySelector?.('.npc-state-delta-viewer-close')?.focus?.());
-    return true;
 }
 
 function messageElement(messageId) {
@@ -4186,7 +4004,19 @@ function messageElement(messageId) {
     return null;
 }
 
+const PRESENT_CAST_DISPLAY_MODES = Object.freeze(['full', 'compact', 'off']);
+
+function normalizePresentCastDisplay(value) {
+    return PRESENT_CAST_DISPLAY_MODES.includes(value) ? value : 'full';
+}
+
+function presentCastDisplayMode() {
+    return normalizePresentCastDisplay(getSettings().presentCastDisplay);
+}
+
 function inlineEntriesForRender(state) {
+    // Presentation only: Off renders nothing, while inlineCards history is still recorded below.
+    if (presentCastDisplayMode() === 'off') return [];
     // Visible NPC State Delta is a live present-cast view, not a historical dossier timeline.
     // Keep inlineCards internally for branch/rollback safety, but render only the latest
     // assistant message and only NPCs physically present in the current merged state.
@@ -4259,9 +4089,9 @@ function mountNpcStateInsideMeguminBlock(message, messageId, html) {
         button.className = 'meg-blocks-tab npc-state-delta-megumin-tab';
         button.dataset.npcStateDeltaMessageId = String(messageId);
         button.dataset.key = `npc-state-delta:${messageId}`;
-        button.title = 'NPC State Delta';
+        button.title = 'Present NPCs';
         button.setAttribute?.('aria-expanded', 'false');
-        button.innerHTML = '<span class="meg-blocks-tab-emoji">👥</span><span class="meg-blocks-tab-label">NPC State Delta</span>';
+        button.innerHTML = '<span class="meg-blocks-tab-emoji">👥</span><span class="meg-blocks-tab-label">Present NPCs</span>';
         button.addEventListener?.('click', event => {
             // Inventory Ledger may deliberately restore this foreign tab from its own bridge.
             // In that case it prevents the click after restoring our pane; do not immediately
@@ -4401,7 +4231,17 @@ function inlineMountNeedsRepair() {
     });
 }
 
+function stopInlineWatchdog() {
+    if (inlineWatchdogTimer) clearInterval(inlineWatchdogTimer);
+    inlineWatchdogTimer = null;
+    try { inlineObserver?.disconnect?.(); } catch {}
+    inlineObserver = null;
+    inlineObserverChat = null;
+}
+
 function startInlineWatchdog() {
+    // Off adds nothing to the chat, so nothing needs to watch host message redraws.
+    if (presentCastDisplayMode() === 'off') return stopInlineWatchdog();
     ensureInlineObserver();
     if (inlineWatchdogTimer || typeof setInterval !== 'function') return;
     inlineWatchdogTimer = setInterval(() => {
@@ -4419,7 +4259,7 @@ function renderInlineCards() {
     let chatKey;
     try { chatKey = getChatKey(); } catch { return { rendered: 0, missing: 0 }; }
     if (chatKey === 'no-chat' || chatHydrationStatus(chatKey) !== 'ready') return { rendered: 0, missing: 0 };
-    ensureInlineObserver();
+    if (presentCastDisplayMode() !== 'off') ensureInlineObserver();
 
     const state = getChatState(chatKey);
     const desiredEntries = inlineEntriesForRender(state).filter(entry => (entry.cards || []).length);
@@ -4500,40 +4340,44 @@ function eventTargetClosest(event, selector) {
     return typeof event?.target?.closest === 'function' ? event.target.closest(selector) : null;
 }
 
-function activateNpcViewerFromEvent(event) {
-    const card = eventTargetClosest(event, '.npc-state-delta-present-card');
+// Present-cast cards open the same launcher dossier page as the floating launcher.
+function openLauncherDossier(npcId) {
+    const id = String(npcId || '').trim();
+    if (!id || !currentNpcById(id)) return false;
+    const request = { npcId: id, handled: false };
+    document.dispatchEvent?.(new CustomEvent('npc-state-delta:open-dossier', { detail: request }));
+    if (!request.handled) globalThis.toastr?.warning?.('NPC State Delta dossier UI is still mounting.');
+    return request.handled;
+}
+
+function activatePresentCardFromEvent(event) {
+    const card = eventTargetClosest(event, '.npc-state-delta-present-card, .npc-state-delta-present-chip');
     if (!card) return false;
     if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) return false;
     const npcId = String(card.dataset?.npcId || '').trim();
     if (!npcId) return false;
     const now = Date.now();
-    if (lastViewerActivation.npcId === npcId && now - lastViewerActivation.at < 650) {
+    if (lastPresentCardActivation.npcId === npcId && now - lastPresentCardActivation.at < 650) {
         event.preventDefault?.();
         event.stopImmediatePropagation?.();
         event.stopPropagation?.();
         return true;
     }
-    lastViewerActivation = { npcId, at: now };
+    lastPresentCardActivation = { npcId, at: now };
     event.preventDefault?.();
     event.stopImmediatePropagation?.();
     event.stopPropagation?.();
-    openNpcViewer(npcId, Number(card.dataset?.messageId ?? -1));
+    openLauncherDossier(npcId);
     return true;
 }
 
-function handleNpcViewerEscape(event) {
+function handlePortraitGeneratorEscape(event) {
     if (event?.key !== 'Escape' || event.defaultPrevented
         || document.getElementById?.('npc_state_delta_tools_overlay')) return false;
-    if (activePortraitGeneratorOverlay) {
-        event.preventDefault?.();
-        event.stopPropagation?.();
-        closePortraitGenerator();
-        return true;
-    }
-    if (!activeNpcViewerOverlay) return false;
+    if (!activePortraitGeneratorOverlay) return false;
     event.preventDefault?.();
     event.stopPropagation?.();
-    closeNpcViewer();
+    closePortraitGenerator();
     return true;
 }
 
@@ -4563,7 +4407,7 @@ async function openNpcEditorSafely(npcId) {
 }
 
 function activateNpcEditorFromEvent(event) {
-    const editButton = eventTargetClosest(event, '.npc-state-delta-roster-edit, .npc-state-delta-inline-edit-npc');
+    const editButton = eventTargetClosest(event, '.npc-state-delta-roster-edit');
     if (!editButton) return false;
     if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) return false;
     const npcId = String(editButton.dataset?.npcId || '').trim();
@@ -4579,7 +4423,6 @@ function activateNpcEditorFromEvent(event) {
     event.preventDefault?.();
     event.stopImmediatePropagation?.();
     event.stopPropagation?.();
-    closeNpcViewer();
     void openNpcEditorSafely(npcId);
     return true;
 }
@@ -4587,18 +4430,18 @@ function activateNpcEditorFromEvent(event) {
 function installUiCaptureBridge() {
     if (uiCaptureBridgeInstalled || typeof document?.addEventListener !== 'function') return;
     uiCaptureBridgeInstalled = true;
-    document.addEventListener('pointerup', activateNpcViewerFromEvent, true);
-    document.addEventListener('click', activateNpcViewerFromEvent, true);
-    document.addEventListener('keydown', activateNpcViewerFromEvent, true);
-    document.addEventListener('keydown', handleNpcViewerEscape, true);
+    document.addEventListener('pointerup', activatePresentCardFromEvent, true);
+    document.addEventListener('click', activatePresentCardFromEvent, true);
+    document.addEventListener('keydown', activatePresentCardFromEvent, true);
+    document.addEventListener('keydown', handlePortraitGeneratorEscape, true);
     document.addEventListener('pointerup', activateNpcEditorFromEvent, true);
     document.addEventListener('click', activateNpcEditorFromEvent, true);
     document.addEventListener('keydown', activateNpcEditorFromEvent, true);
     try {
-        document.addEventListener('touchend', activateNpcViewerFromEvent, { capture: true, passive: false });
+        document.addEventListener('touchend', activatePresentCardFromEvent, { capture: true, passive: false });
         document.addEventListener('touchend', activateNpcEditorFromEvent, { capture: true, passive: false });
     } catch {
-        document.addEventListener('touchend', activateNpcViewerFromEvent, true);
+        document.addEventListener('touchend', activatePresentCardFromEvent, true);
         document.addEventListener('touchend', activateNpcEditorFromEvent, true);
     }
 }
@@ -4670,7 +4513,6 @@ function renderDossier() {
     renderSettingsRoster();
     startInlineWatchdog();
     queueInlineRender();
-    refreshNpcViewer();
 }
 
 function cleanEditorList(value, max = 12) {
@@ -4791,42 +4633,6 @@ function portraitPromptOptions() {
 
 function npcImagePromptPair(npc) {
     return buildNpcPortraitPrompts(npc || {}, portraitPromptOptions());
-}
-
-function npcImagePromptText(npc) {
-    const prompts = npcImagePromptPair(npc);
-    if (!prompts.positive) return '';
-    return `POSITIVE\n${prompts.positive}\n\nNEGATIVE\n${prompts.negative || '(none)'}`;
-}
-
-async function copyNpcImagePrompt(npcId) {
-    const npc = getChatState().npcs.find(item => item.id === npcId);
-    const text = npcImagePromptText(npc);
-    if (!text) {
-        globalThis.toastr?.warning?.('NPC State Delta: no appearance description or portrait override is established for this NPC yet.');
-        return false;
-    }
-    try {
-        if (globalThis.navigator?.clipboard?.writeText) {
-            await globalThis.navigator.clipboard.writeText(text);
-        } else {
-            const area = document.createElement('textarea');
-            area.value = text;
-            area.setAttribute('readonly', '');
-            area.style.position = 'fixed';
-            area.style.opacity = '0';
-            document.body.appendChild(area);
-            area.select();
-            document.execCommand?.('copy');
-            area.remove();
-        }
-        globalThis.toastr?.success?.(`NPC State Delta: copied positive + negative portrait prompts for ${npc.name}.`);
-        return true;
-    } catch (error) {
-        console.warn('[NPC State Delta] Could not copy portrait prompts', error);
-        globalThis.toastr?.warning?.('NPC State Delta: could not access the clipboard.');
-        return false;
-    }
 }
 
 function slashQuoted(value) {
@@ -5064,7 +4870,6 @@ async function useGeneratedPortrait() {
         if (!applied) return false;
         await flushStateFile(originChatKey);
         if (!current()) return false;
-        refreshNpcViewer();
         closePortraitGenerator();
         globalThis.toastr?.success?.(`NPC State Delta: generated portrait applied to ${npc.name} and saved.`);
         return true;
@@ -5745,7 +5550,6 @@ async function savePortraitSettingsDraft(explicitDraft = null) {
         portraitSettingsDirty = false;
         portraitSettingsSaveBusy = false;
         syncSettingsControls();
-        refreshNpcViewer();
         globalThis.toastr?.success?.(next.portraitThemePreset === 'custom'
             ? `NPC State Delta: saved custom portrait preset ${portraitCustomPresetFor(next).name}.`
             : 'NPC State Delta: portrait settings saved.');
@@ -5801,7 +5605,6 @@ async function persistPortraitCustomPresetLibrary(settings, presets, selectedId,
         portraitSettingsDirty = false;
         portraitSettingsSaveBusy = false;
         syncSettingsControls();
-        refreshNpcViewer();
         return portraitSettingsSnapshot(settings);
     } catch (error) {
         Object.assign(settings, before);
@@ -6027,6 +5830,11 @@ function bindUi() {
     $(document).on('click.npcStateDelta', '#npc_state_delta_save_portrait_settings', () => { void savePortraitSettingsDraft(); });
     bindSettingsNumber('#npc_state_delta_scan_every', 'scanEvery', 1, 20, 2);
     bindSettingsNumber('#npc_state_delta_scan_depth', 'scanDepth', 2, 30, 6);
+    $(document).on('change.npcStateDelta', '#npc_state_delta_present_cast_display', function () {
+        getSettings().presentCastDisplay = normalizePresentCastDisplay(this.value); this.value = getSettings().presentCastDisplay; persistSettings();
+        startInlineWatchdog();
+        queueInlineRender(0);
+    });
     $(document).on('change.npcStateDelta', '#npc_state_delta_admission_mode', function () {
         getSettings().admissionMode = normalizeNpcAdmissionMode(this.value); this.value = getSettings().admissionMode; persistSettings();
     });
@@ -6107,18 +5915,14 @@ function bindUi() {
         if (addedNpc) globalThis.toastr?.success?.(`NPC State Delta: ${addedNpc.name} created. Use the wand beside the dossier to Scan dossier and populate it.`);
     });
     $(document).on('click.npcStateDelta', '.npc-state-delta-roster-edit', function (event) { event.preventDefault?.(); event.stopPropagation?.(); openNpcEditorSafely(this.dataset.npcId); });
-    $(document).on('click.npcStateDelta', '.npc-state-delta-inline-edit-npc', function () { closeNpcViewer(); openNpcEditorSafely(this.dataset.npcId); });
     $(document).on('click.npcStateDelta', '.npc-state-delta-scan-dossier', function (event) { event.preventDefault?.(); event.stopPropagation?.(); void scanNpcDossier(String(this.dataset.npcId || '')); });
     $(document).on('click.npcStateDelta', '.npc-state-delta-refresh-chat', function (event) { event.preventDefault?.(); event.stopPropagation?.(); void refreshNpcFromChat(String(this.dataset.npcId || '')); });
-    $(document).on('click.npcStateDelta', '.npc-state-delta-copy-image-prompt', function () { copyNpcImagePrompt(String(this.dataset.npcId || '')); });
-    $(document).on('click.npcStateDelta', '.npc-state-delta-generate-portrait', function (event) { event.preventDefault?.(); event.stopPropagation?.(); openPortraitGenerator(String(this.dataset.npcId || '')); });
     $(document).on('click.npcStateDelta', '.npc-state-delta-portrait-reset', function (event) { event.preventDefault?.(); resetPortraitGeneratorFromDossier(); });
     $(document).on('click.npcStateDelta', '.npc-state-delta-portrait-run', function (event) { event.preventDefault?.(); void generatePortraitFromDialog(); });
     $(document).on('click.npcStateDelta', '.npc-state-delta-portrait-use', function (event) { event.preventDefault?.(); void useGeneratedPortrait(); });
     $(document).on('click.npcStateDelta', '.npc-state-delta-archive-npc', async function () {
         const key = getChatKey();
         if (!await ensureFreshMutationBoundary('archive a dossier', key)) return;
-        closeNpcViewer();
         setNpcArchiveStateById(this.dataset.npcId, true, { reason: 'manual' });
     });
     $(document).on('click.npcStateDelta', '.npc-state-delta-restore-npc', async function () {
@@ -6146,24 +5950,6 @@ function bindUi() {
         cleared.lineage = chatLineage(getContext().chat || []);
         setChatState(getChatKey(), cleared);
         persistCritical(); renderDossier(); updateInjection();
-    });
-    $(document).on('change.npcStateDelta', '.npc-state-delta-inline-portrait-file', async function () {
-        const file = this.files?.[0];
-        const npcId = this.dataset.npcId;
-        const chatKey = getChatKey();
-        this.value = '';
-        if (!file) return;
-        try {
-            const applied = await setNpcPortrait(npcId, file, { chatKey });
-            if (applied) globalThis.toastr?.info?.('NPC State Delta: portrait applied locally; durable save is pending.');
-        } catch (error) {
-            globalThis.toastr?.error?.(`NPC State Delta portrait: ${error?.message || error}`);
-        }
-    });
-    $(document).on('click.npcStateDelta', '.npc-state-delta-inline-remove-portrait', async function () {
-        const key = getChatKey();
-        if (!await ensureFreshMutationBoundary('remove a portrait', key)) return;
-        removeNpcPortrait(this.dataset.npcId, { chatKey: key });
     });
 }
 
@@ -6422,7 +6208,6 @@ function registerEvents() {
             deferredSwipeMessageId = null;
             swipeSettlementSequence += 1;
             closePortraitGenerator();
-            closeNpcViewer();
             closeNpcEditor();
             let key = getChatKey();
             try {
@@ -6594,8 +6379,7 @@ window.NPCStateDelta = Object.freeze({
     render: renderDossier,
     renderInline: renderInlineCards,
     openEditor: value => { const npc = findNpcByIdOrName(value); return npc ? openNpcEditorSafely(npc.id) : false; },
-    openViewer: value => { const npc = findNpcByIdOrName(value); return npc ? openNpcViewer(npc.id, latestMessageId(true)) : false; },
-    closeViewer: closeNpcViewer,
+    openDossier: value => { const npc = findNpcByIdOrName(value); return npc ? openLauncherDossier(npc.id) : false; },
     uiStatus: () => ({
         version: NPC_STATE_VERSION,
         chatKey: getChatKey(),
@@ -6611,8 +6395,7 @@ window.NPCStateDelta = Object.freeze({
         rosterMounted: Boolean(document.querySelector?.('#npc_state_delta_roster_summary')),
         editorMounted: editorIsMounted(),
         editorMode: activeEditorPopup ? 'sillytavern-popup' : 'closed',
-        viewerOpen: Boolean(activeNpcViewerOverlay),
-        viewerNpcId: activeNpcViewerId || null,
+        presentCastDisplay: presentCastDisplayMode(),
         portraitGeneratorOpen: Boolean(activePortraitGeneratorOverlay),
         portraitGeneratorNpcId: activePortraitGeneratorNpcId || null,
         portraitGenerationBusy,

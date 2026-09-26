@@ -3,6 +3,7 @@ import { appearanceFingerprint, normalizeAppearanceModel, resolveNpcAppearance }
 import { formatBirthDate } from './birthday.js';
 
 const ROOT_ID = 'npc_state_delta_dossier_root';
+const OPEN_REQUEST_GUARD = '__npcStateDeltaOpenDossierRequests';
 const STYLE_ID = 'npc_state_delta_dossier_stage1_styles';
 const SETTINGS_ID = 'npc_state_delta_settings';
 const OBSERVER_RETRY_MS = 750;
@@ -422,6 +423,7 @@ class DeltaDossierUi {
         this.query = '';
         this.filter = 'all';
         this.selectedNpcId = '';
+        this.pendingNpcId = '';
         this.projection = null;
         this.lastChatKey = '';
         this.lastRailSignature = '';
@@ -469,7 +471,7 @@ class DeltaDossierUi {
             <button type="button" class="delta-launcher" aria-haspopup="dialog" aria-expanded="false" title="Open NPC dossiers">
                 <span class="delta-launcher-mark" aria-hidden="true">D</span><span>Dossiers</span>
             </button>
-            <section class="delta-panel" role="dialog" aria-modal="true" aria-label="NPC State Delta dossiers" hidden>
+            <section class="delta-panel" role="dialog" aria-modal="true" aria-label="NPC State Delta dossiers" tabindex="-1" hidden>
                 <header class="delta-topbar">
                     <div class="delta-brand"><span class="delta-kicker">NPC DOSSIER</span><strong>NPC State Delta</strong><span class="delta-chat-state"></span></div>
                     <div class="delta-top-actions">
@@ -616,7 +618,7 @@ class DeltaDossierUi {
         this.close();
     }
 
-    async open() {
+    async open({ focusSearch = true } = {}) {
         if (!this.root) return;
         this.panelOpen = true;
         this.root.querySelector('.delta-panel').hidden = false;
@@ -624,7 +626,16 @@ class DeltaDossierUi {
         try { await this.api?.ensureFresh?.({ reason: 'dossier-ui-open' }); }
         catch (error) { console.warn('[NPC State Delta] dossier view freshness check failed safely.', error); }
         await this.refresh({ force: true });
-        this.root.querySelector('.delta-search')?.focus?.({ preventScroll: true });
+        if (focusSearch) this.root.querySelector('.delta-search')?.focus?.({ preventScroll: true });
+        else this.root.querySelector('.delta-panel')?.focus?.({ preventScroll: true });
+    }
+
+    // Open the library on one NPC (present-cast cards in chat use this). The request is applied
+    // after any chat-change reset in refresh(), and clears search/filter so the NPC is visible.
+    async openNpc(npcId) {
+        this.pendingNpcId = plain(npcId);
+        // Opening one NPC should not raise a phone keyboard over its portrait.
+        await this.open({ focusSearch: false });
     }
 
     close({ restoreFocus = true } = {}) {
@@ -659,6 +670,14 @@ class DeltaDossierUi {
             this.lastRailSignature = '';
             this.lastDetailSignature = '';
             this.lastHeroSignature = '';
+        }
+        if (this.pendingNpcId) {
+            this.selectedNpcId = this.pendingNpcId;
+            this.pendingNpcId = '';
+            this.query = '';
+            this.filter = 'all';
+            const search = this.root.querySelector('.delta-search');
+            if (search) search.value = '';
         }
 
         if (chatKey === 'no-chat') {
@@ -903,6 +922,16 @@ export function mountNpcStateDeltaDossierUi(api = globalThis.NPCStateDelta) {
     if (existing?.__npcStateDeltaStage1Ui) return existing.__npcStateDeltaStage1Ui;
     const controller = new DeltaDossierUi(api).mount();
     if (controller?.root) controller.root.__npcStateDeltaStage1Ui = controller;
+    if (!document[OPEN_REQUEST_GUARD]) {
+        document[OPEN_REQUEST_GUARD] = true;
+        document.addEventListener('npc-state-delta:open-dossier', event => {
+            const ui = document.getElementById(ROOT_ID)?.__npcStateDeltaStage1Ui;
+            const npcId = plain(event?.detail?.npcId);
+            if (!ui || !npcId) return;
+            event.detail.handled = true;
+            void ui.openNpc(npcId);
+        });
+    }
     return controller;
 }
 
@@ -954,6 +983,7 @@ const STYLES = `
   background: #263a55; box-shadow: 0 5px 20px rgba(0,0,0,.38); cursor: pointer;
 }
 #${ROOT_ID} .delta-launcher:hover { background: #304866; }
+#${ROOT_ID} .delta-panel:focus { outline: none; }
 #${ROOT_ID} .delta-launcher-mark { display:grid; place-items:center; width:25px; height:25px; border-radius:8px; border:1px solid #a9bdd9; font:700 13px/1 Georgia,serif; }
 #${ROOT_ID} .delta-panel {
   position: fixed; z-index: 2147483500; left:50%; top:50%; transform:translate(-50%,-50%);

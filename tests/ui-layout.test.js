@@ -9,22 +9,36 @@ const root = path.resolve(here, '..');
 const index = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
 const continuityUi = fs.readFileSync(path.join(root, 'continuity-ui.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
+const dossierUi = fs.readFileSync(path.join(root, 'dossier-ui.js'), 'utf8');
 
-test('present NPC pane uses portrait-first cards and a focused dossier viewer', () => {
+test('present NPC pane uses portrait-first cards that open the launcher dossier', () => {
     assert.match(index, /function inlineRosterHtml/);
     assert.match(index, /class="npc-state-delta-present-grid"/);
     assert.match(index, /class="npc-state-delta-present-card"/);
     assert.match(index, /class="npc-state-delta-present-card-portrait"/);
     assert.match(index, /class="npc-state-delta-present-card-overlay"/);
     assert.doesNotMatch(index, /npc-state-delta-present-card-relation/);
-    assert.match(index, /function openNpcViewer/);
-    assert.match(index, /overlay\.className = 'npc-state-delta-viewer-overlay'/);
-    assert.match(index, /class="npc-state-delta-viewer-dialog"/);
-    assert.match(index, /npc-state-delta-viewer-close/);
+    // One dossier page: cards hand off to the launcher instead of a separate quick viewer.
+    assert.doesNotMatch(index + css, /npc-state-delta-viewer|function openNpcViewer|openViewer:/);
+    assert.match(index, /function openLauncherDossier\(npcId\)[\s\S]*new CustomEvent\('npc-state-delta:open-dossier', \{ detail: request \}\)/);
+    assert.match(index, /eventTargetClosest\(event, '\.npc-state-delta-present-card, \.npc-state-delta-present-chip'\)/);
+    assert.match(index, /openDossier: value =>/);
+    assert.match(dossierUi, /addEventListener\('npc-state-delta:open-dossier'[\s\S]*event\.detail\.handled = true;[\s\S]*ui\.openNpc\(npcId\)/);
+    assert.match(dossierUi, /if \(this\.pendingNpcId\) \{\s*this\.selectedNpcId = this\.pendingNpcId;[\s\S]*this\.filter = 'all';/, 'the requested NPC survives the chat-change reset and is not hidden by a filter');
     assert.match(css, /\.npc-state-delta-present-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fill, minmax\(118px, 160px\)\)[^}]*justify-content:\s*start/s);
     assert.match(css, /\.npc-state-delta-present-card\s*\{[^}]*aspect-ratio:\s*3\s*\/\s*4/s);
     assert.match(css, /\.npc-state-delta-present-card-overlay\s*\{[^}]*position:\s*absolute[^}]*bottom:\s*0[^}]*background:\s*linear-gradient/s);
-    assert.match(css, /\.npc-state-delta-viewer-overlay\s*\{[^}]*position:\s*fixed[^}]*inset:\s*0/s);
+});
+
+test('present NPCs in chat support Full, Compact and Off display modes', () => {
+    assert.match(index, /presentCastDisplay: 'full'/);
+    assert.match(index, /PRESENT_CAST_DISPLAY_MODES = Object\.freeze\(\['full', 'compact', 'off'\]\)/);
+    assert.match(index, /assign\('presentCastDisplay', normalizePresentCastDisplay\(settings\.presentCastDisplay\)\)/);
+    assert.match(index, /id="npc_state_delta_present_cast_display"[^>]*><option value="full">Full cards<\/option><option value="compact">Compact strip<\/option><option value="off">Off<\/option>/);
+    assert.match(index, /function inlineEntriesForRender\(state\) \{\s*\/\/[^\n]*\n\s*if \(presentCastDisplayMode\(\) === 'off'\) return \[\];/);
+    assert.match(index, /function startInlineWatchdog\(\) \{[\s\S]*?if \(presentCastDisplayMode\(\) === 'off'\) return stopInlineWatchdog\(\);/);
+    assert.match(index, /class="npc-state-delta-present-chip"/);
+    assert.match(css, /\.npc-state-delta-present-chips \{ display: flex;[^}]*overflow-x: auto;/);
 });
 
 
@@ -34,90 +48,17 @@ test('present NPC gallery keeps sparse rosters card-sized on tablet instead of s
     assert.match(css, /@media \(max-width: 700px\)[\s\S]*?\.npc-state-delta-present-grid \{[^}]*repeat\(2, minmax\(0, 1fr\)\)/s);
 });
 
-test('focused dossier uses a portrait rail, scrollable document, and bottom command bar', () => {
-    for (const title of ['Profile', 'Relationships', 'Background', 'Important memories']) {
-        assert.match(index, new RegExp(`npc-state-delta-viewer-group-title">${title}`));
-    }
-    assert.match(index, /class="npc-state-delta-viewer-glance-title">Current<\/div>/);
-    assert.match(index, /class="npc-state-delta-viewer-portrait-rail"/);
-    assert.match(index, /class="npc-state-delta-viewer-portrait-caption"/);
-    assert.match(index, /class="npc-state-delta-viewer-document"/);
-    assert.match(index, /class="npc-state-delta-viewer-commandbar"/);
-    assert.match(index, /class="npc-state-delta-viewer-more"/);
-    assert.match(index, /<summary><i class="fa-solid fa-ellipsis"><\/i> <span>More<\/span><\/summary>/);
-    const pageStart = index.indexOf('class="npc-state-delta-viewer-page"');
-    const commandStart = index.indexOf('class="npc-state-delta-viewer-commandbar"', pageStart);
-    const pageHtml = index.slice(pageStart, commandStart);
-    assert.match(pageHtml, /npc-state-delta-viewer-portrait-rail/);
-    assert.match(pageHtml, /npc-state-delta-viewer-document/);
-    assert.match(pageHtml, /npc-state-delta-viewer-glance/);
-    assert.doesNotMatch(pageHtml, /Edit dossier|Refresh from Chat|Copy portrait prompts|npc-state-delta-viewer-more/);
-    const commandHtml = index.slice(commandStart, index.indexOf('</footer>', commandStart));
-    assert.match(commandHtml, /Edit dossier/);
-    assert.match(commandHtml, /title="Refresh from Chat"/);
-    assert.match(commandHtml, /npc-state-delta-viewer-more/);
-    assert.match(commandHtml, /Copy portrait prompts/);
-    assert.ok(commandHtml.indexOf('Copy portrait prompts') > commandHtml.indexOf('npc-state-delta-viewer-more'), 'copy prompt belongs inside the secondary More area');
-    assert.match(css, /\.npc-state-delta-viewer-dialog\s*\{[^}]*display:\s*flex[^}]*overflow:\s*hidden/s);
-    assert.match(css, /\.npc-state-delta-viewer-page\s*\{[^}]*display:\s*grid[^}]*overflow:\s*hidden/s);
-    assert.match(css, /\.npc-state-delta-viewer-document\s*\{[^}]*overflow-y:\s*auto[^}]*touch-action:\s*pan-y/s);
-    assert.match(css, /\.npc-state-delta-viewer-portrait-rail\s*\{[^}]*position:\s*relative[^}]*overflow:\s*hidden/s);
-    assert.match(css, /\.npc-state-delta-viewer-commandbar\s*\{[^}]*grid-template-columns/s);
-    assert.match(css, /\.npc-state-delta-viewer-more-menu\s*\{[^}]*position:\s*absolute[^}]*bottom:\s*calc\(100% \+ 8px\)/s);
-});
-
-
-test('focused dossier gives long-form prose breathing room instead of table-like compression', () => {
-    const profileStart = index.indexOf('npc-state-delta-viewer-group-title">Profile');
-    const relationshipsStart = index.indexOf('npc-state-delta-viewer-group-title">Relationships', profileStart);
-    const profileHtml = index.slice(profileStart, relationshipsStart);
-    assert.doesNotMatch(profileHtml, /npc-state-delta-viewer-profile-columns/);
-    assert.match(profileHtml, /<b>Personality<\/b><p>/);
-    assert.match(profileHtml, /<b>Behavioral profile<\/b>/);
-    assert.match(profileHtml, /<b>Speech<\/b><p>/);
-    assert.match(index, /const mannerisms = npc\.mannerisms\?\.length[\s\S]*npc-state-delta-viewer-list/);
-    assert.match(css, /\.npc-state-delta-viewer-section\s*\{[^}]*margin-top:\s*23px;[^}]*padding-top:\s*20px;/s);
-    assert.match(css, /\.npc-state-delta-viewer-section p,\s*\n\.npc-state-delta-viewer-section ul\s*\{[^}]*line-height:\s*1\.68;/s);
-    assert.match(css, /\.npc-state-delta-viewer-section li \+ li\s*\{[^}]*margin-top:\s*9px;/s);
-    assert.match(css, /\.npc-state-delta-viewer-facts\s*\{[^}]*gap:\s*12px 14px;/s);
-});
-
-test('focused dossier refresh preserves whichever responsive viewer surface is scrolling', () => {
-    assert.match(index, /const oldPage = activeNpcViewerOverlay\.querySelector\?\.\('\.npc-state-delta-viewer-page'\)/);
-    assert.match(index, /const oldDocument = activeNpcViewerOverlay\.querySelector\?\.\('\.npc-state-delta-viewer-document'\)/);
-    assert.match(index, /const pageScrollTop = Number\(oldPage\?\.scrollTop \|\| 0\)/);
-    assert.match(index, /const documentScrollTop = Number\(oldDocument\?\.scrollTop \|\| 0\)/);
-    assert.match(index, /const nextPage = activeNpcViewerOverlay\.querySelector\?\.\('\.npc-state-delta-viewer-page'\)/);
-    assert.match(index, /const nextDocument = activeNpcViewerOverlay\.querySelector\?\.\('\.npc-state-delta-viewer-document'\)/);
-    assert.match(index, /if \(nextPage\) nextPage\.scrollTop = pageScrollTop/);
-    assert.match(index, /if \(nextDocument\) nextDocument\.scrollTop = documentScrollTop/);
-});
-
-test('tablet viewer is viewport-bound and switches between portrait rail and cinematic hero layouts', () => {
-    assert.match(css, /@media \(min-width: 701px\) and \(max-width: 1180px\)[\s\S]*?\.npc-state-delta-viewer-dialog\s*\{[^}]*width:\s*100vw;[^}]*height:\s*100dvh;[^}]*max-height:\s*100dvh;[^}]*border-radius:\s*0;/s);
-    assert.match(css, /@media \(min-width: 701px\) and \(max-width: 1180px\) and \(orientation: landscape\)[\s\S]*?\.npc-state-delta-viewer-page\s*\{[^}]*grid-template-columns:\s*minmax\(280px, 38%\)/s);
-    assert.match(css, /@media \(min-width: 701px\) and \(max-width: 1180px\) and \(orientation: portrait\)[\s\S]*?\.npc-state-delta-viewer-portrait-rail\s*\{[^}]*height:\s*clamp\(320px, 38dvh, 460px\)/s);
-    assert.match(css, /\.npc-state-delta-viewer-portrait-caption\s*\{[^}]*position:\s*absolute[^}]*bottom:\s*0[^}]*linear-gradient/s);
-    assert.match(css, /\.npc-state-delta-viewer-portrait img\s*\{[^}]*object-fit:\s*cover[^}]*object-position:\s*center 18%/s);
-});
-
-test('present cards and viewer resolve the current canonical NPC name after identity promotion', () => {
+test('present cards resolve the current canonical NPC name after identity promotion', () => {
     assert.match(index, /const displayName = npc\.name \|\| 'NPC'/);
     assert.match(index, /Open \$\{escapeHtml\(displayName\)\} dossier/);
-    assert.match(index, /<h2 id="npc_state_delta_viewer_title">\$\{escapeHtml\(displayName\)\}<\/h2>/);
 });
 
-
-test('inline dossier uses trust affection desire tension and strict presence wording', () => {
-    assert.match(index, /barHtml\('Trust'/);
-    assert.match(index, /barHtml\('Affection'/);
-    assert.match(index, /barHtml\('Desire'/);
-    assert.match(index, /barHtml\('Tension'/);
-    assert.doesNotMatch(index, /barHtml\('Respect'/);
+test('dossier uses trust affection desire tension and strict presence wording', () => {
+    assert.match(dossierUi, /RELATIONSHIP_AXES = Object\.freeze\(\[\['trust', 'Trust'\], \['affection', 'Affection'\], \['desire', 'Desire'\], \['tension', 'Tension'\]\]\)/);
+    assert.doesNotMatch(dossierUi, /'Respect'/);
     assert.match(index, /filter\(npc => !npc\.archived && npc\.present && !npc\.minor\)/);
     assert.match(index, /Only active NPCs present in the latest scanned scene/);
 });
-
 
 test('relationship tuning exposes baseline, caps, editable rubrics, and delta audit UI', () => {
     for (const id of ['npc_state_delta_base_trust', 'npc_state_delta_base_affection', 'npc_state_delta_base_desire', 'npc_state_delta_base_tension']) assert.match(index, new RegExp(id));
@@ -125,8 +66,7 @@ test('relationship tuning exposes baseline, caps, editable rubrics, and delta au
     assert.match(index, /npc_state_delta_relationship_criteria/);
     assert.match(index, /npc_state_delta_impact_criteria/);
     assert.match(index, /Reset relationship rules/);
-    assert.match(index, /Last relationship change/);
-    assert.match(index, /npc-state-delta-delta-pill/);
+    assert.match(dossierUi, /Last relationship change/);
     assert.match(css, /npc-state-delta-rubric-textarea/);
 });
 
@@ -146,7 +86,6 @@ test('present-only behavior injection and manual dossier editor controls are exp
     assert.match(index, /Inject present NPC state/);
     assert.match(index, /npc_state_delta_behavior_criteria/);
     assert.match(index, /Relationship-to-behavior rubric/);
-    assert.match(index, /npc-state-delta-inline-edit-npc/);
     assert.match(index, /npc-state-delta-roster-edit/);
     assert.match(index, /Save dossier/);
     assert.match(index, /Protect edited stable profile fields/);
@@ -209,11 +148,7 @@ test('relationship UI is bipolar around neutral zero and legacy audit values are
     for (const id of ['npc_state_delta_edit_trust', 'npc_state_delta_edit_affection', 'npc_state_delta_edit_desire', 'npc_state_delta_edit_tension']) {
         assert.match(index, new RegExp(`${id}[^>]*min=\"-100\"[^>]*max=\"100\"`));
     }
-    assert.match(index, /signedRelationship/);
     assert.match(index, /Number\.isFinite\(value\)/);
-    assert.match(css, /npc-state-delta-bar-zero/);
-    assert.match(css, /left:\s*50%/);
-    assert.match(css, /npc-state-delta-bar-negative/);
 });
 
 
@@ -230,10 +165,7 @@ test('dossier exposes species/race, age, form-owned appearance, and portrait gen
     assert.match(continuityUi, /Apply appearance forms/);
     assert.match(continuityUi, /Shared appearance/);
     assert.match(continuityUi, /Current form/);
-    assert.match(index, /npc-state-delta-copy-image-prompt/);
-    assert.match(index, /Copy portrait prompts/);
     assert.match(index, /Age:/);
-    assert.match(index, /npcImagePromptText/);
     assert.match(index, /buildNpcPortraitPrompts/);
     assert.match(index, /npc_state_delta_portrait_style_positive[^\n]+maxlength=\"\$\{PORTRAIT_STYLE_PROMPT_LIMIT\}\"/);
     assert.match(index, /npc_state_delta_portrait_style_negative[^\n]+maxlength=\"\$\{PORTRAIT_STYLE_PROMPT_LIMIT\}\"/);
@@ -241,7 +173,7 @@ test('dossier exposes species/race, age, form-owned appearance, and portrait gen
     assert.match(index, /npc_state_delta_edit_portrait_positive[^\n]+maxlength=\"\$\{PORTRAIT_NPC_PROMPT_LIMIT\}\"/);
     assert.match(index, /npc_state_delta_edit_portrait_negative[^\n]+maxlength=\"\$\{PORTRAIT_NPC_PROMPT_LIMIT\}\"/);
     assert.doesNotMatch(index, /npc_state_delta_portrait_style_(?:positive|negative)[^\n]+maxlength=\"2400\"/);
-    assert.match(index, /Generate portrait/);
+    assert.match(fs.readFileSync(path.join(root, 'portrait-tools.js'), 'utf8'), />Generate Portrait<\/button>/);
     assert.doesNotMatch(index, /<b>Current thoughts<\/b>|Thought basis|npc_state_delta_edit_thought/i);
 });
 
@@ -299,25 +231,15 @@ test('UI integration remounts inline cards on SillyTavern render lifecycle and c
     assert.match(index, /function inlineEntriesForRender/);
     assert.match(index, /live-present-grid/);
     assert.match(index, /function installUiCaptureBridge/);
-    assert.match(index, /document\.addEventListener\('pointerup', activateNpcViewerFromEvent, true\);/);
+    assert.match(index, /document\.addEventListener\('pointerup', activatePresentCardFromEvent, true\);/);
     assert.match(index, /document\.addEventListener\('pointerup', activateNpcEditorFromEvent, true\);/);
-    assert.match(index, /document\.addEventListener\('click', activateNpcViewerFromEvent, true\);/);
+    assert.match(index, /document\.addEventListener\('click', activatePresentCardFromEvent, true\);/);
     assert.match(index, /document\.addEventListener\('click', activateNpcEditorFromEvent, true\);/);
     assert.match(index, /document\.addEventListener\('touchend'/);
-    assert.match(index, /eventTargetClosest\(event, '\.npc-state-delta-roster-edit, \.npc-state-delta-inline-edit-npc'\)/);
+    assert.match(index, /eventTargetClosest\(event, '\.npc-state-delta-roster-edit'\)/);
     assert.match(index, /class="menu_button npc-state-delta-roster-edit"/);
     assert.match(index, /\$\(document\)\.on\('click\.npcStateDelta', '\.npc-state-delta-roster-edit'/);
     assert.match(index, /uiStatus:/);
-});
-
-test('mobile viewer is true full-screen and isolates horizontal swipe gestures', () => {
-    assert.match(css, /@media \(max-width: 700px\)[\s\S]*\.npc-state-delta-viewer-dialog\s*\{[\s\S]*width:\s*100vw;[\s\S]*height:\s*100dvh;[\s\S]*max-height:\s*100dvh;/s);
-    assert.match(css, /\.npc-state-delta-viewer-dialog\s*\{[\s\S]*touch-action:\s*pan-y;/s);
-    assert.match(css, /\.npc-state-delta-viewer-overlay\s*\{[\s\S]*touch-action:\s*none;/s);
-    assert.match(css, /body\.npc-state-delta-viewer-open\s*\{[^}]*overflow:\s*hidden\s*!important/s);
-    assert.match(index, /settledBackdropClick = event\.target === overlay && Date\.now\(\) - activeNpcViewerOpenedAt > 350/);
-    assert.match(index, /eventTargetClosest\(event, '\.npc-state-delta-viewer-close'\)/);
-    assert.match(index, /event\?\.key !== 'Escape'/);
 });
 
 test('visible inline rendering is latest-scene present cast only while historical snapshots remain internal', () => {
@@ -338,7 +260,7 @@ test('inline renderer self-heals host redraws without destructive full remounts'
     assert.doesNotMatch(index, /querySelectorAll\?\.\('\.npc-state-delta-inline-anchor'\)\.forEach\(node => node\.remove\(\)\)/);
 });
 
-test('Megumin master block receives NPC State Delta as an in-card tab with standalone fallback preserved', () => {
+test('Megumin master block receives Present NPCs as an in-card tab with standalone fallback preserved', () => {
     assert.match(index, /function mountNpcStateInsideMeguminBlock/);
     assert.match(index, /querySelector\?\.\('\.meg-blocks'\)|querySelector\('\.meg-blocks'\)/);
     assert.match(index, /\.meg-blocks-tabs/);
@@ -348,7 +270,8 @@ test('Megumin master block receives NPC State Delta as an in-card tab with stand
     assert.match(index, /pane\.dataset\.key = button\.dataset\.key/);
     assert.match(index, /npcStateDeltaSnapshotSignature/);
     assert.match(index, /closest\('\.npc-state-delta-inline-anchor, \.npc-state-delta-megumin-pane'\)/);
-    assert.match(index, /NPC State Delta<\/span>/);
+    assert.match(index, /<span class="meg-blocks-tab-label">Present NPCs<\/span>/);
+    assert.match(index, /button\.title = 'Present NPCs'/);
     assert.match(index, /mountNpcStateInsideMeguminBlock\(message, messageId, html\)/);
     assert.match(index, /anchor\?\.remove\?\.\(\)/, 'successful Megumin integration should remove the duplicate standalone card');
     assert.match(index, /className = 'npc-state-delta-inline-anchor'/, 'standalone rendering remains the fallback when no Megumin block exists');
@@ -390,7 +313,7 @@ test('per-NPC Scan dossier workflow and Key Relationships controls are exposed',
     assert.match(index, /Key relationships/);
     assert.match(index, /cleanEditorList\(editorField\('npc_state_delta_edit_key_relationships'\), KEY_RELATIONSHIP_LIMIT\)/);
     assert.match(index, /keyRelationships: \[\.\.\.\(npc\.keyRelationships \|\| \[\]\)\]/);
-    assert.match(index, /<b>Key relationships<\/b>/);
+    assert.match(dossierUi, /Important bonds/);
 });
 
 
@@ -470,14 +393,13 @@ test('native portrait bridge uses quiet SillyTavern imagine command and separate
 
 
 test('portrait generator top layer stays above the full-screen dossier on tablet and mobile', () => {
-    const viewer = css.match(/\.npc-state-delta-viewer-overlay\s*\{[\s\S]*?z-index:\s*(\d+)/);
+    const dossier = dossierUi.match(/\.delta-panel \{\s*position: fixed; z-index: (\d+)/);
     const generator = css.match(/\.npc-state-delta-portrait-generator-overlay\s*\{[\s\S]*?z-index:\s*(\d+)/);
-    assert.ok(viewer, 'viewer z-index should be explicit');
+    assert.ok(dossier, 'dossier panel z-index should be explicit');
     assert.ok(generator, 'portrait generator z-index should be explicit');
-    assert.ok(Number(generator[1]) > Number(viewer[1]), `portrait generator (${generator[1]}) must sit above dossier (${viewer[1]})`);
+    assert.ok(Number(generator[1]) > Number(dossier[1]), `portrait generator (${generator[1]}) must sit above dossier (${dossier[1]})`);
     assert.match(index, /overlay\.style\.zIndex\s*=\s*'2147483600'/);
 });
-
 test('settings panel buttons override the host min-content button width', () => {
     // SillyTavern's .menu_button is width:min-content, which stacks each word of a label inside a grid cell.
     assert.match(css, /\.delta-settings-quick-actions \.menu_button,\n#npc_state_delta_settings \.npc-state-delta-custom-preset-actions \.menu_button,\n#npc_state_delta_settings \.delta-settings-maintenance-actions > \.menu_button \{ width: 100%; \}/);
