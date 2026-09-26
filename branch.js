@@ -1182,6 +1182,7 @@ export function bestAncestorState(chats = {}, currentKey = '', currentChat = [])
         return Number.isInteger(messageId) && messageId >= 0 && messageId <= best.checkpoint.messageId && messageId < lineage.length;
     }).map(item => ({ ...item, fingerprint: lineage[item.messageId], lineageKey: currentKeys[item.messageId] })));
     inherited.portraitAssets = structuredClone(best.state.portraitAssets || {});
+    inherited.formPortraitAssets = structuredClone(best.state.formPortraitAssets || {});
     inherited.userDismissedGroups = structuredClone(branchCore.normalizeUserDismissedGroups(best.state.userDismissedGroups));
     enforceUserDismissals(inherited, inherited.userDismissedGroups);
     inherited.branchParent = best.key;

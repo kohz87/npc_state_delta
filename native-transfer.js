@@ -46,7 +46,7 @@ function withoutPortraitPayload(value) {
     if (!value || typeof value !== 'object') return value;
     const out = {};
     for (const [key, item] of Object.entries(value)) {
-        if (key === 'portraitAssets') continue;
+        if (key === 'portraitAssets' || key === 'formPortraitAssets') continue;
         if (key === 'portrait' && item && typeof item === 'object') {
             out[key] = { ...item };
             delete out[key].dataUrl;

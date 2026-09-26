@@ -65,9 +65,10 @@ function fieldChangesProjection(value) {
     };
 }
 
-function portraitAppearanceChanged(npc = {}) {
-    const recorded = plain(npc?.portrait?.appearanceFingerprint);
-    if (!recorded || !plain(npc?.portrait?.dataUrl || npc?.portrait?.url || npc?.portrait?.src)) return false;
+function portraitAppearanceChanged(npc = {}, shown = null) {
+    const recorded = shown ? shown.fingerprint : plain(npc?.portrait?.appearanceFingerprint);
+    const src = shown ? shown.src : plain(npc?.portrait?.dataUrl || npc?.portrait?.url || npc?.portrait?.src);
+    if (!recorded || !src) return false;
     const current = appearanceFingerprint(npc);
     return Boolean(current) && current !== recorded;
 }
@@ -119,10 +120,23 @@ export function dossierIndexProjection(npc = {}, portraitAssets = {}) {
     };
 }
 
-export function dossierDetailProjection(npc = {}, portraitAssets = {}) {
+// The displayed portrait follows the current appearance form when that form has its own image;
+// otherwise it is the main portrait. Form images are read-only view data here.
+function displayedPortrait(npc = {}, portraitAssets = {}, formPortraits = {}) {
+    const form = plain(npc?.currentForm);
+    const formImage = form ? Object.entries(formPortraits || {}).find(([name]) => name.toLocaleLowerCase() === form.toLocaleLowerCase())?.[1] : null;
+    if (formImage?.dataUrl) return { src: plain(formImage.dataUrl), fingerprint: plain(formImage.appearanceFingerprint), form, fromForm: true };
+    return { src: portraitSource(npc, portraitAssets), fingerprint: plain(npc?.portrait?.appearanceFingerprint), form: plain(npc?.portrait?.appearanceForm), fromForm: false };
+}
+
+export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortraits = {}) {
     const rel = npc?.relationship && typeof npc.relationship === 'object' ? npc.relationship : {};
+    const shown = displayedPortrait(npc, portraitAssets, formPortraits);
     return {
         ...dossierIndexProjection(npc, portraitAssets),
+        portrait: shown.src,
+        portraitFromForm: shown.fromForm,
+        formPortraits: Object.fromEntries(Object.entries(formPortraits || {}).filter(([, image]) => image?.dataUrl).map(([name, image]) => [name, plain(image.dataUrl)])),
         age: plain(npc?.age),
         appearance: resolveNpcAppearance(npc),
         appearanceModel: normalizeAppearanceModel(npc, { locked: Array.isArray(npc?.manualProfileFields) && npc.manualProfileFields.includes('appearance') }),
@@ -138,8 +152,8 @@ export function dossierDetailProjection(npc = {}, portraitAssets = {}) {
         relationshipSummary: plain(npc?.relationshipSummary),
         lastRelationshipChange: relationshipChangeProjection(npc?.lastRelationshipChange),
         fieldChanges: fieldChangesProjection(npc?.fieldChanges),
-        portraitAppearanceChanged: portraitAppearanceChanged(npc),
-        portraitForm: plain(npc?.portrait?.appearanceForm),
+        portraitAppearanceChanged: portraitAppearanceChanged(npc, shown),
+        portraitForm: shown.form,
         recentRelationshipChanges: (Array.isArray(npc?.relationshipEventHistory) ? npc.relationshipEventHistory : [])
             .slice(-4)
             .reverse()
@@ -206,7 +220,8 @@ export function chooseDossierSelection(currentId, visibleRows = [], allRows = []
 export function projectDossierState(state = {}, status = {}) {
     const portraitAssets = state?.portraitAssets && typeof state.portraitAssets === 'object' ? state.portraitAssets : {};
     const records = Array.isArray(state?.npcs) ? state.npcs : [];
-    const details = records.map(npc => dossierDetailProjection(npc, portraitAssets)).filter(npc => npc.id);
+    const formPortraits = state?.formPortraits && typeof state.formPortraits === 'object' ? state.formPortraits : {};
+    const details = records.map(npc => dossierDetailProjection(npc, portraitAssets, formPortraits[npc?.id] || {})).filter(npc => npc.id);
     return {
         chatKey: plain(status?.chatKey, 'no-chat'),
         hydrationStatus: plain(status?.hydrationStatus, 'ready'),
@@ -300,7 +315,15 @@ export function appearanceFormsHtml(npc) {
     const unclassified = model.currentFormUnknown && model.unclassifiedAppearance
         ? `<div class="delta-appearance-form-row"><b>Current unclassified presentation<span class="delta-appearance-current-badge">Current</span></b>${proseHtml(model.unclassifiedAppearance)}</div>`
         : '';
-    const rows = model.appearanceForms.map(form => `<div class="delta-appearance-form-row"><b>${escapeHtml(form.name)}${form.name === model.currentForm ? '<span class="delta-appearance-current-badge">Current</span>' : ''}</b>${proseHtml(form.appearance)}</div>`).join('');
+    const formImages = npc.formPortraits || {};
+    const rows = model.appearanceForms.map(form => {
+        const image = formImages[form.name] || '';
+        const thumb = image
+            ? `<img class="delta-form-portrait-thumb" src="${escapeHtml(image)}" alt="${escapeHtml(form.name)} form portrait" loading="lazy" decoding="async">`
+            : '<span class="delta-form-portrait-thumb delta-form-portrait-empty" aria-hidden="true">+</span>';
+        const action = npc.id ? `<button type="button" class="delta-btn delta-experience-portrait delta-form-portrait-button" data-npc-id="${escapeHtml(npc.id)}" data-form="${escapeHtml(form.name)}">${image ? 'Change portrait' : 'Add portrait'}</button>` : '';
+        return `<div class="delta-appearance-form-row delta-appearance-form-with-portrait">${thumb}<div><b>${escapeHtml(form.name)}${form.name === model.currentForm ? '<span class="delta-appearance-current-badge">Current</span>' : ''}</b>${proseHtml(form.appearance)}${action}</div></div>`;
+    }).join('');
     const empty = !unclassified && !compatibilityCurrent && !rows ? '<p class="delta-muted">No named forms established.</p>' : '';
     return `<details class="delta-appearance-form-summary" data-delta-key="appearance" open><summary><b>Appearance forms</b><small>Current: ${escapeHtml(current)}</small></summary><div class="delta-appearance-form-list">${model.overallAppearance ? `<div class="delta-appearance-form-row"><b>Shared across forms</b>${proseHtml(model.overallAppearance)}</div>` : ''}${unclassified}${compatibilityCurrent}${rows}${empty}</div></details>`;
 }
@@ -1049,6 +1072,10 @@ const STYLES = `
 #${ROOT_ID} .delta-changed-mark { margin-left:4px; font-style:normal; font-size:.66rem; letter-spacing:.02em; text-transform:none; font-weight:600; }
 #${ROOT_ID} .delta-current-card.delta-changed { border-color:rgba(113,190,145,.32); }
 #${ROOT_ID} .delta-portrait-stale { position:absolute; z-index:3; top:12px; left:12px; max-width:calc(100% - 70px); padding:4px 9px; border:1px solid rgba(216,188,120,.55); border-radius:999px; color:#ffe2a8; background:rgba(5,6,8,.62); backdrop-filter:blur(3px); font-size:.72rem; }
+#${ROOT_ID} .delta-appearance-form-with-portrait { display:grid; grid-template-columns:64px minmax(0,1fr); gap:10px; align-items:start; }
+#${ROOT_ID} .delta-form-portrait-thumb { width:64px; height:82px; border-radius:8px; object-fit:cover; object-position:center 18%; border:1px solid rgba(255,255,255,.12); background:rgba(0,0,0,.25); }
+#${ROOT_ID} .delta-form-portrait-empty { display:grid; place-items:center; color:var(--delta-muted); font-size:1.4rem; border-style:dashed; }
+#${ROOT_ID} .delta-form-portrait-button { margin-top:7px; min-height:28px; padding:3px 9px; font-size:.74rem; }
 #${ROOT_ID} .delta-portrait-expand { position:absolute; z-index:3; top:10px; right:10px; display:grid; place-items:center; width:34px; height:34px; padding:0; border:1px solid rgba(255,255,255,.22); border-radius:9px; color:#fff4d7; background:rgba(5,6,8,.52); backdrop-filter:blur(3px); font-size:1.05rem; cursor:pointer; opacity:.78; }
 #${ROOT_ID} .delta-portrait-expand:hover { opacity:1; background:rgba(5,6,8,.72); }
 #${ROOT_ID} .delta-hero-media img.delta-hero-portrait { cursor:zoom-in; }

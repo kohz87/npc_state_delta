@@ -475,7 +475,7 @@ function bindDossierEvents(root) {
         if (portrait) {
             event.preventDefault();
             event.stopPropagation();
-            openPortraitTools(plain(portrait.dataset.npcId));
+            openPortraitTools(plain(portrait.dataset.npcId), { form: plain(portrait.dataset.form) });
             return;
         }
         const diagnostics = event.target.closest?.('.delta-experience-diagnostics');
