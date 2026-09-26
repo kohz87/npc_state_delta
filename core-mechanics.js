@@ -2245,7 +2245,9 @@ function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evi
             // A full-summary refine is atomic for safety. If any replacement fails its existing
             // identity/morality gate, reject the proposed summary rather than partially clearing it.
             if (!isSafeBehaviorProfileRefinement(current[index], entry)) return current;
-            if (!durableRefinementCandidateGrounded('behaviorProfile', current[index], entry, context, evidenceItems, binding)) return current;
+            // Ground the claim, not the lever label: labels are schema vocabulary that story text
+            // does not contain. First-seed grounding (groundedBehaviorProfile) uses the body too.
+            if (!durableRefinementCandidateGrounded('behaviorProfile', behaviorProfileBody(current[index]), behaviorProfileBody(entry), context, evidenceItems, binding)) return current;
             next.push(entry);
             continue;
         }
@@ -2256,7 +2258,7 @@ function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evi
             return existingPolarity && existingPolarity !== incomingPolarity;
         });
         if (conflicts) return current;
-        if (!durableRefinementCandidateGrounded('behaviorProfile', '', entry, context, evidenceItems, binding)) return current;
+        if (!durableRefinementCandidateGrounded('behaviorProfile', '', behaviorProfileBody(entry), context, evidenceItems, binding)) return current;
         next.push(entry);
     }
     // Omitted old rules are retired because the scanner contract says refine is a FULL field.

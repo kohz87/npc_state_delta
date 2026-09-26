@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.0.64 - 26 September 2026
+
+- Let a Behavioral Profile refine replace stored habit entries with new levers. When a scan or Refresh proposed a lever whose label the dossier did not already have (for example "Threat Sensitivity: high - slow to trust strangers"), the grounding check required the label words themselves to appear in the story. They never do, so the whole proposal was rejected and every stored entry, habits included, stayed. Refine grounding now checks the claim after the label, as first-profile grounding already did. The claim must still be supported by the story or evidence, one ungrounded entry still rejects the whole proposal, and entries omitted from an accepted refine are retired as before. Prompts are unchanged.
+
 ## 1.0.63 - 26 September 2026
 
 - Keep Behavioral Levers to levers. A lever describes how an NPC generally responds or decides ("Label: level - effect", or tendency phrasing such as "slow to trust strangers"). Scans could fill the field with routines and habits ("Keeps a quiet household and strictly enforces advance payment and dusk curfews."), which then crowded out real levers. Scanned, refreshed, backfilled and imported Behavioral Profile entries must now be lever-shaped (`isBehaviorLever`); entries that are not are dropped from the Behavioral Profile proposal and kept as pending Mannerisms evidence instead. A proposal made only of habits no longer replaces the existing levers. Existing dossiers and manual edits are not rewritten or filtered.
