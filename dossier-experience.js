@@ -216,7 +216,7 @@ function ensureEditorStructure(editor) {
     const identity = editorSection('Identity & profile', 'delta-editor-identity');
     for (const [id, wide] of [
         ['npc_state_delta_edit_name', false], ['npc_state_delta_edit_species', false],
-        ['npc_state_delta_edit_role', false], ['npc_state_delta_edit_home_base', false],
+        ['npc_state_delta_edit_gender', false], ['npc_state_delta_edit_role', false], ['npc_state_delta_edit_home_base', false],
         ['npc_state_delta_edit_age', false], ['npc_state_delta_edit_birthday', false],
         ['npc_state_delta_edit_apparent_age', false], ['npc_state_delta_edit_personality', false],
         ['npc_state_delta_edit_behavior_profile', true], ['npc_state_delta_edit_speech', false],
@@ -491,6 +491,7 @@ function installStyles() {
 .npc-state-delta-editor-popup .delta-editor-life-control{display:grid;grid-template-columns:minmax(180px,1fr) auto;gap:8px 10px;align-items:end;margin:0;padding:11px;border:1px solid rgba(218,193,148,.14);border-radius:9px;background:rgba(255,255,255,.035)}
 .npc-state-delta-editor-popup .delta-editor-life-control label{display:grid;gap:5px;margin:0}
 .npc-state-delta-editor-popup .delta-editor-life-control small{grid-column:1/-1;opacity:.72}
+.npc-state-delta-editor-popup .delta-editor-life-control>.menu_button{width:auto;white-space:nowrap;margin:0}
 
 /* Extension settings: same visual grammar, grouped by task instead of one long wall. */
 

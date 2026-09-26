@@ -100,7 +100,7 @@ test('continuity UI ships dedicated calendar/birthday and appearance-form surfac
     assert.doesNotMatch(source, /ensureCalendarDedicatedSection|npc_state_delta_calendar_birthdays_group/, 'the settings owner places the calendar group; no runtime relocation');
     const dossier = readFileSync(new URL('../dossier-ui.js', import.meta.url), 'utf8');
     assert.match(dossier, /delta-continuity-birthday-card/);
-    assert.match(source, /Appearance forms/);
-    assert.match(source, /Apply appearance forms/);
+    assert.match(source, /Named forms/);
+    assert.match(source, /Apply appearance</);
     assert.match(bootstrap, /import\('\.\/continuity-ui\.js'\)/);
 });

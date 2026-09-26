@@ -190,6 +190,16 @@ function presentationSegments(value) {
 function physicalTraitKeys(segment) {
     return PHYSICAL_TRAITS.filter(([, pattern]) => pattern.test(segment)).map(([key]) => key);
 }
+// A clause can mix an enduring trait with changeable detail ("long silver hair tied back with a
+// ribbon", "her hair is wet"). Split only such mixed clauses at their connectors and keep the pieces
+// that describe a trait without any changeable wording, so the trait itself survives and a passing
+// changeable mention of it does not count as re-describing it.
+const MIXED_CLAUSE_SPLIT = /\s+(?:with|and|tied|wearing|in|under|beneath|adorned|decorated|covered|while)\s+/i;
+function physicalPieces(segment) {
+    const pieces = CHANGEABLE_PRESENTATION.test(segment) ? segment.split(MIXED_CLAUSE_SPLIT) : [segment];
+    return pieces.map(piece => clean(piece, 400))
+        .filter(piece => piece && physicalTraitKeys(piece).length && !CHANGEABLE_PRESENTATION.test(piece));
+}
 function preserveOmittedPhysicalTraits(previous, next, { alsoPresent = '' } = {}) {
     const incoming = appearanceText(next);
     const prior = appearanceText(previous);
@@ -198,17 +208,35 @@ function preserveOmittedPhysicalTraits(previous, next, { alsoPresent = '' } = {}
     const presentNormalized = normalizeName(alsoPresent);
     const addressed = new Set(presentationSegments(incoming)
         .filter(segment => !CONCEALED_MENTION.test(segment))
+        .flatMap(physicalPieces)
         .flatMap(physicalTraitKeys));
-    const kept = presentationSegments(prior).filter(segment => {
-        const keys = physicalTraitKeys(segment);
-        if (!keys.length || CHANGEABLE_PRESENTATION.test(segment) || keys.some(key => addressed.has(key))) return false;
-        const normalized = normalizeName(segment);
+    const kept = presentationSegments(prior).flatMap(physicalPieces).filter(piece => {
+        if (physicalTraitKeys(piece).some(key => addressed.has(key))) return false;
+        const normalized = normalizeName(piece);
         return normalized && !incomingNormalized.includes(normalized) && !(presentNormalized && presentNormalized.includes(normalized));
     });
     const limit = DURABLE_PROFILE_LIMITS?.appearance || 800;
     // The incoming presentation is authoritative; if the budget is tight, drop the oldest carried traits whole.
     while (kept.length && `${kept.join(', ')}; ${incoming}`.length > limit) kept.pop();
     return kept.length ? appearanceText(`${kept.join(', ')}; ${incoming}`) : incoming;
+}
+
+// A current presentation may restate some of the enduring physical features held in the shared
+// slot ("Long silver hair, violet eyes; wearing a gown"). Drop only comma-level pieces that exactly
+// match a shared piece, so the resolved appearance does not repeat them; anything that differs,
+// including negated or re-described traits, is kept.
+function withoutSharedPieces(value, shared) {
+    const text = appearanceText(value);
+    const sharedPieces = new Set(presentationSegments(shared).map(normalizeName).filter(Boolean));
+    if (!text || !sharedPieces.size) return text;
+    let changed = false;
+    const clauses = appearanceClauses(text).map(clause => {
+        const parts = clause.split(/\s*,\s*/);
+        const kept = parts.filter(part => !sharedPieces.has(normalizeName(part.replace(/^(?:and|with)\s+/i, '').replace(/[.!?]+$/, ''))));
+        if (kept.length !== parts.length) changed = true;
+        return kept.join(', ');
+    }).filter(clause => clean(clause, 800));
+    return changed ? appearanceText(clauses.join('; ')) : text;
 }
 
 export function normalizeAppearanceForms(value, { updates = false } = {}) {
@@ -298,7 +326,20 @@ export function resolveNpcAppearance(rawNpc = {}) {
     if (current) return combineAppearance(overall, current.appearance);
     if (model.currentFormUnknown) return combineAppearance(overall, model.unclassifiedAppearance || model.appearance);
     if (model.currentForm) return combineAppearance(overall, model.unclassifiedAppearance || model.appearance);
-    return model.appearance || overall || appearanceFormByName(model, 'Base')?.appearance || model.appearanceForms[0]?.appearance || '';
+    // Without a selected form, enduring physical features (the shared slot) plus the current
+    // outfit/presentation make up what is visible now.
+    if (model.appearance || overall) return combineAppearance(overall, model.appearance);
+    return appearanceFormByName(model, 'Base')?.appearance || model.appearanceForms[0]?.appearance || '';
+}
+
+// The editable current outfit/presentation for an NPC without a selected form: the stored current
+// appearance without the enduring physical features already held in the shared slot.
+export function currentPresentationText(rawNpc = {}) {
+    const model = normalizeAppearanceModel(rawNpc, {
+        locked: Array.isArray(rawNpc?.manualProfileFields) && rawNpc.manualProfileFields.includes('appearance'),
+    });
+    if (model.currentForm || model.currentFormUnknown) return '';
+    return stripOverallPrefix(model.appearance, model.overallAppearance);
 }
 
 function reconcileFormAppearance(existing, update, context = '') {
@@ -321,6 +362,21 @@ function reconcileFormAppearance(existing, update, context = '') {
     return mergeRefinement(current, incoming, DURABLE_PROFILE_LIMITS?.appearance || 800);
 }
 
+// The core merge applies an accepted flat Appearance update before this model sees it, so the
+// flat-slot protection above would compare against text that already lost its physical traits.
+// Carry them forward from the pre-scan record. Form slots keep their own text and are protected
+// inside applyAppearanceUpdate.
+export function carryOmittedPhysicalTraits(previous = {}, next = {}) {
+    const prior = normalizeAppearanceModel(previous);
+    const model = normalizeAppearanceModel(next);
+    if (prior.currentForm || prior.currentFormUnknown || model.currentForm || model.currentFormUnknown) return next;
+    const before = appearanceText(prior.appearance);
+    const after = appearanceText(next.appearance);
+    if (!before || !after || sameAppearance(before, after)) return next;
+    const appearance = preserveOmittedPhysicalTraits(before, after, { alsoPresent: model.overallAppearance });
+    return appearance === after ? next : { ...next, appearance };
+}
+
 export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = false, context = '' } = {}) {
     const next = normalizeAppearanceModel(record, { locked });
     if (locked || !rawUpdate || typeof rawUpdate !== 'object') return { ...next, appearance: resolveNpcAppearance(next) };
@@ -334,7 +390,9 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
             const state = formState(rawUpdate.overallAppearanceState ?? rawUpdate.overall_appearance_state);
             if (state === 'change') {
                 const reason = clean(rawUpdate.overallAppearanceReason ?? rawUpdate.overall_appearance_reason, 500);
-                if (reason && (!context || (durableSeedGrounded(reason, context) && durableSeedGrounded(incoming, context)))) next.overallAppearance = incoming;
+                if (reason && (!context || (durableSeedGrounded(reason, context) && durableSeedGrounded(incoming, context)))) {
+                    next.overallAppearance = preserveOmittedPhysicalTraits(next.overallAppearance, incoming);
+                }
             } else {
                 const compatible = state === 'refine'
                     ? (isSafeUnmarkedDurableRefinement(next.overallAppearance, incoming)
@@ -352,7 +410,8 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
         for (const form of normalizeAppearanceForms(rawUpdate.appearanceForms ?? rawUpdate.appearance_forms, { updates: true })) {
             const index = next.appearanceForms.findIndex(item => formKey(item.name) === formKey(form.name));
             if (index >= 0) {
-                const appearance = reconcileFormAppearance(next.appearanceForms[index].appearance, form, context);
+                const existing = next.appearanceForms[index].appearance;
+                const appearance = preserveOmittedPhysicalTraits(existing, reconcileFormAppearance(existing, form, context), { alsoPresent: next.overallAppearance });
                 if (appearance) next.appearanceForms[index] = { name: next.appearanceForms[index].name || form.name, appearance };
             } else if (next.appearanceForms.length < APPEARANCE_FORM_LIMIT) {
                 const appearance = reconcileFormAppearance('', form, context);
@@ -415,10 +474,13 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
                 const previous = next.unclassifiedAppearance;
                 next.unclassifiedAppearance = preserveOmittedPhysicalTraits(previous, reconcileFormAppearance(previous, update, context), { alsoPresent: next.overallAppearance });
             } else {
-                // Without a selected/unknown form the compatibility scalar is resolved on its own (shared
-                // appearance is not prepended), so carried traits are checked against it alone.
+                // Without a selected/unknown form the shared physical features are prepended when resolved,
+                // so traits already held there are not carried into the current presentation again.
                 const previous = next.appearance;
-                next.appearance = preserveOmittedPhysicalTraits(previous, reconcileFormAppearance(previous, update, context));
+                next.appearance = withoutSharedPieces(
+                    preserveOmittedPhysicalTraits(previous, reconcileFormAppearance(previous, update, context), { alsoPresent: next.overallAppearance }),
+                    next.overallAppearance,
+                );
             }
         }
     }
@@ -483,11 +545,17 @@ export function appearanceDraftRecord(npc = {}, draft = {}, { lockAppearance = f
         throw new Error(`Current form is not in the appearance-form list: ${currentForm}`);
     }
 
+    const overallAppearance = clean(draft.overallAppearance).slice(0, 1800);
+    // With no form selected, the current outfit/presentation is the NPC's own appearance slot.
+    // Keep it (from the editor, or the existing record) instead of blanking the NPC's appearance.
+    const currentAppearance = currentForm || currentFormUnknown
+        ? ''
+        : stripOverallPrefix(clean(draft.currentAppearance ?? currentPresentationText(npc)).slice(0, 1800), overallAppearance);
     const nextInput = {
         ...npc,
         appearanceModelVersion: 1,
-        appearance: '',
-        overallAppearance: clean(draft.overallAppearance).slice(0, 1800),
+        appearance: currentAppearance,
+        overallAppearance,
         appearanceForms: forms,
         currentForm,
         currentFormUnknown,
@@ -497,7 +565,7 @@ export function appearanceDraftRecord(npc = {}, draft = {}, { lockAppearance = f
     }
 
     const normalized = normalizeAppearanceModel(nextInput, { locked: false });
-    const next = { ...npc, ...normalized, appearance: '' };
+    const next = { ...npc, ...normalized, appearance: currentAppearance };
     const locks = new Set(Array.isArray(npc?.manualProfileFields) ? npc.manualProfileFields : []);
     // A lock prevents scanner changes; it must not replay old anatomy over a manual form edit.
     next.manualProfileFields = [...locks].filter(key => key !== 'appearance');

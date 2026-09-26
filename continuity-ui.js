@@ -1,6 +1,7 @@
 /* NPC State Delta continuity UI adapter for the appearance-form editor surface.
  * Calendar settings mount through calendar-settings.js into the settings panel's calendar slot. */
 import {
+    currentPresentationText,
     formatAppearanceForms,
     normalizeAppearanceModel,
     parseAppearanceFormsText,
@@ -40,6 +41,7 @@ export function appearanceUiModel(npc = {}) {
         currentForm: model.currentForm,
         currentFormUnknown: Boolean(model.currentFormUnknown),
         unclassifiedAppearance: model.unclassifiedAppearance,
+        currentAppearance: currentPresentationText(npc),
         resolvedAppearance: resolveNpcAppearance(npc),
     };
 }
@@ -64,6 +66,8 @@ function injectStyles() {
       .delta-editor-appearance-forms .delta-appearance-wide { grid-column:1 / -1; }
       .delta-editor-appearance-forms textarea { resize:vertical; }
       .delta-editor-appearance-actions { grid-column:1 / -1; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+      /* SillyTavern's .menu_button is width:min-content; keep the Apply label on one line. */
+      .delta-editor-appearance-actions > .menu_button { width:auto; white-space:nowrap; margin:0; }
       .delta-editor-appearance-actions small { opacity:.72; }
       @media (max-width:700px) {
         .delta-editor-appearance-forms .delta-editor-section-grid { grid-template-columns:minmax(0,1fr); }
@@ -80,7 +84,7 @@ function editorAppearanceSection(editor) {
 
 function appearanceFormOptions(model) {
     return [
-        `<option value="${NO_FORM}">No selected form</option>`,
+        `<option value="${NO_FORM}">No named form</option>`,
         ...model.appearanceForms.map(form => `<option value="${escapeHtml(form.name)}">${escapeHtml(form.name)}</option>`),
         `<option value="${UNKNOWN_FORM}">Unclassified / unknown current form</option>`,
     ].join('');
@@ -94,7 +98,9 @@ function syncAppearanceEditor(editor, npc = currentNpc(editorNpcId(editor))) {
     const forms = section.querySelector('[data-delta-appearance-forms]');
     const current = section.querySelector('[data-delta-current-form]');
     const unclassified = section.querySelector('[data-delta-unclassified-appearance]');
+    const currentAppearance = section.querySelector('[data-delta-current-appearance]');
     if (overall) overall.value = model.overallAppearance || '';
+    if (currentAppearance) currentAppearance.value = model.currentAppearance || '';
     if (forms) forms.value = formatAppearanceForms(model.appearanceForms);
     if (current) {
         current.innerHTML = appearanceFormOptions(model);
@@ -111,7 +117,9 @@ function syncAppearanceEditor(editor, npc = currentNpc(editorNpcId(editor))) {
 function toggleUnclassifiedAppearance(section) {
     const select = section?.querySelector?.('[data-delta-current-form]');
     const holder = section?.querySelector?.('[data-delta-unclassified-holder]');
+    const current = section?.querySelector?.('[data-delta-current-appearance-holder]');
     if (holder) holder.hidden = select?.value !== UNKNOWN_FORM;
+    if (current) current.hidden = select?.value !== NO_FORM;
 }
 
 function ensureAppearanceEditor(editor) {
@@ -125,12 +133,13 @@ function ensureAppearanceEditor(editor) {
     if (!section) {
         section = document.createElement('section');
         section.className = 'delta-editor-section delta-editor-appearance-forms';
-        section.innerHTML = `<h4>Appearance forms</h4><div class="delta-editor-section-grid">
-          <label class="delta-appearance-wide">Shared appearance <small>Visible in every form, such as a persistent scar or pendant.</small><textarea class="text_pole" rows="3" maxlength="1800" data-delta-overall-appearance></textarea></label>
+        section.innerHTML = `<h4>Appearance</h4><div class="delta-editor-section-grid">
+          <label class="delta-appearance-wide">Physical features (enduring) <small>Hair, eyes, skin, build, height, scars, tattoos and anatomy. Kept through outfit changes and shown in every form; scans change them only when the story explicitly does.</small><textarea class="text_pole" rows="3" maxlength="1800" data-delta-overall-appearance placeholder="Long silver hair, violet eyes, slender build, thin scar across her left cheek"></textarea></label>
+          <label class="delta-appearance-wide" data-delta-current-appearance-holder>Current outfit &amp; presentation <small>Clothing, gear and visible condition right now. Scans replace this when the story changes it.</small><textarea class="text_pole" rows="3" maxlength="1800" data-delta-current-appearance placeholder="Wearing a travel-stained blue cloak and leather boots"></textarea></label>
           <label>Current form<select class="text_pole" data-delta-current-form></select></label>
           <label data-delta-unclassified-holder hidden>Unclassified current appearance<textarea class="text_pole" rows="3" maxlength="1800" data-delta-unclassified-appearance></textarea></label>
           <label class="delta-appearance-wide">Named forms <small>One per line: Form name | Description. Maximum 8.</small><textarea class="text_pole" rows="7" spellcheck="false" data-delta-appearance-forms placeholder="Human | ordinary human ears, no wings...&#10;Dragon | silver scales, horns, broad wings..."></textarea></label>
-          <div class="delta-editor-appearance-actions"><button type="button" class="menu_button" data-delta-apply-appearance>Apply appearance forms</button><small data-delta-appearance-status></small></div>
+          <div class="delta-editor-appearance-actions"><button type="button" class="menu_button" data-delta-apply-appearance>Apply appearance</button><small data-delta-appearance-status></small></div>
         </div>`;
         const identity = content.querySelector('.delta-editor-identity');
         if (identity?.nextSibling) content.insertBefore(section, identity.nextSibling);
@@ -175,6 +184,7 @@ async function applyAppearanceEditor(editor) {
         overallAppearance: section.querySelector('[data-delta-overall-appearance]')?.value || '',
         currentForm: section.querySelector('[data-delta-current-form]')?.value || NO_FORM,
         unclassifiedAppearance: section.querySelector('[data-delta-unclassified-appearance]')?.value || '',
+        currentAppearance: section.querySelector('[data-delta-current-appearance]')?.value || '',
         formsText: section.querySelector('[data-delta-appearance-forms]')?.value || '',
     }, { chatKey, lockAppearance: Boolean(editor.querySelector('#npc_state_delta_edit_lock_profile')?.checked) });
     if (!applied) throw new Error('The canonical appearance edit was rejected because its target changed.');
@@ -215,7 +225,7 @@ function bindEvents() {
         const status = editorAppearanceSection(editor)?.querySelector('[data-delta-appearance-status]');
         if (status) status.textContent = 'Applying…';
         void applyAppearanceEditor(editor)
-            .then(npc => { if (npc) globalThis.toastr?.success?.('NPC State Delta: appearance forms updated and saved.'); })
+            .then(npc => { if (npc) globalThis.toastr?.success?.('NPC State Delta: appearance updated and saved.'); })
             .catch(error => {
                 console.error('[NPC State Delta] appearance-form edit failed', error);
                 if (status) status.textContent = error?.message || String(error);

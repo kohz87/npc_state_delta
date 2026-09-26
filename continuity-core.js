@@ -2,6 +2,7 @@
 import * as mechanics from './core-mechanics.js';
 import {
     applyAppearanceUpdate,
+    carryOmittedPhysicalTraits,
     normalizeAppearanceForms,
     normalizeAppearanceModel,
     resolveNpcAppearance,
@@ -157,7 +158,9 @@ export function mergeScanResult(state, scanResult, options = {}) {
         let ordinaryUpdate = ordinary.find(raw => sameNpc(raw, rawNpc));
         let profileUpdate = profiles.find(raw => sameNpc(raw, rawNpc));
         const rawForms = ordinaryUpdate && (ordinaryUpdate.appearanceForms ?? ordinaryUpdate.appearance_forms);
-        const seed = !sources.length && rawForms ? { ...rawNpc, appearanceModelVersion: 1 } : rawNpc;
+        const seed = !sources.length && rawForms
+            ? { ...rawNpc, appearanceModelVersion: 1 }
+            : (sources.length && !lockedAppearance(rawNpc) ? carryOmittedPhysicalTraits(sources[0], rawNpc) : rawNpc);
 
         const formSwitch = Boolean(
             ordinaryUpdate?.currentForm || ordinaryUpdate?.currentFormState

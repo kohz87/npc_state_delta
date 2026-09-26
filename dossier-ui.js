@@ -1,5 +1,5 @@
 /* NPC State Delta dossier surface: bounded presentation of canonical state. */
-import { appearanceFingerprint, normalizeAppearanceModel, resolveNpcAppearance } from './appearance.js';
+import { appearanceFingerprint, currentPresentationText, normalizeAppearanceModel, resolveNpcAppearance } from './appearance.js';
 import { formatBirthDate } from './birthday.js';
 
 const ROOT_ID = 'npc_state_delta_dossier_root';
@@ -141,6 +141,7 @@ export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortr
         age: plain(npc?.age),
         appearance: resolveNpcAppearance(npc),
         appearanceModel: normalizeAppearanceModel(npc, { locked: Array.isArray(npc?.manualProfileFields) && npc.manualProfileFields.includes('appearance') }),
+        currentPresentation: currentPresentationText(npc),
         birthday: formatBirthDate(npc?.birthDate),
         birthdaySource: plain(npc?.birthDateSource),
         personality: plain(npc?.personality),
@@ -307,9 +308,9 @@ function birthdayCard(npc) {
 
 export function appearanceFormsHtml(npc) {
     const model = npc.appearanceModel;
-    const compatibilityCurrent = !model.currentForm && !model.currentFormUnknown && !model.appearanceForms.length && model.appearance
-        && model.appearance !== model.overallAppearance
-        ? `<div class="delta-appearance-form-row"><b>Current presentation<span class="delta-appearance-current-badge">Current</span></b>${proseHtml(model.appearance)}</div>`
+    const presentation = npc.currentPresentation || '';
+    const compatibilityCurrent = !model.currentForm && !model.currentFormUnknown && presentation
+        ? `<div class="delta-appearance-form-row"><b>Current outfit &amp; presentation<span class="delta-appearance-current-badge">Current</span></b>${proseHtml(presentation)}</div>`
         : '';
     const current = model.currentFormUnknown ? 'Unclassified / unknown'
         : model.currentForm || (compatibilityCurrent ? 'Current presentation' : 'No selected form');
@@ -326,7 +327,7 @@ export function appearanceFormsHtml(npc) {
         return `<div class="delta-appearance-form-row delta-appearance-form-with-portrait">${thumb}<div><b>${escapeHtml(form.name)}${form.name === model.currentForm ? '<span class="delta-appearance-current-badge">Current</span>' : ''}</b>${proseHtml(form.appearance)}${action}</div></div>`;
     }).join('');
     const empty = !unclassified && !compatibilityCurrent && !rows ? '<p class="delta-muted">No named forms established.</p>' : '';
-    return `<details class="delta-appearance-form-summary" data-delta-key="appearance" open><summary><b>Appearance forms</b><small>Current: ${escapeHtml(current)}</small></summary><div class="delta-appearance-form-list">${model.overallAppearance ? `<div class="delta-appearance-form-row"><b>Shared across forms</b>${proseHtml(model.overallAppearance)}</div>` : ''}${unclassified}${compatibilityCurrent}${rows}${empty}</div></details>`;
+    return `<details class="delta-appearance-form-summary" data-delta-key="appearance" open><summary><b>Appearance</b><small>Current: ${escapeHtml(current)}</small></summary><div class="delta-appearance-form-list">${model.overallAppearance ? `<div class="delta-appearance-form-row"><b>Physical features</b>${proseHtml(model.overallAppearance)}</div>` : ''}${unclassified}${compatibilityCurrent}${rows}${empty}</div></details>`;
 }
 
 // Cache only rendered section markup on its DOM node, never canonical state/history.
