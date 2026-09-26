@@ -54,3 +54,30 @@ test('manual edits and stored dossiers are not filtered', () => {
     const npc = normalizeNpcRecord({ ...landlady(), behaviorProfile: HABITS });
     assert.deepEqual(npc.behaviorProfile, HABITS);
 });
+
+test('a refine that replaces stored habit entries with grounded new levers is accepted and retires the habits', () => {
+    const disposition = 'Disposition: reserved - practical and guarded with strangers';
+    const result = scan(landlady([disposition, ...HABITS]), {
+        behaviorProfileState: 'refine',
+        behaviorProfile: [
+            disposition,
+            'Conflict/Assertiveness: low - avoids open confrontation, answers challenges with cold politeness',
+            'Threat Sensitivity: high - sizes up every stranger before admitting them',
+        ],
+        evidence: { behaviorProfile: ['avoids open confrontation, answering challenges with cold politeness', 'sizes up every prospective boarder at the door before admitting them'] },
+    });
+    const levers = result.state.npcs[0].behaviorProfile;
+    assert.ok(!levers.some(entry => /curfews|quiet household/.test(entry)), JSON.stringify(levers));
+    assert.ok(levers.some(entry => /^Conflict\/Assertiveness:/.test(entry)), 'lever label words need not appear in the story');
+    assert.ok(levers.some(entry => /^Threat Sensitivity:/.test(entry)));
+});
+
+test('an ungrounded new lever still rejects the whole refine, so stored entries are kept', () => {
+    const disposition = 'Disposition: reserved - practical and guarded with strangers';
+    const result = scan(landlady([disposition, ...HABITS]), {
+        behaviorProfileState: 'refine',
+        behaviorProfile: [disposition, 'Threat Sensitivity: low - reckless gambler who courts danger for thrills'],
+        evidence: { behaviorProfile: ['avoids open confrontation, answering challenges with cold politeness'] },
+    });
+    assert.deepEqual(result.state.npcs[0].behaviorProfile, [disposition, ...HABITS]);
+});
