@@ -1,4 +1,4 @@
-import { isTerminalNpcDeath, normalizeName, normalizeNpcRecord, protectTerminalNpc } from './core.js';
+import { formPortraitKey, isTerminalNpcDeath, normalizeFormPortraitAssets, normalizeName, normalizeNpcRecord, protectTerminalNpc } from './core.js';
 import { normalizeSocialGraph, remapSocialGraphNpcId } from './social.js';
 
 const MAGIC = new Uint8Array([0x4e, 0x50, 0x43, 0x53, 0x54, 0x42, 0x30, 0x31]); // NPCSTB01
@@ -75,6 +75,21 @@ function cloneRecordForManifest(npc, binaryOffsetRef, imageParts) {
     return record;
 }
 
+// Optional additive manifest section: one binary image per (NPC, appearance form). Readers that
+// predate it ignore the key; the main portrait encoding above is unchanged.
+function formPortraitsForManifest(source, npcs, binaryOffsetRef, imageParts) {
+    const ids = new Set(npcs.map(npc => String(npc?.id || '')).filter(Boolean));
+    const out = [];
+    for (const [npcId, forms] of Object.entries(normalizeFormPortraitAssets(source.formPortraitAssets))) {
+        if (!ids.has(npcId)) continue;
+        for (const portrait of Object.values(forms)) {
+            const record = cloneRecordForManifest({ portrait }, binaryOffsetRef, imageParts).portrait;
+            if (record?.binary) out.push({ npcId, form: portrait.form, portrait: record });
+        }
+    }
+    return out;
+}
+
 export function encodeNpcStateBundle(state, { appVersion = 'unknown', chatKey = '' } = {}) {
     const source = state && typeof state === 'object' ? state : {};
     const imageParts = [];
@@ -82,6 +97,7 @@ export function encodeNpcStateBundle(state, { appVersion = 'unknown', chatKey = 
     const npcs = Array.isArray(source.npcs)
         ? source.npcs.map(npc => cloneRecordForManifest(npc, binaryOffsetRef, imageParts))
         : [];
+    const formPortraits = formPortraitsForManifest(source, npcs, binaryOffsetRef, imageParts);
 
     const manifest = {
         format: 'npc_state_delta_bundle',
@@ -93,6 +109,7 @@ export function encodeNpcStateBundle(state, { appVersion = 'unknown', chatKey = 
             npcs,
             socialGraph: normalizeSocialGraph(source.socialGraph),
             dismissed: Array.isArray(source.dismissed) ? [...source.dismissed] : [],
+            ...(formPortraits.length ? { formPortraits } : {}),
         },
     };
 
@@ -196,6 +213,33 @@ export function decodeNpcStateBundle(input) {
         delete record.portrait.binary;
         return record;
     });
+    const npcIds = new Set(npcs.map(npc => String(npc?.id || '')).filter(Boolean));
+    const formPortraitAssets = {};
+    const declaredForms = manifest.state.formPortraits;
+    if (declaredForms !== undefined && !Array.isArray(declaredForms)) throw new Error('NPC State Delta bundle has invalid form portrait metadata.');
+    for (const entry of Array.isArray(declaredForms) ? declaredForms : []) {
+        const npcId = typeof entry?.npcId === 'string' ? entry.npcId : '';
+        const form = typeof entry?.form === 'string' ? entry.form.trim().slice(0, 120) : '';
+        const bin = entry?.portrait?.binary;
+        const offset = Number(bin?.offset);
+        const length = Number(bin?.length);
+        if (!npcId || !form || !entry.portrait || typeof entry.portrait !== 'object' || Array.isArray(entry.portrait)
+            || !Number.isInteger(offset) || !Number.isInteger(length) || offset < 0 || length <= 0) {
+            throw new Error('NPC State Delta bundle has invalid form portrait metadata.');
+        }
+        const start = binaryStart + offset;
+        const end = start + length;
+        if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end < start || end > bytes.length) {
+            throw new Error(`NPC State Delta bundle form portrait is truncated for ${form}.`);
+        }
+        portraitRanges.push({ start, end, name: `${form} form portrait` });
+        if (!npcIds.has(npcId)) continue;
+        const portrait = structuredClone(entry.portrait);
+        delete portrait.binary;
+        portrait.dataUrl = binaryToDataUrl(bytes.subarray(start, end), portrait.mime || 'application/octet-stream');
+        portrait.form = form;
+        formPortraitAssets[npcId] = { ...(formPortraitAssets[npcId] || {}), [formPortraitKey(form)]: portrait };
+    }
     portraitRanges.sort((a, b) => a.start - b.start || a.end - b.end);
     for (let i = 1; i < portraitRanges.length; i += 1) {
         if (portraitRanges[i].start < portraitRanges[i - 1].end) {
@@ -214,6 +258,7 @@ export function decodeNpcStateBundle(input) {
             npcs,
             socialGraph: normalizeSocialGraph(manifest.state.socialGraph),
             dismissed: Array.isArray(manifest.state.dismissed) ? [...manifest.state.dismissed] : [],
+            formPortraitAssets: normalizeFormPortraitAssets(formPortraitAssets),
         },
     };
 }
@@ -354,6 +399,7 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
         .filter(Boolean));
     const cap = Math.max(1, Math.min(100, Number(maxNpcs) || 40));
     let activeCount = npcs.filter(npc => !npc?.archived).length;
+    const acceptedTargetIds = new Map();
 
     for (const rawNpc of imported) {
         const npc = structuredClone(rawNpc);
@@ -399,6 +445,7 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
             if (wasActive !== isActive) activeCount += isActive ? 1 : -1;
             importReport?.updated.push({ sourceId, id: targetId, name: accepted.name });
             importReport?.accepted.push({ sourceId, id: targetId, name: accepted.name, status: 'updated' });
+            if (sourceId) acceptedTargetIds.set(sourceId, targetId);
             if (sourceId && sourceId !== targetId) importReport?.idRemaps.push({ from: sourceId, to: targetId, reason: 'matched-existing' });
             continue;
         }
@@ -434,6 +481,7 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
         if (!npc.archived) activeCount += 1;
         importReport?.added.push({ sourceId, id: targetId, name: npc.name, archived: Boolean(npc.archived) });
         importReport?.accepted.push({ sourceId, id: targetId, name: npc.name, status: 'added' });
+        if (sourceId) acceptedTargetIds.set(sourceId, targetId);
     }
 
     const activeNames = new Set(npcs.flatMap(npcKeys));
@@ -461,11 +509,21 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
         unresolved: [...currentGraph.unresolved, ...importedGraph.unresolved],
     });
 
+    // Form portraits follow their accepted dossier to its target id. An imported image replaces the
+    // target's image for that same form only; the target's other form portraits are kept.
+    const formPortraitAssets = normalizeFormPortraitAssets(current.formPortraitAssets);
+    const incomingForms = normalizeFormPortraitAssets(incoming.formPortraitAssets);
+    for (const [sourceId, targetId] of acceptedTargetIds.entries()) {
+        if (!incomingForms[sourceId] || !validIds.has(targetId)) continue;
+        formPortraitAssets[targetId] = { ...(formPortraitAssets[targetId] || {}), ...structuredClone(incomingForms[sourceId]) };
+    }
+
     return {
         ...current,
         npcs,
         socialGraph,
         dismissed,
+        formPortraitAssets: normalizeFormPortraitAssets(formPortraitAssets),
         lastScannedMessageId: null,
         assistantSinceScan: 0,
     };

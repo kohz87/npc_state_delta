@@ -173,15 +173,31 @@ export function prunePortraitAssetsForState(state = {}) {
     return Object.fromEntries(Object.entries(assets).filter(([id, portrait]) => retained.has(String(id)) && portrait?.dataUrl));
 }
 
+// Form portraits share the main portrait retention rule: they stay while any live, checkpointed
+// or journal-restorable record of that NPC can still show them.
+export function pruneFormPortraitAssetsForState(state = {}) {
+    const assets = state?.formPortraitAssets && typeof state.formPortraitAssets === 'object' ? state.formPortraitAssets : {};
+    const retained = retainedPortraitAssetIds(state);
+    const out = {};
+    for (const [id, forms] of Object.entries(assets)) {
+        if (!retained.has(String(id)) || !forms || typeof forms !== 'object') continue;
+        const kept = Object.entries(forms).filter(([, portrait]) => portrait?.dataUrl).slice(0, 8);
+        if (kept.length) out[id] = Object.fromEntries(kept);
+    }
+    return out;
+}
+
 export function prunePortraitAssetsInPlace(state = {}) {
     if (!state || typeof state !== 'object') return state;
     state.portraitAssets = prunePortraitAssetsForState(state);
+    if (state.formPortraitAssets && typeof state.formPortraitAssets === 'object') state.formPortraitAssets = pruneFormPortraitAssetsForState(state);
     return state;
 }
 
 function compactStateForFile(state) {
     const snapshot = structuredClone(state || {});
     snapshot.portraitAssets = prunePortraitAssetsForState(snapshot);
+    snapshot.formPortraitAssets = pruneFormPortraitAssetsForState(snapshot);
     for (const npc of Array.isArray(snapshot.npcs) ? snapshot.npcs : []) {
         if (!npc?.id) continue;
         if (npc.portrait?.dataUrl) snapshot.portraitAssets[npc.id] = structuredClone(npc.portrait);
