@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.56 - 26 September 2026
+
 - Keep enduring physical appearance traits through outfit/presentation updates. When an accepted current-appearance update omits hair, eyes, skin, build, height, facial features, scars, tattoos or anatomy (ears, horns, tail, wings, fur, scales and similar), those traits carry forward from the previous presentation; a trait changes only when the incoming presentation itself describes it (a "hood hides her hair" style mention does not count). Clothing, gear and transient condition still follow the full-current-presentation replacement rule, admission/grounding gates are unchanged, and named forms keep their own traits without duplicating Shared appearance.
 - Capture narrated birthdays returned in a `profileUpdates` row. The scanner is told to put grounded durable facts there, but birthdays were read only from the `npcs` delta, so an existing NPC's narrated birthday was dropped and the generated fallback stayed. Both channels are now accepted (the `npcs` delta wins when both carry one) under the same establish/correct gate.
 - When a scanner reply contains no JSON object at all (a provider/host message or model refusal such as "The prompt ..."), the failure toast and console warning now show a bounded 200-character excerpt of what was returned and name the usual causes (provider block/refusal, context overflow, or a profile not using a chat model that follows JSON instructions), instead of only a ten-character JSON parse error. The existing single JSON retry, request counts, prompt bytes and diagnostics retention are unchanged.
