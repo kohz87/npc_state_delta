@@ -4543,6 +4543,8 @@ function openNpcEditor(npcId) {
     const content = document.createElement('div');
     content.id = 'npc_state_delta_editor_content';
     content.className = 'npc-state-delta-editor-native';
+    // Editor add-ons (appearance forms, life state, sections) identify their NPC from this.
+    content.dataset.npcId = npc.id;
     content.innerHTML = `
       <div class="npc-state-delta-editor-head"><div><span class="npc-state-delta-kicker">LIVE DOSSIER</span><h3 id="npc_state_delta_editor_title">Edit ${editorValue(npc.name)}</h3></div></div>
       <p class="npc-state-delta-muted">Edits save to NPC State Delta's extension-owned JSON data. Relationship numbers are authoritative current values on a -100 to +100 scale where 0 is neutral; future story deltas continue from them.</p>
