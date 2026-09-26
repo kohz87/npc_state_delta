@@ -785,7 +785,29 @@ function recordSecondaryProfileDiagnostics(report, beforeNpc, afterNpc, rawUpdat
         const stateField = field === 'mannerisms' ? 'mannerismState' : 'behaviorProfileState';
         const reasonField = field === 'mannerisms' ? 'mannerismReason' : 'behaviorProfileReason';
         const provided = field === 'mannerisms' ? normalized.mannerismsProvided : normalized.behaviorProfileProvided;
-        if (!provided) continue;
+        if (!provided) {
+            // Explain why stored non-lever entries survived: the provider omitted the field or
+            // proposed only non-lever entries, which intake drops.
+            if (field !== 'behaviorProfile') continue;
+            const rawBehavior = rawUpdate.behaviorProfile ?? rawUpdate.behavior_profile;
+            const nonLeverOnly = Array.isArray(normalized.nonLeverBehavior) && normalized.nonLeverBehavior.length > 0;
+            const stored = Array.isArray(beforeNpc?.behaviorProfile) ? beforeNpc.behaviorProfile : [];
+            if (!nonLeverOnly && !stored.some(entry => !mechanics.isBehaviorLever(entry))) continue;
+            report.profileDevelopment = Array.isArray(report.profileDevelopment) ? report.profileDevelopment : [];
+            report.profileDevelopment.push({
+                npcId: String(afterNpc.id || ''),
+                field,
+                outcome: nonLeverOnly ? 'non-lever-only' : 'not-provided',
+                modelState: normalized[stateField] || 'keep',
+                locked: Array.isArray(beforeNpc?.manualProfileFields) && beforeNpc.manualProfileFields.includes(field),
+                providerFieldPresent: rawBehavior !== undefined,
+                previous: profileDevelopmentText(field, stored.join(' | '), 720),
+                candidate: profileDevelopmentText(field, (normalized.nonLeverBehavior || []).join(' | '), 720),
+                evidence: [],
+            });
+            if (report.profileDevelopment.length > 48) report.profileDevelopment.splice(0, report.profileDevelopment.length - 48);
+            continue;
+        }
         const previousValue = Array.isArray(beforeNpc?.[field]) ? beforeNpc[field].join(' | ') : '';
         const candidateValue = Array.isArray(normalized?.[field]) ? normalized[field].join(' | ') : '';
         const currentValue = Array.isArray(afterNpc?.[field]) ? afterNpc[field].join(' | ') : '';

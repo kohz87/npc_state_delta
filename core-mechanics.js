@@ -2235,6 +2235,9 @@ function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evi
     // protected identity/morality direction across the whole proposal before category-by-
     // category replacement so relabeling cannot bypass the existing atomic safety gate.
     if (behaviorProfileRefinementConflict(current, updates)) return current;
+    // A lever that restates a stored non-lever entry adds no new meaning: that accepted entry
+    // grounds it, even when the scene that established it is outside the current window.
+    evidenceItems = [...(Array.isArray(evidenceItems) ? evidenceItems : []), ...current.filter(entry => !isBehaviorLever(entry))];
     const next = [];
     for (const entry of updates) {
         const key = behaviorProfileKey(entry);
@@ -5808,6 +5811,12 @@ export function buildProfileRefreshPrompt({
         lockedProfileFields: locked,
     };
     const memoryRubric = compactMemoryRubric(memoryCriteria);
+    // Stored entries that predate the lever check are named only for this target, after the
+    // shared prefix, so the model can replace them with a FULL refine instead of omitting the field.
+    const nonLevers = locked.includes('behaviorProfile') ? [] : existing.behaviorProfile.filter(entry => !isBehaviorLever(entry));
+    const nonLeverHint = nonLevers.length
+        ? `\nStored behaviorProfile entries ${JSON.stringify(nonLevers)} are not levers: return behaviorProfileState:"refine" with the FULL lever list; restate any real response tendency as a labelled lever; habits=>mannerisms.`
+        : '';
     return `NPC State Delta TARGETED REFRESH FROM CHAT. Reconcile exactly one EXISTING NPC dossier against the supplied recent-story window. This is a deliberate user action, so inspect the whole window carefully instead of requiring a current-turn admission signal.
 
 Player: ${userName}
@@ -5839,7 +5848,7 @@ Recent story window (EVIDENCE ONLY; preserve [mN] order):
 ${String(transcript || '').trim()}
 
 Target NPC: ${existing.name} (${existing.id})
-Existing dossier (current authority): ${JSON.stringify(existing)}
+Existing dossier (current authority): ${JSON.stringify(existing)}${nonLeverHint}
 Use the exact id/name above in returned rows; reconcile only this target.`;
 }
 
