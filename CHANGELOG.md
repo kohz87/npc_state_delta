@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.59 - 26 September 2026
+
 - Fix squeezed settings-panel buttons in SillyTavern. The host `.menu_button` rule is `width: min-content`, so the quick-bar actions (Open dossiers, Scan dossier now, Full scan current cast, Add NPC) and the calendar buttons wrapped one word per line inside wide cells. Grid buttons in the panel now fill their cell, and inline buttons size to their label.
 
 ## 1.0.58 - 26 September 2026
