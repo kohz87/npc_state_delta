@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- One dossier page. Tapping an NPC in the in-chat Present NPCs block now opens the launcher dossier on that NPC instead of a separate quick-viewer page, so the chat and the launcher show the same dossier with the same form portraits, change markers and actions. The quick viewer, its duplicate Edit/Refresh/portrait buttons and its styles are removed; the public `openViewer`/`closeViewer` API becomes `openDossier(nameOrId)`, and `uiStatus()` reports `presentCastDisplay` instead of the viewer fields. Opening from a card no longer focuses the search box, so phones do not raise the keyboard over the portrait.
+- Add a "Present NPCs in chat" setting (Roster & continuity): Full cards (default, unchanged), Compact strip (a one-line row of small portraits and names) or Off (nothing is added to the chat, and the chat watcher and repair timer stop). Presence tracking, generation injection and the recorded inline history are unaffected by the setting.
+- Rename the block's Megumin dossier-block tab from "NPC State Delta" to "Present NPCs".
+
 ## 1.0.59 - 26 September 2026
 
 - Fix squeezed settings-panel buttons in SillyTavern. The host `.menu_button` rule is `width: min-content`, so the quick-bar actions (Open dossiers, Scan dossier now, Full scan current cast, Add NPC) and the calendar buttons wrapped one word per line inside wide cells. Grid buttons in the panel now fill their cell, and inline buttons size to their label.

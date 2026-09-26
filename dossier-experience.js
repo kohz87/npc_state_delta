@@ -267,7 +267,6 @@ function ensureEditorStructure(editor) {
 
 function ensureEditorLifeState(editor) {
     if (!editor?.isConnected) return;
-    editor.querySelectorAll('.npc-state-delta-copy-image-prompt').forEach(node => node.remove());
     const lifecycle = editor.querySelector('.npc-state-delta-editor-lifecycle');
     const npcId = editorNpcId(editor);
     const existing = editor.querySelector('.delta-editor-life-control');

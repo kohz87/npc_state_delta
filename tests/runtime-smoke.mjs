@@ -351,6 +351,7 @@ globalThis.document = {
         return [];
     },
     createElement(tag) { return makeMockDomNode(tag); },
+    dispatchEvent(event) { emitDocumentEvent(event.type, event); return true; },
 };
 
 let mounted = false;
@@ -504,19 +505,39 @@ try {
     assert.doesNotMatch(inlineAnchors[0].innerHTML, />Wiz</);
     assert.match(inlineAnchors[0].innerHTML, /npc-state-delta-present-card-overlay/);
     assert.match(inlineAnchors[0].innerHTML, /<small>adventurer(?: · [^<]+)?<\/small>/i);
-    assert.doesNotMatch(inlineAnchors[0].innerHTML, /T \+3 · A -9|npc-state-delta-present-card-relation/, 'gallery cards should keep relationship metrics in the dossier viewer');
-    assert.doesNotMatch(inlineAnchors[0].innerHTML, /Desire|Mannerisms|Species \/ Race|Copy portrait prompts|Current thoughts|Thought basis/, 'portrait grid should stay compact; detailed fields belong in the focused viewer');
-    assert.equal(globalThis.NPCStateDelta.openViewer('Yunyun'), true, 'present NPC portrait viewer should open from the live dossier state');
-    assert.equal(globalThis.NPCStateDelta.uiStatus().viewerOpen, true);
-    assert.equal(globalThis.NPCStateDelta.uiStatus().viewerNpcId, state.npcs.find(n => n.name === 'Yunyun').id);
-    assert.equal(globalThis.NPCStateDelta.openPortraitGenerator('Yunyun'), true, 'portrait generator should open while the full-screen dossier remains mounted underneath');
+    assert.doesNotMatch(inlineAnchors[0].innerHTML, /T \+3 · A -9|npc-state-delta-present-card-relation/, 'gallery cards should keep relationship metrics in the launcher dossier');
+    assert.doesNotMatch(inlineAnchors[0].innerHTML, /Desire|Mannerisms|Species \/ Race|Copy portrait prompts|Current thoughts|Thought basis/, 'portrait grid should stay compact; detailed fields belong in the launcher dossier');
+    // Present-cast cards hand off to the launcher dossier (dossier-ui listens for this request).
+    const presentYunyunId = state.npcs.find(n => n.name === 'Yunyun').id;
+    const dossierRequests = [];
+    document.addEventListener('npc-state-delta:open-dossier', event => { dossierRequests.push(event.detail.npcId); event.detail.handled = true; });
+    assert.equal(globalThis.NPCStateDelta.openDossier('Yunyun'), true, 'present NPCs open the launcher dossier from the live dossier state');
+    const presentCardTarget = { dataset: { npcId: presentYunyunId, messageId: '1' } };
+    emitDocumentEvent('click', { type: 'click', target: { closest: selector => (selector.includes('npc-state-delta-present-card') ? presentCardTarget : null) }, preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {} });
+    assert.deepEqual(dossierRequests, [presentYunyunId, presentYunyunId], 'API and card clicks request the same launcher dossier page');
+    assert.equal(globalThis.NPCStateDelta.uiStatus().presentCastDisplay, 'full', 'Full cards remain the default in-chat display');
+    assert.equal(globalThis.NPCStateDelta.openPortraitGenerator('Yunyun'), true, 'portrait generator API still opens directly');
     assert.equal(globalThis.NPCStateDelta.uiStatus().portraitGeneratorOpen, true);
-    assert.equal(globalThis.NPCStateDelta.uiStatus().viewerOpen, true, 'opening portrait generation should not destroy the underlying dossier');
     emitDocumentEvent('keydown', { key: 'Escape', preventDefault() {}, stopPropagation() {} });
-    assert.equal(globalThis.NPCStateDelta.uiStatus().portraitGeneratorOpen, false, 'Escape should close the top portrait-generator layer first');
-    assert.equal(globalThis.NPCStateDelta.uiStatus().viewerOpen, true, 'closing the generator should return to the same still-open dossier');
-    globalThis.NPCStateDelta.closeViewer();
-    assert.equal(globalThis.NPCStateDelta.uiStatus().viewerOpen, false, 'focused viewer should close without affecting the chat state');
+    assert.equal(globalThis.NPCStateDelta.uiStatus().portraitGeneratorOpen, false, 'Escape closes the portrait-generator layer');
+    // Compact renders a one-line strip; Off removes the block and stops chat observation.
+    mockState.extensionSettings.npc_state_delta.presentCastDisplay = 'compact';
+    globalThis.NPCStateDelta.renderInline();
+    assert.equal(inlineAnchors.length, 1);
+    assert.match(inlineAnchors[0].innerHTML, /npc-state-delta-present-strip/);
+    assert.match(inlineAnchors[0].innerHTML, /class="npc-state-delta-present-chip" data-npc-id="[^"]+"[^>]*aria-label="Open Yunyun dossier"/);
+    assert.doesNotMatch(inlineAnchors[0].innerHTML, /npc-state-delta-present-grid/);
+    mockState.extensionSettings.npc_state_delta.presentCastDisplay = 'off';
+    globalThis.NPCStateDelta.render();
+    globalThis.NPCStateDelta.renderInline();
+    assert.equal(inlineAnchors.length, 0, 'Off removes the in-chat block');
+    assert.equal(globalThis.NPCStateDelta.uiStatus().inlineObserver, false, 'Off stops observing host message redraws');
+    assert.ok((globalThis.NPCStateDelta.getState().inlineCards || []).length > 0, 'inlineCards history is still retained while display is Off');
+    mockState.extensionSettings.npc_state_delta.presentCastDisplay = 'full';
+    globalThis.NPCStateDelta.render();
+    globalThis.NPCStateDelta.renderInline();
+    assert.equal(inlineAnchors.length, 1, 'switching back to Full remounts the block');
+    assert.match(inlineAnchors[0].innerHTML, /npc-state-delta-present-grid/);
 
     // v0.2.23: portrait settings are an explicit transaction. A custom draft must not rely on
     // saveSettingsDebounced; Save calls the host persistence API and retains every parameter.

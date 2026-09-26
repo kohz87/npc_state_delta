@@ -53,7 +53,7 @@ test('editor and portrait workflows are chat-affine', () => {
     assert.match(index, /activeEditorChatKey = originChatKey/);
     assert.match(index, /activePortraitGeneratorChatKey = originChatKey/);
     assert.match(index, /originRevision = Number\(stateVersions\.get\(originChatKey\)/);
-    assert.match(index, /closePortraitGenerator\(\);\n\s*closeNpcViewer\(\);\n\s*closeNpcEditor\(\);/);
+    assert.match(index, /closePortraitGenerator\(\);\n\s*closeNpcEditor\(\);/);
 });
 
 test('Delta application metadata is v1.0.59 and active core ownership is semantic', () => {
