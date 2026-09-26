@@ -150,7 +150,8 @@ test('v1.0.23 inferred time-compressed development also reaches Mannerisms and B
                 mannerismState: 'refine',
                 mannerisms: ['Uses a practiced formal bow when greeting officials.'],
                 behaviorProfileState: 'refine',
-                behaviorProfile: ['Makes routine administrative decisions independently after checking the relevant records.'],
+                // Lever-shaped (1.0.63): a bare routine description is not accepted as a Behavioral Lever.
+                behaviorProfile: ['Independence/Agency: high - makes routine administrative decisions independently after checking the relevant records.'],
                 developmentScale: 'gradual',
                 developmentReason: 'Over two months of daily administrative practice and etiquette training, independent decisions and the formal bow became habitual.',
             }],
