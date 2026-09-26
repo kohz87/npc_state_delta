@@ -78,24 +78,23 @@ The life-state update uses Delta's canonical native dossier import/flush boundar
 
 ## Settings organization
 
-The Extensions-tab Settings panel keeps the same canonical inputs and handlers but groups them by task instead of presenting one long wall of controls:
+The Extensions-tab Settings panel keeps the same canonical inputs and handlers but groups them by task. `index.js` (`buildSettingsHtml`) emits the final structure once; optional owners mount their own controls into named `[data-delta-settings-slot]` placeholders after the panel dispatches `npc-state-delta:settings-mounted` (`full-cast` and `scanner-output` rows in Scanning, the `full-cast-action` button in the quick bar, and `calendar-settings.js` in the calendar group). No module relocates another owner's controls, and `style.css` is the panel's only stylesheet.
 
-1. **General**
-2. **Scanning**
-3. **Continuity & injection**
-4. **Roster & cleanup**
-5. **Portrait prompts**
-6. **Relationship tuning** (Advanced)
-7. **Memory & behavior rules** (Advanced)
-8. **Data & maintenance**
+- **Quick bar** (always visible): Enable, Auto scan, Open dossiers, Scan dossier now, Full scan current cast, Add NPC.
+- **Scanning**: connection profile, cadence, context, output limit and admission.
+- **Roster & continuity**: generation injection, roster lifecycle and stale cleanup.
+- **Calendar & birthdays**
+- **Portrait generation**
+- **Scanner rules** (Advanced): relationship scoring, important memories and behavior expression rubrics.
+- **Data & maintenance**: native Backup / Export, Restore / Import and Diagnostics, a collapsible current-chat roster, and a separated Clear chat dossier action.
 
-Data & maintenance contains native Backup / Export, Restore / Import and Diagnostics plus the current-chat scan/add/clear operations and a collapsible current-chat roster. Legacy transfer controls remain mounted but hidden so existing bindings are not broken.
+Which groups are open is remembered per browser in `localStorage` (presentation only; unavailable storage falls back to Scanning open).
 
 ## Mutation safety
 
 The dossier root and editor use separate bounded observers. The dossier observer watches only the dossier root. The editor observer reacts only to editor insertion/content changes. Editor text/value synchronization writes only when a displayed value actually changes, preventing the self-triggering `MutationObserver -> textContent mutation -> MutationObserver` loop that previously froze the page after opening Edit.
 
-Settings restructuring is one-shot and idempotent; it moves existing controls instead of copying or recreating their state.
+Optional settings owners mount idempotently into their slots; each control exists once and is never copied or recreated.
 
 ## Responsive behavior
 

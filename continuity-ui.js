@@ -1,4 +1,5 @@
-/* NPC State Delta continuity UI adapter for calendar/birthday and appearance-form surfaces. */
+/* NPC State Delta continuity UI adapter for the appearance-form editor surface.
+ * Calendar settings mount through calendar-settings.js into the settings panel's calendar slot. */
 import {
     formatAppearanceForms,
     normalizeAppearanceModel,
@@ -7,8 +8,6 @@ import {
 } from './appearance.js';
 import { activeChatKey, api, flushDurably, stage1Refresh } from './dossier-tools-core.js';
 
-const CALENDAR_ROOT_ID = 'npc_state_delta_calendar_settings';
-const CALENDAR_GROUP_ID = 'npc_state_delta_calendar_birthdays_group';
 const STYLE_ID = 'npc_state_delta_continuity_ui_styles';
 const UNKNOWN_FORM = '__unknown__';
 const NO_FORM = '__none__';
@@ -50,10 +49,6 @@ function injectStyles() {
     const style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
-      #${CALENDAR_GROUP_ID} > summary { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
-      #${CALENDAR_GROUP_ID} > summary small { opacity:.7; font-size:.8em; }
-      #${CALENDAR_GROUP_ID} .npc-state-delta-calendar-dedicated-body { display:grid; grid-template-columns:minmax(0,1fr); gap:9px; }
-      #${CALENDAR_GROUP_ID} .npc-state-delta-calendar-heading { margin:0; padding:0; border:0; }
       .delta-continuity-birthday-card .delta-continuity-source { display:block; opacity:.65; font-size:.78em; margin-top:2px; }
       .delta-appearance-form-summary { margin-top:10px; border:1px solid rgba(127,127,127,.22); border-radius:10px; padding:8px 10px; }
       .delta-appearance-form-summary > summary { cursor:pointer; display:flex; gap:8px; align-items:baseline; }
@@ -77,48 +72,6 @@ function injectStyles() {
       }
     `;
     document.head.appendChild(style);
-}
-
-function ensureCalendarDedicatedSection() {
-    const root = document.getElementById(CALENDAR_ROOT_ID);
-    if (!root) return false;
-    const settings = document.getElementById('npc_state_delta_settings');
-    const drawer = settings?.querySelector?.('.npc-state-delta-drawer');
-    if (!settings || !drawer) return false;
-
-    let group = document.getElementById(CALENDAR_GROUP_ID);
-    if (!group) {
-        group = document.createElement('details');
-        group.id = CALENDAR_GROUP_ID;
-        group.className = 'delta-settings-group npc-state-delta-calendar-birthdays-group';
-        const summary = document.createElement('summary');
-        summary.innerHTML = '<b>Calendar & birthdays</b><small>Fantasy months, birthday generation and optional campaign clock</small>';
-        const body = document.createElement('div');
-        body.className = 'delta-settings-group-body npc-state-delta-calendar-dedicated-body';
-        group.append(summary, body);
-    }
-    const body = group.querySelector('.npc-state-delta-calendar-dedicated-body');
-    if (root.parentElement !== body) body.appendChild(root);
-
-    const layout = settings.querySelector('.delta-settings-experience');
-    const target = layout || drawer;
-    if (group.parentElement !== target) {
-        if (layout) {
-            const continuity = [...layout.children].find(node => /Continuity\s*&\s*injection/i.test(node.querySelector?.(':scope > summary')?.textContent || ''));
-            if (continuity?.nextSibling) layout.insertBefore(group, continuity.nextSibling);
-            else if (continuity) layout.appendChild(group);
-            else {
-                const portrait = layout.querySelector('.delta-settings-portrait-prompts, .npc-state-delta-portrait-generation-settings');
-                if (portrait) layout.insertBefore(group, portrait);
-                else layout.appendChild(group);
-            }
-        } else {
-            const portrait = drawer.querySelector('.npc-state-delta-portrait-generation-settings');
-            if (portrait) drawer.insertBefore(group, portrait);
-            else drawer.appendChild(group);
-        }
-    }
-    return true;
 }
 
 function editorAppearanceSection(editor) {
@@ -242,7 +195,6 @@ function scheduleNormalize() {
     requestAnimationFrame(() => {
         normalizeQueued = false;
         try {
-            ensureCalendarDedicatedSection();
             document.querySelectorAll('.npc-state-delta-editor-popup').forEach(ensureAppearanceEditor);
         } catch (error) {
             console.debug('[NPC State Delta] continuity UI normalization skipped', error);

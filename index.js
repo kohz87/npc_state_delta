@@ -3541,7 +3541,126 @@ function settingRow(id, label, control, hint = '') {
     return `<label class="npc-state-delta-setting-row" for="${id}"><span><b>${label}</b>${hint ? `<small>${hint}</small>` : ''}</span>${control}</label>`;
 }
 
+function numberControl(id, min, max, unit = '', { step = '', prefix = '' } = {}) {
+    return `<span class="delta-setting-number">${prefix}<input id="${id}" type="number" min="${min}" max="${max}"${step ? ` step="${step}"` : ''} class="text_pole npc-state-delta-number">${unit ? `<small>${unit}</small>` : ''}</span>`;
+}
+
+function settingsGroup(key, title, hint, body) {
+    return `<details class="delta-settings-group" data-delta-settings-group="${key}"><summary><b>${title}</b>${hint ? `<small>${hint}</small>` : ''}</summary><div class="delta-settings-group-body">${body}</div></details>`;
+}
+
+function settingsSlot(name) {
+    return `<div class="delta-settings-slot" data-delta-settings-slot="${name}"></div>`;
+}
+
+// The Extensions-tab panel is built once here in its final grouped shape. Optional owners
+// (full cast, scanner output, calendar) mount their own controls into the named slots.
 function buildSettingsHtml() {
+    const scanning = [
+        settingRow('npc_state_delta_scanner_connection_profile', 'Scanner connection profile', '<select id="npc_state_delta_scanner_connection_profile" class="text_pole"></select>', 'Routes every NPC scan, Refresh, focused pass and retry. Default keeps the current roleplay route; an unavailable profile never falls back silently.'),
+        settingRow('npc_state_delta_full_scan_every_turn', 'Full scan every turn', '<input id="npc_state_delta_full_scan_every_turn" type="checkbox">', 'With Auto scan, reconcile the whole scan context after every reply instead of only the latest exchange. Overrides Scan every; relationship deltas still come only from the newest exchange.'),
+        settingsSlot('full-cast'),
+        settingRow('npc_state_delta_scan_every', 'Scan every', numberControl('npc_state_delta_scan_every', 1, 20, 'replies'), 'Quick-scan cadence when Full scan every turn is off.'),
+        settingRow('npc_state_delta_scan_depth', 'Scan context', numberControl('npc_state_delta_scan_depth', 2, 30, 'messages'), 'History window for full, manual and Refresh scans. Quick automatic scans read only the latest user + assistant exchange.'),
+        settingsSlot('scanner-output'),
+        settingRow('npc_state_delta_admission_mode', 'NPC admission', '<select id="npc_state_delta_admission_mode" class="text_pole"><option value="conservative">Conservative</option><option value="balanced">Balanced</option><option value="manual_only">Manual only</option></select>', 'Conservative: proper names immediately, role labels after recurrence. Balanced: also direct or persistent role NPCs. Manual only: every dossier needs Add NPC.'),
+    ].join('');
+    const roster = `
+        <h4 class="delta-settings-subhead">Generation injection</h4>
+        ${settingRow('npc_state_delta_inject', 'Inject present NPC state', '<input id="npc_state_delta_inject" type="checkbox">', 'Only active NPCs present in the latest scanned scene are injected into generation.')}
+        ${settingRow('npc_state_delta_inject_budget', 'Injection budget', numberControl('npc_state_delta_inject_budget', 512, 6000, 'tokens', { step: 100, prefix: '<small>~</small>' }), 'Approximate hard ceiling. Lower-priority fields, then lower-ranked NPCs, are trimmed first.')}
+        <h4 class="delta-settings-subhead">Roster lifecycle</h4>
+        ${settingRow('npc_state_delta_max', 'Maximum active NPCs', numberControl('npc_state_delta_max', 1, 100), 'Archived dossiers do not use an active slot.')}
+        ${settingRow('npc_state_delta_archive_deaths', 'Archive confirmed deaths', '<input id="npc_state_delta_archive_deaths" type="checkbox">', 'Explicit current-timeline deaths archive instead of deleting. Ambiguous death language is ignored.')}
+        ${settingRow('npc_state_delta_reactivate_archived', 'Reactivate on clear return', '<input id="npc_state_delta_reactivate_archived" type="checkbox">', 'Manual archives return when the NPC clearly reappears. Death archives need an explicit living return.')}
+        ${settingRow('npc_state_delta_branch_rescan', 'Rescan changed branches', '<input id="npc_state_delta_branch_rescan" type="checkbox">', 'Re-evaluate the surviving branch after a swipe, edit or middle-message deletion.')}
+        <h4 class="delta-settings-subhead">Stale cleanup</h4>
+        ${settingRow('npc_state_delta_auto_prune_stale', 'Auto-manage stale NPCs', '<input id="npc_state_delta_auto_prune_stale" type="checkbox">', 'Long-absent NPCs auto-archive, then stale auto-archives are deleted later. Manual, death and protected records are kept; deleted names can be rediscovered.')}
+        ${settingRow('npc_state_delta_stale_archive_after', 'Auto-archive after', numberControl('npc_state_delta_stale_archive_after', 10, 999, 'replies'), 'Default 30. Replies since the NPC was last present or active off-screen.')}
+        ${settingRow('npc_state_delta_stale_delete_after', 'Auto-delete after', numberControl('npc_state_delta_stale_delete_after', 11, 1000, 'replies'), 'Default 50. Applies only to stale auto-archives.')}`;
+    const portrait = `
+        <p class="npc-state-delta-muted">Builds positive and negative prompts from the dossier for the native SillyTavern Image Generation handoff. The configured image backend (including ComfyUI) stays host-owned.</p>
+        ${settingRow('npc_state_delta_portrait_generation_enabled', 'Enable Generate Portrait', '<input id="npc_state_delta_portrait_generation_enabled" type="checkbox">', 'Adds Generate Portrait to the dossier menu. Fails safely without changing the dossier if Image Generation is unavailable.')}
+        <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_theme_preset"><b>Theme preset</b><small>Built-ins are fixed starting points. Custom Library uses one of your saved presets.</small></label>
+        <select id="npc_state_delta_portrait_theme_preset" class="text_pole">${Object.entries(PORTRAIT_THEME_PRESETS).map(([key, item]) => `<option value="${key}">${escapeHtml(item.label)}</option>`).join('')}</select>
+        <div class="npc-state-delta-custom-preset-library">
+          <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_custom_preset"><b>Custom preset</b><small id="npc_state_delta_portrait_custom_preset_count"></small></label>
+          <select id="npc_state_delta_portrait_custom_preset" class="text_pole"></select>
+          <div class="npc-state-delta-custom-preset-actions">
+            <div id="npc_state_delta_portrait_custom_add" class="menu_button"><i class="fa-solid fa-plus"></i> Add</div>
+            <div id="npc_state_delta_portrait_custom_duplicate" class="menu_button"><i class="fa-solid fa-copy"></i> Duplicate</div>
+            <div id="npc_state_delta_portrait_custom_rename" class="menu_button"><i class="fa-solid fa-pen"></i> Rename</div>
+            <div id="npc_state_delta_portrait_custom_delete" class="menu_button redWarningBG"><i class="fa-solid fa-trash"></i> Delete</div>
+          </div>
+          <small class="npc-state-delta-muted">Each custom preset stores positive, negative, composition, prompt format, mood and location. Gallery saving stays global.</small>
+        </div>
+        <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_style_positive"><b>Positive style / theme</b><small>House style keywords, e.g. anime key visual, painterly fantasy or model-specific tags.</small></label>
+        <textarea id="npc_state_delta_portrait_style_positive" class="text_pole npc-state-delta-rubric-textarea" rows="3" maxlength="${PORTRAIT_STYLE_PROMPT_LIMIT}"></textarea>
+        <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_style_negative"><b>Negative prompt</b><small>Quality, anatomy, composition or style exclusions for every portrait.</small></label>
+        <textarea id="npc_state_delta_portrait_style_negative" class="text_pole npc-state-delta-rubric-textarea" rows="3" maxlength="${PORTRAIT_STYLE_PROMPT_LIMIT}"></textarea>
+        <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_composition"><b>Portrait composition</b><small>Framing, kept separate from appearance so dossiers never need rewriting.</small></label>
+        <textarea id="npc_state_delta_portrait_composition" class="text_pole npc-state-delta-rubric-textarea" rows="2" maxlength="${PORTRAIT_COMPOSITION_PROMPT_LIMIT}"></textarea>
+        ${settingRow('npc_state_delta_portrait_prompt_format', 'Prompt format', '<select id="npc_state_delta_portrait_prompt_format" class="text_pole"><option value="hybrid">Structured hybrid</option><option value="tags">Comma tags</option><option value="natural">Natural language</option></select>', 'Hybrid groups dossier facts with theme tags; Tags suits SD/anime checkpoints; Natural suits instruction-following image models.')}
+        ${settingRow('npc_state_delta_portrait_use_mood', 'Use current mood', '<input id="npc_state_delta_portrait_use_mood" type="checkbox">', 'Adds current mood as expression. Personality and Background never enter the image prompt.')}
+        ${settingRow('npc_state_delta_portrait_use_location', 'Use current location', '<input id="npc_state_delta_portrait_use_location" type="checkbox">', 'Off by default so portraits stay character-focused.')}
+        ${settingRow('npc_state_delta_portrait_save_gallery', 'Also save to ST character gallery', '<input id="npc_state_delta_portrait_save_gallery" type="checkbox">', 'Off by default. Only the result you choose becomes the dossier portrait either way.')}
+        <div class="npc-state-delta-actions npc-state-delta-tuning-actions">
+          <div id="npc_state_delta_reset_portrait_theme" class="menu_button"><i class="fa-solid fa-rotate-left"></i> Reset Fantasy Anime style</div>
+          <div id="npc_state_delta_save_portrait_settings" class="menu_button"><i class="fa-solid fa-floppy-disk"></i> Save prompt settings</div>
+          <small id="npc_state_delta_portrait_settings_status" class="npc-state-delta-muted">Saved</small>
+        </div>`;
+    const rules = `
+        <section class="delta-settings-subsection npc-state-delta-relationship-rules">
+          <h4>Relationship scoring</h4>
+          <p class="npc-state-delta-muted">The scanner proposes deltas; code applies them and clamps each stat to its impact-tier cap. Stats run from -100 to +100 around neutral 0. Starting values affect new NPCs only.</p>
+          <div class="npc-state-delta-tuning-grid">
+            <div class="npc-state-delta-tuning-group"><b>New NPC starting values</b>
+              <label>Trust <input id="npc_state_delta_base_trust" type="number" min="-100" max="100" class="text_pole npc-state-delta-number"></label>
+              <label>Affection <input id="npc_state_delta_base_affection" type="number" min="-100" max="100" class="text_pole npc-state-delta-number"></label>
+              <label>Desire <input id="npc_state_delta_base_desire" type="number" min="-100" max="100" class="text_pole npc-state-delta-number"></label>
+              <label>Tension <input id="npc_state_delta_base_tension" type="number" min="-100" max="100" class="text_pole npc-state-delta-number"></label>
+            </div>
+            <div class="npc-state-delta-tuning-group"><b>Maximum ± change per scan</b>
+              <label>Ordinary <input id="npc_state_delta_cap_ordinary" type="number" min="0" max="25" class="text_pole npc-state-delta-number"></label>
+              <label>Meaningful <input id="npc_state_delta_cap_meaningful" type="number" min="0" max="35" class="text_pole npc-state-delta-number"></label>
+              <label>Major <input id="npc_state_delta_cap_major" type="number" min="0" max="50" class="text_pole npc-state-delta-number"></label>
+              <label>Extreme <input id="npc_state_delta_cap_extreme" type="number" min="0" max="100" class="text_pole npc-state-delta-number"></label>
+            </div>
+          </div>
+          <label class="npc-state-delta-rubric-label" for="npc_state_delta_relationship_criteria"><b>Relationship stat criteria</b><small>Sent to the private dossier scanner. Adjust the definitions and evidence rules for your RP.</small></label>
+          <textarea id="npc_state_delta_relationship_criteria" class="text_pole npc-state-delta-rubric-textarea" rows="7"></textarea>
+          <label class="npc-state-delta-rubric-label" for="npc_state_delta_impact_criteria"><b>Impact-tier criteria</b><small>What counts as ordinary, meaningful, major or extreme. Code caps apply even if the model proposes more.</small></label>
+          <textarea id="npc_state_delta_impact_criteria" class="text_pole npc-state-delta-rubric-textarea" rows="6"></textarea>
+          <div class="npc-state-delta-actions npc-state-delta-tuning-actions"><div id="npc_state_delta_reset_relationship_rules" class="menu_button"><i class="fa-solid fa-rotate-left"></i> Reset relationship rules</div></div>
+        </section>
+        <section class="delta-settings-subsection npc-state-delta-memory-rules">
+          <h4>Important memories</h4>
+          <p class="npc-state-delta-muted">Decides which established events become persistent Important memories during scans and backfills. Existing memories are shown to the scanner to avoid duplicates.</p>
+          <label class="npc-state-delta-rubric-label" for="npc_state_delta_memory_criteria"><b>Important memory criteria</b><small>Keep routine dialogue, transient feelings and moment-to-moment Inner Chatter out unless you intend otherwise.</small></label>
+          <textarea id="npc_state_delta_memory_criteria" class="text_pole npc-state-delta-rubric-textarea" rows="7"></textarea>
+          <div class="npc-state-delta-actions npc-state-delta-tuning-actions"><div id="npc_state_delta_reset_memory_rules" class="menu_button"><i class="fa-solid fa-rotate-left"></i> Reset memory criteria</div></div>
+        </section>
+        <section class="delta-settings-subsection npc-state-delta-behavior-rules">
+          <h4>Behavior expression</h4>
+          <p class="npc-state-delta-muted">Injected only with present NPCs. Personality, Behavioral profile, Speech and Mannerisms stay authoritative; relationship stats only tint player-specific expression and never imply obedience or a romance archetype.</p>
+          <label class="npc-state-delta-rubric-label" for="npc_state_delta_behavior_criteria"><b>Relationship-to-behavior rubric</b><small>Edit if your RP uses different behavioral assumptions.</small></label>
+          <textarea id="npc_state_delta_behavior_criteria" class="text_pole npc-state-delta-rubric-textarea" rows="8"></textarea>
+          <div class="npc-state-delta-actions npc-state-delta-tuning-actions"><div id="npc_state_delta_reset_behavior_rules" class="menu_button"><i class="fa-solid fa-rotate-left"></i> Reset behavior rubric</div></div>
+        </section>`;
+    const maintenance = `
+        <div class="npc-state-delta-actions delta-settings-maintenance-actions">
+          <button type="button" class="menu_button" data-delta-settings-backup><i class="fa-solid fa-file-export"></i> Backup / Export</button>
+          <button type="button" class="menu_button" data-delta-settings-restore><i class="fa-solid fa-file-import"></i> Restore / Import</button>
+          <button type="button" class="menu_button" data-delta-settings-diagnostics><i class="fa-solid fa-stethoscope"></i> Diagnostics</button>
+        </div>
+        <details class="delta-settings-current-roster">
+          <summary><b>Current chat roster</b><small>Edit, scan, archive or remove individual records</small></summary>
+          <div id="npc_state_delta_roster_summary" class="npc-state-delta-roster-summary"></div>
+        </details>
+        <div class="delta-settings-danger">
+          <span><b>Clear chat dossier</b><small>Removes every NPC record for this chat only.</small></span>
+          <div id="npc_state_delta_clear_chat" class="menu_button redWarningBG"><i class="fa-solid fa-trash"></i> Clear</div>
+        </div>`;
     return `
     <div id="${UI_ID}" class="extension_container npc-state-delta-extension">
       <div class="inline-drawer">
@@ -3550,114 +3669,54 @@ function buildSettingsHtml() {
           <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content npc-state-delta-drawer">
-          <div class="npc-state-delta-intro">Standalone narrated-NPC dossier tracker. Admission is configurable: Conservative avoids routine transactional extras, Balanced admits direct interactions more eagerly, and Manual only requires explicit promotion. Incidental role-only figures stay lightweight candidates; only NPCs detected as physically present in the latest scene receive a new inline card. Settings Add NPC creates a bare dossier with a per-NPC Scan dossier wand; Settings trash hard-deletes/suppresses it. Story text does not execute dossier commands.</div>
-          <div class="npc-state-delta-settings-grid">
-            ${settingRow('npc_state_delta_enabled', 'Enable NPC State Delta', '<input id="npc_state_delta_enabled" type="checkbox">')}
-            ${settingRow('npc_state_delta_auto', 'Auto scan', '<input id="npc_state_delta_auto" type="checkbox">', 'Runs after assistant replies.')}
-            ${settingRow('npc_state_delta_scanner_connection_profile', 'NPC scanner connection profile', '<select id="npc_state_delta_scanner_connection_profile" class="text_pole"></select>', 'Default preserves the current host route. A selected Connection Profile routes all NPC text scans, Refresh, focused passes, and retries without switching roleplay or portrait settings. Changes apply to the next scan; unavailable profiles never fall back silently.')}
-            ${settingRow('npc_state_delta_full_scan_every_turn', 'Full scan every turn', '<input id="npc_state_delta_full_scan_every_turn" type="checkbox">', 'When Auto scan is enabled, reconcile the configured recent-story window after every assistant reply instead of scanning only the current exchange. Overrides Scan every. Uses more context/output tokens, but relationship-score deltas still come only from the newest exchange so old events are not replayed.')}
-            ${settingRow('npc_state_delta_scan_every', 'Scan every', '<span><input id="npc_state_delta_scan_every" type="number" min="1" max="20" class="text_pole npc-state-delta-number"> replies</span>', 'Quick-scan cadence when Full scan every turn is off.')}
-            ${settingRow('npc_state_delta_scan_depth', 'Full/manual scan context', '<span><input id="npc_state_delta_scan_depth" type="number" min="2" max="30" class="text_pole npc-state-delta-number"> messages</span>', 'History window used by Full scan every turn, global Scan dossier now, per-NPC dossier fallback, and Edit Dossier Refresh from Chat. Quick automatic scans still use only the current user + assistant exchange.')}
-            ${settingRow('npc_state_delta_admission_mode', 'NPC admission', '<select id="npc_state_delta_admission_mode" class="text_pole"><option value="conservative">Conservative</option><option value="balanced">Balanced</option><option value="manual_only">Manual only</option></select>', 'Conservative: proper names immediately; role labels require confirmed recurrence or manual Add. Balanced: meaningful/persistent or directly interactive role NPCs can also admit immediately. Manual only: all new dossiers require manual Add.')}
-            ${settingRow('npc_state_delta_max', 'Maximum active NPCs', '<input id="npc_state_delta_max" type="number" min="1" max="100" class="text_pole npc-state-delta-number">', 'Cap for active dossiers only. Archived dossiers no longer consume an active roster slot.')}
-            ${settingRow('npc_state_delta_auto_prune_stale', 'Auto-manage stale NPCs', '<input id="npc_state_delta_auto_prune_stale" type="checkbox">', 'Two-stage stale lifecycle after successful scans: long-absent active NPCs auto-archive first, then stale auto-archives are deleted later. Manual/death archives and protected NPCs are preserved; deleted stale names are not suppressed and can be rediscovered.')}
-            ${settingRow('npc_state_delta_stale_archive_after', 'Auto-archive after', '<span><input id="npc_state_delta_stale_archive_after" type="number" min="10" max="999" class="text_pole npc-state-delta-number"> assistant replies</span>', 'Default 30. Counts NPC State Delta story turns since the NPC was last physically present or explicitly active off-screen. Auto-archive immediately frees an active roster slot.')}
-            ${settingRow('npc_state_delta_stale_delete_after', 'Auto-delete after', '<span><input id="npc_state_delta_stale_delete_after" type="number" min="11" max="1000" class="text_pole npc-state-delta-number"> assistant replies</span>', 'Default 50. Only NPCs auto-archived for staleness are timed out. Manual archives and confirmed-death archives are never deleted by this timer.')}
-            ${settingRow('npc_state_delta_inject', 'Inject present NPC state', '<input id="npc_state_delta_inject" type="checkbox">', 'Only active, non-archived NPCs marked present in the latest scanned scene are eligible for generation injection.')}
-            ${settingRow('npc_state_delta_inject_budget', 'Injection budget', '<span>~<input id="npc_state_delta_inject_budget" type="number" min="512" max="6000" step="100" class="text_pole npc-state-delta-number"> tokens</span>', 'Approximate hard ceiling for the present-NPC dossier injected into main generation. If needed, lower-priority fields and then lower-ranked NPCs are trimmed first.')}
-            ${settingRow('npc_state_delta_archive_deaths', 'Archive confirmed deaths', '<input id="npc_state_delta_archive_deaths" type="checkbox">', 'Explicitly confirmed current-timeline deaths are archived instead of deleted. Ambiguous death language is ignored.')}
-            ${settingRow('npc_state_delta_reactivate_archived', 'Reactivate on clear return', '<input id="npc_state_delta_reactivate_archived" type="checkbox">', 'Manually archived NPCs reactivate when they physically return or are clearly active off-screen in current World State. Death-archived NPCs require an explicit living return, survival, or resurrection.')}
-            ${settingRow('npc_state_delta_branch_rescan', 'Rescan changed branches', '<input id="npc_state_delta_branch_rescan" type="checkbox">', 'Re-evaluates the surviving branch after a swipe/edit or middle-message deletion.')}
+          <div class="delta-settings-quickbar">
+            <div class="delta-settings-quick-toggles">
+              ${settingRow('npc_state_delta_enabled', 'Enable NPC State Delta', '<input id="npc_state_delta_enabled" type="checkbox">')}
+              ${settingRow('npc_state_delta_auto', 'Auto scan', '<input id="npc_state_delta_auto" type="checkbox">', 'Runs after assistant replies.')}
+            </div>
+            <div class="npc-state-delta-actions delta-settings-quick-actions">
+              <button type="button" class="menu_button" data-delta-settings-open-dossiers><i class="fa-solid fa-address-book"></i> Open dossiers</button>
+              <div id="npc_state_delta_scan_now" class="menu_button"><i class="fa-solid fa-wand-magic-sparkles"></i> Scan dossier now</div>
+              ${settingsSlot('full-cast-action')}
+              <div id="npc_state_delta_add_manual" class="menu_button"><i class="fa-solid fa-user-plus"></i> Add NPC</div>
+            </div>
           </div>
-          <details class="npc-state-delta-portrait-generation-settings">
-            <summary><b>Portrait generation</b> <small>SillyTavern Image Generation integration</small></summary>
-            <div class="npc-state-delta-portrait-settings-body">
-              <p class="npc-state-delta-muted">NPC State Delta builds a positive + negative prompt from the dossier, then calls SillyTavern's native <code>/imagine</code> command with <code>quiet=true</code>. SillyTavern keeps control of the configured image backend, model/checkpoint, sampler, steps, workflow, credentials, and resolution.</p>
-              ${settingRow('npc_state_delta_portrait_generation_enabled', 'Enable Generate Portrait', '<input id="npc_state_delta_portrait_generation_enabled" type="checkbox">', 'Shows Generate Portrait in the dossier utility menu. If SillyTavern Image Generation is unavailable or unconfigured, generation fails safely without changing the dossier.')}
-              <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_theme_preset"><b>Theme preset</b><small>Built-ins are fixed starting points. Custom Library uses one of your named saved presets below.</small></label>
-              <select id="npc_state_delta_portrait_theme_preset" class="text_pole">${Object.entries(PORTRAIT_THEME_PRESETS).map(([key, item]) => `<option value="${key}">${escapeHtml(item.label)}</option>`).join('')}</select>
-              <div class="npc-state-delta-custom-preset-library">
-                <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_custom_preset"><b>Custom preset</b><small id="npc_state_delta_portrait_custom_preset_count"></small></label>
-                <select id="npc_state_delta_portrait_custom_preset" class="text_pole"></select>
-                <div class="npc-state-delta-actions npc-state-delta-custom-preset-actions">
-                  <div id="npc_state_delta_portrait_custom_add" class="menu_button"><i class="fa-solid fa-plus"></i> Add</div>
-                  <div id="npc_state_delta_portrait_custom_duplicate" class="menu_button"><i class="fa-solid fa-copy"></i> Duplicate</div>
-                  <div id="npc_state_delta_portrait_custom_rename" class="menu_button"><i class="fa-solid fa-pen"></i> Rename</div>
-                  <div id="npc_state_delta_portrait_custom_delete" class="menu_button redWarningBG"><i class="fa-solid fa-trash"></i> Delete</div>
-                </div>
-                <small class="npc-state-delta-muted">Each custom preset stores positive, negative, composition, prompt format, mood, and location. Gallery saving remains global.</small>
-              </div>
-              <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_style_positive"><b>Positive style / theme</b><small>Use this for a house style such as anime key visual, painterly fantasy, dark medieval, or your own model-specific style keywords.</small></label>
-              <textarea id="npc_state_delta_portrait_style_positive" class="text_pole npc-state-delta-rubric-textarea" rows="4" maxlength="${PORTRAIT_STYLE_PROMPT_LIMIT}"></textarea>
-              <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_style_negative"><b>Negative prompt</b><small>Quality, anatomy, composition, or style exclusions applied to every generated NPC portrait.</small></label>
-              <textarea id="npc_state_delta_portrait_style_negative" class="text_pole npc-state-delta-rubric-textarea" rows="4" maxlength="${PORTRAIT_STYLE_PROMPT_LIMIT}"></textarea>
-              <label class="npc-state-delta-rubric-label" for="npc_state_delta_portrait_composition"><b>Portrait composition</b><small>Kept separate from appearance so you can change framing without rewriting dossiers.</small></label>
-              <textarea id="npc_state_delta_portrait_composition" class="text_pole npc-state-delta-rubric-textarea" rows="3" maxlength="${PORTRAIT_COMPOSITION_PROMPT_LIMIT}"></textarea>
-              <div class="npc-state-delta-portrait-settings-grid">
-                ${settingRow('npc_state_delta_portrait_prompt_format', 'Prompt format', '<select id="npc_state_delta_portrait_prompt_format" class="text_pole"><option value="hybrid">Structured hybrid</option><option value="tags">Comma tags</option><option value="natural">Natural language</option></select>', 'Hybrid keeps theme tags while grouping dossier facts; Tags favors SD/anime checkpoints; Natural is useful for instruction-oriented image models.')}
-                ${settingRow('npc_state_delta_portrait_use_mood', 'Use current mood', '<input id="npc_state_delta_portrait_use_mood" type="checkbox">', 'Adds current mood as expression/bearing. Stable Personality and Background are never dumped into the image prompt.')}
-                ${settingRow('npc_state_delta_portrait_use_location', 'Use current location', '<input id="npc_state_delta_portrait_use_location" type="checkbox">', 'Off by default so portraits stay character-focused.')}
-                ${settingRow('npc_state_delta_portrait_save_gallery', 'Also save to ST character gallery', '<input id="npc_state_delta_portrait_save_gallery" type="checkbox">', 'Off by default. NPC State Delta embeds only the result you choose as its portrait. Enable this if you also want each native generation placed in the current SillyTavern character gallery.')}
-              </div>
-              <div class="npc-state-delta-actions npc-state-delta-tuning-actions">
-                <div id="npc_state_delta_reset_portrait_theme" class="menu_button"><i class="fa-solid fa-rotate-left"></i> Reset Fantasy Anime theme</div>
-                <div id="npc_state_delta_save_portrait_settings" class="menu_button"><i class="fa-solid fa-floppy-disk"></i> Save Portrait Settings</div>
-                <small id="npc_state_delta_portrait_settings_status" class="npc-state-delta-muted">Saved</small>
-              </div>
-            </div>
-          </details>
-          <details class="npc-state-delta-relationship-tuning">
-            <summary><b>Relationship tuning</b> <small>Delta rules and scanner rubric</small></summary>
-            <div class="npc-state-delta-tuning-body">
-              <p class="npc-state-delta-muted">The scanner proposes relationship deltas; NPC State Delta applies them in code and clamps every stat to the selected impact-tier cap. Stats are bipolar from -100 to +100 with 0 neutral. Starting values affect newly created NPCs only.</p>
-              <div class="npc-state-delta-tuning-grid">
-                <div class="npc-state-delta-tuning-group"><b>New NPC starting values</b>
-                  <label>Trust <input id="npc_state_delta_base_trust" type="number" min="-100" max="100" class="text_pole npc-state-delta-number"></label>
-                  <label>Affection <input id="npc_state_delta_base_affection" type="number" min="-100" max="100" class="text_pole npc-state-delta-number"></label>
-                  <label>Desire <input id="npc_state_delta_base_desire" type="number" min="-100" max="100" class="text_pole npc-state-delta-number"></label>
-                  <label>Tension <input id="npc_state_delta_base_tension" type="number" min="-100" max="100" class="text_pole npc-state-delta-number"></label>
-                </div>
-                <div class="npc-state-delta-tuning-group"><b>Maximum ± change per scan</b>
-                  <label>Ordinary <input id="npc_state_delta_cap_ordinary" type="number" min="0" max="25" class="text_pole npc-state-delta-number"></label>
-                  <label>Meaningful <input id="npc_state_delta_cap_meaningful" type="number" min="0" max="35" class="text_pole npc-state-delta-number"></label>
-                  <label>Major <input id="npc_state_delta_cap_major" type="number" min="0" max="50" class="text_pole npc-state-delta-number"></label>
-                  <label>Extreme <input id="npc_state_delta_cap_extreme" type="number" min="0" max="100" class="text_pole npc-state-delta-number"></label>
-                </div>
-              </div>
-              <label class="npc-state-delta-rubric-label" for="npc_state_delta_relationship_criteria"><b>Relationship stat criteria</b><small>Injected into the private dossier scanner. Change these definitions/evidence rules to suit your RP.</small></label>
-              <textarea id="npc_state_delta_relationship_criteria" class="text_pole npc-state-delta-rubric-textarea" rows="9"></textarea>
-              <label class="npc-state-delta-rubric-label" for="npc_state_delta_impact_criteria"><b>Impact-tier criteria</b><small>Defines what counts as ordinary, meaningful, major, or extreme. Code caps still apply even if the model proposes larger numbers.</small></label>
-              <textarea id="npc_state_delta_impact_criteria" class="text_pole npc-state-delta-rubric-textarea" rows="7"></textarea>
-              <div class="npc-state-delta-actions npc-state-delta-tuning-actions"><div id="npc_state_delta_reset_relationship_rules" class="menu_button"><i class="fa-solid fa-rotate-left"></i> Reset relationship rules</div></div>
-            </div>
-          </details>
-          <details class="npc-state-delta-relationship-tuning npc-state-delta-memory-tuning">
-            <summary><b>Important memory tuning</b> <small>What becomes a persistent NPC memory</small></summary>
-            <div class="npc-state-delta-tuning-body">
-              <p class="npc-state-delta-muted">This rubric is injected into automatic scans and targeted backfills. It decides which established events are durable enough to enter the NPC's persistent Important memories list. Existing memories are shown to the scanner for strongly relevant NPCs so it can avoid duplicates.</p>
-              <label class="npc-state-delta-rubric-label" for="npc_state_delta_memory_criteria"><b>Important Memory Criteria</b><small>Define what should be remembered across later scenes. Keep routine dialogue, transient feelings, and moment-to-moment Inner Chatter out unless you intentionally change the rubric.</small></label>
-              <textarea id="npc_state_delta_memory_criteria" class="text_pole npc-state-delta-rubric-textarea" rows="8"></textarea>
-              <div class="npc-state-delta-actions npc-state-delta-tuning-actions"><div id="npc_state_delta_reset_memory_rules" class="menu_button"><i class="fa-solid fa-rotate-left"></i> Reset memory criteria</div></div>
-            </div>
-          </details>
-          <details class="npc-state-delta-relationship-tuning npc-state-delta-behavior-tuning">
-            <summary><b>Behavior expression</b> <small>How relationship stats affect present NPC behavior</small></summary>
-            <div class="npc-state-delta-tuning-body">
-              <p class="npc-state-delta-muted">This rubric is injected only with NPCs marked present. Identity is injected first: Personality, Behavioral profile, Speech, and Mannerisms remain authoritative while Trust, Affection, Desire, and Tension only modify player-specific expression. High relationship scores do not imply obedience, jealousy, clinginess, cruelty toward others, or a generic romance archetype.</p>
-              <label class="npc-state-delta-rubric-label" for="npc_state_delta_behavior_criteria"><b>Relationship-to-behavior rubric</b><small>Edit this if your RP uses different behavioral assumptions.</small></label>
-              <textarea id="npc_state_delta_behavior_criteria" class="text_pole npc-state-delta-rubric-textarea" rows="10"></textarea>
-              <div class="npc-state-delta-actions npc-state-delta-tuning-actions"><div id="npc_state_delta_reset_behavior_rules" class="menu_button"><i class="fa-solid fa-rotate-left"></i> Reset behavior rubric</div></div>
-            </div>
-          </details>
-          <div class="npc-state-delta-actions">
-            <div id="npc_state_delta_scan_now" class="menu_button"><i class="fa-solid fa-wand-magic-sparkles"></i> Scan dossier now</div>
-            <div id="npc_state_delta_add_manual" class="menu_button"><i class="fa-solid fa-user-plus"></i> Add NPC</div>
-            <div id="npc_state_delta_clear_chat" class="menu_button redWarningBG"><i class="fa-solid fa-trash"></i> Clear chat dossier</div>
+          <div class="delta-settings-experience">
+            ${settingsGroup('scanning', 'Scanning', 'Connection, cadence and admission', scanning)}
+            ${settingsGroup('roster', 'Roster & continuity', 'Injection, lifecycle and stale cleanup', roster)}
+            ${settingsGroup('calendar', 'Calendar & birthdays', 'Fantasy months and optional campaign clock', settingsSlot('calendar'))}
+            ${settingsGroup('portrait', 'Portrait generation', 'Image Generation prompts and style', portrait)}
+            ${settingsGroup('rules', 'Scanner rules', 'Advanced relationship, memory and behavior rubrics', rules)}
+            ${settingsGroup('maintenance', 'Data & maintenance', 'Backup, diagnostics and this chat', maintenance)}
           </div>
-          <div id="npc_state_delta_roster_summary" class="npc-state-delta-roster-summary"></div>
         </div>
       </div>
     </div>`;
+}
+
+const SETTINGS_OPEN_GROUPS_KEY = 'npc_state_delta_settings_open_groups';
+const DEFAULT_OPEN_SETTINGS_GROUPS = ['scanning'];
+
+function readOpenSettingsGroups() {
+    try {
+        const raw = globalThis.localStorage?.getItem?.(SETTINGS_OPEN_GROUPS_KEY);
+        const parsed = raw ? JSON.parse(raw) : null;
+        return Array.isArray(parsed) ? parsed.filter(item => typeof item === 'string') : DEFAULT_OPEN_SETTINGS_GROUPS;
+    } catch {
+        return DEFAULT_OPEN_SETTINGS_GROUPS;
+    }
+}
+
+// Remember which settings groups the player keeps open; presentation only, never canonical state.
+function bindSettingsGroupMemory(root) {
+    const groups = [...(root?.querySelectorAll?.('[data-delta-settings-group]') || [])];
+    const open = new Set(readOpenSettingsGroups());
+    for (const group of groups) group.open = open.has(group.dataset.deltaSettingsGroup);
+    root?.addEventListener?.('toggle', event => {
+        if (!event.target?.matches?.('[data-delta-settings-group]')) return;
+        const next = groups.filter(group => group.open).map(group => group.dataset.deltaSettingsGroup);
+        try { globalThis.localStorage?.setItem?.(SETTINGS_OPEN_GROUPS_KEY, JSON.stringify(next)); } catch { /* optional */ }
+    }, true);
 }
 
 function syncScannerProfileControl() {
@@ -6118,8 +6177,11 @@ function attachSettingsPanel() {
         return false;
     }
     host.append(buildSettingsHtml());
+    const panel = document.getElementById?.(UI_ID);
+    bindSettingsGroupMemory(panel);
     syncSettingsControls();
     renderDossier();
+    panel?.dispatchEvent?.(new CustomEvent('npc-state-delta:settings-mounted', { bubbles: true }));
     return true;
 }
 

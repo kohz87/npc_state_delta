@@ -71,8 +71,8 @@ def run_viewport(browser, name, width, height, output):
     page.on('pageerror', lambda error: errors.append(str(error)))
     page.on('dialog', lambda dialog: dialog.accept())
     mount_fixture(page)
-    assert page.locator('#npc_state_delta_calendar_birthdays_group').count() == 1
-    page.locator('#npc_state_delta_calendar_birthdays_group > summary').click()
+    assert page.locator('[data-delta-settings-group="calendar"] #npc_state_delta_calendar_settings').count() == 1
+    page.locator('[data-delta-settings-group="calendar"] > summary').click()
     page.locator('#npc_state_delta_calendar_months').fill('Redleaf:30\nSunwane:31')
     page.locator('#npc_state_delta_save_calendar').click()
     assert page.evaluate('settings.npc_state_delta.calendarConfig.currentYear') is None

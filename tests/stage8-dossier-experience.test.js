@@ -94,23 +94,23 @@ test('editor uses one scroll body and task-grouped form sections', () => {
 });
 
 test('settings are grouped by task and extension-wide backup diagnostics live in Settings', () => {
-    for (const label of ['General', 'Scanning', 'Continuity & injection', 'Roster & cleanup', 'Portrait generation', 'Relationship tuning', 'Memory & behavior rules', 'Data & maintenance']) {
-        assert.match(source, new RegExp(label.replace(/[&]/g, '\\&')));
-    }
+    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const html = index.slice(index.indexOf('function buildSettingsHtml()'), index.indexOf('function readOpenSettingsGroups()'));
+    const groups = [...html.matchAll(/settingsGroup\('([a-z]+)', '([^']+)'/g)].map(match => match[2]);
+    assert.deepEqual(groups, ['Scanning', 'Roster & continuity', 'Calendar & birthdays', 'Portrait generation', 'Scanner rules', 'Data & maintenance']);
+    assert.match(html, /delta-settings-quickbar[\s\S]*npc_state_delta_enabled[\s\S]*npc_state_delta_auto[\s\S]*data-delta-settings-open-dossiers[\s\S]*npc_state_delta_scan_now[\s\S]*npc_state_delta_add_manual/);
+    assert.match(html, /delta-settings-maintenance-actions[\s\S]*data-delta-settings-backup[\s\S]*data-delta-settings-restore[\s\S]*data-delta-settings-diagnostics/);
+    assert.match(html, /npc_state_delta_roster_summary[\s\S]*delta-settings-danger[\s\S]*npc_state_delta_clear_chat/);
+    assert.match(html, /native SillyTavern Image Generation handoff/);
+    assert.match(html, /npc_state_delta_portrait_generation_enabled/);
+    assert.match(html, /npc_state_delta_portrait_save_gallery/);
+    assert.match(index, /dispatchEvent\?\.\(new CustomEvent\('npc-state-delta:settings-mounted'/);
     assert.match(source, /data-delta-settings-backup/);
     assert.match(source, /data-delta-settings-restore/);
     assert.match(source, /data-delta-settings-diagnostics/);
+    assert.match(source, /data-delta-settings-open-dossiers/);
     assert.match(source, /delta-tools-data,[\s\S]*delta-tools-diagnostics-button\{display:none!important\}/);
-    assert.match(source, /native SillyTavern Image Generation handoff/);
-    assert.match(source, /npc_state_delta_portrait_generation_enabled/);
-    assert.match(source, /npc_state_delta_portrait_save_gallery/);
-    assert.match(source, /generationRow\.hidden = false/);
-    assert.match(source, /galleryRow\.hidden = false/);
-    assert.match(source, /rosterActions\.appendChild\(addNpc\)/);
-    assert.match(source, /delta-settings-maintenance-actions/);
-    assert.match(source, /maintenanceActions\.appendChild\(scanNow\)/);
-    assert.match(source, /maintenanceActions\.appendChild\(clearChat\)/);
-    assert.doesNotMatch(source, /querySelectorAll\(':scope > \.npc-state-delta-actions'\)/);
+    assert.doesNotMatch(source, /ensureSettingsExperience|moveSettingsRows|#npc_state_delta_settings /, 'the dossier experience never restructures or styles the settings panel');
 });
 
 test('cohesive experience keeps selected dossier actions routed through the maintained Portrait tool', () => {

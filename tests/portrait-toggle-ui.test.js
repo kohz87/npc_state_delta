@@ -28,10 +28,11 @@ test('portrait copying lazy-loads SillyTavern host utility and exposes a selecte
 });
 
 test('settings booleans use CSS-only row status pills with grey and green dots', () => {
-    const source = fs.readFileSync(new URL('../scanner-output-ui.js', import.meta.url), 'utf8');
-    assert.doesNotMatch(source, /function enhanceSettingsToggles\(/, 'startup must not mutate checkbox sibling DOM');
-    assert.doesNotMatch(source, /insertAdjacentElement\('afterend'/, 'startup must not inject toggle siblings from the global observer');
-    assert.doesNotMatch(source, /delta-toggle-native|delta-toggle-pill|delta-toggle-label/, 'runtime toggle enhancer classes must remain absent');
+    const script = fs.readFileSync(new URL('../scanner-output-ui.js', import.meta.url), 'utf8');
+    const source = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+    assert.doesNotMatch(script, /function enhanceSettingsToggles\(/, 'startup must not mutate checkbox sibling DOM');
+    assert.doesNotMatch(script, /insertAdjacentElement\('afterend'/, 'startup must not inject toggle siblings from the global observer');
+    assert.doesNotMatch(script + source, /delta-toggle-native|delta-toggle-pill|delta-toggle-label/, 'runtime toggle enhancer classes must remain absent');
     assert.match(source, /@supports selector\(label:has\(> input\[type="checkbox"\]:checked\)\)/);
     assert.match(source, /\.npc-state-delta-setting-row>input\[type="checkbox"\][^{]*\{[\s\S]*clip-path:inset\(50%\)!important/);
     assert.match(source, /\.npc-state-delta-setting-row:has\(> input\[type="checkbox"\]\)::after\{[\s\S]*content:"Disabled"!important/s);

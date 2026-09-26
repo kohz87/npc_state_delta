@@ -149,10 +149,11 @@ export async function runFullCastScan(messageId = null, before = null, { manual 
 
 function mountControls() {
     const panel = document.querySelector?.('#npc_state_delta_settings');
-    if (!panel) return false;
+    const rowSlot = panel?.querySelector?.('[data-delta-settings-slot="full-cast"]');
+    const actionSlot = panel?.querySelector?.('[data-delta-settings-slot="full-cast-action"]');
+    if (!rowSlot || !actionSlot) return false;
     if (!document.getElementById(CONTROL_ID)) {
-        const anchor = panel.querySelector('#npc_state_delta_full_scan_every_turn')?.closest?.('.npc-state-delta-setting-row');
-        anchor?.insertAdjacentHTML?.('afterend', `<label class="npc-state-delta-setting-row" for="${CONTROL_ID}"><span><b>Full cast scan</b><small>Optional expensive mode. After each assistant reply, fully refresh every tracked NPC who participated anywhere in the current user/assistant exchange plus every NPC physically present at the end. Physical presence itself is not changed by this extra pass.</small></span><input id="${CONTROL_ID}" type="checkbox"></label>`);
+        rowSlot.insertAdjacentHTML('beforeend', `<label class="npc-state-delta-setting-row" for="${CONTROL_ID}"><span><b>Full cast scan</b><small>Optional expensive mode. After each reply, fully refresh every tracked NPC who took part in the latest exchange or is present at its end. Presence itself is not changed by this pass.</small></span><input id="${CONTROL_ID}" type="checkbox"></label>`);
     }
     const control = document.getElementById(CONTROL_ID);
     if (control && control.dataset.npcStateDeltaBound !== '1') {
@@ -163,25 +164,13 @@ function mountControls() {
             saveSettings();
         });
     }
-    let actions = panel.querySelector('.delta-settings-maintenance-actions');
-    if (!actions) {
-        const legacyScan = panel.querySelector('#npc_state_delta_scan_now');
-        actions = legacyScan?.closest?.('.npc-state-delta-actions') || null;
-    }
-    let button = document.getElementById(SCAN_BUTTON_ID);
-    if (!button && actions) {
-        button = document.createElement('div');
+    if (!document.getElementById(SCAN_BUTTON_ID)) {
+        const button = document.createElement('div');
         button.id = SCAN_BUTTON_ID;
         button.className = 'menu_button';
         button.innerHTML = '<i class="fa-solid fa-users-viewfinder"></i> Full scan current cast';
         button.addEventListener('click', () => void runFullCastScan(latestAssistantId(), snapshot(), { manual: true }));
-    }
-    if (actions && button) {
-        const clearChat = actions.querySelector?.('#npc_state_delta_clear_chat');
-        if (button.parentElement !== actions || (clearChat && button.nextElementSibling !== clearChat)) {
-            if (clearChat) actions.insertBefore(button, clearChat);
-            else actions.appendChild(button);
-        }
+        actionSlot.appendChild(button);
     }
     return true;
 }
