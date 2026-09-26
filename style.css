@@ -856,7 +856,14 @@ body.npc-state-delta-portrait-generator-open { overflow: hidden !important; }
   #npc_state_delta_settings .npc-state-delta-setting-row:has(> input[type="checkbox"]:disabled)::after{opacity:.45!important}
 }
 
-/* Action rows */
+/* Action rows. SillyTavern's own .menu_button is width:min-content, which wraps every word onto
+   its own line inside a grid cell; panel buttons fill their cell or size to their label instead. */
+#npc_state_delta_settings .delta-settings-quick-actions .menu_button,
+#npc_state_delta_settings .npc-state-delta-custom-preset-actions .menu_button,
+#npc_state_delta_settings .delta-settings-maintenance-actions > .menu_button { width: 100%; }
+#npc_state_delta_settings .npc-state-delta-tuning-actions > .menu_button,
+#npc_state_delta_calendar_settings .npc-state-delta-calendar-actions > .menu_button,
+#npc_state_delta_settings .delta-settings-danger > .menu_button { width: auto; white-space: nowrap; }
 #npc_state_delta_settings .npc-state-delta-actions .menu_button { display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; min-height: 36px; margin: 0; white-space: normal; overflow-wrap: break-word; text-align: center; line-height: 1.25; box-sizing: border-box; }
 #npc_state_delta_settings .npc-state-delta-tuning-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 10px 0 0; }
 #npc_state_delta_settings .npc-state-delta-tuning-actions > .menu_button { flex: 1 1 170px; }
