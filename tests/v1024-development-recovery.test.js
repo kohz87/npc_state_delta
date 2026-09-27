@@ -17,10 +17,10 @@ function baseSora() {
         'Slamming her palm against the table when demanding food or whole cream at home.',
     ];
     npc.behaviorProfile = [
-        'Primal & Protective: Lashes out instinctively against threats to Lucien before seeking physical comfort.',
-        'Refined Emulation: Mirrors ladylike etiquette, gentle speech, and delicate tea service to project poise.',
-        'Empirical Application: Transcribes anatomical notes, tests herbal tinctures, and operates with surgical precision.',
-        'Mana Manifestation: Consciously summons ear crests, thunderbird plumage wings, lightning, or raptor form.',
+        'Threat Sensitivity: Lashes out instinctively against threats to Lucien before seeking physical comfort.',
+        'Social Presentation: Mirrors ladylike etiquette, gentle speech, and delicate tea service to project poise.',
+        'Analytical Style: Transcribes anatomical notes, tests herbal tinctures, and operates with surgical precision.',
+        'Expressiveness: Consciously summons ear crests, thunderbird plumage wings, lightning, or raptor form.',
     ];
     return npc;
 }

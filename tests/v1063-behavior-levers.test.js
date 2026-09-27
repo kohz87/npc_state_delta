@@ -18,14 +18,24 @@ function scan(npc, update) {
     return mergeScanResult({ npcs: [npc], turn: 10 }, { npcs: [], profileUpdates: [{ id: npc.id, name: 'Malia', ...update }] }, { developmentContext: CONTEXT, sourceMessageId: 9, turn: 10 });
 }
 
-test('routines, duties, house rules and habits are not Behavioral Levers; labelled or tendency rules are', () => {
-    for (const entry of HABITS) assert.equal(isBehaviorLever(entry), false, entry);
-    assert.equal(isBehaviorLever('Habit: sizes up boarders at the door'), false, 'a "Habit:" label does not make a lever');
+test('only "Category: level - effect" entries with a recognised category are Behavioral Levers', () => {
+    for (const entry of [
+        ...HABITS,
+        'Habit: sizes up boarders at the door',
+        'Household: strictly enforces advance payment and dusk curfews',
+        'Avoids open confrontation; answers challenges with cold politeness.',
+        'When pressed, defers to written rules.',
+        'Disposition:',
+    ]) assert.equal(isBehaviorLever(entry), false, entry);
     for (const entry of [
         'Threat Sensitivity: high - assesses strangers before extending trust',
         'Conflict/Assertiveness: firm - enforces boundaries without apology',
-        'Avoids open confrontation; answers challenges with cold politeness.',
-        'When pressed, defers to written rules.',
+        'Care/Warmth: practical - helps through actions rather than words',
+        'Loyalty: fierce - stands by her boarders when the watch comes',
+        'Drive/Ambition: low - content to keep the house running',
+        'Honesty/Candor: blunt - says what she thinks to anyone',
+        'Expression: guarded - rarely shows what she feels',
+        'Trust: slow - tests newcomers before relying on them',
     ]) assert.equal(isBehaviorLever(entry), true, entry);
 });
 
@@ -148,4 +158,40 @@ test('a lever restating a stored habit is grounded by that entry; unrelated leve
 test('diagnostics explain why stored non-lever entries survived', () => {
     assert.deepEqual(behaviorOutcomes(refresh({ personalityState: 'keep' })), ['not-provided']);
     assert.deepEqual(behaviorOutcomes(refresh({ behaviorProfileState: 'refine', behaviorProfile: HABITS })), ['non-lever-only']);
+});
+
+test('a lever stating a preference with "rather than" is not treated as evolution; change wording still is', () => {
+    const disposition = 'Disposition: reserved - practical and guarded';
+    const preference = 'Care/Warmth: practical - helps through actions rather than words';
+    const accepted = scan(landlady([disposition]), {
+        behaviorProfileState: 'refine',
+        behaviorProfile: [disposition, preference],
+        evidence: { behaviorProfile: ['she helps through actions rather than words'] },
+    });
+    assert.ok(accepted.state.npcs[0].behaviorProfile.includes(preference), JSON.stringify(accepted.state.npcs[0].behaviorProfile));
+    const changed = scan(landlady([disposition]), {
+        behaviorProfileState: 'refine',
+        behaviorProfile: [disposition, 'Care/Warmth: practical - no longer helps anyone'],
+        evidence: { behaviorProfile: ['she no longer helps anyone'] },
+    });
+    assert.deepEqual(changed.state.npcs[0].behaviorProfile, [disposition]);
+});
+
+test('stored entries with pre-category labels survive a scan that copies them back', () => {
+    const creative = [
+        'Primal & Protective: Lashes out instinctively against threats to Lucien.',
+        'Refined Emulation: Mirrors ladylike etiquette to project poise.',
+    ];
+    const disposition = 'Disposition: reserved - practical and guarded';
+    const result = scan(landlady([disposition, ...creative]), {
+        behaviorProfileState: 'refine',
+        behaviorProfile: [disposition, ...creative, 'Conflict/Assertiveness: low - avoids open confrontation, answers challenges with cold politeness'],
+        evidence: { behaviorProfile: ['avoids open confrontation, answering challenges with cold politeness'] },
+    });
+    const levers = result.state.npcs[0].behaviorProfile;
+    for (const entry of creative) assert.ok(levers.includes(entry), `${entry} kept: ${JSON.stringify(levers)}`);
+    assert.ok(levers.some(entry => /^Conflict\/Assertiveness:/.test(entry)));
+    const prompt = buildProfileRefreshPrompt({ transcript: '[m1] Malia pours tea.', userName: 'Ari', charName: 'Narrator', targetNpc: landlady([disposition, ...creative]) });
+    const hint = prompt.split('\n').find(line => line.startsWith('Stored behaviorProfile entries'));
+    assert.ok(hint && creative.every(entry => hint.includes(entry)), 'Refresh asks for pre-category labels to be restated');
 });

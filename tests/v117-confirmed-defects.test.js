@@ -274,7 +274,7 @@ test('v1.0.17 bounded agency negation is recognized without treating ordinary co
         behaviorProfileState: 'refine',
         behaviorProfile: [
             'Independence: High; keeps her own judgment and personal boundaries in difficult negotiations.',
-            'Conduct: Cooperates with lawful authorities when goals align.',
+            'Social Presentation: Cooperates with lawful authorities when goals align.',
         ],
     });
     assert.notDeepEqual(nuanced.behaviorProfile, npc.behaviorProfile);
@@ -285,13 +285,13 @@ test('v1.0.17 an already mixed contextual agency profile can refine without bein
     const npc = independentNpc('Contextually Mixed');
     npc.behaviorProfile = [
         'Independence: High; keeps her own judgment and personal boundaries.',
-        'Conduct: Follows instructions during emergency drills.',
+        'Social Presentation: Follows instructions during emergency drills.',
     ];
     const updated = profileState(npc, {
         behaviorProfileState: 'refine',
         behaviorProfile: [
             'Independence: High; keeps her own judgment and personal boundaries in difficult negotiations.',
-            'Conduct: Follows instructions during emergency drills and coordinates closely with the team.',
+            'Social Presentation: Follows instructions during emergency drills and coordinates closely with the team.',
         ],
     });
     assert.notDeepEqual(updated.behaviorProfile, npc.behaviorProfile);

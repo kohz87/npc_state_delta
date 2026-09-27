@@ -230,14 +230,14 @@ test('unsupported durable meaning cannot ride through refine while directly grou
 test('Behavioral Profile refinement is atomic and rejects unsupported new agency', () => {
     const npc = createNpcRecord('Mira');
     npc.behaviorProfile = [
-        'Study: Records careful botanical observations.',
-        'Hospitality: Serves warm tea to visitors.',
+        'Analytical Style: Records careful botanical observations.',
+        'Care/Warmth: Serves warm tea to visitors.',
     ];
     const unsupported = merge(npc, {
         behaviorProfileState: 'refine',
         behaviorProfile: [
             ...npc.behaviorProfile,
-            'Leadership: Commands a fleet of airships and negotiates intercontinental treaties.',
+            'Drive/Ambition: Commands a fleet of airships and negotiates intercontinental treaties.',
         ],
         evidence: { behaviorProfile: ['Mira serves warm tea to visitors.'] },
     }, 'Mira serves warm tea to visitors.');
@@ -248,11 +248,11 @@ test('Behavioral Profile refinement is atomic and rejects unsupported new agency
         behaviorProfileState: 'refine',
         behaviorProfile: [
             ...npc.behaviorProfile,
-            'Triage: Records symptoms before suggesting simple remedies.',
+            'Threat Sensitivity: cautious - Records symptoms before suggesting simple remedies.',
         ],
         evidence: { behaviorProfile: ['Triage: Records symptoms before suggesting simple remedies.'] },
     }, 'Mira records symptoms before suggesting simple remedies.');
-    assert.ok(grounded.state.npcs[0].behaviorProfile.some(item => /^Triage:/i.test(item)));
+    assert.ok(grounded.state.npcs[0].behaviorProfile.some(item => /^Threat Sensitivity:/i.test(item)));
 });
 
 test('accepted flat current appearance updates the selected canonical form and every projection', () => {
@@ -567,8 +567,8 @@ test('explicit scanner edges still correct mother/daughter direction', () => {
 test('collection reorder and partial refinement retain only evidence not represented by final canon', () => {
     const behavior = createNpcRecord('Mira');
     behavior.behaviorProfile = [
-        'Study: Records careful botanical observations.',
-        'Hospitality: Serves warm tea to visitors.',
+        'Analytical Style: Records careful botanical observations.',
+        'Care/Warmth: Serves warm tea to visitors.',
     ];
     const reordered = merge(behavior, {
         behaviorProfileState: 'refine',
@@ -614,7 +614,7 @@ test('collection reorder and partial refinement retain only evidence not represe
     const partial = merge(behavior, {
         behaviorProfileState: 'refine',
         behaviorProfile: [
-            'Study: Records careful botanical observations and dates each specimen.',
+            'Analytical Style: Records careful botanical observations and dates each specimen.',
             behavior.behaviorProfile[1],
         ],
         evidence: { behaviorProfile: [
@@ -628,7 +628,7 @@ test('collection reorder and partial refinement retain only evidence not represe
 });
 
 test('evidence coverage requires the claim body and polarity rather than a matching concept label', () => {
-    const currentBehavior = ['Study: Records careful botanical observations.'];
+    const currentBehavior = ['Analytical Style: Records careful botanical observations.'];
     assert.equal(durableProfileEvidenceAlreadyRepresented('behaviorProfile', currentBehavior, [
         '[m2] Study: Independently diagnoses complex illnesses and prescribes treatment.',
     ]), false);

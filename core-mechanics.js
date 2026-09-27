@@ -1711,6 +1711,13 @@ function containsEvolutionLanguage(value) {
     return /\b(no longer|formerly|used to|ceased|stopped being|replaced by|rather than|instead of|became|has become|have become|grown more|grown less|increasingly|decreasingly)\b/.test(text);
 }
 
+// Lever effects often state a preference ("helps through actions rather than words"), so for
+// Behavioral Levers only wording that describes a change over time counts as evolution language.
+function containsBehaviorEvolutionLanguage(value) {
+    const text = normalizeName(value);
+    return /\b(no longer|formerly|used to|ceased|stopped being|replaced by|became|has become|have become|grown more|grown less|increasingly|decreasingly)\b/.test(text);
+}
+
 function durableRefinementSupportText(context = '', evidenceItems = [], binding = null) {
     const rawContext = String(context || '').trim();
     const effectiveBinding = binding?.npc || (binding && typeof binding === 'object' && binding.name ? binding : null);
@@ -2002,6 +2009,29 @@ function behaviorProfileKey(value) {
     return normalizeName(match ? match[1] : text);
 }
 
+// One category map serves the lever check, refine matching, ordering and the identity/morality
+// safety gates. Labels may combine categories ("Care/Warmth"); each part is matched on its own.
+const BEHAVIOR_LEVER_CATEGORY_SYNONYMS = Object.freeze([
+    ['disposition', /^(?:disposition|temperament|kindness|empathy|morality|moral compass|social baseline|outlook)$/],
+    ['cruelty', /^(?:cruelty|mercy|harm|ruthlessness|brutality)$/],
+    ['independence', /^(?:independence|agency|autonomy|self reliance|boundaries|obedience|compliance|deference)$/],
+    ['care', /^(?:care|caring|care style|affection|warmth|warm|compassion|protectiveness|support style|nurturing|nurturing style)$/],
+    ['expressiveness', /^(?:expressiveness|expression|emotional display|emotional expression|emotionality)$/],
+    ['conflict', /^(?:conflict|conflict style|assertiveness|anger|temper|composure|restraint|confrontation|aggression|self control)$/],
+    ['threat', /^(?:threat|threat sensitivity|threat response|anxiety|risk sensitivity|risk tolerance|risk taking|uncertainty sensitivity|caution|wariness|vigilance|suspicion|trust)$/],
+    ['analytical', /^(?:analytical|analytical style|analysis|reasoning|reasoning style|decision style|decision making|thinking style|evidence style|problem solving|judgment|judgement|planning|curiosity)$/],
+    ['presentation', /^(?:social presentation|presentation|formality|etiquette|public bearing|social restraint|social style|sociability|demeanor|demeanour|manners)$/],
+    ['loyalty', /^(?:loyalty|allegiance|faithfulness|fidelity)$/],
+    ['drive', /^(?:drive|ambition|motivation|determination|perseverance)$/],
+    ['honesty', /^(?:honesty|candor|candour|truthfulness|sincerity|integrity|deception|deceit|secrecy)$/],
+]);
+
+function behaviorLeverLabel(value) {
+    const text = cleanText(value, DURABLE_PROFILE_LIMITS.behaviorProfile);
+    const colon = text.indexOf(':');
+    return colon > 0 && colon <= 40 ? text.slice(0, colon).trim() : '';
+}
+
 function behaviorProfileFamily(value) {
     const key = behaviorProfileKey(value);
     if (!key) return '';
@@ -2014,6 +2044,12 @@ function behaviorProfileFamily(value) {
     if (/^(?:anxiety|threat sensitivity|threat response|risk sensitivity|uncertainty sensitivity)$/.test(key)) return 'threat';
     if (/^(?:analytical style|analysis|reasoning|reasoning style|decision style|thinking style|evidence style|problem solving)$/.test(key)) return 'analytical';
     if (/^(?:social presentation|presentation|formality|etiquette|public bearing|social restraint)$/.test(key)) return 'presentation';
+    const label = behaviorLeverLabel(value);
+    if (!label) return '';
+    for (const part of label.split(/[/&,+]|\band\b/i).map(normalizeName).filter(Boolean)) {
+        const match = BEHAVIOR_LEVER_CATEGORY_SYNONYMS.find(([, pattern]) => pattern.test(part));
+        if (match) return match[0];
+    }
     return '';
 }
 
@@ -2078,21 +2114,18 @@ function normalizeBehaviorProfile(value) {
     return out.slice(0, BEHAVIOR_PROFILE_LIMIT);
 }
 
-// Behavioral Levers describe how an NPC generally responds or decides ("Threat Sensitivity: high -
-// vets strangers before trusting them"). Concrete routines, duties, house rules and habits ("keeps a
-// quiet household", "sizes up boarders at the door") are evidence for a lever, or belong in
-// Mannerisms/Role/Background, so a scan cannot add them as levers. Manual edits are not filtered.
+// Behavioral Levers describe how an NPC generally responds or decides, as "Category: level - effect"
+// with a recognised category ("Threat Sensitivity: high - vets strangers before trusting them").
+// Concrete routines, duties, house rules and habits ("keeps a quiet household", "Household: enforces
+// curfews") are evidence for a lever, or belong in Mannerisms/Role/Background, so a scan cannot add
+// them as levers. Manual edits are not filtered.
 const BEHAVIOR_LEVER_NON_LABELS = /^(?:habits?|routines?|duties|duty|rules?|house rules?|chores?|jobs?|work|schedule|practices?|customs?|actions?)$/i;
-const BEHAVIOR_TENDENCY_LANGUAGE = /\b(?:tends?|prefers?|avoids?|rarely|seldom|usually|typically|generally|habitually|readily|reluctant(?:ly)?|slow to|quick to|when(?:ever)?|if|unless|under (?:pressure|threat|stress)|values?|prioriti[sz]es?|(?:dis)?trusts?|responds?|reacts?|defers?|resists?|refuses?|insists?|seeks?|favou?rs?|leans?|inclined|(?:un)?willing|wary|cautious|guarded)\b/i;
 export function isBehaviorLever(value) {
     const text = cleanText(value, DURABLE_PROFILE_LIMITS.behaviorProfile);
-    if (!text) return false;
-    const colon = text.indexOf(':');
-    if (colon > 0 && colon <= 40) {
-        const label = text.slice(0, colon).trim();
-        if (/^[\p{L}][\p{L}\s/&'’-]*$/u.test(label) && !BEHAVIOR_LEVER_NON_LABELS.test(label)) return true;
-    }
-    return BEHAVIOR_TENDENCY_LANGUAGE.test(text);
+    const label = behaviorLeverLabel(text);
+    if (!label || BEHAVIOR_LEVER_NON_LABELS.test(label)) return false;
+    if (behaviorProfileBody(text).replace(/[^\p{L}]/gu, '').length < 3) return false;
+    return Boolean(behaviorProfileFamily(text));
 }
 
 function groundedBehaviorProfile(value, personality = '', context = '', evidenceItems = []) {
@@ -2123,8 +2156,11 @@ function behaviorProfilePriority(value) {
         threat: 6,
         analytical: 7,
         presentation: 8,
+        loyalty: 9,
+        drive: 10,
+        honesty: 11,
     };
-    return Object.prototype.hasOwnProperty.call(priority, family) ? priority[family] : 9;
+    return Object.prototype.hasOwnProperty.call(priority, family) ? priority[family] : 12;
 }
 
 function orderedBehaviorProfile(value) {
@@ -2200,7 +2236,7 @@ function behaviorDirectionConflict(existingMask, incomingMask) {
 }
 
 function behaviorProfileRefinementConflict(current, updates) {
-    if ((updates || []).some(entry => containsEvolutionLanguage(behaviorProfileBody(entry)))) return true;
+    if ((updates || []).some(entry => containsBehaviorEvolutionLanguage(behaviorProfileBody(entry)))) return true;
     const oldMorality = aggregateBehaviorDirections(current, moralityDirectionMask);
     const newMorality = aggregateBehaviorDirections(updates, moralityDirectionMask);
     if (behaviorDirectionConflict(oldMorality, newMorality)) return true;
@@ -2216,7 +2252,7 @@ function isSafeBehaviorProfileRefinement(existing, incoming) {
     const sameKey = behaviorProfileKey(oldText) === behaviorProfileKey(newText);
     const sameFamily = behaviorProfileFamily(oldText) && behaviorProfileFamily(oldText) === behaviorProfileFamily(newText);
     if (!sameKey && !sameFamily) return false;
-    if (containsEvolutionLanguage(behaviorProfileBody(newText))) return false;
+    if (containsBehaviorEvolutionLanguage(behaviorProfileBody(newText))) return false;
     if (behaviorProfileMoralityRelevant(oldText)) {
         const oldPolarity = moralityPolarity(oldText);
         const newPolarity = moralityPolarity(newText);
@@ -2227,21 +2263,24 @@ function isSafeBehaviorProfileRefinement(existing, incoming) {
         || durableSemanticSimilarity(behaviorProfileBody(oldText), behaviorProfileBody(newText)) >= 0.55;
 }
 
-function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evidenceItems = [], binding = null, personality = '' } = {}) {
+function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evidenceItems = [], binding = null, personality = '', rejected = [] } = {}) {
     const current = normalizeBehaviorProfile(existing);
     const updates = normalizeBehaviorProfile(incoming);
     if (!updates.length) return current;
     // Refine is a full current summary, but it is not an evolution channel. Evaluate
     // protected identity/morality direction across the whole proposal before category-by-
     // category replacement so relabeling cannot bypass the existing atomic safety gate.
-    if (behaviorProfileRefinementConflict(current, updates)) return current;
+    // Entries dropped at intake for not being levers still count here, so an unrecognised
+    // label cannot hide a reversal from the gate.
+    const rejectedEntries = cleanList(rejected, BEHAVIOR_PROFILE_LIMIT * 3, DURABLE_PROFILE_LIMITS.behaviorProfile);
+    if (behaviorProfileRefinementConflict(current, [...updates, ...rejectedEntries])) return current;
     // A lever that restates a stored non-lever entry adds no new meaning: that accepted entry
     // grounds it, even when the scene that established it is outside the current window.
     evidenceItems = [...(Array.isArray(evidenceItems) ? evidenceItems : []), ...current.filter(entry => !isBehaviorLever(entry))];
     const identity = cleanText(personality, DURABLE_PROFILE_LIMITS.personality);
     const scopedSupport = String(context || '').trim() ? durableRefinementSupportText(context, [], binding) : '';
     const next = [];
-    let droppedNew = false;
+    let droppedNew = rejectedEntries.length > 0;
     for (const entry of updates) {
         const key = behaviorProfileKey(entry);
         const family = behaviorProfileFamily(entry);
@@ -2281,12 +2320,15 @@ function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evi
     }
     // Omitted old rules are retired because the scanner contract says refine is a FULL field.
     // Longitudinal support remains in profileEvidence rather than being copied back into the list.
-    // When an unsupported addition was dropped the proposal is partial, so established levers it
-    // omitted stay; stored non-lever entries still retire.
+    // When an unsupported addition (or an intake-rejected entry) was dropped the proposal is
+    // partial, so established levers it omitted stay; stored non-lever entries still retire.
     if (droppedNew) {
         if (!next.length) return current;
+        // A stored entry the provider copied back is kept even when intake rejected the copy
+        // (for example a pre-category label); only deliberate omission retires it.
+        const copiedBack = new Set(rejectedEntries.map(normalizeName));
         for (const old of current) {
-            if (!isBehaviorLever(old) || next.length >= BEHAVIOR_PROFILE_LIMIT) continue;
+            if ((!isBehaviorLever(old) && !copiedBack.has(normalizeName(old))) || next.length >= BEHAVIOR_PROFILE_LIMIT) continue;
             const oldKey = behaviorProfileKey(old);
             const oldFamily = behaviorProfileFamily(old);
             if (next.some(entry => behaviorProfileKey(entry) === oldKey || (oldFamily && behaviorProfileFamily(entry) === oldFamily))) continue;
@@ -2296,11 +2338,12 @@ function mergeBehaviorProfileRefinements(existing, incoming, { context = '', evi
     return normalizeBehaviorProfile(next);
 }
 
-function recoverBehaviorProfileKeepAdditions(existing, incoming, { evidenceItems = [] } = {}) {
+function recoverBehaviorProfileKeepAdditions(existing, incoming, { evidenceItems = [], rejected = [] } = {}) {
     const current = normalizeBehaviorProfile(existing);
     const updates = normalizeBehaviorProfile(incoming);
     if (!current.length || updates.length <= current.length) return current;
-    if (behaviorProfileRefinementConflict(current, updates)) return current;
+    const rejectedEntries = cleanList(rejected, BEHAVIOR_PROFILE_LIMIT * 3, DURABLE_PROFILE_LIMITS.behaviorProfile);
+    if (behaviorProfileRefinementConflict(current, [...updates, ...rejectedEntries])) return current;
     if (!durableProfileCollectionCandidateGrounded('behaviorProfile', current, updates, evidenceItems)) return current;
 
     // A missing/keep lifecycle marker may recover only an additive refinement. The provider must
@@ -4050,6 +4093,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
             merged.behaviorProfile = mergeBehaviorProfileRefinements(existing.behaviorProfile, incoming.behaviorProfile, {
                 context: lifecycleOptions.developmentContext,
                 personality: merged.personality || existing.personality,
+                rejected: incoming.nonLeverBehavior || [],
                 evidenceItems: incoming.profileEvidence?.behaviorProfile || [],
             });
         } else {
@@ -4840,6 +4884,7 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
             const proposedRefined = mergeBehaviorProfileRefinements(current, incoming.behaviorProfile, {
                 context: options.developmentContext,
                 personality: npc.personality,
+                rejected: incoming.nonLeverBehavior || [],
                 evidenceItems: [...(beforeEvidence.behaviorProfile || []), ...(incomingEvidence.behaviorProfile || [])],
                 binding: {
                     npc,
@@ -4857,6 +4902,7 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
             const behaviorEvidence = [...(beforeEvidence.behaviorProfile || []), ...(incomingEvidence.behaviorProfile || [])];
             const recovered = recoverBehaviorProfileKeepAdditions(current, incoming.behaviorProfile, {
                 context: options.developmentContext,
+                rejected: incoming.nonLeverBehavior || [],
                 evidenceItems: behaviorEvidence,
                 binding: {
                     npc,
@@ -5741,7 +5787,7 @@ Rules:
 3. If the requested NPC is found, RETURN EXACTLY ONE NPC object. Do not return other NPCs. If the target genuinely does not occur and cannot be linked to a role/alias in this history, return {"npcs":[]}.
 4. Preserve literal Species / Race. GENDER=male|female only if explicitly/unambiguously established; never infer. AGE is chronology only. APPARENT AGE is visual presentation and should be a compact approximate number like ~6 or ~24 when inferable; never prose such as "around six/twenties". Never infer fantasy lifespan from species.
 5. Appearance=current grounded visible presentation: direct hair/body traits, current outfit/gear, relevant visible condition. A newer explicit correction/reveal beats an obscured prior impression. Apparent Age owns visual age; invent nothing.
-6. Recover CURRENT COMPACT SUMMARIES, not notes. Important Memories are capped at 5. Key relationships=max5, ONE unambiguous entry/counterpart; never use dangling "(deceased)" that could modify the wrong person. Mannerisms=max4 DISTINCT recurring patterns, not separate animations of the same habit. behaviorProfile=max6 "Label: level - effect" levers: how they generally respond/decide (supported labels only, e.g. Disposition, Care/Warmth, Expressiveness, Independence/Agency, Conflict/Assertiveness, Threat Sensitivity, Analytical Style, Social Presentation, Cruelty/Mercy). Actions are evidence; routines, duties, house rules and habits are not levers (habits=>mannerisms). Route player-specific patterns to relationshipSummary, one-off states to live fields, and consequential incidents to Memories. Memories=max5 distinct events; if crowded return memoryRetention=top5 most consequential/durable.
+6. Recover CURRENT COMPACT SUMMARIES, not notes. Important Memories are capped at 5. Key relationships=max5, ONE unambiguous entry/counterpart; never use dangling "(deceased)" that could modify the wrong person. Mannerisms=max4 DISTINCT recurring patterns, not separate animations of the same habit. behaviorProfile=max6 "Label: level - effect" levers: how they generally respond/decide (labels only: Disposition, Care/Warmth, Expressiveness, Independence/Agency, Conflict/Assertiveness, Threat Sensitivity, Analytical Style, Social Presentation, Cruelty/Mercy, Loyalty, Drive/Ambition, Honesty/Candor). Actions are evidence; routines, duties, house rules and habits are not levers (habits=>mannerisms). Route player-specific patterns to relationshipSummary, one-off states to live fields, and consequential incidents to Memories. Memories=max5 distinct events; if crowded return memoryRetention=top5 most consequential/durable.
 7. NPC Inner Chatter may support durable personality, goals, attitude, or relationship-summary evidence, but do not store the moment-to-moment internal monologue itself.
 8. PRESENT is current-scene state, not historical presence. Set present=true only if the requested NPC physically appears or actively participates in the MOST RECENT ASSISTANT STORY MESSAGE contained in this history. An older appearance does not count. A World State mention alone does not establish presence. Set worldActive=true only for explicit current off-screen activity in the latest World State; present and worldActive are mutually exclusive.
 9. This is historical backfill. relationshipImpact MUST be "none" and every relationshipDelta value MUST be 0. Do not numerically replay old relationship events.
@@ -5787,7 +5833,7 @@ Existing NPC State Delta record: ${JSON.stringify(existing)}
 
 Mapping/rules:
 1. Inner Circle / family / close allies / rivals / mentors / partners => keyRelationships, max ${KEY_RELATIONSHIP_LIMIT}, one concise unambiguous "Name — relation | durable dynamic" entry each. Never dangling "(deceased)"; state who is late/surviving. Never put ${userName} there; player stance belongs relationshipSummary.
-2. Voice=>speech; Personality=>personality; Appearance=>appearance; Background=>background; Role=>role; explicit chronological Age=>age. Explicit/unambiguous Gender/Sex=>gender=male|female; never infer. Apparent Age should be compact ~N when inferable; Appearance must not duplicate an explicit age. behaviorProfile=max6 "Label: level - effect" levers: how they generally respond/decide (supported labels only, e.g. Disposition, Care/Warmth, Expressiveness, Independence/Agency, Conflict/Assertiveness, Threat Sensitivity, Analytical Style, Social Presentation, Cruelty/Mercy). Actions are evidence; routines, duties, house rules and habits are not levers (habits=>mannerisms). Player-specific/one-scene behavior does not belong there. Do not infer species/age from stereotypes.
+2. Voice=>speech; Personality=>personality; Appearance=>appearance; Background=>background; Role=>role; explicit chronological Age=>age. Explicit/unambiguous Gender/Sex=>gender=male|female; never infer. Apparent Age should be compact ~N when inferable; Appearance must not duplicate an explicit age. behaviorProfile=max6 "Label: level - effect" levers: how they generally respond/decide (labels only: Disposition, Care/Warmth, Expressiveness, Independence/Agency, Conflict/Assertiveness, Threat Sensitivity, Analytical Style, Social Presentation, Cruelty/Mercy, Loyalty, Drive/Ambition, Honesty/Candor). Actions are evidence; routines, duties, house rules and habits are not levers (habits=>mannerisms). Player-specific/one-scene behavior does not belong there. Do not infer species/age from stereotypes.
 3. Read on the PC/current stance toward ${userName} may initialize relationshipSummary, but relationshipImpact="none" and every relationshipDelta key MUST be 0. Never invent numeric Trust/Affection/Desire/Tension from prose.
 4. Agenda may initialize goal only when the dossier presents it as the NPC's current ongoing agenda. "Where to Find Them", home, workplace, headquarters, or regular haunt => homeBase, NOT current Location. Changing an established homeBase requires homeBaseState:"update"+homeBaseReason. Do not map home/work/hangout into live location unless the dossier explicitly says they are there now. Do not invent Mood/Status/current presence.
 5. A durable Tell may become a mannerism. One-scene/emotional/stress/player-specific behavior does not. Merge multiple animations of one recurring pattern into one mannerism. Important memories only from explicit consequential past events, max3 new.
@@ -5856,7 +5902,7 @@ Rules:
 2. This is reconciliation, NOT event replay. currentRelationship is READ-ONLY: relationshipImpact MUST be "none" and all four relationshipDelta values MUST be 0. Never re-award Trust/Affection/Desire/Tension from old scenes.
 3. Presence/recency are owned by the live scanner. present/worldActive in your JSON are ignored. Do not infer current physical presence merely because the NPC appeared earlier in this history window.
 4. LOCKS: never rewrite fields listed in lockedProfileFields. Omit them from profileUpdates and ordinary dossier changes.
-5. DURABLE PROFILE: CURRENT COMPACT SUMMARY only. Personality/Speech mention each durable concept once. Appearance=current grounded visible presentation: direct hair/body traits, current outfit/gear, relevant visible condition; no explicit age. Newer explicit correction/reveal=>refine corrected FULL Appearance; changed presentation/clothes=>change+reason FULL Appearance. behaviorProfile=max6 "Label: level - effect" levers: how they generally respond/decide (supported labels only, e.g. Disposition, Care/Warmth, Expressiveness, Independence/Agency, Conflict/Assertiveness, Threat Sensitivity, Analytical Style, Social Presentation, Cruelty/Mercy). Actions are evidence; routines, duties, house rules and habits are not levers (habits=>mannerisms). Player-specific patterns belong relationshipSummary. refine returns FULL field; lasting personality/speech/mannerism/behaviorProfile change uses evolve+reason. Mannerisms=max4 DISTINCT recurring patterns, not separate animations. One transient beat is not durable.
+5. DURABLE PROFILE: CURRENT COMPACT SUMMARY only. Personality/Speech mention each durable concept once. Appearance=current grounded visible presentation: direct hair/body traits, current outfit/gear, relevant visible condition; no explicit age. Newer explicit correction/reveal=>refine corrected FULL Appearance; changed presentation/clothes=>change+reason FULL Appearance. behaviorProfile=max6 "Label: level - effect" levers: how they generally respond/decide (labels only: Disposition, Care/Warmth, Expressiveness, Independence/Agency, Conflict/Assertiveness, Threat Sensitivity, Analytical Style, Social Presentation, Cruelty/Mercy, Loyalty, Drive/Ambition, Honesty/Candor). Actions are evidence; routines, duties, house rules and habits are not levers (habits=>mannerisms). Player-specific patterns belong relationshipSummary. refine returns FULL field; lasting personality/speech/mannerism/behaviorProfile change uses evolve+reason. Mannerisms=max4 DISTINCT recurring patterns, not separate animations. One transient beat is not durable.
 6. IDENTITY FIREWALL: temporary mood, fear, stress, intoxication, intimacy, or behavior unique to ${userName} must not become global Personality, Speech, Mannerisms, or behaviorProfile. A generally kind NPC remains generally kind toward other people unless narration establishes a broader change. Necessary force is not cruelty by itself.
 7. DEVELOPMENT SPEED: assistant/main-speaker=gradual; Player explicit/batch only for declarative canon, not quotes/questions/speculation/requests/conditionals/wishes. [mN]=source. One scene may support multiple fields; emit each grounded item independently (speech+behaviorProfile allowed). Gradual Personality/Speech: up to 4 tagged observations; reuse a concept label when obvious, wording may vary. Speech evidence/candidate=voice behavior, not personality. If evidence makes Personality/Speech stale, return changed FULL CURRENT candidate; never claim refine/evolve with a copied field. Reinforcement=>omit/keep. Time-compressed development MUST include developmentReason, even when state is refine. Mere passage of time does nothing.
 8. ROLE/SPECIES/GENDER/BACKGROUND may update when established/clarified. Gender=male|female only if explicit/unambiguous; never infer; established change=>genderState:"correct"+genderReason. HOME BASE / USUAL LOCATION is durable home, workplace, headquarters, or regular haunt, never the temporary current scene location; establish only from grounded ongoing-life evidence, and changing an established value requires homeBaseState:"update"+homeBaseReason. Species is literal only. Background is durable history, not current mood/status.
@@ -6016,18 +6062,18 @@ Admission: ${admissionPolicy}${fullScanRule}
 Rules:
 1. Exclude player (${userName}), main speaker (${charName}), extras.
 2. EXISTING: match id/name/alias/role. Return compact JSON deltas: changed fields only; omitted persist. Identity promotion: role/interim dossier + grounded proper name => MUST reuse id; old label in aliases; identityKind:"proper_name"; never duplicate/downgrade.
-3. NEW/CANDIDATE: include name,identityKind,dossierSignal,dossierReason,sameIndividual,directInteraction,present,worldActive. Dossier-worthy NEW: populate every grounded field now; homeBase means durable usual home/workplace/headquarters/regular haunt, never a temporary scene location; directInteraction affects admission/relationship only, NEVER enrichment. Incidental role candidates may stay lightweight.
+3. NEW/CANDIDATE: include name,identityKind,dossierSignal,dossierReason,sameIndividual,directInteraction,present,worldActive. Dossier-worthy NEW: populate every grounded field now; directInteraction affects admission/relationship only, NEVER enrichment. Incidental role candidates may stay lightweight.
 4. Candidates are not dossiers. sameIndividual=true only when proven. Use narration, World State, durable Inner Chatter; proper names there MUST be returned even when prose uses role.
 5. Return ONLY observed/new/meaningfully changed NPCs; new grounded durable profile facts count as changes. present=true only latest-scene physical presence; World State/Inner Chatter alone never presence. worldActive=true only explicit current off-screen activity. Inner Chatter supports durable facts, not transient monologue.
 6. Goal/status/mood/location are LIVE: output goal,goalState,status,statusState,mood,moodState,location,locationState as needed; actively reassess each returned EXISTING NPC every scan. Unchanged -> omit; changed -> replace; ended mood/goal/status -> matching *State:"clear". Location=current/last reliable; locationState:"clear" only when old place explicitly obsolete and replacement unknown. Off-screen/no evidence alone never clears it. Never use "Unknown".
-7. DURABLE PROFILE CHANNEL: ALWAYS emit profileUpdates for grounded durable facts; npc delta optional. One scene may support multiple fields; emit each grounded (speech+behaviorProfile allowed). Appearance=CURRENT VISIBLE PRESENTATION: hair/body, outfit/gear, condition. EXISTING grounded visual=>MUST emit appearance+evidence.appearance in profileUpdates, even with other fields. Correction/reveal=>appearanceState:"refine"+FULL Appearance; clothes/form/presentation change=>appearanceState:"change"+reason+FULL Appearance. matching *State:"refine"=>FULL; personality/speech/mannerism "evolve"+reason. behaviorProfile FULL max6 "Label: level - effect" levers, not routines/duties/habits (habits=>mannerisms). Mannerisms FULL max4. Locks never rewrite.
+7. DURABLE PROFILE CHANNEL: ALWAYS emit profileUpdates for grounded durable facts; npc delta optional. One scene may support multiple fields; emit each grounded (speech+behaviorProfile allowed). Appearance=CURRENT VISIBLE PRESENTATION: hair/body, outfit/gear, condition. EXISTING grounded visual=>MUST emit appearance+evidence.appearance in profileUpdates, even with other fields. Correction/reveal=>appearanceState:"refine"+FULL Appearance; clothes/form/presentation change=>appearanceState:"change"+reason+FULL Appearance. matching *State:"refine"=>FULL; personality/speech/mannerism "evolve"+reason. behaviorProfile FULL max6 "Label: level - effect" levers; Label=Disposition|Care|Expression|Independence|Conflict|Threat|Analytical|Presentation|Mercy|Loyalty|Drive|Honesty; habits/routines=>mannerisms. Mannerisms FULL max4. Locks never rewrite.
 8. IDENTITY FIREWALL: mood/stress/intimacy/injury/relationship-specific behavior never becomes global Personality/Speech/Mannerisms/behaviorProfile. Grounded Appearance exempt; fleeting pose/expression is not identity. Kindness stays general unless broader change; necessary force != cruelty. Scores don't create tropes.
 9. DEVELOPMENT SPEED: developmentScale=gradual|explicit|batch. assistant/main-speaker=gradual; Player explicit/batch only for declarative canon, not quotes/questions/speculation/requests/conditionals/wishes. Speech evidence/candidate=observable voice, not personality. Time-compressed refine/evolve/change MUST include developmentReason + changed FULL candidate; unchanged/reinforcing=>omit/keep. Time skip alone invents nothing.
 10. SOCIAL: grounded non-player kin/friend/rival/mentor/partner => ALWAYS top-level keyRelationshipEdges {aId,a,bId,b,aToB,bToA,reason}; one clear counterpart entry. Use late/surviving, never dangling "(deceased)". Social change may evolve+reason; omission NEVER erases other bonds.
 11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue, compact ~N, never prose; species literal; no species-aging inference. gender=male|female only if explicit/unambiguous; never guess; change=>genderState:"correct"+reason. Birthday/exact elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual aging/growth/rejuvenation=>apparentAgeState:"evolve"+reason. Appearance must not repeat explicit age. Vague time skip insufficient.
 12. RELATIONSHIP -100..+100 DELTA-ONLY; currentRelationship read-only. Return relationshipDelta+relationshipEvidence (all 4 keys). NEW only; continuation/aftermath=>0. Raw max 1/2/5/10; axis max 1/2/3/4. EVERY non-zero axis needs grounded CURRENT-exchange evidence. Desire needs explicit attraction/intimacy narration; rescue/gratitude/affection/trust/proximity=>0. Secondary to identity. Trust!=obedience; Affection!=devotion; Tension!=jealousy.
 13. lifeState unknown|alive|deceased; deceased+explicit=death; explicit alive=reactivate.
-14. Memories: max3 NEW, cap5 stored; no duplicate/paraphrased memories. If crowded use memoryRetention=top5 consequential/durable; recency=tiebreak only. HomeBase is durable keep-by-default; changing an established value requires homeBaseState:"update"+homeBaseReason. CAPS homeBase300/appearance500/personality280/speech240/behaviorProfile 6x180/background320/relationshipSummary280/mannerism140/keyRelationship-memory180. COMPACT; never invent.
+14. Memories: max3 NEW, cap5 stored; no duplicate/paraphrased memories. If crowded use memoryRetention=top5 consequential/durable; recency=tiebreak only. homeBase=durable home/workplace/HQ/haunt, never current scene location; keep-by-default; change needs homeBaseState:"update"+homeBaseReason. CAPS homeBase300/appearance500/personality280/speech240/behaviorProfile180/background320/relationshipSummary280/mannerism140/keyRelationship-memory180. COMPACT; never invent.
 15. JSON only: {"npcs":[...],"profileUpdates":[...],"keyRelationshipEdges":[...]}. profileUpdates example: {"id":"npc_myla","evidence":{"appearance":["bronze hair"],"speech":["formal"]},"appearanceState":"refine","appearance":"Bronze hair; wool smock.","speechState":"refine","speech":"Soft, formal."}. Existing relationship delta example: {"id":"npc_myla","relationshipDelta":{"trust":-2,"affection":0,"desire":0,"tension":2},"relationshipEvidence":{"trust":"lie","affection":"","desire":"","tension":"conflict"}}.
 
 Relationship rubric: ${relationshipRubric || '(none)'}
