@@ -1,54 +1,199 @@
 # NPC State Delta v1.0.67
 
-Delta is a standalone SillyTavern NPC continuity extension: a completed story exchange is scanned, grounded dossier changes are persisted with chat/branch ownership, and relevant accepted characterization reaches the next roleplay request. It is built forward from the pinned source recorded in `docs/seed-provenance.*`, not from a replacement Beta/Alpha engine.
+A SillyTavern extension that keeps a living dossier for every NPC in your roleplay: who they are, how they look, how they talk and behave, what they remember, and how they feel about you. After each reply it scans the story, updates the dossiers carefully, and feeds the present NPCs back to the roleplay model so they stay in character.
 
-Stages 1-9 are implemented. Delta 1.0.67 lets automatic scans swing a Behavioral Lever when the behaviour is seen in a second scene (or at once for an explicit event or time skip), instead of only through Refresh. Delta 1.0.66 requires Behavioral Levers to use one of twelve recognised categories (adding Loyalty, Drive/Ambition and Honesty/Candor), keeps unrecognised labels out of the lever list without letting them bypass the safety checks, and no longer treats a "rather than" preference as an attempted personality change. Delta 1.0.65 lets scans and Refresh add Behavioral Levers to an NPC that already has some (each new lever category is grounded on its own, as when seeding) and makes Refresh ask for a full lever list when stored entries are not levers. Delta 1.0.64 lets a Behavioral Profile refine replace stored habit entries with new levers: grounding checks the claim after the lever label instead of requiring the label words in the story. Delta 1.0.63 keeps Behavioral Levers to how an NPC generally responds or decides: scanned routines and habits are routed to Mannerisms evidence instead, and the scanner prompts share one shorter lever definition with duplicated Stage 4 text removed. Delta 1.0.62 makes automatic scans capture outfit changes narrated in the sentence after the NPC is named, instead of waiting for a targeted Refresh. Delta 1.0.61 keeps physical appearance (hair, eyes, build, scars, anatomy) through scanned outfit changes, restores the Appearance controls in Edit dossier, and splits appearance into enduring Physical features and a Current outfit & presentation. Delta 1.0.60 makes tapping an NPC in the in-chat Present NPCs block open the launcher dossier on that NPC (the separate quick viewer is retired) and adds a Present NPCs in chat setting: Full cards, Compact strip or Off. Delta 1.0.59 fixes settings-panel buttons that SillyTavern's `min-content` button width squeezed to one word per line. Delta 1.0.58 consolidates the Extensions-tab settings panel into an always-visible quick bar (Enable, Auto scan, Open dossiers, Scan dossier now, Full scan current cast, Add NPC) plus six task groups built once by a single owner. Delta 1.0.57 reworks the dossier around the portrait: a Player relationship card leads with the last relationship change and its reason, fields changed by the latest update carry turn markers, portraits are flagged when the appearance has moved on, each named appearance form can hold its own portrait, and the library shows the living cast first with the dead as compact tiles. Delta 1.0.56 keeps enduring physical appearance traits (hair, eyes, build, scars, anatomy) through outfit/presentation updates unless the update itself re-describes a trait, captures narrated birthdays returned in the scanner's `profileUpdates` channel, and shows a bounded excerpt of a provider's text reply when a scan returns no JSON. Delta 1.0.55 is an audit/fix release for the 1.0.54 server-authority model: a session that hydrated before another session created a chat's sidecar now probes the deterministic sidecar path and adopts it instead of overwriting it, a lost upload acknowledgement is recognized as this session's own durable revision rather than a false cross-session conflict, and the dossier editor's own Appearance/Life-state commits no longer block its main Save. Delta 1.0.54 makes the SillyTavern server-side sidecar the explicit durable authority across desktop, mobile, tabs and browser sessions that use the same backend. Hydrated browser state is revision-and-writer-aware rather than assumed fresh: chat load/change, app resume, dossier-open and mutation/scan boundaries verify the server token, clean stale caches rehydrate immediately, dirty or same-revision writer conflicts preserve a recovery snapshot and fail closed, and provider/portrait completions are rejected if their durable base moved. Delta 1.0.53's migration, alias-dedupe, native-import and diagnostic hardening remains intact. See [changes](CHANGELOG.md), [the 1.0.28 review](docs/v1.0.28-review.md), [the 1.0.27 prefix-cache review](docs/v1.0.27-review.md), [birthday continuity](docs/birthday-continuity.md) and [historical Stage 9 evidence](docs/stage9-review.md).
+**Current release:** 1.0.67 · [Changelog](CHANGELOG.md) · [Development guide](DEVELOPMENT.md)
 
-## Features and controls
+---
 
-**Dossiers.** The floating launcher opens a searchable portrait-led cast library. Edit dossier identity, including Species / Race and canonical Gender (Male/Female; blank means unknown), durable Home Base / Usual Location, personality, Behavioral Levers, voice, goals, Important Memories, Important Bonds and Player Dynamic through the existing editor. The identity line orders Species · Gender · Role before chronological/apparent age and cast search includes gender. Home Base is ongoing-life geography and remains separate from live Location. Manual Important Bond edits are authoritative: rewriting a counterpart bond replaces stale hidden graph prose, while deleting it removes the shared graph edge and its mirrored structured bond so reconciliation cannot immediately resurrect it. Structured bonds use `Name — relation | dynamic`; malformed legacy entries with extra `|`, repeated spaced-slash fragments, or repeated relation labels are compacted idempotently back to that canonical shape. Canonical bond storage is boundary-aware: whole distinct dynamic fragments are retained while they fit, an over-budget trailing fragment is dropped intact, and a single oversized fragment is shortened only at a sentence/clause/word boundary instead of being sliced mid-word. The editor also normalizes the common `Name — relation; dynamic` form when the relation is recognized. Automatically managed bonds reject sentence-like orphan prose, normalize inverse owner/counterpart relation collisions such as `Daughter / Mother`, and collapse near-duplicate dynamics while preserving distinct facts; manual locks remain authoritative. Manual Add NPC, archive, removal and correction remain explicit controls. Story-text OOC commands do not execute.
+## Contents
 
-**Durable profile development.** Personality and Speech remain keep-by-default and one transient scene cannot rewrite established characterization. Delta keeps bounded hidden ledgers of up to four pending concepts per field, with recent turn/source-message provenance. Concept-level readiness remains the strongest gradual path. Delta 1.0.23 also permits a field-level aggregate fallback when at least three independent observations span the existing provenance threshold and collectively ground the changed portions of the proposed full Personality/Speech candidate. Differently named concepts remain separate records rather than being fuzzily merged, duplicate/replayed sources do not advance readiness, and unrelated observations cannot cross-authorize a candidate. Targeted Refresh still validates raw `[mN]` source tags against its supplied window. Time-compressed development now uses a bounded episode around a real elapsed-time anchor rather than an anchor plus one sentence: the episode is capped, stops at a later distinct elapsed episode or explicit present-scene transition, and each NPC must own the relevant development through name/alias/evidence binding with only conservative pronoun continuation. Shared chronology may therefore support several NPCs in one montage without letting one NPC's evidence authorize another. A provider `gradual` result may use deterministic inferred-batch semantics only when the episode, NPC ownership, reason and changed candidate are all grounded. Delta 1.0.24 can recover a missing time-compressed reason from the field's own grounded evidence, and Mannerisms/Behavioral Profile require the newly proposed entry itself to be evidence-grounded before that recovery can authorize it. Delta 1.0.25 separates candidate equality from evidence coverage: an unchanged Personality/Speech candidate resolves only when the bounded evidence claims are actually represented by the accepted current summary; otherwise its evidence/ledger remains pending as `waiting-for-revised-candidate`. Unchanged Mannerism/Behavioral Profile lists likewise retain novel evidence. Genuinely redundant evidence may still resolve without rewriting the field. Delta 1.0.26 classifies an unchanged provider-declared batch candidate before explicit/batch authorization, so a long-montage grounding miss cannot hide the real copied-candidate state or suppress its evidence-resolution flags. Targeted Refresh may also bind a tagged elapsed-time episode at message level from the nearest prior `[mN]` time anchor through the target's cited evidence messages; each claim must ground in its own cited message, while ordinary multi-NPC scans retain the stricter generic episode cap. This rescue applies consistently to Personality, Speech, Mannerisms and Behavioral Profile through their existing field safety; Appearance, relationships and current-state fields keep their separate mechanics. Delta 1.0.35 additionally recovers a provider-missed Behavioral Profile `refine` only when the returned `keep` candidate preserves every established rule verbatim and adds independently grounded, non-conflicting target-general rules; omission never gains deletion authority. Scanner and Refresh prompts also permit the same scene to emit evidence into multiple durable fields when each claim is independently grounded. Manual locks, baseline resets, cross-chat chronology clearing and replay protection remain authoritative. No extra model request or background worker is introduced.
+- [What it does](#what-it-does)
+- [Requirements](#requirements)
+- [Install and update](#install-and-update)
+- [Getting started](#getting-started)
+- [Settings](#settings)
+- [How dossiers work](#how-dossiers-work)
+- [Swipes, edits and rollback](#swipes-edits-and-rollback)
+- [Data, backups and multiple devices](#data-backups-and-multiple-devices)
+- [Troubleshooting](#troubleshooting)
+- [For developers](#for-developers)
+- [License](#license)
 
-**Deep rollback.** Branch checkpoints remain the byte-bounded safety net for explicit swipe siblings and recovery, while the reversible journal owns chronological rollback. Delta 1.0.12 permits up to 8 MB of retained full checkpoints with a 2 MB ceiling per snapshot, and existing sidecars receive a one-time proof-gated compaction that keeps the active lineage and SillyTavern-retained swipes while discarding unreachable legacy branch residue. Delete/regenerate and edit are linear replacement operations. Delta 1.0.13 makes their destructive recovery exact-boundary only: the requested surviving parent may be reconstructed from the rollback journal or restored from an exact checkpoint, but an older checkpoint can never stand in for a missing parent. Near-tail replacements can therefore recover precisely after full-checkpoint pruning; a deep edit with multiple retained assistant descendants instead fails closed and preserves the current canonical dossiers because the routine scanner cannot deterministically replay an entire retained suffix. Only explicit SillyTavern swipe events retain sibling state, and only an exact known sibling may skip rebuilding; an unseen swipe may use its exact parent/root anchor and then rescan. Destructive lineage v5 uses narrative role/content, so mutable `send_date`, generation ids and swipe indexes cannot manufacture rollback. Recovery distinguishes same lineage, harmless forward extension, strict tail truncation and true replacement divergence; a sidecar that simply trails the live chat cannot restore an older dossier. The journal preserves a contiguous **256 raw SillyTavern message** horizon from its trustworthy baseline, including unchanged user/system boundaries, and coalesces repeated writes owned by the same message. Tail deletion therefore restores exact state even when the full snapshot at the surviving message was already pruned. NPCs introduced only inside deleted history are removed together with their owned social/key-relationship references and pending work; surviving NPCs recover earlier memories, appearance/lifecycle, relationship, Speech and evidence state. Social-graph undo stores only changed edges/slots, rollback-reachable portrait assets remain retained, and histories older than the trustworthy journal floor are never falsely labelled exact. Existing histories still cannot recreate history that was already discarded before a journal baseline existed.
+---
 
-**Appearance forms.** The dossier presents shared appearance, named forms, the selected Current Form, and an unclassified current presentation when needed. Historical/scanner-compatible flat `appearance` remains non-editable, but when no canonical form/unclassified presentation exists the dossier renders that resolved current-visible projection as a read-only Current presentation fallback so captured visual detail is not hidden. It remains a compatibility input/projection for scanner/portrait/injection interoperability, not a second editable authority. In Edit, Appearance forms exposes shared appearance, the selected form, named `Form name | Description` entries and an unclassified current presentation. Apply appearance forms saves that section independently of unrelated editor drafts. Accepted `refine` output is a full current summary for the exact appearance slot: omitted old clothing or visual clauses retire instead of being appended back. Named forms remain separate, so updating Human Form does not overwrite Dragon/Thunderbird/etc. anatomy. The shared resolver is also used by portrait prompts and roleplay injection; selecting one form does not overwrite another form's anatomy or canonical colors. Scanner form handling recognizes grounded anatomical transitions such as horns, wings, tails, plumage or ears visibly dissolving, retracting, appearing or otherwise changing even when narration never uses the words `form` or `transform`. Direct per-NPC Refresh uses the same form/current-presentation contract and receives the selected NPC's established form context, so an unnamed new presentation can become current without erasing stored alternate anatomy.
+## What it does
 
-**Calendar & birthdays.** Dedicated settings accept ordered `Month name:days` lines and an optional era. No current year is required for stable deterministic month/day birthdays. A manual year/month/day is an optional all-or-none fallback. Recognized full dates in the owned assistant World State can supply chronology during scanning. Exact actual age may anchor a derived birth year; a compatible full birth date supports local chronological aging. Delta 1.0.22 closes the exact-birthday edge: an existing yearless month/day birthday can advance once when the grounded date matches and the owned story explicitly identifies the occasion as a birthday or nameday, then the derived year makes repeated scans on that day idempotent. When deterministic chronology actually advances, an existing compact numeric apparent-age estimate such as `~12` follows the same integer delta to preserve its established offset, unless Apparent age is manually locked or the provider explicitly evolves it. Apparent age, species and lifespan are never used to derive chronology. Generated dates remain distinguishable from established dates. Edit Dossier exposes Birthday beside Chronological age so a generated or story-established birthday can be corrected manually without a model call. See [birthday continuity](docs/birthday-continuity.md) for supported formats and limits.
+- **Dossiers for every NPC.** Identity, species, gender, age, home base, appearance, personality, speech, mannerisms, Behavioral Levers, background, goals, important memories and bonds with other NPCs.
+- **Automatic scanning.** After each story exchange, a scanner request reads the latest scene and proposes changes. Only changes the story supports are accepted.
+- **Stays in character.** Present NPCs are injected into the next roleplay request, so the model sees their personality, voice and behaviour, not just their name.
+- **Relationships.** Trust, Affection, Desire and Tension toward the player move in small, capped steps with a reason recorded for each change.
+- **Appearance that keeps up.** Outfits change without erasing hair, eyes or scars. Shapeshifters can have several named forms.
+- **Portraits.** Upload one, or generate one through SillyTavern Image Generation, with prompts built from the dossier.
+- **Calendar and birthdays.** Custom fantasy calendars, and birthdays that age NPCs correctly.
+- **Swipe and edit safe.** Deleting, editing or swiping messages rolls the dossiers back to match.
+- **Backups and diagnostics.** Export and import dossiers and portraits, and see why each profile change was accepted or held.
 
-**Portraits.** Dossier More > Portrait provides device upload/replacement, removal, editable positive/negative prompts, copying, explicit prompt rebuilding, and an optional persisted per-NPC Portrait seed. When canonical gender is established it is placed immediately after species in the automatic subject identity, before apparent age, appearance, role, clothing, mood and style; unknown gender is omitted rather than guessed. A blank seed makes Delta choose a fresh safe-integer seed before each preview, pass that exact value to SillyTavern, show it as the Generation seed, and offer **Save as NPC seed** if the result is worth reproducing. A saved non-negative safe integer is reused as `/imagine seed=<n>` and improves repeatability when prompt, checkpoint, workflow, sampler, resolution and other image settings stay unchanged. Built-in themes remain available, while the named Custom Preset Library stores independent positive/negative style, composition, prompt format, mood, and location choices for up to 24 custom presets. The former single Custom slot migrates into `Custom 1`. Style text and per-NPC prompt overrides each have a 12,000-character safety budget; composition has 6,000 characters. The assembled prompt is not truncated again by Delta, so accepted tail content reaches copy and the native `/imagine` handoff intact. In Comma tags mode, explicit high-value appearance anchors are promoted into standalone tags, and prose fragments already covered by those anchors are omitted while still-unparsed fragments are retained; explicit multicolor hair stays combined where stated. Provider/backend limits remain controlled by SillyTavern Image Generation. The retained runtime host-image workflow uses SillyTavern Image Generation independently of the scanner and keeps generated results preview-only until explicit application. Neither an appearance change nor a generated preview silently replaces an uploaded image. Uploads are bounded and failures/cancellation preserve the previous portrait.
+## Requirements
 
-**Scanning and routes.** Settings > Scanning controls cadence, admission, full-window mode and the scanner connection profile. Empty profile retains the host default route; an explicit unavailable profile fails visibly rather than silently falling back. Ordinary roleplay and image generation retain their own routes. Direct Refresh remains one targeted NPC request over the configured recent-story window; that window now carries raw-message tags only for deterministic Personality/Speech development provenance. Maximum output tokens `0` preserves the built-in per-request allowances; an existing explicit override remains supported. No extra completeness/self-review calls, model worker or generation barrier is added.
+- SillyTavern **1.18.0** or later.
+- A model connection for scanning. It can be the same one you roleplay with, or a separate connection profile.
 
-**Relationships and lifecycle.** Accepted signed relationship formulas, fractional progress, directional gates, milestones, evidence rules and duplicate handling are preserved. Important Bonds / Key Relationships are compact non-player social continuity backed by the hidden social graph; manual rewrites replace the edited direction while preserving a compatible reverse side, and manual deletion removes the shared pair plus mirrored projection so the deleted bond stays deleted unless new later evidence establishes it again. Explicit confirmed death is terminal to automatic writers. A deliberate manual erroneous-death correction or owned rollback can correct invalid death state without fabricating narrative resurrection.
+## Install and update
 
-**Native data and diagnostics.** Data & maintenance offers the versioned Delta-only native bundle, portraits, opt-in portable portrait settings and source-history audit. Matching dossiers reconcile and unrelated target dossiers remain; skipped records are reported. Imported source history is not replayed across chats: the target retains its safe history baseline and unproven source-message ownership is cleared. Audit-only source history is secondary to the actual backup; if full audit metadata would exceed the native manifest or file budget, Delta stores a compact truncation summary, and if necessary omits the audit archive, rather than blocking export of canonical dossiers and portraits. Complete validation precedes mutation. Diagnostics are always collected as a separate bounded runtime telemetry ring and do not become canonical NPC/story state. In addition to dispatcher aggregates, pending writes and branch reconciliation records, recent operations retain compact per-NPC profile/birthday decision receipts: provider/effective development state, bounded evidence IDs/concepts/samples, episode/NPC binding, aggregate readiness, locks, candidate grounding and final outcome. Each dossier may Show/Hide its recent receipts; this is presentation-only and never controls recording, scanning, persistence, prompts or export. Data & Maintenance can export all retained receipts as a versioned compact JSON diagnostic bundle or clear the runtime diagnostic history. The allowlisted export does not retain whole story text, full prompts, credentials or provider payloads. Token values are labelled local estimates, not provider usage.
+1. In SillyTavern, open **Extensions → Install extension** and paste this repository's URL.
+   Or unpack `npc_state_delta-1.0.67.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
+2. Reload SillyTavern.
+3. **Before updating an existing install,** export a backup from **Data & maintenance → Backup / Export**.
 
-## Installation and updates
+## Getting started
 
-Use SillyTavern 1.18.0 or a compatible later host. Install this repository through the host extension installer, or unpack `npc_state_delta-1.0.67.zip` so one `npc_state_delta` folder contains `manifest.json` directly. Reload the host after updating. Keep a native Delta backup before changing an existing installation.
+1. Open **Extensions → NPC State Delta** and make sure **Enable NPC State Delta** and **Auto scan** are on.
+2. Play normally. After each reply the scanner picks up named NPCs and starts their dossiers.
+3. Click the floating launcher, or **Open dossiers**, to browse the cast.
+4. If someone is missing, use **Add NPC**. If a dossier looks stale, open it and use **Refresh**, which re-reads the recent story for that one NPC.
 
-The package is generated by the existing `npm run package` command; its SHA-256 sidecar is written beside it in `dist/`. It contains only the declared runtime JavaScript, stylesheet, manifest, runtime inventory, license and README. Tests, development scripts, Git history and verification artifacts are excluded. CI retains the same installable ZIP and a reproducible verification source bundle through the existing artifact workflow. There is no additional release/tag pipeline.
+> **Tip:** Automatic scans only read the latest exchange. **Refresh** reads a longer recent window, so it is the quickest way to fill in or fix one NPC.
 
-Do not import Alpha/Beta/other-generation databases. Required historical Delta storage readers remain active for owned recovery; they are not foreign-generation converters. Namespace isolation does not make simultaneous automatic writers from multiple NPC extensions an accepted configuration.
+## Settings
 
-## Multi-session authority
+The settings panel has a quick bar that is always visible, plus six groups.
 
-The SillyTavern server-side `/user/files/npc-state-delta-*.json` sidecar is the only canonical persistent NPC State authority. Browser caches, rendered projections, scanner working state, editor drafts, portrait working state and branch helpers are ephemeral. Sessions synchronize only when they use the same SillyTavern backend; separate backends remain independent. Delta does not make localStorage, IndexedDB, cloud synchronization, peer-to-peer synchronization or device-specific copies canonical.
+| Where | What you'll find |
+|---|---|
+| **Quick bar** | Enable, Auto scan, Open dossiers, Scan dossier now, Full scan current cast, Add NPC |
+| **Scanning** | Scanner connection profile, how often to scan, how much story to send, and how readily new NPCs get a dossier (Conservative, Balanced or Manual only) |
+| **Roster & continuity** | Present NPCs in chat (Full cards, Compact strip or Off), injection on/off and budget, maximum active NPCs, death and return handling, stale NPC cleanup |
+| **Calendar & birthdays** | Month names and lengths, optional era, optional campaign date |
+| **Portrait generation** | Style presets, positive and negative prompts, composition, prompt format |
+| **Scanner rules** | Advanced: relationship starting values and per-scan caps, memory criteria, behaviour rubric |
+| **Data & maintenance** | Backup / Export, Restore / Import, Diagnostics, and clearing this chat's dossiers |
 
-## Ownership and verification
+Leave the scanner connection profile empty to use SillyTavern's current connection. If you pick a profile that isn't available, scanning fails visibly instead of silently switching.
 
-`runtime-modules.json` is the one shipping inventory. Canonical state, settings, scanner dispatch, numerical mechanics, persistence/recovery, social graph and appearance resolution each retain one owner. UI projections and editor drafts do not become parallel databases. Personality/Speech development evidence is bounded metadata inside the canonical NPC record, not a second store. Application version 1.0.67 is independent of the unchanged storage and bundle formats; branch lineage remains v5 with guarded v4 compatibility, while branch-history compaction is independently versioned. GPL-3.0 and immutable seed/history records are preserved.
+## How dossiers work
+
+### The golden rule: evidence first
+
+Nothing changes because the model guessed. A proposed change is accepted only when the story (or the model's quoted evidence) supports it, and only story text about **that** NPC counts. One NPC's scene can never rewrite another NPC's profile. If a field isn't mentioned, it stays as it is.
+
+### Personality, speech and mannerisms
+
+These are meant to be stable, like a real person's character:
+
+- **One scene is not enough** to rewrite them. A change needs repeated evidence across separate scenes, or an explicit event or time skip in the story ("after a winter at the academy, she speaks with formal precision").
+- **Mood is not personality.** Fear, anger, flirting or behaviour only toward you never becomes a global trait.
+- **Refine vs evolve.** A *refine* adds detail without changing the meaning. A real change of character is an *evolve*, which needs a reason and the evidence above.
+
+### Behavioral Levers
+
+Levers describe how an NPC **generally** responds and decides, with anyone. Each lever is written as `Category: level - effect`, for example:
+
+> `Conflict/Assertiveness: avoidant - answers challenges with cold politeness`
+
+There are twelve categories:
+
+| | | |
+|---|---|---|
+| Disposition | Care/Warmth | Expressiveness |
+| Independence/Agency | Conflict/Assertiveness | Threat Sensitivity |
+| Analytical Style | Social Presentation | Cruelty/Mercy |
+| Loyalty | Drive/Ambition | Honesty/Candor |
+
+- An NPC has at most six levers.
+- **Habits and routines are not levers.** "Keeps a quiet household and enforces curfews" belongs in Mannerisms and is kept out of the lever list.
+- **How a lever swings:** the first scene showing a different tendency is stored as pending evidence, and the lever changes when the behaviour shows up again in a later scene. An explicit event or time skip changes it at once. Kind ↔ cruel and independence reversals face extra safety checks.
+- Old entries that don't fit a category are listed for rewriting at the next **Refresh**.
+
+### Relationship with the player
+
+- **Trust, Affection, Desire and Tension** each run from −100 to +100 and only describe how the NPC feels about **you**.
+- Each scan can move them by a small amount capped by how big the moment was (ordinary, meaningful, major, extreme). Every change records its reason, shown on the dossier's Player relationship card.
+- The roleplay model gets a short qualitative description, never raw numbers. Personality and levers come first, and the relationship only tints them. A reserved NPC stays reserved even when they like you.
+
+### Appearance, outfits and forms
+
+- **Physical features** (hair, eyes, build, scars) are kept separate from the **current outfit & presentation**. Changing clothes never erases physical traits unless the story re-describes them (dyed hair, a new scar).
+- NPCs who transform can have several **named forms**. Switching form keeps every form's own anatomy.
+- Edit appearance under **Edit dossier → Appearance**.
+
+### Important memories and bonds
+
+- **Important memories:** up to five consequential events (promises, betrayals, rescues, discoveries). Routine chatter is ignored.
+- **Important bonds:** relationships between NPCs, written as `Name — relation | dynamic` and kept in step on both sides. Deleting a bond by hand keeps it deleted.
+
+### Life and death
+
+- A confirmed on-page death is final for automatic updates. Later scans cannot bring the NPC back.
+- If a death was recorded by mistake, open the dossier and use **Restore**. The correction is recorded.
+- With **Archive confirmed deaths** on (the default), dead NPCs are archived rather than deleted. They don't take roster slots and aren't injected, but the scanner still recognises their name, so a later mention doesn't create a new, living duplicate.
+
+### Portraits
+
+- Upload, replace or remove a portrait, or generate one through **SillyTavern Image Generation** from the dossier's prompt.
+- Generated images stay a preview until you apply them, and nothing silently replaces an uploaded image.
+- An optional per-NPC seed makes regeneration repeatable.
+- Each named form can have its own portrait, and a portrait is flagged when the appearance has moved on since it was made.
+
+### Calendar and birthdays
+
+- Define months as `Month name:days` lines, with an optional era.
+- A full date in the story's World State can drive chronology.
+- An NPC with a known birthday ages on the right day. Apparent age (how old they look) is tracked separately and never used to work out real age.
+- See [birthday continuity](docs/birthday-continuity.md) for supported formats.
+
+### Manual control
+
+- **Edit dossier** changes any field.
+- Tick **Protect edited stable profile fields** to stop scans from rewriting the fields you edited.
+- **Add NPC, Archive, Remove and Restore** are always manual.
+- Commands typed into the story text are never executed.
+
+## Swipes, edits and rollback
+
+- **Swipes:** each swipe keeps its own dossier state. Switching back to a known swipe restores it. A swipe that was never scanned starts from the state before it and is scanned again.
+- **Delete or regenerate:** dossiers roll back to the message you returned to. NPCs who only appeared in the removed messages are removed too.
+- **Edits deep in the past:** if an edit can't be replayed exactly, current dossiers are kept rather than guessed.
+- The rollback journal covers the last 256 messages. Full snapshots are size-limited (8 MB total, 2 MB each).
+
+## Data, backups and multiple devices
+
+- Dossiers are stored on your SillyTavern server, in `/user/files/npc-state-delta-*.json`. Any browser or device using the same SillyTavern server sees the same data.
+- **Backup / Export** saves dossiers and portraits as a Delta bundle, and **Restore / Import** loads one into the current chat. Importing into a different chat never pretends that chat's history happened.
+- Only import Delta's own bundles. Data from other NPC extensions or older generations is not supported.
+- Don't run several NPC-tracking extensions that write automatically at the same time.
+
+## Troubleshooting
+
+| Problem | Try |
+|---|---|
+| Behavioral Levers read like habits or routines | Open the dossier and **Refresh**. Entries outside the twelve categories get rewritten or moved to Mannerisms. |
+| An outfit or appearance change was missed | **Refresh** that NPC. Automatic scans only see the latest exchange. |
+| Personality or levers never seem to change | Expected for one-off scenes. They change after repeated scenes or an explicit event or time skip. |
+| An NPC is missing | **Add NPC**, or use **Full scan current cast**. |
+| A scan failed | Check the scanner connection profile in **Scanning**, then use **Scan dossier now**. |
+| You want to know why a field didn't change | Open the dossier's diagnostics (**Show**) or export them from **Data & maintenance → Diagnostics**. Each field has an outcome such as `applied-refine`, `not-provided` or `waiting-for-revised-candidate`. |
+
+Diagnostics are bounded and read-only. They never store whole stories, full prompts or credentials, and their token counts are local estimates.
+
+## For developers
+
+The extension is plain ES modules with no runtime dependencies. Node.js 24 and Python 3 run the development workflow.
 
 ```sh
-npm test
-npm run validate
-npm run measure:prompts
-node scripts/measure-stage9.mjs
-npm run package
+npm test                        # unit, compatibility and synthetic-host tests
+npm run validate                # inventory, isolation, version and ownership checks
+npm run measure:prompts         # prompt size measurements
+node scripts/measure-stage9.mjs # prompt/request budget baseline
+npm run package                 # builds dist/npc_state_delta-1.0.67.zip and its SHA-256
 git diff --check
 ```
 
-Node.js 24 and Python 3 are required for the dependency-free core workflow. Optional synthetic-browser checks use an already available Playwright/Chromium installation; they are not runtime dependencies. Commands, evidence and limitations are in [DEVELOPMENT.md](DEVELOPMENT.md) and [the Stage 9 report](docs/stage9-review.md).
+- `runtime-modules.json` is the single inventory of shipped modules. The package contains only the runtime modules, stylesheet, manifest, inventory, license and README.
+- Application version 1.0.67 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
+- Behaviour is governed by [AGENTS.md](AGENTS.md), [the core contract](docs/core-contract.md) and [the workplan](docs/WORKPLAN.md). Development commands, evidence and limits are in [DEVELOPMENT.md](DEVELOPMENT.md).
+- Historical reviews: [1.0.28](docs/v1.0.28-review.md), [1.0.27 prefix cache](docs/v1.0.27-review.md), [Stage 9](docs/stage9-review.md). Seed provenance is in `docs/seed-provenance.*`.
 
-Behavior is governed by [AGENTS.md](AGENTS.md), [the core contract](docs/core-contract.md) and [the workplan](docs/WORKPLAN.md). Historical source records describe their original snapshots, not current release acceptance.
+## License
+
+GPL-3.0. See [LICENSE](LICENSE). The seed and history records in `docs/` are preserved as provenance.

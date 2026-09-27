@@ -1755,8 +1755,11 @@ export function durableRefinementCandidateGrounded(field, existing, incoming, co
     const newText = compactDurableText(incoming, maxChars, field === 'speech' ? 5 : (field === 'personality' ? 6 : 10));
     if (!newText) return false;
     const support = durableRefinementSupportText(context, evidenceItems, binding);
+    // Only a caller with no narration at all (structured import/API) skips grounding. Narration
+    // that contains nothing about this NPC, and no evidence attributed to it, supports nothing.
+    const narrationSupplied = Boolean(String(context || '').trim());
     if (!oldText) {
-        if (!support) return true;
+        if (!support) return !narrationSupplied;
         const clauses = splitDurableClaimUnits(newText);
         const supportTokens = new Set(durableRefinementTokens(support));
         return clauses.length > 0 && clauses.every(clause => {
@@ -1773,7 +1776,7 @@ export function durableRefinementCandidateGrounded(field, existing, incoming, co
 
     // Structured import/API compatibility: callers without source narration retain the
     // established direct-refinement behavior. Runtime scanner paths always supply context.
-    if (!support) return true;
+    if (!support) return !narrationSupplied;
 
     const oldTokens = new Set(durableRefinementTokens(oldText));
     const supportTokens = new Set(durableRefinementTokens(support));
@@ -1854,6 +1857,20 @@ function presentationContinuationEvidence(context = '', npc = null, otherLabels 
         }
     }
     return evidence;
+}
+
+// Story text the appearance model may ground one NPC's update in: sentences naming the NPC, its
+// pronoun follow-up and the presentation continuation above. Narration that says nothing about the
+// NPC yields a placeholder that grounds nothing, so another NPC's scene cannot support the update.
+const NO_NPC_NARRATION = '[no narration about this NPC]';
+export function npcScopedNarration(context = '', npc = null, otherLabels = []) {
+    const raw = String(context || '').trim();
+    if (!raw) return '';
+    const scoped = [
+        scopedEpisodeText(raw, { npc, otherLabels }),
+        ...presentationContinuationEvidence(raw, npc, otherLabels),
+    ].filter(Boolean).join(' ');
+    return scoped || NO_NPC_NARRATION;
 }
 
 function groundedAppearanceChange(existing, incoming, reason, context = '', evidenceItems = [], binding = null) {
@@ -2128,19 +2145,22 @@ export function isBehaviorLever(value) {
     return Boolean(behaviorProfileFamily(text));
 }
 
-function groundedBehaviorProfile(value, personality = '', context = '', evidenceItems = []) {
-    const source = String(context || '').trim();
+function groundedBehaviorProfile(value, personality = '', context = '', evidenceItems = [], binding = null) {
+    const raw = String(context || '').trim();
+    // With a binding, only story text about this NPC counts; narration that never mentions it
+    // leaves Personality and attributed evidence as the only support.
+    const source = raw && binding ? durableRefinementSupportText(raw, [], binding) : raw;
     const evidence = Array.isArray(evidenceItems) ? evidenceItems : [];
     return normalizeBehaviorProfile(value).filter(entry => {
         if (behaviorProfileTargetSpecific(entry)) return false;
-        if (!source) return true; // structured import/manual compatibility
+        if (!raw) return true; // structured import/manual compatibility
         const body = behaviorProfileBody(entry);
         const identity = cleanText(personality, DURABLE_PROFILE_LIMITS.personality);
         const personalityGrounded = identity && (
             durableSemanticSimilarity(body, identity) >= 0.34
             || durableSemanticSimilarity(entry, identity) >= 0.34
         );
-        return Boolean(personalityGrounded || durableSeedGrounded(body, source) || durableEvidenceGroundsValue(body, evidence));
+        return Boolean(personalityGrounded || (source && durableSeedGrounded(body, source)) || durableEvidenceGroundsValue(body, evidence));
     });
 }
 
@@ -4101,6 +4121,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
                 personality: merged.personality || existing.personality,
                 rejected: incoming.nonLeverBehavior || [],
                 evidenceItems: incoming.profileEvidence?.behaviorProfile || [],
+                binding: incomingBinding,
             });
         } else {
             merged.behaviorProfile = [...(existing.behaviorProfile || [])];
@@ -4111,6 +4132,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
             merged.personality || existing.personality,
             lifecycleOptions.developmentContext,
             incoming.profileEvidence?.behaviorProfile || [],
+            incomingBinding,
         );
         merged.behaviorProfile = reconcileBehaviorProfileWithPersonality(grounded, merged.personality || existing.personality);
     }
@@ -4877,7 +4899,12 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
         const current = normalizeBehaviorProfile(npc.behaviorProfile || []);
         if (!current.length) {
             const behaviorEvidence = [...(beforeEvidence.behaviorProfile || []), ...(incomingEvidence.behaviorProfile || [])];
-            const grounded = groundedBehaviorProfile(incoming.behaviorProfile || [], npc.personality, options.developmentContext, behaviorEvidence);
+            const grounded = groundedBehaviorProfile(incoming.behaviorProfile || [], npc.personality, options.developmentContext, behaviorEvidence, {
+                npc,
+                evidence: behaviorEvidence,
+                targeted: options.targeted === true,
+                otherLabels: options.otherLabels || [],
+            });
             npc.behaviorProfile = reconcileBehaviorProfileWithPersonality(grounded, npc.personality);
             if (npc.behaviorProfile.length) evidence.behaviorProfile = [];
             else evidence.behaviorProfile = mergeRecentProfileEvidence(evidence.behaviorProfile, incomingEvidence.behaviorProfile || []);
