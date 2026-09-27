@@ -57,7 +57,7 @@ test('v1.0.21 a grounded time-compressed Refresh can refine Personality Manneris
     const npc = createNpcRecord('Ryu');
     npc.personality = 'Quiet, wary in public, intensely attached to kin, and driven by predatory curiosity.';
     npc.mannerisms = ['Flexes her fingers against a slate frame while fixing a predatory stare on difficult study subjects.'];
-    npc.behaviorProfile = ['Sisterly Attachment: Seeks Sora for reassurance and shared focus.', 'Territorial Caution: Remains wary of strangers and unfamiliar settings.'];
+    npc.behaviorProfile = ['Loyalty: Seeks Sora for reassurance and shared focus.', 'Threat Sensitivity: Remains wary of strangers and unfamiliar settings.'];
 
     const result = mergeScanResult(
         { npcs: [npc], candidates: [], turn: 204 },
@@ -79,8 +79,8 @@ test('v1.0.21 a grounded time-compressed Refresh can refine Personality Manneris
                 ],
                 behaviorProfileState: 'refine',
                 behaviorProfile: [
-                    'Sisterly Attachment: Seeks Sora for reassurance and shared focus.',
-                    'Civil Self-Control: Consciously suppresses territorial reactions and follows learned public etiquette.',
+                    'Loyalty: Seeks Sora for reassurance and shared focus.',
+                    'Social Presentation: Consciously suppresses territorial reactions and follows learned public etiquette.',
                 ],
                 developmentScale: 'batch',
                 developmentReason: 'Two months of schooling, household etiquette practice, and public preparation reshaped her social presentation.',
@@ -100,8 +100,8 @@ test('v1.0.21 a grounded time-compressed Refresh can refine Personality Manneris
         'Flexes her fingers against a slate frame while fixing a predatory stare on difficult study subjects.',
     ]);
     assert.deepEqual(result.state.npcs[0].behaviorProfile, [
-        'Sisterly Attachment: Seeks Sora for reassurance and shared focus.',
-        'Civil Self-Control: Consciously suppresses territorial reactions and follows learned public etiquette.',
+        'Loyalty: Seeks Sora for reassurance and shared focus.',
+        'Social Presentation: Consciously suppresses territorial reactions and follows learned public etiquette.',
     ]);
 });
 

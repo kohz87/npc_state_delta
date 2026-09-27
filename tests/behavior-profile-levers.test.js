@@ -48,13 +48,13 @@ test('scanner and reconciliation prompts define behaviorProfile as behavioral le
         transcript: 'Marris checks the wound, compares two possible causes, then calmly explains the safer treatment.',
         existingNpcs: [npc],
     });
-    assert.match(scanner, /behaviorProfile FULL max6 "Label: level - effect" levers, not routines\/duties\/habits \(habits=>mannerisms\)/);
+    assert.match(scanner, /behaviorProfile FULL max6 "Label: level - effect" levers; Label=Disposition\|Care\|Expression\|Independence\|Conflict\|Threat\|Analytical\|Presentation\|Mercy\|Loyalty\|Drive\|Honesty; habits\/routines=>mannerisms\./);
 
     const refresh = buildProfileRefreshPrompt({
         transcript: 'Over several months Marris consistently checks evidence before committing to a conclusion.',
         targetNpc: npc,
     });
-    const LEVER = /behaviorProfile=max6 "Label: level - effect" levers: how they generally respond\/decide \(supported labels only[^)]*\)\. Actions are evidence; routines, duties, house rules and habits are not levers \(habits=>mannerisms\)\./;
+    const LEVER = /behaviorProfile=max6 "Label: level - effect" levers: how they generally respond\/decide \(labels only: Disposition, Care\/Warmth, Expressiveness, Independence\/Agency, Conflict\/Assertiveness, Threat Sensitivity, Analytical Style, Social Presentation, Cruelty\/Mercy, Loyalty, Drive\/Ambition, Honesty\/Candor\)\. Actions are evidence; routines, duties, house rules and habits are not levers \(habits=>mannerisms\)\./;
     assert.match(refresh, LEVER);
 
     const backfill = buildBackfillPrompt({
@@ -70,7 +70,7 @@ test('scanner and reconciliation prompts define behaviorProfile as behavioral le
         existingNpc: npc,
     });
     assert.match(imported, LEVER);
-    assert.match(imported, /supported labels only/i);
+    assert.match(imported, /labels only: Disposition/i);
 });
 
 test('roleplay injection tells the model to generalize behavioral profile levers to new situations', () => {
