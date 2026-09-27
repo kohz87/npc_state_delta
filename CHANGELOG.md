@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.0.68 - 27 September 2026
+
+- Close the evidence leak between NPCs. When narration was supplied but none of it was about the NPC being updated, the shared durable-profile check treated the empty NPC-scoped text as "no narration" and accepted the claim, so another NPC's scene could refine this NPC's Personality, Speech, Appearance or Behavioral Levers. Such narration now supports nothing; only a caller with no narration at all (structured import/API) keeps direct refinement, and evidence quotes attributed to the NPC still count. Paths that did not scope the story to the NPC now do: Behavioral Profile refine from the scan's NPC row, first-profile lever seeding on both update paths, and the appearance model (overall appearance and named forms) in ordinary scans, which now reads the NPC's own sentences plus the 1.0.62 presentation follow-up sentences. Targeted Refresh and backfill keep their whole window for appearance. Prompts, request counts and persisted formats are unchanged.
+- Rewrite the README for players: a short introduction, install and first steps, a settings map, plain-language explanations of how dossiers, levers, relationships, appearance, rollback and backups work, and a troubleshooting table. The per-release history now lives only in the changelog; developer commands and governing documents move to a closing section.
+
 ## 1.0.67 - 27 September 2026
 
 - Let automatic scans swing a Behavioral Lever. The automatic-scan prompt listed `evolve` only for Personality, Speech and Mannerisms, so ordinary play almost never proposed a lever change (Refresh already allowed it); it now names Behavioral Profile too. A lever still cannot flip from one scene: the first sighting is kept as pending evidence, and an `evolve` with a reason is accepted when the behaviour is seen again in a later scan, or at once for an explicit event or time skip as before. Refine still only sharpens a lever and cannot reverse it, and the kind/cruel and agency safety checks are unchanged.

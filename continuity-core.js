@@ -186,9 +186,21 @@ export function mergeScanResult(state, scanResult, options = {}) {
             }
         }
 
+        // Ordinary scans ground appearance only in story text about this NPC; targeted Refresh and
+        // backfill reconcile one named NPC and keep their whole window.
+        const appearanceOptions = options.allowTargetedDurableSeed === true || !options.developmentContext
+            ? options
+            : {
+                ...options,
+                developmentContext: mechanics.npcScopedNarration(options.developmentContext, rawNpc, (result.state.npcs || [])
+                    .filter(other => other !== rawNpc && String(other?.id || '') !== String(rawNpc?.id || ''))
+                    .flatMap(other => [other?.name, ...(Array.isArray(other?.aliases) ? other.aliases : [])])
+                    .filter(Boolean)
+                    .slice(0, 64)),
+            };
         let npc = applyModel(seed);
-        if (ordinaryUpdate) npc = applyModel(npc, ordinaryUpdate, options);
-        if (profileUpdate) npc = applyModel(npc, profileUpdate, options);
+        if (ordinaryUpdate) npc = applyModel(npc, ordinaryUpdate, appearanceOptions);
+        if (profileUpdate) npc = applyModel(npc, profileUpdate, appearanceOptions);
         if (sources.length) npc = mergeAppearanceKnowledge(sources, npc);
 
         const terminalSource = sources.find(isTerminalNpcDeath);
