@@ -61,7 +61,7 @@ function combineAppearance(overall, specific) {
     if (!local) return shared;
     if (sameAppearance(shared, local)) return shared;
     if (normalizeName(local).startsWith(normalizeName(shared))) return local;
-    return appearanceText(`${shared}; ${local}`);
+    return appearanceText(`${shared.replace(/[\s.;,]+$/, '')}; ${local}`);
 }
 function formKey(value) { return clean(value, 120).normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim(); }
 function formState(value) {
@@ -225,14 +225,27 @@ function preserveOmittedPhysicalTraits(previous, next, { alsoPresent = '' } = {}
 // slot ("Long silver hair, violet eyes; wearing a gown"). Drop only comma-level pieces that exactly
 // match a shared piece, so the resolved appearance does not repeat them; anything that differs,
 // including negated or re-described traits, is kept.
+// A piece is also redundant when every content word in it already appears in the shared slot and it
+// carries no changeable or negated wording ("faintly pointed" beside shared "faintly pointed,
+// swept-back ears"). A piece that adds any detail, or negates or changes a trait, is kept.
+const NEGATED_DETAIL = /\b(?:no|not|never|without|none|nor|no longer|lacks?|lacking)\b/i;
+function coveredBySharedTokens(piece, sharedTokens) {
+    if (!sharedTokens.size || NEGATED_DETAIL.test(piece) || CHANGEABLE_PRESENTATION.test(piece)) return false;
+    const tokens = refinementTokens(piece).filter(token => !/^\d+$/.test(token));
+    return tokens.length > 0 && tokens.every(token => sharedTokens.has(token));
+}
 function withoutSharedPieces(value, shared) {
     const text = appearanceText(value);
     const sharedPieces = new Set(presentationSegments(shared).map(normalizeName).filter(Boolean));
     if (!text || !sharedPieces.size) return text;
+    const sharedTokens = new Set(refinementTokens(shared));
     let changed = false;
     const clauses = appearanceClauses(text).map(clause => {
         const parts = clause.split(/\s*,\s*/);
-        const kept = parts.filter(part => !sharedPieces.has(normalizeName(part.replace(/^(?:and|with)\s+/i, '').replace(/[.!?]+$/, ''))));
+        const kept = parts.filter(part => {
+            const piece = part.replace(/^(?:and|with)\s+/i, '').replace(/[.!?]+$/, '');
+            return !sharedPieces.has(normalizeName(piece)) && !coveredBySharedTokens(piece, sharedTokens);
+        });
         if (kept.length !== parts.length) changed = true;
         return kept.join(', ');
     }).filter(clause => clean(clause, 800));
@@ -377,15 +390,24 @@ export function carryOmittedPhysicalTraits(previous = {}, next = {}) {
     return appearance === after ? next : { ...next, appearance };
 }
 
-export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = false, context = '' } = {}) {
+export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = false, context = '', seedContext = '' } = {}) {
     const next = normalizeAppearanceModel(record, { locked });
     if (locked || !rawUpdate || typeof rawUpdate !== 'object') return { ...next, appearance: resolveNpcAppearance(next) };
+    const priorOverall = next.overallAppearance;
 
     const overallProvided = hasOwn(rawUpdate, 'overallAppearance') || hasOwn(rawUpdate, 'overall_appearance');
     if (overallProvided) {
         const incoming = appearanceText(rawUpdate.overallAppearance ?? rawUpdate.overall_appearance);
         if (!next.overallAppearance) {
-            if (!context || durableSeedGrounded(incoming, context)) next.overallAppearance = incoming;
+            // First physical features may come from anywhere in the scene (an NPC is often
+            // introduced before it is named) or from the NPC's own stored appearance, when enduring
+            // traits move out of the current-presentation slot. Changes to established features
+            // below stay grounded in story text about this NPC.
+            const narration = String(seedContext || context || '').trim();
+            const seedSupport = narration
+                ? [narration, next.appearance, next.unclassifiedAppearance, ...next.appearanceForms.map(form => form.appearance)].filter(Boolean).join(' ')
+                : '';
+            if (!seedSupport || durableSeedGrounded(incoming, seedSupport)) next.overallAppearance = incoming;
         } else if (incoming && normalizeName(incoming) !== normalizeName(next.overallAppearance)) {
             const state = formState(rawUpdate.overallAppearanceState ?? rawUpdate.overall_appearance_state);
             if (state === 'change') {
@@ -485,6 +507,11 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
         }
     }
 
+    // New or changed physical features own their traits: the current presentation of an NPC without
+    // a selected form stops repeating pieces they already cover.
+    if (next.overallAppearance && next.overallAppearance !== priorOverall && !next.currentForm && !next.currentFormUnknown) {
+        next.appearance = withoutSharedPieces(stripOverallPrefix(next.appearance, priorOverall), next.overallAppearance);
+    }
     next.appearanceModelVersion = APPEARANCE_MODEL_VERSION;
     next.appearance = resolveNpcAppearance(next);
     return next;

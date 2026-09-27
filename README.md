@@ -169,6 +169,7 @@ There are twelve categories:
 |---|---|
 | Behavioral Levers read like habits or routines | Open the dossier and **Refresh**. Entries outside the twelve categories get rewritten or moved to Mannerisms. |
 | An outfit or appearance change was missed | **Refresh** that NPC. Automatic scans only see the latest exchange. |
+| Physical features are empty, or body traits sit under the current outfit | **Refresh** that NPC. Enduring traits move into Physical features and the outfit keeps only clothing and condition. |
 | Personality or levers never seem to change | Expected for one-off scenes. They change after repeated scenes or an explicit event or time skip. |
 | An NPC is missing | **Add NPC**, or use **Full scan current cast**. |
 | A scan failed | Check the scanner connection profile in **Scanning**, then use **Scan dossier now**. |
