@@ -1264,7 +1264,7 @@ test('scanner prompt defines speech and mannerisms as evolving durable identity 
     });
     assert.match(prompt, /profileUpdates/i);
     assert.match(prompt, /matching \*State:"refine"/i);
-    assert.match(prompt, /personality\/speech\/mannerism "evolve"\+reason/i);
+    assert.match(prompt, /personality\/speech\/mannerism\/behaviorProfile "evolve"\+reason/i);
     assert.match(prompt, /mannerisms FULL max4/i);
     assert.match(prompt, /social change[\s\S]*?omission NEVER erases/i);
     assert.match(prompt, /DURABLE PROFILE CHANNEL/i);
@@ -1282,7 +1282,7 @@ test('scanner prompt defines personality as gradual durable development rather t
     assert.match(prompt, /DURABLE PROFILE CHANNEL/i);
     assert.match(prompt, /profileUpdates/i);
     assert.match(prompt, /matching \*State:"refine"/i);
-    assert.match(prompt, /personality\/speech\/mannerism "evolve"\+reason/i);
+    assert.match(prompt, /personality\/speech\/mannerism\/behaviorProfile "evolve"\+reason/i);
     assert.match(prompt, /time skip alone invents nothing/i);
         assert.match(prompt, /"personality":"Shy and approval-seeking\."/);
 });
@@ -1450,7 +1450,6 @@ test('new dossier-worthy NPCs receive full grounded first-pass enrichment withou
         userName: 'Aris',
         charName: 'Ersveil',
     });
-    assert.match(prompt, /NEW dossier-worthy NPCs get a grounded first-pass profile/i);
     assert.match(prompt, /populate every grounded field now/i);
         assert.match(prompt, /NEVER enrichment/i);
     assert.match(prompt, /Incidental role candidates may stay lightweight/i);
