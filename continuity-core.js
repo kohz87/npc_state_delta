@@ -32,7 +32,7 @@ function matchingPrevious(npc, source = []) {
 function applyModel(npc = {}, rawUpdate = null, options = {}) {
     const locked = lockedAppearance(npc);
     const model = rawUpdate
-        ? applyAppearanceUpdate(npc, rawUpdate, { locked, context: options.developmentContext || '' })
+        ? applyAppearanceUpdate(npc, rawUpdate, { locked, context: options.developmentContext || '', seedContext: options.appearanceSeedContext || '' })
         : normalizeAppearanceModel(npc, { locked });
     const next = { ...npc, ...model };
     next.appearance = resolveNpcAppearance(next);
@@ -192,6 +192,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
             ? options
             : {
                 ...options,
+                appearanceSeedContext: options.developmentContext,
                 developmentContext: mechanics.npcScopedNarration(options.developmentContext, rawNpc, (result.state.npcs || [])
                     .filter(other => other !== rawNpc && String(other?.id || '') !== String(rawNpc?.id || ''))
                     .flatMap(other => [other?.name, ...(Array.isArray(other?.aliases) ? other.aliases : [])])
@@ -233,9 +234,9 @@ const COMPACT_STAGE4_RULE = `\nS4: forms/current; confirmed death terminal.`;
 // Form rules shared by every prompt. The scanner and Refresh already define flat Appearance (current
 // visible presentation; correction=>refine, clothes/form change=>change+reason) in their own rules, so
 // only backfill and dossier import, which do not, get that sentence here.
-const APPEARANCE_FORM_RULES = 'overallAppearance=form-independent only. Named anatomy uses appearanceForms:[{name,appearance,state:"refine|change",reason}]+currentForm/currentFormState:"select"; switches preserve other forms. Unknown transformed form=>currentFormState:"unknown"+grounded current appearance; never reuse another form\'s anatomy. Omission preserves; Appearance lock protects all appearance state.';
+const APPEARANCE_FORM_RULES = 'overallAppearance=enduring body traits shared by all forms. Named anatomy uses appearanceForms:[{name,appearance,state:"refine|change",reason}]+currentForm/currentFormState:"select"; switches preserve other forms. Unknown transformed form=>currentFormState:"unknown"+grounded current appearance; never reuse another form\'s anatomy. Omission preserves; Appearance lock protects all appearance state.';
 const APPEARANCE_RULES = `\nSTAGE 4 APPEARANCE: ${APPEARANCE_FORM_RULES}`;
-const APPEARANCE_RULES_WITH_FLAT = `\nSTAGE 4 APPEARANCE: appearance=current visible presentation: grounded hair/body, outfit/gear, visible condition. Explicit correction/reveal=>refine corrected FULL appearance; changed clothes/form/presentation=>change+reason FULL appearance. ${APPEARANCE_FORM_RULES}`;
+const APPEARANCE_RULES_WITH_FLAT = `\nSTAGE 4 APPEARANCE: appearance=current outfit/gear/visible condition. Explicit correction/reveal=>refine corrected FULL appearance; changed clothes/form/presentation=>change+reason FULL appearance. ${APPEARANCE_FORM_RULES}`;
 const DEATH_RULES = `\nSTAGE 4 DEATH: explicit death is terminal: lifeState:"deceased"+lifeStateCertainty:"explicit"; later output cannot return that NPC to alive/present/worldActive.`;
 const PROFILE_REFRESH_FORM_SHAPE_ANCHOR = '"appearanceState":"refine|change","appearance":"","appearanceReason":""';
 const PROFILE_REFRESH_FORM_SHAPE = '"appearanceState":"refine|change","appearance":"","appearanceReason":"","overallAppearance":"","overallAppearanceState":"keep|refine|change","overallAppearanceReason":"","appearanceForms":[{"name":"stable established form name","appearance":"form-specific visible anatomy","state":"refine|change","reason":""}],"currentForm":"stable established form name or empty","currentFormState":"keep|select|unknown","currentFormReason":""';
