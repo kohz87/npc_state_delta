@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.69 - 27 September 2026
+
 - Capture enduring physical features in automatic and first-creation scans. The scanner, Refresh, backfill and import prompts defined Appearance as one field ("hair/body, outfit/gear, condition"), so height, build, hair, eyes and ears were stored with the clothes in the current-outfit slot and **Physical features (enduring)** stayed empty. Prompts now ask for `overallAppearance` = enduring body (height/build/hair/eyes/ears/skin/marks) and `appearance` = current outfit/gear/condition, and backfill/import return shapes include the physical field.
 - Seed empty physical features from the whole scene or from the NPC's own stored appearance. 1.0.68 scoped appearance grounding to sentences naming the NPC, so an NPC introduced as "she" or "the half-elf woman" could not get physical features at all; and existing NPCs could not move traits out of their outfit slot unless the scene re-described the body. Filling an empty Physical features slot now accepts support from the scene or from the NPC's stored appearance; changing established physical features stays grounded in story text about the NPC.
 - Stop the current outfit repeating physical features. Once Physical features change, pieces of the current presentation whose words are all already in Physical features are removed; pieces that add detail, or carry negated or changeable wording ("hair wet from the rain"), are kept. The resolved appearance no longer joins the two parts as "ears.; threadbare".
