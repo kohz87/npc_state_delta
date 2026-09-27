@@ -2711,15 +2711,21 @@ export function durableProfileEvidenceReason(field, existing, incoming, evidence
     return grounded ? cleanText(evidence.join(' '), 500) : '';
 }
 
-function newProfileEvidence(prior = [], incoming = []) {
+function newProfileEvidence(prior = [], incoming = [], duplicateSimilarity = 0.56) {
     const before = cleanList(prior, PROFILE_EVIDENCE_LIMIT * 2, DURABLE_PROFILE_LIMITS.evidence);
     return cleanList(incoming, PROFILE_EVIDENCE_LIMIT * 2, DURABLE_PROFILE_LIMITS.evidence).filter(item =>
-        !before.some(old => normalizeName(old) === normalizeName(item) || durableSemanticSimilarity(old, item) >= 0.56));
+        !before.some(old => normalizeName(old) === normalizeName(item) || durableSemanticSimilarity(old, item) >= duplicateSimilarity));
 }
+
+// A lever swing needs the behaviour seen again in a later scene. Two scenes of the same behaviour
+// are often narrated in similar words, so for Behavioral Levers only a near-copy (a replayed or
+// re-scanned observation) is a duplicate; related but distinct wording counts as a second sighting.
+const BEHAVIOR_EVIDENCE_DUPLICATE_SIMILARITY = 0.85;
 
 function gradualProfileEvolutionReady(field, beforeEvidence, incomingEvidence) {
     const prior = beforeEvidence[field] || [];
-    const fresh = newProfileEvidence(prior, incomingEvidence[field] || []);
+    const fresh = newProfileEvidence(prior, incomingEvidence[field] || [],
+        field === 'behaviorProfile' ? BEHAVIOR_EVIDENCE_DUPLICATE_SIMILARITY : 0.56);
     if (!prior.length || !fresh.length) return false;
     return fresh.some(now => prior.some(old => profileEvidenceRelated(old, now)));
 }
@@ -6057,7 +6063,7 @@ export function buildScannerPrompt({
         ? `\nFULL-WINDOW RECONCILIATION: Story context contains the configured recent-history window. Use durable evidence anywhere in the supplied recent-history window to recover missed durable facts (identity, role/species/gender/age, profile, background, social ties, memories). Earlier turns are context, NOT new events. For present/worldActive and LIVE mood/location/goal/status, use only the newest CURRENT exchange below; older states must never overwrite newer/established live state. Numeric relationshipImpact/relationshipDelta MUST use only CURRENT exchange, never older window events. Do not replay old deltas.`
         : '';
 
-    return `Private NPC dossier scanner. NEW dossier-worthy NPCs get a grounded first-pass profile.
+    return `Private NPC dossier scanner.
 Admission: ${admissionPolicy}${fullScanRule}
 Rules:
 1. Exclude player (${userName}), main speaker (${charName}), extras.
@@ -6066,7 +6072,7 @@ Rules:
 4. Candidates are not dossiers. sameIndividual=true only when proven. Use narration, World State, durable Inner Chatter; proper names there MUST be returned even when prose uses role.
 5. Return ONLY observed/new/meaningfully changed NPCs; new grounded durable profile facts count as changes. present=true only latest-scene physical presence; World State/Inner Chatter alone never presence. worldActive=true only explicit current off-screen activity. Inner Chatter supports durable facts, not transient monologue.
 6. Goal/status/mood/location are LIVE: output goal,goalState,status,statusState,mood,moodState,location,locationState as needed; actively reassess each returned EXISTING NPC every scan. Unchanged -> omit; changed -> replace; ended mood/goal/status -> matching *State:"clear". Location=current/last reliable; locationState:"clear" only when old place explicitly obsolete and replacement unknown. Off-screen/no evidence alone never clears it. Never use "Unknown".
-7. DURABLE PROFILE CHANNEL: ALWAYS emit profileUpdates for grounded durable facts; npc delta optional. One scene may support multiple fields; emit each grounded (speech+behaviorProfile allowed). Appearance=CURRENT VISIBLE PRESENTATION: hair/body, outfit/gear, condition. EXISTING grounded visual=>MUST emit appearance+evidence.appearance in profileUpdates, even with other fields. Correction/reveal=>appearanceState:"refine"+FULL Appearance; clothes/form/presentation change=>appearanceState:"change"+reason+FULL Appearance. matching *State:"refine"=>FULL; personality/speech/mannerism "evolve"+reason. behaviorProfile FULL max6 "Label: level - effect" levers; Label=Disposition|Care|Expression|Independence|Conflict|Threat|Analytical|Presentation|Mercy|Loyalty|Drive|Honesty; habits/routines=>mannerisms. Mannerisms FULL max4. Locks never rewrite.
+7. DURABLE PROFILE CHANNEL: ALWAYS emit profileUpdates for grounded durable facts; npc delta optional. One scene may support multiple fields; emit each grounded (speech+behaviorProfile allowed). Appearance=CURRENT VISIBLE PRESENTATION: hair/body, outfit/gear, condition. EXISTING grounded visual=>MUST emit appearance+evidence.appearance in profileUpdates, even with other fields. Correction/reveal=>appearanceState:"refine"+FULL Appearance; clothes/form/presentation change=>appearanceState:"change"+reason+FULL Appearance. matching *State:"refine"=>FULL; personality/speech/mannerism/behaviorProfile "evolve"+reason. behaviorProfile FULL max6 "Label: level - effect" levers; Label=Disposition|Care|Expression|Independence|Conflict|Threat|Analytical|Presentation|Mercy|Loyalty|Drive|Honesty; habits/routines=>mannerisms. Mannerisms FULL max4. Locks never rewrite.
 8. IDENTITY FIREWALL: mood/stress/intimacy/injury/relationship-specific behavior never becomes global Personality/Speech/Mannerisms/behaviorProfile. Grounded Appearance exempt; fleeting pose/expression is not identity. Kindness stays general unless broader change; necessary force != cruelty. Scores don't create tropes.
 9. DEVELOPMENT SPEED: developmentScale=gradual|explicit|batch. assistant/main-speaker=gradual; Player explicit/batch only for declarative canon, not quotes/questions/speculation/requests/conditionals/wishes. Speech evidence/candidate=observable voice, not personality. Time-compressed refine/evolve/change MUST include developmentReason + changed FULL candidate; unchanged/reinforcing=>omit/keep. Time skip alone invents nothing.
 10. SOCIAL: grounded non-player kin/friend/rival/mentor/partner => ALWAYS top-level keyRelationshipEdges {aId,a,bId,b,aToB,bToA,reason}; one clear counterpart entry. Use late/surviving, never dangling "(deceased)". Social change may evolve+reason; omission NEVER erases other bonds.
