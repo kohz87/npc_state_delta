@@ -1,4 +1,4 @@
-/* NPC State Delta v1.0.67 bootstrap. */
+/* NPC State Delta v1.0.68 bootstrap. */
 import { prepareNpcStateHardening } from './hardening.js';
 
 await prepareNpcStateHardening();
