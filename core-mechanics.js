@@ -5434,7 +5434,9 @@ export function selectRelevantNpcs(npcs, text, turn = 0, limit = 3, socialGraph 
         .map(item => item.npc);
 }
 
-export const DEFAULT_INJECTION_BUDGET_TOKENS = 1800;
+export const DEFAULT_INJECTION_BUDGET_TOKENS = 4000;
+// Section caps are sized for this budget and grow in proportion above it (see buildInjection).
+const INJECTION_CAP_BASE_TOKENS = 1800;
 export const MIN_INJECTION_BUDGET_TOKENS = 512;
 export const MAX_INJECTION_BUDGET_TOKENS = 6000;
 const APPROX_CHARS_PER_TOKEN = 4;
@@ -5487,34 +5489,59 @@ function fairInjectionParts(parts, maxChars) {
     return truncateInjectionText(rendered.join('; '), cap);
 }
 
+// Each lever keeps its category and as much of "level - effect" as its equal share allows, cut at a
+// word boundary. (Cutting to the first three words left "high - refuses", which lost the meaning.)
+function wordBoundedInjection(text, maxChars) {
+    const value = String(text || '').trim().replace(/[\s.;]+$/, '');
+    if (value.length <= maxChars) return value;
+    const cut = value.slice(0, Math.max(1, maxChars - 1));
+    const space = cut.lastIndexOf(' ');
+    const head = (space >= Math.floor(maxChars * 0.6) ? cut.slice(0, space) : cut).replace(/[\s,;:\-–—]+$/, '');
+    return `${head}…`;
+}
+
 function compactBehaviorProfileForInjection(value, maxChars = 180) {
     const entries = orderedBehaviorProfile(value);
     if (!entries.length) return '';
+    const share = Math.floor((maxChars - 3 * (entries.length - 1)) / entries.length);
+    // With little room every category still gets "Category: level" so none is starved; with room,
+    // each lever keeps its effect as well.
+    const levelOnly = share < 40;
     const compact = entries.map(item => {
         const match = item.match(/^([\p{L}][\p{L}\p{N} _\-/]{1,36})\s*:\s*(.*)$/u);
-        if (!match) return truncateInjectionText(item, 28);
-        const label = match[1].trim();
+        if (!match) return wordBoundedInjection(item, Math.max(28, share));
+        const label = match[1].split('/')[0].trim();
         const body = match[2].trim();
-        const firstClause = body.split(/[.;]/, 1)[0].trim();
-        const words = firstClause.split(/\s+/).filter(Boolean);
-        const head = truncateInjectionText(words.slice(0, 3).join(' ') || body, 26);
-        return head ? `${label}: ${head}` : label;
+        if (levelOnly) {
+            const level = body.split(/\s+[-–—]\s+|[.;,]/, 1)[0].trim().split(/\s+/).slice(0, 3).join(' ');
+            return level ? `${label}: ${level}` : label;
+        }
+        return wordBoundedInjection(`${label}: ${body}`, share);
     });
     return truncateInjectionText(compact.join(' | '), maxChars);
 }
 
 function injectionIdentityCore(npc, identityCap = 540) {
-    const parts = [
+    const others = [
         npc.personality && `personality: ${npc.personality}`,
-        npc.behaviorProfile?.length && `behavioral profile: ${compactBehaviorProfileForInjection(npc.behaviorProfile, 220)}`,
         npc.speech && `established speech: ${npc.speech}`,
         npc.mannerisms?.length && `established mannerisms: ${npc.mannerisms.join(', ')}`,
+    ].filter(Boolean);
+    // Size the levers to the room the fair split below will actually give them: other identity
+    // fields take at most an equal share and the levers get the rest (never more than 300 chars).
+    const fairShare = Math.floor(identityCap / (others.length + 1));
+    const leverRoom = identityCap - others.reduce((sum, part) => sum + Math.min(part.length, fairShare) + 2, 0) - 'behavioral profile: '.length;
+    const leverCap = Math.min(1100, Math.max(fairShare - 'behavioral profile: '.length, leverRoom));
+    const parts = [
+        others[0] && others[0].startsWith('personality:') ? others[0] : '',
+        npc.behaviorProfile?.length && `behavioral profile: ${compactBehaviorProfileForInjection(npc.behaviorProfile, leverCap)}`,
+        ...others.filter(part => !part.startsWith('personality:')),
     ].filter(Boolean);
     return fairInjectionParts(parts, identityCap) || 'not yet established; do not invent an archetype to fill the gap';
 }
 
 function injectionAgencyCore(npc, agencyCap = 260) {
-    const bonds = cleanList(npc.keyRelationships, Math.min(3, KEY_RELATIONSHIP_LIMIT), 150);
+    const bonds = cleanList(npc.keyRelationships, agencyCap >= 450 ? KEY_RELATIONSHIP_LIMIT : Math.min(3, KEY_RELATIONSHIP_LIMIT), 150);
     const parts = [
         npc.role && `role: ${npc.role}`,
         npc.goal && `current goal: ${npc.goal}`,
@@ -5546,10 +5573,34 @@ function injectionEssentialBlock(npc, behaviorCap = 160, identityCap = 620, agen
     return `- ${npc.name}: IDENTITY (authoritative): ${identity}; AGENCY/OTHER BONDS: ${agency}; CURRENT STATE: ${currentState}; PLAYER RELATIONSHIP (secondary modifier): ${relationship}`;
 }
 
+const INJECTED_APPEARANCE_LABEL = 'CURRENT VISIBLE APPEARANCE (authoritative anatomy; species/race cannot override the selected form): ';
+const INJECTED_PHYSICAL_LABEL = 'ENDURING PHYSICAL FEATURES (authoritative anatomy): ';
+
+// Appearance is optional continuity, but when the whole current appearance does not fit the
+// remaining budget its enduring physical features still should, so the roleplay model is not left
+// to invent anatomy. Variants are tried in order; the last may be cut at a clause boundary.
+function injectionAppearanceVariants(npc) {
+    const appearance = cleanText(npc.appearance, 1200);
+    if (!appearance) return [];
+    const physical = !npc.currentForm && !npc.currentFormUnknown ? cleanText(npc.overallAppearance, 800) : '';
+    const variants = [`${INJECTED_APPEARANCE_LABEL}${appearance}`];
+    if (physical && normalizeName(physical) !== normalizeName(appearance)) variants.push(`${INJECTED_PHYSICAL_LABEL}${physical}`);
+    return variants;
+}
+
+function clauseBoundedInjection(text, room) {
+    const labelEnd = text.indexOf('): ') + 3;
+    if (room < 80 || labelEnd < 3) return '';
+    const cut = text.slice(0, room);
+    const boundary = Math.max(cut.lastIndexOf('; '), cut.lastIndexOf(', '));
+    return boundary >= labelEnd + 20 ? cut.slice(0, boundary) : '';
+}
+
 function injectionOptionalFields(npc, includeAppearance = false) {
     const importantMemories = cleanList(npc.memories, IMPORTANT_MEMORY_LIMIT, 220);
+    const appearanceVariants = includeAppearance ? injectionAppearanceVariants(npc) : [];
     return [
-        includeAppearance && npc.appearance && `CURRENT VISIBLE APPEARANCE (authoritative anatomy; species/race cannot override the selected form): ${npc.appearance}`,
+        appearanceVariants.length && appearanceVariants,
         includeAppearance && !npc.appearance && (npc.currentForm || npc.currentFormUnknown) && 'Current visible appearance is not established; do not infer anatomy from species or another form.',
         importantMemories.length && `important memories: ${importantMemories.join(' | ')}`,
         npc.species && `species/race: ${npc.species}`,
@@ -5558,6 +5609,7 @@ function injectionOptionalFields(npc, includeAppearance = false) {
         npc.apparentAge && `apparent age: ${npc.apparentAge}`,
         npc.location && `location: ${npc.location}`,
         npc.homeBase && `home base / usual location: ${npc.homeBase}`,
+        npc.background && `background: ${cleanText(npc.background, 320)}`,
     ].filter(Boolean);
 }
 
@@ -5587,10 +5639,13 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
 
     // Identity and agency are structural, not optional enrichment. Drop lower-ranked NPCs before
     // sacrificing the top NPC's personality/voice/mannerisms or non-player goals and bonds.
-    let behaviorCap = 160;
-    let identityCap = 620;
-    let agencyCap = 300;
-    let stateCap = 180;
+    // Section caps grow with the budget above the 1800-token base, so raising the
+    // budget lets a rich dossier arrive whole; tight budgets still shrink them below.
+    const capScale = Math.min(3.6, Math.max(1, budget / INJECTION_CAP_BASE_TOKENS));
+    let behaviorCap = Math.round(Math.min(320, 160 * capScale));
+    let identityCap = Math.round(Math.min(2200, 620 * capScale));
+    let agencyCap = Math.round(Math.min(900, 300 * capScale));
+    let stateCap = Math.round(Math.min(400, 180 * capScale));
     const renderEssentials = () => relevant.map(npc => injectionEssentialBlock(npc, behaviorCap, identityCap, agencyCap, stateCap));
     while (relevant.length > 1 && (header.length + 1 + renderEssentials().join('\n').length) > budgetChars) {
         relevant = relevant.slice(0, -1);
@@ -5635,14 +5690,31 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
     const enriched = essentialBlocks.slice();
     const maxPriority = Math.max(0, ...optionalByNpc.map(fields => fields.length));
     for (let priority = 0; priority < maxPriority; priority++) {
+        // Appearance variants are placed in two passes: every NPC first gets its most compact
+        // anatomy (physical features, or a clause-bounded cut), then full appearances replace them
+        // while room remains, so one long outfit cannot crowd out another NPC's anatomy.
+        const chosen = relevant.map(() => '');
         for (let i = 0; i < relevant.length; i++) {
             const field = optionalByNpc[i][priority];
             if (!field) continue;
-            const addition = `; ${field}`;
-            if ((currentLength + addition.length) <= budgetChars) {
-                enriched[i] += addition;
-                currentLength += addition.length;
-            }
+            const variants = Array.isArray(field) ? field : [field];
+            const compact = variants[variants.length - 1];
+            let pick = (currentLength + 2 + compact.length) <= budgetChars ? compact : '';
+            if (!pick && Array.isArray(field)) pick = clauseBoundedInjection(compact, budgetChars - currentLength - 2);
+            if (!pick) continue;
+            chosen[i] = pick;
+            currentLength += pick.length + 2;
+        }
+        for (let i = 0; i < relevant.length; i++) {
+            const field = optionalByNpc[i][priority];
+            if (!Array.isArray(field) || !chosen[i]) continue;
+            const upgrade = field.find(variant => variant.length > chosen[i].length && (currentLength - chosen[i].length + variant.length) <= budgetChars);
+            if (!upgrade) continue;
+            currentLength += upgrade.length - chosen[i].length;
+            chosen[i] = upgrade;
+        }
+        for (let i = 0; i < relevant.length; i++) {
+            if (chosen[i]) enriched[i] += `; ${chosen[i]}`;
         }
     }
 

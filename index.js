@@ -462,7 +462,7 @@ const DEFAULTS = Object.freeze({
     inject: true,
     injectDepth: 1,
     injectLimit: 3,
-    injectBudgetTokens: 1800,
+    injectBudgetTokens: 4000,
     branchRescan: true,
     presentCastDisplay: 'full',
     relationshipBaseline: { ...DEFAULT_RELATIONSHIP },
@@ -531,7 +531,11 @@ function getSettings() {
     assign('behaviorCriteria', typeof settings.behaviorCriteria === 'string' ? settings.behaviorCriteria : DEFAULT_BEHAVIOR_CRITERIA);
     assign('admissionMode', normalizeNpcAdmissionMode(settings.admissionMode));
     assign('presentCastDisplay', normalizePresentCastDisplay(settings.presentCastDisplay));
-    assign('injectBudgetTokens', Math.max(512, Math.min(6000, Math.round(Number(settings.injectBudgetTokens) || 1800))));
+    // 1.0.70 raised the default budget from 1800 to 4000 tokens. An install still on the old default
+    // is moved once; any value the player chose, including a later deliberate 1800, is kept.
+    const legacyDefaultBudget = settings.injectBudgetDefaultUpgraded !== true && Number(settings.injectBudgetTokens) === 1800;
+    assign('injectBudgetTokens', legacyDefaultBudget ? 4000 : Math.max(512, Math.min(6000, Math.round(Number(settings.injectBudgetTokens) || 4000))));
+    assign('injectBudgetDefaultUpgraded', true);
     assign('fullScanEveryTurn', settings.fullScanEveryTurn === true);
     assign('scannerConnectionProfile', typeof settings.scannerConnectionProfile === 'string' ? settings.scannerConnectionProfile.trim() : '');
     assign('portraitGenerationEnabled', settings.portraitGenerationEnabled !== false);
@@ -3569,7 +3573,7 @@ function buildSettingsHtml() {
         ${settingRow('npc_state_delta_present_cast_display', 'Present NPCs in chat', '<select id="npc_state_delta_present_cast_display" class="text_pole"><option value="full">Full cards</option><option value="compact">Compact strip</option><option value="off">Off</option></select>', 'Shown under the latest reply (or as a Megumin tab). Tapping an NPC opens its dossier. Off adds nothing to the chat; presence tracking and injection are unaffected.')}
         <h4 class="delta-settings-subhead">Generation injection</h4>
         ${settingRow('npc_state_delta_inject', 'Inject present NPC state', '<input id="npc_state_delta_inject" type="checkbox">', 'Only active NPCs present in the latest scanned scene are injected into generation.')}
-        ${settingRow('npc_state_delta_inject_budget', 'Injection budget', numberControl('npc_state_delta_inject_budget', 512, 6000, 'tokens', { step: 100, prefix: '<small>~</small>' }), 'Approximate hard ceiling. Lower-priority fields, then lower-ranked NPCs, are trimmed first.')}
+        ${settingRow('npc_state_delta_inject_budget', 'Injection budget', numberControl('npc_state_delta_inject_budget', 512, 6000, 'tokens', { step: 100, prefix: '<small>~</small>' }), 'Upper limit; only what the present NPCs need is used. The default 4000 lets detailed dossiers reach the roleplay model in full. When it runs short, lower-priority fields, then lower-ranked NPCs, are trimmed first.')}
         <h4 class="delta-settings-subhead">Roster lifecycle</h4>
         ${settingRow('npc_state_delta_max', 'Maximum active NPCs', numberControl('npc_state_delta_max', 1, 100), 'Archived dossiers do not use an active slot.')}
         ${settingRow('npc_state_delta_archive_deaths', 'Archive confirmed deaths', '<input id="npc_state_delta_archive_deaths" type="checkbox">', 'Explicit current-timeline deaths archive instead of deleting. Ambiguous death language is ignored.')}
@@ -5655,7 +5659,7 @@ function bindUi() {
     });
     bindSettingsCheckbox('#npc_state_delta_full_scan_every_turn', 'fullScanEveryTurn');
     bindSettingsCheckbox('#npc_state_delta_inject', 'inject', updateInjection);
-    bindSettingsNumber('#npc_state_delta_inject_budget', 'injectBudgetTokens', 512, 6000, 1800, updateInjection);
+    bindSettingsNumber('#npc_state_delta_inject_budget', 'injectBudgetTokens', 512, 6000, 4000, updateInjection);
     bindSettingsCheckbox('#npc_state_delta_archive_deaths', 'autoArchiveDeaths');
     bindSettingsCheckbox('#npc_state_delta_reactivate_archived', 'autoReactivateArchived');
     bindSettingsCheckbox('#npc_state_delta_branch_rescan', 'branchRescan');
