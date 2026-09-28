@@ -5434,7 +5434,9 @@ export function selectRelevantNpcs(npcs, text, turn = 0, limit = 3, socialGraph 
         .map(item => item.npc);
 }
 
-export const DEFAULT_INJECTION_BUDGET_TOKENS = 1800;
+export const DEFAULT_INJECTION_BUDGET_TOKENS = 4000;
+// Section caps are sized for this budget and grow in proportion above it (see buildInjection).
+const INJECTION_CAP_BASE_TOKENS = 1800;
 export const MIN_INJECTION_BUDGET_TOKENS = 512;
 export const MAX_INJECTION_BUDGET_TOKENS = 6000;
 const APPROX_CHARS_PER_TOKEN = 4;
@@ -5637,9 +5639,9 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
 
     // Identity and agency are structural, not optional enrichment. Drop lower-ranked NPCs before
     // sacrificing the top NPC's personality/voice/mannerisms or non-player goals and bonds.
-    // Section caps grow with the budget (the default budget keeps the original caps), so raising the
+    // Section caps grow with the budget above the 1800-token base, so raising the
     // budget lets a rich dossier arrive whole; tight budgets still shrink them below.
-    const capScale = Math.min(3.6, Math.max(1, budget / DEFAULT_INJECTION_BUDGET_TOKENS));
+    const capScale = Math.min(3.6, Math.max(1, budget / INJECTION_CAP_BASE_TOKENS));
     let behaviorCap = Math.round(Math.min(320, 160 * capScale));
     let identityCap = Math.round(Math.min(2200, 620 * capScale));
     let agencyCap = Math.round(Math.min(900, 300 * capScale));

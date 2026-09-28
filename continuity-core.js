@@ -222,7 +222,7 @@ export function buildNpcPortraitPrompts(rawNpc = {}, options = {}) {
     }, options);
 }
 
-export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria = mechanics.DEFAULT_BEHAVIOR_CRITERIA, budgetTokens = 1800, socialGraph = null) {
+export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria = mechanics.DEFAULT_BEHAVIOR_CRITERIA, budgetTokens = mechanics.DEFAULT_INJECTION_BUDGET_TOKENS, socialGraph = null) {
     const resolved = (Array.isArray(npcs) ? npcs : []).map(npc => ({
         ...normalizeTerminalNpc(npc),
         appearance: resolveNpcAppearance(npc),

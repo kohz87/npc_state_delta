@@ -405,6 +405,15 @@ try {
     eventSource.emit('extension_settings_loaded');
     await sleep(20);
     assert.equal((mockState.listeners.get('message_sent') || []).length, 1, 'lifecycle retries must not duplicate listeners');
+    assert.equal(mockState.extensionSettings.npc_state_delta.injectBudgetTokens, 4000, 'new installs default to a 4000-token injection budget');
+    mockState.extensionSettings.npc_state_delta.injectBudgetTokens = 1800;
+    delete mockState.extensionSettings.npc_state_delta.injectBudgetDefaultUpgraded;
+    globalThis.NPCStateDelta.dataFile(); // any settings read runs the normalizer
+    assert.equal(mockState.extensionSettings.npc_state_delta.injectBudgetTokens, 4000, 'an install still on the old 1800 default moves to 4000 once');
+    mockState.extensionSettings.npc_state_delta.injectBudgetTokens = 1800;
+    globalThis.NPCStateDelta.dataFile();
+    assert.equal(mockState.extensionSettings.npc_state_delta.injectBudgetTokens, 1800, 'a deliberately chosen 1800 budget is kept');
+    mockState.extensionSettings.npc_state_delta.injectBudgetTokens = 4000;
     mockState.extensionSettings.npc_state_delta.relationshipBaseline = { trust: 0, affection: -12, desire: 0, tension: -7 };
     mockState.extensionSettings.npc_state_delta.relationshipCaps = { ordinary: 2, meaningful: 3, major: 9, extreme: 18 };
     mockState.extensionSettings.npc_state_delta.relationshipCriteria = 'Runtime custom relationship rubric.';
