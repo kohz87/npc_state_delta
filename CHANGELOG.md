@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Keep physical features in the roleplay injection when the budget is tight. The current appearance was optional continuity added whole or not at all, so with several present NPCs or a lowered **Injection budget** it silently disappeared and the roleplay model invented anatomy (a dossier's "generous bust" narrated as "small chest"). If the whole current appearance does not fit, an NPC without a selected form now gets its **enduring physical features** (`ENDURING PHYSICAL FEATURES (authoritative anatomy): ...`), and failing that a clause-bounded cut; every present NPC gets its compact anatomy before any NPC's full outfit is added. Essential identity/agency still come first.
+- Stop cutting injected Behavioral Levers to fragments. The injection kept each lever's first three words, so "Independence/Agency: high - refuses help she has not asked for" reached the roleplay model as "high - refuses". Levers now keep the category (first part of a combined label) and as much of the effect as their share of the identity room allows, cut at a word boundary; the lever text is sized to the room the identity section really gives it; and when room is short every category still appears as "Category: level".
+- Request sizes are unchanged; the roleplay injection for the synthetic Stage 9 fixture changes from 2210 to 2209 characters, and the Stage 9 baseline was regenerated.
+
 ## 1.0.69 - 27 September 2026
 
 - Capture enduring physical features in automatic and first-creation scans. The scanner, Refresh, backfill and import prompts defined Appearance as one field ("hair/body, outfit/gear, condition"), so height, build, hair, eyes and ears were stored with the clothes in the current-outfit slot and **Physical features (enduring)** stayed empty. Prompts now ask for `overallAppearance` = enduring body (height/build/hair/eyes/ears/skin/marks) and `appearance` = current outfit/gear/condition, and backfill/import return shapes include the physical field.
