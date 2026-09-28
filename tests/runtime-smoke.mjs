@@ -432,10 +432,23 @@ try {
     await manualAddNpc('Yunyun');
     assert.deepEqual(globalThis.NPCStateDelta.getState().npcs.map(n => n.name), ['Yunyun']);
     assert.equal(inlineAnchors.length, 0, 'manual Add should not bypass presence gating');
+    // The pending player message names Yunyun, so her off-screen dossier joins the next
+    // generation without becoming present.
+    const namedPreview = globalThis.NPCStateDelta.injectionPreview();
+    assert.equal(namedPreview.sending, true, 'an off-screen NPC named by the pending player message is injected');
+    assert.deepEqual(namedPreview.namedByPlayer, ['Yunyun']);
+    assert.deepEqual(namedPreview.injectedNpcs, ['Yunyun']);
+    assert.deepEqual(namedPreview.presentNpcs, [], 'being named does not mark the NPC present');
+    assert.match(namedPreview.text, /- Yunyun \(named by player\): /);
+    assert.equal(globalThis.NPCStateDelta.getState().npcs[0].present, false);
+    mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'I head back to the inn alone.' });
+    eventSource.emit('message_sent', 1);
+    await sleep(20);
     const preview = globalThis.NPCStateDelta.injectionPreview();
-    assert.equal(preview.sending, false, 'an off-screen manual Add is not injected');
+    assert.equal(preview.sending, false, 'an off-screen NPC the pending message does not name is not injected');
     assert.ok(preview.reason.length > 0, 'an empty injection explains why');
     assert.deepEqual(preview.presentNpcs, []);
+    mockState.context.chat.pop();
     await globalThis.NPCStateDelta.flush();
     const pointer = globalThis.NPCStateDelta.dataFile();
     assert.ok(pointer?.path, 'chat state should be persisted to an extension-owned JSON sidecar file');

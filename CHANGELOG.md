@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.0.72 - 28 September 2026
+
+- Send an off-screen NPC's dossier when your message calls her in. Presence came only from scanning AI replies, so if Linnea was absent in message 4 and your message 5 called her over, reply 6 was written without her dossier (her appearance, voice and levers) and could contradict it; she was only included from reply 8. Now, when you send a message, or regenerate/swipe a reply whose scan has not yet run, any off-screen NPC with a dossier whose name, alias or distinctive first name appears in that player message is added to that generation's injection, marked `(named by player)` with a one-line note that she is not yet confirmed on-screen. It is a local name match with no extra model requests. It does not change who is present: the scan of the reply still decides that, and once that reply is scanned she is included or dropped as usual. Archived and confirmed-dead NPCs are never called in. The Diagnostics **Roleplay injection** section lists them as "Named in your latest message". An NPC the model brings in without being named in your message still gets her dossier from the following reply on.
+- Scanner prompts, request counts and persisted formats are unchanged; the injection is byte-identical when no off-screen NPC is named.
+
 ## 1.0.71 - 28 September 2026
 
 - Show what the roleplay model receives. **Diagnostics** now opens with a **Roleplay injection** section: whether the dossier block is being sent, which NPCs it contains, its size against the budget, where it is placed (in chat as a system message, N messages from the end) and the exact text. When nothing is sent it says why: this chat's dossiers are not loaded yet, the extension or **Inject present NPC state** is off, or no NPC is marked present in the latest scanned scene. Previously an empty injection was silent, so a missing dossier could only be found by capturing the provider request. The preview is runtime-only and is not included in the exported diagnostic bundle. `NPCStateDelta.injectionPreview()` returns the same information.
