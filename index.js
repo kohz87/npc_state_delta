@@ -2536,6 +2536,7 @@ async function refreshNpcFromChat(npcId) {
         userName: ctx.name1 || 'User',
         charName: ctx.name2 || 'Character',
         memoryCriteria: settings.memoryCriteria,
+        turn: Number.isInteger(state.turn) ? state.turn : null,
     });
     const scanStateVersion = Number(stateVersions.get(chatKey) || 0);
     const operation = beginScanOperation(chatKey, `chat refresh for ${existing.name}`, { npcId: id, indicator: 'refresh' });
