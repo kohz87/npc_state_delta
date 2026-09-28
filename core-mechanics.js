@@ -5423,6 +5423,19 @@ export function scoreNpcRelevance(npc, text, turn = 0, socialGraph = null, allNp
     return score;
 }
 
+// Name/alias match used to bring an off-screen dossier into the next generation when the
+// player's pending message names that NPC. It never changes presence.
+export function npcNamedInText(npc, text) {
+    const haystack = normalizeName(text);
+    if (!haystack || !npc?.name) return false;
+    for (const label of [npc.name, ...(npc.aliases || [])]) {
+        const needle = normalizeName(label);
+        if (needle && countNormalizedPhrase(haystack, needle) > 0) return true;
+    }
+    const tokens = normalizeName(npc.name).split(/\s+/).filter(Boolean);
+    return tokens.length > 1 && tokens[0].length >= 4 && countNormalizedPhrase(haystack, tokens[0]) > 0;
+}
+
 export function selectRelevantNpcs(npcs, text, turn = 0, limit = 3, socialGraph = null, graphRegistry = null) {
     const all = [...(npcs || [])];
     const registry = Array.isArray(graphRegistry) ? graphRegistry : all;
@@ -5622,20 +5635,24 @@ function compactInjectionBehaviorRubric(criteria, maxChars) {
     return truncateInjectionText(raw, maxChars);
 }
 
-export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria = DEFAULT_BEHAVIOR_CRITERIA, budgetTokens = DEFAULT_INJECTION_BUDGET_TOKENS, socialGraph = null, { includeAppearance = false } = {}) {
-    const present = (npcs || []).filter(npc => Boolean(npc?.present) && !npc?.archived);
+export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria = DEFAULT_BEHAVIOR_CRITERIA, budgetTokens = DEFAULT_INJECTION_BUDGET_TOKENS, socialGraph = null, { includeAppearance = false, namedNpcIds = [] } = {}) {
+    const named = new Set(Array.isArray(namedNpcIds) ? namedNpcIds : []);
+    const calledIn = npc => !npc?.present && named.has(npc?.id);
+    const present = (npcs || []).filter(npc => (Boolean(npc?.present) || calledIn(npc)) && !npc?.archived);
     let relevant = selectRelevantNpcs(present, text, turn, limit, socialGraph, npcs || []);
     if (!relevant.length) return '';
 
     const budget = normalizeInjectionBudgetTokens(budgetTokens);
     const budgetChars = budget * APPROX_CHARS_PER_TOKEN;
-    const header = [
+    const headerFor = () => [
         'NPC STATE DELTA DOSSIER. Only confirmed-present NPCs are included. Treat these as established story facts; never mention the dossier or numeric values.',
         'IDENTITY FIRST / DOMINATES: personality sets identity; behavioral profile translates it into target-general response/decision levers; speech/mannerisms shape expression; goals, duties, morality, independence, other bonds, and CURRENT mood/status determine behavior first.',
         'VOICE FIDELITY: established Speech constrains actual dialogue wording and delivery. Preserve its sentence shape, vocabulary, formality, directness, hedging, cadence, question/explanation style, and recurring verbal habits; do not flatten distinct voices into generic polished prose.',
         'PLAYER RELATIONSHIP IS SECONDARY: it may bias attention, interpretation, openness, tolerance, or willingness toward the player, but need not surface every scene. High scores never mean obedience, universal prioritization, clinginess, jealousy, tsundere behavior, or cruelty toward others.',
         'Temporary mood, stress, intimacy, or player-specific behavior is not global identity. Durable identity changes gradually unless narration explicitly establishes lasting development or a developmental time skip.',
-    ].join('\n');
+        relevant.some(calledIn) && 'Exception: NPCs marked "named by player" are not yet confirmed on-screen; use their dossier if they appear.',
+    ].filter(Boolean).join('\n');
+    let header = headerFor();
 
     // Identity and agency are structural, not optional enrichment. Drop lower-ranked NPCs before
     // sacrificing the top NPC's personality/voice/mannerisms or non-player goals and bonds.
@@ -5646,10 +5663,14 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
     let identityCap = Math.round(Math.min(2200, 620 * capScale));
     let agencyCap = Math.round(Math.min(900, 300 * capScale));
     let stateCap = Math.round(Math.min(400, 180 * capScale));
-    const renderEssentials = () => relevant.map(npc => injectionEssentialBlock(npc, behaviorCap, identityCap, agencyCap, stateCap));
+    const renderEssentials = () => relevant.map(npc => {
+        const block = injectionEssentialBlock(npc, behaviorCap, identityCap, agencyCap, stateCap);
+        return calledIn(npc) ? block.replace(`- ${npc.name}: `, `- ${npc.name} (named by player): `) : block;
+    });
     while (relevant.length > 1 && (header.length + 1 + renderEssentials().join('\n').length) > budgetChars) {
         relevant = relevant.slice(0, -1);
     }
+    header = headerFor();
     let essentialBlocks = renderEssentials();
     while ((header.length + 1 + essentialBlocks.join('\n').length) > budgetChars
         && (behaviorCap > 80 || identityCap > 260 || agencyCap > 140 || stateCap > 100)) {

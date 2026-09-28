@@ -48,6 +48,7 @@ import {
     calibrateRelationshipSummary,
     normalizeNpcAdmissionMode,
     buildInjection,
+    npcNamedInText,
     buildScannerPrompt,
     buildRelationshipPassPrompt,
     buildBackfillPrompt,
@@ -2112,6 +2113,33 @@ function currentExclusions() {
 // Diagnostics can show what the roleplay model actually receives. Runtime-only; never persisted.
 let lastInjection = { text: '', reason: 'Not built yet in this session.', at: 0, chatKey: '' };
 
+// The player message the next generation will answer: the chat tail when it is a user turn, or
+// the user turn before an assistant reply that is not yet reflected by a scan (swipe/regenerate).
+function pendingPlayerMessage(state) {
+    const chat = getContext().chat || [];
+    let tail = chat.length - 1;
+    while (tail >= 0 && chat[tail]?.is_system) tail -= 1;
+    if (tail < 0) return '';
+    if (chat[tail]?.is_user) return cleanMessage(chat[tail]);
+    if (state?.lastScannedMessageId === tail) return '';
+    for (let i = tail - 1; i >= 0; i -= 1) {
+        if (chat[i]?.is_system) continue;
+        return chat[i]?.is_user ? cleanMessage(chat[i]) : '';
+    }
+    return '';
+}
+
+// Off-screen dossiers the player's pending message names. They join the next generation's
+// injection so an NPC entering at the player's call keeps her dossier; presence is still
+// decided by the scan of the reply.
+function namedByPlayerNpcIds(state) {
+    const message = pendingPlayerMessage(state);
+    if (!message) return [];
+    return (state?.npcs || [])
+        .filter(npc => npc && !npc.present && !npc.archived && !isTerminalNpcDeath(npc) && npcNamedInText(npc, message))
+        .map(npc => npc.id);
+}
+
 function updateInjection() {
     const settings = getSettings();
     const ctx = getContext();
@@ -2128,7 +2156,8 @@ function updateInjection() {
     if (!settings.enabled) return clear('NPC State Delta is disabled.');
     if (!settings.inject) return clear('"Inject present NPC state" is off.');
     const state = getChatState();
-    const prompt = buildInjection(state.npcs, recentTranscript(4), state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph);
+    const namedNpcIds = namedByPlayerNpcIds(state);
+    const prompt = buildInjection(state.npcs, recentTranscript(4), state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds });
     const present = (state.npcs || []).filter(npc => npc?.present && !npc?.archived);
     const depth = Math.max(0, Math.min(20, Number(settings.injectDepth) || 1));
     lastInjection = {
@@ -2137,6 +2166,7 @@ function updateInjection() {
         at: Date.now(),
         chatKey: injectionKey,
         depth,
+        namedByPlayer: (state.npcs || []).filter(npc => namedNpcIds.includes(npc.id)).map(npc => npc.name),
     };
     ctx.setExtensionPrompt?.(
         PROMPT_KEY,
@@ -2152,13 +2182,15 @@ function injectionPreview() {
     const settings = getSettings();
     const state = getChatKey() === 'no-chat' ? { npcs: [] } : getChatState();
     const text = String(lastInjection.text || '');
+    const injectedNpcs = text.split('\n').filter(line => line.startsWith('- ')).map(line => line.slice(2).split(':')[0].replace(/ \(named by player\)$/, ''));
     return {
         sending: Boolean(text),
         reason: lastInjection.reason || '',
         placement: `In chat as a system message, ${lastInjection.depth ?? (Number(settings.injectDepth) || 1)} message(s) from the end`,
         builtAt: lastInjection.at ? new Date(lastInjection.at).toISOString() : '',
         presentNpcs: (state.npcs || []).filter(npc => npc?.present && !npc?.archived).map(npc => npc.name),
-        injectedNpcs: text.split('\n').filter(line => line.startsWith('- ')).map(line => line.slice(2).split(':')[0]),
+        namedByPlayer: (lastInjection.namedByPlayer || []).filter(name => injectedNpcs.includes(name)),
+        injectedNpcs,
         chars: text.length,
         estimatedTokens: Math.ceil(text.length / 4),
         budgetTokens: Number(settings.injectBudgetTokens) || 0,
@@ -6169,8 +6201,17 @@ function registerEvents() {
             if (key === 'no-chat') return;
             try { await ensureChatStateLoaded(key); } catch (error) { console.error('[NPC State Delta] user-turn lineage update skipped because chat hydration failed.', error); return; }
             if (getChatKey() !== key) return;
-            // This listener only maintains branch lineage; text never dispatches mutations.
+            // This listener maintains branch lineage and refreshes the injection so an off-screen NPC
+            // the player names reaches this generation; text never dispatches mutations.
             getChatState().lineage = chatLineage(getContext().chat || []);
+            updateInjection();
+        });
+    }
+    // Regenerate/swipe/continue answer an existing player turn without MESSAGE_SENT.
+    if (events.GENERATION_AFTER_COMMANDS) {
+        source.on(events.GENERATION_AFTER_COMMANDS, (type, _options, dryRun) => {
+            if (dryRun || type === 'quiet' || getChatKey() === 'no-chat') return;
+            updateInjection();
         });
     }
 

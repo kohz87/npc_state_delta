@@ -175,7 +175,7 @@ function injectionPreviewHtml() {
         : `Nothing is being sent. ${preview.reason}`;
     return `<section><h3>Roleplay injection (sent with each generation)</h3>
           <p class="${preview.sending ? '' : 'delta-tools-warning'}">${escapeHtml(summary)}</p>
-          <small>${escapeHtml(preview.placement)}. Present NPCs: ${escapeHtml(preview.presentNpcs.join(', ') || 'none')}.${preview.builtAt ? ` Built ${escapeHtml(preview.builtAt)}.` : ''}</small>
+          <small>${escapeHtml(preview.placement)}. Present NPCs: ${escapeHtml(preview.presentNpcs.join(', ') || 'none')}.${preview.namedByPlayer?.length ? ` Named in your latest message (sent for this reply only): ${escapeHtml(preview.namedByPlayer.join(', '))}.` : ''}${preview.builtAt ? ` Built ${escapeHtml(preview.builtAt)}.` : ''}</small>
           ${preview.sending ? `<pre>${escapeHtml(preview.text)}</pre>` : ''}
         </section>`;
 }

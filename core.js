@@ -1493,9 +1493,9 @@ export function buildNpcPortraitPrompts(rawNpc = {}, options = {}) {
     return continuity.buildNpcPortraitPrompts(calendarNpcProjection(rawNpc), options);
 }
 
-export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria = mechanics.DEFAULT_BEHAVIOR_CRITERIA, budgetTokens = mechanics.DEFAULT_INJECTION_BUDGET_TOKENS, socialGraph = null) {
+export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria = mechanics.DEFAULT_BEHAVIOR_CRITERIA, budgetTokens = mechanics.DEFAULT_INJECTION_BUDGET_TOKENS, socialGraph = null, options = {}) {
     const projected = (Array.isArray(npcs) ? npcs : []).map(npc => calendarNpcProjection(npc));
-    return continuity.buildInjection(projected, text, turn, limit, behaviorCriteria, budgetTokens, socialGraph);
+    return continuity.buildInjection(projected, text, turn, limit, behaviorCriteria, budgetTokens, socialGraph, options);
 }
 
 export function buildScannerPrompt(options = {}) {
@@ -1513,4 +1513,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.71';
+export const NPC_STATE_VERSION = '1.0.72';
