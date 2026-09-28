@@ -40,6 +40,11 @@ const PROFILE_DEVELOPMENT_CONCEPT_LIMIT = 4;
 const PROFILE_DEVELOPMENT_OBSERVATION_LIMIT = 4;
 const PROFILE_DEVELOPMENT_READY_COUNT = 3;
 const PROFILE_DEVELOPMENT_MIN_SPAN = 2;
+// A slow Personality change seen in two scenes far apart is development, not one scene's mood,
+// so two observations suffice once they are this far apart; close together it still needs three.
+const PERSONALITY_SPREAD_READY_COUNT = 2;
+const PERSONALITY_SPREAD_MIN_MESSAGES = 20;
+const PERSONALITY_SPREAD_MIN_TURNS = 10;
 const PROFILE_DEVELOPMENT_FIELDS = Object.freeze({
     personality: Object.freeze({ ledgerKey: 'personalityDevelopment', baselineKey: 'baselinePersonality' }),
     speech: Object.freeze({ ledgerKey: 'speechDevelopment', baselineKey: 'baselineSpeech' }),
@@ -269,7 +274,10 @@ function parseProfileDevelopmentEvidence(field, value) {
     if (!text) return null;
     const labeled = text.match(/^([\p{L}\p{N}][\p{L}\p{N} _\-/]{1,48})\s*:\s*(.+)$/u);
     const explicitConcept = labeled ? mechanics.normalizeName(labeled[1]).slice(0, 60) : '';
-    const body = profileDevelopmentText(field, labeled ? labeled[2] : text, mechanics.DURABLE_PROFILE_LIMITS.evidence);
+    // A Speech label is the style claim and a quoted line only illustrates it, so the label stays
+    // in the body; a bare quote could never ground a description of how the NPC speaks.
+    const quotedSpeech = field === 'speech' && labeled && /^["“‘'].*["”’']\W*$/u.test(labeled[2].trim());
+    const body = profileDevelopmentText(field, quotedSpeech ? `${labeled[1].trim()} (${labeled[2].trim()})` : (labeled ? labeled[2] : text), mechanics.DURABLE_PROFILE_LIMITS.evidence);
     const concept = explicitConcept || mechanics.normalizeName(body).slice(0, 60);
     return body && concept ? { concept, explicitConcept, body, sourceMessageId } : null;
 }
@@ -478,19 +486,30 @@ function observeProfileDevelopment(field, ledger, rawUpdate = {}, options = {}) 
     return next;
 }
 
-function profileDevelopmentConceptReady(record = {}) {
-    if (Number(record.observationCount || 0) < PROFILE_DEVELOPMENT_READY_COUNT) return false;
+function developmentReadyCount(field, sourceIds = [], turns = []) {
+    if (field !== 'personality') return PROFILE_DEVELOPMENT_READY_COUNT;
+    const span = values => (values.length >= 2 ? values[values.length - 1] - values[0] : 0);
+    return span(sourceIds) >= PERSONALITY_SPREAD_MIN_MESSAGES || span(turns) >= PERSONALITY_SPREAD_MIN_TURNS
+        ? PERSONALITY_SPREAD_READY_COUNT
+        : PROFILE_DEVELOPMENT_READY_COUNT;
+}
+
+function profileDevelopmentConceptReady(record = {}, field = '') {
+    const sourceIds = [...new Set((record.sourceMessageIds || []).map(profileDevelopmentSourceMessageId).filter(value => value !== null))]
+        .sort((a, b) => a - b);
+    const turns = [...new Set((record.turns || []).map(profileDevelopmentTurn).filter(value => value !== null))]
+        .sort((a, b) => a - b);
+    const required = developmentReadyCount(field, sourceIds, turns);
+    if (Number(record.observationCount || 0) < required) return false;
     const firstTurn = profileDevelopmentTurn(record.firstTurn);
     const lastTurn = profileDevelopmentTurn(record.lastTurn);
     const turnReady = firstTurn !== null && lastTurn !== null && lastTurn - firstTurn >= PROFILE_DEVELOPMENT_MIN_SPAN;
-    const sourceIds = [...new Set((record.sourceMessageIds || []).map(profileDevelopmentSourceMessageId).filter(value => value !== null))]
-        .sort((a, b) => a - b);
-    const sourceReady = sourceIds.length >= PROFILE_DEVELOPMENT_READY_COUNT
+    const sourceReady = sourceIds.length >= required
         && sourceIds[sourceIds.length - 1] - sourceIds[0] >= PROFILE_DEVELOPMENT_MIN_SPAN;
     return turnReady || sourceReady;
 }
 
-function aggregateProfileDevelopmentEvidence(ledger = {}) {
+function aggregateProfileDevelopmentEvidence(ledger = {}, field = '') {
     const groups = new Map();
     const sourceIds = new Set();
     const turns = new Set();
@@ -516,12 +535,14 @@ function aggregateProfileDevelopmentEvidence(ledger = {}) {
     }
     const orderedSources = [...sourceIds].sort((a, b) => a - b);
     const orderedTurns = [...turns].sort((a, b) => a - b);
-    const sourceReady = orderedSources.length >= PROFILE_DEVELOPMENT_READY_COUNT
+    const required = developmentReadyCount(field, orderedSources, orderedTurns);
+    const sourceReady = orderedSources.length >= required
         && orderedSources.at(-1) - orderedSources[0] >= PROFILE_DEVELOPMENT_MIN_SPAN;
-    const turnReady = orderedTurns.length >= PROFILE_DEVELOPMENT_READY_COUNT
+    const turnReady = orderedTurns.length >= required
         && orderedTurns.at(-1) - orderedTurns[0] >= PROFILE_DEVELOPMENT_MIN_SPAN;
     return {
-        ready: groups.size >= PROFILE_DEVELOPMENT_READY_COUNT && (sourceReady || turnReady),
+        ready: groups.size >= required && (sourceReady || turnReady),
+        required,
         count: groups.size,
         groups: [...groups.values()].map(values => values.join(' ')).filter(Boolean),
         sourceMessageIds: orderedSources,
@@ -546,7 +567,7 @@ function readyProfileDevelopmentRecords(field, ledger, rawUpdate = {}) {
     const current = profileDevelopmentEvidence(field, rawUpdate)
         .map(item => parseProfileDevelopmentEvidence(field, item)).filter(Boolean);
     if (!current.length) return [];
-    return (ledger?.concepts || []).filter(record => profileDevelopmentConceptReady(record)
+    return (ledger?.concepts || []).filter(record => profileDevelopmentConceptReady(record, field)
         && current.some(parsed => developmentRecordMatches(record, parsed)));
 }
 
@@ -621,7 +642,7 @@ function prepareProfileDevelopmentState(state, scanResult, options = {}) {
                     evidence: evidence.map(item => parseProfileDevelopmentEvidence(field, item)).filter(Boolean),
                     beforeValue: profileDevelopmentText(field, rawNpc?.[field]),
                     readyRecords: ledger && !locked ? readyProfileDevelopmentRecords(field, ledger, update || {}) : [],
-                    aggregateEvidence: ledger && !locked ? aggregateProfileDevelopmentEvidence(ledger) : { ready: false, count: 0, groups: [], sourceMessageIds: [], turns: [] },
+                    aggregateEvidence: ledger && !locked ? aggregateProfileDevelopmentEvidence(ledger, field) : { ready: false, count: 0, groups: [], sourceMessageIds: [], turns: [] },
                     singleTargetUpdate,
                     otherLabels: (Array.isArray(state?.npcs) ? state.npcs : [])
                         .filter(other => String(other?.id || '') !== String(rawNpc?.id || ''))
@@ -1223,7 +1244,7 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
             authority: observationalScale ? 'model-observed' : 'observational',
             readinessPath: candidateSupport ? 'speech-candidate-support' : 'concept',
             changeClass: candidateSupport?.changeClass || null,
-            requiredObservations: candidateSupport?.requiredObservations || PROFILE_DEVELOPMENT_READY_COUNT,
+            requiredObservations: candidateSupport?.requiredObservations || plan.aggregateEvidence?.required || PROFILE_DEVELOPMENT_READY_COUNT,
             supportingGroups: candidateSupport?.supportingGroups || 0,
         });
         if (ledger) npc[config.ledgerKey] = ledger;
@@ -1234,7 +1255,7 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
             ...diagnosticBase,
             aggregateFallback,
             readinessPath: candidateBridgeReady ? 'speech-candidate-support' : (aggregateFallback ? 'aggregate' : 'concept'),
-            requiredObservations: candidateSupport?.requiredObservations || PROFILE_DEVELOPMENT_READY_COUNT,
+            requiredObservations: candidateSupport?.requiredObservations || plan.aggregateEvidence?.required || PROFILE_DEVELOPMENT_READY_COUNT,
         });
         npc[config.ledgerKey] = ledger;
         return npc;
@@ -1284,7 +1305,7 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
     const modelAuthorized = state === 'evolve' && Boolean(reason);
     const conceptCandidateGrounded = mechanics.durableProfileEvolutionCandidateGrounded(field, currentValue, proposed, groundingEvidence);
     const aggregateCandidateGrounded = aggregateFallback
-        ? mechanics.durableProfileAggregateCandidateGrounded(field, currentValue, proposed, plan.aggregateEvidence?.groups || [])
+        ? mechanics.durableProfileAggregateCandidateGrounded(field, currentValue, proposed, plan.aggregateEvidence?.groups || [], plan.aggregateEvidence?.required)
         : false;
     const bridgeCandidateGrounded = candidateBridgeReady ? Boolean(candidateSupport?.grounded) : false;
     if ((candidateBridgeReady && !bridgeCandidateGrounded)
@@ -1296,7 +1317,7 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
             aggregateFallback,
             readinessPath: candidateBridgeReady ? 'speech-candidate-support' : (aggregateFallback ? 'aggregate' : 'concept'),
             changeClass: candidateSupport?.changeClass || null,
-            requiredObservations: candidateSupport?.requiredObservations || PROFILE_DEVELOPMENT_READY_COUNT,
+            requiredObservations: candidateSupport?.requiredObservations || plan.aggregateEvidence?.required || PROFILE_DEVELOPMENT_READY_COUNT,
             supportingGroups: candidateSupport?.supportingGroups || 0,
         });
         npc[config.ledgerKey] = ledger;
@@ -1319,7 +1340,7 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
             authority: observationalScale ? 'model-observed' : 'observational',
             readinessPath: candidateBridgeReady ? 'speech-candidate-support' : (aggregateFallback ? 'aggregate' : 'concept'),
             changeClass: candidateSupport?.changeClass || null,
-            requiredObservations: candidateSupport?.requiredObservations || PROFILE_DEVELOPMENT_READY_COUNT,
+            requiredObservations: candidateSupport?.requiredObservations || plan.aggregateEvidence?.required || PROFILE_DEVELOPMENT_READY_COUNT,
             supportingGroups: candidateSupport?.supportingGroups || 0,
         });
     return npc;
@@ -1513,4 +1534,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.72';
+export const NPC_STATE_VERSION = '1.0.73';
