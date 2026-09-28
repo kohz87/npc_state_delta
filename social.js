@@ -175,6 +175,19 @@ function preserveUnstructuredRelationshipText(value) {
     return words.length > 0 && words.length <= 8;
 }
 
+// A relation names only the relation. Scanners sometimes fold the dynamic in after a pipe
+// ("cousin | endures her scolding") while also returning it as the dynamic; split it back out so
+// the graph never stores it in the relation and projection never prints it twice.
+function splitRelationDynamic(value) {
+    const text = normalizedWhitespace(value);
+    const pipe = text.indexOf('|');
+    return pipe < 0 ? { relation: text, dynamic: '' } : { relation: text.slice(0, pipe), dynamic: text.slice(pipe + 1) };
+}
+
+function withFoldedDynamic(dynamic, folded) {
+    return folded ? richer(dynamic, folded) : cleanDynamic(dynamic, SOCIAL_DYNAMIC_MAX_CHARS);
+}
+
 function sanitizeRelationshipRelation(subject, value) {
     let relation = cleanBoundary(value, 180, { ellipsis: false });
     if (!relation) return '';
@@ -234,6 +247,10 @@ function mergeRelations(a, b) {
     const ln = norm(left);
     const rn = norm(right);
     if (ln === rn) return relationSpecificity(right) >= relationSpecificity(left) ? right : left;
+    // A gender-neutral inverse ("aunt / uncle") never replaces the specific relation it covers.
+    const slashParts = value => value.split(/\s*\/\s*/).map(norm).filter(Boolean);
+    if (slashParts(right).length > 1 && slashParts(right).includes(ln)) return left;
+    if (slashParts(left).length > 1 && slashParts(left).includes(rn)) return right;
     if (ln.includes(rn)) return left;
     if (rn.includes(ln)) return right;
     const lf = socialRelationFamily(left);
@@ -272,11 +289,12 @@ export function parseKeyRelationshipEntry(value) {
 
 function formatKeyRelationship(subject, relation, dynamic = '', counterpart = null) {
     const who = cleanBoundary(subject, 120, { ellipsis: false });
-    const rel = sanitizeRelationshipRelation(who, relation);
+    const split = splitRelationDynamic(relation);
+    const rel = sanitizeRelationshipRelation(who, split.relation);
     if (!who || !rel) return '';
     const base = `${who} — ${rel}`;
     const availableDynamic = Math.max(0, Math.min(SOCIAL_DYNAMIC_MAX_CHARS, SOCIAL_KEY_RELATIONSHIP_MAX_CHARS - base.length - 3));
-    let dyn = availableDynamic > 0 ? cleanDynamic(dynamic, availableDynamic) : '';
+    let dyn = availableDynamic > 0 ? cleanDynamic(withFoldedDynamic(dynamic, split.dynamic), availableDynamic) : '';
     if (counterpart?.lifeState === 'deceased' && !/\b(?:deceased|dead|late)\b/i.test(`${rel} ${dyn}`)) {
         dyn = cleanDynamic(dyn ? `${dyn}; deceased` : 'deceased', availableDynamic);
     }
@@ -314,9 +332,10 @@ function normalizeEdge(raw = {}) {
     const aId = clean(raw.aId ?? raw.a_id, 100);
     const bId = clean(raw.bId ?? raw.b_id, 100);
     if (!aId || !bId || aId === bId) return null;
-    const aToB = sanitizeRelationshipRelation('', raw.aToB ?? raw.a_to_b ?? raw.relation);
-    const bToAInput = raw.bToA ?? raw.b_to_a ?? raw.reverseRelation;
-    const bToA = sanitizeRelationshipRelation('', bToAInput) || inverseSocialRelation(aToB);
+    const aSplit = splitRelationDynamic(raw.aToB ?? raw.a_to_b ?? raw.relation);
+    const bSplit = splitRelationDynamic(raw.bToA ?? raw.b_to_a ?? raw.reverseRelation);
+    const aToB = sanitizeRelationshipRelation('', aSplit.relation);
+    const bToA = sanitizeRelationshipRelation('', bSplit.relation) || inverseSocialRelation(aToB);
     if (!aToB && !bToA) return null;
     const confidence = clean(raw.confidence, 40) || 'migration';
     return {
@@ -325,8 +344,8 @@ function normalizeEdge(raw = {}) {
         bId,
         aToB,
         bToA,
-        aDynamic: cleanDynamic(raw.aDynamic ?? raw.a_dynamic, SOCIAL_DYNAMIC_MAX_CHARS),
-        bDynamic: cleanDynamic(raw.bDynamic ?? raw.b_dynamic, SOCIAL_DYNAMIC_MAX_CHARS),
+        aDynamic: withFoldedDynamic(raw.aDynamic ?? raw.a_dynamic, aSplit.dynamic),
+        bDynamic: withFoldedDynamic(raw.bDynamic ?? raw.b_dynamic, bSplit.dynamic),
         provenance: clean(raw.provenance, 40) || 'migration',
         confidence,
         reason: clean(raw.reason ?? raw.evidence, 300),
@@ -598,10 +617,12 @@ function parseScanEdges(scanResult = {}, npcs = [], meta = {}) {
         const a = resolveNpcReference(npcs, item?.aId ?? item?.a_id ?? item?.a ?? item?.from ?? item?.source ?? '');
         const b = resolveNpcReference(npcs, item?.bId ?? item?.b_id ?? item?.b ?? item?.to ?? item?.target ?? '');
         if (!a || !b || a.id === b.id) continue;
-        let aToB = sanitizeRelationshipRelation(a.name, item?.aToB ?? item?.a_to_b ?? item?.fromTo ?? item?.from_to ?? item?.relation ?? item?.relationship);
-        let bToA = sanitizeRelationshipRelation(b.name, item?.bToA ?? item?.b_to_a ?? item?.toFrom ?? item?.to_from ?? item?.reverseRelation ?? item?.reverse_relation) || inverseSocialRelation(aToB);
-        let aDynamic = cleanDynamic(item?.aDynamic ?? item?.a_dynamic ?? item?.fromDynamic ?? item?.dynamic, SOCIAL_DYNAMIC_MAX_CHARS);
-        let bDynamic = cleanDynamic(item?.bDynamic ?? item?.b_dynamic ?? item?.toDynamic, SOCIAL_DYNAMIC_MAX_CHARS);
+        const aSplit = splitRelationDynamic(item?.aToB ?? item?.a_to_b ?? item?.fromTo ?? item?.from_to ?? item?.relation ?? item?.relationship);
+        const bSplit = splitRelationDynamic(item?.bToA ?? item?.b_to_a ?? item?.toFrom ?? item?.to_from ?? item?.reverseRelation ?? item?.reverse_relation);
+        let aToB = sanitizeRelationshipRelation(a.name, aSplit.relation);
+        let bToA = sanitizeRelationshipRelation(b.name, bSplit.relation) || inverseSocialRelation(aToB);
+        let aDynamic = withFoldedDynamic(item?.aDynamic ?? item?.a_dynamic ?? item?.fromDynamic ?? item?.dynamic, aSplit.dynamic);
+        let bDynamic = withFoldedDynamic(item?.bDynamic ?? item?.b_dynamic ?? item?.toDynamic, bSplit.dynamic);
         if (!aToB && !bToA) continue;
         const aEstablished = establishedCounterpartRelation(a, b, npcs);
         const bEstablished = establishedCounterpartRelation(b, a, npcs);

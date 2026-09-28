@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Stop Important Bonds repeating their description ("Clara — cousin | endures her harsh scolding… | endures her harsh scolding…"). Scanners sometimes fold the bond dynamic into the relation (`aToB: "cousin | endures…"`) while also returning it as the dynamic. The social graph kept the pipe inside the relation, and every reconciliation merged the stored "cousin" into the longer "cousin | endures…" relation and then appended the dynamic again. Edge normalisation and scanner-edge parsing now split anything after a pipe out of the relation into the dynamic, and bond formatting does the same, so existing affected graphs are repaired on load without losing the description.
+- Keep a specific relation when it meets its own gender-neutral inverse. A stored "Vena — aunt" merged with the inverse derived from the other dossier ("aunt / uncle") and widened to "aunt / uncle" (and "niece" to "niece / nephew"); the specific relation now wins.
+
 ## 1.0.73 - 28 September 2026
 
 - Record Speech evidence as a style, not a bare quote. Scans stored quoted lines ("The ground gives more than it takes.") as Speech evidence. Every quote is unique and shares no words with a description like "speaks in formal aphorisms", so even three scenes of the same voice could never support a Speech change. The scanner and Refresh prompts now ask for the named style with an optional quote (`formal aphorisms: "…"`), and a label followed only by a quote keeps the label as part of the evidence (`formal aphorisms ("…")`), so repeated scenes accumulate under one concept and ground the new description. Bare quotes still cannot ground a Speech change.
