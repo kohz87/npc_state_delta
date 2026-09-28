@@ -167,9 +167,12 @@ function relationshipSubjectLooksStructured(value) {
     return !/^(?:supports?|provides?|raises?|feeds?|dresses?|guides?|works?|serves?|helps?|keeps?|uses?|lives?|died|dies|has|had|is|was|were|remains?|cares?)\b/i.test(subject);
 }
 
+// A bare life-state word is a fragment split off a bond ("…; deceased"), never a bond itself.
+const ORPHAN_LIFE_STATE = /^\(?(?:deceased|dead|late|departed)\)?\.?$/i;
+
 function preserveUnstructuredRelationshipText(value) {
     const text = clean(value, 420);
-    if (!text || /[.!?]\s*$/.test(text)) return false;
+    if (!text || /[.!?]\s*$/.test(text) || ORPHAN_LIFE_STATE.test(text)) return false;
     if (/^(?:supports?|provides?|raises?|feeds?|dresses?|guides?|works?|serves?|helps?|keeps?|uses?|lives?|died|dies|has|had|is|was|were|remains?|cares?)\b/i.test(text)) return false;
     const words = norm(text).split(/\s+/).filter(Boolean);
     return words.length > 0 && words.length <= 8;
@@ -182,6 +185,18 @@ function splitRelationDynamic(value) {
     const text = normalizedWhitespace(value);
     const pipe = text.indexOf('|');
     return pipe < 0 ? { relation: text, dynamic: '' } : { relation: text.slice(0, pipe), dynamic: text.slice(pipe + 1) };
+}
+
+// An inverse derived without gender reads "aunt / uncle"; once the counterpart's gender is known
+// the bond names the one that applies.
+const GENDERED_RELATION_PAIRS = [['aunt', 'uncle'], ['niece', 'nephew']];
+
+function genderedRelation(relation, counterpart = null) {
+    const gender = String(counterpart?.gender || '').toLowerCase();
+    if (!relation || (gender !== 'female' && gender !== 'male')) return relation;
+    const parts = relation.split(/\s*\/\s*/).map(norm);
+    const pair = GENDERED_RELATION_PAIRS.find(([f, m]) => parts.length === 2 && parts.includes(f) && parts.includes(m));
+    return pair ? pair[gender === 'female' ? 0 : 1] : relation;
 }
 
 function withFoldedDynamic(dynamic, folded) {
@@ -290,7 +305,7 @@ export function parseKeyRelationshipEntry(value) {
 function formatKeyRelationship(subject, relation, dynamic = '', counterpart = null) {
     const who = cleanBoundary(subject, 120, { ellipsis: false });
     const split = splitRelationDynamic(relation);
-    const rel = sanitizeRelationshipRelation(who, split.relation);
+    const rel = genderedRelation(sanitizeRelationshipRelation(who, split.relation), counterpart);
     if (!who || !rel) return '';
     const base = `${who} — ${rel}`;
     const availableDynamic = Math.max(0, Math.min(SOCIAL_DYNAMIC_MAX_CHARS, SOCIAL_KEY_RELATIONSHIP_MAX_CHARS - base.length - 3));
@@ -305,7 +320,7 @@ export function compactSocialKeyRelationship(value) {
     const text = normalizedWhitespace(value);
     if (!text) return '';
     const parsed = parseKeyRelationshipEntry(text);
-    if (!parsed) return cleanBoundary(text, SOCIAL_KEY_RELATIONSHIP_MAX_CHARS);
+    if (!parsed) return ORPHAN_LIFE_STATE.test(text) ? '' : cleanBoundary(text, SOCIAL_KEY_RELATIONSHIP_MAX_CHARS);
     return formatKeyRelationship(parsed.subject, parsed.relation, parsed.dynamic);
 }
 
