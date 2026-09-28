@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.74 - 28 September 2026
+
 - Stop Important Bonds repeating their description ("Clara — cousin | endures her harsh scolding… | endures her harsh scolding…"). Scanners sometimes fold the bond dynamic into the relation (`aToB: "cousin | endures…"`) while also returning it as the dynamic. The social graph kept the pipe inside the relation, and every reconciliation merged the stored "cousin" into the longer "cousin | endures…" relation and then appended the dynamic again. Edge normalisation and scanner-edge parsing now split anything after a pipe out of the relation into the dynamic, and bond formatting does the same, so existing affected graphs are repaired on load without losing the description.
 - Keep a specific relation when it meets its own gender-neutral inverse. A stored "Vena — aunt" merged with the inverse derived from the other dossier ("aunt / uncle") and widened to "aunt / uncle" (and "niece" to "niece / nephew"); the specific relation now wins.
 
