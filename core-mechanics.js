@@ -5529,7 +5529,7 @@ function injectionIdentityCore(npc, identityCap = 540) {
     // fields take at most an equal share and the levers get the rest (never more than 300 chars).
     const fairShare = Math.floor(identityCap / (others.length + 1));
     const leverRoom = identityCap - others.reduce((sum, part) => sum + Math.min(part.length, fairShare) + 2, 0) - 'behavioral profile: '.length;
-    const leverCap = Math.min(300, Math.max(fairShare - 'behavioral profile: '.length, leverRoom));
+    const leverCap = Math.min(1100, Math.max(fairShare - 'behavioral profile: '.length, leverRoom));
     const parts = [
         others[0] && others[0].startsWith('personality:') ? others[0] : '',
         npc.behaviorProfile?.length && `behavioral profile: ${compactBehaviorProfileForInjection(npc.behaviorProfile, leverCap)}`,
@@ -5539,7 +5539,7 @@ function injectionIdentityCore(npc, identityCap = 540) {
 }
 
 function injectionAgencyCore(npc, agencyCap = 260) {
-    const bonds = cleanList(npc.keyRelationships, Math.min(3, KEY_RELATIONSHIP_LIMIT), 150);
+    const bonds = cleanList(npc.keyRelationships, agencyCap >= 450 ? KEY_RELATIONSHIP_LIMIT : Math.min(3, KEY_RELATIONSHIP_LIMIT), 150);
     const parts = [
         npc.role && `role: ${npc.role}`,
         npc.goal && `current goal: ${npc.goal}`,
@@ -5607,6 +5607,7 @@ function injectionOptionalFields(npc, includeAppearance = false) {
         npc.apparentAge && `apparent age: ${npc.apparentAge}`,
         npc.location && `location: ${npc.location}`,
         npc.homeBase && `home base / usual location: ${npc.homeBase}`,
+        npc.background && `background: ${cleanText(npc.background, 320)}`,
     ].filter(Boolean);
 }
 
@@ -5636,10 +5637,13 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
 
     // Identity and agency are structural, not optional enrichment. Drop lower-ranked NPCs before
     // sacrificing the top NPC's personality/voice/mannerisms or non-player goals and bonds.
-    let behaviorCap = 160;
-    let identityCap = 620;
-    let agencyCap = 300;
-    let stateCap = 180;
+    // Section caps grow with the budget (the default budget keeps the original caps), so raising the
+    // budget lets a rich dossier arrive whole; tight budgets still shrink them below.
+    const capScale = Math.min(3.6, Math.max(1, budget / DEFAULT_INJECTION_BUDGET_TOKENS));
+    let behaviorCap = Math.round(Math.min(320, 160 * capScale));
+    let identityCap = Math.round(Math.min(2200, 620 * capScale));
+    let agencyCap = Math.round(Math.min(900, 300 * capScale));
+    let stateCap = Math.round(Math.min(400, 180 * capScale));
     const renderEssentials = () => relevant.map(npc => injectionEssentialBlock(npc, behaviorCap, identityCap, agencyCap, stateCap));
     while (relevant.length > 1 && (header.length + 1 + renderEssentials().join('\n').length) > budgetChars) {
         relevant = relevant.slice(0, -1);

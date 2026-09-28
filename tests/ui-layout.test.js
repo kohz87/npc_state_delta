@@ -137,7 +137,7 @@ test('roster exposes present versus current off-screen World State activity', ()
 test('generation injection budget is player-configurable in settings', () => {
     assert.match(index, /npc_state_delta_inject_budget/);
     assert.match(index, /Injection budget/);
-    assert.match(index, /Approximate hard ceiling/);
+    assert.match(index, /Upper limit; only what the present NPCs need is used/);
 });
 
 

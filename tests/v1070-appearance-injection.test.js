@@ -66,3 +66,24 @@ test('injected levers keep their effect when there is room, and every category w
     const elin = line(tight, 'Elin') || line(tight, 'Kora') || line(tight, 'Tam');
     for (const category of ['Independence: high', 'Threat Sensitivity: high', 'Loyalty: fierce']) assert.ok(elin.includes(category), `${category} in ${elin}`);
 });
+
+test('a larger injection budget lets a detailed dossier arrive whole; the default budget is unchanged', () => {
+    const rich = npc('Elin');
+    Object.assign(rich, {
+        personality: 'Guarded, quietly proud and fiercely self-reliant; hides exhaustion behind brisk competence and distrusts kindness that seems to want something back. Loyal to the few who earn it, sharp-tongued when cornered, secretly homesick for the southern forest.',
+        speech: 'Short, clipped sentences with a soft southern forest lilt; answers questions with questions when uneasy; drops into formal elven phrasing when angry or frightened.',
+        behaviorProfile: ['Threat Sensitivity: high - reads every stranger for danger before relaxing', 'Conflict/Assertiveness: guarded - deflects with sarcasm, holds her ground when cornered', 'Independence/Agency: high - refuses help she has not asked for', 'Care/Warmth: practical - helps through work, not words', 'Loyalty: fierce - stands by the few who earn it', 'Honesty/Candor: blunt - says what she thinks when safe'],
+        mannerisms: ['Tucks loose hair behind a pointed ear when thinking', 'Flexes aching wrists after heavy lifting', 'Glances at exits when a room fills', 'Hums forest songs under her breath while working'],
+        keyRelationships: ['Kora — employer | pays late, watches her closely', 'Tam — Kora\'s son | leers at her; she avoids him', 'Brother Aldo — priest | slips her bread; she half trusts him', 'Wren — river trader | cheated her of wages'],
+        background: 'Born in a southern forest village that burned when she was fourteen; walked north alone.',
+    });
+    const full = buildInjection([rich], 'Elin hauls the tub.', 10, 3, undefined, 6000, null);
+    for (const probe of ['secretly homesick for the southern forest', 'formal elven phrasing when angry or frightened', 'Hums forest songs', 'Honesty: blunt - says what she thinks when safe', 'Wren — river trader', 'background: Born in a southern forest village']) {
+        assert.ok(full.includes(probe), probe);
+    }
+    assert.doesNotMatch(full, /…/);
+    assert.ok(full.length < 6000 * 4 / 4, 'a ceiling, not a target');
+    const standard = buildInjection([rich], 'Elin hauls the tub.', 10, 3, undefined, 1800, null);
+    assert.ok(standard.length < full.length);
+    assert.match(standard, /Kora — employer/);
+});

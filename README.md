@@ -173,6 +173,7 @@ There are twelve categories:
 | Personality or levers never seem to change | Expected for one-off scenes. They change after repeated scenes or an explicit event or time skip. |
 | An NPC is missing | **Add NPC**, or use **Full scan current cast**. |
 | A scan failed | Check the scanner connection profile in **Scanning**, then use **Scan dossier now**. |
+| NPCs contradict their dossier (appearance, voice, levers) | Raise **Roster & continuity → Injection budget** to about 3000-4000. It's a ceiling: only what the present NPCs need is sent, and detailed dossiers then arrive in full. |
 | You want to know why a field didn't change | Open the dossier's diagnostics (**Show**) or export them from **Data & maintenance → Diagnostics**. Each field has an outcome such as `applied-refine`, `not-provided` or `waiting-for-revised-candidate`. |
 
 Diagnostics are bounded and read-only. They never store whole stories, full prompts or credentials, and their token counts are local estimates.
