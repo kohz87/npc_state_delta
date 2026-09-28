@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.71 - 28 September 2026
+
 - Show what the roleplay model receives. **Diagnostics** now opens with a **Roleplay injection** section: whether the dossier block is being sent, which NPCs it contains, its size against the budget, where it is placed (in chat as a system message, N messages from the end) and the exact text. When nothing is sent it says why: this chat's dossiers are not loaded yet, the extension or **Inject present NPC state** is off, or no NPC is marked present in the latest scanned scene. Previously an empty injection was silent, so a missing dossier could only be found by capturing the provider request. The preview is runtime-only and is not included in the exported diagnostic bundle. `NPCStateDelta.injectionPreview()` returns the same information.
 
 ## 1.0.70 - 28 September 2026

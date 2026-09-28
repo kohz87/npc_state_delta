@@ -1,8 +1,8 @@
-# NPC State Delta v1.0.70
+# NPC State Delta v1.0.71
 
 A SillyTavern extension that keeps a living dossier for every NPC in your roleplay: who they are, how they look, how they talk and behave, what they remember, and how they feel about you. After each reply it scans the story, updates the dossiers carefully, and feeds the present NPCs back to the roleplay model so they stay in character.
 
-**Current release:** 1.0.70 · [Changelog](CHANGELOG.md) · [Development guide](DEVELOPMENT.md)
+**Current release:** 1.0.71 · [Changelog](CHANGELOG.md) · [Development guide](DEVELOPMENT.md)
 
 ---
 
@@ -42,7 +42,7 @@ A SillyTavern extension that keeps a living dossier for every NPC in your rolepl
 ## Install and update
 
 1. In SillyTavern, open **Extensions → Install extension** and paste this repository's URL.
-   Or unpack `npc_state_delta-1.0.70.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
+   Or unpack `npc_state_delta-1.0.71.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
 2. Reload SillyTavern.
 3. **Before updating an existing install,** export a backup from **Data & maintenance → Backup / Export**.
 
@@ -174,6 +174,7 @@ There are twelve categories:
 | An NPC is missing | **Add NPC**, or use **Full scan current cast**. |
 | A scan failed | Check the scanner connection profile in **Scanning**, then use **Scan dossier now**. |
 | NPCs contradict their dossier (appearance, voice, levers) | Check **Roster & continuity → Injection budget** is at least 4000 (the default). It's a ceiling: only what the present NPCs need is sent, and detailed dossiers arrive in full. |
+| An NPC's dossier doesn't seem to reach the story | Open **Data & maintenance → Diagnostics**. The **Roleplay injection** section shows exactly what is sent with each generation, or why nothing is (NPC not present, chat not loaded, injection off). |
 | You want to know why a field didn't change | Open the dossier's diagnostics (**Show**) or export them from **Data & maintenance → Diagnostics**. Each field has an outcome such as `applied-refine`, `not-provided` or `waiting-for-revised-candidate`. |
 
 Diagnostics are bounded and read-only. They never store whole stories, full prompts or credentials, and their token counts are local estimates.
@@ -187,12 +188,12 @@ npm test                        # unit, compatibility and synthetic-host tests
 npm run validate                # inventory, isolation, version and ownership checks
 npm run measure:prompts         # prompt size measurements
 node scripts/measure-stage9.mjs # prompt/request budget baseline
-npm run package                 # builds dist/npc_state_delta-1.0.70.zip and its SHA-256
+npm run package                 # builds dist/npc_state_delta-1.0.71.zip and its SHA-256
 git diff --check
 ```
 
 - `runtime-modules.json` is the single inventory of shipped modules. The package contains only the runtime modules, stylesheet, manifest, inventory, license and README.
-- Application version 1.0.70 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
+- Application version 1.0.71 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
 - Behaviour is governed by [AGENTS.md](AGENTS.md), [the core contract](docs/core-contract.md) and [the workplan](docs/WORKPLAN.md). Development commands, evidence and limits are in [DEVELOPMENT.md](DEVELOPMENT.md).
 - Historical reviews: [1.0.28](docs/v1.0.28-review.md), [1.0.27 prefix cache](docs/v1.0.27-review.md), [Stage 9](docs/stage9-review.md). Seed provenance is in `docs/seed-provenance.*`.
 
