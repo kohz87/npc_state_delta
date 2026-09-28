@@ -2108,28 +2108,62 @@ function currentExclusions() {
     return [ctx.name1, ctx.name2].filter(Boolean);
 }
 
+// The text last handed to the host for roleplay generation, with the reason when it is empty, so
+// Diagnostics can show what the roleplay model actually receives. Runtime-only; never persisted.
+let lastInjection = { text: '', reason: 'Not built yet in this session.', at: 0, chatKey: '' };
+
 function updateInjection() {
     const settings = getSettings();
     const ctx = getContext();
     const injectionKey = getChatKey();
+    const clear = reason => {
+        lastInjection = { text: '', reason, at: Date.now(), chatKey: injectionKey };
+        ctx.setExtensionPrompt?.(PROMPT_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+    };
     if (injectionKey !== 'no-chat' && chatHydrationStatus(injectionKey) !== 'ready') {
-        ctx.setExtensionPrompt?.(PROMPT_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+        clear(`This chat's dossiers are not loaded (status: ${chatHydrationStatus(injectionKey)}); nothing is sent until they are.`);
         return;
     }
-    if (!settings.enabled || !settings.inject || getChatKey() === 'no-chat') {
-        ctx.setExtensionPrompt?.(PROMPT_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
-        return;
-    }
+    if (injectionKey === 'no-chat') return clear('No chat is open.');
+    if (!settings.enabled) return clear('NPC State Delta is disabled.');
+    if (!settings.inject) return clear('"Inject present NPC state" is off.');
     const state = getChatState();
     const prompt = buildInjection(state.npcs, recentTranscript(4), state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph);
+    const present = (state.npcs || []).filter(npc => npc?.present && !npc?.archived);
+    const depth = Math.max(0, Math.min(20, Number(settings.injectDepth) || 1));
+    lastInjection = {
+        text: prompt,
+        reason: prompt ? '' : (present.length ? 'No present NPC was selected for injection.' : 'No NPC is marked present in the latest scanned scene.'),
+        at: Date.now(),
+        chatKey: injectionKey,
+        depth,
+    };
     ctx.setExtensionPrompt?.(
         PROMPT_KEY,
         prompt,
         extension_prompt_types.IN_CHAT,
-        Math.max(0, Math.min(20, Number(settings.injectDepth) || 1)),
+        depth,
         false,
         extension_prompt_roles.SYSTEM,
     );
+}
+
+function injectionPreview() {
+    const settings = getSettings();
+    const state = getChatKey() === 'no-chat' ? { npcs: [] } : getChatState();
+    const text = String(lastInjection.text || '');
+    return {
+        sending: Boolean(text),
+        reason: lastInjection.reason || '',
+        placement: `In chat as a system message, ${lastInjection.depth ?? (Number(settings.injectDepth) || 1)} message(s) from the end`,
+        builtAt: lastInjection.at ? new Date(lastInjection.at).toISOString() : '',
+        presentNpcs: (state.npcs || []).filter(npc => npc?.present && !npc?.archived).map(npc => npc.name),
+        injectedNpcs: text.split('\n').filter(line => line.startsWith('- ')).map(line => line.slice(2).split(':')[0]),
+        chars: text.length,
+        estimatedTokens: Math.ceil(text.length / 4),
+        budgetTokens: Number(settings.injectBudgetTokens) || 0,
+        text,
+    };
 }
 
 function queueNpcBackfillInState(state, npcId, label, requestedMessageId = null, options = {}) {
@@ -6386,6 +6420,7 @@ window.NPCStateDelta = Object.freeze({
     renderInline: renderInlineCards,
     openEditor: value => { const npc = findNpcByIdOrName(value); return npc ? openNpcEditorSafely(npc.id) : false; },
     openDossier: value => { const npc = findNpcByIdOrName(value); return npc ? openLauncherDossier(npc.id) : false; },
+    injectionPreview: () => structuredClone(injectionPreview()),
     uiStatus: () => ({
         version: NPC_STATE_VERSION,
         chatKey: getChatKey(),

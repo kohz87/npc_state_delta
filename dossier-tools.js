@@ -166,6 +166,20 @@ export async function exportNativeTools() {
     }
 }
 
+// What the roleplay model receives right now (read-only, not exported with the diagnostic bundle).
+function injectionPreviewHtml() {
+    const preview = api()?.injectionPreview?.();
+    if (!preview) return '';
+    const summary = preview.sending
+        ? `Sending ${preview.injectedNpcs.length} NPC(s): ${preview.injectedNpcs.join(', ')} · ${preview.chars} chars (~${preview.estimatedTokens} of ${preview.budgetTokens} tokens, estimate)`
+        : `Nothing is being sent. ${preview.reason}`;
+    return `<section><h3>Roleplay injection (sent with each generation)</h3>
+          <p class="${preview.sending ? '' : 'delta-tools-warning'}">${escapeHtml(summary)}</p>
+          <small>${escapeHtml(preview.placement)}. Present NPCs: ${escapeHtml(preview.presentNpcs.join(', ') || 'none')}.${preview.builtAt ? ` Built ${escapeHtml(preview.builtAt)}.` : ''}</small>
+          ${preview.sending ? `<pre>${escapeHtml(preview.text)}</pre>` : ''}
+        </section>`;
+}
+
 function diagnosticsHtml(npc) {
     const status = api()?.uiStatus?.() || {};
     const routing = status.scannerRouting || api()?.scannerRouting?.() || {};
@@ -204,6 +218,7 @@ function diagnosticsHtml(npc) {
       <header><div><span class="delta-tools-kicker">COMPACT DIAGNOSTICS</span><h2>Current chat</h2><small>Opening diagnostics never starts a scan or database-wide process.</small></div><button type="button" class="delta-tools-close" data-delta-tools-close aria-label="Close">×</button></header>
       <div class="delta-tools-body">
         <div class="delta-tools-metrics"><div><b>${actual.totalProviderRequests}</b><span>Actual provider requests</span></div><div><b>${actual.failed}</b><span>Provider failures</span></div><div><b>${actual.rejectedBeforeDispatch}</b><span>Rejected preflights</span></div><div><b>${actual.timedOut + actual.cancelled}</b><span>Timed out / cancelled</span></div></div>
+        ${injectionPreviewHtml()}
         <section><h3>Request routing</h3><pre>${escapeHtml(JSON.stringify({ actual, lastRequest: routing.last || null }, null, 2))}</pre></section>
         <section><h3>Latest scan accounting</h3><pre>${escapeHtml(JSON.stringify(latest || { available: false }, null, 2))}</pre><small>Retry/focused flags describe the latest scan. The dispatcher aggregate above is the authoritative actual request count; Delta does not fabricate a per-pass provider count it does not expose.</small></section>
         <section><h3>Persistence</h3><pre>${escapeHtml(JSON.stringify({ currentChat: api()?.persistenceStatus?.() || { available: false }, recentStage8Failures: recentPersistenceFailures }, null, 2))}</pre><small>Stage 8 waits for canonical flush and distinguishes local mutation from durable save. Pending and in-flight write flags describe this chat only, not a global database counter.</small></section>

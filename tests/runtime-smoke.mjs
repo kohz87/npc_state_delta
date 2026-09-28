@@ -432,6 +432,10 @@ try {
     await manualAddNpc('Yunyun');
     assert.deepEqual(globalThis.NPCStateDelta.getState().npcs.map(n => n.name), ['Yunyun']);
     assert.equal(inlineAnchors.length, 0, 'manual Add should not bypass presence gating');
+    const preview = globalThis.NPCStateDelta.injectionPreview();
+    assert.equal(preview.sending, false, 'an off-screen manual Add is not injected');
+    assert.ok(preview.reason.length > 0, 'an empty injection explains why');
+    assert.deepEqual(preview.presentNpcs, []);
     await globalThis.NPCStateDelta.flush();
     const pointer = globalThis.NPCStateDelta.dataFile();
     assert.ok(pointer?.path, 'chat state should be persisted to an extension-owned JSON sidecar file');
