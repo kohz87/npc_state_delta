@@ -42,15 +42,76 @@ function branchHash(text) {
     return `${fnv1a32(input, 0x811c9dc5)}.${fnv1a32(input, 0x9e3779b9)}`;
 }
 
+function messageFingerprint(message = {}, system = false) {
+    return branchHash(JSON.stringify({
+        user: Boolean(message.is_user),
+        system,
+        text: String(message.mes || ''),
+    }));
+}
+
 export function fingerprintMessage(message = {}) {
     // Destructive lineage is narrative-content based. SillyTavern send dates, generation IDs,
     // swipe indexes, and speaker labels are mutable host metadata and never define durable state.
-    const payload = JSON.stringify({
-        user: Boolean(message.is_user),
-        system: Boolean(message.is_system),
-        text: String(message.mes || ''),
-    });
-    return branchHash(payload);
+    // So is the system flag: hiding a message (MemoryBooks and similar extensions set is_system on
+    // summarised messages) does not change what was said, and a lineage that followed the flag
+    // invalidated every later checkpoint key whenever a message was hidden or unhidden. The flag is
+    // therefore fixed in the hash, which keeps the value earlier versions stored for ordinary messages.
+    return messageFingerprint(message, false);
+}
+
+// The value earlier versions stored for a message whose system flag was set (hidden or system).
+export function legacySystemFingerprint(message = {}) {
+    return messageFingerprint(message, true);
+}
+
+// Rewrites every stored lineage key from one lineage to another, in every persisted structure that
+// carries one, so checkpoints, the rollback journal and inline cards keep matching the chat.
+export function remapLineageKeys(state, fromLineage, toLineage) {
+    const fromKeys = lineageCheckpointKeys(fromLineage);
+    const toKeys = lineageCheckpointKeys(toLineage);
+    const map = new Map();
+    fromKeys.forEach((key, index) => { if (toKeys[index]) map.set(key, toKeys[index]); });
+    const remap = value => (map.has(value) ? map.get(value) : value);
+    for (const item of Array.isArray(state.checkpoints) ? state.checkpoints : []) {
+        item.lineageKey = remap(item.lineageKey);
+        item.parentLineageKey = remap(item.parentLineageKey);
+        if (Number.isInteger(item.messageId) && toLineage[item.messageId] && map.has(fromKeys[item.messageId])) item.fingerprint = toLineage[item.messageId];
+    }
+    for (const entry of Array.isArray(state.rollbackJournal) ? state.rollbackJournal : []) {
+        entry.lineageKey = remap(entry.lineageKey);
+        entry.parentLineageKey = remap(entry.parentLineageKey);
+    }
+    if (state.rollbackHead && typeof state.rollbackHead === 'object') state.rollbackHead.lineageKey = remap(state.rollbackHead.lineageKey);
+    for (const card of Array.isArray(state.inlineCards) ? state.inlineCards : []) {
+        card.lineageKey = remap(card.lineageKey);
+        if (Number.isInteger(card.messageId) && toLineage[card.messageId] && map.has(fromKeys[card.messageId])) card.fingerprint = toLineage[card.messageId];
+    }
+    state.lineage = toLineage;
+    return state;
+}
+
+// State saved while a message was hidden (or that is system) recorded that message under the old,
+// flag-sensitive hash. When the stored lineage differs from the chat only in such messages, adopt
+// the flag-independent hash and rewrite the stored keys once; real content differences are left for
+// ordinary reconciliation.
+export function migrateLegacyLineage(state, chat) {
+    const previous = Array.isArray(state?.lineage) ? state.lineage : [];
+    const messages = Array.isArray(chat) ? chat : [];
+    if (!previous.length || !messages.length) return false;
+    const rebased = previous.slice();
+    let changed = false;
+    const limit = Math.min(previous.length, messages.length);
+    for (let i = 0; i < limit; i += 1) {
+        if (previous[i] === fingerprintMessage(messages[i])) continue;
+        if (previous[i] === legacySystemFingerprint(messages[i])) {
+            rebased[i] = fingerprintMessage(messages[i]);
+            changed = true;
+        }
+    }
+    if (!changed) return false;
+    remapLineageKeys(state, previous, rebased);
+    return true;
 }
 
 export function chatLineage(chat = []) {
@@ -714,6 +775,7 @@ function boundRootSnapshot(state) {
 
 export function ensureBranchParentAnchor(state, chat, messageId, reason = 'parent-anchor', limit = branchCore.BRANCH_HISTORY_LIMIT) {
     if (!state || typeof state !== 'object' || !Number.isInteger(messageId) || messageId < 0) return state;
+    migrateLegacyLineage(state, chat);
     const lineage = chatLineage(chat);
     const previousLineage = Array.isArray(state.lineage) ? state.lineage : [];
     ensureRollbackJournalBaseline(state, previousLineage.length ? previousLineage : lineage.slice(0, Math.max(0, messageId)));
@@ -754,6 +816,7 @@ export function ensureBranchParentAnchor(state, chat, messageId, reason = 'paren
 
 export function recordBranchCheckpoint(state, chat, messageId, reason = 'state', limit = branchCore.BRANCH_HISTORY_LIMIT) {
     if (!state || typeof state !== 'object') return state;
+    migrateLegacyLineage(state, chat);
     const lineage = chatLineage(chat);
     if (!Number.isInteger(messageId) || messageId < 0 || messageId >= lineage.length) {
         state.lineage = lineage;
@@ -1104,6 +1167,7 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
     // it before establishing any rollback baseline so an old label tombstone or stale snapshot
     // cannot become a new journal mutation merely because content lineage stayed unchanged.
     enforceUserDismissals(state, state?.userDismissedGroups);
+    if (state && typeof state === 'object') migrateLegacyLineage(state, chat);
     const currentLineage = chatLineage(chat);
     const previousLineage = Array.isArray(state?.lineage) ? state.lineage : [];
     ensureRollbackJournalBaseline(state, previousLineage.length ? previousLineage : currentLineage);

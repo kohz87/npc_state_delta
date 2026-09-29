@@ -837,6 +837,8 @@ try {
     // Deleting a message from the middle keeps later dossiers, but the relationship change that
     // message caused is undone exactly (only when no later message touched it).
     {
+        // A memory extension hiding an earlier message must not turn later rollbacks into divergences.
+        mockState.context.chat[0].is_system = true;
         const yunyunBefore = structuredClone(globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Yunyun'));
         mockState.quietResponder = async () => JSON.stringify({ npcs: [
             { name: 'Yunyun', present: true, mood: 'shaken and overwhelmed', relationshipImpact: 'meaningful', relationshipDelta: { trust: 2, affection: 1, desire: 0, tension: 0 },
@@ -908,6 +910,10 @@ try {
         mockState.context.chat.length = 2;
         eventSource.emit('message_deleted', 2);
         await sleep(600);
+        const tailAfterHide = globalThis.NPCStateDelta.uiStatus().branchReconciliations.at(-1);
+        assert.equal(tailAfterHide.relation, 'tail-truncation', 'a hidden earlier message does not turn a tail deletion into a divergence');
+        assert.equal(tailAfterHide.failClosed, false);
+        mockState.context.chat[0].is_system = false;
     }
 
     const wizIdForDelete = state.npcs.find(n => n.name === 'Wiz').id;
