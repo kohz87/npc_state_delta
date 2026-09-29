@@ -4586,8 +4586,10 @@ function renderDossier() {
     queueInlineRender();
 }
 
+// Each list entry is one line in the editor. Entries themselves may contain semicolons (a bond's
+// "…; deceased", a memory's two clauses), so only line breaks separate them.
 function cleanEditorList(value, max = 12) {
-    return [...new Set(String(value || '').split(/\r?\n|\s*;\s*/).map(item => item.trim()).filter(Boolean))].slice(0, max);
+    return [...new Set(String(value || '').split(/\r?\n/).map(item => item.trim()).filter(Boolean))].slice(0, max);
 }
 
 function editorValue(value) {
