@@ -874,6 +874,40 @@ try {
         eventSource.emit('message_deleted', 2);
         await sleep(600);
         assert.deepEqual(globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Yunyun').relationship, yunyunBefore.relationship);
+
+        // Opt-in: rewind every dossier to just before the deleted message, discarding later changes.
+        mockState.extensionSettings.npc_state_delta.midDeleteRewind = true;
+        const rewindBefore = structuredClone(globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Yunyun'));
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [
+            { name: 'Yunyun', present: true, mood: 'shaken', relationshipImpact: 'meaningful', relationshipDelta: { trust: 2, affection: 1, desire: 0, tension: 0 },
+              relationshipEvidence: { trust: 'Kazuma comforts Yunyun in silence.', affection: 'Yunyun leans into Kazuma.', desire: '', tension: '' },
+              relationshipChangeReason: 'Kazuma comforted Yunyun in silence after her first kill.' },
+        ] });
+        mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'Kazuma holds the trembling Yunyun after the fight.', swipe_id: 0 });
+        eventSource.emit('message_received', 2);
+        await sleep(320);
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [{ name: 'Yunyun', present: true, mood: 'relieved', location: 'Axel guild hall' }] });
+        for (const [index, text] of [[4, 'They walk back to the Axel guild hall together.'], [6, 'Yunyun finally smiles at the guild hall fire.']]) {
+            mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: `user-${index}` });
+            mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: text, swipe_id: 0 });
+            eventSource.emit('message_received', index);
+            await sleep(320);
+        }
+        assert.equal(globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Yunyun').mood, 'relieved');
+        const rawCallsBeforeRewind = mockState.rawCalls.length;
+        mockState.context.chat.splice(2, 1);
+        eventSource.emit('message_deleted', 2);
+        await sleep(600);
+        const rewound = globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Yunyun');
+        assert.equal(rewound.mood, rewindBefore.mood, 'the rewind discards what the later messages changed');
+        assert.equal(rewound.location, rewindBefore.location);
+        assert.deepEqual(rewound.relationship, rewindBefore.relationship);
+        assert.equal(globalThis.NPCStateDelta.uiStatus().branchReconciliations.at(-1).rewoundToBoundary, true);
+        assert.equal(mockState.rawCalls.length, rawCallsBeforeRewind, 'the rewind makes no model requests');
+        mockState.extensionSettings.npc_state_delta.midDeleteRewind = false;
+        mockState.context.chat.length = 2;
+        eventSource.emit('message_deleted', 2);
+        await sleep(600);
     }
 
     const wizIdForDelete = state.npcs.find(n => n.name === 'Wiz').id;

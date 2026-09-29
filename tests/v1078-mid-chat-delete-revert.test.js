@@ -269,3 +269,61 @@ test('v1.0.78 a death the deleted message caused is undone; an earlier or later 
     play(earlier, earlierChat, 6, (s, n, id) => { if (n === 3) award(s.npcs[0], s.turn, id); });
     assert.equal(deleteMiddle(earlier, earlierChat, 5).state.npcs.find(npc => npc.name === 'Clara').lifeState, 'deceased');
 });
+
+const deleteMiddleRewinding = (state, chat, index) => reconcileBranchState(state, chat.filter((_, i) => i !== index), { explicitDivergence: index, operation: 'delete', rewindMidDelete: true });
+
+test('v1.0.78 the rewind option restores every dossier to just before the deleted message and drops later changes', () => {
+    const state = makeState();
+    state.npcs[0].goal = 'keep the inn';
+    state.npcs[0].memories = ['Opened the inn'];
+    const chat = [];
+    play(state, chat, 6, (s, n, id) => {
+        const elena = s.npcs[0];
+        if (n === 3) { award(elena, s.turn, id); elena.mood = 'shaken'; }
+        if (n === 5) {
+            elena.goal = 'reach the northern road';
+            elena.memories = [...elena.memories, 'Left Farwick at dawn'];
+            const late = createNpcRecord('Harl');
+            s.npcs.push(late);
+        }
+    });
+    const undoOnly = deleteMiddle(structuredClone(state), chat, 5);
+    assert.equal(elenaOf(undoOnly).goal, 'reach the northern road', 'the default keeps later changes');
+    assert.equal(undoOnly.rewoundToBoundary, false);
+
+    const rewound = deleteMiddleRewinding(structuredClone(state), chat, 5);
+    assert.equal(rewound.rewoundToBoundary, true);
+    assert.equal(rewound.failClosed, false);
+    assert.equal(rewound.requiresRescan, false, 'the rewind uses no model requests');
+    const elena = elenaOf(rewound);
+    assert.equal(elena.goal, 'keep the inn');
+    assert.deepEqual(elena.memories, ['Opened the inn']);
+    assert.equal(elena.mood, createNpcRecord('X').mood);
+    assert.deepEqual(elena.relationship, { trust: 20, affection: 10, desire: 0, tension: 0 });
+    assert.equal(rewound.state.npcs.some(npc => npc.name === 'Harl'), false, 'an NPC a later message introduced is gone too');
+    assert.ok(rewound.state.checkpoints.every(checkpoint => checkpoint.messageId < 5), 'later checkpoints describe a state that no longer exists');
+});
+
+test('v1.0.78 the rewind option falls back to undoing only the deleted message when the boundary is unreachable', () => {
+    const state = makeState();
+    const chat = [];
+    play(state, chat, 6, (s, n, id) => {
+        if (n === 3) award(s.npcs[0], s.turn, id);
+        if (n === 5) s.npcs[0].goal = 'reach the northern road';
+    });
+    state.rollbackJournalFloorMessageId = chat.length;
+    state.checkpoints = [];
+    const result = deleteMiddleRewinding(state, chat, 5);
+    assert.equal(result.rewoundToBoundary, false);
+    assert.equal(result.failClosed, true);
+    assert.equal(elenaOf(result).goal, 'reach the northern road');
+});
+
+test('v1.0.78 the rewind option never applies to swipes, edits or tail deletions', () => {
+    const state = makeState();
+    const chat = [];
+    play(state, chat, 3, (s, n, id) => { if (n === 3) award(s.npcs[0], s.turn, id); });
+    const tail = reconcileBranchState(state, chat.slice(0, -1), { explicitDivergence: chat.length - 1, operation: 'delete', rewindMidDelete: true });
+    assert.equal(tail.rewoundToBoundary, false);
+    assert.equal(elenaOf(tail).relationship.trust, 20);
+});

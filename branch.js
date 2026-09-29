@@ -1099,7 +1099,7 @@ function normalizedRecoveryOperation(value) {
     return ['delete', 'edit', 'swipe'].includes(operation) ? operation : 'auto';
 }
 
-export function reconcileBranchState(state, chat, { explicitDivergence = null, operation = 'auto' } = {}) {
+export function reconcileBranchState(state, chat, { explicitDivergence = null, operation = 'auto', rewindMidDelete = false } = {}) {
     // Permanent UI deletion is external user authority, not narrative branch state. Normalize
     // it before establishing any rollback baseline so an old label tombstone or stale snapshot
     // cannot become a new journal mutation merely because content lineage stayed unchanged.
@@ -1161,8 +1161,14 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
     // parent. Multiple retained assistant descendants cannot be deterministically replayed by the
     // routine scanner, so rewinding them would destroy accepted continuity; preserve canonical
     // state and fail closed instead.
-    const linearSuffixReplaySafe = !linearReplacement || affectedAssistantMessages <= 1;
-    const recoveryBlockedByRetainedDescendants = linearReplacement && !linearSuffixReplaySafe;
+    const suffixReplayable = !linearReplacement || affectedAssistantMessages <= 1;
+    // Opt-in: a deleted middle message rewinds every dossier to the exact state just before it, so
+    // whatever the retained messages changed is discarded rather than replayed. It uses the same
+    // exact journal/checkpoint boundary as a tail deletion; when that boundary is unreachable the
+    // ordinary fail-closed path (undoing only the deleted block) still applies.
+    const rewindRequested = rewindMidDelete === true && recoveryOperation === 'delete' && !suffixReplayable;
+    const linearSuffixReplaySafe = suffixReplayable || rewindRequested;
+    const recoveryBlockedByRetainedDescendants = linearReplacement && !suffixReplayable;
     const tailTruncationRecovery = relation.kind === 'tail-truncation';
     const journalRestore = tailTruncationRecovery || (linearReplacement && linearSuffixReplaySafe)
         ? restoreLinearBoundaryFromJournal(state, previousLineage, currentLineage, divergence)
@@ -1280,8 +1286,9 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
         if (Number.isInteger(restored.lastScannedMessageId) && restored.lastScannedMessageId >= divergence) restored.lastScannedMessageId = null;
     }
     prunePortraitAssetsInPlace(restored);
+    const rewound = rewindRequested && exactRestored;
     const requiresRescan = linearReplacement
-        ? affectedAssistantMessages > 0
+        ? affectedAssistantMessages > 0 && !rewound
         : (explicitSwipeLike ? recoveryAction !== 'exact-checkpoint' : !exactRestored);
     return {
         state: restored,
@@ -1307,6 +1314,7 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
         restoredFromRoot,
         failClosed,
         deletedEffects,
+        rewoundToBoundary: rewindRequested && exactRestored,
         linearHistoryPruned: linearReplacement,
         legacyFallback: failClosed && checkpoints.length === 0 && !state?.branchRootSnapshot,
     };

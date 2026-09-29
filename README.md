@@ -63,7 +63,7 @@ The settings panel has a quick bar that is always visible, plus six groups.
 |---|---|
 | **Quick bar** | Enable, Auto scan, Open dossiers, Scan dossier now, Full scan current cast, Add NPC |
 | **Scanning** | Scanner connection profile, how often to scan, how much story to send, and how readily new NPCs get a dossier (Conservative, Balanced or Manual only) |
-| **Roster & continuity** | Present NPCs in chat (Full cards, Compact strip or Off), injection on/off and budget (a ceiling, default 4000 tokens), maximum active NPCs, death and return handling, stale NPC cleanup |
+| **Roster & continuity** | Present NPCs in chat (Full cards, Compact strip or Off), injection on/off and budget (a ceiling, default 4000 tokens), maximum active NPCs, death and return handling, stale NPC cleanup, rescan and middle-deletion rewind options |
 | **Calendar & birthdays** | Month names and lengths, optional era, optional campaign date |
 | **Portrait generation** | Style presets, positive and negative prompts, composition, prompt format |
 | **Scanner rules** | Advanced: relationship starting values and per-scan caps, memory criteria, behaviour rubric |
@@ -156,7 +156,7 @@ There are twelve categories:
 
 - **Swipes:** each swipe keeps its own dossier state. Switching back to a known swipe restores it. A swipe that was never scanned starts from the state before it and is scanned again.
 - **Delete or regenerate:** dossiers roll back to the message you returned to. NPCs who only appeared in the removed messages are removed too.
-- **Deleting a message from the middle:** later messages were scanned on top of it, so dossiers are not rewound. Instead, everything the deleted message itself changed is undone wherever nothing later touched it: each field returns to how it was before the message (relationship values and the Last relationship change card, mood, appearance, memories the message added, an NPC who only appeared in it, and so on). A field a later message also changed is kept, and confirmed deaths stay unless the deleted message caused the death. Delta tells you when this happens.
+- **Deleting a message from the middle:** later messages were scanned on top of it, so dossiers are not rewound. Instead, everything the deleted message itself changed is undone wherever nothing later touched it: each field returns to how it was before the message (relationship values and the Last relationship change card, mood, appearance, memories the message added, an NPC who only appeared in it, and so on). A field a later message also changed is kept, and confirmed deaths stay unless the deleted message caused the death. Delta tells you when this happens. To rewind everything instead, turn on **Rewind dossiers on middle deletion** (Roster & continuity): every dossier returns to exactly how it was just before the deleted message and whatever the later messages changed is discarded, with no model requests.
 - **Edits deep in the past:** if an edit can't be replayed exactly, current dossiers are kept rather than guessed.
 - The rollback journal covers the last 256 messages. Full snapshots are size-limited (8 MB total, 2 MB each).
 
