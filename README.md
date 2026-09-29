@@ -1,8 +1,8 @@
-# NPC State Delta v1.0.75
+# NPC State Delta v1.0.76
 
 A SillyTavern extension that keeps a living dossier for every NPC in your roleplay: who they are, how they look, how they talk and behave, what they remember, and how they feel about you. After each reply it scans the story, updates the dossiers carefully, and feeds the present NPCs back to the roleplay model so they stay in character.
 
-**Current release:** 1.0.75 · [Changelog](CHANGELOG.md) · [Development guide](DEVELOPMENT.md)
+**Current release:** 1.0.76 · [Changelog](CHANGELOG.md) · [Development guide](DEVELOPMENT.md)
 
 ---
 
@@ -42,7 +42,7 @@ A SillyTavern extension that keeps a living dossier for every NPC in your rolepl
 ## Install and update
 
 1. In SillyTavern, open **Extensions → Install extension** and paste this repository's URL.
-   Or unpack `npc_state_delta-1.0.75.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
+   Or unpack `npc_state_delta-1.0.76.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
 2. Reload SillyTavern.
 3. **Before updating an existing install,** export a backup from **Data & maintenance → Backup / Export**.
 
@@ -105,7 +105,7 @@ There are twelve categories:
 - **Habits and routines are not levers.** "Keeps a quiet household and enforces curfews" belongs in Mannerisms and is kept out of the lever list.
 - **How a lever swings:** the first scene showing a different tendency is stored as pending evidence, and the lever changes when the behaviour shows up again in a later scene. Each category keeps its own pending evidence, so unrelated behaviour in between doesn't push it out. An explicit event or time skip changes it at once. Kind ↔ cruel and independence reversals face extra safety checks.
 - Old entries that don't fit a category are listed for rewriting at the next **Refresh**.
-- **Outdated traits:** Personality, Speech or levers unchanged for 30+ turns are re-checked at the next **Refresh**. A clause tied to something that has ended (a former job, an abuser who has died) is rewritten from the recent story; everything else is kept.
+- **Outdated traits:** Personality, Speech or levers unchanged for 30+ turns, or written before the NPC's background or home base later changed (a servant who now owns the inn), are re-checked at the next **Refresh**. A clause tied to something that has ended (a former job, an abuser who has died) is rewritten from the recent story; everything else is kept.
 
 ### Relationship with the player
 
@@ -191,12 +191,12 @@ npm test                        # unit, compatibility and synthetic-host tests
 npm run validate                # inventory, isolation, version and ownership checks
 npm run measure:prompts         # prompt size measurements
 node scripts/measure-stage9.mjs # prompt/request budget baseline
-npm run package                 # builds dist/npc_state_delta-1.0.75.zip and its SHA-256
+npm run package                 # builds dist/npc_state_delta-1.0.76.zip and its SHA-256
 git diff --check
 ```
 
 - `runtime-modules.json` is the single inventory of shipped modules. The package contains only the runtime modules, stylesheet, manifest, inventory, license and README.
-- Application version 1.0.75 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
+- Application version 1.0.76 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
 - Behaviour is governed by [AGENTS.md](AGENTS.md), [the core contract](docs/core-contract.md) and [the workplan](docs/WORKPLAN.md). Development commands, evidence and limits are in [DEVELOPMENT.md](DEVELOPMENT.md).
 - Historical reviews: [1.0.28](docs/v1.0.28-review.md), [1.0.27 prefix cache](docs/v1.0.27-review.md), [Stage 9](docs/stage9-review.md). Seed provenance is in `docs/seed-provenance.*`.
 

@@ -48,14 +48,15 @@ test('scanner and reconciliation prompts define behaviorProfile as behavioral le
         transcript: 'Marris checks the wound, compares two possible causes, then calmly explains the safer treatment.',
         existingNpcs: [npc],
     });
-    assert.match(scanner, /behaviorProfile FULL max6 "Label: level - effect" levers; Label=Disposition\|Care\|Expression\|Independence\|Conflict\|Threat\|Analytical\|Presentation\|Mercy\|Loyalty\|Drive\|Honesty; habits\/routines=>mannerisms\./);
+    assert.match(scanner, /behaviorProfile FULL max6 "Label: level - effect" levers \(evidence too\); Label=Disposition\|Care\|Expression\|Independence\|Conflict\|Threat\|Analytical\|Presentation\|Mercy\|Loyalty\|Drive\|Honesty; habits\/routines=>mannerisms\./);
 
     const refresh = buildProfileRefreshPrompt({
         transcript: 'Over several months Marris consistently checks evidence before committing to a conclusion.',
         targetNpc: npc,
     });
     const LEVER = /behaviorProfile=max6 "Label: level - effect" levers: how they generally respond\/decide \(labels only: Disposition, Care\/Warmth, Expressiveness, Independence\/Agency, Conflict\/Assertiveness, Threat Sensitivity, Analytical Style, Social Presentation, Cruelty\/Mercy, Loyalty, Drive\/Ambition, Honesty\/Candor\)\. Actions are evidence; routines, duties, house rules and habits are not levers \(habits=>mannerisms\)\./;
-    assert.match(refresh, LEVER);
+    assert.match(refresh.replace(' levers (evidence items too): ', ' levers: '), LEVER);
+    assert.match(refresh, /levers \(evidence items too\): how they/);
 
     const backfill = buildBackfillPrompt({
         transcript: 'Marris repeatedly favors practical help over verbal reassurance.',
