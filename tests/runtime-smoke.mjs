@@ -913,6 +913,11 @@ try {
         const tailAfterHide = globalThis.NPCStateDelta.uiStatus().branchReconciliations.at(-1);
         assert.equal(tailAfterHide.relation, 'tail-truncation', 'a hidden earlier message does not turn a tail deletion into a divergence');
         assert.equal(tailAfterHide.failClosed, false);
+        const exported = globalThis.NPCStateDelta.diagnosticBundle();
+        assert.ok(Array.isArray(exported.branch.reconciliations) && exported.branch.reconciliations.length > 0, 'the diagnostics export carries the rollback records');
+        assert.ok(exported.branch.reconciliations.every(event => !('chatKey' in event) && !('history' in event)), 'and no chat identity');
+        assert.equal(typeof exported.branch.chat.hiddenOrSystemMessages, 'number');
+        assert.equal(exported.branch.chat.storedLineageDivergence, -1, 'the stored lineage matches the chat despite a hidden message');
         mockState.context.chat[0].is_system = false;
     }
 
