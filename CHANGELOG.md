@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.77 - 29 September 2026
+
 - Measure Personality and Speech development in story time. When the scanned message's World State block carries a date in the configured calendar (Megumin Suite, Freaky Frankenstein and similar trackers; a message without one inherits the nearest earlier dated message), each development observation records its story day. A trend started by one grounded observation and confirmed by a second at least 7 story days later now meets the gradual gate (two observations instead of three), however few messages lay between; two observations on nearby story days still need a third, however many messages passed. Chats without dates keep the previous fallback (Personality: 20+ messages or 10+ turns apart). Targeted Refresh dates each tagged `[mN]` observation from its own message.
 - Break a development trend on contrary evidence. A later observation of the opposite tendency (for example "timid" after "confident", or the same claim negated) removes the pending trend, so it has to start again instead of being confirmed across the reversal.
 - Measure trait staleness in story days. Stable-field changes record the story day (`fieldChangeDays`, only when the chat is dated), and Refresh names Personality, Speech or Behavioral Levers unchanged for 30+ story days; undated chats keep the 30-turn rule, and the circumstance-change rule is unchanged. Cross-chat imports drop the source chat's story-day stamps with its other chronology.
