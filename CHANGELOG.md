@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.75 - 29 September 2026
+
 - Stop a lone "deceased" line appearing in Important Bonds. The dossier editor shows one bond per line but split saved lines on semicolons too, and a dead counterpart's bond is written "…; deceased", so saving the editor (even for an unrelated field) split "deceased" off into its own bond, which was then kept because one-word bond text was preserved. Editor lists (bonds, memories, mannerisms, Behavioral Levers) now split only on line breaks, and a bare life-state word ("deceased", "dead", "late") is dropped wherever bonds are normalised, including protected bonds, so existing orphan lines disappear on the next load or scan.
 - Name the relation that fits a known gender. A bond derived without gender ("Vena — aunt / uncle", "Elena — niece / nephew") now reads "aunt"/"niece" or "uncle"/"nephew" once the counterpart's gender is on their dossier; without a known gender the neutral form stays.
 
