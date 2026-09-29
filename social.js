@@ -899,7 +899,25 @@ function resolveSlotsFromEdges(graph) {
     graph.unresolved = remaining;
 }
 
-function inferSiblingEdges(graph) {
+// Two children of one parent are siblings unless either already names a different blood tie to the
+// other ("Greta — aunt"); a wrong parent entry must not keep overriding what the dossiers say.
+function statedOtherKinship(graph, npcs, aId, bId) {
+    const a = npcs.find(npc => npc?.id === aId);
+    const b = npcs.find(npc => npc?.id === bId);
+    const statements = [
+        a && b ? establishedCounterpartRelation(a, b, npcs) : '',
+        a && b ? establishedCounterpartRelation(b, a, npcs) : '',
+        ...graph.edges.filter(edge => !edge.inferred && pairConnects(edge, aId, bId)).flatMap(edge => [edge.aToB, edge.bToA]),
+    ];
+    return statements.some(value => {
+        const family = socialRelationFamily(kinshipParts(value)[0] || '');
+        return KINSHIP_RELATION_FAMILIES.has(family) && family !== 'sibling';
+    });
+}
+
+function inferSiblingEdges(graph, npcs = []) {
+    graph.edges = graph.edges.filter(edge => !(edge.inferred && socialRelationFamily(edge.aToB) === 'sibling'
+        && statedOtherKinship(graph, npcs, edge.aId, edge.bId)));
     const childByParent = new Map();
     for (const edge of graph.edges) {
         for (const ownerId of [edge.aId, edge.bId]) {
@@ -915,6 +933,7 @@ function inferSiblingEdges(graph) {
             for (let j = i + 1; j < unique.length; j += 1) {
                 const a = unique[i]; const b = unique[j];
                 const twin = a.groupId && a.groupId === b.groupId && (a.sharedDescriptor === 'twins' || b.sharedDescriptor === 'twins');
+                if (statedOtherKinship(graph, npcs, a.childId, b.childId)) continue;
                 addEdge(graph, { aId: a.childId, bId: b.childId, aToB: twin ? 'twin sibling' : 'sibling', bToA: twin ? 'twin sibling' : 'sibling', provenance: 'inferred', confidence: 'inferred', reason: 'shared established parent', inferred: true, groupId: a.groupId && a.groupId === b.groupId ? a.groupId : '', sharedDescriptor: twin ? 'twins' : '' });
             }
         }
@@ -1169,9 +1188,35 @@ export function applyManualKeyRelationshipEdit(state, npcId, beforeList = [], af
         const counterpart = npcs.find(npc => npc?.id === removedId);
         removeMirroredRelationship(counterpart, owner, npcs);
     }
+    const beforeByCounterpart = new Map();
+    for (const parsed of (beforeList || []).map(parseKeyRelationshipEntry).filter(Boolean)) {
+        const id = resolveNpcReference(npcs, parsed.subject)?.id;
+        if (id && !beforeByCounterpart.has(id)) beforeByCounterpart.set(id, parsed);
+    }
+    for (const parsed of afterEntries) {
+        const counterpart = resolveNpcReference(npcs, parsed.subject);
+        const previous = counterpart ? beforeByCounterpart.get(counterpart.id) : null;
+        if (previous && norm(previous.relation) !== norm(parsed.relation)) syncMirroredRelationship(counterpart, owner, previous.relation, parsed.relation, npcs);
+    }
     for (const parsed of afterEntries) replaceManualRelationshipEdge(graph, owner, parsed, npcs, meta);
     next.socialGraph = normalizeSocialGraph(graph);
     return next;
+}
+
+// A manual correction ("Marek — brother" instead of "parent") also corrects the counterpart's entry
+// when that entry only mirrored the old relation ("Greta — child"), so it cannot restore the old one.
+function syncMirroredRelationship(counterpart, owner, oldRelation, newRelation, npcs = []) {
+    if (!counterpart || counterpart.id === owner.id) return;
+    if (Array.isArray(counterpart.manualProfileFields) && counterpart.manualProfileFields.includes('keyRelationships')) return;
+    const reverse = explicitReverseRelationship(counterpart, owner, npcs);
+    const replacement = inverseSocialRelation(newRelation);
+    if (!reverse || !replacement) return;
+    const family = value => socialRelationFamily(kinshipParts(value)[0] || '');
+    const mirroredOld = family(reverse.relation) && family(reverse.relation) === family(inverseSocialRelation(oldRelation));
+    if (!mirroredOld || family(reverse.relation) === family(replacement)) return;
+    counterpart.keyRelationships = counterpart.keyRelationships.map(entry => relationshipTargetsNpc(entry, owner, npcs)
+        ? formatKeyRelationship(owner.name, replacement, reverse.dynamic, owner)
+        : entry);
 }
 
 function speciesWords(npc) {
@@ -1309,7 +1354,7 @@ export function reconcileSocialState(state = {}, options = {}) {
     const transcriptFacts = extractUnresolvedSocialFacts(options.transcript || '', npcs, meta);
     ensureUnresolvedFacts(graph, transcriptFacts);
     resolveSlotsFromEdges(graph);
-    inferSiblingEdges(graph);
+    inferSiblingEdges(graph, npcs);
     graph = normalizeSocialGraph(graph);
     const updatedIds = projectGraphToKeyRelationships(npcs, graph);
     next.socialGraph = graph;

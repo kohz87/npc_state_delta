@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Stop a wrong parent entry from forcing "sibling" back onto Important Bonds. Two NPCs listed as children of one parent were always inferred to be siblings, so when Greta wrongly listed her brother Marek as a parent, "Greta — sibling" kept returning on Talia (Marek's daughter) after every edit. The shared-parent inference now skips, and removes its earlier inferred link for, any pair where either dossier or a non-inferred edge names a different blood tie. A manual bond edit also corrects the other NPC's entry when that entry only mirrored the old relation (editing Greta's "Marek — parent" to "brother" turns Marek's "Greta — child" into "Greta — sibling"); a locked dossier, or a new relation with no inverse, is left alone.
+
 ## 1.0.82 - 30 September 2026
 
 - Fix a 1.0.81 regression in Important Bonds: two conflicting blood ties ("Greta — niece / sibling") were settled by keeping the later word, which picked the wrong one and, depending on NPC list order, overwrote the other NPC's correct entry ("Talia — niece" became "sibling"). Such an entry is now settled by what the other NPC's own dossier says (Greta's "Talia — niece" makes Greta the aunt), and without that statement it is left as it is and not mirrored. When deciding which of two dossiers holds a mirrored copy, the side with extra parts ("Niece / sibling" against a plain "niece") is the copy. A blood tie mirrored from the other side no longer overrides an NPC's own entry, so a wrong entry cannot spread.
