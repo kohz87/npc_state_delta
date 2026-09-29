@@ -79,11 +79,30 @@ test('v1.0.81 without a species clue the side that established the edge keeps th
     assert.deepEqual(bonds(state, 'Bea'), ['Ada — cousin']);
 });
 
-test('v1.0.81 conflicting blood ties keep the later one; other combinations still join', () => {
-    const conflicting = reconcile({ npcs: [npc('Talia', 'female', 'human', ['Greta — niece / sibling']), npc('Greta', 'female', 'human')], socialGraph: { edges: [], unresolved: [] } });
-    assert.deepEqual(bonds(conflicting, 'Talia'), ['Greta — sibling']);
+test('conflicting blood ties are settled by the other NPC\'s own statement, in any list order', () => {
+    const talia = () => npc('Talia', 'female', 'human', ['Greta — Niece / sibling']);
+    const greta = () => npc('Greta', 'female', 'human', ['Talia — niece']);
+    for (const order of [[talia(), greta()], [greta(), talia()]]) {
+        let state = reconcile({ npcs: order, socialGraph: { edges: [], unresolved: [] } });
+        state = reconcile(state);
+        assert.deepEqual(bonds(state, 'Talia'), ['Greta — aunt']);
+        assert.deepEqual(bonds(state, 'Greta'), ['Talia — niece'], 'the correct side is never overwritten');
+    }
+    const staleEdge = reconcile({ npcs: [talia(), greta()], socialGraph: { edges: [
+        { aId: 'npc_talia', bId: 'npc_greta', aToB: 'sibling', bToA: 'sibling', confidence: 'explicit' },
+    ], unresolved: [] } });
+    assert.deepEqual(bonds(staleEdge, 'Talia'), ['Greta — aunt'], 'a stale mirrored edge does not override the settled entry');
+    assert.deepEqual(bonds(staleEdge, 'Greta'), ['Talia — niece']);
+});
+
+test('without the other NPC\'s statement a contradictory entry is left alone and not mirrored', () => {
+    assert.equal(inverseSocialRelation('niece / sibling'), '');
+    let state = reconcile({ npcs: [npc('Talia', 'female', 'human', ['Greta — Niece / sibling']), npc('Greta', 'female', 'human')], socialGraph: { edges: [], unresolved: [] } });
+    state = reconcile(state);
+    assert.deepEqual(bonds(state, 'Talia'), ['Greta — Niece / sibling'], 'no guess from word order');
+    assert.deepEqual(bonds(state, 'Greta'), []);
     const mixed = reconcile({ npcs: [npc('Talia', 'female', 'human', ['Oren — cousin / business partner']), npc('Oren', 'male', 'human')], socialGraph: { edges: [], unresolved: [] } });
-    assert.deepEqual(bonds(mixed, 'Talia'), ['Oren — cousin / business partner']);
+    assert.deepEqual(bonds(mixed, 'Talia'), ['Oren — cousin / business partner'], 'non-conflicting combinations still join');
 });
 
 test('v1.0.81 prompts say which way a bond reads', () => {

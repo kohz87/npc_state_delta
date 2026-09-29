@@ -155,8 +155,7 @@ const INVERSE_SOCIAL_RELATION_FAMILIES = new Map([
 
 const KINSHIP_RELATION_FAMILIES = new Set(['child', 'parent', 'sibling', 'cousin', 'aunt-uncle', 'niece-nephew', 'grandparent', 'grandchild']);
 
-// Two different blood ties to the same person cannot both hold ("niece / sibling"); the later one
-// replaces the earlier instead of being joined to it.
+// Two different blood ties to the same person cannot both hold ("niece / sibling").
 function conflictingKinship(a, b) {
     const left = socialRelationFamily(a);
     const right = socialRelationFamily(b);
@@ -225,14 +224,8 @@ function sanitizeRelationshipRelation(subject, value) {
         seen.add(key);
         slash.push(part);
     }
-    const parts = [];
-    for (const part of slash) {
-        const conflict = parts.findIndex(existing => conflictingKinship(existing, part));
-        if (conflict >= 0) parts.splice(conflict, 1);
-        parts.push(part);
-    }
-    if (parts.length === 2 && inverseRelationFamilies(parts[0], parts[1])) relation = parts[0];
-    else if (parts.length) relation = cleanBoundary(parts.join(' / '), 180, { ellipsis: false });
+    if (slash.length === 2 && inverseRelationFamilies(slash[0], slash[1])) relation = slash[0];
+    else if (slash.length) relation = cleanBoundary(slash.join(' / '), 180, { ellipsis: false });
     const subjectKey = norm(subject);
     const relationKey = norm(relation);
     if (/^late husband\b/.test(subjectKey) && /^(?:surviving )?widow\b/.test(relationKey)) return 'spouse';
@@ -258,6 +251,8 @@ function symmetricInverse(rel) {
 export function inverseSocialRelation(value) {
     const text = clean(value, 180);
     const parts = text.split(/\s*\/\s*/).filter(Boolean);
+    // A relation that contradicts itself ("niece / sibling") has no trustworthy inverse.
+    if (parts.some((part, i) => parts.slice(i + 1).some(other => conflictingKinship(part, other)))) return '';
     if (parts.length > 1) return uniq(parts.map(inverseSingleRelation).filter(Boolean)).join(' / ');
     return inverseSingleRelation(text);
 }
@@ -312,7 +307,6 @@ function mergeRelations(a, b) {
     const rf = socialRelationFamily(right);
     if (lf && lf === rf) return relationSpecificity(right) >= relationSpecificity(left) ? right : left;
     if (inverseRelationFamilies(lf, rf)) return left;
-    if (conflictingKinship(left, right)) return right;
     return cleanBoundary(`${left} / ${right}`, 180, { ellipsis: false });
 }
 
@@ -993,7 +987,7 @@ function projectGraphToKeyRelationships(npcs, graph) {
                     continue;
                 }
                 unresolvedText.push(formatKeyRelationship(parsed.subject, parsed.relation, parsed.dynamic));
-            } else existingParsed.push({ counterpartId: counterpart.id, relation: parsed.relation, dynamic: parsed.dynamic, score: 100 });
+            } else existingParsed.push({ counterpartId: counterpart.id, relation: parsed.relation, dynamic: parsed.dynamic, score: 100, own: true });
         }
         const byCounterpart = new Map(existingParsed.map(item => [item.counterpartId, item]));
         for (const edge of graph.edges) {
@@ -1006,6 +1000,9 @@ function projectGraphToKeyRelationships(npcs, graph) {
                 const item = byCounterpart.get(counterpart.id);
                 if (edge.confidence === 'explicit' && inverseRelationFamilies(socialRelationFamily(item.relation), socialRelationFamily(view.relation))) {
                     item.relation = view.relation;
+                } else if (item.own && conflictingKinship(item.relation, view.relation)) {
+                    // A blood tie mirrored from the other side never overrides this NPC's own
+                    // statement; a wrong entry on one dossier must not spread to the other.
                 } else {
                     item.relation = mergeRelations(item.relation, view.relation);
                 }
@@ -1221,11 +1218,14 @@ function repairMirroredKeyRelationships(npcs, graph) {
             const shared = splitParts(aText).filter(part => splitParts(bText).some(other => norm(other) === norm(part))
                 && norm(inverseSocialRelation(part)) !== norm(part));
             if (!shared.length) continue;
-            // The text belongs on the dossier of the NPC it does not describe; otherwise keep the side
-            // that established the edge.
+            // The text belongs on the dossier of the NPC it does not describe. Otherwise the side that
+            // holds extra parts absorbed the copy ("Niece / sibling" against a plain "niece"); failing
+            // both, keep the side that established the edge.
             const aDescribed = shared.some(part => describesNpc(part, a, b));
             const bDescribed = shared.some(part => describesNpc(part, b, a));
-            const copy = aDescribed && !bDescribed ? a : b;
+            const aParts = splitParts(aText).length;
+            const bParts = splitParts(bText).length;
+            const copy = aDescribed !== bDescribed ? (aDescribed ? a : b) : (aParts !== bParts ? (aParts > bParts ? a : b) : b);
             const original = copy === a ? b : a;
             if (locked(copy)) continue;
             const sharedKeys = new Set(shared.map(norm));
@@ -1241,6 +1241,42 @@ function repairMirroredKeyRelationships(npcs, graph) {
             if (copy === a) edge.aToB = inverseSocialRelation(edge.bToA) || edge.aToB;
             else edge.bToA = inverseSocialRelation(edge.aToB) || edge.bToA;
         }
+    }
+    resolveConflictingKinship(npcs, said);
+}
+
+function kinshipParts(value) {
+    return clean(value, 180).split(/\s*\/\s*/).map(part => clean(part, 180)).filter(Boolean);
+}
+
+// An entry naming two different blood ties to one person ("Greta — niece / sibling") is settled by
+// what that person's own dossier says ("Talia — niece" makes Greta the aunt). Without such a
+// statement the entry is left as it is rather than guessed from word order.
+function resolveConflictingKinship(npcs, said) {
+    const locked = npc => Array.isArray(npc?.manualProfileFields) && npc.manualProfileFields.includes('keyRelationships');
+    const byId = new Map(npcs.filter(npc => npc?.id).map(npc => [npc.id, npc]));
+    for (const owner of npcs) {
+        if (!owner?.id || locked(owner) || !said.has(owner.id)) continue;
+        owner.keyRelationships = (Array.isArray(owner.keyRelationships) ? owner.keyRelationships : []).map(raw => {
+            const parsed = parseKeyRelationshipEntry(raw);
+            const counterpart = parsed ? resolveNpcReference(npcs, parsed.subject) : null;
+            if (!counterpart || counterpart.id === owner.id) return raw;
+            const parts = kinshipParts(parsed.relation);
+            const kin = parts.filter(part => KINSHIP_RELATION_FAMILIES.has(socialRelationFamily(part)));
+            if (!kin.some((part, i) => kin.slice(i + 1).some(other => conflictingKinship(part, other)))) return raw;
+            const statement = establishedCounterpartRelation(byId.get(counterpart.id), owner, npcs);
+            const stated = kinshipParts(statement).filter(part => KINSHIP_RELATION_FAMILIES.has(socialRelationFamily(part)));
+            const statedFamilies = new Set(stated.map(socialRelationFamily));
+            if (statedFamilies.size !== 1) return raw;
+            const expected = inverseSocialRelation(stated[0]);
+            const family = socialRelationFamily(kinshipParts(expected)[0]);
+            const matching = kin.filter(part => socialRelationFamily(part) === family);
+            const relation = uniq([
+                ...parts.filter(part => !KINSHIP_RELATION_FAMILIES.has(socialRelationFamily(part))),
+                ...(matching.length ? matching : [expected]),
+            ]).join(' / ');
+            return formatKeyRelationship(counterpart.name, relation, parsed.dynamic, counterpart);
+        });
     }
 }
 

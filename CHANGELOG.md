@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix a 1.0.81 regression in Important Bonds: two conflicting blood ties ("Greta — niece / sibling") were settled by keeping the later word, which picked the wrong one and, depending on NPC list order, overwrote the other NPC's correct entry ("Talia — niece" became "sibling"). Such an entry is now settled by what the other NPC's own dossier says (Greta's "Talia — niece" makes Greta the aunt), and without that statement it is left as it is and not mirrored. When deciding which of two dossiers holds a mirrored copy, the side with extra parts ("Niece / sibling" against a plain "niece") is the copy. A blood tie mirrored from the other side no longer overrides an NPC's own entry, so a wrong entry cannot spread.
+
 ## 1.0.81 - 30 September 2026
 
 - Stop Important Bonds copying one NPC's words onto the other. Each bond is mirrored onto the counterpart's dossier, and for symmetric ties (cousin, friend, rival) the mirror copied the whole phrase, so a bond describing Talia on Hanna's dossier ("Talia — disinherited half-elf cousin") appeared on Talia's as "Hanna — disinherited half-elf cousin". Relations Delta cannot invert ("servant", "employer") were copied unchanged. A mirrored symmetric bond now keeps only the words both sides share (childhood, best, second, sworn, estranged…), and a relation with no known inverse is not mirrored. Stored copies are repaired on the next social reconciliation: when both dossiers hold the same non-mutual text for each other, a species word decides which NPC the text describes, otherwise the side that established the graph edge keeps it; the other side gets the proper inverse, and the persisted edge is corrected too.
