@@ -1,5 +1,5 @@
 import * as branchCore from './branch-core.js';
-import { normalizeName } from './core.js';
+import { isTerminalNpcDeath, normalizeName } from './core.js';
 import { parseQualifiedChatKey } from './identity.js';
 import { prunePortraitAssetsInPlace } from './storage.js';
 import { normalizeSocialGraph, removeNpcFromSocialGraph, purgeNpcStructuredReferences } from './social.js';
@@ -927,6 +927,53 @@ function retainLinearPrefixHistory(target, source, checkpoints, currentLineage, 
     return target;
 }
 
+// Relationship state one scan can change. Numeric/event fields move together; the prose summary is
+// reverted only when it is unlocked and untouched since the deleted scan.
+const RELATIONSHIP_STATE_FIELDS = Object.freeze([
+    'relationship', 'relationshipProgress', 'relationshipMilestones', 'relationshipEventHistory', 'lastRelationshipChange',
+]);
+
+// A message deleted from the middle of the chat leaves retained descendants that cannot be
+// replayed, so canonical dossiers are kept. Relationship changes are the exception that can be
+// undone exactly: when the deleted messages are one contiguous block and an NPC's relationship
+// state still equals its state right after the last deleted scan (nothing later touched it), the
+// deleted scans are the only source of the difference from the state right before the block, so
+// that earlier state is restored. Anything a retained message or a manual edit changed is left.
+export function revertDeletedRelationshipEffects(npcs, checkpoints, previousLineage, currentLineage, divergence) {
+    const removed = previousLineage.length - currentLineage.length;
+    if (!Array.isArray(npcs) || !Number.isInteger(divergence) || divergence < 0 || removed <= 0) return [];
+    for (let i = 0; i < divergence; i += 1) if (previousLineage[i] !== currentLineage[i]) return [];
+    for (let i = divergence; i < currentLineage.length; i += 1) if (previousLineage[i + removed] !== currentLineage[i]) return [];
+    const keys = lineageCheckpointKeys(previousLineage);
+    const owned = (Array.isArray(checkpoints) ? checkpoints : [])
+        .filter(item => item?.snapshot && keys[item.messageId] === item.lineageKey)
+        .sort((a, b) => a.messageId - b.messageId);
+    const boundary = owned.filter(item => item.messageId < divergence).at(-1);
+    const deleted = owned.filter(item => item.messageId >= divergence && item.messageId < divergence + removed).at(-1);
+    if (!boundary || !deleted) return [];
+    const boundaryNpcs = new Map((boundary.snapshot.npcs || []).map(npc => [String(npc?.id || ''), npc]));
+    const deletedNpcs = new Map((deleted.snapshot.npcs || []).map(npc => [String(npc?.id || ''), npc]));
+    const reverted = [];
+    for (const npc of npcs) {
+        const id = String(npc?.id || '');
+        const before = boundaryNpcs.get(id);
+        const after = deletedNpcs.get(id);
+        if (!id || !before || !after || isTerminalNpcDeath(npc)) continue;
+        const changedByDeleted = RELATIONSHIP_STATE_FIELDS.some(field => !jsonEqual(before[field], after[field]));
+        const untouchedSince = RELATIONSHIP_STATE_FIELDS.every(field => jsonEqual(npc[field], after[field]));
+        if (!changedByDeleted || !untouchedSince) continue;
+        for (const field of RELATIONSHIP_STATE_FIELDS) {
+            if (Object.prototype.hasOwnProperty.call(before, field)) npc[field] = structuredClone(before[field]);
+            else delete npc[field];
+        }
+        const summaryLocked = Array.isArray(npc.manualProfileFields) && npc.manualProfileFields.includes('relationshipSummary');
+        if (!summaryLocked && jsonEqual(npc.relationshipSummary, after.relationshipSummary)) npc.relationshipSummary = before.relationshipSummary ?? '';
+        npc.updatedAt = Date.now();
+        reverted.push({ id, name: String(npc.name || '') });
+    }
+    return reverted;
+}
+
 function normalizedRecoveryOperation(value) {
     const operation = String(value || 'auto').toLowerCase();
     return ['delete', 'edit', 'swipe'].includes(operation) ? operation : 'auto';
@@ -1012,6 +1059,7 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
     let restoredFromJournal = false;
     let restoredFromRoot = false;
     let failClosed = false;
+    let relationshipReverted = [];
     let journalHeadSeq = null;
     let recoveryAction = 'fail-closed';
     if ((linearReplacement || tailTruncationRecovery) && journalRestore) {
@@ -1046,6 +1094,10 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
         restored = { ...state };
         failClosed = true;
         recoveryAction = 'fail-closed-keep-current';
+        if (recoveryBlockedByRetainedDescendants && recoveryOperation === 'delete') {
+            restored.npcs = cloneNpcList(state?.npcs);
+            relationshipReverted = revertDeletedRelationshipEffects(restored.npcs, checkpoints, previousLineage, currentLineage, divergence);
+        }
     }
     restored.npcs = branchCore.preserveUserNpcMetadata(restored.npcs, currentNpcs);
     // A journal/checkpoint snapshot intentionally omits portrait binaries. When an NPC
@@ -1130,6 +1182,7 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
         restoredFromJournal,
         restoredFromRoot,
         failClosed,
+        relationshipReverted,
         linearHistoryPruned: linearReplacement,
         legacyFallback: failClosed && checkpoints.length === 0 && !state?.branchRootSnapshot,
     };

@@ -834,6 +834,46 @@ try {
     assert.equal(inlineAnchors[0].dataset.npcStateDeltaMessageId, '1');
     assert.match(inlineAnchors[0].innerHTML, /Yunyun/);
 
+    // Deleting a message from the middle keeps later dossiers, but the relationship change that
+    // message caused is undone exactly (only when no later message touched it).
+    {
+        const yunyunBefore = structuredClone(globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Yunyun'));
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [
+            { name: 'Yunyun', present: true, relationshipImpact: 'meaningful', relationshipDelta: { trust: 2, affection: 1, desire: 0, tension: 0 },
+              relationshipEvidence: { trust: 'Kazuma comforts Yunyun in silence as she breaks down.', affection: 'Yunyun leans into Kazuma.', desire: '', tension: '' },
+              relationshipChangeReason: 'Kazuma offered silent grounding comfort as Yunyun broke down in shock.' },
+        ] });
+        mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'Kazuma silently holds Yunyun while she shakes and breaks down.', swipe_id: 0 });
+        eventSource.emit('message_received', 2);
+        await sleep(320);
+        const awarded = globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Yunyun');
+        assert.equal(awarded.relationship.trust, yunyunBefore.relationship.trust + 2, 'the scan awarded the relationship change');
+        assert.match(awarded.lastRelationshipChange.reason, /silent grounding comfort/);
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [{ name: 'Yunyun', present: true }] });
+        mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'I stay beside her until she is calm.' });
+        mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'Yunyun slowly stops shaking and wipes her eyes.', swipe_id: 0 });
+        eventSource.emit('message_received', 4);
+        await sleep(320);
+        mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'We rest by the fire until morning.' });
+        mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'The fire burns low and Yunyun falls asleep against his shoulder.', swipe_id: 0 });
+        eventSource.emit('message_received', 6);
+        await sleep(320);
+        mockState.context.chat.splice(2, 1);
+        eventSource.emit('message_deleted', 2);
+        await sleep(600);
+        const afterMiddleDelete = globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Yunyun');
+        assert.deepEqual(afterMiddleDelete.relationship, yunyunBefore.relationship, 'the deleted message\'s relationship change is reverted');
+        assert.equal(afterMiddleDelete.lastRelationshipChange.reason, yunyunBefore.lastRelationshipChange.reason);
+        assert.equal(afterMiddleDelete.relationshipEventHistory.length, yunyunBefore.relationshipEventHistory.length);
+        const middleReconcile = globalThis.NPCStateDelta.uiStatus().branchReconciliations.find(entry => entry.reason === 'message-deleted' && entry.failClosed);
+        assert.ok(middleReconcile, 'the mid-chat delete is a recorded fail-closed reconciliation');
+        assert.equal(middleReconcile.relationshipRevertedCount, 1);
+        mockState.context.chat.length = 2;
+        eventSource.emit('message_deleted', 2);
+        await sleep(600);
+        assert.deepEqual(globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Yunyun').relationship, yunyunBefore.relationship);
+    }
+
     const wizIdForDelete = state.npcs.find(n => n.name === 'Wiz').id;
     assert.equal(await globalThis.NPCStateDelta.deleteNpc(wizIdForDelete), true);
     state = globalThis.NPCStateDelta.getState();
