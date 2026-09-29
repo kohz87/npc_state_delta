@@ -1087,7 +1087,7 @@ test('scanner prompt exposes durable Key Relationships and stable profile contex
     assert.match(prompt, /DURABLE PROFILE CHANNEL/i);
     assert.match(prompt, /ALWAYS top-level keyRelationshipEdges/i);
     assert.match(prompt, /new grounded durable profile facts count as changes/i);
-    assert.match(prompt, /aId,a,bId,b,aToB,bToA/i);
+    assert.match(prompt, /aId,a,bId,b,aToB=b's role to a,bToA/i);
     assert.match(prompt, /social change[\s\S]*?evolve/i);
     assert.match(prompt, /"keyRelationships":\["Elena — older sister \| protective but blunt"\]/);
 });

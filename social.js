@@ -153,6 +153,17 @@ const INVERSE_SOCIAL_RELATION_FAMILIES = new Map([
     ['grandparent', 'grandchild'], ['grandchild', 'grandparent'],
 ]);
 
+const KINSHIP_RELATION_FAMILIES = new Set(['child', 'parent', 'sibling', 'cousin', 'aunt-uncle', 'niece-nephew', 'grandparent', 'grandchild']);
+
+// Two different blood ties to the same person cannot both hold ("niece / sibling"); the later one
+// replaces the earlier instead of being joined to it.
+function conflictingKinship(a, b) {
+    const left = socialRelationFamily(a);
+    const right = socialRelationFamily(b);
+    return KINSHIP_RELATION_FAMILIES.has(left) && KINSHIP_RELATION_FAMILIES.has(right)
+        && left !== right && !inverseRelationFamilies(left, right);
+}
+
 function inverseRelationFamilies(a, b) {
     const left = KNOWN_SOCIAL_RELATION_FAMILIES.has(a) ? a : socialRelationFamily(a);
     const right = KNOWN_SOCIAL_RELATION_FAMILIES.has(b) ? b : socialRelationFamily(b);
@@ -214,8 +225,14 @@ function sanitizeRelationshipRelation(subject, value) {
         seen.add(key);
         slash.push(part);
     }
-    if (slash.length === 2 && inverseRelationFamilies(slash[0], slash[1])) relation = slash[0];
-    else if (slash.length) relation = cleanBoundary(slash.join(' / '), 180, { ellipsis: false });
+    const parts = [];
+    for (const part of slash) {
+        const conflict = parts.findIndex(existing => conflictingKinship(existing, part));
+        if (conflict >= 0) parts.splice(conflict, 1);
+        parts.push(part);
+    }
+    if (parts.length === 2 && inverseRelationFamilies(parts[0], parts[1])) relation = parts[0];
+    else if (parts.length) relation = cleanBoundary(parts.join(' / '), 180, { ellipsis: false });
     const subjectKey = norm(subject);
     const relationKey = norm(relation);
     if (/^late husband\b/.test(subjectKey) && /^(?:surviving )?widow\b/.test(relationKey)) return 'spouse';
@@ -223,14 +240,36 @@ function sanitizeRelationshipRelation(subject, value) {
     return relation;
 }
 
+// Words a symmetric bond shares on both sides ("childhood friend", "second cousin"). Any other
+// qualifier ("older", "disinherited half-elf") describes one person only and must not be mirrored.
+const MUTUAL_RELATION_QUALIFIERS = new Set([
+    'best', 'close', 'childhood', 'old', 'lifelong', 'sworn', 'bitter', 'former', 'estranged', 'ex',
+    'first', 'second', 'third', 'distant', 'fellow',
+]);
+const SYMMETRIC_RELATION_WORD = /\b(friend|rival|cousin|ally|companion|comrade|colleague|coworker|neighbou?r|classmate|enemy|acquaintance|teammate)\b/;
+
+function symmetricInverse(rel) {
+    const words = norm(rel).split(/\s+/).filter(Boolean);
+    const index = words.findIndex(word => SYMMETRIC_RELATION_WORD.test(word));
+    if (index < 0) return '';
+    return [...words.slice(0, index).filter(word => MUTUAL_RELATION_QUALIFIERS.has(word)), words[index]].join(' ');
+}
+
 export function inverseSocialRelation(value) {
+    const text = clean(value, 180);
+    const parts = text.split(/\s*\/\s*/).filter(Boolean);
+    if (parts.length > 1) return uniq(parts.map(inverseSingleRelation).filter(Boolean)).join(' / ');
+    return inverseSingleRelation(text);
+}
+
+function inverseSingleRelation(value) {
     const rel = clean(value, 180);
     const family = socialRelationFamily(rel);
     if (!family) return '';
     if (family === 'child') return 'parent';
     if (family === 'parent') return 'child';
     if (family === 'sibling') return /\bclone\b/i.test(rel) ? 'clone sibling' : (/\btwin\b/i.test(rel) ? 'twin sibling' : 'sibling');
-    if (family === 'friend' || family === 'rival' || family === 'cousin') return rel;
+    if (family === 'friend' || family === 'rival' || family === 'cousin') return symmetricInverse(rel);
     if (family === 'partner') {
         if (/\b(?:wife|husband|spouse)\b/i.test(rel)) return 'spouse';
         return 'partner';
@@ -243,7 +282,8 @@ export function inverseSocialRelation(value) {
     if (family === 'niece-nephew') return 'aunt/uncle';
     if (family === 'grandparent') return 'grandchild';
     if (family === 'grandchild') return 'grandparent';
-    return rel;
+    // Only a known symmetric bond mirrors itself; "servant" or "employer" has no safe inverse.
+    return symmetricInverse(rel);
 }
 
 function relationSpecificity(value) {
@@ -272,6 +312,7 @@ function mergeRelations(a, b) {
     const rf = socialRelationFamily(right);
     if (lf && lf === rf) return relationSpecificity(right) >= relationSpecificity(left) ? right : left;
     if (inverseRelationFamilies(lf, rf)) return left;
+    if (conflictingKinship(left, right)) return right;
     return cleanBoundary(`${left} / ${right}`, 180, { ellipsis: false });
 }
 
@@ -350,7 +391,10 @@ function normalizeEdge(raw = {}) {
     const aSplit = splitRelationDynamic(raw.aToB ?? raw.a_to_b ?? raw.relation);
     const bSplit = splitRelationDynamic(raw.bToA ?? raw.b_to_a ?? raw.reverseRelation);
     const aToB = sanitizeRelationshipRelation('', aSplit.relation);
-    const bToA = sanitizeRelationshipRelation('', bSplit.relation) || inverseSocialRelation(aToB);
+    let bToA = sanitizeRelationshipRelation('', bSplit.relation) || inverseSocialRelation(aToB);
+    // A reverse side that repeats the forward text is a mirrored copy ("half-elf cousin" both ways);
+    // keep it only when the relation is genuinely its own inverse.
+    if (aToB && norm(bToA) === norm(aToB) && norm(inverseSocialRelation(aToB)) !== norm(aToB)) bToA = inverseSocialRelation(aToB);
     if (!aToB && !bToA) return null;
     const confidence = clean(raw.confidence, 40) || 'migration';
     return {
@@ -1133,6 +1177,73 @@ export function applyManualKeyRelationshipEdit(state, npcId, beforeList = [], af
     return next;
 }
 
+function speciesWords(npc) {
+    return norm(npc?.species).split(/\s+/).filter(word => word.length >= 3);
+}
+
+function describesNpc(text, npc, other) {
+    const words = norm(text).split(/\s+/);
+    const own = speciesWords(npc);
+    const others = new Set(speciesWords(other));
+    return own.some(word => !others.has(word) && words.includes(word));
+}
+
+// Earlier builds mirrored a bond's whole text onto the counterpart, so both dossiers can hold the
+// words one NPC uses about the other ("Hanna — disinherited half-elf cousin" on Talia). Decide
+// which side the text describes and give the other side the proper inverse.
+function repairMirroredKeyRelationships(npcs, graph) {
+    const locked = npc => Array.isArray(npc?.manualProfileFields) && npc.manualProfileFields.includes('keyRelationships');
+    const splitParts = value => value.split(/\s*\/\s*/).map(part => clean(part, 180)).filter(Boolean);
+    const said = new Map();
+    for (const owner of npcs) {
+        if (!owner?.id) continue;
+        const about = new Map();
+        for (const raw of Array.isArray(owner.keyRelationships) ? owner.keyRelationships : []) {
+            const parsed = parseKeyRelationshipEntry(raw);
+            const target = parsed ? resolveNpcReference(npcs, parsed.subject) : null;
+            if (target && target.id !== owner.id && !about.has(target.id)) about.set(target.id, parsed.relation);
+        }
+        said.set(owner.id, about);
+    }
+    const edges = new Map((graph.edges || []).map(edge => [[edge.aId, edge.bId].sort().join('|'), edge]));
+    const byId = new Map(npcs.filter(npc => npc?.id).map(npc => [npc.id, npc]));
+    const seen = new Set();
+    for (const [ownerId, about] of said) {
+        for (const [counterpartId, ownerText] of about) {
+            const pairKey = [ownerId, counterpartId].sort().join('|');
+            const counterpartText = said.get(counterpartId)?.get(ownerId);
+            if (seen.has(pairKey) || !counterpartText) continue;
+            seen.add(pairKey);
+            const edge = edges.get(pairKey);
+            const [a, b] = edge?.aId === counterpartId ? [byId.get(counterpartId), byId.get(ownerId)] : [byId.get(ownerId), byId.get(counterpartId)];
+            const aText = a.id === ownerId ? ownerText : counterpartText;
+            const bText = a.id === ownerId ? counterpartText : ownerText;
+            const shared = splitParts(aText).filter(part => splitParts(bText).some(other => norm(other) === norm(part))
+                && norm(inverseSocialRelation(part)) !== norm(part));
+            if (!shared.length) continue;
+            // The text belongs on the dossier of the NPC it does not describe; otherwise keep the side
+            // that established the edge.
+            const aDescribed = shared.some(part => describesNpc(part, a, b));
+            const bDescribed = shared.some(part => describesNpc(part, b, a));
+            const copy = aDescribed && !bDescribed ? a : b;
+            const original = copy === a ? b : a;
+            if (locked(copy)) continue;
+            const sharedKeys = new Set(shared.map(norm));
+            copy.keyRelationships = copy.keyRelationships.map(raw => {
+                const parsed = parseKeyRelationshipEntry(raw);
+                if (!parsed || resolveNpcReference(npcs, parsed.subject)?.id !== original.id) return raw;
+                const relation = uniq(splitParts(parsed.relation)
+                    .map(part => sharedKeys.has(norm(part)) ? inverseSocialRelation(part) : part)
+                    .filter(Boolean)).join(' / ');
+                return relation ? formatKeyRelationship(original.name, relation, parsed.dynamic, original) : '';
+            }).filter(Boolean);
+            if (!edge) continue;
+            if (copy === a) edge.aToB = inverseSocialRelation(edge.bToA) || edge.aToB;
+            else edge.bToA = inverseSocialRelation(edge.aToB) || edge.bToA;
+        }
+    }
+}
+
 export function reconcileSocialState(state = {}, options = {}) {
     const next = state && typeof state === 'object' ? state : {};
     const npcs = Array.isArray(next.npcs) ? next.npcs : [];
@@ -1142,6 +1253,7 @@ export function reconcileSocialState(state = {}, options = {}) {
     graph.edges = graph.edges.filter(edge => npcIds.has(edge.aId) && npcIds.has(edge.bId));
     graph.unresolved = graph.unresolved.filter(slot => npcIds.has(slot.ownerId));
     graph = alignGraphWithCanonicalRelationships(graph, npcs);
+    repairMirroredKeyRelationships(npcs, graph);
     const meta = { provenance: options.provenance || 'scanner', sourceMessageId: options.sourceMessageId, turn: options.turn };
 
     for (const edge of parseScanEdges(options.scanResult || {}, npcs, meta)) addEdge(graph, edge);
