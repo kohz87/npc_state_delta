@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.0.76 - 29 September 2026
+
+- Re-check stable traits when an NPC's circumstances change, not only after 30 turns. NPCs first met at a low point (an abused servant) got Personality and levers such as "deeply submissive under constant mistreatment" and "Disposition: docile - endures … orders in submissive silence" from that first scene; when the story moved them on quickly (servant to inn owner within 20 turns) those traits kept telling the roleplay model to obey, while the 30-turn stale check had not yet started. Refresh now also names Personality, Speech or Behavioral Levers written before the NPC's background or home base last changed (a trait with no recorded change dates from the dossier's creation), with the same "check each clause, rewrite what belongs to an ended situation, keep the rest" instruction. The rewrite still passes the ordinary evidence gates, and protected fields are never named.
+- Ask for Behavioral Lever evidence in lever form. Scans recorded behaviour evidence as free text ("Pragmatically trades lodging for larder goods"), which carries no lever category, so it could never count as a second sighting of any lever. The scanner and Refresh prompts now ask for evidence items in the same `Label: level - effect` form as the levers.
+- Request budget: the routine scan request is 8 characters smaller (a redundant "Secondary to identity." was dropped from the relationship rule; identity-first behaviour is still stated in the firewall rule and the roleplay injection) and the Refresh request is 21 characters larger, plus the stale-trait line only when it applies. Request counts, retries, output allowances and routing are unchanged; the Stage 9 baseline was regenerated. Persisted formats are unchanged.
+
 ## 1.0.75 - 29 September 2026
 
 - Stop a lone "deceased" line appearing in Important Bonds. The dossier editor shows one bond per line but split saved lines on semicolons too, and a dead counterpart's bond is written "…; deceased", so saving the editor (even for an unrelated field) split "deceased" off into its own bond, which was then kept because one-word bond text was preserved. Editor lists (bonds, memories, mannerisms, Behavioral Levers) now split only on line breaks, and a bare life-state word ("deceased", "dead", "late") is dropped wherever bonds are normalised, including protected bonds, so existing orphan lines disappear on the next load or scan.
