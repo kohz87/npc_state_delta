@@ -110,6 +110,7 @@ import {
     ensureBranchParentAnchor,
     normalizeUserDismissedGroups,
     recordBranchCheckpoint,
+    migrateLegacyLineage,
     reconcileBranchState,
     snapshotBranchState,
 } from './branch.js';
@@ -6148,6 +6149,7 @@ async function handleAssistantMessageReceived(messageId, { bypassSwipeGuard = fa
     }
 
     const state = getChatState();
+    migrateLegacyLineage(state, getContext().chat || []);
     const receipts = assistantReceipts.get(eventChatKey) || new Set();
     if (!forceBranchRescan && (receipts.has(eventSourceKey)
         || (state.lastScannedMessageId === messageId && eventSourceKey === lineageCheckpointKey(state.lineage, messageId)))) return;
@@ -6262,7 +6264,9 @@ function registerEvents() {
             if (getChatKey() !== key) return;
             // This listener maintains branch lineage and refreshes the injection so an off-screen NPC
             // the player names reaches this generation; text never dispatches mutations.
-            getChatState().lineage = chatLineage(getContext().chat || []);
+            const sentState = getChatState();
+            migrateLegacyLineage(sentState, getContext().chat || []);
+            sentState.lineage = chatLineage(getContext().chat || []);
             updateInjection();
         });
     }
