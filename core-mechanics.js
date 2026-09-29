@@ -2662,6 +2662,32 @@ function durableClaimPolarityConflict(claim, target) {
     return false;
 }
 
+// Opposite tendencies that break a pending development trend: a later sighting of the other side
+// means the trend did not hold. Each pair is a pair of word stems.
+const DEVELOPMENT_TREND_OPPOSITES = [
+    ['confiden', 'timid'], ['confiden', 'hesitan'], ['confiden', 'insecur'], ['bold', 'meek'], ['bold', 'shy'],
+    ['assertiv', 'submissiv'], ['assertiv', 'docile'], ['assertiv', 'deferen'], ['independen', 'dependen'],
+    ['independen', 'relian'], ['calm', 'anxious'], ['calm', 'panick'], ['warm', 'cold'], ['trusting', 'distrust'],
+    ['trusting', 'suspicio'], ['cheerful', 'gloom'], ['open', 'guarded'], ['outspoken', 'silent'], ['proud', 'asham'],
+    ['hopeful', 'despair'], ['decisive', 'indecisi'], ['patient', 'impatien'],
+];
+
+// True when a new observation contradicts a pending one: an opposite tendency, or the same claim
+// negated. Used to break a development trend before it can accumulate further.
+export function durableEvidenceContradicts(pending, incoming) {
+    const left = strippedDevelopmentEvidence(pending);
+    const right = strippedDevelopmentEvidence(incoming);
+    if (!left || !right) return false;
+    if (durableClaimPolarityConflict(left, right)) return true;
+    if (durableClaimHasNegation(left) || durableClaimHasNegation(right)) return false;
+    const words = text => normalizeName(text).split(/\s+/).filter(Boolean);
+    const has = (list, stem) => list.some(word => word.startsWith(stem));
+    const a = words(left);
+    const b = words(right);
+    return DEVELOPMENT_TREND_OPPOSITES.some(([x, y]) => (has(a, x) && has(b, y) && !has(a, y) && !has(b, x))
+        || (has(a, y) && has(b, x) && !has(a, x) && !has(b, y)));
+}
+
 function durableDevelopmentClaimRepresented(claim, target) {
     const source = cleanText(claim, DURABLE_PROFILE_LIMITS.evidence);
     const accepted = cleanText(target, DURABLE_PROFILE_LIMITS.behaviorProfile * 6);
@@ -6012,6 +6038,8 @@ ${String(dossierText || '').trim()}`;
 // A stable field unchanged for this many turns is named in Refresh so outdated clauses (an ended
 // situation, a former role, someone now dead) are re-checked instead of persisting by omission.
 export const STALE_PROFILE_TURNS = 30;
+// With dated World State, age is measured in story days instead of turns.
+export const STALE_PROFILE_DAYS = 30;
 
 export function buildProfileRefreshPrompt({
     transcript,
@@ -6020,6 +6048,7 @@ export function buildProfileRefreshPrompt({
     charName = 'Character',
     memoryCriteria = DEFAULT_MEMORY_CRITERIA,
     turn = null,
+    storyDay = null,
 }) {
     const npc = normalizeNpcRecord(targetNpc || {});
     const locked = Array.isArray(npc.manualProfileFields) ? npc.manualProfileFields : [];
@@ -6065,11 +6094,16 @@ export function buildProfileRefreshPrompt({
     const circumstanceAt = circumstanceTurns.length ? Math.max(...circumstanceTurns) : null;
     const predatesCircumstance = field => circumstanceAt !== null
         && (Number.isInteger(changedAt[field]) ? changedAt[field] : -1) < circumstanceAt;
-    const agedOut = field => Number.isInteger(turn) && Number.isInteger(changedAt[field]) && turn - changedAt[field] >= STALE_PROFILE_TURNS;
+    const changedDay = targetNpc?.fieldChangeDays && typeof targetNpc.fieldChangeDays === 'object' ? targetNpc.fieldChangeDays : {};
+    const agedByDays = field => Number.isInteger(storyDay) && Number.isInteger(changedDay[field]) && storyDay - changedDay[field] >= STALE_PROFILE_DAYS;
+    const agedByTurns = field => !(Number.isInteger(storyDay) && Number.isInteger(changedDay[field]))
+        && Number.isInteger(turn) && Number.isInteger(changedAt[field]) && turn - changedAt[field] >= STALE_PROFILE_TURNS;
+    const agedOut = field => agedByDays(field) || agedByTurns(field);
     const staleFields = ['personality', 'speech', 'behaviorProfile'].filter(field => !locked.includes(field)
         && (Array.isArray(existing[field]) ? existing[field].length : existing[field])
         && (agedOut(field) || predatesCircumstance(field)));
-    const staleReason = staleFields.some(predatesCircumstance) ? 'predate later background/home changes' : `unchanged for ${STALE_PROFILE_TURNS}+ turns`;
+    const staleReason = staleFields.some(predatesCircumstance) ? 'predate later background/home changes'
+        : (staleFields.some(agedByDays) ? `unchanged for ${STALE_PROFILE_DAYS}+ story days` : `unchanged for ${STALE_PROFILE_TURNS}+ turns`);
     const staleHint = staleFields.length
         ? `\nStored ${staleFields.join('/')} ${staleReason}: check each clause against the window. A clause tied to an ended situation, former role or dead person is stale: cite the current tendency as evidence and return the changed FULL field (levers: same label, new level/effect); otherwise keep.`
         : '';

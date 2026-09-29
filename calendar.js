@@ -297,6 +297,18 @@ function dateOrdinal(value, config = null) {
     return ordinal + date.day - 1;
 }
 
+// Absolute day count for a dated calendar value, so two story dates can be compared as elapsed
+// days. Undated or yearless values return null; the caller then falls back to turns.
+export function calendarDayNumber(value, config = null) {
+    const date = normalizeCalendarDate(value, config);
+    if (!date || date.year === null) return null;
+    const ordinal = dateOrdinal(date, config);
+    if (ordinal === null) return null;
+    const normalized = normalizeCalendarConfig(config, { requireCurrentDate: false });
+    const yearLength = normalized.calendarValid ? calendarYearLength(config) : 365;
+    return yearLength > 0 ? date.year * yearLength + ordinal : null;
+}
+
 function stableHash(value) {
     const text = String(value || '').normalize('NFKC').toLocaleLowerCase();
     let hash = 0x811c9dc5;

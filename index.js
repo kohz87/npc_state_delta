@@ -49,6 +49,7 @@ import {
     normalizeNpcAdmissionMode,
     buildInjection,
     npcNamedInText,
+    storyDayFromText,
     buildScannerPrompt,
     buildRelationshipPassPrompt,
     buildBackfillPrompt,
@@ -2104,6 +2105,30 @@ function currentExchangeTranscript(messageId = null) {
         .join('\n');
 }
 
+// Story day of a message: its own dated World State block, else the nearest earlier dated message
+// (user turns and brief replies carry none). Null when nothing nearby is dated; callers then use turns.
+const STORY_DAY_LOOKBACK = 12;
+
+function storyDayAt(messageId) {
+    const chat = getContext().chat || [];
+    const start = Number.isInteger(messageId) ? Math.min(messageId, chat.length - 1) : chat.length - 1;
+    for (let i = start; i >= 0 && i > start - STORY_DAY_LOOKBACK; i -= 1) {
+        const day = storyDayFromText(chat[i]?.mes || '');
+        if (day !== null) return day;
+    }
+    return null;
+}
+
+function storyDaysForTranscript(transcript) {
+    const days = {};
+    for (const match of String(transcript || '').matchAll(/^\[m(\d+)\]/gm)) {
+        const id = Number(match[1]);
+        const day = storyDayAt(id);
+        if (Number.isInteger(id) && day !== null) days[id] = day;
+    }
+    return days;
+}
+
 function currentExclusions() {
     const ctx = getContext();
     return [ctx.name1, ctx.name2].filter(Boolean);
@@ -2417,6 +2442,7 @@ async function scanNpcDossier(npcId) {
             turn: latest.turn,
             sourceMessageId: targetMessageId,
             calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
+            storyDay: storyDayAt(targetMessageId),
             relationshipBaseline: getSettings().relationshipBaseline,
             relationshipCaps: getSettings().relationshipCaps,
             autoArchiveDeaths: getSettings().autoArchiveDeaths !== false,
@@ -2537,6 +2563,7 @@ async function refreshNpcFromChat(npcId) {
         charName: ctx.name2 || 'Character',
         memoryCriteria: settings.memoryCriteria,
         turn: Number.isInteger(state.turn) ? state.turn : null,
+        storyDay: storyDayAt(latestMessageId(true)),
     });
     const scanStateVersion = Number(stateVersions.get(chatKey) || 0);
     const operation = beginScanOperation(chatKey, `chat refresh for ${existing.name}`, { npcId: id, indicator: 'refresh' });
@@ -2625,6 +2652,7 @@ async function refreshNpcFromChat(npcId) {
             turn: latest.turn,
             sourceMessageId: targetMessageId,
             calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
+            storyDay: storyDayAt(targetMessageId),
             relationshipBaseline: settings.relationshipBaseline,
             relationshipCaps: settings.relationshipCaps,
             autoArchiveDeaths: settings.autoArchiveDeaths !== false,
@@ -2635,6 +2663,7 @@ async function refreshNpcFromChat(npcId) {
             memoryInputLimit: IMPORTANT_MEMORY_LIMIT,
             allowTargetedDurableSeed: true,
             developmentSourceMessageIds,
+            storyDays: storyDaysForTranscript(transcript),
             developmentContext: transcript,
             userDevelopmentContext: recentUserDevelopmentContext(settings.scanDepth, { messageIds: true }),
         });
@@ -2878,6 +2907,7 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
             turn: latestState.turn,
             sourceMessageId: targetMessageId,
             calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
+            storyDay: storyDayAt(targetMessageId),
             relationshipBaseline: settings.relationshipBaseline,
             relationshipCaps: settings.relationshipCaps,
             autoArchiveDeaths: settings.autoArchiveDeaths !== false,
@@ -3421,6 +3451,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
             turn: state.turn,
             sourceMessageId: targetMessageId,
             calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
+            storyDay: storyDayAt(targetMessageId),
             relationshipBaseline: settings.relationshipBaseline,
             relationshipCaps: settings.relationshipCaps,
             autoArchiveDeaths: settings.autoArchiveDeaths !== false,
