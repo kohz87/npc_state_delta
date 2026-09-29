@@ -156,7 +156,7 @@ There are twelve categories:
 
 - **Swipes:** each swipe keeps its own dossier state. Switching back to a known swipe restores it. A swipe that was never scanned starts from the state before it and is scanned again.
 - **Delete or regenerate:** dossiers roll back to the message you returned to. NPCs who only appeared in the removed messages are removed too.
-- **Deleting a message from the middle:** later messages were scanned on top of it, so dossiers are kept rather than guessed. The exception is relationship changes: if the deleted message changed an NPC's Trust, Affection, Desire or Tension and nothing later touched them, those changes (and the Last relationship change card) are restored exactly to how they were before it. Delta tells you when this happens.
+- **Deleting a message from the middle:** later messages were scanned on top of it, so dossiers are not rewound. Instead, everything the deleted message itself changed is undone wherever nothing later touched it: each field returns to how it was before the message (relationship values and the Last relationship change card, mood, appearance, memories the message added, an NPC who only appeared in it, and so on). A field a later message also changed is kept, and confirmed deaths stay unless the deleted message caused the death. Delta tells you when this happens.
 - **Edits deep in the past:** if an edit can't be replayed exactly, current dossiers are kept rather than guessed.
 - The rollback journal covers the last 256 messages. Full snapshots are size-limited (8 MB total, 2 MB each).
 

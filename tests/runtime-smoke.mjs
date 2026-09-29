@@ -839,7 +839,7 @@ try {
     {
         const yunyunBefore = structuredClone(globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Yunyun'));
         mockState.quietResponder = async () => JSON.stringify({ npcs: [
-            { name: 'Yunyun', present: true, relationshipImpact: 'meaningful', relationshipDelta: { trust: 2, affection: 1, desire: 0, tension: 0 },
+            { name: 'Yunyun', present: true, mood: 'shaken and overwhelmed', relationshipImpact: 'meaningful', relationshipDelta: { trust: 2, affection: 1, desire: 0, tension: 0 },
               relationshipEvidence: { trust: 'Kazuma comforts Yunyun in silence as she breaks down.', affection: 'Yunyun leans into Kazuma.', desire: '', tension: '' },
               relationshipChangeReason: 'Kazuma offered silent grounding comfort as Yunyun broke down in shock.' },
         ] });
@@ -864,10 +864,12 @@ try {
         const afterMiddleDelete = globalThis.NPCStateDelta.getState().npcs.find(n => n.name === 'Yunyun');
         assert.deepEqual(afterMiddleDelete.relationship, yunyunBefore.relationship, 'the deleted message\'s relationship change is reverted');
         assert.equal(afterMiddleDelete.lastRelationshipChange.reason, yunyunBefore.lastRelationshipChange.reason);
+        assert.equal(awarded.mood, 'shaken and overwhelmed', 'the deleted scan also set a live field');
+        assert.equal(afterMiddleDelete.mood, yunyunBefore.mood, 'every other change the deleted message made is reverted too');
         assert.equal(afterMiddleDelete.relationshipEventHistory.length, yunyunBefore.relationshipEventHistory.length);
         const middleReconcile = globalThis.NPCStateDelta.uiStatus().branchReconciliations.find(entry => entry.reason === 'message-deleted' && entry.failClosed);
         assert.ok(middleReconcile, 'the mid-chat delete is a recorded fail-closed reconciliation');
-        assert.equal(middleReconcile.relationshipRevertedCount, 1);
+        assert.equal(middleReconcile.revertedNpcCount, 1);
         mockState.context.chat.length = 2;
         eventSource.emit('message_deleted', 2);
         await sleep(600);

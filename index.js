@@ -1584,7 +1584,8 @@ function recordBranchReconciliationEvent({ key, reason, operation, result, befor
         restoredFromJournal: Boolean(result.restoredFromJournal),
         restoredFromRoot: Boolean(result.restoredFromRoot),
         failClosed: Boolean(result.failClosed),
-        relationshipRevertedCount: Array.isArray(result.relationshipReverted) ? result.relationshipReverted.length : 0,
+        revertedNpcCount: Array.isArray(result.deletedEffects?.reverted) ? result.deletedEffects.reverted.length : 0,
+        removedNpcCount: Array.isArray(result.deletedEffects?.removed) ? result.deletedEffects.removed.length : 0,
         linearHistoryPruned: Boolean(result.linearHistoryPruned),
         previousLength: Math.max(0, Number(previousLength || 0)),
         currentLength: Math.max(0, Number(currentLength || 0)),
@@ -1657,12 +1658,20 @@ async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true
     persist(key);
     renderDossier();
     updateInjection();
-    // A message deleted from the middle keeps the dossiers (later messages depend on them); say so,
-    // and name the NPCs whose relationship changes from the deleted messages were undone exactly.
+    // A message deleted from the middle keeps the dossiers (later messages depend on them), except
+    // what the deleted message itself changed and nothing later touched, which is undone exactly.
     if (result.failClosed && result.recoveryBlockedByRetainedDescendants && result.recoveryOperation === 'delete') {
-        const reverted = Array.isArray(result.relationshipReverted) ? result.relationshipReverted.map(item => item.name).filter(Boolean) : [];
-        globalThis.toastr?.info?.(reverted.length
-            ? `NPC State Delta: a message was deleted from the middle of the chat. Later messages depend on the dossiers, so they were kept, but the relationship changes the deleted message caused for ${reverted.slice(0, 4).join(', ')}${reverted.length > 4 ? ` +${reverted.length - 4} more` : ''} were reverted.`
+        const names = list => {
+            const values = (Array.isArray(list) ? list : []).map(item => item.name).filter(Boolean);
+            return `${values.slice(0, 4).join(', ')}${values.length > 4 ? ` +${values.length - 4} more` : ''}`;
+        };
+        const reverted = result.deletedEffects?.reverted || [];
+        const removed = result.deletedEffects?.removed || [];
+        const parts = [];
+        if (reverted.length) parts.push(`reverted what the deleted message changed for ${names(reverted)}`);
+        if (removed.length) parts.push(`removed ${names(removed)}, who only appeared in it`);
+        globalThis.toastr?.info?.(parts.length
+            ? `NPC State Delta: a message was deleted from the middle of the chat. Later messages depend on the dossiers, so they were kept, but Delta ${parts.join(' and ')}. Anything a later message also changed was left as it is.`
             : 'NPC State Delta: a message was deleted from the middle of the chat. Later messages depend on the dossiers, so they were kept as they are; edit them manually if the deleted message had changed anything.');
     }
 
