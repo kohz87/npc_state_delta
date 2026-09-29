@@ -1,8 +1,8 @@
-# NPC State Delta v1.0.77
+# NPC State Delta v1.0.78
 
 A SillyTavern extension that keeps a living dossier for every NPC in your roleplay: who they are, how they look, how they talk and behave, what they remember, and how they feel about you. After each reply it scans the story, updates the dossiers carefully, and feeds the present NPCs back to the roleplay model so they stay in character.
 
-**Current release:** 1.0.77 · [Changelog](CHANGELOG.md) · [Development guide](DEVELOPMENT.md)
+**Current release:** 1.0.78 · [Changelog](CHANGELOG.md) · [Development guide](DEVELOPMENT.md)
 
 ---
 
@@ -42,7 +42,7 @@ A SillyTavern extension that keeps a living dossier for every NPC in your rolepl
 ## Install and update
 
 1. In SillyTavern, open **Extensions → Install extension** and paste this repository's URL.
-   Or unpack `npc_state_delta-1.0.77.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
+   Or unpack `npc_state_delta-1.0.78.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
 2. Reload SillyTavern.
 3. **Before updating an existing install,** export a backup from **Data & maintenance → Backup / Export**.
 
@@ -63,7 +63,7 @@ The settings panel has a quick bar that is always visible, plus six groups.
 |---|---|
 | **Quick bar** | Enable, Auto scan, Open dossiers, Scan dossier now, Full scan current cast, Add NPC |
 | **Scanning** | Scanner connection profile, how often to scan, how much story to send, and how readily new NPCs get a dossier (Conservative, Balanced or Manual only) |
-| **Roster & continuity** | Present NPCs in chat (Full cards, Compact strip or Off), injection on/off and budget (a ceiling, default 4000 tokens), maximum active NPCs, death and return handling, stale NPC cleanup |
+| **Roster & continuity** | Present NPCs in chat (Full cards, Compact strip or Off), injection on/off and budget (a ceiling, default 4000 tokens), maximum active NPCs, death and return handling, stale NPC cleanup, rescan and middle-deletion rewind options |
 | **Calendar & birthdays** | Month names and lengths, optional era, optional campaign date |
 | **Portrait generation** | Style presets, positive and negative prompts, composition, prompt format |
 | **Scanner rules** | Advanced: relationship starting values and per-scan caps, memory criteria, behaviour rubric |
@@ -82,7 +82,7 @@ Nothing changes because the model guessed. A proposed change is accepted only wh
 These are meant to be stable, like a real person's character:
 
 - **One scene is not enough** to rewrite them. A change needs repeated evidence across separate scenes (three, or two for Personality and Speech when they are a week or more apart in story time), or an explicit event or time skip in the story ("after a winter at the academy, she speaks with formal precision").
-- **Story time, not message count.** When your World State block carries a date (Megumin Suite, Freaky Frankenstein and similar trackers, parsed with your **Calendar** months), development is measured in story days: a tendency shown once and confirmed a week or more later can change Personality or Speech, however few messages passed. A later sighting of the opposite ("timid" after "confident") breaks the trend and it starts again. Without dates, Personality falls back to 20+ messages apart.
+- **Story time, not message count.** When your World State block carries a date (for example Megumin Suite's World State, parsed with your **Calendar** months), development is measured in story days: a tendency shown once and confirmed a week or more later can change Personality or Speech, however few messages passed. A later sighting of the opposite ("timid" after "confident") breaks the trend and it starts again. Without dates, Personality falls back to 20+ messages apart.
 - **Speech is recorded as a style.** Evidence names how the NPC talks ("formal aphorisms"), with a quoted line only as an example, so repeated scenes can add up to a Speech change.
 - **Mood is not personality.** Fear, anger, flirting or behaviour only toward you never becomes a global trait.
 - **Refine vs evolve.** A *refine* adds detail without changing the meaning. A real change of character is an *evolve*, which needs a reason and the evidence above.
@@ -156,6 +156,7 @@ There are twelve categories:
 
 - **Swipes:** each swipe keeps its own dossier state. Switching back to a known swipe restores it. A swipe that was never scanned starts from the state before it and is scanned again.
 - **Delete or regenerate:** dossiers roll back to the message you returned to. NPCs who only appeared in the removed messages are removed too.
+- **Deleting a message from the middle:** later messages were scanned on top of it, so dossiers are not rewound. Instead, everything the deleted message itself changed is undone wherever nothing later touched it: each field returns to how it was before the message (relationship values and the Last relationship change card, mood, appearance, memories the message added, an NPC who only appeared in it, and so on). A field a later message also changed is kept, and confirmed deaths stay unless the deleted message caused the death. Delta tells you when this happens. To rewind everything instead, turn on **Rewind dossiers on middle deletion** (Roster & continuity): every dossier returns to exactly how it was just before the deleted message and whatever the later messages changed is discarded, with no model requests.
 - **Edits deep in the past:** if an edit can't be replayed exactly, current dossiers are kept rather than guessed.
 - The rollback journal covers the last 256 messages. Full snapshots are size-limited (8 MB total, 2 MB each).
 
@@ -192,12 +193,12 @@ npm test                        # unit, compatibility and synthetic-host tests
 npm run validate                # inventory, isolation, version and ownership checks
 npm run measure:prompts         # prompt size measurements
 node scripts/measure-stage9.mjs # prompt/request budget baseline
-npm run package                 # builds dist/npc_state_delta-1.0.77.zip and its SHA-256
+npm run package                 # builds dist/npc_state_delta-1.0.78.zip and its SHA-256
 git diff --check
 ```
 
 - `runtime-modules.json` is the single inventory of shipped modules. The package contains only the runtime modules, stylesheet, manifest, inventory, license and README.
-- Application version 1.0.77 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
+- Application version 1.0.78 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
 - Behaviour is governed by [AGENTS.md](AGENTS.md), [the core contract](docs/core-contract.md) and [the workplan](docs/WORKPLAN.md). Development commands, evidence and limits are in [DEVELOPMENT.md](DEVELOPMENT.md).
 - Historical reviews: [1.0.28](docs/v1.0.28-review.md), [1.0.27 prefix cache](docs/v1.0.27-review.md), [Stage 9](docs/stage9-review.md). Seed provenance is in `docs/seed-provenance.*`.
 

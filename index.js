@@ -466,6 +466,7 @@ const DEFAULTS = Object.freeze({
     injectLimit: 3,
     injectBudgetTokens: 4000,
     branchRescan: true,
+    midDeleteRewind: false,
     presentCastDisplay: 'full',
     relationshipBaseline: { ...DEFAULT_RELATIONSHIP },
     relationshipCaps: { ...DEFAULT_RELATIONSHIP_CAPS },
@@ -1584,6 +1585,9 @@ function recordBranchReconciliationEvent({ key, reason, operation, result, befor
         restoredFromJournal: Boolean(result.restoredFromJournal),
         restoredFromRoot: Boolean(result.restoredFromRoot),
         failClosed: Boolean(result.failClosed),
+        revertedNpcCount: Array.isArray(result.deletedEffects?.reverted) ? result.deletedEffects.reverted.length : 0,
+        removedNpcCount: Array.isArray(result.deletedEffects?.removed) ? result.deletedEffects.removed.length : 0,
+        rewoundToBoundary: Boolean(result.rewoundToBoundary),
         linearHistoryPruned: Boolean(result.linearHistoryPruned),
         previousLength: Math.max(0, Number(previousLength || 0)),
         currentLength: Math.max(0, Number(currentLength || 0)),
@@ -1639,7 +1643,7 @@ async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true
     const beforeNpcCount = Array.isArray(before.npcs) ? before.npcs.length : 0;
     const previousLength = Array.isArray(before.lineage) ? before.lineage.length : 0;
     const lineageBefore = chatLineage(ctx.chat || []);
-    const result = reconcileBranchState(before, ctx.chat || [], { explicitDivergence, operation });
+    const result = reconcileBranchState(before, ctx.chat || [], { explicitDivergence, operation, rewindMidDelete: getSettings().midDeleteRewind === true });
     if (getChatKey() !== key || firstLineageDivergence(lineageBefore, chatLineage(getContext().chat || [])) !== -1) return null;
     recordBranchReconciliationEvent({
         key, reason, operation, result, beforeNpcCount,
@@ -1656,6 +1660,24 @@ async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true
     persist(key);
     renderDossier();
     updateInjection();
+    // A message deleted from the middle keeps the dossiers (later messages depend on them), except
+    // what the deleted message itself changed and nothing later touched, which is undone exactly.
+    if (result.rewoundToBoundary) {
+        globalThis.toastr?.info?.('NPC State Delta: a message was deleted from the middle of the chat, so every dossier was rewound to how it was just before it. Changes made by the messages after it were discarded.');
+    } else if (result.failClosed && result.recoveryBlockedByRetainedDescendants && result.recoveryOperation === 'delete') {
+        const names = list => {
+            const values = (Array.isArray(list) ? list : []).map(item => item.name).filter(Boolean);
+            return `${values.slice(0, 4).join(', ')}${values.length > 4 ? ` +${values.length - 4} more` : ''}`;
+        };
+        const reverted = result.deletedEffects?.reverted || [];
+        const removed = result.deletedEffects?.removed || [];
+        const parts = [];
+        if (reverted.length) parts.push(`reverted what the deleted message changed for ${names(reverted)}`);
+        if (removed.length) parts.push(`removed ${names(removed)}, who only appeared in it`);
+        globalThis.toastr?.info?.(parts.length
+            ? `NPC State Delta: a message was deleted from the middle of the chat. Later messages depend on the dossiers, so they were kept, but Delta ${parts.join(' and ')}. Anything a later message also changed was left as it is.`
+            : 'NPC State Delta: a message was deleted from the middle of the chat. Later messages depend on the dossiers, so they were kept as they are; edit them manually if the deleted message had changed anything.');
+    }
 
     const targetAssistant = findLatestAssistantAtOrAfter(result.divergence);
     const shouldRescan = result.requiresRescan !== undefined ? Boolean(result.requiresRescan) : !result.exactRestored;
@@ -3676,6 +3698,7 @@ function buildSettingsHtml() {
         ${settingRow('npc_state_delta_max', 'Maximum active NPCs', numberControl('npc_state_delta_max', 1, 100), 'Archived dossiers do not use an active slot.')}
         ${settingRow('npc_state_delta_archive_deaths', 'Archive confirmed deaths', '<input id="npc_state_delta_archive_deaths" type="checkbox">', 'Explicit current-timeline deaths archive instead of deleting. Ambiguous death language is ignored.')}
         ${settingRow('npc_state_delta_reactivate_archived', 'Reactivate on clear return', '<input id="npc_state_delta_reactivate_archived" type="checkbox">', 'Manual archives return when the NPC clearly reappears. Death archives need an explicit living return.')}
+        ${settingRow('npc_state_delta_mid_delete_rewind', 'Rewind dossiers on middle deletion', '<input id="npc_state_delta_mid_delete_rewind" type="checkbox">', 'Off (default): deleting a message from the middle undoes only what that message changed and keeps later changes. On: every dossier rewinds to how it was just before the deleted message, discarding what later messages changed (no model requests).')}
         ${settingRow('npc_state_delta_branch_rescan', 'Rescan changed branches', '<input id="npc_state_delta_branch_rescan" type="checkbox">', 'Re-evaluate the surviving branch after a swipe, edit or middle-message deletion.')}
         <h4 class="delta-settings-subhead">Stale cleanup</h4>
         ${settingRow('npc_state_delta_auto_prune_stale', 'Auto-manage stale NPCs', '<input id="npc_state_delta_auto_prune_stale" type="checkbox">', 'Long-absent NPCs auto-archive, then stale auto-archives are deleted later. Manual, death and protected records are kept; deleted names can be rediscovered.')}
@@ -3850,6 +3873,7 @@ function syncSettingsControls() {
     $('#npc_state_delta_archive_deaths').prop('checked', s.autoArchiveDeaths !== false);
     $('#npc_state_delta_reactivate_archived').prop('checked', s.autoReactivateArchived !== false);
     $('#npc_state_delta_branch_rescan').prop('checked', s.branchRescan !== false);
+    $('#npc_state_delta_mid_delete_rewind').prop('checked', s.midDeleteRewind === true);
     $('#npc_state_delta_present_cast_display').val(presentCastDisplayMode());
     if (!portraitSettingsDirty) writePortraitSettingsDraftToUi(portraitSettingsSnapshot(s));
     updatePortraitSettingsSaveUi();
@@ -5763,6 +5787,7 @@ function bindUi() {
     bindSettingsCheckbox('#npc_state_delta_archive_deaths', 'autoArchiveDeaths');
     bindSettingsCheckbox('#npc_state_delta_reactivate_archived', 'autoReactivateArchived');
     bindSettingsCheckbox('#npc_state_delta_branch_rescan', 'branchRescan');
+    bindSettingsCheckbox('#npc_state_delta_mid_delete_rewind', 'midDeleteRewind');
     $(document).on('change.npcStateDelta', '#npc_state_delta_portrait_theme_preset', function () {
         const settings = getSettings();
         const saved = portraitSettingsSnapshot(settings);

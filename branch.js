@@ -1,5 +1,5 @@
 import * as branchCore from './branch-core.js';
-import { normalizeName } from './core.js';
+import { isTerminalNpcDeath, normalizeName } from './core.js';
 import { parseQualifiedChatKey } from './identity.js';
 import { prunePortraitAssetsInPlace } from './storage.js';
 import { normalizeSocialGraph, removeNpcFromSocialGraph, purgeNpcStructuredReferences } from './social.js';
@@ -927,12 +927,179 @@ function retainLinearPrefixHistory(target, source, checkpoints, currentLineage, 
     return target;
 }
 
+// Fields that describe one thing and must be reverted (or kept) together, so a partial revert
+// never leaves an NPC in a state no scan could have produced.
+const NPC_REVERT_GROUPS = Object.freeze([
+    ['relationship', 'relationshipProgress', 'relationshipMilestones', 'relationshipEventHistory', 'lastRelationshipChange'],
+    ['appearance', 'overallAppearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'appearanceModelVersion'],
+    ['age', 'apparentAge', 'birthDate', 'birthDateSource', 'birthDatePrecision', 'birthDateYearSource', 'birthDateReason',
+        'birthDateSourceMessageId', 'birthDateCalendarFingerprint', 'birthDateDisplay', 'calendarAge'],
+    ['lifeState', 'lifeStateCertainty', 'lifeStateReason', 'archived', 'archiveReason', 'archivedAt', 'archiveSourceMessageId'],
+    ['personality', 'personalityDevelopment'],
+    ['speech', 'speechDevelopment'],
+]);
+const NPC_REVERT_LIST_FIELDS = Object.freeze(['memories', 'mannerisms', 'behaviorProfile', 'keyRelationships', 'aliases']);
+const NPC_REVERT_SKIP = new Set(['id', 'portrait', 'updatedAt', 'createdAt', 'manualProfileFields', 'manualProfileLocksExplicit']);
+// Presence bookkeeping alone does not make an NPC "used" by later messages.
+const NPC_REMOVAL_IGNORED = new Set([...NPC_REVERT_SKIP, 'present', 'worldActive', 'lastWorldActiveTurn', 'fieldChanges', 'fieldChangeDays']);
+
+function withoutKeys(record, ignored) {
+    const out = {};
+    for (const [key, value] of Object.entries(record || {})) if (!ignored.has(key)) out[key] = value;
+    return out;
+}
+
+function setOrDelete(target, key, source) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) target[key] = structuredClone(source[key]);
+    else delete target[key];
+}
+
+// Removes from `current` the list items the deleted block added (present in `after`, absent in
+// `before`), leaving items later messages added.
+function removeAddedItems(current, before, after) {
+    if (!Array.isArray(current) || !Array.isArray(after)) return current;
+    const had = new Set((Array.isArray(before) ? before : []).map(item => JSON.stringify(item)));
+    const added = new Set(after.filter(item => !had.has(JSON.stringify(item))).map(item => JSON.stringify(item)));
+    return added.size ? current.filter(item => !added.has(JSON.stringify(item))) : current;
+}
+
+// Three-way revert of one NPC: `before` is the record just before the deleted block, `after` just
+// after its last scan, `npc` the live record. A field (group) the block changed and nothing later
+// touched returns to `before`; list fields also drop the items the block added. Returns the
+// reverted field names.
+function revertNpcAgainstDeletedBlock(npc, before, after) {
+    const locked = new Set(Array.isArray(npc.manualProfileFields) ? npc.manualProfileFields : []);
+    const changed = [];
+    const handled = new Set();
+    const consider = (keys) => {
+        const usable = keys.filter(key => !NPC_REVERT_SKIP.has(key) && !locked.has(key));
+        if (!usable.length || usable.length !== keys.length) { keys.forEach(key => handled.add(key)); return; }
+        keys.forEach(key => handled.add(key));
+        if (keys.every(key => jsonEqual(after[key], before[key]))) return;          // the block changed nothing here
+        if (!keys.every(key => jsonEqual(npc[key], after[key]))) return;            // something later touched it
+        for (const key of keys) setOrDelete(npc, key, before);
+        changed.push(...keys.filter(key => !jsonEqual(after[key], before[key])));
+    };
+    for (const group of NPC_REVERT_GROUPS) consider(group);
+    const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+    for (const key of keys) {
+        if (handled.has(key) || NPC_REVERT_SKIP.has(key) || locked.has(key)) continue;
+        if (jsonEqual(after[key], before[key])) continue;
+        if (jsonEqual(npc[key], after[key])) { setOrDelete(npc, key, before); changed.push(key); continue; }
+        if (NPC_REVERT_LIST_FIELDS.includes(key)) {
+            const next = removeAddedItems(npc[key], before[key], after[key]);
+            if (next !== npc[key] && next.length !== npc[key].length) { npc[key] = next; changed.push(key); }
+        } else if (key === 'profileEvidence' && npc[key] && typeof npc[key] === 'object') {
+            for (const field of Object.keys(after[key] || {})) {
+                const next = removeAddedItems(npc[key][field], before[key]?.[field], after[key][field]);
+                if (next !== npc[key][field] && next.length !== npc[key][field].length) { npc[key][field] = next; changed.push(`profileEvidence.${field}`); }
+            }
+        }
+    }
+    return changed;
+}
+
+// A message deleted from the middle of the chat leaves retained descendants that cannot be
+// replayed, so canonical dossiers are kept. What the deleted block itself did can still be undone
+// exactly wherever nothing later touched it: compare the live state with the state just before the
+// block and just after its last scan (both from the rollback journal, else retained checkpoints).
+// Only one contiguous deleted block is handled, and confirmed deaths stay terminal unless the
+// deleted block itself caused the death.
+export function revertDeletedBlockEffects(state, currentState, checkpoints, previousLineage, currentLineage, divergence) {
+    const empty = { reverted: [], removed: [], socialEdges: 0 };
+    const removedCount = previousLineage.length - currentLineage.length;
+    if (!Array.isArray(currentState?.npcs) || !Number.isInteger(divergence) || divergence < 0 || removedCount <= 0) return empty;
+    for (let i = 0; i < divergence; i += 1) if (previousLineage[i] !== currentLineage[i]) return empty;
+    for (let i = divergence; i < currentLineage.length; i += 1) if (previousLineage[i + removedCount] !== currentLineage[i]) return empty;
+
+    const keys = lineageCheckpointKeys(previousLineage);
+    const owned = (Array.isArray(checkpoints) ? checkpoints : [])
+        .filter(item => item?.snapshot && keys[item.messageId] === item.lineageKey)
+        .sort((a, b) => a.messageId - b.messageId);
+    const journalState = boundary => restoreLinearBoundaryFromJournal(state, previousLineage, previousLineage, boundary)?.state || null;
+    const before = journalState(divergence)
+        || owned.filter(item => item.messageId < divergence).at(-1)?.snapshot
+        || (divergence === 0 ? state?.branchRootSnapshot : null);
+    const after = journalState(divergence + removedCount)
+        || owned.filter(item => item.messageId >= divergence && item.messageId < divergence + removedCount).at(-1)?.snapshot;
+    if (!before || !after) return empty;
+
+    const byId = list => new Map((Array.isArray(list) ? list : []).map(npc => [String(npc?.id || ''), npc]));
+    const beforeNpcs = byId(before.npcs);
+    const afterNpcs = byId(after.npcs);
+    const result = { reverted: [], removed: [], socialEdges: 0 };
+    const survivors = [];
+    for (const npc of currentState.npcs) {
+        const id = String(npc?.id || '');
+        const was = beforeNpcs.get(id);
+        const then = afterNpcs.get(id);
+        if (!id || !then) { survivors.push(npc); continue; }
+        if (!was) {
+            // Introduced by the deleted block: gone with it unless a later message used the NPC.
+            if (jsonEqual(withoutKeys(npc, NPC_REMOVAL_IGNORED), withoutKeys(then, NPC_REMOVAL_IGNORED)) && !isTerminalNpcDeath(npc)) {
+                result.removed.push({ id, name: String(npc.name || '') });
+                continue;
+            }
+            survivors.push(npc);
+            continue;
+        }
+        if (isTerminalNpcDeath(npc)) {
+            const deathGroup = NPC_REVERT_GROUPS[3];
+            const causedByBlock = !isTerminalNpcDeath(was) && deathGroup.every(key => jsonEqual(npc[key], then[key]));
+            if (!causedByBlock) { survivors.push(npc); continue; }
+        }
+        const fields = revertNpcAgainstDeletedBlock(npc, was, then);
+        if (fields.length) {
+            npc.updatedAt = Date.now();
+            result.reverted.push({ id, name: String(npc.name || ''), fields });
+        }
+        survivors.push(npc);
+    }
+    currentState.npcs = survivors;
+
+    if (currentState.socialGraph && before.socialGraph && after.socialGraph) {
+        const graph = structuredClone(currentState.socialGraph);
+        const edgeMap = list => new Map((Array.isArray(list) ? list : []).map(edge => [String(edge?.id || ''), edge]));
+        const beforeEdges = edgeMap(before.socialGraph.edges);
+        const afterEdges = edgeMap(after.socialGraph.edges);
+        const liveIds = new Set(survivors.map(npc => String(npc?.id || '')));
+        graph.edges = (Array.isArray(graph.edges) ? graph.edges : []).flatMap(edge => {
+            const id = String(edge?.id || '');
+            const then = afterEdges.get(id);
+            const was = beforeEdges.get(id);
+            if (!id || !then || !jsonEqual(edge, then)) return [edge];
+            if (!was) { result.socialEdges += 1; return []; }            // added by the block
+            if (jsonEqual(was, then)) return [edge];
+            result.socialEdges += 1;
+            return [structuredClone(was)];                                // changed by the block
+        }).filter(edge => liveIds.has(String(edge?.aId || '')) && liveIds.has(String(edge?.bId || '')));
+        currentState.socialGraph = graph;
+    }
+    currentState.candidates = removeAddedItems(currentState.candidates, before.candidates, after.candidates);
+    currentState.pendingBackfills = removeAddedItems(currentState.pendingBackfills, before.pendingBackfills, after.pendingBackfills);
+    return result;
+}
+
+// References to an NPC that was removed together with the deleted block.
+function cleanupRemovedNpcs(restored, removed, previousNpcs) {
+    for (const item of removed) {
+        const record = (Array.isArray(previousNpcs) ? previousNpcs : []).find(npc => String(npc?.id || '') === item.id) || item;
+        restored.socialGraph = removeNpcFromSocialGraph(restored.socialGraph, item.id);
+        purgeNpcStructuredReferences(restored.npcs, record);
+        restored.pendingBackfills = (Array.isArray(restored.pendingBackfills) ? restored.pendingBackfills : [])
+            .filter(entry => String(entry?.npcId || '') !== item.id);
+        restored.candidates = (Array.isArray(restored.candidates) ? restored.candidates : [])
+            .filter(entry => String(entry?.id || '') !== item.id);
+    }
+    restored.socialGraph = normalizeSocialGraph(restored.socialGraph);
+}
+
 function normalizedRecoveryOperation(value) {
     const operation = String(value || 'auto').toLowerCase();
     return ['delete', 'edit', 'swipe'].includes(operation) ? operation : 'auto';
 }
 
-export function reconcileBranchState(state, chat, { explicitDivergence = null, operation = 'auto' } = {}) {
+export function reconcileBranchState(state, chat, { explicitDivergence = null, operation = 'auto', rewindMidDelete = false } = {}) {
     // Permanent UI deletion is external user authority, not narrative branch state. Normalize
     // it before establishing any rollback baseline so an old label tombstone or stale snapshot
     // cannot become a new journal mutation merely because content lineage stayed unchanged.
@@ -994,8 +1161,14 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
     // parent. Multiple retained assistant descendants cannot be deterministically replayed by the
     // routine scanner, so rewinding them would destroy accepted continuity; preserve canonical
     // state and fail closed instead.
-    const linearSuffixReplaySafe = !linearReplacement || affectedAssistantMessages <= 1;
-    const recoveryBlockedByRetainedDescendants = linearReplacement && !linearSuffixReplaySafe;
+    const suffixReplayable = !linearReplacement || affectedAssistantMessages <= 1;
+    // Opt-in: a deleted middle message rewinds every dossier to the exact state just before it, so
+    // whatever the retained messages changed is discarded rather than replayed. It uses the same
+    // exact journal/checkpoint boundary as a tail deletion; when that boundary is unreachable the
+    // ordinary fail-closed path (undoing only the deleted block) still applies.
+    const rewindRequested = rewindMidDelete === true && recoveryOperation === 'delete' && !suffixReplayable;
+    const linearSuffixReplaySafe = suffixReplayable || rewindRequested;
+    const recoveryBlockedByRetainedDescendants = linearReplacement && !suffixReplayable;
     const tailTruncationRecovery = relation.kind === 'tail-truncation';
     const journalRestore = tailTruncationRecovery || (linearReplacement && linearSuffixReplaySafe)
         ? restoreLinearBoundaryFromJournal(state, previousLineage, currentLineage, divergence)
@@ -1012,6 +1185,7 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
     let restoredFromJournal = false;
     let restoredFromRoot = false;
     let failClosed = false;
+    let deletedEffects = { reverted: [], removed: [], socialEdges: 0 };
     let journalHeadSeq = null;
     let recoveryAction = 'fail-closed';
     if ((linearReplacement || tailTruncationRecovery) && journalRestore) {
@@ -1046,6 +1220,14 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
         restored = { ...state };
         failClosed = true;
         recoveryAction = 'fail-closed-keep-current';
+        if (recoveryBlockedByRetainedDescendants && recoveryOperation === 'delete') {
+            restored.npcs = cloneNpcList(state?.npcs);
+            restored.candidates = Array.isArray(state?.candidates) ? structuredClone(state.candidates) : [];
+            restored.pendingBackfills = Array.isArray(state?.pendingBackfills) ? structuredClone(state.pendingBackfills) : [];
+            restored.socialGraph = structuredClone(state?.socialGraph || { edges: [], unresolved: [] });
+            deletedEffects = revertDeletedBlockEffects(state, restored, checkpoints, previousLineage, currentLineage, divergence);
+            cleanupRemovedNpcs(restored, deletedEffects.removed, state?.npcs);
+        }
     }
     restored.npcs = branchCore.preserveUserNpcMetadata(restored.npcs, currentNpcs);
     // A journal/checkpoint snapshot intentionally omits portrait binaries. When an NPC
@@ -1104,8 +1286,9 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
         if (Number.isInteger(restored.lastScannedMessageId) && restored.lastScannedMessageId >= divergence) restored.lastScannedMessageId = null;
     }
     prunePortraitAssetsInPlace(restored);
+    const rewound = rewindRequested && exactRestored;
     const requiresRescan = linearReplacement
-        ? affectedAssistantMessages > 0
+        ? affectedAssistantMessages > 0 && !rewound
         : (explicitSwipeLike ? recoveryAction !== 'exact-checkpoint' : !exactRestored);
     return {
         state: restored,
@@ -1130,6 +1313,8 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
         restoredFromJournal,
         restoredFromRoot,
         failClosed,
+        deletedEffects,
+        rewoundToBoundary: rewindRequested && exactRestored,
         linearHistoryPruned: linearReplacement,
         legacyFallback: failClosed && checkpoints.length === 0 && !state?.branchRootSnapshot,
     };
