@@ -132,3 +132,41 @@ test('v1.0.79 stored keys stay consistent after a migration', () => {
     assert.ok(state.rollbackJournal.every(entry => keys[entry.messageId] === entry.lineageKey), 'every journal key matches the chat again');
     assert.equal(state.rollbackHead.lineageKey, keys[state.rollbackHead.messageId]);
 });
+
+// Gives every stored key the value a version that hashed the flag would have written when only the
+// first `cut` currently hidden messages were hidden (progressive hiding by a memory extension).
+function eraKeysFor(chat, hidden, cut) {
+    const target = chatLineage(chat);
+    const legacySet = new Set(hidden.slice(0, cut));
+    return {
+        lineage: target.map((value, index) => (legacySet.has(index) ? legacySystemFingerprint(chat[index]) : value)),
+        keys: lineageCheckpointKeys(target.map((value, index) => (legacySet.has(index) ? legacySystemFingerprint(chat[index]) : value))),
+    };
+}
+
+test('v1.0.79 history saved across several progressive hides is repaired era by era', () => {
+    const { state, chat } = build(20);
+    const hidden = [2, 3, 4, 5, 6, 7, 8, 9];
+    hide(chat, hidden);
+    const cutFor = messageId => (messageId < 12 ? 0 : (messageId < 24 ? 4 : 8));
+    const eras = new Map([0, 4, 8].map(cut => [cut, eraKeysFor(chat, hidden, cut)]));
+    for (const item of state.checkpoints) {
+        const era = eras.get(cutFor(item.messageId));
+        item.lineageKey = era.keys[item.messageId];
+        item.parentLineageKey = item.messageId > 0 ? era.keys[item.messageId - 1] : 'root';
+    }
+    for (const entry of state.rollbackJournal) {
+        const era = eras.get(cutFor(entry.messageId));
+        entry.lineageKey = era.keys[entry.messageId];
+        entry.parentLineageKey = entry.messageId > 0 ? era.keys[entry.messageId - 1] : 'root';
+    }
+    const headEra = eras.get(cutFor(state.rollbackHead.messageId));
+    state.rollbackHead.lineageKey = headEra.keys[state.rollbackHead.messageId];
+    state.lineage = eras.get(8).lineage;
+
+    const result = deleteTail(state, chat, 24);
+    assert.equal(result.lineageRelation, 'tail-truncation');
+    assert.equal(result.failClosed, false, 'entries from every earlier era are reachable again');
+    assert.ok(['rollback-journal', 'exact-checkpoint'].includes(result.recoveryAction));
+    assert.equal(result.state.npcs[0].goal, 'goal-8');
+});

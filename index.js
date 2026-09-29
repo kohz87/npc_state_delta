@@ -6585,7 +6585,24 @@ window.NPCStateDelta = Object.freeze({
     diagnosticsSummary: () => diagnosticStore.summary(getChatKey()),
     diagnosticsRecords: options => diagnosticStore.records(getChatKey(), options || {}),
     diagnosticsForNpc: npcId => diagnosticStore.records(getChatKey(), { npcId: String(npcId || '') }),
-    diagnosticBundle: () => diagnosticStore.bundle(getChatKey(), { applicationVersion: NPC_STATE_VERSION }),
+    diagnosticBundle: () => {
+        const key = getChatKey();
+        const bundle = diagnosticStore.bundle(key, { applicationVersion: NPC_STATE_VERSION });
+        // Rollback diagnostics carry counts, message numbers and outcomes only: no story text and no chat key.
+        const chatMessages = getContext().chat || [];
+        bundle.branch = {
+            chat: key === 'no-chat' ? null : {
+                messages: chatMessages.length,
+                hiddenOrSystemMessages: chatMessages.filter(message => message?.is_system).length,
+                storedLineageDivergence: firstLineageDivergence(getChatState(key)?.lineage || [], chatLineage(chatMessages)),
+                turn: Number(getChatState(key)?.turn || 0),
+            },
+            history: key === 'no-chat' ? null : branchHistoryDiagnostic(getChatState(key)),
+            reconciliations: branchReconciliationEvents.filter(event => event.chatKey === key).slice(-20)
+                .map(({ chatKey, history, ...event }) => event),
+        };
+        return bundle;
+    },
     clearDiagnostics: () => diagnosticStore.clear(getChatKey()),
     getState: () => structuredClone(getChatState()),
     getNpc: npcId => {
