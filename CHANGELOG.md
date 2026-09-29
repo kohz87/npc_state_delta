@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.80 - 30 September 2026
+
 - Repair history saved across several progressive hides. Memory extensions hide messages a few at a time, so state saved by earlier versions holds checkpoint and rollback-journal keys from several eras, each chained through the old flag-sensitive hash of whichever messages were hidden by then. The 1.0.79 migration only rewrote the keys matching the latest stored lineage, leaving the older eras unreachable: a deletion that needed history from before the latest hide still failed closed and kept every dossier. Migration now also tries each prefix of the currently hidden messages (older messages are hidden first) as the set that carried the old hash and rewrites any stored checkpoint, journal, journal-head and inline-card key that matches, once per chat state.
 - Add rollback diagnostics to the exported diagnostics file: the last 20 branch reconciliations of the session (operation, relation, action, divergence, whether it failed closed, reverted/removed counts) without chat identity or story text, the branch history counts, and the chat's message count, hidden/system message count, stored-lineage divergence and turn. Reconciliation records live in memory for the session; export soon after the rollback.
 
