@@ -81,7 +81,8 @@ Nothing changes because the model guessed. A proposed change is accepted only wh
 
 These are meant to be stable, like a real person's character:
 
-- **One scene is not enough** to rewrite them. A change needs repeated evidence across separate scenes (three, or two for Personality when they are at least 20 messages apart), or an explicit event or time skip in the story ("after a winter at the academy, she speaks with formal precision").
+- **One scene is not enough** to rewrite them. A change needs repeated evidence across separate scenes (three, or two for Personality and Speech when they are a week or more apart in story time), or an explicit event or time skip in the story ("after a winter at the academy, she speaks with formal precision").
+- **Story time, not message count.** When your World State block carries a date (Megumin Suite, Freaky Frankenstein and similar trackers, parsed with your **Calendar** months), development is measured in story days: a tendency shown once and confirmed a week or more later can change Personality or Speech, however few messages passed. A later sighting of the opposite ("timid" after "confident") breaks the trend and it starts again. Without dates, Personality falls back to 20+ messages apart.
 - **Speech is recorded as a style.** Evidence names how the NPC talks ("formal aphorisms"), with a quoted line only as an example, so repeated scenes can add up to a Speech change.
 - **Mood is not personality.** Fear, anger, flirting or behaviour only toward you never becomes a global trait.
 - **Refine vs evolve.** A *refine* adds detail without changing the meaning. A real change of character is an *evolve*, which needs a reason and the evidence above.
@@ -105,7 +106,7 @@ There are twelve categories:
 - **Habits and routines are not levers.** "Keeps a quiet household and enforces curfews" belongs in Mannerisms and is kept out of the lever list.
 - **How a lever swings:** the first scene showing a different tendency is stored as pending evidence, and the lever changes when the behaviour shows up again in a later scene. Each category keeps its own pending evidence, so unrelated behaviour in between doesn't push it out. An explicit event or time skip changes it at once. Kind ↔ cruel and independence reversals face extra safety checks.
 - Old entries that don't fit a category are listed for rewriting at the next **Refresh**.
-- **Outdated traits:** Personality, Speech or levers unchanged for 30+ turns, or written before the NPC's background or home base later changed (a servant who now owns the inn), are re-checked at the next **Refresh**. A clause tied to something that has ended (a former job, an abuser who has died) is rewritten from the recent story; everything else is kept.
+- **Outdated traits:** Personality, Speech or levers unchanged for 30+ story days (30+ turns when the chat has no dates), or written before the NPC's background or home base later changed (a servant who now owns the inn), are re-checked at the next **Refresh**. A clause tied to something that has ended (a former job, an abuser who has died) is rewritten from the recent story; everything else is kept.
 
 ### Relationship with the player
 

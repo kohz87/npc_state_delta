@@ -8,6 +8,7 @@ import { isTerminalNpcDeath } from './terminal-lifecycle.js';
 import { resolveNpcAppearance } from './appearance.js';
 import { removeNpcFromSocialGraph, purgeNpcStructuredReferences } from './social.js';
 import {
+    calendarDayNumber,
     currentCalendarDate,
     extractStructuredWorldDate,
     getActiveCalendarConfig,
@@ -40,11 +41,20 @@ const PROFILE_DEVELOPMENT_CONCEPT_LIMIT = 4;
 const PROFILE_DEVELOPMENT_OBSERVATION_LIMIT = 4;
 const PROFILE_DEVELOPMENT_READY_COUNT = 3;
 const PROFILE_DEVELOPMENT_MIN_SPAN = 2;
-// A slow Personality change seen in two scenes far apart is development, not one scene's mood,
-// so two observations suffice once they are this far apart; close together it still needs three.
+// A slow Personality/Speech change seen in two scenes far apart is development, not one scene's
+// mood: a trend started by one grounded sighting needs only one confirmation once enough story time
+// has passed. Dated World State measures story days; without dates, messages/turns stand in.
+// Close together it still needs three.
 const PERSONALITY_SPREAD_READY_COUNT = 2;
+const DEVELOPMENT_SPREAD_MIN_DAYS = 7;
 const PERSONALITY_SPREAD_MIN_MESSAGES = 20;
 const PERSONALITY_SPREAD_MIN_TURNS = 10;
+
+// Story day of a dated World State block in the text, or null when none is dated.
+export function storyDayFromText(text, calendar = getActiveCalendarConfig()) {
+    const extracted = extractStructuredWorldDate(text, calendar);
+    return extracted ? calendarDayNumber(extracted.date, calendar) : null;
+}
 const PROFILE_DEVELOPMENT_FIELDS = Object.freeze({
     personality: Object.freeze({ ledgerKey: 'personalityDevelopment', baselineKey: 'baselinePersonality' }),
     speech: Object.freeze({ ledgerKey: 'speechDevelopment', baselineKey: 'baselineSpeech' }),
@@ -131,13 +141,32 @@ function trackedFieldValue(npc, field) {
     return npc?.[field] ?? '';
 }
 
-function stampFieldChanges(before, after, turn) {
-    const changes = normalizeFieldChanges(after?.fieldChanges ?? before?.fieldChanges);
-    if (!before || !Number.isInteger(turn) || turn < 0) return { ...after, fieldChanges: changes };
-    for (const field of CHANGE_TRACKED_FIELDS) {
-        if (JSON.stringify(trackedFieldValue(before, field)) !== JSON.stringify(trackedFieldValue(after, field))) changes[field] = turn;
+// Story-day counterparts of fieldChanges for the stable fields whose age Refresh checks; present
+// only when the chat's World State carries a date.
+const DAY_TRACKED_FIELDS = Object.freeze(['personality', 'speech', 'behaviorProfile', 'background', 'homeBase']);
+
+export function normalizeFieldChangeDays(value) {
+    const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const out = {};
+    for (const field of DAY_TRACKED_FIELDS) {
+        const day = Number(source[field]);
+        if (Number.isInteger(day)) out[field] = day;
     }
-    return { ...after, fieldChanges: changes };
+    return out;
+}
+
+function stampFieldChanges(before, after, turn, storyDay = null) {
+    const changes = normalizeFieldChanges(after?.fieldChanges ?? before?.fieldChanges);
+    const days = normalizeFieldChangeDays(after?.fieldChangeDays ?? before?.fieldChangeDays);
+    const withDays = next => (Object.keys(days).length ? { ...next, fieldChangeDays: days } : next);
+    if (!before || !Number.isInteger(turn) || turn < 0) return withDays({ ...after, fieldChanges: changes });
+    for (const field of CHANGE_TRACKED_FIELDS) {
+        if (JSON.stringify(trackedFieldValue(before, field)) !== JSON.stringify(trackedFieldValue(after, field))) {
+            changes[field] = turn;
+            if (Number.isInteger(storyDay) && DAY_TRACKED_FIELDS.includes(field)) days[field] = storyDay;
+        }
+    }
+    return withDays({ ...after, fieldChanges: changes });
 }
 
 function matchingPrevious(npc, source = []) {
@@ -291,6 +320,9 @@ function normalizeProfileDevelopmentConcept(raw = {}) {
     const turns = [...new Set((Array.isArray(raw?.turns) ? raw.turns : [])
         .map(profileDevelopmentTurn).filter(value => value !== null))]
         .sort((a, b) => a - b).slice(-PROFILE_DEVELOPMENT_OBSERVATION_LIMIT);
+    const days = [...new Set((Array.isArray(raw?.days) ? raw.days : [])
+        .map(Number).filter(Number.isInteger))]
+        .sort((a, b) => a - b).slice(-PROFILE_DEVELOPMENT_OBSERVATION_LIMIT);
     const firstTurn = profileDevelopmentTurn(raw?.firstTurn);
     const lastTurn = profileDevelopmentTurn(raw?.lastTurn);
     const observationCount = Math.max(
@@ -314,6 +346,7 @@ function normalizeProfileDevelopmentConcept(raw = {}) {
         observationCount,
         sourceMessageIds,
         turns,
+        ...(days.length ? { days } : {}),
         evidenceSamples,
         latestEvidence,
     };
@@ -450,6 +483,13 @@ function observeProfileDevelopment(field, ledger, rawUpdate = {}, options = {}) 
             : null;
         const sourceMessageId = taggedSourceMessageId ?? fallbackSourceMessageId;
         const turn = taggedSourceMessageId !== null ? null : fallbackTurn;
+        const storyDays = options.storyDays && typeof options.storyDays === 'object' ? options.storyDays : {};
+        const taggedDay = taggedSourceMessageId !== null ? Number(storyDays[taggedSourceMessageId]) : NaN;
+        const day = Number.isInteger(taggedDay) ? taggedDay
+            : (taggedSourceMessageId === null && Number.isInteger(options.storyDay) ? options.storyDay : null);
+        // A later sighting of the opposite tendency breaks a pending trend: it has to start again.
+        next.concepts = next.concepts.filter(record => developmentRecordMatches(record, parsed)
+            || !mechanics.durableEvidenceContradicts(record.latestEvidence, parsed.body));
         let index = findDevelopmentRecordIndex(next.concepts, parsed);
         if (index < 0) {
             if (next.concepts.length >= PROFILE_DEVELOPMENT_CONCEPT_LIMIT) next.concepts.shift();
@@ -476,6 +516,10 @@ function observeProfileDevelopment(field, ledger, rawUpdate = {}, options = {}) 
             record.sourceMessageIds = [...new Set([...record.sourceMessageIds, sourceMessageId])]
                 .sort((a, b) => a - b).slice(-PROFILE_DEVELOPMENT_OBSERVATION_LIMIT);
         }
+        if (day !== null) {
+            record.days = [...new Set([...(Array.isArray(record.days) ? record.days : []), day])]
+                .sort((a, b) => a - b).slice(-PROFILE_DEVELOPMENT_OBSERVATION_LIMIT);
+        }
         if (turn !== null) {
             record.turns = [...new Set([...record.turns, turn])]
                 .sort((a, b) => a - b).slice(-PROFILE_DEVELOPMENT_OBSERVATION_LIMIT);
@@ -486,12 +530,19 @@ function observeProfileDevelopment(field, ledger, rawUpdate = {}, options = {}) 
     return next;
 }
 
-function developmentReadyCount(field, sourceIds = [], turns = []) {
-    if (field !== 'personality') return PROFILE_DEVELOPMENT_READY_COUNT;
+function developmentReadyCount(field, sourceIds = [], turns = [], days = []) {
+    if (field !== 'personality' && field !== 'speech') return PROFILE_DEVELOPMENT_READY_COUNT;
     const span = values => (values.length >= 2 ? values[values.length - 1] - values[0] : 0);
+    // Story time decides when it is known; message/turn distance is only the fallback.
+    if (days.length >= 2) return span(days) >= DEVELOPMENT_SPREAD_MIN_DAYS ? PERSONALITY_SPREAD_READY_COUNT : PROFILE_DEVELOPMENT_READY_COUNT;
+    if (field !== 'personality') return PROFILE_DEVELOPMENT_READY_COUNT;
     return span(sourceIds) >= PERSONALITY_SPREAD_MIN_MESSAGES || span(turns) >= PERSONALITY_SPREAD_MIN_TURNS
         ? PERSONALITY_SPREAD_READY_COUNT
         : PROFILE_DEVELOPMENT_READY_COUNT;
+}
+
+function sortedDays(values = []) {
+    return [...new Set((Array.isArray(values) ? values : []).map(Number).filter(Number.isInteger))].sort((a, b) => a - b);
 }
 
 function profileDevelopmentConceptReady(record = {}, field = '') {
@@ -499,8 +550,10 @@ function profileDevelopmentConceptReady(record = {}, field = '') {
         .sort((a, b) => a - b);
     const turns = [...new Set((record.turns || []).map(profileDevelopmentTurn).filter(value => value !== null))]
         .sort((a, b) => a - b);
-    const required = developmentReadyCount(field, sourceIds, turns);
+    const days = sortedDays(record.days);
+    const required = developmentReadyCount(field, sourceIds, turns, days);
     if (Number(record.observationCount || 0) < required) return false;
+    if (required === PERSONALITY_SPREAD_READY_COUNT && days.length >= 2) return true;
     const firstTurn = profileDevelopmentTurn(record.firstTurn);
     const lastTurn = profileDevelopmentTurn(record.lastTurn);
     const turnReady = firstTurn !== null && lastTurn !== null && lastTurn - firstTurn >= PROFILE_DEVELOPMENT_MIN_SPAN;
@@ -535,13 +588,15 @@ function aggregateProfileDevelopmentEvidence(ledger = {}, field = '') {
     }
     const orderedSources = [...sourceIds].sort((a, b) => a - b);
     const orderedTurns = [...turns].sort((a, b) => a - b);
-    const required = developmentReadyCount(field, orderedSources, orderedTurns);
+    const orderedDays = sortedDays((Array.isArray(ledger?.concepts) ? ledger.concepts : []).flatMap(record => record?.days || []));
+    const required = developmentReadyCount(field, orderedSources, orderedTurns, orderedDays);
     const sourceReady = orderedSources.length >= required
         && orderedSources.at(-1) - orderedSources[0] >= PROFILE_DEVELOPMENT_MIN_SPAN;
     const turnReady = orderedTurns.length >= required
         && orderedTurns.at(-1) - orderedTurns[0] >= PROFILE_DEVELOPMENT_MIN_SPAN;
+    const dayReady = required === PERSONALITY_SPREAD_READY_COUNT && orderedDays.length >= 2;
     return {
-        ready: groups.size >= required && (sourceReady || turnReady),
+        ready: groups.size >= required && (sourceReady || turnReady || dayReady),
         required,
         count: groups.size,
         groups: [...groups.values()].map(values => values.join(' ')).filter(Boolean),
@@ -1411,6 +1466,9 @@ export function applyStaleNpcLifecycle(state = {}, options = {}) {
 export function normalizeNpcRecord(raw = {}) {
     const npc = withAppearanceDerivedApparentAge(normalizeNpcBirthday(continuity.normalizeNpcRecord(raw)), raw.appearance);
     npc.fieldChanges = normalizeFieldChanges(raw.fieldChanges);
+    const fieldChangeDays = normalizeFieldChangeDays(raw.fieldChangeDays);
+    if (Object.keys(fieldChangeDays).length) npc.fieldChangeDays = fieldChangeDays;
+    else delete npc.fieldChangeDays;
     for (const field of Object.keys(PROFILE_DEVELOPMENT_FIELDS)) {
         const config = PROFILE_DEVELOPMENT_FIELDS[field];
         const development = profileDevelopmentForNpc(field, npc);
@@ -1433,7 +1491,12 @@ export function applyNpcStateCommand(state, command, options = {}) {
     return result;
 }
 
-export function mergeScanResult(state, scanResult, options = {}) {
+export function mergeScanResult(state, scanResult, rawOptions = {}) {
+    // Story day of the scanned message (its dated World State), unless the caller already resolved
+    // it (carrying the last dated message forward). Undated chats leave it null and use turns.
+    const supplied = rawOptions.storyDay;
+    const suppliedDay = supplied === null || supplied === undefined || supplied === '' ? NaN : Number(supplied);
+    const options = { ...rawOptions, storyDay: Number.isInteger(suppliedDay) ? suppliedDay : storyDayFromText(rawOptions.calendarSource) };
     const profilePrepared = prepareProfileDevelopmentState(state, scanResult, options);
     const sourceState = profilePrepared.state;
     const calendar = getActiveCalendarConfig();
@@ -1495,7 +1558,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
         }
         const finalNpc = withAppearanceDerivedApparentAge(npc, ordinaryUpdate?.appearance || rawNpc.appearance);
         const changeBase = rawSources[0] ? normalizeNpcRecord(rawSources[0]) : null;
-        return stampFieldChanges(changeBase, finalNpc, Math.trunc(Number(result.state?.turn ?? sourceState?.turn)));
+        return stampFieldChanges(changeBase, finalNpc, Math.trunc(Number(result.state?.turn ?? sourceState?.turn)), options.storyDay);
     });
     if (reference.extracted) {
         result.report = {
