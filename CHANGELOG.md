@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.79 - 30 September 2026
+
 - Stop hiding messages from breaking rollback. SillyTavern marks a hidden message `is_system`, and memory extensions such as MemoryBooks hide summarised messages as the chat grows. The branch lineage hashed that flag, so hiding (or unhiding) any earlier message changed its hash and, because checkpoint and rollback-journal keys chain through every earlier message, changed the key of every later message too. A later deletion of the last messages then looked like a divergence at the hidden message instead of a tail truncation, the journal and checkpoints no longer matched, and Delta failed closed and kept everything (a 13-message deletion did not revert). The flag is now fixed in the hash, which keeps the value earlier versions stored for ordinary messages. State saved while messages were hidden is migrated once (`migrateLegacyLineage`): where the stored lineage differs from the chat only in the old flag-sensitive hash, the hash is adopted and every stored checkpoint, journal, journal-head and inline-card key is rewritten to match; real content changes are left to normal reconciliation. Checkpoints saved before an earlier hide can still be unreachable in chats already affected, but new history and rollbacks work.
 
 ## 1.0.78 - 30 September 2026
