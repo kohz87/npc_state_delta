@@ -619,7 +619,7 @@ class DeltaDossierUi {
         this.close();
     }
 
-    async open({ focusSearch = true } = {}) {
+    async open() {
         if (!this.root) return;
         this.panelOpen = true;
         this.root.querySelector('.delta-panel').hidden = false;
@@ -627,16 +627,16 @@ class DeltaDossierUi {
         try { await this.api?.ensureFresh?.({ reason: 'dossier-ui-open' }); }
         catch (error) { console.warn('[NPC State Delta] dossier view freshness check failed safely.', error); }
         await this.refresh({ force: true });
-        if (focusSearch) this.root.querySelector('.delta-search')?.focus?.({ preventScroll: true });
-        else this.root.querySelector('.delta-panel')?.focus?.({ preventScroll: true });
+        // Focus the panel, never the search box: focusing a text field raises the phone/tablet
+        // keyboard over the dossier. Search is focused only when the user taps it.
+        this.root.querySelector('.delta-panel')?.focus?.({ preventScroll: true });
     }
 
     // Open the library on one NPC (present-cast cards in chat use this). The request is applied
     // after any chat-change reset in refresh(), and clears search/filter so the NPC is visible.
     async openNpc(npcId) {
         this.pendingNpcId = plain(npcId);
-        // Opening one NPC should not raise a phone keyboard over its portrait.
-        await this.open({ focusSearch: false });
+        await this.open();
     }
 
     close({ restoreFocus = true } = {}) {

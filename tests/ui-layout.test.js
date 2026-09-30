@@ -406,3 +406,11 @@ test('settings panel buttons override the host min-content button width', () => 
     assert.match(css, /\.delta-settings-quick-actions \.menu_button,\n#npc_state_delta_settings \.npc-state-delta-custom-preset-actions \.menu_button,\n#npc_state_delta_settings \.delta-settings-maintenance-actions > \.menu_button \{ width: 100%; \}/);
     assert.match(css, /\.npc-state-delta-calendar-actions > \.menu_button,\n#npc_state_delta_settings \.delta-settings-danger > \.menu_button \{ width: auto; white-space: nowrap; \}/);
 });
+
+test('opening the dossier never focuses the search box (no phone/tablet keyboard)', () => {
+    const open = dossierUi.slice(dossierUi.indexOf('    async open() {'), dossierUi.indexOf('    async openNpc('));
+    assert.ok(open.length > 0, 'open() was not found');
+    assert.doesNotMatch(open, /delta-search/);
+    assert.match(open, /querySelector\('\.delta-panel'\)\?\.focus\?\.\(\{ preventScroll: true \}\)/);
+    assert.doesNotMatch(dossierUi, /focusSearch/);
+});
