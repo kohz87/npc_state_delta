@@ -5486,7 +5486,17 @@ export function scoreNpcRelevance(npc, text, turn = 0, socialGraph = null, allNp
 
 // Name/alias match used to bring an off-screen dossier into the next generation when the
 // player's pending message names that NPC. It never changes presence.
-export function npcNamedInText(npc, text) {
+// Titles and forms of address never identify one person on their own ("Lady", "Captain").
+const NAME_TITLE_TOKENS = new Set([
+    'lady', 'lord', 'sir', 'dame', 'madam', 'madame', 'mister', 'miss', 'mistress', 'master', 'captain',
+    'commander', 'general', 'lieutenant', 'sergeant', 'major', 'colonel', 'admiral', 'doctor', 'professor',
+    'father', 'mother', 'brother', 'sister', 'elder', 'king', 'queen', 'prince', 'princess', 'duke', 'duchess',
+    'count', 'countess', 'baron', 'baroness', 'lady-in-waiting', 'saint', 'young', 'old', 'little', 'big',
+]);
+
+// A first name alone ("Linnea" for "Linnea Vael") names the NPC only when no other dossier shares
+// that first word, and never when the word is a title. A full name or alias always counts.
+export function npcNamedInText(npc, text, roster = []) {
     const haystack = normalizeName(text);
     if (!haystack || !npc?.name) return false;
     for (const label of [npc.name, ...(npc.aliases || [])]) {
@@ -5494,7 +5504,11 @@ export function npcNamedInText(npc, text) {
         if (needle && countNormalizedPhrase(haystack, needle) > 0) return true;
     }
     const tokens = normalizeName(npc.name).split(/\s+/).filter(Boolean);
-    return tokens.length > 1 && tokens[0].length >= 4 && countNormalizedPhrase(haystack, tokens[0]) > 0;
+    const first = tokens[0] || '';
+    if (tokens.length < 2 || first.length < 4 || NAME_TITLE_TOKENS.has(first)) return false;
+    const sharedFirst = (Array.isArray(roster) ? roster : []).some(other => other && other !== npc && other.id !== npc.id
+        && [other.name, ...(other.aliases || [])].some(label => normalizeName(label).split(/\s+/)[0] === first));
+    return !sharedFirst && countNormalizedPhrase(haystack, first) > 0;
 }
 
 export function selectRelevantNpcs(npcs, text, turn = 0, limit = 3, socialGraph = null, graphRegistry = null) {

@@ -73,7 +73,7 @@ test('lifecycle lookup prefers known owner state and fails closed on ambiguous s
 
 test('high-value manual mutations use immediate persistence', () => {
     assert.match(index, /function persistCritical/);
-    assert.match(index, /persistCritical\(originChatKey\)/);
+    assert.match(index, /persistCriticalDurable\(originChatKey\)/);
     assert.match(index, /persistCritical\(\);\r?\n\s*closeNpcEditor/);
 });
 

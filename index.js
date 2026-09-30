@@ -128,6 +128,7 @@ import {
     inspectNpcStateDataFile,
     makeNpcStateDataFileName,
     makeNpcStateRecoveryFileName,
+    currentWriterId,
     probeNpcStateDataFilePointer,
     preserveUndurableNpcStateSnapshot,
     readNpcStateDataFile,
@@ -1072,7 +1073,9 @@ async function ensureHydratedStateFresh(key = getChatKey(), { reason = 'boundary
 
         try {
             const state = installCanonicalServerState(normalized, pointer, inspected, { reason, dirtyConflict: preserveLocal });
-            if (preserveLocal && notify) globalThis.toastr?.warning?.(
+            // A same-revision fork means a save this session already reported was overwritten by
+            // another session, so it is always reported, even from a background freshness check.
+            if (preserveLocal && (notify || writerFork)) globalThis.toastr?.warning?.(
                 writerFork
                     ? 'NPC State Delta: another session replaced the same server revision. This session copy was preserved for recovery; the server copy is now active.'
                     : 'NPC State Delta: another session advanced this chat. Unsaved local dossier work was preserved for recovery; the server copy is now active.',
@@ -1210,23 +1213,40 @@ async function ensureChatStateLoaded(key = getChatKey()) {
         if (!pointer?.path && !tombstoned) {
             const recoveryName = makeNpcStateDataFileName(key);
             const recoveryPointer = { name: recoveryName, path: `/user/files/${recoveryName}` };
-            try {
-                const recovered = await readNpcStateDataFile(recoveryPointer, { expectedChatKey: key });
-                assertOwnershipEpoch(key, epoch);
-                if (recovered?.retired) {
-                    settings.sidecarTombstones[key] = { reason: recovered.retireReason || 'retired-file', at: Date.now() };
-                    persistSettings();
-                } else if (recovered?.state) {
-                    recoveredState = recovered.state;
-                    loadedUndurable = recovered.undurable === true;
-                    pointer = recoveryPointer;
-                    settings.dataFiles[key] = recoveryPointer;
-                    persistSettings();
-                    console.info(`[NPC State Delta] recovered deterministic sidecar pointer for ${key}.`);
+            // A missing file reads as null. Any thrown error (server error, auth, malformed JSON)
+            // means the sidecar may exist but could not be read, so it must not become a new empty
+            // dossier: retry, then block hydration like an unreadable known pointer.
+            let discoveryError = null;
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+                try {
+                    discoveryError = null;
+                    const recovered = await readNpcStateDataFile(recoveryPointer, { expectedChatKey: key });
+                    assertOwnershipEpoch(key, epoch);
+                    if (recovered?.retired) {
+                        settings.sidecarTombstones[key] = { reason: recovered.retireReason || 'retired-file', at: Date.now() };
+                        persistSettings();
+                    } else if (recovered?.state) {
+                        recoveredState = recovered.state;
+                        loadedUndurable = recovered.undurable === true;
+                        pointer = recoveryPointer;
+                        settings.dataFiles[key] = recoveryPointer;
+                        persistSettings();
+                        console.info(`[NPC State Delta] recovered deterministic sidecar pointer for ${key}.`);
+                    }
+                    break;
+                } catch (error) {
+                    if (error?.code === 'NPC_STATE_STALE_OWNERSHIP') throw error;
+                    discoveryError = error;
+                    if (attempt < 2) {
+                        await new Promise(resolve => setTimeout(resolve, 120 * (attempt + 1)));
+                        assertOwnershipEpoch(key, epoch);
+                    }
                 }
-            } catch (error) {
-                if (error?.code === 'NPC_STATE_STALE_OWNERSHIP') throw error;
-                if (!/404|not found/i.test(String(error?.message || error))) console.debug(`[NPC State Delta] deterministic sidecar recovery skipped for ${key}.`, error);
+            }
+            if (discoveryError) {
+                hydrationErrors.set(key, discoveryError);
+                console.error(`[NPC State Delta] Could not read the existing data file for ${key}; blocking writes instead of starting an empty dossier.`, discoveryError);
+                throw discoveryError;
             }
         }
         let loaded = recoveredState;
@@ -1397,6 +1417,21 @@ function persistCritical(key = getChatKey()) {
         globalThis.toastr?.error?.('NPC State Delta could not immediately save a critical dossier change.');
     });
     return true;
+}
+
+// Like persistCritical, but resolves only once the sidecar write has finished, so a caller can
+// report durable success (true) or a write that is still pending/failed (false).
+async function persistCriticalDurable(key = getChatKey()) {
+    if (!requireReadyChatMutation('save chat dossier changes', key, { notify: false })) return false;
+    persistSettings();
+    markStateDirty(key);
+    try {
+        await flushStateFile(key);
+        return true;
+    } catch (error) {
+        console.error('[NPC State Delta] critical data-file persistence failed', error);
+        return false;
+    }
 }
 
 function commitBranchCheckpoint(state, messageId, reason = 'state') {
@@ -1633,6 +1668,14 @@ async function maybeInheritKnownBranch() {
     }
 }
 
+function staleHostPrefixOfForeignDossier(key, state, liveLineage, operation, explicitDivergence) {
+    if (String(operation || 'auto') !== 'auto' || Number.isInteger(explicitDivergence)) return false;
+    const stored = Array.isArray(state?.lineage) ? state.lineage : [];
+    if (liveLineage.length >= stored.length || firstLineageDivergence(stored, liveLineage) !== liveLineage.length) return false;
+    const dossierWriter = String(hydratedStateMeta.get(key)?.writerId || '');
+    return Boolean(dossierWriter) && dossierWriter !== currentWriterId();
+}
+
 async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true, reason = 'branch', chatKey = null, operation = 'auto' } = {}) {
     const key = chatKey || getChatKey();
     if (key === 'no-chat' || getChatKey() !== key) return null;
@@ -1644,6 +1687,17 @@ async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true
     const beforeNpcCount = Array.isArray(before.npcs) ? before.npcs.length : 0;
     const previousLength = Array.isArray(before.lineage) ? before.lineage.length : 0;
     const lineageBefore = chatLineage(ctx.chat || []);
+    // The dossier can be newer than this browser's chat: another session wrote it after messages
+    // this chat has not loaded yet. Without a delete event, a local chat that is only a shorter
+    // prefix of that dossier is stale, not a deletion, so it must not roll the dossier back.
+    if (staleHostPrefixOfForeignDossier(key, before, lineageBefore, operation, explicitDivergence)) {
+        recordBranchReconciliationEvent({
+            key, reason, operation,
+            result: { recoveryOperation: operation, lineageRelation: 'tail-truncation', recoveryAction: 'deferred-stale-chat', invalidated: false, divergence: lineageBefore.length },
+            beforeNpcCount, previousLength, currentLength: lineageBefore.length,
+        });
+        return null;
+    }
     const result = reconcileBranchState(before, ctx.chat || [], { explicitDivergence, operation, rewindMidDelete: getSettings().midDeleteRewind === true });
     if (getChatKey() !== key || firstLineageDivergence(lineageBefore, chatLineage(getContext().chat || [])) !== -1) return null;
     recordBranchReconciliationEvent({
@@ -2184,7 +2238,7 @@ function namedByPlayerNpcIds(state) {
     const message = pendingPlayerMessage(state);
     if (!message) return [];
     return (state?.npcs || [])
-        .filter(npc => npc && !npc.present && !npc.archived && !isTerminalNpcDeath(npc) && npcNamedInText(npc, message))
+        .filter(npc => npc && !npc.present && !npc.archived && !isTerminalNpcDeath(npc) && npcNamedInText(npc, message, state.npcs))
         .map(npc => npc.id);
 }
 
@@ -2899,14 +2953,19 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
         const liveBeforeBackfill = request.preserveLiveState === true
             ? getChatState(chatKey).npcs.find(item => item.id === request.npcId)
             : null;
+        // A missed-participant repair exists because the NPC takes part in the current exchange;
+        // the broad scan's omission is not evidence of absence, so a grounded present=true stands.
+        // Other repairs keep the live presence (older history must not make an NPC present).
+        const repairedPresence = request.reason === 'missed-participant' && matches[0]?.present === true;
+        const keptPresent = liveBeforeBackfill ? (repairedPresence || Boolean(liveBeforeBackfill.present)) : false;
         parsed.npcs = matches
             .slice(0, 1)
             .map(npc => ({
                 ...npc,
                 id: request.npcId,
                 ...(liveBeforeBackfill ? {
-                    present: Boolean(liveBeforeBackfill.present),
-                    worldActive: Boolean(liveBeforeBackfill.worldActive) && !Boolean(liveBeforeBackfill.present),
+                    present: keptPresent,
+                    worldActive: Boolean(liveBeforeBackfill.worldActive) && !keptPresent,
                     mood: liveBeforeBackfill.mood || npc.mood || '',
                     location: liveBeforeBackfill.location || npc.location || '',
                     goal: liveBeforeBackfill.goal || npc.goal || '',
@@ -2946,14 +3005,16 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
         const nextState = merged.state;
         const finalNpc = nextState.npcs.find(npc => npc.id === request.npcId);
         if (request.preserveLiveState === true && liveBeforeBackfill && finalNpc) {
-            finalNpc.present = Boolean(liveBeforeBackfill.present);
+            finalNpc.present = keptPresent;
             finalNpc.worldActive = Boolean(liveBeforeBackfill.worldActive) && !finalNpc.present;
             finalNpc.mood = liveBeforeBackfill.mood || '';
             finalNpc.location = liveBeforeBackfill.location || '';
             finalNpc.goal = liveBeforeBackfill.goal || '';
             finalNpc.status = liveBeforeBackfill.status || '';
             finalNpc.seenCount = Number(liveBeforeBackfill.seenCount || 0);
-            finalNpc.lastSeenTurn = Number(liveBeforeBackfill.lastSeenTurn || 0);
+            finalNpc.lastSeenTurn = repairedPresence
+                ? Math.max(Number(liveBeforeBackfill.lastSeenTurn || 0), Number(state.turn || 0))
+                : Number(liveBeforeBackfill.lastSeenTurn || 0);
             finalNpc.lastWorldActiveTurn = Number(liveBeforeBackfill.lastWorldActiveTurn || 0);
         }
         if (finalNpc) Object.assign(finalNpc, protectTerminalNpc(existing, finalNpc));
@@ -5161,11 +5222,17 @@ async function saveNpcEditor(npcId, { close = true, silent = false } = {}) {
     state.socialGraph = reconciledSocial.socialGraph;
     state.npcs = reconciledSocial.state.npcs;
     if (targetMessageId >= 0) commitBranchCheckpoint(state, targetMessageId, 'manual-edit');
-    persistCritical(originChatKey);
-    if (close) closeNpcEditor();
     renderDossier();
     updateInjection();
-    if (!silent) globalThis.toastr?.success?.(`NPC State Delta: saved manual dossier edits for ${state.npcs[index].name}.`);
+    // Report success only once the edit is on the server. A failed write keeps the editor open
+    // with the draft; the edit stays applied in this browser and the pending write is retried.
+    const savedName = state.npcs[index].name;
+    if (!await persistCriticalDurable(originChatKey)) {
+        if (!silent) globalThis.toastr?.warning?.(`NPC State Delta: the edits for ${savedName} are applied in this browser but could not be saved to the server yet. Save again to retry.`);
+        return false;
+    }
+    if (close) closeNpcEditor();
+    if (!silent) globalThis.toastr?.success?.(`NPC State Delta: saved manual dossier edits for ${savedName}.`);
     return true;
 }
 

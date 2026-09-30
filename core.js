@@ -20,6 +20,7 @@ import {
     birthdayPromptRule,
     effectiveChronologicalAge,
     mergeNpcBirthdayKnowledge,
+    normalizeBirthDate,
     normalizeNpcBirthday,
     normalizeScanBirthday,
     reanchorDerivedBirthYearFromAge,
@@ -36,6 +37,23 @@ export {
 
 const ROUTINE_APPARENT_AGE_RULE = '11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue, compact ~N, never prose; species literal; no species-aging inference. gender=male|female only if explicit/unambiguous; never guess; change=>genderState:"correct"+reason. Birthday/exact elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual aging/growth/rejuvenation=>apparentAgeState:"evolve"+reason. Appearance must not repeat explicit age. Vague time skip insufficient.';
 const ROUTINE_APPARENT_AGE_RULE_FIXED = '11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue ~N; cue=>MUST return apparentAge when age unknown; species literal; no species-aging inference. Birthday/elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual=>apparentAgeState:"evolve"+reason. Appearance:no age; vague time skip insufficient. gender=male|female only if explicit; never infer; change=>genderState:"correct"+reason.';
+// A scanned birth date may set or change chronology only when the scanned text names the NPC and
+// either states that month and day or speaks of a birthday/birth. A model assertion alone must not
+// rewrite an NPC's age. Callers without source text (manual edits) are not checked here.
+function birthdayUpdateGrounded(npc, update, sourceText, calendar) {
+    const text = String(sourceText || '');
+    if (!text.trim()) return true;
+    const incoming = normalizeBirthDate(update?.birthDate ?? update?.birth_date ?? update?.birthday, calendar);
+    if (!incoming) return true;
+    const lower = text.toLowerCase();
+    const labels = [npc?.name, ...(npc?.aliases || [])].map(label => String(label || '').trim().toLowerCase()).filter(Boolean);
+    const firstNames = labels.map(label => label.split(/\s+/)[0]).filter(token => token.length >= 3);
+    if (![...labels, ...firstNames].some(label => lower.includes(label))) return false;
+    const month = String(incoming.month || '').toLowerCase();
+    const statesDate = month && lower.includes(month) && new RegExp(`\\b${Number(incoming.day)}(?:st|nd|rd|th)?\\b`).test(lower);
+    return Boolean(statesDate) || birthdayEvidenceInText(text);
+}
+
 const PROFILE_DEVELOPMENT_VERSION = 2;
 const PROFILE_DEVELOPMENT_CONCEPT_LIMIT = 4;
 const PROFILE_DEVELOPMENT_OBSERVATION_LIMIT = 4;
@@ -1519,7 +1537,9 @@ export function mergeScanResult(state, scanResult, rawOptions = {}) {
             profileUpdates.find(raw => sameNpc(raw, rawNpc)),
         );
         let npc = normalizeNpcBirthday(rawNpc, calendar, referenceDate);
-        if (ordinaryUpdate) npc = applyNpcBirthdayUpdate(npc, ordinaryUpdate, { ...options, calendarConfig: calendar, referenceDate });
+        if (ordinaryUpdate && birthdayUpdateGrounded(npc, ordinaryUpdate, options.developmentContext, calendar)) {
+            npc = applyNpcBirthdayUpdate(npc, ordinaryUpdate, { ...options, calendarConfig: calendar, referenceDate });
+        }
         const ageState = String(ordinaryUpdate?.ageState ?? ordinaryUpdate?.age_state ?? '').trim().toLowerCase();
         if ((ageState === 'advance' || ageState === 'correct') && npc.birthDateYearSource === 'derived'
             && sources.some(source => String(source.age) !== String(npc.age))) {

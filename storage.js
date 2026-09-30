@@ -112,6 +112,11 @@ function fnv1a(text) {
     return hash.toString(36);
 }
 
+// This page session's writer identity, as stamped on every sidecar it writes.
+export function currentWriterId() {
+    return writerId;
+}
+
 export function makeNpcStateDataFileName(chatKey) {
     const key = String(chatKey || 'chat');
     return `npc-state-delta-${fnv1a(key)}${fnv1a(`npc-state-delta\0${[...key].reverse().join('')}`)}.json`;
