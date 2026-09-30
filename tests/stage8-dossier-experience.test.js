@@ -81,16 +81,17 @@ test('dossier library is a full-portrait cast carousel with overlaid text and hi
     assert.match(source, /delta-cast-rail-wrap/);
 });
 
-test('dossier library collapses from its heading to give the dossier more room', () => {
+test('dossier library starts collapsed and expands from its heading', () => {
     assert.match(source, /heading = document\.createElement\('button'\)/);
     assert.match(source, /heading\.dataset\.deltaLibraryToggle = '1'/);
     assert.match(source, /setAttribute\('aria-expanded', expanded\)/);
     assert.match(source, /classList\?\.toggle\?\.\('delta-library-collapsed', libraryCollapsed\)/);
     assert.match(source, /\.delta-library\.delta-library-collapsed\{grid-template-rows:minmax\(0,1fr\) auto!important\}/);
     assert.match(source, /\.delta-library-collapsed \.delta-search-label,[^{]*\.delta-library-collapsed \.delta-filters,[^{]*\.delta-library-collapsed \.delta-cast-rail-wrap\{display:none!important\}/);
-    // A per-browser presentation preference, never dossier state; storage failures are tolerated.
-    assert.match(source, /LIBRARY_COLLAPSED_KEY = 'npc_state_delta_library_collapsed'/);
-    assert.match(source, /try \{ return globalThis\.localStorage\?\.getItem\?\.\(LIBRARY_COLLAPSED_KEY\) === '1'; \} catch \{ return false; \}/);
+    // Collapsed by default and again whenever the panel closes; presentation only, never stored.
+    assert.match(source, /let libraryCollapsed = true;/);
+    assert.match(source, /observe\(panel, \{ attributes: true, attributeFilter: \['hidden'\] \}\)/);
+    assert.doesNotMatch(source, /LIBRARY_COLLAPSED_KEY|npc_state_delta_library_collapsed/);
 });
 
 test('editor uses one scroll body and task-grouped form sections', () => {

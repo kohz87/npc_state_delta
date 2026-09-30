@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Open the dossier library collapsed. It now starts collapsed every time the dossier panel opens; tap the "DOSSIER LIBRARY" bar to expand it, and it collapses again when the panel closes. The collapsed bar spans the full width with a 40px touch target on touch screens, including tablets. The choice is no longer stored in the browser.
+
 ## 1.0.88 - 30 September 2026
 
 - Make the dossier library collapsible. Tap the "DOSSIER LIBRARY" heading to hide the search, filters and cast rail so the open dossier gets the space (about 200px more on a phone); tap it again to bring them back. The choice is remembered in this browser only.
