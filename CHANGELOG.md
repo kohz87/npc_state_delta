@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.88 - 30 September 2026
+
 - Make the dossier library collapsible. Tap the "DOSSIER LIBRARY" heading to hide the search, filters and cast rail so the open dossier gets the space (about 200px more on a phone); tap it again to bring them back. The choice is remembered in this browser only.
 
 ## 1.0.87 - 30 September 2026
