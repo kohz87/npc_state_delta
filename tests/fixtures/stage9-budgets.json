@@ -282,8 +282,8 @@
     ]
   },
   "injection": {
-    "chars": 2209,
-    "sha256": "540e510ecd612053b4975c5996a238b7a2407f524d964fd2807eaa7a513b572b"
+    "chars": 2309,
+    "sha256": "6e135a7f9d1afffce4dbb3f1dca2d43aa14b98a31449e86ce707ffa5baddaacf"
   },
   "reasoning": "No Delta reasoning/thinking parameter; host/profile preset settings remain host-owned and unmeasured.",
   "providerUsage": "Unavailable; these are character counts, hashes, options and actual mocked dispatcher invocations, not paid provider usage."

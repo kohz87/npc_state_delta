@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Stop NPCs treating the player as uniquely important at low relationship scores ("it must be him", "I must do this for him" at trust 15). The score was not the cause: below 30 its injected wording is neutral. The fixation came from text fields. A relationship summary with obligation, fixation or role claims ("her chosen partner, protector and provider", "must repay him", "only he can", "will follow him anywhere", "devotedly") now needs an unlocked +50 trust or affection milestone, like the existing depth claims; otherwise it is not stored and the neutral score-based wording is injected instead. Stance words in the mood ("devoted", "adoring", "obedient", "infatuated"…) are left out of the roleplay injection while trust and affection are both below 50; the dossier keeps the scanner's text. When an injected NPC has low trust and affection, the injection header adds one line: the player is not uniquely important, with no obligation, fixation or "only them" thinking. Scanner, Refresh, backfill and relationship-pass requests are unchanged; the Stage 9 injection fixture grows by that 100-character line.
+
 ## 1.0.84 - 30 September 2026
 
 Fixes from an external 1.0.83 bug audit (nine reproduced findings):
