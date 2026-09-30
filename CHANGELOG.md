@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.84 - 30 September 2026
+
 Fixes from an external 1.0.83 bug audit (nine reproduced findings):
 
 - Stop deleting a middle message from undoing facts set by earlier retained messages. Reverting the deleted block's own changes now requires the exact state just before it (journal or a checkpoint at the preceding message); an older checkpoint no longer stands in for it, and without the exact boundary the dossiers are left as they are.
