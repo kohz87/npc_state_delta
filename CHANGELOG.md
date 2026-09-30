@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.87 - 30 September 2026
+
 - Fix Scan, Scan dossier, Refresh and backfill being refused after a page reload with "this chat has not loaded the newest messages another session added". Opening a chat reads it from the server, so the opened history is current: if the saved dossier history is longer, those messages were deleted, and the chat-open reconciliation now rolls the dossier back to the chat instead of marking it stale. A dossier adopted from another session mid-session still blocks scans until the chat is reopened, and reopening now clears that mark. Previously every page reload counted as "another session", so the mark could stay until the next new message.
 
 ## 1.0.86 - 30 September 2026
