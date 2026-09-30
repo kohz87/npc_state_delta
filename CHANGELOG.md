@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Make the dossier library collapsible. Tap the "DOSSIER LIBRARY" heading to hide the search, filters and cast rail so the open dossier gets the space (about 200px more on a phone); tap it again to bring them back. The choice is remembered in this browser only.
+
 ## 1.0.87 - 30 September 2026
 
 - Fix Scan, Scan dossier, Refresh and backfill being refused after a page reload with "this chat has not loaded the newest messages another session added". Opening a chat reads it from the server, so the opened history is current: if the saved dossier history is longer, those messages were deleted, and the chat-open reconciliation now rolls the dossier back to the chat instead of marking it stale. A dossier adopted from another session mid-session still blocks scans until the chat is reopened, and reopening now clears that mark. Previously every page reload counted as "another session", so the mark could stay until the next new message.
