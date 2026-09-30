@@ -13,6 +13,17 @@ const EDITOR_OBSERVER_GUARD = '__npcStateDeltaDossierExperienceEditorObserver';
 const DOSSIER_GUARD = '__npcStateDeltaDossierExperienceEvents';
 const DOCUMENT_GUARD = '__npcStateDeltaDossierExperienceDocumentEvents';
 const diagnosticVisibleNpcIds = new Set();
+const LIBRARY_COLLAPSED_KEY = 'npc_state_delta_library_collapsed';
+let libraryCollapsed = readLibraryCollapsed();
+
+// Collapsing the library is a per-browser viewing preference, never dossier state.
+function readLibraryCollapsed() {
+    try { return globalThis.localStorage?.getItem?.(LIBRARY_COLLAPSED_KEY) === '1'; } catch { return false; }
+}
+
+function writeLibraryCollapsed(collapsed) {
+    try { globalThis.localStorage?.setItem?.(LIBRARY_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch { /* optional */ }
+}
 let normalizeQueued = false;
 
 function toast(kind, message) { globalThis.toastr?.[kind]?.(message); }
@@ -96,12 +107,19 @@ function ensureLibraryChrome(root) {
 
     let heading = tools.querySelector('.delta-library-heading');
     if (!heading) {
-        heading = document.createElement('div');
+        heading = document.createElement('button');
+        heading.type = 'button';
         heading.className = 'delta-library-heading';
+        heading.dataset.deltaLibraryToggle = '1';
         tools.prepend(heading);
     }
     const total = root.__npcStateDeltaStage1Ui?.projection?.npcs?.length || 0;
-    setNodeTextIfChanged(heading, `DOSSIER LIBRARY · ${total} NPC${total === 1 ? '' : 's'}`);
+    setNodeTextIfChanged(heading, `${libraryCollapsed ? '▸' : '▾'} DOSSIER LIBRARY · ${total} NPC${total === 1 ? '' : 's'}`);
+    const expanded = libraryCollapsed ? 'false' : 'true';
+    if (heading.getAttribute?.('aria-expanded') !== expanded) heading.setAttribute('aria-expanded', expanded);
+    const title = libraryCollapsed ? 'Show the dossier library' : 'Hide the dossier library for more reading space';
+    if (heading.title !== title) heading.title = title;
+    root.querySelector?.('.delta-library')?.classList?.toggle?.('delta-library-collapsed', libraryCollapsed);
 
     if (!list.parentElement?.classList?.contains('delta-cast-rail-wrap')) {
         const wrap = document.createElement('div');
@@ -332,6 +350,14 @@ function bindDossierEvents(root) {
             normalizeRoot(root);
             return;
         }
+        const libraryToggle = event.target.closest?.('[data-delta-library-toggle]');
+        if (libraryToggle) {
+            event.preventDefault();
+            libraryCollapsed = !libraryCollapsed;
+            writeLibraryCollapsed(libraryCollapsed);
+            ensureLibraryChrome(root);
+            return;
+        }
         const arrow = event.target.closest?.('[data-rail-direction]');
         if (arrow) {
             event.preventDefault();
@@ -432,7 +458,11 @@ function installStyles() {
 #npc_state_delta_dossier_root .delta-library{grid-template-rows:minmax(0,1fr) 188px!important}
 #npc_state_delta_dossier_root .delta-cast{grid-template-rows:auto minmax(0,1fr)!important}
 #npc_state_delta_dossier_root .delta-cast-tools{display:grid!important;grid-template-columns:auto minmax(220px,1fr) auto;align-items:center;gap:10px;padding:7px 10px!important}
-#npc_state_delta_dossier_root .delta-library-heading{font-size:.68rem;letter-spacing:.12em;color:var(--delta-muted);white-space:nowrap}
+#npc_state_delta_dossier_root .delta-library-heading{font:inherit;font-size:.68rem;letter-spacing:.12em;color:var(--delta-muted);white-space:nowrap;justify-self:start;padding:4px 2px;border:0;background:none;text-align:left;cursor:pointer}
+#npc_state_delta_dossier_root .delta-library-heading:hover{color:var(--delta-accent)}
+#npc_state_delta_dossier_root .delta-library.delta-library-collapsed{grid-template-rows:minmax(0,1fr) auto!important}
+#npc_state_delta_dossier_root .delta-library-collapsed .delta-cast{grid-template-rows:auto!important}
+#npc_state_delta_dossier_root .delta-library-collapsed .delta-search-label,#npc_state_delta_dossier_root .delta-library-collapsed .delta-filters,#npc_state_delta_dossier_root .delta-library-collapsed .delta-cast-rail-wrap{display:none!important}
 #npc_state_delta_dossier_root .delta-search-label{max-width:none!important;min-width:0!important}
 #npc_state_delta_dossier_root .delta-filters{justify-self:end;flex-wrap:nowrap!important}
 #npc_state_delta_dossier_root .delta-cast-rail-wrap{position:relative;display:grid;grid-template-columns:30px minmax(0,1fr) 30px;align-items:stretch;min-height:0;overflow:hidden;padding:7px 6px 9px;gap:4px}
@@ -507,7 +537,8 @@ function installStyles() {
 @media(max-width:650px){
   #npc_state_delta_dossier_root .delta-library{grid-template-rows:minmax(0,1fr) 226px!important}
   #npc_state_delta_dossier_root .delta-cast-tools{grid-template-columns:1fr!important;gap:6px!important}
-  #npc_state_delta_dossier_root .delta-library-heading,#npc_state_delta_dossier_root .delta-search-label,#npc_state_delta_dossier_root .delta-filters{grid-column:1!important;justify-self:stretch!important}
+  #npc_state_delta_dossier_root .delta-search-label,#npc_state_delta_dossier_root .delta-filters{grid-column:1!important;justify-self:stretch!important}
+  #npc_state_delta_dossier_root .delta-library-heading{grid-column:1!important;justify-self:stretch!important;min-height:36px}
   #npc_state_delta_dossier_root .delta-filters{overflow-x:auto}
   #npc_state_delta_dossier_root .delta-cast-card{flex-basis:106px!important;width:106px!important;min-width:106px!important;height:126px!important}
   #npc_state_delta_dossier_root .delta-cast-card[data-bucket="dead"]{flex-basis:70px!important;width:70px!important;min-width:70px!important}
