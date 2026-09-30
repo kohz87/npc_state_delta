@@ -937,7 +937,7 @@ function installCanonicalServerState(key, pointer, inspected, { reason = 'freshn
     pendingAutoScans.delete(key);
     assistantReceipts.delete(key);
     const installed = setChatState(key, inspected.payload.state, { markLoaded: true });
-    noteAdoptedDossier(key, installed);
+    noteAdoptedDossier(key, installed, inspected.writerId);
     persistedVersions.set(key, Number(stateVersions.get(key) || 0));
     updateHydratedStateMeta(key, inspected.revision, {
         hydratedAt: Date.now(),
@@ -1678,18 +1678,24 @@ async function maybeInheritKnownBranch() {
 }
 
 // Chats whose local message history is an older prefix of the adopted dossier's history: another
-// session wrote messages this browser has not loaded yet. The mark is independent of who wrote the
-// sidecar last (a local metadata save proves nothing about the chat) and clears only once the local
-// chat catches up with or diverges from the dossier.
+// session wrote messages this browser has not loaded yet. The mark survives local saves (a metadata
+// save proves nothing about the chat) and clears once the local chat catches up with or diverges
+// from the dossier, or once the host reloads the chat.
 const staleHostChats = new Set();
+// SillyTavern emits CHAT_CHANGED after reading the chat from the server, so the history it opens is
+// current. A dossier it only prefixes lost those messages to a deletion (for example one whose
+// truncation was not saved before a reload), not to a session this browser is behind.
+const openingHostChats = new Set();
 
 function hostIsOlderPrefix(state, liveLineage) {
     const stored = Array.isArray(state?.lineage) ? state.lineage : [];
     return liveLineage.length < stored.length && firstLineageDivergence(stored, liveLineage) === liveLineage.length;
 }
 
-function noteAdoptedDossier(key, state) {
-    if (key === getChatKey() && hostIsOlderPrefix(state, chatLineage(getContext().chat || []))) staleHostChats.add(key);
+function noteAdoptedDossier(key, state, writerId = '') {
+    if (key !== getChatKey() || openingHostChats.has(key)) return;
+    if (writerId && String(writerId) === currentWriterId()) return;
+    if (hostIsOlderPrefix(state, chatLineage(getContext().chat || []))) staleHostChats.add(key);
 }
 
 function staleHostActive(key = getChatKey()) {
@@ -1701,14 +1707,9 @@ function staleHostActive(key = getChatKey()) {
     return true;
 }
 
-function staleHostPrefixOfForeignDossier(key, state, liveLineage, operation, explicitDivergence) {
+function staleHostPrefix(key, state, liveLineage, operation, explicitDivergence) {
     if (String(operation || 'auto') !== 'auto' || Number.isInteger(explicitDivergence)) return false;
-    if (!hostIsOlderPrefix(state, liveLineage)) return false;
-    if (staleHostActive(key)) return true;
-    const dossierWriter = String(hydratedStateMeta.get(key)?.writerId || '');
-    if (!dossierWriter || dossierWriter === currentWriterId()) return false;
-    staleHostChats.add(key);
-    return true;
+    return hostIsOlderPrefix(state, liveLineage) && staleHostActive(key);
 }
 
 async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true, reason = 'branch', chatKey = null, operation = 'auto' } = {}) {
@@ -1723,9 +1724,9 @@ async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true
     const previousLength = Array.isArray(before.lineage) ? before.lineage.length : 0;
     const lineageBefore = chatLineage(ctx.chat || []);
     // The dossier can be newer than this browser's chat: another session wrote it after messages
-    // this chat has not loaded yet. Without a delete event, a local chat that is only a shorter
-    // prefix of that dossier is stale, not a deletion, so it must not roll the dossier back.
-    if (staleHostPrefixOfForeignDossier(key, before, lineageBefore, operation, explicitDivergence)) {
+    // this chat has not loaded yet. Until the host reloads the chat, a local chat that is only a
+    // shorter prefix of that dossier is stale, not a deletion, so it must not roll the dossier back.
+    if (staleHostPrefix(key, before, lineageBefore, operation, explicitDivergence)) {
         recordBranchReconciliationEvent({
             key, reason, operation,
             result: { recoveryOperation: operation, lineageRelation: 'tail-truncation', recoveryAction: 'deferred-stale-chat', invalidated: false, divergence: lineageBefore.length },
@@ -6481,6 +6482,8 @@ function registerEvents() {
             closePortraitGenerator();
             closeNpcEditor();
             let key = getChatKey();
+            staleHostChats.delete(key);
+            openingHostChats.add(key);
             try {
                 if (isCanonicalChatKey(key)) await ensureChatStateLoaded(key);
                 if (getChatKey() !== key) return;
@@ -6500,6 +6503,8 @@ function registerEvents() {
             } catch (error) {
                 if (getChatKey() === key) { renderDossier(); updateInjection(); }
                 console.error('[NPC State Delta] chat change hydration failed; durable state was preserved.', error);
+            } finally {
+                openingHostChats.delete(key);
             }
         });
     }
