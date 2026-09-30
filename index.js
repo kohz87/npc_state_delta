@@ -1698,18 +1698,22 @@ function noteAdoptedDossier(key, state, writerId = '') {
     if (hostIsOlderPrefix(state, chatLineage(getContext().chat || []))) staleHostChats.add(key);
 }
 
+// Messages this browser adds locally (a new turn, a reply) do not load the missing remote history,
+// so only a host reload or a local chat that contains the whole adopted lineage clears the mark.
 function staleHostActive(key = getChatKey()) {
-    if (!staleHostChats.has(key)) return false;
-    if (key !== getChatKey() || !hostIsOlderPrefix(getChatState(key), chatLineage(getContext().chat || []))) {
+    if (!staleHostChats.has(key) || key !== getChatKey()) return false;
+    const stored = Array.isArray(getChatState(key)?.lineage) ? getChatState(key).lineage : [];
+    const live = chatLineage(getContext().chat || []);
+    if (live.length >= stored.length && [-1, stored.length].includes(firstLineageDivergence(stored, live))) {
         staleHostChats.delete(key);
         return false;
     }
     return true;
 }
 
-function staleHostPrefix(key, state, liveLineage, operation, explicitDivergence) {
+function staleHostPrefix(key, operation, explicitDivergence) {
     if (String(operation || 'auto') !== 'auto' || Number.isInteger(explicitDivergence)) return false;
-    return hostIsOlderPrefix(state, liveLineage) && staleHostActive(key);
+    return staleHostActive(key);
 }
 
 async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true, reason = 'branch', chatKey = null, operation = 'auto' } = {}) {
@@ -1726,7 +1730,7 @@ async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true
     // The dossier can be newer than this browser's chat: another session wrote it after messages
     // this chat has not loaded yet. Until the host reloads the chat, a local chat that is only a
     // shorter prefix of that dossier is stale, not a deletion, so it must not roll the dossier back.
-    if (staleHostPrefix(key, before, lineageBefore, operation, explicitDivergence)) {
+    if (staleHostPrefix(key, operation, explicitDivergence)) {
         recordBranchReconciliationEvent({
             key, reason, operation,
             result: { recoveryOperation: operation, lineageRelation: 'tail-truncation', recoveryAction: 'deferred-stale-chat', invalidated: false, divergence: lineageBefore.length },
@@ -1948,12 +1952,23 @@ async function removeDeletedChatState(rawId, kind = 'chat', ownerId = '') {
                 retired = true;
                 break;
             } catch (error) {
-                if (error?.code !== 'NPC_STATE_WRITE_CONFLICT' || attempt >= 3) throw error;
+                if (error?.retirementUncertain || error?.code !== 'NPC_STATE_WRITE_CONFLICT' || attempt >= 3) throw error;
                 console.info(`[NPC State Delta] delete retirement raced another writer for ${key}; retrying from the newest revision.`);
             }
         }
         if (!retired) return false;
     } catch (error) {
+        if (error?.retirementUncertain) {
+            // The source may already be retired: keep and register the verified recovery copy so the
+            // dossier stays restorable, like the character rename/delete transactions.
+            if (recoveryPointer?.path) {
+                settings.recoveryFiles[key] = { ...recoveryPointer, reason: 'chat-delete-retirement-uncertain', retiredAt: Date.now() };
+                persistSettings();
+                try { await saveHostSettings(); } catch (saveError) { console.warn(`[NPC State Delta] recovery registration for ${key} could not be persisted immediately.`, saveError); }
+            }
+            console.warn(`[NPC State Delta] chat deletion could not confirm retirement of ${key}; kept the recovery copy.`, error);
+            throw error;
+        }
         if (recoveryPointer?.path) {
             try { await deleteNpcStateDataFile(recoveryPointer, { headers: requestHeaders() }); } catch { queueRecoveryGarbagePointer(recoveryPointer, 'chat-lifecycle-temp'); }
         }
@@ -2370,6 +2385,21 @@ function backfillScanMatchesTarget(npc, request) {
     return Boolean(role && (role.includes(target) || target.includes(role)));
 }
 
+// A single-target request may accept its only returned row even when the model changed the label
+// (e.g. expanded a short name), but never a row that explicitly identifies someone else: that
+// would write another NPC's lifecycle and profile into the requested dossier.
+function soleRowMayBeTarget(row, { npcId = '', labels = [] } = {}, roster = []) {
+    if (!row || typeof row !== 'object') return false;
+    const rowName = String(row.name || '').trim();
+    const targetLabels = labels.map(label => String(label || '').trim()).filter(Boolean);
+    if (rowName) {
+        const rowRecord = { name: rowName, aliases: Array.isArray(row.aliases) ? row.aliases : [] };
+        return targetLabels.some(label => backfillScanMatchesTarget(rowRecord, { npcId: '', label }));
+    }
+    const rowId = String(row.id || '').trim();
+    return !(rowId && rowId !== String(npcId) && roster.some(npc => String(npc?.id || '') === rowId));
+}
+
 function transcriptMentionsBackfillTarget(transcript, label) {
     const target = normalizeName(label);
     const haystack = normalizeName(transcript);
@@ -2537,7 +2567,8 @@ async function scanNpcDossier(npcId) {
             return false;
         }
         const returned = Array.isArray(parsed.npcs) ? parsed.npcs : [];
-        const match = returned.find(npc => backfillScanMatchesTarget(npc, { npcId: id, label: existing.name })) || (returned.length === 1 ? returned[0] : null);
+        const match = returned.find(npc => backfillScanMatchesTarget(npc, { npcId: id, label: existing.name }))
+            || (returned.length === 1 && soleRowMayBeTarget(returned[0], { npcId: id, labels: [existing.name, ...(existing.aliases || [])] }, state.npcs) ? returned[0] : null);
         if (!match) {
             globalThis.toastr?.warning?.(`NPC State Delta: the dossier importer did not return ${existing.name}.`);
             return false;
@@ -2709,7 +2740,7 @@ async function refreshNpcFromChat(npcId) {
         }
         const returned = Array.isArray(parsed.npcs) ? parsed.npcs : [];
         let match = returned.find(npc => backfillScanMatchesTarget(npc, { npcId: id, label: existing.name }));
-        if (!match && returned.length === 1) match = returned[0];
+        if (!match && returned.length === 1 && soleRowMayBeTarget(returned[0], { npcId: id, labels: [existing.name, ...(existing.aliases || [])] }, state.npcs)) match = returned[0];
         parsed.npcs = match ? [{
             ...match,
             id,
@@ -2722,7 +2753,8 @@ async function refreshNpcFromChat(npcId) {
         }] : [];
         const rawProfileUpdates = Array.isArray(parsed.profileUpdates) ? parsed.profileUpdates : (Array.isArray(parsed.profile_updates) ? parsed.profile_updates : []);
         if (rawProfileUpdates.length) {
-            const profile = rawProfileUpdates.find(item => String(item?.id || '') === id || (item?.name && npcMatchesLabel(existing, item.name))) || (rawProfileUpdates.length === 1 ? rawProfileUpdates[0] : null);
+            const profile = rawProfileUpdates.find(item => String(item?.id || '') === id || (item?.name && npcMatchesLabel(existing, item.name)))
+                || (rawProfileUpdates.length === 1 && soleRowMayBeTarget(rawProfileUpdates[0], { npcId: id, labels: [existing.name, ...(existing.aliases || [])] }, state.npcs) ? rawProfileUpdates[0] : null);
             parsed.profileUpdates = profile ? [{ ...profile, id, name: existing.name }] : [];
         }
         const edgeTouchesTarget = edge => String(edge?.aId || edge?.a_id || '') === id
@@ -2989,7 +3021,11 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
         // The backfill prompt is single-target by construction. If the model expands a short
         // label (e.g. Toris -> Toris Vale) without repeating the alias, accept the sole result
         // when the requested target is actually present in the supplied history.
-        if (!matches.length && returned.length === 1 && transcriptMentionsBackfillTarget(transcript, request.label)) matches = returned;
+        if (!matches.length && returned.length === 1 && transcriptMentionsBackfillTarget(transcript, request.label)) {
+            const targetRecord = getChatState(chatKey).npcs.find(item => item.id === request.npcId);
+            const labels = [request.label, ...(targetRecord ? [targetRecord.name, ...(targetRecord.aliases || [])] : [])];
+            if (soleRowMayBeTarget(returned[0], { npcId: request.npcId, labels }, getChatState(chatKey).npcs)) matches = returned;
+        }
         const liveBeforeBackfill = request.preserveLiveState === true
             ? getChatState(chatKey).npcs.find(item => item.id === request.npcId)
             : null;
@@ -4834,7 +4870,7 @@ function openNpcEditor(npcId) {
         animation: 'fast',
         onClosing: async currentPopup => {
             if (currentPopup.result === POPUP_RESULT.AFFIRMATIVE) {
-                return saveNpcEditor(npc.id, { close: false });
+                return saveNpcEditor(npc.id, { close: false, popup: currentPopup });
             }
             return true;
         },
@@ -5135,12 +5171,17 @@ function clampEditorRelationshipStat(id) {
     return Number.isFinite(value) ? Math.max(-100, Math.min(100, Math.round(value))) : 0;
 }
 
-async function saveNpcEditor(npcId, { close = true, silent = false } = {}) {
+async function saveNpcEditor(npcId, { close = true, silent = false, popup = null } = {}) {
     const originChatKey = activeEditorChatKey || getChatKey();
+    const editorAtStart = activeEditorPopup;
     if (getChatKey() !== originChatKey || !await ensureFreshMutationBoundary('save dossier edits', originChatKey)) {
         globalThis.toastr?.warning?.('NPC State Delta: this editor belongs to a different or unloaded chat. Reopen the dossier in the active chat.');
         return false;
     }
+    // Cancel/Escape during the freshness wait (or a replaced editor) invalidates this Save: the
+    // closing popup still holds the draft inputs, but the user abandoned them.
+    if ((editorAtStart && activeEditorPopup !== editorAtStart)
+        || (popup && popup.result !== getContext().POPUP_RESULT?.AFFIRMATIVE)) return false;
     if (activeEditorBaseRevision !== null && Number(activeEditorBaseRevision) !== workingCopyAdoption(originChatKey)) {
         globalThis.toastr?.warning?.('NPC State Delta: this editor was opened on an older server revision. Your typed draft is still open, but it was not applied. Review the newly loaded dossier and reopen the editor before saving.');
         return false;
@@ -6286,7 +6327,7 @@ async function handleAssistantMessageReceived(messageId, { bypassSwipeGuard = fa
     receipts.add(eventSourceKey);
     while (receipts.size > 64) receipts.delete(receipts.values().next().value);
     assistantReceipts.set(eventChatKey, receipts);
-    if (Number.isInteger(messageId)) ensureBranchParentAnchor(state, getContext().chat || [], messageId, 'assistant-parent');
+    if (Number.isInteger(messageId) && !staleHostActive(eventChatKey)) ensureBranchParentAnchor(state, getContext().chat || [], messageId, 'assistant-parent');
     state.turn = Number(state.turn || 0) + 1;
     const receivedMessage = Number.isInteger(messageId) ? getContext().chat?.[messageId] : null;
     const compactWorldStateTurn = hasCompactMeguminWorldState(receivedMessage?.mes || '');
@@ -6394,7 +6435,8 @@ function registerEvents() {
             // the player names reaches this generation; text never dispatches mutations.
             const sentState = getChatState();
             migrateLegacyLineage(sentState, getContext().chat || []);
-            sentState.lineage = chatLineage(getContext().chat || []);
+            // A turn typed on a chat that is behind the adopted dossier must not replace its lineage.
+            if (!staleHostActive(key)) sentState.lineage = chatLineage(getContext().chat || []);
             updateInjection();
         });
     }
@@ -6702,9 +6744,11 @@ window.NPCStateDelta = Object.freeze({
         else await ensureHydratedStateFresh(key, { reason: String(options?.reason || 'public-freshness-check'), notify: options?.notify === true });
         return getChatKey() === key;
     },
-    exportBytes: async () => {
+    exportBytes: async ({ chatKey = '' } = {}) => {
         const key = getChatKey();
+        if (chatKey && chatKey !== key) throw new Error('The active chat changed before export; nothing was exported.');
         if (!await ensureFreshMutationBoundary('export a dossier', key, { notify: false })) throw new Error('NPC State Delta canonical server dossier is unavailable.');
+        if (getChatKey() !== key) throw new Error('The active chat changed before export; nothing was exported.');
         return exportBundleBytes();
     },
     importBytes: async bytes => {

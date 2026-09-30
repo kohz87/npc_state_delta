@@ -47,7 +47,8 @@ export function npcOwnedSentences(npc, text) {
     const owned = [];
     sentences.forEach((sentence, index) => {
         if (patterns.some(pattern => pattern.test(sentence))) owned.push(sentence);
-        else if (index > 0 && owned.includes(sentences[index - 1]) && /^(?:she|he|they|her|his|their)\b/i.test(sentence)) owned.push(sentence);
+        else if (index > 0 && owned.includes(sentences[index - 1])
+            && /^(?:(?:then|now|later|soon|afterwards?|finally),?\s+)?(?:she|he|they|her|his|their)\b/i.test(sentence)) owned.push(sentence);
     });
     return owned;
 }
@@ -55,15 +56,75 @@ export function npcOwnedSentences(npc, text) {
 // Wording that places the NPC outside the current scene ("is not here", "remains at her distant home").
 const ABSENCE_WORDING = /\b(?:not (?:here|present|there|in the room|with (?:us|them|him|her))|(?:isn|wasn|aren|weren)['’]?t (?:here|present|there|around)|absent|elsewhere|far away|off[- ]?screen|remains? (?:at|in) (?:her|his|their) (?:distant |own )?(?:home|house|room|quarters)|has (?:already )?left|is (?:away|gone))\b/i;
 
-export function npcCurrentlyAbsentInText(npc, text) {
-    return npcOwnedSentences(npc, text).some(sentence => ABSENCE_WORDING.test(sentence));
-}
+const HISTORICAL_ABSENCE = /\b(?:ago|earlier|before|previously|until|last\s+(?:night|week)|yesterday|had been)\b/i;
+const CURRENT_PARTICIPATION = /\b(?:now|returns?|returned|arrives?|arrived|comes? (?:back|in)|steps? (?:in|inside|back)|enters?|entered|joins?|joined|sits? (?:beside|with|down)|greets?|here now)\b/i;
+const CLAUSE_BOUNDARY = /,|;|\s+(?:but|then|and then|because|while|although|though)\s+/i;
 
-function npcBirthdayNarrated(npc, text) {
-    return npcOwnedSentences(npc, text).some(birthdayEvidenceInText);
+// The NPC's latest current state in the text: another person's absence ("because Noela is not
+// here") and an absence the narration then resolves ("was not here an hour ago, but now steps
+// inside") do not make this NPC absent.
+export function npcCurrentlyAbsentInText(npc, text) {
+    const own = npcFirstLabels(npc);
+    let absent = false;
+    for (const sentence of npcOwnedSentences(npc, text)) {
+        for (const clause of sentence.split(CLAUSE_BOUNDARY).map(part => String(part || '').trim()).filter(Boolean)) {
+            const subject = clause.match(/^(\p{Lu}[\p{L}\p{M}-]+)\s+(?:is|was|isn|wasn|has|had|remains?|stays?|stayed|left|went)\b/u)?.[1];
+            if (subject && !own.has(subject.toLowerCase())) continue;
+            if (ABSENCE_WORDING.test(clause) && !HISTORICAL_ABSENCE.test(clause)) absent = true;
+            else if (CURRENT_PARTICIPATION.test(clause)) absent = false;
+        }
+    }
+    return absent;
 }
 
 const NEGATED_BEFORE = /\b(?:not|never|isn['’]?t|wasn['’]?t|no longer)\s+(?:\w+\s+){0,3}$/i;
+const BIRTH_PREDICATE = /\b(?:birth(?:day|date)?|name\s*day|nameday|born|hatched|date\s+of\s+birth)\b/giu;
+const CURRENT_BIRTHDAY = /\b(?:birthday|name\s*day|nameday|turn(?:s|ing)?\s+\d{1,3})\b/giu;
+const HYPOTHETICAL_OR_FALSE = /\b(?:if|would|might|could|perhaps|maybe|supposedly|forged|fake|false|pretend(?:s|ed|ing)?|claims?\s+(?:to|that)|as if)\b/i;
+const PAST_BIRTHDAY = /\b(?:yesterday|last\s+(?:year|week|month)|ago|previous|past|was\s+(?:her|his|their)\s+birthday|had\s+(?:her|his|their)\s+birthday)\b/i;
+
+function npcFirstLabels(npc) {
+    const labels = [npc?.name, ...(Array.isArray(npc?.aliases) ? npc.aliases : [])].map(label => String(label || '').trim()).filter(Boolean);
+    return new Set([...labels, ...labels.map(label => label.split(/\s+/)[0])].map(label => label.toLowerCase()));
+}
+
+// The part of a sentence that speaks about this NPC: another named person's possessive
+// ("Noela's birthday"), a "Noela, who ..." relative clause and another person's "Noela turns 18"
+// belong to that person and are removed.
+function npcOwnClaimText(npc, sentence) {
+    const own = npcFirstLabels(npc);
+    const foreign = name => !own.has(String(name || '').toLowerCase());
+    return String(sentence || '')
+        .replace(/\b(\p{Lu}[\p{L}\p{M}-]+),?\s+who\b.*$/u, (match, name) => (foreign(name) ? ' ' : match))
+        .replace(/\b(\p{Lu}[\p{L}\p{M}-]+)['’]s\s+(?:birthday|name\s*day|nameday|birth)\b/gu, (match, name) => (foreign(name) ? ' ' : match))
+        .replace(/\b(\p{Lu}[\p{L}\p{M}-]+)\s+turn(?:s|ing)?\s+\d{1,3}\b/gu, (match, name) => (foreign(name) ? ' ' : match));
+}
+
+function affirmativeMatch(text, pattern) {
+    for (const match of String(text || '').matchAll(pattern)) {
+        if (!NEGATED_BEFORE.test(text.slice(0, match.index))) return true;
+    }
+    return false;
+}
+
+// Affirmative narration that today is this NPC's own birthday (not a denial, question,
+// hypothetical, past birthday or someone else's).
+function ownCurrentBirthdayClaim(npc, sentence) {
+    const text = npcOwnClaimText(npc, sentence);
+    if (/\?\s*$/.test(text) || HYPOTHETICAL_OR_FALSE.test(text) || PAST_BIRTHDAY.test(text)) return false;
+    return affirmativeMatch(text, CURRENT_BIRTHDAY);
+}
+
+// An affirmative statement of this NPC's own birth (born / birthday / date of birth).
+function ownBirthClaim(npc, sentence) {
+    const text = npcOwnClaimText(npc, sentence);
+    if (/\?\s*$/.test(text) || HYPOTHETICAL_OR_FALSE.test(text)) return '';
+    return affirmativeMatch(text, BIRTH_PREDICATE) ? text : '';
+}
+
+function npcBirthdayNarrated(npc, text) {
+    return npcOwnedSentences(npc, text).some(sentence => ownCurrentBirthdayClaim(npc, sentence));
+}
 
 function statedInSentence(sentence, token) {
     const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${String(token).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:st|nd|rd|th)?(?![\\p{L}\\p{N}])`, 'giu');
@@ -73,9 +134,11 @@ function statedInSentence(sentence, token) {
     return false;
 }
 
-// A scanned birth date may set or change chronology only when one sentence about this NPC supports
-// every part it supplies: the month and day (stated, or "today is her birthday" on today's date)
-// and a new year, none of them negated. Callers without source text (manual edits) are not checked.
+// A scanned birth date may set or change chronology only when an affirmative statement of this
+// NPC's own birth supports every part it supplies: the month and day (stated, or "today is her
+// birthday" on today's date) and a new year, none of them negated. The parts may be split across
+// two consecutive sentences about the NPC ("Mira was born in CR790. Her birthday is Redleaf 2.").
+// Callers without source text (manual edits) are not checked.
 function birthdayUpdateGrounded(npc, update, sourceText, calendar, referenceDate = null) {
     const text = String(sourceText || '');
     if (!text.trim()) return true;
@@ -85,15 +148,18 @@ function birthdayUpdateGrounded(npc, update, sourceText, calendar, referenceDate
     const reference = referenceDate ? normalizeCalendarDate(referenceDate, calendar) : null;
     const isToday = reference && String(reference.month).toLowerCase() === String(incoming.month).toLowerCase() && Number(reference.day) === Number(incoming.day);
     const needsYear = incoming.year !== null && !(known && known.year === incoming.year);
-    return npcOwnedSentences(npc, text).some(sentence => {
-        const dated = statedInSentence(sentence, incoming.month) && statedInSentence(sentence, Number(incoming.day));
-        const birthdayToday = isToday && birthdayEvidenceInText(sentence);
+    const sentences = String(text).split(/(?<=[.!?])\s+|\n+/).map(item => item.trim()).filter(Boolean);
+    const owned = new Set(npcOwnedSentences(npc, text));
+    const claims = sentences.map(sentence => (owned.has(sentence) ? ownBirthClaim(npc, sentence) : ''));
+    const era = String(incoming.era || calendar?.era || '').trim();
+    const yearTokens = [String(incoming.year), era && `${era}${incoming.year}`, era && `${era} ${incoming.year}`].filter(Boolean);
+    const supports = window => {
+        const dated = window.some(claim => statedInSentence(claim, incoming.month)) && window.some(claim => statedInSentence(claim, Number(incoming.day)));
+        const birthdayToday = isToday && window.some(claim => ownCurrentBirthdayClaim(npc, claim));
         if (!dated && !birthdayToday) return false;
-        if (!needsYear) return true;
-        const era = String(incoming.era || calendar?.era || '').trim();
-        return [String(incoming.year), era && `${era}${incoming.year}`, era && `${era} ${incoming.year}`]
-            .filter(Boolean).some(token => statedInSentence(sentence, token));
-    });
+        return !needsYear || window.some(claim => yearTokens.some(token => statedInSentence(claim, token)));
+    };
+    return claims.some((claim, index) => claim && (supports([claim]) || (claims[index + 1] && supports([claim, claims[index + 1]]))));
 }
 
 const PROFILE_DEVELOPMENT_VERSION = 2;
@@ -1418,7 +1484,10 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
         }),
         ...plan.evidence.map(item => item.body).filter(Boolean),
     ];
-    const modelAuthorized = state === 'evolve' && Boolean(reason);
+    // A provider-declared evolve with a reason may admit reworded development (strict concept
+    // grounding froze legitimate growth), but never a protected morality reversal on that label alone.
+    const modelAuthorized = state === 'evolve' && Boolean(reason)
+        && !(field === 'personality' && mechanics.identityMoralityConflict(currentValue, proposed));
     const conceptCandidateGrounded = mechanics.durableProfileEvolutionCandidateGrounded(field, currentValue, proposed, groundingEvidence);
     const aggregateCandidateGrounded = aggregateFallback
         ? mechanics.durableProfileAggregateCandidateGrounded(field, currentValue, proposed, plan.aggregateEvidence?.groups || [], plan.aggregateEvidence?.required)
@@ -1451,9 +1520,11 @@ function finalizeProfileDevelopmentField(npc, field, plan, options = {}, report 
             ...diagnosticBase,
             candidateGrounded: candidateBridgeReady
                 ? bridgeCandidateGrounded
-                : (aggregateFallback ? aggregateCandidateGrounded : (modelAuthorized || conceptCandidateGrounded)),
+                : (aggregateFallback ? aggregateCandidateGrounded : conceptCandidateGrounded),
             aggregateFallback,
-            authority: observationalScale ? 'model-observed' : 'observational',
+            authority: !candidateBridgeReady && !aggregateFallback && modelAuthorized && !conceptCandidateGrounded
+                ? 'model-evolve'
+                : (observationalScale ? 'model-observed' : 'observational'),
             readinessPath: candidateBridgeReady ? 'speech-candidate-support' : (aggregateFallback ? 'aggregate' : 'concept'),
             changeClass: candidateSupport?.changeClass || null,
             requiredObservations: candidateSupport?.requiredObservations || plan.aggregateEvidence?.required || PROFILE_DEVELOPMENT_READY_COUNT,
@@ -1660,4 +1731,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.90';
+export const NPC_STATE_VERSION = '1.0.91';

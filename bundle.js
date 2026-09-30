@@ -319,6 +319,10 @@ function filterGraphByIds(graph, validIds, rejectedSourceIds = new Set()) {
             && validIds.has(edge.aId)
             && validIds.has(edge.bId)),
         unresolved: normalized.unresolved.filter(slot => !rejectedSourceIds.has(slot.ownerId) && validIds.has(slot.ownerId)),
+        suppressed: (normalized.suppressed || []).filter(entry => !rejectedSourceIds.has(entry.aId)
+            && !rejectedSourceIds.has(entry.bId)
+            && validIds.has(entry.aId)
+            && validIds.has(entry.bId)),
     });
 }
 
@@ -499,6 +503,7 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
     importedGraph = normalizeSocialGraph({
         edges: importedGraph.edges.filter(edge => !rejectedSourceIds.has(edge.aId) && !rejectedSourceIds.has(edge.bId)),
         unresolved: importedGraph.unresolved.filter(slot => !rejectedSourceIds.has(slot.ownerId)),
+        suppressed: (importedGraph.suppressed || []).filter(entry => !rejectedSourceIds.has(entry.aId) && !rejectedSourceIds.has(entry.bId)),
     });
     for (const [fromId, toId] of importedIdMap.entries()) {
         if (fromId && toId && fromId !== toId) importedGraph = remapSocialGraphNpcId(importedGraph, fromId, toId);
@@ -509,6 +514,8 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
     const socialGraph = normalizeSocialGraph({
         edges: [...currentGraph.edges, ...importedGraph.edges],
         unresolved: [...currentGraph.unresolved, ...importedGraph.unresolved],
+        // Manual removals of inferred sibling pairs stay honoured across import.
+        suppressed: [...(currentGraph.suppressed || []), ...(importedGraph.suppressed || [])],
     });
 
     // Form portraits follow their accepted dossier to its target id. An imported image replaces the

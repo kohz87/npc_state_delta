@@ -548,7 +548,16 @@ export async function retireNpcStateDataFile({ chatKey, pointer = null, reason =
         }
         const revision = Math.max(current.revision, expectedRevision ?? 0) + 1;
         const json = encodeRetiredStateFilePayload(key, reason, appVersion, { revision, writerId });
-        const result = await uploadPayload({ name, json, fetchFn, headers });
+        // Only an explicit client-error response proves the retired payload was not written. A lost
+        // or unreadable acknowledgement, or a server error, may follow a committed write.
+        let result;
+        try {
+            result = await uploadPayload({ name, json, fetchFn, headers });
+        } catch (error) {
+            const status = Number(error?.status || 0);
+            if (!(status >= 400 && status < 500)) error.retirementUncertain = true;
+            throw error;
+        }
         // The retired payload may already have replaced the live dossier. Any failure from here on
         // leaves that outcome uncertain, so callers must keep every copy they made.
         let verified;

@@ -344,6 +344,7 @@ function buildSocialGraphUndo(beforeGraph = {}, afterGraph = {}) {
     if (before.version !== after.version) undo.version = before.version;
     if (edges) undo.edges = edges;
     if (unresolved) undo.unresolved = unresolved;
+    if (!jsonEqual(before.suppressed || [], after.suppressed || [])) undo.suppressed = structuredClone(before.suppressed || []);
     return Object.keys(undo).length > 1 ? undo : null;
 }
 
@@ -354,6 +355,8 @@ function applySocialGraphUndo(currentGraph = {}, undo = null) {
         version: Object.prototype.hasOwnProperty.call(undo, 'version') ? undo.version : current.version,
         edges: applyKeyedRecordUndo(current.edges, undo.edges),
         unresolved: applyKeyedRecordUndo(current.unresolved, undo.unresolved),
+        // Undo that did not change suppression keeps the current manual sibling removals.
+        suppressed: Object.prototype.hasOwnProperty.call(undo, 'suppressed') ? undo.suppressed : (current.suppressed || []),
     });
 }
 
@@ -1214,9 +1217,24 @@ function referencedAfterBlock(liveNpcs, afterNpcs, npc) {
     const labels = [npc?.name, ...(Array.isArray(npc?.aliases) ? npc.aliases : [])]
         .map(label => String(label || '').trim()).filter(label => label.length >= 2);
     if (!labels.length) return false;
-    const patterns = labels.map(label => new RegExp(`(?<![\\p{L}\\p{N}])${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'iu'));
+    const wordPattern = (label, flags = 'iu') => new RegExp(`(?<![\\p{L}\\p{N}])${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, flags);
+    // Resolve against the roster: a label another dossier also carries names nobody, and a label
+    // found inside another dossier's longer name ("Tomas" in "Tomas Hale") is that dossier's.
+    const rosterLabels = (Array.isArray(liveNpcs) ? liveNpcs : [])
+        .filter(other => other && other !== npc && other.id !== npc.id)
+        .flatMap(other => [other.name, ...(Array.isArray(other.aliases) ? other.aliases : [])])
+        .map(label => String(label || '').trim()).filter(Boolean);
+    const rosterKeys = new Set(rosterLabels.map(label => label.toLowerCase()));
+    const ownLabels = labels.filter(label => !rosterKeys.has(label.toLowerCase()));
+    const mentionsIn = entry => ownLabels.some(label => {
+        const masked = rosterLabels
+            .filter(other => other.length > label.length && wordPattern(label).test(other))
+            .sort((a, b) => b.length - a.length)
+            .reduce((text, other) => text.replace(wordPattern(other, 'giu'), '#'), String(entry || ''));
+        return wordPattern(label).test(masked);
+    });
     const mentions = other => [...(Array.isArray(other?.keyRelationships) ? other.keyRelationships : []), ...(Array.isArray(other?.memories) ? other.memories : [])]
-        .some(entry => patterns.some(pattern => pattern.test(String(entry || ''))));
+        .some(mentionsIn);
     return (Array.isArray(liveNpcs) ? liveNpcs : []).some(other => other && other !== npc && other.id !== npc.id
         && mentions(other) && !mentions(afterNpcs.get(String(other.id || ''))));
 }

@@ -150,10 +150,14 @@ async function applyImport(session) {
 export async function exportNativeTools() {
     const chatKey = activeChatKey();
     if (!chatKey || chatKey === 'no-chat') return toast('warning', 'NPC State Delta: open a chat before exporting.');
+    // The export belongs to the chat it was requested in; a switch while the freshness read is
+    // pending must not download another chat's dossiers under this request.
+    const sameChat = () => activeChatKey() === chatKey;
     try {
-        await api()?.ensureFresh?.({ reason: 'dossier-export' });
-        const base = await api()?.exportBytes?.();
+        if (!await api()?.ensureFresh?.({ reason: 'dossier-export' }) || !sameChat()) throw new Error('the active chat changed before export; nothing was exported.');
+        const base = await api()?.exportBytes?.({ chatKey });
         if (!base) throw new Error('Canonical export returned no data.');
+        if (!sameChat()) throw new Error('the active chat changed during export; nothing was exported.');
         const output = augmentNativeBundle(base, {
             portableSettings: buildPortablePortraitSettings(api()?.portraitSettings?.() || {}),
             historyArchive: buildHistoryArchive(api()?.getState?.() || {}),
