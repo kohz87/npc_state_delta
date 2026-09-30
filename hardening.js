@@ -138,6 +138,7 @@ async function moveCharacterOwnerState(oldAvatar, newAvatar) {
     const moved = new Map();
     const retiredPredecessors = [];
     let changed = false;
+    let recoveryRegistered = false;
     let cachesSettled = false;
     const failedKeys = [];
     try {
@@ -190,7 +191,7 @@ async function moveCharacterOwnerState(oldAvatar, newAvatar) {
                         sourceRetired = true;
                         break;
                     } catch (error) {
-                        if (error?.code !== 'NPC_STATE_WRITE_CONFLICT' || attempt >= 3) throw error;
+                        if (error?.retirementUncertain || error?.code !== 'NPC_STATE_WRITE_CONFLICT' || attempt >= 3) throw error;
                         console.info(`[NPC State Delta] character rename retirement raced another writer for ${oldKey}; re-reading before retry.`);
                     }
                 }
@@ -202,6 +203,15 @@ async function moveCharacterOwnerState(oldAvatar, newAvatar) {
                 if (oldPointer?.path) retiredPredecessors.push({ key: oldKey, pointer: oldPointer });
                 changed = true;
             } catch (error) {
+                if (error?.retirementUncertain) {
+                    // The source may already be retired: keep the verified destination and recovery
+                    // copies and register the recovery so the dossier stays restorable.
+                    if (recoveryPointer?.path) config.recoveryFiles[oldKey] = { ...recoveryPointer, reason: `rename-retirement-uncertain:${newKey}` };
+                    recoveryRegistered = true;
+                    failedKeys.push({ key: oldKey, error });
+                    console.warn(`[NPC State Delta] character rename could not confirm retirement of ${oldKey}; kept the new and recovery copies.`, error);
+                    continue;
+                }
                 if (newPointer?.path) {
                     try { await deleteNpcStateDataFile(newPointer, { headers: headers() }); } catch { /* best effort */ }
                 }
@@ -216,6 +226,7 @@ async function moveCharacterOwnerState(oldAvatar, newAvatar) {
             }
         }
 
+        if (recoveryRegistered && !changed) await saveSettingsNow();
         if (changed) {
             await saveSettingsNow();
             for (const predecessor of retiredPredecessors) {
@@ -244,6 +255,7 @@ async function retireCharacterOwner(avatar, reason = 'character-deleted') {
     if (!owner) return false;
     const config = settings();
     let changed = false;
+    let recoveryRegistered = false;
     const retiredPredecessors = [];
     let cachesSettled = false;
     const failedKeys = [];
@@ -267,6 +279,13 @@ async function retireCharacterOwner(avatar, reason = 'character-deleted') {
                 delete config.dataFiles[key];                if (pointer?.path) retiredPredecessors.push({ key, pointer });
                 changed = true;
             } catch (error) {
+                if (error?.retirementUncertain) {
+                    if (recoveryPointer?.path) config.recoveryFiles[key] = { ...recoveryPointer, reason: `delete-retirement-uncertain:${reason}` };
+                    recoveryRegistered = true;
+                    failedKeys.push({ key, error });
+                    console.warn(`[NPC State Delta] character deletion could not confirm retirement of ${key}; kept the recovery copy.`, error);
+                    continue;
+                }
                 if (recoveryPointer?.path) {
                     try { await deleteNpcStateDataFile(recoveryPointer, { headers: headers() }); }
                     catch {
@@ -277,6 +296,7 @@ async function retireCharacterOwner(avatar, reason = 'character-deleted') {
                 console.warn(`[NPC State Delta] character deletion preserved ${key} and continued with other chats.`, error);
             }
         }
+        if (recoveryRegistered && !changed) await saveSettingsNow();
         if (changed) {
             await saveSettingsNow();
             for (const predecessor of retiredPredecessors) {

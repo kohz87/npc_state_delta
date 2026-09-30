@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 1.0.86 - 30 September 2026
+
+Fixes from an external deep audit of 1.0.84 (twelve reproduced findings):
+
+- Keep a renamed or deleted character's dossier recoverable when retiring the old file is uncertain. If the retirement upload was sent but its verification read failed, rename and deletion now keep the new and recovery copies and register the recovery instead of deleting every copy they made.
+- Keep a chat that is behind a newer adopted dossier from rolling it back. The "local chat is an older prefix of the dossier" state is now its own per-chat mark, set on adoption and cleared only when the local chat catches up or diverges. A local metadata save (such as a portrait seed) no longer removes it, and while it holds, scans are refused with a notice and checkpoints do not truncate the dossier's lineage.
+- Stop a message hide during delete settlement from rolling back too far. Settlement now fingerprints messages without the hidden flag, like branch lineage, and a delete/edit event index can no longer move recovery before the first message whose content changed.
+- Reject a stale appearance draft. Apply appearance in an editor opened before a newer server copy was adopted is refused, like the editor's main Save.
+- Stop a read that started before a chat was deleted from bringing it back. A freshness read that completes after a deletion, rename or retirement no longer restores the pointer, clears the tombstone or reinstalls the dossier.
+- Require birthday evidence about the NPC for every date part. A scanned birth date is applied only when one sentence naming that NPC (or continuing it with a pronoun) states the month and day, or says it is their birthday on today's date, and states a new year when one is supplied, none of it negated. Unrelated people's births, a name inside another word, a date without the year, and "CR801, not CR790" no longer change age.
+- Only an NPC's own birthday rolls over a yearless birthday. Another NPC's birthday narration on the same date no longer ages them.
+- Do not repair an explicitly absent NPC into presence. A missed-participant repair restores presence only when the NPC's own sentences in the current exchange do not place them elsewhere ("is not here", "remains at her distant home").
+- Stop a shared alias from injecting unrelated NPCs. An alias another dossier also carries names nobody on its own, and a label found only inside another dossier's longer name belongs to that dossier.
+- Keep a manually removed sibling bond removed. Removing an inferred sibling pair records the shared parents it was inferred from; inference does not recreate the pair until that parent evidence changes.
+- Match later references to a deleted-block NPC by whole name or alias. "Wayfarer" now keeps the NPC it names, and "dangerous" no longer keeps a ghost called Dan.
+- Report Archive, Restore and Delete only once the server has them. They still apply immediately, but success is announced after the durable write; a failed write shows a warning that the change is applied locally and pending.
+
 ## 1.0.85 - 30 September 2026
 
 - Stop NPCs treating the player as uniquely important at low relationship scores ("it must be him", "I must do this for him" at trust 15). The score was not the cause: below 30 its injected wording is neutral. The fixation came from text fields. A relationship summary with obligation, fixation or role claims ("her chosen partner, protector and provider", "must repay him", "only he can", "will follow him anywhere", "devotedly") now needs an unlocked +50 trust or affection milestone, like the existing depth claims; otherwise it is not stored and the neutral score-based wording is injected instead. Stance words in the mood ("devoted", "adoring", "obedient", "infatuated"…) are left out of the roleplay injection while trust and affection are both below 50; the dossier keeps the scanner's text. When an injected NPC has low trust and affection, the injection header adds one line: the player is not uniquely important, with no obligation, fixation or "only them" thinking. Scanner, Refresh, backfill and relationship-pass requests are unchanged; the Stage 9 injection fixture grows by that 100-character line.

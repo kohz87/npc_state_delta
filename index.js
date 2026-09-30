@@ -48,6 +48,7 @@ import {
     calibrateRelationshipSummary,
     normalizeNpcAdmissionMode,
     buildInjection,
+    npcCurrentlyAbsentInText,
     npcNamedInText,
     storyDayFromText,
     buildScannerPrompt,
@@ -936,6 +937,7 @@ function installCanonicalServerState(key, pointer, inspected, { reason = 'freshn
     pendingAutoScans.delete(key);
     assistantReceipts.delete(key);
     const installed = setChatState(key, inspected.payload.state, { markLoaded: true });
+    noteAdoptedDossier(key, installed);
     persistedVersions.set(key, Number(stateVersions.get(key) || 0));
     updateHydratedStateMeta(key, inspected.revision, {
         hydratedAt: Date.now(),
@@ -992,6 +994,7 @@ async function ensureHydratedStateFresh(key = getChatKey(), { reason = 'boundary
     if (freshnessChecks.has(normalized)) return freshnessChecks.get(normalized);
 
     let task;
+    const epoch = ownershipEpoch(normalized);
     task = (async () => {
         const inFlight = stateWritePromises.get(normalized);
         if (inFlight) {
@@ -1019,6 +1022,9 @@ async function ensureHydratedStateFresh(key = getChatKey(), { reason = 'boundary
         const localRevision = hydratedRevision(normalized);
         const localWriterId = String(hydratedStateMeta.get(normalized)?.writerId || pointer?.writerId || '');
         const inspected = await inspectNpcStateDataFile(pointer, { expectedChatKey: normalized });
+        // A deletion, rename or retirement that completed while this read was in flight owns the
+        // chat now; the late result must not restore its pointer, tombstone or cached dossier.
+        if (!ownershipEpochCurrent(normalized, epoch) || getSettings().sidecarTombstones?.[normalized]) throw staleOwnershipError(normalized);
         if (unpointered && !inspected.exists) {
             updateHydratedStateMeta(normalized, 0, { lastCheckedAt: Date.now(), latestObservedServerRevision: 0 });
             return getChatState(normalized);
@@ -1435,6 +1441,9 @@ async function persistCriticalDurable(key = getChatKey()) {
 }
 
 function commitBranchCheckpoint(state, messageId, reason = 'state') {
+    // A checkpoint records the local chat as the lineage; on a stale chat that would truncate the
+    // adopted dossier's newer history.
+    if (staleHostActive()) return state;
     recordBranchCheckpoint(state, getContext().chat || [], messageId, reason);
     return state;
 }
@@ -1668,12 +1677,38 @@ async function maybeInheritKnownBranch() {
     }
 }
 
+// Chats whose local message history is an older prefix of the adopted dossier's history: another
+// session wrote messages this browser has not loaded yet. The mark is independent of who wrote the
+// sidecar last (a local metadata save proves nothing about the chat) and clears only once the local
+// chat catches up with or diverges from the dossier.
+const staleHostChats = new Set();
+
+function hostIsOlderPrefix(state, liveLineage) {
+    const stored = Array.isArray(state?.lineage) ? state.lineage : [];
+    return liveLineage.length < stored.length && firstLineageDivergence(stored, liveLineage) === liveLineage.length;
+}
+
+function noteAdoptedDossier(key, state) {
+    if (key === getChatKey() && hostIsOlderPrefix(state, chatLineage(getContext().chat || []))) staleHostChats.add(key);
+}
+
+function staleHostActive(key = getChatKey()) {
+    if (!staleHostChats.has(key)) return false;
+    if (key !== getChatKey() || !hostIsOlderPrefix(getChatState(key), chatLineage(getContext().chat || []))) {
+        staleHostChats.delete(key);
+        return false;
+    }
+    return true;
+}
+
 function staleHostPrefixOfForeignDossier(key, state, liveLineage, operation, explicitDivergence) {
     if (String(operation || 'auto') !== 'auto' || Number.isInteger(explicitDivergence)) return false;
-    const stored = Array.isArray(state?.lineage) ? state.lineage : [];
-    if (liveLineage.length >= stored.length || firstLineageDivergence(stored, liveLineage) !== liveLineage.length) return false;
+    if (!hostIsOlderPrefix(state, liveLineage)) return false;
+    if (staleHostActive(key)) return true;
     const dossierWriter = String(hydratedStateMeta.get(key)?.writerId || '');
-    return Boolean(dossierWriter) && dossierWriter !== currentWriterId();
+    if (!dossierWriter || dossierWriter === currentWriterId()) return false;
+    staleHostChats.add(key);
+    return true;
 }
 
 async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true, reason = 'branch', chatKey = null, operation = 'auto' } = {}) {
@@ -2435,6 +2470,10 @@ async function prepareCanonicalScanBase(key, label = 'scan') {
     try {
         await settleStateFileWrite(key, { flush: true });
         await ensureHydratedStateFresh(key, { reason: `${label}-start` });
+        if (staleHostActive(key)) {
+            globalThis.toastr?.warning?.('NPC State Delta: this chat has not loaded the newest messages another session added, so scanning it would roll the dossier back. Reload the chat first.');
+            return false;
+        }
         return getChatKey() === key && chatHydrationStatus(key) === 'ready';
     } catch (error) {
         console.info(`[NPC State Delta] ${label} did not start because its canonical server base could not be established.`, error);
@@ -2956,7 +2995,8 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
         // A missed-participant repair exists because the NPC takes part in the current exchange;
         // the broad scan's omission is not evidence of absence, so a grounded present=true stands.
         // Other repairs keep the live presence (older history must not make an NPC present).
-        const repairedPresence = request.reason === 'missed-participant' && matches[0]?.present === true;
+        const repairedPresence = request.reason === 'missed-participant' && matches[0]?.present === true
+            && !npcCurrentlyAbsentInText(existing, currentExchangeTranscript(request.requestedMessageId));
         const keptPresent = liveBeforeBackfill ? (repairedPresence || Boolean(liveBeforeBackfill.present)) : false;
         parsed.npcs = matches
             .slice(0, 1)
@@ -5239,6 +5279,13 @@ async function saveNpcEditor(npcId, { close = true, silent = false } = {}) {
 
 function updateNpcAppearance(npcId, draft, { chatKey, lockAppearance = false } = {}) {
     if (!chatKey || chatKey !== getChatKey() || !requireReadyChatMutation('edit appearance forms', chatKey)) return false;
+    // The appearance draft lives in the dossier editor; like its main Save, it must not overwrite a
+    // newer server copy adopted after the editor opened.
+    if (editorIsMounted() && activeEditorChatKey === chatKey && activeEditorBaseRevision !== null
+        && Number(activeEditorBaseRevision) !== workingCopyAdoption(chatKey)) {
+        globalThis.toastr?.warning?.('NPC State Delta: this editor was opened on an older server revision. The appearance draft was not applied; review the newly loaded dossier and reopen the editor.');
+        return false;
+    }
     const state = getChatState(chatKey);
     const index = state.npcs.findIndex(item => item.id === String(npcId || ''));
     if (index < 0) return false;
@@ -5436,13 +5483,25 @@ function deleteNpcById(npcId, { confirmAction = true } = {}) {
     if (working.formPortraitAssets && typeof working.formPortraitAssets === 'object') delete working.formPortraitAssets[current.id];
     const targetMessageId = latestMessageId(false);
     if (targetMessageId >= 0) commitBranchCheckpoint(working, targetMessageId, 'manual-delete');
-    setChatState(getChatKey(), working);
-    persistCritical();
+    const deleteKey = getChatKey();
+    setChatState(deleteKey, working);
     closeNpcEditor();
     renderDossier();
     updateInjection();
-    globalThis.toastr?.success?.(`NPC State Delta: deleted ${result.report.name}; older branch snapshots cannot restore that identity.`);
+    // The deletion is applied now; completion is announced only once the server holds it.
+    reportDurableOutcome(deleteKey,
+        `NPC State Delta: deleted ${result.report.name}; older branch snapshots cannot restore that identity.`,
+        `NPC State Delta: ${result.report.name} was removed in this browser, but the deletion could not be saved to the server yet. It will be retried; the server copy still contains the dossier until then.`);
     return true;
+}
+
+// Announce a manual lifecycle change only after its sidecar write completes, and say plainly when
+// it is applied locally but not yet on the server (the pending write keeps retrying/recovering).
+function reportDurableOutcome(key, successMessage, pendingMessage) {
+    void persistCriticalDurable(key).then(saved => {
+        if (saved) globalThis.toastr?.success?.(successMessage);
+        else globalThis.toastr?.warning?.(pendingMessage);
+    });
 }
 
 function setNpcArchiveStateById(npcId, archived, { reason = 'manual', confirmAction = true } = {}) {
@@ -5468,13 +5527,14 @@ function setNpcArchiveStateById(npcId, archived, { reason = 'manual', confirmAct
     });
     const targetMessageId = latestMessageId(false);
     if (targetMessageId >= 0) commitBranchCheckpoint(state, targetMessageId, archived ? 'manual-archive' : (correctingDeath ? 'manual-death-correction' : 'manual-restore'));
-    persistCritical();
     closeNpcEditor();
     renderDossier();
     updateInjection();
-    globalThis.toastr?.success?.(archived
-        ? `NPC State Delta: archived ${current.name}. Their dossier and history are preserved.`
-        : (correctingDeath ? `NPC State Delta: corrected ${current.name}'s erroneous death record; presence remains unconfirmed.` : `NPC State Delta: restored ${current.name} to the active roster.`));
+    reportDurableOutcome(getChatKey(),
+        archived
+            ? `NPC State Delta: archived ${current.name}. Their dossier and history are preserved.`
+            : (correctingDeath ? `NPC State Delta: corrected ${current.name}'s erroneous death record; presence remains unconfirmed.` : `NPC State Delta: restored ${current.name} to the active roster.`),
+        `NPC State Delta: the change to ${current.name} is applied in this browser but could not be saved to the server yet. It will be retried; the server copy is unchanged until then.`);
     return true;
 }
 

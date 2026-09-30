@@ -549,7 +549,15 @@ export async function retireNpcStateDataFile({ chatKey, pointer = null, reason =
         const revision = Math.max(current.revision, expectedRevision ?? 0) + 1;
         const json = encodeRetiredStateFilePayload(key, reason, appVersion, { revision, writerId });
         const result = await uploadPayload({ name, json, fetchFn, headers });
-        const verified = await remoteRevision({ path: result.path }, key, fetchFn);
+        // The retired payload may already have replaced the live dossier. Any failure from here on
+        // leaves that outcome uncertain, so callers must keep every copy they made.
+        let verified;
+        try {
+            verified = await remoteRevision({ path: result.path }, key, fetchFn);
+        } catch (error) {
+            error.retirementUncertain = true;
+            throw error;
+        }
         if (!verified.exists || verified.revision !== revision || (verified.writerId && verified.writerId !== writerId) || !verified.retired) {
             const error = new Error(`NPC State Delta sidecar retirement verification lost ownership at revision ${revision}.`);
             error.code = 'NPC_STATE_WRITE_CONFLICT';
@@ -557,6 +565,7 @@ export async function retireNpcStateDataFile({ chatKey, pointer = null, reason =
             error.actualRevision = verified.exists ? verified.revision : null;
             error.expectedWriterId = writerId;
             error.actualWriterId = String(verified.writerId || '');
+            error.retirementUncertain = true;
             throw error;
         }
         return { name, path: result.path, updatedAt: Date.now(), retired: true, revision, writerId };

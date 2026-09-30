@@ -1,5 +1,6 @@
+// Hiding a message (memory extensions set is_system) is not a narrative change; the role here must
+// match branch lineage identity, which ignores the flag.
 function normalizedRole(message = {}) {
-    if (message?.is_system) return 'system';
     return message?.is_user ? 'user' : 'assistant';
 }
 

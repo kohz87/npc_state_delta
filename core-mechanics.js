@@ -5503,15 +5503,23 @@ const NAME_TITLE_TOKENS = new Set([
 export function npcNamedInText(npc, text, roster = []) {
     const haystack = normalizeName(text);
     if (!haystack || !npc?.name) return false;
+    const others = (Array.isArray(roster) ? roster : []).filter(other => other && other !== npc && other.id !== npc.id);
+    const otherLabels = others.flatMap(other => [other.name, ...(other.aliases || [])]).map(normalizeName).filter(Boolean);
     for (const label of [npc.name, ...(npc.aliases || [])]) {
         const needle = normalizeName(label);
-        if (needle && countNormalizedPhrase(haystack, needle) > 0) return true;
+        if (!needle || countNormalizedPhrase(haystack, needle) === 0) continue;
+        // A label another dossier also carries ("Tomas") names nobody on its own, and a label
+        // found only inside another dossier's longer name ("Mira" in "Lady Mira") is theirs.
+        if (otherLabels.includes(needle)) continue;
+        const insideLonger = otherLabels.filter(other => other.length > needle.length && countNormalizedPhrase(other, needle) > 0
+            && countNormalizedPhrase(haystack, other) > 0);
+        if (insideLonger.length && insideLonger.reduce((sum, other) => sum + countNormalizedPhrase(haystack, other), 0) >= countNormalizedPhrase(haystack, needle)) continue;
+        return true;
     }
     const tokens = normalizeName(npc.name).split(/\s+/).filter(Boolean);
     const first = tokens[0] || '';
     if (tokens.length < 2 || first.length < 4 || NAME_TITLE_TOKENS.has(first)) return false;
-    const sharedFirst = (Array.isArray(roster) ? roster : []).some(other => other && other !== npc && other.id !== npc.id
-        && [other.name, ...(other.aliases || [])].some(label => normalizeName(label).split(/\s+/)[0] === first));
+    const sharedFirst = otherLabels.some(label => label.split(/\s+/)[0] === first);
     return !sharedFirst && countNormalizedPhrase(haystack, first) > 0;
 }
 

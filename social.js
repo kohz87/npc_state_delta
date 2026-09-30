@@ -475,7 +475,19 @@ export function normalizeSocialGraph(raw = {}) {
         unresolved.push(slot);
         if (unresolved.length >= SOCIAL_GRAPH_UNRESOLVED_LIMIT) break;
     }
-    return { version: SOCIAL_GRAPH_VERSION, edges, unresolved };
+    // Pairs a user removed by hand that inference must not recreate from the same evidence.
+    const suppressed = [];
+    for (const item of Array.isArray(source.suppressed) ? source.suppressed : []) {
+        const aId = clean(item?.aId, 100);
+        const bId = clean(item?.bId, 100);
+        if (!aId || !bId || aId === bId) continue;
+        const [first, second] = [aId, bId].sort();
+        const basis = clean(item?.basis, 400);
+        if (suppressed.some(entry => entry.aId === first && entry.bId === second && entry.basis === basis)) continue;
+        suppressed.push({ aId: first, bId: second, basis });
+        if (suppressed.length >= 60) break;
+    }
+    return suppressed.length ? { version: SOCIAL_GRAPH_VERSION, edges, unresolved, suppressed } : { version: SOCIAL_GRAPH_VERSION, edges, unresolved };
 }
 
 function addEdge(graph, raw) {
@@ -915,9 +927,24 @@ function statedOtherKinship(graph, npcs, aId, bId) {
     });
 }
 
+// The parents that currently make two NPCs siblings; a manual removal is honoured until this changes.
+function sharedParentBasis(graph, aId, bId) {
+    const parentsOf = childId => new Set(graph.edges.flatMap(edge => [edge.aId, edge.bId]
+        .filter(ownerId => ownerId !== childId && relationFromPerspective(edge, ownerId)?.counterpartId === childId
+            && socialRelationFamily(relationFromPerspective(edge, ownerId).relation) === 'child')));
+    const bParents = parentsOf(bId);
+    return [...parentsOf(aId)].filter(id => bParents.has(id)).sort().join(',');
+}
+
+function inferenceSuppressed(graph, aId, bId) {
+    const [first, second] = [aId, bId].sort();
+    return (graph.suppressed || []).some(entry => entry.aId === first && entry.bId === second
+        && entry.basis === sharedParentBasis(graph, aId, bId));
+}
+
 function inferSiblingEdges(graph, npcs = []) {
     graph.edges = graph.edges.filter(edge => !(edge.inferred && socialRelationFamily(edge.aToB) === 'sibling'
-        && statedOtherKinship(graph, npcs, edge.aId, edge.bId)));
+        && (statedOtherKinship(graph, npcs, edge.aId, edge.bId) || inferenceSuppressed(graph, edge.aId, edge.bId))));
     const childByParent = new Map();
     for (const edge of graph.edges) {
         for (const ownerId of [edge.aId, edge.bId]) {
@@ -933,7 +960,7 @@ function inferSiblingEdges(graph, npcs = []) {
             for (let j = i + 1; j < unique.length; j += 1) {
                 const a = unique[i]; const b = unique[j];
                 const twin = a.groupId && a.groupId === b.groupId && (a.sharedDescriptor === 'twins' || b.sharedDescriptor === 'twins');
-                if (statedOtherKinship(graph, npcs, a.childId, b.childId)) continue;
+                if (statedOtherKinship(graph, npcs, a.childId, b.childId) || inferenceSuppressed(graph, a.childId, b.childId)) continue;
                 addEdge(graph, { aId: a.childId, bId: b.childId, aToB: twin ? 'twin sibling' : 'sibling', bToA: twin ? 'twin sibling' : 'sibling', provenance: 'inferred', confidence: 'inferred', reason: 'shared established parent', inferred: true, groupId: a.groupId && a.groupId === b.groupId ? a.groupId : '', sharedDescriptor: twin ? 'twins' : '' });
             }
         }
@@ -1184,6 +1211,11 @@ export function applyManualKeyRelationshipEdit(state, npcId, beforeList = [], af
     const afterIds = new Set((afterList || []).map(item => relationshipCounterpartId(npcs, item)).filter(Boolean));
     for (const removedId of beforeIds) {
         if (afterIds.has(removedId)) continue;
+        const basis = sharedParentBasis(graph, owner.id, removedId);
+        if (basis) {
+            const [first, second] = [owner.id, removedId].sort();
+            graph.suppressed = [...(graph.suppressed || []).filter(entry => !(entry.aId === first && entry.bId === second)), { aId: first, bId: second, basis }];
+        }
         graph.edges = graph.edges.filter(edge => !pairConnects(edge, owner.id, removedId));
         const counterpart = npcs.find(npc => npc?.id === removedId);
         removeMirroredRelationship(counterpart, owner, npcs);

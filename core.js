@@ -37,21 +37,63 @@ export {
 
 const ROUTINE_APPARENT_AGE_RULE = '11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue, compact ~N, never prose; species literal; no species-aging inference. gender=male|female only if explicit/unambiguous; never guess; change=>genderState:"correct"+reason. Birthday/exact elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual aging/growth/rejuvenation=>apparentAgeState:"evolve"+reason. Appearance must not repeat explicit age. Vague time skip insufficient.';
 const ROUTINE_APPARENT_AGE_RULE_FIXED = '11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue ~N; cue=>MUST return apparentAge when age unknown; species literal; no species-aging inference. Birthday/elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual=>apparentAgeState:"evolve"+reason. Appearance:no age; vague time skip insufficient. gender=male|female only if explicit; never infer; change=>genderState:"correct"+reason.';
-// A scanned birth date may set or change chronology only when the scanned text names the NPC and
-// either states that month and day or speaks of a birthday/birth. A model assertion alone must not
-// rewrite an NPC's age. Callers without source text (manual edits) are not checked here.
-function birthdayUpdateGrounded(npc, update, sourceText, calendar) {
+// Sentences that are about this NPC: they name it as a whole word (name, alias or distinctive
+// first name), plus a directly following sentence that continues with a pronoun.
+export function npcOwnedSentences(npc, text) {
+    const labels = [npc?.name, ...(Array.isArray(npc?.aliases) ? npc.aliases : [])].map(label => String(label || '').trim()).filter(Boolean);
+    const words = [...labels, ...labels.map(label => label.split(/\s+/)[0]).filter(token => token.length >= 3)];
+    const patterns = [...new Set(words)].map(word => new RegExp(`(?<![\\p{L}\\p{N}])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'iu'));
+    const sentences = String(text || '').split(/(?<=[.!?])\s+|\n+/).map(item => item.trim()).filter(Boolean);
+    const owned = [];
+    sentences.forEach((sentence, index) => {
+        if (patterns.some(pattern => pattern.test(sentence))) owned.push(sentence);
+        else if (index > 0 && owned.includes(sentences[index - 1]) && /^(?:she|he|they|her|his|their)\b/i.test(sentence)) owned.push(sentence);
+    });
+    return owned;
+}
+
+// Wording that places the NPC outside the current scene ("is not here", "remains at her distant home").
+const ABSENCE_WORDING = /\b(?:not (?:here|present|there|in the room|with (?:us|them|him|her))|(?:isn|wasn|aren|weren)['’]?t (?:here|present|there|around)|absent|elsewhere|far away|off[- ]?screen|remains? (?:at|in) (?:her|his|their) (?:distant |own )?(?:home|house|room|quarters)|has (?:already )?left|is (?:away|gone))\b/i;
+
+export function npcCurrentlyAbsentInText(npc, text) {
+    return npcOwnedSentences(npc, text).some(sentence => ABSENCE_WORDING.test(sentence));
+}
+
+function npcBirthdayNarrated(npc, text) {
+    return npcOwnedSentences(npc, text).some(birthdayEvidenceInText);
+}
+
+const NEGATED_BEFORE = /\b(?:not|never|isn['’]?t|wasn['’]?t|no longer)\s+(?:\w+\s+){0,3}$/i;
+
+function statedInSentence(sentence, token) {
+    const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${String(token).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:st|nd|rd|th)?(?![\\p{L}\\p{N}])`, 'giu');
+    for (const match of sentence.matchAll(pattern)) {
+        if (!NEGATED_BEFORE.test(sentence.slice(0, match.index))) return true;
+    }
+    return false;
+}
+
+// A scanned birth date may set or change chronology only when one sentence about this NPC supports
+// every part it supplies: the month and day (stated, or "today is her birthday" on today's date)
+// and a new year, none of them negated. Callers without source text (manual edits) are not checked.
+function birthdayUpdateGrounded(npc, update, sourceText, calendar, referenceDate = null) {
     const text = String(sourceText || '');
     if (!text.trim()) return true;
     const incoming = normalizeBirthDate(update?.birthDate ?? update?.birth_date ?? update?.birthday, calendar);
     if (!incoming) return true;
-    const lower = text.toLowerCase();
-    const labels = [npc?.name, ...(npc?.aliases || [])].map(label => String(label || '').trim().toLowerCase()).filter(Boolean);
-    const firstNames = labels.map(label => label.split(/\s+/)[0]).filter(token => token.length >= 3);
-    if (![...labels, ...firstNames].some(label => lower.includes(label))) return false;
-    const month = String(incoming.month || '').toLowerCase();
-    const statesDate = month && lower.includes(month) && new RegExp(`\\b${Number(incoming.day)}(?:st|nd|rd|th)?\\b`).test(lower);
-    return Boolean(statesDate) || birthdayEvidenceInText(text);
+    const known = normalizeBirthDate(npc?.birthDate, calendar);
+    const reference = referenceDate ? normalizeCalendarDate(referenceDate, calendar) : null;
+    const isToday = reference && String(reference.month).toLowerCase() === String(incoming.month).toLowerCase() && Number(reference.day) === Number(incoming.day);
+    const needsYear = incoming.year !== null && !(known && known.year === incoming.year);
+    return npcOwnedSentences(npc, text).some(sentence => {
+        const dated = statedInSentence(sentence, incoming.month) && statedInSentence(sentence, Number(incoming.day));
+        const birthdayToday = isToday && birthdayEvidenceInText(sentence);
+        if (!dated && !birthdayToday) return false;
+        if (!needsYear) return true;
+        const era = String(incoming.era || calendar?.era || '').trim();
+        return [String(incoming.year), era && `${era}${incoming.year}`, era && `${era} ${incoming.year}`]
+            .filter(Boolean).some(token => statedInSentence(sentence, token));
+    });
 }
 
 const PROFILE_DEVELOPMENT_VERSION = 2;
@@ -250,7 +292,8 @@ function applyDeterministicBirthdayRollover(npc, previousRaw, ordinaryUpdate, op
             .includes(String(ordinaryUpdate?.birthDateState ?? ordinaryUpdate?.birth_date_state ?? '').trim().toLowerCase());
     const ageState = String(ordinaryUpdate?.ageState ?? ordinaryUpdate?.age_state ?? '').trim().toLowerCase();
     const correctedAge = ageState === 'correct' || ageState === 'correction';
-    const narratedBirthday = birthdayEvidenceInText(birthdayPromptSource(options));
+    // Only a birthday narrated about this NPC counts; another NPC's birthday on the same date does not.
+    const narratedBirthday = npcBirthdayNarrated(npc, birthdayPromptSource(options));
 
     // Compatibility recovery for an existing yearless birthday: if the story has reached that
     // exact stored birthday and explicitly presents it as a birthday/nameday, the accepted age
@@ -1537,7 +1580,7 @@ export function mergeScanResult(state, scanResult, rawOptions = {}) {
             profileUpdates.find(raw => sameNpc(raw, rawNpc)),
         );
         let npc = normalizeNpcBirthday(rawNpc, calendar, referenceDate);
-        if (ordinaryUpdate && birthdayUpdateGrounded(npc, ordinaryUpdate, options.developmentContext, calendar)) {
+        if (ordinaryUpdate && birthdayUpdateGrounded(npc, ordinaryUpdate, options.developmentContext, calendar, referenceDate)) {
             npc = applyNpcBirthdayUpdate(npc, ordinaryUpdate, { ...options, calendarConfig: calendar, referenceDate });
         }
         const ageState = String(ordinaryUpdate?.ageState ?? ordinaryUpdate?.age_state ?? '').trim().toLowerCase();
@@ -1617,4 +1660,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.85';
+export const NPC_STATE_VERSION = '1.0.86';
