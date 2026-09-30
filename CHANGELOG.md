@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 1.0.91 - 30 September 2026
+
+Fixes from an external deep audit of 1.0.87 (eighteen reproduced findings):
+
+- Keep a dossier recoverable when the server's reply to retiring the old file is lost or unreadable during a character rename or deletion; only an explicit rejection now counts as "not retired".
+- Keep and register the recovery copy when a chat deletion cannot confirm its retirement, instead of deleting it.
+- Keep a chat that is behind a newer dossier from another session blocked after you send a message in it; only reopening the chat (or the chat catching up) clears it, and the send no longer overwrites the dossier's history.
+- Stop Refresh, Scan dossier and backfill applying a returned row that names a different NPC (for example another character's death) to the requested dossier.
+- Stop a gradual "evolve" from flipping an NPC's moral identity (kind to cruel) on its label alone; reworded, non-moral development still applies as before.
+- Stop Speech taking in another person's voice ("Noela speaks warmly") or a negated trait ("does not speak warmly"); ordinary attributed dialogue still counts.
+- Require an affirmative statement of the NPC's own birth for a birthday correction (not a contract date or someone else's birth), and accept one split across two sentences.
+- Age an NPC on a yearless birthday only when today is affirmatively their own birthday (not a denial, question, past birthday or someone else's).
+- Stop another person's absence, or an absence the story then resolves, from keeping an arriving NPC off-screen.
+- Keep a manually removed sibling bond removed across an unrelated import or rollback.
+- Treat in-law ties as their own relationships: a father-in-law no longer creates child bonds or fake siblings.
+- Keep a manually saved portrait seed (including 0) when the latest message is deleted.
+- Include a separately named "Mira" in the roleplay injection when "Lady Mira Valen" is also named.
+- Stop a later mention of "Tomas Hale" keeping a deleted "Tomas Reed" who shares the alias "Tomas".
+- Accept a refused obligation ("does not feel she must repay him") in the player dynamic at low scores.
+- Abandon a Save that was cancelled while it was still checking the server.
+- Stop an export from downloading a different chat when you switch chats while it is starting.
+- Report full cast scan failures truthfully instead of claiming success.
+
 ## 1.0.90 - 30 September 2026
 
 - Stop opening the dossier from raising the phone/tablet keyboard. Opening the panel now focuses the panel itself instead of the search box; search is focused only when you tap it.

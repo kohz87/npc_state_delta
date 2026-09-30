@@ -258,7 +258,7 @@ export function clearUserDismissedGroupsFor(groups, target, { modernByIdOnly = f
 export function preserveUserNpcMetadata(restoredNpcs = [], currentNpcs = []) {
     const restored = cloneNpcList(restoredNpcs);
     const globallyPreserved = [
-        'portraitPromptPositive', 'portraitPromptNegative', 'portraitPromptReplace',
+        'portraitPromptPositive', 'portraitPromptNegative', 'portraitPromptReplace', 'portraitSeed',
         'retentionProtected', 'minor',
     ];
     for (const npc of restored) {

@@ -129,8 +129,9 @@ export async function runFullCastScan(messageId = null, before = null, { manual 
     if (!await waitIdle(chatKey, token)) return false;
     if (latestAssistantId() !== exchange.assistantId || api()?.uiStatus?.().chatKey !== chatKey) return false;
     let state = npcApi.getState();
+    let broadScanOk = true;
     if (Number(state.lastScannedMessageId) !== exchange.assistantId) {
-        await npcApi.scan();
+        broadScanOk = Boolean(await npcApi.scan());
         if (!await waitIdle(chatKey, token)) return false;
         if (latestAssistantId() !== exchange.assistantId || api()?.uiStatus?.().chatKey !== chatKey) return false;
         state = npcApi.getState();
@@ -142,9 +143,17 @@ export async function runFullCastScan(messageId = null, before = null, { manual 
         if (!await waitIdle(chatKey, token)) return false;
         if (await npcApi.refreshFromChat(id)) refreshed += 1;
     }
-    console.info('[NPC State Delta] full exchange/present cast scan complete', { targets: targets.length, refreshed });
-    if (manual) globalThis.toastr?.success?.(`NPC State Delta: full-scanned ${targets.length} exchange/present dossier${targets.length === 1 ? '' : 's'}.`);
-    return true;
+    // Report what actually succeeded: a failed broad scan or refresh is never counted as done.
+    const failed = targets.length - refreshed;
+    const complete = broadScanOk && failed === 0;
+    console.info('[NPC State Delta] full exchange/present cast scan complete', { targets: targets.length, refreshed, failed, broadScanOk });
+    if (manual) {
+        const counts = `refreshed ${refreshed} of ${targets.length} exchange/present dossier${targets.length === 1 ? '' : 's'}`;
+        if (complete) globalThis.toastr?.success?.(`NPC State Delta: full cast scan ${counts}.`);
+        else if (!refreshed && (!broadScanOk || targets.length)) globalThis.toastr?.error?.(`NPC State Delta: full cast scan failed${broadScanOk ? '' : ' (the exchange scan failed)'}; ${counts}.`);
+        else globalThis.toastr?.warning?.(`NPC State Delta: full cast scan partly failed${broadScanOk ? '' : ' (the exchange scan failed)'}; ${counts}.`);
+    }
+    return complete;
 }
 
 function mountControls() {

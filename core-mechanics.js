@@ -690,7 +690,10 @@ function relationshipSummaryHasUnsupportedClaims(value, relationship = DEFAULT_R
     if (exceptionalAffectionClaims.test(text) && !unlocked('affection', 1, 75)) return true;
     if (deepDistrustClaims.test(text) && !unlocked('trust', -1, 50)) return true;
     if (deepDislikeClaims.test(text) && !unlocked('affection', -1, 50)) return true;
-    if (obligationClaims.test(text) && !unlocked('trust', 1, 50) && !unlocked('affection', 1, 50)) return true;
+    // A refused or denied obligation ("does not feel she must repay him") is a boundary, not a claim.
+    const affirmativeObligation = [...String(text).matchAll(new RegExp(obligationClaims.source, 'gi'))]
+        .some(match => !/\b(?:not|never|no|nor|without|refuses?\s+to|[a-z]+n[’']t)\b[^,;.]*$/i.test(String(text).slice(0, match.index)));
+    if (affirmativeObligation && !unlocked('trust', 1, 50) && !unlocked('affection', 1, 50)) return true;
     return false;
 }
 
@@ -1704,7 +1707,7 @@ function identityMoralityMarkers(value) {
     return { kind, cruel };
 }
 
-function identityMoralityConflict(existing, incoming) {
+export function identityMoralityConflict(existing, incoming) {
     const old = identityMoralityMarkers(existing);
     const next = identityMoralityMarkers(incoming);
     return (old.kind && next.cruel) || (old.cruel && next.kind);
@@ -1753,12 +1756,43 @@ function durableRefinementSupportText(context = '', evidenceItems = [], binding 
     return [scopedContext, ...evidence].filter(Boolean).join(' ');
 }
 
+// Voice evidence must describe this NPC affirmatively. Within each sentence, text after another
+// person's name (or a "Name, who ..." relative clause) is theirs, and a negated predicate
+// ("does not speak warmly") is not a voice trait. Everything else is kept unchanged, so ordinary
+// attributed dialogue ("she said softly") still supports Speech.
+const NEGATED_CLAIM_RE = /\b(?:not|never|hardly|rarely|no longer|without|[a-z]+n t)\b[^,;]*?(?=\s+but\b|[,;]|$)/g;
+
+function affirmativeOwnClaimText(text, binding = null) {
+    const otherLabels = [
+        ...(Array.isArray(binding?.otherLabels) ? binding.otherLabels : []),
+        ...(Array.isArray(binding?.speechOtherLabels) ? binding.speechOtherLabels : []),
+    ].map(normalizeName).filter(Boolean);
+    const targetLabels = developmentBindingLabels(binding);
+    return developmentContextSegments(text).map(sentence => {
+        // A sentence about another named person, and not this NPC, is never this NPC's voice.
+        if (otherLabels.length && episodeContainsLabel(sentence, otherLabels) && !episodeContainsLabel(sentence, targetLabels)) return '';
+        let raw = sentence.replace(/\b\p{Lu}[\p{L}\p{M}'’-]+,?\s+who\b.*$/u, ' ');
+        let normalized = ` ${normalizeName(raw)} `;
+        for (const label of otherLabels) {
+            const at = normalized.indexOf(` ${label} `);
+            if (at >= 0) normalized = normalized.slice(0, at);
+        }
+        return normalized.replace(NEGATED_CLAIM_RE, ' ').replace(/\s+/g, ' ').trim();
+    }).filter(Boolean).join(' ');
+}
+
+export function speechSupportContext(context = '', binding = null) {
+    const raw = String(context || '').trim();
+    return raw ? affirmativeOwnClaimText(raw, binding) : '';
+}
+
 export function durableRefinementCandidateGrounded(field, existing, incoming, context = '', evidenceItems = [], binding = null) {
     const maxChars = DURABLE_PROFILE_LIMITS[field] || DURABLE_PROFILE_LIMITS.appearance;
     const oldText = compactDurableText(existing, maxChars, field === 'speech' ? 5 : (field === 'personality' ? 6 : 10));
     const newText = compactDurableText(incoming, maxChars, field === 'speech' ? 5 : (field === 'personality' ? 6 : 10));
     if (!newText) return false;
-    const support = durableRefinementSupportText(context, evidenceItems, binding);
+    const rawSupport = durableRefinementSupportText(context, evidenceItems, binding);
+    const support = field === 'speech' && rawSupport ? affirmativeOwnClaimText(rawSupport, binding) : rawSupport;
     // Only a caller with no narration at all (structured import/API) skips grounding. Narration
     // that contains nothing about this NPC, and no evidence attributed to it, supports nothing.
     const narrationSupplied = Boolean(String(context || '').trim());
@@ -3980,6 +4014,9 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
         npc: existing,
         targeted: targetedDurableSeedAllowed,
         otherLabels: lifecycleOptions.otherLabels || [],
+        // Used only to veto another roster member's voice sentences for Speech; it does not narrow
+        // the narration other fields are grounded in.
+        speechOtherLabels: lifecycleOptions.presentationOtherLabels || [],
     };
     const roleContinuity = Boolean(incoming.role && (identityLabelsRelated(existing.role, incoming.role) || identityLabelsRelated(existingName, incoming.role)));
     const interimIdentity = isInterimNpcLabel(existingName, existing.identityKind);
@@ -4023,6 +4060,13 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
             && !String(existing[field] || '').trim()
             && !targetedDurableSeedAllowed
             && !durableSeedGrounded(value, lifecycleOptions.developmentContext)) {
+            continue;
+        }
+        // A first Speech seed must come from this NPC's own affirmative voice, not another
+        // person's sentence or a negated trait elsewhere in the narration.
+        if (field === 'speech' && !String(existing.speech || '').trim() && !targetedDurableSeedAllowed
+            && String(lifecycleOptions.developmentContext || '').trim()
+            && !durableSeedGrounded(value, speechSupportContext(lifecycleOptions.developmentContext, incomingBinding) || '-')) {
             continue;
         }
         if (field === 'appearance' && String(existing.appearance || '').trim()) {
@@ -4832,7 +4876,7 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
     ])));
     let changed = false;
 
-    const evolutionReady = field => {
+    const evolutionReady = (field, { allowObservationCount = true } = {}) => {
         const scale = incoming.developmentScale || 'gradual';
         const authorityProvenanceSupplied = Object.prototype.hasOwnProperty.call(options, 'userDevelopmentContext');
         if (authorityProvenanceSupplied && (field === 'personality' || field === 'speech')) return false;
@@ -4857,7 +4901,7 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
             ? durableProfileCollectionCandidateGrounded(field, currentValue, candidateValue, incomingEvidence[field] || [])
             : true;
         if (scale === 'gradual') {
-            return gradualProfileEvolutionReady(field, beforeEvidence, incomingEvidence)
+            return (allowObservationCount && gradualProfileEvolutionReady(field, beforeEvidence, incomingEvidence))
                 || (authoritativeContext && effectiveReason && candidateSpecificGrounding
                     && developmentScaleReady('batch', effectiveReason, authoritativeContext, binding));
         }
@@ -4903,6 +4947,10 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
                 binding,
             );
             if (!directAppearanceChange && !evolutionReady(field)) return;
+            // A count of observations with an evolve label may develop Personality, but a protected
+            // morality reversal (kind -> cruel) needs grounded story authority, not the label alone.
+            if (field === 'personality' && identityMoralityConflict(current, value)
+                && !evolutionReady(field, { allowObservationCount: false })) return;
             if (normalizeName(current) !== normalizeName(value)) { npc[field] = value; changed = true; }
             evidence[field] = [];
             return;
@@ -5511,9 +5559,13 @@ export function npcNamedInText(npc, text, roster = []) {
         // A label another dossier also carries ("Tomas") names nobody on its own, and a label
         // found only inside another dossier's longer name ("Mira" in "Lady Mira") is theirs.
         if (otherLabels.includes(needle)) continue;
-        const insideLonger = otherLabels.filter(other => other.length > needle.length && countNormalizedPhrase(other, needle) > 0
-            && countNormalizedPhrase(haystack, other) > 0);
-        if (insideLonger.length && insideLonger.reduce((sum, other) => sum + countNormalizedPhrase(haystack, other), 0) >= countNormalizedPhrase(haystack, needle)) continue;
+        // Mask every span of those longer labels (longest first, so overlapping labels such as
+        // "Lady Mira Valen" and "Mira Valen" consume one span), then look for an independent mention.
+        const masked = otherLabels
+            .filter(other => other.length > needle.length && countNormalizedPhrase(other, needle) > 0)
+            .sort((a, b) => b.length - a.length)
+            .reduce((textSoFar, other) => textSoFar.replace(new RegExp(`(?<=^|\\s)${other.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s|$)`, 'gu'), '#'), haystack);
+        if (countNormalizedPhrase(masked, needle) === 0) continue;
         return true;
     }
     const tokens = normalizeName(npc.name).split(/\s+/).filter(Boolean);

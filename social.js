@@ -126,6 +126,13 @@ function richer(a, b, max = SOCIAL_DYNAMIC_MAX_CHARS) {
 export function socialRelationFamily(value) {
     const rel = norm(value);
     if (!rel) return '';
+    // Ties by marriage are their own families: a father-in-law is not a parent, so he neither
+    // mirrors as "child" nor proves that two people who share him are siblings.
+    if (/\bin[\s-]*law\b/.test(rel)) {
+        if (/\b(?:daughter|son|child)\b/.test(rel)) return 'child-in-law';
+        if (/\b(?:mother|father|parent)\b/.test(rel)) return 'parent-in-law';
+        if (/\b(?:sister|brother|sibling)\b/.test(rel)) return 'sibling-in-law';
+    }
     if (/\b(?:daughter|son|child)\b/.test(rel)) return 'child';
     if (/\b(?:mother|father|parent)\b/.test(rel)) return 'parent';
     if (/\b(?:sister|brother|sibling)\b/.test(rel)) return 'sibling';
@@ -145,12 +152,14 @@ export function socialRelationFamily(value) {
 const KNOWN_SOCIAL_RELATION_FAMILIES = new Set([
     'child', 'parent', 'sibling', 'partner', 'mentor', 'student', 'guardian', 'ward',
     'friend', 'rival', 'cousin', 'aunt-uncle', 'niece-nephew', 'grandparent', 'grandchild',
+    'parent-in-law', 'child-in-law', 'sibling-in-law',
 ]);
 
 const INVERSE_SOCIAL_RELATION_FAMILIES = new Map([
     ['child', 'parent'], ['parent', 'child'], ['mentor', 'student'], ['student', 'mentor'],
     ['guardian', 'ward'], ['ward', 'guardian'], ['aunt-uncle', 'niece-nephew'], ['niece-nephew', 'aunt-uncle'],
     ['grandparent', 'grandchild'], ['grandchild', 'grandparent'],
+    ['parent-in-law', 'child-in-law'], ['child-in-law', 'parent-in-law'], ['sibling-in-law', 'sibling-in-law'],
 ]);
 
 const KINSHIP_RELATION_FAMILIES = new Set(['child', 'parent', 'sibling', 'cousin', 'aunt-uncle', 'niece-nephew', 'grandparent', 'grandchild']);
@@ -261,6 +270,9 @@ function inverseSingleRelation(value) {
     const rel = clean(value, 180);
     const family = socialRelationFamily(rel);
     if (!family) return '';
+    if (family === 'parent-in-law') return 'child-in-law';
+    if (family === 'child-in-law') return 'parent-in-law';
+    if (family === 'sibling-in-law') return 'sibling-in-law';
     if (family === 'child') return 'parent';
     if (family === 'parent') return 'child';
     if (family === 'sibling') return /\bclone\b/i.test(rel) ? 'clone sibling' : (/\btwin\b/i.test(rel) ? 'twin sibling' : 'sibling');
@@ -1079,6 +1091,12 @@ export function remapSocialGraphNpcId(rawGraph, fromId, toId) {
         if (edge.bId === from) edge.bId = to;
     }
     for (const slot of graph.unresolved) if (slot.ownerId === from) slot.ownerId = to;
+    for (const entry of graph.suppressed || []) {
+        if (entry.aId === from) entry.aId = to;
+        if (entry.bId === from) entry.bId = to;
+        // The basis lists the shared parents' ids.
+        entry.basis = String(entry.basis || '').split(',').filter(Boolean).map(id => (id === from ? to : id)).sort().join(',');
+    }
     return normalizeSocialGraph(graph);
 }
 
