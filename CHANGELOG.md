@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.90 - 30 September 2026
+
 - Stop opening the dossier from raising the phone/tablet keyboard. Opening the panel now focuses the panel itself instead of the search box; search is focused only when you tap it.
 
 ## 1.0.89 - 30 September 2026
