@@ -678,6 +678,9 @@ function relationshipSummaryHasUnsupportedClaims(value, relationship = DEFAULT_R
     const exceptionalAffectionClaims = /\b(inseparable|irreplaceable|life-defining bond|devoted to (?:him|her|them|the player))\b/i;
     const deepDistrustClaims = /\b(deep distrust|profound distrust|deeply distrusts?|cannot trust (?:him|her|them|the player) at all)\b/i;
     const deepDislikeClaims = /\b(deep hatred|profound hatred|deep resentment|utterly hates?)\b/i;
+    // Obligation, fixation and role claims make the player uniquely important ("her chosen partner,
+    // protector and provider", "must repay him", "only he can") and need established depth too.
+    const obligationClaims = /\b(chosen (?:partner|one|mate|companion)|(?:her|his|their) (?:protector|provider|savio(?:u)?r|master|purpose|reason to live)|must (?:serve|obey|please|repay|stay with|follow|do (?:whatever|anything|everything))|only (?:he|she|they) can|owes? (?:him|her|them|the player) (?:everything|(?:her|his|their) life)|lives? (?:for|to serve) (?:him|her|them|the player)|belongs? (?:at|by|beside) (?:his|her|their) side|will follow (?:him|her|them|the player) anywhere|devotedly|worships?|obedien(?:t|ce) to)\b/i;
     if (rel.desire < 30 && desireClaims.test(text)) return true;
     if (tropeClaims.test(text)) return true;
     if (positiveStrength < 70 && absoluteClaims.test(text)) return true;
@@ -687,6 +690,7 @@ function relationshipSummaryHasUnsupportedClaims(value, relationship = DEFAULT_R
     if (exceptionalAffectionClaims.test(text) && !unlocked('affection', 1, 75)) return true;
     if (deepDistrustClaims.test(text) && !unlocked('trust', -1, 50)) return true;
     if (deepDislikeClaims.test(text) && !unlocked('affection', -1, 50)) return true;
+    if (obligationClaims.test(text) && !unlocked('trust', 1, 50) && !unlocked('affection', 1, 50)) return true;
     return false;
 }
 
@@ -5638,9 +5642,25 @@ function injectionAgencyCore(npc, agencyCap = 260) {
     return fairInjectionParts(parts, agencyCap) || 'no additional agency facts established';
 }
 
+// A mood that names a stance toward the player ("devoted", "adoring") is a relationship claim, not
+// a mood; below established trust/affection it is left out of the roleplay injection.
+const STANCE_MOOD_WORDS = /\b(devoted|adoring|worshipful|worshipping|obedient|infatuated|lovestruck|besotted|smitten|enthralled)\b/i;
+
+function lowPlayerStanding(npc) {
+    const rel = normalizeRelationshipBaseline(npc?.relationship || DEFAULT_RELATIONSHIP);
+    return Math.max(rel.trust, rel.affection) < 50;
+}
+
+function injectedMood(npc) {
+    const mood = String(npc?.mood || '').trim();
+    if (!mood || !lowPlayerStanding(npc)) return mood;
+    return mood.split(/\s*,\s*|\s*;\s*/).filter(part => part && !STANCE_MOOD_WORDS.test(part)).join(', ');
+}
+
 function injectionCurrentStateCore(npc, stateCap = 180) {
+    const mood = injectedMood(npc);
     const parts = [
-        npc.mood && `mood: ${npc.mood}`,
+        mood && `mood: ${mood}`,
         npc.status && `status: ${npc.status}`,
     ].filter(Boolean);
     return fairInjectionParts(parts, stateCap) || 'no overriding live emotional/condition state established';
@@ -5725,6 +5745,7 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
         'VOICE FIDELITY: established Speech constrains actual dialogue wording and delivery. Preserve its sentence shape, vocabulary, formality, directness, hedging, cadence, question/explanation style, and recurring verbal habits; do not flatten distinct voices into generic polished prose.',
         'PLAYER RELATIONSHIP IS SECONDARY: it may bias attention, interpretation, openness, tolerance, or willingness toward the player, but need not surface every scene. High scores never mean obedience, universal prioritization, clinginess, jealousy, tsundere behavior, or cruelty toward others.',
         'Temporary mood, stress, intimacy, or player-specific behavior is not global identity. Durable identity changes gradually unless narration explicitly establishes lasting development or a developmental time skip.',
+        relevant.some(lowPlayerStanding) && 'LOW SCORES: the player is not uniquely important; no obligation, fixation, or "only them" thinking.',
         relevant.some(calledIn) && 'Exception: NPCs marked "named by player" are not yet confirmed on-screen; use their dossier if they appear.',
     ].filter(Boolean).join('\n');
     let header = headerFor();
