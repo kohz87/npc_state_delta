@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Stop opening the dossier from raising the phone/tablet keyboard. Opening the panel now focuses the panel itself instead of the search box; search is focused only when you tap it.
+
 ## 1.0.89 - 30 September 2026
 
 - Open the dossier library collapsed. It now starts collapsed every time the dossier panel opens; tap the "DOSSIER LIBRARY" bar to expand it, and it collapses again when the panel closes. The collapsed bar spans the full width with a 40px touch target on touch screens, including tablets. The choice is no longer stored in the browser.

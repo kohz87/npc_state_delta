@@ -80,6 +80,7 @@ def run_viewport(browser, name, width, height, output):
     page.wait_for_selector('.delta-library-heading')
     # The library opens collapsed; its heading expands it.
     assert not page.locator('.delta-cast-list').is_visible(), name + ' library not collapsed by default'
+    assert page.evaluate("!document.activeElement?.matches?.('input, textarea')"), name + ' opening focused a text field'
     page.locator('.delta-library-heading').click()
     page.wait_for_selector('.delta-cast-card')
     page.wait_for_timeout(100)
