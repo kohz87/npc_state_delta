@@ -160,7 +160,8 @@ async function auditRuntimeChecks(mockState, eventSource, manualAddNpc, sleep, s
     await runtime.ensureFresh({ reason: 'audit-remote-advance' });
     const adoptedRevision = runtime.uiStatus().hydratedRevision;
     if (!runtime.getState().npcs.some(npc => npc.name === 'Kora Remote')) throw new Error('the newer remote dossier was not adopted');
-    eventSource.emit('chat_changed');
+    // An automatic reconciliation while this browser still holds the older chat (no host reload).
+    await runtime.reconcile({ reason: 'audit-stale-reconcile' });
     await sleep(300);
     if (!runtime.getState().npcs.some(npc => npc.name === 'Kora Remote')) throw new Error('BUG-02: the stale chat rolled back the remote dossier');
     if (runtime.getState().lineage.length !== 4) throw new Error('BUG-02: stored lineage was truncated');

@@ -213,7 +213,7 @@ async function deepAuditRuntimeChecks(mockState, eventSource, manualAddNpc, slee
     const miraId = runtime.getState().npcs.find(npc => npc.name === 'Mira Deep').id;
     await runtime.setPortraitSeed(miraId, 4242, { chatKey: runtime.uiStatus().chatKey });
     await runtime.flush();
-    eventSource.emit('chat_changed');
+    await runtime.reconcile({ reason: 'deep-stale-reconcile' });
     await sleep(300);
     if (!runtime.getState().npcs.some(npc => npc.name === 'Kora Deep')) fail('RB84-02: a local save let the stale chat roll back');
     if (runtime.getState().lineage.length !== 4) fail('RB84-02: lineage truncated after local save');
