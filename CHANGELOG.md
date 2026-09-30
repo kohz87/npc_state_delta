@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 1.0.84 - 30 September 2026
+
+Fixes from an external 1.0.83 bug audit (nine reproduced findings):
+
+- Stop deleting a middle message from undoing facts set by earlier retained messages. Reverting the deleted block's own changes now requires the exact state just before it (journal or a checkpoint at the preceding message); an older checkpoint no longer stands in for it, and without the exact boundary the dossiers are left as they are.
+- Remove an NPC that was introduced and killed only in the deleted block. The exact before-state proves it did not exist earlier, so its recorded death no longer keeps a dead ghost; it stays when a later message changed it or another dossier started naming it afterwards.
+- Stop a shared title or first name from injecting unrelated NPCs. "I ask Lady Mira" no longer selects Lady Noela and Lady Vera: a first name alone counts only when no other dossier shares it, and titles (Lady, Captain, Master…) never count on their own.
+- Do not treat an unreadable sidecar as a missing one. When a chat has no remembered data-file pointer and its data file exists but cannot be read (server error, authentication, malformed content), hydration now retries and then blocks with an error instead of starting an empty dossier as ready. Only a confirmed missing file starts fresh.
+- Report editor saves only once they reach the server. The dossier editor now waits for the write; if it fails, the editor stays open with the draft, the edit remains applied in this browser, and a warning replaces the premature "saved" notice.
+- Let the repair of a participant the broad scan missed restore their presence. The broad scan's omission set them absent and the repair forced that back even when it returned present=true; a missed-participant repair (queued only for someone taking part in the current exchange) now keeps a grounded present=true, while other repairs still keep the live presence.
+- Require story support for scanned birthday changes. A scanned birth date is applied only when the scanned text names the NPC and states that month and day or speaks of a birthday or birth; an ungrounded model "correction" no longer rewrites an NPC's age. Manual edits and generated dates are unchanged.
+- Do not let a stale chat roll back a newer dossier from another session. After adopting a dossier written by another session, a local chat that is only a shorter prefix of it (with no delete event) is treated as not yet loaded rather than as a deletion, so nothing is rolled back or written; the deferral is recorded in the rollback diagnostics. Explicit delete events are unchanged.
+- Always report a same-revision overwrite. When a later check shows another session replaced the revision this session saved, the local copy was already preserved for recovery; the warning is now shown even from background checks. Preventing the race itself needs server-side compare-and-swap, which SillyTavern's file upload does not offer.
+
 ## 1.0.83 - 30 September 2026
 
 - Stop a wrong parent entry from forcing "sibling" back onto Important Bonds. Two NPCs listed as children of one parent were always inferred to be siblings, so when Greta wrongly listed her brother Marek as a parent, "Greta — sibling" kept returning on Talia (Marek's daughter) after every edit. The shared-parent inference now skips, and removes its earlier inferred link for, any pair where either dossier or a non-inferred edge names a different blood tie. A manual bond edit also corrects the other NPC's entry when that entry only mirrored the old relation (editing Greta's "Marek — parent" to "brother" turns Marek's "Greta — child" into "Greta — sibling"); a locked dossier, or a new relation with no inverse, is left alone.

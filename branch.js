@@ -1141,8 +1141,10 @@ export function revertDeletedBlockEffects(state, currentState, checkpoints, prev
         .filter(item => item?.snapshot && keys[item.messageId] === item.lineageKey)
         .sort((a, b) => a.messageId - b.messageId);
     const journalState = boundary => restoreLinearBoundaryFromJournal(state, previousLineage, previousLineage, boundary)?.state || null;
+    // Only the exact boundary just before the block proves what the block changed; an older
+    // checkpoint would attribute every retained message in between to the deletion.
     const before = journalState(divergence)
-        || owned.filter(item => item.messageId < divergence).at(-1)?.snapshot
+        || owned.filter(item => item.messageId === divergence - 1).at(-1)?.snapshot
         || (divergence === 0 ? state?.branchRootSnapshot : null);
     const after = journalState(divergence + removedCount)
         || owned.filter(item => item.messageId >= divergence && item.messageId < divergence + removedCount).at(-1)?.snapshot;
@@ -1159,8 +1161,10 @@ export function revertDeletedBlockEffects(state, currentState, checkpoints, prev
         const then = afterNpcs.get(id);
         if (!id || !then) { survivors.push(npc); continue; }
         if (!was) {
-            // Introduced by the deleted block: gone with it unless a later message used the NPC.
-            if (jsonEqual(withoutKeys(npc, NPC_REMOVAL_IGNORED), withoutKeys(then, NPC_REMOVAL_IGNORED)) && !isTerminalNpcDeath(npc)) {
+            // Introduced by the deleted block: gone with it unless a later message used the NPC. The
+            // exact before-state proves it did not exist, so a death recorded in the block goes too.
+            if (jsonEqual(withoutKeys(npc, NPC_REMOVAL_IGNORED), withoutKeys(then, NPC_REMOVAL_IGNORED))
+                && !referencedAfterBlock(currentState.npcs, afterNpcs, npc)) {
                 result.removed.push({ id, name: String(npc.name || '') });
                 continue;
             }
@@ -1202,6 +1206,16 @@ export function revertDeletedBlockEffects(state, currentState, checkpoints, prev
     currentState.candidates = removeAddedItems(currentState.candidates, before.candidates, after.candidates);
     currentState.pendingBackfills = removeAddedItems(currentState.pendingBackfills, before.pendingBackfills, after.pendingBackfills);
     return result;
+}
+
+// Whether another dossier started naming this NPC after the deleted block (a retained message used it).
+function referencedAfterBlock(liveNpcs, afterNpcs, npc) {
+    const name = String(npc?.name || '').trim().toLowerCase();
+    if (!name) return false;
+    const mentions = other => [...(Array.isArray(other?.keyRelationships) ? other.keyRelationships : []), ...(Array.isArray(other?.memories) ? other.memories : [])]
+        .some(entry => String(entry || '').toLowerCase().includes(name));
+    return (Array.isArray(liveNpcs) ? liveNpcs : []).some(other => other && other !== npc && other.id !== npc.id
+        && mentions(other) && !mentions(afterNpcs.get(String(other.id || ''))));
 }
 
 // References to an NPC that was removed together with the deleted block.
