@@ -13,17 +13,9 @@ const EDITOR_OBSERVER_GUARD = '__npcStateDeltaDossierExperienceEditorObserver';
 const DOSSIER_GUARD = '__npcStateDeltaDossierExperienceEvents';
 const DOCUMENT_GUARD = '__npcStateDeltaDossierExperienceDocumentEvents';
 const diagnosticVisibleNpcIds = new Set();
-const LIBRARY_COLLAPSED_KEY = 'npc_state_delta_library_collapsed';
-let libraryCollapsed = readLibraryCollapsed();
-
-// Collapsing the library is a per-browser viewing preference, never dossier state.
-function readLibraryCollapsed() {
-    try { return globalThis.localStorage?.getItem?.(LIBRARY_COLLAPSED_KEY) === '1'; } catch { return false; }
-}
-
-function writeLibraryCollapsed(collapsed) {
-    try { globalThis.localStorage?.setItem?.(LIBRARY_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch { /* optional */ }
-}
+// The library starts collapsed each time the dossier panel opens, leaving the open dossier the
+// room; expanding it lasts until the panel closes. This is presentation only, never dossier state.
+let libraryCollapsed = true;
 let normalizeQueued = false;
 
 function toast(kind, message) { globalThis.toastr?.[kind]?.(message); }
@@ -354,7 +346,6 @@ function bindDossierEvents(root) {
         if (libraryToggle) {
             event.preventDefault();
             libraryCollapsed = !libraryCollapsed;
-            writeLibraryCollapsed(libraryCollapsed);
             ensureLibraryChrome(root);
             return;
         }
@@ -417,6 +408,14 @@ function bindDocumentEvents() {
 function installRootObserver(root) {
     if (!root || root[ROOT_OBSERVER_GUARD]) return;
     root.addEventListener('npc-state-delta:dossier-rendered', () => scheduleNormalize(root));
+    const panel = root.querySelector?.('.delta-panel');
+    if (panel && typeof MutationObserver !== 'undefined') {
+        new MutationObserver(() => {
+            if (!panel.hidden || libraryCollapsed) return;
+            libraryCollapsed = true;
+            ensureLibraryChrome(root);
+        }).observe(panel, { attributes: true, attributeFilter: ['hidden'] });
+    }
     root[ROOT_OBSERVER_GUARD] = true;
 }
 
@@ -460,6 +459,8 @@ function installStyles() {
 #npc_state_delta_dossier_root .delta-cast-tools{display:grid!important;grid-template-columns:auto minmax(220px,1fr) auto;align-items:center;gap:10px;padding:7px 10px!important}
 #npc_state_delta_dossier_root .delta-library-heading{font:inherit;font-size:.68rem;letter-spacing:.12em;color:var(--delta-muted);white-space:nowrap;justify-self:start;padding:4px 2px;border:0;background:none;text-align:left;cursor:pointer}
 #npc_state_delta_dossier_root .delta-library-heading:hover{color:var(--delta-accent)}
+#npc_state_delta_dossier_root .delta-library-collapsed .delta-library-heading{grid-column:1/-1!important;justify-self:stretch!important}
+@media(pointer:coarse){#npc_state_delta_dossier_root .delta-library-heading{min-height:40px}}
 #npc_state_delta_dossier_root .delta-library.delta-library-collapsed{grid-template-rows:minmax(0,1fr) auto!important}
 #npc_state_delta_dossier_root .delta-library-collapsed .delta-cast{grid-template-rows:auto!important}
 #npc_state_delta_dossier_root .delta-library-collapsed .delta-search-label,#npc_state_delta_dossier_root .delta-library-collapsed .delta-filters,#npc_state_delta_dossier_root .delta-library-collapsed .delta-cast-rail-wrap{display:none!important}

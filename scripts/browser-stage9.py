@@ -77,6 +77,10 @@ def run_viewport(browser, name, width, height, output):
     page.locator('#npc_state_delta_save_calendar').click()
     assert page.evaluate('settings.npc_state_delta.calendarConfig.currentYear') is None
     page.evaluate("document.getElementById('npc_state_delta_dossier_root').__npcStateDeltaStage1Ui.open()")
+    page.wait_for_selector('.delta-library-heading')
+    # The library opens collapsed; its heading expands it.
+    assert not page.locator('.delta-cast-list').is_visible(), name + ' library not collapsed by default'
+    page.locator('.delta-library-heading').click()
     page.wait_for_selector('.delta-cast-card')
     page.wait_for_timeout(100)
     assert page.locator('.delta-continuity-birthday-card').count() == 1
