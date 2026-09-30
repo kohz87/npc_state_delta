@@ -54,6 +54,12 @@ async function hostReloadChecks(mockState, eventSource, manualAddNpc, sleep, uiH
     if (runtime.getState().lineage.length !== 2) fail('the reloaded chat did not become the dossier lineage');
     warnings.length = 0;
     if (await clickRefresh(lenaId) !== 1) fail(`Refresh did not dispatch after a reload: ${warnings.join(' | ')}`);
+    const scanButton = uiHandlers.get('click.npcStateDelta|#npc_state_delta_scan_now');
+    if (typeof scanButton !== 'function') fail('the Scan button is not connected');
+    const beforeScan = mockState.rawCalls.length;
+    await scanButton();
+    await sleep(200);
+    if (mockState.rawCalls.length === beforeScan) fail(`Scan did not dispatch after a reload: ${warnings.join(' | ')}`);
 
     // Another session's newer dossier adopted mid-session still blocks Refresh until the host
     // reloads the chat; the reload then clears the mark.
@@ -65,10 +71,12 @@ async function hostReloadChecks(mockState, eventSource, manualAddNpc, sleep, uiH
     await runtime.ensureFresh({ reason: 'remote-advance' });
     warnings.length = 0;
     if (await clickRefresh(miraId) !== 0) fail('Refresh ran against a chat older than the adopted dossier');
+    if (await runtime.scan() !== false) fail('Scan ran against a chat older than the adopted dossier');
     if (!warnings.some(message => /Reload the chat first/.test(message))) fail('the stale-chat block was not explained');
     eventSource.emit('chat_changed');
     await sleep(400);
     warnings.length = 0;
+    if (await runtime.scan() === false) fail(`Scan stayed blocked after the chat reloaded: ${warnings.join(' | ')}`);
     if (await clickRefresh(miraId) !== 1) fail(`Refresh stayed blocked after the chat reloaded: ${warnings.join(' | ')}`);
 
     mockState.quietResponder = previousResponder;
@@ -76,7 +84,7 @@ async function hostReloadChecks(mockState, eventSource, manualAddNpc, sleep, uiH
     setTimeout(() => process.exit(0), 300);
 }
 
-test('a host chat reload clears the stale-chat mark and dossier Refresh dispatches', () => {
+test('a host chat reload clears the stale-chat mark and Scan/Refresh dispatch', () => {
     let source = fs.readFileSync(new URL('./runtime-smoke.mjs', import.meta.url), 'utf8');
     source = source.replace('const here = path.dirname(fileURLToPath(import.meta.url));', `const here = ${JSON.stringify(fileURLToPath(new URL('.', import.meta.url)))};`);
     const marker = "    console.log('Runtime smoke:";
