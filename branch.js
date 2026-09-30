@@ -1210,10 +1210,13 @@ export function revertDeletedBlockEffects(state, currentState, checkpoints, prev
 
 // Whether another dossier started naming this NPC after the deleted block (a retained message used it).
 function referencedAfterBlock(liveNpcs, afterNpcs, npc) {
-    const name = String(npc?.name || '').trim().toLowerCase();
-    if (!name) return false;
+    // Whole-word name or alias matches only: "Wayfarer" names the NPC, "dangerous" does not name Dan.
+    const labels = [npc?.name, ...(Array.isArray(npc?.aliases) ? npc.aliases : [])]
+        .map(label => String(label || '').trim()).filter(label => label.length >= 2);
+    if (!labels.length) return false;
+    const patterns = labels.map(label => new RegExp(`(?<![\\p{L}\\p{N}])${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'iu'));
     const mentions = other => [...(Array.isArray(other?.keyRelationships) ? other.keyRelationships : []), ...(Array.isArray(other?.memories) ? other.memories : [])]
-        .some(entry => String(entry || '').toLowerCase().includes(name));
+        .some(entry => patterns.some(pattern => pattern.test(String(entry || ''))));
     return (Array.isArray(liveNpcs) ? liveNpcs : []).some(other => other && other !== npc && other.id !== npc.id
         && mentions(other) && !mentions(afterNpcs.get(String(other.id || ''))));
 }
@@ -1273,7 +1276,10 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
     }
 
     let divergence = relation.kind === 'same' ? explicitDivergence : relation.divergence;
-    if (hasExplicitDivergence && relation.kind !== 'same') {
+    // Narrative content owns destructive recovery: a delete/edit event index is only a hint and may
+    // not move recovery before the first message whose content actually changed (a stale index from
+    // a hide or earlier settlement would roll back retained messages).
+    if (hasExplicitDivergence && relation.kind !== 'same' && !linearReplacement) {
         divergence = Math.min(divergence, explicitDivergence);
     }
 
