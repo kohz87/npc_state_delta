@@ -290,7 +290,11 @@ async function uploadPayload({ name, json, fetchFn, headers }) {
 export async function inspectNpcStateDataFile(pointer, { fetchFn = globalThis.fetch, expectedChatKey = '' } = {}) {
     if (!pointer?.path) return { revision: 0, writerId: '', exists: false, retired: false, updatedAt: 0, payload: null };
     if (typeof fetchFn !== 'function') throw new Error('fetch() is unavailable for NPC State Delta data-file inspection.');
-    const response = await withReadSlot(() => fetchFn(pointer.path, { method: 'GET', cache: 'no-store' }));
+    // Always revalidated with the server ('no-cache'), never read stale; but an unchanged sidecar
+    // comes back as "304 Not Modified" from SillyTavern's file route instead of re-downloading the
+    // whole file. A boundary check runs several times per turn, which on a slow remote/mobile link
+    // otherwise re-transfers the full dossier (portraits, checkpoints) each time.
+    const response = await withReadSlot(() => fetchFn(pointer.path, { method: 'GET', cache: 'no-cache' }));
     if (response?.status === 404) return { revision: 0, writerId: '', exists: false, retired: false, updatedAt: 0, payload: null };
     if (!response?.ok) {
         const error = new Error(`NPC State Delta data file revision check failed with HTTP ${response?.status || 'error'}.`);
