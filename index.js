@@ -6429,7 +6429,11 @@ function registerEvents() {
         source.on(events.MESSAGE_SENT, async (messageId) => {
             const key = getChatKey();
             if (key === 'no-chat') return;
-            try { await ensureChatStateLoaded(key); } catch (error) { console.error('[NPC State Delta] user-turn lineage update skipped because chat hydration failed.', error); return; }
+            // SillyTavern waits for this listener before generating. A loaded dossier is used as is;
+            // the scan that follows the reply re-checks the server copy before writing anything.
+            if (!hydratedChatKeys.has(key)) {
+                try { await ensureChatStateLoaded(key); } catch (error) { console.error('[NPC State Delta] user-turn lineage update skipped because chat hydration failed.', error); return; }
+            }
             if (getChatKey() !== key) return;
             // This listener maintains branch lineage and refreshes the injection so an off-screen NPC
             // the player names reaches this generation; text never dispatches mutations.

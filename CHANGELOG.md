@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Cut network load on slow remote/mobile connections. Dossier checks (several per turn) now revalidate with the server instead of forcing a full download each time, so an unchanged dossier file comes back as "304 Not Modified" with no body; a changed file is still fetched in full. Sending a message no longer waits for a server read before generation starts when the chat's dossier is already loaded; the scan after the reply still checks the server copy before writing.
+
 ## 1.0.91 - 30 September 2026
 
 Fixes from an external deep audit of 1.0.87 (eighteen reproduced findings):
