@@ -38,7 +38,7 @@ function settings() {
     const value = extension_settings[EXTENSION_NAME] && typeof extension_settings[EXTENSION_NAME] === 'object'
         ? extension_settings[EXTENSION_NAME]
         : (extension_settings[EXTENSION_NAME] = {});
-    for (const key of ['dataFiles', 'sidecarTombstones', 'recoveryFiles', 'recoveryHistory', 'recoveryGarbage']) {
+    for (const key of ['dataFiles', 'sidecarTombstones', 'recoveryFiles', 'recoveryHistory', 'recoveryGarbage', 'pendingRenames']) {
         if (!value[key] || typeof value[key] !== 'object' || Array.isArray(value[key])) value[key] = {};
     }
     return value;
@@ -172,8 +172,23 @@ async function moveCharacterOwnerState(oldAvatar, newAvatar) {
             let newPointer = null;
             let recoveryPointer = null;
             let sourceRetired = !oldPointer?.path;
+            // A rename whose retirement outcome was uncertain left a verified destination and recovery
+            // behind. Resume that transaction: reuse the destination (so its revision does not
+            // conflict), and if the source turns out to be retired already, just publish the move.
+            const pending = config.pendingRenames?.[oldKey]?.newKey === newKey ? config.pendingRenames[oldKey] : null;
             try {
-                for (let attempt = 0; attempt < 4; attempt += 1) {
+                if (pending?.newPointer?.path) {
+                    newPointer = { ...pending.newPointer };
+                    recoveryPointer = pending.recoveryPointer?.path ? { ...pending.recoveryPointer } : null;
+                    const source = await readNpcStateDataFile(oldPointer, { expectedChatKey: oldKey });
+                    if (source?.retired) {
+                        const destination = await readNpcStateDataFile(newPointer, { expectedChatKey: newKey });
+                        if (!destination || destination.retired || !destination.state) throw new Error(`NPC State Delta character rename could not confirm its retained destination ${newKey}.`);
+                        state = destination.state;
+                        sourceRetired = true;
+                    }
+                }
+                for (let attempt = 0; !sourceRetired && attempt < 4; attempt += 1) {
                     state = await stateFromPointer(oldKey, oldPointer);
                     if (!state) throw new Error(`NPC State Delta character rename could not read live source ${oldKey}.`);
                     newPointer = await writeVerifiedState(newKey, state, newPointer?.path ? newPointer : null);
@@ -199,6 +214,7 @@ async function moveCharacterOwnerState(oldAvatar, newAvatar) {
 
                 archiveRecoveryRecord(config, newKey, 'canonical-ownership-reestablished');
                 applyCanonicalOwnershipMove(config, { oldKey, newKey, newPointer, recoveryPointer, reason: 'character-renamed' });
+                delete config.pendingRenames[oldKey];
                 moved.set(oldKey, newKey);
                 if (oldPointer?.path) retiredPredecessors.push({ key: oldKey, pointer: oldPointer });
                 changed = true;
@@ -207,6 +223,7 @@ async function moveCharacterOwnerState(oldAvatar, newAvatar) {
                     // The source may already be retired: keep the verified destination and recovery
                     // copies and register the recovery so the dossier stays restorable.
                     if (recoveryPointer?.path) config.recoveryFiles[oldKey] = { ...recoveryPointer, reason: `rename-retirement-uncertain:${newKey}` };
+                    if (newPointer?.path) config.pendingRenames[oldKey] = { newKey, newPointer: { ...newPointer }, recoveryPointer: recoveryPointer ? { ...recoveryPointer } : null, at: Date.now() };
                     recoveryRegistered = true;
                     failedKeys.push({ key: oldKey, error });
                     console.warn(`[NPC State Delta] character rename could not confirm retirement of ${oldKey}; kept the new and recovery copies.`, error);

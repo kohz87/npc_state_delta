@@ -43,7 +43,8 @@ export function npcOwnedSentences(npc, text) {
     const labels = [npc?.name, ...(Array.isArray(npc?.aliases) ? npc.aliases : [])].map(label => String(label || '').trim()).filter(Boolean);
     const words = [...labels, ...labels.map(label => label.split(/\s+/)[0]).filter(token => token.length >= 3)];
     const patterns = [...new Set(words)].map(word => new RegExp(`(?<![\\p{L}\\p{N}])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}])`, 'iu'));
-    const sentences = String(text || '').split(/(?<=[.!?])\s+|\n+/).map(item => item.trim()).filter(Boolean);
+    // Markup blocks (<World_State> ...) are separate statements, not part of the next sentence.
+    const sentences = String(text || '').split(/(?<=[.!?])\s+|\n+|<\/?[A-Za-z_][^>]*>/).map(item => item.trim()).filter(Boolean);
     const owned = [];
     sentences.forEach((sentence, index) => {
         if (patterns.some(pattern => pattern.test(sentence))) owned.push(sentence);
@@ -58,7 +59,26 @@ const ABSENCE_WORDING = /\b(?:not (?:here|present|there|in the room|with (?:us|t
 
 const HISTORICAL_ABSENCE = /\b(?:ago|earlier|before|previously|until|last\s+(?:night|week)|yesterday|had been)\b/i;
 const CURRENT_PARTICIPATION = /\b(?:now|returns?|returned|arrives?|arrived|comes? (?:back|in)|steps? (?:in|inside|back)|enters?|entered|joins?|joined|sits? (?:beside|with|down)|greets?|here now)\b/i;
+// A return/arrival that is denied ("does not return") or still ahead ("will return tomorrow") means
+// the NPC is not here now; a hypothetical one ("might return if ...") says nothing.
+const RETURN_VERBS = /\b(?:returns?|arrives?|arrive|comes? (?:back|in)|come (?:back|in)|steps? (?:in|inside|back))\b/i;
+const NEGATED_WORDING = /\b(?:not|never|no longer)\b|n['’]t\b/i;
+const FUTURE_WORDING = /\b(?:will|tomorrow|later|soon|going to|plans? to|intends? to)\b/i;
+const HYPOTHETICAL_WORDING = /\b(?:if|unless|might|may|would|could)\b/i;
 const CLAUSE_BOUNDARY = /,|;|\s+(?:but|then|and then|because|while|although|though)\s+/i;
+const CLAUSE_STARTERS = new Set(['the', 'then', 'she', 'he', 'they', 'her', 'his', 'their', 'it', 'today', 'tomorrow', 'yesterday',
+    'on', 'in', 'at', 'when', 'after', 'before', 'as', 'if', 'but', 'and', 'so', 'now', 'later', 'this', 'that', 'there', 'here',
+    'a', 'an', 'once', 'soon', 'still', 'meanwhile', 'everyone', 'nobody', 'someone']);
+
+// A clause whose subject is a named person other than this NPC ("Noela Far is not here",
+// "Noela was born in CR790", "Noela celebrates her birthday") is about that person.
+function foreignSubjectClause(clause, own) {
+    const lead = String(clause || '').trim().match(/^((?:\p{Lu}[\p{L}\p{M}'’-]*\s+){1,3})(?=\p{Ll})/u)?.[1];
+    if (!lead) return false;
+    const tokens = lead.trim().split(/\s+/).map(token => token.replace(/['’]s$/i, '').toLowerCase());
+    if (CLAUSE_STARTERS.has(tokens[0])) return false;
+    return !tokens.some(token => own.has(token));
+}
 
 // The NPC's latest current state in the text: another person's absence ("because Noela is not
 // here") and an absence the narration then resolves ("was not here an hour ago, but now steps
@@ -68,10 +88,10 @@ export function npcCurrentlyAbsentInText(npc, text) {
     let absent = false;
     for (const sentence of npcOwnedSentences(npc, text)) {
         for (const clause of sentence.split(CLAUSE_BOUNDARY).map(part => String(part || '').trim()).filter(Boolean)) {
-            const subject = clause.match(/^(\p{Lu}[\p{L}\p{M}-]+)\s+(?:is|was|isn|wasn|has|had|remains?|stays?|stayed|left|went)\b/u)?.[1];
-            if (subject && !own.has(subject.toLowerCase())) continue;
+            if (foreignSubjectClause(clause, own)) continue;
             if (ABSENCE_WORDING.test(clause) && !HISTORICAL_ABSENCE.test(clause)) absent = true;
-            else if (CURRENT_PARTICIPATION.test(clause)) absent = false;
+            else if (RETURN_VERBS.test(clause) && (NEGATED_WORDING.test(clause) || FUTURE_WORDING.test(clause))) absent = true;
+            else if (CURRENT_PARTICIPATION.test(clause) && !HYPOTHETICAL_WORDING.test(clause) && !NEGATED_WORDING.test(clause)) absent = false;
         }
     }
     return absent;
@@ -80,8 +100,8 @@ export function npcCurrentlyAbsentInText(npc, text) {
 const NEGATED_BEFORE = /\b(?:not|never|isn['’]?t|wasn['’]?t|no longer)\s+(?:\w+\s+){0,3}$/i;
 const BIRTH_PREDICATE = /\b(?:birth(?:day|date)?|name\s*day|nameday|born|hatched|date\s+of\s+birth)\b/giu;
 const CURRENT_BIRTHDAY = /\b(?:birthday|name\s*day|nameday|turn(?:s|ing)?\s+\d{1,3})\b/giu;
-const HYPOTHETICAL_OR_FALSE = /\b(?:if|would|might|could|perhaps|maybe|supposedly|forged|fake|false|pretend(?:s|ed|ing)?|claims?\s+(?:to|that)|as if)\b/i;
-const PAST_BIRTHDAY = /\b(?:yesterday|last\s+(?:year|week|month)|ago|previous|past|was\s+(?:her|his|their)\s+birthday|had\s+(?:her|his|their)\s+birthday)\b/i;
+const HYPOTHETICAL_OR_FALSE = /\b(?:if|would|might|could|perhaps|maybe|supposedly|allegedly|forged|forgery|fake|false|lie|lies|lied|rumou?rs?|pretend(?:s|ed|ing)?|claims?\s+(?:to|that)|as if|denies|denied|deny|doubts?|doubted|whether|wonders?|wondered)\b/i;
+const PAST_BIRTHDAY = /\b(?:yesterday|tomorrow|last\s+(?:year|week|month)|next\s+birthday|upcoming|ago|earlier|previous|past|recounts?|recounted|recalls?|recalled|remembers?|remembered|was\s+(?:her|his|their)\s+birthday|had\s+(?:her|his|their)\s+birthday|will\s+be)\b/i;
 
 function npcFirstLabels(npc) {
     const labels = [npc?.name, ...(Array.isArray(npc?.aliases) ? npc.aliases : [])].map(label => String(label || '').trim()).filter(Boolean);
@@ -94,7 +114,9 @@ function npcFirstLabels(npc) {
 function npcOwnClaimText(npc, sentence) {
     const own = npcFirstLabels(npc);
     const foreign = name => !own.has(String(name || '').toLowerCase());
-    return String(sentence || '')
+    const ownClauses = String(sentence || '').split(/(?<=[,;])\s*|\s+(?=(?:but|while|whereas|and then|because)\b)/i)
+        .filter(clause => !foreignSubjectClause(clause, own)).join(' ');
+    return ownClauses
         .replace(/\b(\p{Lu}[\p{L}\p{M}-]+),?\s+who\b.*$/u, (match, name) => (foreign(name) ? ' ' : match))
         .replace(/\b(\p{Lu}[\p{L}\p{M}-]+)['’]s\s+(?:birthday|name\s*day|nameday|birth)\b/gu, (match, name) => (foreign(name) ? ' ' : match))
         .replace(/\b(\p{Lu}[\p{L}\p{M}-]+)\s+turn(?:s|ing)?\s+\d{1,3}\b/gu, (match, name) => (foreign(name) ? ' ' : match));
@@ -148,7 +170,7 @@ function birthdayUpdateGrounded(npc, update, sourceText, calendar, referenceDate
     const reference = referenceDate ? normalizeCalendarDate(referenceDate, calendar) : null;
     const isToday = reference && String(reference.month).toLowerCase() === String(incoming.month).toLowerCase() && Number(reference.day) === Number(incoming.day);
     const needsYear = incoming.year !== null && !(known && known.year === incoming.year);
-    const sentences = String(text).split(/(?<=[.!?])\s+|\n+/).map(item => item.trim()).filter(Boolean);
+    const sentences = String(text).split(/(?<=[.!?])\s+|\n+|<\/?[A-Za-z_][^>]*>/).map(item => item.trim()).filter(Boolean);
     const owned = new Set(npcOwnedSentences(npc, text));
     const claims = sentences.map(sentence => (owned.has(sentence) ? ownBirthClaim(npc, sentence) : ''));
     const era = String(incoming.era || calendar?.era || '').trim();
@@ -1731,4 +1753,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.92';
+export const NPC_STATE_VERSION = '1.0.93';

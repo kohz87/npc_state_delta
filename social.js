@@ -1,6 +1,8 @@
 export const SOCIAL_GRAPH_VERSION = 1;
 export const SOCIAL_GRAPH_EDGE_LIMIT = 240;
 export const SOCIAL_GRAPH_UNRESOLVED_LIMIT = 120;
+// Manual sibling removals; sized to the edge cap so a large family never silently loses a removal.
+export const SOCIAL_GRAPH_SUPPRESSED_LIMIT = 240;
 export const SOCIAL_KEY_RELATIONSHIP_MAX_CHARS = 360;
 export const SOCIAL_DYNAMIC_MAX_CHARS = 260;
 
@@ -488,8 +490,10 @@ export function normalizeSocialGraph(raw = {}) {
         if (unresolved.length >= SOCIAL_GRAPH_UNRESOLVED_LIMIT) break;
     }
     // Pairs a user removed by hand that inference must not recreate from the same evidence.
+    // At capacity the oldest removals give way: the newest entries are last, and dropping one just
+    // made would let inference recreate the bond the user just deleted.
     const suppressed = [];
-    for (const item of Array.isArray(source.suppressed) ? source.suppressed : []) {
+    for (const item of (Array.isArray(source.suppressed) ? source.suppressed : []).slice().reverse()) {
         const aId = clean(item?.aId, 100);
         const bId = clean(item?.bId, 100);
         if (!aId || !bId || aId === bId) continue;
@@ -497,8 +501,9 @@ export function normalizeSocialGraph(raw = {}) {
         const basis = clean(item?.basis, 400);
         if (suppressed.some(entry => entry.aId === first && entry.bId === second && entry.basis === basis)) continue;
         suppressed.push({ aId: first, bId: second, basis });
-        if (suppressed.length >= 60) break;
+        if (suppressed.length >= SOCIAL_GRAPH_SUPPRESSED_LIMIT) break;
     }
+    suppressed.reverse();
     return suppressed.length ? { version: SOCIAL_GRAPH_VERSION, edges, unresolved, suppressed } : { version: SOCIAL_GRAPH_VERSION, edges, unresolved };
 }
 
@@ -1080,6 +1085,28 @@ function projectGraphToKeyRelationships(npcs, graph) {
         if (JSON.stringify(next) !== before) updatedIds.push(owner.id);
     }
     return updatedIds;
+}
+
+// Apply a whole old-to-new id map in one pass. Renaming one id at a time (with normalization in
+// between) breaks permutations: swapping A and B first merges them into a self-edge that is dropped.
+export function remapSocialGraphNpcIds(rawGraph, idMap) {
+    const graph = normalizeSocialGraph(rawGraph);
+    const map = new Map([...(idMap instanceof Map ? idMap.entries() : Object.entries(idMap || {}))]
+        .map(([from, to]) => [clean(from, 100), clean(to, 100)])
+        .filter(([from, to]) => from && to && from !== to));
+    if (!map.size) return graph;
+    const remap = id => (map.has(id) ? map.get(id) : id);
+    for (const edge of graph.edges) {
+        edge.aId = remap(edge.aId);
+        edge.bId = remap(edge.bId);
+    }
+    for (const slot of graph.unresolved) slot.ownerId = remap(slot.ownerId);
+    for (const entry of graph.suppressed || []) {
+        entry.aId = remap(entry.aId);
+        entry.bId = remap(entry.bId);
+        entry.basis = String(entry.basis || '').split(',').filter(Boolean).map(remap).sort().join(',');
+    }
+    return normalizeSocialGraph(graph);
 }
 
 export function remapSocialGraphNpcId(rawGraph, fromId, toId) {

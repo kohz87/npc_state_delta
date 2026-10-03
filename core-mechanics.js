@@ -691,8 +691,14 @@ function relationshipSummaryHasUnsupportedClaims(value, relationship = DEFAULT_R
     if (deepDistrustClaims.test(text) && !unlocked('trust', -1, 50)) return true;
     if (deepDislikeClaims.test(text) && !unlocked('affection', -1, 50)) return true;
     // A refused or denied obligation ("does not feel she must repay him") is a boundary, not a claim.
+    // The negation must govern the obligation itself: it counts only within the same clause (not
+    // across "but/and/because ...") and within a few words of it, and "never doubts that ..." affirms.
     const affirmativeObligation = [...String(text).matchAll(new RegExp(obligationClaims.source, 'gi'))]
-        .some(match => !/\b(?:not|never|no|nor|without|refuses?\s+to|[a-z]+n[’']t)\b[^,;.]*$/i.test(String(text).slice(0, match.index)));
+        .some(match => {
+            const clause = String(text).slice(0, match.index).split(/[,;.]|\b(?:but|and|because|while|although|though|yet|so)\b/i).at(-1) || '';
+            const negation = clause.match(/\b(?:not|never|no|nor|without|refuses?\s+to|[a-z]+n[’']t)\b((?:\s+\S+){0,4})\s*$/i);
+            return !negation || /\b(?:doubts?|doubted|questions?|questioned|denies|denied|deny)\b/i.test(negation[1]);
+        });
     if (affirmativeObligation && !unlocked('trust', 1, 50) && !unlocked('affection', 1, 50)) return true;
     return false;
 }
@@ -1756,11 +1762,17 @@ function durableRefinementSupportText(context = '', evidenceItems = [], binding 
     return [scopedContext, ...evidence].filter(Boolean).join(' ');
 }
 
-// Voice evidence must describe this NPC affirmatively. Within each sentence, text after another
-// person's name (or a "Name, who ..." relative clause) is theirs, and a negated predicate
-// ("does not speak warmly") is not a voice trait. Everything else is kept unchanged, so ordinary
-// attributed dialogue ("she said softly") still supports Speech.
-const NEGATED_CLAIM_RE = /\b(?:not|never|hardly|rarely|no longer|without|[a-z]+n t)\b[^,;]*?(?=\s+but\b|[,;]|$)/g;
+// Voice evidence must describe this NPC affirmatively. Each sentence is split into clauses and each
+// clause attributed: to whoever it names first, a "who/whose" clause to the person named just before
+// it ("Mira, who speaks warmly" is Mira's; "listens to Noela, who speaks warmly" is Noela's), a
+// "her mother ..." subject to someone else, and an unnamed clause to the clause before it. Clauses
+// owned by another person, hypothetical clauses ("if she spoke ...") and negated predicates
+// ("does not / neither ... nor / denies speaking warmly") are dropped. Unattributed text such as a
+// "Voice:" line or "she said softly" is kept, so ordinary attributed dialogue still counts.
+const NEGATED_CLAIM_RE = /\b(?:not|never|hardly|rarely|no longer|without|neither|nor|denies|denied|deny|refuses?|refused|[a-z]+n t)\b[^,;]*?(?=\s+but\b|[,;]|$)/g;
+const HYPOTHETICAL_CLAIM_RE = /\b(?:if|unless|would|might|could|wishes|wished|imagines?|imagined|pretends?|pretended)\b/;
+const FOREIGN_KIN_SUBJECT_RE = /^(?:her|his|their|the)\s+(?:mother|father|sister|brother|aunt|uncle|friend|husband|wife|son|daughter|master|mistress|companion|cousin|grandmother|grandfather|parent|child|children|teacher|mentor|captain|innkeeper|stranger|guard|servant|maid)\b/;
+const CLAUSE_SPLIT_RE = /\s*[,;:]\s*|\s+(?=(?:while|whereas|but|because|although|though|and then)\b)/i;
 
 function affirmativeOwnClaimText(text, binding = null) {
     const otherLabels = [
@@ -1768,17 +1780,57 @@ function affirmativeOwnClaimText(text, binding = null) {
         ...(Array.isArray(binding?.speechOtherLabels) ? binding.speechOtherLabels : []),
     ].map(normalizeName).filter(Boolean);
     const targetLabels = developmentBindingLabels(binding);
+    const targetTokens = new Set(targetLabels.flatMap(label => label.split(/\s+/)));
+    const positions = (normalized, labels) => labels.flatMap(label => {
+        const found = [];
+        let at = normalized.indexOf(` ${label} `);
+        while (at >= 0) { found.push(at); at = normalized.indexOf(` ${label} `, at + 1); }
+        return found;
+    });
     return developmentContextSegments(text).map(sentence => {
-        // A sentence about another named person, and not this NPC, is never this NPC's voice.
-        if (otherLabels.length && episodeContainsLabel(sentence, otherLabels) && !episodeContainsLabel(sentence, targetLabels)) return '';
-        let raw = sentence.replace(/\b\p{Lu}[\p{L}\p{M}'’-]+,?\s+who\b.*$/u, ' ');
-        let normalized = ` ${normalizeName(raw)} `;
-        for (const label of otherLabels) {
-            const at = normalized.indexOf(` ${label} `);
-            if (at >= 0) normalized = normalized.slice(0, at);
+        let owner = null;
+        let lastNamed = null;
+        const kept = [];
+        for (const raw of sentence.split(CLAUSE_SPLIT_RE).map(part => String(part || '').trim()).filter(Boolean)) {
+            const normalized = ` ${normalizeName(raw)} `;
+            const own = positions(normalized, targetLabels);
+            const other = positions(normalized, otherLabels);
+            // Capitalized names after the clause start that are not this NPC count as someone else.
+            const capitalized = [...raw.matchAll(/(?<=\s)\p{Lu}[\p{L}\p{M}'’-]+/gu)].map(match => normalizeName(match[0]));
+            const strangerNamed = capitalized.some(token => token && !targetTokens.has(token) && !other.length);
+            let clauseOwner;
+            if (/^(?:who|whose|which)\b/i.test(raw)) clauseOwner = lastNamed;
+            else if (FOREIGN_KIN_SUBJECT_RE.test(normalized.trim())) clauseOwner = 'other';
+            else if (own.length || other.length) {
+                const firstOwn = own.length ? Math.min(...own) : Infinity;
+                const firstOther = other.length ? Math.min(...other) : Infinity;
+                clauseOwner = firstOwn < firstOther ? 'target' : 'other';
+                if (clauseOwner === 'target' && targetLabels.some(label => new RegExp(`\\b${label}\\s+s\\s+(?:mother|father|sister|brother|friend|husband|wife|son|daughter|master|companion|cousin)\\b`).test(normalized))) clauseOwner = 'other';
+            } else clauseOwner = owner;
+            const lastOwn = own.length ? Math.max(...own) : -1;
+            const lastOther = other.length ? Math.max(...other) : -1;
+            if (lastOwn >= 0 || lastOther >= 0) lastNamed = lastOther > lastOwn ? 'other' : 'target';
+            if (strangerNamed) lastNamed = 'other';
+            if (clauseOwner) owner = clauseOwner;
+            if (clauseOwner === 'other' || HYPOTHETICAL_CLAIM_RE.test(normalized)) continue;
+            kept.push(normalized.replace(NEGATED_CLAIM_RE, ' ').replace(/\s+/g, ' ').trim());
         }
-        return normalized.replace(NEGATED_CLAIM_RE, ' ').replace(/\s+/g, ' ').trim();
+        return kept.filter(Boolean).join(' ');
     }).filter(Boolean).join(' ');
+}
+
+const GENERIC_VOICE_WORDS = new Set(['speak', 'speaks', 'spoke', 'speaking', 'speech', 'voice', 'voiced', 'talk', 'talks', 'talking', 'say', 'says', 'said', 'tone', 'words', 'sentences']);
+
+// Whether a proposed voice is borrowed from text that is not this NPC's affirmative voice: some of
+// its words occur in the narration, but only inside another person's or a negated clause.
+export function speechSeedVetoed(value, context = '', binding = null) {
+    const raw = String(context || '').trim();
+    if (!raw) return false;
+    const rawTokens = new Set(durableRefinementTokens(raw));
+    const ownTokens = new Set(durableRefinementTokens(affirmativeOwnClaimText(raw, binding)));
+    return [...new Set(durableRefinementTokens(value))]
+        .filter(token => token.length >= 3 && !/^\d+$/.test(token) && !GENERIC_VOICE_WORDS.has(token))
+        .some(token => rawTokens.has(token) && !ownTokens.has(token));
 }
 
 export function speechSupportContext(context = '', binding = null) {
@@ -4064,9 +4116,11 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
         }
         // A first Speech seed must come from this NPC's own affirmative voice, not another
         // person's sentence or a negated trait elsewhere in the narration.
-        if (field === 'speech' && !String(existing.speech || '').trim() && !targetedDurableSeedAllowed
+        if (field === 'speech' && !String(existing.speech || '').trim()
             && String(lifecycleOptions.developmentContext || '').trim()
-            && !durableSeedGrounded(value, speechSupportContext(lifecycleOptions.developmentContext, incomingBinding) || '-')) {
+            && (targetedDurableSeedAllowed
+                ? speechSeedVetoed(value, lifecycleOptions.developmentContext, incomingBinding)
+                : !durableSeedGrounded(value, speechSupportContext(lifecycleOptions.developmentContext, incomingBinding) || '-'))) {
             continue;
         }
         if (field === 'appearance' && String(existing.appearance || '').trim()) {
@@ -4919,7 +4973,11 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
         if (!current) {
             const repeatedEvidence = gradualProfileEvolutionReady(field, beforeEvidence, incomingEvidence)
                 && durableEvidenceGroundsValue(value, [...(beforeEvidence[field] || []), ...(incomingEvidence[field] || [])]);
-            const seedReady = durableSeedGrounded(value, options.developmentContext) || repeatedEvidence;
+            // A first Speech seed must rest on this NPC's own affirmative voice in the narration.
+            const seedContext = field === 'speech' && String(options.developmentContext || '').trim()
+                ? (speechSupportContext(options.developmentContext, { npc, otherLabels: options.otherLabels || [] }) || '-')
+                : options.developmentContext;
+            const seedReady = durableSeedGrounded(value, seedContext) || repeatedEvidence;
             if (!seedReady) {
                 evidence[field] = mergeRecentProfileEvidence(evidence[field], incomingEvidence[field] || [], field);
                 return;
@@ -5571,8 +5629,15 @@ export function npcNamedInText(npc, text, roster = []) {
     const tokens = normalizeName(npc.name).split(/\s+/).filter(Boolean);
     const first = tokens[0] || '';
     if (tokens.length < 2 || first.length < 4 || NAME_TITLE_TOKENS.has(first)) return false;
+    // A first name another dossier's label also starts with is ambiguous, and an occurrence inside
+    // another dossier's named span ("Mira" in "Lady Mira Valen") is theirs.
     const sharedFirst = otherLabels.some(label => label.split(/\s+/)[0] === first);
-    return !sharedFirst && countNormalizedPhrase(haystack, first) > 0;
+    if (sharedFirst) return false;
+    const masked = otherLabels
+        .filter(other => other.length > first.length)
+        .sort((a, b) => b.length - a.length)
+        .reduce((textSoFar, other) => textSoFar.replace(new RegExp(`(?<=^|\\s)${other.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s|$)`, 'gu'), '#'), haystack);
+    return countNormalizedPhrase(masked, first) > 0;
 }
 
 export function selectRelevantNpcs(npcs, text, turn = 0, limit = 3, socialGraph = null, graphRegistry = null) {
