@@ -1067,8 +1067,10 @@ const NPC_REVERT_GROUPS = Object.freeze([
 ]);
 const NPC_REVERT_LIST_FIELDS = Object.freeze(['memories', 'mannerisms', 'behaviorProfile', 'keyRelationships', 'aliases']);
 const NPC_REVERT_SKIP = new Set(['id', 'portrait', 'updatedAt', 'createdAt', 'manualProfileFields', 'manualProfileLocksExplicit']);
-// Presence bookkeeping alone does not make an NPC "used" by later messages.
-const NPC_REMOVAL_IGNORED = new Set([...NPC_REVERT_SKIP, 'present', 'worldActive', 'lastWorldActiveTurn', 'fieldChanges', 'fieldChangeDays']);
+// Presence bookkeeping alone does not make an NPC "used" by later messages, and neither does manual
+// image/retention metadata (a saved seed or prompt is not a narrative appearance).
+const NPC_REMOVAL_IGNORED = new Set([...NPC_REVERT_SKIP, 'present', 'worldActive', 'lastWorldActiveTurn', 'fieldChanges', 'fieldChangeDays',
+    'portraitSeed', 'portraitPromptPositive', 'portraitPromptNegative', 'portraitPromptReplace', 'retentionProtected', 'minor']);
 
 function withoutKeys(record, ignored) {
     const out = {};
@@ -1094,8 +1096,8 @@ function removeAddedItems(current, before, after) {
 // after its last scan, `npc` the live record. A field (group) the block changed and nothing later
 // touched returns to `before`; list fields also drop the items the block added. Returns the
 // reverted field names.
-function revertNpcAgainstDeletedBlock(npc, before, after) {
-    const locked = new Set(Array.isArray(npc.manualProfileFields) ? npc.manualProfileFields : []);
+function revertNpcAgainstDeletedBlock(npc, before, after, protectedKeys = []) {
+    const locked = new Set([...(Array.isArray(npc.manualProfileFields) ? npc.manualProfileFields : []), ...protectedKeys]);
     const changed = [];
     const handled = new Set();
     const consider = (keys) => {
@@ -1174,12 +1176,15 @@ export function revertDeletedBlockEffects(state, currentState, checkpoints, prev
             survivors.push(npc);
             continue;
         }
+        // A death the deleted block did not cause stays terminal, with its terminal relationship
+        // record (v1.0.78); the block's other unchanged effects (mood, memories, ...) are still undone.
+        let protectedKeys = [];
         if (isTerminalNpcDeath(npc)) {
             const deathGroup = NPC_REVERT_GROUPS[3];
             const causedByBlock = !isTerminalNpcDeath(was) && deathGroup.every(key => jsonEqual(npc[key], then[key]));
-            if (!causedByBlock) { survivors.push(npc); continue; }
+            if (!causedByBlock) protectedKeys = [...deathGroup, ...NPC_REVERT_GROUPS[0]];
         }
-        const fields = revertNpcAgainstDeletedBlock(npc, was, then);
+        const fields = revertNpcAgainstDeletedBlock(npc, was, then, protectedKeys);
         if (fields.length) {
             npc.updatedAt = Date.now();
             result.reverted.push({ id, name: String(npc.name || ''), fields });

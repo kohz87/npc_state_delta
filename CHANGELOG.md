@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## 1.0.93 - 3 October 2026
+
+Fixes from an external deep audit of 1.0.92 (twenty-three reproduced findings):
+
+- Check the server again before generating after you send a message (a 1.0.92 regression): a newer dossier from another device is adopted first, and a chat missing part of it is marked stale. The 1.0.92 "unchanged file returns 304" saving stays, so the check is a short request rather than a full download.
+- Keep a chat whose dossier file was retired by another session blocked on retry until the chat is reopened, instead of reviving the retired dossier.
+- Stop Refresh, Scan dossier and backfill applying a row that belongs to another NPC through a shared id, a name prefix ("Mira" vs "Mira Vale") or a role that mentions the target.
+- Discard a Refresh result when the chat is edited while it is doing its final server check.
+- Let an interrupted rename of a character you are not using finish on retry.
+- Make "Detach broken sidecar" produce a fresh dossier that can be saved, keeping an exact copy of the broken file.
+- Undo a deleted middle message's own changes (mood, memories) on an NPC who died independently later; the death and its relationship record stay.
+- Stop a saved portrait seed or prompt keeping an NPC whose only introduction was deleted.
+- Speech: accept "Mira, who speaks warmly …" again (a 1.0.91 regression) and reject "neither … nor", "denies …", "her mother speaks …" and "if she spoke …".
+- Birthdays: reject birth facts about someone else ("Noela was born …, according to Mira"), denials, questions and forgeries; roll a yearless age only on the NPC's own, current birthday (not "tomorrow", "five years earlier" or someone else's).
+- Presence: a denied or future return ("does not return", "will return tomorrow") no longer counts as arriving, and another person's absence no longer removes a present NPC.
+- Refresh no longer saves a relationship summary that the safety check rejected.
+- Scan dossier's backfill changes only its target, including profile and bond updates.
+- Naming "Lady Mira Valen" no longer also brings Mira Deep into the prompt.
+- "Not angry, but believes she must repay him" no longer escapes the low-score check.
+- Importing with swapped ids keeps hidden bonds and no longer invents friendships.
+- A 61st manual sibling-bond removal now holds (the limit is now 240, keeping the newest).
+- A portrait preview generated before an appearance change is rejected instead of being saved as current.
+- Escape during a portrait-seed Save, and Cancel during Refresh's automatic editor save, now stop the save.
+- Full Cast scans an unscanned first greeting at message 0.
+
 ## 1.0.92 - 1 October 2026
 
 - Cut network load on slow remote/mobile connections. Dossier checks (several per turn) now revalidate with the server instead of forcing a full download each time, so an unchanged dossier file comes back as "304 Not Modified" with no body; a changed file is still fetched in full. Sending a message no longer waits for a server read before generation starts when the chat's dossier is already loaded; the scan after the reply still checks the server copy before writing.

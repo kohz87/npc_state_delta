@@ -310,7 +310,8 @@ async function savePortraitSeed(session, overlay) {
     }
     setBusy(session, true, 'Saving portrait seed…', { allowClose: true });
     try {
-        if (!await api()?.setPortraitSeed?.(session.npcId, seed, { chatKey: session.chatKey })) {
+        if (!await api()?.setPortraitSeed?.(session.npcId, seed, { chatKey: session.chatKey, isCurrent: () => currentSessionIs(session) })) {
+            if (!currentSessionIs(session)) return false;
             throw new Error('The portrait target is no longer current.');
         }
         const saved = await flushDurably(session.chatKey, 'portrait seed');
@@ -327,6 +328,17 @@ async function savePortraitSeed(session, overlay) {
         toast('error', `NPC State Delta portrait seed: ${error?.message || error}`);
         return false;
     }
+}
+
+// The appearance a generated preview was made from. Applying it after the NPC's appearance or form
+// changed would stamp an old image as current, so the preview is rejected and must be regenerated.
+function portraitGenerationBase(npcId, form = '') {
+    const npc = npcById(npcId);
+    if (!npc) return '';
+    return JSON.stringify([
+        String(form || ''), npc.currentForm || '', npc.currentFormUnknown === true, npc.overallAppearance || '',
+        npc.appearance || '', npc.unclassifiedAppearance || '', npc.appearanceForms || [], npc.species || '', npc.gender || '',
+    ]);
 }
 
 async function generatePortrait(session, overlay) {
@@ -361,6 +373,7 @@ async function generatePortrait(session, overlay) {
     const use = overlay?.querySelector?.('[data-use-generated-portrait]');
     if (use) use.disabled = true;
     setBusy(session, true, 'Generating through SillyTavern Image Generation…', { allowClose: true });
+    session.generationBase = portraitGenerationBase(session.npcId, session.form);
     try {
         const url = await runtime.generatePortraitUrl(session.npcId, { positive: draft.positive, negative: draft.negative, seed: generationSeed });
         if (!currentSessionIs(session) || session.actionSeq !== actionSeq) return false;
@@ -397,14 +410,22 @@ async function useGeneratedPortrait(session, overlay) {
     const actionSeq = ++session.actionSeq;
     const live = npcById(session.npcId);
     if (!live) return false;
+    if (session.generationBase && session.generationBase !== portraitGenerationBase(session.npcId, session.form)) {
+        toast('warning', `NPC State Delta: ${live.name}'s appearance changed after this preview was generated, so it was not applied. Generate a new preview.`);
+        return false;
+    }
     setBusy(session, true, 'Applying generated preview through the canonical portrait handler…', { allowClose: true });
     let applied = false;
     try {
         const file = await generatedPortraitFile(url, session.npcId);
         if (!currentSessionIs(session) || session.actionSeq !== actionSeq) return false;
+        if (session.generationBase && session.generationBase !== portraitGenerationBase(session.npcId, session.form)) {
+            throw new Error('the appearance changed after this preview was generated; generate a new preview.');
+        }
         applied = await api()?.setPortrait?.(session.npcId, file, {
             chatKey: session.chatKey,
-            isCurrent: () => currentSessionIs(session) && session.actionSeq === actionSeq,
+            isCurrent: () => currentSessionIs(session) && session.actionSeq === actionSeq
+                && (!session.generationBase || session.generationBase === portraitGenerationBase(session.npcId, session.form)),
             generatedFrom: url,
             form: session.form || '',
         });

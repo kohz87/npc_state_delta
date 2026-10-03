@@ -1,5 +1,5 @@
 import { formPortraitKey, isTerminalNpcDeath, normalizeFormPortraitAssets, normalizeName, normalizeNpcRecord, protectTerminalNpc } from './core.js';
-import { normalizeSocialGraph, remapSocialGraphNpcId } from './social.js';
+import { normalizeSocialGraph, remapSocialGraphNpcIds } from './social.js';
 
 const MAGIC = new Uint8Array([0x4e, 0x50, 0x43, 0x53, 0x54, 0x42, 0x30, 0x31]); // NPCSTB01
 const HEADER_SIZE = 12;
@@ -505,9 +505,7 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
         unresolved: importedGraph.unresolved.filter(slot => !rejectedSourceIds.has(slot.ownerId)),
         suppressed: (importedGraph.suppressed || []).filter(entry => !rejectedSourceIds.has(entry.aId) && !rejectedSourceIds.has(entry.bId)),
     });
-    for (const [fromId, toId] of importedIdMap.entries()) {
-        if (fromId && toId && fromId !== toId) importedGraph = remapSocialGraphNpcId(importedGraph, fromId, toId);
-    }
+    importedGraph = remapSocialGraphNpcIds(importedGraph, importedIdMap);
     const validIds = new Set(npcs.map(npc => String(npc?.id || '')).filter(Boolean));
     importedGraph = filterGraphByIds(importedGraph, validIds);
     const currentGraph = filterGraphByIds(current.socialGraph, validIds);

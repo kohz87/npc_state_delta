@@ -134,6 +134,7 @@ import {
     preserveUndurableNpcStateSnapshot,
     readNpcStateDataFile,
     retireNpcStateDataFile,
+    quarantineUnreadableNpcStateDataFile,
     undurableNpcStateSnapshot,
     writeNpcStateDataFile,
 } from './storage.js';
@@ -303,7 +304,11 @@ async function scanCanonicalBaseCurrent(key, operation, label = 'scan') {
         return false;
     }
     const currentRevision = hydratedRevision(key);
-    const current = scanOperationCurrent(key, operation) && currentRevision === baseRevision;
+    // The awaited read is a window in which the source can be edited or deleted; the result must
+    // still belong to the exact history it was extracted from before it is merged or checkpointed.
+    const sourceIntact = getChatKey() === key && (!Array.isArray(operation?.sourceLineage)
+        || firstLineageDivergence(operation.sourceLineage, chatLineage(getContext().chat || [])) === -1);
+    const current = sourceIntact && scanOperationCurrent(key, operation) && currentRevision === baseRevision;
     if (!current) {
         recordFreshnessEvent(key, 'stale-operation-rejected', {
             reason: label,
@@ -921,6 +926,7 @@ function installCanonicalServerState(key, pointer, inspected, { reason = 'freshn
     if (inspected.retired) {
         const error = new Error(`NPC State Delta sidecar for ${key} was retired by another session. Reload or switch chats before making dossier changes.`);
         error.code = 'NPC_STATE_SIDECAR_RETIRED';
+        retiredInSessionChats.set(key, error);
         settings.sidecarTombstones[key] = { reason: inspected.payload.retireReason || 'retired-file', at: Date.now() };
         delete settings.dataFiles[key];
         hydratedChatKeys.delete(key);
@@ -1168,8 +1174,19 @@ async function detachBrokenSidecar() {
     const pointer = settings.dataFiles?.[key] || null;
     if (!isCanonicalChatKey(key) || !pointer?.path || chatHydrationStatus(key) !== 'error') return false;
     if (!window.confirm('Detach the broken NPC State Delta sidecar for this chat and start a fresh empty dossier? The old pointer is retained under recovery metadata and is not deleted automatically.')) return false;
+    let preserved = null;
+    try {
+        preserved = await quarantineUnreadableNpcStateDataFile({ chatKey: key, pointer, appVersion: NPC_STATE_VERSION, headers: requestHeaders() });
+    } catch (error) {
+        console.error('[NPC State Delta] broken sidecar could not be preserved; it was not detached.', error);
+        globalThis.toastr?.error?.(`NPC State Delta: the broken sidecar could not be preserved, so it was not detached. ${error?.message || error}`);
+        return false;
+    }
+    if (getChatKey() !== key) return false;
     bumpOwnershipEpoch(key);
-    settings.recoveryFiles[key] = { ...pointer, reason: 'manual-detach', retiredAt: Date.now() };
+    settings.recoveryFiles[key] = preserved
+        ? { ...preserved, reason: 'manual-detach', retiredAt: Date.now() }
+        : { ...pointer, reason: 'manual-detach', retiredAt: Date.now() };
     settings.sidecarTombstones[key] = { reason: 'manual-detach', at: Date.now() };
     delete settings.dataFiles[key];
     chatStateCache.delete(key);
@@ -1196,8 +1213,18 @@ function requestHeaders() {
     }
 }
 
+// Chats whose canonical sidecar this session watched another session retire. The tombstone makes a
+// later hydration start an empty dossier (intentional reuse of a retired name), but the same open
+// chat must stay blocked: retrying Scan would otherwise revive the retired dossier from the stale
+// host narration. Reopening the chat (CHAT_CHANGED) is the host lifecycle that releases it.
+const retiredInSessionChats = new Map();
+
 async function ensureChatStateLoaded(key = getChatKey()) {
     if (!key || key === 'no-chat' || !isCanonicalChatKey(key)) return freshChatState();
+    if (retiredInSessionChats.has(key)) {
+        hydrationErrors.set(key, retiredInSessionChats.get(key));
+        throw retiredInSessionChats.get(key);
+    }
     if (hydratedChatKeys.has(key)) return ensureHydratedStateFresh(key, { reason: 'hydrate-boundary' });
     if (loadingChatStates.has(key)) return loadingChatStates.get(key);
     const epoch = ownershipEpoch(key);
@@ -1692,10 +1719,14 @@ function hostIsOlderPrefix(state, liveLineage) {
     return liveLineage.length < stored.length && firstLineageDivergence(stored, liveLineage) === liveLineage.length;
 }
 
+// After adopting another session's newer dossier, the local chat is stale when it does not contain
+// that dossier's whole history: an older prefix, or older history plus a turn typed locally since.
 function noteAdoptedDossier(key, state, writerId = '') {
     if (key !== getChatKey() || openingHostChats.has(key)) return;
     if (writerId && String(writerId) === currentWriterId()) return;
-    if (hostIsOlderPrefix(state, chatLineage(getContext().chat || []))) staleHostChats.add(key);
+    const stored = Array.isArray(state?.lineage) ? state.lineage : [];
+    const divergence = firstLineageDivergence(stored, chatLineage(getContext().chat || []));
+    if (stored.length && divergence !== -1 && divergence < stored.length) staleHostChats.add(key);
 }
 
 // Messages this browser adds locally (a new turn, a reply) do not load the missing remote history,
@@ -2381,8 +2412,30 @@ function backfillScanMatchesTarget(npc, request) {
     if (!target) return false;
     const labels = [npc.name, ...(npc.aliases || [])].map(normalizeName).filter(Boolean);
     if (labels.some(label => label === target || label.startsWith(`${target} `) || target.startsWith(`${label} `))) return true;
+    // A role names its owner only for a role-labelled target ("clerk" for "Gate Clerk"); a role that
+    // merely mentions the target ("Assistant to Mira Deep") belongs to someone else.
     const role = normalizeName(npc.role);
-    return Boolean(role && (role.includes(target) || target.includes(role)));
+    return Boolean(role && role !== target && target.includes(role));
+}
+
+// A returned row is admissible for a single-target request only if no explicit identity field
+// contradicts the target: another roster member's id or name, or (for a proper-named target) a name
+// that is neither the target's label nor an expansion of it. Interim (role-labelled) targets may be
+// renamed by a revealed proper name.
+function rowContradictsTarget(row, target, roster = []) {
+    if (!row || !target) return true;
+    const others = (Array.isArray(roster) ? roster : []).filter(npc => npc && npc.id !== target.id);
+    const rowId = String(row.id || '').trim();
+    if (rowId && rowId !== String(target.id) && others.some(npc => String(npc.id) === rowId)) return true;
+    const rowName = String(row.name || '').trim();
+    if (!rowName) return false;
+    if (npcMatchesLabel(target, rowName)) return false;
+    if (others.some(npc => npcMatchesLabel(npc, rowName))) return true;
+    const key = normalizeName(rowName);
+    const expansion = [target.name, ...(target.aliases || [])].map(normalizeName).filter(Boolean)
+        .some(label => key.startsWith(`${label} `) || label.startsWith(`${key} `));
+    if (expansion) return false;
+    return String(target.identityKind || 'proper_name') === 'proper_name';
 }
 
 // A single-target request may accept its only returned row even when the model changed the label
@@ -2543,6 +2596,7 @@ async function scanNpcDossier(npcId) {
     });
     const scanStateVersion = Number(stateVersions.get(chatKey) || 0);
     const operation = beginScanOperation(chatKey, `dossier import for ${existing.name}`, { npcId: id, indicator: 'dossier' });
+    if (operation) operation.sourceLineage = lineage;
     if (!operation) {
         globalThis.toastr?.info?.('NPC State Delta: another dossier scan is already running in this chat.');
         return false;
@@ -2567,8 +2621,9 @@ async function scanNpcDossier(npcId) {
             return false;
         }
         const returned = Array.isArray(parsed.npcs) ? parsed.npcs : [];
-        const match = returned.find(npc => backfillScanMatchesTarget(npc, { npcId: id, label: existing.name }))
+        let match = returned.find(npc => backfillScanMatchesTarget(npc, { npcId: id, label: existing.name }))
             || (returned.length === 1 && soleRowMayBeTarget(returned[0], { npcId: id, labels: [existing.name, ...(existing.aliases || [])] }, state.npcs) ? returned[0] : null);
+        if (match && rowContradictsTarget(match, existing, state.npcs)) match = null;
         if (!match) {
             globalThis.toastr?.warning?.(`NPC State Delta: the dossier importer did not return ${existing.name}.`);
             return false;
@@ -2715,6 +2770,7 @@ async function refreshNpcFromChat(npcId) {
     });
     const scanStateVersion = Number(stateVersions.get(chatKey) || 0);
     const operation = beginScanOperation(chatKey, `chat refresh for ${existing.name}`, { npcId: id, indicator: 'refresh' });
+    if (operation) operation.sourceLineage = lineage;
     if (!operation) {
         globalThis.toastr?.info?.('NPC State Delta: another dossier scan is already running in this chat.');
         return false;
@@ -2741,6 +2797,7 @@ async function refreshNpcFromChat(npcId) {
         const returned = Array.isArray(parsed.npcs) ? parsed.npcs : [];
         let match = returned.find(npc => backfillScanMatchesTarget(npc, { npcId: id, label: existing.name }));
         if (!match && returned.length === 1 && soleRowMayBeTarget(returned[0], { npcId: id, labels: [existing.name, ...(existing.aliases || [])] }, state.npcs)) match = returned[0];
+        if (match && rowContradictsTarget(match, existing, state.npcs)) match = null;
         parsed.npcs = match ? [{
             ...match,
             id,
@@ -2755,7 +2812,7 @@ async function refreshNpcFromChat(npcId) {
         if (rawProfileUpdates.length) {
             const profile = rawProfileUpdates.find(item => String(item?.id || '') === id || (item?.name && npcMatchesLabel(existing, item.name)))
                 || (rawProfileUpdates.length === 1 && soleRowMayBeTarget(rawProfileUpdates[0], { npcId: id, labels: [existing.name, ...(existing.aliases || [])] }, state.npcs) ? rawProfileUpdates[0] : null);
-            parsed.profileUpdates = profile ? [{ ...profile, id, name: existing.name }] : [];
+            parsed.profileUpdates = profile && !rowContradictsTarget(profile, existing, state.npcs) ? [{ ...profile, id, name: existing.name }] : [];
         }
         const edgeTouchesTarget = edge => String(edge?.aId || edge?.a_id || '') === id
             || String(edge?.bId || edge?.b_id || '') === id
@@ -2832,7 +2889,12 @@ async function refreshNpcFromChat(npcId) {
         refreshed.relationship = structuredClone(liveBefore.relationship || DEFAULT_RELATIONSHIP);
         refreshed.lastRelationshipChange = structuredClone(liveBefore.lastRelationshipChange || refreshed.lastRelationshipChange);
         const proposedSummary = String(match?.relationshipSummary ?? match?.relationship_summary ?? '').trim().slice(0, 900);
-        if (proposedSummary && !(liveBefore.manualProfileFields || []).includes('relationshipSummary')) refreshed.relationshipSummary = proposedSummary;
+        // The reconciled summary must pass the same canonical consistency gate as every other path;
+        // a proposal the merge rejected (for example an unsupported obligation) is not restored here.
+        if (proposedSummary && !(liveBefore.manualProfileFields || []).includes('relationshipSummary')
+            && relationshipSummaryConsistent(proposedSummary, refreshed.relationship, transcript, refreshed.relationshipMilestones)) {
+            refreshed.relationshipSummary = calibrateRelationshipSummary(proposedSummary, refreshed.relationship);
+        }
         Object.assign(refreshed, protectTerminalNpc(liveBefore, refreshed));
         if (!await scanCanonicalBaseCurrent(chatKey, operation, 'dossier refresh final commit')) {
             globalThis.toastr?.info?.('NPC State Delta: another session updated this chat during the refresh; the stale result was discarded.');
@@ -2997,6 +3059,7 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
 
     const scanStateVersion = Number(stateVersions.get(chatKey) || 0);
     const operation = beginScanOperation(chatKey, `backfill for ${request.label}`, { npcId: request.npcId, indicator: 'backfill' });
+    if (operation) operation.sourceLineage = scanLineage;
     if (!operation) return false;
     setScanIndicator(true);
     try {
@@ -3025,6 +3088,12 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
             const targetRecord = getChatState(chatKey).npcs.find(item => item.id === request.npcId);
             const labels = [request.label, ...(targetRecord ? [targetRecord.name, ...(targetRecord.aliases || [])] : [])];
             if (soleRowMayBeTarget(returned[0], { npcId: request.npcId, labels }, getChatState(chatKey).npcs)) matches = returned;
+        }
+        {
+            const roster = getChatState(chatKey).npcs;
+            const targetRecord = roster.find(item => item.id === request.npcId)
+                || { id: request.npcId, name: request.label, aliases: [], identityKind: inferNpcIdentityKind(request.label) };
+            matches = matches.filter(row => !rowContradictsTarget(row, targetRecord, roster));
         }
         const liveBeforeBackfill = request.preserveLiveState === true
             ? getChatState(chatKey).npcs.find(item => item.id === request.npcId)
@@ -3059,6 +3128,22 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
             return false;
         }
         const latestState = getChatState(chatKey);
+        // A single-target backfill may change only its target, in every result channel: profile
+        // updates and social edges for other dossiers are dropped like their npc rows.
+        {
+            const target = latestState.npcs.find(item => item.id === request.npcId)
+                || { id: request.npcId, name: request.label, aliases: [], identityKind: inferNpcIdentityKind(request.label) };
+            const isTarget = row => row && (String(row.id || '') === String(target.id)
+                || (!row.id && row.name && !rowContradictsTarget(row, target, latestState.npcs)));
+            const rawProfiles = Array.isArray(parsed.profileUpdates) ? parsed.profileUpdates : (Array.isArray(parsed.profile_updates) ? parsed.profile_updates : []);
+            parsed.profileUpdates = rawProfiles.filter(isTarget).map(row => ({ ...row, id: target.id }));
+            delete parsed.profile_updates;
+            const touches = edge => String(edge?.aId || edge?.a_id || '') === String(target.id)
+                || String(edge?.bId || edge?.b_id || '') === String(target.id)
+                || npcMatchesLabel(target, edge?.a || edge?.from || edge?.source || '')
+                || npcMatchesLabel(target, edge?.b || edge?.to || edge?.target || '');
+            parsed.keyRelationshipEdges = (Array.isArray(parsed.keyRelationshipEdges) ? parsed.keyRelationshipEdges : []).filter(touches);
+        }
         const targetMessageId = Number.isInteger(messageId) ? messageId : latestMessageId(true);
         const merged = mergeScanResult(latestState, parsed, {
             maxNpcs: settings.maxNpcs,
@@ -3482,6 +3567,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
     }
 
     const operation = beginScanOperation(scanChatKey, manual ? 'manual dossier scan' : 'automatic dossier scan');
+    if (operation) operation.sourceLineage = scanLineage;
     if (!operation) return false;
     setScanIndicator(true);
     const state = getChatState(scanChatKey);
@@ -5180,8 +5266,13 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
     }
     // Cancel/Escape during the freshness wait (or a replaced editor) invalidates this Save: the
     // closing popup still holds the draft inputs, but the user abandoned them.
+    // An implicit save (Refresh saving the open editor first) has no popup argument: the editor
+    // popup it started under must not have been cancelled meanwhile either. Host Popup sets the
+    // result before its closing animation, while the draft inputs and activeEditorPopup still exist.
+    const affirmative = getContext().POPUP_RESULT?.AFFIRMATIVE;
     if ((editorAtStart && activeEditorPopup !== editorAtStart)
-        || (popup && popup.result !== getContext().POPUP_RESULT?.AFFIRMATIVE)) return false;
+        || (popup && popup.result !== affirmative)
+        || (!popup && editorAtStart && editorAtStart.result !== undefined && editorAtStart.result !== affirmative)) return false;
     if (activeEditorBaseRevision !== null && Number(activeEditorBaseRevision) !== workingCopyAdoption(originChatKey)) {
         globalThis.toastr?.warning?.('NPC State Delta: this editor was opened on an older server revision. Your typed draft is still open, but it was not applied. Review the newly loaded dossier and reopen the editor before saving.');
         return false;
@@ -5446,7 +5537,9 @@ async function setNpcPortrait(npcId, file, { chatKey, isCurrent = () => true, ge
     }
 }
 
-function setNpcPortraitSeed(npcId, seed, { chatKey } = {}) {
+function setNpcPortraitSeed(npcId, seed, { chatKey, isCurrent = () => true } = {}) {
+    // Runs after the freshness wait: a workflow the user closed meanwhile must not still mutate.
+    if (!isCurrent()) return false;
     if (!chatKey || chatKey !== getChatKey() || !requireReadyChatMutation('edit portrait seed', chatKey)) return false;
     const npc = getChatState(chatKey).npcs.find(item => item.id === String(npcId || ''));
     if (!npc) return false;
@@ -6429,11 +6522,11 @@ function registerEvents() {
         source.on(events.MESSAGE_SENT, async (messageId) => {
             const key = getChatKey();
             if (key === 'no-chat') return;
-            // SillyTavern waits for this listener before generating. A loaded dossier is used as is;
-            // the scan that follows the reply re-checks the server copy before writing anything.
-            if (!hydratedChatKeys.has(key)) {
-                try { await ensureChatStateLoaded(key); } catch (error) { console.error('[NPC State Delta] user-turn lineage update skipped because chat hydration failed.', error); return; }
-            }
+            // SillyTavern waits for this listener before generating. The freshness read must stay: a
+            // newer dossier from another session has to be adopted (and an older local history
+            // recognised) before this turn is certified or its prompt is built. It is a revalidating
+            // read, so an unchanged sidecar costs a 304 rather than a full download.
+            try { await ensureChatStateLoaded(key); } catch (error) { console.error('[NPC State Delta] user-turn lineage update skipped because chat hydration failed.', error); return; }
             if (getChatKey() !== key) return;
             // This listener maintains branch lineage and refreshes the injection so an off-screen NPC
             // the player names reaches this generation; text never dispatches mutations.
@@ -6529,6 +6622,7 @@ function registerEvents() {
             closeNpcEditor();
             let key = getChatKey();
             staleHostChats.delete(key);
+            retiredInSessionChats.delete(key);
             openingHostChats.add(key);
             try {
                 if (isCanonicalChatKey(key)) await ensureChatStateLoaded(key);

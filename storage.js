@@ -514,6 +514,31 @@ export async function writeNpcStateDataFile({ chatKey, state, appVersion = '', p
     }
 }
 
+// Detach of an unreadable sidecar: copy its exact bytes to a recovery file (verified), then replace
+// the canonical file with a retired marker, which a fresh unpointered write may replace. Without
+// this, the deterministic path still holds the unreadable bytes and every fresh write fails on them.
+export async function quarantineUnreadableNpcStateDataFile({ chatKey, pointer, appVersion = '', fetchFn = globalThis.fetch, headers = {} }) {
+    if (typeof fetchFn !== 'function') throw new Error('fetch() is unavailable for NPC State Delta data-file persistence.');
+    const key = String(chatKey || '');
+    if (!pointer?.path) return null;
+    cancelPendingNpcStateWrite(key);
+    return withWriterLock(key, async () => {
+        const response = await fetchFn(pointer.path, { method: 'GET', cache: 'no-store' });
+        if (response?.status === 404) return null;
+        if (!response?.ok) throw new Error(`NPC State Delta could not read the broken sidecar to preserve it (HTTP ${response?.status || 'error'}).`);
+        const raw = typeof response.text === 'function' ? await response.text() : '';
+        const copyName = makeNpcStateRecoveryFileName(key).replace(/\.json$/i, '-unreadable.json');
+        const copy = await uploadPayload({ name: copyName, json: raw, fetchFn, headers });
+        const check = await fetchFn(copy.path, { method: 'GET', cache: 'no-store' });
+        if (!check?.ok || (typeof check.text === 'function' ? await check.text() : null) !== raw) {
+            throw new Error('NPC State Delta could not verify the preserved copy of the broken sidecar; nothing was detached.');
+        }
+        const name = pointer.name || makeNpcStateDataFileName(key);
+        await uploadPayload({ name, json: encodeRetiredStateFilePayload(key, 'manual-detach', appVersion, { revision: 1, writerId }), fetchFn, headers });
+        return { name: copyName, path: copy.path, preservedFrom: pointer.path };
+    });
+}
+
 export async function retireNpcStateDataFile({ chatKey, pointer = null, reason = 'retired', appVersion = '', fetchFn = globalThis.fetch, headers = {} }) {
     if (typeof fetchFn !== 'function') throw new Error('fetch() is unavailable for NPC State Delta data-file persistence.');
     const key = String(chatKey || '');
