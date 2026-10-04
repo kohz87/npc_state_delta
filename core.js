@@ -8,10 +8,12 @@ import { isTerminalNpcDeath } from './terminal-lifecycle.js';
 import { resolveNpcAppearance } from './appearance.js';
 import { removeNpcFromSocialGraph, purgeNpcStructuredReferences } from './social.js';
 import {
+    STORY_DAY_SCHEME,
     calendarDayNumber,
     currentCalendarDate,
     extractStructuredWorldDate,
     getActiveCalendarConfig,
+    migrateLegacyStoryDay,
     normalizeCalendarDate,
 } from './calendar.js';
 import {
@@ -295,11 +297,13 @@ const DAY_TRACKED_FIELDS = Object.freeze(['personality', 'speech', 'behaviorProf
 
 export function normalizeFieldChangeDays(value) {
     const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const current = Number(source.scheme) === STORY_DAY_SCHEME;
     const out = {};
     for (const field of DAY_TRACKED_FIELDS) {
-        const day = Number(source[field]);
+        const day = current ? Number(source[field]) : migrateLegacyStoryDay(source[field]);
         if (Number.isInteger(day)) out[field] = day;
     }
+    if (Object.keys(out).length) out.scheme = STORY_DAY_SCHEME;
     return out;
 }
 
@@ -311,7 +315,10 @@ function stampFieldChanges(before, after, turn, storyDay = null) {
     for (const field of CHANGE_TRACKED_FIELDS) {
         if (JSON.stringify(trackedFieldValue(before, field)) !== JSON.stringify(trackedFieldValue(after, field))) {
             changes[field] = turn;
-            if (Number.isInteger(storyDay) && DAY_TRACKED_FIELDS.includes(field)) days[field] = storyDay;
+            if (Number.isInteger(storyDay) && DAY_TRACKED_FIELDS.includes(field)) {
+                days[field] = storyDay;
+                days.scheme = STORY_DAY_SCHEME;
+            }
         }
     }
     return withDays({ ...after, fieldChanges: changes });
@@ -361,13 +368,12 @@ function applyDeterministicBirthdayRollover(npc, previousRaw, ordinaryUpdate, op
     if (!npc || !previousRaw || !referenceDate || isTerminalNpcDeath(npc)) return npc;
     const manualFields = Array.isArray(npc.manualProfileFields) ? npc.manualProfileFields : [];
     if (manualFields.includes('age')) return npc;
-    if (!sameCalendarBirthday(npc.birthDate, referenceDate, calendar)) return npc;
+    const exactBirthday = sameCalendarBirthday(npc.birthDate, referenceDate, calendar);
 
     const previousAge = exactStoredAge(previousRaw.age);
     if (previousAge === null) return npc;
     const currentAge = exactStoredAge(npc.age);
     const calendarAge = Number.isInteger(npc.calendarAge) ? npc.calendarAge : null;
-    let targetAge = calendarAge !== null && calendarAge > previousAge ? calendarAge : currentAge;
 
     const previousBirthDate = normalizeCalendarDate(
         previousRaw.birthDate ?? previousRaw.birth_date ?? previousRaw.birthday,
@@ -380,6 +386,15 @@ function applyDeterministicBirthdayRollover(npc, previousRaw, ordinaryUpdate, op
             .includes(String(ordinaryUpdate?.birthDateState ?? ordinaryUpdate?.birth_date_state ?? '').trim().toLowerCase());
     const ageState = String(ordinaryUpdate?.ageState ?? ordinaryUpdate?.age_state ?? '').trim().toLowerCase();
     const correctedAge = ageState === 'correct' || ageState === 'correction';
+    if (!exactBirthday) {
+        // A scan after a skipped birthday: only an unchanged full (year-bearing) birth date proves
+        // the elapsed rollover, and only that calendar delta may carry into apparent age.
+        const currentBirthDate = normalizeCalendarDate(npc.birthDate, calendar);
+        const sameFullBirthDate = previousHadYear && currentBirthDate?.year === previousBirthDate.year
+            && sameCalendarBirthday(currentBirthDate, previousBirthDate, calendar);
+        if (!sameFullBirthDate || birthdayEstablishedNow || correctedAge || calendarAge === null || calendarAge <= previousAge) return npc;
+    }
+    let targetAge = calendarAge !== null && calendarAge > previousAge ? calendarAge : currentAge;
     // Only a birthday narrated about this NPC counts; another NPC's birthday on the same date does not.
     const narratedBirthday = npcBirthdayNarrated(npc, birthdayPromptSource(options));
 
@@ -387,7 +402,7 @@ function applyDeterministicBirthdayRollover(npc, previousRaw, ordinaryUpdate, op
     // exact stored birthday and explicitly presents it as a birthday/nameday, the accepted age
     // is the pre-birthday baseline. Advance once, then anchor the derived year so repeated scans
     // on the same day are idempotent. A birthday first established in this same scan is excluded.
-    if (!previousHadYear && !birthdayEstablishedNow && !correctedAge && narratedBirthday
+    if (exactBirthday && !previousHadYear && !birthdayEstablishedNow && !correctedAge && narratedBirthday
         && (targetAge === null || targetAge <= previousAge)) {
         targetAge = previousAge + 1;
     }
@@ -469,8 +484,9 @@ function normalizeProfileDevelopmentConcept(raw = {}) {
     const turns = [...new Set((Array.isArray(raw?.turns) ? raw.turns : [])
         .map(profileDevelopmentTurn).filter(value => value !== null))]
         .sort((a, b) => a - b).slice(-PROFILE_DEVELOPMENT_OBSERVATION_LIMIT);
+    const currentDays = Number(raw?.dayScheme) === STORY_DAY_SCHEME;
     const days = [...new Set((Array.isArray(raw?.days) ? raw.days : [])
-        .map(Number).filter(Number.isInteger))]
+        .map(value => (currentDays ? Number(value) : migrateLegacyStoryDay(value))).filter(Number.isInteger))]
         .sort((a, b) => a - b).slice(-PROFILE_DEVELOPMENT_OBSERVATION_LIMIT);
     const firstTurn = profileDevelopmentTurn(raw?.firstTurn);
     const lastTurn = profileDevelopmentTurn(raw?.lastTurn);
@@ -495,7 +511,7 @@ function normalizeProfileDevelopmentConcept(raw = {}) {
         observationCount,
         sourceMessageIds,
         turns,
-        ...(days.length ? { days } : {}),
+        ...(days.length ? { days, dayScheme: STORY_DAY_SCHEME } : {}),
         evidenceSamples,
         latestEvidence,
     };
@@ -668,6 +684,7 @@ function observeProfileDevelopment(field, ledger, rawUpdate = {}, options = {}) 
         if (day !== null) {
             record.days = [...new Set([...(Array.isArray(record.days) ? record.days : []), day])]
                 .sort((a, b) => a - b).slice(-PROFILE_DEVELOPMENT_OBSERVATION_LIMIT);
+            record.dayScheme = STORY_DAY_SCHEME;
         }
         if (turn !== null) {
             record.turns = [...new Set([...record.turns, turn])]
@@ -775,16 +792,25 @@ function readyProfileDevelopmentRecords(field, ledger, rawUpdate = {}) {
         && current.some(parsed => developmentRecordMatches(record, parsed)));
 }
 
-function durableUpdateForNpc(scanResult, npc) {
+// The row that supplies one durable field for this NPC. Profile rows still come before ordinary
+// rows, but a matching row that does not carry the field (an unchanged Speech-only profile row)
+// must not hide another field's candidate and evidence in a later matching row.
+function durableUpdateForNpc(scanResult, npc, field = '') {
     const profile = Array.isArray(scanResult?.profileUpdates) ? scanResult.profileUpdates
         : (Array.isArray(scanResult?.profile_updates) ? scanResult.profile_updates : []);
     const ordinary = Array.isArray(scanResult?.npcs) ? scanResult.npcs : [];
-    for (const raw of [...profile, ...ordinary]) {
-        if (!raw || typeof raw !== 'object') continue;
-        if (raw.id && String(raw.id) === String(npc?.id)) return raw;
-        if (raw.name && mechanics.npcMatchesLabel(npc, raw.name)) return raw;
-    }
-    return null;
+    const matches = [...profile, ...ordinary].filter(raw => raw && typeof raw === 'object' && (
+        (raw.id && String(raw.id) === String(npc?.id))
+        || (raw.name && mechanics.npcMatchesLabel(npc, raw.name))
+    ));
+    if (!field) return matches[0] || null;
+    const has = (raw, key) => Object.prototype.hasOwnProperty.call(raw, key);
+    const snake = field.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+    const carries = raw => has(raw, field) || has(raw, snake)
+        || has(raw, `${field}State`) || has(raw, `${snake}_state`)
+        || has(raw, `${field}Reason`) || has(raw, `${snake}_reason`)
+        || profileDevelopmentEvidence(field, raw).length > 0;
+    return matches.find(carries) || matches[0] || null;
 }
 
 function appearanceUpdateForNpc(scanResult, npc) {
@@ -821,11 +847,11 @@ function prepareProfileDevelopmentState(state, scanResult, options = {}) {
         : (Array.isArray(scanResult?.profile_updates) ? scanResult.profile_updates : []);
     const singleTargetUpdate = profileUpdates.length === 1;
     const npcs = (Array.isArray(state?.npcs) ? state.npcs : []).map(rawNpc => {
-        const update = durableUpdateForNpc(scanResult, rawNpc);
         const fieldPlans = {};
         let nextNpc = rawNpc;
         for (const field of Object.keys(PROFILE_DEVELOPMENT_FIELDS)) {
             const config = PROFILE_DEVELOPMENT_FIELDS[field];
+            const update = durableUpdateForNpc(scanResult, rawNpc, field);
             const locked = Array.isArray(rawNpc?.manualProfileFields) && rawNpc.manualProfileFields.includes(field);
             const evidence = profileDevelopmentEvidence(field, update || {});
             const candidate = profileDevelopmentText(field, update?.[field]);
@@ -1753,4 +1779,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.0.93';
+export const NPC_STATE_VERSION = '1.0.94';

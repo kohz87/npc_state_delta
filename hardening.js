@@ -219,6 +219,9 @@ async function moveCharacterOwnerState(oldAvatar, newAvatar) {
                 if (oldPointer?.path) retiredPredecessors.push({ key: oldKey, pointer: oldPointer });
                 changed = true;
             } catch (error) {
+                // A resumed transaction already holds the only verified copies of a source that may
+                // be retired; any failure while resuming (even a plain read error) must keep them.
+                if (pending && error && typeof error === 'object') error.retirementUncertain = true;
                 if (error?.retirementUncertain) {
                     // The source may already be retired: keep the verified destination and recovery
                     // copies and register the recovery so the dossier stays restorable.

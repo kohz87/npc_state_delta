@@ -550,17 +550,22 @@ export function formPortraitFor(assets = {}, npcId = '', formName = '') {
 }
 
 // Compact identity of the resolved current presentation. A portrait records it when attached so
-// the dossier can show that the described appearance moved on after the image was made.
-export function appearanceFingerprint(npc = {}, { form = '' } = {}) {
+// the dossier can show that the described appearance moved on after the image was made. Version 2
+// also covers the explicit apparent age the portrait prompt draws; a recorded version-1 value is
+// compared with the version-1 identity, so portraits attached before it are not all marked stale.
+export function appearanceFingerprint(npc = {}, { form = '', version = 2 } = {}) {
     const subject = form ? { ...npc, currentForm: form, currentFormUnknown: false } : npc;
     const text = normalizeName(resolveNpcAppearance(subject));
     if (!text) return '';
+    const legacy = Number(version) === 1;
+    const apparentAge = legacy ? '' : normalizeName(npc?.apparentAge);
+    const material = apparentAge ? `${text}|apparent age:${apparentAge}` : text;
     let hash = 0x811c9dc5;
-    for (let index = 0; index < text.length; index += 1) {
-        hash ^= text.charCodeAt(index);
+    for (let index = 0; index < material.length; index += 1) {
+        hash ^= material.charCodeAt(index);
         hash = Math.imul(hash, 0x01000193) >>> 0;
     }
-    return `a1:${hash.toString(36)}:${text.length}`;
+    return `a${legacy ? 1 : 2}:${hash.toString(36)}:${material.length}`;
 }
 
 export function appearanceDraftRecord(npc = {}, draft = {}, { lockAppearance = false } = {}) {

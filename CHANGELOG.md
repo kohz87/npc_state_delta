@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 1.0.94 - 4 October 2026
+
+Fixes from an external deep audit of 1.0.93 (fifteen reproduced findings):
+
+- Keep the verified copies of an interrupted character rename when its retry hits a read error (a 1.0.93 regression), so a later retry can still finish it.
+- Never save unsaved local work over a dossier file that another session retired, whether through Save/flush or a character rename; the work is kept for recovery only.
+- Regenerate, swipe and continue now check the server for a newer dossier before building the prompt, like an ordinary send (an unchanged file costs a short 304 request).
+- Scan dossier's structured import changes only its target, including profile and bond updates.
+- Scan dossier and Refresh reject a profile row or bond whose id and name point at different people.
+- Detach keeps its exact backup of the broken file registered even if the server's reply is lost, and a retry does not replace it with an empty marker.
+- Deleting a middle message also removes unnamed relatives (for example twin daughters) that only that message added.
+- Deleting an NPC's introduction no longer removes them when a later message gave them a bond that is hidden behind the five shown bonds.
+- An import that skips a duplicate dossier no longer gives that dossier's bonds and relatives to another NPC.
+- A bond stored in both directions no longer takes a second slot at the 240-bond limit.
+- Importing with swapped ids keeps both NPCs' unnamed relatives.
+- Numeric dates count Dec 31 to Jan 1 and Feb 28 to Mar 1 (common year) as one day; stored days are converted.
+- An unchanged Speech row no longer stops Personality development from the same scan.
+- A scan after a skipped birthday keeps the apparent-age offset.
+- A portrait generated before an apparent-age change is rejected, and the dossier marks such a portrait as outdated.
+
 ## 1.0.93 - 3 October 2026
 
 Fixes from an external deep audit of 1.0.92 (twenty-three reproduced findings):

@@ -1169,7 +1169,8 @@ export function revertDeletedBlockEffects(state, currentState, checkpoints, prev
             // Introduced by the deleted block: gone with it unless a later message used the NPC. The
             // exact before-state proves it did not exist, so a death recorded in the block goes too.
             if (jsonEqual(withoutKeys(npc, NPC_REMOVAL_IGNORED), withoutKeys(then, NPC_REMOVAL_IGNORED))
-                && !referencedAfterBlock(currentState.npcs, afterNpcs, npc)) {
+                && !referencedAfterBlock(currentState.npcs, afterNpcs, npc)
+                && !graphUsedAfterBlock(currentState.socialGraph, after.socialGraph, npc, currentState.npcs)) {
                 result.removed.push({ id, name: String(npc.name || '') });
                 continue;
             }
@@ -1209,6 +1210,22 @@ export function revertDeletedBlockEffects(state, currentState, checkpoints, prev
             result.socialEdges += 1;
             return [structuredClone(was)];                                // changed by the block
         }).filter(edge => liveIds.has(String(edge?.aId || '')) && liveIds.has(String(edge?.bId || '')));
+        // Unresolved relative slots follow the same rule: a slot the block added and no retained
+        // message touched goes with it; one the block changed reverts. Deleted family facts must
+        // not survive as slots that a later scan would consume as evidence.
+        const slotMap = list => new Map(normalizeSocialGraph({ unresolved: list }).unresolved.map(slot => [slot.id, slot]));
+        const beforeSlots = slotMap(before.socialGraph.unresolved);
+        const afterSlots = slotMap(after.socialGraph.unresolved);
+        graph.unresolved = normalizeSocialGraph({ unresolved: graph.unresolved }).unresolved.flatMap(slot => {
+            const id = String(slot?.id || '');
+            const then = afterSlots.get(id);
+            const was = beforeSlots.get(id);
+            if (!id || !then || !jsonEqual(slot, then)) return [slot];
+            if (!was) { result.socialEdges += 1; return []; }            // added by the block
+            if (jsonEqual(was, then)) return [slot];
+            result.socialEdges += 1;
+            return [structuredClone(was)];                                // changed by the block
+        }).filter(slot => liveIds.has(String(slot?.ownerId || '')));
         currentState.socialGraph = graph;
     }
     currentState.candidates = removeAddedItems(currentState.candidates, before.candidates, after.candidates);
@@ -1242,6 +1259,26 @@ function referencedAfterBlock(liveNpcs, afterNpcs, npc) {
         .some(mentionsIn);
     return (Array.isArray(liveNpcs) ? liveNpcs : []).some(other => other && other !== npc && other.id !== npc.id
         && mentions(other) && !mentions(afterNpcs.get(String(other.id || ''))));
+}
+
+// Whether a retained message gave this NPC canonical social continuity: a live, non-inferred graph
+// edge to another live NPC that the deleted block's end state did not already hold. The five-item
+// bond projection is only a view, so a hidden edge counts as later use too.
+function graphUsedAfterBlock(liveGraph, afterGraph, npc, liveNpcs) {
+    const id = String(npc?.id || '');
+    if (!id) return false;
+    const liveIds = new Set((Array.isArray(liveNpcs) ? liveNpcs : []).map(other => String(other?.id || '')));
+    const semantic = edge => edge ? [edge.aId, edge.bId, edge.aToB, edge.bToA, edge.aDynamic, edge.bDynamic, edge.confidence].map(value => String(value ?? '')) : null;
+    const afterEdges = new Map((Array.isArray(afterGraph?.edges) ? afterGraph.edges : []).map(edge => [String(edge?.id || ''), edge]));
+    return (Array.isArray(liveGraph?.edges) ? liveGraph.edges : []).some(edge => {
+        if (!edge || edge.inferred === true) return false;
+        const a = String(edge.aId || '');
+        const b = String(edge.bId || '');
+        if (a !== id && b !== id) return false;
+        const other = a === id ? b : a;
+        if (!other || other === id || !liveIds.has(other)) return false;
+        return !jsonEqual(semantic(edge), semantic(afterEdges.get(String(edge.id || ''))));
+    });
 }
 
 // References to an NPC that was removed together with the deleted block.

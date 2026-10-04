@@ -121,6 +121,7 @@ import {
     applyManualKeyRelationshipEdit,
     removeNpcFromSocialGraph,
     purgeNpcStructuredReferences,
+    resolveNpcReference,
 } from './social.js';
 import {
     adoptNpcStateDataFileMetadata,
@@ -927,6 +928,7 @@ function installCanonicalServerState(key, pointer, inspected, { reason = 'freshn
         const error = new Error(`NPC State Delta sidecar for ${key} was retired by another session. Reload or switch chats before making dossier changes.`);
         error.code = 'NPC_STATE_SIDECAR_RETIRED';
         retiredInSessionChats.set(key, error);
+        holdRetiredLocalWork(key);
         settings.sidecarTombstones[key] = { reason: inspected.payload.retireReason || 'retired-file', at: Date.now() };
         delete settings.dataFiles[key];
         hydratedChatKeys.delete(key);
@@ -1175,18 +1177,30 @@ async function detachBrokenSidecar() {
     if (!isCanonicalChatKey(key) || !pointer?.path || chatHydrationStatus(key) !== 'error') return false;
     if (!window.confirm('Detach the broken NPC State Delta sidecar for this chat and start a fresh empty dossier? The old pointer is retained under recovery metadata and is not deleted automatically.')) return false;
     let preserved = null;
+    let registered = false;
+    const registerBackup = copy => {
+        settings.recoveryFiles[key] = { ...copy, reason: 'manual-detach', retiredAt: Date.now() };
+        registered = true;
+        persistSettings();
+    };
     try {
-        preserved = await quarantineUnreadableNpcStateDataFile({ chatKey: key, pointer, appVersion: NPC_STATE_VERSION, headers: requestHeaders() });
+        preserved = await quarantineUnreadableNpcStateDataFile({ chatKey: key, pointer, appVersion: NPC_STATE_VERSION, headers: requestHeaders(), onPreserved: registerBackup });
     } catch (error) {
-        console.error('[NPC State Delta] broken sidecar could not be preserved; it was not detached.', error);
-        globalThis.toastr?.error?.(`NPC State Delta: the broken sidecar could not be preserved, so it was not detached. ${error?.message || error}`);
+        console.error('[NPC State Delta] broken sidecar detach did not complete.', error);
+        globalThis.toastr?.error?.(registered
+            ? `NPC State Delta: the broken sidecar was preserved and its backup registered, but detaching did not complete. Retry Detach. ${error?.message || error}`
+            : `NPC State Delta: the broken sidecar could not be preserved, so it was not detached. ${error?.message || error}`);
         return false;
     }
     if (getChatKey() !== key) return false;
     bumpOwnershipEpoch(key);
-    settings.recoveryFiles[key] = preserved
-        ? { ...preserved, reason: 'manual-detach', retiredAt: Date.now() }
-        : { ...pointer, reason: 'manual-detach', retiredAt: Date.now() };
+    // A retry that finds this detach already committed keeps the registered original backup.
+    const keepRegistered = preserved?.alreadyDetached && settings.recoveryFiles[key]?.reason === 'manual-detach' && settings.recoveryFiles[key]?.preservedFrom === pointer.path;
+    if (!keepRegistered) {
+        settings.recoveryFiles[key] = preserved?.path
+            ? { ...preserved, reason: 'manual-detach', retiredAt: Date.now() }
+            : { ...pointer, reason: 'manual-detach', retiredAt: Date.now() };
+    }
     settings.sidecarTombstones[key] = { reason: 'manual-detach', at: Date.now() };
     delete settings.dataFiles[key];
     chatStateCache.delete(key);
@@ -1198,7 +1212,8 @@ async function detachBrokenSidecar() {
     persistedVersions.delete(key);
     stateWritePromises.delete(key);
     const state = setChatState(key, freshChatState(), { markLoaded: true });
-    state.lineage = chatLineage(getContext().chat || []);    persistSettings();
+    state.lineage = chatLineage(getContext().chat || []);
+    persistSettings();
     renderDossier();
     updateInjection();
     globalThis.toastr?.warning?.('NPC State Delta: broken sidecar detached. The chat now has a fresh dossier; the previous pointer remains in recovery metadata.');
@@ -1218,6 +1233,26 @@ function requestHeaders() {
 // chat must stay blocked: retrying Scan would otherwise revive the retired dossier from the stale
 // host narration. Reopening the chat (CHAT_CHANGED) is the host lifecycle that releases it.
 const retiredInSessionChats = new Map();
+
+// Observed retirement is authoritative at the durability boundary too: dirty local work for that
+// chat must never be published over the retired marker (an unpointered writer may otherwise reuse
+// the deterministic path). Keep it only as a recovery-only snapshot and stop its queued writes.
+function holdRetiredLocalWork(key) {
+    const error = retiredInSessionChats.get(key);
+    if (!error) return null;
+    if (stateWriteTimers.has(key)) {
+        clearTimeout(stateWriteTimers.get(key));
+        stateWriteTimers.delete(key);
+    }
+    const existing = undurableNpcStateSnapshot(key);
+    const dirty = Number(stateVersions.get(key) || 0) > Number(persistedVersions.get(key) ?? -1);
+    if ((dirty && chatStateCache.has(key)) || (existing && existing.recoveryOnly !== true)) {
+        const state = dirty && chatStateCache.has(key) ? structuredClone(chatStateCache.get(key)) : existing.state;
+        cancelPendingNpcStateWrite(key);
+        preserveUndurableNpcStateSnapshot({ chatKey: key, state, appVersion: NPC_STATE_VERSION, pointer: null, error, reason: 'retired-in-session' });
+    }
+    return error;
+}
 
 async function ensureChatStateLoaded(key = getChatKey()) {
     if (!key || key === 'no-chat' || !isCanonicalChatKey(key)) return freshChatState();
@@ -1362,6 +1397,8 @@ function queueStateFileWrite(key = getChatKey(), delay = STATE_WRITE_DELAY) {
 
 async function flushStateFile(key = getChatKey()) {
     if (!key || key === 'no-chat' || !isCanonicalChatKey(key) || !chatStateCache.has(key)) return null;
+    const retired = holdRetiredLocalWork(key);
+    if (retired) throw retired;
     assertChatHydratedForWrite(key);
     if (stateWriteTimers.has(key)) {
         clearTimeout(stateWriteTimers.get(key));
@@ -2155,6 +2192,9 @@ async function flushLifecycleOwner(kind = 'chat', ownerId = '') {
     });
     const failures = [];
     for (const key of keys) {
+        // A chat retired in this session has no live owner state to move; its dirty work stays
+        // recovery-only instead of being flushed back over the retired marker.
+        if (holdRetiredLocalWork(key)) continue;
         try { await settleStateFileWrite(key, { flush: true }); }
         catch (error) {
             failures.push({ key, error });
@@ -2438,6 +2478,42 @@ function rowContradictsTarget(row, target, roster = []) {
     return String(target.identityKind || 'proper_name') === 'proper_name';
 }
 
+// Single-target channel scope must agree with what the merge will mutate. A profile row binds to the
+// target only when no explicit identity field contradicts it (an exact id with another NPC's name is
+// a contradiction); it is rewritten to the target's id and name so later name-based matching cannot
+// reach the other NPC. An edge endpoint resolves like social.parseScanEdges (explicit id first, then
+// label); an endpoint whose id and label name different people rejects the edge.
+function profileRowBindsToTarget(row, target, roster = []) {
+    if (!row || typeof row !== 'object' || !target) return false;
+    const rowId = String(row.id || '').trim();
+    if (rowId && rowId !== String(target.id)) return false;
+    if (!rowId && !String(row.name || '').trim()) return false;
+    return !rowContradictsTarget(row, target, roster);
+}
+
+function edgeTouchesResolvedTarget(edge, target, roster = []) {
+    if (!edge || typeof edge !== 'object' || !target) return false;
+    const npcs = (Array.isArray(roster) ? roster : []).some(npc => String(npc?.id || '') === String(target.id)) ? roster : [...(roster || []), target];
+    const endpoint = (idValue, labelValue) => {
+        const id = String(idValue || '').trim();
+        const label = String(labelValue || '').trim();
+        const resolved = resolveNpcReference(npcs, id || label);
+        if (resolved && id && label && String(resolved.id) === id && rowContradictsTarget({ name: label }, resolved, npcs)) return { contradiction: true };
+        return { npc: resolved };
+    };
+    const a = endpoint(edge.aId ?? edge.a_id, edge.a ?? edge.from ?? edge.source);
+    const b = endpoint(edge.bId ?? edge.b_id, edge.b ?? edge.to ?? edge.target);
+    if (a.contradiction || b.contradiction) return false;
+    return String(a.npc?.id || '') === String(target.id) || String(b.npc?.id || '') === String(target.id);
+}
+
+function scopeProfileUpdatesToTarget(parsed, target, roster = []) {
+    const rawProfiles = Array.isArray(parsed?.profileUpdates) ? parsed.profileUpdates : (Array.isArray(parsed?.profile_updates) ? parsed.profile_updates : []);
+    parsed.profileUpdates = rawProfiles.filter(row => profileRowBindsToTarget(row, target, roster)).map(row => ({ ...row, id: target.id, name: target.name }));
+    delete parsed.profile_updates;
+    return parsed.profileUpdates;
+}
+
 // A single-target request may accept its only returned row even when the model changed the label
 // (e.g. expanded a short name), but never a row that explicitly identifies someone else: that
 // would write another NPC's lifecycle and profile into the requested dossier.
@@ -2637,6 +2713,11 @@ async function scanNpcDossier(npcId) {
             relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 },
             relationshipChangeReason: '',
         }];
+        // The importer is single-target in every channel, like backfill and Refresh.
+        scopeProfileUpdatesToTarget(parsed, existing, state.npcs);
+        parsed.keyRelationshipEdges = (Array.isArray(parsed.keyRelationshipEdges) ? parsed.keyRelationshipEdges : (Array.isArray(parsed.key_relationship_edges) ? parsed.key_relationship_edges : []))
+            .filter(edge => edgeTouchesResolvedTarget(edge, existing, state.npcs));
+        delete parsed.key_relationship_edges;
         const latest = getChatState(chatKey);
         const targetMessageId = latestMessageId(true);
         const merged = mergeScanResult(latest, parsed, {
@@ -2810,14 +2891,11 @@ async function refreshNpcFromChat(npcId) {
         }] : [];
         const rawProfileUpdates = Array.isArray(parsed.profileUpdates) ? parsed.profileUpdates : (Array.isArray(parsed.profile_updates) ? parsed.profile_updates : []);
         if (rawProfileUpdates.length) {
-            const profile = rawProfileUpdates.find(item => String(item?.id || '') === id || (item?.name && npcMatchesLabel(existing, item.name)))
+            const profile = rawProfileUpdates.find(item => (String(item?.id || '') === id || (item?.name && npcMatchesLabel(existing, item.name))) && profileRowBindsToTarget(item, existing, state.npcs))
                 || (rawProfileUpdates.length === 1 && soleRowMayBeTarget(rawProfileUpdates[0], { npcId: id, labels: [existing.name, ...(existing.aliases || [])] }, state.npcs) ? rawProfileUpdates[0] : null);
             parsed.profileUpdates = profile && !rowContradictsTarget(profile, existing, state.npcs) ? [{ ...profile, id, name: existing.name }] : [];
         }
-        const edgeTouchesTarget = edge => String(edge?.aId || edge?.a_id || '') === id
-            || String(edge?.bId || edge?.b_id || '') === id
-            || npcMatchesLabel(existing, edge?.a || edge?.from || edge?.source || '')
-            || npcMatchesLabel(existing, edge?.b || edge?.to || edge?.target || '');
+        const edgeTouchesTarget = edge => edgeTouchesResolvedTarget(edge, existing, state.npcs);
         const localEdges = extractExplicitKeyRelationshipEdges(transcript, state.npcs, currentExclusions()).filter(edgeTouchesTarget);
         const modelEdges = (Array.isArray(parsed.keyRelationshipEdges) ? parsed.keyRelationshipEdges : []).filter(edgeTouchesTarget);
         parsed.keyRelationshipEdges = [...modelEdges, ...localEdges];
@@ -3133,16 +3211,8 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
         {
             const target = latestState.npcs.find(item => item.id === request.npcId)
                 || { id: request.npcId, name: request.label, aliases: [], identityKind: inferNpcIdentityKind(request.label) };
-            const isTarget = row => row && (String(row.id || '') === String(target.id)
-                || (!row.id && row.name && !rowContradictsTarget(row, target, latestState.npcs)));
-            const rawProfiles = Array.isArray(parsed.profileUpdates) ? parsed.profileUpdates : (Array.isArray(parsed.profile_updates) ? parsed.profile_updates : []);
-            parsed.profileUpdates = rawProfiles.filter(isTarget).map(row => ({ ...row, id: target.id }));
-            delete parsed.profile_updates;
-            const touches = edge => String(edge?.aId || edge?.a_id || '') === String(target.id)
-                || String(edge?.bId || edge?.b_id || '') === String(target.id)
-                || npcMatchesLabel(target, edge?.a || edge?.from || edge?.source || '')
-                || npcMatchesLabel(target, edge?.b || edge?.to || edge?.target || '');
-            parsed.keyRelationshipEdges = (Array.isArray(parsed.keyRelationshipEdges) ? parsed.keyRelationshipEdges : []).filter(touches);
+            scopeProfileUpdatesToTarget(parsed, target, latestState.npcs);
+            parsed.keyRelationshipEdges = (Array.isArray(parsed.keyRelationshipEdges) ? parsed.keyRelationshipEdges : []).filter(edge => edgeTouchesResolvedTarget(edge, target, latestState.npcs));
         }
         const targetMessageId = Number.isInteger(messageId) ? messageId : latestMessageId(true);
         const merged = mergeScanResult(latestState, parsed, {
@@ -6539,8 +6609,17 @@ function registerEvents() {
     }
     // Regenerate/swipe/continue answer an existing player turn without MESSAGE_SENT.
     if (events.GENERATION_AFTER_COMMANDS) {
-        source.on(events.GENERATION_AFTER_COMMANDS, (type, _options, dryRun) => {
-            if (dryRun || type === 'quiet' || getChatKey() === 'no-chat') return;
+        source.on(events.GENERATION_AFTER_COMMANDS, async (type, _options, dryRun) => {
+            const key = getChatKey();
+            if (dryRun || type === 'quiet' || key === 'no-chat') return;
+            // These turns reuse an existing player message, so MESSAGE_SENT never revalidated the
+            // canonical dossier for them; do it here (a 304 when unchanged) before the prompt is built.
+            // An ordinary send is revalidated by its own MESSAGE_SENT listener.
+            if (type === 'regenerate' || type === 'swipe' || type === 'continue') {
+                try { await ensureChatStateLoaded(key); }
+                catch (error) { console.warn('[NPC State Delta] pre-generation freshness check failed; the injection keeps the last verified dossier.', error); }
+                if (getChatKey() !== key) return;
+            }
             updateInjection();
         });
     }
