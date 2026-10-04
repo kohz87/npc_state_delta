@@ -311,6 +311,51 @@ function uniqueImportedId(npc, usedIds) {
     return id.slice(0, 100);
 }
 
+// Unresolved slot and group ids are generated inside each source chat, so after the atomic id remap a
+// coincident id can name a target slot that belongs to a different NPC. Such a collision does not
+// make the slots the same relative: rekey the imported slot (and its group, with the imported edges
+// that carry it) so both owners keep their count-aware continuity. Same-owner duplicates still merge.
+function rekeyCollidingImportedSlots(importedGraph, currentGraph) {
+    const targetSlotOwner = new Map(currentGraph.unresolved.map(slot => [slot.id, slot.ownerId]));
+    const targetGroupOwners = new Map();
+    for (const slot of currentGraph.unresolved) {
+        if (!targetGroupOwners.has(slot.groupId)) targetGroupOwners.set(slot.groupId, new Set());
+        targetGroupOwners.get(slot.groupId).add(slot.ownerId);
+    }
+    for (const edge of currentGraph.edges) {
+        if (!edge.groupId) continue;
+        if (!targetGroupOwners.has(edge.groupId)) targetGroupOwners.set(edge.groupId, new Set());
+        targetGroupOwners.get(edge.groupId).add(edge.aId).add(edge.bId);
+    }
+    const usedSlotIds = new Set([...targetSlotOwner.keys(), ...importedGraph.unresolved.map(slot => slot.id)]);
+    const usedGroupIds = new Set([...targetGroupOwners.keys(), ...importedGraph.unresolved.map(slot => slot.groupId), ...importedGraph.edges.map(edge => edge.groupId).filter(Boolean)]);
+    const unique = (base, used) => {
+        let candidate = String(base).slice(0, 120);
+        for (let n = 2; used.has(candidate); n += 1) candidate = `${String(base).slice(0, 112)}~${n}`;
+        used.add(candidate);
+        return candidate;
+    };
+    const groupRekey = new Map();
+    const unresolved = importedGraph.unresolved.map(slot => {
+        const next = { ...slot };
+        const groupOwners = targetGroupOwners.get(slot.groupId);
+        if (groupOwners && !(groupOwners.size === 1 && groupOwners.has(slot.ownerId))) {
+            const groupKey = `${slot.groupId}|${slot.ownerId}`;
+            if (!groupRekey.has(groupKey)) groupRekey.set(groupKey, unique(`${slot.groupId}~${slot.ownerId}`, usedGroupIds));
+            next.groupId = groupRekey.get(groupKey);
+        }
+        if (targetSlotOwner.has(slot.id) && targetSlotOwner.get(slot.id) !== slot.ownerId) next.id = unique(`${slot.id}~${slot.ownerId}`, usedSlotIds);
+        return next;
+    });
+    if (!groupRekey.size && unresolved.every((slot, index) => slot.id === importedGraph.unresolved[index].id)) return importedGraph;
+    const edges = importedGraph.edges.map(edge => {
+        if (!edge.groupId) return edge;
+        const rekeyed = groupRekey.get(`${edge.groupId}|${edge.aId}`) || groupRekey.get(`${edge.groupId}|${edge.bId}`);
+        return rekeyed ? { ...edge, groupId: rekeyed } : edge;
+    });
+    return normalizeSocialGraph({ ...importedGraph, edges, unresolved });
+}
+
 function filterGraphByIds(graph, validIds, rejectedSourceIds = new Set()) {
     const normalized = normalizeSocialGraph(graph);
     return normalizeSocialGraph({
@@ -413,11 +458,14 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
             const old = npcs[index];
             const wasActive = !old?.archived;
             const targetId = old.id;
-            importedIdMap.set(sourceId, targetId);
             if (usedTargetIndexes.has(index)) {
                 importReport?.skipped.push({ sourceId, id: targetId, name: npc.name, reason: 'duplicate-identity' });
+                // A skipped origin donates nothing: its identity-bound graph channels must not be
+                // remapped onto the different dossier that was accepted for this target.
+                if (sourceId && !acceptedTargetIds.has(sourceId)) rejectedSourceIds.add(sourceId);
                 continue;
             }
+            importedIdMap.set(sourceId, targetId);
             usedTargetIndexes.add(index);
             const lockAware = preserveTargetManualLocks(old, npc);
             const effectiveName = String(lockAware.name || npc.name || old.name || '').trim();
@@ -509,6 +557,7 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
     const validIds = new Set(npcs.map(npc => String(npc?.id || '')).filter(Boolean));
     importedGraph = filterGraphByIds(importedGraph, validIds);
     const currentGraph = filterGraphByIds(current.socialGraph, validIds);
+    importedGraph = rekeyCollidingImportedSlots(importedGraph, currentGraph);
     const socialGraph = normalizeSocialGraph({
         edges: [...currentGraph.edges, ...importedGraph.edges],
         unresolved: [...currentGraph.unresolved, ...importedGraph.unresolved],

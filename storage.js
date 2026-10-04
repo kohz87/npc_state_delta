@@ -517,7 +517,7 @@ export async function writeNpcStateDataFile({ chatKey, state, appVersion = '', p
 // Detach of an unreadable sidecar: copy its exact bytes to a recovery file (verified), then replace
 // the canonical file with a retired marker, which a fresh unpointered write may replace. Without
 // this, the deterministic path still holds the unreadable bytes and every fresh write fails on them.
-export async function quarantineUnreadableNpcStateDataFile({ chatKey, pointer, appVersion = '', fetchFn = globalThis.fetch, headers = {} }) {
+export async function quarantineUnreadableNpcStateDataFile({ chatKey, pointer, appVersion = '', fetchFn = globalThis.fetch, headers = {}, onPreserved = null }) {
     if (typeof fetchFn !== 'function') throw new Error('fetch() is unavailable for NPC State Delta data-file persistence.');
     const key = String(chatKey || '');
     if (!pointer?.path) return null;
@@ -527,15 +527,27 @@ export async function quarantineUnreadableNpcStateDataFile({ chatKey, pointer, a
         if (response?.status === 404) return null;
         if (!response?.ok) throw new Error(`NPC State Delta could not read the broken sidecar to preserve it (HTTP ${response?.status || 'error'}).`);
         const raw = typeof response.text === 'function' ? await response.text() : '';
+        // A retry after an uncertain retirement acknowledgement finds this detach's own marker. The
+        // original bytes were already preserved and registered (onPreserved), so the empty marker
+        // must never be backed up in their place.
+        let marker = null;
+        try { marker = decodeStateFilePayload(raw); } catch { marker = null; }
+        if (marker?.retired && marker.retireReason === 'manual-detach' && String(marker.chatKey || '') === key) {
+            return { alreadyDetached: true, preservedFrom: pointer.path };
+        }
         const copyName = makeNpcStateRecoveryFileName(key).replace(/\.json$/i, '-unreadable.json');
         const copy = await uploadPayload({ name: copyName, json: raw, fetchFn, headers });
         const check = await fetchFn(copy.path, { method: 'GET', cache: 'no-store' });
         if (!check?.ok || (typeof check.text === 'function' ? await check.text() : null) !== raw) {
             throw new Error('NPC State Delta could not verify the preserved copy of the broken sidecar; nothing was detached.');
         }
+        const preserved = { name: copyName, path: copy.path, preservedFrom: pointer.path };
+        // Register the verified backup before the destructive canonical replacement, so a lost
+        // acknowledgement of that replacement cannot lose the only reference to the original bytes.
+        if (typeof onPreserved === 'function') await onPreserved({ ...preserved });
         const name = pointer.name || makeNpcStateDataFileName(key);
         await uploadPayload({ name, json: encodeRetiredStateFilePayload(key, 'manual-detach', appVersion, { revision: 1, writerId }), fetchFn, headers });
-        return { name: copyName, path: copy.path, preservedFrom: pointer.path };
+        return preserved;
     });
 }
 

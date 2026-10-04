@@ -384,6 +384,14 @@ export function resolveNpcReference(npcs = [], labelOrId = '') {
     return matches.length === 1 ? matches[0] : null;
 }
 
+// Normalization must be idempotent: Number(null) is 0, so an absent turn would otherwise become
+// turn 0 on the next pass and no longer compare equal to its own snapshot.
+function optionalTurn(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const turn = Number(value);
+    return Number.isFinite(turn) ? turn : null;
+}
+
 function edgeKey(edge) {
     const a = clean(edge?.aId, 100);
     const b = clean(edge?.bId, 100);
@@ -417,7 +425,7 @@ function normalizeEdge(raw = {}) {
         confidence,
         reason: clean(raw.reason ?? raw.evidence, 300),
         sourceMessageId: Number.isInteger(raw.sourceMessageId) ? raw.sourceMessageId : null,
-        turn: Number.isFinite(Number(raw.turn)) ? Number(raw.turn) : null,
+        turn: optionalTurn(raw.turn),
         groupId: clean(raw.groupId ?? raw.group_id, 120),
         sharedDescriptor: clean(raw.sharedDescriptor ?? raw.shared_descriptor, 120),
         inferred: raw.inferred === true && confidenceRank(confidence) < confidenceRank('explicit'),
@@ -440,7 +448,7 @@ function normalizeUnresolved(raw = {}) {
         confidence: clean(raw.confidence, 40) || 'migration',
         reason: clean(raw.reason ?? raw.evidence, 300),
         sourceMessageId: Number.isInteger(raw.sourceMessageId) ? raw.sourceMessageId : null,
-        turn: Number.isFinite(Number(raw.turn)) ? Number(raw.turn) : null,
+        turn: optionalTurn(raw.turn),
     };
 }
 
@@ -458,12 +466,17 @@ export function normalizeSocialGraph(raw = {}) {
         const edge = normalizeEdge(item);
         if (!edge) continue;
         const key = edgeKey(edge);
-        if (edgeIndex.has(key)) {
-            const current = edges[edgeIndex.get(key)];
-            current.aToB = mergeRelations(current.aToB, edge.aToB);
-            current.bToA = mergeRelations(current.bToA, edge.bToA);
-            current.aDynamic = richer(current.aDynamic, edge.aDynamic);
-            current.bDynamic = richer(current.bDynamic, edge.bDynamic);
+        // The same shared pair stored in the opposite orientation is one edge (as in addEdge), and
+        // must merge before the capacity check rather than take a unique edge's slot.
+        const reverseKey = `${edge.bId}|${edge.aId}|${socialRelationFamily(edge.bToA)}|${socialRelationFamily(edge.aToB)}`;
+        const existingIndex = edgeIndex.has(key) ? edgeIndex.get(key) : edgeIndex.get(reverseKey);
+        if (existingIndex !== undefined) {
+            const current = edges[existingIndex];
+            const reversed = current.aId !== edge.aId;
+            current.aToB = mergeRelations(current.aToB, reversed ? edge.bToA : edge.aToB);
+            current.bToA = mergeRelations(current.bToA, reversed ? edge.aToB : edge.bToA);
+            current.aDynamic = richer(current.aDynamic, reversed ? edge.bDynamic : edge.aDynamic);
+            current.bDynamic = richer(current.bDynamic, reversed ? edge.aDynamic : edge.bDynamic);
             if (confidenceRank(edge.confidence) >= confidenceRank(current.confidence)) {
                 current.confidence = edge.confidence;
                 current.provenance = edge.provenance;

@@ -70,7 +70,7 @@ function portraitAppearanceChanged(npc = {}, shown = null) {
     const recorded = shown ? shown.fingerprint : plain(npc?.portrait?.appearanceFingerprint);
     const src = shown ? shown.src : plain(npc?.portrait?.dataUrl || npc?.portrait?.url || npc?.portrait?.src);
     if (!recorded || !src) return false;
-    const current = appearanceFingerprint(npc);
+    const current = appearanceFingerprint(npc, { version: recorded.startsWith('a1:') ? 1 : 2 });
     return Boolean(current) && current !== recorded;
 }
 

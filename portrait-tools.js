@@ -338,6 +338,8 @@ function portraitGenerationBase(npcId, form = '') {
     return JSON.stringify([
         String(form || ''), npc.currentForm || '', npc.currentFormUnknown === true, npc.overallAppearance || '',
         npc.appearance || '', npc.unclassifiedAppearance || '', npc.appearanceForms || [], npc.species || '', npc.gender || '',
+        // The prompt's visual age (apparent age, else age) is a generation input like the forms.
+        String(npc.apparentAge || '').trim() || String(npc.age || '').trim(),
     ]);
 }
 
