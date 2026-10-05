@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.0.95 - 5 October 2026
+
+- NPCs with several forms no longer repeat their physical features: a form that restates hair, eyes or skin already in Physical features shows them once.
+- A form's own description of a trait (for example different eyes in another form) now replaces the shared one instead of being listed beside it.
+- Mark a form that replaces the whole body (a beast or dragon form) with `[full]` after its name in the Forms editor (`Dragon [full] | …`). Physical features are then not added to it, and the dossier shows a Full form badge. Rescans keep the marker.
+- Scans now keep one form's body (hair, build, size, skin) out of Physical features when an NPC has several forms, so a new dragon form is not given the human body. This adds one short sentence to the appearance-form instructions; nothing else in the prompts changed.
+- Portraits of multi-form NPCs whose combined appearance text changed show the "appearance changed" marker once.
+
 ## 1.0.94 - 4 October 2026
 
 Fixes from an external deep audit of 1.0.93 (fifteen reproduced findings):

@@ -265,6 +265,9 @@ export function normalizeAppearanceForms(value, { updates = false } = {}) {
         const appearance = appearanceText(raw.appearance ?? raw.description ?? raw.visual ?? raw.value);
         if (!name || !appearance) continue;
         const entry = { name, appearance };
+        // A full transformation (a beast or dragon form) replaces the whole body, so the shared
+        // physical features are not added to it. Only the user sets this; scans keep it.
+        if (truthy(raw.fullTransformation ?? raw.full_transformation)) entry.fullTransformation = true;
         if (updates) {
             entry.state = formState(raw.state ?? raw.appearanceState ?? raw.appearance_state);
             entry.reason = clean(raw.reason ?? raw.appearanceReason ?? raw.appearance_reason, 500);
@@ -277,8 +280,9 @@ export function normalizeAppearanceForms(value, { updates = false } = {}) {
     return forms;
 }
 
+const FULL_FORM_MARKER = /\s*\[full\]\s*$/i;
 export function formatAppearanceForms(value) {
-    return normalizeAppearanceForms(value).map(form => `${form.name} | ${form.appearance}`).join('\n');
+    return normalizeAppearanceForms(value).map(form => `${form.name}${form.fullTransformation ? ' [full]' : ''} | ${form.appearance}`).join('\n');
 }
 export function parseAppearanceFormsText(value) {
     const lines = String(value ?? '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
@@ -288,13 +292,15 @@ export function parseAppearanceFormsText(value) {
     for (const line of lines) {
         const split = line.indexOf('|');
         if (split <= 0) throw new Error('Each appearance form must use: Form name | Description');
-        const name = clean(line.slice(0, split), 120);
+        const label = clean(line.slice(0, split), 160);
+        const fullTransformation = FULL_FORM_MARKER.test(label);
+        const name = clean(label.replace(FULL_FORM_MARKER, ''), 120);
         const appearance = appearanceText(line.slice(split + 1));
         const key = formKey(name);
         if (!name || !appearance) throw new Error('Each appearance form needs both a name and description.');
         if (!key || keys.has(key)) throw new Error(`Duplicate appearance form: ${name}`);
         keys.add(key);
-        forms.push({ name, appearance });
+        forms.push(fullTransformation ? { name, appearance, fullTransformation } : { name, appearance });
     }
     return forms;
 }
@@ -330,13 +336,35 @@ export function normalizeAppearanceModel(raw = {}, { locked = false } = {}) {
     };
 }
 
+// The visible appearance of a named form. A full transformation stands alone. Otherwise the shared
+// physical features are added, without repeating them: a form piece that only restates a shared
+// trait ("silver hair" beside shared "long silver hair") is dropped, and a shared piece whose every
+// trait the form describes for itself (different eyes, its own build) gives way to the form's version.
+function formPresentation(overall, form) {
+    const own = appearanceText(form?.appearance);
+    if (!own || form?.fullTransformation) return own;
+    const shared = appearanceText(overall);
+    if (!shared) return own;
+    const local = withoutSharedPieces(stripOverallPrefix(own, shared), shared);
+    const addressed = new Set(presentationSegments(local)
+        .filter(segment => !CONCEALED_MENTION.test(segment))
+        .flatMap(physicalPieces)
+        .flatMap(physicalTraitKeys));
+    const sharedSegments = presentationSegments(shared);
+    const keptShared = sharedSegments.filter(segment => {
+        const keys = physicalTraitKeys(segment);
+        return !keys.length || !keys.every(key => addressed.has(key));
+    });
+    return combineAppearance(keptShared.length === sharedSegments.length ? shared : keptShared.join(', '), local);
+}
+
 export function resolveNpcAppearance(rawNpc = {}) {
     const model = normalizeAppearanceModel(rawNpc, {
         locked: Array.isArray(rawNpc?.manualProfileFields) && rawNpc.manualProfileFields.includes('appearance'),
     });
     const current = model.currentForm ? appearanceFormByName(model, model.currentForm) : null;
     const overall = model.overallAppearance;
-    if (current) return combineAppearance(overall, current.appearance);
+    if (current) return formPresentation(overall, current);
     if (model.currentFormUnknown) return combineAppearance(overall, model.unclassifiedAppearance || model.appearance);
     if (model.currentForm) return combineAppearance(overall, model.unclassifiedAppearance || model.appearance);
     // Without a selected form, enduring physical features (the shared slot) plus the current
@@ -434,7 +462,7 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
             if (index >= 0) {
                 const existing = next.appearanceForms[index].appearance;
                 const appearance = preserveOmittedPhysicalTraits(existing, reconcileFormAppearance(existing, form, context), { alsoPresent: next.overallAppearance });
-                if (appearance) next.appearanceForms[index] = { name: next.appearanceForms[index].name || form.name, appearance };
+                if (appearance) next.appearanceForms[index] = { ...next.appearanceForms[index], name: next.appearanceForms[index].name || form.name, appearance };
             } else if (next.appearanceForms.length < APPEARANCE_FORM_LIMIT) {
                 const appearance = reconcileFormAppearance('', form, context);
                 if (appearance) next.appearanceForms.push({ name: form.name, appearance });
@@ -480,10 +508,15 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
             if (next.currentForm) {
                 const index = next.appearanceForms.findIndex(form => formKey(form.name) === formKey(next.currentForm));
                 if (index >= 0) {
-                    const existingLocal = next.appearanceForms[index].appearance;
-                    const existingResolved = combineAppearance(next.overallAppearance, existingLocal);
+                    const existingForm = next.appearanceForms[index];
+                    const existingLocal = existingForm.appearance;
+                    const existingResolved = formPresentation(next.overallAppearance, existingForm);
                     const resolved = reconcileFormAppearance(existingResolved, { ...update, appearance: incomingAppearance }, context);
-                    const stripped = stripOverallPrefix(resolved, next.overallAppearance) || resolved;
+                    // The resolved text carries the shared features (possibly only some of them); a
+                    // full transformation has none, so it is stored as given.
+                    const stripped = existingForm.fullTransformation
+                        ? resolved
+                        : (withoutSharedPieces(stripOverallPrefix(resolved, next.overallAppearance), next.overallAppearance) || resolved);
                     const appearance = preserveOmittedPhysicalTraits(existingLocal, stripped, { alsoPresent: next.overallAppearance });
                     if (appearance) next.appearanceForms[index] = { ...next.appearanceForms[index], appearance };
                 } else {
