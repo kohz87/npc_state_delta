@@ -86,6 +86,7 @@ import {
     appearanceDraftRecord,
     appearanceFingerprint,
     formPortraitKey,
+    formPortraitFor,
     normalizeFormPortraitAssets,
 } from './core.js';
 import { applyNpcBirthdayUpdate, normalizeBirthDate } from './birthday.js';
@@ -4351,8 +4352,11 @@ function findNpcByIdOrName(value) {
     return getChatState().npcs.find(npc => npc.id === query || normalizeName(npc.name) === normalized) || null;
 }
 
+// Like the dossier, the present cast shows the current form's own portrait when that form has one,
+// and the main portrait otherwise.
 function portraitMarkup(npc, displayName, placeholderClass = 'npc-state-delta-inline-avatar-placeholder') {
-    const portraitUrl = npc?.portrait?.dataUrl || '';
+    const formImage = npc?.currentForm ? formPortraitFor(getChatState().formPortraitAssets, npc.id, npc.currentForm) : null;
+    const portraitUrl = formImage?.dataUrl || npc?.portrait?.dataUrl || '';
     if (portraitUrl) return `<img src="${escapeHtml(portraitUrl)}" alt="${escapeHtml(displayName)} portrait">`;
     const initial = String(displayName || '?').trim().charAt(0).toUpperCase() || '?';
     return `<div class="${placeholderClass}" aria-hidden="true"><span>${escapeHtml(initial)}</span></div>`;
