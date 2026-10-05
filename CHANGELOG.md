@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.0.96 - 5 October 2026
+
+- The Present NPCs cards and chips now show the current form's own portrait when that form has one, like the dossier does, and the main portrait otherwise.
+
 ## 1.0.95 - 5 October 2026
 
 - NPCs with several forms no longer repeat their physical features: a form that restates hair, eyes or skin already in Physical features shows them once.
