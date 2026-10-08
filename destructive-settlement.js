@@ -65,7 +65,3 @@ function registerDestructiveSettlement() {
 }
 
 registerDestructiveSettlement();
-
-export function destructiveSettlementStatus() {
-    return globalThis[REGISTRY_KEY]?.controller?.status?.() || { pending: false };
-}

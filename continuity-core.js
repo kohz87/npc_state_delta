@@ -4,6 +4,7 @@ import {
     APPEARANCE_MODEL_VERSION,
     applyAppearanceUpdate,
     carryOmittedPhysicalTraits,
+    completeFormWithShared,
     normalizeAppearanceForms,
     normalizeAppearanceModel,
     resolveNpcAppearance,
@@ -160,7 +161,12 @@ export function mergeScanResult(state, scanResult, options = {}) {
         let profileUpdate = profiles.find(raw => sameNpc(raw, rawNpc));
         const rawForms = ordinaryUpdate && (ordinaryUpdate.appearanceForms ?? ordinaryUpdate.appearance_forms);
         const seed = !sources.length && rawForms
-            ? { ...rawNpc, appearanceModelVersion: APPEARANCE_MODEL_VERSION }
+            ? {
+                ...rawNpc,
+                appearanceModelVersion: APPEARANCE_MODEL_VERSION,
+                appearanceForms: normalizeAppearanceForms(rawNpc.appearanceForms)
+                    .map(form => ({ ...form, appearance: completeFormWithShared(rawNpc.overallAppearance, form.appearance) })),
+            }
             : (sources.length && !lockedAppearance(rawNpc) ? carryOmittedPhysicalTraits(sources[0], rawNpc) : rawNpc);
 
         const formSwitch = Boolean(
@@ -255,6 +261,7 @@ function needsDetailedStage4(options = {}) {
         || /\b(transform(?:s|ed|ing|ation)?|form|shape-?shift|metamorph|human form|beast form|dragon form|dies|died|dead|deceased|killed|death)\b/i.test(transcript)
         || hasImplicitAnatomicalTransition(transcript);
 }
+const ESTABLISHED_FORM_CONTEXT_CHARS = 240;
 function establishedAppearanceContext(options = {}) {
     const transcriptKey = mechanics.normalizeName(options?.transcript || options?.dossierText || '');
     const source = Array.isArray(options?.existingNpcs) ? options.existingNpcs : [options?.existingNpc, options?.targetNpc].filter(Boolean);
@@ -268,7 +275,10 @@ function establishedAppearanceContext(options = {}) {
         name: npc.name,
         currentForm: npc.currentForm || '',
         currentFormUnknown: Boolean(npc.currentFormUnknown),
-        appearanceForms: normalizeAppearanceForms(npc.appearanceForms),
+        // The current form is shown whole; the others only need enough to be recognised and kept.
+        appearanceForms: normalizeAppearanceForms(npc.appearanceForms).map(form => (form.name === npc.currentForm || form.appearance.length <= ESTABLISHED_FORM_CONTEXT_CHARS
+            ? form
+            : { ...form, appearance: `${form.appearance.slice(0, ESTABLISHED_FORM_CONTEXT_CHARS).replace(/\s+\S*$/, '')}…` })),
     }));
     return records.length ? `\nEstablished Stage 4 appearance forms (preserve omissions): ${JSON.stringify(records)}` : '';
 }

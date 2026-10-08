@@ -1758,11 +1758,6 @@ const staleHostChats = new Set();
 // truncation was not saved before a reload), not to a session this browser is behind.
 const openingHostChats = new Set();
 
-function hostIsOlderPrefix(state, liveLineage) {
-    const stored = Array.isArray(state?.lineage) ? state.lineage : [];
-    return liveLineage.length < stored.length && firstLineageDivergence(stored, liveLineage) === liveLineage.length;
-}
-
 // After adopting another session's newer dossier, the local chat is stale when it does not contain
 // that dossier's whole history: an older prefix, or older history plus a turn typed locally since.
 function noteAdoptedDossier(key, state, writerId = '') {
@@ -5864,13 +5859,6 @@ function portraitThemeLabel(source = getSettings()) {
         return preset?.name ? `Custom · ${preset.name}` : 'Custom Library';
     }
     return PORTRAIT_THEME_PRESETS[snapshot.portraitThemePreset]?.label || 'Custom Library';
-}
-
-function portraitCustomPresetOptionsHtml(source = getSettings()) {
-    const snapshot = portraitSettingsSnapshot(source);
-    return snapshot.portraitCustomPresets
-        .map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`)
-        .join('');
 }
 
 function portraitSettingsSnapshot(source = getSettings()) {

@@ -44,11 +44,6 @@ function settings() {
     return value;
 }
 
-function queueSettingsSave() {
-    try { getContext()?.saveSettingsDebounced?.(); }
-    catch (error) { console.debug('[NPC State Delta] settings save was deferred', error); }
-}
-
 async function saveSettingsNow() {
     await saveHostSettings();
 }

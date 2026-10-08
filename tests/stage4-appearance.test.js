@@ -161,7 +161,9 @@ test('Stage 4 unnamed form keeps form-independent appearance exactly once across
     const twice = normalizeNpcRecord(normalizeNpcRecord(transformed));
     assert.equal(twice.currentFormUnknown, true);
     assert.match(twice.unclassifiedAppearance, /silhouette wrapped in pale mist/i);
-    assert.equal((resolveNpcAppearance(twice).match(/Small silver pendant/gi) || []).length, 1);
+    // Since 1.0.99 an unknown form of an NPC with named forms is described completely: the shared
+    // features (the pendant) are not added, and no other form's anatomy is borrowed.
+    assert.equal((resolveNpcAppearance(twice).match(/Small silver pendant/gi) || []).length, 0);
     assert.doesNotMatch(resolveNpcAppearance(twice), /ordinary human ears|hooked beak/i);
 });
 
