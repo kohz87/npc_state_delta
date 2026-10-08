@@ -391,17 +391,20 @@ function legacyFormPresentation(overall, value) {
 }
 
 // A scan that still sends the body as overallAppearance and only an outfit or condition for a named
-// form (no physical trait in the form's own text) means that body belongs to that form: write it in,
-// so the self-contained form does not lose it. A form that describes its own body is left alone.
+// form means that body belongs to that form: write it in, so the self-contained form does not lose
+// it. Only a form described entirely by clothing, gear or condition qualifies; one that names what
+// the NPC is ("a silver dragon", "spirit form") or describes any body trait is left alone.
 export function completeFormWithShared(overall, value) {
     const own = appearanceText(value);
     const shared = appearanceText(overall);
     if (!own || !shared) return own;
-    const describesBody = presentationSegments(own)
+    const segments = presentationSegments(own);
+    const describesBody = segments
         .filter(segment => !CONCEALED_MENTION.test(segment))
         .flatMap(physicalPieces)
         .some(piece => physicalTraitKeys(piece).length > 0);
-    return describesBody ? own : combineAppearance(shared, own);
+    const outfitOnly = segments.length > 0 && segments.every(segment => CHANGEABLE_PRESENTATION.test(segment));
+    return describesBody || !outfitOnly ? own : combineAppearance(shared, own);
 }
 
 export function resolveNpcAppearance(rawNpc = {}) {
