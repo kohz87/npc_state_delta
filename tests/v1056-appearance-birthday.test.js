@@ -67,6 +67,8 @@ test('a selected named form keeps its omitted physical traits without duplicatin
     const form = next.appearanceForms.find(item => item.name === 'Human').appearance;
     assert.match(form, /Violet eyes, slender build/);
     assert.match(form, /emerald ballgown/);
-    assert.doesNotMatch(form, /blue cloak|silver hair/);
+    // Since 1.0.98 a named form is its complete appearance: it holds the hair once, the old cloak goes.
+    assert.doesNotMatch(form, /blue cloak/);
+    assert.equal(form.match(/silver hair/g)?.length, 1);
     assert.equal(next.appearance.match(/silver hair/g)?.length, 1);
 });
