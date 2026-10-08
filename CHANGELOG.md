@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.1.0 - 8 October 2026
+
+Delta moves to 1.1.0. Fixes from an internal audit of 1.0.100:
+
+- A form or NPC described by what it is ("A silver dragon", "Spirit form", "A wiry old man") keeps that description when a scan only reports an outfit or condition change; before, "Dusted with ash" could replace the whole dragon form. A new description of what she is ("A great black wolf") still replaces it.
+- A creature form with an accessory ("A silver dragon wearing a golden collar", "A black wolf with a red ribbon") is no longer mistaken for an outfit and given the human body.
+- "Her hair catches the light" or "a dark tangle" no longer erases the stored hair colour and length; "dark brown hair" or "dyed black" still replaces it.
+
 ## 1.0.100 - 8 October 2026
 
 Fixes from an internal audit of 1.0.99:

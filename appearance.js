@@ -192,7 +192,7 @@ function physicalTraitKeys(segment) {
 }
 // A hair mention re-describes the hair only when it says what the hair is like (colour, length,
 // texture); "tied up in a bun" or "falls over her eyes" is styling and keeps the stored hair.
-const HAIR_DESCRIPTOR = /\b(?:long|short|cropped|shaved|bald|buzzed|shoulder[- ]length|waist[- ]length|chin[- ]length|ankle[- ]length|trimmed|curly|curled|curls|wavy|straight|frizzy|thick|thin|fine|coarse|silver|silvery|white|black|brown|blonde?|golden|gold|red|auburn|ginger|copper|chestnut|grey|gray|greying|graying|pink|blue|green|purple|violet|teal|dark|light|raven|ebony|platinum|ashen|honey|sandy|strawberry|dyed|streaked|highlighted|bleached|colou?red)\b/i;
+const HAIR_DESCRIPTOR = /\b(?:long|short|cropped|shaved|bald|buzzed|shoulder[- ]length|waist[- ]length|chin[- ]length|ankle[- ]length|trimmed|curly|curled|curls|wavy|straight|frizzy|thick|thin|fine|coarse|silver|silvery|white|black|brown|blonde?|golden|gold|red|auburn|ginger|copper|chestnut|grey|gray|greying|graying|pink|blue|green|purple|violet|teal|(?:dark|light)(?=[- ](?:brown|blonde?|red|grey|gray|auburn|haired|hair|silver|gold|golden|chestnut))|dark-haired|raven|ebony|platinum|ashen|honey|sandy|strawberry|dyed|streaked|highlighted|bleached|colou?red)\b/i;
 function addressedTraitKeys(piece) {
     const keys = physicalTraitKeys(piece);
     return keys.includes('hair') && !HAIR_DESCRIPTOR.test(piece) ? keys.filter(key => key !== 'hair') : keys;
@@ -213,6 +213,14 @@ function physicalPieces(segment) {
     return pieces.map(piece => clean(piece, 400))
         .filter(piece => piece && physicalTraitKeys(piece).length && !CHANGEABLE_PRESENTATION.test(piece));
 }
+// The leading phrase that says what the NPC is ("A silver dragon", "A wiry old man", "Spirit form")
+// rather than what she wears: an article- or form-led piece that is not clothing, gear or condition.
+function identityPhrase(value) {
+    const first = presentationSegments(value)[0] || '';
+    if (!first || CHANGEABLE_PRESENTATION.test(first) || CONCEALED_MENTION.test(first)) return '';
+    return /^(?:an?|the)\s+\S/i.test(first) || /\bform\b/i.test(first) ? first : '';
+}
+
 function preserveOmittedPhysicalTraits(previous, next, { alsoPresent = '' } = {}) {
     const incoming = appearanceText(next);
     const prior = appearanceText(previous);
@@ -228,8 +236,18 @@ function preserveOmittedPhysicalTraits(previous, next, { alsoPresent = '' } = {}
         const normalized = normalizeName(piece);
         return normalized && !incomingNormalized.includes(normalized) && !(presentNormalized && presentNormalized.includes(normalized));
     });
+    // What the NPC is survives an update that only changes outfit or condition ("Dusted with ash"),
+    // unless the update opens with its own description of what she is.
+    const identity = identityPhrase(prior);
+    const identityKey = normalizeName(identity);
+    if (identity && !identityPhrase(incoming) && !incomingNormalized.includes(identityKey)
+        && !(presentNormalized && presentNormalized.includes(identityKey))
+        && !kept.some(piece => normalizeName(piece) === identityKey)) {
+        kept.unshift(identity);
+    }
     const limit = DURABLE_PROFILE_LIMITS?.appearance || 800;
-    // The incoming presentation is authoritative; if the budget is tight, drop the oldest carried traits whole.
+    // The incoming presentation is authoritative; if the budget is tight, drop carried traits whole
+    // from the end (the identity phrase, first, goes last).
     while (kept.length && `${kept.join(', ')}; ${incoming}`.length > limit) kept.pop();
     return kept.length ? appearanceText(`${kept.join(', ')}; ${incoming}`) : incoming;
 }
@@ -403,7 +421,11 @@ export function completeFormWithShared(overall, value) {
         .filter(segment => !CONCEALED_MENTION.test(segment))
         .flatMap(physicalPieces)
         .some(piece => physicalTraitKeys(piece).length > 0);
-    const outfitOnly = segments.length > 0 && segments.every(segment => CHANGEABLE_PRESENTATION.test(segment));
+    // Each part around "wearing / with / in …" must be clothing or condition, so "a silver dragon
+    // wearing a golden collar" is a dragon, not an outfit.
+    const outfitOnly = segments.length > 0 && segments
+        .flatMap(segment => segment.split(MIXED_CLAUSE_SPLIT).map(part => clean(part, 400)).filter(Boolean))
+        .every(part => CHANGEABLE_PRESENTATION.test(part));
     return describesBody || !outfitOnly ? own : combineAppearance(shared, own);
 }
 
