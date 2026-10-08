@@ -1195,12 +1195,15 @@ async function detachBrokenSidecar() {
     }
     if (getChatKey() !== key) return false;
     bumpOwnershipEpoch(key);
-    // A retry that finds this detach already committed keeps the registered original backup.
-    const keepRegistered = preserved?.alreadyDetached && settings.recoveryFiles[key]?.reason === 'manual-detach' && settings.recoveryFiles[key]?.preservedFrom === pointer.path;
-    if (!keepRegistered) {
-        settings.recoveryFiles[key] = preserved?.path
-            ? { ...preserved, reason: 'manual-detach', retiredAt: Date.now() }
-            : { ...pointer, reason: 'manual-detach', retiredAt: Date.now() };
+    // A retry that finds this detach already committed keeps the registered original backup; a
+    // marker another session wrote names its backup. The empty marker itself is never registered
+    // as the preserved sidecar.
+    const ownRegistration = settings.recoveryFiles[key]?.reason === 'manual-detach' && settings.recoveryFiles[key]?.preservedFrom === pointer.path;
+    if (preserved?.path && !(preserved.alreadyDetached && ownRegistration)) {
+        const { alreadyDetached, ...copy } = preserved;
+        settings.recoveryFiles[key] = { ...copy, reason: 'manual-detach', retiredAt: Date.now() };
+    } else if (!preserved) {
+        settings.recoveryFiles[key] = { ...pointer, reason: 'manual-detach', retiredAt: Date.now() };
     }
     settings.sidecarTombstones[key] = { reason: 'manual-detach', at: Date.now() };
     delete settings.dataFiles[key];
@@ -1234,6 +1237,9 @@ function requestHeaders() {
 // chat must stay blocked: retrying Scan would otherwise revive the retired dossier from the stale
 // host narration. Reopening the chat (CHAT_CHANGED) is the host lifecycle that releases it.
 const retiredInSessionChats = new Map();
+// The last pre-generation freshness read, which the one MESSAGE_SENT that follows it may reuse.
+const GENERATION_FRESHNESS_REUSE_MS = 5000;
+let generationFreshness = { key: '', at: 0 };
 
 // Observed retirement is authoritative at the durability boundary too: dirty local work for that
 // chat must never be published over the retired marker (an unpointered writer may otherwise reuse
@@ -6599,8 +6605,15 @@ function registerEvents() {
             // SillyTavern waits for this listener before generating. The freshness read must stay: a
             // newer dossier from another session has to be adopted (and an older local history
             // recognised) before this turn is certified or its prompt is built. It is a revalidating
-            // read, so an unchanged sidecar costs a 304 rather than a full download.
-            try { await ensureChatStateLoaded(key); } catch (error) { console.error('[NPC State Delta] user-turn lineage update skipped because chat hydration failed.', error); return; }
+            // read, so an unchanged sidecar costs a 304 rather than a full download. The generation
+            // that sends this message already revalidated moments ago (GENERATION_AFTER_COMMANDS
+            // runs first), so one read per send is enough.
+            const recentlyChecked = generationFreshness.key === key && Date.now() - generationFreshness.at < GENERATION_FRESHNESS_REUSE_MS
+                && chatHydrationStatus(key) === 'ready';
+            generationFreshness = { key: '', at: 0 };
+            if (!recentlyChecked) {
+                try { await ensureChatStateLoaded(key); } catch (error) { console.error('[NPC State Delta] user-turn lineage update skipped because chat hydration failed.', error); return; }
+            }
             if (getChatKey() !== key) return;
             // This listener maintains branch lineage and refreshes the injection so an off-screen NPC
             // the player names reaches this generation; text never dispatches mutations.
@@ -6616,14 +6629,14 @@ function registerEvents() {
         source.on(events.GENERATION_AFTER_COMMANDS, async (type, _options, dryRun) => {
             const key = getChatKey();
             if (dryRun || type === 'quiet' || key === 'no-chat') return;
-            // These turns reuse an existing player message, so MESSAGE_SENT never revalidated the
-            // canonical dossier for them; do it here (a 304 when unchanged) before the prompt is built.
-            // An ordinary send is revalidated by its own MESSAGE_SENT listener.
-            if (type === 'regenerate' || type === 'swipe' || type === 'continue') {
-                try { await ensureChatStateLoaded(key); }
-                catch (error) { console.warn('[NPC State Delta] pre-generation freshness check failed; the injection keeps the last verified dossier.', error); }
-                if (getChatKey() !== key) return;
-            }
+            // Every roleplay generation revalidates the canonical dossier (a 304 when unchanged)
+            // before its prompt is built: regenerate/swipe/continue, an empty Send, impersonate and
+            // group member turns have no MESSAGE_SENT, and an ordinary send reuses this read there.
+            try {
+                await ensureChatStateLoaded(key);
+                generationFreshness = { key, at: Date.now() };
+            } catch (error) { console.warn('[NPC State Delta] pre-generation freshness check failed; the injection keeps the last verified dossier.', error); }
+            if (getChatKey() !== key) return;
             updateInjection();
         });
     }

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 1.0.97 - 8 October 2026
+
+Fixes from an internal audit of 1.0.94–1.0.96:
+
+- Apparent age no longer ratchets up when the story date jumps around (a 1.0.94 regression): a mistyped year, or a flashback followed by a return to the present, now restores the earlier apparent age exactly instead of adding the gap.
+- An automatic birthday no longer marks the portrait as outdated; a real apparent-age change still does.
+- Importing an older copy of an NPC no longer splits a twin family into two groups.
+- Deleting the message that named a relative (for example a daughter) brings back the unnamed relative it replaced.
+- A form's own trait now replaces a shared one even when the shared text joins them with "and" ("silver hair and violet eyes"), and "short", "small" or "huge" on their own count as height.
+- Every roleplay generation now checks the server for a newer dossier first, including an empty Send, impersonate and group member turns; an ordinary send still makes only one check.
+- Detach after another device already detached the broken file registers that device's backup copy instead of the empty marker.
+
 ## 1.0.96 - 5 October 2026
 
 - The Present NPCs cards and chips now show the current form's own portrait when that form has one, like the dossier does, and the main portrait otherwise.

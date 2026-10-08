@@ -187,8 +187,18 @@ function presentationSegments(value) {
         .map(part => clean(part.replace(/^(?:and|with)\s+/i, '').replace(/[.!?]+$/, ''), 400))
         .filter(Boolean);
 }
+// Size words describe height only when nothing else in the piece is a trait ("short" alone, not
+// "short silver hair").
+const SIZE_ONLY = /\b(?:short|small|tiny|little|huge|giant|massive|enormous|colossal|gigantic)\b/i;
 function physicalTraitKeys(segment) {
-    return PHYSICAL_TRAITS.filter(([, pattern]) => pattern.test(segment)).map(([key]) => key);
+    const keys = PHYSICAL_TRAITS.filter(([, pattern]) => pattern.test(segment)).map(([key]) => key);
+    return keys.length || !SIZE_ONLY.test(segment) ? keys : ['height'];
+}
+// "A and B" splits when both halves describe a trait ("Tall and slender", "long silver hair and
+// violet eyes"), so one trait can give way without taking the other with it.
+function traitParts(segment) {
+    const parts = segment.split(/\s+and\s+/i).map(part => clean(part, 400)).filter(Boolean);
+    return parts.length > 1 && parts.every(part => physicalTraitKeys(part).length) ? parts : [segment];
 }
 // A clause can mix an enduring trait with changeable detail ("long silver hair tied back with a
 // ribbon", "her hair is wet"). Split only such mixed clauses at their connectors and keep the pieces
@@ -346,16 +356,26 @@ function formPresentation(overall, form) {
     const shared = appearanceText(overall);
     if (!shared) return own;
     const local = withoutSharedPieces(stripOverallPrefix(own, shared), shared);
+    // Concealment applies to the whole piece ("silver hair and blue eyes are hidden …") before it
+    // is split into traits.
     const addressed = new Set(presentationSegments(local)
         .filter(segment => !CONCEALED_MENTION.test(segment))
+        .flatMap(traitParts)
         .flatMap(physicalPieces)
         .flatMap(physicalTraitKeys));
-    const sharedSegments = presentationSegments(shared);
-    const keptShared = sharedSegments.filter(segment => {
-        const keys = physicalTraitKeys(segment);
+    const keepsTrait = part => {
+        const keys = physicalTraitKeys(part);
         return !keys.length || !keys.every(key => addressed.has(key));
+    };
+    let dropped = false;
+    const keptShared = presentationSegments(shared).flatMap(segment => {
+        const parts = traitParts(segment);
+        const kept = parts.filter(keepsTrait);
+        if (kept.length === parts.length) return [segment];
+        dropped = true;
+        return kept.length ? [kept.join(' and ')] : [];
     });
-    return combineAppearance(keptShared.length === sharedSegments.length ? shared : keptShared.join(', '), local);
+    return combineAppearance(dropped ? keptShared.join(', ') : shared, local);
 }
 
 export function resolveNpcAppearance(rawNpc = {}) {
@@ -591,7 +611,12 @@ export function appearanceFingerprint(npc = {}, { form = '', version = 2 } = {})
     const text = normalizeName(resolveNpcAppearance(subject));
     if (!text) return '';
     const legacy = Number(version) === 1;
-    const apparentAge = legacy ? '' : normalizeName(npc?.apparentAge);
+    // An apparent age produced only by the automatic birthday carry is not a visual change: compare
+    // the reference apparent age it was carried from, so a portrait is not marked stale every year.
+    const shown = String(npc?.apparentAge ?? '').trim().match(/^~?(\d{1,3})$/);
+    const anchor = npc?.apparentAgeAnchor;
+    const carried = shown && anchor && Number.isInteger(anchor.apparent) && anchor.result === Number(shown[1]);
+    const apparentAge = legacy ? '' : normalizeName(carried ? `~${anchor.apparent}` : npc?.apparentAge);
     const material = apparentAge ? `${text}|apparent age:${apparentAge}` : text;
     let hash = 0x811c9dc5;
     for (let index = 0; index < material.length; index += 1) {
