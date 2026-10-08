@@ -317,18 +317,27 @@ function uniqueImportedId(npc, usedIds) {
 // that carry it) so both owners keep their count-aware continuity. Same-owner duplicates still merge.
 function rekeyCollidingImportedSlots(importedGraph, currentGraph) {
     const targetSlotOwner = new Map(currentGraph.unresolved.map(slot => [slot.id, slot.ownerId]));
-    const targetGroupOwners = new Map();
+    const targetGroupSlotOwners = new Map();
     for (const slot of currentGraph.unresolved) {
-        if (!targetGroupOwners.has(slot.groupId)) targetGroupOwners.set(slot.groupId, new Set());
-        targetGroupOwners.get(slot.groupId).add(slot.ownerId);
+        if (!targetGroupSlotOwners.has(slot.groupId)) targetGroupSlotOwners.set(slot.groupId, new Set());
+        targetGroupSlotOwners.get(slot.groupId).add(slot.ownerId);
     }
+    // A named bond in a group has the owner on one end and the relative on the other, so it only
+    // shows which NPCs the group may belong to; the relative end is not a competing owner.
+    const targetGroupEdges = new Map();
     for (const edge of currentGraph.edges) {
         if (!edge.groupId) continue;
-        if (!targetGroupOwners.has(edge.groupId)) targetGroupOwners.set(edge.groupId, new Set());
-        targetGroupOwners.get(edge.groupId).add(edge.aId).add(edge.bId);
+        if (!targetGroupEdges.has(edge.groupId)) targetGroupEdges.set(edge.groupId, []);
+        targetGroupEdges.get(edge.groupId).push(edge);
     }
+    const groupBelongsToOther = (groupId, ownerId) => {
+        const slotOwners = targetGroupSlotOwners.get(groupId);
+        if (slotOwners && [...slotOwners].some(owner => owner !== ownerId)) return true;
+        const edges = targetGroupEdges.get(groupId) || [];
+        return edges.length > 0 && !edges.some(edge => edge.aId === ownerId || edge.bId === ownerId);
+    };
     const usedSlotIds = new Set([...targetSlotOwner.keys(), ...importedGraph.unresolved.map(slot => slot.id)]);
-    const usedGroupIds = new Set([...targetGroupOwners.keys(), ...importedGraph.unresolved.map(slot => slot.groupId), ...importedGraph.edges.map(edge => edge.groupId).filter(Boolean)]);
+    const usedGroupIds = new Set([...targetGroupSlotOwners.keys(), ...targetGroupEdges.keys(), ...importedGraph.unresolved.map(slot => slot.groupId), ...importedGraph.edges.map(edge => edge.groupId).filter(Boolean)]);
     const unique = (base, used) => {
         let candidate = String(base).slice(0, 120);
         for (let n = 2; used.has(candidate); n += 1) candidate = `${String(base).slice(0, 112)}~${n}`;
@@ -338,8 +347,7 @@ function rekeyCollidingImportedSlots(importedGraph, currentGraph) {
     const groupRekey = new Map();
     const unresolved = importedGraph.unresolved.map(slot => {
         const next = { ...slot };
-        const groupOwners = targetGroupOwners.get(slot.groupId);
-        if (groupOwners && !(groupOwners.size === 1 && groupOwners.has(slot.ownerId))) {
+        if (groupBelongsToOther(slot.groupId, slot.ownerId)) {
             const groupKey = `${slot.groupId}|${slot.ownerId}`;
             if (!groupRekey.has(groupKey)) groupRekey.set(groupKey, unique(`${slot.groupId}~${slot.ownerId}`, usedGroupIds));
             next.groupId = groupRekey.get(groupKey);
@@ -388,7 +396,7 @@ const IMPORT_LOCKED_FIELD_KEYS = Object.freeze({
     gender: ['gender'],
     homeBase: ['homeBase'],
     age: ['age'],
-    apparentAge: ['apparentAge'],
+    apparentAge: ['apparentAge', 'apparentAgeAnchor'],
     appearance: ['appearance', 'overallAppearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'appearanceModelVersion'],
     personality: ['personality'],
     speech: ['speech'],

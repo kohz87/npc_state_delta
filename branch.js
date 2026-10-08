@@ -1060,7 +1060,7 @@ const NPC_REVERT_GROUPS = Object.freeze([
     ['relationship', 'relationshipProgress', 'relationshipMilestones', 'relationshipEventHistory', 'lastRelationshipChange'],
     ['appearance', 'overallAppearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'appearanceModelVersion'],
     ['age', 'apparentAge', 'birthDate', 'birthDateSource', 'birthDatePrecision', 'birthDateYearSource', 'birthDateReason',
-        'birthDateSourceMessageId', 'birthDateCalendarFingerprint', 'birthDateDisplay', 'calendarAge'],
+        'birthDateSourceMessageId', 'birthDateCalendarFingerprint', 'birthDateDisplay', 'calendarAge', 'apparentAgeAnchor'],
     ['lifeState', 'lifeStateCertainty', 'lifeStateReason', 'archived', 'archiveReason', 'archivedAt', 'archiveSourceMessageId'],
     ['personality', 'personalityDevelopment'],
     ['speech', 'speechDevelopment'],
@@ -1196,20 +1196,35 @@ export function revertDeletedBlockEffects(state, currentState, checkpoints, prev
 
     if (currentState.socialGraph && before.socialGraph && after.socialGraph) {
         const graph = structuredClone(currentState.socialGraph);
-        const edgeMap = list => new Map((Array.isArray(list) ? list : []).map(edge => [String(edge?.id || ''), edge]));
+        const edgeMap = list => new Map(normalizeSocialGraph({ edges: list }).edges.map(edge => [edge.id, edge]));
         const beforeEdges = edgeMap(before.socialGraph.edges);
         const afterEdges = edgeMap(after.socialGraph.edges);
         const liveIds = new Set(survivors.map(npc => String(npc?.id || '')));
-        graph.edges = (Array.isArray(graph.edges) ? graph.edges : []).flatMap(edge => {
+        // Grouped bonds the block added and this revert removes, per endpoint and group: each one
+        // may have consumed an unnamed-relative slot that must come back with it.
+        const undoneGroupBonds = new Map();
+        const countUndone = edge => {
+            if (!edge?.groupId) return;
+            for (const owner of [edge.aId, edge.bId]) {
+                const key = `${owner}|${edge.groupId}`;
+                undoneGroupBonds.set(key, (undoneGroupBonds.get(key) || 0) + 1);
+            }
+        };
+        graph.edges = normalizeSocialGraph({ edges: graph.edges }).edges.flatMap(edge => {
             const id = String(edge?.id || '');
             const then = afterEdges.get(id);
             const was = beforeEdges.get(id);
             if (!id || !then || !jsonEqual(edge, then)) return [edge];
-            if (!was) { result.socialEdges += 1; return []; }            // added by the block
+            if (!was) { result.socialEdges += 1; countUndone(edge); return []; }   // added by the block
             if (jsonEqual(was, then)) return [edge];
             result.socialEdges += 1;
             return [structuredClone(was)];                                // changed by the block
-        }).filter(edge => liveIds.has(String(edge?.aId || '')) && liveIds.has(String(edge?.bId || '')));
+        }).filter(edge => {
+            const kept = liveIds.has(String(edge?.aId || '')) && liveIds.has(String(edge?.bId || ''));
+            // A bond to an NPC the block introduced goes with that NPC.
+            if (!kept && afterEdges.has(edge.id) && !beforeEdges.has(edge.id)) countUndone(edge);
+            return kept;
+        });
         // Unresolved relative slots follow the same rule: a slot the block added and no retained
         // message touched goes with it; one the block changed reverts. Deleted family facts must
         // not survive as slots that a later scan would consume as evidence.
@@ -1226,6 +1241,19 @@ export function revertDeletedBlockEffects(state, currentState, checkpoints, prev
             result.socialEdges += 1;
             return [structuredClone(was)];                                // changed by the block
         }).filter(slot => liveIds.has(String(slot?.ownerId || '')));
+        // A slot the block consumed (naming that relative) returns when the bond that named it is
+        // undone; a bond a retained message kept keeps the slot consumed.
+        const liveSlotIds = new Set(graph.unresolved.map(slot => slot.id));
+        const consumed = [...beforeSlots.values()]
+            .filter(slot => !afterSlots.has(slot.id) && !liveSlotIds.has(slot.id) && liveIds.has(String(slot.ownerId || '')))
+            .sort((a, b) => a.id.localeCompare(b.id));
+        for (const slot of consumed) {
+            const key = `${slot.ownerId}|${slot.groupId}`;
+            if (!(undoneGroupBonds.get(key) > 0)) continue;
+            undoneGroupBonds.set(key, undoneGroupBonds.get(key) - 1);
+            graph.unresolved.push(structuredClone(slot));
+            result.socialEdges += 1;
+        }
         currentState.socialGraph = graph;
     }
     currentState.candidates = removeAddedItems(currentState.candidates, before.candidates, after.candidates);

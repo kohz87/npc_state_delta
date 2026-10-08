@@ -237,6 +237,9 @@ export function encodeRetiredStateFilePayload(chatKey, reason = 'retired', appVe
         retired: true,
         retiredAt: new Date().toISOString(),
         retireReason: String(reason || 'retired').slice(0, 120),
+        // A Detach marker names the verified copy of the bytes it replaced, so any session that
+        // later finds the marker can register that backup instead of the empty marker.
+        ...(metadata?.recoveryPath ? { recoveryPath: String(metadata.recoveryPath), recoveryName: String(metadata.recoveryName || '') } : {}),
         state: {},
     }, null, 2);
 }
@@ -533,7 +536,8 @@ export async function quarantineUnreadableNpcStateDataFile({ chatKey, pointer, a
         let marker = null;
         try { marker = decodeStateFilePayload(raw); } catch { marker = null; }
         if (marker?.retired && marker.retireReason === 'manual-detach' && String(marker.chatKey || '') === key) {
-            return { alreadyDetached: true, preservedFrom: pointer.path };
+            const recorded = marker.recoveryPath ? { name: String(marker.recoveryName || ''), path: String(marker.recoveryPath) } : {};
+            return { alreadyDetached: true, preservedFrom: pointer.path, ...recorded };
         }
         const copyName = makeNpcStateRecoveryFileName(key).replace(/\.json$/i, '-unreadable.json');
         const copy = await uploadPayload({ name: copyName, json: raw, fetchFn, headers });
@@ -546,7 +550,7 @@ export async function quarantineUnreadableNpcStateDataFile({ chatKey, pointer, a
         // acknowledgement of that replacement cannot lose the only reference to the original bytes.
         if (typeof onPreserved === 'function') await onPreserved({ ...preserved });
         const name = pointer.name || makeNpcStateDataFileName(key);
-        await uploadPayload({ name, json: encodeRetiredStateFilePayload(key, 'manual-detach', appVersion, { revision: 1, writerId }), fetchFn, headers });
+        await uploadPayload({ name, json: encodeRetiredStateFilePayload(key, 'manual-detach', appVersion, { revision: 1, writerId, recoveryPath: copy.path, recoveryName: copyName }), fetchFn, headers });
         return preserved;
     });
 }
