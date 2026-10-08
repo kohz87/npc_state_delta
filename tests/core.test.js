@@ -10,7 +10,6 @@ import {
     IMPORTANT_MEMORY_LIMIT,
     KEY_RELATIONSHIP_LIMIT,
     DURABLE_PROFILE_LIMITS,
-    NPC_ARCHIVE_REASONS,
     applyNpcStateCommand,
     buildScannerPrompt,
     buildRelationshipPassPrompt,
@@ -57,7 +56,8 @@ test('normalizes names across punctuation and casing', () => {
 });
 
 test('archive reason contract includes automatic stale archives', () => {
-    assert.deepEqual(NPC_ARCHIVE_REASONS, ['', 'manual', 'deceased', 'stale']);
+    for (const reason of ['', 'manual', 'deceased', 'stale']) assert.equal(normalizeNpcRecord({ name: 'Mira', archiveReason: reason }).archiveReason, reason);
+    assert.equal(normalizeNpcRecord({ name: 'Mira', archiveReason: 'forgotten' }).archiveReason, '');
 });
 
 

@@ -10,7 +10,6 @@ import {
 } from './social.js';
 
 export const NPC_LIFE_STATES = Object.freeze(['unknown', 'alive', 'deceased']);
-export const NPC_ARCHIVE_REASONS = Object.freeze(['', 'manual', 'deceased', 'stale']);
 export const NPC_ADMISSION_MODES = Object.freeze(['conservative', 'balanced', 'manual_only']);
 export const IMPORTANT_MEMORY_LIMIT = 5;
 export const KEY_RELATIONSHIP_LIMIT = 5;

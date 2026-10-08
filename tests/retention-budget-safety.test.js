@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { BRANCH_SNAPSHOT_BUDGET_CHARS, chatLineage, pruneBranchCheckpoints } from '../branch.js';
+import { BRANCH_SNAPSHOT_BUDGET_BYTES, chatLineage, pruneBranchCheckpoints } from '../branch.js';
 import { prunePortraitAssetsForState } from '../storage.js';
 import { buildQualifiedChatKey } from '../identity.js';
 
@@ -19,7 +19,7 @@ test('branch snapshots obey a bounded character budget while retaining useful an
     }));
     const pruned = pruneBranchCheckpoints(checkpoints, lineage, 160);
     const size = pruned.reduce((sum, item) => sum + JSON.stringify(item.snapshot || {}).length + 256, 0);
-    assert.ok(size <= BRANCH_SNAPSHOT_BUDGET_CHARS || pruned.length === 1);
+    assert.ok(size <= BRANCH_SNAPSHOT_BUDGET_BYTES || pruned.length === 1);
     assert.ok(pruned.length < checkpoints.length);
     assert.ok(pruned.some(item => item.messageId === 29), 'newest checkpoint must survive budget compaction');
 });

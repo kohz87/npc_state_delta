@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.1.3 - 8 October 2026
+
+Clean-up from an internal audit of 1.1.2; the extension's behaviour is unchanged:
+
+- Removed a broken, never-called copy of two branch-history helpers, three constants nothing used, and two unused style rules.
+- The README describes named forms in one place, and the core contract's release requirements cover every release after 1.0.29.
+
 ## 1.1.2 - 8 October 2026
 
 Test-only release from an internal audit of 1.1.1; the extension's behaviour is unchanged:
