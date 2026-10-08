@@ -241,5 +241,3 @@ function init() {
 if (typeof globalThis.$ === 'function') globalThis.$(init);
 else if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
 else init();
-
-export const NPC_STATE_FULL_CAST = Object.freeze({ runFullCastScan });

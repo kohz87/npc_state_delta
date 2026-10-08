@@ -109,22 +109,6 @@ export function commonPrefixLength(a = [], b = []) {
     return divergence < 0 ? Math.min(a.length, b.length) : divergence;
 }
 
-export function lineageCheckpointKeys(lineage = []) {
-    const source = Array.isArray(lineage) ? lineage : [];
-    const keys = [];
-    let parent = 'root';
-    for (let i = 0; i < source.length; i += 1) {
-        parent = branchHash(`${parent}|${i}|${source[i]}`);
-        keys.push(parent);
-    }
-    return keys;
-}
-
-export function lineageCheckpointKey(lineage = [], messageId = -1) {
-    if (!Number.isInteger(messageId) || messageId < 0) return '';
-    return lineageCheckpointKeys(lineage)[messageId] || '';
-}
-
 function cloneNpcList(npcs) {
     return Array.isArray(npcs) ? structuredClone(npcs) : [];
 }

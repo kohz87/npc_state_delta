@@ -116,10 +116,6 @@
 }
 .npc-state-delta-editor-lifecycle b { color: var(--npc-gold); }
 .npc-state-delta-editor-lifecycle small { grid-column: 1 / -1; opacity: .68; }
-.npc-state-delta-editor-archive-toggle { margin-right: auto !important; }
-@media (max-width: 700px) {
-  .npc-state-delta-editor-archive-toggle { width: 100%; margin-right: 0 !important; }
-}
 
 /* Host/mobile interaction hardening */
 .npc-state-delta-inline-anchor {
@@ -145,12 +141,6 @@
   text-align: left !important;
   overflow-x: hidden;
 }
-.npc-state-delta-editor-tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 10px 0 2px;
-}
 .npc-state-delta-editor-popup .npc-state-delta-editor-grid .text_pole,
 .npc-state-delta-editor-popup .npc-state-delta-editor-stats .text_pole {
   width: 100% !important;
@@ -165,9 +155,6 @@
   .npc-state-delta-editor-popup .popup-body,
   .npc-state-delta-editor-popup .popup-content {
     max-height: 100dvh;
-  }
-  .npc-state-delta-editor-tools .menu_button {
-    flex: 1 1 auto;
   }
 }
 
