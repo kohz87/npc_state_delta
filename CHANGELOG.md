@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.0.98 - 8 October 2026
+
+- Each named appearance form (human, dragon, …) is now its own complete description, body and outfit together. Physical features are no longer combined into forms, so a dragon form can no longer pick up the human body and nothing is repeated. Existing forms are converted once to exactly what they showed before, and portraits are not marked outdated by the conversion.
+- The `[full]` form marker from 1.0.95 is retired: every form is complete now.
+- Scans describe each form completely and keep Physical features for NPCs without forms (one short sentence in the appearance-form instructions changed).
+- A hairstyle mention ("tied up in a bun", "pinned back") no longer erases the stored hair colour and length; a real change ("cropped short and dyed black") still replaces it.
+
 ## 1.0.97 - 8 October 2026
 
 Fixes from an internal audit of 1.0.94–1.0.96:

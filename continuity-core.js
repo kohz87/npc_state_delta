@@ -1,6 +1,7 @@
 /* NPC State Delta Stage 4 continuity facade. */
 import * as mechanics from './core-mechanics.js';
 import {
+    APPEARANCE_MODEL_VERSION,
     applyAppearanceUpdate,
     carryOmittedPhysicalTraits,
     normalizeAppearanceForms,
@@ -69,7 +70,7 @@ function mergeAppearanceKnowledge(sources = [], current = {}) {
         appearanceForms: forms,
         currentForm: selection.currentForm,
         currentFormUnknown: selection.currentFormUnknown,
-        appearanceModelVersion: 1,
+        appearanceModelVersion: APPEARANCE_MODEL_VERSION,
     });
 }
 
@@ -159,7 +160,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
         let profileUpdate = profiles.find(raw => sameNpc(raw, rawNpc));
         const rawForms = ordinaryUpdate && (ordinaryUpdate.appearanceForms ?? ordinaryUpdate.appearance_forms);
         const seed = !sources.length && rawForms
-            ? { ...rawNpc, appearanceModelVersion: 1 }
+            ? { ...rawNpc, appearanceModelVersion: APPEARANCE_MODEL_VERSION }
             : (sources.length && !lockedAppearance(rawNpc) ? carryOmittedPhysicalTraits(sources[0], rawNpc) : rawNpc);
 
         const formSwitch = Boolean(
@@ -234,12 +235,12 @@ const COMPACT_STAGE4_RULE = `\nS4: forms/current; confirmed death terminal.`;
 // Form rules shared by every prompt. The scanner and Refresh already define flat Appearance (current
 // visible presentation; correction=>refine, clothes/form change=>change+reason) in their own rules, so
 // only backfill and dossier import, which do not, get that sentence here.
-const APPEARANCE_FORM_RULES = 'overallAppearance=enduring traits identical in every form; one form\'s body (hair/build/size/skin) goes in that form only. Named anatomy uses appearanceForms:[{name,appearance,state:"refine|change",reason}]+currentForm/currentFormState:"select"; switches preserve other forms. Unknown transformed form=>currentFormState:"unknown"+grounded current appearance; never reuse another form\'s anatomy. Omission preserves; Appearance lock protects all appearance state.';
+const APPEARANCE_FORM_RULES = 'With named forms, each form appearance is that form\'s COMPLETE visible appearance (body+outfit); overallAppearance is only for an NPC without forms. Named anatomy uses appearanceForms:[{name,appearance,state:"refine|change",reason}]+currentForm/currentFormState:"select"; switches preserve other forms. Unknown transformed form=>currentFormState:"unknown"+grounded current appearance; never reuse another form\'s anatomy. Omission preserves; Appearance lock protects all appearance state.';
 const APPEARANCE_RULES = `\nSTAGE 4 APPEARANCE: ${APPEARANCE_FORM_RULES}`;
 const APPEARANCE_RULES_WITH_FLAT = `\nSTAGE 4 APPEARANCE: appearance=current outfit/gear/visible condition. Explicit correction/reveal=>refine corrected FULL appearance; changed clothes/form/presentation=>change+reason FULL appearance. ${APPEARANCE_FORM_RULES}`;
 const DEATH_RULES = `\nSTAGE 4 DEATH: explicit death is terminal: lifeState:"deceased"+lifeStateCertainty:"explicit"; later output cannot return that NPC to alive/present/worldActive.`;
 const PROFILE_REFRESH_FORM_SHAPE_ANCHOR = '"appearanceState":"refine|change","appearance":"","appearanceReason":""';
-const PROFILE_REFRESH_FORM_SHAPE = '"appearanceState":"refine|change","appearance":"","appearanceReason":"","overallAppearance":"","overallAppearanceState":"keep|refine|change","overallAppearanceReason":"","appearanceForms":[{"name":"stable established form name","appearance":"form-specific visible anatomy","state":"refine|change","reason":""}],"currentForm":"stable established form name or empty","currentFormState":"keep|select|unknown","currentFormReason":""';
+const PROFILE_REFRESH_FORM_SHAPE = '"appearanceState":"refine|change","appearance":"","appearanceReason":"","overallAppearance":"","overallAppearanceState":"keep|refine|change","overallAppearanceReason":"","appearanceForms":[{"name":"stable established form name","appearance":"complete visible appearance of this form","state":"refine|change","reason":""}],"currentForm":"stable established form name or empty","currentFormState":"keep|select|unknown","currentFormReason":""';
 const PROFILE_REFRESH_APPEARANCE_RULE = `\nREFRESH: visible anatomy changes are form evidence even without literal "form"/"transform" wording.`;
 function hasImplicitAnatomicalTransition(transcript = '') {
     const text = String(transcript || '');
