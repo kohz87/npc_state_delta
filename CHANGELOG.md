@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.1.2 - 8 October 2026
+
+Test-only release from an internal audit of 1.1.1; the extension's behaviour is unchanged:
+
+- The synthetic host used by the runtime tests now cancels the extension's still-scheduled timers before removing itself, so test runs no longer print stray "reading 'context'" errors from timers that fired after teardown.
+
 ## 1.1.1 - 8 October 2026
 
 Fixes from an internal audit of 1.1.0:

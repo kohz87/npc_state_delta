@@ -379,6 +379,18 @@ globalThis.$ = (selector) => {
     return makeQuery(selector);
 };
 
+// Teardown cancels whatever the extension still has scheduled, so no timer fires against a host
+// that has already been removed.
+const nativeSetTimeout = globalThis.setTimeout;
+const nativeClearTimeout = globalThis.clearTimeout;
+const pendingHostTimers = new Set();
+globalThis.setTimeout = (callback, ms, ...args) => {
+    const handle = nativeSetTimeout((...callArgs) => { pendingHostTimers.delete(handle); callback(...callArgs); }, ms, ...args);
+    pendingHostTimers.add(handle);
+    return handle;
+};
+globalThis.clearTimeout = handle => { pendingHostTimers.delete(handle); nativeClearTimeout(handle); };
+
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function manualAddNpc(name) {
@@ -1622,6 +1634,8 @@ try {
 
     console.log('Runtime smoke: file persistence, branch safety, OOC removal, chat cleanup, group ownership, and same-filename character isolation passed.');
 } finally {
+    for (const handle of pendingHostTimers) nativeClearTimeout(handle);
+    pendingHostTimers.clear();
     delete globalThis.__npcMock;
     fs.rmSync(tempRoot, { recursive: true, force: true });
 }
