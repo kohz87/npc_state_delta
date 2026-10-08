@@ -138,13 +138,6 @@ function safeRefinement(existing, incoming) {
     const coverage = [...oldTokens].filter(token => newTokens.has(token)).length / oldTokens.size;
     return addsDetail && (coverage >= 0.62 || similarity(existing, incoming) >= 0.58);
 }
-function safeUnmarkedReplacement(existing, incoming) {
-    if (!safeRefinement(existing, incoming)) return false;
-    const oldTokens = new Set(refinementTokens(existing));
-    const newTokens = new Set(refinementTokens(incoming));
-    const coverage = [...oldTokens].filter(token => newTokens.has(token)).length / oldTokens.size;
-    return coverage >= 1;
-}
 function mergeRefinement(existing, incoming, maxChars) {
     const current = clean(existing, maxChars);
     const next = clean(incoming, maxChars);
@@ -347,8 +340,13 @@ export function normalizeAppearanceModel(raw = {}, { locked = false } = {}) {
     const currentForm = clean(raw.currentForm ?? raw.current_form, 120);
     let currentFormUnknown = truthy(raw.currentFormUnknown ?? raw.current_form_unknown);
     if (currentForm) currentFormUnknown = false;
+    const convertingV1 = appearanceForms.length && overallAppearance && !(Number(raw.appearanceModelVersion) >= APPEARANCE_MODEL_VERSION);
     if (currentFormUnknown && !unclassifiedAppearance) {
-        unclassifiedAppearance = stripOverallPrefix(appearance, overallAppearance);
+        unclassifiedAppearance = appearanceForms.length && !convertingV1 ? appearance : stripOverallPrefix(appearance, overallAppearance);
+    }
+    // A version-1 unknown-form presentation showed the overall features in front of it; keep that.
+    if (convertingV1 && currentFormUnknown && unclassifiedAppearance) {
+        unclassifiedAppearance = combineAppearance(overallAppearance, unclassifiedAppearance);
     }
     return {
         appearance,
@@ -392,6 +390,20 @@ function legacyFormPresentation(overall, value) {
     return combineAppearance(dropped ? keptShared.join(', ') : shared, local);
 }
 
+// A scan that still sends the body as overallAppearance and only an outfit or condition for a named
+// form (no physical trait in the form's own text) means that body belongs to that form: write it in,
+// so the self-contained form does not lose it. A form that describes its own body is left alone.
+export function completeFormWithShared(overall, value) {
+    const own = appearanceText(value);
+    const shared = appearanceText(overall);
+    if (!own || !shared) return own;
+    const describesBody = presentationSegments(own)
+        .filter(segment => !CONCEALED_MENTION.test(segment))
+        .flatMap(physicalPieces)
+        .some(piece => physicalTraitKeys(piece).length > 0);
+    return describesBody ? own : combineAppearance(shared, own);
+}
+
 export function resolveNpcAppearance(rawNpc = {}) {
     const model = normalizeAppearanceModel(rawNpc, {
         locked: Array.isArray(rawNpc?.manualProfileFields) && rawNpc.manualProfileFields.includes('appearance'),
@@ -399,6 +411,9 @@ export function resolveNpcAppearance(rawNpc = {}) {
     const current = model.currentForm ? appearanceFormByName(model, model.currentForm) : null;
     const overall = model.overallAppearance;
     if (current) return appearanceText(current.appearance);
+    // An unknown transformed form of an NPC with named forms is described completely too; the
+    // overall slot serves only an NPC without forms.
+    if (model.currentFormUnknown && model.appearanceForms.length) return appearanceText(model.unclassifiedAppearance || model.appearance);
     if (model.currentFormUnknown) return combineAppearance(overall, model.unclassifiedAppearance || model.appearance);
     if (model.currentForm) return combineAppearance(overall, model.unclassifiedAppearance || model.appearance);
     // Without a selected form, enduring physical features (the shared slot) plus the current
@@ -499,7 +514,7 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
                 if (appearance) next.appearanceForms[index] = { ...next.appearanceForms[index], name: next.appearanceForms[index].name || form.name, appearance };
             } else if (next.appearanceForms.length < APPEARANCE_FORM_LIMIT) {
                 const appearance = reconcileFormAppearance('', form, context);
-                if (appearance) next.appearanceForms.push({ name: form.name, appearance });
+                if (appearance) next.appearanceForms.push({ name: form.name, appearance: overallProvided ? completeFormWithShared(next.overallAppearance, appearance) : appearance });
             }
         }
     }
@@ -556,7 +571,10 @@ export function applyAppearanceUpdate(record = {}, rawUpdate = {}, { locked = fa
                 }
             } else if (next.currentFormUnknown) {
                 const previous = next.unclassifiedAppearance;
-                next.unclassifiedAppearance = preserveOmittedPhysicalTraits(previous, reconcileFormAppearance(previous, update, context), { alsoPresent: next.overallAppearance });
+                const standalone = next.appearanceForms.length > 0;
+                next.unclassifiedAppearance = preserveOmittedPhysicalTraits(previous,
+                    reconcileFormAppearance(previous, standalone ? { ...update, appearance: incomingAppearance } : update, context),
+                    { alsoPresent: standalone ? '' : next.overallAppearance });
             } else {
                 // Without a selected/unknown form the shared physical features are prepended when resolved,
                 // so traits already held there are not carried into the current presentation again.

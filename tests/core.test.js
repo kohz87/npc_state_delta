@@ -1885,7 +1885,8 @@ test('routine scanner prompt has bounded overhead and delta/profile tiers', () =
     const transcript = `Aris: I ask Myla to step into the alley.\nNarrator: ${'Myla trembles and explains the quota system while begging Aris to keep the tags secret. '.repeat(22)} World State: NPCs Present: Myla Fenn, terrified in the alley. Off-Screen: Toris Vance waits by the hearth. NPC Inner Chatter: Myla Fenn fears Aris.`;
     const prompt = buildScannerPrompt({ transcript, existingNpcs: [toris, myla], userName: 'Aris', charName: 'Narrator' });
     const overhead = prompt.length - transcript.length;
-    assert.ok(overhead < 7550, `routine scanner overhead should stay below 7550 chars after the bounded Appearance clarification, got ${overhead}`);
+    // 1.0.99 adds the user-authorized "if no named forms" qualifier to the Appearance rule.
+    assert.ok(overhead < 7600, `routine scanner overhead should stay below 7600 chars after the bounded Appearance clarifications, got ${overhead}`);
     assert.match(prompt, /Return compact JSON deltas/i);
     assert.match(prompt, /Existing relationship delta example/i);
     assert.match(prompt, /Relevant live context \(dynamic fields only\)/i);

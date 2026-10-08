@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 1.0.99 - 8 October 2026
+
+Fixes from an internal audit of 1.0.98:
+
+- A new NPC whose scan describes the body under Physical features and only the outfit for a form (for example "Human: wearing a grey cloak") no longer loses the hair and eyes: the body is written into that form. A form that describes its own body, such as a dragon, is left alone.
+- The scanner instructions no longer contradict themselves: Physical features are described as applying only when an NPC has no named forms.
+- An unknown transformed form (one that is not a named form) no longer gets the human body in front of it.
+- The dossier no longer shows Physical features above a selected form they do not apply to.
+- Deleting a message from before 1.0.98 that introduced an NPC removes that NPC again.
+- A portrait being generated for a form is no longer rejected because the unused Physical features changed.
+- Other forms are shown in shortened form in the scanner's context, so NPCs with many long forms do not bloat every scan.
+- Removed unused code and corrected two outdated rules in the core contract.
+- Known limitation: a dragon or beast form converted by 1.0.98 may still contain human traits it showed before; Refresh that NPC or edit the form once.
+
 ## 1.0.98 - 8 October 2026
 
 - Each named appearance form (human, dragon, …) is now its own complete description, body and outfit together. Physical features are no longer combined into forms, so a dragon form can no longer pick up the human body and nothing is repeated. Existing forms are converted once to exactly what they showed before, and portraits are not marked outdated by the conversion.

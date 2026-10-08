@@ -37,11 +37,6 @@ export function boundedAppend(list, value, limit = TOOL_EVENT_LIMIT) {
     return list;
 }
 
-export function estimateLocalTokens(chars) {
-    const count = Math.max(0, Math.round(safeNumber(chars, 0)));
-    return count ? Math.max(1, Math.ceil(count / 4)) : 0;
-}
-
 export function validatePortraitFile(file) {
     if (!file) return { ok: false, reason: 'No image was selected.' };
     if (!/^image\/(?:png|jpeg|webp|gif|avif|bmp)$/i.test(plain(file.type))) return { ok: false, reason: 'Choose a supported image file.' };
@@ -137,10 +132,6 @@ export function selectedNpcId() {
         || root?.querySelector?.('.delta-hero .delta-edit[data-npc-id]')?.dataset?.npcId
         || '';
     return plain(selected);
-}
-export function portraitSignature(npc) {
-    const portrait = npc?.portrait || null;
-    return portrait ? `${plain(portrait.dataUrl).length}:${safeNumber(portrait.updatedAt, 0)}:${plain(portrait.sourceName)}` : 'none';
 }
 export function draftKey(chatKey, npcId) { return `${chatKey}::${npcId}`; }
 export function keepPromptDraft(key, draft) {

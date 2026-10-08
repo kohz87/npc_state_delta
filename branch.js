@@ -1,5 +1,5 @@
 import * as branchCore from './branch-core.js';
-import { isTerminalNpcDeath, normalizeName } from './core.js';
+import { isTerminalNpcDeath, normalizeName, normalizeNpcRecord } from './core.js';
 import { parseQualifiedChatKey } from './identity.js';
 import { prunePortraitAssetsInPlace } from './storage.js';
 import { normalizeSocialGraph, removeNpcFromSocialGraph, purgeNpcStructuredReferences } from './social.js';
@@ -832,11 +832,6 @@ export function pruneBranchCheckpoints(checkpoints = [], activeLineage = [], lim
     return [...budgeted.values()].sort((a, b) => a.messageId - b.messageId || a.createdAt - b.createdAt);
 }
 
-function boundRootSnapshot(state) {
-    if (!state?.branchRootSnapshot || typeof state.branchRootSnapshot !== 'object') return;
-    if (utf8Bytes(state.branchRootSnapshot) > BRANCH_SNAPSHOT_MAX_BYTES) state.branchRootSnapshot = null;
-}
-
 export function ensureBranchParentAnchor(state, chat, messageId, reason = 'parent-anchor', limit = branchCore.BRANCH_HISTORY_LIMIT) {
     if (!state || typeof state !== 'object' || !Number.isInteger(messageId) || messageId < 0) return state;
     migrateLegacyLineage(state, chat);
@@ -1096,25 +1091,31 @@ function removeAddedItems(current, before, after) {
 // after its last scan, `npc` the live record. A field (group) the block changed and nothing later
 // touched returns to `before`; list fields also drop the items the block added. Returns the
 // reverted field names.
-function revertNpcAgainstDeletedBlock(npc, before, after, protectedKeys = []) {
+// `views` holds the three records in the current stored format: whether the block changed a field,
+// and whether a later message did, is decided on them, while reverted values come from the raw
+// snapshot (a later normalization converts them like any other stored record).
+function revertNpcAgainstDeletedBlock(npc, before, after, protectedKeys = [], views = { npc, before, after }) {
     const locked = new Set([...(Array.isArray(npc.manualProfileFields) ? npc.manualProfileFields : []), ...protectedKeys]);
     const changed = [];
     const handled = new Set();
+    const same = (key, left, right) => jsonEqual(left[key], right[key]);
+    const blockChanged = key => !same(key, after, before) && !same(key, views.after, views.before);
+    const untouchedSince = key => same(key, npc, after) || same(key, views.npc, views.after);
     const consider = (keys) => {
         const usable = keys.filter(key => !NPC_REVERT_SKIP.has(key) && !locked.has(key));
         if (!usable.length || usable.length !== keys.length) { keys.forEach(key => handled.add(key)); return; }
         keys.forEach(key => handled.add(key));
-        if (keys.every(key => jsonEqual(after[key], before[key]))) return;          // the block changed nothing here
-        if (!keys.every(key => jsonEqual(npc[key], after[key]))) return;            // something later touched it
+        if (!keys.some(blockChanged)) return;                                      // the block changed nothing here
+        if (!keys.every(untouchedSince)) return;                                   // something later touched it
         for (const key of keys) setOrDelete(npc, key, before);
-        changed.push(...keys.filter(key => !jsonEqual(after[key], before[key])));
+        changed.push(...keys.filter(blockChanged));
     };
     for (const group of NPC_REVERT_GROUPS) consider(group);
     const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
     for (const key of keys) {
         if (handled.has(key) || NPC_REVERT_SKIP.has(key) || locked.has(key)) continue;
-        if (jsonEqual(after[key], before[key])) continue;
-        if (jsonEqual(npc[key], after[key])) { setOrDelete(npc, key, before); changed.push(key); continue; }
+        if (!blockChanged(key)) continue;
+        if (untouchedSince(key)) { setOrDelete(npc, key, before); changed.push(key); continue; }
         if (NPC_REVERT_LIST_FIELDS.includes(key)) {
             const next = removeAddedItems(npc[key], before[key], after[key]);
             if (next !== npc[key] && next.length !== npc[key].length) { npc[key] = next; changed.push(key); }
@@ -1155,9 +1156,13 @@ export function revertDeletedBlockEffects(state, currentState, checkpoints, prev
         || owned.filter(item => item.messageId >= divergence && item.messageId < divergence + removedCount).at(-1)?.snapshot;
     if (!before || !after) return empty;
 
+    // Snapshots may predate a stored-format conversion (1.0.94 story days, 1.0.98 complete forms) that
+    // the live records already went through; compare both in the current format so the conversion
+    // alone never reads as a later change.
     const byId = list => new Map((Array.isArray(list) ? list : []).map(npc => [String(npc?.id || ''), npc]));
     const beforeNpcs = byId(before.npcs);
     const afterNpcs = byId(after.npcs);
+    const normalizedView = record => (record ? normalizeNpcRecord(record) : record);
     const result = { reverted: [], removed: [], socialEdges: 0 };
     const survivors = [];
     for (const npc of currentState.npcs) {
@@ -1165,10 +1170,11 @@ export function revertDeletedBlockEffects(state, currentState, checkpoints, prev
         const was = beforeNpcs.get(id);
         const then = afterNpcs.get(id);
         if (!id || !then) { survivors.push(npc); continue; }
+        const views = { npc: normalizedView(npc), before: normalizedView(was), after: normalizedView(then) };
         if (!was) {
             // Introduced by the deleted block: gone with it unless a later message used the NPC. The
             // exact before-state proves it did not exist, so a death recorded in the block goes too.
-            if (jsonEqual(withoutKeys(npc, NPC_REMOVAL_IGNORED), withoutKeys(then, NPC_REMOVAL_IGNORED))
+            if (jsonEqual(withoutKeys(views.npc, NPC_REMOVAL_IGNORED), withoutKeys(views.after, NPC_REMOVAL_IGNORED))
                 && !referencedAfterBlock(currentState.npcs, afterNpcs, npc)
                 && !graphUsedAfterBlock(currentState.socialGraph, after.socialGraph, npc, currentState.npcs)) {
                 result.removed.push({ id, name: String(npc.name || '') });
@@ -1185,7 +1191,7 @@ export function revertDeletedBlockEffects(state, currentState, checkpoints, prev
             const causedByBlock = !isTerminalNpcDeath(was) && deathGroup.every(key => jsonEqual(npc[key], then[key]));
             if (!causedByBlock) protectedKeys = [...deathGroup, ...NPC_REVERT_GROUPS[0]];
         }
-        const fields = revertNpcAgainstDeletedBlock(npc, was, then, protectedKeys);
+        const fields = revertNpcAgainstDeletedBlock(npc, was, then, protectedKeys, views);
         if (fields.length) {
             npc.updatedAt = Date.now();
             result.reverted.push({ id, name: String(npc.name || ''), fields });

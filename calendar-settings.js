@@ -204,7 +204,3 @@ if (typeof document !== 'undefined') {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', observeForSettings, { once: true });
     else observeForSettings();
 }
-
-export function calendarSettingsSnapshot() {
-    return getActiveCalendarConfig();
-}

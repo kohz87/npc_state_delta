@@ -327,7 +327,7 @@ export function appearanceFormsHtml(npc) {
         return `<div class="delta-appearance-form-row delta-appearance-form-with-portrait">${thumb}<div><b>${escapeHtml(form.name)}${form.name === model.currentForm ? '<span class="delta-appearance-current-badge">Current</span>' : ''}</b>${proseHtml(form.appearance)}${action}</div></div>`;
     }).join('');
     const empty = !unclassified && !compatibilityCurrent && !rows ? '<p class="delta-muted">No named forms established.</p>' : '';
-    return `<details class="delta-appearance-form-summary" data-delta-key="appearance" open><summary><b>Appearance</b><small>Current: ${escapeHtml(current)}</small></summary><div class="delta-appearance-form-list">${model.overallAppearance ? `<div class="delta-appearance-form-row"><b>Physical features</b>${proseHtml(model.overallAppearance)}</div>` : ''}${unclassified}${compatibilityCurrent}${rows}${empty}</div></details>`;
+    return `<details class="delta-appearance-form-summary" data-delta-key="appearance" open><summary><b>Appearance</b><small>Current: ${escapeHtml(current)}</small></summary><div class="delta-appearance-form-list">${model.overallAppearance && !(model.appearanceForms.length && (model.currentForm || model.currentFormUnknown)) ? `<div class="delta-appearance-form-row"><b>Physical features</b>${proseHtml(model.overallAppearance)}</div>` : ''}${unclassified}${compatibilityCurrent}${rows}${empty}</div></details>`;
 }
 
 // Cache only rendered section markup on its DOM node, never canonical state/history.

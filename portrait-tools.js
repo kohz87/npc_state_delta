@@ -335,8 +335,11 @@ async function savePortraitSeed(session, overlay) {
 function portraitGenerationBase(npcId, form = '') {
     const npc = npcById(npcId);
     if (!npc) return '';
+    // Physical features are a visual input only when no named form supplies the appearance.
+    const formsInUse = Array.isArray(npc.appearanceForms) && npc.appearanceForms.length > 0
+        && Boolean(form || npc.currentForm || npc.currentFormUnknown);
     return JSON.stringify([
-        String(form || ''), npc.currentForm || '', npc.currentFormUnknown === true, npc.overallAppearance || '',
+        String(form || ''), npc.currentForm || '', npc.currentFormUnknown === true, formsInUse ? '' : (npc.overallAppearance || ''),
         npc.appearance || '', npc.unclassifiedAppearance || '', npc.appearanceForms || [], npc.species || '', npc.gender || '',
         // The prompt's visual age (apparent age, else age) is a generation input like the forms.
         String(npc.apparentAge || '').trim() || String(npc.age || '').trim(),
