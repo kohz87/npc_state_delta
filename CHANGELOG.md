@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.1.1 - 8 October 2026
+
+Fixes from an internal audit of 1.1.0:
+
+- A passing look at the start of an appearance ("A tired smile") is no longer kept as if it were what the NPC is; it no longer sticks through later outfit changes.
+- A scan that opens with a look or a sentence about part of the body ("A weary look, dusted with ash", "The scales are dusted with ash") no longer erases a form such as "A silver dragon".
+- "Now a towering ogre", "She has become …" and "turned into …" now replace the old description of what the NPC is instead of being added beside it.
+
 ## 1.1.0 - 8 October 2026
 
 Delta moves to 1.1.0. Fixes from an internal audit of 1.0.100:
