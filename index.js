@@ -33,7 +33,6 @@ import {
     normalizeRelationshipBaseline,
     normalizeRelationshipCaps,
     normalizeRelationshipProgress,
-    normalizeRelationshipMilestones,
     inferManualRelationshipMilestones,
     applyRelationshipMilestoneCrossings,
     normalizeRelationshipEvidence,
@@ -142,8 +141,6 @@ import {
 } from './storage.js';
 import {
     buildQualifiedChatKey,
-    chatOwnerScope,
-    encodeChatKeyPart,
     getCharacterOwnerId,
     getChatIdentityFromContext,
     isQualifiedChatKey,

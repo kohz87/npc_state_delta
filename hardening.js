@@ -3,11 +3,9 @@ import { getRequestHeaders, saveSettings as saveHostSettings } from '../../../..
 import { NPC_STATE_VERSION } from './core.js';
 import { setBranchProvenanceHint } from './branch.js';
 import {
-    buildQualifiedChatKey,
     chatOwnerScope,
     getCharacterOwnerId,
     getChatIdentityFromContext,
-    parseQualifiedChatKey,
 } from './identity.js';
 import {
     deleteNpcStateDataFile,
@@ -17,12 +15,9 @@ import {
     writeNpcStateDataFile,
 } from './storage.js';
 import {
-    allSettingsKeys,
     applyCanonicalOwnershipMove,
     destinationKeyForOwnerRename,
     qualifiedKeysForOwner,
-    resolveGroupOwnerId,
-    uniqueQualifiedKeyForChat,
 } from './hardening-core.js';
 
 const EXTENSION_NAME = 'npc_state_delta';

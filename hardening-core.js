@@ -1,15 +1,4 @@
-import { buildQualifiedChatKey, chatOwnerScope, parseQualifiedChatKey } from './identity.js';
-
-export function resolveGroupOwnerId(groups = [], chatId = '') {
-    const id = String(chatId ?? '').replace(/\.jsonl$/i, '').trim();
-    if (!id) return '';
-    const matches = (Array.isArray(groups) ? groups : []).filter(group => {
-        const chats = Array.isArray(group?.chats) ? group.chats : [];
-        return chats.some(chat => String(chat ?? '').replace(/\.jsonl$/i, '').trim() === id)
-            || String(group?.chat_id ?? '').replace(/\.jsonl$/i, '').trim() === id;
-    }).map(group => String(group?.id ?? '').trim()).filter(Boolean);
-    return [...new Set(matches)].length === 1 ? matches[0] : '';
-}
+import { buildQualifiedChatKey, parseQualifiedChatKey } from './identity.js';
 
 export function allSettingsKeys(settings = {}) {
     const maps = ['dataFiles', 'sidecarTombstones', 'recoveryFiles'];
@@ -24,22 +13,6 @@ export function qualifiedKeysForOwner(settings = {}, kind = 'chat', ownerId = ''
         const parsed = parseQualifiedChatKey(key);
         return parsed?.kind === kind && parsed.ownerId === owner;
     });
-}
-
-export function uniqueQualifiedKeyForChat(settings = {}, kind = 'chat', chatId = '', ownerIdHint = '') {
-    const id = String(chatId ?? '').replace(/\.jsonl$/i, '').trim();
-    if (!id) return '';
-    const hint = String(ownerIdHint || '').trim();
-    const candidates = allSettingsKeys(settings).filter(key => {
-        const parsed = parseQualifiedChatKey(key);
-        return parsed?.kind === kind && parsed.chatId === id;
-    });
-    if (hint) {
-        const direct = buildQualifiedChatKey(kind, hint, id);
-        if (candidates.includes(direct)) return direct;
-    }
-    if (candidates.length === 1) return candidates[0];
-    return '';
 }
 
 export function destinationKeyForOwnerRename(oldKey, newOwnerId) {

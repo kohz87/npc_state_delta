@@ -3832,44 +3832,6 @@ export function createNpcRecord(name, existingIds = [], baseline = DEFAULT_RELAT
     };
 }
 
-export function pruneStaleNpcState(state = {}, options = {}) {
-    const turn = Math.max(0, Math.round(Number(options.turn ?? state?.turn ?? 0) || 0));
-    const threshold = Math.max(1, Math.round(Number(options.threshold) || 50));
-    const protectedIds = new Set((options.protectedIds || []).map(value => String(value || '').trim()).filter(Boolean));
-    const includeArchived = options.includeArchived === true;
-    const next = { ...state };
-    const removed = [];
-    const removedIds = new Set();
-    next.npcs = (Array.isArray(state?.npcs) ? state.npcs : []).filter(raw => {
-        const npc = normalizeNpcRecord(raw);
-        if ((!includeArchived && npc.archived) || npc.present || npc.worldActive || npc.retentionProtected || protectedIds.has(npc.id)) return true;
-        const activityTurn = Math.max(Number(npc.lastSeenTurn || 0), Number(npc.lastWorldActiveTurn || 0));
-        const age = Math.max(0, turn - activityTurn);
-        if (age < threshold) return true;
-        removed.push({ id: npc.id, name: npc.name, age, activityTurn });
-        removedIds.add(npc.id);
-        return false;
-    });
-    if (!removedIds.size) return { state: next, removed };
-
-    if (Array.isArray(state?.pendingBackfills)) {
-        next.pendingBackfills = state.pendingBackfills.filter(item => !removedIds.has(String(item?.npcId || '')));
-    }
-    if (Array.isArray(state?.inlineCards)) {
-        next.inlineCards = state.inlineCards.map(entry => ({
-            ...entry,
-            cards: Array.isArray(entry?.cards) ? entry.cards.filter(card => !removedIds.has(String(card?.id || ''))) : [],
-        })).filter(entry => Array.isArray(entry.cards) && entry.cards.length > 0);
-    }
-    if (state?.portraitAssets && typeof state.portraitAssets === 'object') {
-        next.portraitAssets = { ...state.portraitAssets };
-        for (const id of removedIds) delete next.portraitAssets[id];
-    }
-    // Deliberately do not add auto-pruned names to dismissed/suppressed. If they return
-    // later, normal admission may build a fresh dossier again.
-    return { state: next, removed };
-}
-
 
 export function applyStaleNpcLifecycle(state = {}, options = {}) {
     const turn = Math.max(0, Math.round(Number(options.turn ?? state?.turn ?? 0) || 0));

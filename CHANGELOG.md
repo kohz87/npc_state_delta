@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.0.100 - 8 October 2026
+
+Fixes from an internal audit of 1.0.99:
+
+- A dragon, wolf, spirit or other non-human form named without body details (for example "A silver dragon") no longer gets the human body written into it (a 1.0.99 regression). Only a form described entirely by clothing, gear or condition receives the Physical features a scan sends.
+- Removed unused code: an old NPC-deletion routine that stale archiving replaced, two unused helpers and ten unused imports. A test now fails if unused code is left behind.
+- README: troubleshooting explains that a multi-form NPC keeps its body in each form.
+
 ## 1.0.99 - 8 October 2026
 
 Fixes from an internal audit of 1.0.98:

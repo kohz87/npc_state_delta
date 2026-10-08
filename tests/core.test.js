@@ -46,7 +46,6 @@ import {
     stripUiNoise,
     hasCompactMeguminWorldState,
     extractExplicitKeyRelationshipEdges,
-    pruneStaleNpcState,
     applyStaleNpcLifecycle,
     buildNpcPortraitPrompts,
     normalizePortraitPromptFormat,
@@ -59,68 +58,6 @@ test('normalizes names across punctuation and casing', () => {
 
 test('archive reason contract includes automatic stale archives', () => {
     assert.deepEqual(NPC_ARCHIVE_REASONS, ['', 'manual', 'deceased', 'stale']);
-});
-
-
-test('stale NPC cleanup frees roster data without suppressing rediscovery', () => {
-    const stale = createNpcRecord('Old Scout', [], { trust: 0, affection: 0, desire: 0, tension: 0 });
-    stale.id = 'npc_old_scout';
-    stale.lastSeenTurn = 50;
-    stale.lastWorldActiveTurn = 20;
-    stale.present = false;
-    stale.worldActive = false;
-    stale.retentionProtected = false;
-
-    const pinned = createNpcRecord('Recurring Knight', [stale.id]);
-    pinned.id = 'npc_recurring_knight';
-    pinned.lastSeenTurn = 1;
-    pinned.retentionProtected = true;
-
-    const offscreen = createNpcRecord('Remote Queen', [stale.id, pinned.id]);
-    offscreen.id = 'npc_remote_queen';
-    offscreen.lastSeenTurn = 1;
-    offscreen.lastWorldActiveTurn = 100;
-    offscreen.worldActive = true;
-
-    const archived = createNpcRecord('Dead Captain', [stale.id, pinned.id, offscreen.id]);
-    archived.id = 'npc_dead_captain';
-    archived.lastSeenTurn = 1;
-    archived.archived = true;
-    archived.archiveReason = 'deceased';
-
-    const recent = createNpcRecord('Recent Clerk', [stale.id, pinned.id, offscreen.id, archived.id]);
-    recent.id = 'npc_recent_clerk';
-    recent.lastSeenTurn = 51;
-
-    const state = {
-        turn: 100,
-        npcs: [stale, pinned, offscreen, archived, recent],
-        dismissed: ['someone else'],
-        candidates: [],
-        pendingBackfills: [{ npcId: stale.id, label: stale.name }, { npcId: recent.id, label: recent.name }],
-        inlineCards: [{ messageId: 7, cards: [stale, recent] }],
-        portraitAssets: {
-            [stale.id]: { dataUrl: 'data:image/png;base64,AAAA' },
-            [recent.id]: { dataUrl: 'data:image/png;base64,BBBB' },
-        },
-    };
-
-    const result = pruneStaleNpcState(state, { turn: 100, threshold: 50 });
-    assert.deepEqual(result.removed.map(item => item.id), [stale.id], 'exactly 50 turns absent should qualify as stale');
-    assert.deepEqual(result.state.npcs.map(npc => npc.id), [pinned.id, offscreen.id, archived.id, recent.id]);
-    assert.equal(result.state.pendingBackfills.some(item => item.npcId === stale.id), false);
-    assert.equal(result.state.inlineCards[0].cards.some(card => card.id === stale.id), false);
-    assert.equal(stale.id in result.state.portraitAssets, false);
-    assert.deepEqual(result.state.dismissed, ['someone else'], 'auto-prune must not suppress future rediscovery');
-});
-
-test('stale cleanup protectedIds conservatively preserves a currently referenced old NPC', () => {
-    const old = createNpcRecord('Marris');
-    old.id = 'npc_marris';
-    old.lastSeenTurn = 1;
-    const result = pruneStaleNpcState({ turn: 90, npcs: [old] }, { turn: 90, threshold: 50, protectedIds: [old.id] });
-    assert.equal(result.removed.length, 0);
-    assert.equal(result.state.npcs[0].id, old.id);
 });
 
 
