@@ -646,6 +646,22 @@ class DeltaDossierUi {
         await this.open();
     }
 
+    // Select one dossier the same way a library card does (the relationship map uses this). If the
+    // current search or filter hides it, they are cleared so the library, hero and map agree.
+    select(npcId) {
+        const id = plain(npcId);
+        if (!this.root || !id || !this.projection?.index?.some(row => row.id === id)) return false;
+        if (!filterDossierIndex(this.projection.index, { query: this.query, filter: this.filter, keepId: id }).some(row => row.id === id)) {
+            this.query = '';
+            this.filter = 'all';
+            const search = this.root.querySelector('.delta-search');
+            if (search) search.value = '';
+        }
+        this.selectedNpcId = id;
+        this.renderFromProjection({ forceRail: true, forceDetail: true });
+        return true;
+    }
+
     close({ restoreFocus = true } = {}) {
         this.root?.querySelector('.delta-lightbox')?.remove();
         if (!this.root) return;

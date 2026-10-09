@@ -62,6 +62,65 @@ def reachable(locator, height):
     assert box and box['y'] >= 0 and box['y'] + box['height'] <= height + 1, box
 
 
+def check_relationship_map(page, name, width, output):
+    """The read-only Map view: switch, node selection shared with the hero, layout, and turning it off."""
+    page.evaluate("""state.npcs.forEach((n, i) => {
+        n.relationship = {...n.relationship, trust: [38,12,-8,0,-42,20,6,30,15,-20,50,5][i], affection: [22,18,4,0,-30,8,2,40,10,-5,35,0][i],
+            desire: 0, tension: [14,20,32,0,58,0,0,0,5,30,0,0][i]};
+        n.homeBase = ['Heron', 'Heron', 'Docks', 'Shrine', '', 'Docks'][i % 6]; n.present = i < 6; n.worldActive = i >= 6 && i < 8; });
+    state.npcs[0].keyRelationships = ['Surveyor 1 — cellar hand | trusted', 'Surveyor 4 — debt collector'];
+    state.npcs[0].lastRelationshipChange = {turn: 1, impact: 'meaningful', delta: {trust: 4, affection: 2, desire: 0, tension: -3}, reason: 'You covered the cellar shortfall.'};
+    refreshUi()""")
+    page.wait_for_timeout(100)
+    assert page.locator('.delta-player-card .delta-map-see').count() == 1, name + ' no See on map link'
+    page.locator('.delta-map-switch [data-map-mode="map"]').click()
+    page.wait_for_selector('.delta-map-node')
+    assert page.locator('.delta-document').is_hidden() and page.locator('.delta-hero').is_visible()
+    assert page.locator('.delta-map-node').count() == 12
+    assert page.locator('[data-map-toggle]').count() == 1, name + ' only the bonds toggle remains'
+    page.evaluate("""const base = {...structuredClone(state.npcs[1]), present: false, worldActive: false};
+        state.npcs.push({...base, id: 'npc-dead', name: 'Fallen Warden', archived: true, archiveReason: 'deceased', lifeState: 'dead', lifeStateCertainty: 'confirmed'},
+            {...base, id: 'npc-stale', name: 'Stale Clerk', archived: true, archiveReason: 'stale'},
+            {...base, id: 'npc-shelved', name: 'Shelved Scout', archived: true, archiveReason: 'manual'}); refreshUi()""")
+    page.wait_for_selector('.delta-map-node[data-npc-id="npc-shelved"][data-status="archived"]')
+    assert page.locator('.delta-map-node[data-npc-id="npc-dead"], .delta-map-node[data-npc-id="npc-stale"]').count() == 0, name + ' dead or stale NPC on the map'
+    page.evaluate("state.npcs.splice(12, 3); refreshUi()")
+    page.wait_for_timeout(100)
+    assert page.locator('.delta-map-node').count() == 12
+    assert page.locator('.delta-map-node[data-npc-id="npc-0"][aria-pressed="true"] .delta-map-delta').inner_text() == '+3'
+    assert page.locator('.delta-map-bond-selected').count() == 2
+    box = page.locator('.delta-map').bounding_box()
+    assert box['x'] >= 0 and box['x'] + box['width'] <= width + 1, (name, box)
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), name + ' map overflow'
+    node = page.locator('.delta-map-node[data-npc-id="npc-3"]')
+    assert node.bounding_box()['width'] >= 44 and node.bounding_box()['height'] >= 44
+    node.click()
+    page.wait_for_timeout(100)
+    assert page.locator('.delta-hero-caption h2').inner_text() == 'Surveyor 3', name + ' hero did not follow the map'
+    assert page.locator('.delta-cast-card.selected').get_attribute('data-npc-id') == 'npc-3'
+    assert page.locator('.delta-map-node[data-npc-id="npc-3"]').get_attribute('aria-pressed') == 'true'
+    page.locator('[data-map-lens="trust"]').click()
+    page.wait_for_timeout(50)
+    assert page.locator('[data-map-lens="trust"]').get_attribute('aria-pressed') == 'true'
+    page.locator('[data-map-lens="warmth"]').click()
+    page.locator('.delta-cast-card[data-npc-id="npc-0"]').click()
+    page.wait_for_timeout(100)
+    page.locator('.delta-map').scroll_into_view_if_needed()
+    page.screenshot(path=str(output / (name + '-map.png')))
+    page.locator('.delta-map-open').click()
+    page.wait_for_timeout(50)
+    assert page.locator('.delta-document').is_visible() and page.locator('.delta-map-pane').is_hidden()
+    page.evaluate("document.getElementById('npc_state_delta_map_enabled').click()")
+    page.wait_for_timeout(50)
+    assert page.evaluate('settings.npc_state_delta.relationshipMap.enabled') is False
+    assert page.locator('.delta-map-switch').count() == 0 and page.locator('.delta-map-see').count() == 0, name + ' map not removed'
+    page.evaluate("document.getElementById('npc_state_delta_map_enabled').click()")
+    page.wait_for_timeout(50)
+    assert page.locator('.delta-map-switch').count() == 1
+    page.evaluate("state.npcs.forEach(n => { n.present = true; n.worldActive = false; }); refreshUi()")
+    page.wait_for_timeout(100)
+
+
 def run_viewport(browser, name, width, height, output):
     context = browser.new_context(viewport={'width': width, 'height': height}, has_touch=name != 'desktop')
     page = context.new_page()
@@ -111,6 +170,7 @@ def run_viewport(browser, name, width, height, output):
     assert page.locator('.delta-cast-card[data-npc-id="npc-dead"]').count() == 0, name + ' dead NPC kept after reselect'
     page.evaluate("state.npcs.pop(); refreshUi()")
     page.wait_for_timeout(100)
+    check_relationship_map(page, name, width, output)
 
     # An unrelated live update must not recreate appearance content or lose disclosure state/focus.
     page.evaluate("""window.savedAppearance = document.querySelector('.delta-appearance-form-summary');
@@ -204,7 +264,7 @@ def run_viewport(browser, name, width, height, output):
     assert not errors, errors
     result = {'viewport': name, 'width': width, 'height': height, 'counts': after,
               'idleDossierMutations500ms': idle, 'pageErrors': errors,
-              'checks': 'dedicated calendar; visible rail; dead hidden until searched; unchanged nodes/focus/scroll; portrait drafts/upload/thumbnails; forms and lifecycle async drafts; reachable modal controls; Escape; bounded diagnostics'}
+              'checks': 'dedicated calendar; visible rail; dead hidden until searched; relationship map without the dead or stale removals; unchanged nodes/focus/scroll; portrait drafts/upload/thumbnails; forms and lifecycle async drafts; reachable modal controls; Escape; bounded diagnostics'}
     context.close()
     return result
 
