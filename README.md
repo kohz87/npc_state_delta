@@ -63,7 +63,7 @@ The settings panel has a quick bar that is always visible, plus six groups.
 |---|---|
 | **Quick bar** | Enable, Auto scan, Open dossiers, Scan dossier now, Full scan current cast, Add NPC |
 | **Scanning** | Scanner connection profile, how often to scan, how much story to send, and how readily new NPCs get a dossier (Conservative, Balanced or Manual only) |
-| **Roster & continuity** | Present NPCs in chat (Full cards, Compact strip or Off), injection on/off and budget (a ceiling, default 4000 tokens), maximum active NPCs, death and return handling, stale NPC cleanup, rescan and middle-deletion rewind options |
+| **Roster & continuity** | Present NPCs in chat (Full cards, Compact strip or Off), injection on/off and budget (a ceiling, default 4000 tokens), relationship map (on/off, default distance, show past NPCs), maximum active NPCs, death and return handling, stale NPC cleanup, rescan and middle-deletion rewind options |
 | **Calendar & birthdays** | Month names and lengths, optional era, optional campaign date |
 | **Portrait generation** | Style presets, positive and negative prompts, composition, prompt format |
 | **Scanner rules** | Advanced: relationship starting values and per-scan caps, memory criteria, behaviour rubric |
@@ -113,6 +113,7 @@ There are twelve categories:
 - **Trust, Affection, Desire and Tension** each run from −100 to +100 and only describe how the NPC feels about **you**.
 - Each scan can move them by a small amount capped by how big the moment was (ordinary, meaningful, major, extreme). Every change records its reason, shown on the dossier's Player relationship card.
 - The roleplay model gets a short qualitative description, never raw numbers. Personality and levers come first, and the relationship only tints them. A reserved NPC stays reserved even when they like you.
+- **Map view:** the **Dossier | Map** switch in the dossier panel (or **See on map** on the Player relationship card) puts you at the centre and every NPC around you. The closer they sit, the higher the chosen value (Warmth, Trust, Affection, Desire or Tension); lines are Important Bonds between NPCs, and a gold badge marks this turn's change. Picking someone on the map selects their dossier. Everyone in the scene and active off-screen is always shown, plus the strongest of the rest (24, or 16 on a phone); **Past NPCs** adds archived and deceased ones. The map only reads the dossiers and never changes them.
 
 ### Appearance, outfits and forms
 

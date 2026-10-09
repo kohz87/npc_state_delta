@@ -35,6 +35,8 @@
     { "path": "portrait-tools.js", "role": "portrait-prompt-and-image-management", "required": true },
     { "path": "launcher-ui.js", "role": "launcher-ui", "required": true },
     { "path": "dossier-experience.js", "role": "dossier-experience-refinement", "required": true },
+    { "path": "relationship-map-core.js", "role": "relationship-map-primitives", "required": true },
+    { "path": "relationship-map.js", "role": "relationship-map-view", "required": true },
     { "path": "continuity-ui.js", "role": "calendar-birthday-appearance-ui-adapter", "required": true }
   ]
 }

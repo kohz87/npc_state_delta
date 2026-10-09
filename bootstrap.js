@@ -36,6 +36,11 @@ try {
     console.error('[NPC State Delta] consolidated dossier experience failed to load', error);
 }
 try {
+    await import('./relationship-map.js');
+} catch (error) {
+    console.error('[NPC State Delta] relationship map failed to load', error);
+}
+try {
     await import('./continuity-ui.js');
 } catch (error) {
     console.error('[NPC State Delta] continuity UI failed to load', error);

@@ -3988,6 +3988,7 @@ function buildSettingsHtml() {
         <h4 class="delta-settings-subhead">Generation injection</h4>
         ${settingRow('npc_state_delta_inject', 'Inject present NPC state', '<input id="npc_state_delta_inject" type="checkbox">', 'Only active NPCs present in the latest scanned scene are injected into generation.')}
         ${settingRow('npc_state_delta_inject_budget', 'Injection budget', numberControl('npc_state_delta_inject_budget', 512, 6000, 'tokens', { step: 100, prefix: '<small>~</small>' }), 'Upper limit; only what the present NPCs need is used. The default 4000 lets detailed dossiers reach the roleplay model in full. When it runs short, lower-priority fields, then lower-ranked NPCs, are trimmed first.')}
+        ${settingsSlot('relationship-map')}
         <h4 class="delta-settings-subhead">Roster lifecycle</h4>
         ${settingRow('npc_state_delta_max', 'Maximum active NPCs', numberControl('npc_state_delta_max', 1, 100), 'Archived dossiers do not use an active slot.')}
         ${settingRow('npc_state_delta_archive_deaths', 'Archive confirmed deaths', '<input id="npc_state_delta_archive_deaths" type="checkbox">', 'Explicit current-timeline deaths archive instead of deleting. Ambiguous death language is ignored.')}
