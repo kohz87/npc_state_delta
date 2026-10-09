@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- New **Map** view in the dossier panel: you sit at the centre and each NPC's distance shows how they feel about you (Warmth, Trust, Affection, Desire or Tension), with Important Bonds drawn between NPCs and this turn's change marked. Choosing an NPC on the map selects their dossier, and **See on map** on the Player relationship card opens it. In-chat and active NPCs always appear, plus the strongest of the rest (24, or 16 on a phone); past NPCs are off unless you turn them on. Three settings under Roster & continuity: Relationship map (on/off), Default distance and Show past NPCs by default. The map is read-only.
+- New **Map** view in the dossier panel: you sit at the centre and each NPC's distance shows how they feel about you (Warmth, Trust, Affection, Desire or Tension), with Important Bonds drawn between NPCs and this turn's change marked. Choosing an NPC on the map selects their dossier, and **See on map** on the Player relationship card opens it. In-chat and active NPCs always appear, plus the strongest of the rest (24, or 16 on a phone); archived NPCs appear dimmed, and the dead and stale removals are left out. Two settings under Roster & continuity: Relationship map (on/off) and Default distance. The map is read-only.
 
 ## 1.1.4 - 9 October 2026
 

@@ -77,6 +77,16 @@ def check_relationship_map(page, name, width, output):
     page.wait_for_selector('.delta-map-node')
     assert page.locator('.delta-document').is_hidden() and page.locator('.delta-hero').is_visible()
     assert page.locator('.delta-map-node').count() == 12
+    assert page.locator('[data-map-toggle]').count() == 1, name + ' only the bonds toggle remains'
+    page.evaluate("""const base = {...structuredClone(state.npcs[1]), present: false, worldActive: false};
+        state.npcs.push({...base, id: 'npc-dead', name: 'Fallen Warden', archived: true, archiveReason: 'deceased', lifeState: 'dead', lifeStateCertainty: 'confirmed'},
+            {...base, id: 'npc-stale', name: 'Stale Clerk', archived: true, archiveReason: 'stale'},
+            {...base, id: 'npc-shelved', name: 'Shelved Scout', archived: true, archiveReason: 'manual'}); refreshUi()""")
+    page.wait_for_selector('.delta-map-node[data-npc-id="npc-shelved"][data-status="archived"]')
+    assert page.locator('.delta-map-node[data-npc-id="npc-dead"], .delta-map-node[data-npc-id="npc-stale"]').count() == 0, name + ' dead or stale NPC on the map'
+    page.evaluate("state.npcs.splice(12, 3); refreshUi()")
+    page.wait_for_timeout(100)
+    assert page.locator('.delta-map-node').count() == 12
     assert page.locator('.delta-map-node[data-npc-id="npc-0"][aria-pressed="true"] .delta-map-delta').inner_text() == '+3'
     assert page.locator('.delta-map-bond-selected').count() == 2
     box = page.locator('.delta-map').bounding_box()
@@ -254,7 +264,7 @@ def run_viewport(browser, name, width, height, output):
     assert not errors, errors
     result = {'viewport': name, 'width': width, 'height': height, 'counts': after,
               'idleDossierMutations500ms': idle, 'pageErrors': errors,
-              'checks': 'dedicated calendar; visible rail; dead hidden until searched; relationship map; unchanged nodes/focus/scroll; portrait drafts/upload/thumbnails; forms and lifecycle async drafts; reachable modal controls; Escape; bounded diagnostics'}
+              'checks': 'dedicated calendar; visible rail; dead hidden until searched; relationship map without the dead or stale removals; unchanged nodes/focus/scroll; portrait drafts/upload/thumbnails; forms and lifecycle async drafts; reachable modal controls; Escape; bounded diagnostics'}
     context.close()
     return result
 

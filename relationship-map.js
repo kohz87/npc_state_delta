@@ -23,7 +23,7 @@ const PHONE_QUERY = '(max-width: 650px)';
 const RING_VALUES = Object.freeze([75, 25, 0, -50]);
 
 // Session-only view state: the last mode and the map's own buttons last until the page reloads.
-const view = { mode: 'dossier', lens: '', showPast: null, allBonds: true, signature: '' };
+const view = { mode: 'dossier', lens: '', allBonds: true, signature: '' };
 
 function escapeHtml(value) {
     return String(value ?? '')
@@ -59,7 +59,6 @@ function dossierUi() {
 }
 
 function sessionLens(settings) { return view.lens || settings.defaultLens; }
-function sessionPast(settings) { return view.showPast === null ? settings.showPast : view.showPast; }
 
 function nodeHtml(node) {
     const avatar = node.portrait
@@ -108,11 +107,10 @@ function stripHtml(model, persona) {
     </section>`;
 }
 
-function paneHtml(model, { phone, persona, showPast }) {
+function paneHtml(model, { phone, persona }) {
     const lens = MAP_LENSES.find(item => item.key === model.lens) || MAP_LENSES[0];
     const lenses = MAP_LENSES.map(item => `<button type="button" class="delta-map-lens" data-map-lens="${item.key}" aria-pressed="${item.key === model.lens}">${item.label}</button>`).join('');
-    const toggles = `<button type="button" class="delta-map-toggle" data-map-toggle="bonds" aria-pressed="${view.allBonds}">${phone ? 'Bonds' : 'All bonds'}</button>`
-        + `<button type="button" class="delta-map-toggle" data-map-toggle="past" aria-pressed="${showPast}">${phone ? 'Past' : 'Past NPCs'}</button>`;
+    const toggles = `<button type="button" class="delta-map-toggle" data-map-toggle="bonds" aria-pressed="${view.allBonds}">${phone ? 'Bonds' : 'All bonds'}</button>`;
     const hint = model.allZero
         ? `<div class="delta-map-hint">Turn ${model.turn}: nobody has moved yet. Everyone starts on the neutral ring and drifts in or out as the story changes how they feel about ${escapeHtml(persona)}.</div>` : '';
     const more = model.total > model.shownCount ? ` · Showing ${model.shownCount} of ${model.total}; the rest are in the library` : '';
@@ -146,19 +144,17 @@ function renderMap(ui, { force = false } = {}) {
     const settings = readMapSettings();
     const phone = isPhone();
     const persona = personaName();
-    const showPast = sessionPast(settings);
     const model = buildMapModel(ui.projection || {}, {
         selectedId: ui.selectedNpcId,
         lens: sessionLens(settings),
-        showPast,
         allBonds: view.allBonds,
         cap: phone ? PHONE_NODE_CAP : DESKTOP_NODE_CAP,
     });
-    const signature = JSON.stringify([model, phone, persona, showPast, view.allBonds]);
+    const signature = JSON.stringify([model, phone, persona, view.allBonds]);
     if (!force && signature === view.signature) return;
     view.signature = signature;
     const refocus = focusKey();
-    pane.innerHTML = paneHtml(model, { phone, persona, showPast });
+    pane.innerHTML = paneHtml(model, { phone, persona });
     if (refocus) pane.querySelector(refocus)?.focus?.({ preventScroll: true });
 }
 
@@ -178,12 +174,10 @@ function setMode(ui, mode) {
 function onPaneClick(event) {
     const ui = dossierUi();
     if (!ui) return;
-    const settings = readMapSettings();
     const lens = event.target.closest('[data-map-lens]')?.dataset?.mapLens;
     if (lens) { view.lens = lens; return void renderMap(ui); }
     const toggle = event.target.closest('[data-map-toggle]')?.dataset?.mapToggle;
     if (toggle === 'bonds') { view.allBonds = !view.allBonds; return void renderMap(ui); }
-    if (toggle === 'past') { view.showPast = !sessionPast(settings); return void renderMap(ui); }
     if (event.target.closest('.delta-map-open')) return void setMode(ui, 'dossier');
     const node = event.target.closest('.delta-map-node')?.dataset?.npcId;
     if (node && typeof ui.select === 'function') ui.select(node);
@@ -260,17 +254,14 @@ export function mountRelationshipMapSettings() {
     root.id = SETTINGS_ROOT_ID;
     root.innerHTML = `<h4 class="delta-settings-subhead">Relationship map</h4>
         ${settingRow('npc_state_delta_map_enabled', 'Relationship map', `<input id="npc_state_delta_map_enabled" type="checkbox"${settings.enabled ? ' checked' : ''}>`, 'Adds a Map view to the dossier panel. Read-only; turning it off removes the switch and the See on map link.')}
-        ${settingRow('npc_state_delta_map_lens', 'Default distance', `<select id="npc_state_delta_map_lens" class="text_pole">${MAP_LENSES.map(lens => `<option value="${lens.key}"${lens.key === settings.defaultLens ? ' selected' : ''}>${lens.label}</option>`).join('')}</select>`, "What the map's distance shows when it opens. The buttons on the map change it for this session only.")}
-        ${settingRow('npc_state_delta_map_past', 'Show past NPCs by default', `<input id="npc_state_delta_map_past" type="checkbox"${settings.showPast ? ' checked' : ''}>`, 'Include archived and deceased NPCs when the map opens.')}`;
+        ${settingRow('npc_state_delta_map_lens', 'Default distance', `<select id="npc_state_delta_map_lens" class="text_pole">${MAP_LENSES.map(lens => `<option value="${lens.key}"${lens.key === settings.defaultLens ? ' selected' : ''}>${lens.label}</option>`).join('')}</select>`, "What the map's distance shows when it opens. The buttons on the map change it for this session only.")}`;
     root.addEventListener('change', () => {
         writeMapSettings({
             enabled: root.querySelector('#npc_state_delta_map_enabled')?.checked === true,
             defaultLens: root.querySelector('#npc_state_delta_map_lens')?.value,
-            showPast: root.querySelector('#npc_state_delta_map_past')?.checked === true,
         });
         // A changed default applies the next time the map is drawn.
         view.lens = '';
-        view.showPast = null;
         const ui = dossierUi();
         if (ui) { syncChrome(ui); renderMap(ui, { force: true }); }
     });
@@ -309,14 +300,13 @@ const STYLES = `
 #${DOSSIER_ROOT_ID} .delta-map-node { --node:8.6cqw; position:absolute; z-index:1; width:max(44px,var(--node)); height:max(44px,var(--node)); padding:0; transform:translate(-50%,-50%); display:grid; place-items:center; border:0; border-radius:50%; background:transparent; cursor:pointer; }
 #${DOSSIER_ROOT_ID} .delta-map-node[data-status="scene"] { --node:11.4cqw; }
 #${DOSSIER_ROOT_ID} .delta-map-node[data-status="active"] { --node:9.8cqw; }
-#${DOSSIER_ROOT_ID} .delta-map-node:is([data-status="archived"],[data-status="dead"]) { --node:7cqw; }
+#${DOSSIER_ROOT_ID} .delta-map-node[data-status="archived"] { --node:7cqw; }
 #${DOSSIER_ROOT_ID} .delta-map-avatar { width:var(--node); height:var(--node); display:grid; place-items:center; overflow:hidden; border:1px solid rgba(255,255,255,.28); border-radius:50%; background:radial-gradient(circle at 50% 38%,rgba(216,188,120,.3),#111 95%); }
 #${DOSSIER_ROOT_ID} .delta-map-avatar img { width:100%; height:100%; object-fit:cover; object-position:center 18%; }
 #${DOSSIER_ROOT_ID} .delta-map-initial { color:var(--delta-accent); font:700 calc(var(--node) * .42)/1 Georgia,serif; }
 #${DOSSIER_ROOT_ID} .delta-map-node[data-status="scene"] .delta-map-avatar { border:2px solid #8fd19e; }
 #${DOSSIER_ROOT_ID} .delta-map-node[data-status="active"] .delta-map-avatar { border:2px solid #8fb4e8; }
 #${DOSSIER_ROOT_ID} .delta-map-node[data-status="archived"] .delta-map-avatar { opacity:.55; }
-#${DOSSIER_ROOT_ID} .delta-map-node[data-status="dead"] .delta-map-avatar { opacity:.6; filter:grayscale(1); }
 #${DOSSIER_ROOT_ID} .delta-map-node[aria-pressed="true"] { z-index:2; }
 #${DOSSIER_ROOT_ID} .delta-map-node[aria-pressed="true"] .delta-map-avatar { border:3px solid var(--delta-accent); box-shadow:0 0 0 5px rgba(216,188,120,.2); opacity:1; }
 #${DOSSIER_ROOT_ID} .delta-map-delta { position:absolute; top:calc(50% - var(--node) / 2 - 5px); left:calc(50% + var(--node) / 2 - 12px); padding:0 4px; border-radius:4px; color:#1a160e; background:var(--delta-accent); font:500 10px/1.5 ui-monospace,monospace; pointer-events:none; }

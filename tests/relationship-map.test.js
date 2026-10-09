@@ -54,27 +54,29 @@ test('angles group NPCs by home base and never depend on relationship values', (
     assert.equal(new Set(angles.values()).size, cast.length);
 });
 
-test('statuses follow the dossier buckets and scene flags', () => {
+test('statuses follow the scene flags', () => {
     assert.equal(mapStatus({ bucket: 'active', present: true }), 'scene');
     assert.equal(mapStatus({ bucket: 'active', worldActive: true }), 'active');
     assert.equal(mapStatus({ bucket: 'active' }), 'away');
     assert.equal(mapStatus({ bucket: 'archived', present: true }), 'archived');
-    assert.equal(mapStatus({ bucket: 'dead' }), 'dead');
 });
 
 test('bonds resolve through social.js names and aliases; unresolved names draw nothing', () => {
     const cast = [
         npc('maelis', { name: 'Maelis Varn', keyRelationships: ['Ferrin Dole — cellar hand | trusted', 'Nobody Known — stranger', 'Kazuma — patron'] }),
         npc('ferrin', { name: 'Ferrin Dole', aliases: ['Ferr'], keyRelationships: ['Maelis Varn — employer'] }),
-        npc('brenn', { name: 'Old Brenn', bucket: 'dead', keyRelationships: ['Ferr — old dock mate'] }),
+        npc('wren', { name: 'Wren', keyRelationships: ['Ferr — old dock mate'] }),
+        npc('brenn', { name: 'Old Brenn', bucket: 'dead', keyRelationships: ['Maelis Varn — captain\'s daughter'] }),
     ];
-    const all = new Set(cast.map(item => item.id));
-    const bonds = resolveMapBonds(cast, all);
-    assert.equal(bonds.length, 2, 'Maelis–Ferrin once, Brenn–Ferrin by alias; the player and unknown names draw nothing');
+    const bonds = resolveMapBonds(cast, new Set(cast.map(item => item.id)));
+    assert.equal(bonds.length, 3, 'Maelis–Ferrin once, Wren–Ferrin by alias; the player and unknown names draw nothing');
     const pair = bonds.find(bond => bond.a === 'ferrin' && bond.b === 'maelis');
     assert.deepEqual(pair.relation, { maelis: 'cellar hand', ferrin: 'employer' });
-    assert.ok(bonds.some(bond => bond.a === 'brenn' && bond.b === 'ferrin'), 'a deceased counterpart is drawn when it is on the map');
+    assert.ok(bonds.some(bond => bond.a === 'ferrin' && bond.b === 'wren'), 'aliases resolve');
     assert.equal(resolveMapBonds(cast, new Set(['maelis', 'ferrin'])).length, 1, 'a counterpart off the map draws nothing');
+    const model = buildMapModel({ turn: 1, npcs: cast }, { selectedId: 'maelis' });
+    assert.ok(!model.nodes.some(node => node.id === 'brenn'), 'a deceased NPC is not on the map');
+    assert.equal(model.lines.length, 2, 'so no line is drawn to a deceased counterpart');
 });
 
 test('the delta badge shows only a change recorded on this turn', () => {
@@ -88,27 +90,27 @@ test('the delta badge shows only a change recorded on this turn', () => {
     assert.deepEqual(Object.fromEntries(model.nodes.map(node => [node.id, node.delta])), { maelis: 4, ferrin: 0 });
 });
 
-test('the map always shows the scene, caps the rest by strength, and keeps the selection', () => {
+test('the map leaves out the dead and stale removals, shows the scene, caps the rest by strength, and keeps the selection', () => {
     const cast = [
         npc('here', { present: true }), npc('busy', { worldActive: true }),
         ...Array.from({ length: 40 }, (_, i) => npc(`n${i}`, { relationship: { trust: i - 20 } })),
         npc('gone', { bucket: 'archived', relationship: { trust: 99 } }),
+        npc('stale', { bucket: 'archived', archiveReason: 'stale', present: true }),
         npc('dead', { bucket: 'dead', relationship: { trust: -99 } }),
     ];
     const desktop = selectMapNpcs(cast, { lens: 'trust', cap: DESKTOP_NODE_CAP });
     assert.equal(desktop.shown.length, 24);
-    assert.equal(desktop.total, 42, 'past NPCs are not counted while Past is off');
+    assert.equal(desktop.total, 43, 'the dead and stale removals are not counted; a manual archive is');
     assert.ok(desktop.shown.some(item => item.id === 'here') && desktop.shown.some(item => item.id === 'busy'));
     assert.ok(desktop.shown.some(item => item.id === 'n0') && !desktop.shown.some(item => item.id === 'n20'), 'the strongest by the lens fill the cap');
     assert.equal(selectMapNpcs(cast, { lens: 'trust', cap: PHONE_NODE_CAP }).shown.length, 16, 'phones show 16');
-    assert.ok(!desktop.shown.some(item => item.id === 'gone' || item.id === 'dead'), 'Past is off by default');
-    const past = selectMapNpcs(cast, { lens: 'trust', showPast: true });
-    assert.ok(past.shown.some(item => item.id === 'gone') && past.shown.some(item => item.id === 'dead'), 'Past adds archived and deceased NPCs under the same cap');
-    assert.equal(past.total, 44);
-    const kept = selectMapNpcs(cast, { lens: 'trust', selectedId: 'n20' });
+    assert.ok(desktop.shown.some(item => item.id === 'gone'), 'a manual archive competes by strength like anyone else');
+    assert.ok(!desktop.shown.some(item => ['stale', 'dead'].includes(item.id)), 'stale removals and the dead never appear, even when marked present');
+    const kept = selectMapNpcs(cast, { lens: 'trust', selectedId: 'n19' });
     assert.equal(kept.shown.length, 25);
-    assert.ok(kept.shown.some(item => item.id === 'n20'), 'the selected dossier is always on the map');
-    assert.ok(selectMapNpcs(cast, { lens: 'trust', selectedId: 'dead' }).shown.some(item => item.id === 'dead'), 'a selected dead dossier shows even with Past off');
+    assert.ok(kept.shown.some(item => item.id === 'n19'), 'the selected dossier is always on the map');
+    assert.ok(!selectMapNpcs(cast, { lens: 'trust', selectedId: 'dead' }).shown.some(item => item.id === 'dead'), 'not even when its dossier is selected');
+    assert.equal(buildMapModel({ turn: 1, npcs: cast }, { selectedId: 'stale' }).selected, null, 'the strip waits for a pick on the map');
     const crowd = Array.from({ length: 30 }, (_, i) => npc(`p${i}`, { present: true }));
     assert.equal(selectMapNpcs(crowd, { cap: PHONE_NODE_CAP }).shown.length, 30, 'everyone in the scene is shown even past the cap');
 });
@@ -129,9 +131,9 @@ test('the model lists every shown node with a position inside the map, and flags
 });
 
 test('settings normalize on read and fall back to defaults', () => {
-    assert.deepEqual(normalizeRelationshipMapSettings(undefined), { enabled: true, defaultLens: 'warmth', showPast: false });
-    assert.deepEqual(normalizeRelationshipMapSettings({ enabled: false, defaultLens: 'tension', showPast: true }), { enabled: false, defaultLens: 'tension', showPast: true });
-    assert.deepEqual(normalizeRelationshipMapSettings({ enabled: 'no', defaultLens: 'love', showPast: 1, bondLines: 'all' }), { enabled: true, defaultLens: 'warmth', showPast: false });
+    assert.deepEqual(normalizeRelationshipMapSettings(undefined), { enabled: true, defaultLens: 'warmth' });
+    assert.deepEqual(normalizeRelationshipMapSettings({ enabled: false, defaultLens: 'tension' }), { enabled: false, defaultLens: 'tension' });
+    assert.deepEqual(normalizeRelationshipMapSettings({ enabled: 'no', defaultLens: 'love', showPast: true, bondLines: 'all' }), { enabled: true, defaultLens: 'warmth' }, 'unknown and retired keys are dropped');
 });
 
 test('the map is a read-only adapter wired through the existing owners', () => {

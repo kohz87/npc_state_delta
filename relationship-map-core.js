@@ -18,7 +18,7 @@ export const MAP_LENSES = Object.freeze([
 const LENS_KEYS = MAP_LENSES.map(lens => lens.key);
 const AXES = Object.freeze([['trust', 'Trust'], ['affection', 'Affection'], ['desire', 'Desire'], ['tension', 'Tension']]);
 
-export const RELATIONSHIP_MAP_DEFAULTS = Object.freeze({ enabled: true, defaultLens: 'warmth', showPast: false });
+export const RELATIONSHIP_MAP_DEFAULTS = Object.freeze({ enabled: true, defaultLens: 'warmth' });
 
 export function plain(value) { return String(value ?? '').trim(); }
 
@@ -34,7 +34,6 @@ export function normalizeRelationshipMapSettings(raw) {
     return {
         enabled: typeof source.enabled === 'boolean' ? source.enabled : RELATIONSHIP_MAP_DEFAULTS.enabled,
         defaultLens: LENS_KEYS.includes(source.defaultLens) ? source.defaultLens : RELATIONSHIP_MAP_DEFAULTS.defaultLens,
-        showPast: typeof source.showPast === 'boolean' ? source.showPast : RELATIONSHIP_MAP_DEFAULTS.showPast,
     };
 }
 
@@ -51,14 +50,14 @@ export function mapRadius(value, size = MAP_SPAN) {
 }
 
 export function mapStatus(npc = {}) {
-    if (npc.bucket === 'dead') return 'dead';
     if (npc.bucket === 'archived') return 'archived';
     if (npc.present) return 'scene';
     if (npc.worldActive) return 'active';
     return 'away';
 }
 
-function isPast(npc) { return npc.bucket === 'dead' || npc.bucket === 'archived'; }
+// Dead NPCs and stale removals never appear on the map; a manual archive does.
+function onMap(npc) { return Boolean(npc?.id) && npc.bucket !== 'dead' && !(npc.bucket === 'archived' && npc.archiveReason === 'stale'); }
 
 function idHash(text) {
     let hash = 0x811c9dc5;
@@ -83,10 +82,10 @@ export function mapAngles(npcs = []) {
 }
 
 // In-chat and active NPCs are always shown; the rest are the strongest by the current lens, up to
-// the cap. Past NPCs only join when asked for. The selected dossier is always on the map.
-export function selectMapNpcs(npcs = [], { lens = 'warmth', showPast = false, cap = DESKTOP_NODE_CAP, selectedId = '' } = {}) {
-    const eligible = npcs.filter(npc => npc?.id && (showPast || !isPast(npc) || npc.id === selectedId));
-    const always = eligible.filter(npc => !isPast(npc) && (npc.present || npc.worldActive));
+// the cap. The selected dossier is kept on the map when it is eligible.
+export function selectMapNpcs(npcs = [], { lens = 'warmth', cap = DESKTOP_NODE_CAP, selectedId = '' } = {}) {
+    const eligible = npcs.filter(onMap);
+    const always = eligible.filter(npc => npc.bucket !== 'archived' && (npc.present || npc.worldActive));
     const rest = eligible.filter(npc => !always.includes(npc))
         .sort((a, b) => Math.abs(lensValue(b.relationship, lens)) - Math.abs(lensValue(a.relationship, lens))
             || String(a.name).localeCompare(String(b.name)));
@@ -133,10 +132,10 @@ function shortName(name) {
     return words[0] || plain(name);
 }
 
-export function buildMapModel(projection = {}, { selectedId = '', lens = 'warmth', showPast = false, allBonds = true, cap = DESKTOP_NODE_CAP } = {}) {
+export function buildMapModel(projection = {}, { selectedId = '', lens = 'warmth', allBonds = true, cap = DESKTOP_NODE_CAP } = {}) {
     const npcs = Array.isArray(projection?.npcs) ? projection.npcs.filter(npc => npc?.id) : [];
     const turn = Number.isFinite(Number(projection?.turn)) ? Number(projection.turn) : 0;
-    const { shown, total } = selectMapNpcs(npcs, { lens, showPast, cap, selectedId });
+    const { shown, total } = selectMapNpcs(npcs, { lens, cap, selectedId });
     const angles = mapAngles(shown);
     const positions = new Map(shown.map(npc => [npc.id, point(lensValue(npc.relationship, lens), angles.get(npc.id))]));
     const selected = shown.find(npc => npc.id === selectedId) || null;
@@ -145,8 +144,8 @@ export function buildMapModel(projection = {}, { selectedId = '', lens = 'warmth
         const status = mapStatus(npc);
         return {
             id: npc.id,
-            name: `${status === 'dead' ? '† ' : ''}${npc.name}`,
-            short: `${status === 'dead' ? '† ' : ''}${shortName(npc.name)}`,
+            name: npc.name,
+            short: shortName(npc.name),
             initial: (shortName(npc.name).charAt(0) || '?').toLocaleUpperCase(),
             portrait: plain(npc.portrait),
             status,
