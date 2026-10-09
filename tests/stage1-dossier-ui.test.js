@@ -47,7 +47,8 @@ test('Stage 1 cast search and lifecycle filters compose', () => {
   assert.deepEqual(filterDossierIndex(rows, { query: 'north road', filter: 'active' }).map(row => row.id), ['mira']);
   assert.deepEqual(filterDossierIndex(rows, { query: 'northwatch lodge', filter: 'active' }).map(row => row.id), ['mira']);
   assert.deepEqual(filterDossierIndex(rows, { filter: 'archived' }).map(row => row.id), ['old']);
-  assert.deepEqual(filterDossierIndex(rows, { filter: 'dead' }).map(row => row.id), ['fallen']);
+  // Since 1.1.4 the dead are left out of the list and found by search (see v114-hide-dead).
+  assert.deepEqual(filterDossierIndex(rows, { query: 'fallen' }).map(row => row.id), ['fallen']);
 });
 
 test('Stage 1 selection survives updates while the selected dossier remains visible', () => {

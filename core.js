@@ -1807,4 +1807,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.1.3';
+export const NPC_STATE_VERSION = '1.1.4';

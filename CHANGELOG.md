@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.1.4 - 9 October 2026
+
+- The dossier list no longer shows the dead. Its filters are **All · Active · Archived**, and their counts leave the dead out. Search by name or alias still finds a dead NPC, and a dead dossier you open stays listed while it is selected. Nothing is deleted or changed in the saved dossiers.
+
 ## 1.1.3 - 8 October 2026
 
 Clean-up from an internal audit of 1.1.2; the extension's behaviour is unchanged:

@@ -188,11 +188,17 @@ export function sortDossierIndex(rows = []) {
     ));
 }
 
-export function filterDossierIndex(rows = [], { query = '', filter = 'all' } = {}) {
+// The dead stay out of the list: a search finds them, and the selected dossier (for example one
+// opened from a chat card) stays visible while it is selected.
+export function filterDossierIndex(rows = [], { query = '', filter = 'all', keepId = '' } = {}) {
     const needle = plain(query).toLocaleLowerCase();
-    const mode = ['all', 'active', 'archived', 'dead'].includes(filter) ? filter : 'all';
+    const mode = ['all', 'active', 'archived'].includes(filter) ? filter : 'all';
+    const keep = plain(keepId);
     return sortDossierIndex(rows).filter(row => {
-        if (mode !== 'all' && row?.bucket !== mode) return false;
+        if (row?.bucket === 'dead') {
+            if (keep && row.id === keep) return true;
+            if (!needle) return false;
+        } else if (mode !== 'all' && row?.bucket !== mode) return false;
         if (!needle) return true;
         return [
             row?.name,
@@ -404,8 +410,9 @@ function sectionNavHtml() {
 }
 
 function countsFor(rows) {
-    const counts = { all: 0, active: 0, archived: 0, dead: 0 };
+    const counts = { all: 0, active: 0, archived: 0 };
     for (const row of Array.isArray(rows) ? rows : []) {
+        if (row?.bucket === 'dead') continue;
         counts.all += 1;
         if (counts[row?.bucket] !== undefined) counts[row.bucket] += 1;
     }
@@ -494,7 +501,7 @@ class DeltaDossierUi {
                             <div class="delta-cast-tools">
                                 <label class="delta-search-label"><span class="sr-only">Search NPC dossiers</span><input type="search" class="delta-search" placeholder="Search cast, role, species, gender, location…" autocomplete="off"></label>
                                 <div class="delta-filters" role="group" aria-label="Dossier filters">
-                                    ${['all', 'active', 'archived', 'dead'].map(key => `<button type="button" class="delta-filter${key === 'all' ? ' active' : ''}" data-filter="${key}" aria-pressed="${key === 'all'}">${key.charAt(0).toUpperCase() + key.slice(1)} <span data-count="${key}">0</span></button>`).join('')}
+                                    ${['all', 'active', 'archived'].map(key => `<button type="button" class="delta-filter${key === 'all' ? ' active' : ''}" data-filter="${key}" aria-pressed="${key === 'all'}">${key.charAt(0).toUpperCase() + key.slice(1)} <span data-count="${key}">0</span></button>`).join('')}
                                 </div>
                             </div>
                             <div class="delta-cast-list" role="listbox" aria-label="NPC dossiers"></div>
@@ -735,8 +742,9 @@ class DeltaDossierUi {
 
         empty.hidden = true;
         library.hidden = false;
-        const filtered = filterDossierIndex(projection.index, { query: this.query, filter: this.filter });
-        this.selectedNpcId = chooseDossierSelection(this.selectedNpcId, filtered, projection.index);
+        const filtered = filterDossierIndex(projection.index, { query: this.query, filter: this.filter, keepId: this.selectedNpcId });
+        const selectable = projection.index.filter(row => row.bucket !== 'dead' || row.id === this.selectedNpcId);
+        this.selectedNpcId = chooseDossierSelection(this.selectedNpcId, filtered, selectable);
         this.renderFilters(projection.index);
         this.renderRail(filtered, { force: forceRail });
         this.renderDetail(filtered, { force: forceDetail });
@@ -765,7 +773,9 @@ class DeltaDossierUi {
         const scrollLeft = list.scrollLeft;
         const focusedId = document.activeElement?.closest?.('.delta-cast-card')?.dataset?.npcId || '';
         if (!filtered.length) {
-            list.innerHTML = `<div class="delta-no-results"><b>No dossiers match this view.</b><span>Change the search or filter to bring the cast back.</span></div>`;
+            const deadHidden = !this.query && this.projection?.index?.some(row => row.bucket === 'dead');
+            const hint = deadHidden ? 'The dead are hidden from the list; search by name to find them.' : 'Change the search or filter to bring the cast back.';
+            list.innerHTML = `<div class="delta-no-results"><b>No dossiers match this view.</b><span>${hint}</span></div>`;
             return;
         }
         list.innerHTML = filtered.map((npc, index) => {
