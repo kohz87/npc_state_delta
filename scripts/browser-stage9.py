@@ -93,6 +93,25 @@ def run_viewport(browser, name, width, height, output):
     assert card['height'] > 90 and card['y'] + card['height'] <= rail['y'] + rail['height'] + 1, (name, card, rail)
     page.screenshot(path=str(output / (name + '-dossier.png')))
 
+    # The dead are left out of the list and its counts; a search finds them, and a found dossier
+    # stays listed only while it is selected.
+    page.evaluate("""state.npcs.push({...structuredClone(state.npcs[1]), id: 'npc-dead', name: 'Fallen Warden',
+        present: false, archived: true, archiveReason: 'deceased', lifeState: 'dead', lifeStateCertainty: 'confirmed'}); refreshUi()""")
+    page.wait_for_timeout(100)
+    assert page.locator('.delta-filter').count() == 3 and page.locator('[data-filter="dead"]').count() == 0
+    assert page.locator('.delta-cast-card[data-npc-id="npc-dead"]').count() == 0, name + ' dead NPC listed'
+    assert page.locator('[data-count="all"]').inner_text() == '12'
+    page.locator('.delta-search').fill('Fallen')
+    page.wait_for_selector('.delta-cast-card[data-npc-id="npc-dead"]')
+    page.locator('.delta-search').fill('')
+    page.wait_for_timeout(100)
+    assert page.locator('.delta-cast-card[data-npc-id="npc-dead"].selected').count() == 1
+    page.locator('.delta-cast-card[data-npc-id="npc-0"]').click()
+    page.wait_for_timeout(100)
+    assert page.locator('.delta-cast-card[data-npc-id="npc-dead"]').count() == 0, name + ' dead NPC kept after reselect'
+    page.evaluate("state.npcs.pop(); refreshUi()")
+    page.wait_for_timeout(100)
+
     # An unrelated live update must not recreate appearance content or lose disclosure state/focus.
     page.evaluate("""window.savedAppearance = document.querySelector('.delta-appearance-form-summary');
         savedAppearance.open = true; savedAppearance.querySelector('summary').focus();
@@ -185,7 +204,7 @@ def run_viewport(browser, name, width, height, output):
     assert not errors, errors
     result = {'viewport': name, 'width': width, 'height': height, 'counts': after,
               'idleDossierMutations500ms': idle, 'pageErrors': errors,
-              'checks': 'dedicated calendar; visible rail; unchanged nodes/focus/scroll; portrait drafts/upload/thumbnails; forms and lifecycle async drafts; reachable modal controls; Escape; bounded diagnostics'}
+              'checks': 'dedicated calendar; visible rail; dead hidden until searched; unchanged nodes/focus/scroll; portrait drafts/upload/thumbnails; forms and lifecycle async drafts; reachable modal controls; Escape; bounded diagnostics'}
     context.close()
     return result
 
