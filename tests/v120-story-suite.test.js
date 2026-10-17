@@ -924,6 +924,9 @@ test('v1.2.2 the runtime: tokens() measures the live injection, shows: chatter, 
         assert.match(alone, /data-delta-scene="/);
         assert.match(alone, /class="npc-state-delta-present-now"><span class="npc-state-delta-present-now-part npc-state-delta-present-now-mood" data-delta-title="\d+"><span class="npc-state-delta-present-now-label">Mood:<\/span> <span class="npc-state-delta-present-now-text" data-delta-text/);
         assert.doesNotMatch(alone, /present-now-world/, 'without Story Block keeping the scene, Delta\'s own now line');
+        // 1.2.4: both have chatter, so the right half of each row is the bubble, not the now lines.
+        assert.equal((alone.match(/class="npc-state-delta-present-cell npc-state-delta-present-cell-chatter"/g) || []).length, 2);
+        assert.doesNotMatch(alone, /npc-state-delta-present-side/);
         assert.match(alone, /npc-state-delta-present-cell-chatter[\s\S]*npc-state-delta-chatter-speech/);
         assert.match(alone, /npc-state-delta-chatter-others/);
         assert.doesNotMatch(alone, /<i>Did he see|Such a nice couple|Boring|flustered/, 'story text never enters the markup');

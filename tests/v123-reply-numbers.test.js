@@ -232,6 +232,11 @@ test('v1.2.3 synthetic host: the dossier follows the chat\'s reply numbers throu
         mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'The guild hall is quiet.' });
         const first = await reply('Who is at the gate?', 'Yunyun, the calm adventurer, waits at the gate.');
         assert.equal(runtime.getDossierState().reply, first);
+        // 1.2.4 present row: no chatter, so the right half holds a copy of the now lines (the card keeps its own for wide grids).
+        const cast = runtime.presentCastHtml();
+        assert.match(cast, /<div class="npc-state-delta-present-cell npc-state-delta-present-cell-now" data-npc-id="[^"]+"[^>]*>\s*<button[\s\S]*<\/button><div class="npc-state-delta-present-side npc-state-delta-present-side-now"><span class="npc-state-delta-present-now">/);
+        assert.equal((cast.match(/npc-state-delta-present-now-mood/g) || []).length, 2, 'on the card and in the right half');
+        assert.doesNotMatch(cast, /present-side-idle|npc-state-delta-chatter/);
 
         mood = 'nervous';
         const second = await reply('Say hello.', 'Yunyun turns nervous and fidgets with her wand.');

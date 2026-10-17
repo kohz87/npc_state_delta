@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.2.4 - 17 October 2026
+
+- **Present NPCs in narrow places, redesigned.** In Story Block's sidebar or sheet and on phones, each NPC is now one row in two halves. On the left, a card that is the NPC's portrait, with the name (and role) over the bottom of the image. On the right, the NPC's Inner Chatter bubble for this reply, pointing at the card; with no chatter, their **Mood**, **Condition** and **Outfit** lines in full; with neither, their role and *No changes this turn*. Others still follow as bubbles. In a very narrow pane the card becomes a short banner with the right half under it. Tapping the card or the right half opens the dossier. The wider card grid (the cards under a message on a desktop) is unchanged. Display only: prompts, scans and saved data are unchanged.
+
 ## 1.2.3 - 17 October 2026
 
 - **The dossiers show the chat's reply number.** The dossier header now reads **Reply #N**, the number of the latest reply in the chat, counted the way Story Block counts it (the greeting is reply #0). It used to show *Turn N*, which counted how many replies Delta had processed, so swipes, regenerates and rescans made it drift away from the chat. Changes recorded from now on carry their reply number too: the changed-field marks (• #14), the *Updated at reply #14* line (or *Updated this reply*), the Player relationship card's last change and earlier changes, and the relationship map. Changes recorded before 1.2.3 keep their old number, still labelled *turn* (hover it for a note). Swipes, deletes and rollback restore the numbers with the rest of the dossier; a dossier imported from another chat keeps its events but not that chat's reply numbers. Delta's internal turn count is unchanged and still drives its timing, and prompts, scans and requests are unchanged.

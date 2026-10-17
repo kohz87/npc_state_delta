@@ -241,7 +241,7 @@ test('v1.2.3 the card shows labelled now lines that wrap to two lines, the name 
     assert.match(index, /class="npc-state-delta-present-chip"/, 'the compact strip stays compact');
 });
 
-test('v1.2.3 narrow panes: compact full-row cards, half-row cards with a thumbnail header beside the bubble; very narrow puts the bubble under; wide keeps the grid', () => {
+test('v1.2.4 narrow panes: each row is an image card on the left and chatter, now lines or role on the right; very narrow stacks a banner; wide keeps the grid', () => {
     const css = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
     assert.match(css, /\.npc-state-delta-present-roster \{[^}]*container-type: inline-size;[^}]*container-name: npc-present;/);
     const blockOf = query => css.match(new RegExp(`@container npc-present \\(max-width: ${query}px\\) \\{([\\s\\S]*?)\\n\\}`))?.[1] || '';
@@ -250,44 +250,39 @@ test('v1.2.3 narrow panes: compact full-row cards, half-row cards with a thumbna
     assert.ok(narrow && tiny, 'both container blocks exist');
     assert.ok(css.indexOf('@container npc-present (max-width: 520px)') > css.lastIndexOf('@media (max-width: 380px)'), 'after the screen-size rules they override');
     assert.ok(css.indexOf('@container npc-present (max-width: 340px)') > css.indexOf('@container npc-present (max-width: 520px)'), 'the very narrow fallback wins');
-    const rule = (block, selector) => block.match(new RegExp(`\\.npc-state-delta-present-roster ${selector.replace(/[.-]/g, '\\$&')}(?:,\\n[^{]*)? \\{([^}]*)\\}`))?.[1] || '';
-    const half = '.npc-state-delta-present-cell-chatter .npc-state-delta-present-card';
+    const rule = (block, selector) => block.match(new RegExp(`\\.npc-state-delta-present-roster ${selector.replace(/[.-]/g, '\\$&')} \\{([^}]*)\\}`))?.[1] || '';
 
-    // Full row (no chatter): a narrow portrait strip as tall as the text, the text in full.
-    assert.match(rule(narrow, '.npc-state-delta-present-grid'), /grid-template-columns: minmax\(0, 1fr\)/, 'one card per row');
-    assert.doesNotMatch(rule(narrow, '.npc-state-delta-present-cell'), /grid-template-columns/, 'without chatter the card takes the whole row');
-    assert.match(rule(narrow, '.npc-state-delta-present-card'), /flex-direction: row; align-items: stretch;/);
-    const strip = rule(narrow, '.npc-state-delta-present-card-portrait');
-    assert.match(strip, /flex: 0 0 84px; width: 84px; min-height: 96px; align-self: stretch; aspect-ratio: auto;/, 'height follows the text, no fixed 4:5');
-    assert.match(rule(narrow, '.npc-state-delta-present-card-portrait img'), /position: absolute; inset: 0;[^}]*object-fit: cover; object-position: center 18%;/, 'the image never sets the row height');
-    assert.match(rule(narrow, '.npc-state-delta-present-card-portrait .npc-state-delta-present-card-placeholder span'), /font-size: 1\.6rem/, 'the initial scales with the box');
-    assert.doesNotMatch(narrow, /\.npc-state-delta-present-roster \.npc-state-delta-present-card-placeholder/, 'the compact strip\'s chips are untouched');
-    assert.match(rule(narrow, '.npc-state-delta-present-card-name'), /line-clamp: none/, 'the name in full');
-    assert.match(rule(narrow, '.npc-state-delta-present-now-part'), /-webkit-line-clamp: unset; line-clamp: none; overflow: visible;/, 'Mood / Condition / Outfit in full');
-
-    // Half row (chatter): thumbnail beside the name, then role and now lines across the card.
-    assert.match(rule(narrow, '.npc-state-delta-present-cell-chatter'), /grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\)/, 'card half, bubble half');
-    assert.match(rule(narrow, half), /display: grid; grid-template-columns: 46px minmax\(0, 1fr\);/);
-    assert.match(rule(narrow, `${half}-portrait`), /grid-column: 1; grid-row: 1; width: 46px; height: 46px; min-height: 0; aspect-ratio: 1 \/ 1;/, 'no portrait block on top');
-    assert.match(rule(narrow, `${half}-portrait .npc-state-delta-present-card-placeholder span`), /font-size: 1\.15rem/);
-    assert.match(rule(narrow, `${half}-text`), /display: contents/);
-    assert.match(rule(narrow, `${half}-name`), /grid-column: 2; grid-row: 1; -webkit-line-clamp: 2;/, 'the name wraps beside the thumbnail, two lines at most');
-    assert.match(narrow, /present-cell-chatter \.npc-state-delta-present-card-role,\n[^{]*present-cell-chatter \.npc-state-delta-present-now \{ grid-column: 1 \/ -1; \}/, 'role and now lines under the header, across the card');
-    assert.match(rule(narrow, '.npc-state-delta-present-cell'), /align-items: start/, 'the bubble aligns to the top of the row');
+    // The row: two equal halves, the taller one setting the height.
+    assert.match(rule(narrow, '.npc-state-delta-present-grid'), /grid-template-columns: minmax\(0, 1fr\)/, 'one row per NPC');
+    assert.match(rule(narrow, '.npc-state-delta-present-cell'), /grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\); align-items: stretch;/);
+    // Left half: image and name only.
+    const card = rule(narrow, '.npc-state-delta-present-card');
+    assert.match(card, /display: block; align-self: stretch; min-height: min\(220px, calc\(\(100cqi - 12px\) \/ 2 \* 1\.25\)\);/, 'about 4:5 of the half, at most 220px, stretched to the row');
+    assert.match(rule(narrow, '.npc-state-delta-present-card-portrait'), /position: absolute; inset: 0;/, 'the portrait fills the card');
+    assert.match(rule(narrow, '.npc-state-delta-present-card-portrait img'), /object-fit: cover; object-position: center 18%;/);
+    assert.match(rule(narrow, '.npc-state-delta-present-card-portrait .npc-state-delta-present-card-placeholder span'), /font-size: 3rem/, 'a sensible initial');
+    assert.match(rule(narrow, '.npc-state-delta-present-card-text'), /position: absolute;[^}]*bottom: 0;[^}]*background: linear-gradient/, 'the name over a gradient at the bottom');
+    assert.match(rule(narrow, '.npc-state-delta-present-card .npc-state-delta-present-now'), /display: none/, 'nothing else on the card');
+    // Right half.
+    assert.match(css, /\n\.npc-state-delta-present-side \{ display: none; \}/, 'wide grids hide the right-half copy');
+    assert.match(rule(narrow, '.npc-state-delta-present-side'), /display: grid; align-content: start;/, 'top-aligned');
+    assert.match(rule(narrow, '.npc-state-delta-present-side .npc-state-delta-present-now-part'), /-webkit-line-clamp: unset; line-clamp: none; overflow: visible;[^}]*color: inherit;/, 'Mood / Condition / Outfit in full, no frame');
+    assert.doesNotMatch(rule(narrow, '.npc-state-delta-present-side'), /border|background/);
+    assert.match(rule(narrow, '.npc-state-delta-present-side-muted'), /opacity: \.6;/);
+    assert.match(rule(narrow, '.npc-state-delta-chatter'), /align-content: start;/);
     assert.match(rule(narrow, '.npc-state-delta-chatter-speech .npc-state-delta-bubble::before'), /left: -7px;[^}]*border-right-color/, 'the pointer points left, at the card');
     assert.match(rule(narrow, '.npc-state-delta-chatter-thought .npc-state-delta-bubble::after'), /left: -19px/);
     assert.match(rule(narrow, '.npc-state-delta-chatter-other'), /border-radius: 12px;/, 'Others are bubbles with the speaker inside');
 
-    // Very narrow: same compact card, the bubble under it, pointing up.
-    assert.match(rule(tiny, '.npc-state-delta-present-cell-chatter'), /grid-template-columns: minmax\(0, 1fr\)/);
-    assert.doesNotMatch(tiny, /present-card/, 'the compact header is kept');
-    assert.match(rule(tiny, '.npc-state-delta-chatter-speech .npc-state-delta-bubble::before'), /top: -7px;[^}]*border-bottom-color/);
+    // Very narrow: stacked, the card a 16:9 banner.
+    assert.match(rule(tiny, '.npc-state-delta-present-cell'), /grid-template-columns: minmax\(0, 1fr\)/);
+    assert.match(rule(tiny, '.npc-state-delta-present-card'), /min-height: 0; aspect-ratio: 16 \/ 9;/);
+    assert.match(rule(tiny, '.npc-state-delta-chatter-speech .npc-state-delta-bubble::before'), /top: -7px;[^}]*border-bottom-color/, 'the bubble under the card points up');
 
-    // Wide: the card grid, the chatter under its card in the same cell.
+    // Wide: the 1.2.3 card grid (4:5 portrait, text footer with the now lines), chatter under the card.
+    assert.match(css, /\n\.npc-state-delta-present-card-portrait \{[^}]*aspect-ratio: 4 \/ 5;/);
     assert.match(css, /\.npc-state-delta-present-cell \{ display: grid; grid-template-columns: minmax\(0, 1fr\);/);
-    assert.match(css, /\n\.npc-state-delta-present-card-portrait \{[^}]*aspect-ratio: 4 \/ 5;/, 'wide cards keep their 4:5 portrait');
-    assert.match(css, /\n\.npc-state-delta-chatter-speech \.npc-state-delta-bubble::before \{[^}]*top: -7px;/);
-    assert.doesNotMatch(css, /@media \(min-width: 701px\) \{/, 'no stretched side-by-side cell on wide screens');
+    assert.doesNotMatch(css, /@media \(min-width: 701px\) \{/);
 });
 
 test('v1.2.2 a malformed scene shapes to nothing instead of throwing', () => {
@@ -311,7 +306,8 @@ test('v1.2.2 the present cards render now/chatter slots and the Story Block tab 
     assert.match(tabs, /storyBlock\.onUpdate\?\.\(\(\) => api\.renderInline\?\.\(\)\)/);
     const css = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
     assert.doesNotMatch(css, /grid-column: span 2/, 'wide: the bubble sits under its card, not in a stretched two-column cell');
-    assert.match(index, /return `<div class="npc-state-delta-present-cell\$\{chatter \? ' npc-state-delta-present-cell-chatter' : ''\}" data-npc-id="\$\{escapeHtml\(npc\.id\)\}"[^`]*>\$\{card\}\$\{chatter\}<\/div>`/, 'one cell per NPC, card then chatter');
+    assert.match(index, /const side = chatter \? chatter\s*: \(now \? `<div class="npc-state-delta-present-side npc-state-delta-present-side-now">\$\{now\}<\/div>`\s*: `<div class="npc-state-delta-present-side npc-state-delta-present-side-idle">[^`]*No changes this turn[^`]*`\);/, 'right half: chatter, else the now lines, else role + no changes');
+    assert.match(index, /return `<div class="npc-state-delta-present-cell npc-state-delta-present-cell-\$\{kind\}" data-npc-id="\$\{escapeHtml\(npc\.id\)\}"[^`]*>\$\{card\}\$\{side\}<\/div>`/, 'one cell per NPC: card, then its right half');
     assert.match(css, /\.npc-state-delta-chatter-thought \.npc-state-delta-bubble \{[^}]*font-style: italic; opacity: \.86;/);
     assert.match(css, /\.npc-state-delta-chatter-thought \.npc-state-delta-bubble::after \{ width: 5px; height: 5px;/, 'trailing thought circles');
 });

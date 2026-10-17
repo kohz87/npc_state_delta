@@ -4589,10 +4589,17 @@ function inlineCardHtml(npc, messageId, scene = null) {
           <small class="npc-state-delta-present-card-role" title="${escapeHtml(identityLine)}">${escapeHtml(identityLine)}</small>${now}
         </span>
       </button>`;
-    // One cell per NPC: the card, then that NPC's chatter under it (a list row in narrow panes, see
-    // style.css). Tapping anywhere in the cell, the bubble included, opens the dossier.
+    // One cell per NPC: the card, then what narrow panes show in the row's right half (1.2.4, see
+    // style.css): the NPC's chatter if any, else the now lines (the same slots as on the card; the
+    // wide grid shows them on the card and hides this copy, narrow panes the reverse), else the role
+    // and "No changes this turn". Wide grids show the chatter under the card. Tapping anywhere in
+    // the cell, the right half included, opens the dossier.
     const chatter = chatterSlotsHtml(scene, npc.id);
-    return `<div class="npc-state-delta-present-cell${chatter ? ' npc-state-delta-present-cell-chatter' : ''}" data-npc-id="${escapeHtml(npc.id)}" data-message-id="${messageId}">${card}${chatter}</div>`;
+    const side = chatter ? chatter
+        : (now ? `<div class="npc-state-delta-present-side npc-state-delta-present-side-now">${now}</div>`
+            : `<div class="npc-state-delta-present-side npc-state-delta-present-side-idle"><small class="npc-state-delta-present-side-role">${escapeHtml(identityLine)}</small><small class="npc-state-delta-present-side-muted">No changes this turn</small></div>`);
+    const kind = chatter ? 'chatter' : (now ? 'now' : 'idle');
+    return `<div class="npc-state-delta-present-cell npc-state-delta-present-cell-${kind}" data-npc-id="${escapeHtml(npc.id)}" data-message-id="${messageId}">${card}${side}</div>`;
 }
 
 function presentCastChipHtml(npc, messageId) {
