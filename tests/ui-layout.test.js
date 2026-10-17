@@ -22,7 +22,7 @@ test('present NPC pane uses portrait-first cards that open the launcher dossier'
     // One dossier page: cards hand off to the launcher instead of a separate quick viewer.
     assert.doesNotMatch(index + css, /npc-state-delta-viewer|function openNpcViewer|openViewer:/);
     assert.match(index, /function openLauncherDossier\(npcId\)[\s\S]*new CustomEvent\('npc-state-delta:open-dossier', \{ detail: request \}\)/);
-    assert.match(index, /eventTargetClosest\(event, '\.npc-state-delta-present-card, \.npc-state-delta-present-chip'\)/);
+    assert.match(index, /eventTargetClosest\(event, '\.npc-state-delta-present-card, \.npc-state-delta-present-chip, \.npc-state-delta-present-cell'\)/);
     assert.match(index, /openDossier: value =>/);
     assert.match(dossierUi, /addEventListener\('npc-state-delta:open-dossier'[\s\S]*event\.detail\.handled = true;[\s\S]*ui\.openNpc\(npcId\)/);
     assert.match(dossierUi, /if \(this\.pendingNpcId\) \{\s*this\.selectedNpcId = this\.pendingNpcId;[\s\S]*this\.filter = 'all';/, 'the requested NPC survives the chat-change reset and is not hidden by a filter');

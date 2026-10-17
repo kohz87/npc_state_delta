@@ -54,22 +54,33 @@ function cleanSpeaker(head) {
     return plain(String(head).replace(/[*_]+/g, '').replace(QUOTES_AT_ENDS, ''));
 }
 
+// A leading article starts a name only before a capitalised word ("The Astral-Bound Spirit").
+const ARTICLES = new Set(['the', 'a', 'an']);
+export const SPEAKER_WORDS_MAX = 10;
+const SPEAKER_HEAD_MAX = 80;
+const KNOWN_SPEAKER_HEAD_MAX = 160;
+
 function nameLike(name) {
-    if (!name || name.length > 64 || !/^\p{L}/u.test(name) || NOT_A_NAME.test(name)) return false;
+    if (!name || name.length > SPEAKER_HEAD_MAX || !/^\p{L}/u.test(name) || NOT_A_NAME.test(name)) return false;
     if (/["“”]/.test(name)) return false;
     const words = name.split(/\s+/);
-    return words.length <= 6 && !NOT_A_FIRST_WORD.has(words[0].toLowerCase());
+    const first = words[0].toLowerCase();
+    if (words.length > SPEAKER_WORDS_MAX || NOT_A_FIRST_WORD.has(first)) return false;
+    return !ARTICLES.has(first) || /^\p{Lu}/u.test(words[1] || '');
 }
 
 function cleanLine(text) {
     return plain(String(text).replace(EMPHASIS_AT_ENDS, '').trim().replace(QUOTES_AT_ENDS, '').replace(EMPHASIS_AT_ENDS, ''));
 }
 
-/** One speaker head and line from `Name: line` (bold names, quotes and bullets tolerated), or null. */
-function readSpeakerLine(raw) {
+/**
+ * One speaker head and line from `Name: line` (bold names, quotes and bullets tolerated), or null.
+ * A head that is the name or alias of a known NPC (`known`: normalized names) is always a speaker.
+ */
+function readSpeakerLine(raw, known = new Set()) {
     const rest = stripBullet(raw);
     const colon = rest.search(/[:：]/);
-    if (colon <= 0 || colon > 64) return null;
+    if (colon <= 0 || colon > KNOWN_SPEAKER_HEAD_MAX) return null;
     const head = rest.slice(0, colon);
     let text = rest.slice(colon + 1);
     // `**Astra:** text`: the bold closes after the colon.
@@ -77,30 +88,36 @@ function readSpeakerLine(raw) {
     if (open && text.startsWith(open[1])) text = text.slice(open[1].length);
     if (text && !/^\s/.test(text)) return null;
     const speaker = cleanSpeaker(head);
-    if (!nameLike(speaker)) return null;
+    if (!(speaker && known.has(normalizeName(speaker))) && !nameLike(speaker)) return null;
     const line = cleanLine(text);
     return line ? { speaker, line } : null;
 }
 
 /**
- * NPC Inner Chatter as [{ speaker, line }] in the block's order: one `Name: line` per line. A
- * line that is not a speaker line continues the speaker above it; rules, placeholders and text
- * before the first speaker are left out. Never throws.
+ * NPC Inner Chatter as [{ speaker, line }] in the block's order: one `Name: line` per line.
+ * `names`: the present cards' and tracked NPCs' names and aliases, always accepted as speakers
+ * whatever their length or first word. A line that is not a speaker line continues the line above
+ * it; before any line it is kept with no speaker (shown under Others) rather than lost. Rules,
+ * placeholders and bare headings ("Inner chatter:") are left out. Never throws.
  */
-export function parseChatterLines(text) {
+export function parseChatterLines(text, { names = [] } = {}) {
     try {
+        if (typeof text !== 'string') return [];
+        const known = new Set((Array.isArray(names) ? names : []).map(name => normalizeName(name)).filter(Boolean));
         const out = [];
-        for (const raw of String(text ?? '').split(/\r?\n/)) {
+        for (const raw of text.split(/\r?\n/)) {
             const trimmed = raw.trim();
             if (!trimmed || RULE.test(trimmed) || PLACEHOLDER.test(trimmed)) continue;
-            const entry = readSpeakerLine(trimmed);
+            const entry = readSpeakerLine(trimmed, known);
             if (entry) {
                 if (out.length >= CHATTER_LINE_LIMIT) break;
                 out.push(entry);
                 continue;
             }
             const more = cleanLine(stripBullet(trimmed));
-            if (out.length && more) out[out.length - 1].line = `${out[out.length - 1].line} ${more}`;
+            if (!more) continue;
+            if (out.length) out[out.length - 1].line = `${out[out.length - 1].line} ${more}`;
+            else if (!/[:：]$/.test(more) && !NOT_A_NAME.test(more)) out.push({ speaker: '', line: more });
         }
         return out.map(entry => ({ speaker: entry.speaker, line: trimAtWord(entry.line, CHATTER_LINE_MAX) }));
     } catch {
@@ -211,7 +228,8 @@ function signatureOf(value) {
  * `chatterText`: Story Block's NPC Inner Chatter for the latest reply.
  * Returns { now: { [id]: { parts: [{ key, label, text, title }], source } }, kind,
  * byCard: { [id]: [{ order, text }] },
- * others: [{ order, speaker, text }], texts: [string], signature } where every `text`/`speaker`
+ * others: [{ order, speaker, text }] (speaker null for a line with no speaker), texts: [string],
+ * signature } where every `text`/`speaker`
  * is an index into `texts`. Never throws.
  */
 export function presentSceneModel({ cards = [], roster = [], sceneText = '', sceneOwned = false, chatterText = '' } = {}) {
@@ -237,13 +255,15 @@ export function presentSceneModel({ cards = [], roster = [], sceneText = '', sce
                 };
             }
         }
-        const lines = parseChatterLines(chatterText);
+        const names = [...list, ...(Array.isArray(roster) ? roster : [])]
+            .flatMap(npc => [npc?.name, ...(Array.isArray(npc?.aliases) ? npc.aliases : [])]);
+        const lines = parseChatterLines(chatterText, { names });
         model.kind = chatterBubbleKind(lines);
         lines.forEach((entry, index) => {
             const id = matchPresentCard(entry.speaker, list, roster);
             const order = index + 1;
             if (id) (model.byCard[id] ||= []).push({ order, text: slot(entry.line) });
-            else model.others.push({ order, speaker: slot(entry.speaker), text: slot(entry.line) });
+            else model.others.push({ order, speaker: entry.speaker ? slot(entry.speaker) : null, text: slot(entry.line) });
         });
     } catch (error) {
         console.warn('[NPC State Delta] present scene could not be shaped', error);
@@ -283,7 +303,7 @@ export function chatterSlotsHtml(model, id) {
 /** The "Others" line under the cards for chatter from names that match no present card, or ''. */
 export function othersSlotsHtml(model) {
     if (!model?.others?.length) return '';
-    const items = model.others.map(other => `<span class="npc-state-delta-chatter-other">${model.kind === 'speech' ? `<span class="npc-state-delta-bubble-order" aria-hidden="true">${Number(other.order)}</span>` : ''}${slotHtml('b', 'npc-state-delta-chatter-speaker', other.speaker)}${slotHtml('span', 'npc-state-delta-chatter-said', other.text)}</span>`).join('');
+    const items = model.others.map(other => `<span class="npc-state-delta-chatter-other">${model.kind === 'speech' ? `<span class="npc-state-delta-bubble-order" aria-hidden="true">${Number(other.order)}</span>` : ''}${other.speaker === null ? '' : slotHtml('b', 'npc-state-delta-chatter-speaker', other.speaker)}${slotHtml('span', 'npc-state-delta-chatter-said', other.text)}</span>`).join('');
     return `<p class="npc-state-delta-chatter-others ${model.kind === 'speech' ? 'npc-state-delta-chatter-speech' : 'npc-state-delta-chatter-thought'}"><span class="npc-state-delta-kicker">Others</span>${items}</p>`;
 }
 

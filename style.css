@@ -216,6 +216,10 @@
 
 /* Present NPCs in chat (full cards and compact strip). Tapping either opens the launcher dossier. */
 .npc-state-delta-present-roster {
+  /* The roster is the container: narrow panes (Story Block's sidebar or sheet, a phone) get the list
+     layout at the end of this section whatever the screen size. */
+  container-type: inline-size;
+  container-name: npc-present;
   --npc-paper: rgba(245, 238, 220, .08);
   --npc-line: rgba(216, 190, 145, .22);
   --npc-gold: #d8bc78;
@@ -335,7 +339,8 @@
   color: #f6e7c4;
 }
 .npc-state-delta-present-now-label { font-weight: 600; opacity: .7; }
-.npc-state-delta-present-cell { display: grid; gap: 8px; min-width: 0; align-items: start; }
+.npc-state-delta-present-cell { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 9px; min-width: 0; }
+.npc-state-delta-present-cell .npc-state-delta-chatter { cursor: pointer; }
 .npc-state-delta-chatter { display: grid; gap: 6px; min-width: 0; }
 .npc-state-delta-bubble {
   position: relative;
@@ -385,13 +390,6 @@
 .npc-state-delta-chatter-others.npc-state-delta-chatter-thought .npc-state-delta-chatter-said { font-style: italic; }
 .npc-state-delta-chatter-speaker { margin-right: 4px; }
 .npc-state-delta-chatter-speaker::after { content: ":"; }
-@media (min-width: 701px) {
-  .npc-state-delta-present-cell-chatter { grid-column: span 2; grid-template-columns: minmax(104px, 160px) minmax(0, 1fr); }
-  .npc-state-delta-chatter-speech .npc-state-delta-bubble::before { top: 12px; left: -7px; border: 7px solid transparent; border-left: 0; border-right-color: rgba(216,190,145,.32); }
-  .npc-state-delta-chatter-thought .npc-state-delta-bubble { margin: 0 0 0 12px; }
-  .npc-state-delta-chatter-thought .npc-state-delta-bubble::before { top: 12px; left: -12px; }
-  .npc-state-delta-chatter-thought .npc-state-delta-bubble::after { top: 22px; left: -19px; }
-}
 
 .npc-state-delta-megumin-pane .npc-state-delta-present-roster { margin: 0; }
 .npc-state-delta-present-strip { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -437,6 +435,47 @@
 @media (max-width: 380px) {
   .npc-state-delta-present-grid { gap: 6px; }
   .npc-state-delta-present-card-role, .npc-state-delta-present-now-part { font-size: .66rem; }
+}
+
+/* Narrow panes (1.2.3; Story Block's sidebar or sheet, a phone): one card per row. A card takes the
+   whole row, the portrait on its left and the name, role and Mood / Condition / Outfit in full on
+   the right. When the NPC has chatter this turn the card takes half the row (portrait on top, the
+   text under it) and the bubble the other half, pointing at the card. Others follow as bubbles
+   with the speaker's name. Very narrow panes keep full-width cards with the bubble under the card.
+   Wide containers keep the card grid above, with the chatter under its card. */
+@container npc-present (max-width: 520px) {
+  .npc-state-delta-present-roster .npc-state-delta-present-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .npc-state-delta-present-roster .npc-state-delta-present-cell { align-items: start; gap: 10px; }
+  .npc-state-delta-present-roster .npc-state-delta-present-cell-chatter { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .npc-state-delta-present-roster .npc-state-delta-present-card { flex-direction: row; align-items: stretch; }
+  .npc-state-delta-present-roster .npc-state-delta-present-card-portrait { flex: 0 0 42%; width: 42%; max-width: 190px; align-self: flex-start; aspect-ratio: 4 / 5; }
+  .npc-state-delta-present-roster .npc-state-delta-present-card-portrait img { object-position: center 18%; }
+  .npc-state-delta-present-roster .npc-state-delta-present-card-text { flex: 1 1 auto; align-self: stretch; gap: 4px; padding: 10px 11px 11px; border-top: 0; border-left: 1px solid var(--npc-line); }
+  .npc-state-delta-present-roster .npc-state-delta-present-card-name { -webkit-line-clamp: unset; line-clamp: none; font-size: .98rem; }
+  .npc-state-delta-present-roster .npc-state-delta-present-card-role { white-space: normal; overflow-wrap: anywhere; font-size: .74rem; }
+  .npc-state-delta-present-roster .npc-state-delta-present-now { gap: 3px; }
+  .npc-state-delta-present-roster .npc-state-delta-present-now-part { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: visible; font-size: .78rem; }
+  .npc-state-delta-present-roster .npc-state-delta-present-cell-chatter .npc-state-delta-present-card { flex-direction: column; }
+  .npc-state-delta-present-roster .npc-state-delta-present-cell-chatter .npc-state-delta-present-card-portrait { flex: 0 0 auto; width: 100%; max-width: none; aspect-ratio: 1 / 1; }
+  .npc-state-delta-present-roster .npc-state-delta-present-cell-chatter .npc-state-delta-present-card-text { border-left: 0; border-top: 1px solid var(--npc-line); padding: 8px 9px 9px; }
+  .npc-state-delta-present-roster .npc-state-delta-chatter { margin: 0; }
+  .npc-state-delta-present-roster .npc-state-delta-chatter-speech .npc-state-delta-bubble::before { top: 14px; left: -7px; border: 7px solid transparent; border-left: 0; border-right-color: rgba(216,190,145,.32); }
+  .npc-state-delta-present-roster .npc-state-delta-chatter-thought .npc-state-delta-bubble { margin: 0 0 0 12px; }
+  .npc-state-delta-present-roster .npc-state-delta-chatter-thought .npc-state-delta-bubble::before { top: 14px; left: -12px; }
+  .npc-state-delta-present-roster .npc-state-delta-chatter-thought .npc-state-delta-bubble::after { top: 24px; left: -19px; }
+  .npc-state-delta-present-roster .npc-state-delta-chatter-others { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin: 12px 0 0; opacity: 1; }
+  .npc-state-delta-present-roster .npc-state-delta-chatter-other { padding: 7px 10px; border: 1px solid rgba(216,190,145,.32); border-radius: 12px; background: rgba(20,18,15,.72); font-size: .82rem; line-height: 1.3; overflow-wrap: anywhere; }
+  .npc-state-delta-present-roster .npc-state-delta-chatter-thought .npc-state-delta-chatter-other { border-radius: 18px; }
+}
+@container npc-present (max-width: 340px) {
+  .npc-state-delta-present-roster .npc-state-delta-present-cell-chatter { grid-template-columns: minmax(0, 1fr); }
+  .npc-state-delta-present-roster .npc-state-delta-present-cell-chatter .npc-state-delta-present-card { flex-direction: row; }
+  .npc-state-delta-present-roster .npc-state-delta-present-cell-chatter .npc-state-delta-present-card-portrait { flex: 0 0 42%; width: 42%; aspect-ratio: 4 / 5; }
+  .npc-state-delta-present-roster .npc-state-delta-present-cell-chatter .npc-state-delta-present-card-text { border-top: 0; border-left: 1px solid var(--npc-line); }
+  .npc-state-delta-present-roster .npc-state-delta-chatter-speech .npc-state-delta-bubble::before { top: -7px; left: 18px; border: 7px solid transparent; border-top: 0; border-bottom-color: rgba(216,190,145,.32); }
+  .npc-state-delta-present-roster .npc-state-delta-chatter-thought .npc-state-delta-bubble { margin: 10px 0 0; }
+  .npc-state-delta-present-roster .npc-state-delta-chatter-thought .npc-state-delta-bubble::before { top: -9px; left: 22px; }
+  .npc-state-delta-present-roster .npc-state-delta-chatter-thought .npc-state-delta-bubble::after { top: -15px; left: 16px; }
 }
 
 /* Native SillyTavern portrait generation */

@@ -4589,8 +4589,10 @@ function inlineCardHtml(npc, messageId, scene = null) {
           <small class="npc-state-delta-present-card-role" title="${escapeHtml(identityLine)}">${escapeHtml(identityLine)}</small>${now}
         </span>
       </button>`;
+    // One cell per NPC: the card, then that NPC's chatter under it (a list row in narrow panes, see
+    // style.css). Tapping anywhere in the cell, the bubble included, opens the dossier.
     const chatter = chatterSlotsHtml(scene, npc.id);
-    return chatter ? `<div class="npc-state-delta-present-cell npc-state-delta-present-cell-chatter">${card}${chatter}</div>` : card;
+    return `<div class="npc-state-delta-present-cell${chatter ? ' npc-state-delta-present-cell-chatter' : ''}" data-npc-id="${escapeHtml(npc.id)}" data-message-id="${messageId}">${card}${chatter}</div>`;
 }
 
 function presentCastChipHtml(npc, messageId) {
@@ -5081,7 +5083,7 @@ function openLauncherDossier(npcId) {
 }
 
 function activatePresentCardFromEvent(event) {
-    const card = eventTargetClosest(event, '.npc-state-delta-present-card, .npc-state-delta-present-chip');
+    const card = eventTargetClosest(event, '.npc-state-delta-present-card, .npc-state-delta-present-chip, .npc-state-delta-present-cell');
     if (!card) return false;
     if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) return false;
     const npcId = String(card.dataset?.npcId || '').trim();
