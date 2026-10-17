@@ -19,6 +19,7 @@ A SillyTavern extension that keeps a living dossier for every NPC in your rolepl
 - [Troubleshooting](#troubleshooting)
 - [For developers](#for-developers)
 - [License](#license)
+- [Credits](#credits)
 
 ---
 
@@ -264,3 +265,7 @@ git diff --check
 ## License
 
 GPL-3.0. See [LICENSE](LICENSE). The seed and history records in `docs/` are preserved as provenance.
+
+## Credits
+
+With thanks to [Arif-salah](https://github.com/Arif-salah).
