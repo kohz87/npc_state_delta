@@ -456,7 +456,7 @@
   .npc-state-delta-present-roster .npc-state-delta-present-card-text { position: absolute; z-index: 1; left: 0; right: 0; bottom: 0; gap: 2px; padding: 30px 9px 9px; border-top: 0; background: linear-gradient(to bottom, rgba(5,6,8,0), rgba(5,6,8,.62) 38%, rgba(5,6,8,.86) 100%); text-shadow: 0 1px 3px rgba(0,0,0,.9); }
   .npc-state-delta-present-roster .npc-state-delta-present-card-name { font-size: .95rem; }
   .npc-state-delta-present-roster .npc-state-delta-present-card .npc-state-delta-present-now { display: none; }
-  .npc-state-delta-present-roster .npc-state-delta-present-side { display: grid; align-content: start; gap: 5px; min-width: 0; padding: 2px 0; }
+  .npc-state-delta-present-roster .npc-state-delta-present-side { display: grid; align-content: center; gap: 5px; min-width: 0; padding: 2px 0; }
   .npc-state-delta-present-roster .npc-state-delta-present-side .npc-state-delta-present-now { gap: 5px; margin: 0; }
   .npc-state-delta-present-roster .npc-state-delta-present-side .npc-state-delta-present-now-part { display: block; -webkit-line-clamp: unset; line-clamp: none; overflow: visible; font-size: .82rem; line-height: 1.3; color: inherit; }
   .npc-state-delta-present-roster .npc-state-delta-present-side-role { font-size: .82rem; overflow-wrap: anywhere; }

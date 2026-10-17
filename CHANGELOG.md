@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.2.6 - 17 October 2026
+
+- **Mood and condition in the middle too.** In narrow panes the right half of a present NPC's row (Mood / Condition / Outfit, or the role and *No changes this turn*) is vertically centred beside the card, like the chatter bubble. Display only; prompts, scans and saved data are unchanged.
+
 ## 1.2.5 - 17 October 2026
 
 - **Speech bubbles in the middle.** In narrow panes (Story Block's sidebar and the phone sheet) the Inner Chatter bubble beside a present NPC's card sits in the middle of the row, its pointer (or the thought bubble's circles) aimed at the card's middle, instead of at the top. Display only; prompts, scans and saved data are unchanged.

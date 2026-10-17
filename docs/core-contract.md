@@ -112,6 +112,8 @@ User-authorized Delta 1.2.4 amendment, narrow present rows: in narrow containers
 
 User-authorized Delta 1.2.5 amendment, centred chatter: in narrow containers the Inner Chatter bubble beside a present card is vertically centred in its row, the pointer at the card's middle; and the floating launcher is hidden while Story Block carries Delta's Present NPCs and Dossiers tabs, unless the player keeps it (`launcherWithStoryBlock`, default false). Display only; no prompt, scan, storage or bundle change.
 
+User-authorized Delta 1.2.6 amendment, centred state: in narrow containers the right half of a present row (now lines or the idle role line) is vertically centred, like the chatter bubble. Display only; no prompt, scan, storage or bundle change.
+
 Measure the actual final extension prompt, not only a UI projection. A saved field without an appropriate route into selected continuity is not sufficient acceptance. Preserve legacy omission, compaction and budget behavior unless a deliberate documented change is requested.
 
 ## C08. Persistence, history and removal of OOC commands — stage 7
