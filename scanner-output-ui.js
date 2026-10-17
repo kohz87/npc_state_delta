@@ -25,9 +25,9 @@ function persistSettings() {
 
 function settingRow() {
     const row = document.createElement('label');
-    row.className = 'npc-state-delta-setting-row delta-scanner-output-row';
+    row.className = 'npc-state-delta-setting-row story-suite-row delta-scanner-output-row';
     row.htmlFor = CONTROL_ID;
-    row.innerHTML = `<span><b>Maximum output tokens</b><small>0 keeps Delta's built-in per-request limits. 128-${SCANNER_MAX_OUTPUT_TOKENS_MAX} sets the maximum output for every NPC scanner text call, including retries and focused passes. It does not change roleplay or image-generation limits.</small></span><span class="delta-setting-number"><input id="${CONTROL_ID}" type="number" min="0" max="${SCANNER_MAX_OUTPUT_TOKENS_MAX}" step="1" inputmode="numeric" class="text_pole npc-state-delta-number"><small>tokens</small></span>`;
+    row.innerHTML = `<span><b>Maximum output tokens</b><small>0 keeps Delta's built-in per-request limits. 128-${SCANNER_MAX_OUTPUT_TOKENS_MAX} sets the maximum output for every NPC scanner text call, including retries and focused passes. It does not change roleplay or image-generation limits.</small></span><span class="delta-setting-number story-suite-number"><input id="${CONTROL_ID}" type="number" min="0" max="${SCANNER_MAX_OUTPUT_TOKENS_MAX}" step="1" inputmode="numeric" class="text_pole npc-state-delta-number"><small>tokens</small></span>`;
     return row;
 }
 

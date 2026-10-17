@@ -45,7 +45,7 @@ function persistHostSettings() {
 }
 
 function settingRow(id, label, control, hint = '') {
-    return `<label class="npc-state-delta-setting-row" for="${id}"><span><b>${label}</b>${hint ? `<small>${hint}</small>` : ''}</span>${control}</label>`;
+    return `<label class="npc-state-delta-setting-row story-suite-row" for="${id}"><span><b>${label}</b>${hint ? `<small>${hint}</small>` : ''}</span>${control}</label>`;
 }
 
 function savedDraft() {

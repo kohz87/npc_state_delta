@@ -79,6 +79,8 @@ With [Story Block](https://github.com/kohz87/Story_block) installed, Delta adds 
 - **👥 Present NPCs:** the same cards as in the chat, for whoever is present in the latest scene.
 - **📇 Dossiers:** every dossier with a search box. The dead stay out of the list until you search for them. Tap a row to open that dossier.
 
+Each present NPC's card carries a *now* line: mood · condition · outfit, from Story Block's World State for the latest reply while Story Block keeps the scene (Source of truth → Scene), otherwise from the dossier. With Story Block's **NPC Inner Chatter** block on, each line of chatter appears as a bubble beside the speaker's card, in the chatter's order: speech bubbles when two or more NPCs whisper, a thought bubble when only one has a line. On wide screens the bubble sits beside the card, on phones under it; lines from someone without a card go to a small *Others* line under the cards. Story Block then hides its own Chatter tab (the block is still written as before). All of this is display only.
+
 While Story Block is installed, the cast shows only in Story Block until you pick a choice under **Roster & continuity → Present NPCs in chat**. Pick **Full cards** or **Compact strip** to keep it in the chat as well; **Only in Story Block** shows full cards in the chat when Story Block isn't installed. The tabs are display only and change nothing in prompts, scans or saved data. Without Story Block nothing changes.
 
 ### Story Suite: Story Block, Story Director and RPG Battle
@@ -91,6 +93,9 @@ Delta works alone and alongside [Story Block](https://github.com/kohz87/Story_bl
 - **Game stats:** with RPG Battle installed, **Custom fields** warns when a field name looks like a game stat (Level, HP, Class…) that RPG Battle keeps.
 - Delta also reads the World State inside Story Block's hidden block, as it reads Megumin Suite's.
 - **Shared with the others (read-only):** the current chat's NPCs (`npcs()`) and NPC profiles (`npcProfiles()`: name, aliases, present, a short role and a summary of up to 200 characters built from the dossier), which RPG Battle can offer as companions, and `openDossier(id)`, which opens Delta's dossier view on that NPC (an exact name or alias also works; archived NPCs open nothing) for RPG Battle's **Dossier** button. Archived and dead NPCs are left out of the profiles; nothing extra is scanned or sent to the model.
+- **Tokens per reply:** the Story Suite overlay shows Delta's estimate (about four characters a token) of what it adds to the next ordinary reply: the dossier injection by section (instructions, present NPC cards, mentioned and deceased references, relationship rubric) and, with one-pass capture on, its instruction plus the block the model writes back. Scans are separate requests and are not counted.
+- **Chatter on the cards:** Delta tells Story Block it shows NPC Inner Chatter on its Present NPCs cards, so Story Block hides its own Chatter tab while Delta is on.
+- **One look:** Delta's settings panel is the shared Story Suite look (`suite.css`, loaded once for all four extensions).
 
 **Source of truth** in the settings lets you choose per area: **Automatic** (the order above), **This extension** or **The other one**. Alone, every choice behaves like Automatic and Delta works exactly as before.
 

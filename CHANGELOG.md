@@ -5,7 +5,12 @@
 ## 1.2.2 - 17 October 2026
 
 - **NPC profiles for the Story Suite.** Delta now also shares a short profile of each tracked NPC in the current chat with the other Story Suite extensions: name, aliases, whether they are present, a short role (the dossier's Role, or a Class/Occupation-style custom field when Role is empty) and a summary of up to 200 characters built from the dossier's role, species, ability-style custom fields (Abilities, Skills, Powers…), personality and background. RPG Battle uses it to offer the story's NPCs as companions. Archived NPCs and NPCs the dossier marks as dead (archived or not) are left out. It is read-only and built from what the dossiers already hold: no model call, no extra scan, and prompts and saved data are unchanged. Alone, nothing changes.
+- **What each NPC is like right now.** Every present NPC card shows a *now* line: mood · condition · outfit. While Story Block keeps the scene it comes from Story Block's World State for the latest reply, otherwise from the dossier.
+- **Inner Chatter beside the cards.** With Story Block's NPC Inner Chatter block on, each line appears as a bubble next to the NPC who said it, in order: speech bubbles when two or more NPCs whisper, a thought bubble when only one has a line. Beside the card on wide screens, under it on phones; lines from someone without a card go to an *Others* line. Delta tells Story Block it shows the chatter, so Story Block hides its separate Chatter tab while Delta is on.
+- **Tokens per reply in Story Suite.** Story Block's overlay can show what Delta adds to the next ordinary reply (an estimate at about four characters a token), broken down by section of the dossier injection and, with one-pass capture on, the capture instruction and block.
+- **One look for the settings panels.** Delta's settings panel is now the shared Story Suite look: its parts also carry the shared `story-suite-*` classes and the shared `suite.css` is loaded once for all four extensions. Delta's panel looks the same as before.
 - **Open a dossier from another extension.** The other Story Suite extensions can open Delta's dossier view on one NPC (by its id, or by an exact name or alias), the same view the launcher and the present-cast cards open; RPG Battle's companion cards use it for their **Dossier** button. Archived and unknown NPCs open nothing. Opening changes nothing and sends nothing to the model.
+- All of this is display or read-only: no model call, no extra scan, and prompts, request counts and saved data are unchanged.
 
 ## 1.2.1 - 17 October 2026
 

@@ -80,7 +80,7 @@ test('scanner output UI mounts into the Scanning slot, leaves panel styling to s
     assert.match(source, /\[data-delta-settings-slot="scanner-output"\]/);
     assert.match(index, /settingsSlot\('full-cast'\)[\s\S]*npc_state_delta_scan_depth[\s\S]*settingsSlot\('scanner-output'\)/, 'full cast and output limit sit inside Scanning');
     assert.doesNotMatch(source, /moveFullCastIntoScanning|npc_state_delta_full_cast_scan|#\$\{SETTINGS_ID\} \./, 'no relocation or settings CSS outside the settings owner');
-    assert.match(source, /class="delta-setting-number"/);
+    assert.match(source, /class="delta-setting-number story-suite-number"/);
     assert.match(css, /\.delta-settings-maintenance-actions \{ display: grid; grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
     assert.match(css, /\.npc-state-delta-tuning-actions \{ display: flex; flex-wrap: wrap;/);
     assert.match(css, /@container npc-delta-settings \(max-width: 500px\)/);

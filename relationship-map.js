@@ -241,7 +241,7 @@ function onDossierRendered() {
 }
 
 function settingRow(id, label, control, hint) {
-    return `<label class="npc-state-delta-setting-row" for="${id}"><span><b>${label}</b><small>${hint}</small></span>${control}</label>`;
+    return `<label class="npc-state-delta-setting-row story-suite-row" for="${id}"><span><b>${label}</b><small>${hint}</small></span>${control}</label>`;
 }
 
 export function mountRelationshipMapSettings() {
@@ -252,7 +252,7 @@ export function mountRelationshipMapSettings() {
     const settings = readMapSettings();
     const root = document.createElement('div');
     root.id = SETTINGS_ROOT_ID;
-    root.innerHTML = `<h4 class="delta-settings-subhead">Relationship map</h4>
+    root.innerHTML = `<h4 class="delta-settings-subhead story-suite-subhead">Relationship map</h4>
         ${settingRow('npc_state_delta_map_enabled', 'Relationship map', `<input id="npc_state_delta_map_enabled" type="checkbox"${settings.enabled ? ' checked' : ''}>`, 'Adds a Map view to the dossier panel. Read-only; turning it off removes the switch and the See on map link.')}
         ${settingRow('npc_state_delta_map_lens', 'Default distance', `<select id="npc_state_delta_map_lens" class="text_pole">${MAP_LENSES.map(lens => `<option value="${lens.key}"${lens.key === settings.defaultLens ? ' selected' : ''}>${lens.label}</option>`).join('')}</select>`, "What the map's distance shows when it opens. The buttons on the map change it for this session only.")}`;
     root.addEventListener('change', () => {

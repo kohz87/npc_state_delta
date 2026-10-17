@@ -15,7 +15,7 @@ assert runtime_config.get('applicationVersion') == manifest['version'], 'runtime
 assert runtime_config.get('entrypoint') == manifest['js'], 'runtime inventory entrypoint differs from manifest'
 assert all('/' not in name and name.endswith('.js') for name in runtime_files), 'runtime inventory contains a non-top-level JS path'
 
-support_files = ['style.css', 'manifest.json', 'runtime-modules.json', 'LICENSE', 'README.md']
+support_files = ['style.css', 'suite.css', 'manifest.json', 'runtime-modules.json', 'LICENSE', 'README.md']
 files = runtime_files + support_files
 out = root / 'dist'
 out.mkdir(exist_ok=True)

@@ -317,6 +317,68 @@
   font-size: .69rem;
 }
 
+/* Present view, display only (present-scene.js): the now line on each card, NPC Inner Chatter as
+   bubbles beside the speaker's card (whispers: speech bubbles; one voice: a thought bubble), and
+   an Others line for speakers without a card. Wide: beside the card; narrow: under it. */
+.npc-state-delta-present-card-overlay small.npc-state-delta-present-now { opacity: .95; color: #f6e7c4; }
+.npc-state-delta-present-cell { display: grid; gap: 8px; min-width: 0; align-items: start; }
+.npc-state-delta-chatter { display: grid; gap: 6px; min-width: 0; }
+.npc-state-delta-bubble {
+  position: relative;
+  margin: 0;
+  padding: 7px 10px;
+  border: 1px solid rgba(216,190,145,.32);
+  border-radius: 12px;
+  background: rgba(20,18,15,.72);
+  color: inherit;
+  font-size: .82rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.npc-state-delta-chatter-speech .npc-state-delta-bubble::before {
+  content: "";
+  position: absolute;
+  top: -7px;
+  left: 18px;
+  border: 7px solid transparent;
+  border-top: 0;
+  border-bottom-color: rgba(216,190,145,.32);
+}
+.npc-state-delta-chatter-thought .npc-state-delta-bubble { border-radius: 18px; font-style: italic; opacity: .86; margin-top: 10px; }
+.npc-state-delta-chatter-thought .npc-state-delta-bubble::before,
+.npc-state-delta-chatter-thought .npc-state-delta-bubble::after {
+  content: "";
+  position: absolute;
+  border: 1px solid rgba(216,190,145,.32);
+  border-radius: 50%;
+  background: rgba(20,18,15,.72);
+}
+.npc-state-delta-chatter-thought .npc-state-delta-bubble::before { width: 9px; height: 9px; top: -9px; left: 22px; }
+.npc-state-delta-chatter-thought .npc-state-delta-bubble::after { width: 5px; height: 5px; top: -15px; left: 16px; }
+.npc-state-delta-bubble-order {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.35em;
+  height: 1.35em;
+  margin-right: 6px;
+  border-radius: 999px;
+  background: rgba(216,190,145,.2);
+  font-size: .68rem;
+  font-style: normal;
+  vertical-align: 1px;
+}
+.npc-state-delta-chatter-others { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 8px 2px 0; font-size: .8rem; opacity: .85; }
+.npc-state-delta-chatter-others.npc-state-delta-chatter-thought .npc-state-delta-chatter-said { font-style: italic; }
+.npc-state-delta-chatter-speaker { margin-right: 4px; }
+.npc-state-delta-chatter-speaker::after { content: ":"; }
+@media (min-width: 701px) {
+  .npc-state-delta-present-cell-chatter { grid-column: span 2; grid-template-columns: minmax(104px, 160px) minmax(0, 1fr); }
+  .npc-state-delta-chatter-speech .npc-state-delta-bubble::before { top: 12px; left: -7px; border: 7px solid transparent; border-left: 0; border-right-color: rgba(216,190,145,.32); }
+  .npc-state-delta-chatter-thought .npc-state-delta-bubble { margin: 0 0 0 12px; }
+  .npc-state-delta-chatter-thought .npc-state-delta-bubble::before { top: 12px; left: -12px; }
+  .npc-state-delta-chatter-thought .npc-state-delta-bubble::after { top: 22px; left: -19px; }
+}
+
 .npc-state-delta-megumin-pane .npc-state-delta-present-roster { margin: 0; }
 .npc-state-delta-present-strip { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .npc-state-delta-present-strip > .npc-state-delta-kicker { flex: 0 0 auto; }
@@ -621,6 +683,8 @@ body.npc-state-delta-portrait-generator-open { overflow: hidden !important; }
 #npc_state_delta_calendar_settings { display: contents; }
 #npc_state_delta_calendar_settings .npc-state-delta-calendar-heading { margin: 6px 0 2px; }
 #npc_state_delta_calendar_settings textarea { min-height: 7.5em; min-width: min(220px, 46vw); resize: vertical; }
+/* suite.css sizes a row's textarea; the calendar's months box keeps text_pole's full width. */
+#npc_state_delta_calendar_settings .story-suite-row > textarea { width: 100%; }
 #npc_state_delta_calendar_settings .npc-state-delta-calendar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 #npc_state_delta_calendar_settings .npc-state-delta-calendar-actions > .menu_button { margin: 0; }
 #npc_state_delta_calendar_settings #npc_state_delta_calendar_status { opacity: .78; }

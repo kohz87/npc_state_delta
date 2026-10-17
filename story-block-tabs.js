@@ -46,6 +46,8 @@ export function connectStoryBlock(api, storyBlock) {
         if (pane.__npcStateDeltaCast !== html) {
             pane.innerHTML = html;
             pane.__npcStateDeltaCast = html;
+            // The now lines and chatter bubbles get their text through textContent, never markup.
+            api.fillPresentCast?.(pane);
         }
     };
     const renderDossiers = pane => {
@@ -74,6 +76,9 @@ export function connectStoryBlock(api, storyBlock) {
     storyBlock.registerTab({ id: STORY_BLOCK_TAB_IDS.cast, label: 'Present NPCs', icon: '👥', order: 200, render: renderCast });
     storyBlock.registerTab({ id: STORY_BLOCK_TAB_IDS.dossiers, label: 'Dossiers', icon: '📇', order: 201, render: renderDossiers });
     if (globalThis.document?.documentElement?.dataset) globalThis.document.documentElement.dataset[CONNECTED_FLAG] = '1';
+    // A new reply, swipe or edit in Story Block can change the World State and chatter the cast
+    // shows; the in-chat cards follow (the tab re-renders with Story Block itself).
+    try { storyBlock.onUpdate?.(() => api.renderInline?.()); } catch { /* optional */ }
     return {
         // Called after Delta redraws its cast; Story Block redraws only when Delta's state moved.
         refresh() {

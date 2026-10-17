@@ -257,7 +257,8 @@ test('inline renderer self-heals host redraws without destructive full remounts'
     assert.match(index, /startInlineWatchdog/);
     assert.match(index, /existingById/);
     assert.match(index, /if \(!anchor\) \{/);
-    assert.match(index, /else if \(anchor\.innerHTML !== html\)/);
+    // Filled now/chatter text makes innerHTML differ from the markup, so the last written markup decides.
+    assert.match(index, /else if \(anchor\.innerHTML !== html && \(anchor\.__npcStateDeltaHtml !== html \|\| !String\(anchor\.innerHTML \|\| ''\)\.trim\(\)\)\)/);
     assert.doesNotMatch(index, /querySelectorAll\?\.\('\.npc-state-delta-inline-anchor'\)\.forEach\(node => node\.remove\(\)\)/);
 });
 

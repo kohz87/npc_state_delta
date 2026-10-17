@@ -93,6 +93,7 @@ import {
     normalizeCustomFieldNames,
     normalizeCustomFields,
     setExternalCalendarSource,
+    currentPresentationText,
 } from './core.js';
 import { applyNpcBirthdayUpdate, normalizeBirthDate } from './birthday.js';
 import {
@@ -161,11 +162,15 @@ import {
 import { storySuite } from './suite.js';
 import {
     SUITE_AREAS,
+    SUITE_SHOWS,
+    NARRATION_CAPTURE_OUTPUT_ESTIMATE_CHARS,
     announceNpcStateDelta,
     areaOwner,
     buildManageApi,
     buildNpcProfiles,
     defersArea,
+    ensureSuiteStylesheet,
+    replyTokenEstimate,
     resolveDossierTarget,
     externalCalendar,
     normalizeSourceOfTruth,
@@ -173,6 +178,16 @@ import {
     statsOverlapWarning,
     suiteManageAvailable,
 } from './suite-handshake.js';
+import {
+    chatterSlotsHtml,
+    fillPresentSceneText,
+    nowSlotHtml,
+    othersSlotsHtml,
+    presentSceneModel,
+    rememberPresentScene,
+    sceneAttr,
+    storyBlockTags,
+} from './present-scene.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
 const PROMPT_KEY = 'npc_state_delta_live_dossier';
@@ -257,6 +272,8 @@ const assistantReceipts = new Map();
 const narrationCaptures = new Map();
 const NARRATION_CAPTURE_LIMIT = 8;
 const narrationCaptureStats = { requested: 0, used: 0, missing: 0, invalid: 0, unterminated: 0, outdated: 0 };
+// The size of the last accepted one-pass capture block this session (0 until one arrives).
+let lastCaptureBlockChars = 0;
 // Swipe and regenerate rebuild the branch after the reply arrives, so their instruction would
 // describe the replaced sibling; only fresh replies and continues are asked for a block.
 const NARRATION_CAPTURE_TYPES = new Set(['', 'normal', 'continue']);
@@ -2403,6 +2420,13 @@ function namedByPlayerNpcIds(state) {
         .map(npc => npc.id);
 }
 
+// The live dossier injection under the current settings and scene defer (sent by updateInjection;
+// tokens() measures the same text).
+function liveInjectionText(state, settings) {
+    const namedNpcIds = namedByPlayerNpcIds(state);
+    return buildInjection(state.npcs, recentTranscript(4), state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: settings.customFieldNames, sceneDeferred: defersArea('scene', settings.sourceOfTruth) });
+}
+
 function updateInjection() {
     const settings = getSettings();
     const ctx = getContext();
@@ -2423,7 +2447,7 @@ function updateInjection() {
         : '';
     if (!settings.inject && !capture) return clear('"Inject present NPC state" is off.');
     const namedNpcIds = namedByPlayerNpcIds(state);
-    const prompt = settings.inject ? buildInjection(state.npcs, recentTranscript(4), state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: settings.customFieldNames, sceneDeferred: defersArea('scene', settings.sourceOfTruth) }) : '';
+    const prompt = settings.inject ? liveInjectionText(state, settings) : '';
     const present = (state.npcs || []).filter(npc => npc?.present && !npc?.archived);
     const depth = Math.max(0, Math.min(20, Number(settings.injectDepth) || 1));
     lastInjection = {
@@ -3729,6 +3753,8 @@ function captureNarrationBlock(chatKey, messageId, message, armed) {
         return;
     }
     narrationCaptures.set(narrationCaptureKey(chatKey, messageId), { parsed, raw: extracted.raw });
+    // Only its size is kept, for the tokens() output estimate; never the block itself.
+    lastCaptureBlockChars = String(extracted.raw ?? '').length;
     while (narrationCaptures.size > NARRATION_CAPTURE_LIMIT) narrationCaptures.delete(narrationCaptures.keys().next().value);
 }
 function receiveNarrationBlock(messageId) {
@@ -4108,15 +4134,15 @@ function setScanIndicator(busy) {
 }
 
 function settingRow(id, label, control, hint = '') {
-    return `<label class="npc-state-delta-setting-row" for="${id}"><span><b>${label}</b>${hint ? `<small>${hint}</small>` : ''}</span>${control}</label>`;
+    return `<label class="npc-state-delta-setting-row story-suite-row" for="${id}"><span><b>${label}</b>${hint ? `<small>${hint}</small>` : ''}</span>${control}</label>`;
 }
 
 function numberControl(id, min, max, unit = '', { step = '', prefix = '' } = {}) {
-    return `<span class="delta-setting-number">${prefix}<input id="${id}" type="number" min="${min}" max="${max}"${step ? ` step="${step}"` : ''} class="text_pole npc-state-delta-number">${unit ? `<small>${unit}</small>` : ''}</span>`;
+    return `<span class="delta-setting-number story-suite-number">${prefix}<input id="${id}" type="number" min="${min}" max="${max}"${step ? ` step="${step}"` : ''} class="text_pole npc-state-delta-number">${unit ? `<small>${unit}</small>` : ''}</span>`;
 }
 
 function settingsGroup(key, title, hint, body) {
-    return `<details class="delta-settings-group" data-delta-settings-group="${key}"><summary><b>${title}</b>${hint ? `<small>${hint}</small>` : ''}</summary><div class="delta-settings-group-body">${body}</div></details>`;
+    return `<details class="delta-settings-group story-suite-fold" data-delta-settings-group="${key}"><summary><b>${title}</b>${hint ? `<small>${hint}</small>` : ''}</summary><div class="delta-settings-group-body story-suite-fold-body">${body}</div></details>`;
 }
 
 const SUITE_AREA_LABELS = Object.freeze({
@@ -4144,22 +4170,22 @@ function buildSettingsHtml() {
         settingRow('npc_state_delta_admission_mode', 'NPC admission', '<select id="npc_state_delta_admission_mode" class="text_pole"><option value="conservative">Conservative</option><option value="balanced">Balanced</option><option value="manual_only">Manual only</option></select>', 'Conservative: proper names immediately, role labels after recurrence. Balanced: also direct or persistent role NPCs. Manual only: every dossier needs Add NPC.'),
     ].join('');
     const roster = `
-        <h4 class="delta-settings-subhead">In-chat display</h4>
+        <h4 class="delta-settings-subhead story-suite-subhead">In-chat display</h4>
         ${settingRow('npc_state_delta_present_cast_display', 'Present NPCs in chat', '<select id="npc_state_delta_present_cast_display" class="text_pole"><option value="full">Full cards</option><option value="compact">Compact strip</option><option value="storyblock">Only in Story Block</option><option value="off">Off</option></select>', 'Shown under the latest reply (or as a Megumin tab). With Story Block installed, Present NPCs and Dossiers tabs also appear in its sidebar, and until you pick a choice here the chat shows them only there; Only in Story Block keeps the chat clear (full cards without Story Block). Tapping an NPC opens its dossier. Off adds nothing to the chat; presence tracking and injection are unaffected.')}
-        <h4 class="delta-settings-subhead">Generation injection</h4>
+        <h4 class="delta-settings-subhead story-suite-subhead">Generation injection</h4>
         ${settingRow('npc_state_delta_inject', 'Inject present NPC state', '<input id="npc_state_delta_inject" type="checkbox">', 'Only active NPCs present in the latest scanned scene are injected into generation.')}
         ${settingRow('npc_state_delta_inject_budget', 'Injection budget', numberControl('npc_state_delta_inject_budget', 512, 6000, 'tokens', { step: 100, prefix: '<small>~</small>' }), 'Upper limit; only what the present NPCs need is used. The default 4000 lets detailed dossiers reach the roleplay model in full. When it runs short, lower-priority fields, then lower-ranked NPCs, are trimmed first.')}
         ${settingsSlot('relationship-map')}
-        <h4 class="delta-settings-subhead">Custom fields</h4>
+        <h4 class="delta-settings-subhead story-suite-subhead">Custom fields</h4>
         ${settingRow('npc_state_delta_custom_fields', 'Custom fields', '<input id="npc_state_delta_custom_fields" class="text_pole" maxlength="260" placeholder="Level, Class, Faction">', 'Up to 6 names, comma-separated, tracked on every dossier. The scanner fills a value only when the story states it, keeps it until it is explicitly changed, and it is sent with present NPCs. Leave empty to turn off.')}
-        <small id="npc_state_delta_custom_fields_stats_warning" class="npc-state-delta-suite-warning" role="status" hidden></small>
-        <h4 class="delta-settings-subhead">Roster lifecycle</h4>
+        <small id="npc_state_delta_custom_fields_stats_warning" class="npc-state-delta-suite-warning story-suite-notice" role="status" hidden></small>
+        <h4 class="delta-settings-subhead story-suite-subhead">Roster lifecycle</h4>
         ${settingRow('npc_state_delta_max', 'Maximum active NPCs', numberControl('npc_state_delta_max', 1, 100), 'Archived dossiers do not use an active slot.')}
         ${settingRow('npc_state_delta_archive_deaths', 'Archive confirmed deaths', '<input id="npc_state_delta_archive_deaths" type="checkbox">', 'Explicit current-timeline deaths archive instead of deleting. Ambiguous death language is ignored.')}
         ${settingRow('npc_state_delta_reactivate_archived', 'Reactivate on clear return', '<input id="npc_state_delta_reactivate_archived" type="checkbox">', 'Manual archives return when the NPC clearly reappears. Death archives need an explicit living return.')}
         ${settingRow('npc_state_delta_mid_delete_rewind', 'Rewind dossiers on middle deletion', '<input id="npc_state_delta_mid_delete_rewind" type="checkbox">', 'Off (default): deleting a message from the middle undoes only what that message changed and keeps later changes. On: every dossier rewinds to how it was just before the deleted message, discarding what later messages changed (no model requests).')}
         ${settingRow('npc_state_delta_branch_rescan', 'Rescan changed branches', '<input id="npc_state_delta_branch_rescan" type="checkbox">', 'Re-evaluate the surviving branch after a swipe, edit or middle-message deletion.')}
-        <h4 class="delta-settings-subhead">Stale cleanup</h4>
+        <h4 class="delta-settings-subhead story-suite-subhead">Stale cleanup</h4>
         ${settingRow('npc_state_delta_auto_prune_stale', 'Auto-manage stale NPCs', '<input id="npc_state_delta_auto_prune_stale" type="checkbox">', 'Long-absent NPCs auto-archive, then stale auto-archives are deleted later. Manual, death and protected records are kept; deleted names can be rediscovered.')}
         ${settingRow('npc_state_delta_stale_archive_after', 'Auto-archive after', numberControl('npc_state_delta_stale_archive_after', 10, 999, 'replies'), 'Default 30. Replies since the NPC was last present or active off-screen.')}
         ${settingRow('npc_state_delta_stale_delete_after', 'Auto-delete after', numberControl('npc_state_delta_stale_delete_after', 11, 1000, 'replies'), 'Default 50. Applies only to stale auto-archives.')}`;
@@ -4245,7 +4271,7 @@ function buildSettingsHtml() {
           <summary><b>Current chat roster</b><small>Edit, scan, archive or remove individual records</small></summary>
           <div id="npc_state_delta_roster_summary" class="npc-state-delta-roster-summary"></div>
         </details>
-        <div class="delta-settings-danger">
+        <div class="delta-settings-danger story-suite-danger">
           <span><b>Clear chat dossier</b><small>Removes every NPC record for this chat only.</small></span>
           <div id="npc_state_delta_clear_chat" class="menu_button redWarningBG"><i class="fa-solid fa-trash"></i> Clear</div>
         </div>`;
@@ -4256,23 +4282,23 @@ function buildSettingsHtml() {
           <b>NPC State Delta <span class="npc-state-delta-version">v${NPC_STATE_VERSION}</span></b>
           <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
-        <div class="inline-drawer-content npc-state-delta-drawer">
-          <div id="npc_state_delta_suite_manage" class="npc-state-delta-suite-manage" data-story-suite-link hidden>
+        <div class="inline-drawer-content npc-state-delta-drawer story-suite-panel">
+          <div id="npc_state_delta_suite_manage" class="npc-state-delta-suite-manage story-suite-manage" data-story-suite-link hidden>
             <button type="button" class="menu_button" data-delta-open-suite><i class="fa-solid fa-layer-group"></i> Manage all in Story Suite</button>
           </div>
-          <div class="delta-settings-quickbar">
+          <div class="delta-settings-quickbar story-suite-quickbar">
             <div class="delta-settings-quick-toggles">
               ${settingRow('npc_state_delta_enabled', 'Enable NPC State Delta', '<input id="npc_state_delta_enabled" type="checkbox">')}
               ${settingRow('npc_state_delta_auto', 'Auto scan', '<input id="npc_state_delta_auto" type="checkbox">', 'Runs after assistant replies.')}
             </div>
-            <div class="npc-state-delta-actions delta-settings-quick-actions">
+            <div class="npc-state-delta-actions delta-settings-quick-actions story-suite-actions">
               <button type="button" class="menu_button" data-delta-settings-open-dossiers><i class="fa-solid fa-address-book"></i> Open dossiers</button>
               <div id="npc_state_delta_scan_now" class="menu_button"><i class="fa-solid fa-wand-magic-sparkles"></i> Scan dossier now</div>
               ${settingsSlot('full-cast-action')}
               <div id="npc_state_delta_add_manual" class="menu_button"><i class="fa-solid fa-user-plus"></i> Add NPC</div>
             </div>
           </div>
-          <div class="delta-settings-experience">
+          <div class="delta-settings-experience story-suite-folds">
             ${settingsGroup('scanning', 'Scanning', 'Connection, cadence and admission', scanning)}
             ${settingsGroup('roster', 'Roster & continuity', 'Injection, lifecycle and stale cleanup', roster)}
             ${settingsGroup('calendar', 'Calendar & birthdays', 'Fantasy months and optional campaign clock', settingsSlot('calendar'))}
@@ -4535,19 +4561,23 @@ function portraitMarkup(npc, displayName, placeholderClass = 'npc-state-delta-in
     return `<div class="${placeholderClass}" aria-hidden="true"><span>${escapeHtml(initial)}</span></div>`;
 }
 
-function inlineCardHtml(npc, messageId) {
+function inlineCardHtml(npc, messageId, scene = null) {
     if (!npc || npc.archived || !npc.present || npc.minor) return '';
     const displayName = npc.name || 'NPC';
-    const identityLine = [npc.role, npc.mood].filter(Boolean).join(' · ') || 'Present NPC';
+    // With a now line (mood · condition · outfit) the identity line keeps only the role.
+    const now = nowSlotHtml(scene, npc.id);
+    const identityLine = (now ? npc.role : [npc.role, npc.mood].filter(Boolean).join(' · ')) || 'Present NPC';
     const portrait = portraitMarkup(npc, displayName, 'npc-state-delta-present-card-placeholder');
-    return `
+    const card = `
       <button type="button" class="npc-state-delta-present-card" data-npc-id="${escapeHtml(npc.id)}" data-message-id="${messageId}" aria-label="Open ${escapeHtml(displayName)} dossier">
         <span class="npc-state-delta-present-card-portrait">${portrait}</span>
         <span class="npc-state-delta-present-card-overlay">
           <b>${escapeHtml(displayName)}</b>
-          <small>${escapeHtml(identityLine)}</small>
+          <small>${escapeHtml(identityLine)}</small>${now}
         </span>
       </button>`;
+    const chatter = chatterSlotsHtml(scene, npc.id);
+    return chatter ? `<div class="npc-state-delta-present-cell npc-state-delta-present-cell-chatter">${card}${chatter}</div>` : card;
 }
 
 function presentCastChipHtml(npc, messageId) {
@@ -4556,10 +4586,57 @@ function presentCastChipHtml(npc, messageId) {
     return `<button type="button" class="npc-state-delta-present-chip" data-npc-id="${escapeHtml(npc.id)}" data-message-id="${messageId}" aria-label="Open ${escapeHtml(displayName)} dossier"><span class="npc-state-delta-present-chip-portrait">${portrait}</span><span>${escapeHtml(displayName)}</span></button>`;
 }
 
-function inlineRosterHtml(cards, messageId, mode = inChatCastMode()) {
+// Story Block's block text for the latest assistant reply (that reply only, never an older copy),
+// or ''. Read through its public api: blockInText on that one message, else getBlock.
+function storyBlockTextForLatestReply(tags, messageId) {
+    const storyBlock = globalThis.StoryBlock;
+    const message = Number.isInteger(messageId) && messageId >= 0 ? getContext().chat?.[messageId] : null;
+    if (!storyBlock || !message || message.is_user || message.is_system) return '';
+    const texts = [];
+    for (const tag of tags) {
+        try {
+            const found = typeof storyBlock.blockInText === 'function'
+                ? storyBlock.blockInText(String(message.mes ?? ''), tag)
+                : storyBlock.getBlock?.(tag, { beforeIndex: messageId + 1 });
+            const text = found && (found.messageIndex === undefined || found.messageIndex === null || found.messageIndex === messageId) ? String(found.text ?? '').trim() : '';
+            if (text) texts.push(text);
+        } catch (error) {
+            console.warn('[NPC State Delta] Story Block block could not be read', error);
+        }
+    }
+    return texts.join('\n');
+}
+
+// Display only: the now line on each present card and Story Block's NPC Inner Chatter beside
+// them. World State is used for the now line only while Story Block keeps the scene.
+function presentSceneFor(visible, messageId) {
+    try {
+        const settings = getSettings();
+        const blocks = typeof globalThis.StoryBlock?.listBlocks === 'function' ? globalThis.StoryBlock.listBlocks() : [];
+        const sceneOwned = areaOwner('scene', settings.sourceOfTruth)?.id === 'story-block';
+        const sceneText = sceneOwned ? storyBlockTextForLatestReply(storyBlockTags(blocks, 'scene'), messageId) : '';
+        // Only enabled chatter blocks (Story Block's default one is tagged NPC_Inner_Chatter).
+        const chatterText = storyBlockTextForLatestReply(storyBlockTags(blocks, 'chatter'), messageId);
+        const cards = visible.map(npc => ({
+            id: npc.id,
+            name: npc.name,
+            aliases: npc.aliases || [],
+            mood: npc.mood,
+            condition: npc.status,
+            outfit: currentPresentationText(npc) || npc.currentForm || '',
+        }));
+        const roster = (getChatState().npcs || []).filter(npc => !npc.archived);
+        return rememberPresentScene(presentSceneModel({ cards, roster, sceneText, sceneOwned, chatterText }));
+    } catch (error) {
+        console.warn('[NPC State Delta] present scene skipped', error);
+        return null;
+    }
+}
+
+function inlineRosterHtml(cards, messageId, mode = inChatCastMode(), { othersWithoutCast = false } = {}) {
     const currentById = new Map(getChatState().npcs.map(npc => [npc.id, npc]));
     const visible = (cards || []).map(card => currentById.get(card.id)).filter(npc => npc?.present && !npc.archived && !npc.minor);
-    if (!visible.length) return '';
+    if (!visible.length && !othersWithoutCast) return '';
     if (mode === 'compact') {
         return `
       <section class="npc-state-delta-present-roster npc-state-delta-present-strip" data-message-id="${messageId}">
@@ -4567,10 +4644,14 @@ function inlineRosterHtml(cards, messageId, mode = inChatCastMode()) {
         <div class="npc-state-delta-present-chips">${visible.map(npc => presentCastChipHtml(npc, messageId)).join('')}</div>
       </section>`;
     }
+    const scene = presentSceneFor(visible, messageId);
+    const others = othersSlotsHtml(scene);
+    if (!visible.length && !others) return '';
+    const grid = visible.length ? `
+        <div class="npc-state-delta-present-grid">${visible.map(npc => inlineCardHtml(npc, messageId, scene)).join('')}</div>` : '';
     return `
-      <section class="npc-state-delta-present-roster" data-message-id="${messageId}">
-        <div class="npc-state-delta-present-roster-head"><span class="npc-state-delta-kicker">PRESENT NPCS</span><small>${visible.length} shown</small></div>
-        <div class="npc-state-delta-present-grid">${visible.map(npc => inlineCardHtml(npc, messageId)).join('')}</div>
+      <section class="npc-state-delta-present-roster" data-message-id="${messageId}"${sceneAttr(scene)}>
+        <div class="npc-state-delta-present-roster-head"><span class="npc-state-delta-kicker">PRESENT NPCS</span><small>${visible.length} shown</small></div>${grid}${others}
       </section>`;
 }
 
@@ -4638,7 +4719,8 @@ function storyBlockCastHtml() {
     const key = getChatKey();
     if (key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return '';
     const present = getChatState(key).npcs.filter(npc => !npc.archived && npc.present && !npc.minor);
-    return inlineRosterHtml(present, latestMessageId(true), 'full');
+    // With nobody present the tab still shows chatter (as Others), so none is lost.
+    return inlineRosterHtml(present, latestMessageId(true), 'full', { othersWithoutCast: true });
 }
 
 function inlineEntriesForRender(state) {
@@ -4925,6 +5007,7 @@ function renderInlineCards() {
         if (mountNpcStateInsideMeguminBlock(message, messageId, html)) {
             anchor?.remove?.();
             existingById.delete(messageId);
+            fillPresentSceneText(message.querySelector?.('.npc-state-delta-megumin-pane'));
             rendered += 1;
             continue;
         }
@@ -4933,13 +5016,17 @@ function renderInlineCards() {
             anchor.className = 'npc-state-delta-inline-anchor';
             anchor.dataset.npcStateDeltaMessageId = String(messageId);
             anchor.innerHTML = html;
+            anchor.__npcStateDeltaHtml = html;
             const text = message.querySelector?.('.mes_text');
             if (text?.insertAdjacentElement) text.insertAdjacentElement('afterend', anchor);
             else (message.querySelector?.('.mes_block') || message).appendChild?.(anchor);
             existingById.set(messageId, anchor);
-        } else if (anchor.innerHTML !== html) {
+        } else if (anchor.innerHTML !== html && (anchor.__npcStateDeltaHtml !== html || !String(anchor.innerHTML || '').trim())) {
+            // Filled now/chatter slots make innerHTML differ from the source markup by design.
             anchor.innerHTML = html;
+            anchor.__npcStateDeltaHtml = html;
         }
+        fillPresentSceneText(anchor);
         rendered += 1;
     }
     document.dispatchEvent?.(new CustomEvent('npc-state-delta:cast-rendered'));
@@ -6376,13 +6463,33 @@ const SUITE_API = Object.freeze({
         setSource: (area, choice) => applySourceOfTruth(area, choice),
         enabled: () => getSettings().enabled !== false,
         setEnabled: on => applyEnabled(on),
+        tokens: () => nextReplyTokens(),
     }),
 });
 let suiteConnected = false;
 let suiteRefreshQueued = false;
 
+// What Delta adds to the next ordinary reply, estimated at about four characters a token: the
+// live dossier injection and, with one-pass capture on, its instruction (input) and the block the
+// model is asked to write back (output). Scans and other quiet requests are not counted.
+function nextReplyTokens() {
+    const settings = getSettings();
+    const key = getChatKey();
+    if (settings.enabled === false || key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return replyTokenEstimate();
+    const state = getChatState(key);
+    const injection = settings.inject ? liveInjectionText(state, settings) : '';
+    const capture = narrationCaptureEnabled(settings)
+        ? buildNarrationCapturePrompt(scannerPromptOptions(state, settings, recentTranscript(4)))
+        : '';
+    return replyTokenEstimate({
+        injection,
+        captureChars: capture.length,
+        captureOutputChars: capture ? (lastCaptureBlockChars || NARRATION_CAPTURE_OUTPUT_ESTIMATE_CHARS) : 0,
+    });
+}
+
 function announceToSuite() {
-    announceNpcStateDelta({ enabled: getSettings().enabled !== false, version: NPC_STATE_VERSION, api: SUITE_API, settings: `#${UI_ID}` });
+    announceNpcStateDelta({ enabled: getSettings().enabled !== false, version: NPC_STATE_VERSION, api: SUITE_API, settings: `#${UI_ID}`, shows: SUITE_SHOWS });
 }
 
 // What the Enable checkbox does after saving; Story Suite's setEnabled does the same.
@@ -6426,6 +6533,7 @@ function syncSuiteControls() {
 function connectStorySuite() {
     if (suiteConnected) return;
     suiteConnected = true;
+    ensureSuiteStylesheet();
     // Read straight from the settings object: the calendar is consulted per NPC projection.
     setExternalCalendarSource(() => externalCalendar(extension_settings[EXTENSION_NAME]?.sourceOfTruth));
     announceToSuite();
@@ -7368,6 +7476,8 @@ window.NPCStateDelta = Object.freeze({
     clearDiagnostics: () => diagnosticStore.clear(getChatKey()),
     getState: () => structuredClone(getChatState()),
     presentCastHtml: () => storyBlockCastHtml(),
+    /** Fill the now/chatter text of present-cast markup inserted under `root` (textContent only). */
+    fillPresentCast: root => fillPresentSceneText(root),
     dossierRevision: () => `${getChatKey()}|${Number(stateVersions.get(getChatKey()) || 0)}`,
     getNpc: npcId => {
         const npc = getChatState().npcs.find(item => item.id === String(npcId || ''));

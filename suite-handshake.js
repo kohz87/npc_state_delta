@@ -15,6 +15,28 @@ export function normalizeSourceOfTruth(raw = {}) {
     return Object.fromEntries(SUITE_AREAS.map(area => [area, SOURCE_OF_TRUTH_CHOICES.includes(source[area]) ? source[area] : 'auto']));
 }
 
+export const SUITE_STYLESHEET_ID = 'story-suite-css';
+
+/**
+ * Load the shared suite.css once per page as <link id="story-suite-css">: the first suite
+ * extension to load wins (the copies are identical). True when this call added it.
+ */
+export function ensureSuiteStylesheet(href = new URL('./suite.css', import.meta.url).href, doc = globalThis.document) {
+    try {
+        if (!doc?.createElement || doc.getElementById?.(SUITE_STYLESHEET_ID)) return false;
+        const parent = doc.head || doc.documentElement;
+        if (typeof parent?.appendChild !== 'function') return false;
+        const link = doc.createElement('link');
+        link.rel = 'stylesheet';
+        link.id = SUITE_STYLESHEET_ID;
+        link.href = String(href);
+        parent.appendChild(link);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 function safeSuite(suite) {
     try {
         return suite || storySuite();
@@ -230,13 +252,82 @@ export function resolveDossierTarget(npcs, value) {
     }
 }
 
+// tokens() (docs/STORY_SUITE.md, api.manage.tokens): about four characters a token.
+export const CHARS_PER_TOKEN = 4;
+// The one-pass capture block the model writes back, until this session has seen one.
+export const NARRATION_CAPTURE_OUTPUT_ESTIMATE_CHARS = 1200;
+const MENTIONED_PREFIX = 'MENTIONED, NOT PRESENT:';
+const DECEASED_PREFIX = 'DECEASED, REFERENCED ONLY:';
+const RUBRIC_PREFIX = 'RELATIONSHIP-TO-BEHAVIOR RUBRIC:';
+const tokensFor = chars => Math.ceil(Math.max(0, Number(chars) || 0) / CHARS_PER_TOKEN);
+
+/**
+ * The dossier injection split into its sections, as { label, chars }: the instructions header,
+ * the present NPC cards, mentioned-not-present lines, deceased references and the relationship
+ * rubric, in the order they appear. Empty sections are left out.
+ */
+export function injectionSections(text) {
+    const order = ['Dossier instructions', 'Present NPC cards', 'Mentioned NPCs', 'Deceased references', 'Relationship rubric'];
+    const chars = new Map();
+    let section = order[0];
+    const lines = String(text ?? '').split('\n');
+    lines.forEach((line, index) => {
+        if (line.startsWith(MENTIONED_PREFIX)) section = order[2];
+        else if (line.startsWith(DECEASED_PREFIX)) section = order[3];
+        else if (line.startsWith(RUBRIC_PREFIX)) section = order[4];
+        else if (line.startsWith('- ') && section === order[0]) section = order[1];
+        if (!line && lines.length === 1) return;
+        chars.set(section, (chars.get(section) || 0) + line.length + (index ? 1 : 0));
+    });
+    return order.filter(label => chars.get(label)).map(label => ({ label, chars: chars.get(label) }));
+}
+
+/**
+ * { input, output, parts: [{ label, input, output }] } for what Delta adds to one ordinary reply:
+ * the injection's sections, plus the one-pass capture instruction (input) and its block (output)
+ * when capture is on. Totals are the sums of the parts. Never throws.
+ */
+export function replyTokenEstimate({ injection = '', captureChars = 0, captureOutputChars = 0 } = {}) {
+    try {
+        const parts = injectionSections(injection).map(({ label, chars }) => ({ label, input: tokensFor(chars), output: 0 }));
+        if (Number(captureChars) > 0) {
+            // The instruction follows the injection after a blank line.
+            parts.push({ label: 'One-pass capture instruction', input: tokensFor(Number(captureChars) + (parts.length ? 2 : 0)), output: 0 });
+            parts.push({ label: 'One-pass capture block', input: 0, output: tokensFor(captureOutputChars) });
+        }
+        const sum = key => parts.reduce((total, part) => total + part[key], 0);
+        return { input: sum('input'), output: sum('output'), parts };
+    } catch {
+        return { input: 0, output: 0, parts: [] };
+    }
+}
+
+/** A plain copy of an estimate: whole non-negative numbers, totals recomputed from the parts. */
+export function copyTokenEstimate(estimate) {
+    const count = value => Math.max(0, Math.round(Number(value) || 0));
+    const parts = (Array.isArray(estimate?.parts) ? estimate.parts : [])
+        .filter(part => part && typeof part === 'object')
+        .map(part => ({ label: String(part.label ?? ''), input: count(part.input), output: count(part.output) }));
+    const sum = key => parts.reduce((total, part) => total + part[key], 0);
+    return { input: sum('input'), output: sum('output'), parts };
+}
+
 /**
  * What Story Suite's overlay uses to manage Delta (docs/STORY_SUITE.md, api.manage). The
  * callbacks are Delta's own settings actions; this wrapper only validates and copies. setSource
  * returns false, without calling back, for an unknown area or choice.
  */
-export function buildManageApi({ sources, setSource, enabled, setEnabled } = {}) {
+export function buildManageApi({ sources, setSource, enabled, setEnabled, tokens } = {}) {
     return Object.freeze({
+        /** What Delta adds to the next ordinary reply ({ input, output, parts }); never throws. */
+        tokens: () => {
+            try {
+                return copyTokenEstimate(typeof tokens === 'function' ? tokens() : null);
+            } catch (error) {
+                console.warn('[NPC State Delta] Story Suite token estimate failed', error);
+                return replyTokenEstimate();
+            }
+        },
         areas: SUITE_AREAS,
         sources: () => ({ ...normalizeSourceOfTruth(sources?.()) }),
         setSource: (area, choice) => {
@@ -278,12 +369,17 @@ export function openSuiteOverlay(suite = null) {
     }
 }
 
+// What Delta displays for another extension (docs/STORY_SUITE.md, `shows`): Story Block's NPC
+// Inner Chatter, on the Present NPCs cards. Story Block hides its own Chatter tab meanwhile.
+export const SUITE_SHOWS = Object.freeze(['chatter']);
+
 /**
- * Announce Delta. Enabled, it offers its four areas. Disabled, it announces `enabled: false`
- * (keeping `settings` and the api) when its api can switch it back on, so the overlay can;
- * otherwise it withdraws. Returns true while Delta is announced as enabled.
+ * Announce Delta. Enabled, it offers its four areas and `shows` what it displays for others.
+ * Disabled, it announces `enabled: false` without `shows` (keeping `settings` and the api) when
+ * its api can switch it back on, so the overlay can; otherwise it withdraws. Returns true while
+ * Delta is announced as enabled.
  */
-export function announceNpcStateDelta({ enabled = true, version = '', api = null, settings = '' } = {}, suite = null) {
+export function announceNpcStateDelta({ enabled = true, version = '', api = null, settings = '', shows = [] } = {}, suite = null) {
     const registry = safeSuite(suite);
     if (!registry) return false;
     try {
@@ -297,6 +393,7 @@ export function announceNpcStateDelta({ enabled = true, version = '', api = null
             version: String(version),
             owns: [...SUITE_AREAS],
             enabled: Boolean(enabled),
+            ...(enabled && Array.isArray(shows) && shows.length ? { shows: shows.map(String) } : {}),
             ...(settings ? { settings: String(settings) } : {}),
             ...(api ? { api } : {}),
         });

@@ -165,7 +165,7 @@ function mountControls() {
     const actionSlot = panel?.querySelector?.('[data-delta-settings-slot="full-cast-action"]');
     if (!rowSlot || !actionSlot) return false;
     if (!document.getElementById(CONTROL_ID)) {
-        rowSlot.insertAdjacentHTML('beforeend', `<label class="npc-state-delta-setting-row" for="${CONTROL_ID}"><span><b>Full cast scan</b><small>Optional expensive mode. After each reply, fully refresh every tracked NPC who took part in the latest exchange or is present at its end. Presence itself is not changed by this pass.</small></span><input id="${CONTROL_ID}" type="checkbox"></label>`);
+        rowSlot.insertAdjacentHTML('beforeend', `<label class="npc-state-delta-setting-row story-suite-row" for="${CONTROL_ID}"><span><b>Full cast scan</b><small>Optional expensive mode. After each reply, fully refresh every tracked NPC who took part in the latest exchange or is present at its end. Presence itself is not changed by this pass.</small></span><input id="${CONTROL_ID}" type="checkbox"></label>`);
     }
     const control = document.getElementById(CONTROL_ID);
     if (control && control.dataset.npcStateDeltaBound !== '1') {

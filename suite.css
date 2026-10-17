@@ -1,0 +1,108 @@
+/* Story Suite shared styles, v1: the settings-panel look of NPC State Delta, for all four. This
+   file is identical in Story Block, Story Director, NPC State Delta and RPG Battle; change it in
+   all four together (docs/STORY_SUITE.md). Each extension loads it once as
+   <link id="story-suite-css">; whichever loads first wins, and the copies are the same.
+   Only story-suite-* classes, scoped to a panel's `.story-suite-panel` (its drawer content). */
+
+.story-suite-panel {
+    --story-suite-line: rgba(216, 190, 145, .22);
+    --story-suite-gold: #d8bc78;
+    container: story-suite-panel / inline-size;
+}
+
+/* The "Manage all in Story Suite" line, first in the panel. */
+.story-suite-panel .story-suite-manage { display: flex; justify-content: flex-start; margin: 0 0 6px; }
+.story-suite-panel .story-suite-manage[hidden] { display: none; }
+.story-suite-panel .story-suite-manage .menu_button { display: inline-flex; align-items: center; gap: 6px; width: auto; margin: 0; white-space: nowrap; }
+
+/* The switches and main actions, boxed at the top. */
+.story-suite-panel .story-suite-quickbar { display: grid; gap: 8px; margin: 0 0 10px; padding: 8px 12px 10px; border: 1px solid var(--story-suite-line); border-radius: 10px; background: rgba(255,255,255,.03); }
+.story-suite-panel .story-suite-quickbar .story-suite-row { border-bottom: 0; padding: 5px 0; }
+.story-suite-panel .story-suite-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 0; }
+.story-suite-panel .story-suite-actions .menu_button { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-width: 0; min-height: 36px; margin: 0; white-space: normal; overflow-wrap: break-word; text-align: center; line-height: 1.25; box-sizing: border-box; }
+
+/* Sections that fold: a title, a short summary, a chevron. */
+.story-suite-panel .story-suite-folds { display: grid; gap: 8px; }
+.story-suite-panel .story-suite-fold { margin: 0; border: 1px solid rgba(218,193,148,.14); border-radius: 9px; overflow: hidden; background: rgba(255,255,255,.018); }
+.story-suite-panel .story-suite-fold > summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; padding: 10px 12px; cursor: pointer; list-style: none; background: rgba(255,255,255,.028); }
+.story-suite-panel .story-suite-fold > summary::-webkit-details-marker { display: none; }
+.story-suite-panel .story-suite-fold > summary::before { content: ""; align-self: center; width: 6px; height: 6px; margin-right: 2px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; opacity: .55; transform: rotate(-45deg); transition: transform .15s ease; }
+.story-suite-panel .story-suite-fold[open] > summary::before { transform: rotate(45deg); }
+.story-suite-panel .story-suite-fold > summary b { font-size: .95rem; }
+.story-suite-panel .story-suite-fold > summary small { opacity: .55; font-weight: 400; }
+.story-suite-panel .story-suite-fold-body { display: grid; gap: 0; padding: 4px 12px 12px; min-width: 0; }
+/* A fold inside a fold: a ruled sub-section, no second box. */
+.story-suite-panel .story-suite-fold .story-suite-fold { border: 0; border-top: 1px solid rgba(218,193,148,.12); border-radius: 0; background: none; }
+.story-suite-panel .story-suite-fold .story-suite-fold > summary { padding: 8px 0; background: none; }
+.story-suite-panel .story-suite-fold .story-suite-fold > .story-suite-fold-body { padding: 0 0 8px; }
+.story-suite-panel .story-suite-subhead { margin: 14px 0 2px; font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; color: var(--story-suite-gold); opacity: .85; }
+.story-suite-panel .story-suite-subhead:first-child { margin-top: 6px; }
+.story-suite-panel .story-suite-muted { margin: 6px 0 4px; opacity: .58; font-size: .84rem; }
+
+/* A setting: text column (bold label, small hint or status) and a bounded control column. */
+.story-suite-panel .story-suite-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 14px; margin: 0; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.055); }
+.story-suite-panel .story-suite-row:last-child { border-bottom: 0; }
+.story-suite-panel .story-suite-row > span:first-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.story-suite-panel .story-suite-row > span:first-child small { opacity: .62; font-size: .72rem; font-weight: 400; overflow-wrap: break-word; line-height: 1.3; }
+.story-suite-panel .story-suite-row > select { width: auto; min-width: 150px; max-width: min(250px, 46vw); margin: 0; }
+.story-suite-panel .story-suite-row > input[type="text"],
+.story-suite-panel .story-suite-row > textarea { width: min(250px, 46vw); margin: 0; }
+.story-suite-panel .story-suite-number { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; white-space: nowrap; }
+.story-suite-panel .story-suite-number input { width: 84px; margin: 0; }
+.story-suite-panel .story-suite-number small { opacity: .6; font-size: .76rem; }
+
+/* Switches: a status pill on the row; the real checkbox stays semantic and focusable. */
+@supports selector(label:has(> input[type="checkbox"]:checked)) {
+    .story-suite-panel .story-suite-row:has(> input[type="checkbox"]) { position: relative; cursor: pointer; }
+    .story-suite-panel .story-suite-row > input[type="checkbox"] {
+        position: absolute !important; width: 1px !important; height: 1px !important; min-width: 1px !important; max-width: 1px !important;
+        margin: -1px !important; padding: 0 !important; border: 0 !important; clip: rect(0 0 0 0) !important; clip-path: inset(50%) !important;
+        overflow: hidden !important; white-space: nowrap !important; opacity: 0 !important; box-shadow: none !important; background: none !important;
+        pointer-events: none !important;
+    }
+    .story-suite-panel .story-suite-row:has(> input[type="checkbox"])::after {
+        content: "Disabled"; display: inline-flex; align-items: center; justify-content: flex-start;
+        min-width: 78px; height: 24px; flex: 0 0 auto; box-sizing: border-box;
+        margin: 0; padding: 0 8px 0 22px; border: 1px solid rgba(255,255,255,.18); border-radius: 999px;
+        background: radial-gradient(circle at 10px 50%, rgba(190,195,202,.62) 0 3.5px, transparent 4px), rgba(255,255,255,.045);
+        box-shadow: inset 0 1px 1px rgba(0,0,0,.18); color: rgba(255,255,255,.68);
+        font: 600 11.5px/1 inherit; letter-spacing: .01em; white-space: nowrap; overflow: hidden; vertical-align: middle;
+    }
+    .story-suite-panel .story-suite-row:has(> input[type="checkbox"]:checked)::after {
+        content: "Enabled"; border-color: rgba(87,209,123,.42);
+        background: radial-gradient(circle at 10px 50%, #57d17b 0 3.5px, transparent 4px), rgba(54,91,64,.26);
+        color: rgba(239,255,243,.94);
+    }
+    .story-suite-panel .story-suite-row:has(> input[type="checkbox"]:focus-visible)::after { outline: 2px solid rgba(111,214,139,.9); outline-offset: 2px; }
+    .story-suite-panel .story-suite-row:has(> input[type="checkbox"]:disabled) { cursor: not-allowed; }
+    .story-suite-panel .story-suite-row:has(> input[type="checkbox"]:disabled)::after { opacity: .45; }
+}
+
+/* Notices: a gold-edged line (a warning, a status); danger: a red box with its button. */
+.story-suite-panel .story-suite-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 2px 0 6px; padding: 6px 8px; border-left: 3px solid var(--story-suite-gold); font-weight: 600; }
+.story-suite-panel .story-suite-notice[hidden] { display: none; }
+.story-suite-panel .story-suite-notice .menu_button { width: auto; margin: 0; font-weight: 400; }
+.story-suite-panel .story-suite-danger { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; padding: 9px 11px; border: 1px solid rgba(214,92,92,.3); border-radius: 8px; background: rgba(214,92,92,.06); }
+.story-suite-panel .story-suite-danger > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.story-suite-panel .story-suite-danger small { opacity: .62; font-size: .72rem; }
+.story-suite-panel .story-suite-danger > .menu_button { flex: 0 0 auto; width: auto; margin: 0; white-space: nowrap; }
+
+/* The panel's own width decides, not the viewport: the Extensions column is narrow on desktop too. */
+@container story-suite-panel (min-width: 720px) {
+    .story-suite-panel .story-suite-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@container story-suite-panel (max-width: 500px) {
+    .story-suite-panel .story-suite-row:has(> select),
+    .story-suite-panel .story-suite-row:has(> textarea),
+    .story-suite-panel .story-suite-row:has(> input[type="text"]) { grid-template-columns: minmax(0, 1fr); row-gap: 7px; }
+    .story-suite-panel .story-suite-row > select,
+    .story-suite-panel .story-suite-row > textarea,
+    .story-suite-panel .story-suite-row > input[type="text"] { width: 100%; max-width: none; }
+    .story-suite-panel .story-suite-danger { flex-direction: column; align-items: stretch; }
+    .story-suite-panel .story-suite-actions .menu_button { min-height: 44px; }
+}
+@container story-suite-panel (max-width: 380px) {
+    @supports selector(label:has(> input[type="checkbox"]:checked)) {
+        .story-suite-panel .story-suite-row:has(> input[type="checkbox"])::after { min-width: 72px; height: 22px; padding: 0 6px 0 20px; font-size: 10.5px; }
+    }
+}
