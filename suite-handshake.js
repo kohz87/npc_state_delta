@@ -92,17 +92,77 @@ export function statsOverlapWarning(names = [], choices = {}, suite = null) {
     return `${owner.name} keeps game stats. ${overlap.join(', ')} may duplicate or contradict it; consider removing ${overlap.length === 1 ? 'that field' : 'those fields'} here.`;
 }
 
-/** Announce Delta while it is enabled; withdraw it while it is disabled. */
-export function announceNpcStateDelta({ enabled = true, version = '', api = null } = {}, suite = null) {
+/**
+ * What Story Suite's overlay uses to manage Delta (docs/STORY_SUITE.md, api.manage). The
+ * callbacks are Delta's own settings actions; this wrapper only validates and copies. setSource
+ * returns false, without calling back, for an unknown area or choice.
+ */
+export function buildManageApi({ sources, setSource, enabled, setEnabled } = {}) {
+    return Object.freeze({
+        areas: SUITE_AREAS,
+        sources: () => ({ ...normalizeSourceOfTruth(sources?.()) }),
+        setSource: (area, choice) => {
+            if (!SUITE_AREAS.includes(area) || !SOURCE_OF_TRUTH_CHOICES.includes(choice)) return false;
+            setSource?.(area, choice);
+            return true;
+        },
+        enabled: () => enabled?.() !== false,
+        setEnabled: on => {
+            setEnabled?.(Boolean(on));
+        },
+    });
+}
+
+/**
+ * Whether Delta's panel shows "Manage all in Story Suite": two or more extensions announced (on
+ * or off, as the overlay counts them) and Story Block sharing openSuite.
+ */
+export function suiteManageAvailable(suite = null) {
     const registry = safeSuite(suite);
     if (!registry) return false;
     try {
-        if (!enabled) {
+        return registry.providers().length >= 2 && typeof registry.api('story-block')?.openSuite === 'function';
+    } catch {
+        return false;
+    }
+}
+
+/** Open Story Suite's overlay on Delta's tab; false when the overlay is unavailable or fails. */
+export function openSuiteOverlay(suite = null) {
+    const registry = safeSuite(suite);
+    if (!suiteManageAvailable(registry)) return false;
+    try {
+        registry.api('story-block').openSuite(SUITE_ID);
+        return true;
+    } catch (error) {
+        console.warn('[NPC State Delta] Story Suite overlay failed to open', error);
+        return false;
+    }
+}
+
+/**
+ * Announce Delta. Enabled, it offers its four areas. Disabled, it announces `enabled: false`
+ * (keeping `settings` and the api) when its api can switch it back on, so the overlay can;
+ * otherwise it withdraws. Returns true while Delta is announced as enabled.
+ */
+export function announceNpcStateDelta({ enabled = true, version = '', api = null, settings = '' } = {}, suite = null) {
+    const registry = safeSuite(suite);
+    if (!registry) return false;
+    try {
+        if (!enabled && typeof api?.manage?.setEnabled !== 'function') {
             registry.withdraw(SUITE_ID);
             return false;
         }
-        registry.announce({ id: SUITE_ID, name: SUITE_NAME, version: String(version), owns: [...SUITE_AREAS], ...(api ? { api } : {}) });
-        return true;
+        registry.announce({
+            id: SUITE_ID,
+            name: SUITE_NAME,
+            version: String(version),
+            owns: [...SUITE_AREAS],
+            enabled: Boolean(enabled),
+            ...(settings ? { settings: String(settings) } : {}),
+            ...(api ? { api } : {}),
+        });
+        return Boolean(enabled);
     } catch (error) {
         console.warn('[NPC State Delta] Story Suite announcement failed', error);
         return false;

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.2.1 - 17 October 2026
+
+- **Story Suite overlay.** With two or more Story Suite extensions installed, **Manage all in Story Suite** at the top of Delta's settings opens Story Block's overlay, where one Source of truth table and each extension's on/off switch manage them all and Delta's settings panel appears in its own tab ([how it works](docs/STORY_SUITE.md)). Choices made there update Delta's own settings, and the reverse. Switched off, Delta now stays listed in the overlay (as off) so it can be switched back on there; it still sends nothing and leads no area while off. Alone, nothing changes; prompts, scans and saved data are unchanged.
+- **Launcher stays out of the way.** While the overlay is open, the floating *npc state* launcher hides, since it would sit over the overlay's close button on phones.
+
 ## 1.2.0 - 17 October 2026
 
 - **Story Suite.** Delta now finds Story Block, Story Director and RPG Battle when they are installed, and they agree on one source of truth per area so the model is not told the same thing twice ([how it works](docs/STORY_SUITE.md)). With Story Block's World State block on, the present NPCs' cards leave out the live mood and current outfit that World State already gives (personality, voice, goals, bonds, custom fields and enduring features still go). With Story Director, birthdays and ages use its months and era (Delta's own calendar returns if Story Director's is missing). With RPG Battle, **Custom fields** warns when a field name looks like a game stat (Level, HP, Class…). A new **Source of truth** settings group lets you pick, per area, Automatic, This extension or The other one. Alone, Delta works exactly as before.

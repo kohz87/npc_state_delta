@@ -47,6 +47,10 @@ test('launcher is a compact top-level stacked npc state wordmark with a 48px tou
     assert.match(source, /z-index:\s*2147483647\s*!important/);
 });
 
+test('launcher hides while Story Block\'s Story Suite overlay is open', () => {
+    assert.match(source, /body\.story-suite-open #\$\{LAUNCHER_ID\} \{ display: none !important; \}/);
+});
+
 test('mobile and tablet launcher stays parked at the safe-area-aware side midpoint', () => {
     assert.match(source, /@media \(max-width:\s*1100px\)/);
     assert.match(source, /right:\s*max\(12px,\s*env\(safe-area-inset-right\)\)\s*!important/);

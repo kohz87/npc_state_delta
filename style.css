@@ -540,6 +540,8 @@ body.npc-state-delta-portrait-generator-open { overflow: hidden !important; }
 #npc_state_delta_settings .delta-settings-subhead:first-child { margin-top: 6px; }
 #npc_state_delta_settings .npc-state-delta-suite-warning { display: block; margin: 2px 0 6px; padding: 6px 8px; border-left: 3px solid var(--npc-gold); font-weight: 600; }
 #npc_state_delta_settings .npc-state-delta-suite-warning[hidden] { display: none; }
+#npc_state_delta_settings .npc-state-delta-suite-manage { display: flex; justify-content: flex-start; margin: 0 0 6px; }
+#npc_state_delta_settings .npc-state-delta-suite-manage[hidden] { display: none; }
 #npc_state_delta_settings .delta-settings-subsection + .delta-settings-subsection { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(218,193,148,.12); }
 #npc_state_delta_settings .delta-settings-subsection > h4 { margin: 4px 0 6px; color: #e3c985; }
 #npc_state_delta_settings .delta-settings-group-body > p.npc-state-delta-muted,

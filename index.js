@@ -163,10 +163,13 @@ import {
     SUITE_AREAS,
     announceNpcStateDelta,
     areaOwner,
+    buildManageApi,
     defersArea,
     externalCalendar,
     normalizeSourceOfTruth,
+    openSuiteOverlay,
     statsOverlapWarning,
+    suiteManageAvailable,
 } from './suite-handshake.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
@@ -4252,6 +4255,9 @@ function buildSettingsHtml() {
           <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content npc-state-delta-drawer">
+          <div id="npc_state_delta_suite_manage" class="npc-state-delta-suite-manage" data-story-suite-link hidden>
+            <button type="button" class="menu_button" data-delta-open-suite><i class="fa-solid fa-layer-group"></i> Manage all in Story Suite</button>
+          </div>
           <div class="delta-settings-quickbar">
             <div class="delta-settings-quick-toggles">
               ${settingRow('npc_state_delta_enabled', 'Enable NPC State Delta', '<input id="npc_state_delta_enabled" type="checkbox">')}
@@ -6323,8 +6329,9 @@ function bindCustomFieldSettings() {
     });
 }
 
-// Story Suite (docs/STORY_SUITE.md): Delta announces itself while enabled and asks who owns the
-// scene, calendar and stats. Alone it owns all four areas, so nothing below changes Delta.
+// Story Suite (docs/STORY_SUITE.md): Delta announces itself (with `enabled: false` while switched
+// off, so Story Suite's overlay can switch it back on) and asks who owns the scene, calendar and
+// stats. Alone it owns all four areas, so nothing below changes Delta.
 const SUITE_API = Object.freeze({
     /** The current chat's tracked NPCs (copies; empty until the chat's dossiers load). */
     npcs: () => {
@@ -6338,12 +6345,45 @@ const SUITE_API = Object.freeze({
             archived: Boolean(npc?.archived),
         }));
     },
+    /** For Story Suite's overlay: the same actions as Delta's own Source of truth selects and Enable checkbox. */
+    manage: buildManageApi({
+        sources: () => getSettings().sourceOfTruth,
+        setSource: (area, choice) => applySourceOfTruth(area, choice),
+        enabled: () => getSettings().enabled !== false,
+        setEnabled: on => applyEnabled(on),
+    }),
 });
 let suiteConnected = false;
 let suiteRefreshQueued = false;
 
 function announceToSuite() {
-    announceNpcStateDelta({ enabled: getSettings().enabled !== false, version: NPC_STATE_VERSION, api: SUITE_API });
+    announceNpcStateDelta({ enabled: getSettings().enabled !== false, version: NPC_STATE_VERSION, api: SUITE_API, settings: `#${UI_ID}` });
+}
+
+// What the Enable checkbox does after saving; Story Suite's setEnabled does the same.
+function afterEnabledChange() {
+    announceToSuite();
+    updateInjection();
+    renderDossier();
+}
+
+function applyEnabled(on) {
+    const settings = getSettings();
+    const next = Boolean(on);
+    $('#npc_state_delta_enabled').prop('checked', next);
+    if ((settings.enabled !== false) === next) return;
+    settings.enabled = next;
+    persistSettings();
+    afterEnabledChange();
+}
+
+// What a Source of truth select does; Story Suite's setSource does the same.
+function applySourceOfTruth(area, choice) {
+    const settings = getSettings();
+    settings.sourceOfTruth = normalizeSourceOfTruth({ ...settings.sourceOfTruth, [area]: choice });
+    persistSettings();
+    syncSuiteControls();
+    updateInjection();
 }
 
 function syncSuiteControls() {
@@ -6355,6 +6395,7 @@ function syncSuiteControls() {
     }
     const warning = statsOverlapWarning(extension_settings[EXTENSION_NAME]?.customFieldNames || [], choices);
     $('#npc_state_delta_custom_fields_stats_warning').text(warning).prop('hidden', !warning);
+    $('#npc_state_delta_suite_manage').prop('hidden', !suiteManageAvailable());
 }
 
 function connectStorySuite() {
@@ -6380,12 +6421,11 @@ function connectStorySuite() {
 
 function bindSourceOfTruthSettings() {
     $(document).on('change.npcStateDelta', '[data-delta-source-area]', function () {
-        const area = this.dataset.deltaSourceArea;
-        const settings = getSettings();
-        settings.sourceOfTruth = normalizeSourceOfTruth({ ...settings.sourceOfTruth, [area]: this.value });
-        persistSettings();
-        syncSuiteControls();
-        updateInjection();
+        applySourceOfTruth(this.dataset.deltaSourceArea, this.value);
+    });
+    $(document).on('click.npcStateDelta', '[data-delta-open-suite]', event => {
+        event?.preventDefault?.();
+        openSuiteOverlay();
     });
 }
 
@@ -6409,7 +6449,7 @@ function bindSettingsText(selector, key, after = null) {
 
 function bindUi() {
     $(document).off('.npcStateDelta');
-    bindSettingsCheckbox('#npc_state_delta_enabled', 'enabled', () => { announceToSuite(); updateInjection(); renderDossier(); });
+    bindSettingsCheckbox('#npc_state_delta_enabled', 'enabled', afterEnabledChange);
     bindSettingsCheckbox('#npc_state_delta_auto', 'autoScan');
     $(document).on('change.npcStateDelta', '#npc_state_delta_scanner_connection_profile', function () {
         getSettings().scannerConnectionProfile = String(this.value || '').trim();

@@ -9,11 +9,14 @@ import {
     SUITE_ID,
     announceNpcStateDelta,
     areaOwner,
+    buildManageApi,
     defersArea,
     externalCalendar,
     normalizeSourceOfTruth,
+    openSuiteOverlay,
     statLikeFieldNames,
     statsOverlapWarning,
+    suiteManageAvailable,
 } from '../suite-handshake.js';
 import { buildInjection, getActiveCalendarConfig, setActiveCalendarConfig, setExternalCalendarSource, stripUiNoise } from '../core.js';
 import { deterministicCalendarBirthday } from '../calendar.js';
@@ -138,7 +141,7 @@ test('v1.2.0 isSourceOfTruth: auto, mine and theirs, alone and together', () => 
     assert.equal(isSourceOfTruth('npc-state-delta', 'scene'), false, 'the default registry is the shared one');
 });
 
-test('v1.2.0 Delta announces its four areas while enabled and withdraws while disabled', () => {
+test('v1.2.0 Delta announces its four areas while enabled; without a manage api it withdraws while disabled', () => {
     const suite = fresh();
     const api = { npcs: () => [] };
     assert.equal(announceNpcStateDelta({ enabled: true, version: '1.2.0', api }), true);
@@ -160,6 +163,103 @@ test('v1.2.0 Delta announces its four areas while enabled and withdraws while di
     assert.equal(announceNpcStateDelta({ enabled: true, version: '1.2.0' }), true);
     assert.equal(suite.has(SUITE_ID), true, 'enable announces again');
     assert.equal(suite.api(SUITE_ID), null, 'without an api nothing is shared');
+});
+
+test('v1.2.1 disabled with api.manage, Delta stays announced as enabled: false with its panel and api', () => {
+    const suite = fresh();
+    const calls = [];
+    const api = { npcs: () => [], manage: buildManageApi({ setEnabled: on => calls.push(on) }) };
+    const settings = '#npc_state_delta_settings';
+    assert.equal(announceNpcStateDelta({ enabled: true, version: '1.2.1', api, settings }), true);
+    assert.deepEqual(suite.providers().map(({ id, enabled, settings: root }) => [id, enabled, root]), [[SUITE_ID, true, settings]]);
+    suite.announce({ id: 'story-block', name: 'Story Block', owns: ['scene'] });
+    assert.equal(suite.owner('scene'), 'story-block');
+    assert.equal(suite.owner('npc'), SUITE_ID);
+
+    assert.equal(announceNpcStateDelta({ enabled: false, version: '1.2.1', api, settings }), false);
+    const off = suite.providers().find(item => item.id === SUITE_ID);
+    assert.ok(off, 'disabled is announced, not withdrawn');
+    assert.deepEqual([off.enabled, off.settings, off.version, off.owns], [false, settings, '1.2.1', ['npc', 'calendar', 'scene', 'stats']]);
+    assert.equal(off.api, api, 'the overlay reads the api from providers()');
+    assert.equal(suite.has(SUITE_ID), false);
+    assert.equal(suite.api(SUITE_ID), null, 'a disabled provider shares nothing through api()');
+    assert.equal(suite.owner('npc'), null, 'a disabled Delta owns nothing');
+    assert.equal(suite.owner('scene'), 'story-block');
+    off.api.manage.setEnabled(1);
+    assert.deepEqual(calls, [true], 'the overlay can switch it back on');
+
+    assert.equal(announceNpcStateDelta({ enabled: true, version: '1.2.1', api, settings }), true);
+    assert.equal(suite.has(SUITE_ID), true);
+    assert.equal(suite.owner('npc'), SUITE_ID);
+    assert.equal(suite.providers().length, 2);
+    assert.equal(announceNpcStateDelta({ enabled: true, version: '1.2.1' }), true);
+    assert.equal('settings' in suite.providers().find(item => item.id === SUITE_ID), false, 'no panel, no settings field');
+    assert.equal(announceNpcStateDelta({ enabled: true }, { announce() { throw new Error('broken'); } }), false, 'a broken registry is reported, not thrown');
+});
+
+test('v1.2.1 api.manage validates, copies and forwards to Delta\'s own settings actions', () => {
+    let stored = { scene: 'mine', stats: 'bogus' };
+    let enabled = true;
+    const sets = [];
+    const toggles = [];
+    const manage = buildManageApi({
+        sources: () => stored,
+        setSource: (area, choice) => { sets.push([area, choice]); stored = { ...stored, [area]: choice }; },
+        enabled: () => enabled,
+        setEnabled: on => { toggles.push(on); enabled = on; },
+    });
+    assert.deepEqual(manage.areas, ['npc', 'calendar', 'scene', 'stats']);
+    assert.deepEqual(manage.sources(), { npc: 'auto', calendar: 'auto', scene: 'mine', stats: 'auto' }, 'normalized');
+    manage.sources().npc = 'theirs';
+    assert.equal(manage.sources().npc, 'auto', 'sources() is a copy');
+    assert.throws(() => manage.areas.push('items'), TypeError, 'areas cannot be changed by a reader');
+    assert.throws(() => { manage.setSource = null; }, TypeError, 'nor can the api');
+    assert.equal(manage.setSource('calendar', 'theirs'), true);
+    assert.equal(manage.sources().calendar, 'theirs');
+    for (const [area, choice] of [['items', 'mine'], ['scene', 'nonsense'], ['', 'auto'], [undefined, undefined]]) {
+        assert.equal(manage.setSource(area, choice), false, `${area}/${choice} is refused`);
+    }
+    assert.deepEqual(sets, [['calendar', 'theirs']], 'refused choices never reach the settings');
+    assert.equal(manage.enabled(), true);
+    manage.setEnabled(0);
+    assert.deepEqual(toggles, [false], 'setEnabled passes a boolean');
+    assert.equal(manage.enabled(), false);
+    const bare = buildManageApi();
+    assert.deepEqual(bare.sources(), normalizeSourceOfTruth());
+    assert.equal(bare.enabled(), true);
+    assert.equal(bare.setSource('npc', 'mine'), true);
+    assert.doesNotThrow(() => bare.setEnabled(true));
+});
+
+test('v1.2.1 "Manage all in Story Suite" needs two providers and Story Block\'s openSuite', () => {
+    const suite = fresh();
+    assert.equal(suiteManageAvailable(), false, 'alone there is no overlay');
+    assert.equal(openSuiteOverlay(), false);
+    announceNpcStateDelta({ enabled: true, version: '1.2.1' }, suite);
+    assert.equal(suiteManageAvailable(), false);
+    const opened = [];
+    suite.announce({ id: 'story-block', name: 'Story Block', owns: ['scene'], api: { openSuite: tab => opened.push(tab) } });
+    assert.equal(suiteManageAvailable(), true);
+    assert.equal(openSuiteOverlay(), true);
+    assert.deepEqual(opened, ['npc-state-delta'], 'opens on Delta\'s tab');
+    suite.withdraw(SUITE_ID);
+    assert.equal(suiteManageAvailable(), false, 'Story Block alone has no overlay');
+    suite.announce({ id: SUITE_ID, name: 'NPC State Delta', owns: ['npc'], enabled: false });
+    assert.equal(suiteManageAvailable(), true, 'a switched-off extension still counts');
+    suite.announce({ id: 'story-block', name: 'Story Block', owns: ['scene'], api: {} });
+    assert.equal(suiteManageAvailable(), false, 'an older Story Block without openSuite shows no line');
+    suite.announce({ id: 'story-block', name: 'Story Block', owns: ['scene'], enabled: false, api: { openSuite: () => {} } });
+    assert.equal(suiteManageAvailable(), false, 'a switched-off Story Block shares no overlay');
+    suite.announce({ id: 'story-block', name: 'Story Block', owns: ['scene'], api: { openSuite: () => { throw new Error('boom'); } } });
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+        assert.equal(openSuiteOverlay(), false, 'a failing overlay is reported, not thrown');
+    } finally {
+        console.warn = warn;
+    }
+    assert.equal(suiteManageAvailable({ providers() { throw new Error('broken'); } }), false);
+    delete globalThis.StorySuite;
 });
 
 test('v1.2.0 source-of-truth choices normalize to auto and drive defersArea / areaOwner', () => {
@@ -400,8 +500,111 @@ test('v1.2.0 the runtime announces itself, follows Enable and defers the scene t
 
         const enable = uiHandlers.get('change.npcStateDelta|#npc_state_delta_enabled');
         enable.call({ checked: false });
-        assert.equal(suite.has('npc-state-delta'), false, 'disable withdraws');
+        assert.equal(suite.has('npc-state-delta'), false, 'disable leaves the areas');
+        assert.equal(suite.providers().find(item => item.id === 'npc-state-delta')?.enabled, false, 'and stays announced as off');
         enable.call({ checked: true });
         assert.equal(suite.has('npc-state-delta'), true, 'enable announces again');
     });
+});
+
+test('v1.2.1 the runtime shares its panel and api.manage, and shows Manage all in Story Suite', () => {
+    runHostScenario('overlay-manage', async () => {
+        const suite = globalThis.StorySuite;
+        const settings = mockState.extensionSettings.npc_state_delta;
+        // Record what the runtime writes into its own controls.
+        const baseQuery = globalThis.$;
+        const writes = [];
+        globalThis.$ = selector => {
+            const q = baseQuery(selector);
+            if (typeof selector !== 'string') return q;
+            for (const method of ['prop', 'val']) {
+                const original = q[method];
+                q[method] = (...args) => { if (args.length) writes.push([selector, method, ...args]); return original.apply(q, args); };
+            }
+            return q;
+        };
+        const lastWrite = (selector, method, key) => writes.filter(([s, m, k]) => s === selector && m === method && (key === undefined || k === key)).at(-1);
+        const own = () => suite.providers().find(item => item.id === 'npc-state-delta');
+        assert.equal(own().settings, '#npc_state_delta_settings', 'the announcement names the settings panel root');
+        const manage = own().api.manage;
+        assert.deepEqual(manage.areas, ['npc', 'calendar', 'scene', 'stats']);
+        assert.deepEqual(manage.sources(), { npc: 'auto', calendar: 'auto', scene: 'auto', stats: 'auto' });
+        assert.equal(manage.enabled(), true);
+
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [{ name: 'Yunyun', present: true, role: 'adventurer', mood: 'nervous, eager', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named companion', directInteraction: true, relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 } }] });
+        mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'Who is at the gate?' });
+        mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'Yunyun waves nervously from the gate.', swipe_id: 0, swipes: ['Yunyun waves nervously from the gate.'] });
+        const id = mockState.context.chat.length - 1;
+        await Promise.all((mockState.listeners.get('message_received') || []).map(fn => fn(id)));
+        await sleep(200);
+        const lastPrompt = () => mockState.prompts.filter(args => args[0] === 'npc_state_delta_live_dossier').at(-1)?.[1] || '';
+        const alone = lastPrompt();
+        assert.match(alone, /mood: nervous, eager/);
+
+        // Story Block arrives with its overlay: the line is shown in the next batched refresh.
+        writes.length = 0;
+        const opened = [];
+        suite.announce({ id: 'story-block', name: 'Story Block', version: '0.9.0', owns: ['scene'], api: { openSuite: tab => opened.push(tab) } });
+        assert.equal(lastWrite('#npc_state_delta_suite_manage', 'prop', 'hidden'), undefined, 'refreshed in the onChange microtask, not inline');
+        await sleep(10);
+        assert.deepEqual(lastWrite('#npc_state_delta_suite_manage', 'prop', 'hidden'), ['#npc_state_delta_suite_manage', 'prop', 'hidden', false]);
+        assert.match(lastPrompt(), /live mood\/outfit: as in World State/);
+        const click = uiHandlers.get('click.npcStateDelta|[data-delta-open-suite]');
+        let prevented = false;
+        click({ preventDefault: () => { prevented = true; } });
+        assert.deepEqual(opened, ['npc-state-delta']);
+        assert.equal(prevented, true);
+
+        // setSource does what the select does, and updates the select.
+        assert.equal(manage.setSource('scene', 'mine'), true);
+        assert.equal(settings.sourceOfTruth.scene, 'mine');
+        assert.deepEqual(manage.sources(), { npc: 'auto', calendar: 'auto', scene: 'mine', stats: 'auto' });
+        assert.deepEqual(lastWrite('#npc_state_delta_source_scene', 'val'), ['#npc_state_delta_source_scene', 'val', 'mine']);
+        assert.equal(lastPrompt(), alone, 'This extension restores the injection Delta sends alone');
+        assert.equal(manage.setSource('scene', 'nonsense'), false);
+        assert.equal(manage.setSource('items', 'mine'), false);
+        assert.equal(settings.sourceOfTruth.scene, 'mine', 'refused choices change nothing');
+        assert.deepEqual(Object.keys(settings.sourceOfTruth), ['npc', 'calendar', 'scene', 'stats']);
+        assert.equal(manage.setSource('scene', 'auto'), true);
+        assert.match(lastPrompt(), /live mood\/outfit: as in World State/);
+
+        // setEnabled does what the Enable checkbox does, and updates the checkbox.
+        manage.setEnabled(false);
+        assert.equal(settings.enabled, false);
+        assert.deepEqual(lastWrite('#npc_state_delta_enabled', 'prop', 'checked'), ['#npc_state_delta_enabled', 'prop', 'checked', false]);
+        assert.equal(own().enabled, false, 'announced as off');
+        assert.equal(own().settings, '#npc_state_delta_settings');
+        assert.equal(own().api.manage.enabled(), false);
+        assert.equal(suite.has('npc-state-delta'), false);
+        assert.equal(suite.api('npc-state-delta'), null);
+        assert.equal(lastPrompt(), '', 'disabled sends nothing, as from the checkbox');
+        await sleep(10);
+        assert.deepEqual(lastWrite('#npc_state_delta_suite_manage', 'prop', 'hidden'), ['#npc_state_delta_suite_manage', 'prop', 'hidden', false], 'two announced, on or off');
+        const announcements = suite.providers().length;
+        manage.setEnabled(false);
+        assert.equal(suite.providers().length, announcements);
+        own().api.manage.setEnabled(true);
+        assert.equal(settings.enabled, true);
+        assert.deepEqual(lastWrite('#npc_state_delta_enabled', 'prop', 'checked'), ['#npc_state_delta_enabled', 'prop', 'checked', true]);
+        assert.equal(suite.has('npc-state-delta'), true);
+        assert.match(lastPrompt(), /live mood\/outfit: as in World State/, 'enabled again, the injection returns');
+
+        // Story Block leaves: the line hides again.
+        suite.withdraw('story-block');
+        await sleep(10);
+        assert.deepEqual(lastWrite('#npc_state_delta_suite_manage', 'prop', 'hidden'), ['#npc_state_delta_suite_manage', 'prop', 'hidden', true]);
+        assert.equal(lastPrompt(), alone, 'alone again, the injection is the one Delta sends alone');
+        globalThis.$ = baseQuery;
+    });
+});
+
+test('v1.2.1 the settings panel starts with a hidden Manage all in Story Suite line', () => {
+    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const html = index.slice(index.indexOf('function buildSettingsHtml()'), index.indexOf('function readOpenSettingsGroups()'));
+    assert.match(html, /<div id="\$\{UI_ID\}" class="extension_container[\s\S]*npc-state-delta-drawer">\s*<div id="npc_state_delta_suite_manage" class="npc-state-delta-suite-manage" data-story-suite-link hidden>\s*<button type="button" class="menu_button" data-delta-open-suite>[^<]*<i [^>]*><\/i> Manage all in Story Suite<\/button>\s*<\/div>\s*<div class="delta-settings-quickbar">/);
+    assert.match(index, /const UI_ID = 'npc_state_delta_settings';/);
+    assert.equal((html.match(/data-story-suite-link/g) || []).length, 1, 'the line carries data-story-suite-link so the overlay can hide it while the panel is inside');
+    assert.match(html, /<div [^>]*data-story-suite-link[^>]*>\s*<button [^>]*data-delta-open-suite>/, 'on the element that holds the link');
+    const css = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+    assert.match(css, /\.npc-state-delta-suite-manage\[hidden\] \{ display: none; \}/);
 });
