@@ -92,6 +92,7 @@ import {
     normalizeFormPortraitAssets,
     normalizeCustomFieldNames,
     normalizeCustomFields,
+    setExternalCalendarSource,
 } from './core.js';
 import { applyNpcBirthdayUpdate, normalizeBirthDate } from './birthday.js';
 import {
@@ -157,6 +158,16 @@ import {
     resolveDeletedLifecycleKeyFromPresence,
     resolveOwnedLifecycleKey,
 } from './hardening-core.js';
+import { storySuite } from './suite.js';
+import {
+    SUITE_AREAS,
+    announceNpcStateDelta,
+    areaOwner,
+    defersArea,
+    externalCalendar,
+    normalizeSourceOfTruth,
+    statsOverlapWarning,
+} from './suite-handshake.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
 const PROMPT_KEY = 'npc_state_delta_live_dossier';
@@ -490,6 +501,7 @@ const DEFAULTS = Object.freeze({
     injectLimit: 3,
     injectBudgetTokens: 4000,
     customFieldNames: [],
+    sourceOfTruth: normalizeSourceOfTruth(),
     branchRescan: true,
     midDeleteRewind: false,
     presentCastDisplay: 'full',
@@ -555,6 +567,7 @@ function getSettings() {
     assign('relationshipBaseline', normalizeRelationshipBaseline(settings.relationshipBaseline), sameJson);
     assign('relationshipCaps', normalizeRelationshipCaps(settings.relationshipCaps), sameJson);
     assign('customFieldNames', normalizeCustomFieldNames(settings.customFieldNames), sameJson);
+    assign('sourceOfTruth', normalizeSourceOfTruth(settings.sourceOfTruth), sameJson);
     assign('relationshipCriteria', typeof settings.relationshipCriteria === 'string' ? settings.relationshipCriteria : DEFAULT_RELATIONSHIP_CRITERIA);
     assign('relationshipImpactCriteria', typeof settings.relationshipImpactCriteria === 'string' ? settings.relationshipImpactCriteria : DEFAULT_IMPACT_CRITERIA);
     assign('memoryCriteria', typeof settings.memoryCriteria === 'string' ? settings.memoryCriteria : DEFAULT_MEMORY_CRITERIA);
@@ -2405,7 +2418,7 @@ function updateInjection() {
         : '';
     if (!settings.inject && !capture) return clear('"Inject present NPC state" is off.');
     const namedNpcIds = namedByPlayerNpcIds(state);
-    const prompt = settings.inject ? buildInjection(state.npcs, recentTranscript(4), state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: settings.customFieldNames }) : '';
+    const prompt = settings.inject ? buildInjection(state.npcs, recentTranscript(4), state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: settings.customFieldNames, sceneDeferred: defersArea('scene', settings.sourceOfTruth) }) : '';
     const present = (state.npcs || []).filter(npc => npc?.present && !npc?.archived);
     const depth = Math.max(0, Math.min(20, Number(settings.injectDepth) || 1));
     lastInjection = {
@@ -4101,6 +4114,13 @@ function settingsGroup(key, title, hint, body) {
     return `<details class="delta-settings-group" data-delta-settings-group="${key}"><summary><b>${title}</b>${hint ? `<small>${hint}</small>` : ''}</summary><div class="delta-settings-group-body">${body}</div></details>`;
 }
 
+const SUITE_AREA_LABELS = Object.freeze({
+    npc: 'NPCs',
+    calendar: 'Calendar',
+    scene: 'Scene (live mood, outfit)',
+    stats: 'Game stats',
+});
+
 function settingsSlot(name) {
     return `<div class="delta-settings-slot" data-delta-settings-slot="${name}"></div>`;
 }
@@ -4127,6 +4147,7 @@ function buildSettingsHtml() {
         ${settingsSlot('relationship-map')}
         <h4 class="delta-settings-subhead">Custom fields</h4>
         ${settingRow('npc_state_delta_custom_fields', 'Custom fields', '<input id="npc_state_delta_custom_fields" class="text_pole" maxlength="260" placeholder="Level, Class, Faction">', 'Up to 6 names, comma-separated, tracked on every dossier. The scanner fills a value only when the story states it, keeps it until it is explicitly changed, and it is sent with present NPCs. Leave empty to turn off.')}
+        <small id="npc_state_delta_custom_fields_stats_warning" class="npc-state-delta-suite-warning" role="status" hidden></small>
         <h4 class="delta-settings-subhead">Roster lifecycle</h4>
         ${settingRow('npc_state_delta_max', 'Maximum active NPCs', numberControl('npc_state_delta_max', 1, 100), 'Archived dossiers do not use an active slot.')}
         ${settingRow('npc_state_delta_archive_deaths', 'Archive confirmed deaths', '<input id="npc_state_delta_archive_deaths" type="checkbox">', 'Explicit current-timeline deaths archive instead of deleting. Ambiguous death language is ignored.')}
@@ -4137,6 +4158,9 @@ function buildSettingsHtml() {
         ${settingRow('npc_state_delta_auto_prune_stale', 'Auto-manage stale NPCs', '<input id="npc_state_delta_auto_prune_stale" type="checkbox">', 'Long-absent NPCs auto-archive, then stale auto-archives are deleted later. Manual, death and protected records are kept; deleted names can be rediscovered.')}
         ${settingRow('npc_state_delta_stale_archive_after', 'Auto-archive after', numberControl('npc_state_delta_stale_archive_after', 10, 999, 'replies'), 'Default 30. Replies since the NPC was last present or active off-screen.')}
         ${settingRow('npc_state_delta_stale_delete_after', 'Auto-delete after', numberControl('npc_state_delta_stale_delete_after', 11, 1000, 'replies'), 'Default 50. Applies only to stale auto-archives.')}`;
+    const suite = `
+        <p class="npc-state-delta-muted">With Story Block, Story Director or RPG Battle installed, each area has one source of truth so the model is not told the same thing twice. Automatic lets the specialist lead (Story Block the scene, Story Director the calendar, RPG Battle game stats; Delta the NPCs). Alone, every choice behaves like Automatic.</p>
+        ${SUITE_AREAS.map(area => settingRow(`npc_state_delta_source_${area}`, SUITE_AREA_LABELS[area], `<select id="npc_state_delta_source_${area}" class="text_pole" data-delta-source-area="${area}"><option value="auto">Automatic</option><option value="mine">This extension</option><option value="theirs">The other one</option></select>`, `<span data-delta-source-status="${area}"></span>`)).join('')}`;
     const portrait = `
         <p class="npc-state-delta-muted">Builds positive and negative prompts from the dossier for the native SillyTavern Image Generation handoff. The configured image backend (including ComfyUI) stays host-owned.</p>
         ${settingRow('npc_state_delta_portrait_generation_enabled', 'Enable Generate Portrait', '<input id="npc_state_delta_portrait_generation_enabled" type="checkbox">', 'Enables Generate Portrait in the dossier Portrait tool. Fails safely without changing the dossier if Image Generation is unavailable.')}
@@ -4244,6 +4268,7 @@ function buildSettingsHtml() {
             ${settingsGroup('scanning', 'Scanning', 'Connection, cadence and admission', scanning)}
             ${settingsGroup('roster', 'Roster & continuity', 'Injection, lifecycle and stale cleanup', roster)}
             ${settingsGroup('calendar', 'Calendar & birthdays', 'Fantasy months and optional campaign clock', settingsSlot('calendar'))}
+            ${settingsGroup('suite', 'Source of truth', 'Sharing with other story extensions', suite)}
             ${settingsGroup('portrait', 'Portrait generation', 'Image Generation prompts and style', portrait)}
             ${settingsGroup('rules', 'Scanner rules', 'Advanced relationship, memory and behavior rubrics', rules)}
             ${settingsGroup('maintenance', 'Data & maintenance', 'Backup, diagnostics and this chat', maintenance)}
@@ -4305,6 +4330,7 @@ function syncSettingsControls() {
     $('#npc_state_delta_inject').prop('checked', !!s.inject);
     $('#npc_state_delta_inject_budget').val(s.injectBudgetTokens);
     $('#npc_state_delta_custom_fields').val((s.customFieldNames || []).join(', '));
+    syncSuiteControls();
     $('#npc_state_delta_archive_deaths').prop('checked', s.autoArchiveDeaths !== false);
     $('#npc_state_delta_reactivate_archived').prop('checked', s.autoReactivateArchived !== false);
     $('#npc_state_delta_branch_rescan').prop('checked', s.branchRescan !== false);
@@ -6292,6 +6318,73 @@ function bindCustomFieldSettings() {
         getSettings().customFieldNames = names;
         this.value = names.join(', ');
         persistSettings();
+        syncSuiteControls();
+        updateInjection();
+    });
+}
+
+// Story Suite (docs/STORY_SUITE.md): Delta announces itself while enabled and asks who owns the
+// scene, calendar and stats. Alone it owns all four areas, so nothing below changes Delta.
+const SUITE_API = Object.freeze({
+    /** The current chat's tracked NPCs (copies; empty until the chat's dossiers load). */
+    npcs: () => {
+        const key = getChatKey();
+        if (key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return [];
+        return (getChatState(key).npcs || []).map(npc => ({
+            id: String(npc?.id || ''),
+            name: String(npc?.name || ''),
+            aliases: [...(npc?.aliases || [])],
+            present: Boolean(npc?.present && !npc?.archived),
+            archived: Boolean(npc?.archived),
+        }));
+    },
+});
+let suiteConnected = false;
+let suiteRefreshQueued = false;
+
+function announceToSuite() {
+    announceNpcStateDelta({ enabled: getSettings().enabled !== false, version: NPC_STATE_VERSION, api: SUITE_API });
+}
+
+function syncSuiteControls() {
+    const choices = normalizeSourceOfTruth(extension_settings[EXTENSION_NAME]?.sourceOfTruth);
+    for (const area of SUITE_AREAS) {
+        $(`#npc_state_delta_source_${area}`).val(choices[area]);
+        const owner = areaOwner(area, choices);
+        $(`[data-delta-source-status="${area}"]`).text(owner ? `Now: ${owner.name}` : 'Now: this extension');
+    }
+    const warning = statsOverlapWarning(extension_settings[EXTENSION_NAME]?.customFieldNames || [], choices);
+    $('#npc_state_delta_custom_fields_stats_warning').text(warning).prop('hidden', !warning);
+}
+
+function connectStorySuite() {
+    if (suiteConnected) return;
+    suiteConnected = true;
+    // Read straight from the settings object: the calendar is consulted per NPC projection.
+    setExternalCalendarSource(() => externalCalendar(extension_settings[EXTENSION_NAME]?.sourceOfTruth));
+    announceToSuite();
+    try {
+        storySuite().onChange(() => {
+            if (suiteRefreshQueued) return;
+            suiteRefreshQueued = true;
+            queueMicrotask(() => {
+                suiteRefreshQueued = false;
+                syncSuiteControls();
+                updateInjection();
+            });
+        });
+    } catch (error) {
+        console.warn('[NPC State Delta] Story Suite is unavailable', error);
+    }
+}
+
+function bindSourceOfTruthSettings() {
+    $(document).on('change.npcStateDelta', '[data-delta-source-area]', function () {
+        const area = this.dataset.deltaSourceArea;
+        const settings = getSettings();
+        settings.sourceOfTruth = normalizeSourceOfTruth({ ...settings.sourceOfTruth, [area]: this.value });
+        persistSettings();
+        syncSuiteControls();
         updateInjection();
     });
 }
@@ -6316,7 +6409,7 @@ function bindSettingsText(selector, key, after = null) {
 
 function bindUi() {
     $(document).off('.npcStateDelta');
-    bindSettingsCheckbox('#npc_state_delta_enabled', 'enabled', () => { updateInjection(); renderDossier(); });
+    bindSettingsCheckbox('#npc_state_delta_enabled', 'enabled', () => { announceToSuite(); updateInjection(); renderDossier(); });
     bindSettingsCheckbox('#npc_state_delta_auto', 'autoScan');
     $(document).on('change.npcStateDelta', '#npc_state_delta_scanner_connection_profile', function () {
         getSettings().scannerConnectionProfile = String(this.value || '').trim();
@@ -6328,6 +6421,7 @@ function bindUi() {
     bindSettingsNumber('#npc_state_delta_inject_budget', 'injectBudgetTokens', 512, 6000, 4000, updateInjection);
     bindSettingsCheckbox('#npc_state_delta_archive_deaths', 'autoArchiveDeaths');
     bindCustomFieldSettings();
+    bindSourceOfTruthSettings();
     bindSettingsCheckbox('#npc_state_delta_reactivate_archived', 'autoReactivateArchived');
     bindSettingsCheckbox('#npc_state_delta_branch_rescan', 'branchRescan');
     bindSettingsCheckbox('#npc_state_delta_mid_delete_rewind', 'midDeleteRewind');
@@ -7012,6 +7106,7 @@ async function init() {
     }
     initialized = true;
     getSettings();
+    connectStorySuite();
     bindUi();
     installUiCaptureBridge();
     registerEvents();

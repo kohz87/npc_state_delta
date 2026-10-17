@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.2.0 - 17 October 2026
+
+- **Story Suite.** Delta now finds Story Block, Story Director and RPG Battle when they are installed, and they agree on one source of truth per area so the model is not told the same thing twice ([how it works](docs/STORY_SUITE.md)). With Story Block's World State block on, the present NPCs' cards leave out the live mood and current outfit that World State already gives (personality, voice, goals, bonds, custom fields and enduring features still go). With Story Director, birthdays and ages use its months and era (Delta's own calendar returns if Story Director's is missing). With RPG Battle, **Custom fields** warns when a field name looks like a game stat (Level, HP, Class…). A new **Source of truth** settings group lets you pick, per area, Automatic, This extension or The other one. Alone, Delta works exactly as before.
+- Fixed: Delta could not see the World State that Story Block keeps in its hidden block (`<!-- STORY_BLOCKS_V1 … -->`), so its scans missed who was present, how they looked and the date. It is now read the same way as Megumin Suite's World State.
+
 ## 1.1.12 - 17 October 2026
 
 - With Story Block installed, the present cast no longer shows twice by default: until you pick a choice under **Present NPCs in chat**, the cards appear only in Story Block's tab. Picking Full cards or Compact strip keeps them in the chat too, and Delta remembers that choice. (Compact and Off were already kept. Full cards had always been saved as the default, so if you want it alongside Story Block, pick it once.)

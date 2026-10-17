@@ -1221,8 +1221,19 @@ export function hasCompactMeguminWorldState(text) {
     return bodies.some(body => /\bTime\s*&\s*Loc\s*:/i.test(body) && /\bNPCs\s+Present\s*:/i.test(body));
 }
 
+// Story Block hides its blocks (World State among them) in one comment at the end of a reply:
+// `<!-- STORY_BLOCKS_V1\n<Blocks>…</Blocks>\n-->`. Unwrapping it to the inner <Blocks> lets the
+// World State inside be read exactly as a plain Megumin <Blocks> is; every other comment is still
+// stripped as markup. A reply cut off mid-envelope ends where the next comment begins. The `\b`
+// keeps STORY_BLOCKS_V1_CUT and STORY_BLOCKS_V1_CONTEXT_* out.
+const STORY_BLOCKS_ENVELOPE = /<!--\s*STORY_BLOCKS_V1\b((?:(?!<!--)[\s\S])*?)(?:-->|(?=<!--)|$)/gi;
+
+function unwrapStoryBlocksEnvelope(source) {
+    return String(source || '').replace(STORY_BLOCKS_ENVELOPE, (_whole, body) => ` ${body} `);
+}
+
 export function stripUiNoise(text) {
-    let source = extractNarrationCapture(text).text
+    let source = unwrapStoryBlocksEnvelope(extractNarrationCapture(text).text)
         .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
         .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ');
 
@@ -5919,11 +5930,16 @@ function injectedMood(npc) {
     return mood.split(/\s*,\s*|\s*;\s*/).filter(part => part && !STANCE_MOOD_WORDS.test(part)).join(', ');
 }
 
-function injectionCurrentStateCore(npc, stateCap = 180) {
-    const mood = injectedMood(npc);
+// While another extension owns the scene (Story Block's World State, Story Suite), the live mood
+// and outfit come from it, so the cards leave them out and point there instead.
+const SCENE_DEFERRED_STATE = 'live mood/outfit: as in World State';
+
+function injectionCurrentStateCore(npc, stateCap = 180, sceneDeferred = false) {
+    const mood = sceneDeferred ? '' : injectedMood(npc);
     const parts = [
         mood && `mood: ${mood}`,
         npc.status && `status: ${npc.status}`,
+        sceneDeferred && SCENE_DEFERRED_STATE,
     ].filter(Boolean);
     return fairInjectionParts(parts, stateCap) || 'no overriding live emotional/condition state established';
 }
@@ -5935,24 +5951,32 @@ function compactRelationshipModifier(npc, behaviorCap = 160) {
     return truncateInjectionText(buildBehaviorGuidance(npc), behaviorCap);
 }
 
-function injectionEssentialBlock(npc, behaviorCap = 160, identityCap = 620, agencyCap = 300, stateCap = 180, customFieldNames = []) {
+function injectionEssentialBlock(npc, behaviorCap = 160, identityCap = 620, agencyCap = 300, stateCap = 180, customFieldNames = [], sceneDeferred = false) {
     const identity = injectionIdentityCore(npc, identityCap);
     const agency = injectionAgencyCore(npc, agencyCap, customFieldNames);
-    const currentState = injectionCurrentStateCore(npc, stateCap);
+    const currentState = injectionCurrentStateCore(npc, stateCap, sceneDeferred);
     const relationship = compactRelationshipModifier(npc, behaviorCap);
     return `- ${npc.name}: IDENTITY (authoritative): ${identity}; AGENCY/OTHER BONDS: ${agency}; CURRENT STATE: ${currentState}; PLAYER RELATIONSHIP (secondary modifier): ${relationship}`;
 }
 
 const INJECTED_APPEARANCE_LABEL = 'CURRENT VISIBLE APPEARANCE (authoritative anatomy; species/race cannot override the selected form): ';
 const INJECTED_PHYSICAL_LABEL = 'ENDURING PHYSICAL FEATURES (authoritative anatomy): ';
+const INJECTED_FORM_ANATOMY_LABEL = 'CURRENT FORM ANATOMY (authoritative; World State gives the outfit): ';
 
 // Appearance is optional continuity, but when the whole current appearance does not fit the
 // remaining budget its enduring physical features still should, so the roleplay model is not left
 // to invent anatomy. Variants are tried in order; the last may be cut at a clause boundary.
-function injectionAppearanceVariants(npc) {
+// With the scene deferred, an NPC without a selected form keeps only its enduring physical
+// features; a selected form's appearance is its whole anatomy, so it stays with World State
+// named as the outfit's source.
+function injectionAppearanceVariants(npc, sceneDeferred = false) {
     const appearance = cleanText(npc.appearance, 1200);
     if (!appearance) return [];
     const physical = !npc.currentForm && !npc.currentFormUnknown ? cleanText(npc.overallAppearance, 800) : '';
+    if (sceneDeferred) {
+        if (npc.currentForm || npc.currentFormUnknown) return [`${INJECTED_FORM_ANATOMY_LABEL}${appearance}`];
+        return physical ? [`${INJECTED_PHYSICAL_LABEL}${physical}`] : [];
+    }
     const variants = [`${INJECTED_APPEARANCE_LABEL}${appearance}`];
     if (physical && normalizeName(physical) !== normalizeName(appearance)) variants.push(`${INJECTED_PHYSICAL_LABEL}${physical}`);
     return variants;
@@ -5966,9 +5990,9 @@ function clauseBoundedInjection(text, room) {
     return boundary >= labelEnd + 20 ? cut.slice(0, boundary) : '';
 }
 
-function injectionOptionalFields(npc, includeAppearance = false) {
+function injectionOptionalFields(npc, includeAppearance = false, sceneDeferred = false) {
     const importantMemories = cleanList(npc.memories, IMPORTANT_MEMORY_LIMIT, 220);
-    const appearanceVariants = includeAppearance ? injectionAppearanceVariants(npc) : [];
+    const appearanceVariants = includeAppearance ? injectionAppearanceVariants(npc, sceneDeferred) : [];
     return [
         appearanceVariants.length && appearanceVariants,
         includeAppearance && !npc.appearance && (npc.currentForm || npc.currentFormUnknown) && 'Current visible appearance is not established; do not infer anatomy from species or another form.',
@@ -6024,7 +6048,7 @@ function referenceBlock(npcs = [], text = '', castIds = new Set(), customFieldNa
     return [mentioned.length && MENTIONED_HEADER, ...mentioned, deceased.length && DECEASED_HEADER, ...deceased].filter(Boolean).join('\n');
 }
 
-export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria = DEFAULT_BEHAVIOR_CRITERIA, budgetTokens = DEFAULT_INJECTION_BUDGET_TOKENS, socialGraph = null, { includeAppearance = false, namedNpcIds = [], customFieldNames = [] } = {}) {
+export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria = DEFAULT_BEHAVIOR_CRITERIA, budgetTokens = DEFAULT_INJECTION_BUDGET_TOKENS, socialGraph = null, { includeAppearance = false, namedNpcIds = [], customFieldNames = [], sceneDeferred = false } = {}) {
     const named = new Set(Array.isArray(namedNpcIds) ? namedNpcIds : []);
     const calledIn = npc => !npc?.present && named.has(npc?.id);
     const present = (npcs || []).filter(npc => (Boolean(npc?.present) || calledIn(npc)) && !npc?.archived);
@@ -6057,7 +6081,7 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
     let agencyCap = Math.round(Math.min(900, 300 * capScale));
     let stateCap = Math.round(Math.min(400, 180 * capScale));
     const renderEssentials = () => relevant.map(npc => {
-        const block = injectionEssentialBlock(npc, behaviorCap, identityCap, agencyCap, stateCap, customFieldNames);
+        const block = injectionEssentialBlock(npc, behaviorCap, identityCap, agencyCap, stateCap, customFieldNames, sceneDeferred);
         return calledIn(npc) ? block.replace(`- ${npc.name}: `, `- ${npc.name} (named by player): `) : block;
     });
     while (relevant.length > 1 && (header.length + 1 + renderEssentials().join('\n').length) > budgetChars) {
@@ -6109,7 +6133,7 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
     // starve another. Relationship summary is deliberately late: live identity/state already won priority.
     // Resolved appearance uses the same optional budget as other continuity. It must not
     // shrink the essential identity/agency budget or be spliced ahead of characterization.
-    const optionalByNpc = relevant.map(npc => injectionOptionalFields(npc, includeAppearance));
+    const optionalByNpc = relevant.map(npc => injectionOptionalFields(npc, includeAppearance, sceneDeferred));
     const enriched = essentialBlocks.slice();
     const maxPriority = Math.max(0, ...optionalByNpc.map(fields => fields.length));
     for (let priority = 0; priority < maxPriority; priority++) {

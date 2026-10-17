@@ -1,8 +1,8 @@
-# NPC State Delta v1.1.12
+# NPC State Delta v1.2.0
 
 A SillyTavern extension that keeps a living dossier for every NPC in your roleplay: who they are, how they look, how they talk and behave, what they remember, and how they feel about you. After each reply it scans the story, updates the dossiers carefully, and feeds the present NPCs back to the roleplay model so they stay in character.
 
-**Current release:** 1.1.12 · [Changelog](CHANGELOG.md) · [Development guide](DEVELOPMENT.md)
+**Current release:** 1.2.0 · [Changelog](CHANGELOG.md) · [Development guide](DEVELOPMENT.md)
 
 ---
 
@@ -42,7 +42,7 @@ A SillyTavern extension that keeps a living dossier for every NPC in your rolepl
 ## Install and update
 
 1. In SillyTavern, open **Extensions → Install extension** and paste this repository's URL.
-   Or unpack `npc_state_delta-1.1.12.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
+   Or unpack `npc_state_delta-1.2.0.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
 2. Reload SillyTavern.
 3. **Before updating an existing install,** export a backup from **Data & maintenance → Backup / Export**.
 
@@ -57,7 +57,7 @@ A SillyTavern extension that keeps a living dossier for every NPC in your rolepl
 
 ## Settings
 
-The settings panel has a quick bar that is always visible, plus six groups.
+The settings panel has a quick bar that is always visible, plus seven groups.
 
 | Where | What you'll find |
 |---|---|
@@ -65,6 +65,7 @@ The settings panel has a quick bar that is always visible, plus six groups.
 | **Scanning** | Scanner connection profile, how often to scan, how much story to send, how readily new NPCs get a dossier (Conservative, Balanced or Manual only), and the experimental one-pass narration capture |
 | **Roster & continuity** | Present NPCs in chat (Full cards, Compact strip, Only in Story Block or Off), injection on/off and budget (a ceiling, default 4000 tokens), relationship map (on/off, default distance), custom fields, maximum active NPCs, death and return handling, stale NPC cleanup, rescan and middle-deletion rewind options |
 | **Calendar & birthdays** | Month names and lengths, optional era, optional campaign date |
+| **Source of truth** | Who leads each shared area (NPCs, calendar, scene, game stats) when Story Block, Story Director or RPG Battle is installed: Automatic, This extension or The other one |
 | **Portrait generation** | Style presets, positive and negative prompts, composition, prompt format |
 | **Scanner rules** | Advanced: relationship starting values and per-scan caps, memory criteria, behaviour rubric |
 | **Data & maintenance** | Backup / Export, Restore / Import, Diagnostics, and clearing this chat's dossiers |
@@ -79,6 +80,18 @@ With [Story Block](https://github.com/kohz87/Story_block) installed, Delta adds 
 - **📇 Dossiers:** every dossier with a search box. The dead stay out of the list until you search for them. Tap a row to open that dossier.
 
 While Story Block is installed, the cast shows only in Story Block until you pick a choice under **Roster & continuity → Present NPCs in chat**. Pick **Full cards** or **Compact strip** to keep it in the chat as well; **Only in Story Block** shows full cards in the chat when Story Block isn't installed. The tabs are display only and change nothing in prompts, scans or saved data. Without Story Block nothing changes.
+
+### Story Suite: Story Block, Story Director and RPG Battle
+
+Delta works alone and alongside [Story Block](https://github.com/kohz87/Story_block), Story Director and RPG Battle. Installed together, they agree on one source of truth per area so the model is not told the same thing twice ([how it works](docs/STORY_SUITE.md)):
+
+- **NPCs:** Delta leads; Story Director's agenda lines then describe only an NPC's plans. Delta keeps its dossiers whatever is chosen here.
+- **Scene:** when Story Block's World State block is on, the present NPCs' cards leave out the live mood and current outfit that World State already gives; personality, voice, goals, bonds, custom fields and enduring features are still sent.
+- **Calendar:** with Story Director installed, Delta uses its months and era for birthdays and ages, and keeps its own calendar if Story Director's is missing.
+- **Game stats:** with RPG Battle installed, **Custom fields** warns when a field name looks like a game stat (Level, HP, Class…) that RPG Battle keeps.
+- Delta also reads the World State inside Story Block's hidden block, as it reads Megumin Suite's.
+
+**Source of truth** in the settings lets you choose per area: **Automatic** (the order above), **This extension** or **The other one**. Alone, every choice behaves like Automatic and Delta works exactly as before.
 
 ### One-pass narration capture (experimental)
 
@@ -148,6 +161,7 @@ There are twelve categories:
 - The scanner fills a value only when the story or World State states it, keeps it while it goes unmentioned, and changes it only when the story says so ("reached level 5"). An NPC who returns after a long absence keeps the value they left with.
 - Present NPCs' values are sent to the roleplay model with the rest of their dossier. You can edit them under **Edit dossier**, and **Protect edits** locks them like other fields.
 - Leave the setting empty to turn custom fields off; prompts are then exactly as before.
+- With RPG Battle installed, a field named like a game stat (Level, HP, Class…) gets a warning under the setting, since RPG Battle already keeps those numbers. Nothing is blocked.
 
 ### Important memories and bonds
 
@@ -228,12 +242,12 @@ npm test                        # unit, compatibility and synthetic-host tests
 npm run validate                # inventory, isolation, version and ownership checks
 npm run measure:prompts         # prompt size measurements
 node scripts/measure-stage9.mjs # prompt/request budget baseline
-npm run package                 # builds dist/npc_state_delta-1.1.12.zip and its SHA-256
+npm run package                 # builds dist/npc_state_delta-1.2.0.zip and its SHA-256
 git diff --check
 ```
 
 - `runtime-modules.json` is the single inventory of shipped modules. The package contains only the runtime modules, stylesheet, manifest, inventory, license and README.
-- Application version 1.1.12 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
+- Application version 1.2.0 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
 - Behaviour is governed by [AGENTS.md](AGENTS.md), [the core contract](docs/core-contract.md) and [the workplan](docs/WORKPLAN.md). Development commands, evidence and limits are in [DEVELOPMENT.md](DEVELOPMENT.md).
 - Historical reviews: [1.0.28](docs/v1.0.28-review.md), [1.0.27 prefix cache](docs/v1.0.27-review.md), [Stage 9](docs/stage9-review.md). Seed provenance is in `docs/seed-provenance.*`.
 

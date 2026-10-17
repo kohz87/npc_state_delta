@@ -229,12 +229,12 @@ export function buildNpcPortraitPrompts(rawNpc = {}, options = {}) {
     }, options);
 }
 
-export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria = mechanics.DEFAULT_BEHAVIOR_CRITERIA, budgetTokens = mechanics.DEFAULT_INJECTION_BUDGET_TOKENS, socialGraph = null, { namedNpcIds = [], customFieldNames = [] } = {}) {
+export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria = mechanics.DEFAULT_BEHAVIOR_CRITERIA, budgetTokens = mechanics.DEFAULT_INJECTION_BUDGET_TOKENS, socialGraph = null, { namedNpcIds = [], customFieldNames = [], sceneDeferred = false } = {}) {
     const resolved = (Array.isArray(npcs) ? npcs : []).map(npc => ({
         ...normalizeTerminalNpc(npc),
         appearance: resolveNpcAppearance(npc),
     }));
-    return mechanics.buildInjection(resolved, text, turn, limit, behaviorCriteria, budgetTokens, socialGraph, { includeAppearance: true, namedNpcIds, customFieldNames });
+    return mechanics.buildInjection(resolved, text, turn, limit, behaviorCriteria, budgetTokens, socialGraph, { includeAppearance: true, namedNpcIds, customFieldNames, sceneDeferred: sceneDeferred === true });
 }
 
 const COMPACT_STAGE4_RULE = `\nS4: forms/current; confirmed death terminal.`;

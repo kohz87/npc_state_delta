@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "applicationVersion": "1.1.12",
+  "applicationVersion": "1.2.0",
   "entrypoint": "bootstrap.js",
   "modules": [
     { "path": "bootstrap.js", "role": "bootstrap", "required": true },
@@ -38,6 +38,8 @@
     { "path": "relationship-map-core.js", "role": "relationship-map-primitives", "required": true },
     { "path": "relationship-map.js", "role": "relationship-map-view", "required": true },
     { "path": "story-block-tabs.js", "role": "story-block-tabs-view", "required": true },
-    { "path": "continuity-ui.js", "role": "calendar-birthday-appearance-ui-adapter", "required": true }
+    { "path": "continuity-ui.js", "role": "calendar-birthday-appearance-ui-adapter", "required": true },
+    { "path": "suite.js", "role": "story-suite-registry", "required": true },
+    { "path": "suite-handshake.js", "role": "story-suite-handshake", "required": true }
   ]
 }
