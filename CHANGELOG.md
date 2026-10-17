@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.2.5 - 17 October 2026
+
+- **Speech bubbles in the middle.** In narrow panes (Story Block's sidebar and the phone sheet) the Inner Chatter bubble beside a present NPC's card sits in the middle of the row, its pointer (or the thought bubble's circles) aimed at the card's middle, instead of at the top. Display only; prompts, scans and saved data are unchanged.
+- **No floating button beside Story Block.** While Story Block carries Delta's Present NPCs and Dossiers tabs, the floating *npc state* button is hidden, since the sidebar already opens the same views. **Present NPCs → Floating button with Story Block** keeps it (off by default). Without Story Block, the button is unchanged.
+
 ## 1.2.4 - 17 October 2026
 
 - **Present NPCs in narrow places, redesigned.** In Story Block's sidebar or sheet and on phones, each NPC is now one row in two halves. On the left, a card that is the NPC's portrait, with the name (and role) over the bottom of the image. On the right, the NPC's Inner Chatter bubble for this reply, pointing at the card; with no chatter, their **Mood**, **Condition** and **Outfit** lines in full; with neither, their role and *No changes this turn*. Others still follow as bubbles. In a very narrow pane the card becomes a short banner with the right half under it. Tapping the card or the right half opens the dossier. The wider card grid (the cards under a message on a desktop) is unchanged. Display only: prompts, scans and saved data are unchanged.

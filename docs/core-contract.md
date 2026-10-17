@@ -110,6 +110,8 @@ User-authorized Delta 1.2.3 amendment, reply numbers and readable present cards:
 
 User-authorized Delta 1.2.4 amendment, narrow present rows: in narrow containers each present NPC is one row in two halves, a portrait card with the name over the image on the left and, on the right, the NPC's chatter bubble for the latest reply, else the labelled now lines, else the role with a muted "No changes this turn"; very narrow containers stack the halves. Wide grids are unchanged. The now-line slots may be rendered twice for the two layouts, filled only by textContent/attribute writes and hidden from view and assistive technology where unused. Display only: prompts, request counts, routing and persisted formats are unchanged.
 
+User-authorized Delta 1.2.5 amendment, centred chatter: in narrow containers the Inner Chatter bubble beside a present card is vertically centred in its row, the pointer at the card's middle; and the floating launcher is hidden while Story Block carries Delta's Present NPCs and Dossiers tabs, unless the player keeps it (`launcherWithStoryBlock`, default false). Display only; no prompt, scan, storage or bundle change.
+
 Measure the actual final extension prompt, not only a UI projection. A saved field without an appropriate route into selected continuity is not sufficient acceptance. Preserve legacy omission, compaction and budget behavior unless a deliberate documented change is requested.
 
 ## C08. Persistence, history and removal of OOC commands — stage 7

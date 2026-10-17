@@ -269,7 +269,8 @@ test('v1.2.4 narrow panes: each row is an image card on the left and chatter, no
     assert.match(rule(narrow, '.npc-state-delta-present-side .npc-state-delta-present-now-part'), /-webkit-line-clamp: unset; line-clamp: none; overflow: visible;[^}]*color: inherit;/, 'Mood / Condition / Outfit in full, no frame');
     assert.doesNotMatch(rule(narrow, '.npc-state-delta-present-side'), /border|background/);
     assert.match(rule(narrow, '.npc-state-delta-present-side-muted'), /opacity: \.6;/);
-    assert.match(rule(narrow, '.npc-state-delta-chatter'), /align-content: start;/);
+    assert.match(rule(narrow, '.npc-state-delta-chatter'), /align-content: center;/, 'the bubble sits in the middle of the row, its pointer at the card\'s middle');
+    assert.match(rule(narrow, '.npc-state-delta-chatter-speech .npc-state-delta-bubble::before'), /top: calc\(50% - 7px\)/);
     assert.match(rule(narrow, '.npc-state-delta-chatter-speech .npc-state-delta-bubble::before'), /left: -7px;[^}]*border-right-color/, 'the pointer points left, at the card');
     assert.match(rule(narrow, '.npc-state-delta-chatter-thought .npc-state-delta-bubble::after'), /left: -19px/);
     assert.match(rule(narrow, '.npc-state-delta-chatter-other'), /border-radius: 12px;/, 'Others are bubbles with the speaker inside');

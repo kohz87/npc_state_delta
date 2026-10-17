@@ -529,6 +529,8 @@ const DEFAULTS = Object.freeze({
     midDeleteRewind: false,
     presentCastDisplay: 'full',
     presentCastDisplayChosen: false,
+    // The floating npc state button while Story Block carries Delta's Present NPCs and Dossiers tabs.
+    launcherWithStoryBlock: false,
     relationshipBaseline: { ...DEFAULT_RELATIONSHIP },
     relationshipCaps: { ...DEFAULT_RELATIONSHIP_CAPS },
     relationshipCriteria: DEFAULT_RELATIONSHIP_CRITERIA,
@@ -598,6 +600,7 @@ function getSettings() {
     assign('admissionMode', normalizeNpcAdmissionMode(settings.admissionMode));
     assign('presentCastDisplay', normalizePresentCastDisplay(settings.presentCastDisplay));
     assign('presentCastDisplayChosen', settings.presentCastDisplayChosen === true);
+    assign('launcherWithStoryBlock', settings.launcherWithStoryBlock === true);
     // 1.0.70 raised the default budget from 1800 to 4000 tokens. An install still on the old default
     // is moved once; any value the player chose, including a later deliberate 1800, is kept.
     const legacyDefaultBudget = settings.injectBudgetDefaultUpgraded !== true && Number(settings.injectBudgetTokens) === 1800;
@@ -4174,6 +4177,7 @@ function buildSettingsHtml() {
     const roster = `
         <h4 class="delta-settings-subhead story-suite-subhead">In-chat display</h4>
         ${settingRow('npc_state_delta_present_cast_display', 'Present NPCs in chat', '<select id="npc_state_delta_present_cast_display" class="text_pole"><option value="full">Full cards</option><option value="compact">Compact strip</option><option value="storyblock">Only in Story Block</option><option value="off">Off</option></select>', 'Shown under the latest reply (or as a Megumin tab). With Story Block installed, Present NPCs and Dossiers tabs also appear in its sidebar, and until you pick a choice here the chat shows them only there; Only in Story Block keeps the chat clear (full cards without Story Block). Tapping an NPC opens its dossier. Off adds nothing to the chat; presence tracking and injection are unaffected.')}
+        ${settingRow('npc_state_delta_launcher_with_story_block', 'Floating button with Story Block', '<input id="npc_state_delta_launcher_with_story_block" type="checkbox">', 'Story Block\'s sidebar has the Present NPCs and Dossiers tabs, so the floating npc state button hides while it is there. Turn on to keep the button as well.')}
         <h4 class="delta-settings-subhead story-suite-subhead">Generation injection</h4>
         ${settingRow('npc_state_delta_inject', 'Inject present NPC state', '<input id="npc_state_delta_inject" type="checkbox">', 'Only active NPCs present in the latest scanned scene are injected into generation.')}
         ${settingRow('npc_state_delta_inject_budget', 'Injection budget', numberControl('npc_state_delta_inject_budget', 512, 6000, 'tokens', { step: 100, prefix: '<small>~</small>' }), 'Upper limit; only what the present NPCs need is used. The default 4000 lets detailed dossiers reach the roleplay model in full. When it runs short, lower-priority fields, then lower-ranked NPCs, are trimmed first.')}
@@ -4372,6 +4376,8 @@ function syncSettingsControls() {
     $('#npc_state_delta_branch_rescan').prop('checked', s.branchRescan !== false);
     $('#npc_state_delta_mid_delete_rewind').prop('checked', s.midDeleteRewind === true);
     $('#npc_state_delta_present_cast_display').val(effectivePresentCastChoice());
+    $('#npc_state_delta_launcher_with_story_block').prop('checked', s.launcherWithStoryBlock === true);
+    applyLauncherFlag();
     if (!portraitSettingsDirty) writePortraitSettingsDraftToUi(portraitSettingsSnapshot(s));
     updatePortraitSettingsSaveUi();
     $('#npc_state_delta_base_trust').val(s.relationshipBaseline.trust);
@@ -4713,6 +4719,13 @@ function normalizePresentCastDisplay(value) {
 
 function presentCastDisplayMode() {
     return normalizePresentCastDisplay(getSettings().presentCastDisplay);
+}
+
+// The floating launcher hides while Story Block carries Delta's tabs (CSS in launcher-ui.js keys on
+// these two flags), unless the player keeps it.
+function applyLauncherFlag() {
+    const data = document?.documentElement?.dataset;
+    if (data) data.npcStateDeltaLauncher = getSettings().launcherWithStoryBlock === true ? 'keep' : 'auto';
 }
 
 // Set by story-block-tabs.js once its Present NPCs and Dossiers tabs are registered with Story Block.
@@ -6792,6 +6805,7 @@ function bindUi() {
         globalThis.toastr?.info?.('NPC State Delta: Fantasy Anime defaults loaded as an unsaved portrait-settings draft.');
     });
     $(document).on('click.npcStateDelta', '#npc_state_delta_save_portrait_settings', () => { void savePortraitSettingsDraft(); });
+    bindSettingsCheckbox('#npc_state_delta_launcher_with_story_block', 'launcherWithStoryBlock', applyLauncherFlag);
     bindSettingsNumber('#npc_state_delta_scan_every', 'scanEvery', 1, 20, 2);
     bindSettingsNumber('#npc_state_delta_scan_depth', 'scanDepth', 2, 30, 6);
     $(document).on('change.npcStateDelta', '#npc_state_delta_present_cast_display', function () {

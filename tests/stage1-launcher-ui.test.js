@@ -51,6 +51,15 @@ test('launcher hides while Story Block\'s Story Suite overlay is open', () => {
     assert.match(source, /body\.story-suite-open #\$\{LAUNCHER_ID\} \{ display: none !important; \}/);
 });
 
+test('launcher hides while Story Block carries Delta\'s tabs, unless the player keeps it', () => {
+    assert.match(source, /html\[data-npc-state-delta-story-block="1"\]:not\(\[data-npc-state-delta-launcher="keep"\]\) #\$\{LAUNCHER_ID\} \{ display: none !important; \}/);
+    const index = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
+    assert.match(index, /launcherWithStoryBlock: false,/, 'hidden by default');
+    assert.match(index, /data\.npcStateDeltaLauncher = getSettings\(\)\.launcherWithStoryBlock === true \? 'keep' : 'auto'/);
+    assert.match(index, /id="npc_state_delta_launcher_with_story_block" type="checkbox"/);
+    assert.match(index, /bindSettingsCheckbox\('#npc_state_delta_launcher_with_story_block', 'launcherWithStoryBlock', applyLauncherFlag\)/);
+});
+
 test('mobile and tablet launcher stays parked at the safe-area-aware side midpoint', () => {
     assert.match(source, /@media \(max-width:\s*1100px\)/);
     assert.match(source, /right:\s*max\(12px,\s*env\(safe-area-inset-right\)\)\s*!important/);

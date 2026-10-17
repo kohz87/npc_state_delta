@@ -1,8 +1,8 @@
-# NPC State Delta v1.2.4
+# NPC State Delta v1.2.5
 
 A SillyTavern extension that keeps a living dossier for every NPC in your roleplay: who they are, how they look, how they talk and behave, what they remember, and how they feel about you. After each reply it scans the story, updates the dossiers carefully, and feeds the present NPCs back to the roleplay model so they stay in character.
 
-**Current release:** 1.2.4 · [Changelog](CHANGELOG.md) · [Development guide](DEVELOPMENT.md)
+**Current release:** 1.2.5 · [Changelog](CHANGELOG.md) · [Development guide](DEVELOPMENT.md)
 
 ---
 
@@ -43,7 +43,7 @@ A SillyTavern extension that keeps a living dossier for every NPC in your rolepl
 ## Install and update
 
 1. In SillyTavern, open **Extensions → Install extension** and paste this repository's URL.
-   Or unpack `npc_state_delta-1.2.4.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
+   Or unpack `npc_state_delta-1.2.5.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
 2. Reload SillyTavern.
 3. **Before updating an existing install,** export a backup from **Data & maintenance → Backup / Export**.
 
@@ -51,7 +51,7 @@ A SillyTavern extension that keeps a living dossier for every NPC in your rolepl
 
 1. Open **Extensions → NPC State Delta** and make sure **Enable NPC State Delta** and **Auto scan** are on.
 2. Play normally. After each reply the scanner picks up named NPCs and starts their dossiers.
-3. Click the floating launcher, or **Open dossiers**, to browse the cast.
+3. Click the floating launcher, or **Open dossiers**, to browse the cast. With Story Block, use its **Present NPCs** and **Dossiers** tabs instead; the floating button hides there (**Floating button with Story Block** keeps it).
 4. If someone is missing, use **Add NPC**. If a dossier looks stale, open it and use **Refresh**, which re-reads the recent story for that one NPC.
 
 > **Tip:** Automatic scans only read the latest exchange. **Refresh** reads a longer recent window, so it is the quickest way to fill in or fix one NPC.
@@ -253,12 +253,12 @@ npm test                        # unit, compatibility and synthetic-host tests
 npm run validate                # inventory, isolation, version and ownership checks
 npm run measure:prompts         # prompt size measurements
 node scripts/measure-stage9.mjs # prompt/request budget baseline
-npm run package                 # builds dist/npc_state_delta-1.2.4.zip and its SHA-256
+npm run package                 # builds dist/npc_state_delta-1.2.5.zip and its SHA-256
 git diff --check
 ```
 
 - `runtime-modules.json` is the single inventory of shipped modules. The package contains only the runtime modules, stylesheet, manifest, inventory, license and README.
-- Application version 1.2.4 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
+- Application version 1.2.5 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
 - Behaviour is governed by [AGENTS.md](AGENTS.md), [the core contract](docs/core-contract.md) and [the workplan](docs/WORKPLAN.md). Development commands, evidence and limits are in [DEVELOPMENT.md](DEVELOPMENT.md).
 - Historical reviews: [1.0.28](docs/v1.0.28-review.md), [1.0.27 prefix cache](docs/v1.0.27-review.md), [Stage 9](docs/stage9-review.md). Seed provenance is in `docs/seed-provenance.*`.
 

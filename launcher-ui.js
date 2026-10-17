@@ -153,6 +153,8 @@ class DeltaLauncherRefinement {
 #${ROOT_ID} .delta-open-settings { display: none !important; }
 /* Story Block's Story Suite overlay is open: the launcher would sit over its close button. */
 body.story-suite-open #${LAUNCHER_ID} { display: none !important; }
+/* Story Block's sidebar carries Delta's Present NPCs and Dossiers tabs: the button is redundant there, unless kept. */
+html[data-npc-state-delta-story-block="1"]:not([data-npc-state-delta-launcher="keep"]) #${LAUNCHER_ID} { display: none !important; }
 #${ROOT_ID} .delta-document-head > .delta-edit { display: none !important; }
 #${ROOT_ID} .delta-backdrop {
   position: fixed;
