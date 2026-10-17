@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.2.2 - 17 October 2026
+
+- **NPC profiles for the Story Suite.** Delta now also shares a short profile of each tracked NPC in the current chat with the other Story Suite extensions: name, aliases, whether they are present, a short role (the dossier's Role, or a Class/Occupation-style custom field when Role is empty) and a summary of up to 200 characters built from the dossier's role, species, ability-style custom fields (Abilities, Skills, Powers…), personality and background. RPG Battle uses it to offer the story's NPCs as companions. Archived NPCs and NPCs the dossier marks as dead (archived or not) are left out. It is read-only and built from what the dossiers already hold: no model call, no extra scan, and prompts and saved data are unchanged. Alone, nothing changes.
+- **Open a dossier from another extension.** The other Story Suite extensions can open Delta's dossier view on one NPC (by its id, or by an exact name or alias), the same view the launcher and the present-cast cards open; RPG Battle's companion cards use it for their **Dossier** button. Archived and unknown NPCs open nothing. Opening changes nothing and sends nothing to the model.
+
 ## 1.2.1 - 17 October 2026
 
 - **Story Suite overlay.** With two or more Story Suite extensions installed, **Manage all in Story Suite** at the top of Delta's settings opens Story Block's overlay, where one Source of truth table and each extension's on/off switch manage them all and Delta's settings panel appears in its own tab ([how it works](docs/STORY_SUITE.md)). Choices made there update Delta's own settings, and the reverse. Switched off, Delta now stays listed in the overlay (as off) so it can be switched back on there; it still sends nothing and leads no area while off. Alone, nothing changes; prompts, scans and saved data are unchanged.

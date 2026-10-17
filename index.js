@@ -164,7 +164,9 @@ import {
     announceNpcStateDelta,
     areaOwner,
     buildManageApi,
+    buildNpcProfiles,
     defersArea,
+    resolveDossierTarget,
     externalCalendar,
     normalizeSourceOfTruth,
     openSuiteOverlay,
@@ -6344,6 +6346,29 @@ const SUITE_API = Object.freeze({
             present: Boolean(npc?.present && !npc?.archived),
             archived: Boolean(npc?.archived),
         }));
+    },
+    /** The tracked, non-archived, not-deceased NPCs' { id, name, aliases, present, role, summary } (frozen copies; empty until the chat's dossiers load). */
+    npcProfiles: () => {
+        try {
+            const key = getChatKey();
+            if (key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return Object.freeze([]);
+            return buildNpcProfiles(getChatState(key).npcs, { customFieldNames: getSettings().customFieldNames });
+        } catch (error) {
+            console.warn('[NPC State Delta] Story Suite NPC profiles failed', error);
+            return Object.freeze([]);
+        }
+    },
+    /** Open Delta's dossier view on one NPC (id, or name/alias fallback), as the launcher and present cast do; false when archived, unknown or not opened. */
+    openDossier: value => {
+        try {
+            const key = getChatKey();
+            if (key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return false;
+            const id = resolveDossierTarget(getChatState(key).npcs, value);
+            return id ? openLauncherDossier(id) === true : false;
+        } catch (error) {
+            console.warn('[NPC State Delta] Story Suite openDossier failed', error);
+            return false;
+        }
     },
     /** For Story Suite's overlay: the same actions as Delta's own Source of truth selects and Enable checkbox. */
     manage: buildManageApi({
