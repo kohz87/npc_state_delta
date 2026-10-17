@@ -244,9 +244,10 @@
   appearance: none;
   -webkit-appearance: none;
   position: relative;
-  display: block;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
   min-width: 0;
-  aspect-ratio: 3 / 4;
   margin: 0;
   padding: 0;
   overflow: hidden;
@@ -266,12 +267,14 @@
   outline: none;
   transform: translateY(-1px);
 }
+/* 1.2.3: a fixed-ratio portrait with the name, role and now lines in a footer under it, so they can
+   wrap (two lines each at most) instead of being cut to one line over the picture. */
 .npc-state-delta-present-card-portrait {
-  position: absolute;
-  inset: 0;
+  position: relative;
   display: block;
+  flex: 0 0 auto;
   width: 100%;
-  height: 100%;
+  aspect-ratio: 4 / 5;
   overflow: hidden;
   background: rgba(0,0,0,.24);
 }
@@ -286,30 +289,29 @@
   font-family: Georgia, 'Times New Roman', serif;
 }
 .npc-state-delta-present-card-placeholder span { font-size: clamp(2rem, 9vw, 3.5rem); opacity: .62; }
-.npc-state-delta-present-card-overlay {
-  position: absolute;
-  z-index: 2;
-  left: 0;
-  right: 0;
-  bottom: 0;
+.npc-state-delta-present-card-text {
   display: grid;
+  align-content: start;
   min-width: 0;
   gap: 3px;
-  padding: 24px 9px 9px;
-  line-height: 1.15;
-  background: linear-gradient(to bottom, rgba(5,6,8,0), rgba(5,6,8,.58) 34%, rgba(5,6,8,.82) 100%);
+  padding: 7px 8px 8px;
+  border-top: 1px solid var(--npc-line);
+  line-height: 1.2;
+  background: rgba(5,6,8,.62);
   color: #f4f1e9;
-  text-shadow: 0 1px 3px rgba(0,0,0,.9);
   pointer-events: none;
 }
-.npc-state-delta-present-card-overlay b {
+.npc-state-delta-present-card-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: .92rem;
+  overflow-wrap: anywhere;
+  font-size: .9rem;
   color: #fff8e8;
 }
-.npc-state-delta-present-card-overlay small {
+.npc-state-delta-present-card-role {
   opacity: .82;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -320,7 +322,19 @@
 /* Present view, display only (present-scene.js): the now line on each card, NPC Inner Chatter as
    bubbles beside the speaker's card (whispers: speech bubbles; one voice: a thought bubble), and
    an Others line for speakers without a card. Wide: beside the card; narrow: under it. */
-.npc-state-delta-present-card-overlay small.npc-state-delta-present-now { opacity: .95; color: #f6e7c4; }
+.npc-state-delta-present-now { display: grid; gap: 2px; min-width: 0; margin-top: 1px; }
+.npc-state-delta-present-now-part {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: .7rem;
+  line-height: 1.25;
+  color: #f6e7c4;
+}
+.npc-state-delta-present-now-label { font-weight: 600; opacity: .7; }
 .npc-state-delta-present-cell { display: grid; gap: 8px; min-width: 0; align-items: start; }
 .npc-state-delta-chatter { display: grid; gap: 6px; min-width: 0; }
 .npc-state-delta-bubble {
@@ -416,13 +430,13 @@
 
 @media (max-width: 700px) {
   .npc-state-delta-present-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
-  .npc-state-delta-present-card-overlay { padding: 22px 8px 8px; }
-  .npc-state-delta-present-card-overlay b { font-size: .88rem; }
+  .npc-state-delta-present-card-text { padding: 6px 7px 7px; }
+  .npc-state-delta-present-card-name { font-size: .88rem; }
 }
 
 @media (max-width: 380px) {
   .npc-state-delta-present-grid { gap: 6px; }
-  .npc-state-delta-present-card-overlay small { font-size: .65rem; }
+  .npc-state-delta-present-card-role, .npc-state-delta-present-now-part { font-size: .66rem; }
 }
 
 /* Native SillyTavern portrait generation */

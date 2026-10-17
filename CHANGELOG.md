@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.2.3 - 17 October 2026
+
+- **The dossiers show the chat's reply number.** The dossier header now reads **Reply #N**, the number of the latest reply in the chat, counted the way Story Block counts it (the greeting is reply #0). It used to show *Turn N*, which counted how many replies Delta had processed, so swipes, regenerates and rescans made it drift away from the chat. Changes recorded from now on carry their reply number too: the changed-field marks (• #14), the *Updated at reply #14* line (or *Updated this reply*), the Player relationship card's last change and earlier changes, and the relationship map. Changes recorded before 1.2.3 keep their old number, still labelled *turn* (hover it for a note). Swipes, deletes and rollback restore the numbers with the rest of the dossier; a dossier imported from another chat keeps its events but not that chat's reply numbers. Delta's internal turn count is unchanged and still drives its timing, and prompts, scans and requests are unchanged.
+- **Readable Present NPCs cards.** Each card now shows what the NPC is like as labelled lines under the portrait (**Mood**, **Condition**, **Outfit**, only those known), each wrapping to two lines instead of one cut-off line; hover a line for its full text. The name wraps to two lines too. This applies to the in-chat cards and Story Block's Present NPCs tab; the compact strip and the chatter bubbles are unchanged. Display only.
+
 ## 1.2.2 - 17 October 2026
 
 - **NPC profiles for the Story Suite.** Delta now also shares a short profile of each tracked NPC in the current chat with the other Story Suite extensions: name, aliases, whether they are present, a short role (the dossier's Role, or a Class/Occupation-style custom field when Role is empty) and a summary of up to 200 characters built from the dossier's role, species, ability-style custom fields (Abilities, Skills, Powers…), personality and background. RPG Battle uses it to offer the story's NPCs as companions. Archived NPCs and NPCs the dossier marks as dead (archived or not) are left out. It is read-only and built from what the dossiers already hold: no model call, no extra scan, and prompts and saved data are unchanged. Alone, nothing changes.

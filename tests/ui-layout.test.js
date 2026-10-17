@@ -16,7 +16,8 @@ test('present NPC pane uses portrait-first cards that open the launcher dossier'
     assert.match(index, /class="npc-state-delta-present-grid"/);
     assert.match(index, /class="npc-state-delta-present-card"/);
     assert.match(index, /class="npc-state-delta-present-card-portrait"/);
-    assert.match(index, /class="npc-state-delta-present-card-overlay"/);
+    assert.match(index, /class="npc-state-delta-present-card-text"/);
+    assert.match(index, /<b class="npc-state-delta-present-card-name" title="\$\{escapeHtml\(displayName\)\}">/);
     assert.doesNotMatch(index, /npc-state-delta-present-card-relation/);
     // One dossier page: cards hand off to the launcher instead of a separate quick viewer.
     assert.doesNotMatch(index + css, /npc-state-delta-viewer|function openNpcViewer|openViewer:/);
@@ -26,8 +27,11 @@ test('present NPC pane uses portrait-first cards that open the launcher dossier'
     assert.match(dossierUi, /addEventListener\('npc-state-delta:open-dossier'[\s\S]*event\.detail\.handled = true;[\s\S]*ui\.openNpc\(npcId\)/);
     assert.match(dossierUi, /if \(this\.pendingNpcId\) \{\s*this\.selectedNpcId = this\.pendingNpcId;[\s\S]*this\.filter = 'all';/, 'the requested NPC survives the chat-change reset and is not hidden by a filter');
     assert.match(css, /\.npc-state-delta-present-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fill, minmax\(118px, 160px\)\)[^}]*justify-content:\s*start/s);
-    assert.match(css, /\.npc-state-delta-present-card\s*\{[^}]*aspect-ratio:\s*3\s*\/\s*4/s);
-    assert.match(css, /\.npc-state-delta-present-card-overlay\s*\{[^}]*position:\s*absolute[^}]*bottom:\s*0[^}]*background:\s*linear-gradient/s);
+    // 1.2.3: a fixed-ratio portrait with the text in a footer under it (the name wraps to two lines).
+    assert.match(css, /\.npc-state-delta-present-card\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column/s);
+    assert.match(css, /\.npc-state-delta-present-card-portrait\s*\{[^}]*position:\s*relative[^}]*aspect-ratio:\s*4\s*\/\s*5/s);
+    assert.match(css, /\.npc-state-delta-present-card-name\s*\{[^}]*-webkit-line-clamp:\s*2/s);
+    assert.doesNotMatch(css + index, /present-card-overlay/);
 });
 
 test('present NPCs in chat support Full, Compact, Only in Story Block and Off display modes', () => {

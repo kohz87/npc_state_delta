@@ -542,8 +542,8 @@ try {
     assert.match(inlineAnchors[0].innerHTML, /npc-state-delta-present-card/);
     assert.match(inlineAnchors[0].innerHTML, /Yunyun/);
     assert.doesNotMatch(inlineAnchors[0].innerHTML, />Wiz</);
-    assert.match(inlineAnchors[0].innerHTML, /npc-state-delta-present-card-overlay/);
-    assert.match(inlineAnchors[0].innerHTML, /<small>adventurer(?: · [^<]+)?<\/small>/i);
+    assert.match(inlineAnchors[0].innerHTML, /npc-state-delta-present-card-text/);
+    assert.match(inlineAnchors[0].innerHTML, /<small class="npc-state-delta-present-card-role" title="[^"]*">adventurer(?: · [^<]+)?<\/small>/i);
     assert.doesNotMatch(inlineAnchors[0].innerHTML, /T \+3 · A -9|npc-state-delta-present-card-relation/, 'gallery cards should keep relationship metrics in the launcher dossier');
     assert.doesNotMatch(inlineAnchors[0].innerHTML, /Desire|Mannerisms|Species \/ Race|Copy portrait prompts|Current thoughts|Thought basis/, 'portrait grid should stay compact; detailed fields belong in the launcher dossier');
     // Present-cast cards hand off to the launcher dossier (dossier-ui listens for this request).

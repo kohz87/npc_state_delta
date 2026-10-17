@@ -600,6 +600,14 @@ export function filterRelationshipDeltaByEvidence(delta, evidence, context = '')
     ]));
 }
 
+// Display-only (1.2.3): the chat message index of the reply a relationship change was recorded
+// at, shown as "reply #N". `turn` stays Delta's own counter for duplicate/recency checks; events
+// recorded before 1.2.3 have no `message`.
+export function relationshipEventMessage(raw = {}) {
+    const message = Number(raw?.message);
+    return Number.isInteger(message) && message >= 0 ? { message } : {};
+}
+
 export function normalizeRelationshipEventHistory(value = []) {
     const source = Array.isArray(value) ? value : [];
     const out = [];
@@ -614,6 +622,7 @@ export function normalizeRelationshipEventHistory(value = []) {
             evidence,
             sourceMessageId: Number.isInteger(raw.sourceMessageId) ? raw.sourceMessageId : null,
             ...(Number.isFinite(Number(raw.turn)) ? { turn: Number(raw.turn) } : {}),
+            ...relationshipEventMessage(raw),
         });
     }
     return out.slice(-RELATIONSHIP_EVENT_HISTORY_LIMIT);
@@ -3879,6 +3888,7 @@ export function normalizeNpcRecord(raw = {}) {
             reason: auditReason,
             sourceMessageId: Number.isInteger(lastChange.sourceMessageId) ? lastChange.sourceMessageId : null,
             ...(Number.isFinite(Number(lastChange.turn)) ? { turn: Number(lastChange.turn) } : {}),
+            ...relationshipEventMessage(lastChange),
         };
     if (!npc.relationshipEventHistory.length
         && npc.lastRelationshipChange.impact !== 'none'
@@ -4512,6 +4522,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
                 reason: incoming.relationshipChangeReason || '',
                 sourceMessageId: Number.isInteger(sourceMessageId) ? sourceMessageId : null,
                 turn: Number.isFinite(Number(turn)) ? Number(turn) : null,
+                ...relationshipEventMessage({ message: sourceMessageId }),
             };
             merged.relationshipEventHistory = appendRelationshipEvent(existing.relationshipEventHistory, event);
             merged.lastRelationshipChange = relationshipStateAdvanced

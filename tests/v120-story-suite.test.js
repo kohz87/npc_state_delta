@@ -922,7 +922,7 @@ test('v1.2.2 the runtime: tokens() measures the live injection, shows: chatter, 
         // Alone: the now line is Delta's own; chatter bubbles beside the speakers; Others for Megumin.
         const alone = globalThis.NPCStateDelta.presentCastHtml();
         assert.match(alone, /data-delta-scene="/);
-        assert.match(alone, /class="npc-state-delta-present-now" data-delta-text/);
+        assert.match(alone, /class="npc-state-delta-present-now"><span class="npc-state-delta-present-now-part npc-state-delta-present-now-mood" data-delta-title="\d+"><span class="npc-state-delta-present-now-label">Mood:<\/span> <span class="npc-state-delta-present-now-text" data-delta-text/);
         assert.doesNotMatch(alone, /present-now-world/, 'without Story Block keeping the scene, Delta\'s own now line');
         assert.match(alone, /npc-state-delta-present-cell-chatter[\s\S]*npc-state-delta-chatter-speech/);
         assert.match(alone, /npc-state-delta-chatter-others/);

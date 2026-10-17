@@ -307,21 +307,42 @@ export function normalizeFieldChangeDays(value) {
     return out;
 }
 
-function stampFieldChanges(before, after, turn, storyDay = null) {
+// Display-only counterpart of fieldChanges (1.2.3): the chat message index of the reply a change
+// was recorded at, the numbering Story Block shows as "reply #N". fieldChanges keeps Delta's own
+// turn counter, which recency and Refresh age rely on; a field without an entry predates 1.2.3.
+export function normalizeFieldChangeMessages(value) {
+    const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const out = {};
+    for (const field of CHANGE_TRACKED_FIELDS) {
+        const message = Number(source[field]);
+        if (Number.isInteger(message) && message >= 0) out[field] = message;
+    }
+    return out;
+}
+
+function stampFieldChanges(before, after, turn, storyDay = null, message = null) {
     const changes = normalizeFieldChanges(after?.fieldChanges ?? before?.fieldChanges);
     const days = normalizeFieldChangeDays(after?.fieldChangeDays ?? before?.fieldChangeDays);
-    const withDays = next => (Object.keys(days).length ? { ...next, fieldChangeDays: days } : next);
-    if (!before || !Number.isInteger(turn) || turn < 0) return withDays({ ...after, fieldChanges: changes });
+    const messages = normalizeFieldChangeMessages(after?.fieldChangeMessages ?? before?.fieldChangeMessages);
+    const withExtras = next => {
+        const out = Object.keys(days).length ? { ...next, fieldChangeDays: days } : next;
+        if (Object.keys(messages).length) out.fieldChangeMessages = messages;
+        else delete out.fieldChangeMessages;
+        return out;
+    };
+    if (!before || !Number.isInteger(turn) || turn < 0) return withExtras({ ...after, fieldChanges: changes });
     for (const field of CHANGE_TRACKED_FIELDS) {
         if (JSON.stringify(trackedFieldValue(before, field)) !== JSON.stringify(trackedFieldValue(after, field))) {
             changes[field] = turn;
+            if (Number.isInteger(message) && message >= 0) messages[field] = message;
+            else delete messages[field];
             if (Number.isInteger(storyDay) && DAY_TRACKED_FIELDS.includes(field)) {
                 days[field] = storyDay;
                 days.scheme = STORY_DAY_SCHEME;
             }
         }
     }
-    return withDays({ ...after, fieldChanges: changes });
+    return withExtras({ ...after, fieldChanges: changes });
 }
 
 function matchingPrevious(npc, source = []) {
@@ -1677,6 +1698,9 @@ export function normalizeNpcRecord(raw = {}) {
     const fieldChangeDays = normalizeFieldChangeDays(raw.fieldChangeDays);
     if (Object.keys(fieldChangeDays).length) npc.fieldChangeDays = fieldChangeDays;
     else delete npc.fieldChangeDays;
+    const fieldChangeMessages = normalizeFieldChangeMessages(raw.fieldChangeMessages);
+    if (Object.keys(fieldChangeMessages).length) npc.fieldChangeMessages = fieldChangeMessages;
+    else delete npc.fieldChangeMessages;
     for (const field of Object.keys(PROFILE_DEVELOPMENT_FIELDS)) {
         const config = PROFILE_DEVELOPMENT_FIELDS[field];
         const development = profileDevelopmentForNpc(field, npc);
@@ -1768,7 +1792,8 @@ export function mergeScanResult(state, scanResult, rawOptions = {}) {
         }
         const finalNpc = withAppearanceDerivedApparentAge(npc, ordinaryUpdate?.appearance || rawNpc.appearance);
         const changeBase = rawSources[0] ? normalizeNpcRecord(rawSources[0]) : null;
-        return stampFieldChanges(changeBase, finalNpc, Math.trunc(Number(result.state?.turn ?? sourceState?.turn)), options.storyDay);
+        return stampFieldChanges(changeBase, finalNpc, Math.trunc(Number(result.state?.turn ?? sourceState?.turn)), options.storyDay,
+            Number.isInteger(options.sourceMessageId) ? options.sourceMessageId : null);
     });
     if (reference.extracted) {
         result.report = {
@@ -1830,4 +1855,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.2.2';
+export const NPC_STATE_VERSION = '1.2.3';

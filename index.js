@@ -37,6 +37,7 @@ import {
     applyRelationshipMilestoneCrossings,
     normalizeRelationshipEvidence,
     normalizeRelationshipEventHistory,
+    relationshipEventMessage,
     appendRelationshipEvent,
     applyRelationshipDelta,
     relationshipChangeReasonGrounded,
@@ -3626,6 +3627,7 @@ function applyFocusedRelationshipDecisions(state, decisions, caps, sourceMessage
                 reason: decision.relationshipChangeReason || '',
                 sourceMessageId: Number.isInteger(sourceMessageId) ? sourceMessageId : null,
                 turn: Number.isFinite(Number(state.turn)) ? Number(state.turn) : null,
+                ...relationshipEventMessage({ message: sourceMessageId }),
             };
             npc.relationshipEventHistory = appendRelationshipEvent(npc.relationshipEventHistory, event);
             if (relationshipStateAdvanced) npc.lastRelationshipChange = event;
@@ -4391,6 +4393,16 @@ function relationshipNumber(value) {
     return Number.isFinite(number) ? Math.round(Math.max(-100, Math.min(100, number))) : 0;
 }
 
+// The chat message index of the latest assistant reply (the greeting is 0), or -1: the number Story
+// Block shows as "reply #N" and the dossiers show for changes recorded since 1.2.3.
+function latestReplyIndex() {
+    const chat = getContext().chat || [];
+    for (let i = chat.length - 1; i >= 0; i -= 1) {
+        if (chat[i] && !chat[i].is_system && !chat[i].is_user) return i;
+    }
+    return -1;
+}
+
 function latestMessageId(preferAssistant = false) {
     const chat = getContext().chat || [];
     if (preferAssistant) {
@@ -4564,16 +4576,17 @@ function portraitMarkup(npc, displayName, placeholderClass = 'npc-state-delta-in
 function inlineCardHtml(npc, messageId, scene = null) {
     if (!npc || npc.archived || !npc.present || npc.minor) return '';
     const displayName = npc.name || 'NPC';
-    // With a now line (mood · condition · outfit) the identity line keeps only the role.
+    // With now lines (Mood, Condition, Outfit) the identity line keeps only the role. The text sits
+    // under the portrait so the name and the now lines can wrap instead of being cut to one line.
     const now = nowSlotHtml(scene, npc.id);
     const identityLine = (now ? npc.role : [npc.role, npc.mood].filter(Boolean).join(' · ')) || 'Present NPC';
     const portrait = portraitMarkup(npc, displayName, 'npc-state-delta-present-card-placeholder');
     const card = `
       <button type="button" class="npc-state-delta-present-card" data-npc-id="${escapeHtml(npc.id)}" data-message-id="${messageId}" aria-label="Open ${escapeHtml(displayName)} dossier">
         <span class="npc-state-delta-present-card-portrait">${portrait}</span>
-        <span class="npc-state-delta-present-card-overlay">
-          <b>${escapeHtml(displayName)}</b>
-          <small>${escapeHtml(identityLine)}</small>${now}
+        <span class="npc-state-delta-present-card-text">
+          <b class="npc-state-delta-present-card-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</b>
+          <small class="npc-state-delta-present-card-role" title="${escapeHtml(identityLine)}">${escapeHtml(identityLine)}</small>${now}
         </span>
       </button>`;
     const chatter = chatterSlotsHtml(scene, npc.id);
@@ -5757,6 +5770,7 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
             reason: 'Manual dossier adjustment by player.',
             sourceMessageId: latestMessageId(false),
             turn: Number.isFinite(Number(state.turn)) ? Number(state.turn) : null,
+            ...relationshipEventMessage({ message: latestReplyIndex() }),
         };
     }
     const stableKeys = ['name', 'role', 'species', 'gender', 'homeBase', 'age', 'apparentAge', 'personality', 'speech', 'behaviorProfile', 'background', 'mannerisms', 'keyRelationships', 'customFields', 'aliases'];
@@ -7490,7 +7504,7 @@ window.NPCStateDelta = Object.freeze({
             formPortraits[npcId] = Object.fromEntries(Object.values(forms || {}).filter(portrait => portrait?.dataUrl)
                 .map(portrait => [portrait.form, { dataUrl: portrait.dataUrl, appearanceFingerprint: portrait.appearanceFingerprint || '' }]));
         }
-        return { turn: state.turn, npcs: structuredClone(state.npcs), portraitAssets: {}, formPortraits };
+        return { turn: state.turn, reply: latestReplyIndex(), npcs: structuredClone(state.npcs), portraitAssets: {}, formPortraits };
     },
     persistenceStatus: () => {
         const key = getChatKey();

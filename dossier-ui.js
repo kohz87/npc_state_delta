@@ -36,14 +36,53 @@ function relationshipValue(value) {
 
 const RELATIONSHIP_AXES = Object.freeze([['trust', 'Trust'], ['affection', 'Affection'], ['desire', 'Desire'], ['tension', 'Tension']]);
 
+function wholeNumber(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const number = Number(value);
+    return Number.isInteger(number) && number >= 0 ? number : null;
+}
+
+// Reply numbers (1.2.3). A change recorded with its reply's chat message index shows "reply #N", the
+// numbering Story Block shows (the greeting is reply #0). A record from before 1.2.3 has only Delta's
+// own scan counter, which drifts from the chat with swipes and rescans; it keeps its old "turn N".
+const LEGACY_TURN_NOTE = "Delta's own scan count, recorded before 1.2.3; it is not the reply number";
+
+export function changeStamp(record = {}) {
+    const message = wholeNumber(record?.message);
+    if (message !== null) {
+        return { message, legacy: false, text: `reply #${message}`, label: `Reply #${message}`, mark: `#${message}`, title: `Changed at reply #${message}` };
+    }
+    const turn = record?.turn === null || record?.turn === undefined || record?.turn === '' ? NaN : Number(record.turn);
+    if (!Number.isFinite(turn)) return { message: null, legacy: false, text: '', label: '', mark: '', title: '' };
+    return { message: null, legacy: true, text: `turn ${turn}`, label: `Turn ${turn}`, mark: `T${turn}`, title: `Changed at turn ${turn} (${LEGACY_TURN_NOTE})` };
+}
+
+// The dossier header: the latest assistant reply's message index, as Story Block's "reply #N".
+export function replyHeaderLabel(projection = {}) {
+    if (!projection?.chatKey || projection.chatKey === 'no-chat') return 'No chat';
+    if (projection.hydrationStatus && projection.hydrationStatus !== 'ready') return projection.hydrationStatus === 'error' ? 'Unavailable' : 'Loading…';
+    const reply = wholeNumber(projection.reply);
+    return reply === null ? 'No replies yet' : `Reply #${reply}`;
+}
+
+function stampHtml(stamp, tag = 'small', className = '') {
+    if (!stamp.label) return '';
+    const classes = [className, stamp.legacy ? 'delta-legacy-turn' : ''].filter(Boolean).join(' ');
+    return `<${tag}${classes ? ` class="${classes}"` : ''}${stamp.legacy ? ` title="${escapeHtml(stamp.title)}"` : ''}>${escapeHtml(stamp.label)}</${tag}>`;
+}
+
 function relationshipChangeProjection(change = {}) {
     const source = change && typeof change === 'object' ? change : {};
     const delta = source.delta && typeof source.delta === 'object' ? source.delta : {};
+    const turn = Number.isFinite(Number(source.turn)) ? Number(source.turn) : null;
+    const message = wholeNumber(source.message);
     return {
         impact: plain(source.impact, 'none').toLocaleLowerCase(),
         delta: Object.fromEntries(RELATIONSHIP_AXES.map(([axis]) => [axis, Math.round(Number(delta[axis]) || 0)])),
         reason: plain(source.reason),
-        turn: Number.isFinite(Number(source.turn)) ? Number(source.turn) : null,
+        turn,
+        message,
+        when: changeStamp({ turn, message }).label,
     };
 }
 
@@ -54,15 +93,21 @@ const FIELD_CHANGE_LABELS = Object.freeze({
     relationshipSummary: 'Player Dynamic', background: 'Background', keyRelationships: 'Bonds', memories: 'Memories', birthDate: 'Birthday',
 });
 
-function fieldChangesProjection(value) {
+// Latest is still decided by Delta's turn counter; the reply number shows only when every field of
+// that latest change carries the same one (a change from before 1.2.3 has none).
+function fieldChangesProjection(value, messageValue) {
     const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const messages = messageValue && typeof messageValue === 'object' && !Array.isArray(messageValue) ? messageValue : {};
     const turns = Object.fromEntries(Object.keys(FIELD_CHANGE_LABELS)
         .map(field => [field, Number(source[field])])
         .filter(([, turn]) => Number.isInteger(turn) && turn >= 0));
     const latestTurn = Object.values(turns).reduce((max, turn) => Math.max(max, turn), -1);
+    const latest = latestTurn >= 0 ? Object.keys(turns).filter(field => turns[field] === latestTurn) : [];
+    const latestMessages = [...new Set(latest.map(field => wholeNumber(messages[field])))];
     return {
         latestTurn: latestTurn >= 0 ? latestTurn : null,
-        latest: latestTurn >= 0 ? Object.keys(turns).filter(field => turns[field] === latestTurn) : [],
+        latest,
+        message: latestMessages.length === 1 ? latestMessages[0] : null,
     };
 }
 
@@ -155,7 +200,7 @@ export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortr
             .map(([name, value]) => [plain(name), plain(value)]).filter(([name, value]) => name && value).slice(0, 12),
         relationshipSummary: plain(npc?.relationshipSummary),
         lastRelationshipChange: relationshipChangeProjection(npc?.lastRelationshipChange),
-        fieldChanges: fieldChangesProjection(npc?.fieldChanges),
+        fieldChanges: fieldChangesProjection(npc?.fieldChanges, npc?.fieldChangeMessages),
         portraitAppearanceChanged: portraitAppearanceChanged(npc, shown),
         portraitForm: shown.form,
         recentRelationshipChanges: (Array.isArray(npc?.relationshipEventHistory) ? npc.relationshipEventHistory : [])
@@ -165,6 +210,7 @@ export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortr
                 impact: plain(event?.impact, 'ordinary').toLocaleLowerCase(),
                 reason: plain(event?.reason),
                 turn: Number.isFinite(Number(event?.turn)) ? Number(event.turn) : null,
+                message: wholeNumber(event?.message),
             }))
             .filter(event => event.reason),
         relationship: {
@@ -237,6 +283,7 @@ export function projectDossierState(state = {}, status = {}) {
         hydrationStatus: plain(status?.hydrationStatus, 'ready'),
         hydrationError: plain(status?.hydrationError),
         turn: Number.isFinite(Number(state?.turn)) ? Number(state.turn) : 0,
+        reply: wholeNumber(state?.reply) ?? -1,
         npcs: details,
         index: sortDossierIndex(details.map(npc => ({
             id: npc.id,
@@ -293,19 +340,22 @@ function identityLine(npc) {
 function changedMark(npc, field) {
     const changes = npc?.fieldChanges;
     if (!changes?.latest?.includes(field)) return '';
-    return ` <em class="delta-changed-mark" title="Changed at turn ${escapeHtml(changes.latestTurn)}">• T${escapeHtml(changes.latestTurn)}</em>`;
+    const stamp = changeStamp({ turn: changes.latestTurn, message: changes.message });
+    return ` <em class="delta-changed-mark${stamp.legacy ? ' delta-legacy-turn' : ''}" title="${escapeHtml(stamp.title)}">• ${escapeHtml(stamp.mark)}</em>`;
 }
 
 function currentCard(label, value, fallback = 'Unknown', mark = '') {
     return `<div class="delta-current-card${mark ? ' delta-changed' : ''}"><b>${escapeHtml(label)}${mark}</b><span>${escapeHtml(plain(value, fallback))}</span></div>`;
 }
 
-function changeSummaryHtml(npc, currentTurn) {
+export function changeSummaryHtml(npc, current = {}) {
     const changes = npc?.fieldChanges;
     if (!changes || changes.latestTurn === null) return '';
-    const when = Number.isInteger(currentTurn) && currentTurn === changes.latestTurn ? 'this turn' : `turn ${changes.latestTurn}`;
+    const stamp = changeStamp({ turn: changes.latestTurn, message: changes.message });
+    let when = `<span class="delta-legacy-turn" title="${escapeHtml(stamp.title)}">${escapeHtml(stamp.text)}</span>`;
+    if (!stamp.legacy) when = stamp.message === wholeNumber(current?.reply) ? 'this reply' : `at ${escapeHtml(stamp.text)}`;
     const labels = changes.latest.map(field => FIELD_CHANGE_LABELS[field]).filter(Boolean);
-    return `<p class="delta-change-line"><span class="delta-changed-dot" aria-hidden="true">•</span> Updated ${escapeHtml(when)} · ${labels.length} field${labels.length === 1 ? '' : 's'} changed${labels.length ? `: ${escapeHtml(labels.join(', '))}` : ''}</p>`;
+    return `<p class="delta-change-line"><span class="delta-changed-dot" aria-hidden="true">•</span> Updated ${when} · ${labels.length} field${labels.length === 1 ? '' : 's'} changed${labels.length ? `: ${escapeHtml(labels.join(', '))}` : ''}</p>`;
 }
 
 function birthdayCard(npc) {
@@ -388,7 +438,7 @@ export function lastRelationshipChangeHtml(change) {
         })
         .join('');
     return `<div class="delta-rel-last">
-        <div class="delta-rel-last-head"><h4>Last relationship change</h4><span class="delta-rel-impact delta-rel-impact-${escapeHtml(change.impact)}">${escapeHtml(impactLabel(change.impact))}</span>${change.turn !== null ? `<small>Turn ${escapeHtml(change.turn)}</small>` : ''}</div>
+        <div class="delta-rel-last-head"><h4>Last relationship change</h4><span class="delta-rel-impact delta-rel-impact-${escapeHtml(change.impact)}">${escapeHtml(impactLabel(change.impact))}</span>${stampHtml(changeStamp(change))}</div>
         <div class="delta-rel-deltas">${deltas || '<span class="delta-rel-delta delta-rel-delta-progress">Progress only · no point change</span>'}</div>
         ${change.reason ? `<p>${escapeHtml(change.reason)}</p>` : ''}
     </div>`;
@@ -399,7 +449,7 @@ function relationshipHistoryHtml(history, latest) {
         .filter((event, index) => !(index === 0 && latest?.reason && event.reason === latest.reason))
         .slice(0, 3);
     if (!rows.length) return '';
-    return `<div class="delta-rel-history"><h4>Earlier changes</h4><ul class="delta-list">${rows.map(event => `<li><span class="delta-rel-impact delta-rel-impact-${escapeHtml(event.impact)}">${escapeHtml(impactLabel(event.impact))}</span>${event.turn !== null ? ` <small class="delta-muted">Turn ${escapeHtml(event.turn)}</small>` : ''} ${escapeHtml(event.reason)}</li>`).join('')}</ul></div>`;
+    return `<div class="delta-rel-history"><h4>Earlier changes</h4><ul class="delta-list">${rows.map(event => `<li><span class="delta-rel-impact delta-rel-impact-${escapeHtml(event.impact)}">${escapeHtml(impactLabel(event.impact))}</span>${changeStamp(event).label ? ` ${stampHtml(changeStamp(event), 'small', 'delta-muted')}` : ''} ${escapeHtml(event.reason)}</li>`).join('')}</ul></div>`;
 }
 
 const DOSSIER_SECTIONS = Object.freeze([
@@ -739,8 +789,8 @@ class DeltaDossierUi {
         const projection = this.projection;
         const hasChat = projection.chatKey && projection.chatKey !== 'no-chat';
 
-        const turnLabel = hasChat ? `Turn ${projection.turn}` : 'No chat';
-        if (chatState.textContent !== turnLabel) chatState.textContent = turnLabel;
+        const replyLabel = replyHeaderLabel(projection);
+        if (chatState.textContent !== replyLabel) chatState.textContent = replyLabel;
         notice.hidden = true;
         if (notice.textContent) notice.textContent = '';
 
@@ -816,7 +866,7 @@ class DeltaDossierUi {
         const selectedVisible = filtered.some(row => row.id === this.selectedNpcId);
         const subtitle = selected ? identityLine(selected) : '';
         const signature = selectedVisible && selected
-            ? JSON.stringify({ ...selected, portrait: undefined, updatedAt: undefined }) : `empty:${this.filter}:${this.query}`;
+            ? JSON.stringify({ ...selected, portrait: undefined, updatedAt: undefined, reply: this.projection.reply }) : `empty:${this.filter}:${this.query}`;
         const heroSignature = selectedVisible && selected
             ? JSON.stringify([selected.id, selected.name, subtitle, selected.bucket, selected.statusLabel, selected.portrait, selected.portraitAppearanceChanged, selected.appearanceModel.currentForm]) : signature;
         const documentChanged = force || signature !== this.lastDetailSignature;
@@ -847,7 +897,7 @@ class DeltaDossierUi {
 
         if (documentChanged) reconcileDocumentSections(documentPane, `
             <div class="delta-document-head">
-                <div><span class="delta-kicker">CURRENT DOSSIER</span><h2>${escapeHtml(selected.name)}</h2><p class="delta-muted">${escapeHtml(subtitle)}</p>${changeSummaryHtml(selected, this.projection?.turn)}</div>
+                <div><span class="delta-kicker">CURRENT DOSSIER</span><h2>${escapeHtml(selected.name)}</h2><p class="delta-muted">${escapeHtml(subtitle)}</p>${changeSummaryHtml(selected, this.projection)}</div>
                 <button type="button" class="delta-btn delta-edit" data-npc-id="${escapeHtml(selected.id)}">Edit</button>
             </div>
             ${sectionNavHtml()}
@@ -1130,6 +1180,7 @@ const STYLES = `
 #${ROOT_ID} .delta-rel-history li .delta-rel-impact { margin-right:4px; }
 #${ROOT_ID} .delta-change-line { margin:6px 0 0 !important; font-size:.78rem; color:var(--delta-muted); }
 #${ROOT_ID} .delta-changed-dot, #${ROOT_ID} .delta-changed-mark { color:#9fd8b5; }
+#${ROOT_ID} .delta-legacy-turn { cursor:help; }
 #${ROOT_ID} .delta-changed-mark { margin-left:4px; font-style:normal; font-size:.66rem; letter-spacing:.02em; text-transform:none; font-weight:600; }
 #${ROOT_ID} .delta-current-card.delta-changed { border-color:rgba(113,190,145,.32); }
 #${ROOT_ID} .delta-portrait-stale { position:absolute; z-index:3; top:12px; left:12px; max-width:calc(100% - 70px); padding:4px 9px; border:1px solid rgba(216,188,120,.55); border-radius:999px; color:#ffe2a8; background:rgba(5,6,8,.62); backdrop-filter:blur(3px); font-size:.72rem; }

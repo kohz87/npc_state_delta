@@ -97,7 +97,7 @@ function stripHtml(model, persona) {
         </div>`;
     }).join('');
     const last = selected.lastReason
-        ? `${selected.lastTurn ? `<b>${escapeHtml(selected.lastTurn)}</b> ` : ''}${escapeHtml(selected.lastReason)}`
+        ? `${selected.lastWhen ? `<b>${escapeHtml(selected.lastWhen)}</b> ` : ''}${escapeHtml(selected.lastReason)}`
         : 'No relationship change recorded yet.';
     return `<section class="delta-map-strip" aria-label="${escapeHtml(`${selected.name} toward ${persona}`)}">
         <div class="delta-map-strip-head"><b>${escapeHtml(selected.name)}</b><small>toward ${escapeHtml(persona)}</small></div>
@@ -112,7 +112,7 @@ function paneHtml(model, { phone, persona }) {
     const lenses = MAP_LENSES.map(item => `<button type="button" class="delta-map-lens" data-map-lens="${item.key}" aria-pressed="${item.key === model.lens}">${item.label}</button>`).join('');
     const toggles = `<button type="button" class="delta-map-toggle" data-map-toggle="bonds" aria-pressed="${view.allBonds}">${phone ? 'Bonds' : 'All bonds'}</button>`;
     const hint = model.allZero
-        ? `<div class="delta-map-hint">Turn ${model.turn}: nobody has moved yet. Everyone starts on the neutral ring and drifts in or out as the story changes how they feel about ${escapeHtml(persona)}.</div>` : '';
+        ? `<div class="delta-map-hint">${model.reply >= 0 ? `Reply #${model.reply}: nobody` : 'Nobody'} has moved yet. Everyone starts on the neutral ring and drifts in or out as the story changes how they feel about ${escapeHtml(persona)}.</div>` : '';
     const more = model.total > model.shownCount ? ` · Showing ${model.shownCount} of ${model.total}; the rest are in the library` : '';
     const map = model.nodes.length
         ? `<div class="delta-map">${svgHtml(model)}<div class="delta-map-you" title="${escapeHtml(persona)}">${escapeHtml(persona)}</div>${model.nodes.map(nodeHtml).join('')}${hint}</div>`

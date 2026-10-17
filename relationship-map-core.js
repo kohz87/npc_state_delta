@@ -163,6 +163,7 @@ export function buildMapModel(projection = {}, { selectedId = '', lens = 'warmth
     const change = selected?.lastRelationshipChange || {};
     return {
         turn,
+        reply: Number.isInteger(projection?.reply) && projection.reply >= 0 ? projection.reply : -1,
         lens,
         nodes,
         lines,
@@ -179,7 +180,8 @@ export function buildMapModel(projection = {}, { selectedId = '', lens = 'warmth
                 delta: change.turn !== null && Number(change.turn) === turn ? score(change.delta?.[key]) : 0,
                 on: lens === key || (lens === 'warmth' && (key === 'trust' || key === 'affection')),
             })),
-            lastTurn: change.turn === null || change.turn === undefined ? '' : `T${change.turn}`,
+            // The dossier projection's label: "Reply #N" (1.2.3), or "Turn N" for an older record.
+            lastWhen: plain(change.when),
             lastReason: plain(change.reason),
         } : null,
     };

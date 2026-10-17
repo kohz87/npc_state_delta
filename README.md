@@ -1,8 +1,8 @@
-# NPC State Delta v1.2.2
+# NPC State Delta v1.2.3
 
 A SillyTavern extension that keeps a living dossier for every NPC in your roleplay: who they are, how they look, how they talk and behave, what they remember, and how they feel about you. After each reply it scans the story, updates the dossiers carefully, and feeds the present NPCs back to the roleplay model so they stay in character.
 
-**Current release:** 1.2.2 · [Changelog](CHANGELOG.md) · [Development guide](DEVELOPMENT.md)
+**Current release:** 1.2.3 · [Changelog](CHANGELOG.md) · [Development guide](DEVELOPMENT.md)
 
 ---
 
@@ -42,7 +42,7 @@ A SillyTavern extension that keeps a living dossier for every NPC in your rolepl
 ## Install and update
 
 1. In SillyTavern, open **Extensions → Install extension** and paste this repository's URL.
-   Or unpack `npc_state_delta-1.2.2.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
+   Or unpack `npc_state_delta-1.2.3.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
 2. Reload SillyTavern.
 3. **Before updating an existing install,** export a backup from **Data & maintenance → Backup / Export**.
 
@@ -79,7 +79,7 @@ With [Story Block](https://github.com/kohz87/Story_block) installed, Delta adds 
 - **👥 Present NPCs:** the same cards as in the chat, for whoever is present in the latest scene.
 - **📇 Dossiers:** every dossier with a search box. The dead stay out of the list until you search for them. Tap a row to open that dossier.
 
-Each present NPC's card carries a *now* line: mood · condition · outfit, from Story Block's World State for the latest reply while Story Block keeps the scene (Source of truth → Scene), otherwise from the dossier. With Story Block's **NPC Inner Chatter** block on, each line of chatter appears as a bubble beside the speaker's card, in the chatter's order: speech bubbles when two or more NPCs whisper, a thought bubble when only one has a line. On wide screens the bubble sits beside the card, on phones under it; lines from someone without a card go to a small *Others* line under the cards. Story Block then hides its own Chatter tab (the block is still written as before). All of this is display only.
+Each present NPC's card shows, under the portrait, what they are like now as labelled lines: **Mood**, **Condition** and **Outfit** (only those known, each wrapping to two lines; hover a line for its full text), from Story Block's World State for the latest reply while Story Block keeps the scene (Source of truth → Scene), otherwise from the dossier. With Story Block's **NPC Inner Chatter** block on, each line of chatter appears as a bubble beside the speaker's card, in the chatter's order: speech bubbles when two or more NPCs whisper, a thought bubble when only one has a line. On wide screens the bubble sits beside the card, on phones under it; lines from someone without a card go to a small *Others* line under the cards. Story Block then hides its own Chatter tab (the block is still written as before). All of this is display only.
 
 While Story Block is installed, the cast shows only in Story Block until you pick a choice under **Roster & continuity → Present NPCs in chat**. Pick **Full cards** or **Compact strip** to keep it in the chat as well; **Only in Story Block** shows full cards in the chat when Story Block isn't installed. The tabs are display only and change nothing in prompts, scans or saved data. Without Story Block nothing changes.
 
@@ -155,6 +155,7 @@ There are twelve categories:
 - **Trust, Affection, Desire and Tension** each run from −100 to +100 and only describe how the NPC feels about **you**.
 - Each scan can move them by a small amount capped by how big the moment was (ordinary, meaningful, major, extreme). Every change records its reason, shown on the dossier's Player relationship card.
 - The roleplay model gets a short qualitative description, never raw numbers. Personality and levers come first, and the relationship only tints them. A reserved NPC stays reserved even when they like you.
+- **Reply numbers:** the dossier header shows **Reply #N**, the latest reply's number in the chat as Story Block counts it (the greeting is reply #0). Changed fields (• #14), the *Updated at reply #14* line and each relationship change show the reply they were recorded at. Changes recorded before 1.2.3 show Delta's older internal count, labelled *turn N*, instead.
 - **Map view:** the **Dossier | Map** switch in the dossier panel (or **See on map** on the Player relationship card) puts you at the centre and every NPC around you. The closer they sit, the higher the chosen value (Warmth, Trust, Affection, Desire or Tension); lines are Important Bonds between NPCs, and a gold badge marks this turn's change. Picking someone on the map selects their dossier. Everyone in the scene and active off-screen is always shown, plus the strongest of the rest (24, or 16 on a phone); archived NPCs appear dimmed, while the dead and stale removals are left out. The map only reads the dossiers and never changes them.
 
 ### Appearance, outfits and forms
@@ -215,6 +216,7 @@ There are twelve categories:
 - **Delete or regenerate:** dossiers roll back to the message you returned to. NPCs who only appeared in the removed messages are removed too.
 - **Deleting a message from the middle:** later messages were scanned on top of it, so dossiers are not rewound. Instead, everything the deleted message itself changed is undone wherever nothing later touched it: each field returns to how it was before the message (relationship values and the Last relationship change card, mood, appearance, memories the message added, an NPC who only appeared in it, and so on). A field a later message also changed is kept, and confirmed deaths stay unless the deleted message caused the death. Delta tells you when this happens. To rewind everything instead, turn on **Rewind dossiers on middle deletion** (Roster & continuity): every dossier returns to exactly how it was just before the deleted message and whatever the later messages changed is discarded, with no model requests.
 - **Edits deep in the past:** if an edit can't be replayed exactly, current dossiers are kept rather than guessed.
+- **Reply numbers** follow the branch: a swipe or a rolled-back delete restores them with the rest of the dossier. After a message is deleted from the middle (without **Rewind dossiers on middle deletion**), changes recorded at later replies keep the number the reply had when they were recorded until that field changes again.
 - The rollback journal covers the last 256 messages. Full snapshots are size-limited (8 MB total, 2 MB each).
 
 ## Data, backups and multiple devices
@@ -250,12 +252,12 @@ npm test                        # unit, compatibility and synthetic-host tests
 npm run validate                # inventory, isolation, version and ownership checks
 npm run measure:prompts         # prompt size measurements
 node scripts/measure-stage9.mjs # prompt/request budget baseline
-npm run package                 # builds dist/npc_state_delta-1.2.2.zip and its SHA-256
+npm run package                 # builds dist/npc_state_delta-1.2.3.zip and its SHA-256
 git diff --check
 ```
 
 - `runtime-modules.json` is the single inventory of shipped modules. The package contains only the runtime modules, stylesheet, manifest, inventory, license and README.
-- Application version 1.2.2 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
+- Application version 1.2.3 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
 - Behaviour is governed by [AGENTS.md](AGENTS.md), [the core contract](docs/core-contract.md) and [the workplan](docs/WORKPLAN.md). Development commands, evidence and limits are in [DEVELOPMENT.md](DEVELOPMENT.md).
 - Historical reviews: [1.0.28](docs/v1.0.28-review.md), [1.0.27 prefix cache](docs/v1.0.27-review.md), [Stage 9](docs/stage9-review.md). Seed provenance is in `docs/seed-provenance.*`.
 

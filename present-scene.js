@@ -1,4 +1,5 @@
-// Present NPCs view, display only: a "now" line (mood · condition · outfit) on each present card,
+// Present NPCs view, display only: what each present NPC is like now (labelled Mood, Condition and
+// Outfit lines, 1.2.3; one "mood · condition · outfit" line in 1.2.2) on each present card,
 // and Story Block's NPC Inner Chatter shown as bubbles beside the speakers' cards. Everything
 // here is pure except fillPresentSceneText, which writes the shaped strings into slots with
 // textContent. Nothing reads or writes dossier state, prompts, scans or saved data; without Story
@@ -6,8 +7,11 @@
 import { normalizeName, npcNamedInText } from './core-mechanics.js';
 import { trimAtWord } from './suite-handshake.js';
 
-export const NOW_PART_MAX = 48;
-export const NOW_LINE_MAX = 120;
+// Each labelled now line shows up to NOW_PART_MAX characters (the card clamps it to two lines) and
+// carries up to NOW_TITLE_MAX in its tooltip, so a long mood or outfit stays readable.
+export const NOW_PART_MAX = 160;
+export const NOW_TITLE_MAX = 400;
+export const NOW_PARTS = Object.freeze([['mood', 'Mood'], ['condition', 'Condition'], ['outfit', 'Outfit']]);
 export const CHATTER_LINE_MAX = 240;
 export const CHATTER_LINE_LIMIT = 12;
 
@@ -174,10 +178,13 @@ export function matchPresentCard(name, cards = [], roster = []) {
     }
 }
 
-/** "mood · condition · outfit", each part and the whole line cut at a word with an ellipsis. */
-export function nowLine({ mood = '', condition = '', outfit = '' } = {}) {
-    const parts = [mood, condition, outfit].map(part => trimAtWord(plain(part), NOW_PART_MAX)).filter(Boolean);
-    return trimAtWord(parts.join(' · '), NOW_LINE_MAX);
+/** The labelled now lines with a value, in order: [{ key, label, text, title }], cut at a word. */
+export function nowParts(source = {}) {
+    const values = source && typeof source === 'object' ? source : {};
+    return NOW_PARTS.map(([key, label]) => {
+        const value = plain(values[key]);
+        return value ? { key, label, text: trimAtWord(value, NOW_PART_MAX), title: trimAtWord(value, NOW_TITLE_MAX) } : null;
+    }).filter(Boolean);
 }
 
 /** 'speech' when two or more people speak in the chatter, 'thought' for one, '' for none. */
@@ -202,7 +209,8 @@ function signatureOf(value) {
  * `cards`: [{ id, name, aliases, mood, condition, outfit }] (Delta's own tracked values).
  * `sceneText`: Story Block's World State for the latest reply, used only when `sceneOwned`.
  * `chatterText`: Story Block's NPC Inner Chatter for the latest reply.
- * Returns { now: { [id]: { text, source } }, kind, byCard: { [id]: [{ order, text }] },
+ * Returns { now: { [id]: { parts: [{ key, label, text, title }], source } }, kind,
+ * byCard: { [id]: [{ order, text }] },
  * others: [{ order, speaker, text }], texts: [string], signature } where every `text`/`speaker`
  * is an index into `texts`. Never throws.
  */
@@ -221,8 +229,13 @@ export function presentSceneModel({ cards = [], roster = [], sceneText = '', sce
         for (const card of list) {
             const id = plain(card.id);
             const section = fromWorld.get(id);
-            const text = nowLine(section || card);
-            if (text) model.now[id] = { text: slot(text), source: section ? 'world-state' : 'dossier' };
+            const parts = nowParts(section || card);
+            if (parts.length) {
+                model.now[id] = {
+                    parts: parts.map(part => ({ key: part.key, label: part.label, text: slot(part.text), title: slot(part.title) })),
+                    source: section ? 'world-state' : 'dossier',
+                };
+            }
         }
         const lines = parseChatterLines(chatterText);
         model.kind = chatterBubbleKind(lines);
@@ -247,10 +260,15 @@ export function presentSceneModel({ cards = [], roster = [], sceneText = '', sce
 const escapeAttr = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const slotHtml = (tag, className, index) => `<${tag} class="${className}" data-delta-text="${Number(index)}"></${tag}>`;
 
-/** The empty now-line slot for a card (filled by fillPresentSceneText), or ''. */
+/**
+ * The empty now lines for a card (filled by fillPresentSceneText), or ''. Each line is its label
+ * plus a text slot; the line's tooltip slot receives the full text.
+ */
 export function nowSlotHtml(model, id) {
     const now = model?.now?.[id];
-    return now ? slotHtml('small', now.source === 'world-state' ? 'npc-state-delta-present-now npc-state-delta-present-now-world' : 'npc-state-delta-present-now', now.text) : '';
+    if (!now?.parts?.length) return '';
+    const lines = now.parts.map(part => `<span class="npc-state-delta-present-now-part npc-state-delta-present-now-${escapeAttr(part.key)}" data-delta-title="${Number(part.title)}"><span class="npc-state-delta-present-now-label">${escapeAttr(part.label)}:</span> ${slotHtml('span', 'npc-state-delta-present-now-text', part.text)}</span>`).join('');
+    return `<span class="${now.source === 'world-state' ? 'npc-state-delta-present-now npc-state-delta-present-now-world' : 'npc-state-delta-present-now'}">${lines}</span>`;
 }
 
 /** The bubbles beside one card: structure only, the text arrives through textContent. */
@@ -288,7 +306,8 @@ export function rememberPresentScene(model) {
 
 /**
  * Write each remembered model's strings into its slots under `root` with textContent (never as
- * markup). Only changed text is written. Returns the number of slots written. Never throws.
+ * markup), and the now lines' full text into their title attribute. Only changed text is written.
+ * Returns the number of slots written. Never throws.
  */
 export function fillPresentSceneText(root) {
     let written = 0;
@@ -305,6 +324,14 @@ export function fillPresentSceneText(root) {
                 const value = model.texts[Number(node.getAttribute?.('data-delta-text') ?? node.dataset?.deltaText)] ?? '';
                 if (node.textContent !== value) {
                     node.textContent = value;
+                    written += 1;
+                }
+            }
+            for (const node of section.querySelectorAll?.('[data-delta-title]') || []) {
+                const value = model.texts[Number(node.getAttribute?.('data-delta-title') ?? node.dataset?.deltaTitle)] ?? '';
+                if ((node.getAttribute?.('title') ?? node.title) !== value) {
+                    if (typeof node.setAttribute === 'function') node.setAttribute('title', value);
+                    else node.title = value;
                     written += 1;
                 }
             }

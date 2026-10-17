@@ -1063,7 +1063,7 @@ const NPC_REVERT_LIST_FIELDS = Object.freeze(['memories', 'mannerisms', 'behavio
 const NPC_REVERT_SKIP = new Set(['id', 'portrait', 'updatedAt', 'createdAt', 'manualProfileFields', 'manualProfileLocksExplicit']);
 // Presence bookkeeping alone does not make an NPC "used" by later messages, and neither does manual
 // image/retention metadata (a saved seed or prompt is not a narrative appearance).
-const NPC_REMOVAL_IGNORED = new Set([...NPC_REVERT_SKIP, 'present', 'worldActive', 'lastWorldActiveTurn', 'fieldChanges', 'fieldChangeDays',
+const NPC_REMOVAL_IGNORED = new Set([...NPC_REVERT_SKIP, 'present', 'worldActive', 'lastWorldActiveTurn', 'fieldChanges', 'fieldChangeDays', 'fieldChangeMessages',
     'portraitSeed', 'portraitPromptPositive', 'portraitPromptNegative', 'portraitPromptReplace', 'retentionProtected', 'minor']);
 
 function withoutKeys(record, ignored) {

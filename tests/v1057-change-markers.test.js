@@ -54,7 +54,7 @@ test('portrait attachment records the appearance it was made for and the dossier
     assert.match(index, /portrait\.appearanceForm = /);
     const ui = fs.readFileSync(new URL('../dossier-ui.js', import.meta.url), 'utf8');
     assert.match(ui, /changedMark\(selected, 'mood'\)/);
-    assert.match(ui, /changeSummaryHtml\(selected, this\.projection\?\.turn\)/);
+    assert.match(ui, /changeSummaryHtml\(selected, this\.projection\)/);
     assert.match(ui, /Appearance changed since portrait/);
 });
 

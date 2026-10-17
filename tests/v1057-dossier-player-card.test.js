@@ -21,6 +21,7 @@ test('the player card projects the last relationship change with its reason and 
     const projected = dossierDetailProjection(npc);
     assert.deepEqual(projected.lastRelationshipChange, {
         impact: 'ordinary', delta: { trust: 1, affection: 0, desire: 0, tension: -2 }, reason: npc.lastRelationshipChange.reason, turn: 71,
+        message: null, when: 'Turn 71',
     });
     assert.deepEqual(projected.recentRelationshipChanges.map(item => item.turn), [71, 60], 'newest first, reason/impact/turn only');
     assert.equal('evidence' in projected.recentRelationshipChanges[0], false);

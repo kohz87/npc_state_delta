@@ -425,6 +425,16 @@ function preserveTargetManualLocks(oldNpc, importedNpc) {
     return merged;
 }
 
+// Reply numbers (1.2.3, display only) are message indexes in the source chat. A foreign dossier keeps
+// its relationship events, which then show as older records do, but never another chat's numbering.
+function withoutSourceReplyNumbers(npc) {
+    if (npc.lastRelationshipChange && typeof npc.lastRelationshipChange === 'object') delete npc.lastRelationshipChange.message;
+    for (const event of Array.isArray(npc.relationshipEventHistory) ? npc.relationshipEventHistory : []) {
+        if (event && typeof event === 'object') delete event.message;
+    }
+    delete npc.fieldChangeMessages;
+}
+
 export function mergeImportedDossierState(currentState, importedState, { maxNpcs = 40, excludeNames = [], report = null, foreignOwnership = false } = {}) {
     const current = currentState && typeof currentState === 'object' ? currentState : {};
     const incoming = importedState && typeof importedState === 'object' ? importedState : {};
@@ -462,6 +472,7 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
 
     for (const rawNpc of imported) {
         const npc = structuredClone(rawNpc);
+        if (foreignActivity) withoutSourceReplyNumbers(npc);
         const sourceId = String(npc.id || '');
         const index = identityMatchIndex(npcs, npc, { stableIdOnly: Boolean(sourceId && tombstonedIds.has(sourceId)) });
         if (index >= 0) {
@@ -500,6 +511,7 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
                     lastWorldActiveTurn: old.lastWorldActiveTurn,
                     fieldChanges: old.fieldChanges || {},
                     fieldChangeDays: old.fieldChangeDays || {},
+                    fieldChangeMessages: old.fieldChangeMessages || {},
                 } : {}),
             });
             const accepted = isTerminalNpcDeath(old) ? protectTerminalNpc(old, merged) : merged;
