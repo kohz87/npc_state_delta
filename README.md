@@ -1,8 +1,8 @@
-# NPC State Delta v1.2.6
+# NPC State Delta v1.2.7
 
 A SillyTavern extension that keeps a living dossier for every NPC in your roleplay: who they are, how they look, how they talk and behave, what they remember, and how they feel about you. After each reply it scans the story, updates the dossiers carefully, and feeds the present NPCs back to the roleplay model so they stay in character.
 
-**Current release:** 1.2.6 · [Changelog](CHANGELOG.md) · [Development guide](DEVELOPMENT.md)
+**Current release:** 1.2.7 · [Changelog](CHANGELOG.md) · [Development guide](DEVELOPMENT.md)
 
 ---
 
@@ -43,7 +43,7 @@ A SillyTavern extension that keeps a living dossier for every NPC in your rolepl
 ## Install and update
 
 1. In SillyTavern, open **Extensions → Install extension** and paste this repository's URL.
-   Or unpack `npc_state_delta-1.2.6.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
+   Or unpack `npc_state_delta-1.2.7.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
 2. Reload SillyTavern.
 3. **Before updating an existing install,** export a backup from **Data & maintenance → Backup / Export**.
 
@@ -80,7 +80,7 @@ With [Story Block](https://github.com/kohz87/Story_block) installed, Delta adds 
 - **👥 Present NPCs:** the same cards as in the chat, for whoever is present in the latest scene.
 - **📇 Dossiers:** every dossier with a search box. The dead stay out of the list until you search for them. Tap a row to open that dossier.
 
-Each present NPC shows what they are like now as labelled lines: **Mood**, **Condition** and **Outfit** (only those known). In Story Block's sidebar or sheet and on phones each NPC is a row in two halves: on the left a portrait card with the name over the image, on the right the NPC's chatter bubble (below), or else those lines in full, or else their role and *No changes this turn*; a very narrow pane stacks the two, the card as a short banner. Wider places show a grid of cards with the lines under the portrait (hover a line for its full text). The lines come from Story Block's World State for the latest reply while Story Block keeps the scene (Source of truth → Scene), otherwise from the dossier. With Story Block's **NPC Inner Chatter** block on, each line of chatter appears as a bubble by the speaker, in the chatter's order: speech bubbles when two or more NPCs whisper, a thought bubble when only one has a line. In narrow places the bubble fills the right half of the NPC's row, pointing at the card (under the card when the pane is very narrow); in the wider grid it sits under the card. Lines from someone without a card, or with no recognisable speaker, go to *Others*. Story Block then hides its own Chatter tab (the block is still written as before). All of this is display only.
+Each present NPC shows what they are like now as labelled lines: **Mood**, **Condition** and **Outfit** (only those known). In Story Block's sidebar or sheet and on phones each NPC is a row in two halves: on the left a portrait card with the name over the image, on the right the NPC's chatter bubble (below), or else those lines in full, or else their role and *No changes this turn*; a very narrow pane stacks the two, the card as a short banner. Wider places show a grid of cards with the lines under the portrait (hover a line for its full text). The lines come from Story Block's World State for the latest reply while Story Block keeps the scene (Source of truth → Scene), otherwise from the dossier. With Story Block's **NPC Inner Chatter** block on, each line of chatter appears as a bubble by the speaker, in the chatter's order: speech bubbles when two or more NPCs whisper, a thought bubble when only one has a line. In narrow places the bubble fills the right half of the NPC's row, pointing at the card (under the card when the pane is very narrow); in the wider grid it sits under the card. Someone who speaks without a present card gets a card of their own after the present NPCs, their bubble beside it the same way: their portrait if Delta tracks them (tap to open the dossier), else their initial and *Not in the dossiers yet*. Lines with no recognisable speaker go to *Others*. Story Block then hides its own Chatter tab (the block is still written as before). All of this is display only.
 
 While Story Block is installed, the cast shows only in Story Block until you pick a choice under **Roster & continuity → Present NPCs in chat**. Pick **Full cards** or **Compact strip** to keep it in the chat as well; **Only in Story Block** shows full cards in the chat when Story Block isn't installed. The tabs are display only and change nothing in prompts, scans or saved data. Without Story Block nothing changes.
 
@@ -253,12 +253,12 @@ npm test                        # unit, compatibility and synthetic-host tests
 npm run validate                # inventory, isolation, version and ownership checks
 npm run measure:prompts         # prompt size measurements
 node scripts/measure-stage9.mjs # prompt/request budget baseline
-npm run package                 # builds dist/npc_state_delta-1.2.6.zip and its SHA-256
+npm run package                 # builds dist/npc_state_delta-1.2.7.zip and its SHA-256
 git diff --check
 ```
 
 - `runtime-modules.json` is the single inventory of shipped modules. The package contains only the runtime modules, stylesheet, manifest, inventory, license and README.
-- Application version 1.2.6 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
+- Application version 1.2.7 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
 - Behaviour is governed by [AGENTS.md](AGENTS.md), [the core contract](docs/core-contract.md) and [the workplan](docs/WORKPLAN.md). Development commands, evidence and limits are in [DEVELOPMENT.md](DEVELOPMENT.md).
 - Historical reviews: [1.0.28](docs/v1.0.28-review.md), [1.0.27 prefix cache](docs/v1.0.27-review.md), [Stage 9](docs/stage9-review.md). Seed provenance is in `docs/seed-provenance.*`.
 

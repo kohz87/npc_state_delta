@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.2.7 - 18 October 2026
+
+- **Everyone who speaks gets a card.** Inner Chatter from someone without a present card (the registration clerk before the scan marks her present, a nameless sentry) was a plain line under *Others*. Now each named speaker gets a card in the Present NPCs grid, after the present NPCs, with their bubble beside it exactly like a present NPC's: someone Delta already tracks shows their portrait and opens their dossier; a name the dossiers do not know shows its initial and *Not in the dossiers yet*. Only lines with no speaker stay under *Others*. Display only; prompts, scans and saved data are unchanged.
+
 ## 1.2.6 - 17 October 2026
 
 - **Mood and condition in the middle too.** In narrow panes the right half of a present NPC's row (Mood / Condition / Outfit, or the role and *No changes this turn*) is vertically centred beside the card, like the chatter bubble. Display only; prompts, scans and saved data are unchanged.

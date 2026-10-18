@@ -341,6 +341,9 @@
 .npc-state-delta-present-now-label { font-weight: 600; opacity: .7; }
 .npc-state-delta-present-cell { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 9px; min-width: 0; }
 .npc-state-delta-present-cell .npc-state-delta-chatter { cursor: pointer; }
+/* A speaker the dossiers do not know (1.2.7): the same card, nothing to open. */
+.npc-state-delta-present-card-untracked,
+.npc-state-delta-present-cell-untracked .npc-state-delta-chatter { cursor: default; }
 /* The right half of a narrow row (1.2.4); the wide grid shows the now lines on the card instead. */
 .npc-state-delta-present-side { display: none; }
 .npc-state-delta-chatter { display: grid; gap: 6px; min-width: 0; }

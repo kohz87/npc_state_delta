@@ -182,11 +182,14 @@ import {
 import {
     chatterSlotsHtml,
     fillPresentSceneText,
+    matchPresentCard,
     nowSlotHtml,
     othersSlotsHtml,
     presentSceneModel,
     rememberPresentScene,
     sceneAttr,
+    speakerChatterHtml,
+    speakerGroups,
     storyBlockTags,
 } from './present-scene.js';
 
@@ -4608,6 +4611,41 @@ function inlineCardHtml(npc, messageId, scene = null) {
     return `<div class="npc-state-delta-present-cell npc-state-delta-present-cell-${kind}" data-npc-id="${escapeHtml(npc.id)}" data-message-id="${messageId}">${card}${side}</div>`;
 }
 
+// A card for someone who speaks in the chatter but has no present card (1.2.7), in the same
+// card-and-bubble cell as a present NPC: a tracked NPC not marked present (or minor) gets their
+// portrait and opens their dossier; a name the dossiers do not know gets its initial, and the
+// name arrives through a text slot like the chatter itself.
+function speakerCellHtml(group, scene, messageId) {
+    const chatter = speakerChatterHtml(scene, group);
+    if (!chatter) return '';
+    const roster = (getChatState().npcs || []).filter(npc => !npc.archived);
+    const id = matchPresentCard(group.name, roster.map(npc => ({ id: npc.id, name: npc.name, aliases: npc.aliases || [] })), roster);
+    const npc = id ? roster.find(item => item.id === id) : null;
+    if (npc) {
+        const displayName = npc.name || 'NPC';
+        const role = npc.role || 'Not marked present';
+        const card = `
+      <button type="button" class="npc-state-delta-present-card" data-npc-id="${escapeHtml(npc.id)}" data-message-id="${messageId}" aria-label="Open ${escapeHtml(displayName)} dossier">
+        <span class="npc-state-delta-present-card-portrait">${portraitMarkup(npc, displayName, 'npc-state-delta-present-card-placeholder')}</span>
+        <span class="npc-state-delta-present-card-text">
+          <b class="npc-state-delta-present-card-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</b>
+          <small class="npc-state-delta-present-card-role" title="${escapeHtml(role)}">${escapeHtml(role)}</small>
+        </span>
+      </button>`;
+        return `<div class="npc-state-delta-present-cell npc-state-delta-present-cell-chatter npc-state-delta-present-cell-speaker" data-npc-id="${escapeHtml(npc.id)}" data-message-id="${messageId}">${card}${chatter}</div>`;
+    }
+    const initial = String(group.name || '?').trim().charAt(0).toUpperCase() || '?';
+    const card = `
+      <div class="npc-state-delta-present-card npc-state-delta-present-card-untracked">
+        <span class="npc-state-delta-present-card-portrait"><div class="npc-state-delta-present-card-placeholder" aria-hidden="true"><span>${escapeHtml(initial)}</span></div></span>
+        <span class="npc-state-delta-present-card-text">
+          <b class="npc-state-delta-present-card-name" data-delta-text="${Number(group.speaker)}"></b>
+          <small class="npc-state-delta-present-card-role">Not in the dossiers yet</small>
+        </span>
+      </div>`;
+    return `<div class="npc-state-delta-present-cell npc-state-delta-present-cell-chatter npc-state-delta-present-cell-speaker npc-state-delta-present-cell-untracked" data-message-id="${messageId}">${card}${chatter}</div>`;
+}
+
 function presentCastChipHtml(npc, messageId) {
     const displayName = npc.name || 'NPC';
     const portrait = portraitMarkup(npc, displayName, 'npc-state-delta-present-card-placeholder');
@@ -4673,13 +4711,17 @@ function inlineRosterHtml(cards, messageId, mode = inChatCastMode(), { othersWit
       </section>`;
     }
     const scene = presentSceneFor(visible, messageId);
-    const others = othersSlotsHtml(scene);
-    if (!visible.length && !others) return '';
-    const grid = visible.length ? `
-        <div class="npc-state-delta-present-grid">${visible.map(npc => inlineCardHtml(npc, messageId, scene)).join('')}</div>` : '';
+    // Named speakers without a present card get cards of their own after the present ones; only
+    // lines with no speaker are left for the Others line.
+    const speakerCells = speakerGroups(scene).map(group => speakerCellHtml(group, scene, messageId)).filter(Boolean);
+    const speakers = speakerCells.join('');
+    const others = othersSlotsHtml(scene, { speakerless: true });
+    if (!visible.length && !speakers && !others) return '';
+    const grid = visible.length || speakers ? `
+        <div class="npc-state-delta-present-grid">${visible.map(npc => inlineCardHtml(npc, messageId, scene)).join('')}${speakers}</div>` : '';
     return `
       <section class="npc-state-delta-present-roster" data-message-id="${messageId}"${sceneAttr(scene)}>
-        <div class="npc-state-delta-present-roster-head"><span class="npc-state-delta-kicker">PRESENT NPCS</span><small>${visible.length} shown</small></div>${grid}${others}
+        <div class="npc-state-delta-present-roster-head"><span class="npc-state-delta-kicker">PRESENT NPCS</span><small>${visible.length + speakerCells.length} shown</small></div>${grid}${others}
       </section>`;
 }
 

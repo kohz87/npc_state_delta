@@ -919,7 +919,7 @@ test('v1.2.2 the runtime: tokens() measures the live injection, shows: chatter, 
         assert.ok(Math.abs(tokens.input - sent.length / 4) <= tokens.parts.length, `${tokens.input} ≈ ${sent.length} / 4`);
         assert.equal(mockState.rawCalls.length, requests, 'no model request');
 
-        // Alone: the now line is Delta's own; chatter bubbles beside the speakers; Others for Megumin.
+        // Alone: the now line is Delta's own; chatter bubbles beside the speakers; a speaker card for Megumin.
         const alone = globalThis.NPCStateDelta.presentCastHtml();
         assert.match(alone, /data-delta-scene="/);
         assert.match(alone, /class="npc-state-delta-present-now"><span class="npc-state-delta-present-now-part npc-state-delta-present-now-mood" data-delta-title="\d+"><span class="npc-state-delta-present-now-label">Mood:<\/span> <span class="npc-state-delta-present-now-text" data-delta-text/);
@@ -928,7 +928,9 @@ test('v1.2.2 the runtime: tokens() measures the live injection, shows: chatter, 
         assert.equal((alone.match(/class="npc-state-delta-present-cell npc-state-delta-present-cell-chatter"/g) || []).length, 2);
         assert.doesNotMatch(alone, /npc-state-delta-present-side/);
         assert.match(alone, /npc-state-delta-present-cell-chatter[\s\S]*npc-state-delta-chatter-speech/);
-        assert.match(alone, /npc-state-delta-chatter-others/);
+        // 1.2.7: Megumin speaks without a present card, so she gets a speaker card, not Others.
+        assert.equal((alone.match(/npc-state-delta-present-cell-speaker/g) || []).length, 1);
+        assert.doesNotMatch(alone, /npc-state-delta-chatter-others/);
         assert.doesNotMatch(alone, /<i>Did he see|Such a nice couple|Boring|flustered/, 'story text never enters the markup');
         assert.ok(reads.includes('NPC_Inner_Chatter'));
         assert.match(inlineAnchors[0]?.innerHTML || '', /npc-state-delta-present-cell-chatter/, 'the in-chat cards show the bubbles too');

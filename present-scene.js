@@ -293,17 +293,48 @@ export function nowSlotHtml(model, id) {
 
 /** The bubbles beside one card: structure only, the text arrives through textContent. */
 export function chatterSlotsHtml(model, id) {
-    const lines = model?.byCard?.[id];
+    return bubblesHtml(model, model?.byCard?.[id]);
+}
+
+function bubblesHtml(model, lines) {
     if (!lines?.length) return '';
     const speech = model.kind === 'speech';
     const bubbles = lines.map(line => `<p class="npc-state-delta-bubble">${speech ? `<span class="npc-state-delta-bubble-order" aria-hidden="true">${Number(line.order)}</span>` : ''}${slotHtml('span', 'npc-state-delta-bubble-text', line.text)}</p>`).join('');
     return `<div class="npc-state-delta-chatter ${speech ? 'npc-state-delta-chatter-speech' : 'npc-state-delta-chatter-thought'}" aria-label="${speech ? 'Whispered' : 'Thinking'}">${bubbles}</div>`;
 }
 
-/** The "Others" line under the cards for chatter from names that match no present card, or ''. */
-export function othersSlotsHtml(model) {
-    if (!model?.others?.length) return '';
-    const items = model.others.map(other => `<span class="npc-state-delta-chatter-other">${model.kind === 'speech' ? `<span class="npc-state-delta-bubble-order" aria-hidden="true">${Number(other.order)}</span>` : ''}${other.speaker === null ? '' : slotHtml('b', 'npc-state-delta-chatter-speaker', other.speaker)}${slotHtml('span', 'npc-state-delta-chatter-said', other.text)}</span>`).join('');
+/**
+ * Chatter from named speakers with no present card (1.2.7), one group per speaker in the order
+ * they first speak: [{ speaker, name, lines: [{ order, text }] }], `speaker` and `text` text
+ * slots, `name` the plain name (for matching a dossier, never for markup). Lines with no
+ * speaker are left to othersSlotsHtml.
+ */
+export function speakerGroups(model) {
+    const groups = new Map();
+    for (const other of Array.isArray(model?.others) ? model.others : []) {
+        if (other?.speaker === null || other?.speaker === undefined) continue;
+        const name = String(model.texts?.[other.speaker] ?? '');
+        const key = normalizeName(name);
+        if (!key) continue;
+        if (!groups.has(key)) groups.set(key, { speaker: other.speaker, name, lines: [] });
+        groups.get(key).lines.push({ order: other.order, text: other.text });
+    }
+    return [...groups.values()];
+}
+
+/** The bubbles beside a speaker's card (a group from speakerGroups), like chatterSlotsHtml. */
+export function speakerChatterHtml(model, group) {
+    return bubblesHtml(model, group?.lines);
+}
+
+/**
+ * The "Others" line under the cards for chatter from names that match no present card, or ''.
+ * `speakerless`: only the lines with no speaker (named speakers get cards, see speakerGroups).
+ */
+export function othersSlotsHtml(model, { speakerless = false } = {}) {
+    const others = (Array.isArray(model?.others) ? model.others : []).filter(other => !speakerless || other.speaker === null);
+    if (!others.length) return '';
+    const items = others.map(other => `<span class="npc-state-delta-chatter-other">${model.kind === 'speech' ? `<span class="npc-state-delta-bubble-order" aria-hidden="true">${Number(other.order)}</span>` : ''}${other.speaker === null ? '' : slotHtml('b', 'npc-state-delta-chatter-speaker', other.speaker)}${slotHtml('span', 'npc-state-delta-chatter-said', other.text)}</span>`).join('');
     return `<p class="npc-state-delta-chatter-others ${model.kind === 'speech' ? 'npc-state-delta-chatter-speech' : 'npc-state-delta-chatter-thought'}"><span class="npc-state-delta-kicker">Others</span>${items}</p>`;
 }
 

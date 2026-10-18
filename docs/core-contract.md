@@ -114,6 +114,8 @@ User-authorized Delta 1.2.5 amendment, centred chatter: in narrow containers the
 
 User-authorized Delta 1.2.6 amendment, centred state: in narrow containers the right half of a present row (now lines or the idle role line) is vertically centred, like the chatter bubble. Display only; no prompt, scan, storage or bundle change.
 
+User-authorized Delta 1.2.7 amendment, speaker cards: a named Inner Chatter speaker whose name matches no present card is shown as a card in the present grid, after the present NPCs, with their bubbles beside it like a present NPC's: a tracked NPC not marked present (or minor) with their portrait, opening their dossier; an unknown name with its initial and *Not in the dossiers yet*, the name filled by textContent like the chatter. Lines with no speaker stay in the Others line. Display only; no prompt, scan, storage or bundle change.
+
 Measure the actual final extension prompt, not only a UI projection. A saved field without an appropriate route into selected continuity is not sufficient acceptance. Preserve legacy omission, compaction and budget behavior unless a deliberate documented change is requested.
 
 ## C08. Persistence, history and removal of OOC commands — stage 7
