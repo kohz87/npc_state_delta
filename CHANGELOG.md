@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.2.8 - 18 October 2026
+
+- **Look, not Outfit, from the dossier.** A present NPC's third line, when it comes from the dossier rather than Story Block's World State, is the NPC's current appearance or form ("Broad, grey at the temples, a soldier's stoop"), so it is labelled *Look*. From World State it is still *Outfit*. Display only; prompts, scans and saved data are unchanged.
+- **Screenshots** in the README, from a demo session with Story Block, Story Director and RPG Battle.
+
 ## 1.2.7 - 18 October 2026
 
 - **Everyone who speaks gets a card.** Inner Chatter from someone without a present card (the registration clerk before the scan marks her present, a nameless sentry) was a plain line under *Others*. Now each named speaker gets a card in the Present NPCs grid, after the present NPCs, with their bubble beside it exactly like a present NPC's: someone Delta already tracks shows their portrait and opens their dossier; a name the dossiers do not know shows its initial and *Not in the dossiers yet*. Only lines with no speaker stay under *Others*. Display only; prompts, scans and saved data are unchanged.

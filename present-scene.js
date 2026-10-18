@@ -12,6 +12,7 @@ import { trimAtWord } from './suite-handshake.js';
 export const NOW_PART_MAX = 160;
 export const NOW_TITLE_MAX = 400;
 export const NOW_PARTS = Object.freeze([['mood', 'Mood'], ['condition', 'Condition'], ['outfit', 'Outfit']]);
+export const DOSSIER_LOOK_LABEL = 'Look';
 export const CHATTER_LINE_MAX = 240;
 export const CHATTER_LINE_LIMIT = 12;
 
@@ -250,7 +251,9 @@ export function presentSceneModel({ cards = [], roster = [], sceneText = '', sce
             const parts = nowParts(section || card);
             if (parts.length) {
                 model.now[id] = {
-                    parts: parts.map(part => ({ key: part.key, label: part.label, text: slot(part.text), title: slot(part.title) })),
+                    // From the dossier the third line is the NPC's current look (appearance or
+                    // form), not only clothes: "Look" (1.2.8). From World State it is the outfit.
+                    parts: parts.map(part => ({ key: part.key, label: !section && part.key === 'outfit' ? DOSSIER_LOOK_LABEL : part.label, text: slot(part.text), title: slot(part.title) })),
                     source: section ? 'world-state' : 'dossier',
                 };
             }

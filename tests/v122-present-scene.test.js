@@ -162,12 +162,12 @@ test('v1.2.2 now line source: World State while Story Block keeps the scene, oth
     const text = (model, now) => now.parts.map(part => `${part.label}: ${model.texts[part.text]}`).join(' | ');
     assert.deepEqual([text(owned, owned.now.yun), owned.now.yun.source], ['Mood: nervous, hopeful | Outfit: red ribbon, black robe', 'world-state']);
     assert.deepEqual([text(owned, owned.now.orrin), owned.now.orrin.source], ['Mood: stern | Condition: bandaged left arm', 'world-state']);
-    assert.deepEqual([text(owned, owned.now.wiz), owned.now.wiz.source], ['Mood: cheerful | Outfit: shop apron', 'dossier'], 'an NPC World State leaves empty keeps Delta\'s own line');
+    assert.deepEqual([text(owned, owned.now.wiz), owned.now.wiz.source], ['Mood: cheerful | Look: shop apron', 'dossier'], 'an NPC World State leaves empty keeps Delta\'s own line (1.2.8: its look, labelled Look)');
     assert.equal(owned.texts[owned.now.yun.parts[0].title], 'nervous, hopeful', 'each line has its full text for the tooltip');
 
     const own = presentSceneModel({ cards, sceneText: WORLD_STATE, sceneOwned: false });
     assert.deepEqual(Object.values(own.now).map(now => [text(own, now), now.source]), [
-        ['Mood: shy | Outfit: travel cloak', 'dossier'], ['Mood: calm | Condition: healthy | Outfit: armor', 'dossier'], ['Mood: cheerful | Outfit: shop apron', 'dossier'],
+        ['Mood: shy | Look: travel cloak', 'dossier'], ['Mood: calm | Condition: healthy | Look: armor', 'dossier'], ['Mood: cheerful | Look: shop apron', 'dossier'],
     ], 'World State is not used while Delta keeps the scene');
 });
 
@@ -223,7 +223,7 @@ test('v1.2.3 the card shows labelled now lines that wrap to two lines, the name 
     const html = nowSlotHtml(model, 'astral');
     assert.match(html, /^<span class="npc-state-delta-present-now">/);
     assert.match(html, /npc-state-delta-present-now-mood" data-delta-title="\d+"><span class="npc-state-delta-present-now-label">Mood:<\/span> <span class="npc-state-delta-present-now-text" data-delta-text="\d+"><\/span>/);
-    assert.match(html, /npc-state-delta-present-now-outfit[^>]*><span class="npc-state-delta-present-now-label">Outfit:<\/span>/);
+    assert.match(html, /npc-state-delta-present-now-outfit[^>]*><span class="npc-state-delta-present-now-label">Look:<\/span>/, '1.2.8: the dossier\'s current look');
     assert.doesNotMatch(html, /Condition:/, 'a part without a value has no line');
     assert.doesNotMatch(html, /Curious|starlit/, 'the story text still arrives by textContent');
     assert.equal(model.texts[model.now.astral.parts[0].text], 'Curious; wary of the strangers at the gate');
