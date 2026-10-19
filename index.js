@@ -191,6 +191,7 @@ import {
     speakerChatterHtml,
     speakerGroups,
     storyBlockTags,
+    worldStatePeople,
 } from './present-scene.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
@@ -2803,6 +2804,7 @@ async function scanNpcDossier(npcId) {
             excludeNames: [...currentExclusions(), ...(latest.dismissed || [])],
             turn: latest.turn,
             sourceMessageId: targetMessageId,
+            scenePresent: scenePresentAt(targetMessageId),
             calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
             storyDay: storyDayAt(targetMessageId),
             relationshipBaseline: getSettings().relationshipBaseline,
@@ -3020,6 +3022,7 @@ async function refreshNpcFromChat(npcId) {
             excludeNames: [...currentExclusions(), ...(latest.dismissed || [])],
             turn: latest.turn,
             sourceMessageId: targetMessageId,
+            scenePresent: scenePresentAt(targetMessageId),
             calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
             storyDay: storyDayAt(targetMessageId),
             customFieldNames: settings.customFieldNames,
@@ -3307,6 +3310,7 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
             excludeNames: [...currentExclusions(), ...(latestState.dismissed || [])],
             turn: latestState.turn,
             sourceMessageId: targetMessageId,
+            scenePresent: scenePresentAt(targetMessageId),
             calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
             storyDay: storyDayAt(targetMessageId),
             customFieldNames: settings.customFieldNames,
@@ -3981,6 +3985,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
             excludeNames: [...currentExclusions(), ...(state.dismissed || [])],
             turn: state.turn,
             sourceMessageId: targetMessageId,
+            scenePresent: scenePresentAt(targetMessageId),
             calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
             storyDay: storyDayAt(targetMessageId),
             customFieldNames: settings.customFieldNames,
@@ -4700,6 +4705,20 @@ function storyBlockTextForLatestReply(tags, messageId) {
         }
     }
     return texts.join('\n');
+}
+
+// (1.2.10) Who the reply's World State puts in the scene and off-screen at its end, or null
+// when the reply has none (or there is no Story Block to read it with): the scan then keeps the
+// model's own word.
+function scenePresentAt(messageId) {
+    try {
+        const blocks = typeof globalThis.StoryBlock?.listBlocks === 'function' ? globalThis.StoryBlock.listBlocks() : [];
+        const text = storyBlockTextForLatestReply(storyBlockTags(blocks, 'scene'), messageId);
+        const people = text ? worldStatePeople(text) : null;
+        return people && (people.present || people.offscreen) ? people : null;
+    } catch {
+        return null;
+    }
 }
 
 // Display only: the now line on each present card and Story Block's NPC Inner Chatter beside

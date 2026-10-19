@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.2.10 - 19 October 2026
+
+- **The World State decides who is still in the scene.** A reply that starts where the last scene ended ("Brecht lay sprawled in the mud") and then moves on (to the herbalist, then the Guild) often left that NPC on the Present cards and in the roleplay injection, because the scan saw them in the reply. Now, when the reply's World State (read through Story Block) lists people under *NPCs Present* or *Off-Screen*, those lists win: an NPC listed under NPCs Present is present, one listed Off-Screen is not, and "(None)" means nobody is. Someone on neither list keeps what the scan said, since a World State often leaves people out. The dead and archived are never made present.
+
 ## 1.2.9 - 19 October 2026
 
 - **One-pass capture survives other extensions writing into the reply.** With Story Block, RPG Battle or Story Director installed, a reply is often rewritten just after it arrives: blocks tidied, a Party sheet written, a quest line closed. NPC State Delta took the rewritten reply for a different one, so its capture block was stored but never merged (the status read *used 0 · waiting 1*), and the NPCs' states did not update that turn. A reply rewritten in place (same position, same history before it) is now the same reply for the receipt and the scan. Any other change to the chat while a scan runs still discards it.

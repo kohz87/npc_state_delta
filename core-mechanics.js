@@ -5467,6 +5467,38 @@ function consolidateAliasLinkedNpcDuplicates(next, report) {
     }
 }
 
+/**
+ * (1.2.10) Presence put right by the reply's World State (`scene`: present names, `none`, and
+ * off-screen names; see present-scene.js worldStatePeople). Listed as present: present. Listed
+ * off-screen, or the scene says nobody is present: not present. Anyone else keeps what the scan
+ * said, since a World State often leaves people out. Nobody dead or archived is made present.
+ * Changes `npcs` in place; returns { cleared: [ids], added: [ids] }.
+ */
+export function applyScenePresence(npcs, scene) {
+    const list = Array.isArray(npcs) ? npcs : [];
+    const cleared = [];
+    const added = [];
+    const names = value => (Array.isArray(value) ? value : []).map(String).filter(Boolean);
+    const present = names(scene?.present);
+    const offscreen = names(scene?.offscreen);
+    const named = (npc, labels) => {
+        const own = [npc.name, ...(npc.aliases || [])].map(normalizeName).filter(Boolean);
+        return labels.some(label => own.includes(normalizeName(label))) || labels.some(label => npcNamedInText(npc, label, list));
+    };
+    for (const npc of list) {
+        if (!npc) continue;
+        let next = npc.present;
+        if (present.length && named(npc, present)) next = true;
+        else if (scene?.none === true || (offscreen.length && named(npc, offscreen))) next = false;
+        if (next && (npc.archived || isTerminalNpcDeath(npc))) next = false;
+        if (npc.present && !next) cleared.push(npc.id);
+        if (!npc.present && next) added.push(npc.id);
+        npc.present = Boolean(next);
+        if (npc.present) npc.worldActive = false;
+    }
+    return { cleared, added };
+}
+
 export function mergeScanResult(state, scanResult, options = {}) {
     const maxNpcs = Math.max(1, Math.min(100, Number(options.maxNpcs) || 40));
     const excludeNames = new Set((options.excludeNames || []).map(normalizeName).filter(Boolean));
@@ -5631,6 +5663,13 @@ export function mergeScanResult(state, scanResult, options = {}) {
     next.socialGraph = social.socialGraph;
     next.npcs = social.state.npcs;
     for (const id of social.updatedIds || []) if (!report.updated.includes(id)) report.updated.push(id);
+
+    // (1.2.10) The reply's World State says who is in the scene as it ends and who is off-screen:
+    // a model that names someone met earlier in the reply ("Brecht lay in the mud" before the walk
+    // to the Guild) no longer keeps them on the Present cards once the scene lists them off-screen.
+    if (options.scenePresent && typeof options.scenePresent === 'object' && !preservePresence) {
+        report.scenePresence = applyScenePresence(next.npcs, options.scenePresent);
+    }
 
     // Final canonicalization is a hard guard against append-only drift from either
     // normal NPC deltas or the independent profile/social channels.

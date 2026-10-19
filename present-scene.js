@@ -176,6 +176,50 @@ export function parseWorldStateNpcs(text) {
     }
 }
 
+// (1.2.10) A World State's people sections: "**👥 NPCs Present:**" and "**📡 Off-Screen:**".
+const WS_PRESENT_HEADING = /^\s*(?:[-*•]\s+)?\**\s*(?:[\p{Extended_Pictographic}\u{FE0F}\u{200D}]+\s*)?(?:NPCs?|Characters?|People)\s+(?:Present|In\s+(?:the\s+)?Scene)\s*:?\s*\**\s*:?\s*$/iu;
+const WS_OFFSCREEN_HEADING = /^\s*(?:[-*•]\s+)?\**\s*(?:[\p{Extended_Pictographic}\u{FE0F}\u{200D}]+\s*)?Off[\s-]?Screen\s*:?\s*\**\s*:?\s*$/iu;
+const WS_NONE = /^\s*[*_(\[]*\s*(?:none|nobody|no one|empty|—|-)\s*[)\]*_.]*\s*$/i;
+// An Off-Screen line: "* Brecht — Beat Astra senseless…", "* Bond collector — now: …", "* Jor: hiding".
+const WS_OFFSCREEN_LINE = /^\s*[-*•]\s+\**\s*([^—–:*]+?)\s*\**\s*(?:—|–|-\s|:)/u;
+
+const cleanName = value => plain(String(value ?? '').replace(/^[\p{Extended_Pictographic}\u{FE0F}\u{200D}\s]+/u, '').replace(/[*_]+/g, ''));
+
+/**
+ * (1.2.10) Who a World State block puts where: `present`, the `**Name:**` headers under its
+ * "NPCs Present" heading; `none`, true when that section says "(None)"; `offscreen`, the names
+ * its "Off-Screen" lines start with. A list is null when the block has no such section.
+ * Each section runs to the next `---` rule or the next section heading. Never throws.
+ */
+export function worldStatePeople(text) {
+    const out = { present: null, none: false, offscreen: null };
+    try {
+        let section = '';
+        const add = (list, name) => {
+            if (name && !PLACEHOLDER.test(name) && !list.some(other => normalizeName(other) === normalizeName(name))) list.push(name);
+        };
+        for (const raw of String(text ?? '').split(/\r?\n/)) {
+            const line = raw.trim();
+            if (!line) continue;
+            if (WS_PRESENT_HEADING.test(line)) { section = 'present'; out.present ||= []; continue; }
+            if (WS_OFFSCREEN_HEADING.test(line)) { section = 'offscreen'; out.offscreen ||= []; continue; }
+            if (RULE.test(line)) { section = ''; continue; }
+            if (section === 'present') {
+                if (WS_NONE.test(line)) { out.none = true; continue; }
+                const header = WS_HEADER.exec(line);
+                if (header) add(out.present, cleanName(header[1] ?? header[2]));
+            } else if (section === 'offscreen') {
+                const entry = WS_OFFSCREEN_LINE.exec(line);
+                if (entry) add(out.offscreen, cleanName(entry[1]));
+            }
+        }
+        if (out.present && out.present.length) out.none = false;
+    } catch {
+        return { present: null, none: false, offscreen: null };
+    }
+    return out;
+}
+
 /**
  * The present card a speaker or World State name belongs to, or ''. An exact (case-insensitive)
  * name or alias of exactly one card first, then Delta's usual name recognition (npcNamedInText:
