@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.2.9 - 19 October 2026
+
+- **One-pass capture survives other extensions writing into the reply.** With Story Block, RPG Battle or Story Director installed, a reply is often rewritten just after it arrives: blocks tidied, a Party sheet written, a quest line closed. NPC State Delta took the rewritten reply for a different one, so its capture block was stored but never merged (the status read *used 0 · waiting 1*), and the NPCs' states did not update that turn. A reply rewritten in place (same position, same history before it) is now the same reply for the receipt and the scan. Any other change to the chat while a scan runs still discards it.
+
 ## 1.2.8 - 18 October 2026
 
 - **Look, not Outfit, from the dossier.** A present NPC's third line, when it comes from the dossier rather than Story Block's World State, is the NPC's current appearance or form ("Broad, grey at the temples, a soldier's stoop"), so it is labelled *Look*. From World State it is still *Outfit*. Display only; prompts, scans and saved data are unchanged.

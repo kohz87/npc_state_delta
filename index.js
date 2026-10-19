@@ -337,7 +337,7 @@ function beginScanOperation(key, label, metadata = {}) {
             && getChatKey() === key
             && Number(stateVersions.get(key) || 0) === localRevision
             && hydratedRevision(key) === canonicalRevision
-            && firstLineageDivergence(lineage, chatLineage(getContext().chat || [])) === -1,
+            && !lineageMoved(lineage, chatLineage(getContext().chat || []), operation.sourceMessageId),
     };
     return operation;
 }
@@ -359,7 +359,7 @@ async function scanCanonicalBaseCurrent(key, operation, label = 'scan') {
     // The awaited read is a window in which the source can be edited or deleted; the result must
     // still belong to the exact history it was extracted from before it is merged or checkpointed.
     const sourceIntact = getChatKey() === key && (!Array.isArray(operation?.sourceLineage)
-        || firstLineageDivergence(operation.sourceLineage, chatLineage(getContext().chat || [])) === -1);
+        || !lineageMoved(operation.sourceLineage, chatLineage(getContext().chat || []), operation?.sourceMessageId));
     const current = sourceIntact && scanOperationCurrent(key, operation) && currentRevision === baseRevision;
     if (!current) {
         recordFreshnessEvent(key, 'stale-operation-rejected', {
@@ -3799,6 +3799,26 @@ function takeNarrationCapture(chatKey, messageId) {
     return capture && narrationCaptureEnabled() ? capture : null;
 }
 
+// (1.2.9) Other extensions write into a reply just after it arrives: Story Block tidying its
+// blocks, RPG Battle its Party sheet, Story Director a closing line. That is the same reply
+// rewritten in place, not a new branch: its position and every message before it are unchanged.
+// Treating it as a different reply left the one-pass capture block waiting, never merged.
+function replyParentKey(messageId) {
+    return messageId > 0 ? lineageCheckpointKey(chatLineage(getContext().chat || []), messageId - 1) : 'root';
+}
+function sameReplyRewritten(chatKey, messageId, parentKey) {
+    if (getChatKey() !== chatKey || !Number.isInteger(messageId)) return false;
+    const message = getContext().chat?.[messageId];
+    return Boolean(message && !message.is_user && !message.is_system) && replyParentKey(messageId) === parentKey;
+}
+// A change between two lineages other than the reply at `messageId` rewritten in place.
+function lineageMoved(previous, current, messageId) {
+    const at = firstLineageDivergence(previous, current);
+    if (at === -1) return false;
+    if (!Number.isInteger(messageId) || at !== messageId || previous.length !== current.length) return true;
+    return previous.slice(messageId + 1).some((entry, index) => entry !== current[messageId + 1 + index]);
+}
+
 async function scanNow({ manual = false, messageId = null, allowDuringSwipe = false } = {}) {
     const settings = getSettings();
     if (!settings.enabled) return false;
@@ -3810,15 +3830,20 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
     const scanChatKey = getChatKey();
     if (scanChatKey === 'no-chat') return false;
     const sourceFingerprint = Number.isInteger(messageId) ? fingerprintMessage(ctx.chat?.[messageId] || {}) : null;
+    const sourceParent = Number.isInteger(messageId) ? replyParentKey(messageId) : null;
+    // The chat changed under the scan, unless only this reply was rewritten in place.
+    const sourceMoved = () => getChatKey() !== scanChatKey || (sourceFingerprint !== null
+        && sourceFingerprint !== fingerprintMessage(getContext().chat?.[messageId] || {})
+        && !sameReplyRewritten(scanChatKey, messageId, sourceParent));
     await ensureChatStateLoaded(scanChatKey);
-    if (getChatKey() !== scanChatKey || (sourceFingerprint !== null && sourceFingerprint !== fingerprintMessage(getContext().chat?.[messageId] || {}))) return false;
+    if (sourceMoved()) return false;
     if (isScanBusy(scanChatKey)) {
         if (manual) globalThis.toastr?.info?.('NPC State Delta: another dossier scan is already running in this chat.');
         else if (Number.isInteger(messageId)) queuePendingAutoScan(scanChatKey, messageId, 'busy-auto-scan');
         return false;
     }
     if (!await prepareCanonicalScanBase(scanChatKey, manual ? 'manual dossier scan' : 'automatic dossier scan')) return false;
-    if (getChatKey() !== scanChatKey || (sourceFingerprint !== null && sourceFingerprint !== fingerprintMessage(getContext().chat?.[messageId] || {}))) return false;
+    if (sourceMoved()) return false;
     const scanLineage = chatLineage(ctx.chat || []);
     const currentTranscript = currentExchangeTranscript(messageId);
     const fullWindowScan = Boolean(!manual && settings.fullScanEveryTurn);
@@ -3832,7 +3857,11 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
     }
 
     const operation = beginScanOperation(scanChatKey, manual ? 'manual dossier scan' : 'automatic dossier scan');
-    if (operation) operation.sourceLineage = scanLineage;
+    if (operation) {
+        operation.sourceLineage = scanLineage;
+        // (1.2.9) The reply it reads: rewritten in place by another extension, it is still the source.
+        operation.sourceMessageId = Number.isInteger(messageId) ? messageId : null;
+    }
     if (!operation) return false;
     setScanIndicator(true);
     const state = getChatState(scanChatKey);
@@ -3858,7 +3887,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         let currentLineage = chatLineage(getContext().chat || []);
         if (!await scanCanonicalBaseCurrent(scanChatKey, operation, 'dossier scan')
             || !scanOperationCurrent(scanChatKey, operation) || getChatKey() !== scanChatKey
-            || firstLineageDivergence(scanLineage, currentLineage) !== -1 || Number(stateVersions.get(scanChatKey) || 0) !== scanStateVersion) {
+            || lineageMoved(scanLineage, currentLineage, messageId) || Number(stateVersions.get(scanChatKey) || 0) !== scanStateVersion) {
             const scanFinishedAt = performance.now?.() ?? Date.now();
             lastScanMetrics = {
                 label: scanLabel,
@@ -3931,7 +3960,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         currentLineage = chatLineage(getContext().chat || []);
         if (!await scanCanonicalBaseCurrent(scanChatKey, operation, 'dossier scan relationship evaluation')
             || !scanOperationCurrent(scanChatKey, operation) || getChatKey() !== scanChatKey
-            || firstLineageDivergence(scanLineage, currentLineage) !== -1 || Number(stateVersions.get(scanChatKey) || 0) !== scanStateVersion) {
+            || lineageMoved(scanLineage, currentLineage, messageId) || Number(stateVersions.get(scanChatKey) || 0) !== scanStateVersion) {
             console.info('[NPC State Delta] discarded stale dossier scan after chat, dossier, or canonical state changed during relationship evaluation.');
             if (manual) globalThis.toastr?.info?.('NPC State Delta: chat changed during scan; stale result was discarded.');
             return false;
@@ -4006,7 +4035,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         if (!await scanCanonicalBaseCurrent(scanChatKey, operation, 'dossier scan new-NPC relationship evaluation')
             || !scanOperationCurrent(scanChatKey, operation)
             || getChatKey() !== scanChatKey
-            || firstLineageDivergence(scanLineage, currentLineage) !== -1
+            || lineageMoved(scanLineage, currentLineage, messageId)
             || Number(stateVersions.get(scanChatKey) || 0) !== scanStateVersion) {
             console.info('[NPC State Delta] discarded stale dossier scan after new-NPC relationship evaluation.');
             if (manual) globalThis.toastr?.info?.('NPC State Delta: chat changed during scan; stale result was discarded.');
@@ -7016,14 +7045,24 @@ async function handleAssistantMessageReceived(messageId, { bypassSwipeGuard = fa
     if (eventChatKey === 'no-chat' || !Number.isInteger(messageId) || messageId < 0) return;
     const eventMessage = getContext().chat?.[messageId];
     if (!eventMessage || eventMessage.is_user || eventMessage.is_system || !String(eventMessage.mes || '').trim()) return;
-    const eventSourceKey = lineageCheckpointKey(chatLineage(getContext().chat || []), messageId);
+    let eventSourceKey = lineageCheckpointKey(chatLineage(getContext().chat || []), messageId);
+    const eventParent = replyParentKey(messageId);
+    // (1.2.9) The same reply rewritten in place by another extension keeps its receipt.
+    const sourceStillHere = () => {
+        if (getChatKey() !== eventChatKey) return false;
+        const now = lineageCheckpointKey(chatLineage(getContext().chat || []), messageId);
+        if (now === eventSourceKey) return true;
+        if (!sameReplyRewritten(eventChatKey, messageId, eventParent)) return false;
+        eventSourceKey = now;
+        return true;
+    };
     try { await ensureChatStateLoaded(eventChatKey); }
     catch (error) {
         console.error('[NPC State Delta] assistant event deferred because chat hydration failed.', error);
         globalThis.toastr?.error?.('NPC State Delta could not load this chat dossier. Existing sidecar data was preserved; retry after the server is available.');
         return;
     }
-    if (getChatKey() !== eventChatKey || eventSourceKey !== lineageCheckpointKey(chatLineage(getContext().chat || []), messageId)) return;
+    if (!sourceStillHere()) return;
 
     // SillyTavern 1.18 emits MESSAGE_SWIPED before starting Generate('swipe'). Some
     // backends then emit MESSAGE_RECEIVED while swipeState is still SWIPING. Never run
@@ -7071,8 +7110,7 @@ async function handleAssistantMessageReceived(messageId, { bypassSwipeGuard = fa
     if (scanExpected) {
         if (await scanNow({ manual: false, messageId, allowDuringSwipe: bypassSwipeGuard }) === false) return;
     }
-    if (getChatKey() !== eventChatKey || latestMessageId(true) !== messageId
-        || eventSourceKey !== lineageCheckpointKey(chatLineage(getContext().chat || []), messageId)) return;
+    if (getChatKey() !== eventChatKey || latestMessageId(true) !== messageId || !sourceStillHere()) return;
     await processPendingBackfills(messageId);
 }
 
