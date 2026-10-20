@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 1.2.15 - 20 October 2026
+
+Small UI release: nothing Delta stores, sends or decides changes.
+
+- **What moved, beside each meter.** The Player relationship meters show the change the latest reply made: ▲3 / ▼2 beside the value, green when it is better for the relationship and red when worse (tension rising counts as worse), with a tooltip naming the reply. An older change stays in Last relationship change below the meters, as before.
+- **An Advanced fold in settings.** Scan context, Maximum output tokens, Injection budget, Rewind dossiers on middle deletion and Rescan changed branches move into their own **Advanced** group, so the everyday settings stay short. Every setting, key and default is unchanged.
+- **Present NPCs has its own icon.** 🎭 instead of 👥, which RPG Battle's Party tab also uses, so the tabs stay distinct when Story Block shows icons only. The tab's short label is Present.
+- **Switched off, its tabs leave at once.** Turning NPC State Delta off used to leave its Present NPCs and Dossiers tabs in Story Block until a reload; they now go straight away, as other extensions' tabs do, and come back when it is switched on.
+- **A flaky test fixed.** The runtime smoke test read the in-chat cast before its debounced mount had settled; it now waits for it. The full suite passed five runs in a row.
+
 ## 1.2.14 - 20 October 2026
 
 Cleanup: nothing Delta stores, sends or decides changes.
