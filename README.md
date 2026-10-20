@@ -1,4 +1,4 @@
-# NPC State Delta v1.2.16
+# NPC State Delta v1.2.17
 
 A SillyTavern extension that keeps a living dossier for every NPC in your roleplay: who they are, how they look, how they talk and behave, what they remember, and how they feel about you. After each reply it scans the story, updates the dossiers carefully, and feeds the present NPCs back to the roleplay model so they stay in character.
 
@@ -54,7 +54,7 @@ From a demo session with [Story Block](https://github.com/kohz87/Story_block), [
 ## Install and update
 
 1. In SillyTavern, open **Extensions → Install extension** and paste this repository's URL.
-   Or unpack `npc_state_delta-1.2.16.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
+   Or unpack `npc_state_delta-1.2.17.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
 2. Reload SillyTavern.
 3. **Before updating an existing install,** export a backup from **Data & maintenance → Backup / Export**.
 
@@ -128,6 +128,8 @@ Off by default. **Scanning → One-pass narration capture** asks the roleplay mo
 - **One-pass catch-up** (since 1.2.11, **Scanning → One-pass catch-up**, default every 8 captured replies, 0 for never): the two NPCs most in those replies get a quiet Refresh, one scanner request each, which reads the scan context window and fills what the blocks missed. It says something only when it changed a dossier (*caught up Verna … (mannerisms, memories)*), skips a dossier open in the editor, and waits for any scan in progress.
 - **Read last** (since 1.2.13): the reminder goes in its own system message at the very end of the prompt, after your latest message, where the model reads it last. It is replaced on every generation and emptied when not asked for, so a spent reminder is never sent again.
 - **Cache-friendly** (since 1.2.16): the instruction is sent in two parts. Its rules (about 7,000 characters) do not change from reply to reply, so they go early, in the system prompt, word for word the same each time; providers that cache the start of a prompt (OpenAI, DeepSeek and Gemini do it on their own; Claude with SillyTavern's caching option) can reuse them. The dossier context and the reminder change each reply, so they go at the very end with the live dossier. Swipes, regenerates and background generations carry neither part, as before.
+- **No repeats** (since 1.2.17): an NPC value the live dossier above already gives word for word is left out of the capture's own NPC context (it says `"inDossier": true`), about 45-125 tokens fewer per present NPC with a full dossier. Ids, presence, the relationship numbers, evidence and locks always stay.
+- **Compact one-pass instruction** (since 1.2.17, **Scanning**, off by default): the same rules in fewer words, every field, state word, gate and cap kept; about 1,530 tokens instead of about 2,015. Compare the blocks your model writes before relying on it.
 - **Same checks as a scan:** the block goes through the same evidence checks as an ordinary scan, so it can only propose changes the story supports. It is used once, kept only in memory, and never saved, exported or shown in diagnostics.
 - **Fallback:** the normal scan runs on its usual schedule if the block is missing, broken or cut off, if the dossiers changed while the reply was being written (outdated), if the reply or an earlier message was edited, or if the page was reloaded first. Focused relationship passes, Refresh and backfills still run as separate scanner requests.
 - **Your story's own text is safe:** with the setting off, Delta removes only its own hidden `npc_state_delta` comment; JSON blocks and tags the story writes are left alone.
@@ -277,12 +279,12 @@ npm test                        # unit, compatibility and synthetic-host tests
 npm run validate                # inventory, isolation, version and ownership checks
 npm run measure:prompts         # prompt size measurements
 node scripts/measure-stage9.mjs # prompt/request budget baseline
-npm run package                 # builds dist/npc_state_delta-1.2.16.zip and its SHA-256
+npm run package                 # builds dist/npc_state_delta-1.2.17.zip and its SHA-256
 git diff --check
 ```
 
 - `runtime-modules.json` is the single inventory of shipped modules. The package contains only the runtime modules, stylesheet, manifest, inventory, license and README.
-- Application version 1.2.16 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
+- Application version 1.2.17 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
 - Behaviour is governed by [AGENTS.md](AGENTS.md), [the core contract](docs/core-contract.md) and [the workplan](docs/WORKPLAN.md). Development commands, evidence and limits are in [DEVELOPMENT.md](DEVELOPMENT.md).
 - Historical reviews: [1.0.28](docs/v1.0.28-review.md), [1.0.27 prefix cache](docs/v1.0.27-review.md), [Stage 9](docs/stage9-review.md). Seed provenance is in `docs/seed-provenance.*`.
 

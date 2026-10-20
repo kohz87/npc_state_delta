@@ -241,6 +241,19 @@ test('v1.1.8 capture arms only fresh replies and continues (not quiet/swipe/rege
         h.settings.injectDepth = 0;
         await h.generate('normal');
         h.equal(dossierDepth(), 0, '0 is honoured');
+
+        // (1.2.17) The opt-in compact rules: shorter, still in the system prompt, the same each reply.
+        const fullRules = String(h.rulesCalls().at(-1)?.[1] ?? '');
+        h.equal(h.settings.narrationCaptureCompact, false, 'the compact instruction is off by default');
+        h.settings.narrationCaptureCompact = true;
+        await h.generate('normal');
+        const compactRules = String(h.rulesCalls().at(-1)?.[1] ?? '');
+        h.check(compactRules.startsWith(h.HEADER) && compactRules.length < fullRules.length * 0.8 && h.rulesCalls().at(-1)?.[2] === 0, 'the compact rules are shorter and still go in the system prompt');
+        await h.generate('normal');
+        h.equal(String(h.rulesCalls().at(-1)?.[1] ?? ''), compactRules, 'the compact rules are byte-identical reply to reply');
+        h.settings.narrationCaptureCompact = false;
+        await h.generate('normal');
+        h.equal(String(h.rulesCalls().at(-1)?.[1] ?? ''), fullRules, 'off sends the full rules again');
     });
 });
 

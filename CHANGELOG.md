@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.2.17 - 20 October 2026
+
+One-pass capture, smaller per reply. Nothing Delta stores or decides changes.
+
+- **Present NPCs' fields are not sent twice.** With one-pass capture, the reply's prompt carries the live dossier and, after it, the capture's own NPC context, which repeated much of the same text (personality, speech, mannerisms, mood). A value the NPC's own dossier line already gives word for word is now left out of the capture context, which says so (`"inDossier": true`, and one line explaining it). Only exact repeats go, and only from that NPC's own line; ids, presence, the relationship numbers, evidence and locked fields always stay, and a value the dossier shortened or left out stays. It is used only when it is shorter, explanation included, so a short repeat is still sent. Measured (estimated tokens): about 45-125 fewer per present NPC with a full dossier, nothing for a short one. The separate scanner's prompt is unchanged.
+- **An opt-in compact instruction.** **Scanning → Compact one-pass instruction** (off by default) sends the capture's rules in fewer words: every field, state word, gate and cap is kept, the explanations are shorter. About 1,530 tokens instead of about 2,015 (24% fewer), and still word for word the same each reply, early in the prompt. It is opt-in because its effect on the blocks the model writes has not been compared on a real model yet; the full instruction stays the default. The separate scanner never uses it.
+- **`npm run measure:prompts`** also reports the capture's static rules, the compact rules and the context with and without the repeats.
+
 ## 1.2.16 - 20 October 2026
 
 - **Cache-friendly prompt layout.** Providers that cache the start of a prompt (OpenAI, DeepSeek and Gemini on their own; Claude with SillyTavern's caching option) reuse everything up to the first part that changed. Delta's text is now arranged for that, following the Story Suite convention:

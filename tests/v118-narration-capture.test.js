@@ -302,3 +302,42 @@ test('v1.2.16 the capture splits into rules (byte-identical reply to reply) and 
     assert.ok(whole.startsWith(first.rules) && whole.endsWith(rest), 'rules first, then the rest, as one piece');
     assert.equal(whole.slice(first.rules.length, whole.length - rest.length).trim(), '', 'only the line break between them');
 });
+
+test('v1.2.17 the capture context leaves out values the live dossier above already gives, only that NPC\'s own and only word for word', () => {
+    const vrena = { id: 'npc_vrena', name: 'Vrena Tolk', present: true, role: 'Guild clerk', personality: 'Dry, exacting, quietly kind.', speech: 'Clipped, formal sentences.', mannerisms: ['Taps the signature line twice.'], mood: 'busy', location: 'Guild counter', relationship: { trust: 3, affection: 1, desire: 0, tension: 0 }, manualProfileFields: ['speech'] };
+    const elke = { id: 'npc_elke', name: 'Elke', present: true, personality: 'Warm.', mood: 'tired', location: 'Back room' };
+    const options = { transcript: 'USER: Vrena Tolk and Elke, a moment?', userName: 'Ari', charName: 'Narrator', existingNpcs: [vrena, elke] };
+    // Vrena's line repeats her personality, speech, mannerism, mood and role; it also says "tired", Elke's mood.
+    const dossier = '- Vrena Tolk: IDENTITY (authoritative): personality: Dry, exacting, quietly kind.; established speech: Clipped, formal sentences.; established mannerisms: Taps the signature line twice.; role: Guild clerk; mood: busy, a little tired';
+    const plain = buildNarrationCaptureParts(options).context;
+    const deduped = buildNarrationCaptureParts({ ...options, dossierAbove: dossier }).context;
+    assert.ok(deduped.length < plain.length);
+    const live = JSON.parse(deduped.split('Relevant live context (dynamic fields only):\n')[1].split('\n')[0]);
+    const vLive = live.find(entry => entry.id === 'npc_vrena');
+    assert.equal(vLive.inDossier, true);
+    assert.equal(vLive.mood, undefined, 'her mood is in her own dossier line');
+    assert.equal(vLive.location, 'Guild counter', 'a value the dossier does not give stays');
+    assert.deepEqual(vLive.currentRelationship, { trust: 3, affection: 1, desire: 0, tension: 0 }, 'the numbers are never in the dossier and always stay');
+    const eLive = live.find(entry => entry.id === 'npc_elke');
+    assert.equal(eLive.mood, 'tired', "another NPC's line never removes Elke's values");
+    assert.equal(eLive.inDossier, undefined);
+    assert.match(deduped, /\(inDossier: fields left out here are the NPC STATE DELTA DOSSIER's values above, current and unchanged\.\)/);
+    // The scanner's own prompt and a capture with no dossier are untouched.
+    assert.equal(buildScannerPrompt({ ...options, dossierAbove: dossier }), buildScannerPrompt(options));
+    assert.doesNotMatch(plain, /inDossier/);
+});
+
+test('v1.2.17 the opt-in compact capture rules keep every field, state word and gate, in fewer words, for capture only', () => {
+    const options = { transcript: 'USER: hi', userName: 'Kazuma', charName: 'Megumin', existingNpcs: [{ id: 'npc_yun', name: 'Yunyun', present: true }] };
+    const full = buildNarrationCaptureParts(options).rules;
+    const compact = buildNarrationCaptureParts({ ...options, compactCapture: true }).rules;
+    assert.ok(compact.length < full.length * 0.8, `compact ${compact.length} vs full ${full.length}`);
+    assert.ok(compact.startsWith('NPC STATE DELTA ONE-PASS CAPTURE.'));
+    for (const word of ['profileUpdates', 'keyRelationshipEdges', 'relationshipDelta', 'relationshipEvidence', 'relationshipImpact', 'developmentScale', 'developmentReason', 'memoryRetention', 'homeBaseState', 'ageState', 'apparentAgeState', 'genderState', 'lifeState', 'appearanceState', 'overallAppearance', 'identityKind', 'dossierSignal', 'sameIndividual', 'directInteraction', 'worldActive', 'goalState', 'locationState', 'Disposition|Care|Expression|Independence|Conflict|Threat|Analytical|Presentation|Mercy|Loyalty|Drive|Honesty', 'Delta caps:', 'Relationship rubric:', 'Kazuma', 'Megumin']) {
+        assert.ok(compact.includes(word), word);
+    }
+    // Byte-identical reply to reply, like the full rules.
+    assert.equal(buildNarrationCaptureParts({ ...options, compactCapture: true, existingNpcs: [] }).rules, compact);
+    // The scanner never uses them.
+    assert.equal(buildScannerPrompt({ ...options, compactCapture: true }), buildScannerPrompt(options));
+});

@@ -6624,6 +6624,24 @@ export const NARRATION_CAPTURE_REMINDER = 'Reminder: after the story, end with t
     // each existing NPC the reply names, and the model's own word on whether that covers everyone.
     + ' Relationships: give each existing NPC your story names an npcs row with relationshipImpact and all four relationshipDelta keys (0 = no change). Add top-level "relationshipsCovered": true when those rows hold everyone whose feelings toward the user could have changed in this reply, and list anyone you are unsure of in "relationshipReview": ["Name"].';
 
+// (1.2.17) The one-pass rules in fewer words, for readers who opt in: every field, state keyword,
+// gate and cap of rules 1-15 kept; the explanations shortened. No wording here is shared with the
+// scanner's own prompt, which is unchanged.
+function compactCaptureRules(userName, charName) {
+    return `Rules (CURRENT exchange = the user's latest message + your reply; never invent):
+1. Skip the player (${userName}), the main speaker (${charName}) and nameless extras. Match existing NPCs by id/name/alias/role and reuse the id; a role-labelled dossier that gets a grounded proper name keeps its id (old label into aliases, identityKind:"proper_name"); never duplicate or downgrade.
+2. Return only NPCs observed or meaningfully changed in the exchange, as deltas: changed fields only; omitted fields persist.
+3. NEW people: name, identityKind, dossierSignal, dossierReason, sameIndividual (true only when proven), directInteraction, present, worldActive, plus every grounded field. Candidates are not dossiers. Proper names from narration, World State or Inner Chatter must be returned even when the prose uses a role.
+4. present = physically in the latest scene; worldActive = explicit current off-screen activity; World State or Inner Chatter alone never sets presence. Live goal/status/mood/location (+goalState/statusState/moodState/locationState): reassess each returned NPC; replace when changed, "clear" only when ended (location only when the old place is explicitly obsolete); never "Unknown".
+5. profileUpdates {id, evidence:{field:[short quotes]}, …} for every grounded durable fact (several fields per scene allowed): personality/speech/mannerisms (FULL, max 4)/behaviorProfile (FULL, max 6 "Label: level - effect", Label=Disposition|Care|Expression|Independence|Conflict|Threat|Analytical|Presentation|Mercy|Loyalty|Drive|Honesty; habits go to mannerisms) with *State "refine" (correction/reveal) or "evolve"+reason; appearance = CURRENT outfit/gear/condition, overallAppearance = enduring body when no named forms; a grounded visual on an existing NPC MUST emit it + evidence.appearance; appearanceState "refine" or "change"+reason, FULL. Locked fields never change.
+6. Mood, stress, intimacy, injury or relationship-specific behaviour never becomes global personality/speech/mannerisms/behaviorProfile; a fleeting pose is not identity. developmentScale: gradual (your narration) | explicit/batch (the player's declarative canon, not quotes/questions/wishes; or a time skip) with developmentReason + the FULL changed candidate; a time skip alone invents nothing.
+7. Bonds between non-player NPCs (kin/friend/rival/mentor/partner): top-level keyRelationshipEdges {aId,a,bId,b,aToB=b's role to a,bToA,reason}, one per pair; omission never erases a bond.
+8. age = chronology only (birthday/exact elapsed => ageState:"advance"+reason; correction => "correct"+reason); apparentAge = visual cue "~N" (apparentAgeState:"evolve"+reason); species literal; gender male|female only if explicit (genderState:"correct"+reason); lifeState unknown|alive|deceased (deceased+explicit is terminal).
+9. Relationship toward the player, from the CURRENT exchange only; currentRelationship is read-only: relationshipImpact none|ordinary|meaningful|major|extreme; relationshipDelta {trust,affection,desire,tension} (all 4 keys) within the delta caps, each axis max 1/2/3/4 by impact; relationshipEvidence for every non-zero axis; continuation/aftermath = 0; desire only for explicit attraction/intimacy; trust != obedience, affection != devotion, tension != jealousy.
+10. memories: max 3 new, cap 5 stored, no paraphrased duplicates (memoryRetention = top 5 when crowded); homeBase = durable home/workplace/haunt, never the scene location; keep unless homeBaseState:"update"+homeBaseReason. Compact text, caps: homeBase 300, appearance 500, personality 280, speech 240, behaviorProfile 180, background 320, relationshipSummary 280, mannerism 140, bond/memory 180.
+11. JSON only: {"npcs":[...],"profileUpdates":[...],"keyRelationshipEdges":[...]}. Example: {"id":"npc_myla","evidence":{"speech":["formal"]},"speechState":"refine","speech":"Soft, formal."}.`;
+}
+
 export function buildScannerPrompt({
     transcript,
     existingNpcs = [],
@@ -6641,6 +6659,8 @@ export function buildScannerPrompt({
     currentTranscript = '',
     fullScanMode = false,
     narrationCapture = false,
+    dossierAbove = '',
+    compactCapture = false,
 }) {
     const baseline = normalizeRelationshipBaseline(relationshipBaseline);
     const caps = normalizeRelationshipCaps(relationshipCaps);
@@ -6747,6 +6767,40 @@ export function buildScannerPrompt({
             };
         });
 
+    // (1.2.17) One-pass capture with the live dossier in the same prompt: a value the dossier above
+    // already gives word for word is not sent twice. Only exact repeats go (a value the dossier
+    // shortened or left out stays); ids, presence, the numeric relationship, evidence and locks stay.
+    const dossierText = narrationCapture ? String(dossierAbove || '') : '';
+    let dedupedCount = 0;
+    // Each NPC's values are looked for in its own dossier line ("- Name: …"), never another's.
+    const dossierLineOf = name => dossierText.split('\n').filter(line => line.startsWith(`- ${name}:`) || line.startsWith(`- ${name} (`)).join('\n');
+    const withoutDossierRepeats = (entry, keep) => {
+        const line = dossierText && entry?.name ? dossierLineOf(entry.name) : '';
+        if (!line) return entry;
+        const out = {};
+        let dropped = false;
+        for (const [key, value] of Object.entries(entry)) {
+            const repeated = !keep.has(key) && (typeof value === 'string'
+                ? value.length >= 3 && line.includes(value)
+                : Array.isArray(value) && value.length > 0 && value.every(item => typeof item === 'string' && line.includes(item.replace(/[.;]\s*$/, ''))));
+            if (repeated) dropped = true;
+            else out[key] = value;
+        }
+        if (!dropped) return entry;
+        dedupedCount += 1;
+        return { ...out, inDossier: true };
+    };
+    const ALWAYS_SENT = new Set(['id', 'name', 'aliases', 'currentRelationship', 'present', 'worldActive', 'lifeState', 'lifeStateCertainty', 'archived', 'archiveReason', 'recentProfileEvidence', 'lockedProfileFields']);
+    const liveDeduped = runtimeExisting.map(entry => withoutDossierRepeats(entry, ALWAYS_SENT));
+    const profileDeduped = profileExisting.map(entry => withoutDossierRepeats(entry, ALWAYS_SENT));
+    const dedupeNote = '\n(inDossier: fields left out here are the NPC STATE DELTA DOSSIER\'s values above, current and unchanged.)';
+    // Only when it is shorter, note included: a short repeat is cheaper to send than to explain.
+    const dedupeSaves = dedupedCount > 0 && JSON.stringify(liveDeduped).length + JSON.stringify(profileDeduped).length + dedupeNote.length
+        < JSON.stringify(runtimeExisting).length + JSON.stringify(profileExisting).length;
+    const liveSent = dedupeSaves ? liveDeduped : runtimeExisting;
+    const profileSent = dedupeSaves ? profileDeduped : profileExisting;
+    const dossierNote = dedupeSaves ? dedupeNote : '';
+
     const relationshipRubric = compactRelationshipRubric(relationshipCriteria);
     const impactRubric = compactImpactRubric(impactCriteria);
     const memoryRubric = compactMemoryRubric(memoryCriteria);
@@ -6758,6 +6812,31 @@ export function buildScannerPrompt({
     const storyContext = narrationCapture
         ? NARRATION_CAPTURE_STORY
         : `Story context:\n${String(transcript || '').trim()}${fullScanMode ? `\n\nCURRENT exchange (authoritative for presence/live state and numeric relationship deltas):\n${currentExchange}` : ''}`;
+
+    // (1.2.17) Opt-in compact one-pass rules: the same fields and gates in fewer words (about 1,200
+    // tokens instead of 2,000). Only for one-pass capture; the scanner keeps its full rules.
+    const rulesBlock = narrationCapture && compactCapture ? compactCaptureRules(userName, charName) : null;
+    if (rulesBlock) {
+        return `${NARRATION_CAPTURE_HEADER}
+Admission: ${admissionPolicy}
+${rulesBlock}
+
+Relationship rubric: ${relationshipRubric || '(none)'}
+Impact rubric: ${impactRubric || '(none)'}
+Memory criteria: ${memoryRubric || '(none configured; store only clearly durable story-relevant events)'}
+Delta caps: ordinary ${caps.ordinary}; meaningful ${caps.meaningful}; major ${caps.major}; extreme ${caps.extreme}. New-NPC baseline: ${JSON.stringify(baseline)}
+
+Identity index (matching only):
+${JSON.stringify(identityIndex)}
+
+Relevant live context (dynamic fields only):
+${JSON.stringify(liveSent)}
+
+Stable profile context (strongly relevant existing only):
+${JSON.stringify(profileSent)}${dossierNote}
+
+${storyContext}`;
+    }
 
     return `${narrationCapture ? NARRATION_CAPTURE_HEADER : 'Private NPC dossier scanner.'}
 Admission: ${admissionPolicy}${fullScanRule}
@@ -6787,10 +6866,10 @@ Identity index (matching only):
 ${JSON.stringify(identityIndex)}
 
 Relevant live context (dynamic fields only):
-${JSON.stringify(runtimeExisting)}
+${JSON.stringify(liveSent)}
 
 Stable profile context (strongly relevant existing only):
-${JSON.stringify(profileExisting)}
+${JSON.stringify(profileSent)}${dossierNote}
 
 ${storyContext}`;
 }

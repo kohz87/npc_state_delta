@@ -520,6 +520,8 @@ const DEFAULTS = Object.freeze({
     // (1.2.11) With one-pass capture: a quiet Refresh of the NPCs most in the last N captured
     // replies (0 = never), for the slow fields a block beside the story tends to leave thin.
     narrationCaptureCatchUp: 8,
+    // (1.2.17) Opt-in: the one-pass rules in fewer words (about 500 tokens less per armed reply).
+    narrationCaptureCompact: false,
     scannerConnectionProfile: '',
     portraitGenerationEnabled: true,
     portraitThemePreset: 'fantasy_anime',
@@ -639,6 +641,7 @@ function getSettings() {
     assign('injectDepthTailUpgraded', true);
     assign('fullScanEveryTurn', settings.fullScanEveryTurn === true);
     assign('narrationCapture', settings.narrationCapture === true);
+    assign('narrationCaptureCompact', settings.narrationCaptureCompact === true);
     assign('narrationCaptureCatchUp', Number.isFinite(Number(settings.narrationCaptureCatchUp)) ? Math.max(0, Math.min(50, Math.round(Number(settings.narrationCaptureCatchUp)))) : 8);
     assign('scannerConnectionProfile', typeof settings.scannerConnectionProfile === 'string' ? settings.scannerConnectionProfile.trim() : '');
     assign('portraitGenerationEnabled', settings.portraitGenerationEnabled !== false);
@@ -2497,13 +2500,15 @@ function updateInjection() {
     const state = getChatState();
     // The recent story and who the player's message names: worked out once for both parts.
     const transcript = recentTranscript(4);
-    const captureParts = narrationCaptureArmed === injectionKey && narrationCaptureEnabled(settings)
-        ? buildNarrationCaptureParts(scannerPromptOptions(state, settings, transcript))
-        : { rules: '', context: '' };
-    const capture = captureParts.context;
-    if (!settings.inject && !capture) return clear('"Inject present NPC state" is off.');
+    const armed = narrationCaptureArmed === injectionKey && narrationCaptureEnabled(settings);
+    if (!settings.inject && !armed) return clear('"Inject present NPC state" is off.');
     const namedNpcIds = namedByPlayerNpcIds(state);
     const prompt = settings.inject ? liveInjectionText(state, settings, { namedNpcIds, transcript }) : '';
+    // (1.2.17) The capture's context leaves out what this dossier already gives word for word.
+    const captureParts = armed
+        ? buildNarrationCaptureParts(scannerPromptOptions(state, settings, transcript, { dossierAbove: prompt }))
+        : { rules: '', context: '' };
+    const capture = captureParts.context;
     const present = (state.npcs || []).filter(npc => npc?.present && !npc?.archived);
     const depth = injectDepthOf(settings);
     lastInjection = {
@@ -3813,6 +3818,7 @@ function scannerPromptOptions(state, settings, transcript, extra = {}) {
         impactCriteria: settings.relationshipImpactCriteria,
         memoryCriteria: settings.memoryCriteria,
         admissionMode: settings.admissionMode,
+        compactCapture: settings.narrationCaptureCompact === true,
         ...extra,
     };
 }
@@ -4353,6 +4359,7 @@ function buildSettingsHtml() {
         settingRow('npc_state_delta_scanner_connection_profile', 'Scanner connection profile', '<select id="npc_state_delta_scanner_connection_profile" class="text_pole"></select>', 'Routes every NPC scan, Refresh, focused pass and retry. Default keeps the current roleplay route; an unavailable profile never falls back silently.'),
         settingRow('npc_state_delta_full_scan_every_turn', 'Full scan every turn', '<input id="npc_state_delta_full_scan_every_turn" type="checkbox">', 'With Auto scan, reconcile the whole scan context after every reply instead of only the latest exchange. Overrides Scan every; relationship deltas still come only from the newest exchange.'),
         settingRow('npc_state_delta_narration_capture', 'One-pass narration capture (experimental)', '<input id="npc_state_delta_narration_capture" type="checkbox">', 'With Auto scan, the roleplay model ends each reply with a hidden NPC update block that replaces the separate scan request. Adds about 2,000-3,000 tokens to every roleplay prompt plus the block to each reply; a missing or broken block falls back to the normal scan. Not used with Full scan every turn.'),
+        settingRow('npc_state_delta_narration_capture_compact', 'Compact one-pass instruction', '<input id="npc_state_delta_narration_capture_compact" type="checkbox">', 'With one-pass capture, the same rules in fewer words: about 1,500 tokens instead of 2,000 on every asked-for reply. Every field, gate and cap is kept, but check the blocks your model writes before relying on it; off sends the full rules.'),
         settingRow('npc_state_delta_narration_capture_catch_up', 'One-pass catch-up', numberControl('npc_state_delta_narration_capture_catch_up', 0, 50, 'replies'), 'With one-pass capture, every this many captured replies the two NPCs most in them get a quiet Refresh (one scanner request each) for mannerisms, levers and memories. 0 turns it off.'),
         settingsSlot('full-cast'),
         settingRow('npc_state_delta_scan_every', 'Scan every', numberControl('npc_state_delta_scan_every', 1, 20, 'replies'), 'Quick-scan cadence when Full scan every turn is off.'),
@@ -4593,6 +4600,7 @@ function syncSettingsControls() {
     syncScannerProfileControl();
     $('#npc_state_delta_full_scan_every_turn').prop('checked', !!s.fullScanEveryTurn);
     $('#npc_state_delta_narration_capture').prop('checked', !!s.narrationCapture);
+    $('#npc_state_delta_narration_capture_compact').prop('checked', !!s.narrationCaptureCompact);
     $('#npc_state_delta_scan_every').val(s.scanEvery);
     $('#npc_state_delta_scan_depth').val(s.scanDepth);
     $('#npc_state_delta_narration_capture_catch_up').val(s.narrationCaptureCatchUp);
@@ -6805,7 +6813,7 @@ function nextReplyTexts() {
     const transcript = recentTranscript(4);
     const injection = settings.inject ? liveInjectionText(state, settings, { transcript }) : '';
     const capture = narrationCaptureEnabled(settings)
-        ? buildNarrationCapturePrompt(scannerPromptOptions(state, settings, transcript))
+        ? buildNarrationCapturePrompt(scannerPromptOptions(state, settings, transcript, { dossierAbove: injection }))
         : '';
     return { injection, capture };
 }
@@ -6990,6 +6998,7 @@ function bindUi() {
     });
     bindSettingsCheckbox('#npc_state_delta_full_scan_every_turn', 'fullScanEveryTurn');
     bindSettingsCheckbox('#npc_state_delta_narration_capture', 'narrationCapture');
+    bindSettingsCheckbox('#npc_state_delta_narration_capture_compact', 'narrationCaptureCompact');
     bindSettingsCheckbox('#npc_state_delta_inject', 'inject', updateInjection);
     bindSettingsNumber('#npc_state_delta_inject_budget', 'injectBudgetTokens', 512, 6000, 4000, updateInjection);
     bindSettingsCheckbox('#npc_state_delta_archive_deaths', 'autoArchiveDeaths');
