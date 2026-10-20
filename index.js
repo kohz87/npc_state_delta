@@ -66,6 +66,7 @@ import {
     parseNarrationCapture,
     buildNarrationCapturePrompt,
     tagScanEvidence,
+    storyProse,
     npcMatchesLabel,
     normalizeName,
     normalizeGender,
@@ -2353,12 +2354,14 @@ function currentExchangeUserDevelopmentContext(messageId = null) {
     return '';
 }
 
-function currentExchangeTranscript(messageId = null) {
+// The current exchange's messages: the assistant reply at (or before) `messageId` and the user
+// message it answers, oldest first; null when there is no reply.
+function currentExchangeMessages(messageId = null) {
     const ctx = getContext();
     const chat = ctx.chat || [];
     let assistantId = Number.isInteger(messageId) ? messageId : chat.length - 1;
     while (assistantId >= 0 && (chat[assistantId]?.is_system || chat[assistantId]?.is_user)) assistantId -= 1;
-    if (assistantId < 0) return recentTranscript(2);
+    if (assistantId < 0) return null;
     let userId = -1;
     for (let i = assistantId - 1; i >= 0; i -= 1) {
         if (chat[i]?.is_system) continue;
@@ -2366,11 +2369,24 @@ function currentExchangeTranscript(messageId = null) {
         // Do not walk across an older assistant turn looking for a distant user message.
         if (!chat[i]?.is_user) break;
     }
-    return [userId >= 0 ? chat[userId] : null, chat[assistantId]]
-        .filter(Boolean)
-        .map(cleanMessage)
-        .filter(Boolean)
-        .join('\n');
+    return [userId >= 0 ? chat[userId] : null, chat[assistantId]].filter(Boolean);
+}
+
+function currentExchangeTranscript(messageId = null) {
+    const messages = currentExchangeMessages(messageId);
+    if (!messages) return recentTranscript(2);
+    return messages.map(cleanMessage).filter(Boolean).join('\n');
+}
+
+// (1.2.12) The current exchange's story alone (narration and dialogue, no World State or blocks):
+// who a relationship moment involves, and what the relationship evaluator is sent.
+function currentExchangeProse(messageId = null) {
+    const ctx = getContext();
+    return (currentExchangeMessages(messageId) || []).map(message => {
+        const body = storyProse(message.mes || '');
+        const speaker = message.name || (message.is_user ? ctx.name1 : ctx.name2) || '';
+        return body ? `${speaker}: ${body}` : '';
+    }).filter(Boolean).join('\n');
 }
 
 // Story day of a message: its own dated World State block, else the nearest earlier dated message
@@ -3472,15 +3488,25 @@ function hasCompletePrimaryRelationshipDecision(raw, transcript = '') {
 
 async function runFocusedRelationshipPass(ctx, parsed, existingNpcs, transcript, settings, options = {}) {
     const returned = Array.isArray(parsed?.npcs) ? parsed.npcs : [];
+    // (1.2.12) `prose`: the exchange's story alone. Who takes part is who it names (a name only in
+    // the World State's lists, Off-Screen above all, is no part in the scene), and it is what the
+    // evaluator reads; evidence is still checked against the whole exchange.
+    const prose = String(options.prose ?? '').trim();
+    const named = prose || transcript;
+    // (1.2.12) A one-pass block's own word: `covered` (its rows hold everyone whose feelings could
+    // have changed) settles anyone it left out; `review` names whom it wants checked anyway.
+    const review = Array.isArray(options.review) ? options.review.map(name => String(name ?? '').trim()).filter(Boolean).slice(0, 8) : [];
     // Relationship reconciliation is keyed to the CURRENT exchange, not to whether the broad
     // dossier scanner happened to return a row. This prevents an NPC who acts early in a long
     // response from being skipped merely because the response ends with another cast/location.
     const targets = (Array.isArray(existingNpcs) ? existingNpcs : [])
         .filter(npc => !npc?.archived && !isTerminalNpcDeath(npc))
         .filter(npc => {
+            if (review.some(name => npcMatchesLabel(npc, name))) return true;
             const raw = returned.find(item => rawScanMatchesExisting(item, npc));
-            if (!currentExchangeRelationshipRelevant(npc, transcript, raw, options)) return false;
-            return !raw || !hasCompletePrimaryRelationshipDecision(raw, transcript);
+            if (!currentExchangeRelationshipRelevant(npc, named, raw, options)) return false;
+            if (raw) return !hasCompletePrimaryRelationshipDecision(raw, transcript);
+            return options.covered !== true;
         });
     if (!targets.length) return { decisions: new Map(), used: false, responseChars: 0, retried: false, targetCount: 0 };
 
@@ -3492,7 +3518,7 @@ async function runFocusedRelationshipPass(ctx, parsed, existingNpcs, transcript,
         const batch = targets.slice(offset, offset + 4);
         try {
             const relationshipPrompt = buildRelationshipPassPrompt({
-                transcript,
+                transcript: prose || transcript,
                 targets: batch,
                 userName: ctx.name1 || 'User',
                 relationshipCriteria: settings.relationshipCriteria,
@@ -3898,6 +3924,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
     if (sourceMoved()) return false;
     const scanLineage = chatLineage(ctx.chat || []);
     const currentTranscript = currentExchangeTranscript(messageId);
+    const currentProse = currentExchangeProse(messageId);
     const fullWindowScan = Boolean(!manual && settings.fullScanEveryTurn);
     const transcript = (manual || fullWindowScan) ? recentTranscript(settings.scanDepth) : currentTranscript;
     const userDevelopmentContext = (manual || fullWindowScan)
@@ -3991,7 +4018,13 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
             state.npcs,
             currentTranscript || transcript,
             settings,
-            { currentExchangeOnly: manual || fullWindowScan, requestScope: operation.requestScope },
+            {
+                currentExchangeOnly: manual || fullWindowScan,
+                requestScope: operation.requestScope,
+                prose: currentProse,
+                // (1.2.12) Only a one-pass block speaks for its relationships this way.
+                ...(capture ? { covered: parsed?.relationshipsCovered === true, review: Array.isArray(parsed?.relationshipReview) ? parsed.relationshipReview : [] } : {}),
+            },
         );
         const scanFinishedAt = performance.now?.() ?? Date.now();
         lastScanMetrics = {
@@ -4067,7 +4100,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
                         batch,
                         currentTranscript || transcript,
                         settings,
-                        { currentExchangeOnly: true, requestScope: operation.requestScope },
+                        { currentExchangeOnly: true, requestScope: operation.requestScope, prose: currentProse },
                     );
                     for (const [id, decision] of result.decisions || []) combinedDecisions.set(id, decision);
                     combinedTargetCount += Number(result.targetCount || 0);

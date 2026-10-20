@@ -9,6 +9,7 @@ import {
     extractNarrationCapture,
     mergeScanResult,
     parseNarrationCapture,
+    storyProse,
     stripUiNoise,
     tagScanEvidence,
 } from '../core.js';
@@ -258,4 +259,17 @@ test('tagScanEvidence tags untagged evidence with its reply and leaves the rest 
     assert.deepEqual(tagged.profileUpdates[1], { id: 'npc_burl' });
     assert.equal(parsed.profileUpdates[0].evidence.mannerisms[0], 'taps the ledger', 'the input is not touched');
     assert.equal(tagScanEvidence(parsed, null), parsed);
+});
+
+test('storyProse keeps the narration and dialogue, never the World State or other blocks (1.2.12)', () => {
+    const reply = 'Verna nods at Burl. "Fine."\n\n<!-- STORY_BLOCKS_V1\n<Blocks>\n<World_State>\n**👥 NPCs Present:**\n**Marrit:**\n**📡 Off-Screen:**\n* Brecht — at the sheds\n</World_State>\n<NPC_Inner_Chatter>Greta: hmm</NPC_Inner_Chatter>\n</Blocks>\n-->';
+    assert.equal(storyProse(reply), 'Verna nods at Burl. "Fine."');
+    assert.match(stripUiNoise(reply), /Brecht/, 'the scan still reads the World State');
+    assert.equal(storyProse('Before <details><summary>World State</summary>Brecht</details> after.'), 'Before after.');
+    assert.equal(storyProse('<World_State>Brecht</World_State>'), '');
+    assert.equal(storyProse(`Yunyun waves.${'\n\n<!--npc_state_delta\n{"npcs":[]}\n-->'}`), 'Yunyun waves.');
+});
+
+test('the capture reminder asks for complete relationship rows and the block\'s own word (1.2.12)', () => {
+    for (const part of ['relationshipImpact', 'relationshipDelta', '"relationshipsCovered": true', '"relationshipReview"']) assert.ok(NARRATION_CAPTURE_REMINDER.includes(part), part);
 });

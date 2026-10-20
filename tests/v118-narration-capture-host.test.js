@@ -131,7 +131,7 @@ test('v1.1.8 capture arms only fresh replies and continues (not quiet/swipe/rege
         await h.generate('normal');
         h.check(h.lastPrompt().includes(h.HEADER), 'a normal generation carries the capture instruction');
         h.check(h.lastPrompt().includes('<!--npc_state_delta'), 'the instruction names the hidden block');
-        h.check(h.lastPrompt().trimEnd().endsWith('even if the field itself must wait.'), 'the reminder is the last thing in the injection');
+        h.check(h.lastPrompt().trimEnd().endsWith('"relationshipReview": ["Name"].'), 'the reminder is the last thing in the injection');
         h.check(!h.lastPrompt().includes('Who is at the gate?'), 'the capture instruction carries no transcript');
         h.check(h.runtime.injectionPreview().captureChars > 1000, 'the preview reports the capture size');
         h.equal(h.status().armed, true, 'armed after a normal generation');
@@ -603,5 +603,35 @@ test('v1.2.11 one-pass catch-up refreshes the NPCs most in the last N captured r
         await h.turn('We wait more.', `Yunyun sighs.${h.block(update)}`);
         await h.sleep(300);
         h.equal(refreshCalls().length, 1, 'none with the setting at 0');
+    });
+});
+
+// (1.2.12) The relationship evaluator in one-pass: only NPCs the story names are targets, it
+// reads the story alone, and the block's own "relationshipsCovered" / "relationshipReview" decide.
+test('v1.2.12 one-pass relationship targets: story names only, the block covers or asks for review', () => {
+    runScenario('relationship-targets', async h => {
+        h.settings.narrationCapture = true;
+        await h.manualAddNpc('Brecht');
+        h.check(h.npc('Brecht'), 'Brecht has a dossier');
+        const worldState = '\n\n<!-- STORY_BLOCKS_V1\n<Blocks>\n<World_State>\n**👥 NPCs Present:**\n**Yunyun:**\n\n**📡 Off-Screen:**\n* Brecht — rallying dockhands at the fish sheds\n</World_State>\n</Blocks>\n-->';
+        const yunyunOnly = { npcs: [{ ...h.YUNYUN }] };
+        const evaluatorPrompts = () => h.relationshipCalls().map(args => String(args.prompt || ''));
+        // 1. Brecht only in the World State's Off-Screen list: no target, no request.
+        await h.turn('Who is at the gate?', `${h.REPLY}${worldState}${h.block(yunyunOnly)}`);
+        h.equal(h.relationshipCalls().length, 0, 'a name only in the World State is no part in the scene');
+        // 2. Brecht named in the story, left out of the block, nothing said: the evaluator checks him,
+        // reading the story without the World State.
+        const named = 'Yunyun points at Brecht across the square and frowns.';
+        const still = { npcs: [{ name: 'Yunyun', present: true, relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 } }] };
+        await h.turn('Who is that?', `${named}${worldState}${h.block(still)}`);
+        h.equal(h.relationshipCalls().length, 1, 'a named NPC the block skipped is checked');
+        h.check(evaluatorPrompts()[0].includes('points at Brecht'), 'the evaluator reads the story');
+        h.check(!/Off-Screen|fish sheds/.test(evaluatorPrompts()[0]), 'and not the World State');
+        // 3. The same, with the block saying it covered everyone: no request.
+        await h.turn('And now?', `${named} Again.${worldState}${h.block({ ...still, relationshipsCovered: true })}`);
+        h.equal(h.relationshipCalls().length, 1, '"relationshipsCovered" settles anyone the block left out');
+        // 4. Brecht not named at all, but the block asks for him: checked.
+        await h.turn('Later.', `Yunyun hums.${worldState}${h.block({ ...still, relationshipsCovered: true, relationshipReview: ['Brecht'] })}`);
+        h.equal(h.relationshipCalls().length, 2, '"relationshipReview" asks for a check');
     });
 });

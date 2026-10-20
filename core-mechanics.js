@@ -1275,6 +1275,28 @@ export function stripUiNoise(text) {
 
 
 
+/**
+ * (1.2.12) A message's story alone: its narration and dialogue, without the World State, Inner
+ * Chatter or any other block. Who takes part in a relationship moment is named here; a name that
+ * only appears in a World State's lists (Off-Screen above all) is no part in the scene.
+ */
+export function storyProse(text) {
+    let source = unwrapStoryBlocksEnvelope(extractNarrationCapture(text).text)
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<!--[\s\S]*?(?:-->|$)/g, ' ')
+        .replace(/<Blocks\b[^>]*>[\s\S]*?(?:<\/Blocks\s*>|$)/gi, ' ')
+        .replace(/<details\b[^>]*>[\s\S]*?<\/details>/gi, ' ');
+    for (const tag of ['World_State', 'NPC_Inner_Chatter', 'Story_Tracker', 'CYOA', 'Bonds', 'Character_Sheet', 'New_NPC', 'NPC_Update']) {
+        source = source.replace(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?(?:<\\/${tag}\\s*>|$)`, 'gi'), ' ');
+    }
+    return source
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 export function npcMatchesLabel(npc, label) {
     const key = normalizeName(label);
     if (!key || !npc) return false;
@@ -6597,7 +6619,10 @@ Never mention the block in the story. Fill its JSON as this private NPC dossier 
 const NARRATION_CAPTURE_STORY = 'Story context: the chat above. CURRENT exchange = the user\'s latest message plus the reply you are writing now; use only it for presence, live state and relationship deltas.';
 // (1.2.11) The slow fields named at the end, where the model looks last: they fill only from
 // evidence gathered over scenes, and a block written beside the story tended to leave them out.
-export const NARRATION_CAPTURE_REMINDER = 'Reminder: after the story, end with the <!--npc_state_delta {valid JSON} --> block. Before closing it, check each NPC who acted in your reply for the slow fields, which build up over scenes: a habit or tic (profileUpdates mannerisms + evidence.mannerisms), how they decide or treat people (behaviorProfile "Label: level - effect" + evidence.behaviorProfile), a consequential event (memories). Write the evidence whenever the reply shows one, even if the field itself must wait.';
+export const NARRATION_CAPTURE_REMINDER = 'Reminder: after the story, end with the <!--npc_state_delta {valid JSON} --> block. Before closing it, check each NPC who acted in your reply for the slow fields, which build up over scenes: a habit or tic (profileUpdates mannerisms + evidence.mannerisms), how they decide or treat people (behaviorProfile "Label: level - effect" + evidence.behaviorProfile), a consequential event (memories). Write the evidence whenever the reply shows one, even if the field itself must wait.'
+    // (1.2.12) Relationships settled in the block, so no evaluator request is needed: a full row for
+    // each existing NPC the reply names, and the model's own word on whether that covers everyone.
+    + ' Relationships: give each existing NPC your story names an npcs row with relationshipImpact and all four relationshipDelta keys (0 = no change). Add top-level "relationshipsCovered": true when those rows hold everyone whose feelings toward the user could have changed in this reply, and list anyone you are unsure of in "relationshipReview": ["Name"].';
 
 export function buildScannerPrompt({
     transcript,

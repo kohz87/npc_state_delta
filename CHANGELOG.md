@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.2.12 - 20 October 2026
+
+- **Far fewer relationship evaluator requests.** After each scan or one-pass block, NSD checks every existing NPC who appears in the exchange, and any without a complete relationship decision got a separate evaluator request carrying the whole exchange: often 2–3 requests and 6–16k tokens a reply. Most of those NPCs only appeared in the World State, for example in the Off-Screen list Story Director fills with every active agenda, so the answer was always "no change".
+  - **Only NPCs named in the story count.** A name that only appears in the World State's lists no longer makes anyone a target. This applies to automatic scans as well as one-pass.
+  - **The evaluator reads the story alone.** Its request carries the exchange's narration and dialogue, not the World State or other blocks, so each request is much smaller. The evidence it returns is still checked against the whole exchange.
+  - **One-pass blocks settle relationships themselves.** The instruction asks for a full relationship row (impact and all four values, 0 for no change) for each existing NPC the story names. The model can add `"relationshipsCovered": true` when its rows hold everyone whose feelings could have changed, and `"relationshipReview": ["Name"]` for anyone it wants checked. Covered NPCs need no request; a reviewed one always gets one, and a block that says neither is checked as before. About 60 tokens on the instruction.
+
 ## 1.2.11 - 20 October 2026
 
 - **One-pass capture fills the slow fields too.** With one-pass capture on, Refresh found mannerisms, Behavioral Levers and important memories that the replies' own blocks had left out. Three changes close that gap:

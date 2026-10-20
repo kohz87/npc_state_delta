@@ -7,7 +7,8 @@ const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 test('v0.2.23 relationship repair targets current-exchange NPCs even when broad scan omits them', () => {
     assert.match(source, /currentExchangeRelationshipRelevant/);
     assert.match(source, /transcriptMentionsNpcRecord\(transcript, npc\)/);
-    assert.match(source, /return !raw \|\| !hasCompletePrimaryRelationshipDecision\(raw, transcript\)/);
+    // (1.2.12) A returned row is judged by its decision; an omitted NPC is a target unless a one-pass block says it covered everyone.
+    assert.match(source, /if \(raw\) return !hasCompletePrimaryRelationshipDecision\(raw, transcript\);\s*return options\.covered !== true;/);
     assert.match(source, /for \(let offset = 0; offset < targets\.length; offset \+= 4\)/);
     const relationshipPassSource = source.slice(
         source.indexOf('async function runFocusedRelationshipPass'),
