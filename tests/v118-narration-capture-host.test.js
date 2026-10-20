@@ -87,7 +87,9 @@ function captureHelpers(mockState, eventSource, sleep, manualAddNpc) {
     const scannerCalls = () => callsOf(/isolated dossier scanner\./i);
     const relationshipCalls = () => callsOf(/isolated relationship evaluator/i);
     const dossierPrompts = () => mockState.prompts.filter(args => args[0] === 'npc_state_delta_live_dossier').map(args => String(args[1] ?? ''));
-    const lastPrompt = () => dossierPrompts().at(-1) ?? '';
+    // (1.2.13) The capture reminder has its own slot at the end of the prompt (depth 0).
+    const captureCalls = () => mockState.prompts.filter(args => args[0] === 'npc_state_delta_capture');
+    const lastPrompt = () => [dossierPrompts().at(-1) ?? '', String(captureCalls().at(-1)?.[1] ?? '')].filter(Boolean).join('\n\n');
     const status = () => runtime.uiStatus().narrationCapture;
     const npc = name => runtime.getState().npcs.find(item => item.name === name) || null;
     // Fire every listener in registration order (as the host does) and wait for the async ones.
@@ -117,7 +119,7 @@ function captureHelpers(mockState, eventSource, sleep, manualAddNpc) {
         if (/isolated dossier scanner\./i.test(String(args.systemPrompt || ''))) return JSON.stringify({ npcs: [{ ...YUNYUN, role: 'scanned adventurer' }] });
         return '{"npcs":[]}';
     };
-    return { manualAddNpc, fail, check, equal, runtime, settings, HEADER, REPLY, YUNYUN, block, scannerCalls, relationshipCalls, dossierPrompts, lastPrompt, status, npc, emitAsync, generate, sendUser, receiveAssistant, turn, mockState, sleep };
+    return { manualAddNpc, fail, check, equal, runtime, settings, HEADER, REPLY, YUNYUN, block, scannerCalls, relationshipCalls, dossierPrompts, captureCalls, lastPrompt, status, npc, emitAsync, generate, sendUser, receiveAssistant, turn, mockState, sleep };
 }
 
 test('v1.1.8 capture arms only fresh replies and continues (not quiet/swipe/regenerate/impersonate/dry-run)', () => {
@@ -132,6 +134,9 @@ test('v1.1.8 capture arms only fresh replies and continues (not quiet/swipe/rege
         h.check(h.lastPrompt().includes(h.HEADER), 'a normal generation carries the capture instruction');
         h.check(h.lastPrompt().includes('<!--npc_state_delta'), 'the instruction names the hidden block');
         h.check(h.lastPrompt().trimEnd().endsWith('"relationshipReview": ["Name"].'), 'the reminder is the last thing in the injection');
+        const sent = h.captureCalls().at(-1);
+        h.check(String(sent?.[1] ?? '').includes(h.HEADER) && sent?.[3] === 0, 'the reminder goes in its own slot at depth 0, the end of the prompt');
+        h.check(!h.dossierPrompts().at(-1)?.includes(h.HEADER), 'the dossier slot carries no reminder');
         h.check(!h.lastPrompt().includes('Who is at the gate?'), 'the capture instruction carries no transcript');
         h.check(h.runtime.injectionPreview().captureChars > 1000, 'the preview reports the capture size');
         h.equal(h.status().armed, true, 'armed after a normal generation');

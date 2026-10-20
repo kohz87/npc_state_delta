@@ -6,13 +6,23 @@ import { dossierIndexProjection, filterDossierIndex } from './dossier-ui.js';
 
 export const STORY_BLOCK_TAB_IDS = Object.freeze({ cast: 'npc-state-delta-cast', dossiers: 'npc-state-delta-dossiers' });
 const CONNECTED_FLAG = 'npcStateDeltaStoryBlock';
-const EMPTY_CAST = '<p class="npc-state-delta-story-empty">No NPC is present in the latest scene.</p>';
+// (1.2.13) An empty tab says why, and offers what would fill it.
+const actionButton = (action, icon, label) => `<button type="button" class="menu_button npc-state-delta-story-action" data-npc-state-delta-action="${action}"><i class="fa-solid ${icon}"></i> ${label}</button>`;
+export function emptyCastHtml(reason = null) {
+    const text = String(reason?.text || 'No NPC is present in the latest scene.');
+    const actions = reason?.scan ? `<div class="npc-state-delta-story-actions">${actionButton('scan', 'fa-wand-magic-sparkles', 'Scan now')}</div>` : '';
+    return `<div class="npc-state-delta-story-empty-state"><p class="npc-state-delta-story-empty">${escapeHtml(text)}</p>${actions}</div>`;
+}
 // Story Block's panes add no padding of their own around another extension's content.
 const paneHtml = html => `<div class="npc-state-delta-story-pane">${html}</div>`;
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 
-export function dossierTabRowsHtml(rows = []) {
+export function dossierTabRowsHtml(rows = [], { query = '', total = null } = {}) {
+    if (!rows.length && String(query).trim()) return `<p class="npc-state-delta-story-empty">No dossier matches “${escapeHtml(String(query).trim())}”.</p>`;
+    if (!rows.length && total === 0) {
+        return `<div class="npc-state-delta-story-empty-state"><p class="npc-state-delta-story-empty">No dossiers yet. An NPC gets one when a scan finds them in the story, or you can add one yourself.</p><div class="npc-state-delta-story-actions">${actionButton('add', 'fa-user-plus', 'Add NPC')}${actionButton('scan', 'fa-wand-magic-sparkles', 'Scan now')}</div></div>`;
+    }
     if (!rows.length) return '<p class="npc-state-delta-story-empty">No dossier matches.</p>';
     return rows.map(row => {
         const initial = escapeHtml((row.name || '?').trim().charAt(0).toUpperCase() || '?');
@@ -41,8 +51,21 @@ export function connectStoryBlock(api, storyBlock) {
         }
         return rows;
     };
+    // One click listener per pane, whatever it shows next: a dossier row, or an empty state's button.
+    const bindActions = pane => {
+        if (pane.__npcStateDeltaActions) return;
+        pane.__npcStateDeltaActions = true;
+        pane.addEventListener?.('click', event => {
+            const action = event.target?.closest?.('[data-npc-state-delta-action]')?.dataset?.npcStateDeltaAction;
+            if (action === 'scan') return void api.scan?.();
+            if (action === 'add') return void api.addNpc?.();
+            const row = event.target?.closest?.('.npc-state-delta-story-row');
+            if (row?.dataset?.npcId) api.openDossier?.(row.dataset.npcId);
+        });
+    };
     const renderCast = pane => {
-        const html = paneHtml(String(api.presentCastHtml?.() || '') || EMPTY_CAST);
+        bindActions(pane);
+        const html = paneHtml(String(api.presentCastHtml?.() || '') || emptyCastHtml(api.castEmptyReason?.()));
         if (pane.__npcStateDeltaCast !== html) {
             pane.innerHTML = html;
             pane.__npcStateDeltaCast = html;
@@ -59,17 +82,14 @@ export function connectStoryBlock(api, storyBlock) {
                 query = input.value;
                 renderDossiers(pane);
             });
-            pane.addEventListener?.('click', event => {
-                const row = event.target?.closest?.('.npc-state-delta-story-row');
-                if (row?.dataset?.npcId) api.openDossier?.(row.dataset.npcId);
-            });
+            bindActions(pane);
             pane.__npcStateDeltaDossiers = { list: pane.querySelector('.npc-state-delta-story-list'), key: '' };
         }
         const view = pane.__npcStateDeltaDossiers;
         const visible = filterDossierIndex(currentRows(), { query });
         const key = `${revision}|${query}`;
         if (view.list && view.key !== key) {
-            view.list.innerHTML = dossierTabRowsHtml(visible);
+            view.list.innerHTML = dossierTabRowsHtml(visible, { query, total: rows.length });
             view.key = key;
         }
     };

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.2.13 - 20 October 2026
+
+- **The one-pass reminder is read last.** It shared the dossier's place, one message from the end (before your latest message). It now has its own system message at the very end of the prompt, where the model reads it last and is likeliest to follow it. The dossier stays at the depth you set. It is still replaced on every generation and emptied when not asked for, so a spent reminder is never sent again.
+- **What's sent.** A new **What's sent** fold in Delta's panel shows the exact text your next reply gets from Delta, each part with its size in tokens: the live dossier and, with one-pass capture on, the capture reminder. It is filled when opened and on **Refresh**. Story Suite can show the same through `api.manage.preview()` → `{ label, text, parts: [{ label, text, tokens }] }`.
+- **Empty tabs say why.** Story Block's **Present NPCs** tab said "No NPC is present" even when the World State listed Lyra: she had no dossier yet, because nothing had been scanned. It now says which it is: no dossier in this chat yet, the latest reply not scanned yet, or the latest scan found no one. It offers **Scan now**. The **Dossiers** tab said "No dossier matches." with no search typed; with no dossiers at all it now says "No dossiers yet" and offers **Add NPC** and **Scan now**, and a search that finds nothing names what was searched.
+
 ## 1.2.12 - 20 October 2026
 
 - **Far fewer relationship evaluator requests.** After each scan or one-pass block, NSD checks every existing NPC who appears in the exchange, and any without a complete relationship decision got a separate evaluator request carrying the whole exchange: often 2–3 requests and 6–16k tokens a reply. Most of those NPCs only appeared in the World State, for example in the Off-Screen list Story Director fills with every active agenda, so the answer was always "no change".

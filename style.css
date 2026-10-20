@@ -176,6 +176,10 @@
 .npc-state-delta-story-pane { padding: 8px 12px 12px; box-sizing: border-box; min-width: 0; }
 .npc-state-delta-story-pane .npc-state-delta-present-grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
 .npc-state-delta-story-empty { margin: 4px 2px; opacity: .65; font-size: .85rem; }
+/* (1.2.13) An empty tab: why, then what would fill it. */
+.npc-state-delta-story-empty-state .npc-state-delta-story-empty { opacity: .8; line-height: 1.4; }
+.npc-state-delta-story-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 2px 4px; }
+.npc-state-delta-story-actions .menu_button { display: inline-flex; gap: 6px; align-items: center; min-height: 2rem; margin: 0; padding: 4px 10px; font-size: .85rem; }
 .npc-state-delta-story-dossiers { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .npc-state-delta-story-search { width: 100%; box-sizing: border-box; margin: 0; }
 .npc-state-delta-story-list { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -771,4 +775,29 @@ body.npc-state-delta-portrait-generator-open { overflow: hidden !important; }
       min-width:72px!important;height:22px!important;padding:0 6px 0 20px!important;font-size:10.5px!important;
     }
   }
+}
+
+/* (1.2.13) What's sent: the next reply's injected text, as sent. */
+.delta-whats-sent-head {
+    margin: 0.5rem 0 0.2rem;
+    font-weight: 600;
+    font-size: 0.9em;
+}
+
+.delta-whats-sent-text {
+    max-height: 16rem;
+    overflow: auto;
+    margin: 0;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid var(--SmartThemeBorderColor, rgba(128, 128, 128, 0.35));
+    border-radius: 6px;
+    background: var(--black30a, rgba(0, 0, 0, 0.2));
+    font-size: 0.8em;
+    line-height: 1.35;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.delta-whats-sent-empty {
+    opacity: 0.7;
 }

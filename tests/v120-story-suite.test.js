@@ -16,6 +16,7 @@ import {
     copyTokenEstimate,
     injectionSections,
     replyTokenEstimate,
+    replyPreview,
     buildManageApi,
     buildNpcProfile,
     buildNpcProfiles,
@@ -954,4 +955,16 @@ test('v1.2.2 the runtime: tokens() measures the live injection, shows: chatter, 
         assert.deepEqual(own().shows, ['chatter']);
         delete globalThis.StoryBlock;
     });
+});
+
+test('v1.2.13 manage.preview(): what the next reply gets, each part with its size, never throws', () => {
+    const manage = buildManageApi({ preview: () => ({ injection: 'NPC STATE DELTA DOSSIER.\n- Elke: IDENTITY …', capture: 'One-pass capture: write …' }) });
+    const preview = manage.preview();
+    assert.equal(preview.label, 'NPC State Delta');
+    assert.deepEqual(preview.parts.map(part => part.label), ['Live dossier', 'One-pass capture instruction (end of the prompt)']);
+    assert.equal(preview.parts[0].tokens, Math.ceil(preview.parts[0].text.length / 4));
+    assert.equal(preview.text, `${preview.parts[0].text}\n\n${preview.parts[1].text}`);
+    assert.deepEqual(replyPreview({ injection: '', capture: '' }), { label: 'NPC State Delta', text: '', parts: [] });
+    assert.deepEqual(buildManageApi({ preview: () => { throw new Error('boom'); } }).preview(), { label: 'NPC State Delta', text: '', parts: [] });
+    assert.deepEqual(buildManageApi().preview().parts, []);
 });

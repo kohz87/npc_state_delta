@@ -198,6 +198,10 @@ import {
 
 const EXTENSION_NAME = 'npc_state_delta';
 const PROMPT_KEY = 'npc_state_delta_live_dossier';
+// (1.2.13) The one-pass capture reminder: one reply only, so it goes in its own slot at the very
+// end of the prompt (depth 0) where it is read last, and is cleared with the dossier.
+const CAPTURE_PROMPT_KEY = 'npc_state_delta_capture';
+const CAPTURE_PROMPT_DEPTH = 0;
 const UI_ID = 'npc_state_delta_settings';
 let eventsRegistered = false;
 let initialized = false;
@@ -2463,6 +2467,7 @@ function updateInjection() {
     const clear = reason => {
         lastInjection = { text: '', reason, at: Date.now(), chatKey: injectionKey };
         ctx.setExtensionPrompt?.(PROMPT_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+        ctx.setExtensionPrompt?.(CAPTURE_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, CAPTURE_PROMPT_DEPTH, false, extension_prompt_roles.SYSTEM);
     };
     if (injectionKey !== 'no-chat' && chatHydrationStatus(injectionKey) !== 'ready') {
         clear(`This chat's dossiers are not loaded (status: ${chatHydrationStatus(injectionKey)}); nothing is sent until they are.`);
@@ -2488,14 +2493,9 @@ function updateInjection() {
         namedByPlayer: (state.npcs || []).filter(npc => namedNpcIds.includes(npc.id)).map(npc => npc.name),
         captureChars: capture.length,
     };
-    ctx.setExtensionPrompt?.(
-        PROMPT_KEY,
-        [prompt, capture].filter(Boolean).join('\n\n'),
-        extension_prompt_types.IN_CHAT,
-        depth,
-        false,
-        extension_prompt_roles.SYSTEM,
-    );
+    ctx.setExtensionPrompt?.(PROMPT_KEY, prompt, extension_prompt_types.IN_CHAT, depth, false, extension_prompt_roles.SYSTEM);
+    // Replaced on every build and emptied when not armed, so a spent reminder is never sent again.
+    ctx.setExtensionPrompt?.(CAPTURE_PROMPT_KEY, capture, extension_prompt_types.IN_CHAT, CAPTURE_PROMPT_DEPTH, false, extension_prompt_roles.SYSTEM);
 }
 
 function injectionPreview() {
@@ -2509,6 +2509,7 @@ function injectionPreview() {
         sending: Boolean(text),
         reason: lastInjection.reason || '',
         placement: `In chat as a system message, ${lastInjection.depth ?? (Number(settings.injectDepth) || 1)} message(s) from the end`,
+        capturePlacement: 'One-pass capture reminder: its own system message at the very end of the prompt (depth 0)',
         builtAt: lastInjection.at ? new Date(lastInjection.at).toISOString() : '',
         presentNpcs: (state.npcs || []).filter(npc => npc?.present && !npc?.archived).map(npc => npc.name),
         namedByPlayer: (lastInjection.namedByPlayer || []).filter(name => injectedNpcs.includes(name)),
@@ -4436,6 +4437,7 @@ function buildSettingsHtml() {
             ${settingsGroup('suite', 'Source of truth', 'Sharing with other story extensions', suite)}
             ${settingsGroup('portrait', 'Portrait generation', 'Image Generation prompts and style', portrait)}
             ${settingsGroup('rules', 'Scanner rules', 'Advanced relationship, memory and behavior rubrics', rules)}
+            ${settingsGroup('sent', "What's sent", 'The text your next reply gets, and its size', `<div class="delta-whats-sent" data-delta-whats-sent><small class="delta-whats-sent-empty">Open this to see it.</small></div><div class="npc-state-delta-actions"><div id="npc_state_delta_sent_refresh" class="menu_button"><i class="fa-solid fa-rotate"></i> Refresh</div></div>`)}
             ${settingsGroup('maintenance', 'Data & maintenance', 'Backup, diagnostics and this chat', maintenance)}
           </div>
         </div>
@@ -6679,6 +6681,7 @@ const SUITE_API = Object.freeze({
         enabled: () => getSettings().enabled !== false,
         setEnabled: on => applyEnabled(on),
         tokens: () => nextReplyTokens(),
+        preview: () => nextReplyTexts(),
     }),
 });
 let suiteConnected = false;
@@ -6687,20 +6690,93 @@ let suiteRefreshQueued = false;
 // What Delta adds to the next ordinary reply, estimated at about four characters a token: the
 // live dossier injection and, with one-pass capture on, its instruction (input) and the block the
 // model is asked to write back (output). Scans and other quiet requests are not counted.
-function nextReplyTokens() {
+// (1.2.13) The texts the next ordinary reply gets, for tokens() and preview(): { injection, capture }.
+function nextReplyTexts() {
     const settings = getSettings();
     const key = getChatKey();
-    if (settings.enabled === false || key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return replyTokenEstimate();
+    if (settings.enabled === false || key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return { injection: '', capture: '' };
     const state = getChatState(key);
     const injection = settings.inject ? liveInjectionText(state, settings) : '';
     const capture = narrationCaptureEnabled(settings)
         ? buildNarrationCapturePrompt(scannerPromptOptions(state, settings, recentTranscript(4)))
         : '';
+    return { injection, capture };
+}
+
+function nextReplyTokens() {
+    const { injection, capture } = nextReplyTexts();
+    if (!injection && !capture) return replyTokenEstimate();
     return replyTokenEstimate({
         injection,
         captureChars: capture.length,
         captureOutputChars: capture ? (lastCaptureBlockChars || NARRATION_CAPTURE_OUTPUT_ESTIMATE_CHARS) : 0,
     });
+}
+
+// The panel's Add NPC and (1.2.13) the Dossiers tab's: ask a name, add a dossier for it.
+async function addNpcManually() {
+    if (!await ensureFreshMutationBoundary('add an NPC')) return;
+    const settings = getSettings();
+    const state = getChatState();
+    if (state.npcs.filter(npc => !npc?.archived).length >= settings.maxNpcs) return globalThis.toastr?.warning?.(`NPC State Delta: active roster cap is ${settings.maxNpcs}. Archived dossiers do not count.`);
+    const name = window.prompt('NPC name to add to this chat dossier:')?.trim();
+    if (!name) return;
+    const result = applyNpcStateCommand(state, { action: 'add', name }, {
+        maxNpcs: settings.maxNpcs,
+        excludeNames: currentExclusions(),
+        turn: state.turn,
+        relationshipBaseline: settings.relationshipBaseline,
+    });
+    if (result.report.status === 'excluded') return globalThis.toastr?.warning?.('NPC State Delta: player/main character cannot be added as an NPC.');
+    if (result.report.status === 'full') return globalThis.toastr?.warning?.(`NPC State Delta: active roster cap is ${settings.maxNpcs}. Archived dossiers do not count.`);
+    if (['added', 'exists', 'restored'].includes(result.report.status)) clearUserDismissedSuppression(result.state, name);
+    const targetMessageId = latestMessageId(false);
+    if (targetMessageId >= 0) commitBranchCheckpoint(result.state, targetMessageId, 'manual-add');
+    setChatState(getChatKey(), result.state);
+    persistCritical(); renderDossier(); updateInjection();
+    const addedNpc = result.report.npcId ? result.state.npcs.find(npc => npc.id === result.report.npcId) : null;
+    if (addedNpc) globalThis.toastr?.success?.(`NPC State Delta: ${addedNpc.name} created. Use the wand beside the dossier to Scan dossier and populate it.`);
+}
+
+// (1.2.13) Why no NPC shows as present, in words, and whether a scan could change that.
+function castEmptyReason() {
+    const key = getChatKey();
+    if (key === 'no-chat') return { text: 'No chat is open.', scan: false };
+    if (getSettings().enabled === false) return { text: 'NPC State Delta is off.', scan: false };
+    if (chatHydrationStatus(key) !== 'ready') return { text: "This chat's dossiers are still loading.", scan: false };
+    const state = getChatState(key);
+    const latest = latestMessageId(true);
+    if (!(state.npcs || []).some(npc => npc && !npc.archived)) {
+        return { text: 'No NPC has a dossier in this chat yet, so nobody shows here even when the story or the World State names them. A scan of the latest reply makes dossiers for the NPCs in it.', scan: true };
+    }
+    if (latest >= 0 && state.lastScannedMessageId !== latest) {
+        return { text: 'The latest reply has not been scanned yet, so who is present is not known.', scan: true };
+    }
+    return { text: 'The latest scan found no NPC in the scene.', scan: true };
+}
+
+// (1.2.13) The "What's sent" fold: each part the next ordinary reply gets, with its size, as text.
+function renderWhatsSent() {
+    const root = globalThis.document?.querySelector?.('[data-delta-whats-sent]');
+    if (!root) return;
+    const { parts } = SUITE_API.manage.preview();
+    root.replaceChildren();
+    if (!parts.length) {
+        const empty = document.createElement('small');
+        empty.className = 'delta-whats-sent-empty';
+        empty.textContent = 'Nothing is sent with the next reply (no present NPC, or injection and one-pass capture are off).';
+        root.append(empty);
+        return;
+    }
+    for (const part of parts) {
+        const head = document.createElement('div');
+        head.className = 'delta-whats-sent-head';
+        head.textContent = `${part.label} · about ${part.tokens} tokens`;
+        const body = document.createElement('pre');
+        body.className = 'delta-whats-sent-text';
+        body.textContent = part.text;
+        root.append(head, body);
+    }
 }
 
 function announceToSuite() {
@@ -7051,29 +7127,12 @@ function bindUi() {
     $(document).on('click.npcStateDelta', '.npc-state-delta-retry-hydration', () => { void retryCurrentChatHydration(); });
     $(document).on('click.npcStateDelta', '.npc-state-delta-detach-sidecar', () => { void detachBrokenSidecar(); });
     $(document).on('click.npcStateDelta', '#npc_state_delta_scan_now', () => scanNow({ manual: true, messageId: latestMessageId(true) }));
-    $(document).on('click.npcStateDelta', '#npc_state_delta_add_manual', async () => {
-        if (!await ensureFreshMutationBoundary('add an NPC')) return;
-        const settings = getSettings();
-        const state = getChatState();
-        if (state.npcs.filter(npc => !npc?.archived).length >= settings.maxNpcs) return globalThis.toastr?.warning?.(`NPC State Delta: active roster cap is ${settings.maxNpcs}. Archived dossiers do not count.`);
-        const name = window.prompt('NPC name to add to this chat dossier:')?.trim();
-        if (!name) return;
-        const result = applyNpcStateCommand(state, { action: 'add', name }, {
-            maxNpcs: settings.maxNpcs,
-            excludeNames: currentExclusions(),
-            turn: state.turn,
-            relationshipBaseline: settings.relationshipBaseline,
-        });
-        if (result.report.status === 'excluded') return globalThis.toastr?.warning?.('NPC State Delta: player/main character cannot be added as an NPC.');
-        if (result.report.status === 'full') return globalThis.toastr?.warning?.(`NPC State Delta: active roster cap is ${settings.maxNpcs}. Archived dossiers do not count.`);
-        if (['added', 'exists', 'restored'].includes(result.report.status)) clearUserDismissedSuppression(result.state, name);
-        const targetMessageId = latestMessageId(false);
-        if (targetMessageId >= 0) commitBranchCheckpoint(result.state, targetMessageId, 'manual-add');
-        setChatState(getChatKey(), result.state);
-        persistCritical(); renderDossier(); updateInjection();
-        const addedNpc = result.report.npcId ? result.state.npcs.find(npc => npc.id === result.report.npcId) : null;
-        if (addedNpc) globalThis.toastr?.success?.(`NPC State Delta: ${addedNpc.name} created. Use the wand beside the dossier to Scan dossier and populate it.`);
-    });
+    // (1.2.13) What's sent: filled when opened and on Refresh, never while closed.
+    $(document).on('click.npcStateDelta', '#npc_state_delta_sent_refresh', () => renderWhatsSent());
+    globalThis.document?.addEventListener?.('toggle', event => {
+        if (event.target?.matches?.('[data-delta-settings-group="sent"]') && event.target.open) renderWhatsSent();
+    }, true);
+    $(document).on('click.npcStateDelta', '#npc_state_delta_add_manual', () => addNpcManually());
     $(document).on('click.npcStateDelta', '.npc-state-delta-roster-edit', function (event) { event.preventDefault?.(); event.stopPropagation?.(); openNpcEditorSafely(this.dataset.npcId); });
     $(document).on('click.npcStateDelta', '.npc-state-delta-scan-dossier', function (event) { event.preventDefault?.(); event.stopPropagation?.(); void scanNpcDossier(String(this.dataset.npcId || '')); });
     $(document).on('click.npcStateDelta', '.npc-state-delta-refresh-chat', function (event) { event.preventDefault?.(); event.stopPropagation?.(); void refreshNpcFromChat(String(this.dataset.npcId || '')); });
@@ -7702,6 +7761,9 @@ window.NPCStateDelta = Object.freeze({
     clearDiagnostics: () => diagnosticStore.clear(getChatKey()),
     getState: () => structuredClone(getChatState()),
     presentCastHtml: () => storyBlockCastHtml(),
+    // (1.2.13) Why the present cast is empty ({ text, scan }), and Add NPC, for the Story Block tabs.
+    castEmptyReason: () => castEmptyReason(),
+    addNpc: () => addNpcManually(),
     /** Fill the now/chatter text of present-cast markup inserted under `root` (textContent only). */
     fillPresentCast: root => fillPresentSceneText(root),
     dossierRevision: () => `${getChatKey()}|${Number(stateVersions.get(getChatKey()) || 0)}`,

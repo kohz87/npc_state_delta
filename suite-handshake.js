@@ -291,8 +291,8 @@ export function replyTokenEstimate({ injection = '', captureChars = 0, captureOu
     try {
         const parts = injectionSections(injection).map(({ label, chars }) => ({ label, input: tokensFor(chars), output: 0 }));
         if (Number(captureChars) > 0) {
-            // The instruction follows the injection after a blank line.
-            parts.push({ label: 'One-pass capture instruction', input: tokensFor(Number(captureChars) + (parts.length ? 2 : 0)), output: 0 });
+            // (1.2.13) Its own slot at the end of the prompt, apart from the dossier.
+            parts.push({ label: 'One-pass capture instruction', input: tokensFor(Number(captureChars)), output: 0 });
             parts.push({ label: 'One-pass capture block', input: 0, output: tokensFor(captureOutputChars) });
         }
         const sum = key => parts.reduce((total, part) => total + part[key], 0);
@@ -317,8 +317,34 @@ export function copyTokenEstimate(estimate) {
  * callbacks are Delta's own settings actions; this wrapper only validates and copies. setSource
  * returns false, without calling back, for an unknown area or choice.
  */
-export function buildManageApi({ sources, setSource, enabled, setEnabled, tokens } = {}) {
+/**
+ * (1.2.13) What Delta sends with the next ordinary reply, as text: { label, text, parts:
+ * [{ label, text, tokens }] } (empty parts left out). Never throws.
+ */
+export function replyPreview({ injection = '', capture = '' } = {}) {
+    try {
+        const parts = [
+            { label: 'Live dossier', text: String(injection ?? '') },
+            { label: 'One-pass capture instruction (end of the prompt)', text: String(capture ?? '') },
+        ].filter(part => part.text).map(part => ({ ...part, tokens: tokensFor(part.text.length) }));
+        return { label: 'NPC State Delta', text: parts.map(part => part.text).join('\n\n'), parts };
+    } catch {
+        return { label: 'NPC State Delta', text: '', parts: [] };
+    }
+}
+
+export function buildManageApi({ sources, setSource, enabled, setEnabled, tokens, preview } = {}) {
     return Object.freeze({
+        /** (1.2.13) What Delta sends with the next ordinary reply ({ label, text, parts }); never throws. */
+        preview: () => {
+            try {
+                const result = typeof preview === 'function' ? preview() : null;
+                return replyPreview({ injection: result?.injection, capture: result?.capture });
+            } catch (error) {
+                console.warn('[NPC State Delta] Story Suite preview failed', error);
+                return replyPreview();
+            }
+        },
         /** What Delta adds to the next ordinary reply ({ input, output, parts }); never throws. */
         tokens: () => {
             try {

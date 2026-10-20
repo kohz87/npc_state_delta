@@ -1,4 +1,4 @@
-# NPC State Delta v1.2.12
+# NPC State Delta v1.2.13
 
 A SillyTavern extension that keeps a living dossier for every NPC in your roleplay: who they are, how they look, how they talk and behave, what they remember, and how they feel about you. After each reply it scans the story, updates the dossiers carefully, and feeds the present NPCs back to the roleplay model so they stay in character.
 
@@ -54,7 +54,7 @@ From a demo session with [Story Block](https://github.com/kohz87/Story_block), [
 ## Install and update
 
 1. In SillyTavern, open **Extensions → Install extension** and paste this repository's URL.
-   Or unpack `npc_state_delta-1.2.12.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
+   Or unpack `npc_state_delta-1.2.13.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
 2. Reload SillyTavern.
 3. **Before updating an existing install,** export a backup from **Data & maintenance → Backup / Export**.
 
@@ -80,6 +80,7 @@ The settings panel has a quick bar that is always visible, plus seven groups.
 | **Source of truth** | Who leads each shared area (NPCs, calendar, scene, game stats) when Story Block, Story Director or RPG Battle is installed: Automatic, This extension or The other one |
 | **Portrait generation** | Style presets, positive and negative prompts, composition, prompt format |
 | **Scanner rules** | Advanced: relationship starting values and per-scan caps, memory criteria, behaviour rubric |
+| **What's sent** | (since 1.2.13) The text your next reply gets from Delta, each part with its size: the live dossier and, with one-pass capture on, the capture reminder. Filled when you open it, and on **Refresh** |
 | **Data & maintenance** | Backup / Export, Restore / Import, Diagnostics, and clearing this chat's dossiers |
 
 Leave the scanner connection profile empty to use SillyTavern's current connection. If you pick a profile that isn't available, scanning fails visibly instead of silently switching.
@@ -92,6 +93,8 @@ With [Story Block](https://github.com/kohz87/Story_block) installed, Delta adds 
 - **📇 Dossiers:** every dossier with a search box. The dead stay out of the list until you search for them. Tap a row to open that dossier.
 
 Each present NPC shows what they are like now as labelled lines: **Mood**, **Condition** and **Outfit** (only those known; when the line comes from the dossier rather than World State it is the NPC's current **Look**). In Story Block's sidebar or sheet and on phones each NPC is a row in two halves: on the left a portrait card with the name over the image, on the right the NPC's chatter bubble (below), or else those lines in full, or else their role and *No changes this turn*; a very narrow pane stacks the two, the card as a short banner. Wider places show a grid of cards with the lines under the portrait (hover a line for its full text). The lines come from Story Block's World State for the latest reply while Story Block keeps the scene (Source of truth → Scene), otherwise from the dossier. With Story Block's **NPC Inner Chatter** block on, each line of chatter appears as a bubble by the speaker, in the chatter's order: speech bubbles when two or more NPCs whisper, a thought bubble when only one has a line. In narrow places the bubble fills the right half of the NPC's row, pointing at the card (under the card when the pane is very narrow); in the wider grid it sits under the card. Someone who speaks without a present card gets a card of their own after the present NPCs, their bubble beside it the same way: their portrait if Delta tracks them (tap to open the dossier), else their initial and *Not in the dossiers yet*. Lines with no recognisable speaker go to *Others*. Story Block then hides its own Chatter tab (the block is still written as before). All of this is display only.
+
+An empty tab says why (since 1.2.13). **Present NPCs** names the reason: no NPC has a dossier in this chat yet (the story or the World State may name someone Delta has not scanned), the latest reply has not been scanned, or the latest scan found no one. It offers **Scan now**. **Dossiers** with none at all says *No dossiers yet* and offers **Add NPC** and **Scan now**.
 
 While Story Block is installed, the cast shows only in Story Block until you pick a choice under **Roster & continuity → Present NPCs in chat**. Pick **Full cards** or **Compact strip** to keep it in the chat as well; **Only in Story Block** shows full cards in the chat when Story Block isn't installed. The tabs are display only and change nothing in prompts, scans or saved data. Without Story Block nothing changes.
 
@@ -122,6 +125,7 @@ Off by default. **Scanning → One-pass narration capture** asks the roleplay mo
 - **The slow fields** (since 1.2.11): Mannerisms, Behavioral Levers and important memories fill from evidence gathered over scenes, and a block written beside the story tends to leave them out. The instruction's last lines name them, so the model checks each NPC for a habit, how they decide or treat people, and a consequential event, and writes the evidence even when the field itself must wait. Each block's evidence is tagged with its reply, so a habit seen again in a later reply counts as a second sighting however alike the words.
 - **Relationships settled in the block** (since 1.2.12): the instruction asks for a full relationship row (impact and all four values, 0 for no change) for each existing NPC the story names, plus the block's own word: `"relationshipsCovered": true` when its rows hold everyone whose feelings could have changed, and `"relationshipReview": ["Name"]` for anyone it wants checked. NPCs it covered need no relationship evaluator request; anyone it lists for review, or skipped without saying it covered everyone, still gets one.
 - **One-pass catch-up** (since 1.2.11, **Scanning → One-pass catch-up**, default every 8 captured replies, 0 for never): the two NPCs most in those replies get a quiet Refresh, one scanner request each, which reads the scan context window and fills what the blocks missed. It says something only when it changed a dossier (*caught up Verna … (mannerisms, memories)*), skips a dossier open in the editor, and waits for any scan in progress.
+- **Read last** (since 1.2.13): the reminder goes in its own system message at the very end of the prompt, after your latest message, where the model reads it last; the dossier stays at the depth you set. It is replaced on every generation and emptied when not asked for, so a spent reminder is never sent again.
 - **Same checks as a scan:** the block goes through the same evidence checks as an ordinary scan, so it can only propose changes the story supports. It is used once, kept only in memory, and never saved, exported or shown in diagnostics.
 - **Fallback:** the normal scan runs on its usual schedule if the block is missing, broken or cut off, if the dossiers changed while the reply was being written (outdated), if the reply or an earlier message was edited, or if the page was reloaded first. Focused relationship passes, Refresh and backfills still run as separate scanner requests.
 - **Your story's own text is safe:** with the setting off, Delta removes only its own hidden `npc_state_delta` comment; JSON blocks and tags the story writes are left alone.
@@ -257,7 +261,7 @@ There are twelve categories:
 | A scan failed | Check the scanner connection profile in **Scanning**, then use **Scan dossier now**. |
 | NPCs contradict their dossier (appearance, voice, levers) | Check **Roster & continuity → Injection budget** is at least 4000 (the default). It's a ceiling: only what the present NPCs need is sent, and detailed dossiers arrive in full. |
 | An NPC walks back in and doesn't match her dossier | Name her in your message when you call her in; her dossier is then sent with that reply. If the story brings her in unprompted, the dossier arrives from the next reply, or swipe once she's marked present. |
-| An NPC's dossier doesn't seem to reach the story | Open **Data & maintenance → Diagnostics**. The **Roleplay injection** section shows exactly what is sent with each generation, or why nothing is (NPC not present, chat not loaded, injection off). With one-pass capture on, the capture instruction is added after it and shown only as a size. |
+| An NPC's dossier doesn't seem to reach the story | Open **Data & maintenance → Diagnostics**. The **Roleplay injection** section shows exactly what is sent with each generation, or why nothing is (NPC not present, chat not loaded, injection off). With one-pass capture on, the capture instruction goes in its own message at the very end of the prompt (since 1.2.13) and is shown there only as a size; **What's sent** shows its text. |
 | You want to know why a field didn't change | Open the dossier's diagnostics (**Show**) or export them from **Data & maintenance → Diagnostics**. Each field has an outcome such as `applied-refine`, `not-provided` or `waiting-for-revised-candidate`. |
 
 Diagnostics are bounded and read-only. They never store whole stories, full prompts or credentials, and their token counts are local estimates.
@@ -271,12 +275,12 @@ npm test                        # unit, compatibility and synthetic-host tests
 npm run validate                # inventory, isolation, version and ownership checks
 npm run measure:prompts         # prompt size measurements
 node scripts/measure-stage9.mjs # prompt/request budget baseline
-npm run package                 # builds dist/npc_state_delta-1.2.12.zip and its SHA-256
+npm run package                 # builds dist/npc_state_delta-1.2.13.zip and its SHA-256
 git diff --check
 ```
 
 - `runtime-modules.json` is the single inventory of shipped modules. The package contains only the runtime modules, stylesheet, manifest, inventory, license and README.
-- Application version 1.2.12 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
+- Application version 1.2.13 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
 - Behaviour is governed by [AGENTS.md](AGENTS.md), [the core contract](docs/core-contract.md) and [the workplan](docs/WORKPLAN.md). Development commands, evidence and limits are in [DEVELOPMENT.md](DEVELOPMENT.md).
 - Historical reviews: [1.0.28](docs/v1.0.28-review.md), [1.0.27 prefix cache](docs/v1.0.27-review.md), [Stage 9](docs/stage9-review.md). Seed provenance is in `docs/seed-provenance.*`.
 
