@@ -1,4 +1,4 @@
-# NPC State Delta v1.2.10
+# NPC State Delta v1.2.11
 
 A SillyTavern extension that keeps a living dossier for every NPC in your roleplay: who they are, how they look, how they talk and behave, what they remember, and how they feel about you. After each reply it scans the story, updates the dossiers carefully, and feeds the present NPCs back to the roleplay model so they stay in character.
 
@@ -54,7 +54,7 @@ From a demo session with [Story Block](https://github.com/kohz87/Story_block), [
 ## Install and update
 
 1. In SillyTavern, open **Extensions → Install extension** and paste this repository's URL.
-   Or unpack `npc_state_delta-1.2.10.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
+   Or unpack `npc_state_delta-1.2.11.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
 2. Reload SillyTavern.
 3. **Before updating an existing install,** export a backup from **Data & maintenance → Backup / Export**.
 
@@ -118,7 +118,9 @@ With two or more installed, **Manage all in Story Suite** at the top of Delta's 
 Off by default. **Scanning → One-pass narration capture** asks the roleplay model to end each reply with a hidden NPC update block. Delta removes the block from the message and uses it instead of the separate scan request for that reply.
 
 - **When it applies:** with Auto scan on and Full scan every turn off, for new replies and continues. Swipes and regenerates use the normal scan, and impersonate and background (quiet) generations never get the instruction.
-- **Cost:** every asked-for reply's prompt grows by about 7,500-9,500 characters (roughly 2,000-2,700 tokens, estimated), plus the JSON block at the end of the reply. In return, a reply with a good block needs no scan request.
+- **Cost:** every asked-for reply's prompt grows by about 7,900-9,900 characters (roughly 2,100-2,800 tokens, estimated), plus the JSON block at the end of the reply. In return, a reply with a good block needs no scan request.
+- **The slow fields** (since 1.2.11): Mannerisms, Behavioral Levers and important memories fill from evidence gathered over scenes, and a block written beside the story tends to leave them out. The instruction's last lines name them, so the model checks each NPC for a habit, how they decide or treat people, and a consequential event, and writes the evidence even when the field itself must wait. Each block's evidence is tagged with its reply, so a habit seen again in a later reply counts as a second sighting however alike the words.
+- **One-pass catch-up** (since 1.2.11, **Scanning → One-pass catch-up**, default every 8 captured replies, 0 for never): the two NPCs most in those replies get a quiet Refresh, one scanner request each, which reads the scan context window and fills what the blocks missed. It says something only when it changed a dossier (*caught up Verna … (mannerisms, memories)*), skips a dossier open in the editor, and waits for any scan in progress.
 - **Same checks as a scan:** the block goes through the same evidence checks as an ordinary scan, so it can only propose changes the story supports. It is used once, kept only in memory, and never saved, exported or shown in diagnostics.
 - **Fallback:** the normal scan runs on its usual schedule if the block is missing, broken or cut off, if the dossiers changed while the reply was being written (outdated), if the reply or an earlier message was edited, or if the page was reloaded first. Focused relationship passes, Refresh and backfills still run as separate scanner requests.
 - **Your story's own text is safe:** with the setting off, Delta removes only its own hidden `npc_state_delta` comment; JSON blocks and tags the story writes are left alone.
@@ -264,12 +266,12 @@ npm test                        # unit, compatibility and synthetic-host tests
 npm run validate                # inventory, isolation, version and ownership checks
 npm run measure:prompts         # prompt size measurements
 node scripts/measure-stage9.mjs # prompt/request budget baseline
-npm run package                 # builds dist/npc_state_delta-1.2.10.zip and its SHA-256
+npm run package                 # builds dist/npc_state_delta-1.2.11.zip and its SHA-256
 git diff --check
 ```
 
 - `runtime-modules.json` is the single inventory of shipped modules. The package contains only the runtime modules, stylesheet, manifest, inventory, license and README.
-- Application version 1.2.10 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
+- Application version 1.2.11 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
 - Behaviour is governed by [AGENTS.md](AGENTS.md), [the core contract](docs/core-contract.md) and [the workplan](docs/WORKPLAN.md). Development commands, evidence and limits are in [DEVELOPMENT.md](DEVELOPMENT.md).
 - Historical reviews: [1.0.28](docs/v1.0.28-review.md), [1.0.27 prefix cache](docs/v1.0.27-review.md), [Stage 9](docs/stage9-review.md). Seed provenance is in `docs/seed-provenance.*`.
 

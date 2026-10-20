@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.2.11 - 20 October 2026
+
+- **One-pass capture fills the slow fields too.** With one-pass capture on, Refresh found mannerisms, Behavioral Levers and important memories that the replies' own blocks had left out. Three changes close that gap:
+  - **The instruction names them last.** The model now checks each NPC who acted in its reply for a habit (Mannerisms), how they decide or treat people (a Behavioral Lever) and a consequential event (memories), and writes the evidence even when the field must wait for more scenes. This adds about 100 tokens to the capture instruction.
+  - **A habit seen again counts.** A habit is the same act in much the same words, and a second sighting worded like the first was dropped as a duplicate, so an empty Mannerisms never filled from automatic scans. Each reply's evidence is now tagged with that reply, and a sighting from another reply counts however alike the words; a re-read of the same reply still does not. This helps ordinary automatic scans too.
+  - **One-pass catch-up.** Every 8 captured replies (**Scanning → One-pass catch-up**, 0 for never), the two NPCs most in them get a quiet Refresh, one scanner request each, to fill anything the blocks missed. It speaks up only when it changed a dossier, never touches a dossier open in the editor, and waits for any scan in progress.
+
 ## 1.2.10 - 19 October 2026
 
 - **The World State decides who is still in the scene.** A reply that starts where the last scene ended ("Brecht lay sprawled in the mud") and then moves on (to the herbalist, then the Guild) often left that NPC on the Present cards and in the roleplay injection, because the scan saw them in the reply. Now, when the reply's World State (read through Story Block) lists people under *NPCs Present* or *Off-Screen*, those lists win: an NPC listed under NPCs Present is present, one listed Off-Screen is not, and "(None)" means nobody is. Someone on neither list keeps what the scan said, since a World State often leaves people out. The dead and archived are never made present.

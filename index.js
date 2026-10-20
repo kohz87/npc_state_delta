@@ -65,6 +65,7 @@ import {
     extractNarrationCapture,
     parseNarrationCapture,
     buildNarrationCapturePrompt,
+    tagScanEvidence,
     npcMatchesLabel,
     normalizeName,
     normalizeGender,
@@ -504,6 +505,9 @@ const DEFAULTS = Object.freeze({
     autoScan: true,
     fullScanEveryTurn: false,
     narrationCapture: false,
+    // (1.2.11) With one-pass capture: a quiet Refresh of the NPCs most in the last N captured
+    // replies (0 = never), for the slow fields a block beside the story tends to leave thin.
+    narrationCaptureCatchUp: 8,
     scannerConnectionProfile: '',
     portraitGenerationEnabled: true,
     portraitThemePreset: 'fantasy_anime',
@@ -612,6 +616,7 @@ function getSettings() {
     assign('injectBudgetDefaultUpgraded', true);
     assign('fullScanEveryTurn', settings.fullScanEveryTurn === true);
     assign('narrationCapture', settings.narrationCapture === true);
+    assign('narrationCaptureCatchUp', Number.isFinite(Number(settings.narrationCaptureCatchUp)) ? Math.max(0, Math.min(50, Math.round(Number(settings.narrationCaptureCatchUp)))) : 8);
     assign('scannerConnectionProfile', typeof settings.scannerConnectionProfile === 'string' ? settings.scannerConnectionProfile.trim() : '');
     assign('portraitGenerationEnabled', settings.portraitGenerationEnabled !== false);
     assign('portraitThemePreset', PORTRAIT_THEME_PRESETS[settings.portraitThemePreset] ? settings.portraitThemePreset : 'custom');
@@ -2893,20 +2898,24 @@ function refreshChangedFields(before, after) {
     return fields.filter(field => JSON.stringify(before?.[field] ?? null) !== JSON.stringify(after?.[field] ?? null));
 }
 
-async function refreshNpcFromChat(npcId) {
+// (1.2.11) `automatic`: a one-pass catch-up, not the reader's click. It stays quiet unless it
+// changed something, and never touches a dossier open in the editor.
+async function refreshNpcFromChat(npcId, { automatic = false } = {}) {
+    const notify = automatic ? () => {} : (level, text) => globalThis.toastr?.[level]?.(text);
     const id = String(npcId || '').trim();
     const ctx = getContext();
     const chatKey = getChatKey();
     if (!id || chatKey === 'no-chat') return false;
-    try { await ensureChatStateLoaded(chatKey); } catch (error) { globalThis.toastr?.warning?.(`NPC State Delta: cannot refresh this dossier until the canonical server state is available. ${error?.message || error}`); return false; }
-    if (getChatKey() !== chatKey || !requireReadyChatMutation('refresh a dossier', chatKey)) return false;
+    try { await ensureChatStateLoaded(chatKey); } catch (error) { notify('warning', `NPC State Delta: cannot refresh this dossier until the canonical server state is available. ${error?.message || error}`); return false; }
+    if (getChatKey() !== chatKey || !requireReadyChatMutation('refresh a dossier', chatKey, automatic ? { notify: false } : undefined)) return false;
     if (isScanBusy(chatKey)) {
-        globalThis.toastr?.info?.('NPC State Delta: another dossier scan is already running in this chat.');
+        notify('info', 'NPC State Delta: another dossier scan is already running in this chat.');
         return false;
     }
     // Preserve any edits currently visible in this dossier before reading history. Otherwise
     // the old popup values could overwrite a successful refresh when Save is clicked later.
     if (editorIsMounted()) {
+        if (automatic) return false;
         const savedEditor = await saveNpcEditor(id, { close: false, silent: true });
         if (!savedEditor) return false;
         try { await flushStateFile(chatKey); } catch { return false; }
@@ -2920,7 +2929,7 @@ async function refreshNpcFromChat(npcId) {
     const developmentSourceMessageIds = [...transcript.matchAll(/^\[m(\d+)\]/gm)]
         .map(match => Number(match[1])).filter(Number.isInteger);
     if (!transcript) {
-        globalThis.toastr?.info?.(`NPC State Delta: no recent story text is available to refresh ${existing.name}.`);
+        notify('info', `NPC State Delta: no recent story text is available to refresh ${existing.name}.`);
         return false;
     }
     const before = structuredClone(existing);
@@ -2940,7 +2949,7 @@ async function refreshNpcFromChat(npcId) {
     const operation = beginScanOperation(chatKey, `chat refresh for ${existing.name}`, { npcId: id, indicator: 'refresh' });
     if (operation) operation.sourceLineage = lineage;
     if (!operation) {
-        globalThis.toastr?.info?.('NPC State Delta: another dossier scan is already running in this chat.');
+        notify('info', 'NPC State Delta: another dossier scan is already running in this chat.');
         return false;
     }
     setScanIndicator(true);
@@ -2959,7 +2968,7 @@ async function refreshNpcFromChat(npcId) {
         }
         const currentLineage = chatLineage(getContext().chat || []);
         if (getChatKey() !== chatKey || firstLineageDivergence(lineage, currentLineage) !== -1 || Number(stateVersions.get(chatKey) || 0) !== scanStateVersion) {
-            globalThis.toastr?.info?.('NPC State Delta: chat or dossier state changed during dossier refresh; stale result was discarded.');
+            notify('info', 'NPC State Delta: chat or dossier state changed during dossier refresh; stale result was discarded.');
             return false;
         }
         const returned = Array.isArray(parsed.npcs) ? parsed.npcs : [];
@@ -3010,7 +3019,7 @@ async function refreshNpcFromChat(npcId) {
                 npcIds: [id],
                 sourceMessageId: latestMessageId(true),
             });
-            globalThis.toastr?.info?.(`NPC State Delta: no grounded dossier changes found for ${existing.name} in the last ${settings.scanDepth} messages.`);
+            notify('info', `NPC State Delta: no grounded dossier changes found for ${existing.name} in the last ${settings.scanDepth} messages.`);
             return true;
         }
         const latest = getChatState(chatKey);
@@ -3064,7 +3073,7 @@ async function refreshNpcFromChat(npcId) {
         }
         Object.assign(refreshed, protectTerminalNpc(liveBefore, refreshed));
         if (!await scanCanonicalBaseCurrent(chatKey, operation, 'dossier refresh final commit')) {
-            globalThis.toastr?.info?.('NPC State Delta: another session updated this chat during the refresh; the stale result was discarded.');
+            notify('info', 'NPC State Delta: another session updated this chat during the refresh; the stale result was discarded.');
             return false;
         }
         if (targetMessageId >= 0) commitBranchCheckpoint(merged.state, targetMessageId, 'chat-refresh');
@@ -3099,13 +3108,17 @@ async function refreshNpcFromChat(npcId) {
             sourceMessageId: targetMessageId,
         });
         console.info('[NPC State Delta] targeted refresh metrics', lastScanMetrics);
-        globalThis.toastr?.success?.(changed.length
-            ? `NPC State Delta: refreshed ${saved?.name || existing.name} from the last ${settings.scanDepth} messages (${changed.join(', ')}).`
-            : `NPC State Delta: ${saved?.name || existing.name} is already consistent with the last ${settings.scanDepth} messages.`);
+        if (automatic) {
+            if (changed.length) globalThis.toastr?.info?.(`NPC State Delta: caught up ${saved?.name || existing.name} from the last ${settings.scanDepth} messages (${changed.join(', ')}).`);
+        } else {
+            globalThis.toastr?.success?.(changed.length
+                ? `NPC State Delta: refreshed ${saved?.name || existing.name} from the last ${settings.scanDepth} messages (${changed.join(', ')}).`
+                : `NPC State Delta: ${saved?.name || existing.name} is already consistent with the last ${settings.scanDepth} messages.`);
+        }
         return true;
     } catch (error) {
         console.error('[NPC State Delta] targeted chat refresh failed', error);
-        globalThis.toastr?.warning?.(`NPC State Delta refresh failed for ${existing.name}: ${error?.message || error}`);
+        notify('warning', `NPC State Delta refresh failed for ${existing.name}: ${error?.message || error}`);
         return false;
     } finally {
         const owned = scanOperationCurrent(chatKey, operation);
@@ -3717,6 +3730,41 @@ function scannerPromptOptions(state, settings, transcript, extra = {}) {
     };
 }
 
+// (1.2.11) One-pass catch-up. Mannerisms, levers and memories fill from evidence gathered over
+// scenes, and a block written beside the story tends to leave them thin, while a Refresh (which
+// reads a window of scenes) fills them. So every `narrationCaptureCatchUp` captured replies, the
+// NPCs most in them get a quiet Refresh. Counted per chat in this session only; nothing is saved.
+const CATCH_UP_TARGETS = 2;
+const CATCH_UP_RETRY_MS = 3000;
+const CATCH_UP_RETRIES = 20;
+const captureCatchUp = new Map();
+
+/** Counts one captured reply and the NPCs in it; the NPC ids due a catch-up now, or []. */
+function noteCaptureCatchUp(chatKey, npcIds = []) {
+    const every = Math.max(0, Math.round(Number(getSettings().narrationCaptureCatchUp) || 0));
+    if (!every) return [];
+    const entry = captureCatchUp.get(chatKey) ?? { count: 0, seen: new Map() };
+    entry.count += 1;
+    for (const id of new Set(npcIds)) if (id) entry.seen.set(id, (entry.seen.get(id) || 0) + 1);
+    captureCatchUp.set(chatKey, entry);
+    if (entry.count < every) return [];
+    captureCatchUp.delete(chatKey);
+    return [...entry.seen.entries()].sort((a, b) => b[1] - a[1]).slice(0, CATCH_UP_TARGETS).map(([id]) => id);
+}
+
+async function runCaptureCatchUp(chatKey, ids, tries = 0) {
+    if (!ids.length || getChatKey() !== chatKey) return;
+    if (isScanBusy(chatKey) || isHostSwipeActive()) {
+        if (tries < CATCH_UP_RETRIES) setTimeout(() => void runCaptureCatchUp(chatKey, ids, tries + 1), CATCH_UP_RETRY_MS);
+        return;
+    }
+    for (const id of ids) {
+        if (getChatKey() !== chatKey) return;
+        if (!getChatState(chatKey).npcs.some(npc => npc.id === id && !npc.archived)) continue;
+        await refreshNpcFromChat(id, { automatic: true });
+    }
+}
+
 function narrationCaptureEnabled(settings = getSettings()) {
     return Boolean(settings.enabled && settings.narrationCapture && settings.autoScan && !settings.fullScanEveryTurn);
 }
@@ -3879,6 +3927,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
     let relationshipEdgeCount = 0;
     let relationshipEdgeFallbacks = 0;
     let profileUpdateCount = 0;
+    let catchUpIds = [];
     try {
         const scanStartedAt = performance.now?.() ?? Date.now();
         const { parsed, raw, retried } = capture ? { ...capture, retried: false } : await generateParsedNpcJson(ctx, {
@@ -3917,7 +3966,10 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         }
 
         if (capture) narrationCaptureStats.used += 1;
-        const resolvedParsed = resolveInterimIdentityPromotions(parsed, state.npcs, state.candidates);
+        // (1.2.11) A scan of one reply tags its evidence with that reply, so a habit seen again in a
+        // later reply counts as a second sighting (a manual or full-window scan reads many replies).
+        const singleReply = !manual && !fullWindowScan && Number.isInteger(messageId);
+        const resolvedParsed = resolveInterimIdentityPromotions(singleReply ? tagScanEvidence(parsed, messageId) : parsed, state.npcs, state.candidates);
         profileUpdateCount = Array.isArray(resolvedParsed.profileUpdates) ? resolvedParsed.profileUpdates.length : (Array.isArray(resolvedParsed.profile_updates) ? resolvedParsed.profile_updates.length : 0);
         // Relationship-edge extraction is a separate channel from ordinary NPC delta admission.
         // Add a deterministic fallback for explicit binary statements so a missed lifecycle field
@@ -4142,6 +4194,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         persist();
         renderDossier();
         updateInjection();
+        if (capture) catchUpIds = noteCaptureCatchUp(scanChatKey, inlineIds);
         if (manual) {
             const { created, updated, candidates, promoted, skipped, staleArchived = [], stalePruned = [] } = merged.report;
             globalThis.toastr?.success?.(`NPC State Delta scan complete: ${created.length} new, ${updated.length} updated${promoted.length ? `, ${promoted.length} promoted` : ''}${candidates.length ? `, ${candidates.length} candidate${candidates.length === 1 ? '' : 's'} held` : ''}${staleArchived.length ? `, ${staleArchived.length} stale archived` : ''}${stalePruned.length ? `, ${stalePruned.length} stale deleted` : ''}${skipped.length ? `, ${skipped.length} skipped` : ''}.`);
@@ -4165,6 +4218,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         if (getChatKey() === scanChatKey) setScanIndicator(isScanBusy(scanChatKey));
         updateInjection();
         if (getChatKey() === scanChatKey) void drainPendingAutoScan(scanChatKey);
+        if (catchUpIds.length) void runCaptureCatchUp(scanChatKey, catchUpIds);
     }
 }
 
@@ -4205,6 +4259,7 @@ function buildSettingsHtml() {
         settingRow('npc_state_delta_scanner_connection_profile', 'Scanner connection profile', '<select id="npc_state_delta_scanner_connection_profile" class="text_pole"></select>', 'Routes every NPC scan, Refresh, focused pass and retry. Default keeps the current roleplay route; an unavailable profile never falls back silently.'),
         settingRow('npc_state_delta_full_scan_every_turn', 'Full scan every turn', '<input id="npc_state_delta_full_scan_every_turn" type="checkbox">', 'With Auto scan, reconcile the whole scan context after every reply instead of only the latest exchange. Overrides Scan every; relationship deltas still come only from the newest exchange.'),
         settingRow('npc_state_delta_narration_capture', 'One-pass narration capture (experimental)', '<input id="npc_state_delta_narration_capture" type="checkbox">', 'With Auto scan, the roleplay model ends each reply with a hidden NPC update block that replaces the separate scan request. Adds about 2,000-3,000 tokens to every roleplay prompt plus the block to each reply; a missing or broken block falls back to the normal scan. Not used with Full scan every turn.'),
+        settingRow('npc_state_delta_narration_capture_catch_up', 'One-pass catch-up', numberControl('npc_state_delta_narration_capture_catch_up', 0, 50, 'replies'), 'With one-pass capture, every this many captured replies the two NPCs most in them get a quiet Refresh (one scanner request each) for mannerisms, levers and memories. 0 turns it off.'),
         settingsSlot('full-cast'),
         settingRow('npc_state_delta_scan_every', 'Scan every', numberControl('npc_state_delta_scan_every', 1, 20, 'replies'), 'Quick-scan cadence when Full scan every turn is off.'),
         settingRow('npc_state_delta_scan_depth', 'Scan context', numberControl('npc_state_delta_scan_depth', 2, 30, 'messages'), 'History window for full, manual and Refresh scans. Quick automatic scans read only the latest user + assistant exchange.'),
@@ -4399,6 +4454,7 @@ function syncSettingsControls() {
     $('#npc_state_delta_narration_capture').prop('checked', !!s.narrationCapture);
     $('#npc_state_delta_scan_every').val(s.scanEvery);
     $('#npc_state_delta_scan_depth').val(s.scanDepth);
+    $('#npc_state_delta_narration_capture_catch_up').val(s.narrationCaptureCatchUp);
     $('#npc_state_delta_admission_mode').val(s.admissionMode);
     $('#npc_state_delta_max').val(s.maxNpcs);
     $('#npc_state_delta_auto_prune_stale').prop('checked', s.autoPruneStale !== false);
@@ -6898,6 +6954,7 @@ function bindUi() {
     bindSettingsCheckbox('#npc_state_delta_launcher_with_story_block', 'launcherWithStoryBlock', applyLauncherFlag);
     bindSettingsNumber('#npc_state_delta_scan_every', 'scanEvery', 1, 20, 2);
     bindSettingsNumber('#npc_state_delta_scan_depth', 'scanDepth', 2, 30, 6);
+    bindSettingsNumber('#npc_state_delta_narration_capture_catch_up', 'narrationCaptureCatchUp', 0, 50, 8);
     $(document).on('change.npcStateDelta', '#npc_state_delta_present_cast_display', function () {
         getSettings().presentCastDisplay = normalizePresentCastDisplay(this.value); this.value = getSettings().presentCastDisplay;
         getSettings().presentCastDisplayChosen = true;

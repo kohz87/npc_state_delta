@@ -2921,21 +2921,53 @@ export function durableProfileEvidenceReason(field, existing, incoming, evidence
     return grounded ? cleanText(evidence.join(' '), 500) : '';
 }
 
+/**
+ * (1.2.11) A scan of one reply (an automatic quick scan, or a one-pass block) writes its profile
+ * evidence without a message tag: tagged with that reply ("[m12] …"), a habit seen again in a later
+ * reply counts as a second sighting however alike the words. Tagged items are left as they are.
+ * Returns a copy; the input is not touched.
+ */
+export function tagScanEvidence(parsed, messageId) {
+    if (!parsed || typeof parsed !== 'object' || !Number.isInteger(messageId) || messageId < 0) return parsed;
+    const rows = Array.isArray(parsed.profileUpdates) ? parsed.profileUpdates : (Array.isArray(parsed.profile_updates) ? parsed.profile_updates : null);
+    if (!rows) return parsed;
+    const tag = item => (typeof item === 'string' && item.trim() && !/^\s*\[m\d+\]/i.test(item) ? `[m${messageId}] ${item.trim()}` : item);
+    const tagged = rows.map(row => {
+        const evidence = row?.evidence;
+        if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return row;
+        return { ...row, evidence: Object.fromEntries(Object.entries(evidence).map(([field, list]) => [field, Array.isArray(list) ? list.map(tag) : list])) };
+    });
+    return Array.isArray(parsed.profileUpdates) ? { ...parsed, profileUpdates: tagged } : { ...parsed, profile_updates: tagged };
+}
+
+// (1.2.11) The message an evidence item was seen in ("[m12] …"), or '' when it carries no tag.
+const evidenceSource = item => (String(item ?? '').match(/^\s*\[m(\d+)\]/i) ?? [])[1] ?? '';
+
 function newProfileEvidence(prior = [], incoming = [], duplicateSimilarity = 0.56) {
     const before = cleanList(prior, BEHAVIOR_EVIDENCE_LIMIT * 2, DURABLE_PROFILE_LIMITS.evidence);
     return cleanList(incoming, PROFILE_EVIDENCE_LIMIT * 2, DURABLE_PROFILE_LIMITS.evidence).filter(item =>
-        !before.some(old => normalizeName(old) === normalizeName(item) || durableSemanticSimilarity(old, item) >= duplicateSimilarity));
+        !before.some(old => {
+            if (normalizeName(old) === normalizeName(item)) return true;
+            // (1.2.11) Seen in another message is another sighting, however alike the words: only a
+            // re-read of the same message (or untagged near-copies) is a duplicate.
+            const was = evidenceSource(old);
+            const now = evidenceSource(item);
+            if (was && now && was !== now) return false;
+            return durableSemanticSimilarity(old, item) >= duplicateSimilarity;
+        }));
 }
 
 // A lever swing needs the behaviour seen again in a later scene. Two scenes of the same behaviour
 // are often narrated in similar words, so for Behavioral Levers only a near-copy (a replayed or
 // re-scanned observation) is a duplicate; related but distinct wording counts as a second sighting.
+// (1.2.11) So for Mannerisms: a habit is the same act again, in much the same words.
 const BEHAVIOR_EVIDENCE_DUPLICATE_SIMILARITY = 0.85;
+const REPEAT_EVIDENCE_FIELDS = new Set(['behaviorProfile', 'mannerisms']);
 
 function gradualProfileEvolutionReady(field, beforeEvidence, incomingEvidence) {
     const prior = beforeEvidence[field] || [];
     const fresh = newProfileEvidence(prior, incomingEvidence[field] || [],
-        field === 'behaviorProfile' ? BEHAVIOR_EVIDENCE_DUPLICATE_SIMILARITY : 0.56);
+        REPEAT_EVIDENCE_FIELDS.has(field) ? BEHAVIOR_EVIDENCE_DUPLICATE_SIMILARITY : 0.56);
     if (!prior.length || !fresh.length) return false;
     return fresh.some(now => prior.some(old => profileEvidenceRelated(old, now)));
 }
@@ -6563,7 +6595,9 @@ const NARRATION_CAPTURE_HEADER = `NPC STATE DELTA ONE-PASS CAPTURE. Write your c
 -->
 Never mention the block in the story. Fill its JSON as this private NPC dossier scanner would for the user's latest message and your reply:`;
 const NARRATION_CAPTURE_STORY = 'Story context: the chat above. CURRENT exchange = the user\'s latest message plus the reply you are writing now; use only it for presence, live state and relationship deltas.';
-export const NARRATION_CAPTURE_REMINDER = 'Reminder: after the story, end with the <!--npc_state_delta {valid JSON} --> block.';
+// (1.2.11) The slow fields named at the end, where the model looks last: they fill only from
+// evidence gathered over scenes, and a block written beside the story tended to leave them out.
+export const NARRATION_CAPTURE_REMINDER = 'Reminder: after the story, end with the <!--npc_state_delta {valid JSON} --> block. Before closing it, check each NPC who acted in your reply for the slow fields, which build up over scenes: a habit or tic (profileUpdates mannerisms + evidence.mannerisms), how they decide or treat people (behaviorProfile "Label: level - effect" + evidence.behaviorProfile), a consequential event (memories). Write the evidence whenever the reply shows one, even if the field itself must wait.';
 
 export function buildScannerPrompt({
     transcript,

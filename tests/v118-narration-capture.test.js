@@ -2,11 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+    NARRATION_CAPTURE_REMINDER,
     buildNarrationCapturePrompt,
     buildScannerPrompt,
+    createNpcRecord,
     extractNarrationCapture,
+    mergeScanResult,
     parseNarrationCapture,
     stripUiNoise,
+    tagScanEvidence,
 } from '../core.js';
 
 // One-pass narration capture: the roleplay reply ends with a hidden quick-scan block that the
@@ -175,7 +179,10 @@ test('the capture prompt carries the scanner rules without the transcript and en
     assert.ok(!capture.includes('Yunyun waves from the gate'));
     assert.ok(!capture.includes('Story context:\n'));
     assert.match(capture, /Story context: the chat above\./);
-    assert.ok(capture.endsWith('\n\nReminder: after the story, end with the <!--npc_state_delta {valid JSON} --> block.'));
+    assert.ok(capture.endsWith(`\n\n${NARRATION_CAPTURE_REMINDER}`));
+    assert.ok(NARRATION_CAPTURE_REMINDER.startsWith('Reminder: after the story, end with the <!--npc_state_delta {valid JSON} --> block.'));
+    // (1.2.11) The slow fields are named last, where the model looks.
+    for (const field of ['mannerisms', 'evidence.mannerisms', 'behaviorProfile', 'evidence.behaviorProfile', 'memories']) assert.ok(NARRATION_CAPTURE_REMINDER.includes(field), field);
     assert.ok(!capture.startsWith('Private NPC dossier scanner.'));
 });
 
@@ -221,4 +228,34 @@ test('v1.1.10 a capture block never swallows another extension\'s comment envelo
     assert.equal(arrow.text, 'Story.', 'a closing arrow inside the JSON still cannot split a final block');
     assert.deepEqual(parseNarrationCapture(arrow.raw).npcs, [{ note: 'A --> B' }]);
     assert.equal(stripUiNoise(`Story. ${block} ${envelope}`), stripUiNoise(`Story. ${envelope}`), 'transcripts treat the envelope exactly as without the block');
+});
+
+// (1.2.11) The slow fields: a habit seen again in a later reply is a second sighting, however
+// alike the words, so it fills once the evidence is written in two replies.
+test('a habit written as evidence in two replies fills Mannerisms; never from one, never without evidence (1.2.11)', () => {
+    const verna = createNpcRecord('Verna');
+    const habit = 'Taps her ledger twice before naming a price.';
+    const block = (said) => ({ npcs: [], profileUpdates: [{ id: verna.id, mannerisms: [habit], evidence: { mannerisms: [said] } }] });
+    const scan = (state, messageId, parsed, context) => mergeScanResult(state, tagScanEvidence(parsed, messageId), { turn: messageId, sourceMessageId: messageId, developmentContext: context });
+    const one = scan({ npcs: [verna], candidates: [], turn: 1 }, 2, block('taps her ledger twice before naming the price'), 'Verna taps her ledger twice before naming the price.');
+    assert.deepEqual(one.state.npcs[0].mannerisms, [], 'one scene is not enough');
+    assert.deepEqual(one.state.npcs[0].profileEvidence.mannerisms, ['[m2] taps her ledger twice before naming the price'], 'the sighting is kept, tagged with its reply');
+    const two = scan({ ...one.state, turn: 7 }, 8, block('taps her ledger twice before naming a price'), 'Verna taps her ledger twice before naming a price.');
+    assert.deepEqual(two.state.npcs[0].mannerisms, [habit], 'seen again in a later reply');
+    // The same reply read again is no second sighting.
+    const again = scan({ ...one.state, turn: 2 }, 2, block('taps her ledger twice before naming a price'), 'Verna taps her ledger twice before naming a price.');
+    assert.deepEqual(again.state.npcs[0].mannerisms, []);
+    // Without evidence the habit never builds up.
+    const bare = { npcs: [], profileUpdates: [{ id: verna.id, mannerisms: [habit] }] };
+    const b1 = scan({ npcs: [verna], candidates: [], turn: 1 }, 2, bare, 'Verna taps her ledger twice before naming the price.');
+    assert.deepEqual(scan({ ...b1.state, turn: 7 }, 8, bare, 'Verna taps her ledger twice before naming a price.').state.npcs[0].mannerisms, []);
+});
+
+test('tagScanEvidence tags untagged evidence with its reply and leaves the rest alone (1.2.11)', () => {
+    const parsed = { npcs: [{ name: 'Verna' }], profileUpdates: [{ id: 'npc_verna', evidence: { mannerisms: ['taps the ledger', '[m3] already tagged'], speech: ['clipped'] } }, { id: 'npc_burl' }] };
+    const tagged = tagScanEvidence(parsed, 9);
+    assert.deepEqual(tagged.profileUpdates[0].evidence, { mannerisms: ['[m9] taps the ledger', '[m3] already tagged'], speech: ['[m9] clipped'] });
+    assert.deepEqual(tagged.profileUpdates[1], { id: 'npc_burl' });
+    assert.equal(parsed.profileUpdates[0].evidence.mannerisms[0], 'taps the ledger', 'the input is not touched');
+    assert.equal(tagScanEvidence(parsed, null), parsed);
 });

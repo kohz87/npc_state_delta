@@ -131,7 +131,7 @@ test('v1.1.8 capture arms only fresh replies and continues (not quiet/swipe/rege
         await h.generate('normal');
         h.check(h.lastPrompt().includes(h.HEADER), 'a normal generation carries the capture instruction');
         h.check(h.lastPrompt().includes('<!--npc_state_delta'), 'the instruction names the hidden block');
-        h.check(h.lastPrompt().trimEnd().endsWith('--> block.'), 'the reminder is the last thing in the injection');
+        h.check(h.lastPrompt().trimEnd().endsWith('even if the field itself must wait.'), 'the reminder is the last thing in the injection');
         h.check(!h.lastPrompt().includes('Who is at the gate?'), 'the capture instruction carries no transcript');
         h.check(h.runtime.injectionPreview().captureChars > 1000, 'the preview reports the capture size');
         h.equal(h.status().armed, true, 'armed after a normal generation');
@@ -574,5 +574,34 @@ test('v1.1.8 GENERATION_STOPPED disarms the instruction', () => {
         h.equal(h.mockState.context.chat[id].mes, h.REPLY);
         h.equal(h.scannerCalls().length, 1, 'a later reply is scanned normally');
         h.equal([h.status().requested, h.status().used], [0, 0]);
+    });
+});
+
+// (1.2.11) One-pass catch-up: every N captured replies, the NPCs most in them get a quiet Refresh.
+test('v1.2.11 one-pass catch-up refreshes the NPCs most in the last N captured replies, quietly', () => {
+    runScenario('catch-up', async h => {
+        h.settings.narrationCapture = true;
+        h.settings.narrationCaptureCatchUp = 2;
+        const refreshCalls = () => h.mockState.rawCalls.map(call => call?.[0] || {}).filter(args => /targeted dossier reconciliation scanner/i.test(String(args.systemPrompt || '')));
+        const toasts = [];
+        for (const level of ['info', 'success', 'warning']) {
+            const before = globalThis.toastr?.[level];
+            if (globalThis.toastr) globalThis.toastr[level] = (text, ...rest) => { toasts.push(`${level}: ${text}`); return before?.(text, ...rest); };
+        }
+        await h.turn('Who is at the gate?', `${h.REPLY}${h.block()}`);
+        h.equal(refreshCalls().length, 0, 'not after one captured reply');
+        const update = { npcs: [{ name: 'Yunyun', present: true, location: 'guild hall', relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 } }] };
+        await h.turn('I go to the guild hall.', `Yunyun waits at the guild hall.${h.block(update)}`);
+        await h.sleep(300);
+        h.equal(h.scannerCalls().length, 0, 'the captures themselves still need no scan');
+        h.equal(refreshCalls().length, 1, 'one Refresh after the second captured reply');
+        h.check(String(refreshCalls()[0].prompt || '').includes('Yunyun'), 'for the NPC in those replies');
+        h.check(!toasts.some(text => /Yunyun is already consistent|no grounded dossier changes/i.test(text)), `a catch-up that changes nothing says nothing: ${toasts.join(' | ')}`);
+        // Off: no catch-up.
+        h.settings.narrationCaptureCatchUp = 0;
+        await h.turn('We wait.', `Yunyun polishes her wand.${h.block(update)}`);
+        await h.turn('We wait more.', `Yunyun sighs.${h.block(update)}`);
+        await h.sleep(300);
+        h.equal(refreshCalls().length, 1, 'none with the setting at 0');
     });
 });
