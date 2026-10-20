@@ -93,13 +93,31 @@ export function connectStoryBlock(api, storyBlock) {
             view.key = key;
         }
     };
-    storyBlock.registerTab({ id: STORY_BLOCK_TAB_IDS.cast, label: 'Present NPCs', short: 'Present', icon: '🎭', order: 200, render: renderCast });
-    storyBlock.registerTab({ id: STORY_BLOCK_TAB_IDS.dossiers, label: 'Dossiers', short: 'Dossiers', icon: '📇', order: 201, render: renderDossiers });
+    // (1.2.15) The tabs are there only while Delta is on: switched off, they leave at once (other
+    // extensions' tabs do), and come back when it is switched on again.
+    const tabs = [
+        { id: STORY_BLOCK_TAB_IDS.cast, label: 'Present NPCs', short: 'Present', icon: '🎭', order: 200, render: renderCast },
+        { id: STORY_BLOCK_TAB_IDS.dossiers, label: 'Dossiers', short: 'Dossiers', icon: '📇', order: 201, render: renderDossiers },
+    ];
+    let shown = false;
+    const syncTabs = () => {
+        const on = api.isEnabled?.() !== false;
+        if (on === shown) return false;
+        if (!on && typeof storyBlock.unregisterTab !== 'function') return false;
+        for (const tab of tabs) {
+            if (on) storyBlock.registerTab(tab);
+            else storyBlock.unregisterTab(tab.id);
+        }
+        shown = on;
+        return true;
+    };
+    syncTabs();
     if (globalThis.document?.documentElement?.dataset) globalThis.document.documentElement.dataset[CONNECTED_FLAG] = '1';
     // A new reply, swipe or edit in Story Block can change the World State and chatter the cast
     // shows; the in-chat cards follow (the tab re-renders with Story Block itself).
     try { storyBlock.onUpdate?.(() => api.renderInline?.()); } catch { /* optional */ }
     return {
+        syncTabs,
         // Called after Delta redraws its cast; Story Block redraws only when Delta's state moved.
         refresh() {
             const next = String(api.dossierRevision?.() ?? '');
@@ -128,5 +146,6 @@ function startStoryBlockTabs(attempt = 0) {
 
 if (typeof document !== 'undefined') {
     document.addEventListener('npc-state-delta:cast-rendered', () => (connection ? connection.refresh() : startStoryBlockTabs(40)));
+    document.addEventListener('npc-state-delta:enabled-changed', () => connection?.syncTabs());
     queueMicrotask(() => startStoryBlockTabs());
 }

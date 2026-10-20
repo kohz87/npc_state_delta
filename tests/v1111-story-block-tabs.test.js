@@ -243,3 +243,24 @@ test('1.2.13 an empty Present NPCs tab says why, and offers Scan now when a scan
     assert.doesNotMatch(emptyCastHtml({ text: 'No chat is open.', scan: false }), /data-npc-state-delta-action/);
     assert.match(emptyCastHtml(), /No NPC is present in the latest scene\./);
 });
+
+test('v1.2.15 switched off, Delta takes its tabs out of Story Block at once; switched on, they come back', () => {
+    const tabs = new Map();
+    const runtime = { ...fakeRuntime(cast), isEnabled: () => enabled };
+    let enabled = true;
+    const storyBlock = { registerTab: tab => tabs.set(tab.id, tab), unregisterTab: id => tabs.delete(id), refresh() {} };
+    const connection = connectStoryBlock(runtime, storyBlock);
+    assert.deepEqual([...tabs.keys()], [STORY_BLOCK_TAB_IDS.cast, STORY_BLOCK_TAB_IDS.dossiers]);
+    enabled = false;
+    assert.equal(connection.syncTabs(), true);
+    assert.equal(tabs.size, 0, 'no tabs while Delta is off');
+    assert.equal(connection.syncTabs(), false, 'nothing to do twice');
+    enabled = true;
+    assert.equal(connection.syncTabs(), true);
+    assert.deepEqual([...tabs.keys()], [STORY_BLOCK_TAB_IDS.cast, STORY_BLOCK_TAB_IDS.dossiers]);
+    // Connected while off: no tabs until it is switched on.
+    const later = new Map();
+    enabled = false;
+    connectStoryBlock(runtime, { registerTab: tab => later.set(tab.id, tab), unregisterTab: id => later.delete(id) });
+    assert.equal(later.size, 0);
+});

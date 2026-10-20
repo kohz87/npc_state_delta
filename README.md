@@ -97,7 +97,7 @@ Each present NPC shows what they are like now as labelled lines: **Mood**, **Con
 
 An empty tab says why (since 1.2.13). **Present NPCs** names the reason: no NPC has a dossier in this chat yet (the story or the World State may name someone Delta has not scanned), the latest reply has not been scanned, or the latest scan found no one. It offers **Scan now**. **Dossiers** with none at all says *No dossiers yet* and offers **Add NPC** and **Scan now**.
 
-While Story Block is installed, the cast shows only in Story Block until you pick a choice under **Roster & continuity → Present NPCs in chat**. Pick **Full cards** or **Compact strip** to keep it in the chat as well; **Only in Story Block** shows full cards in the chat when Story Block isn't installed. The tabs are display only and change nothing in prompts, scans or saved data. Without Story Block nothing changes.
+While Story Block is installed, the cast shows only in Story Block until you pick a choice under **Roster & continuity → Present NPCs in chat**. Pick **Full cards** or **Compact strip** to keep it in the chat as well; **Only in Story Block** shows full cards in the chat when Story Block isn't installed. The tabs are display only and change nothing in prompts, scans or saved data; switching Delta off takes them out of the sidebar at once (since 1.2.15). Without Story Block nothing changes.
 
 ### Story Suite: Story Block, Story Director and RPG Battle
 

@@ -6836,6 +6836,8 @@ function afterEnabledChange() {
     announceToSuite();
     updateInjection();
     renderDossier();
+    // (1.2.15) Story Block's Present NPCs and Dossiers tabs leave with Delta and come back with it.
+    if (typeof CustomEvent === 'function') globalThis.document?.dispatchEvent?.(new CustomEvent('npc-state-delta:enabled-changed', { detail: { enabled: getSettings().enabled !== false } }));
 }
 
 function applyEnabled(on) {
@@ -7723,6 +7725,7 @@ window.NPCStateDelta = Object.freeze({
     openEditor: value => { const npc = findNpcByIdOrName(value); return npc ? openNpcEditorSafely(npc.id) : false; },
     openDossier: value => { const npc = findNpcByIdOrName(value); return npc ? openLauncherDossier(npc.id) : false; },
     injectionPreview: () => structuredClone(injectionPreview()),
+    isEnabled: () => getSettings().enabled !== false,
     uiStatus: () => ({
         version: NPC_STATE_VERSION,
         chatKey: getChatKey(),
