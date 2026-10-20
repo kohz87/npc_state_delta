@@ -110,7 +110,7 @@ test('settings are grouped by task and extension-wide backup diagnostics live in
     const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
     const html = index.slice(index.indexOf('function buildSettingsHtml()'), index.indexOf('function readOpenSettingsGroups()'));
     const groups = [...html.matchAll(/settingsGroup\('([a-z]+)', '([^']+)'/g)].map(match => match[2]);
-    assert.deepEqual(groups, ['Scanning', 'Roster & continuity', 'Calendar & birthdays', 'Source of truth', 'Portrait generation', 'Scanner rules', 'Data & maintenance']);
+    assert.deepEqual(groups, ['Scanning', 'Roster & continuity', 'Calendar & birthdays', 'Source of truth', 'Portrait generation', 'Scanner rules', 'Advanced', 'Data & maintenance']);
     assert.match(html, /delta-settings-quickbar[\s\S]*npc_state_delta_enabled[\s\S]*npc_state_delta_auto[\s\S]*data-delta-settings-open-dossiers[\s\S]*npc_state_delta_scan_now[\s\S]*npc_state_delta_add_manual/);
     assert.match(html, /delta-settings-maintenance-actions[\s\S]*data-delta-settings-backup[\s\S]*data-delta-settings-restore[\s\S]*data-delta-settings-diagnostics/);
     assert.match(html, /npc_state_delta_roster_summary[\s\S]*delta-settings-danger[\s\S]*npc_state_delta_clear_chat/);

@@ -411,11 +411,25 @@ function reconcileDocumentSections(parent, markup, reset = false) {
     while (parent.children.length > children.length) parent.lastElementChild.remove();
 }
 
-function relationshipAxis(label, value, axis) {
+// (1.2.15) The change the latest reply made to one axis, beside its meter: ▲3 / ▼2. Only for a change
+// recorded at the latest reply (an older one is history, shown below the meters); tension rising reads
+// as bad, the other axes rising as good.
+export function relationshipStepHtml(axis, label, change, latestReply) {
+    const reply = wholeNumber(latestReply);
+    if (!change || reply === null || wholeNumber(change.message) !== reply) return '';
+    const step = Math.round(Number(change.delta?.[axis]) || 0);
+    if (!step) return '';
+    const up = step > 0;
+    const good = axis === 'tension' ? !up : up;
+    const title = `${label} ${up ? 'up' : 'down'} ${Math.abs(step)} since the last reply (reply #${reply})`;
+    return `<span class="delta-rel-step delta-rel-step-${good ? 'good' : 'bad'}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${up ? '▲' : '▼'}${Math.abs(step)}</span>`;
+}
+
+function relationshipAxis(label, value, axis, change = null, latestReply = null) {
     const score = relationshipValue(value);
     const position = Math.max(0, Math.min(100, (score + 100) / 2));
     return `<div class="delta-rel-axis delta-rel-${escapeHtml(axis)}">
-        <div class="delta-rel-label"><span>${escapeHtml(label)}</span><b>${score > 0 ? '+' : ''}${score}</b></div>
+        <div class="delta-rel-label"><span>${escapeHtml(label)}</span><b>${score > 0 ? '+' : ''}${score}${relationshipStepHtml(axis, label, change, latestReply)}</b></div>
         <div class="delta-rel-track" aria-label="${escapeHtml(label)} ${score}"><span class="delta-rel-zero"></span><i style="left:${position}%"></i></div>
     </div>`;
 }
@@ -904,7 +918,7 @@ class DeltaDossierUi {
             <section class="delta-section delta-player-card" data-delta-section="player">
                 <h3>Player relationship${changedMark(selected, 'relationship')}</h3>
                 <div class="delta-rel-grid">
-                    ${RELATIONSHIP_AXES.map(([axis, label]) => relationshipAxis(label, selected.relationship[axis], axis)).join('')}
+                    ${RELATIONSHIP_AXES.map(([axis, label]) => relationshipAxis(label, selected.relationship[axis], axis, selected.lastRelationshipChange, this.projection?.reply)).join('')}
                 </div>
                 ${lastRelationshipChangeHtml(selected.lastRelationshipChange)}
             </section>
@@ -1124,6 +1138,9 @@ const STYLES = `
 #${ROOT_ID} .delta-rel-axis { min-width:0; }
 #${ROOT_ID} .delta-rel-label { display:flex; justify-content:space-between; gap:8px; margin-bottom:4px; font-size:.78rem; }
 #${ROOT_ID} .delta-rel-label b { color:var(--delta-accent-soft); }
+#${ROOT_ID} .delta-rel-step { margin-left:6px; font-size:.72rem; font-weight:700; }
+#${ROOT_ID} .delta-rel-step-good { color:#9fd8b4; }
+#${ROOT_ID} .delta-rel-step-bad { color:#eba3a3; }
 #${ROOT_ID} .delta-rel-track { position:relative; height:8px; border-radius:999px; background:rgba(0,0,0,.34); border:1px solid rgba(255,255,255,.07); }
 #${ROOT_ID} .delta-rel-zero { position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:rgba(255,255,255,.32); }
 #${ROOT_ID} .delta-rel-track i { position:absolute; top:50%; width:10px; height:10px; transform:translate(-50%,-50%); border-radius:50%; background:var(--delta-accent); box-shadow:0 0 0 2px rgba(0,0,0,.45); }

@@ -93,8 +93,8 @@ export function connectStoryBlock(api, storyBlock) {
             view.key = key;
         }
     };
-    storyBlock.registerTab({ id: STORY_BLOCK_TAB_IDS.cast, label: 'Present NPCs', icon: '👥', order: 200, render: renderCast });
-    storyBlock.registerTab({ id: STORY_BLOCK_TAB_IDS.dossiers, label: 'Dossiers', icon: '📇', order: 201, render: renderDossiers });
+    storyBlock.registerTab({ id: STORY_BLOCK_TAB_IDS.cast, label: 'Present NPCs', short: 'Present', icon: '🎭', order: 200, render: renderCast });
+    storyBlock.registerTab({ id: STORY_BLOCK_TAB_IDS.dossiers, label: 'Dossiers', short: 'Dossiers', icon: '📇', order: 201, render: renderDossiers });
     if (globalThis.document?.documentElement?.dataset) globalThis.document.documentElement.dataset[CONNECTED_FLAG] = '1';
     // A new reply, swipe or edit in Story Block can change the World State and chatter the cast
     // shows; the in-chat cards follow (the tab re-renders with Story Block itself).

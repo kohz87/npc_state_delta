@@ -52,9 +52,10 @@ test('v1.1.11 the adapter registers Present NPCs and Dossiers tabs and nothing w
     const runtime = fakeRuntime(cast);
     let refreshes = 0;
     const connection = connectStoryBlock(runtime, { registerTab: tab => tabs.push(tab), refresh: () => { refreshes += 1; } });
-    assert.deepEqual(tabs.map(tab => [tab.id, tab.label, tab.icon]), [
-        [STORY_BLOCK_TAB_IDS.cast, 'Present NPCs', '👥'],
-        [STORY_BLOCK_TAB_IDS.dossiers, 'Dossiers', '📇'],
+    // (1.2.15) 🎭, not 👥: RPG Battle's Party tab has 👥, and the tab row may show icons only.
+    assert.deepEqual(tabs.map(tab => [tab.id, tab.label, tab.short, tab.icon]), [
+        [STORY_BLOCK_TAB_IDS.cast, 'Present NPCs', 'Present', '🎭'],
+        [STORY_BLOCK_TAB_IDS.dossiers, 'Dossiers', 'Dossiers', '📇'],
     ]);
     assert.ok(tabs.every(tab => typeof tab.render === 'function' && tab.order >= 200), 'after Story Block\'s own blocks');
     assert.equal(connectStoryBlock(runtime, null), null, 'no Story Block, no tabs');

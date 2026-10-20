@@ -392,6 +392,12 @@ globalThis.setTimeout = (callback, ms, ...args) => {
 globalThis.clearTimeout = handle => { pendingHostTimers.delete(handle); nativeClearTimeout(handle); };
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+// The present-cast roster mounts on a debounce: wait for it to settle instead of reading it at once.
+async function waitFor(check, { timeout = 3000, step = 10 } = {}) {
+    const end = Date.now() + timeout;
+    while (!check() && Date.now() < end) await sleep(step);
+    return check();
+}
 
 async function manualAddNpc(name) {
     const previous = globalThis.prompt;
@@ -537,6 +543,7 @@ try {
     assert.match(portraitCommand, /negative="[^"]+/);
     assert.match(portraitCommand, /Crimson Demon/);
     assert.equal(mockState.context.chat.length, 2, 'quiet native portrait generation must not add a chat message in the runtime harness');
+    await waitFor(() => inlineAnchors.length === 1);
     assert.equal(inlineAnchors.length, 1, 'only the latest present-cast roster should mount');
     assert.match(inlineAnchors[0].innerHTML, /npc-state-delta-present-grid/);
     assert.match(inlineAnchors[0].innerHTML, /npc-state-delta-present-card/);
