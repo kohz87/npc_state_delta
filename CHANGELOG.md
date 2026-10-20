@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 1.2.16 - 20 October 2026
+
+- **Cache-friendly prompt layout.** Providers that cache the start of a prompt (OpenAI, DeepSeek and Gemini on their own; Claude with SillyTavern's caching option) reuse everything up to the first part that changed. Delta's text is now arranged for that, following the Story Suite convention:
+  - **The one-pass capture rules go early and never change.** The capture instruction's rules (about 7,000 characters, roughly 2,000 tokens) are the same every reply, so they now ride in the system prompt, word for word identical each time. Before, the whole instruction sat at the end of the prompt, after the chat, where nothing could be reused.
+  - **What changes goes last.** The capture's dossier context and its reminder, and the live dossier, go at the very end, after your latest message (depth 0), the reminder last.
+  - **The live dossier moves from one message from the end to the end.** An install on the old default (1) is moved once; a depth you set yourself is kept, and 0 can now be set (it used to be read as 1).
+  - **Nothing in the text changes**: the instruction is split where its dossier context starts. Swipes, regenerates and background generations carry neither part, as before. The prompt keys are new (`story_suite_static_npc_state_delta`, `story_suite_tail_4_npc_state_delta`, `story_suite_tail_5_npc_state_delta_capture`); the old ones are emptied on load.
+  - **Never lost to a preset without a Main Prompt.** SillyTavern drops system-prompt extension text when a chat-completion preset's prompt order has no Main Prompt; the capture rules are then put back right after the leading system messages, once, only for the reply being written (never a token count, another extension's call or Delta's own scans).
+
 ## 1.2.15 - 20 October 2026
 
 Small UI release: nothing Delta stores, sends or decides changes.

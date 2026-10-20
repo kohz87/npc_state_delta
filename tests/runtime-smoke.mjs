@@ -953,7 +953,7 @@ try {
     state = globalThis.NPCStateDelta.getState();
     assert.equal(state.npcs.find(n => n.name === 'Yunyun').archived, true);
     assert.equal(state.npcs.find(n => n.name === 'Yunyun').present, false);
-    const promptAfterArchive = [...mockState.prompts].reverse().find(args => args?.[0] === 'npc_state_delta_live_dossier')?.[1] || '';
+    const promptAfterArchive = [...mockState.prompts].reverse().find(args => args?.[0] === 'story_suite_tail_4_npc_state_delta')?.[1] || '';
     assert.doesNotMatch(promptAfterArchive, /- Yunyun:/);
     assert.equal(await globalThis.NPCStateDelta.restore(yunyunId), true);
     state = globalThis.NPCStateDelta.getState();

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
     NARRATION_CAPTURE_REMINDER,
     buildNarrationCapturePrompt,
+    buildNarrationCaptureParts,
     buildScannerPrompt,
     createNpcRecord,
     extractNarrationCapture,
@@ -272,4 +273,32 @@ test('storyProse keeps the narration and dialogue, never the World State or othe
 
 test('the capture reminder asks for complete relationship rows and the block\'s own word (1.2.12)', () => {
     for (const part of ['relationshipImpact', 'relationshipDelta', '"relationshipsCovered": true', '"relationshipReview"']) assert.ok(NARRATION_CAPTURE_REMINDER.includes(part), part);
+});
+
+test('v1.2.16 the capture splits into rules (byte-identical reply to reply) and the dossier context with the reminder', () => {
+    // Two consecutive replies: the dossiers, the cast, a candidate, a form and a death all change between them.
+    const first = buildNarrationCaptureParts({
+        transcript: 'USER: Who is at the gate?', userName: 'Kazuma', charName: 'Megumin', customFieldNames: ['Rank'],
+        existingNpcs: [{ id: 'npc_yun', name: 'Yunyun', present: true, mood: 'shy', location: 'Gate', personality: 'Earnest.' }],
+    });
+    const second = buildNarrationCaptureParts({
+        transcript: 'USER: We head for the guild hall instead.', userName: 'Kazuma', charName: 'Megumin', customFieldNames: ['Rank'],
+        existingNpcs: [
+            { id: 'npc_yun', name: 'Yunyun', present: false, mood: 'lonely', location: 'Guild', lifeState: 'deceased', lifeStateCertainty: 'explicit' },
+            { id: 'npc_wiz', name: 'Wiz', present: true, appearanceForms: [{ name: 'Lich', appearance: 'pale' }], currentForm: 'Lich' },
+        ],
+        candidates: [{ name: 'Guard', seenCount: 1 }],
+    });
+    assert.equal(first.rules, second.rules, 'the rules part is the same text on both replies');
+    assert.ok(first.rules.startsWith('NPC STATE DELTA ONE-PASS CAPTURE.') && first.rules.includes('\n15. JSON only'));
+    for (const dynamic of ['Yunyun', 'Wiz', 'Guard', 'Gate', 'Identity index', 'Reminder:']) {
+        assert.ok(!first.rules.includes(dynamic) && !second.rules.includes(dynamic), `no ${dynamic} in the rules`);
+    }
+    assert.ok(second.context.includes('"Wiz"') && second.context.includes('Identity index (matching only):'));
+    assert.ok(second.context.trimEnd().endsWith('"relationshipReview": ["Name"].'), 'the reminder is still read last');
+    // Nothing added or lost: the parts are the one-piece instruction, split where the context starts.
+    const whole = buildNarrationCapturePrompt({ transcript: 'USER: Who is at the gate?', userName: 'Kazuma', charName: 'Megumin', customFieldNames: ['Rank'], existingNpcs: [{ id: 'npc_yun', name: 'Yunyun', present: true, mood: 'shy', location: 'Gate', personality: 'Earnest.' }] });
+    const rest = first.context.split('\n').slice(1).join('\n');
+    assert.ok(whole.startsWith(first.rules) && whole.endsWith(rest), 'rules first, then the rest, as one piece');
+    assert.equal(whole.slice(first.rules.length, whole.length - rest.length).trim(), '', 'only the line break between them');
 });

@@ -65,6 +65,7 @@ import {
     extractNarrationCapture,
     parseNarrationCapture,
     buildNarrationCapturePrompt,
+    buildNarrationCaptureParts,
     tagScanEvidence,
     storyProse,
     npcMatchesLabel,
@@ -197,11 +198,17 @@ import {
 } from './present-scene.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
-const PROMPT_KEY = 'npc_state_delta_live_dossier';
-// (1.2.13) The one-pass capture reminder: one reply only, so it goes in its own slot at the very
-// end of the prompt (depth 0) where it is read last, and is cleared with the dossier.
-const CAPTURE_PROMPT_KEY = 'npc_state_delta_capture';
+// (1.2.16) Cache-friendly layout (the Story Suite convention): text that never changes from reply
+// to reply goes early and byte-identical, text that changes goes last, so providers that cache the
+// prompt's head can reuse it. The live dossier and the one-pass capture's context and reminder are
+// the tail (depth 0, after the player's message, in this key order); the capture's rules are the
+// head, in the system prompt. Keys sort so the suite's tail reads Story Block, Director, Battle, NSD.
+const PROMPT_KEY = 'story_suite_tail_4_npc_state_delta';
+const CAPTURE_PROMPT_KEY = 'story_suite_tail_5_npc_state_delta_capture';
 const CAPTURE_PROMPT_DEPTH = 0;
+const CAPTURE_RULES_KEY = 'story_suite_static_npc_state_delta';
+// Keys of earlier versions, emptied on load so a stale copy never lingers in the prompt.
+const LEGACY_PROMPT_KEYS = ['npc_state_delta_live_dossier', 'npc_state_delta_capture'];
 const UI_ID = 'npc_state_delta_settings';
 let eventsRegistered = false;
 let initialized = false;
@@ -533,7 +540,9 @@ const DEFAULTS = Object.freeze({
     staleDeleteAfter: 50,
     admissionMode: 'conservative',
     inject: true,
-    injectDepth: 1,
+    // (1.2.16) 0: after the player's message, the cache-friendly tail. An install still on the old
+    // default 1 is moved once (injectDepthTailUpgraded); any other depth the player set is kept.
+    injectDepth: 0,
     injectLimit: 3,
     injectBudgetTokens: 4000,
     customFieldNames: [],
@@ -571,6 +580,12 @@ function escapeHtml(value) {
 function persistSettings() {
     const ctx = getContext();
     if (typeof ctx.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
+}
+
+// The dossier's depth: 0 to 20, 0 kept (it is the default since 1.2.16).
+function injectDepthOf(settings) {
+    const depth = Math.round(Number(settings?.injectDepth));
+    return Number.isFinite(depth) ? Math.max(0, Math.min(20, depth)) : 0;
 }
 
 function getSettings() {
@@ -619,6 +634,9 @@ function getSettings() {
     const legacyDefaultBudget = settings.injectBudgetDefaultUpgraded !== true && Number(settings.injectBudgetTokens) === 1800;
     assign('injectBudgetTokens', legacyDefaultBudget ? 4000 : Math.max(512, Math.min(6000, Math.round(Number(settings.injectBudgetTokens) || 4000))));
     assign('injectBudgetDefaultUpgraded', true);
+    const legacyDefaultDepth = settings.injectDepthTailUpgraded !== true && Number(settings.injectDepth) === 1;
+    assign('injectDepth', legacyDefaultDepth ? 0 : injectDepthOf(settings));
+    assign('injectDepthTailUpgraded', true);
     assign('fullScanEveryTurn', settings.fullScanEveryTurn === true);
     assign('narrationCapture', settings.narrationCapture === true);
     assign('narrationCaptureCatchUp', Number.isFinite(Number(settings.narrationCaptureCatchUp)) ? Math.max(0, Math.min(50, Math.round(Number(settings.narrationCaptureCatchUp)))) : 8);
@@ -2467,6 +2485,8 @@ function updateInjection() {
         lastInjection = { text: '', reason, at: Date.now(), chatKey: injectionKey };
         ctx.setExtensionPrompt?.(PROMPT_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
         ctx.setExtensionPrompt?.(CAPTURE_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, CAPTURE_PROMPT_DEPTH, false, extension_prompt_roles.SYSTEM);
+        ctx.setExtensionPrompt?.(CAPTURE_RULES_KEY, '', extension_prompt_types.IN_PROMPT, 0, false, extension_prompt_roles.SYSTEM);
+        sentCaptureRules = '';
     };
     if (injectionKey !== 'no-chat' && chatHydrationStatus(injectionKey) !== 'ready') {
         clear(`This chat's dossiers are not loaded (status: ${chatHydrationStatus(injectionKey)}); nothing is sent until they are.`);
@@ -2477,14 +2497,15 @@ function updateInjection() {
     const state = getChatState();
     // The recent story and who the player's message names: worked out once for both parts.
     const transcript = recentTranscript(4);
-    const capture = narrationCaptureArmed === injectionKey && narrationCaptureEnabled(settings)
-        ? buildNarrationCapturePrompt(scannerPromptOptions(state, settings, transcript))
-        : '';
+    const captureParts = narrationCaptureArmed === injectionKey && narrationCaptureEnabled(settings)
+        ? buildNarrationCaptureParts(scannerPromptOptions(state, settings, transcript))
+        : { rules: '', context: '' };
+    const capture = captureParts.context;
     if (!settings.inject && !capture) return clear('"Inject present NPC state" is off.');
     const namedNpcIds = namedByPlayerNpcIds(state);
     const prompt = settings.inject ? liveInjectionText(state, settings, { namedNpcIds, transcript }) : '';
     const present = (state.npcs || []).filter(npc => npc?.present && !npc?.archived);
-    const depth = Math.max(0, Math.min(20, Number(settings.injectDepth) || 1));
+    const depth = injectDepthOf(settings);
     lastInjection = {
         text: prompt,
         reason: prompt ? '' : (!settings.inject ? '"Inject present NPC state" is off.' : (present.length ? 'No present NPC was selected for injection.' : 'No NPC is marked present in the latest scanned scene.')),
@@ -2492,11 +2513,47 @@ function updateInjection() {
         chatKey: injectionKey,
         depth,
         namedByPlayer: (state.npcs || []).filter(npc => namedNpcIds.includes(npc.id)).map(npc => npc.name),
-        captureChars: capture.length,
+        captureChars: captureParts.rules.length + capture.length,
+        captureRules: captureParts.rules,
+        captureContext: capture,
     };
     ctx.setExtensionPrompt?.(PROMPT_KEY, prompt, extension_prompt_types.IN_CHAT, depth, false, extension_prompt_roles.SYSTEM);
-    // Replaced on every build and emptied when not armed, so a spent reminder is never sent again.
+    // Replaced on every build and emptied when not armed, so a spent reminder is never sent again;
+    // the rules go and come with it (only armed replies carry them, byte-identical each time).
     ctx.setExtensionPrompt?.(CAPTURE_PROMPT_KEY, capture, extension_prompt_types.IN_CHAT, CAPTURE_PROMPT_DEPTH, false, extension_prompt_roles.SYSTEM);
+    ctx.setExtensionPrompt?.(CAPTURE_RULES_KEY, captureParts.rules, extension_prompt_types.IN_PROMPT, 0, false, extension_prompt_roles.SYSTEM);
+    if (!captureParts.rules) sentCaptureRules = '';
+}
+
+// (1.2.16) A chat-completion preset whose prompt order has no Main Prompt drops in-prompt extension
+// text, so the capture's rules would vanish while its context still asks for the block. At
+// prompt-ready they go back in, once, after the leading system messages (still early, so still
+// cacheable). Only for the reply's own generation: the rules are held from its arming until the
+// reply arrives or is stopped (sentCaptureRules, '' otherwise), never on a dry run, never in a
+// prompt without the chat's replies (another extension's call), never in Delta's own requests.
+let sentCaptureRules = '';
+const OWN_REQUEST = /NPC State Delta's (?:isolated|targeted)|isolated relationship evaluator|Private NPC dossier scanner/;
+function holdCaptureRules() {
+    const ctx = getContext();
+    const rules = String(lastInjection.captureRules || '');
+    sentCaptureRules = rules && typeof ctx.substituteParams === 'function' ? ctx.substituteParams(rules) : rules;
+}
+function keepCaptureRules(eventData) {
+    const rules = String(sentCaptureRules || '').trim();
+    if (!rules || eventData?.dryRun === true || !Array.isArray(eventData?.chat)) return;
+    const chat = eventData.chat;
+    if (chat.some(message => typeof message?.content === 'string' && message.content.includes(rules))) return;
+    if (chat.some(message => typeof message?.content === 'string' && OWN_REQUEST.test(message.content))) return;
+    if ((getContext().chat || []).some(message => message && !message.is_user && !message.is_system) && !chat.some(message => message?.role === 'assistant')) return;
+    let at = 0;
+    while (at < chat.length && chat[at]?.role === 'system') at += 1;
+    chat.splice(at, 0, { role: 'system', content: rules });
+}
+
+// (1.2.16) Earlier versions' prompt keys, emptied once on load.
+function clearLegacyPromptKeys() {
+    const ctx = getContext();
+    for (const key of LEGACY_PROMPT_KEYS) ctx.setExtensionPrompt?.(key, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
 }
 
 function injectionPreview() {
@@ -2509,8 +2566,10 @@ function injectionPreview() {
     return {
         sending: Boolean(text),
         reason: lastInjection.reason || '',
-        placement: `In chat as a system message, ${lastInjection.depth ?? (Number(settings.injectDepth) || 1)} message(s) from the end`,
-        capturePlacement: 'One-pass capture reminder: its own system message at the very end of the prompt (depth 0)',
+        placement: (lastInjection.depth ?? injectDepthOf(settings)) === 0
+            ? 'In chat as a system message at the end, after your latest message (depth 0)'
+            : `In chat as a system message, ${lastInjection.depth ?? injectDepthOf(settings)} message(s) from the end`,
+        capturePlacement: 'One-pass capture: its rules in the system prompt (unchanged reply to reply), its context and reminder in their own system message at the very end (depth 0)',
         builtAt: lastInjection.at ? new Date(lastInjection.at).toISOString() : '',
         presentNpcs: (state.npcs || []).filter(npc => npc?.present && !npc?.archived).map(npc => npc.name),
         namedByPlayer: (lastInjection.namedByPlayer || []).filter(name => injectedNpcs.includes(name)),
@@ -7440,6 +7499,7 @@ function registerEvents() {
             // swipe and regenerate generations never carry the instruction.
             const captureType = NARRATION_CAPTURE_TYPES.has(String(type ?? '')) && narrationCaptureEnabled();
             if (type === 'quiet') {
+                sentCaptureRules = '';
                 disarmNarrationCapture();
                 return;
             }
@@ -7456,15 +7516,18 @@ function registerEvents() {
             updateInjection();
             // Armed only when the instruction actually went out (hydration may have withheld it).
             if (!lastInjection.captureChars) narrationCaptureArmed = '';
+            if (narrationCaptureArmed) holdCaptureRules();
+            else sentCaptureRules = '';
             noteNarrationCaptureVersion(key);
         });
     }
-    if (events.GENERATION_STOPPED) source.on(events.GENERATION_STOPPED, () => disarmNarrationCapture());
+    if (events.GENERATION_STOPPED) source.on(events.GENERATION_STOPPED, () => { sentCaptureRules = ''; disarmNarrationCapture(); });
+    if (events.CHAT_COMPLETION_PROMPT_READY) source.on(events.CHAT_COMPLETION_PROMPT_READY, eventData => keepCaptureRules(eventData));
 
     if (events.MESSAGE_RECEIVED) {
         // The capture block leaves the reply before any other listener (TTS, full cast, other
         // extensions) or lineage key reads it.
-        const stripCapture = messageId => receiveNarrationBlock(messageId);
+        const stripCapture = messageId => { sentCaptureRules = ''; return receiveNarrationBlock(messageId); };
         if (typeof source.makeFirst === 'function') source.makeFirst(events.MESSAGE_RECEIVED, stripCapture);
         else source.on(events.MESSAGE_RECEIVED, stripCapture);
         source.on(events.MESSAGE_RECEIVED, async (messageId) => {
@@ -7536,6 +7599,7 @@ function registerEvents() {
     if (events.CHAT_CHANGED) {
         source.on(events.CHAT_CHANGED, async () => {
             narrationCaptureArmed = '';
+            sentCaptureRules = '';
             for (const cachedKey of chatStateCache.keys()) cancelScanOperation(cachedKey, 'chat changed');
             if (branchReconcileTimer) clearTimeout(branchReconcileTimer);
             branchReconcileTimer = null;
@@ -7614,6 +7678,7 @@ async function init() {
     }
     initialized = true;
     getSettings();
+    clearLegacyPromptKeys();
     connectStorySuite();
     bindUi();
     installUiCaptureBridge();

@@ -494,7 +494,7 @@ test('v1.2.0 the runtime announces itself, follows Enable and defers the scene t
         await Promise.all((mockState.listeners.get('message_received') || []).map(fn => fn(id)));
         await sleep(200);
         assert.deepEqual(suite.api('npc-state-delta').npcs().map(npc => [npc.name, npc.present]), [['Yunyun', true]]);
-        const lastPrompt = () => mockState.prompts.filter(args => args[0] === 'npc_state_delta_live_dossier').at(-1)?.[1] || '';
+        const lastPrompt = () => mockState.prompts.filter(args => args[0] === 'story_suite_tail_4_npc_state_delta').at(-1)?.[1] || '';
         assert.match(lastPrompt(), /mood: nervous, eager/, 'alone, the live mood is sent');
 
         suite.announce({ id: 'story-block', name: 'Story Block', version: '0.8.0', owns: ['scene'] });
@@ -549,7 +549,7 @@ test('v1.2.1 the runtime shares its panel and api.manage, and shows Manage all i
         const id = mockState.context.chat.length - 1;
         await Promise.all((mockState.listeners.get('message_received') || []).map(fn => fn(id)));
         await sleep(200);
-        const lastPrompt = () => mockState.prompts.filter(args => args[0] === 'npc_state_delta_live_dossier').at(-1)?.[1] || '';
+        const lastPrompt = () => mockState.prompts.filter(args => args[0] === 'story_suite_tail_4_npc_state_delta').at(-1)?.[1] || '';
         const alone = lastPrompt();
         assert.match(alone, /mood: nervous, eager/);
 
@@ -911,7 +911,7 @@ test('v1.2.2 the runtime: tokens() measures the live injection, shows: chatter, 
 
         // tokens(): the same injection Delta sends, split by section; no request is made for it.
         const requests = mockState.rawCalls.length;
-        const sent = mockState.prompts.filter(args => args[0] === 'npc_state_delta_live_dossier').at(-1)?.[1] || '';
+        const sent = mockState.prompts.filter(args => args[0] === 'story_suite_tail_4_npc_state_delta').at(-1)?.[1] || '';
         assert.ok(sent.length > 0);
         const tokens = manage.tokens();
         assert.ok(tokens.parts.some(part => part.label === 'Present NPC cards' && part.input > 0));

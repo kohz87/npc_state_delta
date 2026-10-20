@@ -18,6 +18,7 @@ function runScenario(name, scenario, { makeFirst = false } = {}) {
     const script = `${source.slice(0, cut)}
 mockState.context.eventTypes.GENERATION_AFTER_COMMANDS = 'generation_after_commands';
 mockState.context.eventTypes.GENERATION_STOPPED = 'generation_stopped';
+mockState.context.eventTypes.CHAT_COMPLETION_PROMPT_READY = 'chat_completion_prompt_ready';
 mockState.updatedBlocks = [];
 mockState.context.updateMessageBlock = (id, message) => { mockState.updatedBlocks.push({ id, mes: message.mes }); };
 mockState.earlierListenerSaw = [];
@@ -86,10 +87,12 @@ function captureHelpers(mockState, eventSource, sleep, manualAddNpc) {
     const callsOf = pattern => mockState.rawCalls.map(call => call?.[0] || {}).filter(args => pattern.test(String(args.systemPrompt || '')));
     const scannerCalls = () => callsOf(/isolated dossier scanner\./i);
     const relationshipCalls = () => callsOf(/isolated relationship evaluator/i);
-    const dossierPrompts = () => mockState.prompts.filter(args => args[0] === 'npc_state_delta_live_dossier').map(args => String(args[1] ?? ''));
+    const dossierPrompts = () => mockState.prompts.filter(args => args[0] === 'story_suite_tail_4_npc_state_delta').map(args => String(args[1] ?? ''));
     // (1.2.13) The capture reminder has its own slot at the end of the prompt (depth 0).
-    const captureCalls = () => mockState.prompts.filter(args => args[0] === 'npc_state_delta_capture');
-    const lastPrompt = () => [dossierPrompts().at(-1) ?? '', String(captureCalls().at(-1)?.[1] ?? '')].filter(Boolean).join('\n\n');
+    const captureCalls = () => mockState.prompts.filter(args => args[0] === 'story_suite_tail_5_npc_state_delta_capture');
+    // (1.2.16) The capture's rules ride early in the system prompt; its context and reminder at the end.
+    const rulesCalls = () => mockState.prompts.filter(args => args[0] === 'story_suite_static_npc_state_delta');
+    const lastPrompt = () => [String(rulesCalls().at(-1)?.[1] ?? ''), dossierPrompts().at(-1) ?? '', String(captureCalls().at(-1)?.[1] ?? '')].filter(Boolean).join('\n\n');
     const status = () => runtime.uiStatus().narrationCapture;
     const npc = name => runtime.getState().npcs.find(item => item.name === name) || null;
     // Fire every listener in registration order (as the host does) and wait for the async ones.
@@ -119,7 +122,7 @@ function captureHelpers(mockState, eventSource, sleep, manualAddNpc) {
         if (/isolated dossier scanner\./i.test(String(args.systemPrompt || ''))) return JSON.stringify({ npcs: [{ ...YUNYUN, role: 'scanned adventurer' }] });
         return '{"npcs":[]}';
     };
-    return { manualAddNpc, fail, check, equal, runtime, settings, HEADER, REPLY, YUNYUN, block, scannerCalls, relationshipCalls, dossierPrompts, captureCalls, lastPrompt, status, npc, emitAsync, generate, sendUser, receiveAssistant, turn, mockState, sleep };
+    return { manualAddNpc, fail, check, equal, runtime, settings, HEADER, REPLY, YUNYUN, block, scannerCalls, relationshipCalls, dossierPrompts, captureCalls, rulesCalls, lastPrompt, status, npc, emitAsync, generate, sendUser, receiveAssistant, turn, mockState, sleep };
 }
 
 test('v1.1.8 capture arms only fresh replies and continues (not quiet/swipe/regenerate/impersonate/dry-run)', () => {
@@ -135,7 +138,10 @@ test('v1.1.8 capture arms only fresh replies and continues (not quiet/swipe/rege
         h.check(h.lastPrompt().includes('<!--npc_state_delta'), 'the instruction names the hidden block');
         h.check(h.lastPrompt().trimEnd().endsWith('"relationshipReview": ["Name"].'), 'the reminder is the last thing in the injection');
         const sent = h.captureCalls().at(-1);
-        h.check(String(sent?.[1] ?? '').includes(h.HEADER) && sent?.[3] === 0, 'the reminder goes in its own slot at depth 0, the end of the prompt');
+        h.check(String(sent?.[1] ?? '').includes('"relationshipReview": ["Name"].') && sent?.[2] === 1 && sent?.[3] === 0, 'the context and reminder go in their own slot at depth 0, the end of the prompt');
+        const rules = h.rulesCalls().at(-1);
+        h.check(String(rules?.[1] ?? '').startsWith(h.HEADER) && rules?.[2] === 0, 'the rules go in the system prompt (IN_PROMPT)');
+        h.check(!String(rules?.[1] ?? '').includes('Identity index'), 'the rules carry no dossier context');
         h.check(!h.dossierPrompts().at(-1)?.includes(h.HEADER), 'the dossier slot carries no reminder');
         h.check(!h.lastPrompt().includes('Who is at the gate?'), 'the capture instruction carries no transcript');
         h.check(h.runtime.injectionPreview().captureChars > 1000, 'the preview reports the capture size');
@@ -181,6 +187,60 @@ test('v1.1.8 capture arms only fresh replies and continues (not quiet/swipe/rege
         h.equal(h.lastPrompt(), '', 'quiet with Inject off clears the prompt entirely');
         h.equal(h.scannerCalls().length, 0, 'arming never makes a scanner request');
         h.equal(h.status().requested, 0, 'no reply was received');
+
+        // (1.2.16) A preset with its Main Prompt off drops the in-prompt rules: they go back in at
+        // prompt-ready, after the leading system messages, once; never into a dry run or a quiet call.
+        h.settings.inject = true;
+        await h.generate('normal');
+        const rulesText = String(h.rulesCalls().at(-1)?.[1] ?? '');
+        const dropped = { chat: [{ role: 'system', content: 'Card.' }, { role: 'system', content: 'Scenario.' }, { role: 'user', content: 'Hi' }, { role: 'system', content: 'tail' }], dryRun: false };
+        await h.emitAsync('chat_completion_prompt_ready', dropped);
+        h.equal(dropped.chat.map(message => message.role), ['system', 'system', 'system', 'user', 'system'], 'inserted after the leading system messages');
+        h.equal(dropped.chat[2].content, rulesText.trim(), 'the rules, as sent');
+        await h.emitAsync('chat_completion_prompt_ready', dropped);
+        h.equal(dropped.chat.length, 5, 'only once: a prompt that already carries them is left alone');
+        const dry = { chat: [{ role: 'user', content: 'Hi' }], dryRun: true };
+        await h.emitAsync('chat_completion_prompt_ready', dry);
+        h.equal(dry.chat.length, 1, 'never into a dry run');
+        const ownScan = { chat: [{ role: 'system', content: "You are NPC State Delta's isolated dossier scanner. Use only the supplied scanner payload." }, { role: 'user', content: 'payload' }], dryRun: false };
+        await h.emitAsync('chat_completion_prompt_ready', ownScan);
+        h.equal(ownScan.chat.length, 2, "never into Delta's own scanner request");
+        await h.generate('quiet');
+        const quiet = { chat: [{ role: 'user', content: 'Hi' }], dryRun: false };
+        await h.emitAsync('chat_completion_prompt_ready', quiet);
+        h.equal(quiet.chat.length, 1, 'never into a quiet call');
+        // Once the chat has replies, only a prompt that carries them is the story's own.
+        await h.generate('normal');
+        h.mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'Earlier reply.' });
+        const background = { chat: [{ role: 'system', content: 'Summarize.' }, { role: 'user', content: 'text' }], dryRun: false };
+        await h.emitAsync('chat_completion_prompt_ready', background);
+        h.equal(background.chat.length, 2, "never into another extension's call without the chat's replies");
+        const story = { chat: [{ role: 'system', content: 'Card.' }, { role: 'assistant', content: 'Earlier reply.' }, { role: 'user', content: 'Hi' }], dryRun: false };
+        await h.emitAsync('chat_completion_prompt_ready', story);
+        h.equal(story.chat.length, 4, 'the story prompt gets them');
+        h.mockState.context.chat.pop();
+        await h.emitAsync('generation_stopped');
+        const stopped = { chat: [{ role: 'user', content: 'Hi' }], dryRun: false };
+        await h.emitAsync('chat_completion_prompt_ready', stopped);
+        h.equal(stopped.chat.length, 1, 'not after the generation is stopped');
+
+        // (1.2.16) The dossier goes last (depth 0) by default; the old default 1 moves there once,
+        // any other depth the player set is kept, and so is a 1 set after the move.
+        const dossierDepth = () => h.mockState.prompts.filter(args => args[0] === 'story_suite_tail_4_npc_state_delta').at(-1)?.[3];
+        h.settings.inject = true;
+        h.settings.injectDepth = 1;
+        h.settings.injectDepthTailUpgraded = false;
+        await h.generate('normal');
+        h.equal(dossierDepth(), 0, 'an install on the old default 1 is moved to depth 0');
+        h.settings.injectDepth = 3;
+        await h.generate('normal');
+        h.equal(dossierDepth(), 3, 'a depth the player chose is kept');
+        h.settings.injectDepth = 1;
+        await h.generate('normal');
+        h.equal(dossierDepth(), 1, 'a 1 chosen after the move is kept');
+        h.settings.injectDepth = 0;
+        await h.generate('normal');
+        h.equal(dossierDepth(), 0, '0 is honoured');
     });
 });
 
