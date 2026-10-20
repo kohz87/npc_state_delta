@@ -3,7 +3,7 @@
  * adaptive editing, extension-wide settings actions, and explicit manual life-state correction.
  */
 import { isTerminalNpcDeath } from './core.js';
-import { activeChatKey, api, flushDurably, stage1Refresh, uiRoot } from './dossier-tools-core.js';
+import { activeChatKey, api, escapeHtml, flushDurably, plain, stage1Refresh, uiRoot } from './dossier-tools-core.js';
 import { exportNativeTools, openDiagnostics, openImportTools } from './dossier-tools.js';
 import { openPortraitTools } from './portrait-tools.js';
 
@@ -19,15 +19,6 @@ let libraryCollapsed = true;
 let normalizeQueued = false;
 
 function toast(kind, message) { globalThis.toastr?.[kind]?.(message); }
-function plain(value) { return String(value ?? '').trim(); }
-function escapeHtml(value) {
-    return String(value ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
-}
 
 export function setNodeTextIfChanged(node, value) {
     const text = String(value ?? '');

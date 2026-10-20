@@ -7,22 +7,13 @@ import {
     parseAppearanceFormsText,
     resolveNpcAppearance,
 } from './appearance.js';
-import { activeChatKey, api, flushDurably, stage1Refresh } from './dossier-tools-core.js';
+import { activeChatKey, api, escapeHtml, flushDurably, plain, stage1Refresh } from './dossier-tools-core.js';
 
 const STYLE_ID = 'npc_state_delta_continuity_ui_styles';
 const UNKNOWN_FORM = '__unknown__';
 const NO_FORM = '__none__';
 let normalizeQueued = false;
 
-function plain(value) { return String(value ?? '').trim(); }
-function escapeHtml(value) {
-    return String(value ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
-}
 function currentNpc(npcId = '') {
     try { return api()?.getNpc?.(npcId) || null; }
     catch { return null; }

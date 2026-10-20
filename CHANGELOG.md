@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.2.18 - 20 October 2026
+
+Cleanup: nothing Delta stores, sends, shows or decides changes.
+
+- **One copy of two small helpers.** The continuity editor and the dossier experience each carried their own copy of the HTML-escaping and text-trimming helpers, byte for byte the same as the shared dossier-tools ones they already load. They now use the shared ones. The other copies stay where they are: they differ in what they do (a `plain` that also collapses spaces, an escape that writes `&#39;`), or they sit in modules that do not load the dossier tools and should not start to for a four-line helper.
+
 ## 1.2.17 - 20 October 2026
 
 One-pass capture, smaller per reply. Nothing Delta stores or decides changes.
