@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.2.19 - 20 October 2026
+
+- **New memories for NPCs already in the dossier are kept.** An NPC met for the first time got their memories, but later ones for the same NPC were often lost. The capture is told to send an existing NPC's durable facts in `profileUpdates`, and its reminder lists memories among them, so a model filing a new memory there was doing what it was asked; that part of the merge only read personality, speech, appearance, mannerisms and Behavioral Levers, and dropped the memory without a word. Memories in a profile update are now merged the same way as those in the NPC's own entry: added to the stored ones, a repeat or reworded copy not added twice, at most three new per reply and five kept (the most consequential when crowded), never replacing the earlier ones.
+- **The instruction says where memories go and that they are additions.** The full and compact capture rules, the scanner and the reminder now say: an existing NPC's new memories go in their `npcs[]` entry, only the new ones from this exchange, added to the stored ones, never resent. Measured (estimated tokens): the full rules +10, the compact rules +25, the reminder +11, the scanner +10.
+
 ## 1.2.18 - 20 October 2026
 
 Cleanup: nothing Delta stores, sends, shows or decides changes.

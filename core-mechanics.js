@@ -5292,6 +5292,15 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
         }
     }
 
+    // (1.2.19) A model that files a known NPC's new memory under profileUpdates (a durable fact,
+    // which the rules send there) used to lose it: only the npcs[] entry merged memories. Merged
+    // here the same way: added to the stored ones, deduplicated, capped, never replacing them.
+    if ((incoming.memories || []).length) {
+        const before = JSON.stringify(npc.memories || []);
+        npc.memories = mergeImportantMemories(npc.memories, incoming.memories, incoming.memoryRetention, options.memoryInputLimit || 3);
+        if (JSON.stringify(npc.memories) !== before) changed = true;
+    }
+
     const evidenceChanged = JSON.stringify(beforeEvidence) !== JSON.stringify(evidence);
     npc.profileEvidence = evidence;
     if (changed || evidenceChanged) npc.updatedAt = Date.now();
@@ -5690,6 +5699,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
     // scanner had no live-state delta worth returning for that NPC.
     const profileUpdateOptions = {
         developmentContext: options.developmentContext || '',
+        memoryInputLimit,
         targeted: options.allowTargetedDurableSeed === true || options.developmentSingleTarget === true,
     };
     if (Object.prototype.hasOwnProperty.call(options, 'userDevelopmentContext')) {
@@ -6492,7 +6502,7 @@ Mapping/rules:
 2. Voice=>speech; Personality=>personality; Appearance=>overallAppearance (enduring body)+appearance (outfit); named forms=>each form complete; Background=>background; Role=>role; explicit chronological Age=>age. Explicit/unambiguous Gender/Sex=>gender=male|female; never infer. Apparent Age should be compact ~N when inferable; Appearance must not duplicate an explicit age. behaviorProfile=max6 "Label: level - effect" levers: how they generally respond/decide (labels only: Disposition, Care/Warmth, Expressiveness, Independence/Agency, Conflict/Assertiveness, Threat Sensitivity, Analytical Style, Social Presentation, Cruelty/Mercy, Loyalty, Drive/Ambition, Honesty/Candor). Actions are evidence; routines, duties, house rules and habits are not levers (habits=>mannerisms). Player-specific/one-scene behavior does not belong there. Do not infer species/age from stereotypes.
 3. Read on the PC/current stance toward ${userName} may initialize relationshipSummary, but relationshipImpact="none" and every relationshipDelta key MUST be 0. Never invent numeric Trust/Affection/Desire/Tension from prose.
 4. Agenda may initialize goal only when the dossier presents it as the NPC's current ongoing agenda. "Where to Find Them", home, workplace, headquarters, or regular haunt => homeBase, NOT current Location. Changing an established homeBase requires homeBaseState:"update"+homeBaseReason. Do not map home/work/hangout into live location unless the dossier explicitly says they are there now. Do not invent Mood/Status/current presence.
-5. A durable Tell may become a mannerism. One-scene/emotional/stress/player-specific behavior does not. Merge multiple animations of one recurring pattern into one mannerism. Important memories only from explicit consequential past events, max3 new.
+5. A durable Tell may become a mannerism. One-scene/emotional/stress/player-specific behavior does not. Merge multiple animations of one recurring pattern into one mannerism. Important memories only from explicit consequential past events, max3 new, in npcs[]; added to stored ones.
 6. Existing unlocked durable fields may refine from established facts. Empty != permission to guess from one act: seed only direct description, recurrence, or stable cross-context evidence. Return FULL CURRENT COMPACT fields; merge duplicate concepts first. personality/speech/appearance use refine; behaviorProfile refine/evolve; lasting change uses evolve/change+reason. Player-specific behavior=>relationshipSummary. Social update/evolve merges named counterparts; omission never erases others.
 7. KeyRelationships update/evolve merge by named counterpart and never erase unrelated ties by omission. Estrangement, death, reconciliation, or rivalry changes that counterpart entry; otherwise omit unchanged fields.
 8. JSON only. Compact limits: appearance<=500; personality<=280; speech<=240; behaviorProfile max6/180 each; background<=320; relationshipSummary<=280; keyRelationships max5/180 each; mannerisms max4/140 each. Never repeat a fact just to preserve wording.
@@ -6619,7 +6629,7 @@ Never mention the block in the story. Fill its JSON as this private NPC dossier 
 const NARRATION_CAPTURE_STORY = 'Story context: the chat above. CURRENT exchange = the user\'s latest message plus the reply you are writing now; use only it for presence, live state and relationship deltas.';
 // (1.2.11) The slow fields named at the end, where the model looks last: they fill only from
 // evidence gathered over scenes, and a block written beside the story tended to leave them out.
-export const NARRATION_CAPTURE_REMINDER = 'Reminder: after the story, end with the <!--npc_state_delta {valid JSON} --> block. Before closing it, check each NPC who acted in your reply for the slow fields, which build up over scenes: a habit or tic (profileUpdates mannerisms + evidence.mannerisms), how they decide or treat people (behaviorProfile "Label: level - effect" + evidence.behaviorProfile), a consequential event (memories). Write the evidence whenever the reply shows one, even if the field itself must wait.'
+export const NARRATION_CAPTURE_REMINDER = 'Reminder: after the story, end with the <!--npc_state_delta {valid JSON} --> block. Before closing it, check each NPC who acted in your reply for the slow fields, which build up over scenes: a habit or tic (profileUpdates mannerisms + evidence.mannerisms), how they decide or treat people (behaviorProfile "Label: level - effect" + evidence.behaviorProfile), a consequential event (memories: only the new one, in its npcs[] entry). Write the evidence whenever the reply shows one, even if the field itself must wait.'
     // (1.2.12) Relationships settled in the block, so no evaluator request is needed: a full row for
     // each existing NPC the reply names, and the model's own word on whether that covers everyone.
     + ' Relationships: give each existing NPC your story names an npcs row with relationshipImpact and all four relationshipDelta keys (0 = no change). Add top-level "relationshipsCovered": true when those rows hold everyone whose feelings toward the user could have changed in this reply, and list anyone you are unsure of in "relationshipReview": ["Name"].';
@@ -6638,7 +6648,7 @@ function compactCaptureRules(userName, charName) {
 7. Bonds between non-player NPCs (kin/friend/rival/mentor/partner): top-level keyRelationshipEdges {aId,a,bId,b,aToB=b's role to a,bToA,reason}, one per pair; omission never erases a bond.
 8. age = chronology only (birthday/exact elapsed => ageState:"advance"+reason; correction => "correct"+reason); apparentAge = visual cue "~N" (apparentAgeState:"evolve"+reason); species literal; gender male|female only if explicit (genderState:"correct"+reason); lifeState unknown|alive|deceased (deceased+explicit is terminal).
 9. Relationship toward the player, from the CURRENT exchange only; currentRelationship is read-only: relationshipImpact none|ordinary|meaningful|major|extreme; relationshipDelta {trust,affection,desire,tension} (all 4 keys) within the delta caps, each axis max 1/2/3/4 by impact; relationshipEvidence for every non-zero axis; continuation/aftermath = 0; desire only for explicit attraction/intimacy; trust != obedience, affection != devotion, tension != jealousy.
-10. memories: max 3 new, cap 5 stored, no paraphrased duplicates (memoryRetention = top 5 when crowded); homeBase = durable home/workplace/haunt, never the scene location; keep unless homeBaseState:"update"+homeBaseReason. Compact text, caps: homeBase 300, appearance 500, personality 280, speech 240, behaviorProfile 180, background 320, relationshipSummary 280, mannerism 140, bond/memory 180.
+10. memories, in npcs[] for existing NPCs too: only NEW events from this exchange (max 3), added to the stored (cap 5); never resend or paraphrase those (memoryRetention = top 5 when crowded); homeBase = durable home/workplace/haunt, never the scene location; keep unless homeBaseState:"update"+homeBaseReason. Compact text, caps: homeBase 300, appearance 500, personality 280, speech 240, behaviorProfile 180, background 320, relationshipSummary 280, mannerism 140, bond/memory 180.
 11. JSON only: {"npcs":[...],"profileUpdates":[...],"keyRelationshipEdges":[...]}. Example: {"id":"npc_myla","evidence":{"speech":["formal"]},"speechState":"refine","speech":"Soft, formal."}.`;
 }
 
@@ -6854,7 +6864,7 @@ Rules:
 11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue, compact ~N, never prose; species literal; no species-aging inference. gender=male|female only if explicit/unambiguous; never guess; change=>genderState:"correct"+reason. Birthday/exact elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual aging/growth/rejuvenation=>apparentAgeState:"evolve"+reason. Appearance must not repeat explicit age. Vague time skip insufficient.
 12. RELATIONSHIP -100..+100 DELTA-ONLY; currentRelationship read-only. Return relationshipDelta+relationshipEvidence (all 4 keys). NEW only; continuation/aftermath=>0. Raw max 1/2/5/10; axis max 1/2/3/4. EVERY non-zero axis needs grounded CURRENT-exchange evidence. Desire needs explicit attraction/intimacy narration; rescue/gratitude/affection/trust/proximity=>0. Trust!=obedience; Affection!=devotion; Tension!=jealousy.
 13. lifeState unknown|alive|deceased; deceased+explicit=death; explicit alive=reactivate.
-14. Memories: max3 NEW, cap5 stored; no duplicate/paraphrased memories. If crowded use memoryRetention=top5 consequential/durable; recency=tiebreak only. homeBase=durable home/workplace/HQ/haunt, never current scene location; keep-by-default; change needs homeBaseState:"update"+homeBaseReason. CAPS homeBase300/appearance500/personality280/speech240/behaviorProfile180/background320/relationshipSummary280/mannerism140/keyRelationship-memory180. COMPACT; never invent.
+14. Memories: max3 NEW in npcs[] (existing too), ADDED to cap5 stored; no duplicate/paraphrased memories. If crowded use memoryRetention=top5 consequential/durable; recency=tiebreak only. homeBase=durable home/workplace/HQ/haunt, never current scene location; keep-by-default; change needs homeBaseState:"update"+homeBaseReason. CAPS homeBase300/appearance500/personality280/speech240/behaviorProfile180/background320/relationshipSummary280/mannerism140/keyRelationship-memory180. COMPACT; never invent.
 15. JSON only: {"npcs":[...],"profileUpdates":[...],"keyRelationshipEdges":[...]}. profileUpdates example: {"id":"npc_myla","evidence":{"appearance":["bronze hair"],"speech":["formal"]},"appearanceState":"refine","appearance":"Bronze hair; wool smock.","speechState":"refine","speech":"Soft, formal."}. Existing relationship delta example: {"id":"npc_myla","relationshipDelta":{"trust":-2,"affection":0,"desire":0,"tension":2},"relationshipEvidence":{"trust":"lie","affection":"","desire":"","tension":"conflict"}}.
 
 Relationship rubric: ${relationshipRubric || '(none)'}
