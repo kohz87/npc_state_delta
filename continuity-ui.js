@@ -23,7 +23,6 @@ function escapeHtml(value) {
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#039;');
 }
-function formKey(value) { return plain(value).normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' '); }
 function currentNpc(npcId = '') {
     try { return api()?.getNpc?.(npcId) || null; }
     catch { return null; }

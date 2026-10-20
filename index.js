@@ -2455,9 +2455,8 @@ function namedByPlayerNpcIds(state) {
 
 // The live dossier injection under the current settings and scene defer (sent by updateInjection;
 // tokens() measures the same text).
-function liveInjectionText(state, settings) {
-    const namedNpcIds = namedByPlayerNpcIds(state);
-    return buildInjection(state.npcs, recentTranscript(4), state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: settings.customFieldNames, sceneDeferred: defersArea('scene', settings.sourceOfTruth) });
+function liveInjectionText(state, settings, { namedNpcIds = namedByPlayerNpcIds(state), transcript = recentTranscript(4) } = {}) {
+    return buildInjection(state.npcs, transcript, state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: settings.customFieldNames, sceneDeferred: defersArea('scene', settings.sourceOfTruth) });
 }
 
 function updateInjection() {
@@ -2476,12 +2475,14 @@ function updateInjection() {
     if (injectionKey === 'no-chat') return clear('No chat is open.');
     if (!settings.enabled) return clear('NPC State Delta is disabled.');
     const state = getChatState();
+    // The recent story and who the player's message names: worked out once for both parts.
+    const transcript = recentTranscript(4);
     const capture = narrationCaptureArmed === injectionKey && narrationCaptureEnabled(settings)
-        ? buildNarrationCapturePrompt(scannerPromptOptions(state, settings, recentTranscript(4)))
+        ? buildNarrationCapturePrompt(scannerPromptOptions(state, settings, transcript))
         : '';
     if (!settings.inject && !capture) return clear('"Inject present NPC state" is off.');
     const namedNpcIds = namedByPlayerNpcIds(state);
-    const prompt = settings.inject ? liveInjectionText(state, settings) : '';
+    const prompt = settings.inject ? liveInjectionText(state, settings, { namedNpcIds, transcript }) : '';
     const present = (state.npcs || []).filter(npc => npc?.present && !npc?.archived);
     const depth = Math.max(0, Math.min(20, Number(settings.injectDepth) || 1));
     lastInjection = {
@@ -4458,13 +4459,54 @@ function readOpenSettingsGroups() {
     }
 }
 
+// (1.2.14) A long setting hint reads as its first sentence; "more" shows the rest in place. The
+// rows come from several modules (some fill their slots later), so hints are compacted when a
+// group opens. Presentation only: every setting, its key and its text stay as they are.
+const HINT_COMPACT_CHARS = 110;
+function compactSettingHints(root) {
+    for (const small of root?.querySelectorAll?.('.npc-state-delta-setting-row > span:first-child > small:not([data-delta-hint])') || []) {
+        small.dataset.deltaHint = '1';
+        if (small.children?.length) continue;
+        const text = String(small.textContent || '').trim();
+        const split = text.length > HINT_COMPACT_CHARS ? text.match(/^(.{20,160}?[.!?])\s+(\S[\s\S]*)$/) : null;
+        if (!split) continue;
+        const rest = document.createElement('span');
+        rest.className = 'delta-hint-rest';
+        rest.textContent = ` ${split[2]}`;
+        const more = document.createElement('span');
+        more.className = 'delta-hint-more';
+        more.setAttribute('role', 'button');
+        more.setAttribute('tabindex', '0');
+        more.textContent = 'more';
+        small.title = text;
+        small.replaceChildren(document.createTextNode(split[1]), rest, document.createTextNode(' '), more);
+    }
+}
+
+function toggleSettingHint(event) {
+    const more = event.target?.closest?.('.delta-hint-more');
+    if (!more) return;
+    if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
+    // Inside the row's label: keep the click from toggling the setting.
+    event.preventDefault();
+    event.stopPropagation();
+    const small = more.parentElement;
+    const open = !small.classList.contains('is-open');
+    small.classList.toggle('is-open', open);
+    more.textContent = open ? 'less' : 'more';
+}
+
 // Remember which settings groups the player keeps open; presentation only, never canonical state.
 function bindSettingsGroupMemory(root) {
     const groups = [...(root?.querySelectorAll?.('[data-delta-settings-group]') || [])];
     const open = new Set(readOpenSettingsGroups());
     for (const group of groups) group.open = open.has(group.dataset.deltaSettingsGroup);
+    for (const group of groups) if (group.open) setTimeout(() => compactSettingHints(group), 0);
+    root?.addEventListener?.('click', toggleSettingHint, true);
+    root?.addEventListener?.('keydown', toggleSettingHint, true);
     root?.addEventListener?.('toggle', event => {
         if (!event.target?.matches?.('[data-delta-settings-group]')) return;
+        if (event.target.open) compactSettingHints(event.target);
         const next = groups.filter(group => group.open).map(group => group.dataset.deltaSettingsGroup);
         try { globalThis.localStorage?.setItem?.(SETTINGS_OPEN_GROUPS_KEY, JSON.stringify(next)); } catch { /* optional */ }
     }, true);
@@ -6696,9 +6738,10 @@ function nextReplyTexts() {
     const key = getChatKey();
     if (settings.enabled === false || key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return { injection: '', capture: '' };
     const state = getChatState(key);
-    const injection = settings.inject ? liveInjectionText(state, settings) : '';
+    const transcript = recentTranscript(4);
+    const injection = settings.inject ? liveInjectionText(state, settings, { transcript }) : '';
     const capture = narrationCaptureEnabled(settings)
-        ? buildNarrationCapturePrompt(scannerPromptOptions(state, settings, recentTranscript(4)))
+        ? buildNarrationCapturePrompt(scannerPromptOptions(state, settings, transcript))
         : '';
     return { injection, capture };
 }

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.2.14 - 20 October 2026
+
+Cleanup: nothing Delta stores, sends or decides changes.
+
+- **Shorter settings.** Every setting carried a full paragraph of help, so the panel read as one long wall of text. A long hint now shows its first sentence; **more** shows the rest in place (and the whole text is the hint's tooltip). Every setting, its place and its wording are unchanged, and the help for settings that other parts of Delta add later is shortened the same way.
+- **Less repeated work per reply.** Building what the next reply gets read the recent story, and worked out which off-screen NPCs your message names, twice. It now does each once and passes them along. The text sent is identical.
+- **One unused helper removed** from the appearance editor.
+
 ## 1.2.13 - 20 October 2026
 
 - **The one-pass reminder is read last.** It shared the dossier's place, one message from the end (before your latest message). It now has its own system message at the very end of the prompt, where the model reads it last and is likeliest to follow it. The dossier stays at the depth you set. It is still replaced on every generation and emptied when not asked for, so a spent reminder is never sent again.

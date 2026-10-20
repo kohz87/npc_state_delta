@@ -801,3 +801,9 @@ body.npc-state-delta-portrait-generator-open { overflow: hidden !important; }
 .delta-whats-sent-empty {
     opacity: 0.7;
 }
+
+/* (1.2.14) A long setting hint: its first sentence, then "more" for the rest. */
+#npc_state_delta_settings .delta-hint-rest { display: none; }
+#npc_state_delta_settings small.is-open .delta-hint-rest { display: inline; }
+#npc_state_delta_settings .delta-hint-more { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; opacity: .9; white-space: nowrap; }
+#npc_state_delta_settings .delta-hint-more:focus-visible { outline: 1px solid currentColor; }
