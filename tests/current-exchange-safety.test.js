@@ -12,7 +12,7 @@ test('v0.2.23 relationship repair targets current-exchange NPCs even when broad 
     assert.match(source, /for \(let offset = 0; offset < targets\.length; offset \+= 4\)/);
     const relationshipPassSource = source.slice(
         source.indexOf('async function runFocusedRelationshipPass'),
-        source.indexOf('function prepareFullWindowRelationshipEvaluation'),
+        source.indexOf('function suppressPrimaryRelationshipForFocusedDecisions'),
     );
     assert.doesNotMatch(relationshipPassSource, /\.slice\(0,\s*4\)/);
 });

@@ -6,20 +6,13 @@ import {
     parseMonthDefinitions,
     setActiveCalendarConfig,
 } from './calendar.js';
+import { escapeHtml } from './src/util/html.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
 const ROOT_ID = 'npc_state_delta_calendar_settings';
 const SETTINGS_ID = 'npc_state_delta_settings';
 let observer = null;
 
-function escapeHtml(value) {
-    return String(value ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
-}
 
 function settingsObject({ create = false } = {}) {
     const current = extension_settings[EXTENSION_NAME];

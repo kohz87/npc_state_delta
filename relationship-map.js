@@ -13,6 +13,7 @@ import {
     plain,
     signed,
 } from './relationship-map-core.js';
+import { escapeHtml } from './src/util/html.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
 const DOSSIER_ROOT_ID = 'npc_state_delta_dossier_root';
@@ -25,14 +26,6 @@ const RING_VALUES = Object.freeze([75, 25, 0, -50]);
 // Session-only view state: the last mode and the map's own buttons last until the page reloads.
 const view = { mode: 'dossier', lens: '', allBonds: true, signature: '' };
 
-function escapeHtml(value) {
-    return String(value ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
-}
 
 function readMapSettings() {
     return normalizeRelationshipMapSettings(extension_settings?.[EXTENSION_NAME]?.relationshipMap);

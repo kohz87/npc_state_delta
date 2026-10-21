@@ -83,7 +83,7 @@ The settings panel has a quick bar that is always visible, plus seven groups.
 | **Source of truth** | Who leads each shared area (NPCs, calendar, scene, game stats) when Story Block, Story Director or RPG Battle is installed: Automatic, This extension or The other one |
 | **Portrait generation** | Style presets, positive and negative prompts, composition, prompt format |
 | **Scanner rules** | Advanced: relationship starting values and per-scan caps, memory criteria, behaviour rubric |
-| **Advanced** | (since 1.2.15) Settings most readers never touch: Scan context (how much story full, manual and Refresh scans read), Maximum output tokens for the scanner, Injection budget (a ceiling, default 4000 tokens), Rewind dossiers on middle deletion, Rescan changed branches |
+| **Advanced** | (since 1.2.15) Settings most readers never touch: Scan context (how much story full, manual and Refresh scans read), Maximum output tokens for the scanner, NPCs in the dossier (how many present NPCs the live dossier carries, default 3), Injection budget (a ceiling, default 4000 tokens), Rewind dossiers on middle deletion, Rescan changed branches |
 | **What's sent** | (since 1.2.13) The text your next reply gets from Delta, each part with its size: the live dossier and, with one-pass capture on, the capture reminder. Filled when you open it, and on **Refresh** |
 | **Data & maintenance** | Backup / Export, Restore / Import, Diagnostics, and clearing this chat's dossiers |
 
