@@ -22,6 +22,18 @@ import { createDiagnosticStore } from './diagnostics-core.js';
 import { EDITOR_FIELDS, editorManualMemories, editorProfileLocks, settleEditorSave, untouchedEditorFields } from './src/dossier-edit.js';
 import { REFRESH_CHANGED_FIELDS, snapshotNpc } from './src/fields/registry.js';
 import {
+    cleanMessage,
+    recentTranscript,
+    recentUserDevelopmentContext,
+    currentExchangeUserDevelopmentContext,
+    currentExchangeTranscript,
+    currentExchangeProse,
+    storyDayAt,
+    storyDaysForTranscript,
+    currentExclusions,
+    useTranscriptSource,
+} from './src/transcript.js';
+import {
     NPC_STATE_VERSION,
     DEFAULT_RELATIONSHIP,
     DEFAULT_RELATIONSHIP_CAPS,
@@ -54,7 +66,6 @@ import {
     buildInjection,
     npcCurrentlyAbsentInText,
     npcNamedInText,
-    storyDayFromText,
     buildScannerPrompt,
     buildRelationshipPassPrompt,
     buildBackfillPrompt,
@@ -71,7 +82,6 @@ import {
     buildNarrationCapturePrompt,
     buildNarrationCaptureParts,
     tagScanEvidence,
-    storyProse,
     npcMatchesLabel,
     normalizeName,
     normalizeGender,
@@ -80,7 +90,6 @@ import {
     normalizeScanNpc,
     resolveInterimIdentityPromotions,
     setNpcArchived,
-    stripUiNoise,
     hasCompactMeguminWorldState,
     extractExplicitKeyRelationshipEdges,
     applyStaleNpcLifecycle,
@@ -205,6 +214,8 @@ import {
 import { escapeHtml } from './src/util/html.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
+// The chat text helpers (src/transcript.js) read the host's chat and the Scan context setting.
+useTranscriptSource({ context: () => getContext(), scanDepth: () => getSettings().scanDepth });
 // (1.2.16) Cache-friendly layout (the Story Suite convention): text that never changes from reply
 // to reply goes early and byte-identical, text that changes goes last, so providers that cache the
 // prompt's head can reuse it. The live dossier and the one-pass capture's context and reminder are
@@ -2425,126 +2436,6 @@ function flushCurrentChatOnPageHide() {
     const key = getChatKey();
     if (key === 'no-chat' || !hydratedChatKeys.has(key) || !chatStateCache.has(key)) return;
     void settleStateFileWrite(key, { flush: true }).catch(error => console.debug('[NPC State Delta] page-hide flush deferred', error));
-}
-
-function cleanMessage(message) {
-    if (!message || message.is_system) return '';
-    const speaker = message.name || (message.is_user ? getContext().name1 : getContext().name2) || '';
-    const body = stripUiNoise(message.mes || '');
-    return body ? `${speaker}: ${body}` : '';
-}
-
-function recentTranscript(limit = null, { messageIds = false } = {}) {
-    const settings = getSettings();
-    const chat = getContext().chat || [];
-    const count = Math.max(2, Math.min(30, Number(limit ?? settings.scanDepth) || 6));
-    const lines = [];
-    // Walk backward and stop as soon as the requested meaningful window is full.
-    // Long chats no longer pay to clean every historical message on each scan/injection.
-    for (let i = chat.length - 1; i >= 0 && lines.length < count; i -= 1) {
-        if (!chat[i] || chat[i].is_system) continue;
-        const line = cleanMessage(chat[i]);
-        if (line) lines.push(messageIds ? `[m${i}] ${line}` : line);
-    }
-    return lines.reverse().join('\n');
-}
-
-function recentUserDevelopmentContext(limit = null, { messageIds = true } = {}) {
-    const settings = getSettings();
-    const chat = getContext().chat || [];
-    const count = Math.max(2, Math.min(30, Number(limit ?? settings.scanDepth) || 6));
-    const selected = [];
-    let meaningful = 0;
-    for (let i = chat.length - 1; i >= 0 && meaningful < count; i -= 1) {
-        const message = chat[i];
-        if (!message || message.is_system) continue;
-        const line = cleanMessage(message);
-        if (!line) continue;
-        meaningful += 1;
-        if (message.is_user) selected.push(messageIds ? `[m${i}] ${line}` : line);
-    }
-    return selected.reverse().join('\n');
-}
-
-function currentExchangeUserDevelopmentContext(messageId = null) {
-    const ctx = getContext();
-    const chat = ctx.chat || [];
-    let assistantId = Number.isInteger(messageId) ? messageId : chat.length - 1;
-    while (assistantId >= 0 && (chat[assistantId]?.is_system || chat[assistantId]?.is_user)) assistantId -= 1;
-    if (assistantId < 0) return '';
-    for (let i = assistantId - 1; i >= 0; i -= 1) {
-        if (chat[i]?.is_system) continue;
-        if (chat[i]?.is_user) {
-            const line = cleanMessage(chat[i]);
-            return line ? `[m${i}] ${line}` : '';
-        }
-        break;
-    }
-    return '';
-}
-
-// The current exchange's messages: the assistant reply at (or before) `messageId` and the user
-// message it answers, oldest first; null when there is no reply.
-function currentExchangeMessages(messageId = null) {
-    const ctx = getContext();
-    const chat = ctx.chat || [];
-    let assistantId = Number.isInteger(messageId) ? messageId : chat.length - 1;
-    while (assistantId >= 0 && (chat[assistantId]?.is_system || chat[assistantId]?.is_user)) assistantId -= 1;
-    if (assistantId < 0) return null;
-    let userId = -1;
-    for (let i = assistantId - 1; i >= 0; i -= 1) {
-        if (chat[i]?.is_system) continue;
-        if (chat[i]?.is_user) { userId = i; break; }
-        // Do not walk across an older assistant turn looking for a distant user message.
-        if (!chat[i]?.is_user) break;
-    }
-    return [userId >= 0 ? chat[userId] : null, chat[assistantId]].filter(Boolean);
-}
-
-function currentExchangeTranscript(messageId = null) {
-    const messages = currentExchangeMessages(messageId);
-    if (!messages) return recentTranscript(2);
-    return messages.map(cleanMessage).filter(Boolean).join('\n');
-}
-
-// (1.2.12) The current exchange's story alone (narration and dialogue, no World State or blocks):
-// who a relationship moment involves, and what the relationship evaluator is sent.
-function currentExchangeProse(messageId = null) {
-    const ctx = getContext();
-    return (currentExchangeMessages(messageId) || []).map(message => {
-        const body = storyProse(message.mes || '');
-        const speaker = message.name || (message.is_user ? ctx.name1 : ctx.name2) || '';
-        return body ? `${speaker}: ${body}` : '';
-    }).filter(Boolean).join('\n');
-}
-
-// Story day of a message: its own dated World State block, else the nearest earlier dated message
-// (user turns and brief replies carry none). Null when nothing nearby is dated; callers then use turns.
-const STORY_DAY_LOOKBACK = 12;
-
-function storyDayAt(messageId) {
-    const chat = getContext().chat || [];
-    const start = Number.isInteger(messageId) ? Math.min(messageId, chat.length - 1) : chat.length - 1;
-    for (let i = start; i >= 0 && i > start - STORY_DAY_LOOKBACK; i -= 1) {
-        const day = storyDayFromText(chat[i]?.mes || '');
-        if (day !== null) return day;
-    }
-    return null;
-}
-
-function storyDaysForTranscript(transcript) {
-    const days = {};
-    for (const match of String(transcript || '').matchAll(/^\[m(\d+)\]/gm)) {
-        const id = Number(match[1]);
-        const day = storyDayAt(id);
-        if (Number.isInteger(id) && day !== null) days[id] = day;
-    }
-    return days;
-}
-
-function currentExclusions() {
-    const ctx = getContext();
-    return [ctx.name1, ctx.name2].filter(Boolean);
 }
 
 // The text last handed to the host for roleplay generation, with the reason when it is empty, so
