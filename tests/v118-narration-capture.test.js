@@ -175,7 +175,16 @@ test('the capture prompt carries the scanner rules without the transcript and en
     assert.ok(capture.startsWith('NPC STATE DELTA ONE-PASS CAPTURE.'));
     assert.ok(capture.includes('<!--npc_state_delta'));
     assert.ok(capture.includes('Identity index (matching only):'));
-    assert.equal(rulesSection(capture), rulesSection(scanner), 'Rules 1-15 and the admission policy are the scanner\'s own text');
+    // (b5b r2-8) Rule 1 names roles in the capture (the people are named in the context part);
+    // otherwise rules 1-15 and the admission policy are the scanner's own text.
+    // (cleanup step 12, I-10) and it always ends with the short Stage 4 and birthday rules, where the
+    // scanner has its one-line Stage 4 summary.
+    const rubricsOnly = text => text.slice(0, text.lastIndexOf('\n\n'));
+    assert.equal(rubricsOnly(rulesSection(capture)), rubricsOnly(rulesSection(scanner)).replace('Exclude player (Kazuma), main speaker (Megumin), extras.', 'Exclude the player, the character you play, extras.'),
+        'Rules 1-15 and the admission policy are the scanner\'s own text');
+    assert.match(rulesSection(capture), /\n\nSTAGE 4: named forms=>[^\n]+\nBIRTHDAY: grounded evidence only: [^\n]+\n$/);
+    assert.match(rulesSection(scanner), /\n\nS4: forms\/current; confirmed death terminal\.\n$/);
+    assert.match(capture, /\nNot NPCs: the player is Kazuma; the character you play is Megumin\.\n/);
     for (let rule = 1; rule <= 15; rule += 1) assert.match(capture, new RegExp(`\\n${rule}\\. `), `rule ${rule}`);
     assert.ok(!capture.includes(TRANSCRIPT), 'the roleplay model already sees the chat; no transcript is duplicated');
     assert.ok(!capture.includes('Yunyun waves from the gate'));
@@ -331,11 +340,19 @@ test('v1.2.17 the opt-in compact capture rules keep every field, state word and 
     const options = { transcript: 'USER: hi', userName: 'Kazuma', charName: 'Megumin', existingNpcs: [{ id: 'npc_yun', name: 'Yunyun', present: true }] };
     const full = buildNarrationCaptureParts(options).rules;
     const compact = buildNarrationCaptureParts({ ...options, compactCapture: true }).rules;
-    assert.ok(compact.length < full.length * 0.8, `compact ${compact.length} vs full ${full.length}`);
+    // (cleanup step 12) Both now carry the short Stage 4 and birthday rules, and compact its restored gates.
+    assert.ok(compact.length < full.length * 0.85, `compact ${compact.length} vs full ${full.length}`);
     assert.ok(compact.startsWith('NPC STATE DELTA ONE-PASS CAPTURE.'));
-    for (const word of ['profileUpdates', 'keyRelationshipEdges', 'relationshipDelta', 'relationshipEvidence', 'relationshipImpact', 'developmentScale', 'developmentReason', 'memoryRetention', 'homeBaseState', 'ageState', 'apparentAgeState', 'genderState', 'lifeState', 'appearanceState', 'overallAppearance', 'identityKind', 'dossierSignal', 'sameIndividual', 'directInteraction', 'worldActive', 'goalState', 'locationState', 'Disposition|Care|Expression|Independence|Conflict|Threat|Analytical|Presentation|Mercy|Loyalty|Drive|Honesty', 'Delta caps:', 'Relationship rubric:', 'Kazuma', 'Megumin']) {
+    for (const word of ['profileUpdates', 'keyRelationshipEdges', 'relationshipDelta', 'relationshipEvidence', 'relationshipImpact', 'developmentScale', 'developmentReason', 'memoryRetention', 'homeBaseState', 'ageState', 'apparentAgeState', 'genderState', 'lifeState', 'appearanceState', 'overallAppearance', 'identityKind', 'dossierSignal', 'sameIndividual', 'directInteraction', 'worldActive', 'goalState', 'locationState', 'Disposition|Care|Expression|Independence|Conflict|Threat|Analytical|Presentation|Mercy|Loyalty|Drive|Honesty', 'Delta caps:', 'Relationship rubric:',
+        // (cleanup step 12, I-11) the gates the first compact version dropped
+        'MUST return it when age unknown', 'never dangling "(deceased)"', 'no species-aging inference', 'Inner Chatter gives durable facts only, not monologue',
+        'raw max 1/2/5/10', 'kindness stays general; necessary force != cruelty', 'speech evidence = voice style',
+        'Explicit death (deceased+explicit) is terminal: never alive/present/worldActive again', 'STAGE 4: named forms', 'BIRTHDAY:']) {
         assert.ok(compact.includes(word), word);
     }
+    // (b5b r2-8) Roles in the rules, names with the context.
+    assert.ok(!compact.includes('Kazuma') && !compact.includes('Megumin'));
+    assert.match(buildNarrationCaptureParts({ ...options, compactCapture: true }).context, /Not NPCs: the player is Kazuma; the character you play is Megumin\./);
     // Byte-identical reply to reply, like the full rules.
     assert.equal(buildNarrationCaptureParts({ ...options, compactCapture: true, existingNpcs: [] }).rules, compact);
     // The scanner never uses them.

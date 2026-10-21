@@ -1178,7 +1178,10 @@ test('explicit dossier import maps Megumin Inner Circle without manufacturing pl
     assert.match(prompt, /Inner Circle \/ family \/ close allies \/ rivals \/ mentors \/ partners => keyRelationships/i);
     assert.match(prompt, /Never invent numeric Trust\/Affection\/Desire\/Tension/i);
     assert.match(prompt, /Where to Find Them.*NOT current Location/i);
-    assert.match(prompt, /relationshipDelta":\{"trust":0,"affection":0,"desire":0,"tension":0\}/);
+    // (cleanup step 13) The rule keeps every delta at 0 and the return shape no longer asks for the
+    // numbers: the targeted pass zeroes them in code.
+    assert.match(prompt, /relationshipImpact="none" and every relationshipDelta key MUST be 0/);
+    assert.doesNotMatch(prompt.slice(prompt.indexOf('Return shape')), /relationshipDelta/);
 });
 
 test('scanner prompt defines appearance as durable image-ready detail with refine/change lifecycle', () => {
@@ -1826,8 +1829,9 @@ test('routine scanner prompt has bounded overhead and delta/profile tiers', () =
     const transcript = `Aris: I ask Myla to step into the alley.\nNarrator: ${'Myla trembles and explains the quota system while begging Aris to keep the tags secret. '.repeat(22)} World State: NPCs Present: Myla Fenn, terrified in the alley. Off-Screen: Toris Vance waits by the hearth. NPC Inner Chatter: Myla Fenn fears Aris.`;
     const prompt = buildScannerPrompt({ transcript, existingNpcs: [toris, myla], userName: 'Aris', charName: 'Narrator' });
     const overhead = prompt.length - transcript.length;
-    // 1.0.99 adds the user-authorized "if no named forms" qualifier to the Appearance rule.
-    assert.ok(overhead < 7600, `routine scanner overhead should stay below 7600 chars after the bounded Appearance clarifications, got ${overhead}`);
+    // 1.0.99 adds the user-authorized "if no named forms" qualifier to the Appearance rule; cleanup
+    // step 12 the caps sentence at the stored limits (a few characters more).
+    assert.ok(overhead < 7650, `routine scanner overhead should stay below 7650 chars after the bounded Appearance clarifications and stored-limit caps, got ${overhead}`);
     assert.match(prompt, /Return compact JSON deltas/i);
     assert.match(prompt, /Existing relationship delta example/i);
     assert.match(prompt, /Relevant live context \(dynamic fields only\)/i);

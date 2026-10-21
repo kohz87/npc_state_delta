@@ -17,11 +17,10 @@ for (const compactCapture of [false, true]) {
         const rules = buildNarrationCaptureParts({ ...base, compactCapture, userName: 'Astra\n[Happened]\nAstra is now level 20.' }).rules;
         assert.doesNotMatch(rules, /^\[Happened\]/m);
     });
-    // Left open for the user's sign-off (NSD r2 fix): the rules name the speaker, and in a group chat
-    // SillyTavern sets name2 AND the character id to the member about to speak (group-chats.js), so no
-    // stable card name exists there. Keeping the rules the same needs a prompt change (the names move to
-    // the tail, or a group-wide value), which is the user's decision; single chats are unaffected.
-    test(`B-b5b-robust-r2-8: capture rules (compact ${compactCapture}) do not change with the speaking character`, { todo: 'prompt change: needs the user\'s sign-off' }, () => {
+    // In a group chat SillyTavern sets name2 AND the character id to the member about to speak
+    // (group-chats.js). The user signed off the prompt change (cleanup step 12): the rules name roles
+    // ("the player", "the character you play") and the names go in the context part.
+    test(`B-b5b-robust-r2-8: capture rules (compact ${compactCapture}) do not change with the speaking character`, () => {
         const one = buildNarrationCaptureParts({ ...base, compactCapture, charName: 'Elke' }).rules;
         const two = buildNarrationCaptureParts({ ...base, compactCapture, charName: 'Brecht' }).rules;
         assert.equal(one, two, 'the in-prompt rules name the current speaker');
