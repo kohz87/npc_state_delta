@@ -6958,6 +6958,12 @@ function connectStorySuite() {
     } catch (error) {
         console.warn('[NPC State Delta] Story Suite is unavailable', error);
     }
+    // Story Suite v2: when Delta registers with a Story Block v2 host, or that host goes away, the v1
+    // announcement and the "Open Story Suite" button follow (suite-handshake.js, storyBlockIsV2).
+    globalThis.document?.addEventListener?.('npc-state-delta:v2-host', () => {
+        announceToSuite();
+        syncSuiteControls();
+    });
 }
 
 function bindSourceOfTruthSettings() {

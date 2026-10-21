@@ -7,10 +7,16 @@ import {
     DOSSIER_FIELDS,
     HOST_RETRY_ATTEMPTS,
     MODULE_ID,
+    QUERY_NAMES,
+    V2_HOST_EVENT,
     createStorySuiteV2Adapter,
     dossierFields,
     isV2Host,
+    portraitUrl,
+    safeImageUrl,
 } from '../src/storysuite-v2.js';
+import { connectStoryBlock, V2_HOST_EVENT as TABS_V2_HOST_EVENT } from '../story-block-tabs.js';
+import { announceNpcStateDelta, openSuiteOverlay, storyBlockIsV2, suiteManageAvailable } from '../suite-handshake.js';
 
 // Story Suite v2 adapter (src/storysuite-v2.js): Delta registers with a Story Block v2 host when one
 // is on the page, and does nothing otherwise. A fake sdk, a fake Delta runtime, fake timers and a
@@ -102,6 +108,12 @@ function fakeDocument() {
     };
     doc.addEventListener = (name, fn) => { (doc.listeners[name] ||= []).push(fn); };
     doc.dispatch = name => { for (const fn of doc.listeners[name] || []) fn({ type: name }); };
+    doc.sent = [];
+    doc.dispatchEvent = event => {
+        doc.sent.push({ type: event.type, detail: event.detail });
+        for (const fn of doc.listeners[event.type] || []) fn(event);
+        return true;
+    };
     return doc;
 }
 
@@ -165,6 +177,9 @@ const RECORDS = {
     },
     npc_oren: { id: 'npc_oren', name: 'Oren', aliases: [], role: 'Guard', present: false, archived: false },
 };
+const PNG = 'data:image/png;base64,iVBORw0KGgo=';
+const WEBP = 'data:image/webp;base64,UklGRg==';
+const FORM_PORTRAITS = {};
 
 function fakeDelta() {
     const delta = {
@@ -177,6 +192,7 @@ function fakeDelta() {
             castEmptyReason: () => ({ text: 'The latest scan found no NPC in the scene.', scan: true }),
             fillPresentCast: root => delta.filled.push(root),
             getNpc: id => (RECORDS[id] ? structuredClone(RECORDS[id]) : null),
+            formPortraits: id => structuredClone(FORM_PORTRAITS[id] || {}),
             scan: () => { delta.scans += 1; },
             addNpc: () => { delta.adds += 1; },
         },
@@ -244,14 +260,15 @@ test('a v1 Story Block (registerTab, no ready or sdk) is not a v2 host and is le
 
 // ---- registration ----
 
-test('registers module npc-state-delta once, with no domains, three queries, a Cast tab and a settings section', async () => {
+test('registers module npc-state-delta once, with no domains, four queries, a Cast tab and a settings section', async () => {
     const { adapter, sdk, def, timers } = await hosted();
     assert.equal(sdk.registered.length, 1);
     assert.equal(def.id, MODULE_ID);
     assert.equal(def.name, 'NPC State Delta');
     assert.equal(def.version, '1.2.19');
     assert.deepEqual(def.domains, {});
-    assert.deepEqual(Object.keys(def.queries).sort(), ['npc.dossier', 'npc.known', 'npc.present']);
+    assert.deepEqual(Object.keys(def.queries).sort(), ['npc.dossier', 'npc.known', 'npc.portrait', 'npc.present']);
+    assert.deepEqual([...QUERY_NAMES].sort(), Object.keys(def.queries).sort());
     assert.equal(def.commands, undefined);
     assert.equal(def.capture, undefined);
     assert.equal(def.context, undefined, 'Delta keeps its own prompt keys');
@@ -374,6 +391,93 @@ test('dossierFields copies only the listed fields', () => {
     assert.equal(dossierFields(null), null);
     const out = dossierFields({ name: 'A', relationship: { trust: '5', extra: 1 }, portrait: { dataUrl: 'data:x' }, aliases: ['B'] });
     assert.deepEqual(out, { name: 'A', aliases: ['B'], relationship: { trust: 5, affection: 0, desire: 0, tension: 0 } });
+});
+
+// ---- npc.portrait (MODULES §F11) ----
+
+// A Delta whose records carry portraits: Mira has a main portrait and a Raven form image, Oren none.
+function portraitDelta({ mira = {}, forms = { Raven: { form: 'Raven', dataUrl: WEBP } } } = {}) {
+    const delta = fakeDelta();
+    const records = {
+        npc_mira: { ...structuredClone(RECORDS.npc_mira), portrait: { dataUrl: PNG, sourceName: 'mira.png' }, ...mira },
+        npc_oren: structuredClone(RECORDS.npc_oren),
+        npc_kael: { id: 'npc_kael', name: 'Kael', archived: true, portrait: { dataUrl: PNG } },
+    };
+    delta.records = records;
+    delta.formReads = [];
+    delta.api.getNpc = id => (records[id] ? structuredClone(records[id]) : null);
+    delta.api.formPortraits = id => { delta.formReads.push(id); return id === 'npc_mira' ? structuredClone(forms) : {}; };
+    return delta;
+}
+
+test('npc.portrait gives the portrait Delta shows, by name, alias or id; none, unknown or archived give null', async () => {
+    const delta = portraitDelta();
+    const { def } = await hosted({ delta });
+    const portrait = def.queries['npc.portrait'];
+    assert.equal(portrait({}, { name: 'Mira' }), PNG);
+    assert.equal(portrait({}, { name: 'the smith' }), PNG, 'by alias, case-insensitive');
+    assert.equal(portrait({}, { name: 'npc_mira' }), PNG, 'by id');
+    assert.deepEqual(delta.formReads.at(-1), 'npc_mira', 'form images are read by the resolved id');
+    assert.equal(portrait({}, { name: 'Oren' }), null, 'no portrait');
+    assert.equal(portrait({}, { name: 'Kael' }), null, 'archived NPCs are not offered (as npc.dossier)');
+    assert.equal(portrait({}, { name: 'Nobody' }), null);
+    assert.equal(portrait({}, {}), null);
+    assert.equal(portrait({}, undefined), null);
+    assert.equal(portrait({}, { name: 42 }), null);
+});
+
+test('npc.portrait follows the current appearance form when that form has its own image', async () => {
+    const delta = portraitDelta({ mira: { currentForm: 'raven' } });
+    const { def } = await hosted({ delta });
+    assert.equal(def.queries['npc.portrait']({}, { name: 'Mira' }), WEBP, 'form names match case-insensitively');
+    delta.records.npc_mira.currentForm = 'Human';
+    assert.equal(def.queries['npc.portrait']({}, { name: 'Mira' }), PNG, 'a form without its own image shows the main portrait');
+    delta.api.formPortraits = () => { throw new Error('not loaded'); };
+    delta.records.npc_mira.currentForm = 'Raven';
+    assert.equal(def.queries['npc.portrait']({}, { name: 'Mira' }), PNG, 'form images failing falls back to the main portrait');
+});
+
+test('npc.portrait never hands out an unsafe URL', async () => {
+    for (const bad of ['javascript:alert(1)', ' JavaScript:alert(1)', 'java\tscript:alert(1)', 'data:image/svg+xml;base64,PHN2Zz4=',
+        'data:text/html;base64,PGI+', 'data:image/png,<svg onload=x>', 'http://example.com/a.png', '//evil.example/a.png',
+        '/\\evil.example/a.png', 'blob:https://example.com/1', 'vbscript:x', 'https:evil.example', '?a', '#a', '', '   ']) {
+        const delta = portraitDelta({ mira: { portrait: { dataUrl: bad, url: bad, src: bad } }, forms: { Raven: { dataUrl: bad } } });
+        delta.records.npc_mira.currentForm = 'Raven';
+        const { def } = await hosted({ delta });
+        assert.equal(def.queries['npc.portrait']({}, { name: 'Mira' }), null, `${JSON.stringify(bad)} is refused`);
+    }
+    // An unsafe image gives way to the next safe one: form image, then dataUrl, url, src.
+    const delta = portraitDelta({ mira: { currentForm: 'Raven', portrait: { dataUrl: 'javascript:x', url: '/user/images/Mira.png' } }, forms: { Raven: { dataUrl: 'javascript:y' } } });
+    const { def } = await hosted({ delta });
+    assert.equal(def.queries['npc.portrait']({}, { name: 'Mira' }), '/user/images/Mira.png');
+});
+
+test('safeImageUrl keeps data: images, https: and same-origin paths only; portraitUrl reads Delta\'s fields', () => {
+    for (const good of [PNG, WEBP, 'data:image/jpeg;base64,/9j/4AAQ', 'https://cdn.example.com/m.png', '/user/images/Mira.png', 'user/images/Mira.png', '../img/a.png']) {
+        assert.equal(safeImageUrl(good), good, good);
+    }
+    assert.equal(safeImageUrl('  /user/images/Mira.png \n'), '/user/images/Mira.png', 'trimmed');
+    for (const bad of [null, undefined, 3, {}, 'javascript:alert(1)', 'data:image/svg+xml;base64,AA', 'http://x/a.png', '//x/a.png', 'file:///etc/passwd', 'a\u0000b.png']) {
+        assert.equal(safeImageUrl(bad), null, String(bad));
+    }
+    assert.equal(portraitUrl(null), null);
+    assert.equal(portraitUrl({}), null);
+    assert.equal(portraitUrl({ portrait: { dataUrl: PNG } }), PNG);
+    assert.equal(portraitUrl({ portrait: { url: 'https://cdn.example.com/m.png' } }), 'https://cdn.example.com/m.png');
+    assert.equal(portraitUrl({ portrait: { src: '/user/images/m.png' } }), '/user/images/m.png');
+    assert.equal(portraitUrl({ currentForm: ' Raven ', portrait: { dataUrl: PNG } }, { raven: { dataUrl: WEBP } }), WEBP);
+    assert.equal(portraitUrl({ currentForm: 'Raven', portrait: 'not-an-object' }, null), null);
+});
+
+test('npc.portrait gives nothing while Delta is off, and never throws when Delta fails', async () => {
+    const delta = portraitDelta();
+    const { def, warnings } = await hosted({ delta });
+    delta.enabled = false;
+    assert.equal(def.queries['npc.portrait']({}, { name: 'Mira' }), null);
+    delta.enabled = true;
+    delta.api.getNpc = () => { throw new Error('broken'); };
+    assert.equal(def.queries['npc.portrait']({}, { name: 'Mira' }), null);
+    assert.ok(warnings.some(args => /portrait query failed/.test(args[0])));
 });
 
 // ---- the drawer copy and the settings section ----
@@ -526,6 +630,99 @@ test('if the v1 empty-state markup cannot load, the Cast tab still shows a plain
     const el = doc.body.appendChild(doc.createElement('div'));
     def.tabs[0].render(el, {}, {});
     assert.match(el.innerHTML, /&lt;b&gt;nobody&lt;\/b&gt;/);
+});
+
+// ---- with a v2 host, nothing of v1 is offered (MODULES §D; v1 hosts unchanged) ----
+
+test('the adapter tells the page when it is hosted and when the host goes away; never without a host', async () => {
+    const { doc, box, timers, adapter } = await hosted();
+    assert.equal(V2_HOST_EVENT, TABS_V2_HOST_EVENT, 'story-block-tabs.js listens for the same event');
+    assert.deepEqual(doc.sent, [{ type: V2_HOST_EVENT, detail: { hosted: true } }]);
+    box.host = undefined;
+    timers.runIntervals();
+    assert.deepEqual(doc.sent.at(-1), { type: V2_HOST_EVENT, detail: { hosted: false } });
+    adapter.stop();
+    assert.equal(doc.sent.length, 2, 'stop() after the host left sends nothing more');
+
+    const alone = setup({ hostValue: { apiVersion: 1, registerTab() {} } });
+    alone.adapter.start();
+    while (alone.timers.runTimeouts());
+    alone.adapter.stop();
+    assert.deepEqual(alone.doc.sent, [], 'a v1 host or none: no event');
+});
+
+test('storyBlockIsV2 is true only for apiVersion 2', () => {
+    assert.equal(storyBlockIsV2({ apiVersion: 2, ready: Promise.resolve({}) }), true);
+    assert.equal(storyBlockIsV2({ apiVersion: 1, registerTab() {} }), false);
+    assert.equal(storyBlockIsV2({ apiVersion: '2' }), false);
+    assert.equal(storyBlockIsV2({}), false);
+    assert.equal(storyBlockIsV2(undefined), false);
+    assert.equal(storyBlockIsV2(null), false);
+    const throwing = { get apiVersion() { throw new Error('no'); } };
+    assert.equal(storyBlockIsV2(throwing), false);
+});
+
+// A v1-style registry, as suite.js makes it, with Story Block v1's openSuite.
+function fakeRegistry() {
+    const providers = new Map();
+    const opened = [];
+    return {
+        opened,
+        announce(provider) { providers.set(provider.id, { ...provider }); },
+        withdraw(id) { providers.delete(id); },
+        providers: () => [...providers.values()],
+        has: id => providers.has(id),
+        api: id => providers.get(id)?.api ?? null,
+    };
+}
+
+test('with a v2 Story Block, Delta withdraws from v1\'s Story Suite registry and offers no v1 overlay; v1 hosts are unchanged', () => {
+    const registry = fakeRegistry();
+    registry.announce({ id: 'story-block', api: { openSuite: id => registry.opened.push(id) } });
+    const v1 = { apiVersion: 1, registerTab() {} };
+    const v2 = { apiVersion: 2, ready: Promise.resolve({}) };
+
+    assert.equal(announceNpcStateDelta({ enabled: true, version: '1.2.19', settings: '#npc_state_delta_settings', storyBlock: v1 }, registry), true);
+    assert.equal(registry.has('npc-state-delta'), true, 'v1: announced as before');
+    assert.equal(suiteManageAvailable(registry, v1), true);
+    assert.equal(openSuiteOverlay(registry, v1), true);
+    assert.deepEqual(registry.opened, ['npc-state-delta']);
+
+    assert.equal(announceNpcStateDelta({ enabled: true, version: '1.2.19', settings: '#npc_state_delta_settings', storyBlock: v2 }, registry), false);
+    assert.equal(registry.has('npc-state-delta'), false, 'v2: withdrawn, so v1\'s overlay cannot carry the panel too');
+    registry.announce({ id: 'npc-state-delta' });
+    assert.equal(suiteManageAvailable(registry, v2), false, 'no "Open Story Suite" button');
+    assert.equal(openSuiteOverlay(registry, v2), false);
+    assert.deepEqual(registry.opened, ['npc-state-delta'], 'nothing more opened');
+
+    // The default reads the page's Story Block.
+    const saved = globalThis.StoryBlock;
+    try {
+        globalThis.StoryBlock = v2;
+        assert.equal(suiteManageAvailable(registry), false);
+        assert.equal(announceNpcStateDelta({ enabled: true }, registry), false);
+        globalThis.StoryBlock = v1;
+        assert.equal(announceNpcStateDelta({ enabled: true }, registry), true);
+        assert.equal(suiteManageAvailable(registry), true);
+    } finally {
+        if (saved === undefined) delete globalThis.StoryBlock; else globalThis.StoryBlock = saved;
+    }
+});
+
+test('with a v2 Story Block, the v1 Present NPCs / Dossiers tabs are not registered even if it offers registerTab', () => {
+    const tabs = [];
+    const api = { presentCastHtml: () => '', isEnabled: () => true };
+    assert.equal(connectStoryBlock(api, { apiVersion: 2, ready: Promise.resolve({}), registerTab: tab => tabs.push(tab) }), null);
+    assert.deepEqual(tabs, []);
+
+    // A v1 host still gets both, and a v2 host taking over later takes them back.
+    const removed = [];
+    const connection = connectStoryBlock(api, { apiVersion: 1, registerTab: tab => tabs.push(tab), unregisterTab: id => removed.push(id) });
+    assert.deepEqual(tabs.map(tab => tab.id), ['npc-state-delta-cast', 'npc-state-delta-dossiers']);
+    connection.disconnect();
+    assert.deepEqual(removed, ['npc-state-delta-cast', 'npc-state-delta-dossiers']);
+    connection.disconnect();
+    assert.equal(removed.length, 2, 'once');
 });
 
 // ---- the hook in index.js ----
