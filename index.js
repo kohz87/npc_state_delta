@@ -278,6 +278,12 @@ const hydratedChatKeys = new Set();
 const hydratedStateMeta = new Map();
 const workingCopyAdoptions = new Map();
 const freshnessChecks = new Map();
+// Chats whose deterministic sidecar this session looked for and did not find: "no sidecar yet" is
+// an empty dossier. While a Story Block v2 host carries Delta, automatic boundaries (chat events,
+// scan start and commit) trust that miss instead of asking the server again each time
+// (sidecarMissTrusted). The reader's own actions, page resume and the first save still look, and
+// that save never overwrites a file another session created. Without a v2 host nothing changes.
+const missingSidecarChats = new Set();
 const freshnessEvents = [];
 const FRESHNESS_EVENT_LIMIT = 24;
 const loadingChatStates = new Map();
@@ -555,6 +561,8 @@ const DEFAULTS = Object.freeze({
     presentCastDisplayChosen: false,
     // The floating npc state button while Story Block carries Delta's Present NPCs and Dossiers tabs.
     launcherWithStoryBlock: false,
+    // The same button while a Story Block v2 host carries Delta (its Cast tab and overlay).
+    launcherWithStoryBlockV2: false,
     relationshipBaseline: { ...DEFAULT_RELATIONSHIP },
     relationshipCaps: { ...DEFAULT_RELATIONSHIP_CAPS },
     relationshipCriteria: DEFAULT_RELATIONSHIP_CRITERIA,
@@ -631,6 +639,7 @@ function getSettings() {
     assign('presentCastDisplay', normalizePresentCastDisplay(settings.presentCastDisplay));
     assign('presentCastDisplayChosen', settings.presentCastDisplayChosen === true);
     assign('launcherWithStoryBlock', settings.launcherWithStoryBlock === true);
+    assign('launcherWithStoryBlockV2', settings.launcherWithStoryBlockV2 === true);
     // 1.0.70 raised the default budget from 1800 to 4000 tokens. An install still on the old default
     // is moved once; any value the player chose, including a later deliberate 1800, is kept.
     const legacyDefaultBudget = settings.injectBudgetDefaultUpgraded !== true && Number(settings.injectBudgetTokens) === 1800;
@@ -787,6 +796,7 @@ function forgetCachedChat(key) {
     hydratedChatKeys.delete(key);
     hydratedStateMeta.delete(key);
     freshnessChecks.delete(key);
+    missingSidecarChats.delete(key);
     hydrationErrors.delete(key);
     pendingAutoScans.delete(key);
     assistantReceipts.delete(key);
@@ -821,7 +831,21 @@ function bumpOwnershipEpoch(key) {
     const next = ownershipEpoch(normalized) + 1;
     ownershipEpochs.set(normalized, next);
     loadingChatStates.delete(normalized);
+    missingSidecarChats.delete(normalized);
     return next;
+}
+
+// Set by src/storysuite-v2.js while Delta is registered with a Story Block v2 host.
+function storyBlockV2Hosted() {
+    return globalThis.document?.documentElement?.dataset?.npcStateDeltaStoryBlockV2 === '1';
+}
+
+// A v2-hosted automatic boundary may skip the deterministic-path probe: this session already found
+// no sidecar for the chat, has no pointer for it and nothing has found or written one since.
+function sidecarMissTrusted(key) {
+    if (!missingSidecarChats.has(key) || !storyBlockV2Hosted()) return false;
+    const settings = getSettings();
+    return !settings.dataFiles?.[key]?.path && !settings.sidecarTombstones?.[key];
 }
 
 function ownershipEpochCurrent(key, epoch) {
@@ -1089,10 +1113,11 @@ async function reconcileCrossSessionWriteConflict(key, error, snapshot, knownPoi
     return inspected;
 }
 
-async function ensureHydratedStateFresh(key = getChatKey(), { reason = 'boundary', notify = false } = {}) {
+async function ensureHydratedStateFresh(key = getChatKey(), { reason = 'boundary', notify = false, probeMissing = false } = {}) {
     const normalized = String(key || '');
     if (!normalized || normalized === 'no-chat' || !isCanonicalChatKey(normalized)) return getChatState(normalized);
     if (!hydratedChatKeys.has(normalized)) return getChatState(normalized);
+    if (!probeMissing && sidecarMissTrusted(normalized)) return getChatState(normalized);
     if (freshnessChecks.has(normalized)) return freshnessChecks.get(normalized);
 
     let task;
@@ -1128,9 +1153,11 @@ async function ensureHydratedStateFresh(key = getChatKey(), { reason = 'boundary
         // chat now; the late result must not restore its pointer, tombstone or cached dossier.
         if (!ownershipEpochCurrent(normalized, epoch) || getSettings().sidecarTombstones?.[normalized]) throw staleOwnershipError(normalized);
         if (unpointered && !inspected.exists) {
+            missingSidecarChats.add(normalized);
             updateHydratedStateMeta(normalized, 0, { lastCheckedAt: Date.now(), latestObservedServerRevision: 0 });
             return getChatState(normalized);
         }
+        if (inspected.exists) missingSidecarChats.delete(normalized);
         const writerFork = Boolean(inspected.exists && inspected.revision === localRevision
             && localWriterId && inspected.writerId && inspected.writerId !== localWriterId);
         updateHydratedStateMeta(normalized, localRevision, {
@@ -1208,7 +1235,7 @@ async function ensureFreshMutationBoundary(action, key = getChatKey(), { notify 
         return false;
     }
     try {
-        await ensureChatStateLoaded(normalized);
+        await ensureChatStateLoaded(normalized, { probeMissing: true });
     } catch (error) {
         if (notify) globalThis.toastr?.warning?.(`NPC State Delta: cannot ${action} because the canonical server dossier could not be verified. ${error?.message || error}`);
         return false;
@@ -1251,7 +1278,7 @@ async function retryCurrentChatHydration() {
     const key = getChatKey();
     if (!key || key === 'no-chat') return false;
     try {
-        await ensureChatStateLoaded(key);
+        await ensureChatStateLoaded(key, { probeMissing: true });
         if (getChatKey() !== key) return false;
         renderDossier();
         updateInjection();
@@ -1354,13 +1381,15 @@ function holdRetiredLocalWork(key) {
     return error;
 }
 
-async function ensureChatStateLoaded(key = getChatKey()) {
+// probeMissing: an explicit look (the reader's own action, page resume) that asks the server even
+// when this session already found no sidecar for the chat (sidecarMissTrusted).
+async function ensureChatStateLoaded(key = getChatKey(), { probeMissing = false } = {}) {
     if (!key || key === 'no-chat' || !isCanonicalChatKey(key)) return freshChatState();
     if (retiredInSessionChats.has(key)) {
         hydrationErrors.set(key, retiredInSessionChats.get(key));
         throw retiredInSessionChats.get(key);
     }
-    if (hydratedChatKeys.has(key)) return ensureHydratedStateFresh(key, { reason: 'hydrate-boundary' });
+    if (hydratedChatKeys.has(key)) return ensureHydratedStateFresh(key, { reason: 'hydrate-boundary', probeMissing });
     if (loadingChatStates.has(key)) return loadingChatStates.get(key);
     const epoch = ownershipEpoch(key);
     let task;
@@ -1416,6 +1445,8 @@ async function ensureChatStateLoaded(key = getChatKey()) {
                 console.error(`[NPC State Delta] Could not read the existing data file for ${key}; blocking writes instead of starting an empty dossier.`, discoveryError);
                 throw discoveryError;
             }
+            if (!recoveredState && !settings.sidecarTombstones?.[key]) missingSidecarChats.add(key);
+            else missingSidecarChats.delete(key);
         }
         let loaded = recoveredState;
         if (pointer?.path && !loaded) {
@@ -1538,6 +1569,7 @@ async function flushStateFile(key = getChatKey()) {
             pointer = written;
             settings.dataFiles[key] = pointer;
             delete settings.sidecarTombstones[key];
+            missingSidecarChats.delete(key);
             persistedVersions.set(key, writeVersion);
             updateHydratedStateMeta(key, written.revision, {
                 lastCheckedAt: Date.now(),
@@ -4368,7 +4400,8 @@ function buildSettingsHtml() {
     const roster = `
         <h4 class="delta-settings-subhead story-suite-subhead">In-chat display</h4>
         ${settingRow('npc_state_delta_present_cast_display', 'Present NPCs in chat', '<select id="npc_state_delta_present_cast_display" class="text_pole"><option value="full">Full cards</option><option value="compact">Compact strip</option><option value="storyblock">Only in Story Block</option><option value="off">Off</option></select>', 'Shown under the latest reply (or as a Megumin tab). With Story Block installed, Present NPCs and Dossiers tabs also appear in its sidebar, and until you pick a choice here the chat shows them only there; Only in Story Block keeps the chat clear (full cards without Story Block). Tapping an NPC opens its dossier. Off adds nothing to the chat; presence tracking and injection are unaffected.')}
-        ${settingRow('npc_state_delta_launcher_with_story_block', 'Floating button with Story Block', '<input id="npc_state_delta_launcher_with_story_block" type="checkbox">', 'Story Block\'s sidebar has the Present NPCs and Dossiers tabs, so the floating npc state button hides while it is there. Turn on to keep the button as well.')}
+        <div class="npc-state-delta-v2-hosted-hide">${settingRow('npc_state_delta_launcher_with_story_block', 'Floating button with Story Block', '<input id="npc_state_delta_launcher_with_story_block" type="checkbox">', 'Story Block\'s sidebar has the Present NPCs and Dossiers tabs, so the floating npc state button hides while it is there. Turn on to keep the button as well.')}</div>
+        <div class="npc-state-delta-v2-hosted-only">${settingRow('npc_state_delta_launcher_with_story_block_v2', 'Show NSD\'s own launcher with Story Block v2', '<input id="npc_state_delta_launcher_with_story_block_v2" type="checkbox">', 'Story Block v2 has Delta\'s Cast tab and its overlay, so the floating npc state button hides while it is there. Turn on to keep the button as well.')}</div>
         <h4 class="delta-settings-subhead story-suite-subhead">Generation injection</h4>
         ${settingRow('npc_state_delta_inject', 'Inject present NPC state', '<input id="npc_state_delta_inject" type="checkbox">', 'Only active NPCs present in the latest scanned scene are injected into generation.')}
         ${settingsSlot('relationship-map')}
@@ -4619,6 +4652,7 @@ function syncSettingsControls() {
     $('#npc_state_delta_mid_delete_rewind').prop('checked', s.midDeleteRewind === true);
     $('#npc_state_delta_present_cast_display').val(effectivePresentCastChoice());
     $('#npc_state_delta_launcher_with_story_block').prop('checked', s.launcherWithStoryBlock === true);
+    $('#npc_state_delta_launcher_with_story_block_v2').prop('checked', s.launcherWithStoryBlockV2 === true);
     applyLauncherFlag();
     if (!portraitSettingsDirty) writePortraitSettingsDraftToUi(portraitSettingsSnapshot(s));
     updatePortraitSettingsSaveUi();
@@ -5016,11 +5050,13 @@ function presentCastDisplayMode() {
     return normalizePresentCastDisplay(getSettings().presentCastDisplay);
 }
 
-// The floating launcher hides while Story Block carries Delta's tabs (CSS in launcher-ui.js keys on
-// these two flags), unless the player keeps it.
+// The floating launcher hides while Story Block carries Delta's tabs, or a Story Block v2 host
+// carries Delta (CSS in launcher-ui.js keys on these flags), unless the player keeps it.
 function applyLauncherFlag() {
     const data = document?.documentElement?.dataset;
-    if (data) data.npcStateDeltaLauncher = getSettings().launcherWithStoryBlock === true ? 'keep' : 'auto';
+    if (!data) return;
+    data.npcStateDeltaLauncher = getSettings().launcherWithStoryBlock === true ? 'keep' : 'auto';
+    data.npcStateDeltaLauncherV2 = getSettings().launcherWithStoryBlockV2 === true ? 'keep' : 'auto';
 }
 
 // Set by story-block-tabs.js once its Present NPCs and Dossiers tabs are registered with Story Block.
@@ -5028,20 +5064,25 @@ function storyBlockTabsActive() {
     return document?.documentElement?.dataset?.npcStateDeltaStoryBlock === '1';
 }
 
+// Story Block shows Delta's present cast: v1's Present NPCs tab, or a v2 host's Cast tab.
+function storyBlockCarriesCast() {
+    return storyBlockTabsActive() || storyBlockV2Hosted();
+}
+
 // The choice in effect. Until the player picks one, Full cards becomes "Only in Story Block" while
 // Story Block carries the cast, so it is not shown twice. Compact and Off are always deliberate.
 function effectivePresentCastChoice() {
     const mode = presentCastDisplayMode();
     const chosen = getSettings().presentCastDisplayChosen === true || mode !== 'full';
-    return !chosen && storyBlockTabsActive() ? 'storyblock' : mode;
+    return !chosen && storyBlockCarriesCast() ? 'storyblock' : mode;
 }
 
-// What the chat itself shows. "Only in Story Block" hides the in-chat cast while the Story Block tab
+// What the chat itself shows. "Only in Story Block" hides the in-chat cast while a Story Block tab
 // carries it, and falls back to full cards when Story Block is not installed.
 function inChatCastMode() {
     const mode = effectivePresentCastChoice();
     if (mode !== 'storyblock') return mode;
-    return storyBlockTabsActive() ? 'off' : 'full';
+    return storyBlockCarriesCast() ? 'off' : 'full';
 }
 
 // The Story Block tab's cast: the live present NPCs as full cards, whatever the in-chat choice.
@@ -6959,10 +7000,14 @@ function connectStorySuite() {
         console.warn('[NPC State Delta] Story Suite is unavailable', error);
     }
     // Story Suite v2: when Delta registers with a Story Block v2 host, or that host goes away, the v1
-    // announcement and the "Open Story Suite" button follow (suite-handshake.js, storyBlockIsV2).
+    // announcement and the "Open Story Suite" button follow (suite-handshake.js, storyBlockIsV2), and
+    // so do the in-chat cast's "Only in Story Block" default and the settings shown for it.
     globalThis.document?.addEventListener?.('npc-state-delta:v2-host', () => {
         announceToSuite();
         syncSuiteControls();
+        try { $('#npc_state_delta_present_cast_display').val(effectivePresentCastChoice()); } catch { /* settings not mounted */ }
+        startInlineWatchdog();
+        queueInlineRender(0);
     });
 }
 
@@ -7185,6 +7230,7 @@ function bindUi() {
     });
     $(document).on('click.npcStateDelta', '#npc_state_delta_save_portrait_settings', () => { void savePortraitSettingsDraft(); });
     bindSettingsCheckbox('#npc_state_delta_launcher_with_story_block', 'launcherWithStoryBlock', applyLauncherFlag);
+    bindSettingsCheckbox('#npc_state_delta_launcher_with_story_block_v2', 'launcherWithStoryBlockV2', applyLauncherFlag);
     bindSettingsNumber('#npc_state_delta_scan_every', 'scanEvery', 1, 20, 2);
     bindSettingsNumber('#npc_state_delta_scan_depth', 'scanDepth', 2, 30, 6);
     bindSettingsNumber('#npc_state_delta_narration_capture_catch_up', 'narrationCaptureCatchUp', 0, 50, 8);
@@ -7410,7 +7456,7 @@ async function refreshCurrentChatFromServer(reason = 'resume') {
     const key = getChatKey();
     if (key === 'no-chat' || !isCanonicalChatKey(key)) return false;
     try {
-        await ensureChatStateLoaded(key);
+        await ensureChatStateLoaded(key, { probeMissing: true });
         if (getChatKey() !== key) return false;
         renderDossier();
         updateInjection();
@@ -7850,8 +7896,8 @@ window.NPCStateDelta = Object.freeze({
     ensureFresh: async (options = {}) => {
         const key = getChatKey();
         if (!key || key === 'no-chat') return false;
-        if (!hydratedChatKeys.has(key)) await ensureChatStateLoaded(key);
-        else await ensureHydratedStateFresh(key, { reason: String(options?.reason || 'public-freshness-check'), notify: options?.notify === true });
+        if (!hydratedChatKeys.has(key)) await ensureChatStateLoaded(key, { probeMissing: true });
+        else await ensureHydratedStateFresh(key, { reason: String(options?.reason || 'public-freshness-check'), notify: options?.notify === true, probeMissing: true });
         return getChatKey() === key;
     },
     exportBytes: async ({ chatKey = '' } = {}) => {

@@ -807,3 +807,10 @@ body.npc-state-delta-portrait-generator-open { overflow: hidden !important; }
 #npc_state_delta_settings small.is-open .delta-hint-rest { display: inline; }
 #npc_state_delta_settings .delta-hint-more { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; opacity: .9; white-space: nowrap; }
 #npc_state_delta_settings .delta-hint-more:focus-visible { outline: 1px solid currentColor; }
+/* Story Block v2 hosting (src/storysuite-v2.js sets the flag): the v2 launcher setting shows only
+   then, and v1's Story Block launcher setting steps aside. The wrappers add no box of their own. */
+.npc-state-delta-v2-hosted-only, .npc-state-delta-v2-hosted-hide { display: contents; }
+html:not([data-npc-state-delta-story-block-v2="1"]) .npc-state-delta-v2-hosted-only { display: none !important; }
+html[data-npc-state-delta-story-block-v2="1"] .npc-state-delta-v2-hosted-hide { display: none !important; }
+#npc_state_delta_settings .npc-state-delta-v2-hosted-only > .npc-state-delta-setting-row,
+#npc_state_delta_settings .npc-state-delta-v2-hosted-hide > .npc-state-delta-setting-row { border-bottom: 1px solid rgba(255,255,255,.055); }

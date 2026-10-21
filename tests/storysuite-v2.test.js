@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import {
     CAST_TAB_ID,
     DOSSIER_FIELDS,
+    HOSTED_FLAG,
     HOST_RETRY_ATTEMPTS,
     MODULE_ID,
     QUERY_NAMES,
@@ -649,6 +650,40 @@ test('the adapter tells the page when it is hosted and when the host goes away; 
     while (alone.timers.runTimeouts());
     alone.adapter.stop();
     assert.deepEqual(alone.doc.sent, [], 'a v1 host or none: no event');
+});
+
+test('the page flag (data-npc-state-delta-story-block-v2) is set while hosted, before the event, and removed when the host goes away or on stop()', async () => {
+    assert.equal(HOSTED_FLAG, 'npcStateDeltaStoryBlockV2');
+    const sdk = fakeSdk();
+    const env = setup({ hostValue: v2Host(sdk) });
+    const seen = [];
+    env.doc.addEventListener(V2_HOST_EVENT, event => seen.push([event.detail.hosted, env.doc.documentElement.dataset[HOSTED_FLAG]]));
+    env.adapter.start();
+    assert.equal(await env.adapter.settled(), true);
+    assert.equal(env.doc.documentElement.dataset[HOSTED_FLAG], '1');
+    env.box.host = undefined;
+    env.timers.runIntervals();
+    assert.equal(env.doc.documentElement.dataset[HOSTED_FLAG], undefined);
+    assert.deepEqual(seen, [[true, '1'], [false, undefined]], 'listeners see the flag already in its new state');
+
+    const again = await hosted();
+    assert.equal(again.doc.documentElement.dataset[HOSTED_FLAG], '1');
+    again.adapter.stop();
+    assert.equal(again.doc.documentElement.dataset[HOSTED_FLAG], undefined);
+
+    for (const hostValue of [undefined, { apiVersion: 1, registerTab() {} }]) {
+        const alone = setup({ hostValue });
+        alone.adapter.start();
+        while (alone.timers.runTimeouts());
+        assert.equal(alone.doc.documentElement.dataset[HOSTED_FLAG], undefined, 'never without a v2 host');
+        alone.adapter.stop();
+        assert.deepEqual(alone.doc.documentElement.dataset, {});
+    }
+
+    const refused = setup({ hostValue: v2Host(fakeSdk({ fail: true })) });
+    refused.adapter.start();
+    assert.equal(await refused.adapter.settled(), false);
+    assert.equal(refused.doc.documentElement.dataset[HOSTED_FLAG], undefined, 'a refused registration is not hosting');
 });
 
 test('storyBlockIsV2 is true only for apiVersion 2', () => {
