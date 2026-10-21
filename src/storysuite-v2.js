@@ -30,6 +30,7 @@
 import { resolveDossierTarget } from '../suite-handshake.js';
 import { NPC_KIND, createNpcPart, meterDefs, normalizeMeterSettings, normalizeSecrets, secretsFromLines, secretsToLines } from './npc-meters.js';
 import { METERS_CARD_ID, metersCardScreen } from './npc-meters-screen.js';
+import { DOSSIER_FIELDS } from './fields/registry.js';
 
 export const MODULE_ID = 'npc-state-delta';
 export const MODULE_NAME = 'NPC State Delta';
@@ -51,15 +52,10 @@ export const HOST_RETRY_ATTEMPTS = 40;
 export const HOST_ALIVE_MS = 5000;
 export const SECTION_WATCH_MS = 1000;
 
-// What npc.dossier returns: the dossier's own fields, as the dossier shows them. Book-keeping
-// (evidence, change ledgers, portrait prompts and images, timestamps, locks) stays inside Delta.
-export const DOSSIER_FIELDS = Object.freeze([
-    'id', 'name', 'aliases', 'role', 'species', 'gender', 'age', 'apparentAge', 'birthDate', 'homeBase',
-    'appearance', 'appearanceForms', 'currentForm', 'personality', 'speech', 'mannerisms', 'behaviorProfile',
-    'background', 'memories', 'keyRelationships', 'relationshipSummary', 'relationship',
-    'mood', 'location', 'goal', 'status', 'customFields',
-    'lifeState', 'present', 'worldActive', 'archived', 'minor',
-]);
+// What npc.dossier returns: the dossier's own fields, as the dossier shows them (DOSSIER_FIELDS, from
+// the field registry). Book-keeping (evidence, change ledgers, portrait prompts and images,
+// timestamps, locks) and the hidden notes stay inside Delta.
+export { DOSSIER_FIELDS };
 const RELATIONSHIP_KEYS = ['trust', 'affection', 'desire', 'tension'];
 
 const PLACEHOLDER_FLAG = 'npcStateDeltaPlaceholder';

@@ -1,5 +1,6 @@
 /* NPC State Delta terminal lifecycle helpers. */
 import { normalizeLifeState } from './core-mechanics.js';
+import { TERMINAL_FROZEN_FIELDS } from './src/fields/registry.js';
 
 export function isTerminalNpcDeath(npc = {}) {
     return npc?.archiveReason === 'deceased'
@@ -39,12 +40,7 @@ export function protectTerminalNpc(previous = {}, candidate = {}) {
 
     // Post-death narration may recover durable facts, but it cannot advance live state or the
     // dead NPC's relationship as though they participated in a later scene.
-    for (const field of [
-        'mood', 'location', 'goal', 'status',
-        'relationship', 'relationshipProgress', 'relationshipMilestones',
-        'relationshipEventHistory', 'lastRelationshipChange', 'relationshipSummary',
-        'seenCount', 'lastSeenTurn', 'lastWorldActiveTurn',
-    ]) {
+    for (const field of TERMINAL_FROZEN_FIELDS) {
         if (Object.prototype.hasOwnProperty.call(previous, field)) next[field] = structuredClone(previous[field]);
     }
     return normalizeTerminalNpc(next);

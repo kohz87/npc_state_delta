@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { snapshotNpc } from '../src/fields/registry.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -318,7 +319,7 @@ test('per-NPC Scan dossier workflow and Key Relationships controls are exposed',
     assert.match(index, /npc_state_delta_edit_key_relationships/);
     assert.match(index, /Key relationships/);
     assert.match(index, /editorList\('keyRelationships', KEY_RELATIONSHIP_LIMIT\)/);
-    assert.match(index, /keyRelationships: \[\.\.\.\(npc\.keyRelationships \|\| \[\]\)\]/);
+    assert.deepEqual(snapshotNpc({ id: 'npc_x', keyRelationships: ['Ilse — sister'] }).keyRelationships, ['Ilse — sister'], 'the inline snapshot copies the bonds');
     assert.match(dossierUi, /Important bonds/);
 });
 

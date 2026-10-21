@@ -16,6 +16,8 @@ Story Suite v2. NSD stays standalone; with Story Block v2 it registers as a host
 
 ## Unreleased
 
+- **One table of the dossier's fields.** `src/fields/registry.js` describes every stored NPC field that a hand-kept list used to name, and the lists the modules use (the text fields a scan replaces, the change-tracked fields, the editor's lockable fields and the keys a lock keeps, the branch revert groups, the fields a death freezes, the alias-merge fields, the Refresh change list, the inline snapshot, the v2 `npc.dossier` fields) are now derived from it, each exactly as it was, order included. The v2 hidden notes (`secrets`) are in it, marked never to reach a model-facing text until unlocked. Nothing Delta stores, sends or shows changes.
+
 - **Tests: golden outputs for every dossier write path.** `tests/field-paths-golden.test.js` freezes what the merge produces on each path (scan, full scan, one-pass capture, Refresh, backfill, dossier import, bundle import, branch restore, editor normalisation) for one rich dossier and the same reply sent in `npcs[]` and in `profileUpdates[]`. Later cleanup steps must leave it unchanged except where they fix something on purpose. Nothing Delta does changes.
 
 - **Saving the dossier editor no longer cuts what you did not touch.** Save cut Role and Mood to 240 characters and Condition / Activity to 300, although the dossier keeps 300, 300 and 500, so any Save shortened them even when you had changed something else. The editor now keeps what the dossier keeps, its fields say so (`maxlength`), and a field you did not change is saved exactly as it was stored: not re-cut, not compacted, its identity kind not reset from the name.

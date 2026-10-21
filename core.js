@@ -27,6 +27,7 @@ import {
     normalizeScanBirthday,
     reanchorDerivedBirthYearFromAge,
 } from './birthday.js';
+import { CHANGE_TRACKED_FIELDS, DAY_TRACKED_FIELDS } from './src/fields/registry.js';
 export {
     BIRTHDAY_PROMPT_RULE,
     birthDatePrecision,
@@ -266,11 +267,6 @@ function birthdayUpdateRow(ordinaryRow, profileRow) {
 
 // Deterministic per-field "last changed at turn" markers for the dossier. They are presentation
 // metadata on the canonical record (rolled back with it), never scanner input or prompt content.
-const CHANGE_TRACKED_FIELDS = Object.freeze([
-    'mood', 'location', 'goal', 'status', 'homeBase', 'age', 'apparentAge', 'lifeState',
-    'personality', 'speech', 'behaviorProfile', 'mannerisms', 'appearance',
-    'relationship', 'relationshipSummary', 'background', 'keyRelationships', 'memories', 'birthDate',
-]);
 
 export function normalizeFieldChanges(value) {
     const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -293,7 +289,6 @@ function trackedFieldValue(npc, field) {
 
 // Story-day counterparts of fieldChanges for the stable fields whose age Refresh checks; present
 // only when the chat's World State carries a date.
-const DAY_TRACKED_FIELDS = Object.freeze(['personality', 'speech', 'behaviorProfile', 'background', 'homeBase']);
 
 export function normalizeFieldChangeDays(value) {
     const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
