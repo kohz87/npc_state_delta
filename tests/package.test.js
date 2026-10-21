@@ -57,7 +57,9 @@ test('the package ships the Story Suite v2 adapter beside the runtime modules', 
     const srcJs = fs.readdirSync(path.join(root, 'src'), { recursive: true })
         .filter(name => String(name).endsWith('.js'))
         .map(name => `src/${String(name).split(path.sep).join('/')}`);
-    for (const name of srcJs) assert.ok(listed.includes(name), `${name} is packaged`);
+    // A src/ module ships either as a support file or as a module declared in runtime-modules.json.
+    const declared = activeRuntimeConfig().modules.map(module => module.path);
+    for (const name of srcJs) assert.ok(listed.includes(name) || declared.includes(name), `${name} is packaged`);
     assert.match(script, /assert all\(name in files for name in src_js\)/, 'package.py refuses to leave a src/ module out');
 });
 
