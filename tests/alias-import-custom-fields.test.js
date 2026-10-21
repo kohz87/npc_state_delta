@@ -62,8 +62,10 @@ test('bundle import keeps the target\'s locked aliases', () => {
 
 test('the Megumin dossier import merges configured custom fields like every other path', () => {
     const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
-    const importer = index.slice(index.indexOf('async function scanNpcDossier'), index.indexOf('function refreshChangedFields'));
-    assert.match(importer, /customFieldNames: getSettings\(\)\.customFieldNames,/);
+    const importer = index.slice(index.indexOf('async function scanNpcDossier'), index.indexOf('function setNpcChatRefreshIndicator'));
+    assert.match(importer, /return runTargetedDossierPass\(\{/, 'the import runs the shared targeted pass');
+    const runner = index.slice(index.indexOf('async function runTargetedDossierPass'), index.indexOf('function scopeTargetedChannels'));
+    assert.match(runner, /customFieldNames: settings\.customFieldNames,/, 'whose merge gets the configured custom fields');
     const state = { turn: 2, npcs: [normalizeNpcRecord({ id: 'npc_myla', name: 'Myla Venn', customFields: { Level: '3' } })], candidates: [] };
     const out = mergeScanResult(state, { npcs: [{ id: 'npc_myla', name: 'Myla Venn', customFields: { Level: '4' }, customFieldsReason: 'Dossier says Level 4.' }] },
         { turn: 3, preservePresence: true, skipRelationshipUpdate: true, developmentContext: 'Name: Myla Venn\nLevel: 4', customFieldNames: ['Level'] });

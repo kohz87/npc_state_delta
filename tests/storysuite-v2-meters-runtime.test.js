@@ -211,7 +211,7 @@ test('index.js: the v2 meter hooks are the identity without a host', () => {
     assert.match(index, /function hostedSecretsEditorHtml\(npc\) \{\n    const adapter = storySuiteV2Meters\(\);\n    if \(!adapter\) return '';/);
     assert.match(index, /const secretsInput = hostedMeters \? document\.getElementById\(SECRETS_EDITOR_ID\) : null;/);
     assert.match(index, /if \(shownRelationship\) \{/);
-    assert.equal((index.match(/forwardRelationshipChangesToHost\(/g) || []).length, 2, 'one hook, in the live scan\'s commit');
+    assert.equal((index.match(/forwardRelationshipChangesToHost\(/g) || []).length, 3, 'two hooks: the live scan\'s commit and the targeted pass\'s commit');
 });
 
 // The dossier editor: while hosted it shows the slice's numbers and a Hidden notes field, and saves

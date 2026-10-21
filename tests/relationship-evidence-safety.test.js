@@ -156,7 +156,7 @@ test('runtime wires targeted new-NPC enrichment and post-admission relationship 
     assert.match(source, /prepareFullWindowRelationshipPayload/);
     assert.match(source, /memoryInputLimit: IMPORTANT_MEMORY_LIMIT/);
     assert.match(source, /allowTargetedDurableSeed: true/);
-    assert.match(source, /finalNpc\.seenCount = Number\(liveBeforeBackfill\.seenCount \|\| 0\)/);
+    assert.match(source, /finalNpc\.seenCount = Number\(preserved\.seenCount \|\| 0\)/);
     assert.match(source, /targetedMemoryLimit = \/\(\?:backfill\|chat refresh\)\/i/);
     assert.match(source, /const reasonPresent = Boolean\(String\(normalized\.relationshipChangeReason/);
     assert.match(source, /schemaVersion: 30/);
