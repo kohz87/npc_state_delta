@@ -64,7 +64,7 @@ const timers = {
 };
 
 /** A Story Block host over a chat: real registry, store and bus; the adapter registered on it. */
-async function host({ settings = {}, delta = fakeDelta() } = {}) {
+async function host({ settings = {}, delta = fakeDelta(), headReply = () => null } = {}) {
     const chat = [{ is_user: false, name: 'Narrator', mes: 'The forge is warm.', swipe_id: 0, swipes: ['The forge is warm.'], swipe_info: [{ extra: {} }], extra: {} }];
     chat[0].swipe_info[0].extra = chat[0].extra;
     const registry = createRegistry();
@@ -95,7 +95,7 @@ async function host({ settings = {}, delta = fakeDelta() } = {}) {
     const box = { host: { ready: Promise.resolve(sdk), sdk } };
     const warnings = [];
     const adapter = createStorySuiteV2Adapter({
-        suiteApi: delta.suiteApi, delta: () => delta.api, version: 'test', host: () => box.host,
+        suiteApi: delta.suiteApi, delta: () => delta.api, version: 'test', host: () => box.host, headReply,
         doc: fakeDoc(), timers, logger: { warn: (...args) => warnings.push(args) }, loadEmptyCast: async () => null,
     });
     adapter.start();
@@ -493,6 +493,65 @@ test('Delta\'s scanner path: npc.adjust from the adapter, seeded from the dossie
     assert.equal(out.receipt.narrate, false, 'the reply already told it');
     assert.deepEqual(h.sent.map(item => item.type), ['npc.adjust']);
     assert.equal(h.sent[0].options.cause, undefined);
+});
+
+// (NSD r2) npc.adjust is the scanner's and other modules': a button, screen or pack that names it at
+// the top (cause ui, no calling module) is refused and nothing is saved, as the host's own steps are.
+test('npc.adjust from a button is refused and saves nothing; another module\'s command may send it', async () => {
+    const h = await host();
+    const rev = h.store.head().meta?.rev;
+    const before = structuredClone(h.store.head().domains.npc);
+    const out = await h.sdk.command('npc.adjust', { name: 'Oren', meters: { trust: 50 }, reply: 7 });
+    assert.equal(out.ok, false);
+    assert.equal(out.code, 'REFUSED');
+    assert.deepEqual(h.store.head().domains.npc, before, 'nothing saved');
+    assert.equal(h.store.head().meta?.rev, rev);
+    // The same payload through another module's command (ctx.call sets ctx.caller).
+    h.registry.register({
+        id: 'zz-nudge', name: 'Nudge',
+        commands: { 'zz.nudge': (ctx, payload) => { ctx.call('npc.adjust', payload); return { summary: 'nudged' }; } },
+    });
+    const called = await h.sdk.command('zz.nudge', { name: 'Oren', meters: { trust: 3 }, reply: 0 });
+    assert.equal(called.ok, true, JSON.stringify(called));
+    assert.equal(h.npc('Oren').meters.trust, -2);
+    // Delta's own scanner (the adapter) still gets through; a copy sent after it has finished does not.
+    const own = await h.adapter.adjust({ name: 'Oren', meters: { trust: 2 }, reply: 0 });
+    assert.equal(own.ok, true);
+    assert.equal(h.npc('Oren').meters.trust, 0);
+    const replayed = await h.sdk.command('npc.adjust', { name: 'Oren', meters: { trust: 2 }, reply: 0 });
+    assert.equal(replayed.code, 'REFUSED', 'the adapter\'s pass is for its own send only');
+    assert.equal(h.npc('Oren').meters.trust, 0);
+});
+
+test('npc.set from the UI ignores a caller-chosen reply: the window starts at the latest reply', async () => {
+    let latest = 0;
+    const h = await host({ settings: { changeCap: 5 }, headReply: () => latest });
+    h.reply('Warm.', '~ npc Mira | trust: +5');
+    latest = 2;
+    assert.equal(h.npc('Mira').reply, 2);
+    // A pack button names an old reply to reopen its window; the editor's own value starts reply 2's.
+    const set = await h.sdk.command('npc.set', { name: 'Mira', meters: { trust: 40 }, reply: 0 });
+    assert.equal(set.ok, true);
+    assert.equal(h.npc('Mira').reply, 2, 'the latest reply, not the payload\'s');
+    assert.equal(h.npc('Mira').meters.trust, 40);
+    // The scanner's change on reply 2 is held within the cap of the reader's value.
+    await h.adapter.adjust({ name: 'Mira', meters: { trust: 30 }, reply: 2 });
+    assert.equal(h.npc('Mira').meters.trust, 45);
+    // Without a latest reply the reader's value ends the window instead.
+    latest = null;
+    await h.sdk.command('npc.set', { name: 'Mira', meters: { trust: 10 }, reply: 2 });
+    assert.equal(h.npc('Mira').reply, undefined);
+    // The adapter's editor path sends no reply of its own.
+    latest = 2;
+    await h.adapter.setMeters({ name: 'Mira', meters: { trust: 12 }, reply: 0 });
+    assert.equal(h.sent.at(-1).type, 'npc.set');
+    assert.equal('reply' in h.sent.at(-1).payload, false);
+    assert.equal(h.npc('Mira').reply, 2);
+});
+
+test('the definition asks for Story Block 2.0.0-alpha.2 or later', async () => {
+    const h = await host();
+    assert.deepEqual(h.def.requires, { storyBlock: '>=2.0.0-alpha.2' });
 });
 
 test('the slice is the truth while hosted: npc.dossier, npc.present and sliceView read it', async () => {

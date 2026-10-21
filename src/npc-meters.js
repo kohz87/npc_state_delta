@@ -418,6 +418,9 @@ function result({ name, key, moved, settled, problems, created, disposition }) {
  *   secretTexts(name, ids) → [{ id, text }] for those unlocked notes (the tail only)
  *   present()         → names of the NPCs present now
  *   settings()        → the module's stored settings (queries and the prompt; commands use ctx.settings)
+ *   ownCommand(type, payload) → true while Delta's own adapter is sending exactly this command (its
+ *                       scanner's npc.adjust); a button, screen or pack cannot make it true
+ *   headReply()       → the index of the latest reply (the reader's own values start its window)
  */
 export function createNpcPart(hooks = {}) {
     const call = (fn, fallback, ...args) => {
@@ -442,6 +445,12 @@ export function createNpcPart(hooks = {}) {
     };
     const storedSettings = () => normalizeMeterSettings(call(hooks.settings, {}));
     const defsFrom = settings => meterDefs(settings, baseline());
+    // A reader's action at the top (a button, a screen, a pack): cause ui and no calling module.
+    const readerAction = ctx => ctx.cause === 'ui' && !ctx.caller;
+    const headReply = () => {
+        const value = call(hooks.headReply, null);
+        return isInt(value) && value >= 0 ? value : null;
+    };
 
     // Who a change is about: the entry key, the name it shows, the dossier's labels and numbers.
     function identify(npcs, label) {
@@ -544,21 +553,31 @@ export function createNpcPart(hooks = {}) {
          * npc.adjust { name, meters: { meter: ±n }, start?: { meter: n }, reply?: n }: moves meters
          * by the given amounts, with the same range and per-reply clamps as a story line. Delta's
          * own scanner sends its relationship changes this way while hosted (`start`: the values the
-         * dossier had before them, for an NPC the slice has no entry for yet).
+         * dossier had before them, for an NPC the slice has no entry for yet). Only Delta's scanner
+         * and another module's command (ctx.call) may send it: a button, screen or pack at the top
+         * (cause ui, no calling module) is refused, as the host's own steps are.
          */
         'npc.adjust'(ctx, payload = {}) {
+            if (readerAction(ctx) && call(hooks.ownCommand, false, 'npc.adjust', payload) !== true) {
+                ctx.fail('REFUSED', 'Meters move with the story and with NPC State Delta\'s scans; the dossier editor sets them by hand.');
+            }
             const problems = [];
             const defs = defsFrom(normalizeMeterSettings(ctx.settings()));
             const changes = changesFrom(payload?.meters, defs, 'add', problems).filter(change => change.value !== 0);
             const reply = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : null;
             return run(ctx, { label: payload?.name, changes, problems, limit: true, reply, seed: isObject(payload?.start) ? payload.start : null });
         },
-        /** npc.set { name, meters: { meter: n }, reply? }: the reader's own values (range only). */
+        /**
+         * npc.set { name, meters: { meter: n }, reply? }: the reader's own values (range only). From
+         * a button or screen the reply is the latest one, whatever the payload says; `reply` is
+         * read only from another module's command.
+         */
         'npc.set'(ctx, payload = {}) {
             const problems = [];
             const defs = defsFrom(normalizeMeterSettings(ctx.settings()));
             const changes = changesFrom(payload?.meters, defs, 'set', problems);
-            const reply = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : null;
+            const asked = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : null;
+            const reply = readerAction(ctx) ? headReply() : asked;
             return run(ctx, { label: payload?.name, changes, problems, limit: false, reply });
         },
         /** npc.refresh { name }: stages and notes again (after the reader changed them). */

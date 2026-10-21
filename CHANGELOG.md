@@ -10,11 +10,21 @@ Story Suite v2. NSD stays standalone; with Story Block v2 it registers as a host
 - **Hidden notes** in the dossier editor while hosted (`trust 40: …`, stored as the dossier's `secrets`): never sent while locked; opened by code when the meter reaches the threshold, then given to the story in the tail while the NPC is present.
 - An **NPCs** card under each reply (`npc-state-delta/meters`, Story Block's `ss.meter` bars) and the meters under the Cast tab's cards.
 - Prompt: one fixed static line for the meters (about 77 tokens with the four built-ins, 86 with two custom meters and a stage), and in the tail the present NPCs' meters when they moved in the last two replies (about 48-62 tokens for two NPCs and one note); Delta's own prompts are unchanged (`npm run measure:prompts`).
-- Tests run against Story Block's real registry, store, command bus and change-line parser, vendored in `tests/vendor/story-block/`.
+- Tests run against Story Block's real registry, store, command bus and change-line parser, vendored in `tests/vendor/story-block/` (now from Story Block 2f17c2c).
+- **Re-break round 2 fixes:**
+  - The Cast tab no longer draws over another module's tab. Story Block's tabs share one pane; Delta's own redraws (a cast drawn in the chat, Delta turned on or off) now write only while that pane still shows the Cast tab and still holds what Delta drew. Otherwise Delta waits for the host to show the Cast tab again.
+  - A chat whose sidecar cannot be read now says so in the Cast tab, and names Retry Load (and Detach Broken Sidecar, when the chat has one) in Delta's settings section. It used to say "still loading" forever.
+  - A scan that finishes after the reader swiped, or after a reply was added or deleted, no longer sends its `npc.adjust` onto the reply now shown. Delta's sidecar keeps the scan by its own rules, and the new swipe gets its own scan.
+  - `npc.adjust` is refused from a button, screen or pack at the top (cause `ui`, no calling module), as Story Block's own steps are. Delta's own scanner and another module's command (`ctx.call`) may still send it.
+  - `npc.set` (the reader's own values) from the UI ignores a `reply` in the payload: the window starts at the latest reply.
+  - The module asks for Story Block `>=2.0.0-alpha.2` (`requires`); an older host ignores the field.
 
 # NPC State Delta changes
 
 ## Unreleased
+
+- **A confirmed-dead NPC stays dead.** No scan, Refresh, backfill or import output can make them alive or present again, an explicit "alive" row included, and Story Block's scene can no longer put them on stage while Delta is hosted. Only the reader's own correction (Restore, or the life state in the editor) and rollback of the reply that killed them change it (contract C05).
+- Names in the prompts are written on one line and clipped to 80 characters, so a line break in a persona or character name cannot start a line of the one-pass capture rules or any other prompt. Ordinary names, and so ordinary prompts, are unchanged.
 
 - Cleanup: the focused relationship pass (who needs a relationship decision, the isolated evaluator request, applying its decisions) moves from `index.js` to `src/relationship-pass.js`. Nothing Delta stores, sends or shows changes.
 
