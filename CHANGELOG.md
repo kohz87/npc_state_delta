@@ -1,3 +1,7 @@
+## 2.0.0-alpha.1 (in progress, `v2` branch)
+
+Story Suite v2. NSD stays standalone; with Story Block v2 it registers as a hosted module (queries, Cast tab, settings in the overlay). Integration in progress. Status: https://github.com/kohz87/Story_block/blob/v2/docs/v2/STATUS.md
+
 # NPC State Delta changes
 
 ## Unreleased
