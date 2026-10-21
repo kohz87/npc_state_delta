@@ -45,6 +45,7 @@
     { "path": "src/dossier-edit.js", "role": "manual-edit-locks", "required": true },
     { "path": "src/fields/registry.js", "role": "dossier-field-registry", "required": true },
     { "path": "src/util/html.js", "role": "html-escape", "required": true },
-    { "path": "src/transcript.js", "role": "chat-transcript-windows", "required": true }
+    { "path": "src/transcript.js", "role": "chat-transcript-windows", "required": true },
+    { "path": "src/scanner-request.js", "role": "scanner-request-and-json-retry", "required": true }
   ]
 }
