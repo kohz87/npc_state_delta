@@ -66,13 +66,13 @@ assert.match(index, /function inlineRosterHtml/, 'present-only roster renderer m
 assert.doesNotMatch(index, /function openNpcViewer/, 'the separate quick viewer must stay retired');
 assert.doesNotMatch(index, /\bnpcBank\b|\blocalProfile\b|from\s+['\"][^'\"]*Megumin|extension_settings\s*\[[^\]]*Megumin-Suite/i, 'standalone build must not import or access Megumin NPC Bank internals');
 
-const configuredRuntime = runtimeConfig.modules.map(module => module.path).sort();
+const configuredRuntime = runtimeConfig.modules.map(module => module.path).filter(file => !file.includes('/')).sort();
 const rootRuntime = fs.readdirSync(root, { withFileTypes: true })
     .filter(entry => entry.isFile() && entry.name.endsWith('.js'))
     .map(entry => entry.name)
     .sort();
 assert.deepEqual(configuredRuntime, rootRuntime, 'active runtime inventory must match the installed root modules');
-for (const file of configuredRuntime) assert.ok(fs.existsSync(path.join(root, file)), `missing active runtime module ${file}`);
+for (const file of runtimeConfig.modules.map(module => module.path)) assert.ok(fs.existsSync(path.join(root, file)), `missing active runtime module ${file}`);
 assert.ok(configuredRuntime.includes('core-mechanics.js'));
 assert.ok(configuredRuntime.includes('branch-core.js'));
 assert.equal(configuredRuntime.includes('core-v0218.js'), false);

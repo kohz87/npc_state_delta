@@ -17,6 +17,7 @@ import {
     npcParticipatesInExchange,
 } from './scan-context.js';
 import { createDiagnosticStore } from './diagnostics-core.js';
+import { editorProfileLocks } from './src/dossier-edit.js';
 import {
     NPC_STATE_VERSION,
     DEFAULT_RELATIONSHIP,
@@ -5731,8 +5732,8 @@ function openNpcEditor(npcId) {
           <label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_portrait_replace" type="checkbox" ${npc.portraitPromptReplace ? 'checked' : ''}> Replace the automatic positive prompt entirely <small>Use only when this NPC needs a hand-authored model-specific prompt. The global negative prompt still applies.</small></label>
         </div>
       </details>
-      <label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_lock_profile" type="checkbox" ${locked.length ? 'checked' : ''}> Protect edited stable profile fields from future scanner rewrites <small>Leave off to use manual edits as an organic baseline. Existing locks stay protected until you uncheck and save.</small></label>
-      ${locked.length ? `<p class="npc-state-delta-muted">Currently protected: ${editorValue([...locked].join(', '))}</p>` : ''}
+      <label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_lock_profile" type="checkbox" ${locked.size ? 'checked' : ''}> Protect edited stable profile fields from future scanner rewrites <small>Leave off to use manual edits as an organic baseline. Existing locks stay protected until you uncheck and save.</small></label>
+      ${locked.size ? `<p class="npc-state-delta-muted">Currently protected: ${editorValue([...locked].join(', '))}</p>` : ''}
       <label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_retention_protected" type="checkbox" ${npc.retentionProtected ? 'checked' : ''}> Keep this NPC from automatic stale cleanup <small>Use for recurring or major NPCs who may disappear for long arcs. This does not lock their profile fields.</small></label>
       <label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_minor" type="checkbox" ${npc.minor ? 'checked' : ''}> Hide present-NPC card <small>The dossier still scans, updates, stores memories/relationships, and injects when present; only the present cast card is hidden.</small></label>
       <div class="npc-state-delta-editor-grid">
@@ -6188,21 +6189,7 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
             ...relationshipEventMessage({ message: latestReplyIndex() }),
         };
     }
-    const stableKeys = ['name', 'role', 'species', 'gender', 'homeBase', 'age', 'apparentAge', 'personality', 'speech', 'behaviorProfile', 'background', 'mannerisms', 'keyRelationships', 'customFields', 'aliases'];
-    if (document.getElementById('npc_state_delta_edit_lock_profile')?.checked) {
-        const locks = new Set(current.manualProfileFields || []);
-        for (const key of stableKeys) {
-            const listField = key === 'mannerisms' || key === 'behaviorProfile' || key === 'keyRelationships' || key === 'aliases';
-            const before = key === 'customFields' ? JSON.stringify(normalizeCustomFields(current.customFields))
-                : (listField ? JSON.stringify(current[key] || []) : String(current[key] || ''));
-            const after = key === 'customFields' ? JSON.stringify(normalizeCustomFields(next.customFields))
-                : (listField ? JSON.stringify(next[key] || []) : String(next[key] || ''));
-            if (before !== after) locks.add(key);
-        }
-        next.manualProfileFields = [...locks];
-    } else {
-        next.manualProfileFields = [];
-    }
+    Object.assign(next, editorProfileLocks(current, next, { protect: Boolean(document.getElementById('npc_state_delta_edit_lock_profile')?.checked) }));
     next.retentionProtected = Boolean(document.getElementById('npc_state_delta_edit_retention_protected')?.checked);
     next.minor = Boolean(document.getElementById('npc_state_delta_edit_minor')?.checked);
     next.updatedAt = Date.now();
@@ -6253,6 +6240,8 @@ function updateNpcAppearance(npcId, draft, { chatKey, lockAppearance = false } =
     const index = state.npcs.findIndex(item => item.id === String(npcId || ''));
     if (index < 0) return false;
     const next = appearanceDraftRecord(state.npcs[index], draft, { lockAppearance });
+    // The appearance lock comes from the editor's protect checkbox: the reader's explicit choice.
+    next.manualProfileLocksExplicit = true;
     next.updatedAt = Date.now();
     state.npcs[index] = normalizeNpcRecord(next);
     const messageId = latestMessageId(false);

@@ -1,5 +1,6 @@
 import { formPortraitKey, isTerminalNpcDeath, normalizeFormPortraitAssets, normalizeName, normalizeNpcRecord, protectTerminalNpc } from './core.js';
 import { normalizeSocialGraph, remapSocialGraphNpcIds } from './social.js';
+import { LOCKED_FIELD_KEYS } from './src/dossier-edit.js';
 
 const MAGIC = new Uint8Array([0x4e, 0x50, 0x43, 0x53, 0x54, 0x42, 0x30, 0x31]); // NPCSTB01
 const HEADER_SIZE = 12;
@@ -389,31 +390,12 @@ function initImportReport(report) {
     return report;
 }
 
-const IMPORT_LOCKED_FIELD_KEYS = Object.freeze({
-    name: ['name', 'identityKind'],
-    role: ['role'],
-    species: ['species'],
-    gender: ['gender'],
-    homeBase: ['homeBase'],
-    age: ['age'],
-    apparentAge: ['apparentAge', 'apparentAgeAnchor'],
-    appearance: ['appearance', 'overallAppearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'appearanceModelVersion'],
-    personality: ['personality'],
-    speech: ['speech'],
-    behaviorProfile: ['behaviorProfile'],
-    background: ['background'],
-    mannerisms: ['mannerisms'],
-    keyRelationships: ['keyRelationships'],
-    customFields: ['customFields'],
-    aliases: ['aliases'],
-});
-
 function preserveTargetManualLocks(oldNpc, importedNpc) {
     const targetLocks = new Set(Array.isArray(oldNpc?.manualProfileFields) ? oldNpc.manualProfileFields : []);
     const sourceLocks = new Set(Array.isArray(importedNpc?.manualProfileFields) ? importedNpc.manualProfileFields : []);
     const merged = { ...oldNpc, ...importedNpc };
     for (const field of targetLocks) {
-        for (const key of IMPORT_LOCKED_FIELD_KEYS[field] || []) {
+        for (const key of LOCKED_FIELD_KEYS[field] || []) {
             if (Object.prototype.hasOwnProperty.call(oldNpc || {}, key)) merged[key] = structuredClone(oldNpc[key]);
             else delete merged[key];
         }
