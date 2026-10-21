@@ -4189,6 +4189,105 @@ function mergeImportantMemories(oldList, newList, retentionList = [], incomingLi
     return pool.slice(-IMPORTANT_MEMORY_LIMIT);
 }
 
+// ---- Durable-field rules shared by a scan row (npcs[]) and a profile update (profileUpdates[]) ----
+// (cleanup step 5) A model may send an existing NPC's durable facts in either channel; both apply
+// them by these same rules.
+
+// The plain durable texts a profile update applies with the npcs[] rules (the profile texts, Personality,
+// Speech and Appearance, have their own evidence-gated rules there).
+const PROFILE_UPDATE_TEXT_FIELDS = Object.freeze(['role', 'species', 'gender', 'homeBase', 'age', 'apparentAge', 'background']);
+
+// Gender, home base and ages are keep-by-default once established.
+function durableTextAccepted(field, existing, incoming, value, options = {}) {
+    if (field === 'gender') {
+        const prior = normalizeGender(existing.gender);
+        return !(prior && prior !== value && (incoming.genderState !== 'correct' || !String(incoming.genderReason || '').trim()));
+    }
+    if (field === 'homeBase') {
+        const prior = String(existing.homeBase || '').trim();
+        const context = String(options.developmentContext || '').trim();
+        if (prior) {
+            if (incoming.homeBaseState !== 'update' || !String(incoming.homeBaseReason || '').trim()) return false;
+            if (context && !durableSeedGrounded(value, context)) return false;
+        } else if (context && !durableSeedGrounded(value, context)) {
+            return false;
+        }
+        return true;
+    }
+    if (field === 'age' && String(existing.age || '').trim()) {
+        // Chronological age is keep-by-default once established. It may advance from
+        // explicit elapsed chronology/birthdays or be corrected by stronger story evidence.
+        // An advance may never move an exact numeric age backward or sideways.
+        const state = String(incoming.ageState || 'keep');
+        if ((state !== 'advance' && state !== 'correct') || !String(incoming.ageReason || '').trim()) return false;
+        const oldExact = /^\d{1,3}$/.test(String(existing.age || '').trim()) ? Number(existing.age) : null;
+        const newExact = /^\d{1,3}$/.test(String(value || '').trim()) ? Number(value) : null;
+        if (state === 'advance' && oldExact !== null && newExact !== null && newExact <= oldExact) return false;
+    }
+    if (field === 'apparentAge' && String(existing.apparentAge || '').trim()) {
+        // Apparent age is also keep-by-default. Visual aging, growth, rejuvenation,
+        // transformation, or a grounded correction must be explicitly marked as evolution.
+        if (incoming.apparentAgeState !== 'evolve' || !String(incoming.apparentAgeReason || '').trim()) return false;
+    }
+    if (field === 'age' || field === 'apparentAge') {
+        // Even a lifecycle update cannot downgrade stronger age evidence to a weaker estimate.
+        if (ageSpecificity(existing[field]) > ageSpecificity(value)) return false;
+    }
+    return true;
+}
+
+// Configured custom fields only, grounded in the source text; a change needs a reason. Null when
+// nothing is accepted.
+function incomingCustomFields(existing, incoming, manualFields, options = {}) {
+    if (!incoming.customFields || manualFields.has('customFields')) return null;
+    return mergeCustomFieldValues(existing.customFields, incoming.customFields, {
+        names: options.customFieldNames,
+        reason: incoming.customFieldsReason,
+        context: options.developmentContext,
+    });
+}
+
+// The NPC's Key Relationships after an incoming row: merged by counterpart; unmarked rows add new
+// counterparts only.
+function incomingKeyRelationships(existing, incoming, manualFields) {
+    if (manualFields.has('keyRelationships')) {
+        return [...(existing.keyRelationships || [])];
+    } else if ((existing.keyRelationships || []).length) {
+        // Key Relationships are durable social continuity, not a running contact log.
+        // Scanner omission is never evidence that another important bond vanished. Even
+        // during an evolution, update named counterparts in place and preserve unrelated
+        // bonds; estrangement/death should change that counterpart's entry rather than
+        // silently deleting everyone the model did not mention this turn.
+        if (incoming.keyRelationshipsState === 'evolve'
+            && String(incoming.keyRelationshipsReason || '').trim()
+            && incoming.keyRelationshipsProvided) {
+            return mergeKeyRelationshipUpdates(existing.keyRelationships, incoming.keyRelationships || []);
+        } else if (incoming.keyRelationshipsState === 'update'
+            && incoming.keyRelationshipsProvided) {
+            // Discovery/clarification is not social evolution. A model that correctly
+            // marks an update may omit the audit reason, so the explicit lifecycle state
+            // plus grounded entries is sufficient to merge by counterpart.
+            return mergeKeyRelationshipUpdates(existing.keyRelationships, incoming.keyRelationships);
+        } else if (incoming.keyRelationshipsProvided && (incoming.keyRelationships || []).length) {
+            // Recovery for models that extract an explicit newly revealed tie but omit
+            // the lifecycle marker entirely. Only NEW counterparts are admitted here;
+            // an unmarked rewrite of an already-known person's dynamic is still rejected.
+            const knownSubjects = new Set((existing.keyRelationships || []).map(keyRelationshipSubject).filter(Boolean));
+            const newlyEstablished = (incoming.keyRelationships || []).filter(entry => {
+                const subject = keyRelationshipSubject(entry);
+                return subject && !knownSubjects.has(subject);
+            });
+            return newlyEstablished.length
+                ? mergeKeyRelationshipUpdates(existing.keyRelationships, newlyEstablished)
+                : [...(existing.keyRelationships || [])];
+        } else {
+            return [...(existing.keyRelationships || [])];
+        }
+    } else {
+        return mergeKeyRelationshipUpdates([], incoming.keyRelationships || []);
+    }
+}
+
 function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELATIONSHIP_CAPS, sourceMessageId = null, lifecycleOptions = {}) {
     const merged = { ...existing };
     const manualFields = new Set(Array.isArray(existing.manualProfileFields) ? existing.manualProfileFields : []);
@@ -4248,33 +4347,14 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
     if (!merged.name) merged.name = incomingName || existingName || 'Unnamed NPC';
     if (!merged.identityKind) merged.identityKind = inferNpcIdentityKind(merged.name, existingKind);
 
-    if (incoming.customFields && !manualFields.has('customFields')) {
-        const accepted = mergeCustomFieldValues(existing.customFields, incoming.customFields, {
-            names: lifecycleOptions.customFieldNames,
-            reason: incoming.customFieldsReason,
-            context: lifecycleOptions.developmentContext,
-        });
-        if (accepted) merged.customFields = accepted;
-    }
+    const acceptedCustomFields = incomingCustomFields(existing, incoming, manualFields, lifecycleOptions);
+    if (acceptedCustomFields) merged.customFields = acceptedCustomFields;
     for (const field of TEXT_FIELDS) {
         const value = incoming[field];
         if (manualFields.has(field)) continue;
         if (field === 'relationshipSummary') continue; // gated after relationship evidence is accepted
         if (typeof value !== 'string' || !value.trim()) continue;
-        if (field === 'gender') {
-            const prior = normalizeGender(existing.gender);
-            if (prior && prior !== value && (incoming.genderState !== 'correct' || !String(incoming.genderReason || '').trim())) continue;
-        }
-        if (field === 'homeBase') {
-            const prior = String(existing.homeBase || '').trim();
-            const context = String(lifecycleOptions.developmentContext || '').trim();
-            if (prior) {
-                if (incoming.homeBaseState !== 'update' || !String(incoming.homeBaseReason || '').trim()) continue;
-                if (context && !durableSeedGrounded(value, context)) continue;
-            } else if (context && !durableSeedGrounded(value, context)) {
-                continue;
-            }
-        }
+        if ((field === 'gender' || field === 'homeBase') && !durableTextAccepted(field, existing, incoming, value, lifecycleOptions)) continue;
         if (['personality', 'speech', 'appearance'].includes(field)
             && !String(existing[field] || '').trim()
             && !targetedDurableSeedAllowed
@@ -4358,25 +4438,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
                 continue;
             }
         }
-        if (field === 'age' && String(existing.age || '').trim()) {
-            // Chronological age is keep-by-default once established. It may advance from
-            // explicit elapsed chronology/birthdays or be corrected by stronger story evidence.
-            // An advance may never move an exact numeric age backward or sideways.
-            const state = String(incoming.ageState || 'keep');
-            if ((state !== 'advance' && state !== 'correct') || !String(incoming.ageReason || '').trim()) continue;
-            const oldExact = /^\d{1,3}$/.test(String(existing.age || '').trim()) ? Number(existing.age) : null;
-            const newExact = /^\d{1,3}$/.test(String(value || '').trim()) ? Number(value) : null;
-            if (state === 'advance' && oldExact !== null && newExact !== null && newExact <= oldExact) continue;
-        }
-        if (field === 'apparentAge' && String(existing.apparentAge || '').trim()) {
-            // Apparent age is also keep-by-default. Visual aging, growth, rejuvenation,
-            // transformation, or a grounded correction must be explicitly marked as evolution.
-            if (incoming.apparentAgeState !== 'evolve' || !String(incoming.apparentAgeReason || '').trim()) continue;
-        }
-        if (field === 'age' || field === 'apparentAge') {
-            // Even a lifecycle update cannot downgrade stronger age evidence to a weaker estimate.
-            if (ageSpecificity(existing[field]) > ageSpecificity(value)) continue;
-        }
+        if ((field === 'age' || field === 'apparentAge') && !durableTextAccepted(field, existing, incoming, value, lifecycleOptions)) continue;
         if (field === 'appearance' && String(existing.appearance || '').trim() && incoming.appearanceState === 'keep') {
             merged.appearance = mergeDurableTextRefinement(existing.appearance, value, DURABLE_PROFILE_LIMITS.appearance);
             continue;
@@ -4467,42 +4529,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
         );
         merged.behaviorProfile = reconcileBehaviorProfileWithPersonality(grounded, merged.personality || existing.personality);
     }
-    if (manualFields.has('keyRelationships')) {
-        merged.keyRelationships = [...(existing.keyRelationships || [])];
-    } else if ((existing.keyRelationships || []).length) {
-        // Key Relationships are durable social continuity, not a running contact log.
-        // Scanner omission is never evidence that another important bond vanished. Even
-        // during an evolution, update named counterparts in place and preserve unrelated
-        // bonds; estrangement/death should change that counterpart's entry rather than
-        // silently deleting everyone the model did not mention this turn.
-        if (incoming.keyRelationshipsState === 'evolve'
-            && String(incoming.keyRelationshipsReason || '').trim()
-            && incoming.keyRelationshipsProvided) {
-            merged.keyRelationships = mergeKeyRelationshipUpdates(existing.keyRelationships, incoming.keyRelationships || []);
-        } else if (incoming.keyRelationshipsState === 'update'
-            && incoming.keyRelationshipsProvided) {
-            // Discovery/clarification is not social evolution. A model that correctly
-            // marks an update may omit the audit reason, so the explicit lifecycle state
-            // plus grounded entries is sufficient to merge by counterpart.
-            merged.keyRelationships = mergeKeyRelationshipUpdates(existing.keyRelationships, incoming.keyRelationships);
-        } else if (incoming.keyRelationshipsProvided && (incoming.keyRelationships || []).length) {
-            // Recovery for models that extract an explicit newly revealed tie but omit
-            // the lifecycle marker entirely. Only NEW counterparts are admitted here;
-            // an unmarked rewrite of an already-known person's dynamic is still rejected.
-            const knownSubjects = new Set((existing.keyRelationships || []).map(keyRelationshipSubject).filter(Boolean));
-            const newlyEstablished = (incoming.keyRelationships || []).filter(entry => {
-                const subject = keyRelationshipSubject(entry);
-                return subject && !knownSubjects.has(subject);
-            });
-            merged.keyRelationships = newlyEstablished.length
-                ? mergeKeyRelationshipUpdates(existing.keyRelationships, newlyEstablished)
-                : [...(existing.keyRelationships || [])];
-        } else {
-            merged.keyRelationships = [...(existing.keyRelationships || [])];
-        }
-    } else {
-        merged.keyRelationships = mergeKeyRelationshipUpdates([], incoming.keyRelationships || []);
-    }
+    merged.keyRelationships = incomingKeyRelationships(existing, incoming, manualFields);
     let relationshipEventAccepted = false;
     let relationshipNarrativeAdvance = false;
     if (!lifecycleOptions.skipRelationshipUpdate) {
@@ -5290,6 +5317,30 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
         }
     }
 
+    // (cleanup step 5) The other durable facts a profile update carries (the scanner rule sends an
+    // existing NPC's durable facts there) are applied by the same rules as in the NPC's npcs[] entry;
+    // they used to be dropped without a word. Live state (mood, location, goal, status) stays npcs[]-only.
+    for (const field of PROFILE_UPDATE_TEXT_FIELDS) {
+        if (manualFields.has(field)) continue;
+        const value = typeof incoming[field] === 'string' ? incoming[field].trim() : '';
+        if (!value || value === String(npc[field] ?? '').trim()) continue;
+        if (!durableTextAccepted(field, npc, incoming, value, options)) continue;
+        npc[field] = value;
+        changed = true;
+    }
+    const customFields = incomingCustomFields(npc, incoming, manualFields, options);
+    if (customFields) {
+        npc.customFields = customFields;
+        changed = true;
+    }
+    if (incoming.keyRelationshipsProvided && !manualFields.has('keyRelationships')) {
+        const bonds = incomingKeyRelationships(npc, incoming, manualFields);
+        if (JSON.stringify(bonds) !== JSON.stringify(npc.keyRelationships || [])) {
+            npc.keyRelationships = bonds;
+            changed = true;
+        }
+    }
+
     // (1.2.19) A model that files a known NPC's new memory under profileUpdates (a durable fact,
     // which the rules send there) used to lose it: only the npcs[] entry merged memories. Merged
     // here the same way: added to the stored ones, deduplicated, capped, never replacing them.
@@ -5699,6 +5750,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
         developmentContext: options.developmentContext || '',
         memoryInputLimit,
         targeted: options.allowTargetedDurableSeed === true || options.developmentSingleTarget === true,
+        customFieldNames: options.customFieldNames,
     };
     if (Object.prototype.hasOwnProperty.call(options, 'userDevelopmentContext')) {
         profileUpdateOptions.userDevelopmentContext = String(options.userDevelopmentContext || '');
