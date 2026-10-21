@@ -714,7 +714,7 @@
     "archiveReason": "",
     "archiveSourceMessageId": null,
     "archived": false,
-    "background": "Raised in the river quarter; apprenticed to the archive at twelve; survived the flood year.",
+    "background": "Raised in the river quarter; served ten years as a royal archivist; apprenticed to the archive at twelve.",
     "behaviorProfile": [
      "Disposition: kind - helps strangers without fuss"
     ],
@@ -735,17 +735,21 @@
     "currentForm": "",
     "currentFormUnknown": false,
     "customFields": {
-     "Level": "3"
+     "Level": "4"
     },
     "fieldChangeMessages": {
+     "background": 7,
      "goal": 7,
+     "homeBase": 7,
      "keyRelationships": 7,
      "memories": 7,
      "mood": 7,
      "relationship": 7
     },
     "fieldChanges": {
+     "background": 5,
      "goal": 5,
+     "homeBase": 5,
      "keyRelationships": 5,
      "memories": 5,
      "mood": 5,
@@ -753,11 +757,12 @@
     },
     "gender": "female",
     "goal": "Move to Mill Street",
-    "homeBase": "The old archive tower",
+    "homeBase": "Rooms above the bakery on Mill Street",
     "id": "npc_myla",
     "identityKind": "proper_name",
     "keyRelationships": [
-     "Ilse Venn — sister | close, protective; deceased"
+     "Ilse Venn — sister | close, protective; deceased",
+     "Tobin Ash — courier | brings her letters"
     ],
     "lastRelationshipChange": {
      "delta": {
@@ -871,7 +876,7 @@
     },
     "relationshipSummary": "Cautious respect for Ari after the archive fire.",
     "retentionProtected": false,
-    "role": "Archivist",
+    "role": "Former royal archivist",
     "seenCount": 5,
     "species": "Human",
     "speech": "Measured and precise; quotes old ledgers",
@@ -1366,6 +1371,23 @@
      "confidence": "strong-context",
      "groupId": "",
      "id": "edge_npc-myla-npc-ilse-sibling-sibling",
+     "inferred": false,
+     "provenance": "scanner",
+     "reason": "structured key relationship",
+     "sharedDescriptor": "",
+     "sourceMessageId": 7,
+     "turn": 5
+    },
+    {
+     "aDynamic": "brings her letters",
+     "aId": "npc_myla",
+     "aToB": "courier",
+     "bDynamic": "",
+     "bId": "npc_tobin-ash",
+     "bToA": "",
+     "confidence": "strong-context",
+     "groupId": "",
+     "id": "edge_npc-myla-npc-tobin-ash-courier",
      "inferred": false,
      "provenance": "scanner",
      "reason": "structured key relationship",
@@ -2076,7 +2098,7 @@
     "archiveReason": "",
     "archiveSourceMessageId": null,
     "archived": false,
-    "background": "Raised in the river quarter; apprenticed to the archive at twelve; survived the flood year.",
+    "background": "Raised in the river quarter; served ten years as a royal archivist; apprenticed to the archive at twelve.",
     "behaviorProfile": [
      "Disposition: kind - helps strangers without fuss"
     ],
@@ -2097,27 +2119,32 @@
     "currentForm": "",
     "currentFormUnknown": false,
     "customFields": {
-     "Level": "3"
+     "Level": "4"
     },
     "fieldChangeMessages": {
+     "background": 7,
      "goal": 7,
+     "homeBase": 7,
      "keyRelationships": 7,
      "memories": 7,
      "mood": 7
     },
     "fieldChanges": {
+     "background": 5,
      "goal": 5,
+     "homeBase": 5,
      "keyRelationships": 5,
      "memories": 5,
      "mood": 5
     },
     "gender": "female",
     "goal": "Move to Mill Street",
-    "homeBase": "The old archive tower",
+    "homeBase": "Rooms above the bakery on Mill Street",
     "id": "npc_myla",
     "identityKind": "proper_name",
     "keyRelationships": [
-     "Ilse Venn — sister | close, protective; deceased"
+     "Ilse Venn — sister | close, protective; deceased",
+     "Tobin Ash — courier | brings her letters"
     ],
     "lastRelationshipChange": {
      "delta": {
@@ -2215,7 +2242,7 @@
     },
     "relationshipSummary": "Cautious respect for Ari after the archive fire.",
     "retentionProtected": false,
-    "role": "Archivist",
+    "role": "Former royal archivist",
     "seenCount": 5,
     "species": "Human",
     "speech": "Measured and precise; quotes old ledgers",
@@ -2710,6 +2737,23 @@
      "confidence": "strong-context",
      "groupId": "",
      "id": "edge_npc-myla-npc-ilse-sibling-sibling",
+     "inferred": false,
+     "provenance": "scanner",
+     "reason": "structured key relationship",
+     "sharedDescriptor": "",
+     "sourceMessageId": 7,
+     "turn": 5
+    },
+    {
+     "aDynamic": "brings her letters",
+     "aId": "npc_myla",
+     "aToB": "courier",
+     "bDynamic": "",
+     "bId": "npc_tobin-ash",
+     "bToA": "",
+     "confidence": "strong-context",
+     "groupId": "",
+     "id": "edge_npc-myla-npc-tobin-ash-courier",
      "inferred": false,
      "provenance": "scanner",
      "reason": "structured key relationship",
@@ -3438,7 +3482,7 @@
     "archiveReason": "",
     "archiveSourceMessageId": null,
     "archived": false,
-    "background": "Raised in the river quarter; apprenticed to the archive at twelve; survived the flood year.",
+    "background": "Raised in the river quarter; served ten years as a royal archivist; apprenticed to the archive at twelve.",
     "behaviorProfile": [
      "Disposition: kind - helps strangers without fuss"
     ],
@@ -3459,17 +3503,21 @@
     "currentForm": "",
     "currentFormUnknown": false,
     "customFields": {
-     "Level": "3"
+     "Level": "4"
     },
     "fieldChangeMessages": {
+     "background": 7,
      "goal": 7,
+     "homeBase": 7,
      "keyRelationships": 7,
      "memories": 7,
      "mood": 7,
      "relationship": 7
     },
     "fieldChanges": {
+     "background": 5,
      "goal": 5,
+     "homeBase": 5,
      "keyRelationships": 5,
      "memories": 5,
      "mood": 5,
@@ -3477,11 +3525,12 @@
     },
     "gender": "female",
     "goal": "Move to Mill Street",
-    "homeBase": "The old archive tower",
+    "homeBase": "Rooms above the bakery on Mill Street",
     "id": "npc_myla",
     "identityKind": "proper_name",
     "keyRelationships": [
-     "Ilse Venn — sister | close, protective; deceased"
+     "Ilse Venn — sister | close, protective; deceased",
+     "Tobin Ash — courier | brings her letters"
     ],
     "lastRelationshipChange": {
      "delta": {
@@ -3595,7 +3644,7 @@
     },
     "relationshipSummary": "Cautious respect for Ari after the archive fire.",
     "retentionProtected": false,
-    "role": "Archivist",
+    "role": "Former royal archivist",
     "seenCount": 5,
     "species": "Human",
     "speech": "Measured and precise; quotes old ledgers",
@@ -4090,6 +4139,23 @@
      "confidence": "strong-context",
      "groupId": "",
      "id": "edge_npc-myla-npc-ilse-sibling-sibling",
+     "inferred": false,
+     "provenance": "scanner",
+     "reason": "structured key relationship",
+     "sharedDescriptor": "",
+     "sourceMessageId": 7,
+     "turn": 5
+    },
+    {
+     "aDynamic": "brings her letters",
+     "aId": "npc_myla",
+     "aToB": "courier",
+     "bDynamic": "",
+     "bId": "npc_tobin-ash",
+     "bToA": "",
+     "confidence": "strong-context",
+     "groupId": "",
+     "id": "edge_npc-myla-npc-tobin-ash-courier",
      "inferred": false,
      "provenance": "scanner",
      "reason": "structured key relationship",
@@ -4669,7 +4735,7 @@
     "archiveReason": "",
     "archiveSourceMessageId": null,
     "archived": false,
-    "background": "Raised in the river quarter; apprenticed to the archive at twelve; survived the flood year.",
+    "background": "Raised in the river quarter; served ten years as a royal archivist; apprenticed to the archive at twelve.",
     "behaviorProfile": [
      "Disposition: kind - helps strangers without fuss"
     ],
@@ -4690,26 +4756,31 @@
     "currentForm": "",
     "currentFormUnknown": false,
     "customFields": {
-     "Level": "3"
+     "Level": "4"
     },
     "fieldChangeMessages": {
+     "background": 7,
      "goal": 7,
+     "homeBase": 7,
      "keyRelationships": 7,
      "memories": 7,
      "mood": 7
     },
     "fieldChanges": {
+     "background": 5,
      "goal": 5,
+     "homeBase": 5,
      "keyRelationships": 5,
      "memories": 5,
      "mood": 5
     },
     "gender": "female",
     "goal": "Move to Mill Street",
-    "homeBase": "The old archive tower",
+    "homeBase": "Rooms above the bakery on Mill Street",
     "id": "npc_myla",
     "identityKind": "proper_name",
     "keyRelationships": [
+     "Tobin Ash — courier | brings her letters",
      "Ilse Venn — sister | close, protective; deceased"
     ],
     "lastRelationshipChange": {
@@ -4808,7 +4879,7 @@
     },
     "relationshipSummary": "Cautious respect for Ari after the archive fire.",
     "retentionProtected": false,
-    "role": "Archivist",
+    "role": "Former royal archivist",
     "seenCount": 5,
     "species": "Human",
     "speech": "Measured and precise; quotes old ledgers",
@@ -5768,7 +5839,7 @@
     "archiveReason": "",
     "archiveSourceMessageId": null,
     "archived": false,
-    "background": "Raised in the river quarter; apprenticed to the archive at twelve; survived the flood year.",
+    "background": "Raised in the river quarter; served ten years as a royal archivist; apprenticed to the archive at twelve.",
     "behaviorProfile": [
      "Disposition: kind - helps strangers without fuss"
     ],
@@ -5789,26 +5860,31 @@
     "currentForm": "",
     "currentFormUnknown": false,
     "customFields": {
-     "Level": "3"
+     "Level": "4"
     },
     "fieldChangeMessages": {
+     "background": 7,
      "goal": 7,
+     "homeBase": 7,
      "keyRelationships": 7,
      "memories": 7,
      "mood": 7
     },
     "fieldChanges": {
+     "background": 5,
      "goal": 5,
+     "homeBase": 5,
      "keyRelationships": 5,
      "memories": 5,
      "mood": 5
     },
     "gender": "female",
     "goal": "Move to Mill Street",
-    "homeBase": "The old archive tower",
+    "homeBase": "Rooms above the bakery on Mill Street",
     "id": "npc_myla",
     "identityKind": "proper_name",
     "keyRelationships": [
+     "Tobin Ash — courier | brings her letters",
      "Ilse Venn — sister | close, protective; deceased"
     ],
     "lastRelationshipChange": {
@@ -5907,7 +5983,7 @@
     },
     "relationshipSummary": "Cautious respect for Ari after the archive fire.",
     "retentionProtected": false,
-    "role": "Archivist",
+    "role": "Former royal archivist",
     "seenCount": 5,
     "species": "Human",
     "speech": "Measured and precise; quotes old ledgers",
@@ -6867,7 +6943,7 @@
     "archiveReason": "",
     "archiveSourceMessageId": null,
     "archived": false,
-    "background": "Raised in the river quarter; apprenticed to the archive at twelve; survived the flood year.",
+    "background": "Raised in the river quarter; served ten years as a royal archivist; apprenticed to the archive at twelve.",
     "behaviorProfile": [
      "Disposition: kind - helps strangers without fuss"
     ],
@@ -6891,23 +6967,28 @@
      "Level": "3"
     },
     "fieldChangeMessages": {
+     "background": 7,
      "goal": 7,
+     "homeBase": 7,
      "keyRelationships": 7,
      "memories": 7,
      "mood": 7
     },
     "fieldChanges": {
+     "background": 5,
      "goal": 5,
+     "homeBase": 5,
      "keyRelationships": 5,
      "memories": 5,
      "mood": 5
     },
     "gender": "female",
     "goal": "Move to Mill Street",
-    "homeBase": "The old archive tower",
+    "homeBase": "Rooms above the bakery on Mill Street",
     "id": "npc_myla",
     "identityKind": "proper_name",
     "keyRelationships": [
+     "Tobin Ash — courier | brings her letters",
      "Ilse Venn — sister | close, protective; deceased"
     ],
     "lastRelationshipChange": {
@@ -7006,7 +7087,7 @@
     },
     "relationshipSummary": "Cautious respect for Ari after the archive fire.",
     "retentionProtected": false,
-    "role": "Archivist",
+    "role": "Former royal archivist",
     "seenCount": 5,
     "species": "Human",
     "speech": "Measured and precise; quotes old ledgers",
