@@ -16,6 +16,14 @@ Story Suite v2. NSD stays standalone; with Story Block v2 it registers as a host
 
 ## Unreleased
 
+- **Refresh, backfill and the Megumin dossier import work the same way.** They are now one targeted pass with three kinds, so they share the same rules:
+  - A Refresh, backfill or import is no longer thrown away because another extension (Story Block, RPG Battle) rewrote the latest reply in place while it ran, as the scan already allowed; an edit or swipe of that reply still discards it.
+  - Backfill and import change no other dossier, as Refresh already did.
+  - Every one leaves a diagnostics receipt (backfill and import left none).
+  - A backfill that keeps the live state now applies it once, the same way before and after the merge, so no false "mood changed" marker is left.
+  - Refresh adds at most three new memories, as its instruction says (it took five).
+- **With Story Block v2, relationship changes start from the shown numbers.** While hosted, the scan reads, scores and forwards relationship changes from Story Block's meters (what the dossier view, the editor and the injection already show) instead of Delta's own copy, which then follows them; Refresh, backfill and import also forward any relationship change.
+
 - **Merging a duplicate dossier keeps the newer facts.** When two dossiers turn out to be the same NPC (an alias links them), the merged one used to take custom field values only from the older record, and the longer mood, location, goal and condition rather than the newer. It now takes the newer custom values and the most recently updated live state, keeps memories you typed as typed, and a hand-locked alias list takes only the other dossier's name.
 - **Locked aliases stay locked on import.** Importing a dossier bundle added the imported aliases even to a dossier whose aliases you had locked.
 - **Custom fields, the same everywhere.** The Megumin dossier import now merges configured custom fields like every other path (it never set them), and the dossier view and the Story Suite v2 `npc.dossier` query show the configured custom fields only, as the roleplay dossier and the suite profile already did; a value stored under a name you removed stays in the editor so you can clear it.

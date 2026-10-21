@@ -1,5 +1,5 @@
-// Drives the real dossier editor (openNpcEditor / saveNpcEditor) inside the runtime-smoke synthetic
-// host. A scenario is a function run in that host; it can use the editor helpers defined below.
+// Runs a scenario inside the runtime-smoke synthetic host. It can drive the real dossier editor
+// (openNpcEditor / saveNpcEditor) with the editor helpers defined below.
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -61,14 +61,19 @@ async function editNpc(id, changes = {}) {
 }
 `;
 
-export function runEditorHostScenario(name, scenario) {
+// `prelude` (optional) runs before Delta loads, for a host that must be on the page first.
+export function runEditorHostScenario(name, scenario, { prelude = null } = {}) {
     let source = fs.readFileSync(new URL('./runtime-smoke.mjs', import.meta.url), 'utf8');
     source = source.replace('const here = path.dirname(fileURLToPath(import.meta.url));', `const here = ${JSON.stringify(fileURLToPath(new URL('.', import.meta.url)))};`);
     const cut = source.indexOf(TRY_MARKER);
     if (cut < 0) throw new Error('Runtime smoke import marker changed');
     const script = `${source.slice(0, cut)}
 ${EDITOR_HELPERS}
+globalThis.document.documentElement ||= { dataset: {} };
 globalThis.document.readyState = 'loading';
+// index.js imports the v2 adapter from src/ at runtime, as the package ships it.
+fs.cpSync(path.join(sourceRoot, 'src'), path.join(extRoot, 'src'), { recursive: true });
+${prelude ? `await (${prelude.toString()})();` : ''}
 try {
     await import(pathToFileURL(path.join(extRoot, 'index.js')).href + \`?t=\${Date.now()}\`);
     await sleep(30);
