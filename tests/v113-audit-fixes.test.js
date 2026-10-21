@@ -47,7 +47,9 @@ test('2: no top-level constant in a shipped module goes unused', () => {
 
 test('3: every extension class in style.css is used by a shipped module', () => {
     const classes = [...new Set([...read('style.css').matchAll(/\.(npc-state-delta-[A-Za-z0-9_-]+)/g)].map(match => match[1]))];
-    assert.deepEqual(classes.filter(name => !all.includes(name)), []);
+    // src/ ships too (the Story Suite v2 adapter and its parts, imported by index.js at runtime).
+    const shipped = [all, ...fs.readdirSync(new URL('../src/', import.meta.url)).filter(name => name.endsWith('.js')).map(name => read(`src/${name}`))].join('\n');
+    assert.deepEqual(classes.filter(name => !shipped.includes(name)), []);
 });
 
 test('4: README describes named forms once, and the contract covers later releases', () => {

@@ -175,6 +175,18 @@
    search box over compact rows. Tapping a row opens the launcher dossier. */
 .npc-state-delta-story-pane { padding: 8px 12px 12px; box-sizing: border-box; min-width: 0; }
 .npc-state-delta-story-pane .npc-state-delta-present-grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+.npc-state-delta-v2-meters { display: grid; gap: 8px; margin-top: 10px; }
+.npc-state-delta-v2-meter-npc { display: grid; gap: 4px; padding: 6px 8px; border-left: 3px solid var(--SmartThemeQuoteColor, currentColor); border-radius: 6px; background: var(--SmartThemeBlurTintColor, transparent); }
+.npc-state-delta-v2-meter-npc h4 { margin: 0; font-size: 0.95em; }
+.npc-state-delta-v2-meter-bars { display: grid; grid-template-columns: repeat(auto-fill, minmax(9em, 1fr)); gap: 4px 12px; }
+/* The bars carry ss.meter's own classes, so Story Block's widget styles draw them; this is the same look for
+   when no Story Block widget has been drawn on the page yet. */
+.npc-state-delta-v2-meters .ss-w-meter { display: flex; flex-direction: column; gap: 0.2em; font-size: 0.9em; }
+.npc-state-delta-v2-meters .ss-w-meter-head { display: flex; align-items: baseline; gap: 0.4em; }
+.npc-state-delta-v2-meters .ss-w-meter-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.npc-state-delta-v2-meters .ss-w-meter-value { margin-left: auto; font-variant-numeric: tabular-nums; opacity: 0.75; }
+.npc-state-delta-v2-meters .ss-w-meter-track { position: relative; height: 0.6em; border-radius: 999px; background: color-mix(in srgb, var(--SmartThemeBodyColor, currentColor) 15%, transparent); overflow: hidden; }
+.npc-state-delta-v2-meters .ss-w-meter-fill { position: absolute; inset: 0 auto 0 0; width: calc(var(--ss-w-ratio, 0) * 100%); background: var(--ss-w-tone, var(--SmartThemeQuoteColor, currentColor)); border-radius: inherit; }
 .npc-state-delta-story-empty { margin: 4px 2px; opacity: .65; font-size: .85rem; }
 /* (1.2.13) An empty tab: why, then what would fill it. */
 .npc-state-delta-story-empty-state .npc-state-delta-story-empty { opacity: .8; line-height: 1.4; }

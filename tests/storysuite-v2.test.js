@@ -261,19 +261,20 @@ test('a v1 Story Block (registerTab, no ready or sdk) is not a v2 host and is le
 
 // ---- registration ----
 
-test('registers module npc-state-delta once, with no domains, four queries, a Cast tab and a settings section', async () => {
+test('registers module npc-state-delta once, with the npc domain, its queries and commands, a Cast tab and a settings section', async () => {
     const { adapter, sdk, def, timers } = await hosted();
     assert.equal(sdk.registered.length, 1);
     assert.equal(def.id, MODULE_ID);
     assert.equal(def.name, 'NPC State Delta');
     assert.equal(def.version, '1.2.19');
-    assert.deepEqual(def.domains, {});
-    assert.deepEqual(Object.keys(def.queries).sort(), ['npc.dossier', 'npc.known', 'npc.portrait', 'npc.present']);
+    assert.deepEqual(Object.keys(def.domains), ['npc'], 'one small domain: the NPC meters (F81, F90)');
+    assert.deepEqual(Object.keys(def.queries).sort(), ['npc.cast', 'npc.dossier', 'npc.known', 'npc.meters', 'npc.portrait', 'npc.present']);
     assert.deepEqual([...QUERY_NAMES].sort(), Object.keys(def.queries).sort());
-    assert.equal(def.commands, undefined);
-    assert.equal(def.capture, undefined);
-    assert.equal(def.context, undefined, 'Delta keeps its own prompt keys');
+    assert.deepEqual(Object.keys(def.commands).sort(), ['npc.adjust', 'npc.refresh', 'npc.set']);
+    assert.deepEqual(Object.keys(def.capture.kinds), ['npc']);
+    assert.equal(typeof def.context.static, 'function', 'one static line for the npc kind; Delta keeps its own prompt keys besides');
     assert.equal(typeof def.settings.section, 'function');
+    assert.deepEqual(Object.keys(def.settings.schema), ['changeCap', 'customMeters', 'stages']);
     assert.deepEqual(def.tabs.map(tab => [tab.id, tab.title]), [[CAST_TAB_ID, 'Cast']]);
     adapter.start();
     adapter.check();

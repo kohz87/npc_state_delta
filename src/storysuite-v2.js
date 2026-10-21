@@ -2,9 +2,14 @@
 //
 // NPC State Delta stays a standalone engine: its storage, capture, prompts and history rules are
 // its own and nothing here changes them. When a Story Block v2 host is on the page, Delta also
-// registers as module `npc-state-delta` (no domains) with four read-only queries, a Cast tab that
-// shows Delta's own present-cast cards, and a settings section that carries Delta's own settings
-// panel into the Story Suite overlay. While hosted, the copy in SillyTavern's extensions drawer is
+// registers as module `npc-state-delta` with read-only queries, a Cast tab that shows Delta's own
+// present-cast cards, and a settings section that carries Delta's own settings panel into the Story
+// Suite overlay. It also owns one small domain, `npc` (src/npc-meters.js; F81, F90): each NPC's
+// meters, stages and unlocked hidden notes in the per-reply state, so they swipe and delete back
+// with the replies. While hosted that slice is the truth for meter values: index.js reads it back
+// through sliceView() for the dossier view and the injection, and sends its scanner's relationship
+// changes as `npc.adjust` (adjust()); the `~ npc` change line, an NPC card under each reply and the
+// meters in the Cast tab come from here. While hosted, the copy in SillyTavern's extensions drawer is
 // hidden; if the host goes away it comes back exactly where it was. While hosted, <html> also carries
 // HOSTED_FLAG, which index.js and the CSS read (launcher, in-chat cast default, sidecar checks).
 //
@@ -23,11 +28,15 @@
 // Pure apart from the DOM it is given: no SillyTavern import, and every outside thing (Delta's
 // runtime api, the host global, the document, timers) is injectable for tests.
 import { resolveDossierTarget } from '../suite-handshake.js';
+import { NPC_KIND, createNpcPart, meterDefs, normalizeMeterSettings, normalizeSecrets, secretsFromLines, secretsToLines } from './npc-meters.js';
+import { METERS_CARD_ID, metersCardScreen } from './npc-meters-screen.js';
 
 export const MODULE_ID = 'npc-state-delta';
 export const MODULE_NAME = 'NPC State Delta';
 export const CAST_TAB_ID = 'cast';
-export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait']);
+export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast']);
+export const COMMAND_NAMES = Object.freeze(['npc.adjust', 'npc.set', 'npc.refresh']);
+export { METERS_CARD_ID };
 /** Sent on the document with detail { hosted } when Delta registers with a v2 host and when it goes away. */
 export const V2_HOST_EVENT = 'npc-state-delta:v2-host';
 /**
@@ -144,6 +153,25 @@ export function portraitUrl(npc, formPortraits = {}) {
     return null;
 }
 
+const METER_TONES = new Set(['neutral', 'accent', 'good', 'warn', 'bad', 'info']);
+
+/**
+ * One meter bar as ss.meter draws it (WIDGETS.md: role="meter", aria values, `ss-w-meter-*` parts,
+ * `--ss-w-ratio` on the track), as markup for the Cast tab. `def`: { id, label, min, max, tone }.
+ */
+export function meterBarHtml(def, value, stage = '') {
+    const min = Number.isFinite(def?.min) ? def.min : -100;
+    const max = Number.isFinite(def?.max) && def.max > min ? def.max : min + 100;
+    const now = Math.min(max, Math.max(min, Number.isFinite(Number(value)) ? Math.round(Number(value)) : min));
+    const ratio = Math.round(((now - min) / (max - min)) * 10000) / 10000;
+    const text = stage ? `${now} · ${stage}` : String(now);
+    const tone = METER_TONES.has(def?.tone) ? def.tone : 'neutral';
+    const label = escapeHtml(def?.label ?? def?.id ?? '');
+    return `<div class="ss-w ss-w-meter ss-w-tone-${tone}${ratio >= 1 ? ' ss-w-full' : ''}${ratio <= 0 ? ' ss-w-empty' : ''}" role="meter" aria-label="${label}" aria-valuemin="${min}" aria-valuemax="${max}" aria-valuenow="${now}" aria-valuetext="${escapeHtml(text)}" data-meter="${escapeHtml(def?.id ?? '')}">`
+        + `<div class="ss-w-meter-head"><span class="ss-w-meter-label">${label}</span><span class="ss-w-meter-value" aria-hidden="true">${escapeHtml(text)}</span></div>`
+        + `<div class="ss-w-meter-track" style="--ss-w-ratio: ${ratio}"><div class="ss-w-meter-fill"></div></div></div>`;
+}
+
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 // Used only if story-block-tabs.js cannot be loaded: the same empty line, without the Scan button.
 const fallbackEmptyCast = reason => `<div class="npc-state-delta-story-empty-state"><p class="npc-state-delta-story-empty">${escapeHtml(reason?.text || 'No NPC is present in the latest scene.')}</p></div>`;
@@ -212,17 +240,90 @@ export function createStorySuiteV2Adapter({
         }
     };
     const names = list => list.map(npc => String(npc.name ?? '').trim()).filter(Boolean);
+    const presentList = () => npcList().filter(npc => npc.present === true && npc.archived !== true);
+    // Delta's own record for a name, alias or id (as npc.dossier finds it), or null.
+    const dossierOf = name => {
+        const id = resolveDossierTarget(npcList(), name);
+        if (!id) return null;
+        const npc = runtime()?.getNpc?.(id);
+        return npc && typeof npc === 'object' ? npc : null;
+    };
+    const storedSettings = () => {
+        try { return sdkRef?.settings?.(MODULE_ID) ?? {}; } catch { return {}; }
+    };
+
+    // ---- the npc slice (src/npc-meters.js) ----
+
+    const part = createNpcPart({
+        resolve: name => {
+            const npc = dossierOf(name);
+            return npc ? { name: npc.name, aliases: Array.isArray(npc.aliases) ? npc.aliases : [], relationship: npc.relationship } : null;
+        },
+        baseline: () => runtime()?.relationshipBaseline?.() ?? {},
+        // Only the rules leave the dossier for the handlers; the texts go to the tail alone.
+        secretRules: (name, labels = []) => {
+            const npc = dossierOf(name) ?? labels.map(dossierOf).find(Boolean);
+            return normalizeSecrets(npc?.secrets).map(({ id, meter, at }) => ({ id, meter, at }));
+        },
+        secretTexts: (name, ids = []) => {
+            const npc = dossierOf(name);
+            return normalizeSecrets(npc?.secrets).filter(secret => ids.includes(secret.id)).map(({ id, text }) => ({ id, text }));
+        },
+        present: () => names(presentList()),
+        settings: storedSettings,
+    });
+    // The slice entries at the head, by key (null when the host cannot answer).
+    const sliceEntries = () => {
+        if (!hosted || typeof sdkRef?.query !== 'function') return null;
+        try {
+            const list = sdkRef.query('npc.meters', {});
+            return Array.isArray(list) ? list : null;
+        } catch {
+            return null;
+        }
+    };
+    const entryFor = (entries, npc) => {
+        if (!entries?.length || !npc) return null;
+        const byKey = Object.fromEntries(entries.map(entry => [entry.key, entry]));
+        const who = part.identify(byKey, npc.name);
+        return who && Object.hasOwn(byKey, who.key) ? byKey[who.key] : null;
+    };
+    // The built-in meters of a slice entry as Delta's `relationship`.
+    const relationshipOf = (entry, fallback = {}) => Object.fromEntries(RELATIONSHIP_KEYS.map(key => [key, Number.isInteger(entry?.meters?.[key]) ? entry.meters[key] : (Number(fallback?.[key]) || 0)]));
+
     const queries = Object.freeze({
-        /** Names of the NPCs present in the current scene, in dossier order. */
-        'npc.present': () => names(npcList().filter(npc => npc.present === true && npc.archived !== true)),
+        /**
+         * Names of the NPCs present in the current scene, in dossier order. With { meters: true },
+         * [{ name, meters, stages }] instead (the slice's values; null meters for someone it has no entry for).
+         */
+        'npc.present': (state, args) => {
+            const list = presentList();
+            if (args?.meters !== true) return names(list);
+            return list.map(npc => {
+                const entry = part.queries['npc.meters'](state, { name: npc.name });
+                return { name: String(npc.name ?? '').trim(), meters: entry?.meters ?? null, stages: entry?.stages ?? {} };
+            }).filter(item => item.name);
+        },
         /** Names of every tracked (not archived) NPC, in dossier order. */
         'npc.known': () => names(npcList().filter(npc => npc.archived !== true)),
-        /** One NPC's dossier fields by name, alias or id (case-insensitive, exact), or null. */
+        /**
+         * One NPC's dossier fields by name, alias or id (case-insensitive, exact), or null. While the
+         * slice has an entry for them, `relationship` is the slice's and `meters`, `stages` and
+         * `unlocked` (note ids) are added. Hidden notes are never part of it.
+         */
         'npc.dossier': (state, args) => {
             try {
-                const id = resolveDossierTarget(npcList(), args?.name);
-                if (!id) return null;
-                return dossierFields(runtime()?.getNpc?.(id));
+                const npc = dossierOf(args?.name);
+                if (!npc) return null;
+                const out = dossierFields(npc);
+                const entry = part.queries['npc.meters'](state, { name: npc.name });
+                if (entry) {
+                    out.relationship = relationshipOf(entry, out.relationship);
+                    out.meters = entry.meters;
+                    out.stages = entry.stages;
+                    out.unlocked = entry.unlocked;
+                }
+                return out;
             } catch (error) {
                 warn('Story Suite v2 dossier query failed', error);
                 return null;
@@ -244,6 +345,10 @@ export function createStorySuiteV2Adapter({
                 return null;
             }
         },
+        /** npc.meters({ name }) → { key, name, meters, stages, unlocked, … } | null; no name: every entry. */
+        'npc.meters': (state, args) => part.queries['npc.meters'](state, args ?? {}),
+        /** npc.cast() → the slice's NPCs with their bars, present first (the NPC card). */
+        'npc.cast': state => part.queries['npc.cast'](state),
     });
 
     // ---- the drawer copy ----
@@ -346,6 +451,24 @@ export function createStorySuiteV2Adapter({
         });
     }
 
+    // The present NPCs' meters under the cards: one bar per shown meter, drawn with ss.meter's own
+    // markup and classes (role="meter", the --ss-w-ratio fill) so Story Block's widget styles apply.
+    // A module tab is given no widget renderer (SPEC §6 tabs get el, view, api), so the bars are
+    // written here; the NPC card under each reply uses the real ss.meter widget (npc-meters-screen.js).
+    function castMetersHtml() {
+        const entries = sliceEntries();
+        if (!entries?.length) return '';
+        const defs = meterDefs(normalizeMeterSettings(storedSettings()), runtime()?.relationshipBaseline?.() ?? {}).filter(def => def.show);
+        const blocks = [];
+        for (const npc of presentList()) {
+            const entry = entryFor(entries, npc);
+            if (!entry) continue;
+            const bars = defs.map(def => meterBarHtml(def, entry.meters?.[def.id] ?? def.start, entry.stages?.[def.id] ?? '')).join('');
+            blocks.push(`<section class="npc-state-delta-v2-meter-npc" data-npc-key="${escapeHtml(entry.key)}"><h4>${escapeHtml(entry.name)}</h4><div class="npc-state-delta-v2-meter-bars">${bars}</div></section>`);
+        }
+        return blocks.length ? `<div class="npc-state-delta-v2-meters"><span class="npc-state-delta-kicker">METERS</span>${blocks.join('')}</div>` : '';
+    }
+
     // Delta's own present-cast cards (the same markup as v1's Present NPCs tab), or why it is empty.
     function renderCast(el) {
         if (!el) return;
@@ -356,7 +479,8 @@ export function createStorySuiteV2Adapter({
         if (!api) body = emptyCast({ text: 'NPC State Delta is still loading.' });
         else if (!enabled()) body = emptyCast({ text: 'NPC State Delta is off.' });
         else body = String(api.presentCastHtml?.() || '') || emptyCast(api.castEmptyReason?.());
-        const html = `<div class="${PANE_CLASS}">${body}</div>`;
+        const meters = api && enabled() ? castMetersHtml() : '';
+        const html = `<div class="${PANE_CLASS}">${body}${meters}</div>`;
         if (el.__npcStateDeltaV2Cast === html) return;
         el.innerHTML = html;
         el.__npcStateDeltaV2Cast = html;
@@ -370,13 +494,25 @@ export function createStorySuiteV2Adapter({
         id: MODULE_ID,
         name: MODULE_NAME,
         version: String(version),
-        domains: {},
+        domains: part.domains,
+        commands: part.commands,
         queries,
+        capture: {
+            kinds: { [NPC_KIND]: { grammar: part.kinds[NPC_KIND].grammar } },
+            apply: (ctx, line) => part.kinds[NPC_KIND].apply(ctx, line),
+        },
+        context: {
+            // Nothing about meters while Delta is off; otherwise the same line until the settings change.
+            static: () => (enabled() ? part.context.static() : ''),
+            tail: view => (enabled() ? part.context.tail(view) : { lines: [], optional: [] }),
+            budget: part.context.budget,
+        },
         settings: {
-            defaults: {},
-            schema: {},
+            defaults: part.settings.defaults,
+            schema: part.settings.schema,
             section: (el) => mountSection(el),
         },
+        screens: [metersCardScreen],
         tabs: [{
             id: CAST_TAB_ID,
             title: 'Cast',
@@ -504,8 +640,59 @@ export function createStorySuiteV2Adapter({
         return false;
     }
 
+    // ---- what index.js asks while hosted (each a no-op answer without a host) ----
+
+    // A command to the host as Delta's own action (cause ui; the host keeps other causes for itself).
+    async function send(type, payload) {
+        if (!hosted || typeof sdkRef?.command !== 'function') return null;
+        try {
+            const out = await sdkRef.command(type, payload);
+            if (out && out.ok === false && out.code !== 'REFUSED' && out.code !== 'NOT_FOUND') warn(`Story Suite v2 ${type} was not kept: ${out.message ?? out.code}`);
+            return out ?? null;
+        } catch (error) {
+            warn(`Story Suite v2 ${type} failed`, error);
+            return null;
+        }
+    }
+
+    /**
+     * `npcs` (Delta's records) with each one's `relationship` read from the v2 slice where the slice
+     * has an entry; the same array when not hosted or when nothing differs. Never changes `npcs`.
+     */
+    function sliceView(npcs) {
+        if (!Array.isArray(npcs) || !hosted) return npcs;
+        const entries = sliceEntries();
+        if (!entries?.length) return npcs;
+        let changed = false;
+        const out = npcs.map(npc => {
+            const entry = npc && typeof npc === 'object' ? entryFor(entries, npc) : null;
+            if (!entry) return npc;
+            const relationship = relationshipOf(entry, npc.relationship);
+            if (RELATIONSHIP_KEYS.every(key => Number(npc.relationship?.[key]) === relationship[key])) return npc;
+            changed = true;
+            return { ...npc, relationship };
+        });
+        return changed ? out : npcs;
+    }
+
     return Object.freeze({
         definition,
+        /** While hosted: Delta's scanner changes for one NPC → `npc.adjust` (a promise of the result, or null). */
+        adjust: ({ name, meters, start, reply } = {}) => send('npc.adjust', { name, meters, ...(start ? { start } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}) }),
+        /** While hosted: the reader's own values from the dossier editor → `npc.set`. */
+        setMeters: ({ name, meters, reply } = {}) => send('npc.set', { name, meters, ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}) }),
+        /** While hosted: stages and notes again for one NPC (after its notes were edited) → `npc.refresh`. */
+        refresh: name => send('npc.refresh', { name }),
+        /** While hosted: one NPC's slice entry (npc.meters), or null. */
+        meters: name => {
+            const entries = sliceEntries();
+            const npc = dossierOf(name) ?? { name };
+            return entries ? entryFor(entries, npc) : null;
+        },
+        sliceView,
+        /** A dossier's hidden notes as editor lines, and editor lines back to notes (src/npc-meters.js). */
+        secretLines: list => secretsToLines(list),
+        parseSecrets: (text, previous) => secretsFromLines(text, previous),
         /** Start looking for the host (idempotent). */
         start() {
             if (started) return;

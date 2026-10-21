@@ -1,0 +1,4 @@
+Story Block 2.0.0-alpha.1 (v2 branch)
+commit 74f8630c7a9190676941f36c5a9d09015b185919
+files: src/id.js, src/v2/{capture,check,commands,ops,persist,registry,rng,store}.js
+The real store, command bus, registry and change-line parser, for tests/storysuite-v2-meters-host.test.js only.
