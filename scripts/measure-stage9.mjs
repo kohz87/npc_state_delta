@@ -12,7 +12,11 @@ const source = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
 // The scanner request (response lengths, JSON retry) lives in src/scanner-request.js.
 const request = await import(pathToFileURL(path.join(root, 'src', 'scanner-request.js')));
 const lengths = Object.fromEntries(Object.entries(request).filter(([name]) => /RESPONSE_LENGTH$/.test(name)));
-const systems = [...source.matchAll(/systemPrompt: "([^"]+)"/g)].map(match => match[1]);
+const systemPrompts = text => [...text.matchAll(/systemPrompt: "([^"]+)"/g)].map(match => match[1]);
+const systems = systemPrompts(source);
+// The focused relationship pass (systems[3]) lives in src/relationship-pass.js.
+const relationshipPassPath = path.join(root, 'src', 'relationship-pass.js');
+if (fs.existsSync(relationshipPassPath)) systems.splice(3, 0, ...systemPrompts(fs.readFileSync(relationshipPassPath, 'utf8')));
 assert.equal(systems.length, 5, 'Review measurement fixture when request owners change.');
 const requestOwner = request.generateParsedNpcJson;
 const npc = core.normalizeNpcRecord({ id: 'survey-clerk', name: 'Mara', age: '26', apparentAge: '~26', present: true,

@@ -16,6 +16,8 @@ Story Suite v2. NSD stays standalone; with Story Block v2 it registers as a host
 
 ## Unreleased
 
+- Cleanup: the focused relationship pass (who needs a relationship decision, the isolated evaluator request, applying its decisions) moves from `index.js` to `src/relationship-pass.js`. Nothing Delta stores, sends or shows changes.
+
 - Cleanup: the scanner request (one dispatch, JSON parsing, the compact retry) moves from `index.js` to `src/scanner-request.js`; validation looks for the shared dispatcher in the runtime's `src/` modules too. Nothing Delta stores, sends or shows changes.
 
 - Cleanup: the chat text helpers (recent windows, the current exchange, the story day) move from `index.js` to `src/transcript.js`, the first part of splitting `index.js`. Nothing Delta stores, sends or shows changes.
