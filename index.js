@@ -7689,6 +7689,8 @@ async function init() {
     getSettings();
     clearLegacyPromptKeys();
     connectStorySuite();
+    // Story Suite v2 (Story Block 2): optional; without a v2 host the adapter does nothing.
+    import('./src/storysuite-v2.js').then(v2 => v2.startStorySuiteV2({ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION })).catch(error => console.debug('[NPC State Delta] Story Suite v2 adapter is not available', error));
     bindUi();
     installUiCaptureBridge();
     registerEvents();
