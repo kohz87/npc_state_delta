@@ -3,18 +3,32 @@
 // capture kind; the initial state; hooks, tabs, settings, prompt contexts). One writer per
 // domain: a second owner for a domain, command, query, capture kind or tab is refused with a
 // plain sentence, and nothing of the refused module is kept. Pure: no DOM, no SillyTavern.
+//
+// Old and new versions meet (SPEC §6): a module may say which Story Block it needs
+// (`requires: { storyBlock: '>=2.0.0' }`) and is refused with "needs Story Block ≥ x" when this
+// one is older; a field this host does not know (a newer module's) is logged and ignored, never a
+// refusal. A domain's initial() that throws when a chat starts costs that domain only.
+
+import { parseRange, parseVersion, satisfies } from './packs/version.js';
 
 // Commands the registry makes itself, so the command bus can run them like any other:
 // `capture.<kind>` runs the owner's capture.apply on a change line (turn.js), and
 // `module.init.<id>` adds a late module's initial slices (sdk.js). Modules cannot use these
 // prefixes for their own commands.
+//
+// Internal commands (`isInternal(type)`): those two families, and any module command marked
+// `internal: true` (the events part's `events.fire`). They are steps the host takes itself (a change
+// line, a module's set-up, a due event): the command bus refuses them with cause 'ui', from the top or
+// through ctx.call, and the public sdk refuses to send them at all, so no button, screen, widget or
+// layout can name one. A command is marked either as `{ handler, internal: true }` in `commands`, or
+// as a handler function that carries `internal === true` itself.
 export const CAPTURE_PREFIX = 'capture.';
 export const INIT_PREFIX = 'module.init.';
 // The host's module id and the namespace of its standard widgets (MODULES §F9).
 export const HOST_MODULE = 'story-block';
 export const STANDARD_PREFIX = 'ss.';
 
-const KNOWN_KEYS = ['id', 'name', 'version', 'description', 'domains', 'commands', 'queries', 'capture', 'context', 'hooks', 'settings', 'tabs', 'screens', 'widgets'];
+const KNOWN_KEYS = ['id', 'name', 'version', 'description', 'requires', 'domains', 'commands', 'queries', 'capture', 'context', 'hooks', 'settings', 'tabs', 'screens', 'widgets'];
 const FIELD_TYPES = ['bool', 'int', 'choice', 'text', 'list'];
 
 const MODULE_ID = /^[a-z0-9][a-z0-9._-]*$/;
@@ -96,8 +110,13 @@ export function definitionProblems(def) {
         return true;
     };
     if (typeof def.id !== 'string' || !MODULE_ID.test(def.id)) problems.push('its id must be lowercase letters, digits, ".", "_" or "-" (like "rpg-battle")');
-    for (const key of Object.keys(def)) if (!KNOWN_KEYS.includes(key)) problems.push(`"${key}" is not a module field (known: ${KNOWN_KEYS.join(', ')})`);
     for (const key of ['name', 'version', 'description']) if (def[key] !== undefined && typeof def[key] !== 'string') problems.push(`${key} is not text`);
+    if (def.requires !== undefined) {
+        if (!isObject(def.requires)) problems.push('requires is not an object (like { storyBlock: ">=2.0.0" })');
+        else if (def.requires.storyBlock !== undefined && (typeof def.requires.storyBlock !== 'string' || !parseRange(def.requires.storyBlock))) {
+            problems.push('requires.storyBlock is not a version range (like ">=2.0.0" or "^2")');
+        }
+    }
 
     if (map(def.domains, 'domains')) {
         for (const [name, domain] of Object.entries(def.domains)) {
@@ -105,6 +124,9 @@ export function definitionProblems(def) {
             if (!isObject(domain)) { problems.push(`domain "${name}" is not an object`); continue; }
             fn(domain.initial, `domain "${name}" initial`);
             if (domain.validate !== undefined) fn(domain.validate, `domain "${name}" validate`);
+            if (domain.counters !== undefined && (!Array.isArray(domain.counters) || domain.counters.some(path => typeof path !== 'string' || !/^[^/~][^~]*$/.test(path)))) {
+                problems.push(`domain "${name}" counters must be a list of paths inside the domain, like "wallets/*/coin"`);
+            }
             if (typeof domain.initial === 'function') {
                 let slice;
                 try { slice = domain.initial(); } catch (error) { problems.push(`domain "${name}" initial() threw: ${error?.message ?? error}`); continue; }
@@ -117,7 +139,11 @@ export function definitionProblems(def) {
         for (const [type, handler] of Object.entries(def.commands)) {
             if (!COMMAND.test(type)) problems.push(`the command name "${type}" must be words joined by dots (like "item.use")`);
             else if (type.startsWith(CAPTURE_PREFIX) || type.startsWith('module.')) problems.push(`the command name "${type}" uses a prefix Story Block keeps for itself ("capture." or "module.")`);
-            fn(handler, `command "${type}"`);
+            if (isObject(handler)) {
+                fn(handler.handler, `command "${type}" handler`);
+                if (handler.internal !== undefined && typeof handler.internal !== 'boolean') problems.push(`command "${type}" internal is not true or false`);
+                for (const key of Object.keys(handler)) if (!['handler', 'internal'].includes(key)) problems.push(`"${key}" is not a command field (known: handler, internal)`);
+            } else fn(handler, `command "${type}"`);
         }
     }
     if (map(def.queries, 'queries')) {
@@ -200,7 +226,42 @@ export function definitionProblems(def) {
     return problems;
 }
 
-export function createRegistry() {
+/**
+ * The fields of a definition this host does not know (a newer module's, like MODULES §F100's
+ * `features`): plain sentences. They are logged when the module registers and otherwise ignored.
+ */
+export function definitionWarnings(def) {
+    if (!isObject(def)) return [];
+    const out = Object.keys(def).filter(key => !KNOWN_KEYS.includes(key)).map(key => `"${key}" is not a module field this Story Block knows; it is ignored`);
+    if (isObject(def.requires)) {
+        for (const key of Object.keys(def.requires)) if (key !== 'storyBlock') out.push(`"requires.${key}" is not a requires field this Story Block knows; it is ignored`);
+    }
+    return out;
+}
+
+const compareVersions = (a, b) => (a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2]);
+
+// What a refused module needs, for the reader: "≥ 2.1.0" when every alternative of the range starts
+// at a version above `version`, else the range as written ("<2", "^1.4").
+function neededVersion(range, version) {
+    const v = parseVersion(version);
+    const alternatives = parseRange(range);
+    if (!v || !alternatives) return range;
+    const lows = alternatives.map(checks => checks
+        .filter(([op]) => op === '>=' || op === '=')
+        .map(([, target]) => target)
+        .reduce((best, target) => (!best || compareVersions(target, best) > 0 ? target : best), null));
+    if (lows.some(low => !low)) return range;
+    const lowest = lows.reduce((a, b) => (compareVersions(a, b) <= 0 ? a : b));
+    return compareVersions(lowest, v) > 0 ? `≥ ${lowest.join('.')}` : range;
+}
+
+/**
+ * `hostVersion`: this Story Block's version (runtime.js VERSION), checked against each module's
+ * `requires.storyBlock`; null skips that check (a registry built outside the host).
+ * `warn(message)`: where definition warnings and failed initial() calls go (default console.warn).
+ */
+export function createRegistry({ hostVersion = null, warn = message => console.warn(`[Story Suite] ${message}`) } = {}) {
     const defs = new Map();
     const owners = { domain: new Map(), command: new Map(), query: new Map(), kind: new Map(), tab: new Map(), screen: new Map(), widget: new Map() };
     // Every capture kind and alias → its canonical kind.
@@ -233,6 +294,10 @@ export function createRegistry() {
         const id = isObject(def) && typeof def.id === 'string' ? def.id : '?';
         const problems = definitionProblems(def);
         if (problems.length) refuse(id, problems);
+        const range = def.requires?.storyBlock;
+        if (hostVersion && typeof range === 'string' && !satisfies(hostVersion, range)) {
+            throw new Error(`Story Suite: ${def.name ?? id} needs Story Block ${neededVersion(range, hostVersion)}; this is ${hostVersion}. Update Story Block to use it.`);
+        }
         if (defs.has(id)) refuse(id, ['a module with this id is already registered']);
         const clashes = [];
         const seen = new Set();
@@ -250,6 +315,7 @@ export function createRegistry() {
             for (const alias of spec.aliases ?? []) canonical.set(alias, kind);
         }
         defs.set(id, def);
+        for (const message of definitionWarnings(def)) warn(`${def.name ?? id}: ${message}.`);
     }
 
     function captureEntry(word) {
@@ -259,16 +325,54 @@ export function createRegistry() {
         return { moduleId: def.id, kind, grammar: def.capture.kinds[kind].grammar.trim(), apply: def.capture.apply };
     }
 
-    // `module.init.<id>`: sets each of the module's domains to its initial() slice (§2.6).
+    // One domain's initial() slice, a plain copy; null when it throws or is not plain JSON. Each
+    // failure is logged once (until that domain works again), so a broken domain costs only itself
+    // and the retry at every later turn stays quiet.
+    const failing = new Map();
+    function initialSlice(name) {
+        const owner = owners.domain.get(name);
+        const def = defs.get(owner);
+        let problem = '';
+        let slice = null;
+        try {
+            slice = def.domains[name].initial();
+            problem = isObject(slice) ? jsonProblem(slice, `/domains/${name}`) : `initial() does not return an object`;
+        } catch (error) {
+            problem = `initial() threw: ${error?.message ?? error}`;
+        }
+        if (!problem) {
+            failing.delete(name);
+            return structuredClone(slice);
+        }
+        if (failing.get(name) !== problem) {
+            failing.set(name, problem);
+            warn(`${def.name ?? owner}: the domain "${name}" could not be set up (${problem}); the rest of the story goes on without it, and it is tried again later.`);
+        }
+        return null;
+    }
+
+    // `module.init.<id>`: sets the module's domains the state lacks to their initial() slices (§2.6).
+    // The payload names them ({ domains: [...] }, from sdk.js ensureModules); without it, every
+    // domain of the module. Either way a domain the chat already holds is never reset (a module that
+    // gains a domain keeps the data of the others). A domain whose initial() fails is skipped; the
+    // command fails only when none could be set up.
     function initHandler(def) {
-        return ctx => {
-            for (const [name, domain] of Object.entries(def.domains ?? {})) {
+        return (ctx, payload) => {
+            const own = Object.keys(def.domains ?? {});
+            const lacking = name => typeof ctx.read !== 'function' || ctx.read(name) == null;
+            const named = own.filter(name => (!Array.isArray(payload?.domains) || payload.domains.includes(name)) && lacking(name));
+            const done = [];
+            for (const name of named) {
+                const slice = initialSlice(name);
+                if (!slice) continue;
                 const draft = ctx.draft(name);
                 if (!isObject(draft)) ctx.fail('FAILED', `The ${def.name ?? def.id} state could not be set up.`);
                 for (const key of Object.keys(draft)) delete draft[key];
-                Object.assign(draft, domain.initial());
+                Object.assign(draft, slice);
+                done.push(name);
             }
-            return { summary: `${def.name ?? def.id} is set up.`, narrate: false, data: { module: def.id } };
+            if (named.length && !done.length) ctx.fail('FAILED', `The ${def.name ?? def.id} state could not be set up: ${named.map(name => failing.get(name) ?? '').filter(Boolean).join('; ')}.`);
+            return { summary: `${def.name ?? def.id} is set up.`, narrate: false, data: { module: def.id, domains: done } };
         };
     }
 
@@ -282,8 +386,21 @@ export function createRegistry() {
             const def = defs.get(name.slice(INIT_PREFIX.length));
             return def && Object.keys(def.domains ?? {}).length ? initHandler(def) : null;
         }
+        const entry = commandEntry(name);
+        return entry ? (isObject(entry) ? entry.handler : entry) : null;
+    }
+
+    function commandEntry(name) {
         const owner = owners.command.get(name);
         return owner ? defs.get(owner).commands[name] : null;
+    }
+
+    // Steps the host takes itself (see the top): never a reader's action.
+    function isInternal(type) {
+        const name = String(type ?? '');
+        if (name.startsWith(CAPTURE_PREFIX) || name.startsWith(INIT_PREFIX)) return true;
+        const entry = commandEntry(name);
+        return Boolean(entry) && entry.internal === true;
     }
 
     function commandOwner(type) {
@@ -293,14 +410,13 @@ export function createRegistry() {
         return owners.command.get(name) ?? null;
     }
 
+    // A domain whose initial() fails is left out (logged once); sdk.js ensureModules adds it later.
     function initialState() {
         const domains = {};
         const names = [...owners.domain.keys()].sort();
         for (const name of names) {
-            const slice = defs.get(owners.domain.get(name)).domains[name].initial();
-            const problem = isObject(slice) ? jsonProblem(slice, `/domains/${name}`) : `domain "${name}" initial() does not return an object`;
-            if (problem) throw new Error(`Story Suite: the initial state cannot be built: ${problem}.`);
-            domains[name] = structuredClone(slice);
+            const slice = initialSlice(name);
+            if (slice) domains[name] = slice;
         }
         return { v: 2, meta: { rev: 0, claims: {} }, domains };
     }
@@ -317,6 +433,8 @@ export function createRegistry() {
         queryOwner: name => owners.query.get(name) ?? null,
         /** The handler for a command type (module commands and the registry's own), or null. */
         command,
+        /** True for a command only the host runs (capture.*, module.init.*, commands marked internal). */
+        isInternal,
         /** { moduleId, kind, grammar, apply } for a capture kind or alias, or null. */
         capture: captureEntry,
         /** The canonical kind a written kind word stands for, or null. */
@@ -324,6 +442,12 @@ export function createRegistry() {
         validator(name) {
             const owner = owners.domain.get(name);
             return owner ? defs.get(owner).domains[name].validate ?? null : null;
+        },
+        /** The number paths a domain keeps as counts (`counters`, ops.js), [] when none. */
+        counters(name) {
+            const owner = owners.domain.get(name);
+            const list = owner ? defs.get(owner).domains[name].counters : null;
+            return Array.isArray(list) ? [...list] : [];
         },
         query(name) {
             const owner = owners.query.get(name);

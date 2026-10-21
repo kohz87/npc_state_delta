@@ -73,11 +73,14 @@ function setKey(target, key, value) {
     else target[key] = value;
 }
 
-/** A deep copy of plain JSON (other values are kept as they are, for checkOps to report). */
+/**
+ * A deep copy of plain JSON (other values are kept as they are, for checkOps to report). An object
+ * without a prototype (a change line's labels) stays one, so a key it lacks is never an inherited one.
+ */
 export function clone(value) {
     if (Array.isArray(value)) return value.map(clone);
     if (isPlainObject(value)) {
-        const out = {};
+        const out = Object.getPrototypeOf(value) === null ? Object.create(null) : {};
         for (const key of Object.keys(value)) setKey(out, key, clone(value[key]));
         return out;
     }
@@ -199,6 +202,84 @@ function applyOne(root, op, fresh) {
     return step(root, 0);
 }
 
+// ---------- counters (B3-8) ----------
+//
+// A domain may name number fields that are counts kept by adding and taking away (`counters`, paths
+// relative to the domain with `*` for any one key: the inventory's `wallets/*/coin`, `stacks/*/qty`).
+// A `replace` of such a number keeps the value it replaced (`was`). On replay, when the value found is
+// not `was` (an earlier reply was deleted, so the count stands elsewhere), the op adds its own change
+// (`value - was`) to what is there instead of writing its number (`rebaseOps`); the store then runs the
+// domain's validator on the result. Ops without `was` (older records, other fields) apply as written.
+// A `remove` of a thing that holds a counter (a stack a reply emptied) keeps that counter's number then
+// (`was`) and where it is inside the thing (`count`, '/qty'). On replay, when the thing holds another
+// number (an earlier reply was deleted), it is taken from instead: `was` comes off and the rest stays;
+// holding less than `was` goes below zero, which the validator refuses (that block is skipped). Holding
+// `was` exactly, it goes, as written.
+
+/** True when `path` (/domains/<name>/…) is one of the domain's `counters` patterns. */
+export function isCounterPath(path, patterns) {
+    if (!Array.isArray(patterns) || !patterns.length) return false;
+    let keys;
+    try { keys = parsePath(path); } catch { return false; }
+    if (keys[0] !== 'domains' || keys.length < 3) return false;
+    const rest = keys.slice(2);
+    return patterns.some(pattern => {
+        const parts = String(pattern).split('/').filter(Boolean);
+        return parts.length === rest.length && parts.every((part, i) => part === '*' || part === rest[i]);
+    });
+}
+
+/**
+ * The pointer, inside the thing at `path`, of the one counter it holds ('/qty' for a stack, with
+ * the inventory's stack pattern), or null when no `patterns` entry reaches past `path` to a fixed key.
+ */
+export function counterInside(path, patterns) {
+    if (!Array.isArray(patterns) || !patterns.length) return null;
+    let keys;
+    try { keys = parsePath(path); } catch { return null; }
+    if (keys[0] !== 'domains' || keys.length < 3) return null;
+    const rest = keys.slice(2);
+    for (const pattern of patterns) {
+        const parts = String(pattern).split('/').filter(Boolean);
+        if (parts.length <= rest.length || !rest.every((key, i) => parts[i] === '*' || parts[i] === key)) continue;
+        const inside = parts.slice(rest.length);
+        if (inside.includes('*')) continue;
+        return inside.map(key => `/${escapeKey(key)}`).join('');
+    }
+    return null;
+}
+
+/**
+ * `ops` with each counter op (`replace` with a numeric `was`) moved onto the value `state` holds
+ * there, and each `remove` of a thing holding a counter (`was`, `count`) that now holds another
+ * number turned into taking `was` from it: { ops, rebased: Set of domain names whose counts moved }.
+ * Ops are not changed in place.
+ */
+export function rebaseOps(state, ops) {
+    const rebased = new Set();
+    const moved = path => {
+        const keys = parsePath(path);
+        if (keys[0] === 'domains' && keys[1]) rebased.add(keys[1]);
+    };
+    const out = ops.map(op => {
+        if (op?.op === 'remove' && typeof op.was === 'number' && typeof op.count === 'string' && op.count.startsWith('/')) {
+            const at = `${op.path}${op.count}`;
+            const now = valueAt(state, at);
+            if (typeof now !== 'number' || now === op.was) return op;
+            // Take `was` from what is there: the rest stays; less than `was` there is below zero, which
+            // the domain's validator refuses (the block is skipped), as a take of more than is held is.
+            moved(op.path);
+            return { op: 'replace', path: at, value: now - op.was, was: now };
+        }
+        if (op?.op !== 'replace' || typeof op.was !== 'number' || typeof op.value !== 'number') return op;
+        const now = valueAt(state, op.path);
+        if (typeof now !== 'number' || now === op.was) return op;
+        moved(op.path);
+        return { ...op, value: now + (op.value - op.was), was: now };
+    });
+    return { ops: out, rebased };
+}
+
 /** The value at a JSON Pointer, or undefined when the path does not exist. Never throws. */
 export function valueAt(state, path) {
     let keys;
@@ -213,11 +294,15 @@ export function valueAt(state, path) {
 
 // Keys whose values must be IDs: `id`, and names ending in `Id` or `_id` (`stackId`, `owner_id`).
 const ID_KEY = /^(?:id|.+Id|.+_id)$/;
+// Keys no value in the state may hold: copied with Object.assign or a for-in loop they would change
+// an object's prototype, and code reading them would get the language's own (QA #70).
+export const FORBIDDEN_KEYS = Object.freeze(['__proto__', 'constructor', 'prototype']);
 
 /**
  * checkOps(ops, before?) → string[]: the generic rules of SPEC §2.5, as plain sentences (empty when
  * fine). Every op: a known op, a well-formed path below the root, a plain-JSON value (no NaN, no
- * Infinity, no undefined). Anywhere in a value or at the end of a path:
+ * Infinity, no undefined, no key named __proto__, constructor or prototype inside a value). Anywhere
+ * in a value or at the end of a path:
  * * `qty` is a whole number, 0 or more;
  * * `/meta/rev` is a whole number, 0 or more;
  * * a key named `id` holds a well-formed ID (`it_k3f9a2qz` or `story/moonveil-trout`); a key ending
@@ -271,7 +356,13 @@ function checkValue(value, key, path, errors) {
     }
     if (Array.isArray(value)) value.forEach((item, i) => checkValue(item, String(i), `${path}/${i}`, errors));
     else if (value !== null && typeof value === 'object') {
-        for (const child of Object.keys(value)) checkValue(value[child], child, `${path}/${escapeKey(child)}`, errors);
+        for (const child of Object.keys(value)) {
+            if (FORBIDDEN_KEYS.includes(child)) {
+                errors.push(`${path} holds a key named "${child}", which the state may not use.`);
+                continue;
+            }
+            checkValue(value[child], child, `${path}/${escapeKey(child)}`, errors);
+        }
     }
 }
 

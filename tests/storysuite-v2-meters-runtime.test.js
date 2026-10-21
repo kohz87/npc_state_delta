@@ -152,6 +152,64 @@ test('hosted: a scan\'s relationship change goes to the slice as npc.adjust; the
     assert.ok(scenarioOutput(output).relationship.trust > 0);
 });
 
+// (NSD r2) Story Block writes a module's command onto its head reply. A scan that finishes after the
+// reader swiped that reply belongs to the swipe that is gone: its changes stay in Delta's sidecar
+// (as its own rules decide) but nothing is sent to the host, so the new swipe's meters are untouched.
+test('hosted: a scan that finishes after a swipe sends no npc.adjust onto the new swipe', () => {
+    const output = runHostScenario('meters-swipe-guard', async () => {
+        const sdk = {
+            registered: [], sent: [],
+            registerModule(def) { sdk.registered.push(def); },
+            command: async (type, payload, options) => { sdk.sent.push({ type, payload, options: options ?? null }); return { ok: true, receipt: { summary: '' } }; },
+            query: () => null,
+            settings: () => ({}),
+        };
+        mockState.sdk = sdk;
+        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    }, async () => {
+        const api = globalThis.NPCStateDelta;
+        assert.ok(await waitFor(() => mockState.sdk.registered.length === 1));
+        const arrive = { name: 'Yunyun', present: true, role: 'adventurer', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named companion', directInteraction: true, relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 } };
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [arrive] });
+        await turn('Yunyun waves from the gate.');
+        await sleep(200);
+        const confide = {
+            ...arrive, relationshipImpact: 'meaningful', relationshipDelta: { trust: 2, affection: 0, desire: 0, tension: 0 },
+            relationshipEvidence: { trust: 'Yunyun confided a private secret and trusted Kazuma with it.', affection: '', desire: '', tension: '' },
+            relationshipChangeReason: 'Yunyun confided a private secret to Kazuma.',
+        };
+        // The scanner answers only once the reader has swiped the reply it is reading.
+        let release;
+        const gate = new Promise(resolve => { release = resolve; });
+        let asked = 0;
+        mockState.quietResponder = async () => {
+            asked += 1;
+            await gate;
+            const id = api.getState().npcs.find(npc => npc.name === 'Yunyun')?.id;
+            return JSON.stringify({ npcs: [{ ...confide, ...(id ? { id } : {}) }] });
+        };
+        const sentBefore = mockState.sdk.sent.length;
+        const replied = turn('Yunyun confided a private secret and trusted Kazuma with it, whispering by the gate.');
+        assert.ok(await waitFor(() => asked > 0), 'the scan asked the scanner');
+        const message = mockState.context.chat.at(-1);
+        const next = 'Yunyun confided a private secret and trusted Kazuma with it, a second time, by the well.';
+        message.swipes.push(next);
+        message.swipe_id = 1;
+        message.mes = next;
+        release();
+        await replied;
+        await sleep(400);
+        const yunyun = api.getState().npcs.find(npc => npc.name === 'Yunyun');
+        console.log('RESULT ' + JSON.stringify({
+            trust: yunyun?.relationship?.trust ?? null,
+            adjusts: mockState.sdk.sent.slice(sentBefore).filter(item => item.type === 'npc.adjust').length,
+        }));
+    });
+    const result = scenarioOutput(output);
+    assert.ok(result.trust > 0, `the scan itself was kept by Delta's own rules (trust ${result.trust})`);
+    assert.equal(result.adjusts, 0, 'nothing was sent onto the swipe now shown');
+});
+
 test('without a v2 host the same turns send nothing, and the sidecar and the injection are the same as hosted', () => {
     const run = (name, prelude) => scenarioOutput(runHostScenario(name, prelude, async () => {
         const api = globalThis.NPCStateDelta;
@@ -207,7 +265,7 @@ test('index.js: the v2 meter hooks are the identity without a host', () => {
     // Every hook asks storySuiteV2Meters() first, which is null unless the page flag is set and the adapter is hosted.
     assert.match(index, /function storySuiteV2Meters\(\) \{\n    return storyBlockV2Hosted\(\) && storySuiteV2\?\.hosted\?\.\(\) \? storySuiteV2 : null;\n\}/);
     assert.match(index, /function hostedMeterView\(npcs\) \{\n    const adapter = storySuiteV2Meters\(\);\n    if \(!adapter\) return npcs;/);
-    assert.match(index, /function forwardRelationshipChangesToHost\(before, after, messageId\) \{\n    const adapter = storySuiteV2Meters\(\);\n    if \(!adapter\) return;/);
+    assert.match(index, /function forwardRelationshipChangesToHost\(before, after, messageId, head = null\) \{\n    const adapter = storySuiteV2Meters\(\);\n    if \(!adapter\) return;/);
     assert.match(index, /function hostedSecretsEditorHtml\(npc\) \{\n    const adapter = storySuiteV2Meters\(\);\n    if \(!adapter\) return '';/);
     assert.match(index, /const secretsInput = hostedMeters \? document\.getElementById\(SECRETS_EDITOR_ID\) : null;/);
     assert.match(index, /if \(shownRelationship\) \{/);

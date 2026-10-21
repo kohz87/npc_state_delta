@@ -598,6 +598,7 @@ test('a panel that mounts after hosting, with no section waiting, is hidden at o
 test('the Cast tab renders Delta\'s own present-cast markup and fills its text', async () => {
     const { def, delta, doc } = await hosted();
     const el = doc.body.appendChild(doc.createElement('div'));
+    el.dataset.tabId = CAST_TAB_ID;   // Story Block's tab host marks its pane with the shown tab
     def.tabs[0].render(el, { state: {} }, {});
     assert.match(el.innerHTML, /^<div class="npc-state-delta-story-pane"><section class="npc-state-delta-present-roster">Mira<\/section><\/div>$/);
     assert.deepEqual(delta.filled, [el]);
@@ -613,6 +614,7 @@ test('an empty Cast tab uses the v1 tab\'s empty line and Scan button; Delta off
     const { def, delta, doc } = await hosted();
     delta.cast = '';
     const el = doc.body.appendChild(doc.createElement('div'));
+    el.dataset.tabId = CAST_TAB_ID;
     def.tabs[0].render(el, {}, {});
     assert.match(el.innerHTML, /The latest scan found no NPC in the scene\./);
     assert.match(el.innerHTML, /data-npc-state-delta-action="scan"/, 'emptyCastHtml from story-block-tabs.js');
@@ -767,6 +769,6 @@ test('index.js starts the adapter once at startup through an optional import', (
     const index = fs.readFileSync(fileURLToPath(new URL('../index.js', import.meta.url)), 'utf8');
     const calls = index.match(/import\('\.\/src\/storysuite-v2\.js'\)/g) || [];
     assert.equal(calls.length, 1);
-    assert.match(index, /startStorySuiteV2\(\{ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION \}\)/);
+    assert.match(index, /startStorySuiteV2\(\{ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION, headReply: latestReplyIndex \}\)/);
     assert.equal(/from '\.\/src\/storysuite-v2\.js'/.test(index), false, 'no static import: a copy without src/ still loads');
 });

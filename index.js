@@ -363,6 +363,8 @@ function beginScanOperation(key, label, metadata = {}) {
     const localRevision = Number(stateVersions.get(key) || 0);
     const canonicalRevision = hydratedRevision(key);
     operation.canonicalRevision = canonicalRevision;
+    // The chat's head when the scan began (forwardRelationshipChangesToHost).
+    operation.chatHead = chatHeadMark();
     operation.requestController = new AbortController();
     operation.requestScope = {
         route: { profileId: getSettings().scannerConnectionProfile },
@@ -890,7 +892,8 @@ function scenePresenceView(npcs) {
     const here = new Set(names.map(name => resolveDossierTarget(npcs, name)).filter(Boolean));
     let changed = false;
     const out = npcs.map(npc => {
-        const present = Boolean(npc?.id) && here.has(String(npc.id)) && !npc.archived;
+        // (C-1) The scene cannot bring a confirmed-dead NPC back on stage.
+        const present = Boolean(npc?.id) && here.has(String(npc.id)) && !npc.archived && !isTerminalNpcDeath(npc);
         if (Boolean(npc?.present) === present) return npc;
         changed = true;
         return { ...npc, present, worldActive: present ? false : Boolean(npc.worldActive) };
@@ -903,11 +906,31 @@ function hostedScanState(state) {
     const npcs = hostedMeterView(state?.npcs);
     return npcs === state?.npcs ? state : { ...state, npcs };
 }
+// Which message is the head of the chat, and which of its swipes is shown. Story Block writes a
+// module's command onto its head reply, so a scan's changes may go there only while it is the head
+// the scan started from: the same message object at the same place with the same swipe.
+function chatHeadMark() {
+    const chat = getContext().chat || [];
+    const message = chat[chat.length - 1] ?? null;
+    return { length: chat.length, message, swipe: Number.isInteger(message?.swipe_id) ? message.swipe_id : null };
+}
+function chatHeadUnchanged(mark) {
+    if (!mark) return true;
+    const now = chatHeadMark();
+    return now.length === mark.length && now.message === mark.message && now.swipe === mark.swipe;
+}
 // A committed scan's relationship changes go to the slice as npc.adjust (same clamps as a story
-// line), in dossier order; the sidecar keeps its own numbers by v1's rules.
-function forwardRelationshipChangesToHost(before, after, messageId) {
+// line), in dossier order; the sidecar keeps its own numbers by v1's rules. `head` (chatHeadMark,
+// taken when the scan started): when the reader swiped, or a reply was added or deleted, since
+// then, nothing is sent; the changes belonged to a reply that is no longer the one Story Block
+// would write them on, and the reply now shown gets its own scan.
+function forwardRelationshipChangesToHost(before, after, messageId, head = null) {
     const adapter = storySuiteV2Meters();
     if (!adapter) return;
+    const dropped = () => {
+        console.info('[NPC State Delta] the chat moved on during the scan (a swipe or a new or deleted reply); its relationship changes were not sent to Story Suite.');
+    };
+    if (!chatHeadUnchanged(head)) return dropped();
     const prior = new Map((before || []).map(npc => [npc?.id, npc]));
     const baseline = normalizeRelationshipBaseline(getSettings().relationshipBaseline);
     const changes = [];
@@ -919,7 +942,12 @@ function forwardRelationshipChangesToHost(before, after, messageId) {
         if (Object.keys(meters).length) changes.push({ name: npc.name, meters, start: from, reply: messageId });
     }
     if (!changes.length) return;
-    void (async () => { for (const change of changes) await adapter.adjust(change); })();
+    void (async () => {
+        for (const change of changes) {
+            if (!chatHeadUnchanged(head)) return dropped();
+            await adapter.adjust(change);
+        }
+    })();
 }
 
 // A v2-hosted automatic boundary may skip the deterministic-path probe: this session already found
@@ -2907,7 +2935,7 @@ async function runTargetedDossierPass(job) {
             commitBranchCheckpoint(merged.state, targetMessageId, job.checkpoint);
         }
         setChatState(chatKey, merged.state);
-        forwardRelationshipChangesToHost(latest.npcs, merged.state.npcs, targetMessageId);
+        forwardRelationshipChangesToHost(latest.npcs, merged.state.npcs, targetMessageId, operation.chatHead);
         persist();
         renderDossier();
         updateInjection();
@@ -3926,7 +3954,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         }
         if (targetMessageId >= 0) commitBranchCheckpoint(nextState, targetMessageId, 'scan');
         setChatState(chatKey, nextState);
-        forwardRelationshipChangesToHost(state.npcs, nextState.npcs, targetMessageId);
+        forwardRelationshipChangesToHost(state.npcs, nextState.npcs, targetMessageId, operation.chatHead);
         persist();
         renderDossier();
         updateInjection();
@@ -5762,7 +5790,7 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
         return false;
     }
     if (hostedMeters && (meterEdits || secretsInput)) {
-        if (meterEdits) await hostedMeters.setMeters({ name: current.name, meters: meterEdits, reply: latestReplyIndex() });
+        if (meterEdits) await hostedMeters.setMeters({ name: current.name, meters: meterEdits });
         if (secretsInput) await hostedMeters.refresh(savedName);
         updateInjection();
     }
@@ -6497,7 +6525,14 @@ function castEmptyReason() {
     const key = getChatKey();
     if (key === 'no-chat') return { text: 'No chat is open.', scan: false };
     if (getSettings().enabled === false) return { text: 'NPC State Delta is off.', scan: false };
-    if (chatHydrationStatus(key) !== 'ready') return { text: "This chat's dossiers are still loading.", scan: false };
+    const hydration = chatHydrationStatus(key);
+    // (R2-5) A sidecar that could not be read is not "still loading": say so, and where to fix it
+    // (the settings section's roster, the same notice the drawer shows).
+    if (hydration === 'error') {
+        const detach = getSettings().dataFiles?.[key]?.path ? ' or Detach Broken Sidecar' : '';
+        return { text: `This chat's dossiers could not be loaded, so nothing is shown and nothing is changed. NPC State Delta's settings section has Retry Load${detach}.`, scan: false };
+    }
+    if (hydration !== 'ready') return { text: "This chat's dossiers are still loading.", scan: false };
     const state = getChatState(key);
     const latest = latestMessageId(true);
     if (!(state.npcs || []).some(npc => npc && !npc.archived)) {
@@ -7340,7 +7375,7 @@ async function init() {
     clearLegacyPromptKeys();
     connectStorySuite();
     // Story Suite v2 (Story Block 2): optional; without a v2 host the adapter does nothing.
-    import('./src/storysuite-v2.js').then(v2 => { storySuiteV2 = v2.startStorySuiteV2({ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION }); }).catch(error => console.debug('[NPC State Delta] Story Suite v2 adapter is not available', error));
+    import('./src/storysuite-v2.js').then(v2 => { storySuiteV2 = v2.startStorySuiteV2({ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION, headReply: latestReplyIndex }); }).catch(error => console.debug('[NPC State Delta] Story Suite v2 adapter is not available', error));
     bindUi();
     installUiCaptureBridge();
     registerEvents();

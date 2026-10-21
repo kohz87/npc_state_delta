@@ -243,7 +243,7 @@ git diff --check
 `npm test` runs all three required programs:
 
 ```sh
-node --import ./tests/active-runtime-test-setup.mjs --test tests/*.test.js
+node --import ./tests/active-runtime-test-setup.mjs --test tests/*.test.js tests/v2/break/*.test.js
 node --import ./tests/active-runtime-test-setup.mjs tests/compatibility-check.js
 node --import ./tests/active-runtime-test-setup.mjs tests/runtime-smoke.mjs
 ```

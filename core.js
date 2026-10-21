@@ -1630,6 +1630,10 @@ function finalizeProfileDevelopment(npc, plans, options = {}, report = null) {
 
 function calendarPromptOptions(options = {}) {
     const next = { ...options };
+    // (b5b r2-8) Names on one short line: a line break in a persona name cannot start a line of
+    // the prompt (the one-pass rules go in-prompt). Ordinary names are unchanged.
+    if (typeof options.userName === 'string') next.userName = mechanics.flatPromptName(options.userName, 'User');
+    if (typeof options.charName === 'string') next.charName = mechanics.flatPromptName(options.charName, 'Character');
     const calendar = getActiveCalendarConfig();
     const reference = calendarReference(options, calendar);
     const referenceDate = reference.date;

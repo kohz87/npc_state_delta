@@ -132,10 +132,9 @@ export function applyNpcStateCommand(state, command, options = {}) {
 
 export function mergeScanResult(state, scanResult, options = {}) {
     const previous = (state?.npcs || []).map(normalizeNpcRecord);
-    // Production scanner/Refresh/backfill/import transactions carry sourceMessageId.
-    // That provenance marks them as automatic writers and makes confirmed death terminal.
-    // Direct unowned utility calls remain outside that automatic-writer contract.
-    const automaticOwnedWriter = Number.isInteger(options.sourceMessageId) || options.enforceTerminalDeath === true;
+    // (C05, C-1) Confirmed death is terminal for every merge: scanner, Refresh, backfill and import
+    // output, with or without a source message, cannot make the NPC alive or present again. Only
+    // the reader's own correction (manual Restore / life state in the editor) and owned rollback can.
     const result = mechanics.mergeScanResult(state, scanResult, options);
     const ordinary = Array.isArray(scanResult?.npcs) ? scanResult.npcs : [];
     const profiles = Array.isArray(scanResult?.profileUpdates)
@@ -199,7 +198,7 @@ export function mergeScanResult(state, scanResult, options = {}) {
         if (sources.length) npc = mergeAppearanceKnowledge(sources, npc);
 
         const terminalSource = sources.find(isTerminalNpcDeath);
-        if (terminalSource && automaticOwnedWriter) return protectTerminalNpc(terminalSource, npc);
+        if (terminalSource) return protectTerminalNpc(terminalSource, npc);
         return isTerminalNpcDeath(npc) ? normalizeTerminalNpc(npc) : npc;
     });
     return result;

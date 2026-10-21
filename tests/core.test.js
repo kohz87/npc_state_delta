@@ -2009,7 +2009,7 @@ test('manual archive preserves dossier, blocks injection, and auto-reactivates o
     assert.equal(live.present, true);
 });
 
-test('confirmed death archives instead of deleting and requires explicit living return to reactivate', () => {
+test('confirmed death archives instead of deleting, and no later scan output revives the NPC (C05)', () => {
     const npc = createNpcRecord('Luna');
     npc.present = true;
     const death = mergeScanResult({ npcs: [npc], turn: 4 }, { npcs: [{
@@ -2031,13 +2031,19 @@ test('confirmed death archives instead of deleting and requires explicit living 
     assert.equal(ghost.state.npcs[0].archived, true, 'ghost/continued deceased presence must not revive the NPC');
     assert.equal(ghost.state.npcs[0].present, false);
 
+    // (audit C-1) Even an explicit "alive" row cannot undo a confirmed death; only the reader's own
+    // correction (manual Restore, life state in the editor) or owned rollback can.
     const revived = mergeScanResult(ghost.state, { npcs: [{
         id: dead.id, name: 'Luna', present: true, lifeState: 'alive', lifeStateCertainty: 'explicit',
         lifeStateReason: 'Luna was resurrected and spoke in person.',
     }] }, { turn: 6, autoReactivateArchived: true });
-    assert.equal(revived.state.npcs[0].archived, false);
-    assert.equal(revived.state.npcs[0].lifeState, 'alive');
-    assert.equal(revived.state.npcs[0].present, true);
+    assert.equal(revived.state.npcs[0].archived, true);
+    assert.equal(revived.state.npcs[0].archiveReason, 'deceased');
+    assert.equal(revived.state.npcs[0].lifeState, 'deceased');
+    assert.equal(revived.state.npcs[0].present, false);
+    const corrected = setNpcArchived(revived.state.npcs[0], false, { allowDeathCorrection: true });
+    assert.equal(corrected.archived, false);
+    assert.equal(corrected.lifeState, 'alive', 'the reader\'s correction still revives');
 });
 
 test('ambiguous or inferred death never triggers automatic archive', () => {
@@ -2078,7 +2084,7 @@ test('World State off-screen activity reactivates a manually archived NPC withou
     assert.doesNotMatch(buildInjection([npc], 'Yunyun is training outside Axel.', 21, 3), /IDENTITY/, 'off-screen active NPCs get no dossier block');
 });
 
-test('death archive ignores off-screen activity until an explicit living return is established', () => {
+test('death archive ignores off-screen activity, an explicit living return included (C05)', () => {
     const dead = setNpcArchived(createNpcRecord('Beldia'), true, { reason: 'deceased', sourceMessageId: 30 });
     const legacyActivity = mergeScanResult({ npcs: [dead], turn: 31 }, { npcs: [{
         id: dead.id,
@@ -2103,10 +2109,10 @@ test('death archive ignores off-screen activity until an explicit living return 
         location: 'Demon King territory',
     }] }, { turn: 32, autoReactivateArchived: true });
     const npc = revived.state.npcs[0];
-    assert.equal(npc.archived, false);
-    assert.equal(npc.lifeState, 'alive');
+    assert.equal(npc.archived, true);
+    assert.equal(npc.lifeState, 'deceased');
     assert.equal(npc.present, false);
-    assert.equal(npc.worldActive, true, 'explicit resurrection may reactivate a dossier off-screen');
+    assert.equal(npc.worldActive, false, 'scan output cannot bring a confirmed-dead NPC back, even off-screen');
 });
 
 test('each scanner merge clears stale present and World State activity flags when an NPC is not observed', () => {

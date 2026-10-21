@@ -188,6 +188,7 @@ const fallbackEmptyCast = reason => `<div class="npc-state-delta-story-empty-sta
  *   panelId    id of Delta's settings panel in the extensions drawer.
  *   version    Delta's version, for the module definition.
  *   host       () => the Story Block global.
+ *   headReply  () => the index of the latest reply (the reader's own meter values start its window).
  *   doc, timers, loadEmptyCast (() => Promise<emptyCastHtml>), logger.
  */
 export function createStorySuiteV2Adapter({
@@ -196,6 +197,7 @@ export function createStorySuiteV2Adapter({
     panelId = 'npc_state_delta_settings',
     version = '',
     host = () => globalThis.StoryBlock,
+    headReply = () => null,
     doc = globalThis.document,
     timers = globalThis,
     loadEmptyCast = () => import('../story-block-tabs.js').then(module => module.emptyCastHtml),
@@ -219,6 +221,12 @@ export function createStorySuiteV2Adapter({
     let listening = false;
     let pending = null;          // the connection attempt in progress, if any
     const savedDisplay = new WeakMap();
+    // Delta's own commands on their way to the host, by type and payload: npc.adjust takes a reader's
+    // action at the top only when it is one of these (the scanner's), never a button that names it.
+    const ownSends = new Map();
+    const sendKey = (type, payload) => {
+        try { return `${type}\n${JSON.stringify(payload)}`; } catch { return null; }
+    };
 
     const warn = (message, error) => {
         try { logger?.warn?.(`[NPC State Delta] ${message}`, error); } catch { /* logging only */ }
@@ -275,6 +283,8 @@ export function createStorySuiteV2Adapter({
         },
         present: () => names(presentList()),
         settings: storedSettings,
+        ownCommand: (type, payload) => (ownSends.get(sendKey(type, payload)) ?? 0) > 0,
+        headReply: () => headReply?.(),
     });
     // The slice entries at the head, by key (null when the host cannot answer).
     const sliceEntries = () => {
@@ -498,12 +508,24 @@ export function createStorySuiteV2Adapter({
         api?.fillPresentCast?.(el);
     }
 
+    // Story Block's tab host has ONE pane for every module's tab (host-ui.js createTabHost marks it
+    // with the shown tab's id). Delta may draw into it on its own only while it still shows the Cast
+    // tab and still holds what Delta drew there; otherwise it is another module's tab now.
+    function castStillShown(el) {
+        if (el?.dataset?.tabId !== CAST_TAB_ID) return false;
+        const drawn = el.__npcStateDeltaV2CastNode;
+        if (drawn) return drawn.parentNode === el;
+        return typeof el.__npcStateDeltaV2Cast === 'string' && el.innerHTML === el.__npcStateDeltaV2Cast;
+    }
+
     // ---- the module definition ----
 
     const definition = Object.freeze({
         id: MODULE_ID,
         name: MODULE_NAME,
         version: String(version),
+        // Story Block 2.0.0-alpha.2 or later (an older host ignores the field).
+        requires: Object.freeze({ storyBlock: '>=2.0.0-alpha.2' }),
         domains: part.domains,
         commands: part.commands,
         queries,
@@ -562,10 +584,16 @@ export function createStorySuiteV2Adapter({
             if (pendingSection?.isConnected) mountSection(pendingSection);
             else syncDrawer();
         });
+        // Delta's own page events (a cast drawn in the chat, Delta turned on or off) redraw the Cast
+        // tab only while the pane still shows it; once the reader has moved to another tab the pane
+        // is let go until the host renders the Cast tab again.
         const rerender = () => {
-            if (hosted && castEl?.isConnected) {
-                try { renderCast(castEl); } catch (error) { warn('Story Suite v2 Cast tab failed', error); }
+            if (!hosted || !castEl) return;
+            if (!castEl.isConnected || !castStillShown(castEl)) {
+                castEl = null;
+                return;
             }
+            try { renderCast(castEl); } catch (error) { warn('Story Suite v2 Cast tab failed', error); }
         };
         doc.addEventListener(EVENTS.castRendered, rerender);
         doc.addEventListener(EVENTS.enabledChanged, rerender);
@@ -657,8 +685,11 @@ export function createStorySuiteV2Adapter({
     // ---- what index.js asks while hosted (each a no-op answer without a host) ----
 
     // A command to the host as Delta's own action (cause ui; the host keeps other causes for itself).
-    async function send(type, payload) {
+    // `own`: the command is one npc.adjust takes only from Delta itself (ownSends, while it runs).
+    async function send(type, payload, { own = false } = {}) {
         if (!hosted || typeof sdkRef?.command !== 'function') return null;
+        const key = own ? sendKey(type, payload) : null;
+        if (key) ownSends.set(key, (ownSends.get(key) ?? 0) + 1);
         try {
             const out = await sdkRef.command(type, payload);
             if (out && out.ok === false && out.code !== 'REFUSED' && out.code !== 'NOT_FOUND') warn(`Story Suite v2 ${type} was not kept: ${out.message ?? out.code}`);
@@ -666,6 +697,12 @@ export function createStorySuiteV2Adapter({
         } catch (error) {
             warn(`Story Suite v2 ${type} failed`, error);
             return null;
+        } finally {
+            if (key) {
+                const left = (ownSends.get(key) ?? 1) - 1;
+                if (left > 0) ownSends.set(key, left);
+                else ownSends.delete(key);
+            }
         }
     }
 
@@ -692,9 +729,9 @@ export function createStorySuiteV2Adapter({
     return Object.freeze({
         definition,
         /** While hosted: Delta's scanner changes for one NPC → `npc.adjust` (a promise of the result, or null). */
-        adjust: ({ name, meters, start, reply } = {}) => send('npc.adjust', { name, meters, ...(start ? { start } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}) }),
-        /** While hosted: the reader's own values from the dossier editor → `npc.set`. */
-        setMeters: ({ name, meters, reply } = {}) => send('npc.set', { name, meters, ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}) }),
+        adjust: ({ name, meters, start, reply } = {}) => send('npc.adjust', { name, meters, ...(start ? { start } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}) }, { own: true }),
+        /** While hosted: the reader's own values from the dossier editor → `npc.set` (the host's latest reply; headReply). */
+        setMeters: ({ name, meters } = {}) => send('npc.set', { name, meters }),
         /** While hosted: stages and notes again for one NPC (after its notes were edited) → `npc.refresh`. */
         refresh: name => send('npc.refresh', { name }),
         /** While hosted: one NPC's slice entry (npc.meters), or null. */
