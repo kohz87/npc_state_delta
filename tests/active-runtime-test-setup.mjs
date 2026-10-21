@@ -16,7 +16,9 @@ fs.copyFileSync = (source, destination, ...args) => {
         && path.dirname(path.resolve(resolvedDestination)) !== sourceRoot) {
         for (const module of runtimeModules) {
             const target = path.join(path.dirname(resolvedDestination), module.path);
-            if (!fs.existsSync(target)) copyFileSync(path.join(sourceRoot, module.path), target);
+            if (fs.existsSync(target)) continue;
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            copyFileSync(path.join(sourceRoot, module.path), target);
         }
     }
     return result;
