@@ -2993,6 +2993,8 @@ async function scanNpcDossier(npcId) {
         existingNpc: existing,
         userName: ctx.name1 || 'User',
         charName: ctx.name2 || 'Character',
+        // (I-13) The configured custom fields, as the merge already accepts them from the import.
+        customFieldNames: getSettings().customFieldNames,
     });
     return runTargetedDossierPass({
         chatKey, ctx, id, prompt,

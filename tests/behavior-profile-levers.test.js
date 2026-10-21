@@ -54,7 +54,8 @@ test('scanner and reconciliation prompts define behaviorProfile as behavioral le
         transcript: 'Over several months Marris consistently checks evidence before committing to a conclusion.',
         targetNpc: npc,
     });
-    const LEVER = /behaviorProfile=max6 "Label: level - effect" levers: how they generally respond\/decide \(labels only: Disposition, Care\/Warmth, Expressiveness, Independence\/Agency, Conflict\/Assertiveness, Threat Sensitivity, Analytical Style, Social Presentation, Cruelty\/Mercy, Loyalty, Drive\/Ambition, Honesty\/Candor\)\. Actions are evidence; routines, duties, house rules and habits are not levers \(habits=>mannerisms\)\./;
+    // (cleanup step 13) The targeted prompts use the scanner's short label list.
+    const LEVER = /behaviorProfile=max6 "Label: level - effect" levers: how they generally respond\/decide \(Label=Disposition\|Care\|Expression\|Independence\|Conflict\|Threat\|Analytical\|Presentation\|Mercy\|Loyalty\|Drive\|Honesty\)\. Actions are evidence; routines, duties, house rules and habits are not levers \(habits=>mannerisms\)\./;
     assert.match(refresh.replace(' levers (evidence items too): ', ' levers: '), LEVER);
     assert.match(refresh, /levers \(evidence items too\): how they/);
 
@@ -71,7 +72,7 @@ test('scanner and reconciliation prompts define behaviorProfile as behavioral le
         existingNpc: npc,
     });
     assert.match(imported, LEVER);
-    assert.match(imported, /labels only: Disposition/i);
+    assert.match(imported, /Label=Disposition\|/);
 });
 
 test('roleplay injection tells the model to generalize behavioral profile levers to new situations', () => {

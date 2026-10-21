@@ -231,8 +231,9 @@ const APPEARANCE_FORM_RULES = 'With named forms, each form appearance is that fo
 const APPEARANCE_RULES = `\nSTAGE 4 APPEARANCE: ${APPEARANCE_FORM_RULES}`;
 const APPEARANCE_RULES_WITH_FLAT = `\nSTAGE 4 APPEARANCE: appearance=current outfit/gear/visible condition. Explicit correction/reveal=>refine corrected FULL appearance; changed clothes/form/presentation=>change+reason FULL appearance. ${APPEARANCE_FORM_RULES}`;
 const DEATH_RULES = `\nSTAGE 4 DEATH: explicit death is terminal: lifeState:"deceased"+lifeStateCertainty:"explicit"; later output cannot return that NPC to alive/present/worldActive.`;
-const PROFILE_REFRESH_FORM_SHAPE_ANCHOR = '"appearanceState":"refine|change","appearance":"","appearanceReason":""';
-const PROFILE_REFRESH_FORM_SHAPE = '"appearanceState":"refine|change","appearance":"","appearanceReason":"","overallAppearance":"","overallAppearanceState":"keep|refine|change","overallAppearanceReason":"","appearanceForms":[{"name":"stable established form name","appearance":"complete visible appearance of this form","state":"refine|change","reason":""}],"currentForm":"stable established form name or empty","currentFormState":"keep|select|unknown","currentFormReason":""';
+// (cleanup step 12, I-10) The one-pass rules are written before the reply exists, and the reply can
+// bring a transformation or a death, so they always carry the form and death rules, in short.
+const CAPTURE_STAGE4_RULES = `\nSTAGE 4: named forms=>appearanceForms:[{name,appearance=its COMPLETE look,state:"refine|change",reason}]+currentForm,currentFormState:"select|unknown" (unknown=>grounded appearance, never another form's anatomy); a switch keeps other forms; overallAppearance only without forms. Explicit death (deceased+explicit) is terminal: never alive/present/worldActive again.`;
 const PROFILE_REFRESH_APPEARANCE_RULE = `\nREFRESH: visible anatomy changes are form evidence even without literal "form"/"transform" wording.`;
 function hasImplicitAnatomicalTransition(transcript = '') {
     const text = String(transcript || '');
@@ -268,9 +269,6 @@ function establishedAppearanceContext(options = {}) {
     }));
     return records.length ? `\nEstablished Stage 4 appearance forms (preserve omissions): ${JSON.stringify(records)}` : '';
 }
-function sanitizePrompt(prompt = '') {
-    return String(prompt).replace('deceased+explicit=death; explicit alive=reactivate.', 'deceased+explicit=terminal death; alive output cannot revive.');
-}
 function insertPromptBlockBefore(prompt = '', anchor = '', block = '') {
     const source = String(prompt);
     const addition = String(block || '');
@@ -282,29 +280,22 @@ function insertPromptBlockBefore(prompt = '', anchor = '', block = '') {
     if (!lineBreak) return `${prefix}${addition}\n${source.slice(index)}`;
     return `${prefix.slice(0, -lineBreak.length)}${addition}${lineBreak}${source.slice(index)}`;
 }
-function appendRules(prompt, options = {}, detailed = true) {
-    const sanitized = sanitizePrompt(prompt);
-    const context = establishedAppearanceContext(options);
-    // The one-line S4 summary is only needed when the detailed rules are absent.
-    return detailed ? `${sanitized}${APPEARANCE_RULES_WITH_FLAT}${DEATH_RULES}${context}` : `${sanitized}${COMPACT_STAGE4_RULE}${context}`;
-}
-function profileRefreshFormContract(prompt = '') {
-    const source = String(prompt);
-    return source.includes(PROFILE_REFRESH_FORM_SHAPE_ANCHOR)
-        ? source.replace(PROFILE_REFRESH_FORM_SHAPE_ANCHOR, PROFILE_REFRESH_FORM_SHAPE)
-        : source;
+// (cleanup step 12) The terminal-death wording and Refresh's form keys are written in the prompts
+// themselves now (core-mechanics; the registry's return shapes), not patched in here.
+function appendRules(prompt, options = {}) {
+    return `${String(prompt)}${APPEARANCE_RULES_WITH_FLAT}${DEATH_RULES}${establishedAppearanceContext(options)}`;
 }
 export function buildScannerPrompt(options = {}) {
-    const detailed = needsDetailedStage4(options);
-    const base = sanitizePrompt(mechanics.buildScannerPrompt(options));
-    const prefixed = insertPromptBlockBefore(base, 'Identity index (matching only):', COMPACT_STAGE4_RULE);
+    const base = mechanics.buildScannerPrompt(options);
     const context = establishedAppearanceContext(options);
-    return detailed ? `${prefixed}${APPEARANCE_RULES}${DEATH_RULES}${context}` : `${prefixed}${context}`;
+    if (options.narrationCapture) return `${insertPromptBlockBefore(base, 'Identity index (matching only):', CAPTURE_STAGE4_RULES)}${context}`;
+    const prefixed = insertPromptBlockBefore(base, 'Identity index (matching only):', COMPACT_STAGE4_RULE);
+    return needsDetailedStage4(options) ? `${prefixed}${APPEARANCE_RULES}${DEATH_RULES}${context}` : `${prefixed}${context}`;
 }
 export function buildBackfillPrompt(options = {}) { return appendRules(mechanics.buildBackfillPrompt(options), options); }
 export function buildDossierImportPrompt(options = {}) { return appendRules(mechanics.buildDossierImportPrompt(options), options); }
 export function buildProfileRefreshPrompt(options = {}) {
-    const base = sanitizePrompt(profileRefreshFormContract(mechanics.buildProfileRefreshPrompt(options)));
+    const base = mechanics.buildProfileRefreshPrompt(options);
     const stableRules = `${PROFILE_REFRESH_APPEARANCE_RULE}${APPEARANCE_RULES}${DEATH_RULES}`;
     const prefixed = insertPromptBlockBefore(base, 'Recent story window (EVIDENCE ONLY;', stableRules);
     return `${prefixed}${establishedAppearanceContext(options)}`;

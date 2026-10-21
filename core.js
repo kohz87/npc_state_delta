@@ -10,6 +10,7 @@ import { removeNpcFromSocialGraph, purgeNpcStructuredReferences } from './social
 import {
     STORY_DAY_SCHEME,
     calendarDayNumber,
+    calendarPromptContext,
     currentCalendarDate,
     extractStructuredWorldDate,
     getActiveCalendarConfig,
@@ -18,6 +19,7 @@ import {
 } from './calendar.js';
 import {
     applyNpcBirthdayUpdate,
+    birthdayCaptureRule,
     birthdayEvidenceInText,
     birthdayPromptRule,
     effectiveChronologicalAge,
@@ -38,8 +40,6 @@ export {
     normalizeBirthDateState,
 } from './birthday.js';
 
-const ROUTINE_APPARENT_AGE_RULE = '11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue, compact ~N, never prose; species literal; no species-aging inference. gender=male|female only if explicit/unambiguous; never guess; change=>genderState:"correct"+reason. Birthday/exact elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual aging/growth/rejuvenation=>apparentAgeState:"evolve"+reason. Appearance must not repeat explicit age. Vague time skip insufficient.';
-const ROUTINE_APPARENT_AGE_RULE_FIXED = '11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue ~N; cue=>MUST return apparentAge when age unknown; species literal; no species-aging inference. Birthday/elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual=>apparentAgeState:"evolve"+reason. Appearance:no age; vague time skip insufficient. gender=male|female only if explicit; never infer; change=>genderState:"correct"+reason.';
 // Sentences that are about this NPC: they name it as a whole word (name, alias or distinctive
 // first name), plus a directly following sentence that continues with a pronoun.
 export function npcOwnedSentences(npc, text) {
@@ -210,10 +210,6 @@ const PROFILE_DEVELOPMENT_FIELDS = Object.freeze({
     personality: Object.freeze({ ledgerKey: 'personalityDevelopment', baselineKey: 'baselinePersonality' }),
     speech: Object.freeze({ ledgerKey: 'speechDevelopment', baselineKey: 'baselineSpeech' }),
 });
-
-function strengthenRoutineApparentAgeRule(prompt) {
-    return String(prompt).replace(ROUTINE_APPARENT_AGE_RULE, ROUTINE_APPARENT_AGE_RULE_FIXED);
-}
 
 function explicitVisualAgeCueFromAppearance(value) {
     const text = String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -1650,6 +1646,20 @@ function appendBirthdayRule(prompt, options = {}) {
     return `${String(prompt)}${birthdayPromptRule(calendar, referenceDate)}`;
 }
 
+// (cleanup step 12, I-10) The one-pass rules always carry a short birthday rule (the reply can bring
+// a birthday the text before it does not show), in the rules part, which holds nothing that changes
+// from reply to reply; the current world date, which does, goes at the end with the context.
+function withCaptureBirthdayRule(prompt, options = {}) {
+    const calendar = getActiveCalendarConfig();
+    const source = String(prompt);
+    const marker = 'Identity index (matching only):';
+    const at = source.indexOf(marker);
+    const rule = birthdayCaptureRule(calendar);
+    const ruled = at > 0 ? `${source.slice(0, at).replace(/\n$/, '')}${rule}\n${source.slice(at)}` : `${source}${rule}`;
+    const date = calendarPromptContext(calendar, calendarReference(options, calendar).date);
+    return date ? `${ruled}\n${date}` : ruled;
+}
+
 function insertRefreshBirthdayRule(prompt, options = {}) {
     if (!birthdayEvidenceInText(birthdayPromptSource(options))) return String(prompt);
     const calendar = getActiveCalendarConfig();
@@ -1825,11 +1835,12 @@ function appendCustomFieldRule(prompt, options = {}) {
     const example = Object.fromEntries(names.slice(0, 2).map(name => [name, 'value']));
     return `${prompt}
 
-CUSTOM FIELDS (${names.join(', ')}): in an NPC row, "customFields":${JSON.stringify(example)} only when the story or World State states that NPC's value explicitly. Keep-by-default: omit unchanged or unknown values; a changed established value needs "customFieldsReason". Never guess.${Object.keys(known).length ? `\nEstablished custom fields: ${JSON.stringify(known)}` : ''}`;
+CUSTOM FIELDS (${names.join(', ')}): in an NPC row, "customFields":${JSON.stringify(example)} only when ${options.customFieldSource || 'the story or World State'} states that NPC's value explicitly. Keep-by-default: omit unchanged or unknown values; a changed established value needs "customFieldsReason". Never guess.${Object.keys(known).length ? `\nEstablished custom fields: ${JSON.stringify(known)}` : ''}`;
 }
 
 export function buildScannerPrompt(options = {}) {
-    const prompt = strengthenRoutineApparentAgeRule(continuity.buildScannerPrompt(calendarPromptOptions(options)));
+    const prompt = continuity.buildScannerPrompt(calendarPromptOptions(options));
+    if (options.narrationCapture) return appendCustomFieldRule(withCaptureBirthdayRule(prompt, options), options);
     return appendCustomFieldRule(appendBirthdayRule(prompt, options), options);
 }
 // The one-pass capture instruction rides in the roleplay injection: the same scanner rules and
@@ -1853,7 +1864,7 @@ export function buildBackfillPrompt(options = {}) {
     return appendCustomFieldRule(appendBirthdayRule(continuity.buildBackfillPrompt(calendarPromptOptions(options)), options), options);
 }
 export function buildDossierImportPrompt(options = {}) {
-    return appendBirthdayRule(continuity.buildDossierImportPrompt(calendarPromptOptions(options)), options);
+    return appendCustomFieldRule(appendBirthdayRule(continuity.buildDossierImportPrompt(calendarPromptOptions(options)), options), { ...options, customFieldSource: 'the dossier text' });
 }
 export function buildProfileRefreshPrompt(options = {}) {
     return appendCustomFieldRule(insertRefreshBirthdayRule(continuity.buildProfileRefreshPrompt(calendarPromptOptions(options)), options), options);

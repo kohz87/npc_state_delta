@@ -62,6 +62,7 @@ test('scanner, Refresh, backfill and import prompts separate enduring body from 
     assert.match(buildProfileRefreshPrompt({ transcript: '[m1] Elin works.', targetNpc: npc, userName: 'Ari', charName: 'N' }), PHYS);
     const backfill = buildBackfillPrompt({ transcript: 'Elin works.', targetName: 'Elin', existingNpc: npc });
     assert.match(backfill, PHYS);
-    assert.match(backfill, /"overallAppearance":"enduring body traits","appearance":"current outfit\/gear\/condition"/);
+    // (cleanup step 13) The rule above defines both; the generated shape lists the keys.
+    assert.match(backfill, /,overallAppearance,appearance,appearanceState:refine\|change,/);
     assert.match(buildDossierImportPrompt({ dossierText: 'Elin is small.', targetName: 'Elin', existingNpc: npc }), /Appearance=>overallAppearance \(enduring body\)\+appearance \(outfit\)/);
 });

@@ -130,7 +130,7 @@ test('the snapshot built from the registry is today\'s snapshotNpc, key order in
 
 test('the modules use the derived lists, not copies of their own', () => {
     const read = path => fs.readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
-    assert.match(read('core-mechanics.js'), /import \{ ALIAS_MERGE_TEXT_FIELDS, PROFILE_EVIDENCE_FIELDS, TEXT_FIELDS \} from '\.\/src\/fields\/registry\.js';/);
+    assert.match(read('core-mechanics.js'), /import \{ ALIAS_MERGE_TEXT_FIELDS, PROFILE_EVIDENCE_FIELDS, RETURN_KEYS, RETURN_SHAPES, TEXT_FIELDS \} from '\.\/src\/fields\/registry\.js';/);
     assert.match(read('core.js'), /import \{ CHANGE_TRACKED_FIELDS, DAY_TRACKED_FIELDS \} from '\.\/src\/fields\/registry\.js';/);
     assert.match(read('branch.js'), /import \{ NPC_REVERT_GROUPS, NPC_REVERT_LIST_FIELDS \} from '\.\/src\/fields\/registry\.js';/);
     assert.match(read('branch-core.js'), /const globallyPreserved = BRANCH_USER_METADATA_FIELDS;/);

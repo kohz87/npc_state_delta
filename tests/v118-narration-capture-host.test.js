@@ -248,7 +248,7 @@ test('v1.1.8 capture arms only fresh replies and continues (not quiet/swipe/rege
         h.settings.narrationCaptureCompact = true;
         await h.generate('normal');
         const compactRules = String(h.rulesCalls().at(-1)?.[1] ?? '');
-        h.check(compactRules.startsWith(h.HEADER) && compactRules.length < fullRules.length * 0.8 && h.rulesCalls().at(-1)?.[2] === 0, 'the compact rules are shorter and still go in the system prompt');
+        h.check(compactRules.startsWith(h.HEADER) && compactRules.length < fullRules.length * 0.85 && h.rulesCalls().at(-1)?.[2] === 0, 'the compact rules are shorter and still go in the system prompt');
         await h.generate('normal');
         h.equal(String(h.rulesCalls().at(-1)?.[1] ?? ''), compactRules, 'the compact rules are byte-identical reply to reply');
         h.settings.narrationCaptureCompact = false;
