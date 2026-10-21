@@ -1,6 +1,6 @@
 # NPC State Delta v1.2.19
 
-> **Story Suite v2 is being built on the `v2` branch.** NSD stays standalone; with Story Block v2 it registers as a hosted module (queries, Cast tab, settings in the overlay). Integration in progress. Progress for the whole suite: [Story Block docs/v2/STATUS.md](https://github.com/kohz87/Story_block/blob/v2/docs/v2/STATUS.md). The rest of this README describes v1 until v2 is released.
+> **Story Suite v2 is being built on the `v2` branch.** NSD stays standalone; with Story Block v2 it registers as a hosted module (queries, Cast tab, settings in the overlay; see [With Story Block v2](#with-story-block-v2)). Integration in progress. Progress for the whole suite: [Story Block docs/v2/STATUS.md](https://github.com/kohz87/Story_block/blob/v2/docs/v2/STATUS.md). The rest of this README describes v1 until v2 is released.
 
 
 A SillyTavern extension that keeps a living dossier for every NPC in your roleplay: who they are, how they look, how they talk and behave, what they remember, and how they feel about you. After each reply it scans the story, updates the dossiers carefully, and feeds the present NPCs back to the roleplay model so they stay in character.
@@ -91,7 +91,7 @@ Leave the scanner connection profile empty to use SillyTavern's current connecti
 
 ### Story Block tabs
 
-With [Story Block](https://github.com/kohz87/Story_block) installed, Delta adds two tabs to its sidebar and card, next to your inventory, World State and other blocks:
+With [Story Block](https://github.com/kohz87/Story_block) installed, Delta adds two tabs to its sidebar and card, next to your inventory, World State and other blocks (Story Block 2 gets a **Cast** tab instead, see [With Story Block v2](#with-story-block-v2)):
 
 - **🎭 Present NPCs:** the same cards as in the chat, for whoever is present in the latest scene.
 - **📇 Dossiers:** every dossier with a search box. The dead stay out of the list until you search for them. Tap a row to open that dossier.
@@ -119,6 +119,19 @@ Delta works alone and alongside [Story Block](https://github.com/kohz87/Story_bl
 **Source of truth** in the settings lets you choose per area: **Automatic** (the order above), **This extension** or **The other one**. Alone, every choice behaves like Automatic and Delta works exactly as before.
 
 With two or more installed, **Manage all in Story Suite** at the top of Delta's settings opens Story Block's Story Suite overlay: one Source of truth table and on/off switch for all of them, with Delta's own settings in its tab ([how it works](docs/STORY_SUITE.md)).
+
+### With Story Block v2
+
+Story Block 2 (Story Suite v2, in preview on Story Block's `v2` branch) hosts the suite's modules itself. Delta stays a standalone extension: its dossiers, scans, prompts, saved data and swipe handling are exactly as without it. When Story Block 2 is on the page, Delta also joins it as the module `npc-state-delta`:
+
+- **Cast tab:** Story Block's tab bar gets a **Cast** tab with Delta's present-cast cards (the same cards, Scan now and Add NPC as the v1 Present NPCs tab).
+- **Settings:** Delta's settings panel moves into the Story Suite overlay as its section, and the copy in the extensions drawer is hidden meanwhile. If Story Block 2 goes away, the panel goes back to the drawer where it was.
+- **Questions other modules can ask** (read-only; nothing in Delta changes):
+  - `npc.present` → the names of the NPCs in the current scene;
+  - `npc.known` → the names of every tracked NPC (archived ones left out);
+  - `npc.dossier({ name })` → one NPC's dossier fields (by name, alias or id), or `null`;
+  - `npc.portrait({ name })` → the portrait Delta shows for that NPC (the current form's own image when it has one, else the main portrait), or `null`. It is the image you uploaded or generated in the dossier, as a `data:` image, an `https:` address or a path on your SillyTavern server; anything else (a `javascript:` or `http:` address, an SVG) gives `null`. RPG Battle and other modules use it for companion and NPC portraits. Delta never generates an image for it.
+- **No v1 doubles:** with Story Block 2, Delta does not add its v1 **Present NPCs** / **Dossiers** tabs, does not announce itself to v1's Story Suite registry, and hides **Manage all in Story Suite** (Story Block 2's own overlay carries its settings instead). With Story Block 1, or without Story Block, everything works as described above.
 
 ### One-pass narration capture (experimental)
 

@@ -15,8 +15,11 @@ assert runtime_config.get('applicationVersion') == manifest['version'], 'runtime
 assert runtime_config.get('entrypoint') == manifest['js'], 'runtime inventory entrypoint differs from manifest'
 assert all('/' not in name and name.endswith('.js') for name in runtime_files), 'runtime inventory contains a non-top-level JS path'
 
-support_files = ['style.css', 'suite.css', 'manifest.json', 'runtime-modules.json', 'LICENSE', 'README.md']
+# src/storysuite-v2.js is the optional Story Suite v2 adapter, imported by index.js at runtime.
+support_files = ['style.css', 'suite.css', 'manifest.json', 'runtime-modules.json', 'LICENSE', 'README.md', 'src/storysuite-v2.js']
 files = runtime_files + support_files
+src_js = sorted(p.relative_to(root).as_posix() for p in (root / 'src').rglob('*.js'))
+assert all(name in files for name in src_js), 'every src/ module must be packaged'
 out = root / 'dist'
 out.mkdir(exist_ok=True)
 archive = out / f"npc_state_delta-{manifest['version']}.zip"

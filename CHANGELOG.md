@@ -1,6 +1,10 @@
-## 2.0.0-alpha.1 (in progress, `v2` branch)
+## Story Suite v2: 2.0.0-alpha.1 (in progress, `v2` branch)
 
 Story Suite v2. NSD stays standalone; with Story Block v2 it registers as a hosted module (queries, Cast tab, settings in the overlay). Integration in progress. Status: https://github.com/kohz87/Story_block/blob/v2/docs/v2/STATUS.md
+
+- Queries `npc.present`, `npc.known`, `npc.dossier({ name })` and `npc.portrait({ name })` (the portrait Delta shows, as a safe `data:` image, `https:` or same-origin URL, or null).
+- With Story Block v2 (`apiVersion: 2`) Delta adds none of v1's Story Block tabs, Story Suite announcement or overlay button; with Story Block 1 or none, nothing changes.
+- The package ships `src/storysuite-v2.js`.
 
 # NPC State Delta changes
 

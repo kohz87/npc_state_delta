@@ -39,3 +39,18 @@ test('install folder has SillyTavern-discoverable one-level layout', () => {
     assert.equal(config.entrypoint, manifest.js);
     assert.equal(config.modules.some(module => /legacy|(?:^|[-_.])v\d{3,}/i.test(module.path)), false, 'active module paths must use current semantic names');
 });
+
+test('the package ships the Story Suite v2 adapter beside the runtime modules', () => {
+    const script = fs.readFileSync(path.join(root, 'scripts', 'package.py'), 'utf8');
+    const support = script.match(/^support_files = \[(.*)\]$/m);
+    assert.ok(support, 'package.py lists its support files on one line');
+    const listed = [...support[1].matchAll(/'([^']+)'/g)].map(match => match[1]);
+    assert.ok(listed.includes('src/storysuite-v2.js'), 'src/storysuite-v2.js is packaged');
+    for (const name of listed) assert.ok(fs.existsSync(path.join(root, name)), `${name} exists`);
+    // Every module under src/ ships (index.js imports the adapter at runtime, by relative path).
+    const srcJs = fs.readdirSync(path.join(root, 'src'), { recursive: true })
+        .filter(name => String(name).endsWith('.js'))
+        .map(name => `src/${String(name).split(path.sep).join('/')}`);
+    for (const name of srcJs) assert.ok(listed.includes(name), `${name} is packaged`);
+    assert.match(script, /assert all\(name in files for name in src_js\)/, 'package.py refuses to leave a src/ module out');
+});

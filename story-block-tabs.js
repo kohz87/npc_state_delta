@@ -3,6 +3,7 @@
 // Display only: it reads the runtime API and opens dossiers through it; it never writes state,
 // prompts or messages, and nothing changes when Story Block is not installed.
 import { dossierIndexProjection, filterDossierIndex } from './dossier-ui.js';
+import { storyBlockIsV2 } from './suite-handshake.js';
 
 export const STORY_BLOCK_TAB_IDS = Object.freeze({ cast: 'npc-state-delta-cast', dossiers: 'npc-state-delta-dossiers' });
 const CONNECTED_FLAG = 'npcStateDeltaStoryBlock';
@@ -36,8 +37,10 @@ export function dossierTabRowsHtml(rows = [], { query = '', total = null } = {})
 
 // Story Block re-renders external tabs on every refresh, so both panes keep their own DOM and
 // only replace what changed; the search box keeps focus and its text across refreshes.
+// A Story Block v2 host (apiVersion 2) gets Delta's Cast tab through its sdk instead
+// (src/storysuite-v2.js), so these v1 tabs are not offered to it.
 export function connectStoryBlock(api, storyBlock) {
-    if (!api || typeof storyBlock?.registerTab !== 'function') return null;
+    if (!api || storyBlockIsV2(storyBlock) || typeof storyBlock?.registerTab !== 'function') return null;
     let revision = null;
     let rows = [];
     let query = '';
@@ -118,6 +121,17 @@ export function connectStoryBlock(api, storyBlock) {
     try { storyBlock.onUpdate?.(() => api.renderInline?.()); } catch { /* optional */ }
     return {
         syncTabs,
+        // A v2 host took over the page: the v1 tabs leave (when Story Block can take them back) and
+        // the in-chat cast no longer counts them as carried by Story Block.
+        disconnect() {
+            if (shown && typeof storyBlock.unregisterTab === 'function') {
+                for (const tab of tabs) {
+                    try { storyBlock.unregisterTab(tab.id); } catch { /* already gone */ }
+                }
+            }
+            shown = false;
+            if (globalThis.document?.documentElement?.dataset) delete globalThis.document.documentElement.dataset[CONNECTED_FLAG];
+        },
         // Called after Delta redraws its cast; Story Block redraws only when Delta's state moved.
         refresh() {
             const next = String(api.dossierRevision?.() ?? '');
@@ -129,11 +143,15 @@ export function connectStoryBlock(api, storyBlock) {
     };
 }
 
+// Sent by src/storysuite-v2.js when Delta registers with a Story Block v2 host, and when that host goes away.
+export const V2_HOST_EVENT = 'npc-state-delta:v2-host';
+
 let connection = null;
 function startStoryBlockTabs(attempt = 0) {
     if (connection) return;
     const api = globalThis.NPCStateDelta;
     const storyBlock = globalThis.StoryBlock;
+    if (storyBlockIsV2(storyBlock)) return;
     if (api && typeof storyBlock?.registerTab === 'function') {
         connection = connectStoryBlock(api, storyBlock);
         // The in-chat cast follows the "Story Block" display choice once the tabs exist.
@@ -147,5 +165,14 @@ function startStoryBlockTabs(attempt = 0) {
 if (typeof document !== 'undefined') {
     document.addEventListener('npc-state-delta:cast-rendered', () => (connection ? connection.refresh() : startStoryBlockTabs(40)));
     document.addEventListener('npc-state-delta:enabled-changed', () => connection?.syncTabs());
+    document.addEventListener(V2_HOST_EVENT, event => {
+        if (event?.detail?.hosted === true) {
+            connection?.disconnect();
+            connection = null;
+            globalThis.NPCStateDelta?.renderInline?.();
+        } else if (!connection) {
+            startStoryBlockTabs();
+        }
+    });
     queueMicrotask(() => startStoryBlockTabs());
 }

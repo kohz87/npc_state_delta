@@ -2,14 +2,16 @@
 //
 // NPC State Delta stays a standalone engine: its storage, capture, prompts and history rules are
 // its own and nothing here changes them. When a Story Block v2 host is on the page, Delta also
-// registers as module `npc-state-delta` (no domains) with three read-only queries, a Cast tab that
+// registers as module `npc-state-delta` (no domains) with four read-only queries, a Cast tab that
 // shows Delta's own present-cast cards, and a settings section that carries Delta's own settings
 // panel into the Story Suite overlay. While hosted, the copy in SillyTavern's extensions drawer is
 // hidden; if the host goes away it comes back exactly where it was.
 //
 // Without a v2 host (no Story Block, or a v1 Story Block whose global has no `ready`/`sdk`) this
 // module does nothing: it looks for the host a bounded number of times and then stops. The v1
-// handshake (suite.js, suite-handshake.js, story-block-tabs.js) is untouched and keeps working.
+// handshake (suite.js, suite-handshake.js, story-block-tabs.js) keeps working with v1 hosts; with a
+// v2 host (`apiVersion: 2`) it offers nothing (suite-handshake.js storyBlockIsV2), and this adapter
+// sends V2_HOST_EVENT when it registers and when the host goes away so the v1 side can follow.
 //
 // Waiting for the host: the spec names no page event for it, so the adapter polls
 // `globalThis.StoryBlock` every 250 ms, 40 times (10 s, the same bound as the v1 tabs), and once it
@@ -24,7 +26,9 @@ import { resolveDossierTarget } from '../suite-handshake.js';
 export const MODULE_ID = 'npc-state-delta';
 export const MODULE_NAME = 'NPC State Delta';
 export const CAST_TAB_ID = 'cast';
-export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known']);
+export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait']);
+/** Sent on the document with detail { hosted } when Delta registers with a v2 host and when it goes away. */
+export const V2_HOST_EVENT = 'npc-state-delta:v2-host';
 export const HOST_RETRY_MS = 250;
 export const HOST_RETRY_ATTEMPTS = 40;
 export const HOST_ALIVE_MS = 5000;
@@ -82,6 +86,56 @@ export function dossierFields(npc) {
     return out;
 }
 
+// ---- portraits (MODULES §F11: a companion or NPC's portrait comes from Delta) ----
+
+// The raster image types Delta accepts for a portrait (index.js setNpcPortrait); compressed
+// portraits are stored as data:image/webp.
+const DATA_IMAGE = /^data:image\/(?:png|jpeg|jpg|webp|gif|avif|bmp);base64,[a-z0-9+/=]+$/i;
+const URL_BASE = 'https://npc-state-delta.invalid/';
+
+/**
+ * `value` when it is safe to hand to another module as an image URL, else null: a data: URL of a
+ * raster image, an https: URL, or a same-origin relative URL (a path, never `//host`). Anything
+ * else (javascript:, http:, blob:, svg data, control characters) is null.
+ */
+export function safeImageUrl(value) {
+    if (typeof value !== 'string') return null;
+    const url = value.trim();
+    if (!url || /[\u0000-\u001f\u007f\\]/.test(url)) return null;
+    if (/^data:/i.test(url)) return DATA_IMAGE.test(url) ? url : null;
+    let parsed;
+    try {
+        parsed = new URL(url, URL_BASE);
+    } catch {
+        return null;
+    }
+    if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return /^https:\/\//i.test(url) && parsed.protocol === 'https:' && parsed.hostname ? url : null;
+    // A path on the page's own server (SillyTavern's /user/images/…), never `//host` or a bare ?query or #hash.
+    return !/^[?#]/.test(url) && parsed.origin === new URL(URL_BASE).origin ? url : null;
+}
+
+/**
+ * The portrait Delta shows for one NPC record, as its dossier and present cast do: the current
+ * appearance form's own image when that form has one, else the main portrait. `formPortraits` is
+ * Delta's { [form name]: { dataUrl } }. A safe URL (safeImageUrl) or null.
+ */
+export function portraitUrl(npc, formPortraits = {}) {
+    if (!npc || typeof npc !== 'object') return null;
+    const candidates = [];
+    const form = typeof npc.currentForm === 'string' ? npc.currentForm.trim().toLocaleLowerCase() : '';
+    if (form && formPortraits && typeof formPortraits === 'object') {
+        const image = Object.entries(formPortraits).find(([name]) => String(name).trim().toLocaleLowerCase() === form)?.[1];
+        if (image && typeof image === 'object') candidates.push(image.dataUrl);
+    }
+    const main = npc.portrait && typeof npc.portrait === 'object' ? npc.portrait : {};
+    candidates.push(main.dataUrl, main.url, main.src);
+    for (const candidate of candidates) {
+        const url = safeImageUrl(candidate);
+        if (url) return url;
+    }
+    return null;
+}
+
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 // Used only if story-block-tabs.js cannot be loaded: the same empty line, without the Scan button.
 const fallbackEmptyCast = reason => `<div class="npc-state-delta-story-empty-state"><p class="npc-state-delta-story-empty">${escapeHtml(reason?.text || 'No NPC is present in the latest scene.')}</p></div>`;
@@ -90,7 +144,7 @@ const fallbackEmptyCast = reason => `<div class="npc-state-delta-story-empty-sta
  * The adapter. Options (all optional except in tests):
  *   suiteApi   Delta's v1 suite api (index.js SUITE_API): npcs() gives { id, name, aliases, present, archived }.
  *   delta      () => Delta's runtime api (window.NPCStateDelta): presentCastHtml, fillPresentCast,
- *              castEmptyReason, getNpc, isEnabled, scan, addNpc.
+ *              castEmptyReason, getNpc, formPortraits, isEnabled, scan, addNpc.
  *   panelId    id of Delta's settings panel in the extensions drawer.
  *   version    Delta's version, for the module definition.
  *   host       () => the Story Block global.
@@ -163,6 +217,22 @@ export function createStorySuiteV2Adapter({
                 return dossierFields(runtime()?.getNpc?.(id));
             } catch (error) {
                 warn('Story Suite v2 dossier query failed', error);
+                return null;
+            }
+        },
+        /** One NPC's portrait URL by name, alias or id (as npc.dossier finds them), or null (§F11). */
+        'npc.portrait': (state, args) => {
+            try {
+                const id = resolveDossierTarget(npcList(), args?.name);
+                if (!id) return null;
+                const api = runtime();
+                const npc = api?.getNpc?.(id);
+                if (!npc) return null;
+                let forms = {};
+                try { forms = api?.formPortraits?.(id) || {}; } catch { forms = {}; }
+                return portraitUrl(npc, forms);
+            } catch (error) {
+                warn('Story Suite v2 portrait query failed', error);
                 return null;
             }
         },
@@ -311,6 +381,17 @@ export function createStorySuiteV2Adapter({
 
     // ---- host lifecycle ----
 
+    // story-block-tabs.js and index.js take back (or offer again) what v1 gave Story Block.
+    function announceHosted(on) {
+        try {
+            if (typeof doc?.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+                doc.dispatchEvent(new CustomEvent(V2_HOST_EVENT, { detail: { hosted: on } }));
+            }
+        } catch (error) {
+            warn('Story Suite v2 host event failed', error);
+        }
+    }
+
     function listen() {
         if (listening || typeof doc?.addEventListener !== 'function') return;
         listening = true;
@@ -347,6 +428,7 @@ export function createStorySuiteV2Adapter({
         hosted = true;
         listen();
         syncDrawer();
+        announceHosted(true);
         aliveTimer = timers.setInterval?.(check, aliveMs) ?? null;
         aliveTimer?.unref?.();
         return true;
@@ -387,6 +469,7 @@ export function createStorySuiteV2Adapter({
     function unhost() {
         if (aliveTimer !== null) timers.clearInterval?.(aliveTimer);
         aliveTimer = null;
+        const was = hosted;
         hosted = false;
         hostRef = null;
         sdkRef = null;
@@ -394,6 +477,7 @@ export function createStorySuiteV2Adapter({
         castEl = null;
         unmountSection();
         syncDrawer();
+        if (was) announceHosted(false);
     }
 
     /** Checks that the host is still there; restores the drawer and looks again when it is not. */
