@@ -3,17 +3,20 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+// (cleanup step 10) The focused relationship pass moved to src/relationship-pass.js.
+const passSource = fs.readFileSync(new URL('../src/relationship-pass.js', import.meta.url), 'utf8');
 
 test('v0.2.23 relationship repair targets current-exchange NPCs even when broad scan omits them', () => {
-    assert.match(source, /currentExchangeRelationshipRelevant/);
-    assert.match(source, /transcriptMentionsNpcRecord\(transcript, npc\)/);
+    assert.match(passSource, /currentExchangeRelationshipRelevant/);
+    assert.match(passSource, /transcriptMentionsNpcRecord\(transcript, npc\)/);
     // (1.2.12) A returned row is judged by its decision; an omitted NPC is a target unless a one-pass block says it covered everyone.
-    assert.match(source, /if \(raw\) return !hasCompletePrimaryRelationshipDecision\(raw, transcript\);\s*return options\.covered !== true;/);
-    assert.match(source, /for \(let offset = 0; offset < targets\.length; offset \+= 4\)/);
-    const relationshipPassSource = source.slice(
-        source.indexOf('async function runFocusedRelationshipPass'),
-        source.indexOf('function suppressPrimaryRelationshipForFocusedDecisions'),
+    assert.match(passSource, /if \(raw\) return !hasCompletePrimaryRelationshipDecision\(raw, transcript\);\s*return options\.covered !== true;/);
+    assert.match(passSource, /for \(let offset = 0; offset < targets\.length; offset \+= 4\)/);
+    const relationshipPassSource = passSource.slice(
+        passSource.indexOf('async function runFocusedRelationshipPass'),
+        passSource.indexOf('function suppressPrimaryRelationshipForFocusedDecisions'),
     );
+    assert.ok(relationshipPassSource.length > 1000);
     assert.doesNotMatch(relationshipPassSource, /\.slice\(0,\s*4\)/);
 });
 
@@ -40,11 +43,12 @@ test('new NPC admission enriches only the newly admitted dossiers while omitted 
 test('v0.2.23 manual and full-window scans scrub rolling relationship output and evaluate only the current exchange', () => {
     assert.match(source, /const fullWindowRelationship = \(manual \|\| fullWindowScan\)/);
     assert.match(source, /currentExchangeOnly: manual \|\| fullWindowScan/);
-    assert.match(source, /if \(currentExchangeOnly\) return false/);
-    const relevance = source.slice(
-        source.indexOf('function currentExchangeRelationshipRelevant'),
-        source.indexOf('function dossierLabelsMatch'),
+    assert.match(passSource, /if \(currentExchangeOnly\) return false/);
+    const relevance = passSource.slice(
+        passSource.indexOf('function currentExchangeRelationshipRelevant'),
+        passSource.indexOf('function rawScanMatchesExisting'),
     );
+    assert.ok(relevance.length > 200);
     assert.doesNotMatch(relevance, /npc\.present \|\| npc\.worldActive/);
 });
 
