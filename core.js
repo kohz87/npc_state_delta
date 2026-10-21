@@ -340,6 +340,13 @@ function stampFieldChanges(before, after, turn, storyDay = null, message = null)
     return withExtras({ ...after, fieldChanges: changes });
 }
 
+// (cleanup step 9) The same per-field "changed at" stamps for writers outside the merge: the
+// focused relationship pass and the reader's own edits (dossier editor, appearance forms, life
+// state). `message` is the reply index the change belongs to; `storyDay` the World State day, if any.
+export function stampChangedFields(before, after, { turn, storyDay = null, message = null } = {}) {
+    return stampFieldChanges(before, after, Math.trunc(Number(turn)), storyDay, message);
+}
+
 function matchingPrevious(npc, source = []) {
     return (Array.isArray(source) ? source : []).filter(item => item && (
         String(item.id || '') === String(npc?.id || '')
