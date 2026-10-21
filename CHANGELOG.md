@@ -16,6 +16,8 @@ Story Suite v2. NSD stays standalone; with Story Block v2 it registers as a host
 
 ## Unreleased
 
+- Cleanup: the chat text helpers (recent windows, the current exchange, the story day) move from `index.js` to `src/transcript.js`, the first part of splitting `index.js`. Nothing Delta stores, sends or shows changes.
+
 - **Refresh, backfill and the Megumin dossier import work the same way.** They are now one targeted pass with three kinds, so they share the same rules:
   - A Refresh, backfill or import is no longer thrown away because another extension (Story Block, RPG Battle) rewrote the latest reply in place while it ran, as the scan already allowed; an edit or swipe of that reply still discards it.
   - Backfill and import change no other dossier, as Refresh already did.
