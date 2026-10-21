@@ -319,7 +319,7 @@ async function deepAuditRuntimeChecks(mockState, eventSource, manualAddNpc, slee
     await sleep(300);
 
     // RB87-04: Refresh rejects a sole returned row that names someone else.
-    await open('rb87-refresh', ['Mira Deep greets you. Noela has died elsewhere.', 'Mira Deep nods.']);
+    await open('rb87-refresh', ['Mira Deep greets you. Noela has died elsewhere.', 'Mira Deep, the records clerk of the old quarter, nods.']);
     await manualAddNpc('Mira Deep');
     await runtime.flush();
     const miraId = runtime.getState().npcs.find(npc => npc.name === 'Mira Deep').id;

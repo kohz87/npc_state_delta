@@ -7,7 +7,8 @@ import { EDITOR_LOCKABLE_FIELDS as EDITOR_LOCKS, LOCKED_FIELD_KEYS as EDITOR_LOC
 import * as core from '../core.js';
 
 // Cleanup step 4: the field registry is read-only. Every list derived from it is exactly the hand-kept
-// list it replaced; these are those lists as they stood (v2 @ 2b8a3ea), copied verbatim.
+// list it replaced; these are those lists as they stood (v2 @ 2b8a3ea), copied verbatim. Step 6 adds the
+// fields it makes lockable and the hand-entered memories, marked below.
 
 const TODAY = {
     TEXT_FIELDS: ['role', 'species', 'gender', 'homeBase', 'age', 'apparentAge', 'appearance', 'personality', 'speech', 'background',
@@ -17,13 +18,18 @@ const TODAY = {
         'personality', 'speech', 'behaviorProfile', 'mannerisms', 'appearance',
         'relationship', 'relationshipSummary', 'background', 'keyRelationships', 'memories', 'birthDate'],
     DAY_TRACKED_FIELDS: ['personality', 'speech', 'behaviorProfile', 'background', 'homeBase'],
-    EDITOR_LOCKABLE_FIELDS: ['name', 'role', 'species', 'gender', 'homeBase', 'age', 'apparentAge', 'personality', 'speech', 'behaviorProfile', 'background', 'mannerisms', 'keyRelationships', 'customFields', 'aliases'],
+    // Step 6 makes Player Dynamic, the live fields and memories lockable (the last six).
+    EDITOR_LOCKABLE_FIELDS: ['name', 'role', 'species', 'gender', 'homeBase', 'age', 'apparentAge', 'personality', 'speech', 'behaviorProfile', 'background', 'mannerisms', 'keyRelationships', 'customFields', 'aliases',
+        'relationshipSummary', 'mood', 'location', 'goal', 'status', 'memories'],
     LOCKED_FIELD_KEYS: {
         name: ['name', 'identityKind'], role: ['role'], species: ['species'], gender: ['gender'], homeBase: ['homeBase'], age: ['age'],
         apparentAge: ['apparentAge', 'apparentAgeAnchor'],
         appearance: ['appearance', 'overallAppearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'appearanceModelVersion'],
         personality: ['personality'], speech: ['speech'], behaviorProfile: ['behaviorProfile'], background: ['background'], mannerisms: ['mannerisms'],
         keyRelationships: ['keyRelationships'], customFields: ['customFields'], aliases: ['aliases'],
+        // Step 6:
+        relationshipSummary: ['relationshipSummary'], mood: ['mood'], location: ['location'], goal: ['goal'], status: ['status'],
+        memories: ['memories', 'manualMemories'],
     },
     NPC_REVERT_GROUPS: [
         ['relationship', 'relationshipProgress', 'relationshipMilestones', 'relationshipEventHistory', 'lastRelationshipChange'],
@@ -40,7 +46,7 @@ const TODAY = {
         'relationshipEventHistory', 'lastRelationshipChange', 'relationshipSummary',
         'seenCount', 'lastSeenTurn', 'lastWorldActiveTurn'],
     ALIAS_MERGE_TEXT_FIELDS: ['role', 'species', 'age', 'apparentAge', 'personality', 'speech', 'appearance', 'background', 'relationshipSummary', 'mood', 'location', 'goal', 'status', 'lifeStateReason'],
-    BRANCH_USER_METADATA_FIELDS: ['portraitPromptPositive', 'portraitPromptNegative', 'portraitPromptReplace', 'portraitSeed', 'retentionProtected', 'minor'],
+    BRANCH_USER_METADATA_FIELDS: ['portraitPromptPositive', 'portraitPromptNegative', 'portraitPromptReplace', 'portraitSeed', 'retentionProtected', 'minor', 'manualMemories'],
     REFRESH_CHANGED_FIELDS: ['name', 'role', 'species', 'gender', 'homeBase', 'age', 'apparentAge', 'appearance', 'personality', 'speech', 'behaviorProfile', 'background', 'keyRelationships', 'relationshipSummary', 'mood', 'location', 'goal', 'status', 'lifeState', 'mannerisms', 'memories'],
     DOSSIER_FIELDS: [
         'id', 'name', 'aliases', 'role', 'species', 'gender', 'age', 'apparentAge', 'birthDate', 'homeBase',

@@ -14,7 +14,7 @@
     "archiveReason": "",
     "archiveSourceMessageId": null,
     "archived": false,
-    "background": "Raised in the river quarter; served ten years as a royal archivist; apprenticed to the archive at twelve.",
+    "background": "Raised in the river quarter; apprenticed to the archive at twelve; survived the flood year.",
     "behaviorProfile": [
      "Disposition: kind - helps strangers without fuss"
     ],
@@ -38,7 +38,6 @@
      "Level": "4"
     },
     "fieldChangeMessages": {
-     "background": 7,
      "goal": 7,
      "homeBase": 7,
      "keyRelationships": 7,
@@ -47,7 +46,6 @@
      "relationship": 7
     },
     "fieldChanges": {
-     "background": 5,
      "goal": 5,
      "homeBase": 5,
      "keyRelationships": 5,
@@ -714,7 +712,7 @@
     "archiveReason": "",
     "archiveSourceMessageId": null,
     "archived": false,
-    "background": "Raised in the river quarter; served ten years as a royal archivist; apprenticed to the archive at twelve.",
+    "background": "Raised in the river quarter; apprenticed to the archive at twelve; survived the flood year.",
     "behaviorProfile": [
      "Disposition: kind - helps strangers without fuss"
     ],
@@ -738,7 +736,6 @@
      "Level": "4"
     },
     "fieldChangeMessages": {
-     "background": 7,
      "goal": 7,
      "homeBase": 7,
      "keyRelationships": 7,
@@ -747,7 +744,6 @@
      "relationship": 7
     },
     "fieldChanges": {
-     "background": 5,
      "goal": 5,
      "homeBase": 5,
      "keyRelationships": 5,
@@ -1416,7 +1412,7 @@
     "archiveReason": "",
     "archiveSourceMessageId": null,
     "archived": false,
-    "background": "Raised in the river quarter; served ten years as a royal archivist; apprenticed to the archive at twelve.",
+    "background": "Raised in the river quarter; apprenticed to the archive at twelve; survived the flood year.",
     "behaviorProfile": [
      "Disposition: kind - helps strangers without fuss"
     ],
@@ -1440,7 +1436,6 @@
      "Level": "4"
     },
     "fieldChangeMessages": {
-     "background": 7,
      "goal": 7,
      "homeBase": 7,
      "keyRelationships": 7,
@@ -1448,7 +1443,6 @@
      "mood": 7
     },
     "fieldChanges": {
-     "background": 5,
      "goal": 5,
      "homeBase": 5,
      "keyRelationships": 5,
@@ -2098,7 +2092,7 @@
     "archiveReason": "",
     "archiveSourceMessageId": null,
     "archived": false,
-    "background": "Raised in the river quarter; served ten years as a royal archivist; apprenticed to the archive at twelve.",
+    "background": "Raised in the river quarter; apprenticed to the archive at twelve; survived the flood year.",
     "behaviorProfile": [
      "Disposition: kind - helps strangers without fuss"
     ],
@@ -2122,7 +2116,6 @@
      "Level": "4"
     },
     "fieldChangeMessages": {
-     "background": 7,
      "goal": 7,
      "homeBase": 7,
      "keyRelationships": 7,
@@ -2130,7 +2123,6 @@
      "mood": 7
     },
     "fieldChanges": {
-     "background": 5,
      "goal": 5,
      "homeBase": 5,
      "keyRelationships": 5,
@@ -2782,7 +2774,7 @@
     "archiveReason": "",
     "archiveSourceMessageId": null,
     "archived": false,
-    "background": "Raised in the river quarter; served ten years as a royal archivist; apprenticed to the archive at twelve.",
+    "background": "Raised in the river quarter; apprenticed to the archive at twelve; survived the flood year.",
     "behaviorProfile": [
      "Disposition: kind - helps strangers without fuss"
     ],
@@ -2806,7 +2798,6 @@
      "Level": "4"
     },
     "fieldChangeMessages": {
-     "background": 7,
      "goal": 7,
      "homeBase": 7,
      "keyRelationships": 7,
@@ -2815,7 +2806,6 @@
      "relationship": 7
     },
     "fieldChanges": {
-     "background": 5,
      "goal": 5,
      "homeBase": 5,
      "keyRelationships": 5,
@@ -3482,7 +3472,7 @@
     "archiveReason": "",
     "archiveSourceMessageId": null,
     "archived": false,
-    "background": "Raised in the river quarter; served ten years as a royal archivist; apprenticed to the archive at twelve.",
+    "background": "Raised in the river quarter; apprenticed to the archive at twelve; survived the flood year.",
     "behaviorProfile": [
      "Disposition: kind - helps strangers without fuss"
     ],
@@ -3506,7 +3496,6 @@
      "Level": "4"
     },
     "fieldChangeMessages": {
-     "background": 7,
      "goal": 7,
      "homeBase": 7,
      "keyRelationships": 7,
@@ -3515,7 +3504,6 @@
      "relationship": 7
     },
     "fieldChanges": {
-     "background": 5,
      "goal": 5,
      "homeBase": 5,
      "keyRelationships": 5,
@@ -4184,7 +4172,7 @@
     "archiveReason": "",
     "archiveSourceMessageId": null,
     "archived": false,
-    "background": "Raised in the river quarter; served ten years as a royal archivist; apprenticed to the archive at twelve.",
+    "background": "Raised in the river quarter; apprenticed to the archive at twelve; survived the flood year.",
     "behaviorProfile": [
      "Disposition: kind - helps strangers without fuss"
     ],
@@ -4208,7 +4196,6 @@
      "Level": "4"
     },
     "fieldChangeMessages": {
-     "background": 7,
      "goal": 7,
      "homeBase": 7,
      "keyRelationships": 7,
@@ -4216,7 +4203,6 @@
      "mood": 7
     },
     "fieldChanges": {
-     "background": 5,
      "goal": 5,
      "homeBase": 5,
      "keyRelationships": 5,
@@ -4735,7 +4721,7 @@
     "archiveReason": "",
     "archiveSourceMessageId": null,
     "archived": false,
-    "background": "Raised in the river quarter; served ten years as a royal archivist; apprenticed to the archive at twelve.",
+    "background": "Raised in the river quarter; apprenticed to the archive at twelve; survived the flood year.",
     "behaviorProfile": [
      "Disposition: kind - helps strangers without fuss"
     ],
@@ -4759,7 +4745,6 @@
      "Level": "4"
     },
     "fieldChangeMessages": {
-     "background": 7,
      "goal": 7,
      "homeBase": 7,
      "keyRelationships": 7,
@@ -4767,7 +4752,6 @@
      "mood": 7
     },
     "fieldChanges": {
-     "background": 5,
      "goal": 5,
      "homeBase": 5,
      "keyRelationships": 5,
@@ -5288,7 +5272,7 @@
     "archiveReason": "",
     "archiveSourceMessageId": null,
     "archived": false,
-    "background": "Raised in the river quarter; served ten years as a royal archivist; apprenticed to the archive at twelve.",
+    "background": "Raised in the river quarter; apprenticed to the archive at twelve; survived the flood year.",
     "behaviorProfile": [
      "Disposition: kind - helps strangers without fuss"
     ],
@@ -5312,7 +5296,6 @@
      "Level": "4"
     },
     "fieldChangeMessages": {
-     "background": 7,
      "goal": 7,
      "homeBase": 7,
      "keyRelationships": 7,
@@ -5320,7 +5303,6 @@
      "mood": 7
     },
     "fieldChanges": {
-     "background": 5,
      "goal": 5,
      "homeBase": 5,
      "keyRelationships": 5,
@@ -5839,7 +5821,7 @@
     "archiveReason": "",
     "archiveSourceMessageId": null,
     "archived": false,
-    "background": "Raised in the river quarter; served ten years as a royal archivist; apprenticed to the archive at twelve.",
+    "background": "Raised in the river quarter; apprenticed to the archive at twelve; survived the flood year.",
     "behaviorProfile": [
      "Disposition: kind - helps strangers without fuss"
     ],
@@ -5863,7 +5845,6 @@
      "Level": "4"
     },
     "fieldChangeMessages": {
-     "background": 7,
      "goal": 7,
      "homeBase": 7,
      "keyRelationships": 7,
@@ -5871,7 +5852,6 @@
      "mood": 7
     },
     "fieldChanges": {
-     "background": 5,
      "goal": 5,
      "homeBase": 5,
      "keyRelationships": 5,
@@ -6392,7 +6372,7 @@
     "archiveReason": "",
     "archiveSourceMessageId": null,
     "archived": false,
-    "background": "Raised in the river quarter; served ten years as a royal archivist; apprenticed to the archive at twelve.",
+    "background": "Raised in the river quarter; apprenticed to the archive at twelve; survived the flood year.",
     "behaviorProfile": [
      "Disposition: kind - helps strangers without fuss"
     ],
@@ -6416,7 +6396,6 @@
      "Level": "3"
     },
     "fieldChangeMessages": {
-     "background": 7,
      "goal": 7,
      "homeBase": 7,
      "keyRelationships": 7,
@@ -6424,7 +6403,6 @@
      "mood": 7
     },
     "fieldChanges": {
-     "background": 5,
      "goal": 5,
      "homeBase": 5,
      "keyRelationships": 5,
@@ -6943,7 +6921,7 @@
     "archiveReason": "",
     "archiveSourceMessageId": null,
     "archived": false,
-    "background": "Raised in the river quarter; served ten years as a royal archivist; apprenticed to the archive at twelve.",
+    "background": "Raised in the river quarter; apprenticed to the archive at twelve; survived the flood year.",
     "behaviorProfile": [
      "Disposition: kind - helps strangers without fuss"
     ],
@@ -6967,7 +6945,6 @@
      "Level": "3"
     },
     "fieldChangeMessages": {
-     "background": 7,
      "goal": 7,
      "homeBase": 7,
      "keyRelationships": 7,
@@ -6975,7 +6952,6 @@
      "mood": 7
     },
     "fieldChanges": {
-     "background": 5,
      "goal": 5,
      "homeBase": 5,
      "keyRelationships": 5,

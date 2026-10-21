@@ -17,7 +17,7 @@ import {
     npcParticipatesInExchange,
 } from './scan-context.js';
 import { createDiagnosticStore } from './diagnostics-core.js';
-import { EDITOR_FIELDS, editorProfileLocks, settleEditorSave, untouchedEditorFields } from './src/dossier-edit.js';
+import { EDITOR_FIELDS, editorManualMemories, editorProfileLocks, settleEditorSave, untouchedEditorFields } from './src/dossier-edit.js';
 import { REFRESH_CHANGED_FIELDS, snapshotNpc } from './src/fields/registry.js';
 import {
     NPC_STATE_VERSION,
@@ -5717,7 +5717,7 @@ function openNpcEditor(npcId) {
           <label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_portrait_replace" type="checkbox" ${npc.portraitPromptReplace ? 'checked' : ''}> Replace the automatic positive prompt entirely <small>Use only when this NPC needs a hand-authored model-specific prompt. The global negative prompt still applies.</small></label>
         </div>
       </details>
-      <label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_lock_profile" type="checkbox" ${locked.size ? 'checked' : ''}> Protect edited stable profile fields from future scanner rewrites <small>Leave off to use manual edits as an organic baseline. Existing locks stay protected until you uncheck and save.</small></label>
+      <label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_lock_profile" type="checkbox" ${locked.size ? 'checked' : ''}> Protect edited stable profile fields from future scanner rewrites <small>Leave off to use manual edits as an organic baseline. Existing locks stay protected until you uncheck and save. Also covers Player Dynamic, Mood, Location, Goal, Condition and Important memories. Memories you type are never pushed out by later scans, protected or not.</small></label>
       ${locked.size ? `<p class="npc-state-delta-muted">Currently protected: ${editorValue([...locked].join(', '))}</p>` : ''}
       <label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_retention_protected" type="checkbox" ${npc.retentionProtected ? 'checked' : ''}> Keep this NPC from automatic stale cleanup <small>Use for recurring or major NPCs who may disappear for long arcs. This does not lock their profile fields.</small></label>
       <label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_minor" type="checkbox" ${npc.minor ? 'checked' : ''}> Hide present-NPC card <small>The dossier still scans, updates, stores memories/relationships, and injects when present; only the present cast card is hidden.</small></label>
@@ -6189,6 +6189,9 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
     const shortened = settleEditorSave(state.npcs[index], current, next, untouched, {
         keepVerbatim: key => key !== 'relationshipSummary' || !relationshipMoved,
     });
+    const manualMemories = editorManualMemories(current, state.npcs[index], untouched);
+    if (manualMemories.length) state.npcs[index].manualMemories = manualMemories;
+    else delete state.npcs[index].manualMemories;
     if (next.lastRelationshipChange?.impact === 'manual') state.npcs[index].lastRelationshipChange = structuredClone(next.lastRelationshipChange);
     const targetMessageId = latestMessageId(false);
     applyManualKeyRelationshipEdit(state, npcId, beforeKeyRelationships, state.npcs[index].keyRelationships || [], {

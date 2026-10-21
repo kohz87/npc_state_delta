@@ -11,7 +11,7 @@ import { EDITOR_LOCKABLE_FIELDS, LOCKED_FIELD_KEYS } from './fields/registry.js'
 // on a field keeps everything that field is made of, so a restored or imported copy never pairs a kept
 // value with another copy's parts). Both come from the field registry.
 export { EDITOR_LOCKABLE_FIELDS, LOCKED_FIELD_KEYS };
-const LIST_FIELDS = new Set(['mannerisms', 'behaviorProfile', 'keyRelationships', 'aliases']);
+const LIST_FIELDS = new Set(['mannerisms', 'behaviorProfile', 'keyRelationships', 'aliases', 'memories']);
 
 export function lockedFieldKeys(field) {
     return LOCKED_FIELD_KEYS[field] || [field];
@@ -99,4 +99,17 @@ export function settleEditorSave(saved, current, typed, untouched, { keepVerbati
         if (lost) shortened.push(field.label);
     }
     return shortened;
+}
+
+// The memories the reader entered by hand after a Save (a later scan never evicts them): the lines of
+// an edited Memories field that were not already stored, plus the earlier hand-entered ones still kept.
+export function editorManualMemories(current, saved, untouched) {
+    const stored = new Set((Array.isArray(current?.memories) ? current.memories : []).map(plainLine));
+    const before = (Array.isArray(current?.manualMemories) ? current.manualMemories : []).map(plainLine);
+    const kept = Array.isArray(saved?.memories) ? saved.memories : [];
+    if (untouched.has('memories')) return kept.filter(item => before.includes(plainLine(item)));
+    return kept.filter(item => !stored.has(plainLine(item)) || before.includes(plainLine(item)));
+}
+function plainLine(value) {
+    return String(value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
 }

@@ -61,9 +61,11 @@ export const FIELDS = Object.freeze({
     mannerisms: { kind: 'list', evidence: 3, tracked: 11, editorLock: 11, lock: [12, ['mannerisms']], revertList: 1, refreshChanged: 19, snapshot: [21, 'list'], v2: 15 },
     behaviorProfile: { kind: 'list', evidence: 4, tracked: 10, dayTracked: 2, editorLock: 9, lock: [10, ['behaviorProfile']], revertList: 2, refreshChanged: 10, snapshot: [12, 'list'], v2: 16 },
     background: { kind: 'text', text: 9, tracked: 15, dayTracked: 3, editorLock: 10, lock: [11, ['background']], aliasMerge: 7, refreshChanged: 11, snapshot: [13, 'text'], v2: 17 },
-    memories: { kind: 'list', tracked: 17, revertList: 0, refreshChanged: 20, snapshot: [20, 'list'], v2: 18 },
+    memories: { kind: 'list', tracked: 17, editorLock: 20, lock: [21, ['memories', 'manualMemories']], revertList: 0, refreshChanged: 20, snapshot: [20, 'list'], v2: 18 },
+    // The memories the reader entered by hand: a later scan never evicts them (core-mechanics mergeImportantMemories).
+    manualMemories: { kind: 'part', userMeta: 6 },
     keyRelationships: { kind: 'list', tracked: 16, editorLock: 12, lock: [13, ['keyRelationships']], revertList: 3, refreshChanged: 12, snapshot: [22, 'list'], v2: 19 },
-    relationshipSummary: { kind: 'text', text: 10, tracked: 14, terminalFrozen: 9, aliasMerge: 8, refreshChanged: 13, snapshot: [14, 'text'], v2: 20 },
+    relationshipSummary: { kind: 'text', text: 10, tracked: 14, editorLock: 15, lock: [16, ['relationshipSummary']], terminalFrozen: 9, aliasMerge: 8, refreshChanged: 13, snapshot: [14, 'text'], v2: 20 },
     relationship: {
         kind: 'meter', tracked: 13, terminalFrozen: 4, snapshot: [32, 'shallow'], v2: 21,
         revertGroup: [0, ['relationship', 'relationshipProgress', 'relationshipMilestones', 'relationshipEventHistory', 'lastRelationshipChange']],
@@ -72,10 +74,10 @@ export const FIELDS = Object.freeze({
     relationshipMilestones: { kind: 'part', terminalFrozen: 6 },
     relationshipEventHistory: { kind: 'part', terminalFrozen: 7 },
     lastRelationshipChange: { kind: 'part', terminalFrozen: 8, snapshot: [33, 'relationshipChange'] },
-    mood: { kind: 'text', text: 11, tracked: 0, terminalFrozen: 0, aliasMerge: 9, refreshChanged: 14, snapshot: [15, 'text'], v2: 22 },
-    location: { kind: 'text', text: 12, tracked: 1, terminalFrozen: 1, aliasMerge: 10, refreshChanged: 15, snapshot: [16, 'text'], v2: 23 },
-    goal: { kind: 'text', text: 13, tracked: 2, terminalFrozen: 2, aliasMerge: 11, refreshChanged: 16, snapshot: [17, 'text'], v2: 24 },
-    status: { kind: 'text', text: 14, tracked: 3, terminalFrozen: 3, aliasMerge: 12, refreshChanged: 17, snapshot: [18, 'text'], v2: 25 },
+    mood: { kind: 'text', text: 11, tracked: 0, editorLock: 16, lock: [17, ['mood']], terminalFrozen: 0, aliasMerge: 9, refreshChanged: 14, snapshot: [15, 'text'], v2: 22 },
+    location: { kind: 'text', text: 12, tracked: 1, editorLock: 17, lock: [18, ['location']], terminalFrozen: 1, aliasMerge: 10, refreshChanged: 15, snapshot: [16, 'text'], v2: 23 },
+    goal: { kind: 'text', text: 13, tracked: 2, editorLock: 18, lock: [19, ['goal']], terminalFrozen: 2, aliasMerge: 11, refreshChanged: 16, snapshot: [17, 'text'], v2: 24 },
+    status: { kind: 'text', text: 14, tracked: 3, editorLock: 19, lock: [20, ['status']], terminalFrozen: 3, aliasMerge: 12, refreshChanged: 17, snapshot: [18, 'text'], v2: 25 },
     customFields: { kind: 'map', editorLock: 13, lock: [14, ['customFields']], v2: 26 },
     lifeState: {
         kind: 'life', tracked: 7, refreshChanged: 18, snapshot: [25, 'lifeState'], v2: 27,

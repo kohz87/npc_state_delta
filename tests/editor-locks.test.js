@@ -18,7 +18,7 @@ test('editor locks: the Save keeps existing locks, adds changed fields and is al
         { manualProfileFields: ['appearance'], manualProfileLocksExplicit: true }, 'an unchanged Save keeps the locks');
     assert.deepEqual(editorProfileLocks(current, next, { protect: false }),
         { manualProfileFields: [], manualProfileLocksExplicit: true }, 'unticked clears them, explicitly');
-    assert.equal(EDITOR_LOCKABLE_FIELDS.length, 15);
+    assert.equal(EDITOR_LOCKABLE_FIELDS.length, 21, 'stable fields, Player Dynamic, the live fields and memories');
     const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
     assert.doesNotMatch(index, /locked\.length/, 'the editor reads the Set size');
     assert.match(index, /editorProfileLocks\(current, next, \{ protect: Boolean\(document\.getElementById\('npc_state_delta_edit_lock_profile'\)\?\.checked\) \}\)/);
@@ -81,7 +81,8 @@ test('editor locks through the synthetic host: a second Save, a later scan, a sw
         assert.equal(second.controls.get('npc_state_delta_edit_lock_profile').checked, true, 'the protect checkbox is pre-checked');
         assert.match(second.html, /Currently protected: role/);
         await saveEditorForm(second, { mood: 'curious' });
-        assert.deepEqual(yunyun().manualProfileFields, ['role'], 'the second Save kept the lock');
+        // (step 6) Mood is lockable too, so the edited mood joins the kept lock.
+        assert.deepEqual(yunyun().manualProfileFields, ['role', 'mood'], 'the second Save kept the lock');
         assert.equal(yunyun().mood, 'curious');
 
         // A later scan proposing another role leaves the locked one.
@@ -91,13 +92,13 @@ test('editor locks through the synthetic host: a second Save, a later scan, a sw
         // Edits made after that reply: a new role and a newly locked background.
         await editNpc(id, { role: 'Crimson Demon chieftain', background: 'Raised in the Crimson Demon village.' });
         assert.equal(yunyun().role, 'Crimson Demon chieftain');
-        assert.deepEqual(yunyun().manualProfileFields, ['role', 'background']);
+        assert.deepEqual(yunyun().manualProfileFields, ['role', 'mood', 'background']);
         // The appearance editor's lock comes from the same checkbox.
         assert.equal(await runtime.updateAppearance(id, { overallAppearance: 'Crimson eyes and a black cloak.', currentForm: '__none__', currentAppearance: 'A red scarf.', formsText: '' },
             { chatKey: runtime.uiStatus().chatKey, lockAppearance: true }), true);
         const appearance = yunyun().appearance;
         assert.equal(yunyun().overallAppearance, 'Crimson eyes and a black cloak.');
-        assert.deepEqual(yunyun().manualProfileFields, ['role', 'background', 'appearance']);
+        assert.deepEqual(yunyun().manualProfileFields, ['role', 'mood', 'background', 'appearance']);
 
         // A swipe of that reply restores the boundary before it and rescans; the edits and their locks stay.
         mockState.context.chat[next] = { is_user: false, is_system: false, name: 'Megumin', swipe_id: 1,
@@ -111,7 +112,7 @@ test('editor locks through the synthetic host: a second Save, a later scan, a sw
         await sleep(500);
         assert.equal(yunyun().role, 'Crimson Demon chieftain', 'the swipe kept the locked edit');
         assert.equal(yunyun().background, 'Raised in the Crimson Demon village.');
-        assert.deepEqual(yunyun().manualProfileFields, ['role', 'background', 'appearance'], 'the swipe kept the locks');
+        assert.deepEqual(yunyun().manualProfileFields, ['role', 'mood', 'background', 'appearance'], 'the swipe kept the locks');
         assert.equal(yunyun().appearance, appearance, 'the swipe kept the locked appearance');
         assert.equal(yunyun().overallAppearance, 'Crimson eyes and a black cloak.', 'and the appearance forms under it');
 
@@ -121,7 +122,7 @@ test('editor locks through the synthetic host: a second Save, a later scan, a sw
         await sleep(500);
         assert.equal(yunyun().role, 'Crimson Demon chieftain', 'the branch restore kept the locked edit');
         assert.equal(yunyun().background, 'Raised in the Crimson Demon village.');
-        assert.deepEqual(yunyun().manualProfileFields, ['role', 'background', 'appearance'], 'the branch restore kept the locks');
+        assert.deepEqual(yunyun().manualProfileFields, ['role', 'mood', 'background', 'appearance'], 'the branch restore kept the locks');
         assert.equal(yunyun().overallAppearance, 'Crimson eyes and a black cloak.');
 
         // Unticking and saving clears the locks; the next scan may then rewrite the role.
