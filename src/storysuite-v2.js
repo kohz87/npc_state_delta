@@ -5,7 +5,8 @@
 // registers as module `npc-state-delta` (no domains) with four read-only queries, a Cast tab that
 // shows Delta's own present-cast cards, and a settings section that carries Delta's own settings
 // panel into the Story Suite overlay. While hosted, the copy in SillyTavern's extensions drawer is
-// hidden; if the host goes away it comes back exactly where it was.
+// hidden; if the host goes away it comes back exactly where it was. While hosted, <html> also carries
+// HOSTED_FLAG, which index.js and the CSS read (launcher, in-chat cast default, sidecar checks).
 //
 // Without a v2 host (no Story Block, or a v1 Story Block whose global has no `ready`/`sdk`) this
 // module does nothing: it looks for the host a bounded number of times and then stops. The v1
@@ -29,6 +30,13 @@ export const CAST_TAB_ID = 'cast';
 export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait']);
 /** Sent on the document with detail { hosted } when Delta registers with a v2 host and when it goes away. */
 export const V2_HOST_EVENT = 'npc-state-delta:v2-host';
+/**
+ * Set to '1' on <html> (data-npc-state-delta-story-block-v2) while Delta is registered with a v2
+ * host, removed when it goes away. index.js and the CSS read it: the floating launcher hides (unless
+ * the reader keeps it), the in-chat cast takes v1's "Only in Story Block" default, and automatic
+ * freshness checks trust an already-seen missing sidecar.
+ */
+export const HOSTED_FLAG = 'npcStateDeltaStoryBlockV2';
 export const HOST_RETRY_MS = 250;
 export const HOST_RETRY_ATTEMPTS = 40;
 export const HOST_ALIVE_MS = 5000;
@@ -381,8 +389,16 @@ export function createStorySuiteV2Adapter({
 
     // ---- host lifecycle ----
 
-    // story-block-tabs.js and index.js take back (or offer again) what v1 gave Story Block.
+    // story-block-tabs.js and index.js take back (or offer again) what v1 gave Story Block, and the
+    // page flag (HOSTED_FLAG) follows.
     function announceHosted(on) {
+        try {
+            const data = doc?.documentElement?.dataset;
+            if (data && on) data[HOSTED_FLAG] = '1';
+            else if (data) delete data[HOSTED_FLAG];
+        } catch (error) {
+            warn('Story Suite v2 host flag failed', error);
+        }
         try {
             if (typeof doc?.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
                 doc.dispatchEvent(new CustomEvent(V2_HOST_EVENT, { detail: { hosted: on } }));

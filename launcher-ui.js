@@ -155,6 +155,8 @@ class DeltaLauncherRefinement {
 body.story-suite-open #${LAUNCHER_ID} { display: none !important; }
 /* Story Block's sidebar carries Delta's Present NPCs and Dossiers tabs: the button is redundant there, unless kept. */
 html[data-npc-state-delta-story-block="1"]:not([data-npc-state-delta-launcher="keep"]) #${LAUNCHER_ID} { display: none !important; }
+/* A Story Block v2 host carries Delta (its Cast tab and overlay): the same, with its own keep setting. */
+html[data-npc-state-delta-story-block-v2="1"]:not([data-npc-state-delta-launcher-v2="keep"]) #${LAUNCHER_ID} { display: none !important; }
 #${ROOT_ID} .delta-document-head > .delta-edit { display: none !important; }
 #${ROOT_ID} .delta-backdrop {
   position: fixed;
