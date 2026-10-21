@@ -481,9 +481,14 @@ export function createStorySuiteV2Adapter({
         else body = String(api.presentCastHtml?.() || '') || emptyCast(api.castEmptyReason?.());
         const meters = api && enabled() ? castMetersHtml() : '';
         const html = `<div class="${PANE_CLASS}">${body}${meters}</div>`;
-        if (el.__npcStateDeltaV2Cast === html) return;
+        // Skip an unchanged redraw only while the pane still holds what was drawn: Story Block's tab
+        // host empties the shared pane (replaceChildren) before every render.
+        const drawn = el.__npcStateDeltaV2CastNode;
+        const stillShown = drawn ? drawn.parentNode === el : Boolean(el.innerHTML);
+        if (el.__npcStateDeltaV2Cast === html && stillShown) return;
         el.innerHTML = html;
         el.__npcStateDeltaV2Cast = html;
+        el.__npcStateDeltaV2CastNode = el.firstElementChild ?? null;
         // The now lines and chatter bubbles get their text through textContent, never markup.
         api?.fillPresentCast?.(el);
     }
@@ -561,7 +566,7 @@ export function createStorySuiteV2Adapter({
         doc.addEventListener(EVENTS.enabledChanged, rerender);
     }
 
-    function register(sdk, from, attempt) {
+    async function register(sdk, from, attempt) {
         if (hostRef !== from) return false;
         if (host() !== from) {
             // Replaced while it was getting ready: look again (still within the bound).
@@ -571,12 +576,16 @@ export function createStorySuiteV2Adapter({
         }
         if (typeof sdk?.registerModule !== 'function' || sdkRef === sdk) return false;
         sdkRef = sdk;
+        // The host's registerModule is async: Delta is hosted (drawer copy, launcher and in-chat cast
+        // step aside) only once the host has accepted the module, never on a refusal.
         try {
-            sdk.registerModule(definition);
+            await sdk.registerModule(definition);
         } catch (error) {
+            if (sdkRef === sdk) sdkRef = null;
             warn('Story Suite v2 registration failed; Delta keeps working on its own', error);
             return false;
         }
+        if (!started || hostRef !== from || sdkRef !== sdk) return false;
         hosted = true;
         listen();
         syncDrawer();
@@ -690,6 +699,16 @@ export function createStorySuiteV2Adapter({
             return entries ? entryFor(entries, npc) : null;
         },
         sliceView,
+        /** While hosted: the names in Story Block's scene (`scene.present`), or null when it cannot answer. */
+        scenePresent: () => {
+            if (!hosted || typeof sdkRef?.query !== 'function') return null;
+            try {
+                const list = sdkRef.query('scene.present');
+                return Array.isArray(list) ? list.map(name => String(name ?? '').trim()).filter(Boolean) : null;
+            } catch {
+                return null;
+            }
+        },
         /** A dossier's hidden notes as editor lines, and editor lines back to notes (src/npc-meters.js). */
         secretLines: list => secretsToLines(list),
         parseSecrets: (text, previous) => secretsFromLines(text, previous),

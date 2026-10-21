@@ -61,6 +61,9 @@ function safeSuite(suite) {
 
 /** True when another suite extension is the source of truth for `area` under the reader's choice. */
 export function defersArea(area, choices = {}, suite = null) {
+    // A Story Block v2 host keeps the scene (its `scene.present`) but never fills v1's registry: the
+    // reader's "theirs" (and "auto", where the scene specialist wins) defer to it; "mine" keeps it here.
+    if (area === 'scene' && storyBlockIsV2()) return normalizeSourceOfTruth(choices).scene !== 'mine';
     const registry = safeSuite(suite);
     if (!registry) return false;
     try {

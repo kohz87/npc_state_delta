@@ -177,6 +177,7 @@ import {
     ensureSuiteStylesheet,
     replyTokenEstimate,
     resolveDossierTarget,
+    storyBlockIsV2,
     externalCalendar,
     normalizeSourceOfTruth,
     openSuiteOverlay,
@@ -852,6 +853,26 @@ function hostedMeterView(npcs) {
     const adapter = storySuiteV2Meters();
     if (!adapter) return npcs;
     try { return adapter.sliceView(npcs) || npcs; } catch { return npcs; }
+}
+// (v2) While hosted, Story Block's scene says who is here unless the reader keeps the scene in Delta
+// ("scene: mine"): the dossier injection, the Cast tab and the module's queries all follow its
+// `scene.present`, so the prompt never carries two different casts. Delta's stored presence is not
+// changed. Without a host, or when the scene cannot answer, Delta's own presence stands.
+function scenePresenceView(npcs) {
+    const adapter = storySuiteV2Meters();
+    if (!adapter || !Array.isArray(npcs) || !defersArea('scene', getSettings().sourceOfTruth)) return npcs;
+    let names = null;
+    try { names = adapter.scenePresent?.(); } catch { names = null; }
+    if (!Array.isArray(names)) return npcs;
+    const here = new Set(names.map(name => resolveDossierTarget(npcs, name)).filter(Boolean));
+    let changed = false;
+    const out = npcs.map(npc => {
+        const present = Boolean(npc?.id) && here.has(String(npc.id)) && !npc.archived;
+        if (Boolean(npc?.present) === present) return npc;
+        changed = true;
+        return { ...npc, present, worldActive: present ? false : Boolean(npc.worldActive) };
+    });
+    return changed ? out : npcs;
 }
 // A committed scan's relationship changes go to the slice as npc.adjust (same clamps as a story
 // line), in dossier order; the sidecar keeps its own numbers by v1's rules.
@@ -2541,7 +2562,10 @@ function namedByPlayerNpcIds(state) {
 // The live dossier injection under the current settings and scene defer (sent by updateInjection;
 // tokens() measures the same text).
 function liveInjectionText(state, settings, { namedNpcIds = namedByPlayerNpcIds(state), transcript = recentTranscript(4) } = {}) {
-    return buildInjection(hostedMeterView(state.npcs), transcript, state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: settings.customFieldNames, sceneDeferred: defersArea('scene', settings.sourceOfTruth) });
+    // v1's World State carries the live mood and outfit the cards then leave out; v2's scene keeps
+    // only the place and who is present, so under a v2 host the cards keep them.
+    const sceneDeferred = defersArea('scene', settings.sourceOfTruth) && !storyBlockIsV2();
+    return buildInjection(scenePresenceView(hostedMeterView(state.npcs)), transcript, state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: settings.customFieldNames, sceneDeferred });
 }
 
 function updateInjection() {
@@ -3948,7 +3972,10 @@ function stripNarrationSwipes(message, lenient) {
         if (typeof message.swipes[index] === 'string') message.swipes[index] = extractNarrationCapture(message.swipes[index], { lenient }).text;
     }
 }
+// On MESSAGE_RECEIVED the reply is not drawn yet (the host draws it next, from the stripped text);
+// re-render only a message already in the chat.
 function rerenderNarrationMessage(messageId, message) {
+    if (!globalThis.document?.querySelector?.(`#chat .mes[mesid="${Number(messageId)}"]`)) return;
     try { getContext().updateMessageBlock?.(messageId, message); }
     catch (error) { console.warn('[NPC State Delta] could not re-render a reply after removing its capture block.', error); }
 }
@@ -5122,7 +5149,7 @@ function inChatCastMode() {
 function storyBlockCastHtml() {
     const key = getChatKey();
     if (key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return '';
-    const present = getChatState(key).npcs.filter(npc => !npc.archived && npc.present && !npc.minor);
+    const present = scenePresenceView(getChatState(key).npcs).filter(npc => !npc.archived && npc.present && !npc.minor);
     // With nobody present the tab still shows chatter (as Others), so none is lost.
     return inlineRosterHtml(present, latestMessageId(true), 'full', { othersWithoutCast: true });
 }
@@ -6849,7 +6876,7 @@ const SUITE_API = Object.freeze({
     npcs: () => {
         const key = getChatKey();
         if (key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return [];
-        return (getChatState(key).npcs || []).map(npc => ({
+        return scenePresenceView(getChatState(key).npcs || []).map(npc => ({
             id: String(npc?.id || ''),
             name: String(npc?.name || ''),
             aliases: [...(npc?.aliases || [])],

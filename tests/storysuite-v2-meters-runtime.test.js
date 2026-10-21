@@ -164,17 +164,33 @@ test('without a v2 host the same turns send nothing, and the sidecar and the inj
             sent: mockState.sdk?.sent?.length ?? 0,
             hosted: globalThis.document.documentElement.dataset.npcStateDeltaStoryBlockV2 ?? null,
             injection: api.injectionPreview().text,
+            presentQuery: mockState.sdk?.registered?.[0]?.queries?.['npc.present']?.({}) ?? null,
+            castHtml: api.presentCastHtml(),
             lastChange: { ...yunyun.lastRelationshipChange, at: undefined },
             milestones: yunyun.relationshipMilestones,
         }));
     }));
     const alone = run('meters-alone', async () => {});
     // A host whose slice has no entries yet: Delta forwards the change, everything it shows is its own.
+    // Its scene (`scene.present`, which owns presence while hosted) agrees that Yunyun is here.
     const hosted = run('meters-empty-slice', async () => {
+        const sdk = { registered: [], sent: [], registerModule(def) { sdk.registered.push(def); }, command: async (type, payload) => { sdk.sent.push({ type, payload }); return { ok: true }; }, query: name => (name === 'scene.present' ? ['Yunyun'] : []), settings: () => ({}) };
+        mockState.sdk = sdk;
+        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    });
+    // A host whose scene does not list her: the injection follows Story Block's scene, not Delta's own presence.
+    const elsewhere = run('meters-scene-elsewhere', async () => {
         const sdk = { registered: [], sent: [], registerModule(def) { sdk.registered.push(def); }, command: async (type, payload) => { sdk.sent.push({ type, payload }); return { ok: true }; }, query: () => [], settings: () => ({}) };
         mockState.sdk = sdk;
         globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
     });
+    assert.match(alone.injection, /Only confirmed-present NPCs are included[\s\S]*- Yunyun/);
+    assert.doesNotMatch(elsewhere.injection, /Only confirmed-present NPCs are included/, 'nobody is presented as in the scene');
+    assert.match(elsewhere.injection, /- Yunyun \(mentioned, not present/);
+    assert.deepEqual(hosted.presentQuery, ['Yunyun'], 'npc.present follows the scene');
+    assert.deepEqual(elsewhere.presentQuery, [], 'npc.present follows the scene when it leaves her out');
+    assert.match(hosted.castHtml, /Yunyun/);
+    assert.doesNotMatch(elsewhere.castHtml, /npc-state-delta-present-card[^"]*"[^>]*data-npc-id/, 'the Cast tab shows nobody as present');
     assert.equal(alone.hosted, null);
     assert.equal(alone.sent, 0, 'nothing is sent without a host');
     assert.equal(hosted.hosted, '1');
