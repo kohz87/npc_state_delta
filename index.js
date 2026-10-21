@@ -100,6 +100,7 @@ import {
     normalizeCustomFields,
     setExternalCalendarSource,
     currentPresentationText,
+    stampChangedFields,
 } from './core.js';
 import { applyNpcBirthdayUpdate, normalizeBirthDate } from './birthday.js';
 import {
@@ -3767,11 +3768,28 @@ function suppressPrimaryRelationshipForFocusedDecisions(parsed, decisions) {
     return clone;
 }
 
+// Copies the "changed at" stamps for whatever differs between `before` and the record (`npc`) onto it.
+function stampNpcChanges(npc, before, { turn, message = null, storyDay = null } = {}) {
+    const stamped = stampChangedFields(before, npc, { turn, message, storyDay });
+    for (const key of ['fieldChanges', 'fieldChangeDays', 'fieldChangeMessages']) {
+        if (stamped[key] === undefined) delete npc[key];
+        else npc[key] = stamped[key];
+    }
+    return npc;
+}
+// The stamps for one of the reader's own edits: Delta's turn and the latest reply.
+function stampManualEdit(state, npc, before) {
+    const reply = latestReplyIndex();
+    return stampNpcChanges(npc, before, { turn: state.turn, message: reply >= 0 ? reply : null, storyDay: storyDayAt(reply >= 0 ? reply : undefined) });
+}
+
 function applyFocusedRelationshipDecisions(state, decisions, caps, sourceMessageId, report = null) {
     if (!decisions?.size) return state;
     for (const [id, decision] of decisions) {
         const npc = state.npcs.find(item => item.id === id);
         if (!npc || isTerminalNpcDeath(npc)) continue;
+        // (cleanup step 9) The pass runs after the merge stamped its changes: it stamps its own.
+        const before = structuredClone(npc);
         const requestedHasDelta = Object.values(decision.relationshipDelta || {}).some(value => Number(value) !== 0);
         const evidence = normalizeRelationshipEvidence(decision.relationshipEvidence);
         const duplicateAward = requestedHasDelta && relationshipHistoryLooksDuplicate(npc.relationshipEventHistory, decision.relationshipChangeReason, {
@@ -3841,6 +3859,7 @@ function applyFocusedRelationshipDecisions(state, decisions, caps, sourceMessage
             npc.updatedAt = Date.now();
             if (report?.updated && !report.updated.includes(id)) report.updated.push(id);
         }
+        stampNpcChanges(npc, before, { turn: state.turn, message: Number.isInteger(sourceMessageId) ? sourceMessageId : null });
     }
     return state;
 }
@@ -6192,6 +6211,7 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
     const manualMemories = editorManualMemories(current, state.npcs[index], untouched);
     if (manualMemories.length) state.npcs[index].manualMemories = manualMemories;
     else delete state.npcs[index].manualMemories;
+    stampManualEdit(state, state.npcs[index], current);
     if (next.lastRelationshipChange?.impact === 'manual') state.npcs[index].lastRelationshipChange = structuredClone(next.lastRelationshipChange);
     const targetMessageId = latestMessageId(false);
     applyManualKeyRelationshipEdit(state, npcId, beforeKeyRelationships, state.npcs[index].keyRelationships || [], {
@@ -6238,11 +6258,12 @@ function updateNpcAppearance(npcId, draft, { chatKey, lockAppearance = false } =
     const state = getChatState(chatKey);
     const index = state.npcs.findIndex(item => item.id === String(npcId || ''));
     if (index < 0) return false;
-    const next = appearanceDraftRecord(state.npcs[index], draft, { lockAppearance });
+    const before = state.npcs[index];
+    const next = appearanceDraftRecord(before, draft, { lockAppearance });
     // The appearance lock comes from the editor's protect checkbox: the reader's explicit choice.
     next.manualProfileLocksExplicit = true;
     next.updatedAt = Date.now();
-    state.npcs[index] = normalizeNpcRecord(next);
+    state.npcs[index] = stampManualEdit(state, normalizeNpcRecord(next), before);
     const messageId = latestMessageId(false);
     if (messageId >= 0) commitBranchCheckpoint(state, messageId, 'manual-edit');
     persistCritical(chatKey);
@@ -6263,7 +6284,7 @@ function updateNpcLifeState(npcId, choice, { chatKey } = {}) {
     const corrected = correctingDeath ? setNpcArchived(current, false, {
         allowDeathCorrection: true, sourceMessageId: messageId,
     }) : current;
-    state.npcs[index] = normalizeNpcRecord(manualLifeStateRecord(corrected, choice));
+    state.npcs[index] = stampManualEdit(state, normalizeNpcRecord(manualLifeStateRecord(corrected, choice)), current);
     if (messageId >= 0) commitBranchCheckpoint(state, messageId, correctingDeath ? 'manual-death-correction' : 'manual-life-state');
     persistCritical(chatKey);
     renderDossier();

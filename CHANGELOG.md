@@ -16,6 +16,8 @@ Story Suite v2. NSD stays standalone; with Story Block v2 it registers as a host
 
 ## Unreleased
 
+- **"Changed at reply #N" follows every change.** The per-field change markers were set only inside the scan's merge, so a relationship change made by the relationship evaluator (the usual writer on an ordinary reply), and your own edits in the dossier editor, the appearance forms and the life state, left them at an older reply. They now record those changes too, and Refresh no longer treats a field you just rewrote by hand as stale.
+
 - **Background is no longer cut down by an ordinary scan.** A scan's background replaced the stored one outright, so a shorter restatement ("Raised in the river quarter.") erased every other clause. An established background now changes the way the home base does: with `backgroundState: "update"`, a reason and support in the story. No prompt asks for that state yet, so a restatement that keeps every stored point and adds something the story says is accepted too. A first background still needs support in the story.
 - **Player Dynamic, Mood, Location, Goal, Condition and Important memories can be protected.** The editor's protect checkbox now locks these too when you change them, and every scan, Refresh and relationship pass keeps a locked one (memories included: before, a scan merged new memories into a protected list and pushed the oldest out).
 - **Memories you type are never pushed out.** A memory you enter in the editor stays when later scans add new ones, protected or not; new memories fill only the slots yours leave free (with five of your own, none are added until you remove one).
