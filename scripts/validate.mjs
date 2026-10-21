@@ -102,7 +102,9 @@ requireCheck(scannerRouting.includes('scannerConnectionProfile') && scannerRouti
 requireCheck(scannerRouting.includes('ConnectionManagerRequestService') && scannerRouting.includes('service.sendRequest('), 'scanner routing must use request-scoped SillyTavern Connection Manager requests');
 requireCheck(scannerRouting.includes('ctx.generateRaw(options)'), 'scanner routing must preserve the default host generateRaw route');
 requireCheck(!/connectionManager\s*\.\s*selectedProfile\s*=/.test(scannerRouting), 'scanner routing must not mutate the host roleplay connection profile');
-requireCheck(runtime.includes('dispatchScannerRequest') && runtime.includes('dispatchScannerRequest(ctx,'), 'runtime scanner calls are not wired through the shared dispatcher');
+// The runtime controller and its src/ modules (the scanner request lives in src/scanner-request.js).
+const runtimeAndModules = [runtime, ...declaredSrcModules.filter(name => fs.existsSync(path.join(root, name))).map(name => fs.readFileSync(path.join(root, name), 'utf8'))].join('\n');
+requireCheck(runtimeAndModules.includes('dispatchScannerRequest') && runtimeAndModules.includes('dispatchScannerRequest(ctx,'), 'runtime scanner calls are not wired through the shared dispatcher');
 requireCheck(runtime.includes("scannerConnectionProfile: ''"), 'scanner connection profile is missing from active Delta settings defaults');
 
 for (const file of ['AGENTS.md', 'docs/core-contract.md', 'docs/WORKPLAN.md', 'DEVELOPMENT.md', 'docs/seed-provenance.md', 'docs/seed-provenance.json', 'LICENSE']) {

@@ -187,12 +187,12 @@ test('scanner uses current-exchange auto context and keeps wider history for man
     assert.match(fs.readFileSync(path.join(root, 'src', 'transcript.js'), 'utf8'), /export function currentExchangeTranscript/);
     assert.match(index, /const fullWindowScan = Boolean\(!manual && settings\.fullScanEveryTurn\)/);
     assert.match(index, /\(manual \|\| fullWindowScan\) \? recentTranscript\(settings\.scanDepth\) : currentTranscript/);
-    assert.match(index, /SCAN_RESPONSE_LENGTH = 1800/);
-    assert.match(index, /FULL_SCAN_RESPONSE_LENGTH = 3200/);
+    assert.match(fs.readFileSync(path.join(root, 'src', 'scanner-request.js'), 'utf8'), /SCAN_RESPONSE_LENGTH = 1800/);
+    assert.match(fs.readFileSync(path.join(root, 'src', 'scanner-request.js'), 'utf8'), /FULL_SCAN_RESPONSE_LENGTH = 3200/);
     assert.match(index, /fullWindowScan \? FULL_SCAN_RESPONSE_LENGTH : SCAN_RESPONSE_LENGTH/);
-    assert.match(index, /BACKFILL_RESPONSE_LENGTH = 3200/);
-    assert.match(index, /JSON_RETRY_RESPONSE_LENGTH = 5200/);
-    assert.match(index, /CRITICAL COMPACT JSON RETRY/);
+    assert.match(fs.readFileSync(path.join(root, 'src', 'scanner-request.js'), 'utf8'), /BACKFILL_RESPONSE_LENGTH = 3200/);
+    assert.match(fs.readFileSync(path.join(root, 'src', 'scanner-request.js'), 'utf8'), /JSON_RETRY_RESPONSE_LENGTH = 5200/);
+    assert.match(fs.readFileSync(path.join(root, 'src', 'scanner-request.js'), 'utf8'), /CRITICAL COMPACT JSON RETRY/);
     assert.match(index, /'Scan context'/);
     assert.match(index, /Full scan every turn/);
     assert.match(index, /Quick automatic scans read only the latest user \+ assistant exchange/);
