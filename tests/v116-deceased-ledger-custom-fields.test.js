@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { EDITOR_LOCKABLE_FIELDS, LOCKED_FIELD_KEYS } from '../src/fields/registry.js';
 import {
     buildBackfillPrompt,
     buildInjection,
@@ -96,6 +97,6 @@ test('settings, editor, scans and imports are wired to the custom fields', () =>
     assert.equal((index.match(/customFieldNames: settings\.customFieldNames/g) || []).length, 7, 'three prompts, three merges and the injection');
     assert.match(index, /\$\{customFieldEditorHtml\(npc\)\}/);
     assert.match(index, /customFields: customFieldEditorValues\(current\)/);
-    assert.match(fs.readFileSync(new URL('../src/dossier-edit.js', import.meta.url), 'utf8'), /'keyRelationships', 'customFields'/, 'manual edits lock custom fields like other stable fields');
-    assert.match(fs.readFileSync(new URL('../src/dossier-edit.js', import.meta.url), 'utf8'), /customFields: \['customFields'\],/, 'the lock map bundle import and branch restore share');
+    assert.ok(EDITOR_LOCKABLE_FIELDS.includes('customFields'), 'manual edits lock custom fields like other stable fields');
+    assert.deepEqual(LOCKED_FIELD_KEYS.customFields, ['customFields'], 'the lock map bundle import and branch restore share');
 });

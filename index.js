@@ -18,6 +18,7 @@ import {
 } from './scan-context.js';
 import { createDiagnosticStore } from './diagnostics-core.js';
 import { EDITOR_FIELDS, editorProfileLocks, settleEditorSave, untouchedEditorFields } from './src/dossier-edit.js';
+import { REFRESH_CHANGED_FIELDS, snapshotNpc } from './src/fields/registry.js';
 import {
     NPC_STATE_VERSION,
     DEFAULT_RELATIONSHIP,
@@ -3064,8 +3065,7 @@ function syncOpenNpcEditorFields(npc) {
 }
 
 function refreshChangedFields(before, after) {
-    const fields = ['name','role','species','gender','homeBase','age','apparentAge','appearance','personality','speech','behaviorProfile','background','keyRelationships','relationshipSummary','mood','location','goal','status','lifeState','mannerisms','memories'];
-    return fields.filter(field => JSON.stringify(before?.[field] ?? null) !== JSON.stringify(after?.[field] ?? null));
+    return REFRESH_CHANGED_FIELDS.filter(field => JSON.stringify(before?.[field] ?? null) !== JSON.stringify(after?.[field] ?? null));
 }
 
 // (1.2.11) `automatic`: a one-pass catch-up, not the reader's click. It stays quiet unless it
@@ -4758,48 +4758,6 @@ function latestMessageId(preferAssistant = false) {
     return -1;
 }
 
-function snapshotNpc(npc) {
-    return {
-        id: npc.id,
-        name: npc.name || '',
-        aliases: [...(npc.aliases || [])],
-        role: npc.role || '',
-        species: npc.species || '',
-        gender: npc.gender || '',
-        homeBase: npc.homeBase || '',
-        age: npc.age || '',
-        apparentAge: npc.apparentAge || '',
-        appearance: npc.appearance || '',
-        personality: npc.personality || '',
-        speech: npc.speech || '',
-        behaviorProfile: [...(npc.behaviorProfile || [])],
-        background: npc.background || '',
-        relationshipSummary: npc.relationshipSummary || '',
-        mood: npc.mood || '',
-        location: npc.location || '',
-        goal: npc.goal || '',
-        status: npc.status || '',
-        memories: [...(npc.memories || [])],
-        mannerisms: [...(npc.mannerisms || [])],
-        keyRelationships: [...(npc.keyRelationships || [])],
-        present: Boolean(npc.present),
-        worldActive: Boolean(npc.worldActive),
-        lifeState: npc.lifeState || 'unknown',
-        lifeStateCertainty: npc.lifeStateCertainty || '',
-        lifeStateReason: npc.lifeStateReason || '',
-        archived: Boolean(npc.archived),
-        archiveReason: npc.archiveReason || '',
-        archivedAt: npc.archivedAt || null,
-        archiveSourceMessageId: Number.isInteger(npc.archiveSourceMessageId) ? npc.archiveSourceMessageId : null,
-        relationship: { ...(npc.relationship || {}) },
-        lastRelationshipChange: structuredClone(npc.lastRelationshipChange || { impact: 'none', delta: { trust: 0, affection: 0, desire: 0, tension: 0 }, reason: '', sourceMessageId: null }),
-        updatedAt: npc.updatedAt || Date.now(),
-        seenCount: Number(npc.seenCount || 0),
-        manualProfileFields: [...(npc.manualProfileFields || [])],
-        retentionProtected: Boolean(npc.retentionProtected),
-        minor: Boolean(npc.minor),
-    };
-}
 
 function currentLineageKeyForMessage(messageId) {
     const lineage = chatLineage(getContext().chat || []);

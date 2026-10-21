@@ -8,6 +8,7 @@ import {
     SOCIAL_KEY_RELATIONSHIP_MAX_CHARS,
     SOCIAL_DYNAMIC_MAX_CHARS,
 } from './social.js';
+import { ALIAS_MERGE_TEXT_FIELDS, PROFILE_EVIDENCE_FIELDS, TEXT_FIELDS } from './src/fields/registry.js';
 
 export const NPC_LIFE_STATES = Object.freeze(['unknown', 'alive', 'deceased']);
 export const NPC_ADMISSION_MODES = Object.freeze(['conservative', 'balanced', 'manual_only']);
@@ -745,10 +746,6 @@ export function calibrateRelationshipSummary(value, relationship = DEFAULT_RELAT
 }
 
 
-const TEXT_FIELDS = [
-    'role', 'species', 'gender', 'homeBase', 'age', 'apparentAge', 'appearance', 'personality', 'speech', 'background',
-    'relationshipSummary', 'mood', 'location', 'goal', 'status',
-];
 
 export function clamp(value, min = 0, max = 100) {
     const number = Number(value);
@@ -2544,7 +2541,6 @@ function recoverBehaviorProfileKeepAdditions(existing, incoming, { evidenceItems
     return normalizeBehaviorProfile(next);
 }
 
-const PROFILE_EVIDENCE_FIELDS = Object.freeze(['personality', 'speech', 'appearance', 'mannerisms', 'behaviorProfile']);
 
 function emptyProfileEvidence() {
     return { personality: [], speech: [], appearance: [], mannerisms: [], behaviorProfile: [] };
@@ -5447,7 +5443,7 @@ function mergeAliasLinkedNpcPair(a, b) {
         [a.name, ...(a.aliases || []), b.name, ...(b.aliases || [])],
         [], 8,
     ).filter(alias => normalizeName(alias) !== normalizeName(merged.name));
-    for (const field of ['role','species','age','apparentAge','personality','speech','appearance','background','relationshipSummary','mood','location','goal','status','lifeStateReason']) {
+    for (const field of ALIAS_MERGE_TEXT_FIELDS) {
         if (field === 'appearance' && lockedAppearanceSource) continue;
         const lockedSource = lockedSourceFor(field);
         if (lockedSource) {

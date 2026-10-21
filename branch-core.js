@@ -1,6 +1,7 @@
 import { normalizeName } from './core.js';
 import { normalizeSocialGraph } from './social.js';
 import { lockedFieldKeys } from './src/dossier-edit.js';
+import { BRANCH_USER_METADATA_FIELDS } from './src/fields/registry.js';
 
 export const BRANCH_HISTORY_LIMIT = 160;
 
@@ -242,10 +243,7 @@ export function clearUserDismissedGroupsFor(groups, target, { modernByIdOnly = f
 
 export function preserveUserNpcMetadata(restoredNpcs = [], currentNpcs = []) {
     const restored = cloneNpcList(restoredNpcs);
-    const globallyPreserved = [
-        'portraitPromptPositive', 'portraitPromptNegative', 'portraitPromptReplace', 'portraitSeed',
-        'retentionProtected', 'minor',
-    ];
+    const globallyPreserved = BRANCH_USER_METADATA_FIELDS;
     for (const npc of restored) {
         // Retired dossier metadata must not be resurrected by historical checkpoints.
         delete npc.importance;
