@@ -17,7 +17,7 @@ import {
     npcParticipatesInExchange,
 } from './scan-context.js';
 import { createDiagnosticStore } from './diagnostics-core.js';
-import { editorProfileLocks } from './src/dossier-edit.js';
+import { EDITOR_FIELDS, editorProfileLocks, settleEditorSave, untouchedEditorFields } from './src/dossier-edit.js';
 import {
     NPC_STATE_VERSION,
     DEFAULT_RELATIONSHIP,
@@ -5733,20 +5733,20 @@ function openNpcEditor(npcId) {
       <p class="npc-state-delta-muted">Edits save to NPC State Delta's extension-owned JSON data. Relationship numbers are authoritative current values on a -100 to +100 scale where 0 is neutral; future story deltas continue from them.</p>
       <div class="npc-state-delta-editor-lifecycle"><b>Lifecycle</b><span>${isTerminalNpcDeath(npc) ? 'Confirmed deceased' : (npc.archived ? 'Archived' : (npc.present ? 'Active · Present' : (npc.worldActive ? 'Active · Off-screen' : 'Active')))}${npc.archiveReason === 'deceased' ? ' · Deceased' : (npc.archiveReason === 'stale' ? ' · Stale auto-archive' : '')}</span>${npc.lifeStateReason ? `<small>${editorValue(npc.lifeStateReason)}</small>` : ''}</div>
       <div class="npc-state-delta-editor-grid npc-state-delta-editor-profile">
-        <label>Name<input id="npc_state_delta_edit_name" class="text_pole" value="${editorValue(npc.name)}"></label>
-        <label>Species / Race<input id="npc_state_delta_edit_species" class="text_pole" maxlength="160" placeholder="Half-elf, dwarf, dwelf, human, custom species..." value="${editorValue(npc.species)}"></label>
+        <label>Name<input id="npc_state_delta_edit_name" class="text_pole" maxlength="${EDITOR_FIELDS.name.max}" value="${editorValue(npc.name)}"></label>
+        <label>Species / Race<input id="npc_state_delta_edit_species" class="text_pole" maxlength="${EDITOR_FIELDS.species.max}" placeholder="Half-elf, dwarf, dwelf, human, custom species..." value="${editorValue(npc.species)}"></label>
         <label>Gender<select id="npc_state_delta_edit_gender" class="text_pole"><option value="" ${!npc.gender ? 'selected' : ''}>Unknown / not established</option><option value="male" ${npc.gender === 'male' ? 'selected' : ''}>Male</option><option value="female" ${npc.gender === 'female' ? 'selected' : ''}>Female</option></select></label>
-        <label>Role<input id="npc_state_delta_edit_role" class="text_pole" value="${editorValue(npc.role)}"></label>
+        <label>Role<input id="npc_state_delta_edit_role" class="text_pole" maxlength="${EDITOR_FIELDS.role.max}" value="${editorValue(npc.role)}"></label>
         <label>Aliases / nicknames <small>One per line, max 8. Distinctive nicknames ("Red", "the Butcher of Vell") recall this NPC when mentioned; role descriptions ("the innkeeper") are kept for reference only.</small><textarea id="npc_state_delta_edit_aliases" class="text_pole" rows="2">${editorValue((npc.aliases || []).join('\n'))}</textarea></label>
-        <label>Home Base / Usual Location<input id="npc_state_delta_edit_home_base" class="text_pole" maxlength="300" placeholder="Home, workplace, headquarters, or regular haunt" value="${editorValue(npc.homeBase)}"></label>
+        <label>Home Base / Usual Location<input id="npc_state_delta_edit_home_base" class="text_pole" maxlength="${EDITOR_FIELDS.homeBase.max}" placeholder="Home, workplace, headquarters, or regular haunt" value="${editorValue(npc.homeBase)}"></label>
         ${customFieldEditorHtml(npc)}
-        <label>Chronological age<input id="npc_state_delta_edit_age" class="text_pole" maxlength="80" placeholder="Actual stated age; leave blank if unknown" value="${editorValue(npc.age)}"></label>
+        <label>Chronological age<input id="npc_state_delta_edit_age" class="text_pole" maxlength="${EDITOR_FIELDS.age.max}" placeholder="Actual stated age; leave blank if unknown" value="${editorValue(npc.age)}"></label>
         <label>Birthday <small>${npc.birthDateSource === 'generated' ? 'Generated fallback; editing establishes a manual correction' : (npc.birthDateSource === 'established' ? 'Established date; editing records a manual correction' : 'Uses the active calendar')}</small><input id="npc_state_delta_edit_birthday" class="text_pole" maxlength="180" placeholder="MM-DD / YYYY-MM-DD or configured calendar date" value="${editorValue(npc.birthDateDisplay)}"></label>
-        <label>Apparent age<input id="npc_state_delta_edit_apparent_age" class="text_pole" maxlength="80" placeholder="~25, young, middle-aged..." value="${editorValue(npc.apparentAge)}"></label>
-        <label>Personality<textarea id="npc_state_delta_edit_personality" class="text_pole" rows="3">${editorValue(npc.personality)}</textarea></label>
+        <label>Apparent age<input id="npc_state_delta_edit_apparent_age" class="text_pole" maxlength="${EDITOR_FIELDS.apparentAge.max}" placeholder="~25, young, middle-aged..." value="${editorValue(npc.apparentAge)}"></label>
+        <label>Personality<textarea id="npc_state_delta_edit_personality" class="text_pole" rows="3" maxlength="${EDITOR_FIELDS.personality.max}">${editorValue(npc.personality)}</textarea></label>
         <label class="npc-state-delta-editor-wide">Behavioral Levers <small>Max ${BEHAVIOR_PROFILE_LIMIT} compact target-general response/decision rules, one per line</small><textarea id="npc_state_delta_edit_behavior_profile" class="text_pole" rows="6" placeholder="Disposition: kind - broadly considerate; avoids needless harm&#10;Expressiveness: low - strong feelings show subtly&#10;Independence: high - keeps own goals and boundaries&#10;Care: practical - helps through actions before reassurance&#10;Conflict: controlled - concise, firm, not gratuitously cruel">${editorValue((npc.behaviorProfile || []).join('\n'))}</textarea></label>
-        <label>Speech<textarea id="npc_state_delta_edit_speech" class="text_pole" rows="3">${editorValue(npc.speech)}</textarea></label>
-        <label>Background<textarea id="npc_state_delta_edit_background" class="text_pole" rows="3">${editorValue(npc.background)}</textarea></label>
+        <label>Speech<textarea id="npc_state_delta_edit_speech" class="text_pole" rows="3" maxlength="${EDITOR_FIELDS.speech.max}">${editorValue(npc.speech)}</textarea></label>
+        <label>Background<textarea id="npc_state_delta_edit_background" class="text_pole" rows="3" maxlength="${EDITOR_FIELDS.background.max}">${editorValue(npc.background)}</textarea></label>
         <label class="npc-state-delta-editor-wide">Established mannerisms <small>One per line</small><textarea id="npc_state_delta_edit_mannerisms" class="text_pole" rows="4">${editorValue((npc.mannerisms || []).join('\n'))}</textarea></label>
         <label class="npc-state-delta-editor-wide">Key relationships <small>Max ${KEY_RELATIONSHIP_LIMIT} · family, friends, rivals, mentors, partners · one per line</small><textarea id="npc_state_delta_edit_key_relationships" class="text_pole" rows="5" placeholder="Yunyun — friend / rival | competitive but loyal">${editorValue((npc.keyRelationships || []).join('\n'))}</textarea></label>
       </div>
@@ -5764,11 +5764,11 @@ function openNpcEditor(npcId) {
       <label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_retention_protected" type="checkbox" ${npc.retentionProtected ? 'checked' : ''}> Keep this NPC from automatic stale cleanup <small>Use for recurring or major NPCs who may disappear for long arcs. This does not lock their profile fields.</small></label>
       <label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_minor" type="checkbox" ${npc.minor ? 'checked' : ''}> Hide present-NPC card <small>The dossier still scans, updates, stores memories/relationships, and injects when present; only the present cast card is hidden.</small></label>
       <div class="npc-state-delta-editor-grid">
-        <label>Player Dynamic<textarea id="npc_state_delta_edit_relationship_summary" class="text_pole" rows="3">${editorValue(npc.relationshipSummary)}</textarea></label>
-        <label>Mood<input id="npc_state_delta_edit_mood" class="text_pole" value="${editorValue(npc.mood)}"></label>
-        <label>Location<input id="npc_state_delta_edit_location" class="text_pole" value="${editorValue(npc.location)}"></label>
-        <label>Goal<input id="npc_state_delta_edit_goal" class="text_pole" value="${editorValue(npc.goal)}"></label>
-        <label>Condition / Activity<input id="npc_state_delta_edit_status" class="text_pole" value="${editorValue(npc.status)}"></label>
+        <label>Player Dynamic<textarea id="npc_state_delta_edit_relationship_summary" class="text_pole" rows="3" maxlength="${EDITOR_FIELDS.relationshipSummary.max}">${editorValue(npc.relationshipSummary)}</textarea></label>
+        <label>Mood<input id="npc_state_delta_edit_mood" class="text_pole" maxlength="${EDITOR_FIELDS.mood.max}" value="${editorValue(npc.mood)}"></label>
+        <label>Location<input id="npc_state_delta_edit_location" class="text_pole" maxlength="${EDITOR_FIELDS.location.max}" value="${editorValue(npc.location)}"></label>
+        <label>Goal<input id="npc_state_delta_edit_goal" class="text_pole" maxlength="${EDITOR_FIELDS.goal.max}" value="${editorValue(npc.goal)}"></label>
+        <label>Condition / Activity<input id="npc_state_delta_edit_status" class="text_pole" maxlength="${EDITOR_FIELDS.status.max}" value="${editorValue(npc.status)}"></label>
         <label class="npc-state-delta-editor-wide">Important memories <small>Max 5 · one per line</small><textarea id="npc_state_delta_edit_memories" class="text_pole" rows="5">${editorValue((npc.memories || []).join('\n'))}</textarea></label>
       </div>
       <div class="npc-state-delta-editor-stats">
@@ -6119,22 +6119,27 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
     // (v2 meters) While hosted the inputs showed the slice's numbers; edits to them go to the slice.
     const hostedMeters = storySuiteV2Meters();
     const shownRelationship = hostedMeters ? { ...hostedMeterView([current])[0].relationship } : null;
+    // A field whose control still shows the stored value is kept as stored (never re-cut or compacted).
+    const untouched = untouchedEditorFields(current, editorField);
+    const editorControl = key => editorField(`npc_state_delta_edit_${EDITOR_FIELDS[key].id}`);
+    const editorText = key => (untouched.has(key) ? String(current[key] ?? '') : String(editorControl(key)).trim().slice(0, EDITOR_FIELDS[key].max));
+    const editorList = (key, max) => (untouched.has(key) ? structuredClone(current[key] || []) : cleanEditorList(editorControl(key), max));
     const stableInputs = {
-        name: String(editorField('npc_state_delta_edit_name')).trim().slice(0, 120) || current.name,
-        role: String(editorField('npc_state_delta_edit_role')).trim().slice(0, 240),
-        species: String(editorField('npc_state_delta_edit_species')).trim().slice(0, 160),
-        gender: normalizeGender(editorField('npc_state_delta_edit_gender')),
-        homeBase: String(editorField('npc_state_delta_edit_home_base')).trim().slice(0, 300),
-        age: String(editorField('npc_state_delta_edit_age')).trim().slice(0, 80),
-        apparentAge: String(editorField('npc_state_delta_edit_apparent_age')).trim().slice(0, 80),
-        personality: String(editorField('npc_state_delta_edit_personality')).trim().slice(0, 900),
-        speech: String(editorField('npc_state_delta_edit_speech')).trim().slice(0, 600),
-        behaviorProfile: cleanEditorList(editorField('npc_state_delta_edit_behavior_profile'), BEHAVIOR_PROFILE_LIMIT),
-        background: String(editorField('npc_state_delta_edit_background')).trim().slice(0, 1200),
-        mannerisms: cleanEditorList(editorField('npc_state_delta_edit_mannerisms'), 8),
-        keyRelationships: cleanEditorList(editorField('npc_state_delta_edit_key_relationships'), KEY_RELATIONSHIP_LIMIT),
+        name: editorText('name') || current.name,
+        role: editorText('role'),
+        species: editorText('species'),
+        gender: untouched.has('gender') ? current.gender : normalizeGender(editorControl('gender')),
+        homeBase: editorText('homeBase'),
+        age: editorText('age'),
+        apparentAge: editorText('apparentAge'),
+        personality: editorText('personality'),
+        speech: editorText('speech'),
+        behaviorProfile: editorList('behaviorProfile', BEHAVIOR_PROFILE_LIMIT),
+        background: editorText('background'),
+        mannerisms: editorList('mannerisms', 8),
+        keyRelationships: editorList('keyRelationships', KEY_RELATIONSHIP_LIMIT),
         customFields: customFieldEditorValues(current),
-        aliases: cleanEditorList(editorField('npc_state_delta_edit_aliases'), 8),
+        aliases: editorList('aliases', 8),
     };
     const nameCollision = state.npcs.some((item, i) => i !== index && npcMatchesLabel(item, stableInputs.name));
     if (nameCollision) {
@@ -6169,13 +6174,13 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
     next.portraitPromptPositive = String(editorField('npc_state_delta_edit_portrait_positive')).trim().slice(0, PORTRAIT_NPC_PROMPT_LIMIT);
     next.portraitPromptNegative = String(editorField('npc_state_delta_edit_portrait_negative')).trim().slice(0, PORTRAIT_NPC_PROMPT_LIMIT);
     next.portraitPromptReplace = Boolean(document.getElementById('npc_state_delta_edit_portrait_replace')?.checked);
-    next.identityKind = inferNpcIdentityKind(stableInputs.name);
-    next.relationshipSummary = String(editorField('npc_state_delta_edit_relationship_summary')).trim().slice(0, 900);
-    next.mood = String(editorField('npc_state_delta_edit_mood')).trim().slice(0, 240);
-    next.location = String(editorField('npc_state_delta_edit_location')).trim().slice(0, 300);
-    next.goal = String(editorField('npc_state_delta_edit_goal')).trim().slice(0, 500);
-    next.status = String(editorField('npc_state_delta_edit_status')).trim().slice(0, 300);
-    next.memories = cleanEditorList(editorField('npc_state_delta_edit_memories'), IMPORTANT_MEMORY_LIMIT);
+    if (stableInputs.name !== current.name) next.identityKind = inferNpcIdentityKind(stableInputs.name);
+    next.relationshipSummary = editorText('relationshipSummary');
+    next.mood = editorText('mood');
+    next.location = editorText('location');
+    next.goal = editorText('goal');
+    next.status = editorText('status');
+    next.memories = editorList('memories', IMPORTANT_MEMORY_LIMIT);
     next.relationship = {
         trust: clampEditorRelationshipStat('npc_state_delta_edit_trust'),
         affection: clampEditorRelationshipStat('npc_state_delta_edit_affection'),
@@ -6221,6 +6226,11 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
     next.minor = Boolean(document.getElementById('npc_state_delta_edit_minor')?.checked);
     next.updatedAt = Date.now();
     state.npcs[index] = normalizeNpcRecord(next);
+    // A changed relationship recalibrates the Player Dynamic even when its text was not edited.
+    const relationshipMoved = Object.values(relationshipDelta).some(value => value !== 0);
+    const shortened = settleEditorSave(state.npcs[index], current, next, untouched, {
+        keepVerbatim: key => key !== 'relationshipSummary' || !relationshipMoved,
+    });
     if (next.lastRelationshipChange?.impact === 'manual') state.npcs[index].lastRelationshipChange = structuredClone(next.lastRelationshipChange);
     const targetMessageId = latestMessageId(false);
     applyManualKeyRelationshipEdit(state, npcId, beforeKeyRelationships, state.npcs[index].keyRelationships || [], {
@@ -6250,6 +6260,7 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
     }
     if (close) closeNpcEditor();
     if (!silent) globalThis.toastr?.success?.(`NPC State Delta: saved manual dossier edits for ${savedName}.`);
+    if (!silent && shortened.length) globalThis.toastr?.warning?.(`NPC State Delta: ${shortened.join(', ')} ${shortened.length === 1 ? 'was' : 'were'} shortened or adjusted to fit the dossier's limits for unprotected fields. Tick "Protect edited stable profile fields" to keep a longer Personality, Speech, Background or Mannerisms.`);
     return true;
 }
 
