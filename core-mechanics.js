@@ -5515,6 +5515,20 @@ function chooseDuplicateCanonicalName(a, b) {
     return bUpdated > aUpdated ? b.name : a.name;
 }
 
+// (cleanup step 7) The live fields an alias merge takes from the most recently updated record.
+const ALIAS_MERGE_LIVE_FIELDS = Object.freeze(['mood', 'location', 'goal', 'status']);
+
+// Two custom-field maps as one, case-insensitive by name, `newer` winning.
+function mergeCustomFieldMaps(older, newer) {
+    const out = normalizeCustomFields(older);
+    for (const [name, value] of Object.entries(normalizeCustomFields(newer))) {
+        const existing = Object.keys(out).find(key => key.toLowerCase() === name.toLowerCase());
+        if (existing && existing !== name) delete out[existing];
+        out[name] = value;
+    }
+    return out;
+}
+
 function mergeAliasLinkedNpcPair(a, b) {
     const canonicalName = cleanText(chooseDuplicateCanonicalName(a, b), 120) || a.name || b.name;
     const canonicalRecord = normalizeName(a?.name) === normalizeName(canonicalName) ? a
@@ -5554,10 +5568,17 @@ function mergeAliasLinkedNpcPair(a, b) {
             else delete merged[key];
         }
     }
-    merged.aliases = mergeLists(
-        [a.name, ...(a.aliases || []), b.name, ...(b.aliases || [])],
-        [], 8,
-    ).filter(alias => normalizeName(alias) !== normalizeName(merged.name));
+    // (cleanup step 7) Hand-locked aliases take nothing from the duplicate but its name, which must
+    // stay a label of the merged dossier so later mentions still find it.
+    const lockedAliasSource = lockedSourceFor('aliases');
+    const absorbed = lockedAliasSource === a ? b : a;
+    merged.aliases = (lockedAliasSource
+        ? mergeLists([...(lockedAliasSource.aliases || []), absorbed.name], [], 8)
+        : mergeLists([a.name, ...(a.aliases || []), b.name, ...(b.aliases || [])], [], 8))
+        .filter(alias => normalizeName(alias) !== normalizeName(merged.name));
+    // The live state is the most recently updated record's; the durable texts keep the fuller one.
+    const liveSource = Number(a?.updatedAt || 0) >= Number(b?.updatedAt || 0) ? a : b;
+    const liveOther = liveSource === a ? b : a;
     for (const field of ALIAS_MERGE_TEXT_FIELDS) {
         if (field === 'appearance' && lockedAppearanceSource) continue;
         const lockedSource = lockedSourceFor(field);
@@ -5565,11 +5586,23 @@ function mergeAliasLinkedNpcPair(a, b) {
             merged[field] = cleanText(lockedSource?.[field], field === 'appearance' ? 1800 : 1200);
             continue;
         }
+        if (ALIAS_MERGE_LIVE_FIELDS.includes(field)) {
+            merged[field] = cleanText(liveSource?.[field], 1200) || cleanText(liveOther?.[field], 1200);
+            continue;
+        }
         const av = cleanText(a?.[field], field === 'appearance' ? 1800 : 1200);
         const bv = cleanText(b?.[field], field === 'appearance' ? 1800 : 1200);
         merged[field] = bv.length > av.length ? bv : av;
     }
+    // Custom fields: both records' values, the newer record's winning (a lock keeps its source's).
+    const lockedCustomSource = lockedSourceFor('customFields');
+    const customFields = lockedCustomSource
+        ? normalizeCustomFields(lockedCustomSource.customFields)
+        : mergeCustomFieldMaps(older.customFields, newer.customFields);
+    if (Object.keys(customFields).length) merged.customFields = customFields;
+    else delete merged.customFields;
     merged.memories = normalizeStoredMemories([...(a.memories || []), ...(b.memories || [])]);
+    merged.manualMemories = [...(a.manualMemories || []), ...(b.manualMemories || [])];
     const mannerismLock = lockedSourceFor('mannerisms');
     const behaviorLock = lockedSourceFor('behaviorProfile');
     const relationshipLock = lockedSourceFor('keyRelationships');

@@ -2995,6 +2995,8 @@ async function scanNpcDossier(npcId) {
             scenePresent: scenePresentAt(targetMessageId),
             calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
             storyDay: storyDayAt(targetMessageId),
+            // (cleanup step 7) The configured custom fields, as on every other path.
+            customFieldNames: getSettings().customFieldNames,
             relationshipBaseline: getSettings().relationshipBaseline,
             relationshipCaps: getSettings().relationshipCaps,
             autoArchiveDeaths: getSettings().autoArchiveDeaths !== false,
@@ -8030,6 +8032,8 @@ window.NPCStateDelta = Object.freeze({
         const npc = getChatState().npcs.find(item => item.id === String(npcId || ''));
         return npc ? structuredClone(npc) : null;
     },
+    /** The configured custom field names (the dossier shows these; a stored value under another name stays in the editor only). */
+    customFieldNames: () => [...getSettings().customFieldNames],
     getDossierState: () => {
         const state = getChatState();
         const formPortraits = {};
@@ -8037,7 +8041,7 @@ window.NPCStateDelta = Object.freeze({
             formPortraits[npcId] = Object.fromEntries(Object.values(forms || {}).filter(portrait => portrait?.dataUrl)
                 .map(portrait => [portrait.form, { dataUrl: portrait.dataUrl, appearanceFingerprint: portrait.appearanceFingerprint || '' }]));
         }
-        return { turn: state.turn, reply: latestReplyIndex(), npcs: structuredClone(hostedMeterView(state.npcs)), portraitAssets: {}, formPortraits };
+        return { turn: state.turn, reply: latestReplyIndex(), npcs: structuredClone(hostedMeterView(state.npcs)), portraitAssets: {}, formPortraits, customFieldNames: [...getSettings().customFieldNames] };
     },
     persistenceStatus: () => {
         const key = getChatKey();

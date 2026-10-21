@@ -168,7 +168,17 @@ function displayedPortrait(npc = {}, portraitAssets = {}, formPortraits = {}) {
     return { src: portraitSource(npc, portraitAssets), fingerprint: plain(npc?.portrait?.appearanceFingerprint), form: plain(npc?.portrait?.appearanceForm), fromForm: false };
 }
 
-export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortraits = {}) {
+// (cleanup step 7) With `customFieldNames` (the configured names), only those custom fields are shown,
+// as the injection and the suite profile show them; without it, every stored one (older callers).
+function shownCustomFields(npc, customFieldNames) {
+    const stored = Object.entries(npc?.customFields && typeof npc.customFields === 'object' ? npc.customFields : {});
+    const configured = Array.isArray(customFieldNames) ? customFieldNames.map(name => plain(name).toLowerCase()).filter(Boolean) : null;
+    return stored
+        .filter(([name]) => !configured || configured.includes(plain(name).toLowerCase()))
+        .map(([name, value]) => [plain(name), plain(value)]).filter(([name, value]) => name && value).slice(0, 12);
+}
+
+export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortraits = {}, { customFieldNames } = {}) {
     const rel = npc?.relationship && typeof npc.relationship === 'object' ? npc.relationship : {};
     const shown = displayedPortrait(npc, portraitAssets, formPortraits);
     return {
@@ -189,8 +199,7 @@ export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortr
         background: plain(npc?.background),
         memories: stringList(npc?.memories, 8),
         keyRelationships: stringList(npc?.keyRelationships, 12),
-        customFields: Object.entries(npc?.customFields && typeof npc.customFields === 'object' ? npc.customFields : {})
-            .map(([name, value]) => [plain(name), plain(value)]).filter(([name, value]) => name && value).slice(0, 12),
+        customFields: shownCustomFields(npc, customFieldNames),
         relationshipSummary: plain(npc?.relationshipSummary),
         lastRelationshipChange: relationshipChangeProjection(npc?.lastRelationshipChange),
         fieldChanges: fieldChangesProjection(npc?.fieldChanges, npc?.fieldChangeMessages),
@@ -270,7 +279,8 @@ export function projectDossierState(state = {}, status = {}) {
     const portraitAssets = state?.portraitAssets && typeof state.portraitAssets === 'object' ? state.portraitAssets : {};
     const records = Array.isArray(state?.npcs) ? state.npcs : [];
     const formPortraits = state?.formPortraits && typeof state.formPortraits === 'object' ? state.formPortraits : {};
-    const details = records.map(npc => dossierDetailProjection(npc, portraitAssets, formPortraits[npc?.id] || {})).filter(npc => npc.id);
+    const customFieldNames = Array.isArray(state?.customFieldNames) ? state.customFieldNames : undefined;
+    const details = records.map(npc => dossierDetailProjection(npc, portraitAssets, formPortraits[npc?.id] || {}, { customFieldNames })).filter(npc => npc.id);
     return {
         chatKey: plain(status?.chatKey, 'no-chat'),
         hydrationStatus: plain(status?.hydrationStatus, 'ready'),

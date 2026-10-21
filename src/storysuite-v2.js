@@ -85,10 +85,18 @@ function plainCopy(value) {
 }
 
 /** One NPC record's dossier fields (DOSSIER_FIELDS) as a fresh plain copy. Missing fields are left out. */
-export function dossierFields(npc) {
+export function dossierFields(npc, { customFieldNames } = {}) {
     if (!npc || typeof npc !== 'object') return null;
     const out = {};
     for (const field of DOSSIER_FIELDS) {
+        if (field === 'customFields' && Array.isArray(customFieldNames)) {
+            // (cleanup step 7) Only the configured custom fields, as the dossier and the injection show.
+            const configured = customFieldNames.map(name => String(name ?? '').trim().toLowerCase()).filter(Boolean);
+            const kept = Object.entries(npc.customFields && typeof npc.customFields === 'object' ? npc.customFields : {})
+                .filter(([name]) => configured.includes(String(name).trim().toLowerCase()));
+            if (kept.length) out.customFields = Object.fromEntries(kept.map(([name, value]) => [name, String(value ?? '')]));
+            continue;
+        }
         if (field === 'relationship') {
             const rel = npc.relationship && typeof npc.relationship === 'object' ? npc.relationship : null;
             if (rel) out.relationship = Object.fromEntries(RELATIONSHIP_KEYS.map(key => [key, Number.isFinite(Number(rel[key])) ? Number(rel[key]) : 0]));
@@ -311,7 +319,8 @@ export function createStorySuiteV2Adapter({
             try {
                 const npc = dossierOf(args?.name);
                 if (!npc) return null;
-                const out = dossierFields(npc);
+                const names = runtime()?.customFieldNames?.();
+                const out = dossierFields(npc, { customFieldNames: Array.isArray(names) ? names : undefined });
                 const entry = part.queries['npc.meters'](state, { name: npc.name });
                 if (entry) {
                     out.relationship = relationshipOf(entry, out.relationship);

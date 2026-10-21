@@ -475,7 +475,8 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
             const merged = normalizeNpcRecord({
                 ...lockAware,
                 id: targetId,
-                aliases: [...new Set([
+                // (cleanup step 7) Hand-locked aliases on the target take no imported additions.
+                aliases: [...new Set((old.manualProfileFields || []).includes('aliases') ? [...(old.aliases || [])] : [
                     ...(old.aliases || []),
                     ...(npc.aliases || []),
                     old.name,
