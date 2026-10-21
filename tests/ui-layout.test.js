@@ -82,7 +82,7 @@ test('important memory criteria are editable and resettable from settings', () =
     assert.match(index, /Reset memory criteria/);
     assert.match(index, /Existing memories are shown to the scanner/i);
     assert.match(index, /Important memories <small>Max 5/i);
-    assert.match(index, /cleanEditorList\(editorField\('npc_state_delta_edit_memories'\), IMPORTANT_MEMORY_LIMIT\)/);
+    assert.match(index, /editorList\('memories', IMPORTANT_MEMORY_LIMIT\)/);
 });
 
 
@@ -317,7 +317,7 @@ test('per-NPC Scan dossier workflow and Key Relationships controls are exposed',
     assert.match(index, /dossier-import/);
     assert.match(index, /npc_state_delta_edit_key_relationships/);
     assert.match(index, /Key relationships/);
-    assert.match(index, /cleanEditorList\(editorField\('npc_state_delta_edit_key_relationships'\), KEY_RELATIONSHIP_LIMIT\)/);
+    assert.match(index, /editorList\('keyRelationships', KEY_RELATIONSHIP_LIMIT\)/);
     assert.match(index, /keyRelationships: \[\.\.\.\(npc\.keyRelationships \|\| \[\]\)\]/);
     assert.match(dossierUi, /Important bonds/);
 });
