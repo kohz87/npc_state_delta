@@ -1,0 +1,426 @@
+// The command bus (SPEC §3): every change to v2 state is a command. A handler reads frozen copies,
+// writes mutable drafts of the domains its module owns, may call other modules' commands inside the
+// same transaction, and returns { summary, narrate, data }. The bus then diffs the drafts into ops,
+// checks them (generic rules, then each touched domain's validator), bumps `meta.rev` as one more op
+// and hands ops + receipt to the store. Anything that throws on the way rejects the whole command and
+// leaves the store untouched. Synchronous: handlers cannot await, so neither does the bus (the public
+// sdk may wrap the results in promises).
+//
+// Transaction rules worth knowing:
+// * One set of drafts per command: a sub-command that drafts the same domain writes the same draft,
+//   and `ctx.read` / `ctx.query` see the transaction's drafts, not just the head.
+// * A sub-command that throws fails the whole command, even if the caller catches the error (its
+//   half-written drafts cannot be told apart from the caller's). A `ctx.call` to a command that does
+//   not exist throws UNKNOWN_COMMAND without failing the command, since nothing ran: a handler may
+//   catch it to treat the other module as absent.
+// * Every committed receipt bumps `meta.rev` by one, even when it changed nothing else, so each
+//   receipt has its own rev.
+// * What a handler is told about where it runs (MODULES §F2, the capture context): `ctx.caller` is the
+//   module whose handler made this ctx.call (null at the top), `ctx.rev` the meta.rev this receipt will
+//   have, `ctx.id(prefix)` a new `<prefix>_<8 base36>` drawn from the receipt's seed (so the same seed
+//   gives the same IDs, and ctx.rng() is not disturbed), and, for capture runs, `ctx.carrier`
+//   ({ index, swipe, key }) and `ctx.chat` ({ lastUser, reply }); both are null for other commands.
+
+import { apply, checkOps, clone, deepFreeze, diff, escapeKey, isJson } from './ops.js';
+import { isSeed, rng as makeRng, roll as rollDice, seed as freshSeed } from './rng.js';
+
+export const MAX_DEPTH = 8;
+const CAUSES = ['ui', 'story', 'system'];
+const CODE = /^[A-Z][A-Z0-9_]*$/;
+const MAX_PREVIEWS = 16;
+const ID_PREFIX = /^[a-z][a-z0-9]*$/;
+const BASE36 = '0123456789abcdefghijklmnopqrstuvwxyz';
+// Mixed into the receipt's seed for ctx.id's own stream (any odd constant; fixed, so IDs replay).
+const ID_STREAM = 0x5bd1e995;
+
+/** The error `ctx.fail` throws; the bus turns it into { ok: false, code, message }. */
+export class CommandError extends Error {
+    constructor(code, message) {
+        super(message);
+        this.name = 'CommandError';
+        this.code = code;
+    }
+}
+
+function fail(code, message) {
+    throw new CommandError(code, message);
+}
+
+function asCommandError(type, error) {
+    if (error instanceof CommandError) return error;
+    return new CommandError('FAILED', `Something went wrong in ${type}: ${error?.message ?? String(error)}`);
+}
+
+function isRecord(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** `<prefix>_<8 base36>` from crypto (SPEC §2.1), for receipt IDs when no `id` option is given. */
+export function newId(prefix, cryptoApi = globalThis.crypto) {
+    if (typeof cryptoApi?.getRandomValues !== 'function') throw new Error('This browser has no crypto random source for IDs.');
+    const chars = [];
+    const bytes = new Uint8Array(16);
+    while (chars.length < 8) {
+        cryptoApi.getRandomValues(bytes);
+        // 252 = 7 × 36: bytes at or above it are thrown away so every character is equally likely.
+        for (const byte of bytes) if (byte < 252 && chars.length < 8) chars.push((byte % 36).toString(36));
+    }
+    return `${prefix}_${chars.join('')}`;
+}
+
+/**
+ * createCommandBus({ store, registry, settings, onCommitted?, id?, seed? })
+ * `store` and `registry` as in SPEC §12; `settings(moduleId)` → that module's settings object;
+ * `onCommitted({ receipt, ops })` runs after each commit; `id(prefix)` and `seed()` replace the crypto
+ * sources (tests).
+ */
+export function createCommandBus({ store, registry, settings = () => ({}), onCommitted = null, id = newId, seed = freshSeed } = {}) {
+    const previews = new Map();
+    let previewCount = 0;
+
+    function resolve(type) {
+        const handler = typeof type === 'string' && type ? registry.command(type) : null;
+        const moduleId = typeof handler === 'function' ? registry.commandOwner(type) : null;
+        if (typeof handler !== 'function' || !moduleId) fail('UNKNOWN_COMMAND', `There is no command called "${type}".`);
+        return { moduleId, handler };
+    }
+
+    function findQuery(name) {
+        if (typeof registry.query === 'function') {
+            const fn = registry.query(name);
+            if (typeof fn === 'function') return fn;
+        }
+        for (const def of registry.modules?.() ?? []) {
+            const fn = def?.queries?.[name];
+            if (typeof fn === 'function') return fn;
+        }
+        return null;
+    }
+
+    // ---- one transaction ----------------------------------------------------------------------
+
+    function draftOf(tx, domain) {
+        if (!tx.drafts.has(domain)) {
+            const slice = tx.head.domains?.[domain];
+            tx.drafts.set(domain, slice === undefined ? {} : clone(slice));
+        }
+        return tx.drafts.get(domain);
+    }
+
+    function metaOf(tx) {
+        if (!tx.meta) tx.meta = clone(tx.head.meta ?? {});
+        if (!isRecord(tx.meta.claims)) tx.meta.claims = {};
+        return tx.meta;
+    }
+
+    function readOf(tx, domain) {
+        if (tx.drafts.has(domain)) return deepFreeze(clone(tx.drafts.get(domain)));
+        if (!isRecord(tx.head.domains) || !Object.hasOwn(tx.head.domains, domain)) return null;
+        if (!tx.frozen.has(domain)) tx.frozen.set(domain, deepFreeze(clone(tx.head.domains[domain])));
+        return tx.frozen.get(domain);
+    }
+
+    // The state as this transaction has it so far: the head with every draft (and claim) laid over it.
+    function currentState(tx) {
+        const domains = { ...(tx.head.domains ?? {}) };
+        for (const [name, draft] of tx.drafts) domains[name] = clone(draft);
+        return deepFreeze({ ...tx.head, meta: tx.meta ? clone(tx.meta) : tx.head.meta, domains });
+    }
+
+    // A query's third argument (MODULES §F3): other queries over the same transaction state, and the
+    // stored receipts in chat order.
+    function queryTools(tx) {
+        const state = currentState(tx);
+        const tools = Object.freeze({
+            query(name, args) {
+                const fn = findQuery(name);
+                if (!fn) fail('NOT_FOUND', `There is no query called "${name}".`);
+                return deepFreeze(clone(fn(state, deepFreeze(clone(args)), tools)));
+            },
+            receipts: () => store.receipts?.() ?? [],
+        });
+        return tools;
+    }
+
+    function invoke(tx, type, target, payload, depth, caller = null) {
+        const ctx = makeCtx(tx, target.moduleId, depth, caller);
+        const out = target.handler(ctx, deepFreeze(clone(payload)));
+        if (out && typeof out.then === 'function') {
+            out.then(null, () => {});   // nobody waits on it; keep a late rejection quiet
+            fail('FAILED', `${type} must finish at once: command handlers cannot wait (no async).`);
+        }
+        return out;
+    }
+
+    function makeCtx(tx, moduleId, depth, caller) {
+        const open = () => {
+            if (tx.closed) throw new Error('This command has already finished; its ctx cannot be used any more.');
+        };
+        return Object.freeze({
+            receiptId: tx.receiptId,
+            cause: tx.cause,
+            module: moduleId,
+            caller,
+            rev: tx.rev,
+            carrier: tx.carrier,
+            chat: tx.chat,
+            id(prefix) {
+                open();
+                if (typeof prefix !== 'string' || !ID_PREFIX.test(prefix)) fail('INVALID', `An id prefix is lowercase letters and digits (like "it"), not "${prefix}".`);
+                let out = '';
+                for (let n = 0; n < 8; n += 1) out += BASE36[Math.floor(tx.idRandom() * 36) % 36];
+                return `${prefix}_${out}`;
+            },
+            read(domain) {
+                open();
+                return readOf(tx, domain);
+            },
+            draft(domain) {
+                open();
+                const owner = registry.domainOwner(domain);
+                if (!owner) fail('NOT_OWNER', `There is no domain called "${domain}" for ${moduleId} to change.`);
+                if (owner !== moduleId) fail('NOT_OWNER', `${moduleId} cannot change ${domain}: only ${owner} writes it (ask it through a command).`);
+                return draftOf(tx, domain);
+            },
+            call(type, payload) {
+                open();
+                if (depth >= MAX_DEPTH) {
+                    tx.failure ??= new CommandError('FAILED', `Commands called each other more than ${MAX_DEPTH} levels deep (at ${type}).`);
+                    throw tx.failure;
+                }
+                const target = resolve(type);   // UNKNOWN_COMMAND here has changed nothing
+                try {
+                    return invoke(tx, type, target, payload, depth + 1, moduleId);
+                } catch (error) {
+                    tx.failure ??= asCommandError(type, error);
+                    throw error;
+                }
+            },
+            rng() {
+                open();
+                return tx.random();
+            },
+            roll(expression) {
+                open();
+                try {
+                    return rollDice(tx.random, expression);
+                } catch (error) {
+                    return fail('INVALID', error.message);
+                }
+            },
+            claim(key) {
+                open();
+                if (typeof key !== 'string' || !key) fail('INVALID', 'A claim key must be non-empty text.');
+                const claims = metaOf(tx).claims;
+                if (Object.hasOwn(claims, key)) return false;
+                Object.defineProperty(claims, key, { value: true, enumerable: true, writable: true, configurable: true });
+                return true;
+            },
+            query(name, args) {
+                open();
+                const fn = findQuery(name);
+                if (!fn) fail('NOT_FOUND', `There is no query called "${name}".`);
+                return deepFreeze(clone(fn(currentState(tx), deepFreeze(clone(args)), queryTools(tx))));
+            },
+            settings(id = moduleId) {
+                return deepFreeze(clone(settings(id) ?? {}));
+            },
+            // The Director's minutes: its `director.time` query when one is registered, else the
+            // `director.time.minutes` of the state (SPEC §8), else null.
+            time() {
+                open();
+                const fn = findQuery('director.time');
+                const value = fn ? fn(currentState(tx), deepFreeze({}), queryTools(tx)) : readOf(tx, 'director')?.time;
+                const minutes = isRecord(value) ? value.minutes : value;
+                return Number.isInteger(minutes) ? minutes : null;
+            },
+            fail(code, message) {
+                const known = typeof code === 'string' && CODE.test(code);
+                throw new CommandError(known ? code : 'FAILED', String(message ?? 'The command was refused.'));
+            },
+        });
+    }
+
+    function resultOf(type, out, cause) {
+        const result = out ?? {};
+        if (!isRecord(result)) fail('FAILED', `${type} returned something other than { summary, narrate, data }.`);
+        const summary = result.summary ?? '';
+        const narrate = result.narrate ?? cause === 'ui';
+        const data = result.data ?? {};
+        if (typeof summary !== 'string') fail('FAILED', `${type} returned a summary that is not text.`);
+        if (typeof narrate !== 'boolean') fail('FAILED', `${type} returned a narrate flag that is not true or false.`);
+        if (!isRecord(data) || !isJson(data)) fail('FAILED', `${type} returned data that is not a plain JSON object.`);
+        return { summary, narrate, data: clone(data) };
+    }
+
+    function opsOf(tx) {
+        const ops = [];
+        const touched = [];
+        for (const name of [...tx.drafts.keys()].sort()) {
+            const before = tx.head.domains?.[name];
+            const path = `/domains/${escapeKey(name)}`;
+            const draft = tx.drafts.get(name);
+            const changes = before === undefined ? [{ op: 'add', path, value: clone(draft) }] : diff(before, draft, path);
+            if (changes.length) touched.push(name);
+            ops.push(...changes);
+        }
+        if (tx.meta) ops.push(...diff(tx.head.meta ?? {}, tx.meta, '/meta'));
+        const meta = tx.head.meta;
+        const rev = (Number.isInteger(meta?.rev) ? meta.rev : 0) + 1;
+        ops.push({ op: isRecord(meta) && Object.hasOwn(meta, 'rev') ? 'replace' : 'add', path: '/meta/rev', value: rev });
+        return { ops, touched, rev };
+    }
+
+    // Runs one command against `head` and returns { ok, ops, receipt, state } without storing anything.
+    function transact(head, type, payload, { cause, seed: seedValue, receiptId, capture, carrier = null, chat = null }) {
+        let tx = null;
+        try {
+            if (!CAUSES.includes(cause)) fail('INVALID', `"${cause}" is not a cause (ui, story or system).`);
+            if (!isSeed(seedValue)) fail('INVALID', 'The seed must be a whole number from 0 to 4294967295.');
+            if (!isRecord(head)) fail('FAILED', 'There is no state to change yet.');
+            const target = capture
+                ? { moduleId: capture.moduleId, handler: capture.apply }
+                : resolve(type);
+            if (typeof target.handler !== 'function' || !target.moduleId) fail('UNKNOWN_COMMAND', `There is no capture handler for "${type}".`);
+            const headRev = Number.isInteger(head.meta?.rev) ? head.meta.rev : 0;
+            tx = {
+                head, cause, receiptId, random: makeRng(seedValue), idRandom: makeRng((seedValue ^ ID_STREAM) >>> 0),
+                rev: headRev + 1, carrier: carrierOf(carrier), chat: chatOf(chat),
+                drafts: new Map(), frozen: new Map(), meta: null, failure: null, closed: false,
+            };
+            const out = invoke(tx, type, target, payload, 0);
+            if (tx.failure) throw tx.failure;
+            const { summary, narrate, data } = resultOf(type, out, cause);
+            tx.closed = true;
+
+            const { ops, touched, rev } = opsOf(tx);
+            const problems = checkOps(ops, head);
+            if (problems.length) fail('INVALID', `This change breaks the state's rules: ${problems.join(' ')}`);
+            let next;
+            try {
+                next = deepFreeze(apply(head, ops));
+            } catch (error) {
+                fail('FAILED', `The change could not be applied: ${error.message}`);
+            }
+            for (const name of touched) {
+                const validate = registry.validator(name);
+                if (typeof validate !== 'function') continue;
+                let errors;
+                try {
+                    errors = validate(next.domains[name], next);
+                } catch (error) {
+                    fail('FAILED', `The ${name} check itself failed: ${error.message}`);
+                }
+                if (Array.isArray(errors) && errors.length) fail('INVALID', `The ${name} would not be valid: ${errors.join('; ')}.`);
+            }
+            const receipt = deepFreeze({
+                id: receiptId, type, module: target.moduleId, cause, seed: seedValue, summary, narrate, data, rev,
+            });
+            return { ok: true, ops: deepFreeze(ops), receipt, state: next };
+        } catch (error) {
+            const reason = asCommandError(type, tx?.failure ?? error);
+            return { ok: false, code: reason.code, message: reason.message };
+        } finally {
+            if (tx) tx.closed = true;
+        }
+    }
+
+    // The reply a capture runs for, frozen; `key` (and String(carrier)) is "<index>:<swipe>".
+    function carrierOf(carrier) {
+        if (!isRecord(carrier) || !Number.isInteger(carrier.index)) return null;
+        const swipe = Number.isInteger(carrier.swipe) ? carrier.swipe : 0;
+        const key = `${carrier.index}:${swipe}`;
+        const out = { index: carrier.index, swipe, key };
+        Object.defineProperty(out, 'toString', { value: () => key });
+        return Object.freeze(out);
+    }
+
+    function chatOf(chat) {
+        if (!isRecord(chat)) return null;
+        return Object.freeze({ lastUser: String(chat.lastUser ?? ''), reply: String(chat.reply ?? '') });
+    }
+
+    // ---- storing ------------------------------------------------------------------------------
+
+    function storeResult(ops, receipt) {
+        try {
+            store.append({ ops, receipt });
+        } catch (error) {
+            return { ok: false, code: 'FAILED', message: `The change could not be stored: ${error?.message ?? error}` };
+        }
+        store.scheduleSave();
+        if (typeof onCommitted === 'function') {
+            try {
+                onCommitted({ receipt, ops });
+            } catch (error) {
+                console.warn('[Story Block] A committed listener failed:', error);
+            }
+        }
+        return { ok: true, receipt };
+    }
+
+    function fresh(cause, seedValue) {
+        return { cause, seed: seedValue ?? seed(), receiptId: id('rc') };
+    }
+
+    function guarded(fn) {
+        try {
+            return fn();
+        } catch (error) {
+            const reason = asCommandError('the command bus', error);
+            return { ok: false, code: reason.code, message: reason.message };
+        }
+    }
+
+    function fingerprint(head) {
+        return { rev: head?.meta?.rev, index: store.headIndex?.(), json: JSON.stringify(head) };
+    }
+
+    return {
+        /** command(type, payload, { cause = 'ui' }) → { ok: true, receipt } | { ok: false, code, message } */
+        command(type, payload, { cause = 'ui' } = {}) {
+            return guarded(() => {
+                const result = transact(store.head(), type, payload, fresh(cause));
+                return result.ok ? storeResult(result.ops, result.receipt) : result;
+            });
+        },
+
+        /** preview(type, payload) → { ok: true, receipt, token, ops }: the handler's result, nothing stored. */
+        preview(type, payload, { cause = 'ui' } = {}) {
+            return guarded(() => {
+                const head = store.head();
+                const result = transact(head, type, payload, fresh(cause));
+                if (!result.ok) return result;
+                const token = `pv_${++previewCount}`;
+                previews.set(token, { ops: result.ops, receipt: result.receipt, seen: fingerprint(head) });
+                while (previews.size > MAX_PREVIEWS) previews.delete(previews.keys().next().value);
+                return { ok: true, receipt: result.receipt, token, ops: result.ops };
+            });
+        },
+
+        /** commit(token): stores exactly what the preview showed, or STALE when the head moved since. */
+        commit(token) {
+            return guarded(() => {
+                const saved = previews.get(token);
+                if (!saved) return { ok: false, code: 'NOT_FOUND', message: 'That preview is gone; try the action again.' };
+                previews.delete(token);
+                const now = fingerprint(store.head());
+                if (now.rev !== saved.seen.rev || now.index !== saved.seen.index || now.json !== saved.seen.json) {
+                    return { ok: false, code: 'STALE', message: 'The story changed since this preview; try the action again.' };
+                }
+                return storeResult(saved.ops, saved.receipt);
+            });
+        },
+
+        /**
+         * run(type, payload, { cause = 'story', seed, state, capture }) → { ok, ops, receipt, state }:
+         * the command's result without storing it (capture). `state` is the state to run against
+         * (default: the head), so lines of one reply can chain; `capture` = registry.capture(kind)'s
+         * { moduleId, apply } runs that capture handler as command `type`; `carrier` ({ index, swipe })
+         * and `chat` ({ lastUser, reply }) become ctx.carrier and ctx.chat.
+         */
+        run(type, payload, { cause = 'story', seed: seedValue, state, capture, carrier = null, chat = null } = {}) {
+            return guarded(() => transact(state ?? store.head(), type, payload, { ...fresh(cause, seedValue), capture, carrier, chat }));
+        },
+    };
+}

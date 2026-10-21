@@ -840,6 +840,37 @@ function storyBlockV2Hosted() {
     return globalThis.document?.documentElement?.dataset?.npcStateDeltaStoryBlockV2 === '1';
 }
 
+// (v2 meters, F81/F90) While hosted, Story Block's per-reply `npc` slice holds the meter values. Every
+// helper here is a no-op without a host: the records pass through untouched and nothing is sent.
+let storySuiteV2 = null;
+function storySuiteV2Meters() {
+    return storyBlockV2Hosted() && storySuiteV2?.hosted?.() ? storySuiteV2 : null;
+}
+// Delta's records with their relationship numbers read from the slice (views and the injection).
+function hostedMeterView(npcs) {
+    const adapter = storySuiteV2Meters();
+    if (!adapter) return npcs;
+    try { return adapter.sliceView(npcs) || npcs; } catch { return npcs; }
+}
+// A committed scan's relationship changes go to the slice as npc.adjust (same clamps as a story
+// line), in dossier order; the sidecar keeps its own numbers by v1's rules.
+function forwardRelationshipChangesToHost(before, after, messageId) {
+    const adapter = storySuiteV2Meters();
+    if (!adapter) return;
+    const prior = new Map((before || []).map(npc => [npc?.id, npc]));
+    const baseline = normalizeRelationshipBaseline(getSettings().relationshipBaseline);
+    const changes = [];
+    for (const npc of after || []) {
+        if (!npc?.id || npc.archived) continue;
+        const from = prior.has(npc.id) ? normalizeRelationshipBaseline(prior.get(npc.id).relationship) : baseline;
+        const to = normalizeRelationshipBaseline(npc.relationship);
+        const meters = Object.fromEntries(Object.keys(to).filter(key => to[key] !== from[key]).map(key => [key, to[key] - from[key]]));
+        if (Object.keys(meters).length) changes.push({ name: npc.name, meters, start: from, reply: messageId });
+    }
+    if (!changes.length) return;
+    void (async () => { for (const change of changes) await adapter.adjust(change); })();
+}
+
 // A v2-hosted automatic boundary may skip the deterministic-path probe: this session already found
 // no sidecar for the chat, has no pointer for it and nothing has found or written one since.
 function sidecarMissTrusted(key) {
@@ -2509,7 +2540,7 @@ function namedByPlayerNpcIds(state) {
 // The live dossier injection under the current settings and scene defer (sent by updateInjection;
 // tokens() measures the same text).
 function liveInjectionText(state, settings, { namedNpcIds = namedByPlayerNpcIds(state), transcript = recentTranscript(4) } = {}) {
-    return buildInjection(state.npcs, transcript, state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: settings.customFieldNames, sceneDeferred: defersArea('scene', settings.sourceOfTruth) });
+    return buildInjection(hostedMeterView(state.npcs), transcript, state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: settings.customFieldNames, sceneDeferred: defersArea('scene', settings.sourceOfTruth) });
 }
 
 function updateInjection() {
@@ -4323,6 +4354,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         }
         if (targetMessageId >= 0) commitBranchCheckpoint(nextState, targetMessageId, 'scan');
         setChatState(chatKey, nextState);
+        forwardRelationshipChangesToHost(state.npcs, nextState.npcs, targetMessageId);
         persist();
         renderDossier();
         updateInjection();
@@ -5636,6 +5668,15 @@ function editorValue(value) {
     return escapeHtml(String(value ?? ''));
 }
 
+// (v2 meters, F90) Hidden notes: shown in the editor only while hosted (they unlock by v2 meters).
+const SECRETS_EDITOR_ID = 'npc_state_delta_edit_secrets';
+function hostedSecretsEditorHtml(npc) {
+    const adapter = storySuiteV2Meters();
+    if (!adapter) return '';
+    return `
+      <label class="npc-state-delta-editor-wide">Hidden notes <small>Never sent to the story while locked. One per line: meter, threshold, colon, note (e.g. "trust 40: She is the duke's daughter."). Opens when the meter reaches the threshold (at or below it for a negative one); then given to the story while this NPC is present.</small><textarea id="${SECRETS_EDITOR_ID}" class="text_pole" rows="3">${editorValue(adapter.secretLines(npc.secrets))}</textarea></label>`;
+}
+
 function openNpcEditor(npcId) {
     const originChatKey = getChatKey();
     if (!requireReadyChatMutation('edit a dossier', originChatKey)) return null;
@@ -5651,7 +5692,8 @@ function openNpcEditor(npcId) {
     if (typeof Popup !== 'function' || !POPUP_TYPE?.TEXT || !POPUP_RESULT) {
         throw new Error('SillyTavern Popup API is unavailable. NPC State Delta requires SillyTavern 1.18+ for dossier editing.');
     }
-    const rel = npc.relationship || DEFAULT_RELATIONSHIP;
+    // While hosted the numbers shown (and edited) are the v2 slice's; without a host, the dossier's.
+    const rel = hostedMeterView([npc])[0].relationship || DEFAULT_RELATIONSHIP;
     const locked = new Set(npc.manualProfileFields || []);
     const content = document.createElement('div');
     content.id = 'npc_state_delta_editor_content';
@@ -5706,7 +5748,7 @@ function openNpcEditor(npcId) {
         <label>Affection<input id="npc_state_delta_edit_affection" class="text_pole" type="number" min="-100" max="100" value="${relationshipNumber(rel.affection)}"></label>
         <label>Desire<input id="npc_state_delta_edit_desire" class="text_pole" type="number" min="-100" max="100" value="${relationshipNumber(rel.desire)}"></label>
         <label>Tension<input id="npc_state_delta_edit_tension" class="text_pole" type="number" min="-100" max="100" value="${relationshipNumber(rel.tension)}"></label>
-      </div>`;
+      </div>${hostedSecretsEditorHtml(npc)}`;
 
     let popup;
     popup = new Popup(content, POPUP_TYPE.TEXT, '', {
@@ -6046,6 +6088,9 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
     const beforeKeyRelationships = [...(current.keyRelationships || [])];
     const next = structuredClone(current);
     const oldRelationship = { ...(current.relationship || DEFAULT_RELATIONSHIP) };
+    // (v2 meters) While hosted the inputs showed the slice's numbers; edits to them go to the slice.
+    const hostedMeters = storySuiteV2Meters();
+    const shownRelationship = hostedMeters ? { ...hostedMeterView([current])[0].relationship } : null;
     const stableInputs = {
         name: String(editorField('npc_state_delta_edit_name')).trim().slice(0, 120) || current.name,
         role: String(editorField('npc_state_delta_edit_role')).trim().slice(0, 240),
@@ -6109,6 +6154,18 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
         desire: clampEditorRelationshipStat('npc_state_delta_edit_desire'),
         tension: clampEditorRelationshipStat('npc_state_delta_edit_tension'),
     };
+    let meterEdits = null;
+    if (shownRelationship) {
+        const edited = Object.fromEntries(Object.keys(next.relationship).filter(key => next.relationship[key] !== Number(shownRelationship[key] || 0)).map(key => [key, next.relationship[key]]));
+        meterEdits = Object.keys(edited).length ? edited : null;
+        next.relationship = { ...oldRelationship };
+    }
+    const secretsInput = hostedMeters ? document.getElementById(SECRETS_EDITOR_ID) : null;
+    if (secretsInput) {
+        const parsedSecrets = hostedMeters.parseSecrets(secretsInput.value, current.secrets);
+        next.secrets = parsedSecrets.secrets;
+        if (parsedSecrets.problems.length && !silent) globalThis.toastr?.warning?.(`NPC State Delta: these hidden notes were not kept (write "meter number: note"): ${parsedSecrets.problems.join(' / ').slice(0, 300)}`);
+    }
     const relationshipDelta = Object.fromEntries(['trust', 'affection', 'desire', 'tension'].map(key => [key, next.relationship[key] - Number(oldRelationship[key] || 0)]));
     if (Object.values(relationshipDelta).some(value => value !== 0)) {
         const progress = normalizeRelationshipProgress(current.relationshipProgress);
@@ -6171,6 +6228,11 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
     if (!await persistCriticalDurable(originChatKey)) {
         if (!silent) globalThis.toastr?.warning?.(`NPC State Delta: the edits for ${savedName} are applied in this browser but could not be saved to the server yet. Save again to retry.`);
         return false;
+    }
+    if (hostedMeters && (meterEdits || secretsInput)) {
+        if (meterEdits) await hostedMeters.setMeters({ name: current.name, meters: meterEdits, reply: latestReplyIndex() });
+        if (secretsInput) await hostedMeters.refresh(savedName);
+        updateInjection();
     }
     if (close) closeNpcEditor();
     if (!silent) globalThis.toastr?.success?.(`NPC State Delta: saved manual dossier edits for ${savedName}.`);
@@ -7742,7 +7804,7 @@ async function init() {
     clearLegacyPromptKeys();
     connectStorySuite();
     // Story Suite v2 (Story Block 2): optional; without a v2 host the adapter does nothing.
-    import('./src/storysuite-v2.js').then(v2 => v2.startStorySuiteV2({ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION })).catch(error => console.debug('[NPC State Delta] Story Suite v2 adapter is not available', error));
+    import('./src/storysuite-v2.js').then(v2 => { storySuiteV2 = v2.startStorySuiteV2({ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION }); }).catch(error => console.debug('[NPC State Delta] Story Suite v2 adapter is not available', error));
     bindUi();
     installUiCaptureBridge();
     registerEvents();
@@ -7939,6 +8001,8 @@ window.NPCStateDelta = Object.freeze({
     },
     clearDiagnostics: () => diagnosticStore.clear(getChatKey()),
     getState: () => structuredClone(getChatState()),
+    // (v2 meters) Delta's base relationship values: where a new NPC's slice meters start.
+    relationshipBaseline: () => normalizeRelationshipBaseline(getSettings().relationshipBaseline),
     presentCastHtml: () => storyBlockCastHtml(),
     // (1.2.13) Why the present cast is empty ({ text, scan }), and Add NPC, for the Story Block tabs.
     castEmptyReason: () => castEmptyReason(),
@@ -7957,7 +8021,7 @@ window.NPCStateDelta = Object.freeze({
             formPortraits[npcId] = Object.fromEntries(Object.values(forms || {}).filter(portrait => portrait?.dataUrl)
                 .map(portrait => [portrait.form, { dataUrl: portrait.dataUrl, appearanceFingerprint: portrait.appearanceFingerprint || '' }]));
         }
-        return { turn: state.turn, reply: latestReplyIndex(), npcs: structuredClone(state.npcs), portraitAssets: {}, formPortraits };
+        return { turn: state.turn, reply: latestReplyIndex(), npcs: structuredClone(hostedMeterView(state.npcs)), portraitAssets: {}, formPortraits };
     },
     persistenceStatus: () => {
         const key = getChatKey();

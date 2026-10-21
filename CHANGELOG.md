@@ -5,6 +5,12 @@ Story Suite v2. NSD stays standalone; with Story Block v2 it registers as a host
 - Queries `npc.present`, `npc.known`, `npc.dossier({ name })` and `npc.portrait({ name })` (the portrait Delta shows, as a safe `data:` image, `https:` or same-origin URL, or null).
 - With Story Block v2 (`apiVersion: 2`) Delta adds none of v1's Story Block tabs, Story Suite announcement or overlay button; with Story Block 1 or none, nothing changes.
 - The package ships `src/storysuite-v2.js`.
+- **NPC meters in v2's per-reply state** (F81, F90; `src/npc-meters.js`): domain `npc` (`{ npcs: { key: { name, meters, stages, unlocked, disposition? } } }`, up to 80 NPCs), change line `~ npc Name | meter: +N | meter: =N`, commands `npc.adjust` / `npc.set` / `npc.refresh`, queries `npc.meters` and `npc.cast`, `npc.present({ meters: true })`, `npc.dossier` with the slice's meters. Code clamps every meter to its range and to the per-reply change cap; unknown meters and `stage:` labels are problems, not errors; swipes and deletes take the changes back. While hosted the slice is the truth: the dossier view, the editor and the injection read it, and Delta's scans send their relationship changes as `npc.adjust`. Without Story Block 2 nothing changes.
+- **New settings** (Delta's fold in the Story Suite overlay): **Most a meter moves per reply** (default 15), **Custom meters** (up to six: name, lowest, highest, start, bar shown or hidden), **Meter stages** (meter, at, name; code moves stages and notes it on the reply).
+- **Hidden notes** in the dossier editor while hosted (`trust 40: …`, stored as the dossier's `secrets`): never sent while locked; opened by code when the meter reaches the threshold, then given to the story in the tail while the NPC is present.
+- An **NPCs** card under each reply (`npc-state-delta/meters`, Story Block's `ss.meter` bars) and the meters under the Cast tab's cards.
+- Prompt: one fixed static line for the meters (about 77 tokens with the four built-ins, 86 with two custom meters and a stage), and in the tail the present NPCs' meters when they moved in the last two replies (about 48-62 tokens for two NPCs and one note); Delta's own prompts are unchanged (`npm run measure:prompts`).
+- Tests run against Story Block's real registry, store, command bus and change-line parser, vendored in `tests/vendor/story-block/`.
 
 # NPC State Delta changes
 
