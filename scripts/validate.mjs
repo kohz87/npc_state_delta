@@ -28,14 +28,18 @@ const rootRuntimeFiles = fs.readdirSync(root, { withFileTypes: true })
   .filter(entry => entry.isFile() && entry.name.endsWith('.js'))
   .map(entry => entry.name)
   .sort();
+// A declared module is either a top-level file or a module under src/ (posix path, no `..`).
+const isSrcModulePath = file => /^src\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.js$/.test(file) && !file.split('/').includes('..');
+const declaredTopLevel = declaredPaths.filter(file => path.dirname(file) === '.').sort();
+const declaredSrcModules = declaredPaths.filter(isSrcModulePath).sort();
 
 requireCheck(runtimeConfig.schemaVersion === 1, 'runtime module inventory schema mismatch');
 requireCheck(declaredPaths.length === declaredSet.size, 'runtime module inventory contains duplicate paths');
 requireCheck(declaredModules.every(module => typeof module?.role === 'string' && module.role.trim()), 'runtime module inventory requires a role for every module');
 requireCheck(declaredModules.every(module => typeof module?.required === 'boolean'), 'runtime module inventory requires explicit required flags');
-requireCheck(declaredPaths.every(file => file && path.dirname(file) === '.' && file.endsWith('.js')), 'runtime module inventory may contain only top-level JS modules');
+requireCheck(declaredPaths.every(file => file && file.endsWith('.js') && (path.dirname(file) === '.' || isSrcModulePath(file))), 'runtime module inventory may contain only top-level or src/ JS modules');
 requireCheck(declaredPaths.every(file => !/(?:^|[-_.])legacy(?:[-_.]|$)/i.test(file) && !/(?:^|[-_.])v\d{3,}(?:[-_.]|$)/i.test(file)), 'active runtime module names must be semantic, not legacy/version labels');
-requireCheck(JSON.stringify([...declaredSet].sort()) === JSON.stringify(rootRuntimeFiles), 'runtime-modules.json must declare every and only top-level runtime JS module');
+requireCheck(JSON.stringify(declaredTopLevel) === JSON.stringify(rootRuntimeFiles), 'runtime-modules.json must declare every and only top-level runtime JS module');
 
 for (const module of declaredModules) {
   const full = path.join(root, module.path);
@@ -47,7 +51,7 @@ for (const file of files.filter(file => /\.(?:m?js)$/.test(file))) {
   requireCheck(result.status === 0, `${path.relative(root, file)}: ${result.stderr || result.error || 'syntax check failed'}`);
 }
 
-for (const file of rootRuntimeFiles.map(name => path.join(root, name))) {
+for (const file of [...rootRuntimeFiles, ...declaredSrcModules.filter(name => fs.existsSync(path.join(root, name)))].map(name => path.join(root, name))) {
   const source = fs.readFileSync(file, 'utf8');
   requireCheck(!/npc_state(?!_delta)|npc-state(?!-delta)|NPCState(?!Delta)|npcState(?!Delta)|\.npcstate(?!delta)/.test(source), `${path.basename(file)}: old shared namespace remains`);
   requireCheck(!/(?:from\s*|import\s*\()\s*['"]https?:/.test(source), `${path.basename(file)}: remote runtime import`);
@@ -109,5 +113,5 @@ if (errors.length) {
   console.error(errors.join('\n'));
   process.exitCode = 1;
 } else {
-  console.log(`Validation passed: ${rootRuntimeFiles.length} declared active runtime JS modules; syntax, local imports, isolation, semantic module ownership, scanner routing, application version, entrypoints and governing documents.`);
+  console.log(`Validation passed: ${rootRuntimeFiles.length + declaredSrcModules.length} declared active runtime JS modules; syntax, local imports, isolation, semantic module ownership, scanner routing, application version, entrypoints and governing documents.`);
 }

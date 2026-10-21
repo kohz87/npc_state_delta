@@ -10,6 +10,8 @@ Story Suite v2. NSD stays standalone; with Story Block v2 it registers as a host
 
 ## Unreleased
 
+- **Runtime modules can live under `src/`.** `runtime-modules.json` may declare `src/...` modules beside the top-level ones. Validation gives them the same checks (syntax, local imports, namespace, scanner routing) and packaging ships them once; any other nested path is still refused. Nothing Delta stores, sends or shows changes.
+
 ## 1.2.19 - 20 October 2026
 
 - **New memories for NPCs already in the dossier are kept.** An NPC met for the first time got their memories, but later ones for the same NPC were often lost. The capture is told to send an existing NPC's durable facts in `profileUpdates`, and its reminder lists memories among them, so a model filing a new memory there was doing what it was asked; that part of the merge only read personality, speech, appearance, mannerisms and Behavioral Levers, and dropped the memory without a word. Memories in a profile update are now merged the same way as those in the NPC's own entry: added to the stored ones, a repeat or reworded copy not added twice, at most three new per reply and five kept (the most consequential when crowded), never replacing the earlier ones.
