@@ -16,6 +16,10 @@ Story Suite v2. NSD stays standalone; with Story Block v2 it registers as a host
 
 ## Unreleased
 
+- **Merging a duplicate dossier keeps the newer facts.** When two dossiers turn out to be the same NPC (an alias links them), the merged one used to take custom field values only from the older record, and the longer mood, location, goal and condition rather than the newer. It now takes the newer custom values and the most recently updated live state, keeps memories you typed as typed, and a hand-locked alias list takes only the other dossier's name.
+- **Locked aliases stay locked on import.** Importing a dossier bundle added the imported aliases even to a dossier whose aliases you had locked.
+- **Custom fields, the same everywhere.** The Megumin dossier import now merges configured custom fields like every other path (it never set them), and the dossier view and the Story Suite v2 `npc.dossier` query show the configured custom fields only, as the roleplay dossier and the suite profile already did; a value stored under a name you removed stays in the editor so you can clear it.
+
 - **Advanced → NPCs in the dossier.** How many present NPCs the live dossier carries at most each reply (1-12, the most relevant first). The default stays 3, so nothing changes unless you change it; before, the setting existed but had no control.
 - Cleanup, nothing Delta stores, sends or shows changes: one HTML-escaping helper (`src/util/html.js`) instead of seven copies; one pair of "is this row/record that NPC" helpers in `core-mechanics.js` instead of copies in `core.js` and `continuity-core.js`; a no-op presence line and a one-line pass-through removed. The settings whose controls live in other modules (full-cast scanning, the scanner's maximum output, the relationship map, the calendar) are declared and normalized by the one settings owner, `getSettings`.
 
