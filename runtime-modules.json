@@ -41,6 +41,7 @@
     { "path": "continuity-ui.js", "role": "calendar-birthday-appearance-ui-adapter", "required": true },
     { "path": "suite.js", "role": "story-suite-registry", "required": true },
     { "path": "suite-handshake.js", "role": "story-suite-handshake", "required": true },
-    { "path": "present-scene.js", "role": "present-scene-view", "required": true }
+    { "path": "present-scene.js", "role": "present-scene-view", "required": true },
+    { "path": "src/dossier-edit.js", "role": "manual-edit-locks", "required": true }
   ]
 }

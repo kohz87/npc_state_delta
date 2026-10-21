@@ -19,6 +19,7 @@ import {
     setBranchProvenanceHint,
 } from '../branch.js';
 import { normalizeSocialGraph } from '../social.js';
+import { editorProfileLocks } from '../src/dossier-edit.js';
 
 function user(text, name = 'Kazuma') {
     return { is_user: true, is_system: false, name, mes: text };
@@ -160,9 +161,9 @@ test('v0.2.11 branch restore overlays user-owned portrait/profile metadata witho
     state.npcs[0].minor = true;
     state.npcs[0].importance = 77;
     state.npcs[0].manual = true;
-    state.npcs[0].personality = 'Reserved and dryly humorous.';
-    state.npcs[0].manualProfileFields = ['personality'];
-    state.npcs[0].manualProfileLocksExplicit = true;
+    // The personality edit and its lock are written by the editor's own Save logic, not by hand.
+    const edited = { ...structuredClone(state.npcs[0]), personality: 'Reserved and dryly humorous.' };
+    Object.assign(state.npcs[0], { personality: edited.personality }, editorProfileLocks(state.npcs[0], edited, { protect: true }));
     state.npcs[0].relationship.trust = 88;
 
     const sibling = [user('Wait.'), assistant('Myla refuses.', 1)];
@@ -173,6 +174,7 @@ test('v0.2.11 branch restore overlays user-owned portrait/profile metadata witho
     assert.equal(Object.prototype.hasOwnProperty.call(result.state.npcs[0], 'importance'), false);
     assert.equal(Object.prototype.hasOwnProperty.call(result.state.npcs[0], 'manual'), false);
     assert.equal(result.state.npcs[0].personality, 'Reserved and dryly humorous.');
+    assert.deepEqual(result.state.npcs[0].manualProfileFields, ['personality'], 'the lock itself survives the restore');
     assert.equal(result.state.npcs[0].relationship.trust, 0, 'relationship remains narrative branch state rather than user-metadata overlay');
 });
 

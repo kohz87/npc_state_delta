@@ -16,6 +16,8 @@ Story Suite v2. NSD stays standalone; with Story Block v2 it registers as a host
 
 ## Unreleased
 
+- **A field you protect in the editor stays protected.** The "Protect edited stable profile fields" checkbox never showed as ticked, even on a protected dossier, so the next Save (of anything) cleared every lock, the appearance lock included, and the next scan could rewrite the protected fields. It now shows ticked with the list of protected fields, and saving keeps them.
+- **Your edits survive a swipe, a regenerate and a branch restore.** A lock set in the editor was not marked as the reader's own, so swiping or deleting the reply it was made after brought back the older values. Editor saves now mark their locks explicit, as bundle imports already did, and a restore keeps everything a lock covers (an appearance lock keeps the forms and overall appearance too, as an import does).
 - **Runtime modules can live under `src/`.** `runtime-modules.json` may declare `src/...` modules beside the top-level ones. Validation gives them the same checks (syntax, local imports, namespace, scanner routing) and packaging ships them once; any other nested path is still refused. Nothing Delta stores, sends or shows changes.
 
 ## 1.2.19 - 20 October 2026

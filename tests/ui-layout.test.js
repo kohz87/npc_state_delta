@@ -94,7 +94,7 @@ test('present-only behavior injection and manual dossier editor controls are exp
     assert.match(index, /Save dossier/);
     assert.match(index, /Protect edited stable profile fields/);
     assert.match(index, /Leave off to use manual edits as an organic baseline/);
-    assert.match(index, /\$\{locked\.length \? 'checked' : ''\}/);
+    assert.match(index, /\$\{locked\.size \? 'checked' : ''\}/, 'locked is a Set: the protect box shows the existing locks');
     assert.match(index, /npc_state_delta_edit_trust/);
     assert.match(index, /npc_state_delta_edit_affection/);
     assert.match(index, /npc_state_delta_edit_desire/);

@@ -65,7 +65,7 @@ test('hand-edited aliases are kept from scanner additions and shown on the dossi
     const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
     assert.match(index, /id="npc_state_delta_edit_aliases"/);
     assert.match(index, /aliases: cleanEditorList\(editorField\('npc_state_delta_edit_aliases'\), 8\)/);
-    assert.match(index, /'customFields', 'aliases'\];/);
+    assert.match(fs.readFileSync(new URL('../src/dossier-edit.js', import.meta.url), 'utf8'), /'customFields', 'aliases',\n\]\);/);
     assert.match(fs.readFileSync(new URL('../dossier-ui.js', import.meta.url), 'utf8'), /currentCard\('Also known as'/);
-    assert.match(fs.readFileSync(new URL('../bundle.js', import.meta.url), 'utf8'), /aliases: \['aliases'\],/);
+    assert.match(fs.readFileSync(new URL('../src/dossier-edit.js', import.meta.url), 'utf8'), /aliases: \['aliases'\],/, 'the lock map bundle import and branch restore share');
 });

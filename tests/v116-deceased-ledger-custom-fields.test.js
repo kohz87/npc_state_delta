@@ -96,6 +96,6 @@ test('settings, editor, scans and imports are wired to the custom fields', () =>
     assert.equal((index.match(/customFieldNames: settings\.customFieldNames/g) || []).length, 7, 'three prompts, three merges and the injection');
     assert.match(index, /\$\{customFieldEditorHtml\(npc\)\}/);
     assert.match(index, /customFields: customFieldEditorValues\(current\)/);
-    assert.match(index, /'keyRelationships', 'customFields'/, 'manual edits lock custom fields like other stable fields');
-    assert.match(fs.readFileSync(new URL('../bundle.js', import.meta.url), 'utf8'), /customFields: \['customFields'\],/);
+    assert.match(fs.readFileSync(new URL('../src/dossier-edit.js', import.meta.url), 'utf8'), /'keyRelationships', 'customFields'/, 'manual edits lock custom fields like other stable fields');
+    assert.match(fs.readFileSync(new URL('../src/dossier-edit.js', import.meta.url), 'utf8'), /customFields: \['customFields'\],/, 'the lock map bundle import and branch restore share');
 });
