@@ -3250,6 +3250,8 @@ export function normalizeScanNpc(raw = {}, options = {}) {
             return ['update', 'change', 'move', 'relocate', 'establish', 'refine'].includes(state) ? 'update' : 'keep';
         })(),
         homeBaseReason: cleanText(raw.homeBaseReason ?? raw.home_base_reason ?? raw.usualLocationReason ?? raw.usual_location_reason, 500),
+        backgroundState: String(raw.backgroundState ?? raw.background_state ?? '').trim().toLowerCase() === 'update' ? 'update' : '',
+        backgroundReason: cleanText(raw.backgroundReason ?? raw.background_reason, 500),
         age: ageFields.age,
         ageState: (() => {
             const state = String(raw.ageState ?? raw.age_state ?? '').trim().toLowerCase();
@@ -3897,6 +3899,12 @@ export function normalizeNpcRecord(raw = {}) {
     npc.portraitSeed = normalizePortraitSeed(raw.portraitSeed ?? raw.portrait_seed);
     npc.aliases = cleanList(raw.aliases, 8, 120);
     npc.memories = normalizeStoredMemories(raw.memories);
+    // The memories the reader entered by hand (never evicted by a later scan), while they are stored.
+    const manualMemories = Array.isArray(raw.manualMemories)
+        ? raw.manualMemories.map(item => cleanText(item, DURABLE_PROFILE_LIMITS.memory)).filter(item => item && npc.memories.some(stored => normalizeName(stored) === normalizeName(item)))
+        : [];
+    if (manualMemories.length) npc.manualMemories = [...new Set(manualMemories)];
+    else delete npc.manualMemories;
     npc.mannerisms = locked.has('mannerisms')
         ? cleanList(raw.mannerisms, 8, 320)
         : normalizeMannerisms(raw.mannerisms);
@@ -4142,7 +4150,29 @@ function mergeLists(oldList, newList, limit = 8) {
     return result;
 }
 
-function mergeImportantMemories(oldList, newList, retentionList = [], incomingLimit = 3) {
+// (cleanup step 6) Memories the reader entered by hand (`pinned`, the record's manualMemories) are
+// never evicted: new ones take only the slots the reader's own leave free.
+function mergeImportantMemories(oldList, newList, retentionList = [], incomingLimit = 3, pinned = []) {
+    const merged = mergeUnpinnedMemories(oldList, newList, retentionList, incomingLimit);
+    const keep = (Array.isArray(pinned) ? pinned : []).map(normalizeName).filter(Boolean);
+    if (!keep.length) return merged;
+    const isPinned = item => keep.includes(normalizeName(item));
+    const existing = cleanList(oldList, 64, DURABLE_PROFILE_LIMITS.memory);
+    const missing = existing.filter(item => isPinned(item) && !merged.some(other => normalizeName(other) === normalizeName(item)));
+    if (!missing.length) return merged;
+    const order = [...existing, ...merged.filter(item => !existing.some(other => normalizeName(other) === normalizeName(item)))];
+    const chosen = new Set([...merged, ...missing].map(normalizeName));
+    const out = order.filter(item => chosen.has(normalizeName(item)));
+    // Too many: drop the oldest memories the reader did not write.
+    while (out.length > IMPORTANT_MEMORY_LIMIT) {
+        const at = out.findIndex(item => !isPinned(item));
+        if (at < 0) break;
+        out.splice(at, 1);
+    }
+    return out.slice(-IMPORTANT_MEMORY_LIMIT);
+}
+
+function mergeUnpinnedMemories(oldList, newList, retentionList = [], incomingLimit = 3) {
     const existing = semanticDedupeItems(cleanList(oldList, 64, DURABLE_PROFILE_LIMITS.memory), {
         maxItems: 64, maxChars: DURABLE_PROFILE_LIMITS.memory, similarity: 0.58,
     });
@@ -4197,7 +4227,7 @@ function mergeImportantMemories(oldList, newList, retentionList = [], incomingLi
 // Speech and Appearance, have their own evidence-gated rules there).
 const PROFILE_UPDATE_TEXT_FIELDS = Object.freeze(['role', 'species', 'gender', 'homeBase', 'age', 'apparentAge', 'background']);
 
-// Gender, home base and ages are keep-by-default once established.
+// Gender, home base, background and ages are keep-by-default once established.
 function durableTextAccepted(field, existing, incoming, value, options = {}) {
     if (field === 'gender') {
         const prior = normalizeGender(existing.gender);
@@ -4213,6 +4243,21 @@ function durableTextAccepted(field, existing, incoming, value, options = {}) {
             return false;
         }
         return true;
+    }
+    if (field === 'background') {
+        // (cleanup step 6) Background is durable history and keep-by-default like the home base: an
+        // established one changes with backgroundState:"update" + backgroundReason + grounding. No
+        // prompt asks for that state yet, so a grounded restatement that keeps every stored concept
+        // (the unmarked-refinement safety appearance uses) is accepted too; a shorter restatement that
+        // drops a stored clause is not.
+        const prior = String(existing.background || '').trim();
+        const context = String(options.developmentContext || '').trim();
+        if (prior && normalizeName(prior) === normalizeName(value)) return false;
+        if (prior) {
+            const marked = incoming.backgroundState === 'update' && String(incoming.backgroundReason || '').trim();
+            if (!marked && !isSafeUnmarkedDurableReplacement(prior, value)) return false;
+        }
+        return !context || durableSeedGrounded(value, context);
     }
     if (field === 'age' && String(existing.age || '').trim()) {
         // Chronological age is keep-by-default once established. It may advance from
@@ -4354,7 +4399,7 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
         if (manualFields.has(field)) continue;
         if (field === 'relationshipSummary') continue; // gated after relationship evidence is accepted
         if (typeof value !== 'string' || !value.trim()) continue;
-        if ((field === 'gender' || field === 'homeBase') && !durableTextAccepted(field, existing, incoming, value, lifecycleOptions)) continue;
+        if ((field === 'gender' || field === 'homeBase' || field === 'background') && !durableTextAccepted(field, existing, incoming, value, lifecycleOptions)) continue;
         if (['personality', 'speech', 'appearance'].includes(field)
             && !String(existing[field] || '').trim()
             && !targetedDurableSeedAllowed
@@ -4471,7 +4516,9 @@ function applyIncoming(existing, incoming, turn, relationshipCaps = DEFAULT_RELA
     if (normalizeName(incomingName) === normalizeName(merged.name) && incoming.identityKind) {
         merged.identityKind = inferNpcIdentityKind(merged.name, incoming.identityKind);
     }
-    merged.memories = mergeImportantMemories(existing.memories, incoming.memories, incoming.memoryRetention, lifecycleOptions.memoryInputLimit || 3);
+    merged.memories = manualFields.has('memories')
+        ? [...(existing.memories || [])]
+        : mergeImportantMemories(existing.memories, incoming.memories, incoming.memoryRetention, lifecycleOptions.memoryInputLimit || 3, existing.manualMemories);
     if (manualFields.has('mannerisms')) {
         merged.mannerisms = [...(existing.mannerisms || [])];
     } else if ((existing.mannerisms || []).length) {
@@ -5344,9 +5391,9 @@ function applyDurableProfileUpdate(npc, raw = {}, options = {}) {
     // (1.2.19) A model that files a known NPC's new memory under profileUpdates (a durable fact,
     // which the rules send there) used to lose it: only the npcs[] entry merged memories. Merged
     // here the same way: added to the stored ones, deduplicated, capped, never replacing them.
-    if ((incoming.memories || []).length) {
+    if ((incoming.memories || []).length && !manualFields.has('memories')) {
         const before = JSON.stringify(npc.memories || []);
-        npc.memories = mergeImportantMemories(npc.memories, incoming.memories, incoming.memoryRetention, options.memoryInputLimit || 3);
+        npc.memories = mergeImportantMemories(npc.memories, incoming.memories, incoming.memoryRetention, options.memoryInputLimit || 3, npc.manualMemories);
         if (JSON.stringify(npc.memories) !== before) changed = true;
     }
 
