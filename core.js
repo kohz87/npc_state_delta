@@ -245,11 +245,6 @@ function withAppearanceDerivedApparentAge(npc = {}, sourceAppearance = '') {
     return apparentAge ? { ...npc, apparentAge } : npc;
 }
 
-function sameNpc(raw = {}, npc = {}) {
-    if (raw?.id && String(raw.id) === String(npc?.id)) return true;
-    if (raw?.name && mechanics.npcMatchesLabel(npc, raw.name)) return true;
-    return Array.isArray(raw?.aliases) && raw.aliases.some(alias => mechanics.npcMatchesLabel(npc, alias));
-}
 
 const BIRTHDAY_UPDATE_KEYS = ['birthDate', 'birth_date', 'birthday', 'birthDateState', 'birth_date_state', 'birthDateReason', 'birth_date_reason'];
 function hasBirthdayUpdate(row) {
@@ -347,14 +342,6 @@ export function stampChangedFields(before, after, { turn, storyDay = null, messa
     return stampFieldChanges(before, after, Math.trunc(Number(turn)), storyDay, message);
 }
 
-function matchingPrevious(npc, source = []) {
-    return (Array.isArray(source) ? source : []).filter(item => item && (
-        String(item.id || '') === String(npc?.id || '')
-        || (npc?.name && mechanics.npcMatchesLabel(item, npc.name))
-        || (item?.name && mechanics.npcMatchesLabel(npc, item.name))
-        || (item?.aliases || []).some(alias => mechanics.npcMatchesLabel(npc, alias))
-    ));
-}
 
 function birthdayPromptSource(options = {}) {
     return String(options?.transcript || options?.dossierText || options?.developmentContext || '');
@@ -1746,11 +1733,11 @@ export function mergeScanResult(state, scanResult, rawOptions = {}) {
     const diagnosticNpcRegistry = (result.state.npcs || []).map(npc => structuredClone(npc));
 
     result.state.npcs = (result.state.npcs || []).map(rawNpc => {
-        const sources = matchingPrevious(rawNpc, previous);
-        const rawSources = matchingPrevious(rawNpc, previousRaw);
+        const sources = mechanics.matchingNpcRecords(rawNpc, previous);
+        const rawSources = mechanics.matchingNpcRecords(rawNpc, previousRaw);
         const ordinaryUpdate = birthdayUpdateRow(
-            ordinary.find(raw => sameNpc(raw, rawNpc)),
-            profileUpdates.find(raw => sameNpc(raw, rawNpc)),
+            ordinary.find(raw => mechanics.scanRowMatchesNpc(raw, rawNpc)),
+            profileUpdates.find(raw => mechanics.scanRowMatchesNpc(raw, rawNpc)),
         );
         let npc = normalizeNpcBirthday(rawNpc, calendar, referenceDate);
         if (ordinaryUpdate && birthdayUpdateGrounded(npc, ordinaryUpdate, options.developmentContext, calendar, referenceDate)) {

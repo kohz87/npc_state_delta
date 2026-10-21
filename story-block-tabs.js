@@ -4,6 +4,7 @@
 // prompts or messages, and nothing changes when Story Block is not installed.
 import { dossierIndexProjection, filterDossierIndex } from './dossier-ui.js';
 import { storyBlockIsV2 } from './suite-handshake.js';
+import { escapeHtml } from './src/util/html.js';
 
 export const STORY_BLOCK_TAB_IDS = Object.freeze({ cast: 'npc-state-delta-cast', dossiers: 'npc-state-delta-dossiers' });
 const CONNECTED_FLAG = 'npcStateDeltaStoryBlock';
@@ -17,7 +18,6 @@ export function emptyCastHtml(reason = null) {
 // Story Block's panes add no padding of their own around another extension's content.
 const paneHtml = html => `<div class="npc-state-delta-story-pane">${html}</div>`;
 
-const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 
 export function dossierTabRowsHtml(rows = [], { query = '', total = null } = {}) {
     if (!rows.length && String(query).trim()) return `<p class="npc-state-delta-story-empty">No dossier matches “${escapeHtml(String(query).trim())}”.</p>`;

@@ -18,19 +18,6 @@ import {
 function lockedAppearance(npc = {}) {
     return Array.isArray(npc.manualProfileFields) && npc.manualProfileFields.includes('appearance');
 }
-function sameNpc(raw = {}, npc = {}) {
-    if (raw?.id && String(raw.id) === String(npc.id)) return true;
-    if (raw?.name && mechanics.npcMatchesLabel(npc, raw.name)) return true;
-    return Array.isArray(raw?.aliases) && raw.aliases.some(alias => mechanics.npcMatchesLabel(npc, alias));
-}
-function matchingPrevious(npc, source = []) {
-    return (Array.isArray(source) ? source : []).filter(item => item && (
-        String(item.id || '') === String(npc?.id || '')
-        || (npc?.name && mechanics.npcMatchesLabel(item, npc.name))
-        || (item?.name && mechanics.npcMatchesLabel(npc, item.name))
-        || (item?.aliases || []).some(alias => mechanics.npcMatchesLabel(npc, alias))
-    ));
-}
 function applyModel(npc = {}, rawUpdate = null, options = {}) {
     const locked = lockedAppearance(npc);
     const model = rawUpdate
@@ -136,7 +123,7 @@ export function applyNpcStateCommand(state, command, options = {}) {
     const prior = (state?.npcs || []).filter(isTerminalNpcDeath).map(normalizeNpcRecord);
     const result = mechanics.applyNpcStateCommand(state, command, options);
     result.state.npcs = (result.state.npcs || []).map(npc => {
-        const protectedNpc = matchingPrevious(npc, prior)[0];
+        const protectedNpc = mechanics.matchingNpcRecords(npc, prior)[0];
         return protectedNpc ? protectTerminalNpc(protectedNpc, applyModel(npc)) : applyModel(npc);
     });
     if (result.report?.status === 'restored' && prior.some(npc => String(npc.id) === String(result.report.npcId))) result.report.status = 'terminal-death';
@@ -156,9 +143,9 @@ export function mergeScanResult(state, scanResult, options = {}) {
         : (Array.isArray(scanResult?.profile_updates) ? scanResult.profile_updates : []);
 
     result.state.npcs = (result.state.npcs || []).map(rawNpc => {
-        const sources = matchingPrevious(rawNpc, previous);
-        let ordinaryUpdate = ordinary.find(raw => sameNpc(raw, rawNpc));
-        let profileUpdate = profiles.find(raw => sameNpc(raw, rawNpc));
+        const sources = mechanics.matchingNpcRecords(rawNpc, previous);
+        let ordinaryUpdate = ordinary.find(raw => mechanics.scanRowMatchesNpc(raw, rawNpc));
+        let profileUpdate = profiles.find(raw => mechanics.scanRowMatchesNpc(raw, rawNpc));
         const rawForms = ordinaryUpdate && (ordinaryUpdate.appearanceForms ?? ordinaryUpdate.appearance_forms);
         const seed = !sources.length && rawForms
             ? {

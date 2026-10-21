@@ -1,5 +1,6 @@
 /* NPC State Delta supporting tools: portrait manager, native data transfer, and diagnostics. */
 import { PORTRAIT_STYLE_PROMPT_LIMIT, PORTRAIT_COMPOSITION_PROMPT_LIMIT } from './core-mechanics.js';
+import { escapeHtml } from './src/util/html.js';
 
 const OVERLAY_ID = 'npc_state_delta_tools_overlay';
 const DOSSIER_ROOT_ID = 'npc_state_delta_dossier_root';
@@ -16,14 +17,7 @@ export let activeSession = null;
 let sessionSequence = 0;
 
 export function plain(value) { return String(value ?? '').trim(); }
-export function escapeHtml(value) {
-    return String(value ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
-}
+export { escapeHtml };
 export function safeNumber(value, fallback = 0) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;

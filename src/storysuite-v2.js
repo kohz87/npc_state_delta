@@ -31,6 +31,7 @@ import { resolveDossierTarget } from '../suite-handshake.js';
 import { NPC_KIND, createNpcPart, meterDefs, normalizeMeterSettings, normalizeSecrets, secretsFromLines, secretsToLines } from './npc-meters.js';
 import { METERS_CARD_ID, metersCardScreen } from './npc-meters-screen.js';
 import { DOSSIER_FIELDS } from './fields/registry.js';
+import { escapeHtml } from './util/html.js';
 
 export const MODULE_ID = 'npc-state-delta';
 export const MODULE_NAME = 'NPC State Delta';
@@ -168,7 +169,6 @@ export function meterBarHtml(def, value, stage = '') {
         + `<div class="ss-w-meter-track" style="--ss-w-ratio: ${ratio}"><div class="ss-w-meter-fill"></div></div></div>`;
 }
 
-const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 // Used only if story-block-tabs.js cannot be loaded: the same empty line, without the Scan button.
 const fallbackEmptyCast = reason => `<div class="npc-state-delta-story-empty-state"><p class="npc-state-delta-story-empty">${escapeHtml(reason?.text || 'No NPC is present in the latest scene.')}</p></div>`;
 

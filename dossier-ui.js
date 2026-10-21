@@ -1,6 +1,7 @@
 /* NPC State Delta dossier surface: bounded presentation of canonical state. */
 import { appearanceFingerprint, currentPresentationText, normalizeAppearanceModel, resolveNpcAppearance } from './appearance.js';
 import { formatBirthDate } from './birthday.js';
+import { escapeHtml } from './src/util/html.js';
 
 const ROOT_ID = 'npc_state_delta_dossier_root';
 const OPEN_REQUEST_GUARD = '__npcStateDeltaOpenDossierRequests';
@@ -9,14 +10,6 @@ const SETTINGS_ID = 'npc_state_delta_settings';
 const OBSERVER_RETRY_MS = 750;
 const OBSERVER_RETRY_LIMIT = 80;
 
-function escapeHtml(value) {
-    return String(value ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
-}
 
 function plain(value, fallback = '') {
     const text = String(value ?? '').replace(/\s+/g, ' ').trim();

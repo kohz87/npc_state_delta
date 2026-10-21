@@ -7,7 +7,9 @@ import {
     scannerRoutingError,
     scannerRoutingMetrics,
     scannerProfileOptions,
+    normalizeScannerMaxOutputTokens,
 } from './scanner-routing.js';
+import { normalizeRelationshipMapSettings } from './relationship-map-core.js';
 import {
     AUTOMATIC_BACKFILL_QUEUE_VERSION,
     AUTOMATIC_MISSED_PARTICIPANT_REPAIR_LIMIT,
@@ -200,6 +202,7 @@ import {
     storyBlockTags,
     worldStatePeople,
 } from './present-scene.js';
+import { escapeHtml } from './src/util/html.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
 // (1.2.16) Cache-friendly layout (the Story Suite convention): text that never changes from reply
@@ -555,6 +558,7 @@ const DEFAULTS = Object.freeze({
     // (1.2.16) 0: after the player's message, the cache-friendly tail. An install still on the old
     // default 1 is moved once (injectDepthTailUpgraded); any other depth the player set is kept.
     injectDepth: 0,
+    // How many present NPCs the live dossier carries at most (the most relevant first).
     injectLimit: 3,
     injectBudgetTokens: 4000,
     customFieldNames: [],
@@ -580,16 +584,13 @@ const DEFAULTS = Object.freeze({
     recoveryFiles: {},
     recoveryHistory: {},
     recoveryGarbage: {},
+    // Settings whose controls live in their own modules (full-cast.js, scanner-output-ui.js,
+    // relationship-map.js, calendar-settings.js); declared and normalized here, the one settings owner.
+    fullCastScanEveryTurn: false,
+    scannerMaxOutputTokens: 0,
+    relationshipMap: normalizeRelationshipMapSettings(),
 });
 
-function escapeHtml(value) {
-    return String(value ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('\"', '&quot;')
-        .replaceAll("'", '&#039;');
-}
 
 function persistSettings() {
     const ctx = getContext();
@@ -685,6 +686,16 @@ function getSettings() {
     const archiveAfter = Math.max(10, Math.min(999, Math.round(Number(settings.staleArchiveAfter) || 30)));
     assign('staleArchiveAfter', archiveAfter);
     assign('staleDeleteAfter', Math.max(archiveAfter + 1, Math.min(1000, Math.round(Number(settings.staleDeleteAfter) || 50))));
+    assign('injectLimit', Math.max(1, Math.min(12, Math.round(Number(settings.injectLimit) || 3))));
+    assign('fullCastScanEveryTurn', settings.fullCastScanEveryTurn === true);
+    assign('scannerMaxOutputTokens', normalizeScannerMaxOutputTokens(settings.scannerMaxOutputTokens));
+    assign('relationshipMap', normalizeRelationshipMapSettings(settings.relationshipMap), sameJson);
+    // The fantasy calendar (calendar-settings.js) is optional: absent means none; only a stored
+    // object is a calendar.
+    if (settings.calendarConfig !== undefined && (!settings.calendarConfig || typeof settings.calendarConfig !== 'object' || Array.isArray(settings.calendarConfig))) {
+        delete settings.calendarConfig;
+        dirty = true;
+    }
     assign('schemaVersion', DEFAULTS.schemaVersion);
 
     if (dirty) persistSettings();
@@ -3740,10 +3751,6 @@ async function runFocusedRelationshipPass(ctx, parsed, existingNpcs, transcript,
     return { decisions, used: true, responseChars, retried, targetCount: targets.length, failed };
 }
 
-function prepareFullWindowRelationshipEvaluation(parsed, existingNpcs) {
-    return prepareFullWindowRelationshipPayload(parsed, existingNpcs);
-}
-
 function suppressPrimaryRelationshipForFocusedDecisions(parsed, decisions) {
     if (!decisions?.size) return parsed;
     const clone = structuredClone(parsed || { npcs: [] });
@@ -4187,7 +4194,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         // broad dossier scanner. Relationship movement is evaluated separately against the
         // current exchange only, so manual/full scans cannot replay older relationship events.
         const fullWindowRelationship = (manual || fullWindowScan)
-            ? prepareFullWindowRelationshipEvaluation(resolvedParsed, state.npcs)
+            ? prepareFullWindowRelationshipPayload(resolvedParsed, state.npcs)
             : { evaluation: resolvedParsed, mergeSafe: resolvedParsed };
         const relationshipPass = await runFocusedRelationshipPass(
             ctx,
@@ -4500,6 +4507,7 @@ function buildSettingsHtml() {
     const advanced = [
         settingRow('npc_state_delta_scan_depth', 'Scan context', numberControl('npc_state_delta_scan_depth', 2, 30, 'messages'), 'History window for full, manual and Refresh scans. Quick automatic scans read only the latest user + assistant exchange.'),
         settingsSlot('scanner-output'),
+        settingRow('npc_state_delta_inject_limit', 'NPCs in the dossier', numberControl('npc_state_delta_inject_limit', 1, 12, 'NPCs'), 'At most this many present NPCs go into the live dossier each reply, the most relevant first (default 3).'),
         settingRow('npc_state_delta_inject_budget', 'Injection budget', numberControl('npc_state_delta_inject_budget', 512, 6000, 'tokens', { step: 100, prefix: '<small>~</small>' }), 'Upper limit; only what the present NPCs need is used. The default 4000 lets detailed dossiers reach the roleplay model in full. When it runs short, lower-priority fields, then lower-ranked NPCs, are trimmed first.'),
         settingRow('npc_state_delta_mid_delete_rewind', 'Rewind dossiers on middle deletion', '<input id="npc_state_delta_mid_delete_rewind" type="checkbox">', 'Off (default): deleting a message from the middle undoes only what that message changed and keeps later changes. On: every dossier rewinds to how it was just before the deleted message, discarding what later messages changed (no model requests).'),
         settingRow('npc_state_delta_branch_rescan', 'Rescan changed branches', '<input id="npc_state_delta_branch_rescan" type="checkbox">', 'Re-evaluate the surviving branch after a swipe, edit or middle-message deletion.'),
@@ -4723,6 +4731,7 @@ function syncSettingsControls() {
     $('#npc_state_delta_stale_delete_after').val(s.staleDeleteAfter);
     $('#npc_state_delta_inject').prop('checked', !!s.inject);
     $('#npc_state_delta_inject_budget').val(s.injectBudgetTokens);
+    $('#npc_state_delta_inject_limit').val(s.injectLimit);
     $('#npc_state_delta_custom_fields').val((s.customFieldNames || []).join(', '));
     syncSuiteControls();
     $('#npc_state_delta_archive_deaths').prop('checked', s.autoArchiveDeaths !== false);
@@ -7123,6 +7132,7 @@ function bindUi() {
     bindSettingsCheckbox('#npc_state_delta_narration_capture_compact', 'narrationCaptureCompact');
     bindSettingsCheckbox('#npc_state_delta_inject', 'inject', updateInjection);
     bindSettingsNumber('#npc_state_delta_inject_budget', 'injectBudgetTokens', 512, 6000, 4000, updateInjection);
+    bindSettingsNumber('#npc_state_delta_inject_limit', 'injectLimit', 1, 12, 3, updateInjection);
     bindSettingsCheckbox('#npc_state_delta_archive_deaths', 'autoArchiveDeaths');
     bindCustomFieldSettings();
     bindSourceOfTruthSettings();
@@ -7498,11 +7508,8 @@ async function handleAssistantMessageReceived(messageId, { bypassSwipeGuard = fa
     assistantReceipts.set(eventChatKey, receipts);
     if (Number.isInteger(messageId) && !staleHostActive(eventChatKey)) ensureBranchParentAnchor(state, getContext().chat || [], messageId, 'assistant-parent');
     state.turn = Number(state.turn || 0) + 1;
-    const receivedMessage = Number.isInteger(messageId) ? getContext().chat?.[messageId] : null;
-    const compactWorldStateTurn = hasCompactMeguminWorldState(receivedMessage?.mes || '');
     // Presence remains last-confirmed until a successful scanner observation replaces it.
     // A skipped, busy, failed, or timed-out scan must not make every NPC disappear.
-    if (!compactWorldStateTurn) for (const npc of state.npcs) npc.worldActive = Boolean(npc.worldActive);
     state.assistantSinceScan = Number(state.assistantSinceScan || 0) + 1;
     const shouldForceBranchScan = forceBranchRescan && settings.branchRescan !== false;
     const autoScanDue = settings.autoScan && (settings.fullScanEveryTurn || state.assistantSinceScan >= settings.scanEvery);

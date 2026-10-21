@@ -13,11 +13,8 @@ let userSnapshot = null;
 let userSnapshotChatKey = '';
 
 const api = () => globalThis.NPCStateDelta || null;
-const cfg = () => {
-    const root = extension_settings[EXTENSION_NAME] ||= {};
-    if (root[FULL_CAST_KEY] === undefined) root[FULL_CAST_KEY] = false;
-    return root;
-};
+// The setting's default and normalization live in index.js getSettings (the settings owner).
+const cfg = () => (extension_settings[EXTENSION_NAME] ||= {});
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function saveSettings() {
