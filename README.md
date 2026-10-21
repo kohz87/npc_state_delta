@@ -1,6 +1,6 @@
 # NPC State Delta v1.2.19
 
-> **Story Suite v2 is being built on the `v2` branch.** NSD stays standalone; with Story Block v2 it registers as a hosted module (queries, Cast tab, settings in the overlay). Integration in progress. Progress for the whole suite: [Story Block docs/v2/STATUS.md](https://github.com/kohz87/Story_block/blob/v2/docs/v2/STATUS.md). The rest of this README describes v1 until v2 is released.
+> **Story Suite v2 is being built on the `v2` branch.** NSD stays standalone; with Story Block v2 it registers as a hosted module (queries, Cast tab, settings in the overlay; see [With Story Block v2](#with-story-block-v2)). Integration in progress. Progress for the whole suite: [Story Block docs/v2/STATUS.md](https://github.com/kohz87/Story_block/blob/v2/docs/v2/STATUS.md). The rest of this README describes v1 until v2 is released.
 
 
 A SillyTavern extension that keeps a living dossier for every NPC in your roleplay: who they are, how they look, how they talk and behave, what they remember, and how they feel about you. After each reply it scans the story, updates the dossiers carefully, and feeds the present NPCs back to the roleplay model so they stay in character.
