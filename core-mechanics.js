@@ -1529,12 +1529,14 @@ function parseWithScannerRepairs(text, firstError) {
 
 // One-pass narration capture (opt-in). The roleplay model ends its reply with the quick-scan JSON
 // inside a hidden comment; the block is removed from the stored message before any lineage key or
-// transcript reads it. The block never reaches past the start of another HTML comment, so other
-// extensions' comment envelopes (Story Block's inventory, for one) stay whole whichever comes first.
-// Within that bound a closing `-->` at the very end wins, so one inside the JSON cannot split the
-// block. The tag and trailing-fence near-misses are accepted only from a reply asked for the block.
-const NARRATION_CAPTURE_COMMENT = /<!--\s*npc_state_delta\b((?:(?!<!--)[\s\S])*?)-->\s*$|<!--\s*npc_state_delta\b((?:(?!<!--)[\s\S])*?)-->|<!--\s*npc_state_delta\b((?:(?!<!--)[\s\S])*)/gi;
-const NARRATION_CAPTURE_NEAR_MISS = /<npc_state_delta\b[^>]*>([\s\S]*?)(?:<\/npc_state_delta>|$)|```(?:json)?\s*(\{\s*"npcs"(?:(?!```)[\s\S])*)```\s*$/gi;
+// transcript reads it. The block never reaches past the start of another extension's block (an HTML
+// comment such as Story Block's <!-- STORY_SUITE_V2 envelope, Story Block's <Changes> block, or any
+// tag after a blank line), so their text stays whole whichever comes first, even when Delta's block
+// is never closed. Within that bound a closing `-->` at the very end wins, so one inside the JSON
+// cannot split the block. The tag and trailing-fence near-misses are accepted only from a reply asked
+// for the block.
+const NARRATION_CAPTURE_COMMENT = /<!--\s*npc_state_delta\b((?:(?!<!--|<changes\b|\n[ \t]*\n[ \t]*<)[\s\S])*?)-->\s*$|<!--\s*npc_state_delta\b((?:(?!<!--|<changes\b|\n[ \t]*\n[ \t]*<)[\s\S])*?)-->|<!--\s*npc_state_delta\b((?:(?!<!--|<changes\b|\n[ \t]*\n[ \t]*<)[\s\S])*)/gi;
+const NARRATION_CAPTURE_NEAR_MISS = /<npc_state_delta\b[^>]*>((?:(?!<!--|<changes\b|\n[ \t]*\n[ \t]*<)[\s\S])*?)(?:<\/npc_state_delta>|(?=<!--|<changes\b|\n[ \t]*\n[ \t]*<)|$)|```(?:json)?\s*(\{\s*"npcs"(?:(?!```)[\s\S])*)```\s*$/gi;
 const NARRATION_CAPTURE_CLOSED = /(?:-->|<\/npc_state_delta>|```)\s*$/i;
 
 function removeNarrationCaptureBlocks(source, pattern, found) {
