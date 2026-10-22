@@ -25,6 +25,8 @@ export const MAX_COIN_VALUE = 1_000_000;
 // Words that sometimes follow a coin's name in an amount and say nothing more ("3 silver coins",
 // "3 pieces of silver").
 const COIN_FILLER = new Set(['coin', 'coins', 'piece', 'pieces', 'of', 'in']);
+// The money words that name the smallest unit on their own (coinValue).
+const BARE_COIN = new Set(['coin', 'coins']);
 // Coin names that read as their own plural ("15 copper", "3 silver").
 const MASS_WORDS = new Set(['copper', 'silver', 'gold', 'bronze', 'iron', 'brass', 'tin', 'steel', 'platinum', 'electrum', 'nickel']);
 
@@ -100,13 +102,16 @@ export function baseUnit(currency = DEFAULT_CURRENCY) {
 /**
  * What one of the money word `text` is worth in the smallest unit: a coin's value for a coin's name or
  * plural (any case, "coins"/"pieces of" around it ignored, "<name>s" too), else 1 for the currency's name
- * or plural, else 0. With coins the currency's own name is not a coin (B-a1-8: "+ coin 2 gold" in a world
- * of copper and silver is refused, never read as 2 copper), unless no coin is worth 1 (it is the unit).
+ * or plural or a bare "coin"/"coins" (the smallest unit), else 0. With coins the currency's own name is
+ * not a coin (B-a1-8: "+ coin 2 gold" in a world of copper and silver is refused, never read as 2
+ * copper), unless no coin is worth 1 (it is the unit).
  */
 export function coinValue(text, currency = DEFAULT_CURRENCY) {
-    const words = tidy(text, 200).toLowerCase().split(' ').filter(word => word && !COIN_FILLER.has(word));
-    const word = words.join(' ');
-    if (!word) return 0;
+    const all = tidy(text, 200).toLowerCase().split(' ').filter(Boolean);
+    const word = all.filter(word => !COIN_FILLER.has(word)).join(' ');
+    // FB-3: "coin" or "coins" alone ("+ item Coins | qty: 5", "+ coin 5 coins") is the smallest unit, as
+    // "+ coin 5" is; filler words alone ("pieces") are not money.
+    if (!word) return all.some(word => BARE_COIN.has(word)) ? 1 : 0;
     const coins = coinList(currency);
     const coin = coins.find(entry => entry.name.toLowerCase() === word || entry.plural.toLowerCase() === word || `${entry.name.toLowerCase()}s` === word);
     if (coin) return coin.value;
