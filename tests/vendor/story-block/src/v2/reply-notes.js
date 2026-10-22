@@ -21,6 +21,8 @@ import { STRINGS, fill } from './strings.js';
 
 const N = STRINGS.notes;
 const NOTE = 'story-suite-reply-note';
+/** How many of the last drawn messages a redraw after a rebuild goes over. */
+export const RECENT_MESSAGES = 30;
 
 /** The reason part of a turn problem about a change line (its message without the line itself). */
 export function problemReason(item) {
@@ -59,7 +61,10 @@ const firstCarrier = chat => (Array.isArray(chat) ? chat.findIndex(isCarrier) : 
 /**
  * createReplyNotes({ ctx, doc?, extractorOn?() → bool, extractorFailed?(index, swipe) → bool, reread?(index) → Promise<{ ok, problems?, message? }>,
  * turn? (for problems()), events? (the runtime's: 'turn', 'head'), messageElement?(index), onChanged?(index) })
- * → { refresh(index), refreshAll(), refusedAt(index), noteKind(index), markEdited(index), onTurn(turn),
+ * Long chats: a rebuild (`head`) redraws the notes of the last RECENT_MESSAGES drawn messages only; a chat
+ * opened, a delete or more messages loaded go over every drawn message. Each pass finds the messages with one
+ * query (not one document query per message).
+ * → { refresh(index), refreshAll({ recent }), refusedAt(index), noteKind(index), markEdited(index), onTurn(turn),
  *     reread(index), forget(), destroy() }
  */
 export function createReplyNotes({
@@ -131,8 +136,8 @@ export function createReplyNotes({
     }
 
     /** Draws, updates or removes the note under reply `index` (when SillyTavern has drawn it). */
-    function refresh(index) {
-        const message = elementOf(index);
+    function refresh(index, element = null) {
+        const message = element ?? elementOf(index);
         if (!message) return null;
         let note = message.querySelector(`.${NOTE}`);
         const kind = noteKind(index);
@@ -165,10 +170,11 @@ export function createReplyNotes({
     }
 
     /** Every reply SillyTavern has drawn. */
-    function refreshAll() {
-        for (const message of doc.querySelectorAll('.mes[mesid]')) {
+    function refreshAll({ recent = false } = {}) {
+        const drawn = Array.from(doc.querySelectorAll('.mes[mesid]'));
+        for (const message of recent ? drawn.slice(Math.max(0, drawn.length - RECENT_MESSAGES)) : drawn) {
             const index = Number(message.getAttribute('mesid'));
-            if (Number.isInteger(index)) refresh(index);
+            if (Number.isInteger(index)) refresh(index, messageElement ? null : message);
         }
     }
 
@@ -250,7 +256,7 @@ export function createReplyNotes({
         });
     }
     if (typeof events?.on === 'function') {
-        for (const off of [events.on('turn', onTurn), events.on('head', () => refreshAll())]) if (typeof off === 'function') offs.push(off);
+        for (const off of [events.on('turn', onTurn), events.on('head', () => refreshAll({ recent: true }))]) if (typeof off === 'function') offs.push(off);
     }
 
     return {

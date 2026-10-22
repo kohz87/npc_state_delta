@@ -336,7 +336,11 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
         // `problem`: the command was done, but not all of what was asked (a clamp); a capture's
         // problem goes to the Problems list (turn.js). Not stored in the receipt.
         const problem = typeof result.problem === 'string' && result.problem.trim() ? result.problem.trim() : null;
-        return { summary, narrate, data: clone(data), problem };
+        // `replan: true` (a system step only, B-a1-13): what it did is planned from the story state it ran
+        // on (RPG Battle's story-time heal), so a Re-read of the reply it is kept on runs it again on the
+        // new story changes instead of applying what it did before (store.replaceStory).
+        const replan = cause === 'system' && result.replan === true;
+        return { summary, narrate, data: clone(data), problem, replan };
     }
 
     function opsOf(tx) {
@@ -411,7 +415,7 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
             tx.reply = tx.carrier ? replyOf(tx.carrier.index, tx.carrier.sid ?? tx.carrier.key) : headReply(store);
             const out = invoke(tx, type, target, payload, 0);
             if (tx.failure) throw tx.failure;
-            const { summary, narrate, data, problem } = resultOf(type, out, cause);
+            const { summary, narrate, data, problem, replan } = resultOf(type, out, cause);
             tx.closed = true;
 
             const { ops, touched, rev } = opsOf(tx);
@@ -436,6 +440,8 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
             }
             const receipt = deepFreeze({
                 id: receiptId, type, module: target.moduleId, cause, seed: seedValue, summary, narrate, data, rev,
+                // What to run it again with on a Re-read (resultOf `replan`): its payload.
+                ...(replan && isJson(payload ?? {}) ? { replan: { payload: clone(payload ?? {}) } } : {}),
             });
             return { ok: true, ops: deepFreeze(ops), receipt, state: next, ...(problem ? { problem } : {}) };
         } catch (error) {

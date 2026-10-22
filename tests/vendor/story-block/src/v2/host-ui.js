@@ -27,7 +27,7 @@ import { FIELD_TYPES, normalizeField } from './registry.js';
 import { HOST_SETTINGS_SCHEMA, SETTING_LIST_ROWS } from './sdk.js';
 import { PROMPT_HINT, featureOf } from './features.js';
 import { compatReport, renderCompat } from './compat.js';
-import { scrollCue } from './view/scroll-cue.js';
+import { bringIntoView, scrollCue } from './view/scroll-cue.js';
 import { DEFAULT_TAIL_BUDGET, contextNotice, estimateTokens } from './prompt.js';
 import { fill } from './strings.js';
 import { cutAt } from '../text.js';
@@ -40,6 +40,8 @@ export const VERSIONS_FOLD = 'story-suite-versions';
 export const DIAGNOSTICS_FOLD = 'story-suite-diagnostics';
 // "Show what's sent", a sub-fold of Story Suite's own under the prompt size.
 export const SENT_FOLD = 'story-suite::sent';
+// Tabs (the reader's order for the Story panel's tabs and the game view's screens), a sub-fold of Story Suite's own.
+export const TABS_FOLD = 'story-suite::tabs';
 // Story Block's Packs fold (its `settings.folds`), second after Story Suite's; Home's "Import a pack" opens it.
 export const PACKS_FOLD = 'story-block/packs';
 // A sub-fold's key: its module's id, this, and the part ("rpg-battle::features", "story-director::group:Calendar").
@@ -115,6 +117,32 @@ export const SETTINGS_TEXT = Object.freeze({
         copyFailed: 'It could not be copied here: the text is selected, so copy it by hand (Ctrl+C, or long-press on a phone).',
         textLabel: 'What is sent: {part}',
     }),
+});
+// Settings → Story Suite → Tabs (view/tab-order.js keeps the choice).
+export const TABS_TEXT = Object.freeze({
+    title: 'Tabs',
+    hint: 'order, show or hide',
+    help: 'The order of the Story panel\'s tabs and the game view\'s screens, one list for both. Up and Down move one; a hidden one leaves the tabs and the game view and stays here to show again. Home is always first and always shown.',
+    none: 'No module has a tab or a screen yet.',
+    listLabel: 'Tabs and screens, in order',
+    up: 'Up',
+    down: 'Down',
+    upTitle: 'Move {name} up',
+    downTitle: 'Move {name} down',
+    shown: 'Shown',
+    shownTitle: 'Show {name} in the tabs and the game view',
+    homeTitle: 'Home is always first and always shown',
+    hidden: 'hidden',
+    both: 'Story panel and game view',
+    tab: 'Story panel',
+    screen: 'game view',
+    reset: 'Reset to default',
+    resetTitle: 'Put every tab back in the default order and show them all',
+    movedUp: '{name} moved up.',
+    movedDown: '{name} moved down.',
+    nowHidden: '{name} is hidden.',
+    nowShown: '{name} is shown.',
+    wasReset: 'Back to the default order, all shown.',
 });
 // The Diagnostics fold (diagnostics.js builds the report).
 export const DIAGNOSTICS_TEXT = Object.freeze({
@@ -681,7 +709,7 @@ const FOLD_SELECTOR = 'details.story-suite-fold, details.story-suite-subfold';
  * A module's `section(el, api)` gets api = { get(key), set(key, value), values(), sdk } (a section
  * given as a title plus render(el, api) is the same panel). Returns { refresh(), refreshSize() }.
  */
-export function renderSettingsHost(root, { registry, settings, doc = globalThis.document, sdk = null, features = null, promptParts = null, countTokens = null, openState = new Map(), diagnostics = null }) {
+export function renderSettingsHost(root, { registry, settings, doc = globalThis.document, sdk = null, features = null, promptParts = null, countTokens = null, openState = new Map(), diagnostics = null, tabs = null }) {
     const featureList = () => (features && typeof features.list === 'function' ? features.list() : []);
     // A settings field or panel under a feature that is off is not drawn (its stored value is kept).
     const hiddenByFeature = item => {
@@ -1087,6 +1115,91 @@ export function renderSettingsHost(root, { registry, settings, doc = globalThis.
             body.appendChild(block);
             drawSize(block);
         }
+        if (tabs && typeof tabs.rows === 'function') body.appendChild(tabsFold());
+        return remember(details);
+    }
+    // Tabs: every tab and screen of every module, in the reader's order, each with Up, Down and Shown;
+    // then Reset to default. A change redraws only this list (and the tabs and the game view, through
+    // `tabs`); the focus stays on the same control of the same row, or its neighbour when that one is
+    // now disabled (Up on the first row). A status line says what changed, for screen readers too.
+    function tabsFold() {
+        const T = TABS_TEXT;
+        const { details, body } = fold(doc, TABS_FOLD, T.title, T.hint, 'story-suite-subfold');
+        details.classList.add('story-suite-tabs-settings');
+        body.appendChild(el(doc, 'p', 'story-suite-muted', T.help));
+        const list = el(doc, 'ol', 'story-suite-taborder');
+        list.setAttribute('aria-label', T.listLabel);
+        const foot = el(doc, 'div', 'story-suite-taborder-actions');
+        const reset = button(doc, 'menu_button story-suite-taborder-reset', T.reset, T.resetTitle);
+        const status = el(doc, 'span', 'story-suite-taborder-status');
+        status.setAttribute('role', 'status');
+        foot.append(reset, status);
+        body.append(list, foot);
+        // A real button clicks itself on Enter; SillyTavern's page-wide Enter handler clicks a `.menu_button`
+        // again (keyboard.js), which would move a tab two places. The Enter stays with the button.
+        body.addEventListener('keydown', event => {
+            if (event.key === 'Enter' && String(event.target?.tagName ?? '').toLowerCase() === 'button') event.stopPropagation?.();
+        });
+        const say = (text, name = '') => { status.textContent = fill(text, { name }); };
+        const after = (id, control) => {
+            draw();
+            const row = [...list.querySelectorAll('.story-suite-taborder-row')].find(node => node.dataset.tabId === id);
+            const wanted = row?.querySelector(`.story-suite-taborder-${control}`);
+            const other = row?.querySelector(`.story-suite-taborder-${control === 'up' ? 'down' : 'up'}`);
+            (wanted && !wanted.disabled ? wanted : other && !other.disabled ? other : wanted)?.focus?.();
+        };
+        function draw() {
+            list.replaceChildren();
+            const rows = tabs.rows();
+            if (!rows.length) list.appendChild(el(doc, 'li', 'story-suite-muted', T.none));
+            const movable = rows.filter(row => !row.fixed);
+            rows.forEach(row => {
+                const item = el(doc, 'li', `story-suite-taborder-row${row.hidden ? ' story-suite-taborder-hidden' : ''}`);
+                item.dataset.tabId = row.id;
+                const glyph = el(doc, 'i', `fa-solid ${row.icon || 'fa-table-columns'} story-suite-taborder-icon`);
+                glyph.setAttribute('aria-hidden', 'true');
+                const name = el(doc, 'span', 'story-suite-taborder-name');
+                name.appendChild(el(doc, 'b', '', row.title));
+                const where = row.where?.includes('tab') && row.where?.includes('screen') ? T.both : row.where?.includes('tab') ? T.tab : T.screen;
+                name.appendChild(el(doc, 'small', '', row.hidden ? `${where} · ${T.hidden}` : where));
+                const at = movable.indexOf(row);
+                const up = button(doc, 'menu_button story-suite-taborder-up', '', fill(T.upTitle, { name: row.title }));
+                const down = button(doc, 'menu_button story-suite-taborder-down', '', fill(T.downTitle, { name: row.title }));
+                for (const [node, icon, text] of [[up, 'fa-arrow-up', T.up], [down, 'fa-arrow-down', T.down]]) {
+                    const arrow = el(doc, 'i', `fa-solid ${icon}`);
+                    arrow.setAttribute('aria-hidden', 'true');
+                    node.append(arrow, el(doc, 'span', 'story-suite-taborder-word', text));
+                }
+                up.disabled = row.fixed || at <= 0;
+                down.disabled = row.fixed || at < 0 || at >= movable.length - 1;
+                up.addEventListener('click', () => { tabs.move(row.id, -1); say(T.movedUp, row.title); after(row.id, 'up'); });
+                down.addEventListener('click', () => { tabs.move(row.id, 1); say(T.movedDown, row.title); after(row.id, 'down'); });
+                const label = el(doc, 'label', 'checkbox_label story-suite-taborder-shown');
+                const check = el(doc, 'input');
+                check.type = 'checkbox';
+                check.id = `story_suite_tab_shown_${encodeURIComponent(row.id)}`;
+                check.checked = !row.hidden;
+                check.disabled = Boolean(row.fixed);
+                label.title = row.fixed ? T.homeTitle : fill(T.shownTitle, { name: row.title });
+                check.addEventListener('change', () => {
+                    tabs.setHidden(row.id, !check.checked);
+                    say(check.checked ? T.nowShown : T.nowHidden, row.title);
+                    draw();
+                    [...list.querySelectorAll('input')].find(node => node.id === check.id)?.focus?.();
+                });
+                label.append(check, el(doc, 'span', '', T.shown));
+                item.append(glyph, name, up, down, label);
+                list.appendChild(item);
+            });
+            reset.disabled = typeof tabs.isDefault === 'function' ? tabs.isDefault() : false;
+        }
+        reset.addEventListener('click', () => {
+            tabs.reset();
+            say(T.wasReset);
+            draw();
+            reset.focus?.();
+        });
+        draw();
         return remember(details);
     }
     // Versions (compat.js): each module, its version, the Story Block it needs, and what is out of step.
@@ -1213,7 +1326,7 @@ let currentOverlay = null;
  * bring into view (PACKS_FOLD for Home's "Import a pack"). The other options are renderSettingsHost's.
  * Returns { root, close(), refresh(), refreshSize(), isOpen() }.
  */
-export function openSettingsOverlay({ registry, settings, doc = globalThis.document, sdk = null, features = null, promptParts = null, countTokens = null, diagnostics = null, fold: target = null, openState = overlayOpenState, onClose = null }) {
+export function openSettingsOverlay({ registry, settings, doc = globalThis.document, sdk = null, features = null, promptParts = null, countTokens = null, diagnostics = null, tabs = null, fold: target = null, openState = overlayOpenState, onClose = null }) {
     // One overlay at a time: opening it again closes the one there (its listeners with it).
     if (currentOverlay?.root?.ownerDocument === doc) currentOverlay.close();
     doc.querySelector?.('#story_suite_v2_overlay')?.remove();
@@ -1242,7 +1355,7 @@ export function openSettingsOverlay({ registry, settings, doc = globalThis.docum
         // A sub-fold opens its module's fold too.
         if (target.includes(SUB_FOLD)) openState.set(target.split(SUB_FOLD)[0], true);
     }
-    const host = renderSettingsHost(body, { registry, settings, doc, sdk, features, promptParts, countTokens, openState, diagnostics });
+    const host = renderSettingsHost(body, { registry, settings, doc, sdk, features, promptParts, countTokens, openState, diagnostics, tabs });
     let open = true;
     // The focus stays in the dialog: a Tab that would leave it, or a click on the page behind, comes back.
     const onFocus = event => {
@@ -1283,10 +1396,13 @@ export function openSettingsOverlay({ registry, settings, doc = globalThis.docum
 }
 
 /**
- * The tab bar in `root`: a button per module tab (registry.tabs(), module-id order) and one
+ * The tab bar in `root`: a button per tab `registry.tabs()` gives, in its order (Story Block's panel
+ * gives the module tabs and the tab screens in the reader's order, without the hidden ones), and one
  * pane, the chosen tab's, rendered with `tab.render(pane, view, api)`. `options`: { registry,
  * view: () => view, api (the sdk), doc?, active? }. Tabs read the head state's view only, never
- * message text. Returns { refresh(), select(id), active() }.
+ * message text. The bar scrolls sideways when the tabs do not fit (a phone); the chosen tab is
+ * scrolled into view when it changes (a click, or the one shown was hidden). Returns
+ * { refresh(), select(id), active() }.
  */
 export function createTabHost(root, { registry, view, api = null, doc = globalThis.document, active = null }) {
     let current = active;
@@ -1298,10 +1414,12 @@ export function createTabHost(root, { registry, view, api = null, doc = globalTh
     // Tabs that do not fit scroll sideways; the edge with more of them fades (scroll-cue.js).
     const cue = scrollCue(bar, { win: doc.defaultView ?? globalThis });
 
+    let revealed = null;
     function draw() {
         const tabs = registry.tabs();
         if (!tabs.some(tab => tab.id === current)) current = tabs[0]?.id ?? null;
         bar.replaceChildren();
+        let chosen = null;
         for (const tab of tabs) {
             const node = button(doc, `story-suite-tab${tab.id === current ? ' active' : ''}`, '', tab.title);
             node.dataset.tabId = tab.id;
@@ -1314,9 +1432,14 @@ export function createTabHost(root, { registry, view, api = null, doc = globalTh
             }
             node.appendChild(el(doc, 'span', 'story-suite-tab-label', tab.title));
             node.addEventListener('click', () => select(tab.id));
+            if (tab.id === current) chosen = node;
             bar.appendChild(node);
         }
         cue.update();
+        if (chosen && revealed !== current) {
+            bringIntoView(bar, chosen);
+            revealed = current;
+        }
         pane.replaceChildren();
         const tab = tabs.find(item => item.id === current);
         pane.dataset.tabId = tab?.id ?? '';

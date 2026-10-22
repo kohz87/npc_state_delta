@@ -4,13 +4,18 @@
 // with a fade on the edge where more items are scrolled out of sight (scroll-cue.js), a close button, and
 // Escape closes it. It shows the head state and redraws when the head changes while it is open.
 //
+// The reader's order and hidden screens (Settings → Story Suite → Tabs, view/tab-order.js) come in through
+// `deps.screens.list` (the order) and `deps.inNav` (hidden ones leave the navigation, but a screen opened by
+// name, a fight starting, still opens). The current item is scrolled into view when the bar overflows.
+//
 // deps (see common.js) plus:
 //   container   () → element the view is added to (optional, default document.body)
+//   inNav       (screenId) → bool: listed in the navigation (optional, default every screen)
 //
 // → { mount(el, screenId, opts) → handle, open(screenId?) → bool, close(), isOpen(), current(), update(), destroy() }
 
 import { button, documentOf, icon, make, mountHead, onHead, screensFor } from './common.js';
-import { scrollCue } from '../scroll-cue.js';
+import { bringIntoView, scrollCue } from '../scroll-cue.js';
 
 export function createScreenMount(deps) {
     if (typeof deps?.render !== 'function') throw new TypeError('The screen mount needs a render(el, screen, scope) function.');
@@ -29,26 +34,33 @@ export function createScreenMount(deps) {
         }
     };
 
-    function drawNav() {
+    // `reveal`: scroll the current item into view (on a screen change; a redraw on a new reply leaves the bar be).
+    function drawNav(reveal = false) {
         const entries = screensFor(deps, 'screen');
+        const listed = typeof deps.inNav === 'function' ? entries.filter(entry => deps.inNav(entry.id)) : entries;
         view.nav.replaceChildren();
-        view.root.classList.toggle('ss-gameview-single', entries.length < 2);
-        for (const entry of entries) {
+        view.root.classList.toggle('ss-gameview-single', listed.length < 2);
+        let current = null;
+        for (const entry of listed) {
             const item = button(doc, 'ss-gameview-navitem');
             item.setAttribute('data-ss-target', entry.id);
             item.append(icon(doc, entry.screen.icon), make(doc, 'span', 'ss-gameview-navlabel', entry.screen.title ?? entry.id));
-            if (entry.id === view.screenId) item.setAttribute('aria-current', 'page');
+            if (entry.id === view.screenId) {
+                item.setAttribute('aria-current', 'page');
+                current = item;
+            }
             item.addEventListener('click', () => show(entry.id));
             view.nav.appendChild(item);
         }
         view.cue?.update();
+        if (current && reveal) bringIntoView(view.nav, current);
         return entries;
     }
 
     function show(screenId) {
         if (!view) return false;
         view.screenId = screenId;
-        const entries = drawNav();
+        const entries = drawNav(true);
         const entry = entries.find(item => item.id === screenId);
         view.title.textContent = entry?.screen.title ?? screenId;
         view.handle?.unmount();

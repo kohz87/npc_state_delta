@@ -57,6 +57,71 @@ function replacePairs(text, pairs, fn) {
 const hiddenPairs = text => closedPairs(text, HIDDEN_OPEN, HIDDEN_CLOSE);
 const blank = pair => ' '.repeat(pair.end - pair.start);
 
+// --- The hidden comment's body -----------------------------------------------------------------------
+// `<!-- STORY_SUITE_V2[ open][ off:word,word]` then the blocks' bodies, each in <Changes>…</Changes>, then
+// (when there are any) the change lines a capture left in the story, in <Changes-story>…</Changes-story>,
+// so a Re-read leaves them too (strayLines), and an open block's unfinished last line in <Changes-cut>…
+// </Changes-cut>, for a Continue that finishes it (continuation()), and the story lines that echoed a
+// line of the blocks (C-1), taken out of the story but never read, in <Changes-echo>…</Changes-echo>.
+// `open`: the reply was cut off inside its last block. `off:`: display kinds (written words) whose lines were read while their feature was
+// off, so they are not shown when it is turned on later, until a Re-read reads them again (markOff).
+//
+// An HTML comment ends at `-->` (or `--!>`), so no `--` may stand in its body. Each `--` is written with a
+// word joiner (U+2060) between, and a word joiner already there is written twice, so the body read back
+// (commentText) is exactly what was read live (B-a1-11). Comments written before this broke `--` up with a
+// space ("- -"); they hold no word joiner between dashes and read as they always did.
+const JOIN = '\u2060';
+const commentSafe = text => String(text).replace(/\u2060/g, JOIN + JOIN).replace(/-(?=-)/g, `-${JOIN}`);
+const commentText = text => String(text).replace(/\u2060\u2060|(?<=-)\u2060(?=-)/g, found => (found.length === 2 ? JOIN : ''));
+
+const sectionTags = tag => ({ story: `${tag}-story`, cut: `${tag}-cut`, echo: `${tag}-echo` });
+
+// The parts of a hidden pair's body beside its blocks: { head: Set of header words, off: Set, story:
+// lines, cut: line | null }.
+function commentParts(text, pair, tag = 'Changes') {
+    const body = text.slice(pair.bodyStart, pair.bodyEnd);
+    const nl = body.indexOf('\n');
+    const head = (nl < 0 ? body : body.slice(0, nl)).trim().split(/\s+/).filter(Boolean);
+    const off = new Set(head.filter(word => word.startsWith('off:')).flatMap(word => word.slice(4).split(',')).filter(Boolean));
+    const names = sectionTags(tag);
+    const story = [];
+    const cut = [];
+    let into = null;
+    if (body.includes(`<${names.story}>`) || body.includes(`<${names.cut}>`)) {
+        for (const line of body.split('\n')) {
+            const trimmed = line.trim();
+            if (trimmed === `<${names.story}>`) into = story;
+            else if (trimmed === `<${names.cut}>`) into = cut;
+            else if (trimmed === `</${names.story}>` || trimmed === `</${names.cut}>`) into = null;
+            else if (into && trimmed) into.push(commentText(trimmed));
+        }
+    }
+    return { head: new Set(head), off, story, cut: cut[0] ?? null };
+}
+
+/** True when `mes` holds Story Suite's hidden comment (whatever is in it). */
+export function hasHidden(mes) {
+    return hiddenPairs(String(mes ?? '')).length > 0;
+}
+
+/**
+ * `mes` with the header of each hidden comment from `from` on saying which display kinds (written words,
+ * `words`) were off when its lines were read (`off:choice,chatter`), or nothing when none: displayLines
+ * then leaves those lines out (B-a1-5). A Re-read marks every comment of the reply anew.
+ */
+export function markOff(mes, words, from = 0) {
+    const text = String(mes ?? '');
+    const list = [...new Set(words ?? [])].map(word => String(word).toLowerCase()).filter(word => KIND_WORD.test(word)).sort();
+    const pairs = hiddenPairs(text).filter(pair => pair.start >= from);
+    return replacePairs(text, pairs, pair => {
+        const body = text.slice(pair.bodyStart, pair.bodyEnd);
+        const nl = body.indexOf('\n');
+        const words = (nl < 0 ? body : body.slice(0, nl)).trim().split(/\s+/).filter(word => word && !word.startsWith('off:'));
+        if (list.length) words.push(`off:${list.join(',')}`);
+        return `${text.slice(pair.start, pair.bodyStart)}${words.map(word => ` ${word}`).join('')}${nl < 0 ? '' : body.slice(nl)}${text.slice(pair.bodyEnd, pair.end)}`;
+    });
+}
+
 // Every function here is linear in the length of the reply: a looping model can write a run of
 // thousands of spaces or blank lines, and the text is read again for every later prompt (turn.js).
 // So there are no regexes that can retry from each place in a run (`\s+$`, `\n\s*$`, `\s*x|\s+y`);
@@ -135,9 +200,9 @@ function blankAfter(text, at) {
 
 // Every <tag>…</tag> in `mes`, in order: { start, end, body }. A block left open (the reply was
 // cut off) runs to the end of the text. Opens and closes are counted, so a block opened twice
-// ends at its matching close, not the first one. A close tag ends a block only at the start or
-// the end of a line: one in the middle of a line (`note: the </Changes> tag`) is part of that
-// line, so the lines after it are still read (and anything that is not a change line among them
+// ends at its matching close, not the first one. A close tag ends a block only at the start of a line,
+// or at the end of a line that is a whole change line before it (C-3): one in a line (`note: the
+// </Changes> tag`, `| who: </Changes>`) is part of that line, so the lines after it are still read (and anything that is not a change line among them
 // becomes a Problem), never dropped without a word.
 // `openAt` (a Continue of a reply cut off inside its block, see continuation()): the search starts
 // there, inside a block already open (its `start` and body start there).
@@ -168,12 +233,26 @@ function findBlocks(mes, tag, openAt = -1) {
             continue;
         }
         if (!depth) continue;   // a stray close outside a block
-        if (!blankBefore(text, match.index) && !blankAfter(text, re.lastIndex)) continue;
+        // C-3: a close ends the block at the start of a line (alone, or with story after it, as a Continue
+        // joins it), or at the end of a line that is a whole change line before it ("+ item Rope</Changes>");
+        // one inside a line ("| note: </Changes>", "+ item Torch </Changes> and then") is part of that
+        // line, so the block's later lines stay in it.
+        if (!blankBefore(text, match.index) && !(blankAfter(text, re.lastIndex) && wholeBefore(text, match.index, bodyStart))) continue;
         depth -= 1;
         if (!depth) blocks.push({ start, end: re.lastIndex, body: text.slice(bodyStart, match.index) });
     }
     if (depth) blocks.push({ start, end: text.length, body: text.slice(bodyStart), open: true });
     return blocks;
+}
+
+// The line up to `at` (at most MAX_LINE characters looked at) is a whole change line (or "none"): it parses
+// and does not end waiting for more (a label with no value, a dash, a bar).
+function wholeBefore(text, at, floor = 0) {
+    const start = Math.max(text.lastIndexOf('\n', at - 1) + 1, at - MAX_LINE, floor);
+    const line = text.slice(start, at).trim();
+    if (!line) return false;
+    if (NOTHING.test(line)) return true;
+    return /^[+\-~!?]/.test(line) && !/[|:—–-]$/.test(line) && !parseLine(line).error;
 }
 
 // The rest of the line from `at` (at most MAX_LINE characters looked at) is a change line.
@@ -184,30 +263,29 @@ function changeAfter(text, at) {
     return !!rest && /^[+\-~!?]/.test(rest) && !parseLine(rest).error;
 }
 
-// A block left open ends where the reply stopped. Its last line is whole when a line break follows
-// it; with none (SillyTavern trims every reply, so a block the model forgot to close ends that way) it
-// is still read, unless the reader stopped the reply (`stopped`: it was cut off mid-way, "+ coin 2" of
-// "+ coin 25", B2-11), the line is not a change line, or a tag sits in it (a close in mid-line, story
-// text after it) (r2-2); then it is left out.
+// A block left open ends where the reply stopped. Its last line is whole only when a line break follows
+// it; with none it may be cut off mid-way ("+ item Ro" of "+ item Rope", by the reader's stop or by the
+// length limit, B-a1-14), so it is never applied: it is left out, told (CUT_OFF), and kept in the hidden
+// comment, where a Continue that goes on with it reads it joined to the Continue's first line
+// (continuation()). A model that forgot the close tag loses its last line the same way (the Problem says
+// how to get it back). `stopped` (the reader stopped the reply) no longer changes this.
 // → { body, cut } (`cut`: the line left out, or '').
-function wholeLines(block, stopped = false) {
+function wholeLines(block) {
     if (!block.open || block.body.endsWith('\n')) return { body: block.body, cut: '' };
     const nl = block.body.lastIndexOf('\n');
     const last = block.body.slice(nl + 1).trim();
-    if (!stopped && (!last || (!last.includes('</') && !parseLine(last).error))) return { body: block.body, cut: '' };
+    if (!last) return { body: block.body, cut: '' };
     return { body: nl < 0 ? '' : block.body.slice(0, nl + 1), cut: last };
 }
 
 /**
- * The change line a reply stopped in the middle of (its block left open, the last line with no line
- * break after it, and the reply `stopped` by the reader or the line no change line), or null.
- * extractBlock and hideBlock leave that line out; turn.js tells it as a Problem.
- * `at` (continuation()): only a Continue's own blocks are looked at.
+ * The change line a reply ended in the middle of (its block left open, the last line with no line break
+ * after it), or null. extractBlock and hideBlock leave that line out; turn.js tells it as a Problem.
+ * `at` (continuation()): only a Continue's own blocks are looked at (a line it finished is whole).
  */
-export function cutLine(mes, tag = 'Changes', at = null, { stopped = false } = {}) {
-    const last = (at ? laterBlocks(mes, tag, at) : findBlocks(withoutReasoning(mes), tag)).at(-1);
-    const cut = last ? wholeLines(last, stopped).cut : '';
-    return cut || null;
+export function cutLine(mes, tag = 'Changes', at = null) {
+    const last = readBlocks(mes, tag, at).at(-1);
+    return last ? wholeLines(last).cut || null : null;
 }
 
 // Reasoning a model writes in the reply itself (<think>, <thinking>, <reasoning>): a draft of the
@@ -290,11 +368,16 @@ function endsInOpenBlock(text) {
 // C2-2: when the reply was cut off inside its block (its hidden comment says so, see hideBlock) and the
 // Continue's text goes on with it (a close tag comes before any open one, or its first line is a change
 // line), `tail` is set: that text is the rest of the block. Story text that goes on is left as it is.
+// `cut` (B-a1-14): the block's unfinished last line, kept in the comment; the Continue's text up to its
+// first line break finishes it ("+ item Ro" + "pe | qty: 2"), read as one line.
 export function continuation(base, mes, tag = 'Changes') {
     const before = String(base ?? '');
     const after = String(mes ?? '');
     const skip = bareBlocks(before, tag).filter(block => !block.open).length;
-    const at = from => (endsInOpenBlock(before) && goesOn(after, tag, from) ? { from, skip, tail: true } : { from, skip });
+    // B-a1-14: the unfinished last line the reply's hidden comment kept, which the Continue's first line finishes.
+    const last = endsInOpenBlock(before) ? hiddenPairs(before).at(-1) : null;
+    const cut = last ? commentParts(before, last, tag).cut : null;
+    const at = from => (last && goesOn(after, tag, from, cut) ? { from, skip, tail: true, ...(cut ? { cut } : {}) } : { from, skip });
     if (after.startsWith(before)) return at(before.length);
     let i = 0;
     let j = 0;
@@ -308,29 +391,81 @@ export function continuation(base, mes, tag = 'Changes') {
     return i < before.length ? { from: j, skip } : at(j);
 }
 
-// Does the text from `from` go on with a block left open: a close tag first, or a change line first?
-function goesOn(mes, tag, from) {
+// Does the text from `from` go on with a block left open: a close tag first, or a change line first (with
+// `cut`, the unfinished line it goes on with, joined to its first line)?
+function goesOn(mes, tag, from, cut = null) {
     const first = bareBlocks(mes, tag, from)[0];
     if (!first) return false;
     if (!first.open) return true;
-    const line = first.body.trimStart().split('\n')[0].trim();
+    // (A Continue that starts on a new line leaves the cut line as it was; its own first line decides.)
+    const own = first.body.split('\n')[0];
+    const line = (cut && own.trim() ? `${cut}${own}` : first.body.trimStart().split('\n')[0]).trim();
     return !!line && !parseLine(line).error;
 }
+
+// C-1: a change line written in the story that the reply's blocks also hold (the model wrote it, then
+// listed it) is one change: it is taken out of the story and kept in the hidden comment (<Changes-echo>),
+// never read. Lines are the same when they are equal without decoration, bold and extra spaces.
+const sameLine = line => stripDecoration(stripMarkdown(line).trim()).trim().replace(/\s+/g, ' ');
+function splitEchoes(strays, bodies) {
+    if (!strays.length) return { strays, echoes: [] };
+    const listed = new Set(bodies.flatMap(body => body.split('\n')).map(sameLine).filter(Boolean));
+    const echoes = strays.filter(line => listed.has(sameLine(line.line)));
+    return echoes.length ? { strays: strays.filter(line => !echoes.includes(line)), echoes } : { strays, echoes };
+}
+
+// The blocks of `mes` that extractBlock reads, in order: with `at`, the bare ones a Continue added (the
+// first one joined to the unfinished line it goes on with, `at.cut`); else every block outside reasoning,
+// one kept in a hidden comment read back as it was before it was made comment-safe (commentText), with
+// the display kinds its comment marks as off (`off`).
+function readBlocks(mes, tag, at) {
+    if (at) {
+        const blocks = laterBlocks(mes, tag, at);
+        if (at.tail && at.cut && blocks.length) blocks[0] = { ...blocks[0], body: `${at.cut}${blocks[0].body}` };
+        return blocks;
+    }
+    // Each hidden comment's blocks are read inside it (a tag nested in a kept body never runs past the
+    // comment's end into what follows), the bare blocks with the comments blanked; in order.
+    const text = withoutReasoning(mes);
+    const pairs = hiddenPairs(text);
+    const out = [];
+    for (const pair of pairs) {
+        const off = commentParts(text, pair, tag).off;
+        for (const block of findBlocks(text.slice(pair.bodyStart, pair.bodyEnd), tag)) {
+            out.push({ ...block, start: block.start + pair.bodyStart, end: block.end + pair.bodyStart, body: commentText(block.body), off });
+        }
+    }
+    out.push(...findBlocks(replacePairs(text, pairs, blank), tag));
+    return out.sort((x, y) => x.start - y.start);
+}
+
+// A display line whose kind its comment marks as off (markOff): counted as a line, never read.
+const OFF_LINE = '(read while its feature was off)';
 
 /**
  * The text inside the reply's <Changes> block (or `tag`), or null when there is none. Found
  * whether the block is bare or already hidden in Story Suite's comment; several blocks are
  * read as one, in order, so no line is lost. Blocks inside closed reasoning are not read.
- * `at` ({ from, skip }, from continuation()): only the bare blocks a Continue added are read.
- * `stopped`: the reader stopped the reply, so an open block's unfinished last line is left out.
+ * `at` ({ from, skip, tail?, cut? }, from continuation()): only the bare blocks a Continue added are read.
+ * An open block's unfinished last line is left out (wholeLines); `stopped` is accepted and changes nothing.
  * `heads` (grammarHeads): change lines written in the story near the block (strayLines) are read
  * too, after the blocks, and count as a block when there is none.
+ * `display` (extras.js displayLines): a line of a kind its hidden comment marks as off is not read.
  */
-export function extractBlock(mes, tag = 'Changes', at = null, { stopped = false, heads = null } = {}) {
-    const blocks = at ? laterBlocks(mes, tag, at) : findBlocks(withoutReasoning(mes), tag);
-    const strays = heads ? strayLines(mes, heads, { tag, from: at?.from ?? 0, tail: at?.tail === true, stopped }).taken : [];
+export function extractBlock(mes, tag = 'Changes', at = null, { stopped = false, heads = null, display = false } = {}) {
+    const blocks = readBlocks(mes, tag, at);
+    const found = heads ? strayLines(mes, heads, { tag, from: at?.from ?? 0, tail: at?.tail === true, stopped }).taken : [];
+    const { strays } = splitEchoes(found, blocks.map(block => wholeLines(block).body));
     if (!blocks.length && !strays.length) return null;
-    return inOrder(blocks.map(block => blockBody(wholeLines(block, stopped).body)), strays, blocks.at(-1)?.open === true).join('\n');
+    const bodies = blocks.map(block => {
+        const body = blockBody(wholeLines(block).body);
+        if (!display || !block.off?.size) return body;
+        return body.split('\n').map(line => {
+            const parsed = line.trim() ? parseLine(line) : { error: 'blank' };
+            return !parsed.error && block.off.has(parsed.kind) ? OFF_LINE : line;
+        }).join('\n');
+    });
+    return inOrder(bodies, strays, blocks.at(-1)?.open === true).join('\n');
 }
 
 /**
@@ -341,31 +476,40 @@ export function stripBlock(mes, tag = 'Changes', { heads = null } = {}) {
     const given = String(mes ?? '');
     // `heads` (grammarHeads): the change lines written in the story near the block go too.
     const raw = heads ? dropLines(given, strayLines(given, heads, { tag }).taken) : given;
-    let text = replacePairs(raw, hiddenPairs(raw), pair => (findBlocks(raw.slice(pair.bodyStart, pair.bodyEnd), tag).length ? '' : raw.slice(pair.start, pair.end)));
+    // A hidden comment goes when it holds a block, or only the lines left in the story or a cut line.
+    const ours = pair => {
+        const body = raw.slice(pair.bodyStart, pair.bodyEnd);
+        if (findBlocks(body, tag).length) return true;
+        const parts = commentParts(raw, pair, tag);
+        return parts.story.length > 0 || parts.cut !== null || body.includes(`<${sectionTags(tag).echo}>`);
+    };
+    let text = replacePairs(raw, hiddenPairs(raw), pair => (ours(pair) ? '' : raw.slice(pair.start, pair.end)));
     const blocks = findBlocks(text, tag);
     for (const block of blocks.reverse()) text = text.slice(0, block.start) + text.slice(block.end);
     return trimEnd(text);
 }
 
-// Every `--` in a comment's body broken up, so neither `-->` nor `--!>` can end it early.
-const commentSafe = text => text.replace(/-(?=-)/g, '- ');
-
 /**
  * `mes` with its bare <Changes> blocks moved into one hidden comment at the end, so
  * SillyTavern shows nothing of them and Re-read can still find them. Already hidden: unchanged.
- * `from`, `skip`, `tail` (continuation()): only blocks that end after `from`, from the `skip`th bare
+ * `from`, `skip`, `tail`, `cut` (continuation()): only blocks that end after `from`, from the `skip`th bare
  * block on (a Continue's own text), are moved; the ones before are left as they are. A block left
- * open is kept with the word `open` after the marker, so a Continue can tell it goes on with it.
+ * open is kept with the word `open` after the marker, so a Continue can tell it goes on with it, and its
+ * unfinished last line is kept beside it (<Changes-cut>). With `heads`, the change lines a capture left in
+ * the story are listed in it (<Changes-story>), so a Re-read leaves them too.
  */
-export function hideBlock(mes, tag = 'Changes', { from = 0, skip = 0, tail = false, stopped = false, heads = null } = {}) {
+export function hideBlock(mes, tag = 'Changes', { from = 0, skip = 0, tail = false, cut = null, stopped = false, heads = null } = {}) {
     const given = String(mes ?? '');
     // `heads` (grammarHeads): the change lines written in the story near the block (strayLines) are
     // taken out of the story and kept after the blocks, in a block of their own.
-    const strays = heads ? strayLines(given, heads, { tag, from, tail, stopped }).taken : [];
+    const found = heads ? strayLines(given, heads, { tag, from, tail, stopped }) : { taken: [], problems: [] };
+    const left = found.problems.filter(item => item.keep).map(item => item.line);
     // Taking whole lines out after `from` leaves `from`, `skip` and `tail` true of the text.
-    const text = dropLines(given, strays);
-    const bare = laterBlocks(text, tag, { from, skip, tail });
-    if (!bare.length && !strays.length) return text;
+    const text = dropLines(given, found.taken);
+    const bare = readBlocks(text, tag, { from, skip, tail, cut });
+    // (Echoes are judged against this read's blocks, as extractBlock judges them.)
+    const { strays, echoes } = splitEchoes(found.taken, bare.map(block => wholeLines(block).body));
+    if (!bare.length && !found.taken.length && !left.length) return text;
     // C2-6: the bodies were found in the text with reasoning blanked (what extractBlock reads), so
     // reasoning inside a block is left in the story where it stood, never written back as spaces.
     const thoughts = reasoningPairs(replacePairs(text, hiddenPairs(text), blank));
@@ -377,11 +521,17 @@ export function hideBlock(mes, tag = 'Changes', { from = 0, skip = 0, tail = fal
     // (Spaces left at line ends, where reasoning was blanked, go.)
     const lineEnds = body => body.split('\n').map(line => line.trimEnd()).join('\n');
     const open = bare.at(-1)?.open === true;
-    const kept = inOrder(bare.map(block => blockBody(wholeLines(block, stopped).body)), strays, open)
-        .map(body => `<${tag}>\n${commentSafe(lineEnds(body))}\n</${tag}>`).join('\n');
+    const parts = inOrder(bare.map(block => blockBody(wholeLines(block).body)), strays, open)
+        .map(body => `<${tag}>\n${commentSafe(lineEnds(body))}\n</${tag}>`);
+    const names = sectionTags(tag);
+    if (left.length) parts.push(`<${names.story}>\n${commentSafe(left.join('\n'))}\n</${names.story}>`);
+    if (echoes.length) parts.push(`<${names.echo}>\n${commentSafe(echoes.map(line => line.line).join('\n'))}\n</${names.echo}>`);
+    // The unfinished line, unless a tag sits in it (then no Continue can finish it as a line).
+    const unfinished = open ? wholeLines(bare.at(-1)).cut : '';
+    if (unfinished && !unfinished.includes('<')) parts.push(`<${names.cut}>\n${commentSafe(unfinished)}\n</${names.cut}>`);
     // A block left open (the reply was cut off in it) is said so, for a Continue (continuation()).
     const mark = open ? ` ${CUT_MARK}` : '';
-    return `${trimEnd(story)}\n\n<!-- ${HIDDEN_MARKER}${mark}\n${kept}\n-->`;
+    return `${trimEnd(story)}\n\n<!-- ${HIDDEN_MARKER}${mark}\n${parts.join('\n')}\n-->`;
 }
 
 // A bullet, number or quote mark in front of a line is decoration. A hyphen counts as one only
@@ -504,26 +654,113 @@ export function grammarHeads(kinds) {
     return heads;
 }
 
-// A story line as a change line: 'C' (a known head, exactly, and it parses), 'N' (close to one: an op
-// and a known kind word, but not as the grammar writes it, or it does not parse), or null.
-function strayClass(raw, heads, words) {
+// A story line as a change line: 'C' (a known head, exactly, it parses, and nothing in it reads as prose),
+// 'N' (close to one: an op or an op look-alike and a known kind word or its plural, but not as the grammar
+// writes it, it does not parse, or it reads as a sentence, speech or a mention of the block's tag), or
+// null. `why`: for an 'N', the reason told.
+// The op look-alikes models write ("– coin 5", "− coin 5", "＋ coin 5"): a near miss, never taken (B-a1-9).
+const STRAY_OP = /^([+\-~!?\p{Pd}−➕➖﹢﹣＋－～])([ \t]*)(\p{L}[\p{L}\p{N}_-]*)(.?)/u;
+// Marks that open or close a quotation (an apostrophe is not one: "Bob's").
+const QUOTE_MARKS = /["“”„«»「」『』]/;
+const QUOTE_MARKS_ALL = /["“”„«»「」『』]/g;
+// A comma and a word that goes on as speech or a sentence ("+ coin 5, she said", "…, and not one more").
+const SPEECH = /,\s*(?:she|he|they|i|we|you|it|said|says|asked|asks|replied|whispered|muttered|shouted|called|added|laughed|and|but|or|then|so)(?![\p{L}\p{N}])/iu;
+function prose(line, tag) {
+    if (new RegExp(`</?${escapeRe(tag)}(?![\\p{L}\\p{N}_])`, 'iu').test(line)) return `a <${tag}> tag sits in it`;
+    if (QUOTE_MARKS.test(line)) return 'it holds a quotation, so it reads as speech';
+    if (/[.!?…][\s"”’)\]*_]*$/u.test(line) || /[.!?…]["”’)\]]*\s+\p{L}/u.test(line) || SPEECH.test(line)) return 'it reads as a sentence, not a change line';
+    return null;
+}
+function strayClass(raw, heads, words, tag) {
     if (raw.length > MAX_LINE) return null;
     const line = stripDecoration(stripMarkdown(raw).trim()).trim();
-    const found = /^([+\-~!?])([ \t]*)(\p{L}[\p{L}\p{N}_-]*)(.?)/u.exec(line);
-    if (!found || !words.has(found[3].toLowerCase())) return null;
+    const found = STRAY_OP.exec(line);
+    if (!found) return null;
     const [, op, gap, word, next] = found;
-    const parsed = parseLine(line);
-    const exact = gap === ' ' && heads.has(`${op} ${word}`) && (next === ' ' || next === '\t');
-    return { type: exact && !parsed.error ? 'C' : 'N', op, word: word.toLowerCase(), error: parsed.error ?? null };
+    const lower = word.toLowerCase();
+    // "+ coins 5": the kind in the plural is a near miss of "+ coin".
+    const plural = !words.has(lower) && lower.endsWith('s') && words.has(lower.slice(0, -1));
+    if (!words.has(lower) && !plural) return null;
+    const kind = plural ? lower.slice(0, -1) : lower;
+    const ascii = /^[+\-~!?]$/.test(op);
+    const parsed = ascii ? parseLine(line) : { error: `it starts with "${op}", not one of + - ~ ! ?` };
+    const exact = ascii && !plural && gap === ' ' && heads.has(`${op} ${word}`) && (next === ' ' || next === '\t');
+    // (What follows the op and the kind: the op itself is no sentence's end.)
+    const why = parsed.error || !exact ? null : prose(line.slice(found[0].length - next.length), tag);
+    const type = exact && !parsed.error && !why ? 'C' : 'N';
+    return { type, op, word: kind, error: parsed.error ?? null, why: why ?? (plural ? `the kind is written "${word}", not "${kind}"` : null) };
 }
 
 const STRAY_HINT = 'change lines go inside the <Changes> block at the end of the reply';
 
+// Lines of `scan` that are something shown, not the story's own words (B-a1-2): a fenced code block
+// (``` or ~~~, one left open to the end), an indented code block (4 spaces or a tab, after a blank line), a
+// quote (`>`), and HTML elements a reply shows or hides (<details>, <style>, <pre>, <script>, <code>,
+// <textarea>, a <!-- comment -->, one left open to the end). → a Set of line starts. Linear.
+const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+const SHOWN_OPEN = /<(details|style|pre|script|code|textarea)\b|<!--/gi;
+function shownRanges(scan) {
+    const lower = scan.toLowerCase();
+    const ranges = [];
+    SHOWN_OPEN.lastIndex = 0;
+    let match;
+    while ((match = SHOWN_OPEN.exec(scan))) {
+        const close = match[1] ? `</${match[1].toLowerCase()}` : '-->';
+        const end = lower.indexOf(close, SHOWN_OPEN.lastIndex);
+        // A single-line element ("a <code>x</code> word") is part of its line's text, not a block of its own.
+        const stop = end < 0 ? scan.length : end + close.length;
+        if (end >= 0 && !scan.slice(match.index, stop).includes('\n')) { SHOWN_OPEN.lastIndex = stop; continue; }
+        ranges.push([match.index, stop]);
+        if (end < 0) break;
+        SHOWN_OPEN.lastIndex = stop;
+    }
+    return ranges;
+}
+function shownLines(scan) {
+    const out = new Set();
+    const ranges = shownRanges(scan);
+    let r = 0;
+    let fence = null;
+    let prevBlank = true;
+    let indented = false;
+    for (let start = 0; start <= scan.length;) {
+        const nl = scan.indexOf('\n', start);
+        const end = nl < 0 ? scan.length : nl;
+        const line = scan.slice(start, end);
+        const isBlank = !line.trim();
+        while (r < ranges.length && ranges[r][1] <= start) r += 1;
+        const inRange = r < ranges.length && ranges[r][0] < end && ranges[r][1] > start;
+        if (fence) {
+            out.add(start);
+            const close = FENCE.exec(line);
+            if (close && close[1][0] === fence.char && close[1].length >= fence.size && !line.slice(close[0].length).trim()) fence = null;
+        } else if (!isBlank && FENCE.test(line)) {
+            const open = FENCE.exec(line);
+            out.add(start);
+            fence = { char: open[1][0], size: open[1].length };
+        } else if (!isBlank && /^(?: {4}|\t)/.test(line) && (prevBlank || indented)) {
+            out.add(start);
+            indented = true;
+        } else if (!isBlank && /^ {0,3}>/.test(line)) {
+            out.add(start);
+        } else if (!isBlank && inRange) {
+            out.add(start);
+        }
+        if (!isBlank && !(indented && out.has(start) && /^(?: {4}|\t)/.test(line))) indented = false;
+        prevBlank = isBlank;
+        if (nl < 0) break;
+        start = nl + 1;
+    }
+    return out;
+}
+
 /**
  * The change lines written in the story of `mes` (see above): { taken: [{ start, end, line }], problems:
- * [{ line, reason }] }, `start`/`end` the line's place in `mes` (without its line break), `line` trimmed.
- * `heads` from grammarHeads. `from`, `tail` (continuation()): only a Continue's own text is looked at.
- * `stopped`: the reader stopped the reply, so a last line with no line break after it is left out.
+ * [{ line, reason, keep? }] }, `start`/`end` the line's place in `mes` (without its line break), `line`
+ * trimmed. `keep`: a line that has a change line's shape but is left in the story, which hideBlock lists in
+ * the hidden comment so a Re-read leaves it too. `heads` from grammarHeads. `from`, `tail`
+ * (continuation()): only a Continue's own text is looked at. `stopped`: the reader stopped the reply, so a
+ * last line with no line break after it is left out.
  */
 export function strayLines(mes, heads, { tag = 'Changes', from = 0, tail = false, stopped = false } = {}) {
     const text = String(mes ?? '');
@@ -537,35 +774,61 @@ export function strayLines(mes, heads, { tag = 'Changes', from = 0, tail = false
     if (!words.size || !text) return { taken: [], problems: [] };
     const at = Math.max(0, Math.min(text.length, from | 0));
     // The story alone: reasoning, hidden comments and bare blocks blanked, places kept.
-    const spans = [...hiddenPairs(text), ...(tail ? bareBlocks(text, tag, at) : bareBlocks(text, tag))].sort((a, b) => a.start - b.start);
+    const hidden = hiddenPairs(text);
+    const spans = [...hidden, ...(tail ? bareBlocks(text, tag, at) : bareBlocks(text, tag))].sort((a, b) => a.start - b.start);
     const scan = replacePairs(maskReasoning(text), spans, blank);
     const later = spans.filter(span => span.end > at);
     const anchor = later.length ? later[0].start : text.length;
     // A stopped reply's last line, when no line break follows it, may be cut.
     const lastEnd = text.trimEnd().length;
     const cutStart = stopped && text.indexOf('\n', lastEnd) < 0 ? text.lastIndexOf('\n', lastEnd - 1) + 1 : -1;
+    const shown = shownLines(scan);
 
-    // Paragraphs: runs of lines with something on them, in order; lines before `from` are story.
+    // Paragraphs: runs of lines with something on them, in order; lines before `from` are story. `quoted`:
+    // a quotation was left open before the paragraph (a paragraph that starts with a quote mark opens a
+    // new one, as speech over several paragraphs is written), so its lines are someone's words.
     const paragraphs = [];
     let current = null;
+    let open = false;
     for (let start = 0; start <= scan.length;) {
         const nl = scan.indexOf('\n', start);
         const end = nl < 0 ? scan.length : nl;
         const raw = scan.slice(start, end).trim();
         if (!raw) current = null;
         else {
-            if (!current) paragraphs.push(current = { start, lines: [] });
-            // (A line reasoning was blanked in is not taken: its text is not the line alone.)
-            const kind = start >= at && text.slice(start, end).trim() === raw ? strayClass(raw, known, words) : null;
-            current.lines.push({ start, end, raw, kind });
+            if (!current) {
+                if (/^["“«「『]/.test(raw)) open = false;
+                paragraphs.push(current = { start, lines: [], quoted: open });
+            }
+            const isShown = shown.has(start);
+            // A line a tag or reasoning was blanked in is not the line alone (`partial`).
+            const kind = start >= at ? strayClass(raw, known, words, tag) : null;
+            current.lines.push({ start, end, raw, kind, shown: isShown, partial: text.slice(start, end).trim() !== raw });
+            if (!isShown) open = ((raw.match(QUOTE_MARKS_ALL)?.length ?? 0) % 2 === 1) !== open;
         }
         if (nl < 0) break;
         start = nl + 1;
     }
+    // The lines an earlier read of this reply left in the story, which its hidden comment lists: each one is
+    // the nearest line of that text above the comment that no earlier comment claimed (a comment lists only
+    // lines of the text before it), so they are left again, on every later read.
+    const left = new Set();
+    const byText = new Map();
+    for (const paragraph of paragraphs) for (const line of paragraph.lines) {
+        if (!byText.has(line.raw)) byText.set(line.raw, []);
+        byText.get(line.raw).push(line.start);
+    }
+    for (const pair of hidden) {
+        for (const raw of commentParts(text, pair, tag).story) {
+            const starts = byText.get(raw) ?? [];
+            const found = starts.findLast(start => start < pair.start && !left.has(start));
+            if (found !== undefined) left.add(found);
+        }
+    }
     const inRegion = new Set();
     let counted = 0;
     for (const paragraph of paragraphs) {
-        paragraph.changes = paragraph.lines.every(line => line.kind);
+        paragraph.changes = paragraph.lines.every(line => line.kind && !line.shown && !line.partial);
         if (paragraph.start >= anchor) inRegion.add(paragraph);
     }
     for (let i = paragraphs.length - 1; i >= 0; i -= 1) {
@@ -581,24 +844,34 @@ export function strayLines(mes, heads, { tag = 'Changes', from = 0, tail = false
 
     const taken = [];
     const problems = [];
-    const refuse = (line, reason) => problems.push({ line: line.raw, reason });
+    // `keep`: the line is left in the story with a change line's shape; hideBlock lists it (see above).
+    const refuse = (line, reason, keep = false) => problems.push({ line: line.raw, reason, ...(keep ? { keep: true } : {}) });
     for (const paragraph of paragraphs) {
         const near = inRegion.has(paragraph);
         for (const line of paragraph.lines) {
             const kind = line.kind;
             if (!kind) continue;
             if (kind.type === 'N') {
-                if (!near && !paragraph.changes) continue;
+                if (line.shown || (!near && !paragraph.changes)) continue;
                 const how = (words.get(kind.word) ?? []).map(head => `"${head} …"`).join(' or ');
-                refuse(line, kind.error ? `it is not a change line: ${kind.error}; ${STRAY_HINT}` : `it is in the story and does not start the way a ${kind.word} line does (${how}); ${STRAY_HINT}`);
+                const reason = kind.error ? `it is not a change line: ${kind.error}` : kind.why ?? `it is in the story and does not start the way a ${kind.word} line does (${how})`;
+                refuse(line, `${reason}; ${STRAY_HINT}`);
+            } else if (left.has(line.start)) {
+                if (near || paragraph.changes || kind.op !== '-') refuse(line, `it was read as story when the reply came, so it stays story; ${STRAY_HINT}`);
             } else if (line.start === cutStart) {
-                refuse(line, 'the reply stopped in the middle of it');
-            } else if (near && (paragraph.changes || kind.op !== '-')) {
+                refuse(line, 'the reply stopped in the middle of it', true);
+            } else if (line.partial) {
+                if (near) refuse(line, `a tag or a thought shares its line, so it was read as story; ${STRAY_HINT}`, true);
+            } else if (line.shown) {
+                if (near) refuse(line, `it is in a code block, a quote or an HTML block, so it was read as something shown; ${STRAY_HINT}`, true);
+            } else if (paragraph.quoted) {
+                if (near) refuse(line, `it is inside someone's words (a quotation left open above it), so it was read as story; ${STRAY_HINT}`, true);
+            } else if (near && paragraph.changes) {
                 taken.push({ start: line.start, end: line.end, line: line.raw });
             } else if (near) {
-                refuse(line, `it is part of a story paragraph, so it was read as story; ${STRAY_HINT}`);
+                refuse(line, `it is part of a story paragraph, so it was read as story; ${STRAY_HINT}`, true);
             } else if (paragraph.changes || kind.op !== '-') {
-                refuse(line, `it is in the story, far from the end of the reply, so it was read as story; ${STRAY_HINT}`);
+                refuse(line, `it is in the story, far from the end of the reply, so it was read as story; ${STRAY_HINT}`, true);
             }
         }
     }

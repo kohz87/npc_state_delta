@@ -259,11 +259,13 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
         if (result?.ok) events.emit('committed', { receipt: result.receipt });
         return result;
     };
-    // The reader's action is saved at once, before the result comes back (B-b2-timeline-1): a chat
-    // opened right after it can no longer take it along. A failed save is told and tried again by the
-    // store; the action itself stands.
+    // The reader's action goes out with the turn's save (store.saveIdle: a moment after the last action,
+    // with the reply's capture; docs/v2/PERFORMANCE.md "Long chats"): a chat opened before that save puts
+    // the action into its own chat's file (the store's rescue, B-b2-timeline-1). Where that cannot be done
+    // (no chat file this page can write) it is saved at once, before the result comes back. A failed save
+    // is told and tried again by the store; the action itself stands.
     const saved = async result => {
-        if (result?.ok) await store.saveSoon?.();
+        if (result?.ok && !store.saveIdle?.()) await store.saveSoon?.();
         return result;
     };
     const sdk = Object.freeze({

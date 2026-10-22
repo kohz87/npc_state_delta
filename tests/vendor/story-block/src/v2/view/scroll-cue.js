@@ -49,3 +49,25 @@ export function scrollCue(el, { win = globalThis } = {}) {
         },
     };
 }
+
+/**
+ * Scrolls `scroller` (the tab strip, the game view's navigation) just enough that `item` (the active
+ * one) is in view, along whichever axis overflows, with `pad` px to spare; the page itself never
+ * scrolls. False when there is nothing to measure (no layout, or the item is not in the scroller).
+ */
+export function bringIntoView(scroller, item, pad = 12) {
+    if (!scroller || !item || typeof scroller.getBoundingClientRect !== 'function' || typeof item.getBoundingClientRect !== 'function') return false;
+    const box = scroller.getBoundingClientRect();
+    const at = item.getBoundingClientRect();
+    if (!box || !at || !(box.width > 0 || box.height > 0)) return false;
+    let moved = false;
+    if ((scroller.scrollWidth ?? 0) > (scroller.clientWidth ?? 0) + 1) {
+        if (at.left < box.left) { scroller.scrollLeft -= box.left - at.left + pad; moved = true; }
+        else if (at.right > box.right) { scroller.scrollLeft += at.right - box.right + pad; moved = true; }
+    }
+    if ((scroller.scrollHeight ?? 0) > (scroller.clientHeight ?? 0) + 1) {
+        if (at.top < box.top) { scroller.scrollTop -= box.top - at.top + pad; moved = true; }
+        else if (at.bottom > box.bottom) { scroller.scrollTop += at.bottom - box.bottom + pad; moved = true; }
+    }
+    return moved;
+}

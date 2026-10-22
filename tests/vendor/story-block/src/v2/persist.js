@@ -334,6 +334,11 @@ export function carryRecord(from, to) {
 // request whose body has not arrived by then). Without a timeout nothing is stamped or read. The
 // read-backs never hold a save, the reader's command or the next reply.
 export const RECHECK_MS = Object.freeze([10000, 20000, 40000, 80000, 160000]);
+// The turn's save (`idle()`, docs/v2/PERFORMANCE.md "Long chats"): the reply's capture and the reader's actions
+// after it go out in one write, IDLE_MS after the last of them, and never later than IDLE_MAX_MS after the
+// first one not yet saved.
+export const IDLE_MS = 1500;
+export const IDLE_MAX_MS = 8000;
 export function createSaver({
     save, onError = null, timers = globalThis, verify = null, target = null, check = null, rescue = null,
     retry = [1000, 2000, 4000, 8000, 15000], waitMs = 200, waits = 50, timeout = 20000,
@@ -343,6 +348,7 @@ export function createSaver({
     let version = 0;
     let saved = 0;
     let timer = null;
+    let deadline = null;        // the idle window's latest save (idle())
     let running = null;
     let latest = null;          // target of the newest change
     const orphans = [];         // [{ target, tries }]: changes of a chat that is no longer open
@@ -356,18 +362,41 @@ export function createSaver({
     const dirty = () => version !== saved || orphans.length > 0;
     const backoff = () => retry[Math.max(0, Math.min(failures, retry.length) - 1)];
 
-    function cancel() {
+    function clearTimer() {
         if (timer !== null) timers.clearTimeout(timer);
         timer = null;
     }
+    function clearDeadline() {
+        if (deadline !== null) timers.clearTimeout(deadline);
+        deadline = null;
+    }
+    function cancel() {
+        clearTimer();
+        clearDeadline();
+    }
 
     function later(ms) {
-        cancel();
+        clearTimer();
         timer = timers.setTimeout(() => {
             timer = null;
+            clearDeadline();
             saveNow().then(followUp, failed);
         }, ms);
         timer?.unref?.();
+    }
+
+    // The idle window (see IDLE_MS): each call puts the save `wait` ms after it, never past `max` ms after
+    // the call that opened the window.
+    function idle(wait = IDLE_MS, max = IDLE_MAX_MS) {
+        if (deadline === null) {
+            deadline = timers.setTimeout(() => {
+                deadline = null;
+                clearTimer();
+                saveNow().then(followUp, failed);
+            }, Math.max(wait, max));
+            deadline?.unref?.();
+        }
+        later(wait);
     }
 
     function tell(error) {
@@ -663,7 +692,7 @@ export function createSaver({
             }
             return moved;
         },
-        pending: () => timer !== null || running !== null,
+        pending: () => timer !== null || deadline !== null || running !== null,
         /** True while a write of some chat timed out and its file is still to be read back. */
         suspect: () => suspects.size > 0,
         /** True while a save of the open chat is on its way (the server has not answered yet). */
@@ -707,8 +736,22 @@ export function createSaver({
         },
         /** True while the last save failed (until one works again). */
         failing: () => failures > 0,
+        /** Saves `ms` after the last call; inside an idle window (idle()) the window's save stands instead. */
         schedule(ms = 400) {
+            if (deadline !== null) return;
             later(ms);
+        },
+        /**
+         * The turn's save (IDLE_MS): `wait` ms after the last call, at most `max` ms after the first one of
+         * the window. A failed save stays dirty and is tried again as any other.
+         */
+        idle,
+        /**
+         * Puts off the save that is only waiting (the reply's own save takes it along). Inside an idle window
+         * its latest save (`max`) still stands, so a change never waits longer than that.
+         */
+        defer() {
+            clearTimer();
         },
         /** Saves now; resolves to true when saved, false when not (told and tried again). */
         saveSoon(options = {}) {

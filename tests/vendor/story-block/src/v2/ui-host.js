@@ -16,6 +16,9 @@
 //   choices as buttons that only fill the message box, each reply's chatter in a folded strip.
 // * The tab panel: the tab host (src/v2/host-ui.js) with every module tab and every `tab` screen, a
 //   side sheet on wide screens and a bottom sheet on phones. Redrawn from the head on every change.
+// * The reader's tab order (src/v2/view/tab-order.js, Settings → Story Suite → Tabs): one list for the
+//   panel's tabs and the game view's screens, Up/Down, Shown, Reset to default. Hidden ones leave the
+//   tab strip and the game view's navigation; Home is always first and shown.
 // * The Story Block drawer in Extensions: version, modules, the same buttons.
 // * Settings → Diagnostics (src/v2/diagnostics.js): a report to copy or save, made from the runtime's
 //   parts and each module's `hooks.diagnostics`; Story Suite's console errors are caught for it.
@@ -37,7 +40,8 @@ import { mountQuery } from './sdk.js';
 import { createMounts } from './view/mounts/index.js';
 import { createScreenRenderer } from './view/render-screen.js';
 import { formatStoryTime, storyCalendar } from './view/clock.js';
-import { byNavOrder, createScreens } from './view/screens.js';
+import { HOME_ID, createScreens } from './view/screens.js';
+import { createTabOrderStore, isDefaultChoice, isHiddenNav, moveNav, navKey, orderNav, setNavHidden, visibleNav } from './view/tab-order.js';
 import { CHANGES_CARD_SCREEN_ID, HOME_SCREEN_ID, changesSummary } from './screens/index.js';
 import { createReplyNotes } from './reply-notes.js';
 import { createReplyExtras } from './extras-ui.js';
@@ -121,7 +125,8 @@ function readerStore(ctx) {
 /**
  * mountUi({ runtime, ctx, doc?, version? }) → { refresh(), blocked(reason, moduleId), clearBlocked(),
  * openPanel(), closePanel(), openSettings(), toggleGameView(), setHud(on), hudOn(), screens, mounts,
- * renderer, notes, extras, savePoints, inspector, syncScreens(), destroy() }.
+ * renderer, notes, extras, savePoints, inspector, tabs (Settings → Tabs: rows(), move(id, delta),
+ * setHidden(id, hidden), reset(), isDefault()), syncScreens(), destroy() }.
  * Re-read uses `sdk.reread(index)` (or `runtime.turn.reread(index)`) when the runtime has one.
  */
 export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' }) {
@@ -195,13 +200,18 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
             };
         },
     });
-    // The screen registry as the mounts see it: a screen under a feature that is off is not there.
+    // The screen registry as the mounts see it: a screen under a feature that is off is not there, and the
+    // game view's and the tab strip's screens come in the reader's order (Settings → Story Suite → Tabs).
     const allScreens = createScreens(readerStore(ctx));
     const screenOff = id => registry.screenOff?.(id) === true;
+    const tabOrder = createTabOrderStore(ctx);
     const screens = Object.freeze({
         ...allScreens,
         resolve: id => (screenOff(id) ? null : allScreens.resolve(id)),
-        list: (mount = null) => allScreens.list(mount).filter(entry => !screenOff(entry.id)),
+        list: (mount = null) => {
+            const list = allScreens.list(mount).filter(entry => !screenOff(entry.id));
+            return mount === 'screen' || mount === 'tab' ? orderNav(list, tabOrder.choice(), entry => entry.id, entry => entry.screen.order) : list;
+        },
     });
     const extraTabs = [];
 
@@ -322,6 +332,8 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         swipeAt: index => ctx.chat?.[index]?.swipe_id ?? 0,
         eventSource: ctx.eventSource,
         eventTypes: ctx.eventTypes ?? ctx.event_types,
+        // The game view's navigation leaves out the screens the reader hid (they still open by name).
+        inNav: screenId => !isHiddenNav(tabOrder.choice(), screenId),
         addTab(tab) {
             extraTabs.push(tab);
             return () => {
@@ -332,9 +344,52 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         document: doc,
     });
     runtime.setDialog?.((screenId, opts) => mounts.dialog.open(screenId, opts), () => mounts.dialog.current?.() ?? null);
-    // The tab host sees the module tabs and the tab screens as one list, in navigation order (Home's
-    // neighbours first: Party, Quests, Scene, Inventory, Map, then the rest; a tab's `order` moves it).
-    const tabSource = { tabs: () => byNavOrder([...registry.tabs(), ...extraTabs.map(tab => ({ ...tab, moduleId: 'screens' }))]) };
+    // The tab host sees the module tabs and the tab screens as one list, in the reader's order (else the
+    // default: screens.js screenOrder), without the ones the reader hid. A module tab goes by
+    // "<module>/<id>" there, so NPC State Delta's Cast tab and its Cast screen are one entry.
+    const panelTabs = () => [...registry.tabs(), ...extraTabs.map(tab => ({ ...tab, moduleId: 'screens' }))];
+    const tabSource = { tabs: () => visibleNav(panelTabs(), tabOrder.choice(), navKey, tab => tab.order) };
+
+    // Settings → Story Suite → Tabs: every tab and screen once (by id), where it shows, in the reader's order.
+    function tabRows() {
+        const rows = new Map();
+        const add = (id, { title, icon, order }, where) => {
+            if (!id) return;
+            const row = rows.get(id) ?? { id, title: String(title || id), icon: icon || '', order, where: [] };
+            if (!row.where.includes(where)) row.where.push(where);
+            rows.set(id, row);
+        };
+        for (const mount of ['screen', 'tab']) for (const entry of screens.list(mount)) add(entry.id, entry.screen, mount);
+        for (const tab of registry.tabs()) add(navKey(tab), tab, 'tab');
+        const choice = tabOrder.choice();
+        return orderNav([...rows.values()], choice).map(row => ({
+            ...row,
+            fixed: row.id === HOME_ID,
+            hidden: isHiddenNav(choice, row.id),
+        }));
+    }
+    // After a change: the tab strip and the game view's navigation follow at once.
+    function refreshNav() {
+        if (!panel.hidden) tabHost?.refresh();
+        mounts.screen.update();
+    }
+    const tabsControl = Object.freeze({
+        rows: tabRows,
+        move(id, delta) {
+            const ids = tabRows().filter(row => !row.fixed).map(row => row.id);
+            tabOrder.set(moveNav(tabOrder.choice(), ids, id, delta));
+            refreshNav();
+        },
+        setHidden(id, hidden) {
+            tabOrder.set(setNavHidden(tabOrder.choice(), id, hidden));
+            refreshNav();
+        },
+        reset() {
+            tabOrder.reset();
+            refreshNav();
+        },
+        isDefault: () => isDefaultChoice(tabOrder.choice()),
+    });
 
     // ---- the panel ---------------------------------------------------------------------------
     let tabHost = null;
@@ -408,7 +463,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         const fold = typeof options?.fold === 'string' ? options.fold : null;
         overlay = openSettingsOverlay({
             registry, settings, doc, sdk, features: runtime.features ?? null, fold, diagnostics,
-            promptParts,
+            promptParts, tabs: tabsControl,
             countTokens: countTokens(),
             onClose: () => { overlay = null; },
         });
@@ -599,6 +654,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         hudOn: () => hudOn(ctx.extensionSettings),
         syncScreens() { syncScreens(); refresh(); mounts.card?.refreshAll?.({ force: true }); },
         screens,
+        tabs: tabsControl,
         mounts,
         renderer,
         notes,
