@@ -12,9 +12,13 @@
 // * The notes under replies (src/v2/reply-notes.js, MODULES §F40): a reply that came without change lines,
 //   a reply edited since, each with Re-read when the runtime offers one. The changes card gets the reply's
 //   refused lines in its scope as `refused` (§F41).
+// * Choices and Inner chatter under replies (src/v2/extras-ui.js, MODULES §F115): the latest reply's
+//   choices as buttons that only fill the message box, each reply's chatter in a folded strip.
 // * The tab panel: the tab host (src/v2/host-ui.js) with every module tab and every `tab` screen, a
 //   side sheet on wide screens and a bottom sheet on phones. Redrawn from the head on every change.
 // * The Story Block drawer in Extensions: version, modules, the same buttons.
+// * Settings → Diagnostics (src/v2/diagnostics.js): a report to copy or save, made from the runtime's
+//   parts and each module's `hooks.diagnostics`; Story Suite's console errors are caught for it.
 // * The wand menu: Story Suite (the overlay). The overlay's prompt size counts what the next reply would
 //   be sent (turn.preview) with SillyTavern's tokenizer when there is one; `openSettings({ fold })` opens
 //   it at one fold (Home's "Import a pack" → the Packs fold, while no pack is installed).
@@ -27,6 +31,7 @@
 // Every text is set with textContent; nothing a module or a pack wrote becomes markup here. The texts are
 // in src/v2/strings.js.
 
+import { formatAmount } from './domains/money.js';
 import { PACKS_FOLD, createTabHost, openSettingsOverlay } from './host-ui.js';
 import { mountQuery } from './sdk.js';
 import { createMounts } from './view/mounts/index.js';
@@ -35,6 +40,8 @@ import { formatStoryTime, storyCalendar } from './view/clock.js';
 import { byNavOrder, createScreens } from './view/screens.js';
 import { CHANGES_CARD_SCREEN_ID, HOME_SCREEN_ID, changesSummary } from './screens/index.js';
 import { createReplyNotes } from './reply-notes.js';
+import { createReplyExtras } from './extras-ui.js';
+import { displayLines } from './extras.js';
 import { STRINGS, fill } from './strings.js';
 import { readRecord } from './persist.js';
 import { CORE_FEATURE } from './features.js';
@@ -44,6 +51,7 @@ import { createInspectorWidget, INSPECTOR_WIDGET } from './screens/inspector.js'
 import { createSavePointsWidget, SAVEPOINTS_WIDGET } from './screens/savepoints.js';
 import { createPacksHintWidget, PACKS_HINT_WIDGET } from './screens/packs-hint.js';
 import { createReadyHintWidget, READY_HINT_WIDGET } from './screens/ready-hint.js';
+import { buildReport, captureConsole, caughtSoFar, reportFileName } from './diagnostics.js';
 
 const IDS = Object.freeze({ bar: 'story_suite_v2_bar', panel: 'story_suite_v2_panel', drawer: 'story_suite_v2_drawer', menu: 'story_suite_v2_menu' });
 
@@ -113,7 +121,7 @@ function readerStore(ctx) {
 /**
  * mountUi({ runtime, ctx, doc?, version? }) → { refresh(), blocked(reason, moduleId), clearBlocked(),
  * openPanel(), closePanel(), openSettings(), toggleGameView(), setHud(on), hudOn(), screens, mounts,
- * renderer, notes, savePoints, inspector, syncScreens(), destroy() }.
+ * renderer, notes, extras, savePoints, inspector, syncScreens(), destroy() }.
  * Re-read uses `sdk.reread(index)` (or `runtime.turn.reread(index)`) when the runtime has one.
  */
 export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' }) {
@@ -180,8 +188,9 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
             // fmt.time: the story clock on its calendar (Story Director's, else the pack's, else Gregorian).
             const calendar = storyCalendar((name, args) => (registry.query(name) ? sdk.query(name, args) : null));
             return {
-                // "1 mark", "44 marks": the currency's plural for any amount but one (MODULES §F1).
-                ...(currency?.name ? { money: n => (Number.isInteger(n) ? `${n} ${Math.abs(n) === 1 ? currency.name : currency.plural || currency.name}` : '') } : {}),
+                // "1 mark", "44 marks": the currency's plural for any amount but one (MODULES §F1); with coins
+                // the mixed coins, "3 silver 5 copper", or the smallest unit when the reader prefers (§F108).
+                ...(currency?.name ? { money: n => (!Number.isInteger(n) ? '' : n < 0 ? `-${formatAmount(-n, currency)}` : formatAmount(n, currency)) } : {}),
                 time: minutes => formatStoryTime(minutes, calendar),
             };
         },
@@ -259,6 +268,16 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
             } catch { return false; }
         },
         onChanged: index => mounts?.card?.refresh?.(index, { force: true }),
+    });
+    // Choices and Inner chatter under replies (MODULES §F115), read from each reply's own text.
+    const extras = createReplyExtras({
+        ctx,
+        doc,
+        events,
+        display: typeof runtime.display === 'function' ? runtime.display : mes => displayLines(mes, { entryOf: word => registry.capture(word) }),
+        featureOn: id => registry.featureOn?.(id) === true,
+        // NPC State Delta knows the name: its dossier opens from the chip (without it, the plain name).
+        query: (name, args) => (registry.query(name) ? sdk.query(name, args) : null),
     });
     // What the Inspector lists as a reply's problems: blocks its replay skipped, and what the turn met
     // reading it in this session (change lines not used, with why); the refused lines the notes keep
@@ -352,12 +371,44 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         const live = liveCtx();
         return typeof live?.getTokenCountAsync === 'function' ? text => live.getTokenCountAsync(text) : null;
     };
+    // Settings → Diagnostics (diagnostics.js): the report's parts, read when it is built. SillyTavern's
+    // version is the one its page shows (else its /version answer). Each module's `hooks.diagnostics`
+    // adds its own section.
+    const promptParts = typeof runtime.turn?.previewFit === 'function' ? () => runtime.turn.previewFit()
+        : typeof runtime.turn?.preview === 'function' ? () => runtime.turn.preview() : null;
+    const stVersion = async () => {
+        const shown = doc.querySelector?.('#version_display')?.textContent?.trim();
+        if (shown && shown !== 'SillyTavern') return shown;
+        const fetcher = (doc.defaultView ?? globalThis).fetch;
+        if (typeof fetcher !== 'function') return '';
+        const answer = await fetcher('/version');
+        const data = answer?.ok ? await answer.json() : null;
+        return data?.pkgVersion ? `SillyTavern ${data.pkgVersion}` : '';
+    };
+    const diagnostics = Object.freeze({
+        report: () => buildReport({
+            stVersion,
+            hostVersion: version || registry.hostVersion?.() || '',
+            modules: () => registry.modules().map(def => ({ id: def.id, name: def.name ?? def.id, version: def.version ?? '' })),
+            refusals: () => registry.refusals?.() ?? [],
+            features: () => runtime.features?.list?.() ?? [],
+            hostSettings: () => settings(),
+            settingsOf: id => settings(id),
+            promptParts,
+            problems: () => runtime.turn?.problems?.() ?? [],
+            save: () => ({ failing: store.failing?.(), dirty: store.dirty?.(), suspect: typeof store.suspect === 'function' ? store.suspect() : undefined }),
+            caught: caughtSoFar,
+            chat: () => liveCtx()?.chat ?? [],
+            chatOpen: () => Boolean(liveCtx()?.getCurrentChatId?.() ?? liveCtx()?.chatId),
+            hooks: () => registry.hookEntries?.('diagnostics') ?? [],
+        }),
+        fileName: () => reportFileName(),
+    });
     function openSettings(options = null) {
         const fold = typeof options?.fold === 'string' ? options.fold : null;
         overlay = openSettingsOverlay({
-            registry, settings, doc, sdk, features: runtime.features ?? null, fold,
-            promptParts: typeof runtime.turn?.previewFit === 'function' ? () => runtime.turn.previewFit()
-                : typeof runtime.turn?.preview === 'function' ? () => runtime.turn.preview() : null,
+            registry, settings, doc, sdk, features: runtime.features ?? null, fold, diagnostics,
+            promptParts,
             countTokens: countTokens(),
             onClose: () => { overlay = null; },
         });
@@ -483,6 +534,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         if (hudCheck) hudCheck.checked = hudOn(ctx.extensionSettings);
         mounts.screen.update();
         notes.refreshAll();
+        extras.refreshAll();
     }
 
     /**
@@ -502,6 +554,8 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         return Boolean(on);
     }
     const offs = [];
+    // Story Suite's console errors, kept for Diagnostics (once per page; the console still prints them).
+    offs.push(captureConsole());
     for (const name of ['head', 'committed']) offs.push(events.on(name, () => { if (!panel.hidden) tabHost?.refresh(); }));
     // A feature turned on or off: its screens, tabs, widgets and cards come and go; nothing else changes.
     for (const name of ['head', 'committed', 'turn']) offs.push(events.on(name, () => overlay?.refreshSize?.()));
@@ -548,6 +602,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         mounts,
         renderer,
         notes,
+        extras,
         savePoints,
         inspector,
         destroy() {
@@ -555,6 +610,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
             doc.removeEventListener?.('keydown', onKey);
             offs.splice(0).forEach(off => off?.());
             notes.destroy();
+            extras.destroy();
         },
     };
 }

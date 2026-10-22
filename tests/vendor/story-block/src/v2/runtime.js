@@ -15,19 +15,24 @@
 //   their two switches from Story Block's preroll and extractor features.
 // * sdk.callModel (MODULES §G, model-call.js) over the `callModel` option (the one the assist helpers
 //   use), else SillyTavern's own (stModelCall): one call per module at a time, a time limit
-//   (`modelTimeoutMs`), FEATURE_OFF while the calling module's feature is off.
+//   (`modelTimeoutMs`), FEATURE_OFF while the calling module's feature is off. A call on the chat's
+//   connection (the assist's too) is marked as our own, so the turn never takes its prompt for the
+//   reply's; sdk.callModel's waits while a reply is being built or awaited (the assist's run inside the
+//   turn and do not). A profile's call goes at once.
 
-import { createChatFile } from './chat-file.js';
+import { KEEPALIVE_MAX, createChatFile } from './chat-file.js';
 import { createCommandBus as realBus } from './commands.js';
 import { CORE_MODULE_ID, createCoreModule } from './domains/index.js';
 import { WALLET_KEY } from './domains/money.js';
 import { SETTING as ASSIST_SETTING, createAssistPart } from './assist/index.js';
 import { CORE_FEATURE, createFeatureStore } from './features.js';
 import { applyStart, createPacksPart } from './packs/index.js';
-import { createModelCalls, stModelCall } from './model-call.js';
+import { createModelCalls, createOwnCalls, profileName, stModelCall } from './model-call.js';
+import { stCallModel } from './assist/st-adapter.js';
 import { carryRecord } from './persist.js';
 import { createRegistry } from './registry.js';
-import { createEvents, createSdk, createSettings, newId } from './sdk.js';
+import { MAX_CHANGE_LINES, createEvents, createSdk, createSettings, newId } from './sdk.js';
+import { displayLines } from './extras.js';
 import { createRewind } from './rewind.js';
 import { createStore as realStore } from './store.js';
 import { createTurn, substituteNames } from './turn.js';
@@ -35,8 +40,10 @@ import { createTurn, substituteNames } from './turn.js';
 export const VERSION = '2.0.0-alpha.2';
 
 /**
- * Settings where Story Block's `currency` (and `currencyShort`, `currencyPlural`) fall back to
- * `suggest()` → { name, short, plural? } | null when the reader has not set them. Same interface as createSettings().
+ * Settings where Story Block's `currency` (and `currencyShort`, `currencyPlural`, `coins`) fall back to
+ * `suggest()` → { name, short, plural?, coins? } | null when the reader has not set them: the reader's
+ * coins win, then the pack's (only with the pack's currency: a currency the reader named keeps no pack
+ * coins), then none. Same interface as createSettings().
  */
 export function withPackCurrency(base, suggest) {
     const settings = id => {
@@ -50,6 +57,8 @@ export function withPackCurrency(base, suggest) {
             values.currency = offer.name.trim();
             if (!Object.hasOwn(stored, 'currencyShort') || !String(stored.currencyShort ?? '').trim()) values.currencyShort = String(offer.short ?? '');
             if (!Object.hasOwn(stored, 'currencyPlural') || !String(stored.currencyPlural ?? '').trim()) values.currencyPlural = String(offer.plural ?? '');
+            const ownCoins = Array.isArray(stored.coins) && stored.coins.length > 0;
+            if (!ownCoins && Array.isArray(offer.coins) && offer.coins.length) values.coins = structuredClone(offer.coins);
         }
         return values;
     };
@@ -127,6 +136,16 @@ export function storeSaving({ ctx, live = () => ctx, fetch = null, onSaveError =
     }
     const memoKey = chatId => `${MEMO_PREFIX}${chatId}`;
     return {
+        /**
+         * Would a save of the open chat now go out with keepalive (a body of at most KEEPALIVE_MAX)? Measured
+         * only when asked (the page is closing). True where this page does not write the file itself.
+         */
+        keepaliveFits() {
+            if (!file.where()) return true;
+            try {
+                return JSON.stringify({ chat: [context().chatMetadata ?? {}, ...(ctx.chat ?? [])] }).length + 256 <= KEEPALIVE_MAX;
+            } catch { return false; }
+        },
         chat: () => ctx.chat,
         chatId: () => (typeof ctx.getCurrentChatId === 'function' ? ctx.getCurrentChatId() : ctx.chatId),
         place: () => file.where(),
@@ -271,25 +290,50 @@ export function markUsed(metadata, chat) {
 }
 
 /**
- * On a page: the unsaved story goes out when the page is closed (keepalive), at once even while an earlier
- * save is still on its way; the browser asks first while saves fail or one is on its way. See storeSaving.
+ * On a page: the unsaved story goes out as early as the page lets it (see storeSaving).
+ * * Hidden (`visibilitychange` to hidden: a tab switch, a phone putting the browser away) or `pagehide`:
+ *   the newest state is saved at once, with keepalive, past a save still on its way. A page often goes
+ *   from hidden to gone without another event, on a phone always.
+ * * `beforeunload`: the same, and the browser asks first while saves fail, while one is still on its way,
+ *   or when the body is too big to go out with keepalive (`fits()` false: more than 64 KiB, most real
+ *   chats), since then the save is cut off with the page. SillyTavern 1.19 has no way to write part of a
+ *   chat file, so a smaller keepalive request is not possible.
  */
-export function saveOnUnload(store, page) {
+export function saveOnUnload(store, page, { fits = () => true } = {}) {
     if (typeof page?.addEventListener !== 'function') return () => {};
+    const doc = page.document ?? null;
+    const urgent = (options = {}) => (store.saveUrgent ?? store.saveSoon)?.call(store, { keepalive: true, ...options });
     const onUnload = event => {
         // A1-4: a save still on its way (the server has not answered) would hold a queued one until the
-        // page is gone: the newest state goes out at once past it, and the browser asks first, as it does
-        // while saves are failing (the one on its way may still land after it, or be cut off by the close).
+        // page is gone: the newest state goes out at once past it.
         const inFlight = store.inFlight?.() === true;
-        if (!store.dirty?.() && !inFlight) return;
-        if (store.dirty?.()) (store.saveUrgent ?? store.saveSoon)?.call(store, { keepalive: true });
-        if (store.failing?.() || inFlight) {
+        const dirty = store.dirty?.() === true;
+        if (!dirty && !inFlight) return;
+        if (dirty) urgent();
+        let big = false;
+        if (dirty) {
+            try { big = fits() === false; } catch { big = true; }
+        }
+        if (store.failing?.() || inFlight || big) {
             event.preventDefault?.();
             event.returnValue = true;
         }
     };
+    // The page may be going away (pagehide), so a save on its way is sent again with keepalive.
+    const onHide = () => {
+        if (store.dirty?.() === true) urgent({ force: true });
+    };
+    const onVisibility = () => {
+        if (doc?.visibilityState === 'hidden' && store.dirty?.() === true) urgent();
+    };
     page.addEventListener('beforeunload', onUnload);
-    return () => page.removeEventListener?.('beforeunload', onUnload);
+    page.addEventListener('pagehide', onHide);
+    doc?.addEventListener?.('visibilitychange', onVisibility);
+    return () => {
+        page.removeEventListener?.('beforeunload', onUnload);
+        page.removeEventListener?.('pagehide', onHide);
+        doc?.removeEventListener?.('visibilitychange', onVisibility);
+    };
 }
 
 /**
@@ -298,7 +342,7 @@ export function saveOnUnload(store, page) {
  * profile, system, signal }) → text (the assist helpers' and sdk.callModel's model call), modelTimeoutMs? (sdk.callModel's default limit),
  * live?() (SillyTavern's live getContext(); default: globalThis.SillyTavern's, else ctx), fetch?, page? (for
  * beforeunload; default: globalThis.window) }) → { registry, settings, features, store, bus, events, sdk, turn,
- * markReady, initial, packs, setDialog }. `features` is createFeatureStore() (the reader's choices). `ctx` is SillyTavern's context (or the testkit's fake); `packs` a
+ * markReady, initial, packs, setDialog, ownCalls }. `ownCalls` marks Story Suite's own model calls on the chat's connection (model-call.js). `features` is createFeatureStore() (the reader's choices). `ctx` is SillyTavern's context (or the testkit's fake); `packs` a
  * createPacksPart() result (default: one over ctx.extensionSettings).
  */
 export function createRuntime({
@@ -321,6 +365,17 @@ export function createRuntime({
     let sdk = null;
     let bus = null;
     let turn = null;
+    // What a reply's display lines (Choices, Inner chatter; extras.js) show, read from its text with the
+    // same cap the capture read it with (the host's maxChangeLines).
+    const display = mes => {
+        const cap = settings()?.maxChangeLines;
+        return displayLines(mes, { entryOf: word => registry.capture(word), max: Number.isInteger(cap) && cap > 0 ? cap : MAX_CHANGE_LINES });
+    };
+    // Our own calls on the chat's connection (model-call.js): marked for the turn's prompt handlers.
+    const ownCalls = createOwnCalls();
+    const marked = base => (prompt, options = {}) => (profileName(options?.profile)
+        ? base(prompt, options)
+        : ownCalls.around(prompt, () => base(prompt, options)));
     if (core) {
         registry.register(createCoreModule({
             hooks: name => registry.hooks(name),
@@ -328,6 +383,8 @@ export function createRuntime({
             // A failing item.define hook goes to the Problems list (the turn is made below).
             problem: entry => turn?.report(entry),
             settings: () => settings(CORE_MODULE_ID),
+            // The chatter the reader may send back to the story (its setting): the replies and how to read one.
+            extras: { chat: () => ctx.chat, display },
             version: VERSION,
             packs: packPart,
             // Due events are the host's own system cues: straight to the bus (the public sdk only runs
@@ -359,7 +416,7 @@ export function createRuntime({
                     const entry = registry.capture(kind);
                     return Boolean(entry) && !entry.off;
                 },
-                ...(callModel ? { callModel } : {}),
+                callModel: marked(callModel ?? stCallModel),
             }),
         }));
     }
@@ -376,15 +433,17 @@ export function createRuntime({
             return [`The ${name} check failed: ${error?.message ?? error}`];
         }
     });
-    const store = createStore({ ...storeSaving({ ctx, live, fetch, onSaveError, storage: pageStorage(page) }), validate, scratch: name => registry.scratch(name) });
-    saveOnUnload(store, page);
+    const saving = storeSaving({ ctx, live, fetch, onSaveError, storage: pageStorage(page) });
+    const store = createStore({ ...saving, validate, scratch: name => registry.scratch(name) });
+    saveOnUnload(store, page, { fits: saving.keepaliveFits });
     bus = createCommandBus({ store, registry, settings });
     events = createEvents();
     const rewind = createRewind({ ctx, store, events, ...(branch ? { branch } : {}) });
     let dialogOpener = null;
     let dialogCurrent = null;
     const modelCalls = createModelCalls({
-        call: callModel ?? stModelCall,
+        call: marked(callModel ?? stModelCall),
+        gate: { whenIdle: () => turn?.whenIdle?.() ?? Promise.resolve() },
         featureOn: id => registry.featureOn(id),
         featureModule: id => (registry.features?.() ?? []).find(feature => feature?.id === id)?.moduleId ?? null,
         ...(modelTimeoutMs !== undefined ? { timeoutMs: modelTimeoutMs } : {}),
@@ -394,11 +453,11 @@ export function createRuntime({
         dialogCurrent: () => dialogCurrent?.() ?? null, reread: index => turn?.reread(index), callModel: modelCalls.callModel });
     sdk = made.sdk;
     const initial = () => initialWithStart(registry);
-    turn = createTurn({ ctx, live, store, bus, registry, settings, events, onBlocked, initial, ...(notify ? { notify } : {}) });
+    turn = createTurn({ ctx, live, store, bus, registry, settings, events, onBlocked, initial, ownPrompt: eventData => ownCalls.owns(eventData), ...(notify ? { notify } : {}) });
     // The UI (ui-host.js) plugs its dialog mount in here, for sdk.dialog.open (and .current).
     const setDialog = (fn, current = null) => {
         dialogOpener = typeof fn === 'function' ? fn : null;
         dialogCurrent = typeof current === 'function' ? current : null;
     };
-    return { registry, settings, features, store, bus, events, sdk, turn, markReady: made.markReady, initial, packs: packPart, setDialog };
+    return { registry, settings, features, store, bus, events, sdk, turn, markReady: made.markReady, initial, packs: packPart, setDialog, display, ownCalls };
 }

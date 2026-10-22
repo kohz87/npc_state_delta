@@ -235,6 +235,8 @@ export function createStorySuiteV2Adapter({
     aliveMs = HOST_ALIVE_MS,
     watchMs = SECTION_WATCH_MS,
     logger = console,
+    // True while the reader keeps the calendar in Delta (Source of truth: calendar "mine"): no story clock.
+    calendarOwn = () => false,
 } = {}) {
     let started = false;
     let pollTimer = null;
@@ -596,10 +598,27 @@ export function createStorySuiteV2Adapter({
         const byKey = Object.fromEntries(cast.map(entry => [entry.key, entry]));
         const defs = part.defs();
         const blocks = [];
+        // The present dossiers' entries, in dossier order; then (beta) the entries of people the story's
+        // change lines gave meters who have no dossier yet (no scan has made one), straight from the
+        // state: those Story Block's scene has here, or all of them when the scene cannot say.
+        const shown = [];
         for (const npc of presentList()) {
             const who = part.identify(byKey, npc.name);
             const entry = who && Object.hasOwn(byKey, who.key) ? byKey[who.key] : null;
-            if (!entry) continue;
+            if (entry && !shown.includes(entry)) shown.push(entry);
+        }
+        let scene = null;
+        try {
+            const list = sdkRef.query('scene.present');
+            scene = Array.isArray(list) ? list.map(name => part.identify(byKey, String(name ?? ''))?.key).filter(Boolean) : null;
+        } catch { scene = null; }
+        for (const entry of cast) {
+            if (shown.includes(entry) || dossierOf(entry.name)) continue;
+            if (scene && !scene.includes(entry.key)) continue;
+            shown.push(entry);
+        }
+        for (const entry of shown) {
+            const npc = { name: entry.name };
             const bars = entry.bars.map(bar => meterBarHtml(defs.find(def => def.id === bar.id) ?? bar, bar.value, bar.stage, bar)).join('');
             const lines = [];
             if (entry.rank) lines.push(`<p class="npc-state-delta-v2-rank"><b>${escapeHtml(entry.rank)}</b></p>`);
@@ -790,6 +809,45 @@ export function createStorySuiteV2Adapter({
         return lines;
     }
 
+    // ---- what Delta sends on its own (Story Block's prompt size; its `ownPrompt` hook, SPEC §5) ----
+
+    // Delta's live dossier and, with one-pass capture on, its instruction go out under Delta's own prompt
+    // keys, so the host counts them toward its share of the context and shows them in its prompt size and
+    // "Show what's sent". The same texts Delta's own What's sent shows (index.js nextReplyTexts); nothing
+    // is built twice for the prompt and nothing here changes what is sent.
+    function ownPrompt() {
+        if (!enabled()) return [];
+        let preview = null;
+        try { preview = suiteApi?.manage?.preview?.(); } catch { return []; }
+        const parts = Array.isArray(preview?.parts) ? preview.parts : [];
+        return parts
+            .filter(item => typeof item?.text === 'string' && item.text)
+            .map(item => ({ label: String(item.label ?? MODULE_NAME), text: item.text }));
+    }
+
+    // ---- the story's date (Story Director's clock, read only) ----
+
+    // Story Director's `director.time` minutes and `director.calendar` config while hosted, or null: no
+    // host, no Story Director (the queries are unknown), its clock not set yet, or the reader keeps the
+    // calendar in Delta (`calendarOwn`). calendar.js turns it
+    // into a date on Delta's own calendar (storyClockDate) when the two calendars agree.
+    function storyClock() {
+        if (!hosted || typeof sdkRef?.query !== 'function') return null;
+        try { if (calendarOwn?.() === true) return null; } catch { return null; }
+        let time = null;
+        let calendar = null;
+        try {
+            time = sdkRef.query('director.time', {});
+            if (!Number.isSafeInteger(time?.minutes)) return null;
+            calendar = sdkRef.query('director.calendar', {});
+        } catch {
+            return null;
+        }
+        if (!calendar || typeof calendar !== 'object' || !Array.isArray(calendar.months)) return null;
+        const months = calendar.months.map(month => ({ name: String(month?.name ?? ''), days: Number(month?.days) }));
+        return { minutes: time.minutes, calendar: { era: String(calendar.era ?? ''), months, leapYears: calendar.leapYears === true } };
+    }
+
     // ---- the module definition ----
 
     const definition = Object.freeze({
@@ -825,8 +883,9 @@ export function createStorySuiteV2Adapter({
             section: (el, api) => mountSection(el, presetsBlock(api)),
         },
         // Story Block's Settings → Diagnostics (its optional hooks.diagnostics; an older host ignores it):
-        // the scanner's route, profile, call counts and last outcome (index.js scannerReport).
-        hooks: Object.freeze({ diagnostics: () => diagnosticsLines() }),
+        // the scanner's route, profile, call counts and last outcome (index.js scannerReport),
+        // and what Delta sends under its own prompt keys (`ownPrompt`, Story Block's prompt size).
+        hooks: Object.freeze({ diagnostics: () => diagnosticsLines(), ownPrompt: () => ownPrompt() }),
         screens: [metersCardScreen, castScreen],
         widgets: { [CAST_WIDGET]: castWidget },
         tabs: [{
@@ -1158,6 +1217,10 @@ export function createStorySuiteV2Adapter({
             return entries ? entryFor(entries, npc) : null;
         },
         sliceView,
+        /** While hosted: Story Director's clock, { minutes, calendar: { era, months, leapYears } }, or null. */
+        storyClock,
+        /** What Delta sends with the next reply under its own keys: [{ label, text }] (the `ownPrompt` hook). */
+        ownPrompt,
         /** While hosted: the names in Story Block's scene (`scene.present`), or null when it cannot answer. */
         scenePresent: () => {
             if (!hosted || typeof sdkRef?.query !== 'function') return null;

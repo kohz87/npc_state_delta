@@ -2,7 +2,6 @@
 import {
     calendarFingerprint,
     calendarPromptContext,
-    currentCalendarDate,
     deriveAgeFromBirthDate,
     deriveBirthDateFromAgeParts,
     deterministicCalendarBirthday,
@@ -10,6 +9,7 @@ import {
     getActiveCalendarConfig,
     normalizeCalendarConfig,
     normalizeCalendarDate,
+    storyCurrentDate,
 } from './calendar.js';
 
 const BIRTH_DATE_SOURCES = Object.freeze(['generated', 'established']);
@@ -51,7 +51,7 @@ function exactAge(value) {
 }
 
 function groundedReferenceDate(calendar, referenceDate = null) {
-    return normalizeCalendarDate(referenceDate, calendar) || currentCalendarDate(calendar);
+    return normalizeCalendarDate(referenceDate, calendar) || storyCurrentDate(calendar);
 }
 
 export function normalizeBirthDate(value, config = undefined) {

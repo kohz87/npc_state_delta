@@ -1,17 +1,19 @@
-// The reader's rank ladder (MODULES §F86, §F91; PACKS.md "Ranks"): the names a world gives its ranks,
-// lowest first, typed in Story Block's settings (Terms: Rank ladder), one per line ("Soul Class I" …
-// "Soul Class IX", or "F", "E" … "SSS"). Pure.
+// The reader's rank ladder (MODULES §F86, §F91, §F105; PACKS.md "Ranks"): the names a world gives its
+// ranks, lowest first, one per line ("Soul Class I" … "Soul Class IX", or "F", "E" … "SSS"). Pure.
 //
-// The ladder is read where every module reads ranks: Story Block's `packs.content({ kind: 'ranks' })`
-// answers with the reader's ladder when it is set, instead of the packs', so Story Director's quest ranks,
-// RPG Battle's party and foe ranks and Story Block's own coin budget all follow it, whichever of them is
-// installed. Empty: the first enabled pack's ladder, else each module's built-in one.
+// The lines are a module's setting (RPG Battle's Terms: Rank ladder and Levels per rank; levels are what
+// a ladder bands, so it lives with the levels), handed to Story Block by that module's `ranks.reader`
+// hook. Story Block's `packs.content({ kind: 'ranks' })` answers with this ladder instead of the packs',
+// so Story Director's quest ranks, RPG Battle's party and foe ranks and Story Block's own coin budget
+// all follow it. No such module (or no lines): the first enabled pack's ladder, else each module's own.
 //
-// * A line is a rank's name, or its name and the first level it starts at ("Soul Class II: 11"). The
-//   levels are kept only when every line gives one and they rise; then a rank reaches up to the level
-//   before the next one starts (the last one to RANK_TOP_LEVEL). Otherwise the ranks have no levels of
-//   their own and each module bands them as it does any ladder (RPG Battle by its tiers or its
-//   built-in bands).
+// * A line is a rank's name, or its name and the first level it starts at ("Soul Class II: 11").
+//   With Levels per rank (`perRank`, e.g. 10): a line's own first level wins when it rises above the
+//   rank before; any other rank starts `perRank` levels after the one before (the first at 1), so
+//   "Soul Class I" is levels 1–10 and "Soul Class II" 11–20. Without it, the levels are kept only when
+//   every line gives one and they rise. Either way a rank reaches up to the level before the next one
+//   starts (the last one to RANK_TOP_LEVEL). Otherwise the ranks have no levels of their own and each
+//   module bands them as it does any ladder (RPG Battle by its tiers or evenly to its cap).
 // * The numbers otherwise stay the pack's: a rank at the place of one of the first pack's ranks keeps
 //   that rank's levels (when the lines give none) and its reward range, so renaming a ladder never
 //   changes what quests pay. A rank past the pack's ladder has no reward of its own; modules give one by
@@ -56,7 +58,7 @@ export function rankLines(rows) {
  * The reader's ladder as rank records (see above), lowest first, or [] when the setting is empty.
  * `pack`: the first enabled pack's ranks (packs.content records of one pack), for their numbers.
  */
-export function readerRanks(rows, pack = []) {
+export function readerRanks(rows, pack = [], { perRank = 0 } = {}) {
     const lines = rankLines(rows);
     if (!lines.length) return [];
     const ids = [];
@@ -69,15 +71,36 @@ export function readerRanks(rows, pack = []) {
                 : `R${index + 1}`;
         ids.push(taken(id) ? `R${index + 1}` : id);
     }
-    const rising = lines.every((line, index) => line.from !== null && (index === 0 || line.from > lines[index - 1].from));
+    const starts = rankStarts(lines, perRank);
     const theirs = Array.isArray(pack) ? pack : [];
     return lines.map((line, index) => {
-        const own = rising ? [line.from, index + 1 < lines.length ? lines[index + 1].from - 1 : RANK_TOP_LEVEL] : null;
+        const own = starts ? [starts[index], index + 1 < lines.length ? starts[index + 1] - 1 : RANK_TOP_LEVEL] : null;
         const at = theirs[index];
         const levels = own ?? (Array.isArray(at?.levels) ? [...at.levels] : null);
         const reward = Array.isArray(at?.reward) ? [...at.reward] : null;
         return { id: ids[index], title: line.title, ...(levels ? { levels } : {}), ...(reward ? { reward } : {}), pack: null, reader: true };
     });
+}
+
+/**
+ * The first level of each line (see above), rising, or null when the lines give no levels: with
+ * `perRank` every line has one (its own when it rises, else `perRank` after the one before); without
+ * it, only when every line gives one and they rise.
+ */
+export function rankStarts(lines, perRank = 0) {
+    const per = Number.isInteger(perRank) && perRank > 0 ? Math.min(perRank, RANK_TOP_LEVEL) : 0;
+    if (!per) {
+        const rising = lines.length > 0 && lines.every((line, index) => line.from !== null && (index === 0 || line.from > lines[index - 1].from));
+        return rising ? lines.map(line => line.from) : null;
+    }
+    const out = [];
+    for (const [index, line] of lines.entries()) {
+        const before = out[index - 1];
+        const own = line.from !== null && (index === 0 || line.from > before) ? line.from : null;
+        out.push(Math.min(RANK_TOP_LEVEL, own ?? (index === 0 ? 1 : before + per)));
+    }
+    // Held at the top, a rank would start where the one before it does: the ladder stops below it.
+    return out.every((start, index) => index === 0 || start > out[index - 1]) ? out : out.map((start, index) => Math.min(start, RANK_TOP_LEVEL - lines.length + index + 1));
 }
 
 /** The first pack's ranks out of `packs.content({ kind: 'ranks' })`'s list (every pack's, one after another). */

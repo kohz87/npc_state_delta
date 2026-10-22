@@ -57,6 +57,20 @@ export const STRINGS = deepFreeze({
         inspectorDescribe: 'A read-only Inspector screen: any reply\'s story state as a tree you can search, what changed since the reply before, its receipts and its problems.',
         savepoints: 'Save points',
         savepointsDescribe: 'A Save point button on Home keeps the moment as a named branch of the chat, listed with Return here.',
+        choices: 'Choices',
+        choicesDescribe: 'The story offers 2 to 4 short next moves as buttons under the latest reply. A click only puts the words in your message box; you still send, edit or ignore them.',
+        chatter: 'Inner chatter',
+        chatterDescribe: 'Short unspoken thoughts of the people in the scene, folded away under each reply. Kept out of the story text and, unless you say so, out of later prompts.',
+    },
+
+    // Choices and Inner chatter under a reply (src/v2/extras.js, MODULES §F115).
+    extras: {
+        choices: 'Choices',
+        choiceTitle: 'Put this in your message box (it is not sent)',
+        chatter: 'Inner chatter',
+        dossierTitle: 'Open {name}\'s dossier',
+        inPrompt: 'Send the last reply\'s thoughts back to the story',
+        inPromptHelp: 'Off: inner chatter never reaches a later prompt, so it cannot steer the story. On: the thoughts of the reply you answered go with your next message as one short note, dropped first when the notes are full.',
     },
 
     // The small notes under a reply (MODULES §F40).

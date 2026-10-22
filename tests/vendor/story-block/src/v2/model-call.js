@@ -11,6 +11,11 @@
 // time taken and the outcome code: never the prompt, the answer, an error's words or anything of the
 // profile's (its address, key or model).
 //
+// The reader's reply always comes first on the chat's connection (generateRaw runs SillyTavern's
+// prompt-ready events, which the turn reads): a call there waits while a reply is being built or awaited
+// (the `gate`, turn.js whenIdle), and its prompt is marked as our own (createOwnCalls) so the turn never
+// takes it for the reply's. A profile's call (sendRequest) runs none of that and goes at once.
+//
 // Everything of SillyTavern is read when called, never at import.
 
 import { answerText, findProfile } from './assist/st-adapter.js';
@@ -143,6 +148,59 @@ export async function stModelCall(prompt, { maxTokens = MODEL_CALL_TOKENS, profi
     return answerText(out);
 }
 
+// The part of a prompt that SillyTavern's macro pass (substituteParams) leaves as it is: its longest
+// stretch between macros, trimmed ('' when there is none worth matching).
+const MACRO = /\{\{[\s\S]*?\}\}|<(?:USER|BOT|CHAR|CHARIFNOTGROUP|GROUP)>/gi;
+export function promptKey(prompt) {
+    const pieces = String(prompt ?? '').split(MACRO).flatMap(piece => piece.split(/\r?\n/)).map(piece => piece.trim());
+    const longest = pieces.reduce((best, piece) => (piece.length > best.length ? piece : best), '');
+    return longest.length >= 8 ? cutAt(longest, 400) : '';
+}
+const contentOf = content => (typeof content === 'string' ? content
+    : Array.isArray(content) ? content.map(part => (typeof part === 'string' ? part : typeof part?.text === 'string' ? part.text : '')).join('\n') : '');
+
+/**
+ * Our own calls on the chat's connection, so the turn can tell their prompt from the reply's:
+ * { around(prompt, fn) → fn()'s result (the call is ours while fn runs), owns(eventData) → true for the
+ * prompt-ready event (CHAT_COMPLETION_PROMPT_READY { chat } or GENERATE_AFTER_COMBINE_PROMPTS { prompt })
+ * of one of them, size() }. Each call's prompt is matched once: a raw call's chat is at most three
+ * messages (system, user, prefill) and holds the prompt's key (promptKey); a text prompt holds it. A prompt
+ * too short for a key is taken by position, as the first such short chat after it started (never a text
+ * prompt, which may be the reply's).
+ */
+export function createOwnCalls() {
+    const live = new Map();
+    let next = 0;
+    return {
+        async around(prompt, fn) {
+            next += 1;
+            const id = next;
+            live.set(id, { key: promptKey(prompt), seen: false });
+            try {
+                return await fn();
+            } finally {
+                live.delete(id);
+            }
+        },
+        owns(eventData) {
+            if (!live.size || !eventData || eventData.dryRun === true) return false;
+            const chat = Array.isArray(eventData.chat) ? eventData.chat : null;
+            const text = chat ? (chat.length <= 3 ? chat.map(message => contentOf(message?.content)).join('\n') : null)
+                : typeof eventData.prompt === 'string' ? eventData.prompt : null;
+            if (text === null) return false;
+            for (const call of live.values()) {
+                if (call.seen) continue;
+                if (call.key ? text.includes(call.key) : chat !== null) {
+                    call.seen = true;
+                    return true;
+                }
+            }
+            return false;
+        },
+        size: () => live.size,
+    };
+}
+
 const now = () => (typeof globalThis.performance?.now === 'function' ? globalThis.performance.now() : Date.now());
 const intIn = (value, min, max, fallback) => (Number.isFinite(value) && value > 0 ? Math.min(max, Math.max(min, Math.round(value))) : fallback);
 
@@ -150,13 +208,14 @@ const intIn = (value, min, max, fallback) => (Number.isFinite(value) && value > 
  * The rules around a model call. `deps`: { call(prompt, { maxTokens, profile, system, signal }) → text
  * (stModelCall by default; the runtime's `callModel` option, the testkit's fake), featureOn(id) → bool,
  * featureModule(id) → the module id that declares it (or null), timeoutMs (MODEL_CALL_TIMEOUT_MS), log(line),
- * timer ({ setTimeout, clearTimeout }) }.
+ * timer ({ setTimeout, clearTimeout }), gate?: { whenIdle() → Promise } (a call on the chat's connection
+ * waits for it: no reply in progress; a profile's call does not) }.
  * Returns { callModel(request), busy(module) }: `callModel({ profile, system, prompt, maxTokens, signal,
  * feature, module, timeoutMs })` → Promise<{ ok: true, text, error: null } | { ok: false, text: '', error
  * (a MODEL_CALL_ERRORS code), message }>, never rejecting. The module is `module`, else the owner of
  * `feature`, else '' (callers that name neither share one slot).
  */
-export function createModelCalls({ call = stModelCall, featureOn = () => true, featureModule = () => null, timeoutMs = MODEL_CALL_TIMEOUT_MS, log = line => console.info(line), timer = globalThis } = {}) {
+export function createModelCalls({ call = stModelCall, featureOn = () => true, featureModule = () => null, timeoutMs = MODEL_CALL_TIMEOUT_MS, log = line => console.info(line), timer = globalThis, gate = null } = {}) {
     const inFlight = new Set();
     const defaultTimeout = intIn(timeoutMs, MODEL_CALL_TIMEOUT_MIN, MODEL_CALL_TIMEOUT_MAX, MODEL_CALL_TIMEOUT_MS);
     const fail = (error, message) => ({ ok: false, text: '', error, message });
@@ -204,6 +263,11 @@ export function createModelCalls({ call = stModelCall, featureOn = () => true, f
             });
             const answer = (async () => {
                 try {
+                    // The chat's connection waits for a reply in progress (the time limit and signal still hold).
+                    if (!profile && typeof gate?.whenIdle === 'function') {
+                        await Promise.race([gate.whenIdle(), new Promise(resolve => inner.signal.addEventListener('abort', resolve, { once: true }))]);
+                        if (inner.signal.aborted) return fail(MODEL_CALL_ERRORS.ABORTED, MODEL_CALL_TEXT.aborted);
+                    }
                     const text = await call(req.prompt, { maxTokens, profile, system: typeof req.system === 'string' ? req.system : '', signal: inner.signal });
                     const out = typeof text === 'string' ? text : answerText(text);
                     return out.trim() ? { ok: true, text: out, error: null } : fail(MODEL_CALL_ERRORS.EMPTY, MODEL_CALL_TEXT.empty);

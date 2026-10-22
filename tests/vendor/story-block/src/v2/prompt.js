@@ -19,6 +19,9 @@
 // prompt has (the context size less the reply's length; `contextShare` percent, default 40). Only the
 // tail is cut for it, never below MIN_TAIL_BUDGET: the static part stays byte-identical reply to reply.
 // When the static part alone is over the share, `fit.tooSmall` says so (turn.js tells the reader).
+// What a module sends on its own (NPC State Delta's dossiers, under its own prompt keys; its
+// `ownPrompt` hook says what, turn.js ownPrompt) counts toward the share too: the tail gets what the
+// static part and that leave, still never below MIN_TAIL_BUDGET. It never cuts the static part.
 
 export const TAIL_ORDER = Object.freeze(['scene', 'inventory', 'party', 'combat', 'trade', 'director']);
 export const DEFAULT_TAIL_BUDGET = 1500;
@@ -130,21 +133,23 @@ function happenedLines(lines, budget) {
 /**
  * How Story Suite fits the context: `context` = { size, reply, room } (the context size the reader set, the
  * reply's length or null, the tokens the prompt may take; turn.js contextRoom) or null when not known,
- * `staticTokens` the static part's size, `settings` the host settings ({ tailBudget, contextShare }).
- * → { size, reply, room, percent, share, static, budget, tooSmall } or null (no context known: the tail
- * budget is the setting's).
+ * `staticTokens` the static part's size, `settings` the host settings ({ tailBudget, contextShare }),
+ * `ownTokens` what modules send on their own (their `ownPrompt` hooks; 0 by default).
+ * → { size, reply, room, percent, share, static, own, budget, tooSmall } or null (no context known: the
+ * tail budget is the setting's).
  */
-export function contextFit(context, staticTokens, settings = {}) {
+export function contextFit(context, staticTokens, settings = {}, ownTokens = 0) {
     const tail = Number.isInteger(settings?.tailBudget) && settings.tailBudget > 0 ? settings.tailBudget : DEFAULT_TAIL_BUDGET;
     const room = Number(context?.room);
     if (!Number.isFinite(room) || room <= 0) return null;
     const asked = settings?.contextShare;
     const percent = Number.isInteger(asked) ? Math.min(CONTEXT_SHARE_MAX, Math.max(CONTEXT_SHARE_MIN, asked)) : DEFAULT_CONTEXT_SHARE;
     const share = Math.floor(room * percent / 100);
-    const budget = Math.min(tail, Math.max(MIN_TAIL_BUDGET, share - staticTokens));
+    const own = Number.isFinite(Number(ownTokens)) && Number(ownTokens) > 0 ? Math.round(Number(ownTokens)) : 0;
+    const budget = Math.min(tail, Math.max(MIN_TAIL_BUDGET, share - staticTokens - own));
     const size = Number.isFinite(Number(context.size)) && Number(context.size) > 0 ? Math.round(Number(context.size)) : Math.round(room);
     const reply = Number.isFinite(Number(context.reply)) && Number(context.reply) > 0 ? Math.round(Number(context.reply)) : null;
-    return { size, reply, room: Math.round(room), percent, share, static: staticTokens, budget, tooSmall: staticTokens > share };
+    return { size, reply, room: Math.round(room), percent, share, static: staticTokens, own, budget, tooSmall: staticTokens > share };
 }
 
 /** What the reader is told when the static part alone is over the share (`fit` from contextFit). */
@@ -163,15 +168,16 @@ export function contextNotice(fit) {
  * - `cues` (optional): { [moduleId]: string[] } extra required tail lines (beforeGenerate hooks).
  * - `substitute` (optional): text → text, run on every text before it is counted (turn.js fills in
  *   `{{user}}` and `{{char}}` with it).
+ * - `ownTokens` (optional): what modules send on their own this reply (contextFit), 0 by default.
  * Returns { staticText, tailText, parts: [{ module, label, place, text, tokens, dropped? }],
  * problems, fit (contextFit, or null) }. `parts` is what the What's-sent preview lists, in prompt order.
  */
-export function assemble({ registry, view, untold = [], settings = {}, cues = {}, substitute = null, context = null }) {
+export function assemble({ registry, view, untold = [], settings = {}, cues = {}, substitute = null, context = null, ownTokens = 0 }) {
     const problems = [];
     const fill = typeof substitute === 'function' ? text => String(substitute(text) ?? '') : text => text;
     const statics = staticParts(registry, problems).map(part => ({ ...part, text: fill(part.text) }));
     const staticText = statics.map(part => part.text).join('\n\n');
-    const fitted = contextFit(context, estimateTokens(staticText), settings);
+    const fitted = contextFit(context, estimateTokens(staticText), settings, ownTokens);
     const total = fitted ? fitted.budget
         : Number.isInteger(settings?.tailBudget) && settings.tailBudget > 0 ? settings.tailBudget : DEFAULT_TAIL_BUDGET;
 

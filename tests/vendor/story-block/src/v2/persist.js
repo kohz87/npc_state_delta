@@ -587,7 +587,7 @@ export function createSaver({
                 return 'moved';
             }
             token = verify?.before?.();
-            const trip = { chatId: now?.chatId, renamed: false };
+            const trip = { chatId: now?.chatId, renamed: false, goal };
             sending = trip;
             // After a timeout of this chat's write, this one is stamped, so a read-back can tell it from the
             // late one (startRechecks).
@@ -686,9 +686,12 @@ export function createSaver({
          * A1-4: the page is closing. With a save of the open chat still on its way, the newest state goes
          * out at once (with `options`, e.g. keepalive), not behind it; it is stamped and the chat is
          * suspect, as after a timeout (the page may stay). Otherwise as saveSoon. Never throws.
+         * A save on its way that already carries the newest change is not sent twice, unless `force`
+         * (the page is going away and may cut that request off).
          */
-        urgent(options = {}) {
+        urgent({ force = false, ...options } = {}) {
             if (!sending || version === saved || !latest) return this.saveSoon(options);
+            if (!force && sending.goal === version) return Promise.resolve(false);
             const now = latest;
             const verdict = typeof check === 'function' ? check(now) : '';
             if (verdict) return this.saveSoon(options);

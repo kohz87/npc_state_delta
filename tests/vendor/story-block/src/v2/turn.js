@@ -4,7 +4,8 @@
 // flush pending saves, let modules add cues (beforeGenerate), collect the untold receipts and
 // assemble the two prompt texts; the static part goes in-prompt, this reply's part in-chat at
 // depth 0. The interceptor's context size holds them to a share of it (prompt.js contextFit): the
-// tail is cut to fit, and when the static part alone is too big the reader is told once per chat. Quiet and impersonate generations (and any other kind) get both slots emptied.
+// tail is cut to fit (what modules send under their own keys, their `ownPrompt` hooks, counts toward it
+// too), and when the static part alone is too big the reader is told once per chat. Quiet and impersonate generations (and any other kind) get both slots emptied.
 // At prompt-ready: hidden change blocks leave the prompt history, and when the preset left out
 // the Main Prompt (SillyTavern then drops in-prompt text) the static part is put back at the
 // start of this reply's part, for the story's own prompt only.
@@ -20,9 +21,10 @@
 // the command bus (their interfaces are docs/v2/SPEC.md §12).
 
 import { continuation, cutLine, defangMarker, extractBlock, grammarHeads, hideBlock, parseChanges, strayLines, stripBlock } from './capture.js';
+import { readDisplayLine } from './extras.js';
 import { hash, readRecord } from './persist.js';
 import { CAPTURE_PREFIX } from './registry.js';
-import { STATIC_MARKER, assemble, contextNotice } from './prompt.js';
+import { STATIC_MARKER, assemble, contextNotice, estimateTokens } from './prompt.js';
 import { MAX_CHANGE_LINES, ensureModules, makeView } from './sdk.js';
 import { cutAt } from '../text.js';
 
@@ -35,6 +37,9 @@ export const V1_KEYS = Object.freeze([
     ['story_block', 'static'],
 ]);
 export const FOREGROUND = Object.freeze(['normal', 'swipe', 'regenerate', 'continue']);
+// A module's `ownPrompt` hook: at most this many parts, each counted up to this many characters.
+export const OWN_PROMPT_PARTS = 8;
+export const OWN_PROMPT_CHARS = 200000;
 export const INTERCEPTOR_NAME = 'storyBlockGenerationInterceptor';
 // SillyTavern's extension_prompt_types and extension_prompt_roles, when the context lacks them.
 const IN_PROMPT = 0;
@@ -43,6 +48,9 @@ const ROLE_SYSTEM = 0;
 const MAX_PROBLEMS = 200;
 // How long a canGenerate or beforeGenerate hook may take before the reply goes on without it.
 export const HOOK_TIMEOUT_MS = 2500;
+// A reply that never ends (no MESSAGE_RECEIVED, GENERATION_ENDED or STOPPED) stops counting as in progress
+// after this long, so Story Suite's own model calls on the chat's connection are not held up for good.
+export const REPLY_BUSY_MAX_MS = 5 * 60_000;
 const TIMED_OUT = Symbol('timed out');
 
 // `value`, or TIMED_OUT when it is a promise that has not settled within `ms`.
@@ -183,13 +191,14 @@ export function restoreMissing(chat, staticText, tailText) {
  * default ctx), store, bus, registry, settings, events?,
  * onBlocked?(reason, moduleId), notify?(reason, moduleId) (default: a toastr warning),
  * initial?() → the initial State for a chat with none (default registry.initialState(); the host
- * adds the packs' start, SPEC §2.6) }.
+ * adds the packs' start, SPEC §2.6), ownPrompt?(eventData) → true for the prompt of Story Suite's own model
+ * call on the chat's connection (model-call.js createOwnCalls().owns): never taken for the reply's }.
  * `settings` is createSettings() (settings() → host settings, settings(id) → a module's).
  * Returns { interceptor, install, uninstall, onPromptReady, onTextPromptReady, onMessageReceived,
  * onChatChanged, onChatRenamed, onTimelineChanged, onGenerationEnded, preview, report, problems, clearProblems, blocked, blockers, unblock,
- * session }.
+ * session, replyBusy, whenIdle }.
  */
-export function createTurn({ ctx, live = () => ctx, store, bus, registry, settings, events = null, onBlocked = null, notify = defaultNotify, initial = () => registry.initialState() }) {
+export function createTurn({ ctx, live = () => ctx, store, bus, registry, settings, events = null, onBlocked = null, notify = defaultNotify, initial = () => registry.initialState(), ownPrompt = () => false }) {
     const types = () => ctx?.extension_prompt_types ?? ctx?.extensionPromptTypes ?? {};
     const roles = () => ctx?.extension_prompt_roles ?? ctx?.extensionPromptRoles ?? {};
     const position = place => (place === 'static' ? types().IN_PROMPT ?? IN_PROMPT : types().IN_CHAT ?? IN_CHAT);
@@ -205,6 +214,30 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         try { return live() ?? ctx; } catch { return ctx; }
     };
     const contextNow = () => contextRoom(liveContext(), lastSize);
+    // A reply in progress: from its interceptor until it is received, ended, stopped or held back (or the
+    // chat changes). Story Suite's own model calls on the chat's connection wait for it (whenIdle).
+    let replyBusy = false;
+    let busyTimer = null;
+    let idleWaiters = [];
+    function markBusy() {
+        replyBusy = true;
+        if (busyTimer !== null) clearTimeout(busyTimer);
+        busyTimer = setTimeout(markIdle, REPLY_BUSY_MAX_MS);
+        busyTimer?.unref?.();
+    }
+    function markIdle() {
+        replyBusy = false;
+        if (busyTimer !== null) clearTimeout(busyTimer);
+        busyTimer = null;
+        const waiters = idleWaiters;
+        idleWaiters = [];
+        for (const resolve of waiters) resolve();
+    }
+    const whenIdle = () => (replyBusy ? new Promise(resolve => idleWaiters.push(resolve)) : Promise.resolve());
+    // Our own model call's prompt (model-call.js) is never the reply's.
+    const isOwn = eventData => {
+        try { return ownPrompt(eventData) === true; } catch { return false; }
+    };
 
     function setPrompt(key, text, place) {
         if (typeof ctx?.setExtensionPrompt !== 'function') return;
@@ -296,11 +329,42 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         return cues;
     }
 
+    // What modules send with the reply on their own, under their own prompt keys (SPEC §5: NPC State
+    // Delta's dossiers): each `ownPrompt(view)` hook's [{ label, text }] (one { label, text } or a string
+    // also do), read at once (a promise is not waited for), names filled in as SillyTavern fills them.
+    // It is counted, never sent by Story Block: the share of the context (prompt.js contextFit) and the
+    // settings' prompt size count it. A hook that throws or answers nothing counts nothing; the size is a
+    // report, never a reason to hold the reply back. → [{ module, label, place: 'own', text, tokens }]
+    function sentByModules(current) {
+        const out = [];
+        for (const { moduleId, fn } of registry.hookEntries('ownPrompt')) {
+            let answer;
+            try { answer = fn(current); } catch { continue; }
+            if (typeof answer?.then === 'function') {
+                answer.then?.(() => {}, () => {});
+                continue;
+            }
+            const list = typeof answer === 'string' ? [{ text: answer }] : Array.isArray(answer) ? answer : answer && typeof answer === 'object' ? [answer] : [];
+            const name = registry.module(moduleId)?.name ?? moduleId;
+            for (const item of list.slice(0, OWN_PROMPT_PARTS)) {
+                const raw = typeof item === 'string' ? item : item?.text;
+                if (typeof raw !== 'string' || !raw.trim()) continue;
+                const text = substituteNames(cutAt(raw, OWN_PROMPT_CHARS), ctx);
+                const label = typeof item?.label === 'string' && item.label.trim() ? cutAt(item.label.replace(/\s+/g, ' ').trim(), 80) : name;
+                out.push({ module: moduleId, label, place: 'own', text, tokens: estimateTokens(text) });
+            }
+        }
+        return out;
+    }
+
     function build(cues = {}) {
         const untold = store.untold();
-        const result = assemble({ registry, view: view(), untold, settings: hostSettings(), cues, substitute: text => substituteNames(text, ctx), context: contextNow() });
+        const current = view();
+        const own = sentByModules(current);
+        const ownTokens = own.reduce((sum, part) => sum + part.tokens, 0);
+        const result = assemble({ registry, view: current, untold, settings: hostSettings(), cues, substitute: text => substituteNames(text, ctx), context: contextNow(), ownTokens });
         for (const message of result.problems) problem({ code: 'FAILED', message });
-        return { ...result, untold };
+        return { ...result, own, untold };
     }
 
     /** SillyTavern's generate interceptor: (chat, contextSize, abort, type). */
@@ -358,6 +422,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
 
     function block({ moduleId, reason }, abort) {
         session = null;
+        markIdle();
         clearPrompts();
         try { abort?.(true); } catch (error) { console.warn('[Story Suite] the generation could not be stopped', error); }
         try { notify?.(reason, moduleId); } catch { /* a missing toastr is not an error */ }
@@ -395,6 +460,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             return;
         }
         if (!ctx?.chat) return;
+        markBusy();
         if (Number.isFinite(Number(contextSize)) && Number(contextSize) > 0) lastSize = Number(contextSize);
         // B-b2-timeline-r2-1: never a dry run (SillyTavern runs interceptors only for real generations).
         // It is not read from GENERATION_STARTED: another caller's dry run (token counting) can start
@@ -433,6 +499,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             setPrompts(session.staticText, session.tailText);
         } catch (error) {
             session = null;
+            markIdle();
             clearPrompts();
             problem({ code: 'FAILED', message: `The reply's notes could not be built: ${error?.message ?? error}` });
         }
@@ -470,7 +537,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
 
     /** CHAT_COMPLETION_PROMPT_READY: { chat, dryRun }. */
     function onPromptReady(eventData) {
-        if (!eventData || eventData.dryRun === true || !Array.isArray(eventData.chat)) return;
+        if (!eventData || eventData.dryRun === true || !Array.isArray(eventData.chat) || isOwn(eventData)) return;
         stripHistory(eventData.chat);
         if (backgroundPrompt() || !session || session.prompted) return;
         session.prompted = true;
@@ -479,7 +546,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
 
     /** GENERATE_AFTER_COMBINE_PROMPTS (text completion): { prompt, dryRun }. */
     function onTextPromptReady(eventData) {
-        if (!eventData || eventData.dryRun === true || typeof eventData.prompt !== 'string') return;
+        if (!eventData || eventData.dryRun === true || typeof eventData.prompt !== 'string' || isOwn(eventData)) return;
         // Only the hidden form: the static text's own example block must stay.
         const hidden = new RegExp(`\\s*<!--\\s*STORY_SUITE_V2\\b[\\s\\S]*?-->`, 'g');
         eventData.prompt = eventData.prompt.replace(hidden, '');
@@ -555,6 +622,8 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         // A Re-read (a2-3): the reply as it stands now, for bookkeeping its kept blocks wrote (ctx.standing).
         let standing = null;
         if (base) { try { standing = store.at(index); } catch { standing = null; } }
+        // How many lines of each display kind this reply has shown so far (their cap per reply).
+        const shown = new Map();
         for (const line of lines) {
             const entry = registry.capture(line.kind);
             if (!entry) {
@@ -570,6 +639,14 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             if (entry.off && !again) {
                 const label = registry.feature?.(entry.feature)?.label ?? entry.feature;
                 found.push(problem({ module: entry.moduleId, index, line: line.raw, code: 'FEATURE_OFF', quiet: true, message: `"${line.raw}" was not used: ${label} is turned off (feature off).` }));
+                continue;
+            }
+            // A display kind (Choices, Inner chatter; extras.js): read for the reader alone. No command
+            // runs and nothing is stored; what is shown is read again from the reply's hidden block, by
+            // the same rule (readDisplayLine), so only what the rule refuses is told here.
+            if (entry.display) {
+                const read = readDisplayLine(entry, line, shown);
+                if (!read.ok) found.push(problem({ module: entry.moduleId, index, line: line.raw, code: read.code, message: `"${line.raw}" was not used: ${read.message}.` }));
                 continue;
             }
             let result;
@@ -699,6 +776,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         const current = session;
         if (!current || !Number.isInteger(id) || id !== current.index) return null;
         session = null;
+        markIdle();
         clearPrompts();
         const message = ctx?.chat?.[id];
         if (!isCarrier(message)) return null;
@@ -808,6 +886,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
     /** CHAT_CHANGED: a new chat (or the same one reloaded). */
     async function onChatChanged() {
         session = null;
+        markIdle();
         clearPrompts();
         rebuild();
         // A1-2: read-backs of a write that timed out before a reload of the page go on.
@@ -854,6 +933,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
     function onGenerationEnded() {
         if (session?.prompted) clearPrompts();
         deferred = false;
+        markIdle();
         // A save that failed and was not made good after the reply (or the reply never came): again soon.
         if (store.dirty()) store.scheduleSave();
     }
@@ -888,6 +968,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         listeners = [];
         if (globalName && globalThis[globalName] === interceptor) delete globalThis[globalName];
         clearPrompts();
+        markIdle();
     }
 
     const api = {
@@ -904,10 +985,13 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         reread,
         /** What the next ordinary reply would be sent, without changing anything (no cues run). */
         preview: () => build().parts,
-        /** The same with how it fits the context: { parts, fit } (prompt.js contextFit, or null). */
+        /**
+         * The same with how it fits the context and what modules send on their own: { parts, fit, own }
+         * (fit: prompt.js contextFit, or null; own: [{ module, label, place: 'own', text, tokens }]).
+         */
         previewFit: () => {
             const built = build();
-            return { parts: built.parts, fit: built.fit };
+            return { parts: built.parts, fit: built.fit, own: built.own };
         },
         /** Adds { module?, code?, message, index?, line? } to the Problems list (and the console). */
         report: entry => problem(entry),
@@ -926,6 +1010,10 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         unblock: (moduleId, reason = '') => runOnBlocked(moduleId, reason),
         /** The pending reply's session (for status and tests), or null. */
         session: () => (session ? { ...session } : null),
+        /** Whether a reply is being built or awaited (its interceptor ran; not yet received, ended or stopped). */
+        replyBusy: () => replyBusy,
+        /** Resolves when no reply is in progress (at once when none is). */
+        whenIdle,
     };
     return api;
 }

@@ -290,9 +290,32 @@ async function uploadPayload({ name, json, fetchFn, headers }) {
     return result;
 }
 
-export async function inspectNpcStateDataFile(pointer, { fetchFn = globalThis.fetch, expectedChatKey = '' } = {}) {
-    if (!pointer?.path) return { revision: 0, writerId: '', exists: false, retired: false, updatedAt: 0, payload: null };
+// (beta) Whether a file exists, asked without fetching it (SillyTavern's /api/files/verify): true, false,
+// or null when the server cannot say (no such route, an error, an answer of another shape); the caller
+// then reads the file as before. A new chat has no data file yet, and fetching it only to be told so
+// puts a red "404" in the browser console on every new chat.
+export async function dataFileExists(path, { fetchFn = globalThis.fetch, headers = null } = {}) {
+    if (!path || typeof fetchFn !== 'function' || !headers) return null;
+    try {
+        const response = await fetchFn('/api/files/verify', { method: 'POST', headers, body: JSON.stringify({ urls: [path] }) });
+        if (!response?.ok || typeof response.json !== 'function') return null;
+        const result = await response.json();
+        const value = result && typeof result === 'object' ? result[path] : undefined;
+        return typeof value === 'boolean' ? value : null;
+    } catch {
+        return null;
+    }
+}
+
+const MISSING_FILE = Object.freeze({ revision: 0, writerId: '', exists: false, retired: false, updatedAt: 0, payload: null });
+
+// `probeHeaders` (request headers): ask whether the file exists first (dataFileExists) and, when
+// the server says it does not, answer "missing" without fetching it. Used where a missing file is
+// expected (a chat's first look for its file); everywhere else the file is fetched directly.
+export async function inspectNpcStateDataFile(pointer, { fetchFn = globalThis.fetch, expectedChatKey = '', probeHeaders = null } = {}) {
+    if (!pointer?.path) return { ...MISSING_FILE };
     if (typeof fetchFn !== 'function') throw new Error('fetch() is unavailable for NPC State Delta data-file inspection.');
+    if (probeHeaders && await dataFileExists(pointer.path, { fetchFn, headers: probeHeaders }) === false) return { ...MISSING_FILE };
     // Always revalidated with the server ('no-cache'), never read stale; but an unchanged sidecar
     // comes back as "304 Not Modified" from SillyTavern's file route instead of re-downloading the
     // whole file. A boundary check runs several times per turn, which on a slow remote/mobile link
@@ -626,7 +649,7 @@ export async function retireNpcStateDataFile({ chatKey, pointer = null, reason =
     });
 }
 
-export async function readNpcStateDataFile(pointer, { fetchFn = globalThis.fetch, expectedChatKey = '' } = {}) {
+export async function readNpcStateDataFile(pointer, { fetchFn = globalThis.fetch, expectedChatKey = '', probeHeaders = null } = {}) {
     const pendingKey = String(expectedChatKey || '');
     const pending = pendingKey ? durabilityQueue.get(pendingKey) : null;
     const shadow = pendingKey ? undurableSnapshots.get(pendingKey) : null;
@@ -648,7 +671,7 @@ export async function readNpcStateDataFile(pointer, { fetchFn = globalThis.fetch
     }
     if (!pointer?.path) return null;
     if (typeof fetchFn !== 'function') throw new Error('fetch() is unavailable for NPC State Delta data-file persistence.');
-    const inspected = await inspectNpcStateDataFile(pointer, { fetchFn, expectedChatKey });
+    const inspected = await inspectNpcStateDataFile(pointer, { fetchFn, expectedChatKey, probeHeaders });
     if (!inspected.exists) return null;
     // Full hydration is the point at which a caller deliberately adopts the durable revision.
     // A cheap freshness probe uses inspectNpcStateDataFile() directly and never mutates this

@@ -4,6 +4,13 @@
 //
 // The name is singular ("1 mark"); the plural is its own setting, blank for the name + "s" ("44 marks",
 // see pluralOf). The default, gold, has no plural form of its own ("44 gold").
+//
+// Coins (MODULES §F108): a world may count its one currency in coins of different worth ("copper: 1",
+// "silver: 10", "gold: 100"): the reader's Coins setting, else the pack's `currency.coins` (when the pack's
+// currency is in use), else none. The wallet still holds one whole number of the smallest unit (the
+// coin worth 1); a written amount names at most one coin ("3 silver" is 30), which code turns into
+// that unit before any budget or cap; amounts are shown in mixed coins ("3 silver 5 copper"), or in
+// the smallest unit when the reader prefers (Coin display: base).
 
 import { cutAt } from '../../text.js';
 
@@ -12,6 +19,14 @@ export const DEFAULT_CURRENCY = Object.freeze({ name: 'gold', plural: 'gold', sh
 
 const MAX_NAME = 24;
 const MAX_SHORT = 6;
+// The most coins a currency has, and the most one is worth in the smallest unit.
+export const MAX_COINS = 8;
+export const MAX_COIN_VALUE = 1_000_000;
+// Words that sometimes follow a coin's name in an amount and say nothing more ("3 silver coins",
+// "3 pieces of silver").
+const COIN_FILLER = new Set(['coin', 'coins', 'piece', 'pieces', 'of', 'in']);
+// Coin names that read as their own plural ("15 copper", "3 silver").
+const MASS_WORDS = new Set(['copper', 'silver', 'gold', 'bronze', 'iron', 'brass', 'tin', 'steel', 'platinum', 'electrum', 'nickel']);
 
 const tidy = (text, max) => cutAt(String(text ?? '').replace(/\s+/g, ' ').trim(), max);
 
@@ -25,32 +40,124 @@ export function pluralOf(name) {
     return `${singular}s`;
 }
 
+/** The plural a coin gets when none is written: a metal reads as its own ("15 copper"), "penny" → "pennies", "crown" → "crowns". */
+export function coinPlural(name) {
+    const singular = tidy(name, MAX_NAME);
+    const lower = singular.toLowerCase();
+    if (!singular || MASS_WORDS.has(lower) || /s$/i.test(singular)) return singular;
+    if (/[^aeiou]y$/i.test(singular)) return `${singular.slice(0, -1)}ies`;
+    if (/(?:x|z|ch|sh)$/i.test(singular)) return `${singular}es`;
+    return `${singular}s`;
+}
+
 /**
- * The currency from this module's settings ({ currency?, currencyPlural?, currencyShort? }):
- * { name, plural, short }. The plural defaults to pluralOf(name); the short form to the name's first
- * letter, lowercased.
+ * A list of coins (the Coins setting's rows `{ name, value }`, a row's name may be "penny/pennies", or a
+ * pack's `{ name, plural?, value }`) cleaned: `[{ name, plural, value }]`, smallest first, at most
+ * MAX_COINS, names once each (ignoring case); [] when none is usable. Two coins may be worth the same
+ * ("copper" and "bronze"): both are read, the first is the one shown.
+ */
+export function coinsOf(rows) {
+    const out = [];
+    const taken = word => out.some(coin => [coin.name, coin.plural].some(other => other.toLowerCase() === word.toLowerCase()));
+    for (const row of Array.isArray(rows) ? rows : []) {
+        if (!row || typeof row !== 'object' || out.length >= MAX_COINS) continue;
+        const [first, second] = String(row.name ?? '').split('/');
+        const name = tidy(first, MAX_NAME).replace(/[|:#<>]/g, '').trim();
+        const plural = tidy(row.plural ?? second ?? '', MAX_NAME).replace(/[|:#<>]/g, '').trim() || coinPlural(name);
+        const value = Number(row.value);
+        if (!name || /\d/.test(name) || !Number.isSafeInteger(value) || value < 1 || value > MAX_COIN_VALUE || taken(name) || taken(plural)) continue;
+        out.push({ name, plural, value });
+    }
+    return out.sort((a, b) => a.value - b.value);
+}
+
+/**
+ * The currency from this module's settings ({ currency?, currencyPlural?, currencyShort?, coins?,
+ * coinDisplay? }): { name, plural, short }, with `coins` (coinsOf) when it has any and `display: 'base'`
+ * when the reader shows amounts in the smallest unit. The plural defaults to pluralOf(name); the short
+ * form to the name's first letter, lowercased.
  */
 export function currencyOf(settings) {
     const name = tidy(settings?.currency, MAX_NAME) || DEFAULT_CURRENCY.name;
     const plural = tidy(settings?.currencyPlural, MAX_NAME) || pluralOf(name);
     const short = cutAt(String(settings?.currencyShort ?? '').trim(), MAX_SHORT)
         || (name === DEFAULT_CURRENCY.name ? DEFAULT_CURRENCY.short : Array.from(name)[0].toLowerCase());
-    return { name, plural, short };
+    const coins = coinsOf(settings?.coins);
+    if (!coins.length) return { name, plural, short };
+    return { name, plural, short, coins, ...(settings?.coinDisplay === 'base' ? { display: 'base' } : {}) };
 }
 
-/** True when `text` is exactly the currency's name or its plural (any case): "+ item Marks" is money. */
-export function isCurrencyName(text, currency = DEFAULT_CURRENCY) {
-    const word = tidy(text, 200).toLowerCase();
-    if (!word) return false;
-    const plural = currency?.plural || pluralOf(currency?.name);
-    return word === String(currency?.name ?? '').toLowerCase() || word === String(plural).toLowerCase();
+const coinList = currency => (Array.isArray(currency?.coins) ? currency.coins : []);
+
+/** The smallest unit's names: the coin worth 1, else the currency's own name. */
+export function baseUnit(currency = DEFAULT_CURRENCY) {
+    const one = coinList(currency).find(coin => coin.value === 1);
+    if (one) return { name: one.name, plural: one.plural };
+    const name = currency?.name || DEFAULT_CURRENCY.name;
+    return { name, plural: currency?.plural || pluralOf(name) };
 }
 
 /**
- * An amount from a coin line: only the number counts ("30", "30 gold", "1,200 crowns"); coin words
- * are ignored. { amount } or { error } with a plain sentence. Two numbers are refused, not added up.
+ * What one of the money word `text` is worth in the smallest unit: 1 for the currency's name or plural,
+ * a coin's value for a coin's name or plural (any case, "coins"/"pieces of" around it ignored), else 0.
  */
-export function parseAmount(text) {
+export function coinValue(text, currency = DEFAULT_CURRENCY) {
+    const words = tidy(text, 200).toLowerCase().split(' ').filter(word => word && !COIN_FILLER.has(word));
+    const word = words.join(' ');
+    if (!word) return 0;
+    const coin = coinList(currency).find(entry => entry.name.toLowerCase() === word || entry.plural.toLowerCase() === word || `${entry.name.toLowerCase()}s` === word);
+    if (coin) return coin.value;
+    const plural = currency?.plural || pluralOf(currency?.name);
+    return word === String(currency?.name ?? '').toLowerCase() || word === String(plural).toLowerCase() ? 1 : 0;
+}
+
+/** True when `text` is exactly the currency's name or its plural, or a coin's (any case): "+ item Marks" is money. */
+export function isCurrencyName(text, currency = DEFAULT_CURRENCY) {
+    const word = tidy(text, 200).toLowerCase();
+    if (!word) return false;
+    const coin = coinList(currency).some(entry => entry.name.toLowerCase() === word || entry.plural.toLowerCase() === word);
+    const plural = currency?.plural || pluralOf(currency?.name);
+    return coin || word === String(currency?.name ?? '').toLowerCase() || word === String(plural).toLowerCase();
+}
+
+/**
+ * The static prompt's coin line (one short line), or '' for a currency without coins: the coins and
+ * what each is worth in the smallest unit, and how a money line is written. It changes only when the
+ * coins do.
+ */
+export function coinLine(currency) {
+    const coins = coinList(currency);
+    if (!coins.length) return '';
+    const base = baseUnit(currency);
+    const larger = coins.filter(coin => coin.value > 1).slice(0, 6);
+    const worth = larger.map(coin => `1 ${coin.name} = ${coin.value} ${base.plural}`).join(', ');
+    const example = larger[0]?.name ?? base.plural;
+    return `Money is counted in ${base.plural}${worth ? `: ${worth}` : ''}. A coin line names one coin (+ coin 3 ${example}) or ${base.plural} (+ coin 35); never two coins in one line.`;
+}
+
+/**
+ * An amount from a coin line: the number, in the smallest unit ("30", "30 gold", "1,200 crowns"; a
+ * currency without coins ignores the words). With coins, a known coin's name multiplies it ("3 silver"
+ * → 30 when silver is worth 10) and any other word is refused, so no amount is read in the wrong coin.
+ * { amount } or { error } with a plain sentence. Two numbers are refused, not added up.
+ */
+export function parseAmount(text, currency = null) {
+    const { multiple = false, ...read } = parseNumber(text);
+    const coined = coinList(currency).length > 0;
+    if (!coined) return read;
+    // "3 silver 5 copper" is two numbers: refused, with how to write it.
+    if (read.error) return multiple ? { error: `${read.error.replace(/; write one amount\.$/, '')}: write it in one coin or in ${baseUnit(currency).plural} (+ coin 35).` } : read;
+    const words = String(text ?? '').replace(/\d[\d,.]*/g, ' ').replace(/[^\p{L}\s'-]+/gu, ' ');
+    if (!words.trim()) return read;
+    const value = coinValue(words, currency);
+    if (!value) return { error: `"${tidy(words, 40)}" is not a coin here: write ${coinList(currency).map(coin => coin.name).join(', ')} or a number of ${baseUnit(currency).plural}.` };
+    const amount = read.amount * value;
+    if (!Number.isSafeInteger(amount)) return { error: 'That amount is too large.' };
+    return { amount };
+}
+
+// The number of an amount (parseAmount without coins): only plain whole digits, one number, no sign.
+function parseNumber(text) {
     const numbers = String(text ?? '').match(/\d[\d,.]*/g) ?? [];
     if (!numbers.length) return { error: 'No amount of money was written.' };
     // The line's op is the only sign: "+ coin -50" is not a payment of 50 (B3-5). Any dash or minus
@@ -59,7 +166,7 @@ export function parseAmount(text) {
     // C2-4: only plain digits make an amount; a fraction, a superscript, other digits or a decimal
     // point in front (".5", "٫5", "2⁵", "½5") would be paid as a different whole number.
     if (/[^\P{N}0-9]/u.test(String(text)) || /(?:^|[^\d])[.,\u066B\u066C]\d/.test(String(text))) return { error: `"${String(text).trim()}" is not a whole amount.` };
-    if (numbers.length > 1) return { error: `"${String(text).trim()}" holds more than one number; write one amount.` };
+    if (numbers.length > 1) return { error: `"${String(text).trim()}" holds more than one number; write one amount.`, multiple: true };
     const written = numbers[0].replace(/[.,]$/, '');
     if (!/^(?:\d{1,3}(?:,\d{3})+|\d+)$/.test(written)) return { error: `"${written}" is not a whole amount.` };
     const amount = Number(written.replace(/,/g, ''));
@@ -67,9 +174,29 @@ export function parseAmount(text) {
     return { amount };
 }
 
-/** "1 mark", "44 marks" (the plural from the currency, else pluralOf(name)). */
+/**
+ * "1 mark", "44 marks" (the plural from the currency, else pluralOf(name)). With coins: mixed, largest
+ * first ("3 silver 5 pennies"; nothing: "0 pennies"), or the smallest unit ("35 pennies") with
+ * `display: 'base'`.
+ */
 export function formatAmount(amount, currency = DEFAULT_CURRENCY) {
     const n = Math.max(0, Math.round(Number(amount) || 0));
+    const coins = coinList(currency);
+    if (coins.length) {
+        const base = baseUnit(currency);
+        if (currency?.display === 'base' || n === 0) return `${n} ${n === 1 ? base.name : base.plural}`;
+        const parts = [];
+        let rest = n;
+        const shown = coins.filter((coin, index) => coins.findIndex(other => other.value === coin.value) === index);
+        for (const coin of [...shown].reverse()) {
+            const count = Math.floor(rest / coin.value);
+            if (!count) continue;
+            parts.push(`${count} ${count === 1 ? coin.name : coin.plural}`);
+            rest -= count * coin.value;
+        }
+        if (rest) parts.push(`${rest} ${rest === 1 ? base.name : base.plural}`);
+        return parts.join(' ');
+    }
     const name = currency?.name || DEFAULT_CURRENCY.name;
     return `${n} ${n === 1 ? name : currency?.plural || pluralOf(name)}`;
 }

@@ -20,6 +20,7 @@ import { MAX_DEPTH as MAX_TEMPLATE_DEPTH, tooDeep } from '../view/template/html.
 import { MAX_LOOP_DEPTH, templateShape } from '../view/template/index.js';
 import { MAX_JSON_DEPTH } from '../view/template/json.js';
 import { MAX_AT_DEPTH, cssDepth } from '../view/css.js';
+import { MAX_COINS, MAX_COIN_VALUE, coinsOf } from '../domains/money.js';
 
 export const HOST_VERSION = '2.0.0';
 
@@ -548,17 +549,31 @@ function linkEvents(events, packId, add) {
 }
 
 // A currency the pack suggests (MODULES §F1): one name for the chat's one currency (singular, with an
-// optional plural and short form), used only when the reader has not named one.
+// optional plural and short form), used only when the reader has not named one; optionally its coins
+// (MODULES §F108): `coins: [{ name, plural?, value }]`, each worth `value` of the smallest (whole, 1 to
+// 1,000,000), at most 8, names once each.
 function checkCurrency(currency, add) {
-    const { short, plural } = currency ?? {};
+    const { short, plural, coins } = currency ?? {};
     const optional = (value, max) => value === undefined || (typeof value === 'string' && value.trim() && value.length <= max);
-    if (!isObject(currency) || Object.keys(currency).some(key => !['name', 'plural', 'short'].includes(key))
+    if (!isObject(currency) || Object.keys(currency).some(key => !['name', 'plural', 'short', 'coins'].includes(key))
         || typeof currency.name !== 'string' || !currency.name.trim() || currency.name.length > 24
         || !optional(short, 8) || !optional(plural, 24)) {
-        add('BAD_CURRENCY', 'currency', 'currency must be { "name": "mark" } (at most 24 characters), with an optional "plural" of at most 24 ("marks") and "short" of at most 8 ("m").');
+        add('BAD_CURRENCY', 'currency', 'currency must be { "name": "mark" } (at most 24 characters), with an optional "plural" of at most 24 ("marks"), "short" of at most 8 ("m") and "coins".');
         return null;
     }
-    return { name: oneLine(currency.name), short: oneLine(short ?? ''), ...(plural === undefined ? {} : { plural: oneLine(plural) }) };
+    let cleanCoins = null;
+    if (coins !== undefined) {
+        const good = Array.isArray(coins) && coins.length >= 1 && coins.length <= MAX_COINS && coins.every(coin => isObject(coin)
+            && Object.keys(coin).every(key => ['name', 'plural', 'value'].includes(key))
+            && typeof coin.name === 'string' && coin.name.trim() && coin.name.length <= 24 && !/[\d|:#<>/]/.test(coin.name)
+            && optional(coin.plural, 24) && Number.isSafeInteger(coin.value) && coin.value >= 1 && coin.value <= MAX_COIN_VALUE);
+        cleanCoins = good ? coinsOf(coins.map(coin => ({ name: oneLine(coin.name), value: coin.value, ...(coin.plural === undefined ? {} : { plural: oneLine(coin.plural) }) }))) : [];
+        if (!good || cleanCoins.length !== coins.length) {
+            add('BAD_CURRENCY', 'currency.coins', 'currency.coins must be 1 to 8 coins [{ "name": "penny", "plural": "pennies", "value": 1 }, { "name": "silver", "value": 10 }]: a name of at most 24 characters without digits, once each, and a whole value from 1 to 1,000,000 (what one is worth in the smallest).');
+            cleanCoins = null;
+        }
+    }
+    return { name: oneLine(currency.name), short: oneLine(short ?? ''), ...(plural === undefined ? {} : { plural: oneLine(plural) }), ...(cleanCoins ? { coins: cleanCoins } : {}) };
 }
 
 // A pack's money scale (MODULES §F104): `{ scale?, note? }`, `scale` a number from 0.001 to 1000

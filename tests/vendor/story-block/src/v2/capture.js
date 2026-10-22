@@ -393,6 +393,15 @@ function stripDecoration(line) {
         .replace(/^-\s+(?=[+\-~!?]\s)/, '');
 }
 
+/**
+ * A change line's text after its op and kind, as written (bold, backticks and a bullet in front are
+ * decoration; a colon after the kind is drift): the whole of what a display kind shows (extras.js).
+ */
+export function lineBody(raw) {
+    const line = stripDecoration(stripMarkdown(raw).trim()).trim();
+    return line.replace(/^[+\-~!?]\s*\p{L}[\p{L}\p{N}_-]*\s*:?\s*/u, '');
+}
+
 function addLabel(labels, label, value) {
     const had = Object.hasOwn(labels, label) ? labels[label] : '';
     const next = had && value ? `${had}; ${value}` : (had || value);

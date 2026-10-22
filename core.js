@@ -14,6 +14,7 @@ import {
     currentCalendarDate,
     extractStructuredWorldDate,
     getActiveCalendarConfig,
+    hostedStoryDate,
     migrateLegacyStoryDay,
     normalizeCalendarDate,
 } from './calendar.js';
@@ -343,12 +344,16 @@ function birthdayPromptSource(options = {}) {
     return String(options?.transcript || options?.dossierText || options?.developmentContext || '');
 }
 
+// The story's date for a scan: a World State date in the scanned text (v1), else a given reference date,
+// else (v2, hosted with Story Director) the story clock's date (calendar.js hostedStoryDate), else Delta's
+// manual clock. `fallback` says no grounded date was found (the manual clock, or none).
 function calendarReference(options = {}, calendar = getActiveCalendarConfig()) {
     const extracted = extractStructuredWorldDate(options.calendarSource ?? birthdayPromptSource(options), calendar);
+    const given = normalizeCalendarDate(options?.referenceDate, calendar) || hostedStoryDate(calendar);
     return {
         extracted,
-        fallback: !extracted && !normalizeCalendarDate(options?.referenceDate, calendar),
-        date: extracted?.date || normalizeCalendarDate(options?.referenceDate, calendar) || currentCalendarDate(calendar),
+        fallback: !extracted && !given,
+        date: extracted?.date || given || currentCalendarDate(calendar),
     };
 }
 

@@ -10,7 +10,7 @@ import {
     OWNER_RE, isPlainObject, clone, labelOf, parseCount, newId, ownerName, ownerNameIn, capitalize,
 } from './common.js';
 import { aliasKey, cleanName, resolveDef, slugify, trimText } from './names.js';
-import { WALLET_KEY, currencyOf, formatAmount, formatWallet, isCurrencyName, parseAmount } from './money.js';
+import { WALLET_KEY, coinValue, currencyOf, formatAmount, formatWallet, isCurrencyName, parseAmount } from './money.js';
 import { DEF_ID, isId } from '../check.js';
 
 export const KINDS = Object.freeze(['goods', 'material', 'consumable', 'equipment', 'quest', 'money']);
@@ -769,9 +769,10 @@ function lootPart(text, fallback, currency) {
     const counted = /^(.*?)\s*[x×]\s*(\d+)$/i.exec(text);
     const number = digits => Math.min(Number(digits), Number.MAX_SAFE_INTEGER);
     const { name, qty } = counted && counted[1].trim() ? { name: counted[1].trim(), qty: number(counted[2]) } : { name: text, qty: fallback };
-    if (isCurrencyName(cleanName(name), currency)) return { name, money: qty };
+    // A coin's name counts in the smallest unit: "3 silver" is 30 when silver is worth 10 (money.js coinValue).
+    if (isCurrencyName(cleanName(name), currency)) return { name, money: number(qty * coinValue(cleanName(name), currency)) };
     const leading = /^(\d[\d,]*)\s+(.+)$/.exec(name);
-    if (leading && isCurrencyName(cleanName(leading[2]), currency)) return { name: leading[2], money: number(leading[1].replace(/,/g, '')) };
+    if (leading && isCurrencyName(cleanName(leading[2]), currency)) return { name: leading[2], money: number(Number(leading[1].replace(/,/g, '')) * coinValue(cleanName(leading[2]), currency)) };
     return { name, qty };
 }
 
@@ -1559,8 +1560,11 @@ function itemAsCoin(ctx, line, env, currency) {
     if (line.op !== '+' && line.op !== '-') {
         ctx.fail('INVALID', `${currency.plural} are money, not an item; write + coin or - coin with the amount.`);
     }
-    const amount = lineQty(ctx, line, 1);
-    if (amount < 1) ctx.fail('INVALID', 'An amount of money must be more than nothing.');
+    const count = lineQty(ctx, line, 1);
+    if (count < 1) ctx.fail('INVALID', 'An amount of money must be more than nothing.');
+    // `+ item Silver | qty: 3` is 3 silver: counted in the smallest unit (money.js coinValue).
+    const amount = count * Math.max(1, coinValue(cleanName(line?.name), currency));
+    if (!Number.isSafeInteger(amount)) ctx.fail('INVALID', 'That amount is too large.');
     const who = labelOf(line, line.op === '+' ? 'from' : 'to');
     const note = who ? `${line.op === '+' ? 'from' : 'to'} ${trimText(who, 80)}` : '';
     return line.op === '+'
@@ -1582,7 +1586,8 @@ export function captureCoin(ctx, line, env) {
     if (line?.op !== '+' && line?.op !== '-') {
         ctx.fail('INVALID', `"${line?.op} coin" is not a change the wallet understands; use + coin or - coin.`);
     }
-    const parsed = parseAmount(written);
+    // With coins, "3 silver" is read in the smallest unit here, before the reply's budget holds it.
+    const parsed = parseAmount(written, currencyOf(ctx.settings()));
     if (parsed.error) ctx.fail('INVALID', parsed.error);
     const who = labelOf(line, line.op === '+' ? 'from' : 'to');
     const note = who ? `${line.op === '+' ? 'from' : 'to'} ${trimText(who, 80)}` : '';

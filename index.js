@@ -2,6 +2,7 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { extension_prompt_types, extension_prompt_roles, getRequestHeaders, saveSettings as saveHostSettings } from '../../../../script.js';
 import {
+    isEmptyScannerAnswer,
     isScannerRoutingError,
     scannerRoutingError,
     scannerRoutingMetrics,
@@ -112,6 +113,7 @@ import {
     normalizeCustomFieldNames,
     normalizeCustomFields,
     setExternalCalendarSource,
+    setStoryClockSource,
     currentPresentationText,
 } from './core.js';
 import { applyNpcBirthdayUpdate, normalizeBirthDate } from './birthday.js';
@@ -884,6 +886,13 @@ let storySuiteV2 = null;
 function storySuiteV2Meters() {
     return storyBlockV2Hosted() && storySuiteV2?.hosted?.() ? storySuiteV2 : null;
 }
+// (v2) Story Director's clock while hosted ({ minutes, calendar }), for calendar.js; null otherwise (and
+// while the reader keeps the calendar here: the adapter's calendarOwn).
+function hostedStoryClock() {
+    const adapter = storySuiteV2Meters();
+    if (!adapter) return null;
+    try { return adapter.storyClock?.() ?? null; } catch { return null; }
+}
 // Delta's records with their relationship numbers read from the slice (views and the injection).
 function hostedMeterView(npcs) {
     const adapter = storySuiteV2Meters();
@@ -1269,7 +1278,8 @@ async function ensureHydratedStateFresh(key = getChatKey(), { reason = 'boundary
 
         const localRevision = hydratedRevision(normalized);
         const localWriterId = String(hydratedStateMeta.get(normalized)?.writerId || pointer?.writerId || '');
-        const inspected = await inspectNpcStateDataFile(pointer, { expectedChatKey: normalized });
+        // (beta) Unpointered, a missing file is the usual answer: asked first, so no 404 is fetched.
+        const inspected = await inspectNpcStateDataFile(pointer, { expectedChatKey: normalized, probeHeaders: unpointered ? requestHeaders() : null });
         // A deletion, rename or retirement that completed while this read was in flight owns the
         // chat now; the late result must not restore its pointer, tombstone or cached dossier.
         if (!ownershipEpochCurrent(normalized, epoch) || getSettings().sidecarTombstones?.[normalized]) throw staleOwnershipError(normalized);
@@ -1538,7 +1548,8 @@ async function ensureChatStateLoaded(key = getChatKey(), { probeMissing = false 
             for (let attempt = 0; attempt < 3; attempt += 1) {
                 try {
                     discoveryError = null;
-                    const recovered = await readNpcStateDataFile(recoveryPointer, { expectedChatKey: key });
+                    // (beta) A new chat has no file: asked first, so no 404 is fetched for it.
+                    const recovered = await readNpcStateDataFile(recoveryPointer, { expectedChatKey: key, probeHeaders: requestHeaders() });
                     assertOwnershipEpoch(key, epoch);
                     if (recovered?.retired) {
                         settings.sidecarTombstones[key] = { reason: recovered.retireReason || 'retired-file', at: Date.now() };
@@ -2476,6 +2487,21 @@ function flushCurrentChatOnPageHide() {
     void settleStateFileWrite(key, { flush: true }).catch(error => console.debug('[NPC State Delta] page-hide flush deferred', error));
 }
 
+// (beta) A scanner call that came back with no text at all (SillyTavern's "No message generated") is a
+// quiet note, once per chat: nothing was changed and the next reply scans again, so it is not a red
+// console error with a stack on every reply. Every other failure is logged as before.
+const emptyAnswerChats = new Set();
+function noteScanFailure(label, error, chatKey = '') {
+    if (!isEmptyScannerAnswer(error)) {
+        console.error(`[NPC State Delta] ${label} failed`, error);
+        return;
+    }
+    const key = String(chatKey || '');
+    if (emptyAnswerChats.has(key)) return;
+    emptyAnswerChats.add(key);
+    console.warn(`[NPC State Delta] ${label}: the model answered nothing, so nothing changed; the next reply scans again. (Said once per chat.)`);
+}
+
 // The text last handed to the host for roleplay generation, with the reason when it is empty, so
 // Diagnostics can show what the roleplay model actually receives. Runtime-only; never persisted.
 let lastInjection = { text: '', reason: 'Not built yet in this session.', at: 0, chatKey: '' };
@@ -3361,7 +3387,7 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
             return true;
         },
         onError: error => {
-            console.error('[NPC State Delta] dossier backfill failed', error);
+            noteScanFailure('dossier backfill', error, getChatKey());
             if (error?.code === 'NPC_SCANNER_ROUTE_CANCELLED' || error?.code === 'NPC_SCANNER_ROUTE_TIMEOUT') return null;
             if (!request.silent || (isScannerRoutingError(error) && error.code !== 'NPC_SCANNER_ROUTE_CANCELLED')) globalThis.toastr?.warning?.(`NPC State Delta backfill failed for ${request.label}: ${error?.message || error}`);
             return false;
@@ -4045,7 +4071,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         }
         return true;
     } catch (error) {
-        console.error('[NPC State Delta] dossier scan failed', error);
+        noteScanFailure('dossier scan', error, scanChatKey);
         if (manual || (isScannerRoutingError(error) && error.code !== 'NPC_SCANNER_ROUTE_CANCELLED')) globalThis.toastr?.error?.(`NPC State Delta scan failed: ${error?.message || error}`);
         return false;
     } finally {
@@ -7461,7 +7487,10 @@ async function init() {
     clearLegacyPromptKeys();
     connectStorySuite();
     // Story Suite v2 (Story Block 2): optional; without a v2 host the adapter does nothing.
-    import('./src/storysuite-v2.js').then(v2 => { storySuiteV2 = v2.startStorySuiteV2({ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION, headReply: latestReplyIndex }); }).catch(error => console.debug('[NPC State Delta] Story Suite v2 adapter is not available', error));
+    import('./src/storysuite-v2.js').then(v2 => { storySuiteV2 = v2.startStorySuiteV2({ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION, headReply: latestReplyIndex, calendarOwn: () => normalizeSourceOfTruth(getSettings().sourceOfTruth).calendar === 'mine' }); }).catch(error => console.debug('[NPC State Delta] Story Suite v2 adapter is not available', error));
+    // (v2) Hosted with Story Director, the story's date follows its clock (calendar.js hostedStoryDate)
+    // unless the reader keeps the calendar here (Source of truth: calendar "mine"). No host: none.
+    setStoryClockSource(hostedStoryClock);
     bindUi();
     installUiCaptureBridge();
     registerEvents();
