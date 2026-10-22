@@ -5,7 +5,7 @@ import { compileTemplate } from './vendor/story-block/src/v2/view/template/index
 import { validateScreen } from './vendor/story-block/src/v2/view/screens.js';
 import { MODULE_ID, createStorySuiteV2Adapter, meterBarHtml } from '../src/storysuite-v2.js';
 import {
-    FEATURE_DRIFT, FEATURE_PRESETS, FEATURE_STAGES, bandWord, createNpcPart, limitsFromLines, limitsToLines, normalizeMeterSettings,
+    DEFAULT_CHANGE_CAP, FEATURE_DRIFT, FEATURE_PRESETS, FEATURE_STAGES, bandWord, createNpcPart, limitsFromLines, limitsToLines, normalizeMeterSettings,
     parseBands, parseNeeds, secretId, secretsFromLines, secretsToLines, validateNpcSlice,
 } from '../src/npc-meters.js';
 import { BUILT_IN_PRESETS, presetCatalog } from '../src/npc-meters-presets.js';
@@ -477,15 +477,24 @@ for (const seed of [5, 17, 41]) {
             const marks = [];
             for (let n = r.int(1, 3); n > 0; n -= 1) {
                 const who = r.pick(['Mira', 'Oren']);
-                switch (r.int(0, 3)) {
+                switch (r.int(0, 4)) {
                     case 0: lines.push(`~ npc ${who} | trust: ${r.pick(['+', '-'])}${r.int(1, 15)} | affection: +${r.int(0, 9)}`); break;
+                    // Past the change cap (B-a1-15): held to 15 a reply, also after a middle delete.
+                    case 4: lines.push(`~ npc ${who} | trust: ${r.pick(['+', '-'])}${r.int(16, 40)}`); break;
                     case 1: lines.push(`~ npc ${who} | respect: +${r.int(1, 9)} | tension: ${r.pick(['+', '-'])}${r.int(1, 9)}`); break;
                     case 2: { const name = `deed ${step}-${n}`; lines.push(`+ milestone ${who} — ${name}`); marks.push(`${who}|${name}`); break; }
                     default: lines.push(`+ milestone ${who} — saved her brother`);
                 }
             }
+            const before = Object.fromEntries(['Mira', 'Oren'].map(who => [who, s.npc(who).meters]));
             const index = await s.say(lines, `Step ${step}.`);
             own.set(s.host.store.carrierSid(index), marks);
+            // One reply moves each meter at most the change cap, whatever was deleted before it.
+            for (const who of ['Mira', 'Oren']) {
+                for (const [meter, value] of Object.entries(s.npc(who).meters)) {
+                    assert.ok(Math.abs(value - before[who][meter]) <= DEFAULT_CHANGE_CAP, `seed ${seed} step ${step}: ${who}'s ${meter} moved ${value - before[who][meter]} in one reply`);
+                }
+            }
             if (step < 3 || !r.chance(0.4)) continue;
             const replies = s.host.ctx.chat.map((message, at) => (!message.is_user && at > setup && at < index ? at : -1)).filter(at => at >= 0);
             if (!replies.length) continue;

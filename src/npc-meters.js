@@ -110,6 +110,17 @@ const RECORD_FIELDS = Object.freeze(['name', 'meters', 'stages', 'unlocked', 'di
 
 const isObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
 const isInt = value => Number.isInteger(value);
+// The longest reply record ID a meter window keeps (Story Block's are "sw_" and 12 letters).
+const REPLY_ID_MAX = 64;
+const isReplyId = value => typeof value === 'string' && value.length > 0 && value.length <= REPLY_ID_MAX;
+/**
+ * The reply a meter window belongs to (SPEC §2.2, per-reply bookkeeping): the reply's record ID (`sid`),
+ * which a middle delete never moves (B-a1-15), else its index (a host that gives no record ID); null
+ * when neither is known.
+ */
+export const replyKey = (sid, index) => (isReplyId(sid) ? sid : isInt(index) && index >= 0 ? index : null);
+// Whether the window `turn` is the reply `key`'s.
+const sameReply = (turn, key) => turn?.reply === key && key !== null && key !== undefined;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 // Flattened to one line and cut by code points (a surrogate pair is never split).
 const clean = (value, max) => [...String(value ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim()].slice(0, max).join('').trim();
@@ -507,7 +518,8 @@ export function validateNpcSlice(slice) {
         if (record.disposition !== undefined && (typeof record.disposition !== 'string' || record.disposition.length > DISPOSITION_MAX)) errors.push(`${where} has an unusable disposition.`);
         if (record.turn !== undefined) {
             const turn = record.turn;
-            if (!isObject(turn) || !isInt(turn.reply) || turn.reply < 0 || !isObject(turn.from)
+            if (!isObject(turn) || replyKey(turn.reply, turn.reply) === null || !isObject(turn.from)
+                || (turn.at !== undefined && (!isInt(turn.at) || turn.at < 0 || !isReplyId(turn.reply)))
                 || Object.values(turn.from).some(value => !isInt(value))) errors.push(`${where} has an unusable reply window.`);
         }
         if (record.milestones !== undefined) {
@@ -549,13 +561,16 @@ export const meterValue = (record, def) => (isInt(record?.meters?.[def.id]) ? re
 const signed = value => (value > 0 ? `+${value}` : String(value));
 
 // Moves meters on `record` (in place). `changes`: [{ meter (id), mode: 'add' | 'set', value }].
-// `limit` holds each meter within cap of the value the reply `reply` started from (story lines and
-// scans) and within the NPC's own `limits` (growth stops at a ceiling, a fall at a floor; a value
-// already past one moves only back toward it); without it (the reader's own set) only the range applies.
-function moveMeters(record, changes, { defs, cap, reply, limit, limits = {} }) {
+// `limit` holds each meter within cap of the value the reply `reply` (replyKey: its record ID, else its
+// index) started from (story lines and scans) and within the NPC's own `limits` (growth stops at a
+// ceiling, a fall at a floor; a value already past one moves only back toward it); without it (the
+// reader's own set) only the range applies. `at`: the reply's index now, kept beside a record ID for
+// "moved lately" in the tail.
+function moveMeters(record, changes, { defs, cap, reply, at = null, limit, limits = {} }) {
     const byId = new Map(defs.map(def => [def.id, def]));
-    const known = Number.isInteger(reply) && reply >= 0;
-    if (limit && known && record.turn?.reply !== reply) record.turn = { reply, from: { ...record.meters } };
+    const known = replyKey(reply, reply) !== null;
+    const windowOf = () => ({ reply, ...(isReplyId(reply) && isInt(at) && at >= 0 ? { at } : {}), from: { ...record.meters } });
+    if (limit && known && !sameReply(record.turn, reply)) record.turn = windowOf();
     const moved = [];
     for (const change of changes) {
         const def = byId.get(change.meter);
@@ -581,7 +596,7 @@ function moveMeters(record, changes, { defs, cap, reply, limit, limits = {} }) {
     }
     // The reader's own values are the new start of this reply's window (or end it).
     if (!limit && moved.length) {
-        if (known) record.turn = { reply, from: { ...record.meters } };
+        if (known) record.turn = windowOf();
         else delete record.turn;
     }
     return moved;
@@ -771,6 +786,10 @@ export function createNpcPart(hooks = {}) {
         const value = call(hooks.headReply, null);
         return isInt(value) && value >= 0 ? value : null;
     };
+    // The window key for a command about the reply at `index` (Delta's scan of it, the reader's values):
+    // the record ID Story Block gives the reply the command is stored on (`ctx.reply`) when that is the
+    // reply meant, else the index (replyKey).
+    const commandReply = (ctx, index) => replyKey(isInt(index) && ctx?.reply?.index === index ? ctx.reply.sid : null, index);
     // The NPC's meter setup from the dossier (track, limits) and what it means with these settings.
     const setupFor = (name, labels = []) => {
         const value = call(hooks.setup, null, name, labels);
@@ -840,7 +859,7 @@ export function createNpcPart(hooks = {}) {
     };
 
     // `milestone`: { add: [{ key, name }], remove: [key] } (the reader's or a story line's).
-    function run(ctx, { label, changes, problems, limit, reply, seed, disposition, allowEmpty = false, milestone = null }) {
+    function run(ctx, { label, changes, problems, limit, reply, at = null, seed, disposition, allowEmpty = false, milestone = null }) {
         const settings = normalized(ctx.settings(), ctx);
         const defs = defsFrom(settings);
         if (!changes.length && disposition === undefined && !allowEmpty) {
@@ -856,7 +875,7 @@ export function createNpcPart(hooks = {}) {
         if (!isObject(record.stages)) record.stages = {};
         if (!Array.isArray(record.unlocked)) record.unlocked = [];
         const setup = setupFor(record.name, who.labels);
-        const moved = moveMeters(record, changes, { defs, cap: settings.changeCap, reply, limit, limits: limitsFor(settings, setup) });
+        const moved = moveMeters(record, changes, { defs, cap: settings.changeCap, reply, at, limit, limits: limitsFor(settings, setup) });
         if (disposition !== undefined) {
             if (disposition) record.disposition = disposition;
             else delete record.disposition;
@@ -914,8 +933,11 @@ export function createNpcPart(hooks = {}) {
             if (!parsed) { problems.push(`${def.label}: "${clean(raw, 40)}" is not +N, -N or =N.`); continue; }
             changes.push({ meter: def.id, ...parsed });
         }
-        const reply = Number.isInteger(ctx.carrier?.index) ? ctx.carrier.index : null;
-        return run(ctx, { label: line.name, changes, problems, limit: true, reply, disposition, allowEmpty: line.op === '+' });
+        // B-a1-15: the window is the reply's by its record ID, so after a middle delete a new reply at an
+        // index an older one had is its own reply, with its own cap.
+        const at = isInt(ctx.carrier?.index) ? ctx.carrier.index : null;
+        const reply = replyKey(ctx.carrier?.sid, at);
+        return run(ctx, { label: line.name, changes, problems, limit: true, reply, at, disposition, allowEmpty: line.op === '+' });
     }
 
     // ---- commands (cause ui from Delta itself; capture is the story's) ----
@@ -940,8 +962,8 @@ export function createNpcPart(hooks = {}) {
             const problems = [];
             const defs = defsFrom(normalized(ctx.settings(), ctx));
             const changes = changesFrom(payload?.meters, defs, 'add', problems).filter(change => change.value !== 0);
-            const reply = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : null;
-            return run(ctx, { label: payload?.name, changes, problems, limit: true, reply, seed: isObject(payload?.start) ? payload.start : null });
+            const at = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : null;
+            return run(ctx, { label: payload?.name, changes, problems, limit: true, reply: commandReply(ctx, at), at, seed: isObject(payload?.start) ? payload.start : null });
         },
         /**
          * npc.set { name, meters: { meter: n }, reply? }: the reader's own values (range only). From
@@ -953,8 +975,8 @@ export function createNpcPart(hooks = {}) {
             const defs = defsFrom(normalized(ctx.settings(), ctx));
             const changes = changesFrom(payload?.meters, defs, 'set', problems);
             const asked = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : null;
-            const reply = readerAction(ctx) ? headReply() : asked;
-            return run(ctx, { label: payload?.name, changes, problems, limit: false, reply });
+            const at = readerAction(ctx) ? headReply() : asked;
+            return run(ctx, { label: payload?.name, changes, problems, limit: false, reply: commandReply(ctx, at), at });
         },
         /** npc.refresh { name }: stages, the ladder and notes again (after the reader changed them). */
         'npc.refresh'(ctx, payload = {}) {
@@ -1049,7 +1071,8 @@ export function createNpcPart(hooks = {}) {
         stages: { ...(record.stages ?? {}) },
         unlocked: [...(record.unlocked ?? [])],
         ...(record.disposition ? { disposition: record.disposition } : {}),
-        ...(record.turn ? { reply: record.turn.reply } : {}),
+        // The window's reply by its index (as before record IDs): `at` beside a record ID.
+        ...(isInt(record.turn?.at) ? { reply: record.turn.at } : isInt(record.turn?.reply) ? { reply: record.turn.reply } : {}),
         ...(isObject(record.milestones) && Object.keys(record.milestones).length ? { milestones: { ...record.milestones } } : {}),
         ...(rungs.find(step => step.key === record.rank) ? { rank: rungs.find(step => step.key === record.rank).name } : {}),
     });
@@ -1111,12 +1134,15 @@ export function createNpcPart(hooks = {}) {
         return { locked, opened };
     }
 
-    function bars(record, defs, settings, { headReply: head = undefined } = {}) {
+    function bars(record, defs, settings, { headReply: head = undefined, reply = null } = {}) {
         const setup = setupFor(record.name);
         const limits = limitsFor(settings, setup);
         const rungs = rungsFor(settings, setup);
-        // A window that belongs to a reply other than the head's is not "since the last reply".
-        const fresh = head === undefined || (isInt(head) && record.turn?.reply === head);
+        // A window that belongs to a reply other than the head's is not "since the last reply". The head
+        // is asked by index; a window keyed by record ID is the head's when the query's reply
+        // (`tools.reply`, the head) is at that index with that ID.
+        const headKey = isInt(head) && reply?.index === head && isReplyId(reply?.sid) ? reply.sid : head;
+        const fresh = head === undefined || (isInt(head) && (sameReply(record.turn, head) || sameReply(record.turn, headKey)));
         return defs.filter(def => def.show).map(def => {
             const value = meterValue(record, def);
             const stage = record.stages?.[def.id] ?? '';
@@ -1164,7 +1190,7 @@ export function createNpcPart(hooks = {}) {
          * `still`: the same without `delta`. `locked`: the hidden notes still locked, as teasers
          * ({ title, meter, at, text: "🔒 Her past — unlocks at Trust 60" }); `opened`: [{ id, title }].
          */
-        'npc.cast'(state, args = {}) {
+        'npc.cast'(state, args = {}, tools = null) {
             const { npcs } = sliceOf(state);
             const settings = storedSettings();
             const defs = defsFrom(settings);
@@ -1173,7 +1199,7 @@ export function createNpcPart(hooks = {}) {
             return Object.keys(npcs)
                 .map(key => {
                     const record = npcs[key];
-                    const list = bars(record, defs, settings, { headReply: head });
+                    const list = bars(record, defs, settings, { headReply: head, reply: tools?.reply ?? null });
                     const ladder = ladderView(record, settings, defs);
                     const notes = notesView(record, defs);
                     return {
@@ -1223,7 +1249,9 @@ export function createNpcPart(hooks = {}) {
         for (const key of Object.keys(npcs).sort()) {
             if (!here.has(key)) continue;
             const record = npcs[key];
-            if (isInt(record.turn?.reply) && record.turn.reply >= length - RECENT_MESSAGES) {
+            // Where the window's reply was (its index, kept beside a record ID).
+            const where = isInt(record.turn?.at) ? record.turn.at : record.turn?.reply;
+            if (isInt(where) && where >= length - RECENT_MESSAGES) {
                 const parts = defs.map(def => {
                     const stage = record.stages?.[def.id];
                     const value = meterValue(record, def);

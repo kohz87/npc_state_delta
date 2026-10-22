@@ -111,7 +111,8 @@ async function host({ settings = {}, delta = fakeDelta(), headReply = () => null
             const entry = registry.capture(line.kind);
             if (!entry) { problems.push({ line: line.raw, code: 'UNKNOWN_KIND' }); continue; }
             const result = bus.run(`${CAPTURE_PREFIX}${entry.kind}`, { ...line, kind: entry.kind, word: line.kind }, {
-                cause: 'story', capture: entry, carrier: { index, swipe: chat[index].swipe_id ?? 0 },
+                // The reply's record ID too, as Story Block's turn.js gives it (ctx.carrier.sid).
+                cause: 'story', capture: entry, carrier: { index, swipe: chat[index].swipe_id ?? 0, sid: store.carrierSid(index) },
             });
             if (result.ok) store.append({ ops: result.ops, receipt: result.receipt });
             else problems.push({ line: line.raw, code: result.code, message: result.message });
