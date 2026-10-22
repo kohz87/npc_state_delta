@@ -62,7 +62,7 @@ test('with a Story Block v2 host, Delta registers through the sdk only, answers 
         assert.ok(await waitFor(() => sdk.registered.length === 1), 'Delta registers with the v2 host');
         const def = sdk.registered[0];
         assert.equal(def.id, 'npc-state-delta');
-        assert.deepEqual(Object.keys(def.queries).sort(), ['npc.cast', 'npc.dossier', 'npc.known', 'npc.meters', 'npc.next', 'npc.portrait', 'npc.present']);
+        assert.deepEqual(Object.keys(def.queries).sort(), ['npc.cast', 'npc.dossier', 'npc.known', 'npc.meters', 'npc.next', 'npc.portrait', 'npc.present', 'npc.socialModifier']);
         assert.deepEqual(mockState.storyBlockTabs, [], 'no v1 Present NPCs / Dossiers tabs');
         assert.equal(globalThis.document.documentElement.dataset.npcStateDeltaStoryBlock, undefined);
         assert.equal(globalThis.StorySuite?.has?.('npc-state-delta') ?? false, false, 'not announced to v1\'s Story Suite registry');

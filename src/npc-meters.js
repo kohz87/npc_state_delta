@@ -42,6 +42,9 @@
 // values, note rules and texts, per-NPC setup, presets, who is present) comes in through the hooks
 // given to createNpcPart.
 import { BUILT_IN_PRESETS, normalizeLimits, normalizePreset, presetIds } from './npc-meters-presets.js';
+import {
+    DEFAULT_SOCIAL_CAP, DEFAULT_SOCIAL_SCALE, FEATURE_SOCIAL, MAX_SOCIAL_CAP, MAX_SOCIAL_SCALE, SOCIAL_QUERY, socialModifier, socialSettings, socialSkill,
+} from './social-check.js';
 
 export const NPC_DOMAIN = 'npc';
 export const NPC_KIND = 'npc';
@@ -84,10 +87,13 @@ export const CONTEXT_BUDGET = 250;
 export const FEATURE_STAGES = 'npc-state-delta.stages';
 export const FEATURE_DRIFT = 'npc-state-delta.drift';
 export const FEATURE_PRESETS = 'npc-state-delta.presets';
+export { FEATURE_SOCIAL, SOCIAL_QUERY };
 export const FEATURES = Object.freeze([
     Object.freeze({ id: FEATURE_STAGES, label: 'Stage ladders and milestones', describe: 'Stages that need several meters at once and a story milestone; promotion waits out a conflict, a stage is lost only after a sustained low.', default: true, prompt: true }),
     Object.freeze({ id: FEATURE_DRIFT, label: 'Meters drift each story day', describe: 'Meters with a drift setting move toward their resting value as story days pass (needs Story Director\'s clock).', default: false }),
     Object.freeze({ id: FEATURE_PRESETS, label: 'Meter presets and rules', describe: 'One-click meter sets (Companion, Rival, Mentor and packs\') and each meter\'s rule line in the story\'s instructions.', default: true, prompt: true }),
+    // Read-only (src/social-check.js): no prompt text, no state; a dice module asks npc.socialModifier.
+    Object.freeze({ id: FEATURE_SOCIAL, label: 'Social checks use the dossier', describe: 'A persuade, charm, intimidate or deceive check against an NPC gets a small bonus or penalty from their meters, stage and disposition (for a dice module such as RPG Battle).', default: true }),
 ]);
 const FEATURE_DEFAULTS = Object.freeze(Object.fromEntries(FEATURES.map(feature => [feature.id, feature.default])));
 
@@ -1220,6 +1226,44 @@ export function createNpcPart(hooks = {}) {
             const settings = storedSettings();
             return ladderView(npcs[who.key], settings, defsFrom(settings));
         },
+        /**
+         * npc.socialModifier({ name, skill }) → { mod, name, skill, reasons: [{ text, value }] } | null
+         * (src/social-check.js has the rules). Null for a skill that is not social, a name that is
+         * neither a dossier (name or alias, any case) nor an entry in `state`, or the feature off.
+         * Reads `state` as given (the check's reply) and the stored settings; never writes.
+         */
+        [SOCIAL_QUERY](state, args = {}) {
+            if (!featureOn(FEATURE_SOCIAL)) return null;
+            const skill = socialSkill(args?.skill);
+            const asked = clean(args?.name, NAME_MAX);
+            if (!skill || !asked) return null;
+            const { npcs } = sliceOf(state);
+            const dossier = resolve(asked);
+            const who = identify(npcs, asked);
+            const entry = who && Object.hasOwn(npcs, who.key) ? npcs[who.key] : null;
+            if (!dossier && !entry) return null;
+            const settings = storedSettings();
+            const defs = defsFrom(settings);
+            // Someone with a dossier but no meters yet stands where their entry would start (ensure).
+            const seed = isObject(who.seed) ? who.seed : {};
+            const record = entry ?? { name: who.name, meters: Object.fromEntries(defs.map(def => {
+                const given = intOr(seed[def.id], null);
+                return [def.id, given === null ? def.start : clamp(given, def.min, def.max)];
+            })) };
+            const meters = defs.map(def => {
+                const value = meterValue(record, def);
+                const stage = entry ? record.stages?.[def.id] : stageAt(settings.stages[def.id], value)?.name;
+                return { def, value, stage: typeof stage === 'string' ? stage : '' };
+            });
+            const rungs = rungsFor(settings, setupFor(record.name, who.labels));
+            const index = record.rank === undefined ? -1 : rungs.findIndex(step => step.key === record.rank);
+            return socialModifier({
+                name: record.name, skill, meters,
+                rank: index >= 0 ? { name: rungs[index].name, index } : null,
+                disposition: typeof record.disposition === 'string' ? record.disposition : '',
+                settings: socialSettings(call(hooks.settings, {})),
+            });
+        },
     };
 
     // ---- the prompt (SPEC §5) ----
@@ -1299,7 +1343,7 @@ export function createNpcPart(hooks = {}) {
     };
 }
 
-export const SETTINGS_DEFAULTS = Object.freeze({ changeCap: DEFAULT_CHANGE_CAP, customMeters: [], stages: [], ladder: [], conflictAt: DEFAULT_CONFLICT_AT, demoteAfter: DEFAULT_DEMOTE_AFTER, presets: [] });
+export const SETTINGS_DEFAULTS = Object.freeze({ changeCap: DEFAULT_CHANGE_CAP, customMeters: [], stages: [], ladder: [], conflictAt: DEFAULT_CONFLICT_AT, demoteAfter: DEFAULT_DEMOTE_AFTER, presets: [], socialScale: DEFAULT_SOCIAL_SCALE, socialCap: DEFAULT_SOCIAL_CAP });
 
 const TONE_OPTIONS = Object.freeze(TONES.map(tone => Object.freeze({ value: tone, label: tone[0].toUpperCase() + tone.slice(1) })));
 
@@ -1352,5 +1396,14 @@ export const SETTINGS_SCHEMA = Object.freeze({
     demoteAfter: Object.freeze({
         type: 'int', min: 0, max: 50, label: 'Replies before a stage is lost',
         help: 'A stage on the ladder falls back one rung only after its needs have failed this many replies in a row (0: never).',
+    }),
+    // Social checks (feature npc-state-delta.social, src/social-check.js): read by a dice module only.
+    socialScale: Object.freeze({
+        type: 'int', min: 0, max: MAX_SOCIAL_SCALE, label: 'Social checks: strength (%)', feature: FEATURE_SOCIAL,
+        help: 'How strongly an NPC\'s meters, stage and disposition move a social check against them: 100 is the standard table, 50 half, 0 none.',
+    }),
+    socialCap: Object.freeze({
+        type: 'int', min: 1, max: MAX_SOCIAL_CAP, label: 'Social checks: most a check moves', feature: FEATURE_SOCIAL,
+        help: 'The bonus or penalty on one social check never goes past this (on a d20 roll).',
     }),
 });

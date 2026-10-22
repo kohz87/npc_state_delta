@@ -29,6 +29,12 @@ const COIN_FILLER = new Set(['coin', 'coins', 'piece', 'pieces', 'of', 'in']);
 const BARE_COIN = new Set(['coin', 'coins']);
 // Coin names that read as their own plural ("15 copper", "3 silver").
 const MASS_WORDS = new Set(['copper', 'silver', 'gold', 'bronze', 'iron', 'brass', 'tin', 'steel', 'platinum', 'electrum', 'nickel']);
+// Words that name a coin of some world (MODULES §F122): in a chat without coins, an amount in one of them
+// that is not the chat's own currency ("40 silver" where money is pennies) names a coin this chat does not
+// know, so it is refused, never read as that many of the chat's money.
+const DENOMINATIONS = new Set([...MASS_WORDS, 'cp', 'sp', 'gp', 'pp', 'ep', 'crown', 'crowns', 'mark', 'marks', 'penny',
+    'pennies', 'pence', 'shilling', 'shillings', 'ducat', 'ducats', 'florin', 'florins', 'sovereign', 'sovereigns',
+    'denar', 'denars', 'denarii', 'groat', 'groats', 'farthing', 'farthings', 'guinea', 'guineas', 'noble', 'nobles', 'gil']);
 
 const tidy = (text, max) => cutAt(String(text ?? '').replace(/\s+/g, ' ').trim(), max);
 
@@ -139,6 +145,24 @@ export function countedMoney(text, currency = DEFAULT_CURRENCY) {
     return value > 0 && Number.isSafeInteger(count) && count > 0 ? { count, value } : null;
 }
 
+// "gp" is gold pieces in a gold chat (and so on): the metal's own short form.
+const PIECES = Object.freeze({ gold: 'gp', silver: 'sp', copper: 'cp', platinum: 'pp', electrum: 'ep' });
+
+/**
+ * The coin word in `text` that is not this chat's money, or '': only for a currency without coins (with
+ * coins, coinValue already refuses every word that is not one of them). The currency's own name, plural and
+ * short form, and a bare "coin", are its money; any other word of DENOMINATIONS ("silver" where money is
+ * pennies) names a coin the chat does not know (MODULES §F122).
+ */
+export function foreignCoin(text, currency = DEFAULT_CURRENCY) {
+    if (coinList(currency).length) return '';
+    const name = tidy(currency?.name, MAX_NAME).toLowerCase() || DEFAULT_CURRENCY.name;
+    const own = new Set([name, `${name}s`, String(currency?.plural || pluralOf(name)).toLowerCase(), String(currency?.short ?? '').toLowerCase(), PIECES[name]].filter(Boolean));
+    const words = String(text ?? '').toLowerCase().split(/[^\p{L}]+/u).filter(Boolean);
+    if (words.some(word => own.has(word))) return '';
+    return words.find(word => DENOMINATIONS.has(word)) ?? '';
+}
+
 /**
  * The static prompt's coin line (one short line), or '' for a currency without coins: the coins and
  * what each is worth in the smallest unit, and how a money line is written. It changes only when the
@@ -156,14 +180,21 @@ export function coinLine(currency) {
 
 /**
  * An amount from a coin line: the number, in the smallest unit ("30", "30 gold", "1,200 crowns"; a
- * currency without coins ignores the words). With coins, a known coin's name multiplies it ("3 silver"
+ * currency without coins reads the number, and refuses a coin word that is not its own, foreignCoin:
+ * "40 silver" where money is pennies is never 40 pennies). With coins, a known coin's name multiplies it ("3 silver"
  * → 30 when silver is worth 10) and any other word is refused, so no amount is read in the wrong coin.
  * { amount } or { error } with a plain sentence. Two numbers are refused, not added up.
  */
 export function parseAmount(text, currency = null) {
     const { multiple = false, ...read } = parseNumber(text);
     const coined = coinList(currency).length > 0;
-    if (!coined) return read;
+    if (!coined) {
+        // "40 silver" where the money is pennies: a coin this chat does not know is refused (MODULES §F122).
+        // Without a currency (a caller that does not know the chat's money) only the number is read, as before.
+        const foreign = read.error || !currency ? '' : foreignCoin(String(text ?? '').replace(/\d[\d,.]*/g, ' '), currency);
+        if (foreign) return { error: `"${foreign}" is not this chat's money: it counts in ${baseUnit(currency).plural}. Write the amount in ${baseUnit(currency).plural}, or name the coins under Settings → Coins.` };
+        return read;
+    }
     // "3 silver 5 copper" is two numbers: refused, with how to write it.
     if (read.error) return multiple ? { error: `${read.error.replace(/; write one amount\.$/, '')}: write it in one coin or in ${baseUnit(currency).plural} (+ coin 35).` } : read;
     const words = String(text ?? '').replace(/\d[\d,.]*/g, ' ').replace(/[^\p{L}\s'-]+/gu, ' ');

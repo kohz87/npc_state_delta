@@ -131,6 +131,7 @@ Story Block 2 (Story Suite v2, in beta on Story Block's `v2` branch) hosts the s
   - `npc.known` → the names of every tracked NPC (archived ones left out);
   - `npc.dossier({ name })` → one NPC's dossier fields (by name, alias or id), or `null`; with a meters entry, `relationship` is the story state's and `meters`, `stages` and `unlocked` (note ids) are added. Hidden notes are never part of it;
   - `npc.meters({ name })` → `{ key, name, meters, stages, unlocked }` from the story state, or `null` (no name: every entry); `npc.cast()` → the entries with their bars, for the NPCs card;
+  - `npc.socialModifier({ name, skill })` → the bonus or penalty a social check against that NPC gets, with its reasons, or `null` (see [Social checks](#social-checks));
   - `npc.portrait({ name })` → the portrait Delta shows for that NPC (the current form's own image when it has one, else the main portrait), or `null`. It is the image you uploaded or generated in the dossier, as a `data:` image, an `https:` address or a path on your SillyTavern server; anything else (a `javascript:` or `http:` address, an SVG) gives `null`. RPG Battle and other modules use it for companion and NPC portraits. Delta never generates an image for it.
 - **NPC meters in the story state** (F81, F90): each NPC's trust, affection, desire and tension (-100..100, starting from your base values, or from the dossier's own numbers for an NPC Delta already knows), plus up to six meters of your own, are kept in Story Block 2's per-reply state, so swiping or deleting a reply takes their changes back. While Story Block 2 is on the page these are the numbers the dossier view, the dossier editor and Delta's injection show; Delta's own saved numbers are left as they are and come back if Story Block 2 goes away. The story changes them with a line in its `<Changes>` block, `~ npc Mira | trust: +5 | lust: +3` (`+N`/`-N` moves a meter, `=N` or a bare number sets it); code keeps each in its range and moves it at most **Most a meter moves per reply** (default 15) within one reply, story lines and Delta's scans together. A meter name that is not in use, or a `stage:` label, is noted in the module's problems and the rest of the line still counts. Delta's own scans send their relationship changes the same way. An **NPCs** card under each reply (turn it on per screen in the Story Suite overlay) and the **Cast** tab show one bar per meter, with its stage. The prompt gets one fixed line naming the meters, and, at its end, the present NPCs' meters when they moved in the last two replies.
 - **Meter settings** (in Delta's fold of the Story Suite overlay, above Delta's own panel):
@@ -149,6 +150,29 @@ Story Block 2 (Story Suite v2, in beta on Story Block's `v2` branch) hosts the s
 - **Story Block's prompt size counts Delta:** the dossier and one-pass instruction Delta sends show as their own row in Story Block's prompt size and its **Show what's sent**, and count toward Story Suite's share of the context.
 - **Meters before any dossier:** the Cast tab shows the meters the story's `~ npc` lines set at once, for people in Story Block's scene, even before a scan makes their dossier.
 - **No v1 doubles:** with Story Block 2, Delta does not add its v1 **Present NPCs** / **Dossiers** tabs, does not announce itself to v1's Story Suite registry, and hides **Manage all in Story Suite** (Story Block 2's own overlay carries its settings instead). With Story Block 1, or without Story Block, everything works as described above.
+
+### Social checks
+
+With Story Block 2 and a dice module (RPG Battle), a social check the player makes against an NPC gets a small bonus or penalty from what Delta knows about that NPC. Delta owns these rules; the dice module rolls and shows them ("Persuade DC 12 · Elula trusts you (+2) · Old Hob is wary of you (−1)"). It is the feature **Social checks use the dossier** (`npc-state-delta.social`, on by default); turned off, every check is as before. Nothing is sent to the model and no prompt changes: it only reads the NPC's meters, stage and disposition at the reply the check is made on, so a swipe or a delete changes the answer with the story.
+
+- **Which checks:** persuade (persuasion, convince, diplomacy, negotiate, haggle…), charm (seduce, flirt…), intimidate (threaten, coerce…), deceive (deception, lie, bluff…) and a generic social one (social, charisma, CHA). Any other skill (Athletics, Stealth, Insight…) gets nothing.
+- **Which NPC:** the dossier's name or an alias, in any case (as the dossier lookup finds it), or someone the story already gave meters with a `~ npc` line. Anyone else gets nothing.
+- **How much** (each part a whole number, added together):
+  - each meter the skill reads, by how far it is from 0 as a share of its range: 25% or more ±1, 50% ±2, 75% ±3;
+
+    | Skill | Helps (high) | Works against (high) |
+    | --- | --- | --- |
+    | persuade | trust, loyalty, respect, approval | tension, suspicion, rivalry |
+    | charm | affection, desire | tension |
+    | intimidate | tension, fear | trust, respect |
+    | deceive | trust | tension, suspicion |
+    | social | trust, affection, loyalty, respect, approval | tension |
+
+    A low value counts the other way ("Mira is at ease with you": tension −40 helps a persuade check). Loyalty, respect and approval come with the Companion, Rival and Mentor presets; fear and suspicion count when you add a custom meter with that name;
+  - the stage ladder (feature **Stage ladders and milestones**): +1 per rung reached, at most +2, for every skill but intimidate;
+  - the NPC's disposition word (`~ npc Mira | disposition: wary`): a warm word (friendly, fond, grateful…) +1 and a cold one (wary, hostile, suspicious…) −1, for every skill but intimidate; for intimidate a frightened word (afraid, nervous…) +1 and a defiant one (defiant, fearless…) −1.
+- **Settings** (Delta's fold of the Story Suite overlay, while the feature is on): **Social checks: strength (%)** (0-200, default 100: 50 halves every part, 0 turns the modifiers off) and **Social checks: most a check moves** (1-10, default 5: the total never goes past ± this on a d20 roll).
+- **For module authors:** `npc.socialModifier({ name, skill })` → `{ mod, name, skill, reasons: [{ text, value }] }` or `null` (Delta off, the feature off, a skill that is not social, an unknown NPC). `mod` is the whole number to add to the roll (or take off the DC), within the cap; `reasons` add up to `mod` (a held total gets one more reason, "Held to the most a check moves (+5)") and each shows as `text (value)`. Ask it through the view your check is made on (`view.query`), so it reads that reply's state. Rules and numbers: `src/social-check.js`.
 
 ### One-pass narration capture (experimental)
 
