@@ -33,6 +33,8 @@ import { carryRecord } from './persist.js';
 import { createRegistry } from './registry.js';
 import { MAX_CHANGE_LINES, createEvents, createSdk, createSettings, newId } from './sdk.js';
 import { displayLines } from './extras.js';
+import { DEFAULT_HIDDEN } from './view/screens.js';
+import { SCENE_SCREEN_ID } from './screens/scene.js';
 import { createRewind } from './rewind.js';
 import { createStore as realStore } from './store.js';
 import { createTurn, substituteNames } from './turn.js';
@@ -385,7 +387,8 @@ export function createRuntime({
             settings: () => settings(CORE_MODULE_ID),
             // The chatter the reader may send back to the story (its setting): the replies and how to read one.
             // The head reply's index too, for `scene.moved` (the store is made below; asked only later).
-            extras: { chat: () => ctx.chat, display, headIndex: () => store.headIndex() },
+            // Whether Story Director's World screen is there (it shows the chatter; else Scene does: `scene.chatter`).
+            extras: { chat: () => ctx.chat, display, headIndex: () => store.headIndex(), worldShown: () => registry.screens().some(screen => screen.id === DEFAULT_HIDDEN[SCENE_SCREEN_ID]) },
             version: VERSION,
             packs: packPart,
             // Due events are the host's own system cues: straight to the bus (the public sdk only runs

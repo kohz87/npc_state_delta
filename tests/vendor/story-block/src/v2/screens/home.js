@@ -81,6 +81,7 @@ const TEMPLATE = `
     <h4><i class="fa-solid fa-location-dot" aria-hidden="true"></i> ${html(S.where)}</h4>
     <p class="place"><b data-if="q.place.name">{{ q.place.name }}</b><span class="muted" data-if="!q.place.name">${html(S.unnamed)}</span><span class="muted" data-if="q.place.region"> · {{ q.place.region }}</span></p>
     <p class="time muted" data-if="state.director.time.minutes != null"><i class="fa-regular fa-clock" aria-hidden="true"></i> {{ fmt.time(state.director.time.minutes) }}</p>
+    <p class="weather muted" data-if="q.weather.text"><i class="fa-solid fa-cloud-sun" aria-hidden="true"></i> {{ q.weather.text }}</p>
     <p class="here" data-if="len(q.present) > 0"><span class="muted">${html(S.here)}</span> {{ q.present }}</p>
   </section>
 
@@ -165,6 +166,7 @@ export const homeScreen = Object.freeze({
     data: Object.freeze({
         place: Object.freeze({ query: 'scene.place' }),
         present: Object.freeze({ query: 'scene.present' }),
+        weather: Object.freeze({ query: 'scene.weather' }),
         items: Object.freeze({ query: 'inventory.items' }),
         wallet: Object.freeze({ query: 'inventory.wallet', args: Object.freeze({ owner: 'party' }) }),
         currency: Object.freeze({ query: 'inventory.currency' }),

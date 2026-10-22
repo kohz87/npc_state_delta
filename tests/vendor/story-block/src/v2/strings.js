@@ -60,15 +60,15 @@ export const STRINGS = deepFreeze({
         choices: 'Choices',
         choicesDescribe: 'The story offers 2 to 4 short next moves as buttons under the latest reply. A click only puts the words in your message box; you still send, edit or ignore them.',
         chatter: 'Inner chatter',
-        chatterDescribe: 'Short unspoken thoughts of the people in the scene, folded away under each reply. Kept out of the story text and, unless you say so, out of later prompts.',
+        weather: 'Weather',
+        weatherDescribe: 'The story notes the weather in a few words when it changes; shown on Scene, Home and the reply\'s Status card. Descriptive only: nothing in the rules reads it.',
+        chatterDescribe: 'Short unspoken thoughts of the people in the scene, shown next to each person on the World screen (on the Scene screen without Story Director). Kept out of the story text and, unless you say so, out of later prompts.',
     },
 
-    // Choices and Inner chatter under a reply (src/v2/extras.js, MODULES §F115).
+    // Choices under a reply and the Inner chatter setting (src/v2/extras.js, MODULES §F115).
     extras: {
         choices: 'Choices',
         choiceTitle: 'Put this in your message box (it is not sent)',
-        chatter: 'Inner chatter',
-        dossierTitle: 'Open {name}\'s dossier',
         inPrompt: 'Send the last reply\'s thoughts back to the story',
         inPromptHelp: 'Off: inner chatter never reaches a later prompt, so it cannot steer the story. On: the thoughts of the reply you answered go with your next message as one short note, dropped first when the notes are full.',
     },
@@ -184,6 +184,7 @@ export const STRINGS = deepFreeze({
         unnamed: 'Somewhere not yet named',
         here: 'Here',
         nobody: 'No one else is here.',
+        weather: 'Weather',
     },
 
     // `story-block/home`.

@@ -1,12 +1,20 @@
-// The `scene` domain (§7): where the story is and who is present, with its validator,
-// commands, capture kinds `place` and `present`, queries and prompt view. Pure.
+// The `scene` domain (§7): where the story is, who is present and the weather, with its validator,
+// commands, capture kinds `place`, `present` and `weather`, queries and prompt view. Pure.
 
 import { isPlainObject, labelOf } from './common.js';
 import { cleanName, trimText } from './names.js';
 import { foldKey } from '../../text.js';
+import { lineBody } from '../capture.js';
+import { cutPoints, flatten } from '../extras.js';
+import { CORE_FEATURE } from '../features.js';
 
 const MAX_NAME = 80;
 const MAX_PRESENT = 40;
+/** A weather text is at most this many code points (cut, an ellipsis in the last place). */
+export const WEATHER_CHARS = 60;
+/** The weather in the tail's Place line is cut to this many code points (about 8 tokens with its separator). */
+export const WEATHER_TAIL_CHARS = 26;
+export const WEATHER_FEATURE = CORE_FEATURE.weather;
 
 export function initialScene() {
     return { place: { name: '', kind: '', region: '' }, present: [] };
@@ -37,6 +45,16 @@ export function validateScene(slice) {
             seen.add(name.toLowerCase());
         }
         if (slice.present.length > MAX_PRESENT) errors.push(`At most ${MAX_PRESENT} people can be listed as present.`);
+    }
+    // The weather (`~ weather`, MODULES §F120): absent until a reply first writes one.
+    if (slice.weather !== undefined) {
+        const weather = slice.weather;
+        if (!isPlainObject(weather)) errors.push('The weather is not a record.');
+        else {
+            if (typeof weather.text !== 'string' || !weather.text.trim()) errors.push('The weather has no text.');
+            else if (Array.from(weather.text).length > WEATHER_CHARS) errors.push(`The weather is longer than ${WEATHER_CHARS} characters.`);
+            if (!Number.isSafeInteger(weather.rev) || weather.rev < 0) errors.push('The weather\'s rev is not a whole number.');
+        }
     }
     return errors;
 }
@@ -176,19 +194,54 @@ export function capturePresent(ctx, line) {
     return ctx.fail('INVALID', `"${line.op} present" is not a change the scene understands; use + present or - present.`);
 }
 
+// A weather text as stored: the line's words (markdown and decoration gone), tags and anything inside
+// `<…>` out (never markup), one plain line, cut by code points.
+const HAS_WORD = /[\p{L}\p{N}]/u;
+export function weatherText(raw) {
+    const text = flatten(lineBody(String(raw ?? '')).replace(/<[^>]*>?/g, ' ').replace(/[<>]/g, ' '));
+    return HAS_WORD.test(text) ? cutPoints(text, WEATHER_CHARS) : '';
+}
+
+/**
+ * `~ weather cold drizzle, low fog` (or `+ weather`): the weather now, descriptive only (no mechanics read
+ * it). Kept as `scene.weather = { text, rev }` (`rev`: the meta.rev of the receipt that wrote it). The same
+ * text again changes nothing. `weather` is one of the scene's `scratch` fields, so a later reply's write
+ * replays whole after the reply that first wrote a weather is deleted (SPEC §2.2).
+ */
+export function captureWeather(ctx, line) {
+    if (line?.op !== '~' && line?.op !== '+') {
+        ctx.fail('INVALID', `"${line?.op} weather" is not a change the scene understands; use ~ weather and a few words.`);
+    }
+    const text = weatherText(line?.raw ?? `${line?.op ?? '~'} weather ${line?.text ?? line?.name ?? ''}`);
+    if (!text) ctx.fail('INVALID', 'The weather line has no words (write "~ weather cold drizzle, low fog").');
+    const scene = ctx.draft('scene');
+    if (scene.weather?.text === text) return { summary: `The weather stays: ${text}.`, data: { text, same: true }, narrate: false };
+    scene.weather = { text, rev: Number.isSafeInteger(ctx.rev) ? ctx.rev : 0 };
+    return { summary: `The weather: ${text}.`, data: { text }, narrate: false };
+}
+
 export const sceneQueries = {
     'scene.place': state => ({ ...(state?.domains?.scene?.place ?? initialScene().place) }),
     'scene.present': state => [...(state?.domains?.scene?.present ?? [])],
+    // The weather now, `{ text }`, or null when no reply wrote one (and while `story-block.weather` is off).
+    'scene.weather': Object.assign(state => {
+        const text = state?.domains?.scene?.weather?.text;
+        return typeof text === 'string' && text ? { text } : null;
+    }, { feature: WEATHER_FEATURE }),
 };
 
-/** The scene's tail lines: the place and who is present (nothing when both are empty). */
-export function sceneTail(state) {
+/**
+ * The scene's tail lines: the place and who is present (nothing when both are empty). With `weather`
+ * (the feature is on), the weather ends the Place line, cut to WEATHER_TAIL_CHARS code points.
+ */
+export function sceneTail(state, { weather = false } = {}) {
     const scene = state?.domains?.scene;
     const lines = [];
     const place = scene?.place;
     if (place?.name) {
         const about = [place.kind, place.region].filter(Boolean);
-        lines.push(`Place: ${place.name}${about.length ? ` (${about.join(', ')})` : ''}`);
+        const sky = weather && typeof scene.weather?.text === 'string' && scene.weather.text ? `; ${cutPoints(scene.weather.text, WEATHER_TAIL_CHARS)}` : '';
+        lines.push(`Place: ${place.name}${about.length ? ` (${about.join(', ')})` : ''}${sky}`);
     }
     if (scene?.present?.length) lines.push(`Present: ${scene.present.join(', ')}`);
     return lines;

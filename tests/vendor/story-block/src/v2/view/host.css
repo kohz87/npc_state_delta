@@ -328,7 +328,7 @@ body.story-suite-open { overflow: hidden; }
 .story-suite-reply-note-error { flex: 1 1 100%; color: var(--story-suite-accent); }
 .story-suite-reply-note-error[hidden] { display: none; }
 
-/* ---- Choices and Inner chatter under a reply (src/v2/extras-ui.js, MODULES §F115) ---- */
+/* ---- Choices under a reply (src/v2/extras-ui.js, MODULES §F115) ---- */
 .story-suite-extras { display: grid; gap: 4px; margin: 4px 0 2px; font-size: 0.9em; color: var(--story-suite-fg); animation: story-suite-fade-in 0.2s ease-out; }
 .story-suite-choices { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .story-suite-choices > i { color: var(--story-suite-accent); opacity: 0.85; }
@@ -339,22 +339,6 @@ body.story-suite-open { overflow: hidden; }
     transition: border-color 0.15s ease, color 0.15s ease;
 }
 .story-suite-choice:hover, .story-suite-choice:focus-visible { border-color: var(--story-suite-accent); color: var(--story-suite-accent); }
-.story-suite-chatter { border-radius: 6px; border: 1px dashed var(--story-suite-line); }
-.story-suite-chatter-head {
-    display: flex; align-items: center; gap: 6px; width: 100%; padding: 2px 8px; cursor: pointer; font: inherit;
-    color: inherit; background: transparent; border: 0; text-align: left; opacity: 0.85;
-}
-.story-suite-chatter-head > .fa-comment-dots { color: var(--story-suite-accent); }
-.story-suite-chatter-head > .fa-chevron-down { margin-left: auto; transition: transform 0.15s ease; }
-.story-suite-chatter-open > .story-suite-chatter-head > .fa-chevron-down { transform: rotate(180deg); }
-.story-suite-chatter-count { opacity: 0.7; }
-.story-suite-chatter-list { list-style: none; margin: 0; padding: 0 8px 4px; display: grid; gap: 3px; }
-.story-suite-chatter-list[hidden] { display: none; }
-.story-suite-chatter-line { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
-.story-suite-chatter-name { flex: 0 0 auto; font-weight: 600; font-size: 0.95em; padding: 0 8px; border-radius: 999px; border: 1px solid var(--story-suite-line); }
-.story-suite-chatter-dossier { cursor: pointer; font: inherit; font-weight: 600; color: var(--story-suite-accent); background: transparent; }
-.story-suite-chatter-dossier:hover, .story-suite-chatter-dossier:focus-visible { border-color: var(--story-suite-accent); }
-.story-suite-chatter-text { flex: 1 1 200px; min-width: 0; font-style: italic; opacity: 0.9; overflow-wrap: anywhere; }
 
 /* ---- subtle motion (MODULES §F57): cards open, meters move, the views come in ---- */
 @keyframes story-suite-fade-in {

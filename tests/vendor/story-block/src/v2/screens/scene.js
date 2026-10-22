@@ -3,6 +3,10 @@
 // keeps a clock. Each person present gets a portrait when NPC State Delta answers `npc.portrait`
 // (MODULES §F11): the screen asks `npc.known` first, and without NSD that answer is null, so the
 // portraits are left out and the names stand alone.
+// The weather (`scene.weather`, MODULES §F120) sits with the place while `story-block.weather` is on. Without
+// Story Director's World (which shows each thought next to its person), each person present has their Inner
+// chatter thought from the newest reply under their name (`scene.chatter`, MODULES §F115; [] while World is
+// there, null while the chatter is off).
 
 import { STRINGS, html } from '../strings.js';
 import { BASE_CSS } from './style.js';
@@ -26,6 +30,7 @@ const TEMPLATE = `
         <span class="kind" data-if="q.place.kind">{{ q.place.kind }}</span>
         <span class="region" data-if="q.place.region">{{ q.place.region }}</span>
         <span class="time" data-if="state.director.time.minutes != null"><i class="fa-regular fa-clock" aria-hidden="true"></i> {{ fmt.time(state.director.time.minutes) }}</span>
+        <span class="weather" data-if="q.weather.text" title="${html(S.weather)}"><i class="fa-solid fa-cloud-sun" aria-hidden="true"></i> {{ q.weather.text }}</span>
       </p>
     </div>
   </header>
@@ -36,6 +41,7 @@ const TEMPLATE = `
       <li class="who" data-each="q.present as p">
         <ss-widget name="ss.portrait" class="face" data-if="q.cast != null" data-props='${PORTRAIT_PROPS}'></ss-widget>
         <span class="name">{{ p }}</span>
+        <span class="thought" data-each="q.chatter as c" data-if="c.name == p">{{ c.text }}</span>
       </li>
     </ul>
   </section>
@@ -52,9 +58,11 @@ const CSS = `${BASE_CSS}
 .moved { border-color: var(--sb-accent); }
 .count { min-width: 1.4em; padding: 0 5px; border-radius: 9px; text-align: center; background: var(--sb-surface); color: var(--sb-fg); }
 .cast { display: flex; flex-wrap: wrap; gap: 6px 14px; }
-.who { display: inline-flex; gap: 6px; align-items: center; }
+.who { display: inline-flex; flex-wrap: wrap; gap: 2px 6px; align-items: baseline; }
 .faces .who { flex-direction: column; text-align: center; max-width: 6em; }
 .faces .name { font-size: 0.85em; overflow-wrap: anywhere; }
+.thought { font-size: 0.85em; font-style: italic; opacity: 0.85; overflow-wrap: anywhere; }
+.weather { display: inline-flex; gap: 4px; align-items: baseline; }
 `;
 
 export const sceneScreen = Object.freeze({
@@ -67,6 +75,8 @@ export const sceneScreen = Object.freeze({
         present: Object.freeze({ query: 'scene.present' }),
         // NPC State Delta's list of known people: only used to tell whether portraits can be asked for.
         cast: Object.freeze({ query: 'npc.known' }),
+        weather: Object.freeze({ query: 'scene.weather' }),
+        chatter: Object.freeze({ query: 'scene.chatter' }),
     }),
     template: TEMPLATE,
     css: CSS,

@@ -12,8 +12,8 @@
 // * The notes under replies (src/v2/reply-notes.js, MODULES §F40): a reply that came without change lines,
 //   a reply edited since, each with Re-read when the runtime offers one. The changes card gets the reply's
 //   refused lines in its scope as `refused` (§F41).
-// * Choices and Inner chatter under replies (src/v2/extras-ui.js, MODULES §F115): the latest reply's
-//   choices as buttons that only fill the message box, each reply's chatter in a folded strip.
+// * Choices under replies (src/v2/extras-ui.js, MODULES §F115): the latest reply's choices as buttons
+//   that only fill the message box. Inner chatter is not drawn under replies (World → Now or Scene shows it).
 // * The tab panel: the tab host (src/v2/host-ui.js) with every module tab and every `tab` screen, a
 //   side sheet on wide screens and a bottom sheet on phones. Redrawn from the head on every change.
 // * The reader's tab order (src/v2/view/tab-order.js, Settings → Story Suite → Tabs): one list for the
@@ -281,15 +281,13 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         },
         onChanged: index => mounts?.card?.refresh?.(index, { force: true }),
     });
-    // Choices and Inner chatter under replies (MODULES §F115), read from each reply's own text.
+    // Choices under the latest reply (MODULES §F115), read from its own text.
     const extras = createReplyExtras({
         ctx,
         doc,
         events,
         display: typeof runtime.display === 'function' ? runtime.display : mes => displayLines(mes, { entryOf: word => registry.capture(word) }),
         featureOn: id => registry.featureOn?.(id) === true,
-        // NPC State Delta knows the name: its dossier opens from the chip (without it, the plain name).
-        query: (name, args) => (registry.query(name) ? sdk.query(name, args) : null),
     });
     // What the Inspector lists as a reply's problems: blocks its replay skipped, and what the turn met
     // reading it in this session (change lines not used, with why); the refused lines the notes keep
