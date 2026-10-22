@@ -307,6 +307,30 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
             feature(id) {
                 return featureOn(id) || (tx.again === true && Boolean(registry.feature?.(id)));
             },
+            // Every other module's answer to hook `name` on the state this command sees (MODULES §F126): each
+            // module's `hooks[name]({ state, query }, args)`, synchronous. An answer that is null, a promise,
+            // or a throw is left out, so asking is always safe: [{ module, answer }] in module order, frozen
+            // copies. RPG Battle asks `checkModifiers` before a check is resolved.
+            gather(name, args) {
+                open();
+                if (typeof name !== 'string' || !name) fail('INVALID', 'gather needs a hook name.');
+                const state = currentState(tx);
+                const tools = queryTools(tx, state);
+                const view = Object.freeze({ state, query: tools.query });
+                const out = [];
+                for (const entry of registry.hookEntries?.(name) ?? []) {
+                    if (entry.moduleId === moduleId) continue;
+                    let answer;
+                    try {
+                        answer = entry.fn(view, deepFreeze(clone(args ?? {})));
+                        if (answer === undefined || answer === null || typeof answer?.then === 'function') continue;
+                        out.push(Object.freeze({ module: entry.moduleId, answer: deepFreeze(clone(answer)) }));
+                    } catch {
+                        continue;
+                    }
+                }
+                return Object.freeze(out);
+            },
             // The Director's minutes: its `director.time` query when one is registered, else the
             // `director.time.minutes` of the state (SPEC §8), else null.
             time() {

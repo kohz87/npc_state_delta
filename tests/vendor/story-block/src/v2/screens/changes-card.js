@@ -8,17 +8,27 @@
 // writes it from the reply's state and the state before it, so it can say what was gained and lost:
 // "+1 Moonveil Trout, −1 Rope · +30 gold · to Bluewatch Village · Fenna arrived". A stack used up
 // completely is gone from the reply's state, so only the header (which sees the state before) names it.
+//
+// Modules add their own lines (MODULES §F125): a module's `hooks.replyCard({ index, state, before, changes })`
+// answers [{ text, summary?, flag?, note?, icon? }] for that reply (RPG Battle: the checks it rolled, the die,
+// the modifiers and the total against the difficulty). `replyCardLines` cleans them (one line each, cut by
+// code points, at most REPLY_LINES_MAX per module, a Font Awesome icon name or a default); the host puts them in
+// the card's scope as `moduleLines` (ui-host.js) and their `summary` (else their `text`) in the header line.
+// Plain text only: the template prints them escaped.
 // Pure: no DOM.
 
 import { STRINGS, fill, html } from '../strings.js';
 import { formatAmount } from '../domains/money.js';
 import { BASE_CSS } from './style.js';
+import { oneLine } from '../../text.js';
 
 export const CHANGES_CARD_SCREEN_ID = 'story-block/changes-card';
 
 const C = STRINGS.card;
 const T = STRINGS.summary;
 
+// `assisted` (MODULES §F123): the lines the Assist safety net applied on this reply ([{ line, late }],
+// from its receipts), each shown with "(assist)" or "(assist, from the previous reply)".
 // `refused` is not a state path: the host puts the reply's refused change lines in the card's scope
 // (ui-host.js, from the turn's problems for that reply: [{ line, reason }]). A screen drawn without it
 // (another host, a test) simply has none.
@@ -47,6 +57,12 @@ const TEMPLATE = `
       <span data-if="len(state.scene.present) > 0">${html(C.hereNow, { names: '{{ state.scene.present }}' })}</span>
       <span data-if="len(state.scene.present) == 0">${html(C.nobodyNow)}</span>
     </li>
+    <li class="line extra" data-each="moduleLines as x" data-class="off: x.flag != ''">
+      <i class="fa-solid {{ x.icon }}" aria-hidden="true"></i>
+      <span class="txt">{{ x.text }}</span>
+      <span class="flag" data-if="x.flag != ''">{{ x.flag }}</span>
+      <span class="note muted" data-if="x.note != ''">{{ x.note }}</span>
+    </li>
   </ul>
   <div class="loot" data-each="state.inventory.loot as o, sid" data-if="changed(o)">
     <p class="loot-head"><i class="fa-solid fa-sack-dollar" aria-hidden="true"></i> <b>${html(C.loot)}</b><span class="where" data-if="o.where"> — {{ o.where }}</span></p>
@@ -60,11 +76,17 @@ const TEMPLATE = `
     </div>
     <p class="taken muted" data-if="state.meta.claims[o.claim] == true">${html(C.lootTaken)}</p>
   </div>
-  <p class="none muted" data-if="!changed('state.inventory') && !changed('state.scene')">${html(C.nothing)}</p>
+  <p class="none muted" data-if="!changed('state.inventory') && !changed('state.scene') && len(moduleLines) == 0">${html(C.nothing)}</p>
   <ul class="refused" data-if="len(refused) > 0">
     <li class="line" data-each="refused as r">
       <i class="fa-solid fa-ban" aria-hidden="true"></i>
       <span><span class="label">${html(C.notApplied)}</span> <span class="raw">{{ r.line }}</span><span class="why" data-if="r.reason"> — {{ r.reason }}</span></span>
+    </li>
+  </ul>
+  <ul class="assisted" data-if="len(assisted) > 0" title="${html(C.assistTitle)}">
+    <li class="line" data-each="assisted as a">
+      <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
+      <span><span class="raw">{{ a.line }}</span> <span class="muted" data-if="!a.late">${html(C.assist)}</span><span class="muted" data-if="a.late">${html(C.assistLate)}</span></span>
     </li>
   </ul>
 </div>`;
@@ -88,11 +110,17 @@ const CSS = `${BASE_CSS}
 .loot .pick input { width: 1em; height: 1em; min-width: 0; margin: 0; accent-color: var(--sb-accent); }
 .loot .hint, .loot .taken { margin: 0; font-size: 0.9em; }
 .loot .take { justify-self: start; }
+.extra .flag, .extra .note { flex-basis: 100%; padding-left: calc(1.1em + 6px); font-size: 0.95em; }
+.extra .flag { color: var(--sb-em); font-weight: 600; }
 .refused { display: grid; gap: 2px; margin-top: 4px; padding-top: 4px; border-top: 1px dashed var(--sb-border);
            color: var(--sb-em); opacity: 0.75; font-size: 0.95em; }
 .refused .line { flex-wrap: nowrap; }
 .refused .line > i { color: var(--sb-em); }
 .refused .line > span { flex: 1 1 0; min-width: 0; }
+.assisted { display: grid; gap: 2px; margin-top: 4px; padding-top: 4px; border-top: 1px dashed var(--sb-border); }
+.assisted .line { flex-wrap: nowrap; }
+.assisted .line > span { flex: 1 1 0; min-width: 0; }
+.assisted .raw { font-family: var(--monoFontFamily, monospace); font-size: 0.95em; overflow-wrap: anywhere; }
 .refused .raw { font-family: var(--monoFontFamily, monospace); font-size: 0.95em; overflow-wrap: anywhere; }
 `;
 
@@ -118,6 +146,9 @@ const PLACE = /^\/domains\/scene\/place(\/|$)|^\/domains\/scene$/;
 const PRESENT = /^\/domains\/scene\/present(\/|$)|^\/domains\/scene$/;
 const LOOT = /^\/domains\/inventory\/loot(?:\/([^/]+))?$/;
 const MAX_ITEMS = 3;
+/** The most lines one module adds to a reply's card (MODULES §F125). */
+export const REPLY_LINES_MAX = 6;
+const ICON = /^fa-[a-z0-9-]{1,40}$/;
 
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const inventoryOf = state => (isRecord(state?.domains?.inventory) ? state.domains.inventory : {});
@@ -214,6 +245,42 @@ export function changesDigest({ state = null, before = null, changes = [] } = {}
     return digest;
 }
 
+/**
+ * The modules' own lines for one reply's card (MODULES §F125). `entries`: [{ moduleId, fn }] (the registry's
+ * `hookEntries('replyCard')`); `info`: { index, state, before, changes } of that reply. Each hook is called
+ * with a copy of `info`; one that throws or answers anything but a list (a promise too) adds nothing.
+ * → [{ module, icon, text, summary, flag, note }], each field one line: text ≤ 200, summary ≤ 80, flag and
+ * note ≤ 160 characters; a line without text is left out.
+ */
+export function replyCardLines(entries, info = {}) {
+    const out = [];
+    for (const { moduleId, fn } of Array.isArray(entries) ? entries : []) {
+        if (typeof fn !== 'function') continue;
+        let answer;
+        try {
+            answer = fn({ index: info.index ?? null, state: info.state ?? null, before: info.before ?? null, changes: [...(info.changes ?? [])] });
+        } catch {
+            continue;
+        }
+        if (!Array.isArray(answer)) continue;
+        for (const item of answer.slice(0, REPLY_LINES_MAX)) {
+            const line = typeof item === 'string' ? { text: item } : item;
+            if (!isRecord(line)) continue;
+            const text = oneLine(line.text, 200);
+            if (!text) continue;
+            out.push({
+                module: String(moduleId ?? ''),
+                icon: typeof line.icon === 'string' && ICON.test(line.icon) ? line.icon : 'fa-circle-info',
+                text,
+                summary: oneLine(line.summary ?? '', 80),
+                flag: oneLine(line.flag ?? '', 160),
+                note: oneLine(line.note ?? '', 160),
+            });
+        }
+    }
+    return out;
+}
+
 function itemList(entries, sign) {
     const shown = entries.slice(0, MAX_ITEMS).map(entry => `${sign}${entry.qty} ${entry.name}`);
     return entries.length > MAX_ITEMS ? [...shown, fill(T.more, { n: entries.length - MAX_ITEMS })] : shown;
@@ -230,9 +297,11 @@ function people(names) {
  * to Bluewatch Village · Fenna arrived", or "No changes" ("No item, coin or place changes" when only
  * another module's state moved). `currency` is `inventory.currency`'s
  * `{ name }` (default gold). `refused` is how many of the reply's change lines were not applied
- * (MODULES §F41): "… · 1 line not applied". Takes the same fields as changesDigest, or a digest as `digest`.
+ * (MODULES §F41): "… · 1 line not applied". `lines`: the modules' own lines (replyCardLines), each told by its
+ * `summary` (else its `text`) after the rest: "+1 Rope · AGI check 14 vs 10: success". Takes the same fields
+ * as changesDigest, or a digest as `digest`.
  */
-export function changesSummary({ state = null, before = null, changes = [], currency = null, digest = null, refused = 0 } = {}) {
+export function changesSummary({ state = null, before = null, changes = [], currency = null, digest = null, refused = 0, lines = [] } = {}) {
     const d = digest ?? changesDigest({ state, before, changes });
     // The currency word for an amount: its name for exactly 1, else its plural (MODULES §F1).
     const name = typeof currency?.name === 'string' && currency.name ? currency.name : T.defaultMoney;
@@ -253,6 +322,10 @@ export function changesSummary({ state = null, before = null, changes = [], curr
     if (d.left.length) parts.push(fill(T.left, { names: people(d.left) }));
     if (d.presentNow) parts.push(d.presentNow.length ? fill(T.here, { names: people(d.presentNow) }) : T.nobody);
     if (d.loot > 0) parts.push(d.loot === 1 ? T.lootOne : fill(T.lootMany, { n: d.loot }));
+    for (const line of Array.isArray(lines) ? lines : []) {
+        const told = oneLine(line?.summary || line?.text || '', 80);
+        if (told) parts.push(told);
+    }
     const count = Number.isSafeInteger(refused) && refused > 0 ? refused : 0;
     const notApplied = count === 0 ? null : count === 1 ? T.refusedOne : fill(T.refusedMany, { n: count });
     if (parts.length) return [...parts, ...(notApplied ? [notApplied] : [])].join(' · ');

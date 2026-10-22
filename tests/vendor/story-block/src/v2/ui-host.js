@@ -42,7 +42,7 @@ import { createScreenRenderer } from './view/render-screen.js';
 import { formatStoryTime, storyCalendar } from './view/clock.js';
 import { HOME_ID, createScreens } from './view/screens.js';
 import { createTabOrderStore, isDefaultChoice, isHiddenNav, moveNav, navKey, orderNav, setNavHidden, visibleNav } from './view/tab-order.js';
-import { CHANGES_CARD_SCREEN_ID, HOME_SCREEN_ID, changesSummary } from './screens/index.js';
+import { CHANGES_CARD_SCREEN_ID, HOME_SCREEN_ID, changesSummary, replyCardLines } from './screens/index.js';
 import { createReplyNotes } from './reply-notes.js';
 import { createReplyExtras } from './extras-ui.js';
 import { displayLines } from './extras.js';
@@ -300,9 +300,20 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         if (!told.length) for (const item of notes.refusedAt(index)) out.push({ code: 'REFUSED', message: item.reason ? `"${item.line}": ${item.reason}` : `"${item.line}"` });
         return out;
     }
-    // A card's scope also gets `refused`: that reply's change lines the code did not apply.
+    // A card's scope also gets `refused`: that reply's change lines the code did not apply; the "Changed this
+    // reply" card also `moduleLines`: the modules' own lines for that reply (hooks.replyCard, MODULES §F125).
+    const cardLines = (index, state, changes) => replyCardLines(registry.hookEntries?.('replyCard') ?? [], { index, state, changes });
     const drawScreen = renderer.render;
-    renderer.render = (el, screen, scope) => drawScreen(el, screen, scope?.mount === 'card' ? { ...scope, refused: notes.refusedAt(scope.index) } : scope);
+    // …and `assisted`: the lines the Assist safety net applied on it (its receipts marked `assist`).
+    const assistedAt = index => {
+        try {
+            return (readRecord(ctx.chat?.[index])?.receipts ?? []).filter(receipt => receipt?.assist === 'now' || receipt?.assist === 'late')
+                .map(receipt => ({ line: String(receipt.assistLine ?? receipt.summary ?? ''), late: receipt.assist === 'late' }));
+        } catch { return []; }
+    };
+    renderer.render = (el, screen, scope) => drawScreen(el, screen, scope?.mount === 'card'
+        ? { ...scope, refused: notes.refusedAt(scope.index), assisted: assistedAt(scope.index), ...(screen?.id === CHANGES_CARD_SCREEN_ID ? { moduleLines: cardLines(scope.index, scope.state, scope.changes) } : {}) }
+        : scope);
     const mounts = createMounts({
         screens,
         render: renderer.render,
@@ -317,7 +328,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
             if (screen?.id !== CHANGES_CARD_SCREEN_ID) return null;
             let currency = null;
             try { currency = sdk.query('inventory.currency'); } catch { currency = null; }
-            return changesSummary({ state, before, changes, currency, refused: notes.refusedAt(index).length });
+            return changesSummary({ state, before, changes, currency, refused: notes.refusedAt(index).length, lines: cardLines(index, state, changes) });
         },
         settings: screenId => {
             const owner = String(screenId ?? '').split('/')[0];
@@ -452,6 +463,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
             promptParts,
             problems: () => runtime.turn?.problems?.() ?? [],
             save: () => ({ failing: store.failing?.(), dirty: store.dirty?.(), suspect: typeof store.suspect === 'function' ? store.suspect() : undefined }),
+            calls: () => runtime.callQueue?.stats?.() ?? null,
             caught: caughtSoFar,
             chat: () => liveCtx()?.chat ?? [],
             chatOpen: () => Boolean(liveCtx()?.getCurrentChatId?.() ?? liveCtx()?.chatId),

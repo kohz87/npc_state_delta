@@ -3,6 +3,7 @@
 // DOM, no SillyTavern, no clock in state (the log counts runs, it does not time them).
 
 import { cutAt } from '../../text.js';
+import { DEFAULT_KINDS } from './safety.js';
 
 // The settings live in Story Block's own module settings (the parts' defaults share one bucket, so
 // each key carries the part's name). Both helpers are off until the reader turns them on.
@@ -10,12 +11,16 @@ export const SETTING = Object.freeze({
     classifier: 'assistClassifier',
     extractor: 'assistExtractor',
     profile: 'assistProfile',
+    extractorProfile: 'assistExtractorProfile',
+    extractorKinds: 'assistExtractorKinds',
 });
 
 export const DEFAULTS = Object.freeze({
     [SETTING.classifier]: false,
     [SETTING.extractor]: false,
     [SETTING.profile]: '',
+    [SETTING.extractorProfile]: '',
+    [SETTING.extractorKinds]: DEFAULT_KINDS,
 });
 
 // The two switches are features of Story Block (MODULES §F100, Settings → Features): their texts are
@@ -29,8 +34,8 @@ export const FEATURE_TEXT = Object.freeze({
         needs: 'Needs a module that keeps checks, like RPG Battle.',
     }),
     extractor: Object.freeze({
-        label: 'Read changes from replies that forgot them',
-        describe: 'One small extra model call when a reply comes without its change lines: the items, coins, places and other changes it told are kept anyway.',
+        label: 'Safety net: read changes the reply forgot',
+        describe: 'One cheap extra model call per reply: time, place, who came or went, weather, quest progress or a hand-over the story told but its change lines missed are kept anyway, marked "assist". Never adds coin, items or XP.',
     }),
 });
 
@@ -43,6 +48,18 @@ export const SCHEMA = Object.freeze({
         group: 'Assist',
         label: 'Connection profile for these calls',
         help: 'The Connection Manager profile the two helpers\' extra calls use (a cheaper model, say). Same as chat: the chat\'s connection.',
+    }),
+    [SETTING.extractorProfile]: Object.freeze({
+        type: 'profile',
+        group: 'Assist',
+        label: 'Connection profile for the safety net',
+        help: 'The profile the safety net\'s one call per reply uses. Same as chat here: the profile above.',
+    }),
+    [SETTING.extractorKinds]: Object.freeze({
+        type: 'text',
+        group: 'Assist',
+        label: 'Kinds the safety net may write',
+        help: `"op kind" pairs, comma-separated (default: ${DEFAULT_KINDS}). Coin, new items, XP, loot and heals are never written, whatever this says.`,
     }),
 });
 

@@ -24,11 +24,10 @@ import { KEEPALIVE_MAX, createChatFile, utf8Bytes } from './chat-file.js';
 import { createCommandBus as realBus } from './commands.js';
 import { CORE_MODULE_ID, createCoreModule } from './domains/index.js';
 import { WALLET_KEY } from './domains/money.js';
-import { SETTING as ASSIST_SETTING, createAssistPart } from './assist/index.js';
+import { SETTING as ASSIST_SETTING, TIMEOUT_MS as ASSIST_TIMEOUT_MS, createAssistPart } from './assist/index.js';
 import { CORE_FEATURE, createFeatureStore } from './features.js';
 import { applyStart, createPacksPart } from './packs/index.js';
-import { createModelCalls, createOwnCalls, profileName, stModelCall } from './model-call.js';
-import { stCallModel } from './assist/st-adapter.js';
+import { MODEL_CALL_ERRORS, createCallQueue, createModelCalls, createOwnCalls, profileName, stModelCall } from './model-call.js';
 import { carryRecord } from './persist.js';
 import { createRegistry } from './registry.js';
 import { MAX_CHANGE_LINES, createEvents, createSdk, createSettings, newId } from './sdk.js';
@@ -366,6 +365,7 @@ export function createRuntime({
     const settings = withPackCurrency(base, () => packPart.startState().currency);
     let sdk = null;
     let bus = null;
+    let assistCall = async () => { throw new Error('Story Block is not ready.'); };
     let turn = null;
     // What a reply's display lines (Choices, Inner chatter; extras.js) show, read from its text with the
     // same cap the capture read it with (the host's maxChangeLines).
@@ -420,7 +420,9 @@ export function createRuntime({
                     const entry = registry.capture(kind);
                     return Boolean(entry) && !entry.off;
                 },
-                callModel: marked(callModel ?? stCallModel),
+                // Through sdk.callModel's rules and its queue per connection (model-call.js), as the host's
+                // own call: no wait for an idle chat (the pre-roll asks while the reply is prepared).
+                callModel: (prompt, options = {}) => assistCall(prompt, options),
             }),
         }));
     }
@@ -445,13 +447,24 @@ export function createRuntime({
     const rewind = createRewind({ ctx, store, events, ...(branch ? { branch } : {}) });
     let dialogOpener = null;
     let dialogCurrent = null;
+    // One model call at a time per connection (the host setting `callQueue`, default on; MODULES §G).
+    const callQueue = createCallQueue({ enabled: () => settings()?.callQueue !== false });
     const modelCalls = createModelCalls({
+        queue: callQueue,
         call: marked(callModel ?? stModelCall),
         gate: { whenIdle: () => turn?.whenIdle?.() ?? Promise.resolve() },
         featureOn: id => registry.featureOn(id),
         featureModule: id => (registry.features?.() ?? []).find(feature => feature?.id === id)?.moduleId ?? null,
         ...(modelTimeoutMs !== undefined ? { timeoutMs: modelTimeoutMs } : {}),
     });
+    // The assist helpers' call (assist/index.js: (prompt, { maxTokens, profile, helper }) → text, throwing
+    // with a code on failure; an empty answer is '' as before).
+    assistCall = async (prompt, { maxTokens, profile = '', helper = 'pre-roll' } = {}) => {
+        const result = await modelCalls.callModel({ prompt, maxTokens, profile, module: `${CORE_MODULE_ID} (${helper === 'extractor' ? 'safety net' : 'pre-roll'})`, timeoutMs: ASSIST_TIMEOUT_MS }, { idle: false });
+        if (result.ok) return result.text;
+        if (result.error === MODEL_CALL_ERRORS.EMPTY) return '';
+        throw Object.assign(new Error(result.message), { code: result.error });
+    };
     const made = createSdk({ store, bus, registry, settings, events, chat: () => ctx.chat, onRegister: def => onRegister?.(def), rewind,
         substitute: text => substituteNames(text, ctx), dialog: (screenId, opts) => dialogOpener?.(screenId, opts) ?? null,
         dialogCurrent: () => dialogCurrent?.() ?? null, reread: index => turn?.reread(index), callModel: modelCalls.callModel });
@@ -463,5 +476,5 @@ export function createRuntime({
         dialogOpener = typeof fn === 'function' ? fn : null;
         dialogCurrent = typeof current === 'function' ? current : null;
     };
-    return { registry, settings, features, store, bus, events, sdk, turn, markReady: made.markReady, initial, packs: packPart, setDialog, display, ownCalls };
+    return { registry, settings, features, store, bus, events, sdk, turn, markReady: made.markReady, initial, packs: packPart, setDialog, display, ownCalls, callQueue };
 }

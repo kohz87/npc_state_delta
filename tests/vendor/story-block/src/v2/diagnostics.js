@@ -248,11 +248,24 @@ function withLimit(run, ms) {
 }
 
 /**
+ * The queue line (model-call.js createCallQueue().stats()): "One at a time per connection: on. Waiting now: 1
+ * (chat: 1). Calls that waited: 3, 2.4 s in all, longest 1.2 s." Only counts and times, never a profile's details.
+ */
+export function callsLine(calls) {
+    if (!calls || typeof calls !== 'object') return 'One at a time per connection: unknown (no queue here).';
+    const secs = ms => `${Math.round((Number(ms) || 0) / 100) / 10} s`;
+    const lanes = Object.entries(calls.lanes ?? {}).length;
+    const head = `One at a time per connection: ${calls.on === false ? 'off' : 'on'}. Waiting now: ${num(calls.waiting ?? 0)}${lanes ? ` on ${lanes} connection${lanes === 1 ? '' : 's'}` : ''}. Running: ${num(calls.running ?? 0)}.`;
+    return `${head} Calls that waited: ${num(calls.waited ?? 0)}, ${secs(calls.waitedMs)} in all, longest ${secs(calls.longestMs)}.`;
+}
+
+/**
  * The report, as text. `source` (every part optional; a part that throws is named, the rest goes on):
  *   stVersion?() → text (or a promise), hostVersion, modules?() → [{ id, name, version }], refusals?(),
  *   features?() → [{ id, on, available }], settingsOf?(moduleId) → values, hostSettings?() → values,
  *   promptParts?() → parts or { parts, fit } (as the prompt size panel), tailBudget?,
  *   problems?() → [{ module, code, message, index, line }], save?() → { failing, dirty, suspect, pending },
+ *   calls?() → the model-call queue's stats (callsLine),
  *   caught?() → caughtSoFar(), chat?() → the chat array, chatOpen?() → boolean,
  *   hooks?() → [{ moduleId, fn }] (each module's `hooks.diagnostics`), now?() → a Date (the stamp only).
  * → Promise<string>.
@@ -342,6 +355,12 @@ export async function buildReport(source = {}) {
         out.push(`Failing now: ${yes(save.failing)}. Unsaved changes: ${yes(save.dirty)}. Waiting to read the file back after a timed-out save: ${yes(save.suspect)}.`);
         out.push(`Failed saves this page load: ${num(seen.saveFailures ?? 0)}.`);
         for (const item of seen.saves ?? []) out.push(`- ${item.text}`);
+    });
+
+    section('Model calls');
+    tryPart('the model calls', () => {
+        const calls = source.calls?.() ?? null;
+        out.push(callsLine(calls));
     });
 
     section('This chat');

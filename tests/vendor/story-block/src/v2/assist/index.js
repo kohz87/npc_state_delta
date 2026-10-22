@@ -5,13 +5,15 @@
 // * Pre-roll classifier (classifier.js), in `beforeGenerate`: the reader's new message → at most one
 //   check line → `assist.precheck` (claim, capture.check, check.roll) committed before the reply, so
 //   the reply narrates the roll.
-// * After-reply extractor (extractor.js), in the `afterReply` hook the host calls when a reply came
-//   without its <Changes> block: the reply → change lines → the host's capture.
+// * After-reply extractor, the safety net (extractor.js, safety.js), in the `afterReply` hook the host
+//   calls after each captured reply: the reply and its own lines → only the lines it missed, through the
+//   value wall (never coin, new items, XP, loot or heals) → the host's capture, marked as Assist's.
 //
 // No domain of its own: a pre-roll is a claim in `meta.claims` plus the check's own changes; the run
 // log behind `assist.status` lives in memory and is never state. Model calls go through the injected
-// `callModel(prompt, { maxTokens, profile }) → text` (st-adapter.js by default); tests and the host
-// can replace every dependency.
+// `callModel(prompt, { maxTokens, profile, helper }) → text` (st-adapter.js by default; the runtime gives
+// sdk.callModel's rules and its queue per connection, model-call.js); tests and the host can replace
+// every dependency.
 
 import { DEFAULTS, SCHEMA, SETTING, TIMEOUT_MS, createRunLog } from './common.js';
 import { PRECHECK, createClassifier, precheck } from './classifier.js';
@@ -24,7 +26,8 @@ export {
     ANSWER_TOKENS as CLASSIFIER_ANSWER_TOKENS, CHECK_KIND, CLASSIFIER_HEAD, MESSAGE_LIMIT, PRECHECK, PROMPT_BUDGET, ROLLED_LINE, ROLL_COMMAND,
     checkLine, claimKey, classifierPrompt, createClassifier, normalizeDc, parseClassifierAnswer, pendingCheckId, precheck,
 } from './classifier.js';
-export { EXTRACTOR_FOOT, EXTRACTOR_HEAD, MAX_LINES, REPLY_LIMIT, createExtractor, extractorPrompt, grammarKind, parseExtractorAnswer } from './extractor.js';
+export { EXTRACTOR_FOOT, EXTRACTOR_HEAD, MAX_LINES, REPLY_HEAD, REPLY_LIMIT, WRITTEN_HEAD, allowedGrammar, createExtractor, extractorPrompt, grammarKind, notWritten, parseExtractorAnswer } from './extractor.js';
+export { DEFAULT_KINDS, allowedKinds, refusedWhy, safeLines } from './safety.js';
 export { renderAssistSection, runLine } from './section.js';
 export { answerText, findProfile, stCallModel, stChat, stChatId } from './st-adapter.js';
 
