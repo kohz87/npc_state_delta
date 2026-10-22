@@ -53,6 +53,21 @@ export const widgetCss = `
 :where(.ss-w-meter-cell) { border-radius: 2px; background: var(--ss-w-raised); }
 :where(.ss-w-meter-cell.ss-w-on) { background: var(--ss-w-tone); }
 :where(.ss-w-meter-cell.ss-w-part) { background: color-mix(in srgb, var(--ss-w-tone) 45%, transparent); }
+:where(.ss-w-meter-stage) { font-size: 0.85em; color: var(--ss-w-tone); white-space: nowrap; }
+:where(.ss-w-meter-delta) { font-size: 0.85em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+:where(.ss-w-meter-delta.ss-w-up) { color: var(--ss-w-good); }
+:where(.ss-w-meter-delta.ss-w-down) { color: var(--ss-w-bad); }
+:where(.ss-w-meter-band) { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--ss-w-bad) 22%, transparent); pointer-events: none; }
+:where(.ss-w-meter-band.ss-w-lo) { left: 0; width: calc(var(--ss-w-warn-lo, 0) * 100%); }
+:where(.ss-w-meter-band.ss-w-hi) { left: calc(var(--ss-w-warn-hi, 1) * 100%); right: 0; }
+:where(.ss-w-meter-band.ss-w-in) { background: color-mix(in srgb, var(--ss-w-bad) 40%, transparent); }
+:where(.ss-w-critical .ss-w-meter-fill) { background: var(--ss-w-bad); }
+:where(.ss-w-critical .ss-w-meter-value) { color: var(--ss-w-bad); font-weight: bold; }
+:where(.ss-w-meter-above) { position: absolute; top: 0; bottom: 0; right: 0; left: calc(var(--ss-w-ceiling, 1) * 100%); background: repeating-linear-gradient(135deg, transparent 0 3px, color-mix(in srgb, var(--ss-w-fg) 18%, transparent) 3px 5px); pointer-events: none; }
+:where(.ss-w-meter-ceiling) { position: absolute; top: 0; bottom: 0; left: calc(var(--ss-w-ceiling, 1) * 100%); width: 2px; margin-left: -1px; background: var(--ss-w-fg); border-radius: 1px; }
+:where(.ss-w-meter-ticks) { position: absolute; inset: 0; pointer-events: none; }
+:where(.ss-w-meter-tick) { position: absolute; top: 0; bottom: 0; left: calc(var(--ss-w-at, 0) * 100%); width: 1px; margin-left: -0.5px; background: color-mix(in srgb, var(--ss-w-fg) 55%, transparent); pointer-events: auto; }
+:where(.ss-w-meter-tick.ss-w-on) { background: var(--ss-w-fg); }
 
 /* radar */
 :where(.ss-w-radar) { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 0.2em; --ss-w-tone: var(--ss-w-accent); }

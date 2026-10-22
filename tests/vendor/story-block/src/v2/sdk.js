@@ -4,6 +4,7 @@
 // module's initial state. No SillyTavern import (turn.js wires SillyTavern).
 
 import { INIT_PREFIX, normalizeField } from './registry.js';
+import { headReply } from './commands.js';
 import { cutAt } from '../text.js';
 
 // sdk.check comes from check.js (SB-commands); the sdk still loads without it.
@@ -13,11 +14,15 @@ const checkModule = await import('./check.js').catch(() => null);
 export const EVENTS = Object.freeze(['committed', 'head', 'turn', 'feature']);
 // The most change lines one reply's block may hold; the rest are one Problem (turn.js).
 export const MAX_CHANGE_LINES = 150;
-export const HOST_SETTINGS_DEFAULTS = Object.freeze({ tailBudget: 1500, maxChangeLines: MAX_CHANGE_LINES });
+export const HOST_SETTINGS_DEFAULTS = Object.freeze({ tailBudget: 1500, contextShare: 40, maxChangeLines: MAX_CHANGE_LINES });
 export const HOST_SETTINGS_SCHEMA = Object.freeze({
     tailBudget: Object.freeze({
         type: 'int', min: 100, max: 20000, label: 'Notes per reply (tokens)',
         help: 'The most Story Suite adds to the end of each reply\'s prompt, about four characters a token.',
+    }),
+    contextShare: Object.freeze({
+        type: 'int', min: 10, max: 90, label: 'Share of the context (%)',
+        help: 'The most of SillyTavern\'s context size (less the reply) Story Suite\'s instructions and notes take together; the rest is left for the conversation. The notes are cut to fit, the instructions never are.',
     }),
     maxChangeLines: Object.freeze({
         type: 'int', min: 10, max: 1000, label: 'Change lines per reply',
@@ -150,14 +155,17 @@ export function createSettings({ root, registry, save = () => {} }) {
 
 /**
  * Runs a registered query on `state`; the answer is a plain copy. Throws for an unknown query.
- * A query is called (state, args, tools) with tools.query(name, args) over the same state and
- * tools.receipts() → [{ index, receipt }], the stored receipts in chat order (`receipts` option).
+ * A query is called (state, args, tools) with tools.query(name, args) over the same state,
+ * tools.receipts() → [{ index, receipt }], the stored receipts in chat order (`receipts` option), and
+ * tools.reply ({ index, sid } or null, the `reply` option): the reply the state is the head of, as a
+ * command's ctx.reply (commands.js).
  */
-export function runQuery(registry, state, name, args, { receipts = () => [] } = {}) {
+export function runQuery(registry, state, name, args, { receipts = () => [], reply = null } = {}) {
     const query = registry.query(name);
     if (!query) throw new Error(`Story Suite: no module answers the query "${name}".`);
     const tools = Object.freeze({
-        query: (other, otherArgs) => runQuery(registry, state, other, otherArgs, { receipts }),
+        reply,
+        query: (other, otherArgs) => runQuery(registry, state, other, otherArgs, { receipts, reply }),
         receipts: () => receipts() ?? [],
     });
     const answer = query(state, args === undefined ? undefined : structuredClone(args), tools);
@@ -182,7 +190,7 @@ export function makeView({ store, registry, settings, chat = [] }) {
     const lastUser = [...messages].reverse().find(message => message?.is_user);
     return Object.freeze({
         state,
-        query: (name, args) => runQuery(registry, state, name, args, { receipts: () => store.receipts?.() ?? [] }),
+        query: (name, args) => runQuery(registry, state, name, args, { receipts: () => store.receipts?.() ?? [], reply: headReply(store) }),
         settings,
         feature: id => featureOn(registry, id),
         chat: Object.freeze({ length: messages.length, lastUser: String(lastUser?.mes ?? '') }),
@@ -234,11 +242,11 @@ export async function ensureModules({ store, bus, registry, events = null }) {
 /**
  * The public sdk. `deps`: { store, bus, registry, settings (createSettings), events
  * (createEvents), chat?: () => Message[], check?, onRegister?(def) (after each registerModule),
- * rewind?({ index, beforeRev }) (src/v2/rewind.js), substitute?(text), dialog?(screenId, opts), reread?(index) (turn.js) }.
+ * rewind?({ index, beforeRev }) (src/v2/rewind.js), substitute?(text), dialog?(screenId, opts), dialogCurrent?(), reread?(index) (turn.js) }.
  * Returns { sdk, events, markReady }:
  * `sdk.ready` resolves to the sdk once the host calls markReady().
  */
-export function createSdk({ store, bus, registry, settings, events = createEvents(), chat = () => [], check = checkModule, onRegister = null, rewind = null, substitute = text => String(text ?? ''), dialog = null, reread = null }) {
+export function createSdk({ store, bus, registry, settings, events = createEvents(), chat = () => [], check = checkModule, onRegister = null, rewind = null, substitute = text => String(text ?? ''), dialog = null, dialogCurrent = null, reread = null }) {
     let markReady;
     const ready = new Promise(resolve => { markReady = () => resolve(sdk); });
     const refused = message => ({ ok: false, code: 'REFUSED', message });
@@ -280,7 +288,7 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
             ? refused(`"${type}" is a step Story Block takes itself; it cannot be sent as an action.`)
             : bus.preview(type, payload)),
         commit: async token => saved(committed(await bus.commit(token))),
-        query: (name, args) => runQuery(registry, store.head(), name, args, { receipts: () => store.receipts?.() ?? [] }),
+        query: (name, args) => runQuery(registry, store.head(), name, args, { receipts: () => store.receipts?.() ?? [], reply: headReply(store) }),
         /** The stored receipts on the current line of history, in chat order: [{ index, receipt }]. */
         receipts: () => store.receipts?.() ?? [],
         /**
@@ -301,9 +309,13 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
         substitute: text => substitute(text),
         /**
          * Dialogs and wizards (SPEC §13.6): `open(screenId, opts)` → the dialog handle, or null where no
-         * page is shown (opts as the dialog mount's: draft, submit, random, onDone, onClose…).
+         * page is shown (opts as the dialog mount's: draft, submit, random, onDone, onClose…);
+         * `current()` → the topmost open dialog's handle, or null (so a module does not open a second).
          */
-        dialog: Object.freeze({ open: (screenId, opts = {}) => (typeof dialog === 'function' ? dialog(screenId, opts) : null) }),
+        dialog: Object.freeze({
+            open: (screenId, opts = {}) => (typeof dialog === 'function' ? dialog(screenId, opts) : null),
+            current: () => (typeof dialogCurrent === 'function' ? dialogCurrent() ?? null : null),
+        }),
         id: newId,
         check: check ? Object.freeze({ ...check }) : null,
         settings: id => settings(id),

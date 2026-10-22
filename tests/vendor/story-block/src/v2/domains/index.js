@@ -8,7 +8,10 @@
 //   registry.register(createCoreModule({ hooks: name => registry.hooks(name), settings: () => sdk.settings('story-block') }))
 // createCorePart gives the same thing as a MODULES.md part, for a host that merges parts.
 
-import { createInventoryCommands, createInventoryQueries, captureCoin, captureItem, initialInventory, inventoryTail, validateInventory } from './inventory.js';
+import {
+    FEATURE, INVENTORY_FEATURES, createInventoryCommands, createInventoryQueries, captureCoin, captureItem, captureLoot, encumbranceTail,
+    featureOn, initialInventory, inventoryTail, validateInventory,
+} from './inventory.js';
 import { capturePlace, capturePresent, initialScene, sceneCommands, sceneQueries, sceneTail, validateScene } from './scene.js';
 import { DEFAULT_CURRENCY, currencyOf } from './money.js';
 import { renderInventoryTab } from '../ui/inventory-tab.js';
@@ -39,16 +42,23 @@ export const CORE_KINDS = Object.freeze({
     coin: Object.freeze({ grammar: '+ coin 30 | from: who (- coin 5 | to: who when paid; one number, in the wallet\'s currency)' }),
     place: Object.freeze({ grammar: '~ place Name | kind: settlement|wild|dungeon|… | region: wider area | with: who came along (the rest stay behind)' }),
     present: Object.freeze({ grammar: '+ present Name when someone arrives, - present Name when they leave' }),
+    // MODULES §F100: off, the kind and its grammar line are left out (a host without Features keeps it).
+    loot: Object.freeze({ grammar: '? loot Thing, Other Thing x2 — where it lies (things the party could pick up; the reader chooses what to take)', feature: FEATURE.loot }),
 });
 
 // Story Block's own optional pieces as features (MODULES §F100): the status strip and the cards under
-// replies (on), the two assist helpers (off; each makes an extra model call). None of them changes the
+// replies (on), the two assist helpers (off; each makes an extra model call), the state inspector (off)
+// and save points (on). None of them changes the
 // static prompt part. The host reads them where the piece is drawn or run (ui-host.js, runtime.js).
 export const CORE_FEATURES = Object.freeze([
     Object.freeze({ id: CORE_FEATURE.hud, label: STRINGS.features.hud, describe: STRINGS.features.hudDescribe, default: true }),
     Object.freeze({ id: CORE_FEATURE.cards, label: STRINGS.features.cards, describe: STRINGS.features.cardsDescribe, default: true }),
-    Object.freeze({ id: CORE_FEATURE.preroll, label: FEATURE_TEXT.classifier.label, describe: FEATURE_TEXT.classifier.describe, default: false }),
+    // The pre-roll only works with a module that keeps `? check` lines.
+    Object.freeze({ id: CORE_FEATURE.preroll, label: FEATURE_TEXT.classifier.label, describe: FEATURE_TEXT.classifier.describe, default: false, needs: Object.freeze({ kinds: Object.freeze(['check']), why: FEATURE_TEXT.classifier.needs }) }),
     Object.freeze({ id: CORE_FEATURE.extractor, label: FEATURE_TEXT.extractor.label, describe: FEATURE_TEXT.extractor.describe, default: false }),
+    // The state inspector is for testers and pack authors (off); save points are for every reader (on).
+    Object.freeze({ id: CORE_FEATURE.inspector, label: STRINGS.features.inspector, describe: STRINGS.features.inspectorDescribe, default: false }),
+    Object.freeze({ id: CORE_FEATURE.savepoints, label: STRINGS.features.savepoints, describe: STRINGS.features.savepointsDescribe, default: true }),
 ]);
 
 // The chat's one currency (MODULES.md F1): its name (singular) and plural, renamable by the reader,
@@ -62,7 +72,7 @@ export const CORE_SETTINGS = Object.freeze({
         currencyShort: Object.freeze({ type: 'text', label: 'Currency, short form (blank: its first letter)', max: 6 }),
         storyCoinPerReply: Object.freeze({
             type: 'int', min: 0, max: 1000000000, label: 'Money one reply may give',
-            help: 'The most + coin lines of one reply may pay, in whole coins. 0: the top quest reward for the player character\'s rank (or 1000 per level, times the money scale).',
+            help: 'The most + coin lines of one reply may pay, in whole coins. 0: worked out from your installed modules (a quest rank\'s top reward, or 1000 per character level, times the money scale; 1000 times the scale when neither is installed).',
         }),
         // A number from 0.001 to 1000, kept as text so it can hold a fraction (MODULES §F104).
         economyScale: Object.freeze({
@@ -102,7 +112,7 @@ export function createCorePart({ hooks = () => [], settings = () => ({}), hookEn
         domains: {
             scene: { initial: initialScene, validate: slice => validateScene(slice) },
             // Coin and stack sizes are counts: a replay after a deleted reply adds each change to them.
-            inventory: { initial: initialInventory, validate: slice => validateInventory(slice), counters: ['wallets/*/coin', 'stacks/*/qty'], scratch: ['perReply'] },
+            inventory: { initial: initialInventory, validate: slice => validateInventory(slice), counters: ['wallets/*/coin', 'stacks/*/qty'], scratch: ['perReply', 'loot', 'condLog'] },
         },
         commands: { ...createInventoryCommands(env), ...sceneCommands },
         queries: { ...createInventoryQueries(env), ...sceneQueries },
@@ -111,6 +121,7 @@ export function createCorePart({ hooks = () => [], settings = () => ({}), hookEn
             coin: kind(CORE_KINDS.coin.grammar, (ctx, line) => captureCoin(ctx, line, env)),
             place: kind(CORE_KINDS.place.grammar, (ctx, line) => capturePlace(ctx, line)),
             present: kind(CORE_KINDS.present.grammar, (ctx, line) => capturePresent(ctx, line)),
+            loot: { ...kind(CORE_KINDS.loot.grammar, (ctx, line) => captureLoot(ctx, line, env)), feature: FEATURE.loot },
         },
         context: {
             static: () => CORE_STATIC,
@@ -118,9 +129,14 @@ export function createCorePart({ hooks = () => [], settings = () => ({}), hookEn
             tail(view) {
                 const chars = CORE_BUDGET * 4;
                 const scene = sceneTail(view?.state);
-                const used = scene.reduce((sum, line) => sum + line.length + 1, 0);
+                // The encumbered condition, when the carry module reports it (one short line).
+                // Asked through the query, which a host with Features answers with null while it is off.
+                let found = null;
+                try { found = featureOn(view, FEATURE.encumbrance) ? view.query('inventory.encumbrance') : null; } catch { found = null; }
+                const heavy = encumbranceTail(found);
+                const used = [...scene, ...heavy].reduce((sum, line) => sum + line.length + 1, 0);
                 const inventory = inventoryTail(view?.state, { currency: currency(), chars: chars / 2 - used, optionalChars: chars / 2 });
-                return { lines: [...scene, ...inventory.lines], optional: inventory.optional };
+                return { lines: [...scene, ...inventory.lines, ...heavy], optional: inventory.optional };
             },
             budget: CORE_BUDGET,
         },
@@ -137,10 +153,11 @@ export function createCorePart({ hooks = () => [], settings = () => ({}), hookEn
  * side (a name in two parts throws), capture by `line.kind`, statics joined in part order, tails
  * concatenated, budgets summed, a hook name shared by parts called in part order (beforeGenerate
  * lines and commands added up; for any other hook the first answer that is not null/undefined),
- * and each part's settings section drawn as its own block in the module's settings panel.
+ * and each part's settings section drawn as its own block in the module's settings panel (or, with
+ * `settings.fold`, as a fold of its own at the top of the settings: `folds`).
  */
 export function mergeParts(parts) {
-    const out = { domains: {}, commands: {}, queries: {}, kinds: {}, hooks: {}, tabs: [], statics: [], tails: [], budget: 0, sections: [], defaults: {}, schema: {} };
+    const out = { domains: {}, commands: {}, queries: {}, kinds: {}, hooks: {}, tabs: [], statics: [], tails: [], budget: 0, sections: [], folds: [], defaults: {}, schema: {} };
     const put = (table, name, value, what) => {
         if (Object.hasOwn(out[table], name)) throw new Error(`Story Block: two parts both define the ${what} "${name}".`);
         out[table][name] = value;
@@ -160,7 +177,11 @@ export function mergeParts(parts) {
         for (const [key, value] of Object.entries(settings.defaults ?? {})) put('defaults', key, value, 'setting');
         Object.assign(out.schema, settings.schema ?? {});
         const render = typeof settings.render === 'function' ? settings.render : typeof settings.section === 'function' ? settings.section : null;
-        if (render) out.sections.push({ title: typeof settings.section === 'string' ? settings.section : '', render });
+        const title = typeof settings.section === 'string' ? settings.section : '';
+        // A part whose panel is a fold of its own (`settings.fold: { id, hint? }`, the Packs) goes to the top
+        // of the settings instead of the module's section.
+        if (render && settings.fold && typeof settings.fold.id === 'string') out.folds.push({ id: settings.fold.id, title: title || settings.fold.id, hint: settings.fold.hint ?? '', render });
+        else if (render) out.sections.push({ title, render });
     }
     for (const [name, fns] of Object.entries(hookLists)) {
         out.hooks[name] = fns.length === 1 ? fns[0] : name === 'beforeGenerate'
@@ -207,7 +228,7 @@ export function createCoreModule({ hooks = () => [], settings = () => ({}), vers
         id: CORE_MODULE_ID,
         name: 'Story Block',
         version,
-        features: CORE_FEATURES.map(feature => ({ ...feature })),
+        features: [...CORE_FEATURES, ...INVENTORY_FEATURES].map(feature => ({ ...feature })),
         domains: merged.domains,
         commands: merged.commands,
         queries: merged.queries,
@@ -237,6 +258,8 @@ export function createCoreModule({ hooks = () => [], settings = () => ({}), vers
         settings: {
             defaults: merged.defaults,
             schema: merged.schema,
+            // The Packs: a fold of its own, second after Story Suite's, so it is found (host-ui.js).
+            folds: merged.folds.map(item => ({ ...item, render: (el, api) => item.render(el, { ...api, query: (name, args) => api?.sdk?.query?.(name, args), notify: text => globalThis.toastr?.info?.(text, 'Story Suite') }) })),
             // Each part's own panel (Packs, Events) under its title, below the schema rows.
             render(el, api) {
                 const doc = el.ownerDocument ?? globalThis.document;

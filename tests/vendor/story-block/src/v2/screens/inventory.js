@@ -1,6 +1,10 @@
 // `story-block/inventory` (SPEC §13.1): the party's things from the head state, grouped by kind, with
 // rarity colours, quantities, an equipped marker, the wallet in the chat's one currency (MODULES §F1),
-// Equip / Unequip and Drop buttons, and filters that fill the view's draft (§13.2, §13.6): a name box
+// an Equipped section per wearer with Take off, "Equip on…" (only the members who can wear the piece,
+// `inventory.equipOn`, MODULES §F99) and "Give…" (`inventory.transfer`) pickers once the party has
+// members (a party with none keeps the plain Equip), RPG Battle's item detail widget when it is there,
+// a "To pick up" section with the loot still waiting (the same chips and Take selected as the reply's
+// card, so loot works with the cards off), Unequip and Drop buttons, and filters that fill the view's draft (§13.2, §13.6): a name box
 // ("Filter…", `draft.find`), what kind, what rarity, equipped only. Its texts are in src/v2/strings.js. Nothing here writes state; the buttons run the core commands with
 // the payloads of MODULES §F5 (`inventory.equip { stack }`, `inventory.unequip { stack }`,
 // `inventory.drop { stack, qty }`), and Drop asks first (a folded "Drop" that opens to the choices).
@@ -27,7 +31,8 @@ const anyKind = kind => `(draft.kind == null || draft.kind == '' || draft.kind =
 const ITEM_FILTER = "(draft.rarity == null || draft.rarity == '' || draft.rarity == it.rarity)"
     + ' && (draft.equippedOnly != true || it.equipped != null)'
     + ' && contains(it.name, draft.find)';
-const RARITY_CLASSES = RARITIES.filter(rarity => rarity !== 'common').map(rarity => `r-${rarity}: it.rarity == '${rarity}'`).join('; ');
+const rarityClasses = name => RARITIES.filter(rarity => rarity !== 'common').map(rarity => `r-${rarity}: ${name}.rarity == '${rarity}'`).join('; ');
+const RARITY_CLASSES = rarityClasses('it');
 
 function group(kind) {
     return `
@@ -40,15 +45,31 @@ function group(kind) {
           <span class="name">{{ it.name }}</span>
           <span class="qty" data-if="it.qty != 1">×{{ it.qty }}</span>
           <span class="chip eq" data-if="it.equipped" title="${html(S.equippedTitle)}"><i class="fa-solid fa-check" aria-hidden="true"></i> {{ it.equipped }}</span>
+          <span class="chip key" data-if="it.key" title="${html(S.keyTitle)}">${html(S.key)}</span>
           <span class="rarity">{{ it.rarity }}</span>
           <span class="owner muted" data-if="it.owner != 'party'">{{ state.party.actors[it.owner].name }}</span>
         </div>
         <p class="note muted" data-if="it.note">{{ it.note }}</p>
+        <div class="detail" data-if="q.gear.detail == true"><ss-widget name="rpg-battle.item-detail" data-props='{"stack":"{{ it.stack }}"}'></ss-widget></div>
         <div class="actions">
-          <button class="btn" data-if="it.kind == 'equipment' && it.equipped == null" data-command="inventory.equip"
+          <button class="btn" data-if="it.kind == 'equipment' && it.equipped == null && len(q.gear.members) == 0" data-command="inventory.equip"
                   data-payload='{"stack":"{{ it.stack }}"}' title="${html(S.equipTitle, { name: '{{ it.name }}' })}"><i class="fa-solid fa-hand-fist" aria-hidden="true"></i> ${html(S.equip)}</button>
+          <details class="pick equip-on" data-if="it.kind == 'equipment' && len(q.gear.wearers[it.stack]) > 0">
+            <summary class="btn" title="${html(S.equipOnTitle, { name: '{{ it.name }}' })}"><i class="fa-solid fa-hand-fist" aria-hidden="true"></i> ${html(S.equipOn)}</summary>
+            <span class="choices">
+              <button class="btn" data-each="q.gear.wearers[it.stack] as who" data-command="inventory.equipOn"
+                      data-payload='{"stack":"{{ it.stack }}","actor":"{{ who.id }}"}' title="${html(S.equipOnWho, { name: '{{ it.name }}' })}">{{ who.name }}</button>
+            </span>
+          </details>
           <button class="btn" data-if="it.equipped" data-command="inventory.unequip"
                   data-payload='{"stack":"{{ it.stack }}"}' title="${html(S.unequipTitle, { name: '{{ it.name }}' })}">${html(S.unequip)}</button>
+          <details class="pick give" data-if="len(q.gear.members) > 0 && len(q.gear.givers[it.stack]) > 0">
+            <summary class="btn" title="${html(S.giveTitle, { name: '{{ it.name }}' })}"><i class="fa-solid fa-hand-holding" aria-hidden="true"></i> ${html(S.give)}</summary>
+            <span class="choices">
+              <button class="btn" data-each="q.gear.givers[it.stack] as to" data-command="inventory.transfer"
+                      data-payload='{"stack":"{{ it.stack }}","to":"{{ to.id }}"}' title="${html(S.giveTo, { name: '{{ to.name }}' })}">{{ to.name }}</button>
+            </span>
+          </details>
           <details class="drop">
             <summary class="btn danger" title="${html(S.dropTitle, { name: '{{ it.name }}' })}"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> ${html(S.drop)}</summary>
             <span class="confirm">
@@ -90,6 +111,35 @@ ${RARITIES.map(rarity => `          <option value="${rarity}">${html(S.rarities[
       <label class="check"><input type="checkbox" data-draft="equippedOnly"> ${html(S.equippedOnly)}</label>
     </div>
   </header>
+  <section class="loot" data-if="len(q.loot) > 0">
+    <h4><i class="fa-solid fa-sack-dollar" aria-hidden="true"></i> ${html(S.lootTitle)}</h4>
+    <div class="offer" data-each="q.loot as o">
+      <p class="loot-head"><b>${html(S.lootWhere)}</b><span class="where" data-if="o.where"> — {{ o.where }}</span></p>
+      <div class="chips">
+        <label class="chip pick" data-each="o.items as it, i"><input type="checkbox" data-draft="loot[o.sid]" value="{{ i }}"> <span>{{ it.name }}</span><span class="n" data-if="it.qty != 1"> ×{{ it.qty }}</span></label>
+      </div>
+      <p class="hint muted">${html(S.lootPick)}</p>
+      <button class="btn take" data-command="inventory.lootTake" data-payload='{"sid":"{{ o.sid }}","pick":{{ draft.loot[o.sid] }}}'
+              title="${html(S.lootTakeTitle)}"><i class="fa-solid fa-hand" aria-hidden="true"></i> ${html(S.lootTake)}</button>
+    </div>
+  </section>
+  <section class="worn" data-if="len(q.gear.worn) > 0">
+    <h4><i class="fa-solid fa-user-shield" aria-hidden="true"></i> ${html(S.wornTitle)}</h4>
+    <div class="wearer" data-each="q.gear.worn as w">
+      <h5>{{ w.name }}</h5>
+      <ul>
+        <li class="piece" data-each="w.items as p" data-class="${rarityClasses('p')}">
+          <div class="line">
+            <span class="chip eq">{{ p.equipped }}</span>
+            <span class="name">{{ p.name }}</span>
+            <span class="cond muted" data-if="p.cond != null" title="${html(S.condTitle)}">{{ p.cond }}/100</span>
+            <button class="btn" data-command="inventory.unequip" data-payload='{"stack":"{{ p.stack }}"}'
+                    title="${html(S.takeOffTitle, { name: '{{ p.name }}' })}">${html(S.takeOff)}</button>
+          </div>
+        </li>
+      </ul>
+    </div>
+  </section>
   <p class="empty muted" data-if="len(q.items) == 0">${html(S.empty)}</p>
   <div class="groups">${KIND_ORDER.map(group).join('')}
   </div>
@@ -113,13 +163,13 @@ const CSS = `${BASE_CSS}
 .group:not(:has(.item)) { display: none; }
 .nomatch { display: none; }
 .groups:not(:has(.item)) + .nomatch { display: block; }
-.item { --rarity: var(--sb-common); padding: 6px 8px; margin: 0 0 4px; border-radius: 6px;
+.item, .piece { --rarity: var(--sb-common); padding: 6px 8px; margin: 0 0 4px; border-radius: 6px;
         border-left: 3px solid var(--rarity); background: var(--sb-raised); transition: background-color 0.15s ease, box-shadow 0.15s ease; }
-.item:hover { background: color-mix(in srgb, var(--sb-fg) 9%, transparent); }
-.item.r-uncommon { --rarity: var(--sb-uncommon); }
-.item.r-rare { --rarity: var(--sb-rare); }
-.item.r-epic { --rarity: var(--sb-epic); }
-.item.r-legendary { --rarity: var(--sb-legendary); }
+.item:hover, .piece:hover { background: color-mix(in srgb, var(--sb-fg) 9%, transparent); }
+.item.r-uncommon, .piece.r-uncommon { --rarity: var(--sb-uncommon); }
+.item.r-rare, .piece.r-rare { --rarity: var(--sb-rare); }
+.item.r-epic, .piece.r-epic { --rarity: var(--sb-epic); }
+.item.r-legendary, .piece.r-legendary { --rarity: var(--sb-legendary); }
 .item.equipped { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sb-accent) 45%, transparent); }
 .line { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
 .name { font-weight: 600; color: var(--rarity); }
@@ -133,6 +183,24 @@ const CSS = `${BASE_CSS}
 .drop > summary { list-style: none; }
 .drop > summary::-webkit-details-marker { display: none; }
 .drop .confirm { display: inline-flex; gap: 6px; margin-left: 6px; }
+.pick { display: inline-flex; gap: 6px; align-items: center; }
+.pick > summary { list-style: none; }
+.pick > summary::-webkit-details-marker { display: none; }
+.pick .choices { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-left: 6px; }
+.loot { display: grid; gap: 6px; }
+.loot .offer { display: grid; gap: 4px; padding: 6px 8px; border-radius: 6px; background: var(--sb-raised); }
+.loot .loot-head, .loot .hint { margin: 0; }
+.loot .hint { font-size: 0.85em; }
+.loot .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.loot .pick { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; padding: 1px 8px; border-radius: 999px;
+              border: 1px solid var(--sb-border); background: var(--sb-surface); }
+.loot .pick:has(input:checked) { border-color: var(--sb-accent); color: var(--sb-accent); }
+.loot .pick input { width: 1em; height: 1em; min-width: 0; margin: 0; accent-color: var(--sb-accent); }
+.loot .take { justify-self: start; }
+.worn { display: grid; gap: 4px; }
+.worn h5 { margin: 4px 0 2px; font-size: 0.9em; }
+.worn .line .btn { margin-left: auto; }
+.cond { font-size: 0.8em; font-variant-numeric: tabular-nums; }
 @media (max-width: 480px) { .filter { width: 100%; } }
 `;
 
@@ -145,6 +213,10 @@ export const inventoryScreen = Object.freeze({
         items: Object.freeze({ query: 'inventory.items' }),
         wallet: Object.freeze({ query: 'inventory.wallet', args: Object.freeze({ owner: 'party' }) }),
         currency: Object.freeze({ query: 'inventory.currency' }),
+        // Who wears what, who may put each piece on, where Give may hand it (MODULES §F99).
+        gear: Object.freeze({ query: 'inventory.equipment' }),
+        // The loot laid out and not yet taken, so it can be taken with the cards off too.
+        loot: Object.freeze({ query: 'inventory.loot' }),
     }),
     theme: RARITY_THEME,
     template: TEMPLATE,

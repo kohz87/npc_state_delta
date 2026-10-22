@@ -19,7 +19,28 @@
 // * `covers` (with a checkpoint) = the `sid`s of the records from the checkpoint before it up to this one,
 //   so the store can tell a checkpoint made over a reply since deleted (store.js chain).
 // * An op on a count a domain keeps (`counters`) carries `was`, the number it replaced (ops.js).
-// The record is written to `message.extra` and copied to `swipe_info[swipe_id].extra`, as v1 did.
+// The record is written to `message.extra`. Its copy in `swipe_info[swipe_id].extra` (as v1 kept one on
+// every message) is kept only where SillyTavern can read it back (`keepsCopy`): see below.
+//
+// Keeping each record once (docs/v2/PERFORMANCE.md). SillyTavern 1.19 sets `extra` from `swipe_info` in
+// one function only, `syncSwipeToMes`, and calls it
+// * when a message is swiped (script.js `swipe` → `loadFromSwipeId`): only the last message can be
+//   swiped by the reader, and before it moves away from the shown swipe it copies `extra` into that
+//   swipe's `swipe_info` itself (`syncMesToSwipe`), except when the shown swipe is being deleted (then
+//   it moves to another swipe's own copy) or a failed swipe is turned back (to the swipe it just copied);
+// * when a branch is made from a swipe picked in the swipe list (bookmarks.js `getBranchChatSnapshot`):
+//   the picker opens on any message with more than one swipe, and it does NOT copy the shown swipe first,
+//   so the branch takes the shown swipe's `extra` from its `swipe_info` copy.
+// Nothing else reads it (deleting a message, editing, Continue, loading a chat read `extra` itself). So
+// the shown swipe's copy is kept on the last carrier and on any carrier with more than one swipe, and
+// dropped on the others. When a deletion makes an earlier carrier the last one, the store copies its
+// record into its shown swipe again (`restoreCopy`, on rebuild). Other swipes' copies, SillyTavern's own
+// (each holding that swipe's own record), are never touched.
+// * Receipts RECEIPT_KEEP or more carriers back lose their `data` (`trimReceipts`). That is a contract
+//   (SPEC §2.2): receipt data older than 200 carriers may be dropped, and modules must not rely on it;
+//   what a module needs later it keeps in its own state. Story Block itself never reads it then (claims
+//   live in meta.claims, Re-read uses `line` and `seed`, narration `summary` and `narrate`). Every other
+//   field stays.
 
 import { randomId } from '../id.js';
 
@@ -163,18 +184,18 @@ export function readRecord(message) {
 // index is seen as a copy. A trusted record whose mark has moved on (the reply was edited, or continued)
 // gets the swipe's mark as it is now, so the next change to the other part still finds it. True when it
 // wrote.
-export function restamp(message) {
+export function restamp(message, { mirror = true } = {}) {
     const record = readRecord(message);
     if (!record) return false;
     const shifted = record.swipe !== undefined && record.swipe !== swipeOf(message);
     if (!shifted && !(record.swipe !== undefined && markStale(record, message))) return false;
-    writeRecord(message, record);
+    writeRecord(message, record, { mirror });
     return true;
 }
 
 // Writes the record for the shown swipe and keeps swipe_info in step (`mirror: false` leaves the
-// swipe_info copy for later: the store writes a reply's lines one by one and copies once at the end).
-// Touches nothing else in the message.
+// swipe_info copy for later: the store writes a reply's lines one by one and copies once at the end, and
+// drops it where it is not kept). Touches nothing else in the message.
 export function writeRecord(message, record, { mirror = true } = {}) {
     const swipe = swipeOf(message);
     const mark = swipeMark(message);
@@ -183,13 +204,81 @@ export function writeRecord(message, record, { mirror = true } = {}) {
     else delete stored.mark;
     if (!isObject(message.extra)) message.extra = {};
     message.extra[KEY] = stored;
-    if (!mirror) return stored;
-    const info = Array.isArray(message.swipe_info) ? message.swipe_info[swipe] : null;
-    if (isObject(info)) {
-        if (!isObject(info.extra)) info.extra = {};
-        if (info.extra !== message.extra) info.extra[KEY] = structuredClone(stored);
-    }
+    if (mirror) mirrorCopy(message);
     return stored;
+}
+
+/**
+ * Does this carrier keep its shown swipe's record in `swipe_info` too? Yes when it is the last carrier
+ * (`last`: the one the reader can swipe), or when it has more than one swipe (a branch can be made from
+ * one of them, see the top of this file).
+ */
+export function keepsCopy(message, last) {
+    return !!last || (Array.isArray(message?.swipes) && message.swipes.length > 1);
+}
+
+/** Copies the record in `message.extra` into the shown swipe's `swipe_info` (when it has one). */
+export function mirrorCopy(message) {
+    const record = message?.extra?.[KEY];
+    const info = Array.isArray(message?.swipe_info) ? message.swipe_info[swipeOf(message)] : null;
+    if (!isObject(record) || !isObject(info)) return false;
+    if (!isObject(info.extra)) info.extra = {};
+    if (info.extra !== message.extra) info.extra[KEY] = structuredClone(record);
+    return true;
+}
+
+/**
+ * The copy a rebuild gives the last carrier back (an earlier one became the last). Only for a message at
+ * rest: its shown swipe's text is the one shown, and that swipe's `swipe_info` holds no other record.
+ * SillyTavern's deleteSwipe tells of a deleted swipe (MESSAGE_SWIPE_DELETED) before it shows the next
+ * one: then `extra` is still the deleted swipe's and the slot under `swipe_id` is the next swipe's own,
+ * which must not be written over. True when it copied.
+ */
+export function restoreCopy(message) {
+    const record = message?.extra?.[KEY];
+    const swipe = swipeOf(message);
+    const info = Array.isArray(message?.swipe_info) ? message.swipe_info[swipe] : null;
+    if (!isObject(record) || !isObject(info) || info.extra === message.extra) return false;
+    if (Array.isArray(message.swipes) && message.swipes[swipe] !== message.mes) return false;
+    const there = isObject(info.extra) ? info.extra[KEY] : undefined;
+    if (there !== undefined && !(isObject(there) && there.sid === record.sid)) return false;
+    return mirrorCopy(message);
+}
+
+/**
+ * Drops the shown swipe's copy of the record in `message.extra` from `swipe_info` (only a copy of that
+ * same record, by `sid`; a copy of anything else is left alone). True when it dropped one.
+ */
+export function dropCopy(message) {
+    const own = message?.extra?.[KEY];
+    const info = Array.isArray(message?.swipe_info) ? message.swipe_info[swipeOf(message)] : null;
+    const copy = isObject(info?.extra) && info.extra !== message.extra ? info.extra[KEY] : undefined;
+    if (!isObject(own) || !isObject(copy) || copy.sid !== own.sid) return false;
+    delete info.extra[KEY];
+    return true;
+}
+
+/** How many carriers back (the head is 0) a record's receipts keep their `data`. */
+export const RECEIPT_KEEP = 200;
+
+/**
+ * Drops `data` from the receipts of the record shown on `message` (and from its kept copy), keeping
+ * every other field. Nothing else in the record changes (no new mark or swipe stamp). True when it did.
+ */
+export function trimReceipts(message) {
+    const record = readRecord(message);
+    if (!record || !record.receipts.some(receipt => isObject(receipt) && Object.hasOwn(receipt, 'data'))) return false;
+    const receipts = record.receipts.map(receipt => {
+        if (!isObject(receipt) || !Object.hasOwn(receipt, 'data')) return receipt;
+        const { data, ...rest } = receipt;
+        void data;
+        return rest;
+    });
+    const info = Array.isArray(message.swipe_info) ? message.swipe_info[swipeOf(message)] : null;
+    const copied = isObject(info?.extra) && info.extra !== message.extra && isObject(info.extra[KEY]) && info.extra[KEY].sid === record.sid;
+    message.extra[KEY] = { ...record, receipts };
+    if (copied) info.extra[KEY] = structuredClone(message.extra[KEY]);
+    return true;
 }
 
 /**
@@ -216,8 +305,9 @@ export function carryRecord(from, to) {
 // must start writing before it returns):
 //   ''                  → save the chat that is open;
 //   { wait: reason }    → a chat is being loaded (SillyTavern empties the chat before it reads the next
-//                         one): nothing is written, it is tried again shortly (`waitMs`, up to `waits`
-//                         times; a chat that stays empty has nothing of the change left to save);
+//                         one): nothing is written, it is tried again shortly (`waitMs`, `waits` times),
+//                         then less often (`retry`'s longest) for as long as it takes: the change stays
+//                         unsaved, never dropped (a big chat on a slow connection can take a while);
 //   { moved: reason }   → another chat is open: the change is the other chat's, so the chat that is open
 //                         is NOT saved; `rescue(target)` puts the change into that chat's own file;
 //   { gone: reason }    → nothing of the change is left in the chat (its reply was deleted): nothing to save.
@@ -225,9 +315,25 @@ export function carryRecord(from, to) {
 // A failed save stays dirty: the reader is told once (`onError`) until a save works again, and it is
 // tried again after `retry` ms (growing). `verify` (SPEC §3.3): `{ before() → token, after(token) → '' |
 // problem }` around each save; a problem counts as a failed save.
+// A save (or a rescue) the server does not answer within `timeout` ms counts as failed too: it is given
+// up (`save` gets `{ signal }`, aborted then) and tried again, so a request left hanging (a dropped
+// connection, a stuck proxy) never holds the next save, the reader's command or the next reply.
+// A save of a chat renamed while it was on its way (`renamed`) landed under the old name: it does not
+// count, and the change is saved again, into the renamed chat's file.
+// A save given up that way may still be written: its body can already be at the server, which writes it
+// when it gets to it, after the retry that carried a newer change (SillyTavern's integrity token is the
+// same on both). So after a timeout the saver is "suspect" for that chat: each later save is stamped
+// (`confirm.mark(target)` → token, right before it starts: a rising number in the chat's metadata), and
+// once one of them is answered the file is read back after each of `recheck` ms
+// (`confirm.holds(target, token)` → true when the file holds that save or a newer one). A file holding
+// an older one is saved again at once. The read-backs end when the last delay has passed (about five
+// minutes: a server drops a request whose body has not arrived by then). Without a timeout nothing is
+// stamped or read. The read-backs never hold a save, the reader's command or the next reply.
+export const RECHECK_MS = Object.freeze([10000, 20000, 40000, 80000, 160000]);
 export function createSaver({
     save, onError = null, timers = globalThis, verify = null, target = null, check = null, rescue = null,
-    retry = [1000, 2000, 4000, 8000, 15000], waitMs = 200, waits = 50,
+    retry = [1000, 2000, 4000, 8000, 15000], waitMs = 200, waits = 50, timeout = 20000,
+    confirm = null, recheck = RECHECK_MS,
 } = {}) {
     if (typeof save !== 'function') throw new TypeError('createSaver needs a save function.');
     let version = 0;
@@ -239,6 +345,8 @@ export function createSaver({
     let failures = 0;           // failed saves in a row
     let told = false;           // the reader was told about this run of failures
     let waited = 0;             // saves put off in a row because a chat was being opened
+    let sending = null;         // { chatId, renamed } of the save on its way
+    let suspect = null;         // { chatId, good: token | null, step, timer }: a save of that chat timed out
 
     const dirty = () => version !== saved || orphans.length > 0;
     const backoff = () => retry[Math.max(0, Math.min(failures, retry.length) - 1)];
@@ -264,8 +372,9 @@ export function createSaver({
     }
 
     // A save that did not happen: told once, tried again later (a wait is not a failure).
+    const waitDelay = () => (waited > waits ? retry[retry.length - 1] : waitMs);
     function failed(error) {
-        if (error?.wait) later(waitMs);
+        if (error?.wait) later(waitDelay());
         else {
             tell(error);
             later(backoff());
@@ -275,6 +384,64 @@ export function createSaver({
     // Another chat's change that could not be written yet is tried again later.
     function followUp() {
         if (orphans.length && timer === null) later(backoff());
+    }
+
+    // After a timeout: is the newest answered save of the suspect chat still the one in its file? Read
+    // back after each delay; an older save found there is written over at once (a new save, stamped anew).
+    function startRechecks() {
+        if (!suspect || suspect.timer !== null || typeof confirm?.holds !== 'function') return;
+        if (suspect.step >= recheck.length) {
+            suspect = null;
+            return;
+        }
+        const run = suspect;
+        run.timer = timers.setTimeout(async () => {
+            run.step++;
+            const now = latest;
+            const open = now && now.chatId === run.chatId && (typeof check !== 'function' || !check(now));
+            let holds = true;
+            if (open && run.good !== null && run.good !== undefined) {
+                try { holds = await answered(() => confirm.holds(now, run.good)) !== false; } catch { holds = true; }
+            }
+            if (suspect !== run) return;     // a newer timeout started its own read-backs
+            run.timer = null;
+            if (!holds) {
+                if (version === saved) version++;
+                cancel();
+                saveNow().then(followUp, failed);
+            }
+            startRechecks();
+        }, recheck[run.step]);
+        run.timer?.unref?.();
+    }
+
+    function markSuspect(chatId) {
+        if (suspect?.timer !== null && suspect?.timer !== undefined) timers.clearTimeout(suspect.timer);
+        suspect = { chatId, good: null, step: 0, timer: null };
+    }
+
+    // `start(signal)`'s promise, failed after `timeout` ms without an answer (and `signal` aborted).
+    // `onTimeout()` is told when it is given up that way.
+    function answered(start, onTimeout = null) {
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        let job;
+        try { job = Promise.resolve(start(controller?.signal)); } catch (error) { return Promise.reject(error); }
+        if (!(timeout > 0)) return job;
+        return new Promise((resolve, reject) => {
+            const timer = timers.setTimeout(() => {
+                try { controller?.abort(); } catch { /* nothing to abort */ }
+                try { onTimeout?.(); } catch { /* only a note */ }
+                reject(new Error(`the server did not answer within ${Math.round(timeout / 1000)} seconds`));
+            }, timeout);
+            timer?.unref?.();
+            job.then(value => {
+                timers.clearTimeout(timer);
+                resolve(value);
+            }, error => {
+                timers.clearTimeout(timer);
+                reject(error);
+            });
+        });
     }
 
     // One write at a time. `fn` runs in the same tick as the last wait ends: nothing can come between
@@ -303,7 +470,7 @@ export function createSaver({
             }
             try {
                 if (typeof rescue !== 'function') throw new Error('this page cannot write to another chat');
-                await exclusive(() => rescue(orphan.target));
+                await exclusive(() => answered(() => rescue(orphan.target)));
                 orphans.splice(orphans.indexOf(orphan), 1);
             } catch (error) {
                 orphan.tries++;
@@ -328,9 +495,14 @@ export function createSaver({
             goal = version;
             const now = latest;
             const verdict = now && typeof check === 'function' ? check(now) : '';
-            if (verdict?.wait && ++waited <= waits) return verdict;
+            // C4-3: a chat being opened is waited for however long it takes; the change is never
+            // dropped for it (the same chat read again takes the change back on, see `check`).
+            if (verdict?.wait) {
+                waited++;
+                return verdict;
+            }
             waited = 0;
-            if (verdict?.gone || verdict?.wait) {
+            if (verdict?.gone) {
                 saved = goal;
                 return 'clean';
             }
@@ -340,9 +512,23 @@ export function createSaver({
                 return 'moved';
             }
             token = verify?.before?.();
-            return Promise.resolve(save(now, options)).then(() => 'saved', error => {
+            const trip = { chatId: now?.chatId, renamed: false };
+            sending = trip;
+            // After a timeout of this chat's save, this one is stamped, so a read-back can tell it from the
+            // late one (startRechecks).
+            const watched = suspect && suspect.chatId === trip.chatId ? suspect : null;
+            let stamp = null;
+            if (watched && typeof confirm?.mark === 'function') {
+                try { stamp = confirm.mark(now); } catch { stamp = null; }
+            }
+            return answered(signal => save(now, signal ? { ...options, signal } : options), () => markSuspect(trip.chatId)).then(() => {
+                if (watched && suspect === watched && stamp !== null && stamp !== undefined) watched.good = stamp;
+                return trip.renamed ? 'renamed' : 'saved';
+            }, error => {
                 failures++;
                 throw error;
+            }).finally(() => {
+                if (sending === trip) sending = null;
             });
         });
         if (outcome?.wait) {
@@ -351,6 +537,8 @@ export function createSaver({
             throw error;
         }
         if (outcome === 'moved') await rescueOrphans();
+        // C4-2: it landed under the chat's old name; the renamed chat's file is written next.
+        if (outcome === 'renamed') return saveNow(options);
         if (outcome !== 'saved') return;
         // A change made while the save ran goes with the next save, which checks it then.
         const problem = version === goal ? verify?.after?.(token) : '';
@@ -361,6 +549,7 @@ export function createSaver({
         saved = goal;
         failures = 0;
         told = false;
+        if (suspect?.good !== null && suspect?.good !== undefined) startRechecks();
     }
 
     return {
@@ -386,9 +575,15 @@ export function createSaver({
             };
             latest = move(latest);
             for (const orphan of orphans) orphan.target = move(orphan.target);
+            if (sending && sending.chatId === from) {
+                sending.renamed = true;
+                moved = true;
+            }
             return moved;
         },
         pending: () => timer !== null || running !== null,
+        /** True while a save of the open chat timed out and the file is still to be read back (createSaver). */
+        suspect: () => suspect !== null,
         /** True while the last save failed (until one works again). */
         failing: () => failures > 0,
         schedule(ms = 400) {
@@ -411,7 +606,7 @@ export function createSaver({
                 await saveNow();
             } catch (error) {
                 // The caller tells the reader; the save is still tried again.
-                later(error?.wait ? waitMs : backoff());
+                later(error?.wait ? waitDelay() : backoff());
                 throw error;
             }
             followUp();

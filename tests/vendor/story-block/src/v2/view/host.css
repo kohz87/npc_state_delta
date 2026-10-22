@@ -89,35 +89,167 @@
 .story-suite-tab.active { border-color: var(--story-suite-line); background: rgba(128, 128, 128, 0.14); color: var(--story-suite-accent); }
 .story-suite-pane { padding-top: 8px; min-width: 0; }
 
-/* ---- the settings overlay ---- */
+/* ---- the settings overlay ----
+   A header with Close, then one scrolling area (the whole width, so the scroll bar sits at the window's
+   edge) holding a centred column of folds. The folds never shrink: a closed one keeps its full summary
+   row however long an open one is, and the area scrolls instead (no fixed heights, no negative margins). */
 body.story-suite-open { overflow: hidden; }
 .story-suite-overlay {
-    position: fixed; top: 0; left: 0; width: 100vw; height: 100dvh; z-index: 3100; display: flex; flex-direction: column;
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; height: 100dvh; z-index: 3100;
+    display: flex; flex-direction: column; box-sizing: border-box;
     background: var(--story-suite-bg); color: var(--story-suite-fg);
     backdrop-filter: blur(var(--SmartThemeBlurStrength, 8px));
+    padding-top: env(safe-area-inset-top, 0px);
 }
+.story-suite-overlay *, .story-suite-overlay *::before, .story-suite-overlay *::after { box-sizing: border-box; }
 .story-suite-overlay-header {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    padding: 10px 16px; border-bottom: 1px solid var(--story-suite-line);
+    flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 8px 16px; border-bottom: 1px solid var(--story-suite-line);
 }
-.story-suite-overlay-header .menu_button { width: auto; margin: 0; }
+.story-suite-overlay-title { font-size: 1.1em; }
+.story-suite-overlay-header .menu_button { width: auto; margin: 0; min-height: 36px; padding: 4px 14px; }
+.story-suite-scroll {
+    flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto;
+    overscroll-behavior: contain; -webkit-overflow-scrolling: touch; scrollbar-gutter: stable;
+}
 .story-suite-overlay .story-suite-panel {
-    overflow: auto; padding: 12px 16px 32px; width: 100%; max-width: 760px; margin: 0 auto; box-sizing: border-box;
+    width: 100%; max-width: 760px; margin: 0 auto;
+    padding: 12px 16px calc(32px + env(safe-area-inset-bottom, 0px));
 }
-.story-suite-folds { display: flex; flex-direction: column; gap: 8px; }
-.story-suite-fold { border: 1px solid var(--story-suite-line); border-radius: 10px; padding: 0 12px; }
-.story-suite-fold > summary { cursor: pointer; padding: 10px 0; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
-.story-suite-fold > summary small { opacity: 0.7; }
-.story-suite-fold-body { padding-bottom: 12px; }
+.story-suite-folds { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.story-suite-folds > * { flex: none; min-width: 0; }
+
+/* A fold: a summary row (chevron, title, quiet hint) at least 44px tall, then its body. */
+.story-suite-fold, .story-suite-subfold { display: block; min-width: 0; margin: 0; }
+.story-suite-fold {
+    border: 1px solid var(--story-suite-line); border-radius: 10px;
+    background: color-mix(in srgb, var(--story-suite-fg) 2.5%, transparent);
+}
+.story-suite-fold > summary, .story-suite-subfold > summary {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 2px 10px;
+    min-height: 44px; margin: 0; padding: 8px 12px; cursor: pointer; list-style: none;
+    border-radius: 10px; user-select: none;
+}
+.story-suite-fold > summary::-webkit-details-marker, .story-suite-subfold > summary::-webkit-details-marker { display: none; }
+.story-suite-fold > summary::before, .story-suite-subfold > summary::before {
+    content: ""; flex: none; width: 7px; height: 7px; margin: 0 2px 0 2px;
+    border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+    opacity: 0.6; transform: rotate(-45deg); transition: transform 0.15s ease;
+}
+.story-suite-fold[open] > summary::before, .story-suite-subfold[open] > summary::before { transform: rotate(45deg); }
+.story-suite-fold > summary b { font-size: 1.02em; }
+.story-suite-fold > summary small, .story-suite-subfold > summary small { opacity: 0.65; font-weight: normal; margin-left: auto; text-align: right; }
+.story-suite-fold > summary:hover, .story-suite-subfold > summary:hover { background: color-mix(in srgb, var(--story-suite-fg) 5%, transparent); }
+.story-suite-fold > summary:focus-visible, .story-suite-subfold > summary:focus-visible { outline: 2px solid var(--story-suite-accent); outline-offset: -2px; }
+.story-suite-fold[open] > summary { border-bottom: 1px solid var(--story-suite-line); border-radius: 10px 10px 0 0; }
+.story-suite-fold-body { padding: 8px 14px 14px; min-width: 0; }
+.story-suite-fold-warn > summary small { color: var(--warning, #d9a33a); opacity: 1; }
+.story-suite-fold-packs { border-color: color-mix(in srgb, var(--story-suite-accent) 45%, var(--story-suite-line)); }
+
+/* Sub-folds inside a module's fold: lighter, one under the other. */
+.story-suite-subfold { border-top: 1px solid var(--story-suite-line); }
+.story-suite-subfold:first-child { border-top: 0; }
+.story-suite-subfold > summary { min-height: 40px; padding: 6px 4px; border-radius: 6px; }
+.story-suite-subfold > summary b { font-size: 0.95em; }
+.story-suite-subfold-body { padding: 0 4px 10px 22px; min-width: 0; }
+
+/* The Versions fold (compat.js): one row per module, its fix sentence under it when out of step. */
+.story-suite-compat { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.story-suite-compat-row { overflow-wrap: anywhere; min-width: 0; }
+.story-suite-compat-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.story-suite-compat-version { font-variant-numeric: tabular-nums; }
+.story-suite-compat-state { margin-left: auto; font-size: 0.85em; }
+.story-suite-compat-note { display: block; overflow-wrap: anywhere; }
+.story-suite-compat-fix { margin: 2px 0 0; color: var(--warning, #d9a33a); }
+.story-suite-compat-newer .story-suite-compat-state, .story-suite-compat-refused .story-suite-compat-state,
+.story-suite-compat-twice .story-suite-compat-state { color: var(--warning, #d9a33a); font-weight: bold; }
+/* A settings row: label and help on the left, the control on the right; stacked on a phone. A switch
+   stays beside its label everywhere; a list takes the whole width under its label. */
 .story-suite-row {
-    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
-    padding: 8px 0; border-bottom: 1px solid var(--story-suite-line);
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(140px, 260px); align-items: center; gap: 6px 16px;
+    padding: 8px 0; border-bottom: 1px solid var(--story-suite-line); min-width: 0; margin: 0;
 }
-.story-suite-row > span { display: flex; flex-direction: column; gap: 2px; flex: 1 1 200px; min-width: 0; }
+.story-suite-row:last-child { border-bottom: 0; }
+.story-suite-row[hidden] { display: none; }
+.story-suite-row > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
 .story-suite-row > span small { opacity: 0.7; }
-.story-suite-row .text_pole { width: auto; min-width: 120px; max-width: 100%; margin: 0; }
+.story-suite-row > .text_pole, .story-suite-row > select { width: 100%; min-width: 0; max-width: 100%; margin: 0; }
+.story-suite-row[data-type="bool"] { grid-template-columns: minmax(0, 1fr) auto; }
+.story-suite-row[data-type="bool"] > input { justify-self: end; margin: 0; }
+.story-suite-row[data-type="list"] { grid-template-columns: minmax(0, 1fr); }
 .story-suite-subsection { margin-top: 12px; }
 .story-suite-subsection > h4 { margin: 8px 0 4px; }
+@media (max-width: 560px) {
+    .story-suite-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+    .story-suite-fold-body { padding: 8px 10px 12px; }
+    .story-suite-subfold-body { padding-left: 4px; }
+}
+
+/* A list of {…}: one line per item, its fields side by side, × at the end, Add under them. */
+.story-suite-list { display: grid; gap: 4px; min-width: 0; }
+.story-suite-list-head, .story-suite-list-item { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.story-suite-list-item { flex-wrap: wrap; }
+.story-suite-list-head { font-size: 0.8em; opacity: 0.7; padding: 0 2px; }
+.story-suite-list-cell { flex: 1 1 9em; max-width: 22em; min-width: 0; display: flex; }
+.story-suite-list-cell[data-type="int"] { flex: 0 0 6.5em; }
+.story-suite-list-cell[data-type="bool"] { flex: 0 0 auto; }
+.story-suite-list-cell > .text_pole, .story-suite-list-cell > select { width: 100%; min-width: 0; margin: 0; }
+.story-suite-list-spacer { flex: 0 0 32px; }
+.story-suite-list .menu_button { margin: 0; width: auto; }
+.story-suite-list-remove {
+    flex: 0 0 32px; width: 32px; height: 32px; min-height: 32px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center; font-size: 1.15em; line-height: 1;
+}
+.story-suite-list-add { justify-self: start; min-height: 32px; padding: 2px 14px; }
+.story-suite-list .menu_button:focus-visible { outline: 2px solid var(--story-suite-accent); outline-offset: 1px; }
+/* A list's text form: a textarea, one item per line ("Frostmoon: 30"), its format under it, the line
+   that does not read named in warning colour; the switch between rows and text sits beside Add. */
+.story-suite-list-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.story-suite-list-toggle { min-height: 32px; padding: 2px 12px; }
+.story-suite-list-text { width: 100%; min-width: 0; max-width: 100%; margin: 0; resize: vertical; line-height: 1.45; }
+.story-suite-list-help { display: block; opacity: 0.7; }
+.story-suite-list-error { margin: 2px 0; color: var(--warning, #d9a33a); overflow-wrap: anywhere; }
+.story-suite-list-error[hidden] { display: none; }
+.story-suite-list-text[aria-invalid="true"] { outline: 2px solid var(--warning, #d9a33a); outline-offset: 1px; }
+
+/* The Features fold: a filter box, then a sub-fold per module; a module's fold has one line going there. */
+.story-suite-subfold[hidden] { display: none; }
+.story-suite-feature-filter { border-bottom: 0; }
+.story-suite-feature-none:empty { display: none; }
+.story-suite-feature-line { margin: 0 0 6px; }
+.story-suite-feature-link {
+    background: none; border: 0; margin: 0; padding: 4px 0; min-height: 32px; font: inherit; text-align: left;
+    color: var(--story-suite-accent); text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+}
+.story-suite-feature-link:focus-visible { outline: 2px solid var(--story-suite-accent); outline-offset: 2px; }
+
+/* The Packs fold (packs/panel.js): the two ways in first, then the installed packs. */
+.ss-packs-hint { display: block; opacity: 0.75; margin: 2px 0 8px; }
+.ss-packs-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.ss-packs-actions .menu_button { display: inline-flex; align-items: center; gap: 6px; width: auto; margin: 0; min-height: 36px; }
+.ss-packs-message:empty, .ss-packs-errors:empty { display: none; }
+.ss-packs-errors { margin: 4px 0; padding-left: 18px; color: var(--warning, #d9a33a); }
+.ss-packs-list { display: grid; gap: 8px; }
+.ss-packs-row { display: grid; gap: 2px; padding: 8px 0; border-top: 1px solid var(--story-suite-line); min-width: 0; overflow-wrap: anywhere; }
+.ss-packs-row .menu_button { justify-self: start; width: auto; margin: 4px 0 0; display: inline-flex; align-items: center; gap: 6px; }
+.ss-packs-label { display: flex; align-items: center; gap: 6px; font-weight: bold; }
+.ss-packs-facts, .ss-packs-description, .ss-packs-empty { opacity: 0.75; }
+.ss-packs-problem { color: var(--warning, #d9a33a); }
+
+/* The prompt size in Story Suite's fold. */
+.story-suite-size-sum { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 4px; }
+.story-suite-size-sum > li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.story-suite-size-sum > li > span { flex: 1 1 12em; min-width: 0; }
+.story-suite-size-n { font-variant-numeric: tabular-nums; }
+.story-suite-size-meter { flex: 1 1 100%; width: 100%; height: 8px; }
+.story-suite-size-over .story-suite-size-n { color: var(--warning, #d9a33a); }
+.story-suite-size-warn { margin: 6px 0; padding: 6px 8px; border-left: 3px solid var(--warning, #d9a33a); overflow-wrap: anywhere; }
+.story-suite-size-total { border-top: 1px solid var(--story-suite-line); padding-top: 4px; }
+.story-suite-size-table { width: 100%; border-collapse: collapse; margin: 6px 0 2px; font-size: 0.9em; }
+.story-suite-size-table caption { text-align: left; opacity: 0.75; padding-bottom: 2px; }
+.story-suite-size-table th, .story-suite-size-table td { padding: 3px 6px; border-bottom: 1px solid var(--story-suite-line); text-align: right; font-variant-numeric: tabular-nums; }
+.story-suite-size-table th:first-child { text-align: left; font-weight: normal; overflow-wrap: anywhere; }
+.story-suite-size-table thead th { font-weight: bold; opacity: 0.8; }
 
 .story-suite-drawer-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
 .story-suite-drawer-buttons .menu_button { width: auto; display: inline-flex; gap: 6px; align-items: center; }

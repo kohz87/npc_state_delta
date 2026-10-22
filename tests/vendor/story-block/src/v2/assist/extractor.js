@@ -67,8 +67,11 @@ export function createExtractor({ callModel, settings, grammar, capture, chatId,
     // Carriers and swipes already read (whatever came of it), by chat.
     const done = new Set();
 
+    // Each entry names its chat (`chat`), so a reply's note can tell the extractor failed on it.
     function note(outcome, entry = {}) {
-        const item = log.add({ helper: 'extractor', outcome, ...entry });
+        let chat = '';
+        try { chat = String(chatId?.() ?? ''); } catch { chat = ''; }
+        const item = log.add({ helper: 'extractor', outcome, chat, ...entry });
         if (['failed', 'timeout'].includes(outcome)) warn(`the reply's changes were not read: ${entry.message}`);
         return item;
     }

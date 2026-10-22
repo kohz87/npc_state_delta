@@ -57,13 +57,13 @@ export function refusedFrom(problems, index) {
 const firstCarrier = chat => (Array.isArray(chat) ? chat.findIndex(isCarrier) : -1);
 
 /**
- * createReplyNotes({ ctx, doc?, extractorOn?() → bool, reread?(index) → Promise<{ ok, problems?, message? }>,
+ * createReplyNotes({ ctx, doc?, extractorOn?() → bool, extractorFailed?(index, swipe) → bool, reread?(index) → Promise<{ ok, problems?, message? }>,
  * turn? (for problems()), events? (the runtime's: 'turn', 'head'), messageElement?(index), onChanged?(index) })
  * → { refresh(index), refreshAll(), refusedAt(index), noteKind(index), markEdited(index), onTurn(turn),
  *     reread(index), forget(), destroy() }
  */
 export function createReplyNotes({
-    ctx, doc = globalThis.document, extractorOn = () => false, reread = null, turn = null, events = null,
+    ctx, doc = globalThis.document, extractorOn = () => false, extractorFailed = () => false, reread = null, turn = null, events = null,
     messageElement = null, onChanged = () => {},
 } = {}) {
     const chat = () => (Array.isArray(ctx?.chat) ? ctx.chat : []);
@@ -82,6 +82,10 @@ export function createReplyNotes({
         if (!readRecord(message)) return null;
         let extractor = false;
         try { extractor = extractorOn() === true; } catch { extractor = false; }
+        // C2-ext: the extractor's call failed (an error, a time-out) on this reply: nobody read it.
+        if (extractor) {
+            try { extractor = extractorFailed(index, swipeOf(message)) !== true; } catch { /* still on */ }
+        }
         if (!extractor && extractBlock(String(message.mes ?? '')) === null) return 'missing';
         if (canReread && edited.has(keyOf(index))) return 'edited';
         return null;
