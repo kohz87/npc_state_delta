@@ -12,7 +12,7 @@
 // `capabilities` (the capability names this Story Block has, or null when unknown: then
 // requires.capabilities is checked for form only).
 
-import { CALENDAR_FIELDS, CALENDAR_LIMITS, CALENDAR_START_FIELDS, CHOICE_FIELDS, CONTENT_KINDS, COMMAND, CRAFT_FIELDS, ECONOMY_FIELDS, ECONOMY_LIMITS, CRAFTS_LIMITS, DEFAULT_CRAFTS, METER_FIELDS, METER_LIMITS, METER_PRESET_FIELDS, METER_RESERVED, METER_STAGE_FIELDS, RECIPE_LIMITS, STAT_SUM, DEF_ID, EVENT_FIELDS, EVENT_LIMITS, ITEM_FIELDS, ITEM_KINDS, LIMITS, MOUNTS, PACK_FIELDS, PACK_ID, PLACE_FIELDS, PRESET_FIELDS, RARITIES, ROUTE_FIELDS, SCREEN_FIELDS, SCREEN_ID, SEMVER, SKILL_FIELDS, SKILL_TARGETS, SKILL_TYPES, SLUG, START_FIELDS, STAT_NAME, RANK_FIELDS, RANK_ID, RANKS_LIMITS, TERM_SEPARATORS, ITEM_CARRY, MARKET_FIELDS, MARKET_LIMITS, MARKET_WORD, TERMS_FIELDS, TERMS_LIMITS, TERMS_NUMERALS, TERMS_TIER_FIELDS } from './limits.js';
+import { CALENDAR_FIELDS, CALENDAR_HOLIDAY_FIELDS, CALENDAR_LIMITS, CALENDAR_START_FIELDS, CHOICE_FIELDS, CONTENT_KINDS, COMMAND, CRAFT_FIELDS, ECONOMY_FIELDS, ECONOMY_LIMITS, CRAFTS_LIMITS, DEFAULT_CRAFTS, METER_FIELDS, METER_LIMITS, METER_PRESET_FIELDS, METER_RESERVED, METER_STAGE_FIELDS, RECIPE_LIMITS, STAT_SUM, DEF_ID, EVENT_FIELDS, EVENT_LIMITS, ITEM_FIELDS, ITEM_KINDS, LIMITS, MOUNTS, PACK_FIELDS, PACK_ID, PLACE_FIELDS, PRESET_FIELDS, RARITIES, ROUTE_FIELDS, SCREEN_FIELDS, SCREEN_ID, SEMVER, SKILL_FIELDS, SKILL_TARGETS, SKILL_TYPES, SLUG, START_FIELDS, STAT_NAME, RANK_FIELDS, RANK_ID, RANKS_LIMITS, TERM_SEPARATORS, ITEM_CARRY, MARKET_FIELDS, MARKET_LIMITS, MARKET_WORD, TERMS_FIELDS, TERMS_LIMITS, TERMS_NUMERALS, TERMS_TIER_FIELDS } from './limits.js';
 import { byteLength, checkPlain } from './safety.js';
 import { parseRange, satisfies } from './version.js';
 import { foldKey, oneLine } from '../../text.js';
@@ -972,7 +972,22 @@ function checkCalendar(calendar, add) {
             if (seen.has(foldKey(month.name))) return say(at, `two months are called "${month.name}".`);
             seen.add(foldKey(month.name));
         });
-        if (calendar.start !== undefined && !problems.length) {
+        // The months are usable: holidays and the start can be read against them.
+        const monthsOk = !problems.length;
+        // Holidays: named days that come back every year, `{ name, month, day }` (month by name or number).
+        if (calendar.holidays !== undefined && monthsOk) {
+            const holidays = calendar.holidays;
+            if (!Array.isArray(holidays) || holidays.length > CALENDAR_LIMITS.holidays) say('calendar.holidays', `holidays must be a list of at most ${CALENDAR_LIMITS.holidays} { "name", "month", "day" }.`);
+            else holidays.forEach((holiday, index) => {
+                const at = `calendar.holidays[${index}]`;
+                if (!isObject(holiday) || Object.keys(holiday).some(key => !CALENDAR_HOLIDAY_FIELDS.includes(key))) return say(at, `${at} must be { "name", "month", "day" }.`);
+                if (!holidayName(holiday.name)) say(`${at}.name`, 'name must be text (a holiday\'s name).');
+                const month = monthIndexOf(months, holiday.month);
+                if (month < 0) say(`${at}.month`, 'month must be one of the months, by name or by number (1 is the first).');
+                else if (!isInt(holiday.day, 1) || holiday.day > months[month].days) say(`${at}.day`, `day must be a whole number from 1 to ${months[month].days}.`);
+            });
+        }
+        if (calendar.start !== undefined && monthsOk) {
             const start = calendar.start;
             const at = 'calendar.start';
             if (!isObject(start) || Object.keys(start).some(key => !CALENDAR_START_FIELDS.includes(key))) say(at, `${at} must be { "year", "month", "day", "hour", "minute" }.`);
@@ -994,11 +1009,26 @@ function checkCalendar(calendar, add) {
     const months = calendar.months.map(month => ({ name: oneLine(month.name, CALENDAR_LIMITS.monthName), days: month.days }));
     const start = calendar.start;
     const index = start === undefined ? -1 : typeof start.month === 'string' ? months.findIndex(month => foldKey(month.name) === foldKey(start.month)) : start.month - 1;
+    const holidays = (calendar.holidays ?? []).map(holiday => ({ name: holidayName(holiday.name), month: months[monthIndexOf(months, holiday.month)].name, day: holiday.day }));
     return {
         era: oneLine(calendar.era ?? '', CALENDAR_LIMITS.era),
         months,
         start: start === undefined ? null : { year: start.year, month: months[index].name, day: start.day, hour: start.hour ?? 0, minute: start.minute ?? 0 },
+        // Only when the pack names any, so a calendar without them reads as before.
+        ...(holidays.length ? { holidays } : {}),
     };
+}
+
+// A month given by name (any case) or number (1 = the first): its index in `months`, or -1.
+function monthIndexOf(months, month) {
+    if (typeof month === 'string') return months.findIndex(entry => foldKey(entry.name) === foldKey(month));
+    return isInt(month, 1) && month <= months.length ? month - 1 : -1;
+}
+
+// A holiday's name as kept: control and invisible marks dropped, one line, at most CALENDAR_LIMITS.holidayName
+// characters; '' when that leaves nothing.
+function holidayName(name) {
+    return typeof name === 'string' ? oneLine(name.replace(/[\p{Cc}\p{Cf}]+/gu, ' '), CALENDAR_LIMITS.holidayName).trim() : '';
 }
 
 // Themes are CSS custom properties (SPEC §13.3): `{ "--ss-accent": "#7c5cff" }`.

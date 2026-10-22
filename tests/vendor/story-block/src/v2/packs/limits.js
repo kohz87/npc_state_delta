@@ -115,10 +115,12 @@ export const METER_STAGE_FIELDS = Object.freeze(['id', 'name', 'needs', 'milesto
 export const METER_LIMITS = Object.freeze({ presets: 4, meters: 6, min: -1000, max: 1000, id: 40, name: 40, title: 40, describe: 200, bands: 8, word: 24, stages: 8, needs: 4, milestone: 200 });
 // Words NPC State Delta keeps for itself (a stage line, a reason): never a meter id.
 export const METER_RESERVED = Object.freeze(['stage', 'stages', 'disposition', 'name', 'meter', 'meters', 'reason', 'why', 'because', 'note', 'cause']);
-// A calendar for the story clock: { era, months: [{ name, days }], start: { year, month, day, hour, minute } }.
-export const CALENDAR_FIELDS = Object.freeze(['era', 'months', 'start']);
+// A calendar for the story clock: { era, months: [{ name, days }], start: { year, month, day, hour, minute },
+// holidays: [{ name, month, day }] } (holidays: named days that come back every year, at most 60).
+export const CALENDAR_FIELDS = Object.freeze(['era', 'months', 'start', 'holidays']);
+export const CALENDAR_HOLIDAY_FIELDS = Object.freeze(['name', 'month', 'day']);
 export const CALENDAR_START_FIELDS = Object.freeze(['year', 'month', 'day', 'hour', 'minute']);
-export const CALENDAR_LIMITS = Object.freeze({ era: 24, months: 60, monthName: 40, days: 400 });
+export const CALENDAR_LIMITS = Object.freeze({ era: 24, months: 60, monthName: 40, days: 400, holidays: 60, holidayName: 60 });
 export const START_FIELDS = Object.freeze(['scene', 'inventory']);
 // Screens (SPEC §13.1) a pack adds or overrides by id.
 export const SCREEN_FIELDS = Object.freeze(['id', 'title', 'icon', 'mounts', 'template', 'layout', 'css', 'theme', 'data', 'steps']);
