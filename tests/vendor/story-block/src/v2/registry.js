@@ -8,8 +8,15 @@
 // (`requires: { storyBlock: '>=2.0.0' }`) and is refused with "needs Story Block ≥ x" when this
 // one is older; a field this host does not know (a newer module's) is logged and ignored, never a
 // refusal. A domain's initial() that throws when a chat starts costs that domain only.
+//
+// Features (MODULES §F100, features.js): what a module marks `feature: '<id>'` is left out of the
+// lookups while the reader has that feature off: its capture kinds' grammar and its context (contexts),
+// its hooks, tabs, screens and widgets; its queries answer null (query); its commands are known but
+// refused by the bus (commandFeature); a change line of its kinds is told quietly (capture().off).
+// `featureValue(id)` gives the reader's stored choice (true, false or undefined for the default).
 
-import { parseRange, parseVersion, satisfies } from './packs/version.js';
+import { compareVersions, formatVersion, parseRange, parseVersion, satisfies } from './packs/version.js';
+import { affectsStatic, featureOf, featureProblems, featureWarnings } from './features.js';
 
 // Commands the registry makes itself, so the command bus can run them like any other:
 // `capture.<kind>` runs the owner's capture.apply on a change line (turn.js), and
@@ -28,8 +35,10 @@ export const INIT_PREFIX = 'module.init.';
 export const HOST_MODULE = 'story-block';
 export const STANDARD_PREFIX = 'ss.';
 
-const KNOWN_KEYS = ['id', 'name', 'version', 'description', 'requires', 'domains', 'commands', 'queries', 'capture', 'context', 'hooks', 'settings', 'tabs', 'screens', 'widgets'];
-const FIELD_TYPES = ['bool', 'int', 'choice', 'text', 'list'];
+const KNOWN_KEYS = ['id', 'name', 'version', 'description', 'requires', 'domains', 'commands', 'queries', 'capture', 'context', 'hooks', 'settings', 'tabs', 'screens', 'widgets', 'features'];
+const CONTEXT_KEYS = ['static', 'tail', 'budget', 'feature', 'parts'];
+const COMMAND_KEYS = ['handler', 'internal', 'feature'];
+export const FIELD_TYPES = Object.freeze(['bool', 'int', 'choice', 'text', 'list']);
 
 const MODULE_ID = /^[a-z0-9][a-z0-9._-]*$/;
 // Domain names are JSON Pointer segments (/domains/<name>/…): no `/` or `~`.
@@ -66,11 +75,15 @@ export function jsonProblem(value, path = '') {
     return `${path || 'the value'} is not plain JSON (${value === undefined ? 'undefined' : typeof value})`;
 }
 
+const fieldType = field => (typeof field === 'string' ? field : Array.isArray(field) ? 'choice' : field?.type);
+
 // One settings schema field: '' or what is wrong with it. A string is shorthand for its type and
-// an array for a choice.
+// an array for a choice. A type this Story Block does not know (a newer module's) is no problem: the
+// field is hidden and its value kept as it is (definitionWarnings says so).
 function fieldProblem(field, where) {
-    const type = typeof field === 'string' ? field : Array.isArray(field) ? 'choice' : field?.type;
-    if (!FIELD_TYPES.includes(type)) return `${where} has type "${type}"; use one of ${FIELD_TYPES.join(', ')}`;
+    const type = fieldType(field);
+    if (typeof type === 'string' && type && !FIELD_TYPES.includes(type)) return '';
+    if (!FIELD_TYPES.includes(type)) return `${where} has no type; use one of ${FIELD_TYPES.join(', ')}`;
     if (type === 'choice') {
         const options = Array.isArray(field) ? field : field.options;
         if (!Array.isArray(options) || !options.length) return `${where} is a choice with no options`;
@@ -127,6 +140,9 @@ export function definitionProblems(def) {
             if (domain.counters !== undefined && (!Array.isArray(domain.counters) || domain.counters.some(path => typeof path !== 'string' || !/^[^/~][^~]*$/.test(path)))) {
                 problems.push(`domain "${name}" counters must be a list of paths inside the domain, like "wallets/*/coin"`);
             }
+            if (domain.scratch !== undefined && (!Array.isArray(domain.scratch) || domain.scratch.some(key => typeof key !== 'string' || !/^[A-Za-z_][A-Za-z0-9_-]*$/.test(key)))) {
+                problems.push(`domain "${name}" scratch must be a list of field names in the domain, like "perReply"`);
+            }
             if (typeof domain.initial === 'function') {
                 let slice;
                 try { slice = domain.initial(); } catch (error) { problems.push(`domain "${name}" initial() threw: ${error?.message ?? error}`); continue; }
@@ -142,7 +158,6 @@ export function definitionProblems(def) {
             if (isObject(handler)) {
                 fn(handler.handler, `command "${type}" handler`);
                 if (handler.internal !== undefined && typeof handler.internal !== 'boolean') problems.push(`command "${type}" internal is not true or false`);
-                for (const key of Object.keys(handler)) if (!['handler', 'internal'].includes(key)) problems.push(`"${key}" is not a command field (known: handler, internal)`);
             } else fn(handler, `command "${type}"`);
         }
     }
@@ -172,6 +187,17 @@ export function definitionProblems(def) {
         if (def.context.static !== undefined) fn(def.context.static, 'context.static');
         if (def.context.tail !== undefined) fn(def.context.tail, 'context.tail');
         if (def.context.budget !== undefined && !(Number.isInteger(def.context.budget) && def.context.budget > 0)) problems.push('context.budget is not a positive whole number of tokens');
+        // A context part: static and/or tail text of its own, usually under a feature (MODULES §F100).
+        if (def.context.parts !== undefined) {
+            if (!Array.isArray(def.context.parts)) problems.push('context.parts is not a list');
+            else def.context.parts.forEach((part, index) => {
+                const where = `context part ${index + 1}`;
+                if (!isObject(part)) { problems.push(`${where} is not an object`); return; }
+                if (part.static === undefined && part.tail === undefined) problems.push(`${where} has neither static nor tail`);
+                if (part.static !== undefined) fn(part.static, `${where} static`);
+                if (part.tail !== undefined) fn(part.tail, `${where} tail`);
+            });
+        }
     }
     if (map(def.hooks, 'hooks')) for (const [name, hook] of Object.entries(def.hooks)) fn(hook, `hook "${name}"`);
     if (map(def.settings, 'settings')) {
@@ -191,9 +217,6 @@ export function definitionProblems(def) {
         // in `render(el, api)` (MODULES §A).
         if (section !== undefined && typeof section !== 'string') fn(section, 'settings.section');
         if (render !== undefined) fn(render, 'settings.render');
-        for (const key of Object.keys(def.settings)) {
-            if (!['defaults', 'schema', 'section', 'render'].includes(key)) problems.push(`"settings.${key}" is not a settings field (known: defaults, schema, section, render)`);
-        }
     }
     if (def.tabs !== undefined) {
         if (!Array.isArray(def.tabs)) problems.push('tabs is not a list');
@@ -223,6 +246,7 @@ export function definitionProblems(def) {
             fn(widget.render, `widget "${name}" render`);
         }
     }
+    problems.push(...featureProblems(def));
     return problems;
 }
 
@@ -236,10 +260,30 @@ export function definitionWarnings(def) {
     if (isObject(def.requires)) {
         for (const key of Object.keys(def.requires)) if (key !== 'storyBlock') out.push(`"requires.${key}" is not a requires field this Story Block knows; it is ignored`);
     }
+    // One level down the same (R2-b7-2): a newer module's command option, settings part or field type.
+    if (isObject(def.commands)) {
+        for (const [type, handler] of Object.entries(def.commands)) {
+            if (isObject(handler)) for (const key of Object.keys(handler)) if (!COMMAND_KEYS.includes(key)) out.push(`"${key}" on command "${type}" is not a command field this Story Block knows; it is ignored`);
+        }
+    }
+    if (isObject(def.context)) {
+        for (const key of Object.keys(def.context)) if (!CONTEXT_KEYS.includes(key)) out.push(`"context.${key}" is not a context field this Story Block knows; it is ignored`);
+    }
+    out.push(...featureWarnings(def));
+    if (isObject(def.settings)) {
+        for (const key of Object.keys(def.settings)) if (!['defaults', 'schema', 'section', 'render'].includes(key)) out.push(`"settings.${key}" is not a settings field this Story Block knows; it is ignored`);
+        const fields = isObject(def.settings.schema) ? Object.entries(def.settings.schema) : [];
+        for (const [key, field] of fields) {
+            const subs = fieldType(field) === 'list' && isObject(field?.of) ? Object.entries(field.of).map(([sub, inner]) => [`${key}.${sub}`, inner]) : [];
+            for (const [where, inner] of [[key, field], ...subs]) {
+                const type = fieldType(inner);
+                if (typeof type === 'string' && type && !FIELD_TYPES.includes(type)) out.push(`settings field "${where}" has the type "${type}", which this Story Block does not know; it is hidden and its value kept`);
+            }
+        }
+    }
     return out;
 }
 
-const compareVersions = (a, b) => (a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2]);
 
 // What a refused module needs, for the reader: "≥ 2.1.0" when every alternative of the range starts
 // at a version above `version`, else the range as written ("<2", "^1.4").
@@ -253,7 +297,7 @@ function neededVersion(range, version) {
         .reduce((best, target) => (!best || compareVersions(target, best) > 0 ? target : best), null));
     if (lows.some(low => !low)) return range;
     const lowest = lows.reduce((a, b) => (compareVersions(a, b) <= 0 ? a : b));
-    return compareVersions(lowest, v) > 0 ? `≥ ${lowest.join('.')}` : range;
+    return compareVersions(lowest, v) > 0 ? `≥ ${formatVersion(lowest)}` : range;
 }
 
 /**
@@ -261,9 +305,9 @@ function neededVersion(range, version) {
  * `requires.storyBlock`; null skips that check (a registry built outside the host).
  * `warn(message)`: where definition warnings and failed initial() calls go (default console.warn).
  */
-export function createRegistry({ hostVersion = null, warn = message => console.warn(`[Story Suite] ${message}`) } = {}) {
+export function createRegistry({ hostVersion = null, warn = message => console.warn(`[Story Suite] ${message}`), featureValue = () => undefined } = {}) {
     const defs = new Map();
-    const owners = { domain: new Map(), command: new Map(), query: new Map(), kind: new Map(), tab: new Map(), screen: new Map(), widget: new Map() };
+    const owners = { domain: new Map(), command: new Map(), query: new Map(), kind: new Map(), tab: new Map(), screen: new Map(), widget: new Map(), feature: new Map() };
     // Every capture kind and alias → its canonical kind.
     const canonical = new Map();
 
@@ -287,6 +331,7 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         for (const tab of def.tabs ?? []) out.push(['tab', tab.id, `the tab "${tab.id}"`]);
         for (const screen of def.screens ?? []) out.push(['screen', screen.id, `the screen "${screen.id}"`]);
         for (const name of Object.keys(def.widgets ?? {})) out.push(['widget', name, `the widget "${name}"`]);
+        for (const feature of def.features ?? []) out.push(['feature', feature.id, `the feature "${feature.id}"`]);
         return out;
     }
 
@@ -318,11 +363,74 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         for (const message of definitionWarnings(def)) warn(`${def.name ?? id}: ${message}.`);
     }
 
+    // ---- features (features.js) -----------------------------------------------------------------
+
+    function featureDecl(id) {
+        const owner = owners.feature.get(String(id ?? ''));
+        if (!owner) return null;
+        const def = defs.get(owner);
+        const feature = def.features.find(item => item.id === id);
+        return Object.freeze({
+            id: feature.id,
+            moduleId: def.id,
+            moduleName: def.name ?? def.id,
+            label: feature.label.trim(),
+            describe: typeof feature.describe === 'string' ? feature.describe.trim() : '',
+            default: feature.default !== false,
+            prompt: affectsStatic(def, feature.id),
+        });
+    }
+    // On: the reader's choice when there is one, else the feature's default; an id no module declares is off.
+    function featureOn(id) {
+        const decl = featureDecl(id);
+        if (!decl) return false;
+        let value;
+        try { value = featureValue(decl.id); } catch { value = undefined; }
+        return typeof value === 'boolean' ? value : decl.default;
+    }
+    // Is this item (a kind spec, a command, a hook, a tab…) under a feature that is off?
+    const off = item => {
+        const id = featureOf(item);
+        return id !== null && !featureOn(id);
+    };
+    const offQuery = () => null;
+
+    // A context with its parts folded in: one static() and one tail(view) of what is on.
+    function contextOf(def) {
+        const context = isObject(def.context) ? def.context : {};
+        const whole = !off(context);
+        const parts = whole ? [{ static: context.static, tail: context.tail }, ...(Array.isArray(context.parts) ? context.parts : []).filter(part => !off(part))] : [];
+        const statics = parts.map(part => part.static).filter(item => typeof item === 'function');
+        const tails = parts.map(part => part.tail).filter(item => typeof item === 'function');
+        const joined = statics.length <= 1 ? statics[0] ?? null
+            : () => statics.map(item => item()).filter(text => typeof text === 'string' && text.trim()).map(text => text.trim()).join('\n');
+        const tail = tails.length <= 1 ? tails[0] ?? null : view => {
+            const lines = [];
+            const optional = [];
+            for (const item of tails) {
+                const out = item(view) ?? {};
+                if (Array.isArray(out.lines)) lines.push(...out.lines);
+                if (Array.isArray(out.optional)) optional.push(...out.optional);
+            }
+            return { lines, optional };
+        };
+        return { static: joined, tail };
+    }
+
     function captureEntry(word) {
         const kind = canonical.get(String(word ?? '').toLowerCase());
         if (!kind) return null;
         const def = defs.get(owners.kind.get(kind));
-        return { moduleId: def.id, kind, grammar: def.capture.kinds[kind].grammar.trim(), apply: def.capture.apply };
+        const spec = def.capture.kinds[kind];
+        return { moduleId: def.id, kind, grammar: spec.grammar.trim(), apply: def.capture.apply, feature: featureOf(spec), off: off(spec) };
+    }
+
+    // The feature a command belongs to (a capture.<kind> command: its kind's), or null.
+    function commandFeature(type) {
+        const name = String(type ?? '');
+        if (name.startsWith(CAPTURE_PREFIX)) return captureEntry(name.slice(CAPTURE_PREFIX.length))?.feature ?? null;
+        if (name.startsWith(INIT_PREFIX)) return null;
+        return featureOf(commandEntry(name));
     }
 
     // One domain's initial() slice, a plain copy; null when it throws or is not plain JSON. Each
@@ -435,7 +543,7 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         command,
         /** True for a command only the host runs (capture.*, module.init.*, commands marked internal). */
         isInternal,
-        /** { moduleId, kind, grammar, apply } for a capture kind or alias, or null. */
+        /** { moduleId, kind, grammar, apply, feature, off } for a capture kind or alias, or null. */
         capture: captureEntry,
         /** The canonical kind a written kind word stands for, or null. */
         kindOf: word => canonical.get(String(word ?? '').toLowerCase()) ?? null,
@@ -443,32 +551,57 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
             const owner = owners.domain.get(name);
             return owner ? defs.get(owner).domains[name].validate ?? null : null;
         },
+        /** The fields a domain keeps per-reply bookkeeping in (`scratch`, ops.js), [] when none. */
+        scratch(name) {
+            const owner = owners.domain.get(name);
+            const list = owner ? defs.get(owner).domains[name].scratch : null;
+            return Array.isArray(list) ? [...list] : [];
+        },
         /** The number paths a domain keeps as counts (`counters`, ops.js), [] when none. */
         counters(name) {
             const owner = owners.domain.get(name);
             const list = owner ? defs.get(owner).domains[name].counters : null;
             return Array.isArray(list) ? [...list] : [];
         },
+        /** The query function; one answering null while its feature is off. */
         query(name) {
             const owner = owners.query.get(name);
-            return owner ? defs.get(owner).queries[name] : null;
+            if (!owner) return null;
+            const fn = defs.get(owner).queries[name];
+            return off(fn) ? offQuery : fn;
         },
         initialState,
         /** The functions modules registered under hook `name`, in module-id order. */
-        hooks: name => sorted().map(def => def.hooks?.[name]).filter(hook => typeof hook === 'function'),
+        // Hooks, tabs, screens and widgets under a feature that is off are left out of these lists.
+        hooks: name => sorted().map(def => def.hooks?.[name]).filter(hook => typeof hook === 'function' && !off(hook)),
         /** Same, with the module each comes from: [{ moduleId, fn }]. */
-        hookEntries: name => sorted().filter(def => typeof def.hooks?.[name] === 'function').map(def => ({ moduleId: def.id, fn: def.hooks[name] })),
+        hookEntries: name => sorted().filter(def => typeof def.hooks?.[name] === 'function' && !off(def.hooks[name])).map(def => ({ moduleId: def.id, fn: def.hooks[name] })),
         /** [{ moduleId, id, title, icon, render }] in module-id order, each module's in its own order. */
-        tabs: () => sorted().flatMap(def => (def.tabs ?? []).map(tab => ({ ...tab, moduleId: def.id }))),
+        tabs: () => sorted().flatMap(def => (def.tabs ?? []).filter(tab => !off(tab)).map(tab => ({ ...tab, moduleId: def.id }))),
         /** [{ moduleId, ...screen }] in module-id order, each module's in its own order (§13.1). */
-        screens: () => sorted().flatMap(def => (def.screens ?? []).map(screen => ({ ...screen, moduleId: def.id }))),
+        screens: () => sorted().flatMap(def => (def.screens ?? []).filter(screen => !off(screen)).map(screen => ({ ...screen, moduleId: def.id }))),
         /** [{ moduleId, name, props, render }] in module-id order, then by name (§13.5). */
-        widgets: () => sorted().flatMap(def => Object.keys(def.widgets ?? {}).sort().map(name => ({ ...def.widgets[name], name, moduleId: def.id }))),
-        /** One widget by its namespaced name, or null. */
+        widgets: () => sorted().flatMap(def => Object.keys(def.widgets ?? {}).sort().filter(name => !off(def.widgets[name])).map(name => ({ ...def.widgets[name], name, moduleId: def.id }))),
+        /** One widget by its namespaced name, or null (also while its feature is off). */
         widget(name) {
             const owner = owners.widget.get(name);
-            return owner ? { ...defs.get(owner).widgets[name], name, moduleId: owner } : null;
+            return owner && !off(defs.get(owner).widgets[name]) ? { ...defs.get(owner).widgets[name], name, moduleId: owner } : null;
         },
+        /** True when a module's screen `id` is under a feature that is off (whoever restyled it). */
+        screenOff(id) {
+            const owner = owners.screen.get(id);
+            return Boolean(owner) && off(defs.get(owner).screens.find(screen => screen.id === id));
+        },
+        /** The names of the widgets whose feature is off. */
+        widgetsOff: () => sorted().flatMap(def => Object.keys(def.widgets ?? {}).sort().filter(name => off(def.widgets[name]))),
+        /** Every declared feature: [{ id, moduleId, moduleName, label, describe, default, prompt }], module-id order. */
+        features: () => sorted().flatMap(def => (def.features ?? []).map(feature => featureDecl(feature.id))),
+        /** One declared feature, or null. */
+        feature: featureDecl,
+        /** Whether feature `id` is on (the reader's choice, else its default); false for an id no module declares. */
+        featureOn,
+        /** The feature command `type` belongs to, or null; the bus refuses it with FEATURE_OFF while that is off. */
+        commandFeature,
         /**
          * [{ moduleId, name, title, defaults, schema, section }] for modules with settings, in module-id
          * order. `section` is the custom panel function (from either form) or null; `title` the
@@ -483,14 +616,18 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
             section: typeof def.settings.section === 'function' ? def.settings.section : def.settings.render ?? null,
         })),
         /** [{ moduleId, name, domains, kinds: [{ kind, grammar }], static, tail, budget }] in module-id order. */
-        contexts: () => sorted().map(def => ({
-            moduleId: def.id,
-            name: def.name ?? def.id,
-            domains: Object.keys(def.domains ?? {}),
-            kinds: Object.keys(def.capture?.kinds ?? {}).sort().map(kind => ({ kind, grammar: def.capture.kinds[kind].grammar.trim() })),
-            static: def.context?.static ?? null,
-            tail: def.context?.tail ?? null,
-            budget: def.context?.budget ?? null,
-        })),
+        // Kinds and context (parts) under a feature that is off are left out (MODULES §F100).
+        contexts: () => sorted().map(def => {
+            const context = contextOf(def);
+            return {
+                moduleId: def.id,
+                name: def.name ?? def.id,
+                domains: Object.keys(def.domains ?? {}),
+                kinds: Object.keys(def.capture?.kinds ?? {}).sort().filter(kind => !off(def.capture.kinds[kind])).map(kind => ({ kind, grammar: def.capture.kinds[kind].grammar.trim() })),
+                static: context.static,
+                tail: context.tail,
+                budget: def.context?.budget ?? null,
+            };
+        }),
     };
 }

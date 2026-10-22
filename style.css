@@ -187,6 +187,19 @@
 .npc-state-delta-v2-meters .ss-w-meter-value { margin-left: auto; font-variant-numeric: tabular-nums; opacity: 0.75; }
 .npc-state-delta-v2-meters .ss-w-meter-track { position: relative; height: 0.6em; border-radius: 999px; background: color-mix(in srgb, var(--SmartThemeBodyColor, currentColor) 15%, transparent); overflow: hidden; }
 .npc-state-delta-v2-meters .ss-w-meter-fill { position: absolute; inset: 0 auto 0 0; width: calc(var(--ss-w-ratio, 0) * 100%); background: var(--ss-w-tone, var(--SmartThemeQuoteColor, currentColor)); border-radius: inherit; }
+/* (v2 meters) The NPC's ceiling as a notch, stage thresholds as ticks, the latest reply's change, the
+   ladder line and the locked-note teasers; the meter presets block in the settings section. */
+.npc-state-delta-v2-meters .npc-state-delta-v2-tick, .npc-state-delta-v2-meters .npc-state-delta-v2-ceiling { position: absolute; top: 0; bottom: 0; left: calc(var(--npc-state-delta-at, 0) * 100%); width: 1px; background: color-mix(in srgb, var(--SmartThemeBodyColor, currentColor) 45%, transparent); }
+.npc-state-delta-v2-meters .npc-state-delta-v2-ceiling { width: 2px; background: var(--SmartThemeEmColor, #eba3a3); }
+.npc-state-delta-v2-delta { margin-left: 4px; font-size: 0.85em; font-weight: 700; }
+.npc-state-delta-v2-delta-up { color: #9fd8b4; }
+.npc-state-delta-v2-delta-down { color: #eba3a3; }
+.npc-state-delta-v2-rank, .npc-state-delta-v2-next, .npc-state-delta-v2-note { margin: 2px 0 0; font-size: 0.85em; }
+.npc-state-delta-v2-next, .npc-state-delta-v2-note-locked { opacity: 0.75; }
+.npc-state-delta-v2-presets { display: grid; gap: 6px; margin: 0 0 10px; }
+.npc-state-delta-v2-preset { display: grid; grid-template-columns: minmax(6em, auto) 1fr auto; gap: 4px 10px; align-items: center; }
+.npc-state-delta-v2-preset small { opacity: 0.75; }
+.npc-state-delta-v2-editor-meters { display: grid; grid-template-columns: repeat(auto-fill, minmax(8em, 1fr)); gap: 6px 10px; }
 .npc-state-delta-story-empty { margin: 4px 2px; opacity: .65; font-size: .85rem; }
 /* (1.2.13) An empty tab: why, then what would fill it. */
 .npc-state-delta-story-empty-state .npc-state-delta-story-empty { opacity: .8; line-height: 1.4; }

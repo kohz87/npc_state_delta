@@ -1,0 +1,439 @@
+/* Story Suite v2 mounts (SPEC §13.4): the game view, inline cards, the hud strip and dialogs.
+   Mobile first: the narrow layout is the base, wider screens adjust. Colours come from SillyTavern's
+   theme variables; a screen's own `theme` sets --ss-* properties on its root. */
+
+:root {
+    --ss-text: var(--SmartThemeBodyColor, CanvasText);
+    --ss-surface: var(--SmartThemeBlurTintColor, Canvas);
+    --ss-chat-surface: var(--SmartThemeChatTintColor, var(--ss-surface));
+    --ss-border: var(--SmartThemeBorderColor, currentColor);
+    --ss-accent: var(--SmartThemeQuoteColor, currentColor);
+    --ss-muted: var(--SmartThemeEmColor, currentColor);
+    --ss-shadow: var(--SmartThemeShadowColor, transparent);
+    --ss-radius: 10px;
+    --ss-gap: 8px;
+    --ss-nav-size: 56px;
+    --ss-fade: 40px;
+}
+
+[data-ss-mount] {
+    color: var(--ss-text);
+    min-width: 0;
+}
+
+.ss-mount-problem {
+    margin: 0;
+    padding: var(--ss-gap);
+    opacity: 0.8;
+    font-style: italic;
+}
+
+/* ---- Game view: full screen, bottom navigation on narrow widths ---- */
+
+.ss-gameview {
+    position: fixed;
+    inset: 0;
+    /* Above SillyTavern's top bar (3005): the game view is full screen. */
+    z-index: 3020;
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    color: var(--ss-text);
+    /* Opaque: the theme's tint often lets the chat show through (light themes most). Three layers of
+       the tint where relative colours are missing, the tint at full alpha where they are not. */
+    background-color: var(--ss-surface);
+    background-image: linear-gradient(var(--ss-surface), var(--ss-surface)), linear-gradient(var(--ss-surface), var(--ss-surface));
+}
+
+@supports (color: rgb(from red r g b)) {
+    .ss-gameview {
+        background-color: rgb(from var(--ss-surface) r g b / 1);
+        background-image: none;
+    }
+}
+
+.ss-gameview-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.ss-gameview-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--ss-gap);
+    padding: var(--ss-gap) 12px;
+    padding-top: max(var(--ss-gap), env(safe-area-inset-top));
+    border-bottom: 1px solid var(--ss-border);
+}
+
+.ss-gameview-title {
+    flex: 1;
+    margin: 0;
+    font-size: 1.1em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ss-gameview-close,
+.ss-dialog-close {
+    min-width: 44px;
+    min-height: 44px;
+    border: 0;
+    border-radius: var(--ss-radius);
+    color: inherit;
+    background: transparent;
+    cursor: pointer;
+}
+
+.ss-gameview-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 12px;
+}
+
+.ss-gameview-nav {
+    display: flex;
+    overflow-x: auto;
+    border-top: 1px solid var(--ss-border);
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
+.ss-gameview-single .ss-gameview-nav {
+    display: none;
+}
+
+.ss-gameview-navitem {
+    flex: 1 0 64px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-height: var(--ss-nav-size);
+    padding: 4px;
+    border: 0;
+    color: inherit;
+    background: transparent;
+    opacity: 0.7;
+    font-size: 0.8em;
+    cursor: pointer;
+}
+
+.ss-gameview-navitem[aria-current="page"] {
+    opacity: 1;
+    color: var(--ss-accent);
+    box-shadow: inset 0 2px 0 var(--ss-accent);
+}
+
+/* More items than fit (a phone's bottom bar, the tab bar): the edge with more fades (scroll-cue.js). */
+:is(.ss-gameview-nav, .story-suite-tabs)[data-ss-axis="x"][data-ss-more="end"] {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--ss-fade)), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - var(--ss-fade)), transparent);
+}
+:is(.ss-gameview-nav, .story-suite-tabs)[data-ss-axis="x"][data-ss-more="start"] {
+    -webkit-mask-image: linear-gradient(to left, #000 calc(100% - var(--ss-fade)), transparent);
+    mask-image: linear-gradient(to left, #000 calc(100% - var(--ss-fade)), transparent);
+}
+:is(.ss-gameview-nav, .story-suite-tabs)[data-ss-axis="x"][data-ss-more="both"] {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--ss-fade), #000 calc(100% - var(--ss-fade)), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 var(--ss-fade), #000 calc(100% - var(--ss-fade)), transparent);
+}
+:is(.ss-gameview-nav, .story-suite-tabs)[data-ss-axis="y"][data-ss-more="end"] {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--ss-fade)), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - var(--ss-fade)), transparent);
+}
+:is(.ss-gameview-nav, .story-suite-tabs)[data-ss-axis="y"][data-ss-more="start"] {
+    -webkit-mask-image: linear-gradient(to top, #000 calc(100% - var(--ss-fade)), transparent);
+    mask-image: linear-gradient(to top, #000 calc(100% - var(--ss-fade)), transparent);
+}
+:is(.ss-gameview-nav, .story-suite-tabs)[data-ss-axis="y"][data-ss-more="both"] {
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--ss-fade), #000 calc(100% - var(--ss-fade)), transparent);
+    mask-image: linear-gradient(to bottom, transparent, #000 var(--ss-fade), #000 calc(100% - var(--ss-fade)), transparent);
+}
+
+.ss-gameview-navlabel {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@media (min-width: 768px) {
+    .ss-gameview {
+        flex-direction: row;
+    }
+
+    .ss-gameview-nav {
+        order: -1;
+        flex-direction: column;
+        width: 200px;
+        overflow-x: hidden;
+        overflow-y: auto;
+        border-top: 0;
+        border-right: 1px solid var(--ss-border);
+        padding-bottom: 0;
+    }
+
+    .ss-gameview-navitem {
+        flex: 0 0 auto;
+        flex-direction: row;
+        justify-content: flex-start;
+        gap: var(--ss-gap);
+        min-height: 44px;
+        padding: 8px 12px;
+        font-size: 1em;
+    }
+
+    .ss-gameview-navitem[aria-current="page"] {
+        box-shadow: inset 3px 0 0 var(--ss-accent);
+    }
+
+    .ss-gameview-body {
+        padding: 16px 24px;
+    }
+}
+
+/* ---- Inline cards under replies ---- */
+
+.ss-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+.ss-card {
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius);
+    background: var(--ss-chat-surface);
+    overflow: hidden;
+}
+
+.ss-card-head {
+    display: flex;
+    align-items: center;
+    gap: var(--ss-gap);
+    width: 100%;
+    min-height: 36px;
+    padding: 4px 10px;
+    border: 0;
+    color: inherit;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.ss-card-title {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.ss-card-summary {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 0.75;
+    font-size: 0.9em;
+}
+
+.ss-card-chevron {
+    transition: transform 0.15s ease;
+}
+
+.ss-card-open .ss-card-chevron {
+    transform: rotate(180deg);
+}
+
+.ss-card-body {
+    padding: 8px 10px;
+    border-top: 1px solid var(--ss-border);
+    overflow-x: auto;
+}
+
+/* ---- HUD strip above the message box ---- */
+
+.ss-hud {
+    display: flex;
+    gap: var(--ss-gap);
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 2px 4px;
+    color: var(--ss-text);
+    background: var(--ss-surface);
+    border-top: 1px solid var(--ss-border);
+    font-size: 0.85em;
+}
+
+.ss-hud::-webkit-scrollbar {
+    display: none;
+}
+
+.ss-hud[hidden],
+.ss-hud-empty {
+    display: none;
+}
+
+.ss-hud-item {
+    flex: 0 0 auto;
+    max-height: 48px;
+    overflow: hidden;
+}
+
+/* An item sizes to its content. A screen's css can make its root (this item) a size container
+   (`:root { container: x / inline-size }`), and a size container gets no width from its content, so
+   the item would shrink to nothing: the strip keeps its items plain boxes. Containers further in still work. */
+.ss-hud > .ss-hud-item {
+    container-type: normal;
+    min-width: min-content;
+}
+
+/* ---- Dialogs: a sheet from the bottom on narrow widths, centred on wide ones ---- */
+
+.ss-dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    /* <html> may be the 0-high box fixed elements sit in (SillyTavern's mobile layout): give the height. */
+    height: 100dvh;
+    z-index: 3030;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    /* A real dim and a light blur: the page behind is out of play while the dialog is open (the
+       backdrop takes the clicks; dialog.js keeps the focus inside). */
+    background: rgba(0, 0, 0, 0.55);
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+}
+
+.ss-dialog {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-height: 92dvh;
+    color: var(--ss-text);
+    background: var(--ss-surface);
+    backdrop-filter: blur(var(--SmartThemeBlurStrength, 10px));
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius) var(--ss-radius) 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
+.ss-dialog-head {
+    display: flex;
+    align-items: center;
+    gap: var(--ss-gap);
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--ss-border);
+}
+
+.ss-dialog-title {
+    flex: 1;
+    margin: 0;
+    font-size: 1.1em;
+}
+
+.ss-dialog-steps {
+    display: flex;
+    gap: 4px;
+    margin: 0;
+    padding: 6px 12px;
+    list-style: none;
+    overflow-x: auto;
+    font-size: 0.85em;
+}
+
+.ss-dialog-steps[hidden] {
+    display: none;
+}
+
+.ss-dialog-step {
+    flex: 0 0 auto;
+    padding: 2px 8px;
+    border-radius: 999px;
+    opacity: 0.6;
+}
+
+.ss-dialog-step[aria-current="step"] {
+    opacity: 1;
+    color: var(--ss-accent);
+    outline: 1px solid var(--ss-accent);
+}
+
+.ss-dialog-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 12px;
+}
+
+.ss-dialog-receipt {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ss-gap);
+    margin: 0 12px;
+    padding: 8px 10px;
+    border-left: 3px solid var(--ss-accent);
+    background: var(--ss-chat-surface);
+}
+
+.ss-dialog-receipt-text {
+    flex: 1 1 200px;
+    margin: 0;
+}
+
+.ss-dialog-error {
+    margin: 6px 12px 0;
+    color: var(--ss-muted);
+    font-weight: 600;
+}
+
+.ss-dialog-foot {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--ss-gap);
+    padding: 8px 12px;
+    border-top: 1px solid var(--ss-border);
+}
+
+.ss-dialog-foot > button,
+.ss-dialog-accept {
+    min-height: 44px;
+}
+
+.ss-dialog-back {
+    margin-right: auto;
+}
+
+.ss-gameview [hidden],
+.ss-dialog [hidden],
+.ss-card [hidden] {
+    display: none !important;
+}
+
+@media (min-width: 768px) {
+    .ss-dialog-backdrop {
+        align-items: center;
+    }
+
+    .ss-dialog {
+        width: min(640px, 92vw);
+        max-height: 85dvh;
+        border-radius: var(--ss-radius);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ss-card-chevron {
+        transition: none;
+    }
+}

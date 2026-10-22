@@ -20,14 +20,20 @@ export const LIMITS = Object.freeze({
 // RPG Battle skill templates and presets ready-made characters for that wizard; places and
 // routes are the map Story Director's atlas reads; terms are the words a world uses for levels and XP
 // (MODULES §F25), which RPG Battle reads under the reader's own; ranks are a ladder of quest ranks
-// (Story Director's `quest.ranks`, RPG Battle's foe strength).
-export const CONTENT_KINDS = Object.freeze(['items', 'creatures', 'shops', 'recipes', 'events', 'quests', 'races', 'talents', 'skills', 'presets', 'places', 'routes', 'terms', 'ranks']);
+// (Story Director's `quest.ranks`, RPG Battle's foe strength); crafts change which stats a craft rolls
+// with (MODULES §F102); meterPresets are ready-made NPC meter sets for NPC State Delta (MODULES §F81, §F90).
+export const CONTENT_KINDS = Object.freeze(['items', 'creatures', 'shops', 'recipes', 'events', 'quests', 'races', 'talents', 'skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets']);
 // Kinds added after the first pack format: a normalized pack has them only when the file gives
 // them, so what older packs list (counts) stays as it was.
-export const OPTIONAL_KINDS = Object.freeze(['skills', 'presets', 'places', 'routes', 'terms', 'ranks']);
+export const OPTIONAL_KINDS = Object.freeze(['skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets']);
 
 // Top-level fields of pack.json; anything else is refused so a typo is not silently ignored.
-export const PACK_FIELDS = Object.freeze(['id', 'version', 'name', 'author', 'description', 'requires', 'currency', 'calendar', 'content', 'start', 'layouts', 'screens', 'theme']);
+export const PACK_FIELDS = Object.freeze(['id', 'version', 'name', 'author', 'description', 'requires', 'currency', 'economy', 'calendar', 'content', 'start', 'layouts', 'screens', 'theme']);
+// A pack's money scale (MODULES §F104): `{ scale?: 0.001–1000 (default 1), note? }`. `scale` multiplies the
+// built-in money defaults (Story Block's coin budget by level, a module's default loot and prices) when
+// this pack's currency is in use; numbers the pack writes itself (ranks, item values, prices) stay as written.
+export const ECONOMY_FIELDS = Object.freeze(['scale', 'note']);
+export const ECONOMY_LIMITS = Object.freeze({ min: 0.001, max: 1000, note: 500 });
 
 // Item definitions follow Story Block's inventory def (SPEC §7).
 export const ITEM_KINDS = Object.freeze(['goods', 'material', 'consumable', 'equipment', 'quest', 'money']);
@@ -61,6 +67,37 @@ export const TERM_SEPARATORS = /[|:#<>\r\n]/;
 export const RANK_FIELDS = Object.freeze(['id', 'title', 'levels', 'reward']);
 export const RANK_ID = /^[\p{L}\p{N}+-]{1,8}$/u;
 export const RANKS_LIMITS = Object.freeze({ records: 12, title: 30, level: 999 });
+// Crafting (MODULES §F102). A recipe may say which craft it is, how hard (`dc`), where it is made
+// (`station`), which stats it rolls with (`stat`, overriding the craft's), whether a character knows
+// it from the start (`known`) and who teaches it. RPG Battle's craft part reads them; code sets every
+// chance. Fields a recipe had before (fee, minutes, any other plain data) are kept as they were.
+export const RECIPE_CRAFT_FIELDS = Object.freeze(['craft', 'dc', 'station', 'stat', 'known', 'teaches']);
+export const RECIPE_LIMITS = Object.freeze({ dcMin: 5, dcMax: 40, teaches: 120, stats: 3 });
+// Two or three stats joined by `+`, or one: `STR+DEX`, `INT`.
+export const STAT_SUM = /^[A-Z]{2,12}(?:\+[A-Z]{2,12}){0,2}$/;
+// The stations Story Suite names; a pack may name any other slug (`salt-yard`).
+export const STATIONS = Object.freeze(['forge', 'alchemy-table', 'campfire', 'inn', 'workbench']);
+// The default crafts: the stats a check rolls with and the stations it can be worked at (none
+// listed: anywhere). A pack's `crafts` record with the same id replaces one; a new id adds a craft.
+export const DEFAULT_CRAFTS = Object.freeze([
+    Object.freeze({ craft: 'smithing', title: 'Smithing', stats: Object.freeze(['STR', 'DEX']), stations: Object.freeze(['forge']) }),
+    Object.freeze({ craft: 'alchemy', title: 'Alchemy', stats: Object.freeze(['INT']), stations: Object.freeze(['alchemy-table']) }),
+    Object.freeze({ craft: 'leather', title: 'Leatherwork', stats: Object.freeze(['DEX']), stations: Object.freeze(['workbench', 'campfire', 'inn']) }),
+    Object.freeze({ craft: 'cooking', title: 'Cooking', stats: Object.freeze(['VIT']), stations: Object.freeze(['campfire', 'inn']) }),
+    Object.freeze({ craft: 'enchanting', title: 'Enchanting', stats: Object.freeze(['INT', 'LUK']), stations: Object.freeze(['workbench', 'alchemy-table']) }),
+]);
+// A pack's craft: `{ id, title, stats: ['INT', 'DEX'], stations?: ['alchemy-table'], note? }`.
+export const CRAFT_FIELDS = Object.freeze(['id', 'title', 'stats', 'stations', 'note']);
+export const CRAFTS_LIMITS = Object.freeze({ records: 12, title: 30, stats: 3, stations: 8, note: 200 });
+// Ready-made NPC meter sets for NPC State Delta (MODULES §F81, §F90):
+// `{ id, title, meters: [{ id, name, min, max, start, describe?, bands?, drift? }], stages?: [{ id, name, needs, milestone? }] }`.
+// The limits follow NPC State Delta's own (six custom meters from -1000 to 1000, eight stages, names of 40).
+export const METER_PRESET_FIELDS = Object.freeze(['id', 'title', 'meters', 'stages']);
+export const METER_FIELDS = Object.freeze(['id', 'name', 'min', 'max', 'start', 'describe', 'bands', 'drift']);
+export const METER_STAGE_FIELDS = Object.freeze(['id', 'name', 'needs', 'milestone']);
+export const METER_LIMITS = Object.freeze({ presets: 4, meters: 6, min: -1000, max: 1000, id: 40, name: 40, title: 40, describe: 200, bands: 8, word: 24, stages: 8, needs: 4, milestone: 200 });
+// Words NPC State Delta keeps for itself (a stage line, a reason): never a meter id.
+export const METER_RESERVED = Object.freeze(['stage', 'stages', 'disposition', 'name', 'meter', 'meters', 'reason', 'why', 'because', 'note', 'cause']);
 // A calendar for the story clock: { era, months: [{ name, days }], start: { year, month, day, hour, minute } }.
 export const CALENDAR_FIELDS = Object.freeze(['era', 'months', 'start']);
 export const CALENDAR_START_FIELDS = Object.freeze(['year', 'month', 'day', 'hour', 'minute']);

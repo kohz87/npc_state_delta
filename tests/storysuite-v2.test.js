@@ -268,13 +268,15 @@ test('registers module npc-state-delta once, with the npc domain, its queries an
     assert.equal(def.name, 'NPC State Delta');
     assert.equal(def.version, '1.2.19');
     assert.deepEqual(Object.keys(def.domains), ['npc'], 'one small domain: the NPC meters (F81, F90)');
-    assert.deepEqual(Object.keys(def.queries).sort(), ['npc.cast', 'npc.dossier', 'npc.known', 'npc.meters', 'npc.portrait', 'npc.present']);
+    assert.deepEqual(Object.keys(def.queries).sort(), ['npc.cast', 'npc.dossier', 'npc.known', 'npc.meters', 'npc.next', 'npc.portrait', 'npc.present']);
     assert.deepEqual([...QUERY_NAMES].sort(), Object.keys(def.queries).sort());
-    assert.deepEqual(Object.keys(def.commands).sort(), ['npc.adjust', 'npc.refresh', 'npc.set']);
-    assert.deepEqual(Object.keys(def.capture.kinds), ['npc']);
+    assert.deepEqual(Object.keys(def.commands).sort(), ['npc.adjust', 'npc.milestone', 'npc.refresh', 'npc.set', 'npc.tick']);
+    assert.deepEqual(Object.keys(def.capture.kinds), ['npc', 'milestone']);
+    assert.equal(def.capture.kinds.milestone.feature, 'npc-state-delta.stages', 'the milestone kind belongs to the stages feature');
+    assert.deepEqual(def.features.map(feature => [feature.id, feature.default]), [['npc-state-delta.stages', true], ['npc-state-delta.drift', false], ['npc-state-delta.presets', true]]);
     assert.equal(typeof def.context.static, 'function', 'one static line for the npc kind; Delta keeps its own prompt keys besides');
     assert.equal(typeof def.settings.section, 'function');
-    assert.deepEqual(Object.keys(def.settings.schema), ['changeCap', 'customMeters', 'stages']);
+    assert.deepEqual(Object.keys(def.settings.schema), ['changeCap', 'customMeters', 'stages', 'ladder', 'conflictAt', 'demoteAfter']);
     assert.deepEqual(def.tabs.map(tab => [tab.id, tab.title]), [[CAST_TAB_ID, 'Cast']]);
     adapter.start();
     adapter.check();
@@ -567,7 +569,8 @@ test('a panel that mounts after hosting is hidden; a section opened before it wa
     await adapter.settled();
     const el = doc.body.appendChild(doc.createElement('section'));
     sdk.registered[0].settings.section(el, {});
-    assert.match(el.textContent, /still loading/);
+    // The meter presets block shows at once; Delta's panel is still on its way.
+    assert.match(el.children.map(child => child.textContent).join(' '), /still loading/);
     const { panel } = drawerWithPanel(doc);
     doc.dispatch('npc-state-delta:settings-mounted');
     assert.equal(panel.parentNode, el);

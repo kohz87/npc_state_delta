@@ -105,6 +105,9 @@ export const FIELDS = Object.freeze({
     // (v2 meters) The hidden notes: [{ id, meter, at, text }]. A note reaches a model-facing text
     // only once its meter has unlocked it, and only through the v2 slice (src/npc-meters.js).
     secrets: { kind: 'secret', prompt: 'unlocked' },
+    // (v2 meters) The reader's meter setup for this NPC: { track (a preset or ladder track), limits:
+    // { meter: { ceiling?, floor? } } }. Read by the v2 slice's handlers only; never model-facing.
+    meterSetup: { kind: 'meta', prompt: 'never' },
 });
 
 // (cleanup step 13) How each key a targeted prompt asks the model to return is written in its return

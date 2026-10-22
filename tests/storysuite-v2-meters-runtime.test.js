@@ -267,7 +267,8 @@ test('index.js: the v2 meter hooks are the identity without a host', () => {
     assert.match(index, /function hostedMeterView\(npcs\) \{\n    const adapter = storySuiteV2Meters\(\);\n    if \(!adapter\) return npcs;/);
     assert.match(index, /function forwardRelationshipChangesToHost\(before, after, messageId, head = null\) \{\n    const adapter = storySuiteV2Meters\(\);\n    if \(!adapter\) return;/);
     assert.match(index, /function hostedSecretsEditorHtml\(npc\) \{\n    const adapter = storySuiteV2Meters\(\);\n    if \(!adapter\) return '';/);
-    assert.match(index, /const secretsInput = hostedMeters \? document\.getElementById\(SECRETS_EDITOR_ID\) : null;/);
+    assert.match(index, /const v2Edits = hostedMeters \? hostedMeters\.readEditor\(id => document\.getElementById\(id\)\?\.value, current\) : null;/);
+    assert.match(index, /const meterViews = storySuiteV2Meters\(\)\?\.dossierMeters\?\.\(state\.npcs\) \?\? \{\};/);
     assert.match(index, /if \(shownRelationship\) \{/);
     assert.equal((index.match(/forwardRelationshipChangesToHost\(/g) || []).length, 3, 'two hooks: the live scan\'s commit and the targeted pass\'s commit');
 });
@@ -333,5 +334,66 @@ test('the dossier editor: hosted, it edits the slice and the hidden notes; alone
     assert.equal(alone.hasNotes, false, 'no Hidden notes field without a host');
     assert.equal(alone.savedTrust, 45, 'v1: the editor sets Delta\'s own number');
     assert.equal(alone.secrets, null);
+    assert.deepEqual(alone.sent, []);
+});
+
+// (TRS 1-4) The editor's v2 controls while hosted: the meter limits go to the dossier (meterSetup),
+// the milestones and a custom meter's value to the slice (npc.milestone, npc.set), then a refresh.
+const editorLadderScenario = async () => {
+    const api = globalThis.NPCStateDelta;
+    await sleep(200);
+    await manualAddNpc('Yunyun');
+    await sleep(100);
+    const yunyun = api.getState().npcs.find(npc => npc.name === 'Yunyun');
+    await api.openEditor(yunyun.id);
+    await sleep(30);
+    const popup = mockState.popupCalls.at(-1);
+    const html = String(popup.content?.innerHTML ?? popup.content ?? '');
+    const values = new Map();
+    for (const match of html.matchAll(/id="(npc_state_delta_edit_[a-z_]+)"([^>]*)>/g)) values.set(match[1], { value: (match[2].match(/value="([^"]*)"/) || [])[1] ?? '', checked: /\bchecked\b/.test(match[2]) });
+    for (const match of html.matchAll(/id="(npc_state_delta_edit_[a-z_]+)"[^>]*>([^<]*)<\/textarea>/g)) values.set(match[1], { value: match[2], checked: false });
+    const shown = Object.fromEntries([...values].filter(([id]) => /meter|milestone|secrets/.test(id)).map(([id, item]) => [id, item.value]));
+    values.set('npc_state_delta_edit_meter_limits', { value: 'affection: ceiling 40\nnot a limit', checked: false });
+    values.set('npc_state_delta_edit_milestones', { value: 'saved her brother\nkept the oath', checked: false });
+    values.set('npc_state_delta_edit_meter_loyalty', { value: '33', checked: false });
+    const realGet = document.getElementById;
+    document.getElementById = id => values.get(id) || null;
+    await popup.complete(1);
+    await sleep(150);
+    document.getElementById = realGet;
+    const saved = api.getState().npcs.find(npc => npc.name === 'Yunyun');
+    const dossierState = api.getDossierState();
+    console.log('RESULT ' + JSON.stringify({
+        shown, meterSetup: saved.meterSetup ?? null, sent: (mockState.sdk?.sent ?? []).map(({ type, payload }) => ({ type, payload })),
+        hasMeterViews: Object.hasOwn(dossierState, 'meterViews'),
+    }));
+};
+
+test('the dossier editor (hosted): limits to the dossier, milestones and custom meters to the slice; alone, none of it', () => {
+    const prelude = async () => {
+        const sdk = {
+            registered: [], sent: [],
+            entries: [{ key: 'yunyun', name: 'Yunyun', meters: { trust: 30, affection: 0, desire: 0, tension: 0, loyalty: 20 }, stages: {}, unlocked: [], milestones: { 'saved-her-brother': 'saved her brother', 'old-debt': 'old debt' } }],
+            registerModule(def) { sdk.registered.push(def); },
+            command: async (type, payload) => { sdk.sent.push({ type, payload }); return { ok: true, receipt: { summary: '' } }; },
+            query: name => (name === 'npc.meters' ? structuredClone(sdk.entries) : null),
+            settings: () => ({ presets: ['companion'] }),
+        };
+        mockState.sdk = sdk;
+        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    };
+    const hosted = scenarioOutput(runHostScenario('meters-editor-ladder', prelude, `async () => { const editorLadderScenario = ${editorLadderScenario.toString()}; await editorLadderScenario(); }`));
+    assert.equal(hosted.shown.npc_state_delta_edit_milestones, 'saved her brother\nold debt', 'the slice\'s milestones are shown');
+    assert.equal(hosted.shown.npc_state_delta_edit_meter_loyalty, '20', 'the preset\'s meter, from the slice');
+    assert.equal(hosted.shown.npc_state_delta_edit_meter_limits, '');
+    assert.deepEqual(hosted.meterSetup, { track: '', limits: { affection: { ceiling: 40 } } }, 'the readable limit is kept on the dossier');
+    assert.deepEqual(hosted.sent.map(item => item.type), ['npc.set', 'npc.milestone', 'npc.refresh']);
+    assert.deepEqual(hosted.sent[0].payload, { name: 'Yunyun', meters: { loyalty: 33 } });
+    assert.deepEqual(hosted.sent[1].payload, { name: 'Yunyun', add: ['kept the oath'], remove: ['old-debt'] });
+    assert.equal(hosted.hasMeterViews, true);
+
+    const alone = scenarioOutput(runHostScenario('meters-editor-ladder-alone', async () => {}, `async () => { const editorLadderScenario = ${editorLadderScenario.toString()}; await editorLadderScenario(); }`));
+    assert.deepEqual(alone.shown, {}, 'no v2 controls without a host');
+    assert.equal(alone.meterSetup, null);
     assert.deepEqual(alone.sent, []);
 });

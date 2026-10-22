@@ -280,7 +280,12 @@ export function projectDossierState(state = {}, status = {}) {
     const records = Array.isArray(state?.npcs) ? state.npcs : [];
     const formPortraits = state?.formPortraits && typeof state.formPortraits === 'object' ? state.formPortraits : {};
     const customFieldNames = Array.isArray(state?.customFieldNames) ? state.customFieldNames : undefined;
-    const details = records.map(npc => dossierDetailProjection(npc, portraitAssets, formPortraits[npc?.id] || {}, { customFieldNames })).filter(npc => npc.id);
+    const meterViews = state?.meterViews && typeof state.meterViews === 'object' ? state.meterViews : {};
+    const details = records.map(npc => {
+        const detail = dossierDetailProjection(npc, portraitAssets, formPortraits[npc?.id] || {}, { customFieldNames });
+        const meters = v2MetersProjection(Object.hasOwn(meterViews, String(npc?.id ?? '')) ? meterViews[npc.id] : null);
+        return meters ? { ...detail, v2Meters: meters } : detail;
+    }).filter(npc => npc.id);
     return {
         chatKey: plain(status?.chatKey, 'no-chat'),
         hydrationStatus: plain(status?.hydrationStatus, 'ready'),
@@ -426,6 +431,45 @@ export function relationshipStepHtml(axis, label, change, latestReply) {
     const good = axis === 'tension' ? !up : up;
     const title = `${label} ${up ? 'up' : 'down'} ${Math.abs(step)} since the last reply (reply #${reply})`;
     return `<span class="delta-rel-step delta-rel-step-${good ? 'good' : 'bad'}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${up ? '▲' : '▼'}${Math.abs(step)}</span>`;
+}
+
+// (v2 meters, hosted) An NPC's Story Suite meters beyond the four axes: custom meters, the stage on
+// the ladder and what the next one needs, milestones, and the hidden notes still locked (their
+// titles and rules only; a locked note's text never reaches the dossier view). Null without a host.
+export function v2MetersProjection(view) {
+    if (!view || typeof view !== 'object') return null;
+    const bars = (Array.isArray(view.bars) ? view.bars : []).filter(bar => bar && !bar.builtIn && plain(bar.id)).slice(0, 12).map(bar => {
+        const min = Number.isFinite(Number(bar.min)) ? Number(bar.min) : 0;
+        const max = Number.isFinite(Number(bar.max)) && Number(bar.max) > min ? Number(bar.max) : min + 100;
+        const value = Math.max(min, Math.min(max, Math.round(Number(bar.value) || 0)));
+        const ceiling = Number.isInteger(bar.ceiling) && bar.ceiling < max ? bar.ceiling : null;
+        return { id: plain(bar.id), label: plain(bar.label, plain(bar.id)), value, min, max, text: plain(bar.text, String(value)), ceiling, delta: Number.isInteger(bar.delta) ? bar.delta : 0 };
+    });
+    return {
+        bars,
+        rank: plain(view.rank),
+        next: plain(view.next),
+        milestones: stringList(view.milestones, 16),
+        locked: stringList(view.locked, 8),
+        opened: stringList(view.opened, 8),
+    };
+}
+
+export function v2MetersHtml(view) {
+    if (!view) return '';
+    const at = (bar, point) => Math.max(0, Math.min(100, ((point - bar.min) / (bar.max - bar.min)) * 100));
+    const bars = view.bars.map(bar => `<div class="delta-rel-axis delta-rel-custom" data-meter="${escapeHtml(bar.id)}">
+        <div class="delta-rel-label"><span>${escapeHtml(bar.label)}</span><b>${escapeHtml(bar.text)}${bar.delta ? `<span class="delta-rel-step delta-rel-step-${bar.delta > 0 ? 'good' : 'bad'}">${bar.delta > 0 ? '▲' : '▼'}${Math.abs(bar.delta)}</span>` : ''}</b></div>
+        <div class="delta-rel-track" aria-label="${escapeHtml(`${bar.label} ${bar.value}`)}">${bar.ceiling !== null ? `<span class="delta-rel-ceiling" style="left:${at(bar, bar.ceiling)}%" title="${escapeHtml(`Ceiling ${bar.ceiling}`)}"></span>` : ''}<i style="left:${at(bar, bar.value)}%"></i></div>
+    </div>`).join('');
+    const lines = [
+        view.rank ? `<p class="delta-v2-rank"><b>${escapeHtml(view.rank)}</b></p>` : '',
+        view.next ? `<p class="delta-muted delta-v2-next">${escapeHtml(view.next)}</p>` : '',
+        view.milestones.length ? `<p class="delta-v2-milestones"><span class="delta-kicker">MILESTONES</span> ${view.milestones.map(escapeHtml).join(' · ')}</p>` : '',
+        ...view.opened.map(title => `<p class="delta-v2-note">🔓 ${escapeHtml(title)}</p>`),
+        ...view.locked.map(text => `<p class="delta-muted delta-v2-note">${escapeHtml(text)}</p>`),
+    ].filter(Boolean).join('');
+    return `${bars ? `<div class="delta-rel-grid delta-v2-meters">${bars}</div>` : ''}${lines}`;
 }
 
 function relationshipAxis(label, value, axis, change = null, latestReply = null) {
@@ -923,6 +967,7 @@ class DeltaDossierUi {
                 <div class="delta-rel-grid">
                     ${RELATIONSHIP_AXES.map(([axis, label]) => relationshipAxis(label, selected.relationship[axis], axis, selected.lastRelationshipChange, this.projection?.reply)).join('')}
                 </div>
+                ${v2MetersHtml(selected.v2Meters)}
                 ${lastRelationshipChangeHtml(selected.lastRelationshipChange)}
             </section>
             <section class="delta-section" data-delta-section="identity">
@@ -1145,6 +1190,9 @@ const STYLES = `
 #${ROOT_ID} .delta-rel-step-good { color:#9fd8b4; }
 #${ROOT_ID} .delta-rel-step-bad { color:#eba3a3; }
 #${ROOT_ID} .delta-rel-track { position:relative; height:8px; border-radius:999px; background:rgba(0,0,0,.34); border:1px solid rgba(255,255,255,.07); }
+#${ROOT_ID} .delta-v2-meters { margin-top:9px; }
+#${ROOT_ID} .delta-rel-ceiling { position:absolute; top:-3px; bottom:-3px; width:2px; background:rgba(235,163,163,.8); }
+#${ROOT_ID} .delta-v2-rank, #${ROOT_ID} .delta-v2-next, #${ROOT_ID} .delta-v2-milestones, #${ROOT_ID} .delta-v2-note { margin:6px 0 0; font-size:.8rem; }
 #${ROOT_ID} .delta-rel-zero { position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:rgba(255,255,255,.32); }
 #${ROOT_ID} .delta-rel-track i { position:absolute; top:50%; width:10px; height:10px; transform:translate(-50%,-50%); border-radius:50%; background:var(--delta-accent); box-shadow:0 0 0 2px rgba(0,0,0,.45); }
 #${ROOT_ID} .delta-summary { margin-top:12px; padding-top:10px; border-top:1px solid rgba(218,193,148,.12); }
