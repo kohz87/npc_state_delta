@@ -68,8 +68,8 @@ export function recordFault(message) {
     return 'its saved starting point (checkpoint) is damaged';
 }
 
-// 32-bit FNV-1a, as 8 hex digits: enough to tell two swipes' openings apart.
-function hash(text) {
+// 32-bit FNV-1a, as 8 hex digits: enough to tell two swipes' openings apart (and two change lines).
+export function hash(text) {
     let h = 0x811c9dc5;
     for (let i = 0; i < text.length; i++) {
         h ^= text.charCodeAt(i);
@@ -87,12 +87,27 @@ const dateOf = value => {
     return String(value);
 };
 
+// B-b2-timeline-r2-3: a new swipe being written still shows the swipe it was made from. SillyTavern's
+// swipe() moves swipe_id past the swipes it has and leaves the old text and send_date until the reply
+// is saved (saveReply sets them just before MESSAGE_RECEIVED, and the swipe's own slot after it).
+// So while the shown swipe has no slot of its own and its text is another swipe's (or none), it has
+// no text of its own to mark.
+function borrowed(message) {
+    const swipes = message?.swipes;
+    const id = message?.swipe_id;
+    if (!Array.isArray(swipes) || !Number.isInteger(id) || id < 0 || swipes[id] !== undefined) return false;
+    const mes = String(message.mes ?? '');
+    return !mes.trim() || swipes.some(text => text === mes);
+}
+
 /**
- * The shown swipe's mark, or null while its text has not started (a reply still being written):
+ * The shown swipe's mark, or null while its text has not started (a reply still being written, or a
+ * new swipe still showing the old one's text, see `borrowed`):
  * `t` = "<hash>:<n>", the hash of the first n (at most 40) characters before any tag (a Continue only
  * adds after them, and the hidden change block comes after them), and `d` = its send_date ('' if none).
  */
 export function swipeMark(message) {
+    if (borrowed(message)) return null;
     const text = opening(message).slice(0, MARK_CHARS);
     if (!text.trim()) return null;
     return { t: `${hash(text)}:${text.length}`, d: dateOf(message?.send_date) };
@@ -295,7 +310,9 @@ export function createSaver({
                 if (orphan.tries < 3) continue;
                 orphans.splice(orphans.indexOf(orphan), 1);
                 try {
-                    onError?.(new Error(`A change made in chat "${orphan.target?.chatId ?? '?'}" was not saved: another chat was opened before it was saved, and ${error?.message ?? error}.`));
+                    // B-b2-timeline-r2-2: the reason is the one the rescue met, not a guess at what happened.
+                    const why = String(error?.message ?? error).trim().replace(/[.\s]*$/, '');
+                    onError?.(new Error(`A change made in chat "${orphan.target?.chatId ?? '?'}" was not saved: that chat was no longer open when it was saved, and ${why}.`));
                 } catch { /* told in the console below */ }
                 console.warn('[Story Suite] a change of another chat was not saved', error);
             }
@@ -355,6 +372,22 @@ export function createSaver({
             latest = now ?? latest;
         },
         dirty,
+        /**
+         * Chat `from` is now called `to` (SillyTavern renamed its file): its unsaved changes, waiting or
+         * left behind, belong to `to` and its file. True when there was any.
+         */
+        renamed(from, to) {
+            if (!from || !to || from === to) return false;
+            let moved = false;
+            const move = change => {
+                if (!change || change.chatId !== from) return change;
+                moved = true;
+                return { ...change, chatId: to, place: change.place ? { ...change.place, chatId: to } : change.place };
+            };
+            latest = move(latest);
+            for (const orphan of orphans) orphan.target = move(orphan.target);
+            return moved;
+        },
         pending: () => timer !== null || running !== null,
         /** True while the last save failed (until one works again). */
         failing: () => failures > 0,

@@ -57,12 +57,14 @@ const revOf = state => (Number.isInteger(state?.meta?.rev) ? state.meta.rev : 0)
  * @param {number} [options.checkpointEvery] / [options.checkpointBytes]  thresholds (default 20 / 32 KB)
  * @param {() => string} [options.recordId]  ID of a new carrier record
  * @param {(state, domains: string[]) => string[]} [options.validate]  the domains' validators, run on a
- *   state whose counts were moved by a replay (ops.js rebaseOps); a problem skips that block
+ *   state whose counts were moved by a replay (ops.js rebaseOps), and on every replayed block's touched
+ *   domains; a problem the block brings skips that block
+ * @param {(domain: string) => string[]} [options.scratch]  a domain's per-reply scratch fields (ops.js)
  */
 export function createStore({
     chat, save, now = null, apply = applyOps, onSaveError = null, timers = globalThis,
     checkpointEvery = CHECKPOINT_EVERY, checkpointBytes = CHECKPOINT_BYTES, recordId = newRecordId, validate = null,
-    chatId = () => undefined, place = () => null, rescue = null,
+    chatId = () => undefined, place = () => null, rescue = null, scratch = null,
 } = {}) {
     if (typeof chat !== 'function') throw new TypeError('createStore needs a chat() function.');
     if (typeof apply !== 'function') throw new TypeError('createStore needs an apply(state, ops) function.');
@@ -165,15 +167,29 @@ export function createStore({
 
     // Ops are cloned on the way in so nothing the chat holds ends up inside (and frozen with) a state.
     // A count that stands elsewhere than when the op was made (a reply before it was deleted) takes the
-    // op's change rather than its number (ops.js rebaseOps, B3-8); the domains whose counts moved are
-    // checked by their validators, and a problem there throws (the block is skipped and reported).
-    function step(state, ops) {
+    // op's change rather than its number (ops.js rebaseOps, B3-8), and per-reply scratch fits what is
+    // there (ops.js scratch); the domains whose counts moved are checked by their validators, and a
+    // problem there throws (the block is skipped and reported). With `replayed` (a stored block replayed,
+    // r2-14) every domain the block touches is checked too: a block that leaves one invalid (a stack
+    // whose definition a deleted reply made) throws the same way. Only problems the block brings count,
+    // so a chat stored before a validator grew stricter still replays.
+    function step(state, ops, { replayed = false } = {}) {
         if (!ops.length) return state;
-        const { ops: rebased, rebased: moved } = rebaseOps(state, ops);
+        const { ops: rebased, rebased: moved } = rebaseOps(state, ops, { scratch, replayed });
         const next = deepFreeze(apply(state, structuredClone(rebased)));
-        if (moved.size && typeof validate === 'function') {
-            const problems = validate(next, [...moved].sort()) ?? [];
-            if (problems.length) throw new Error(`Taken onto the counts as they stand now, these changes no longer fit: ${problems.join(' ')}`);
+        if (typeof validate !== 'function') return next;
+        const names = new Set(moved);
+        if (replayed) for (const op of rebased) if (/^\/domains\/[^/]/.test(op?.path ?? '')) names.add(op.path.split('/')[2].replace(/~1/g, '/').replace(/~0/g, '~'));
+        if (!names.size) return next;
+        const list = [...names].filter(name => next?.domains?.[name] !== undefined).sort();
+        const problems = list.length ? validate(next, list) ?? [] : [];
+        if (!problems.length) return next;
+        const before = new Set(validate(state, list.filter(name => state?.domains?.[name] !== undefined)) ?? []);
+        const brought = problems.filter(problem => !before.has(problem));
+        if (brought.length) {
+            throw new Error(moved.size
+                ? `Taken onto the counts as they stand now, these changes no longer fit: ${brought.join(' ')}`
+                : `Taken onto the story as it stands now, these changes no longer fit: ${brought.join(' ')}`);
         }
         return next;
     }
@@ -244,7 +260,7 @@ export function createStore({
                 return;
             }
             try {
-                state = step(state, ops);
+                state = step(state, ops, { replayed: true });
             } catch (error) {
                 const why = String(error?.message ?? error);
                 problems.push({
@@ -273,9 +289,24 @@ export function createStore({
 
     const sameKey = (a, b) => Object.keys(a).every(name => a[name] === b[name]);
 
+    // The cached head still holds when all that changed is messages after its carrier that hold no
+    // record (the reader's next message, a reply not read yet): replaying them would give it again.
+    function stillHolds(arr, key) {
+        const old = cache?.key;
+        if (!cache?.state || old.arr !== arr || old.index < 0 || key.index < old.index || arr.length < old.length) return false;
+        const message = arr[old.index];
+        if (message !== old.message || message?.swipe_id !== old.swipe || message?.extra !== old.extra || message?.extra?.[KEY] !== old.record) return false;
+        for (let i = old.index + 1; i < arr.length; i++) if (arr[i]?.extra?.[KEY] !== undefined) return false;
+        return true;
+    }
+
     function current() {
         const arr = list();
         const key = headKey(arr);
+        if (cache && !sameKey(cache.key, key) && stillHolds(arr, key)) {
+            cache = { ...cache, key };
+            known = carrierIndexes(arr).map(i => arr[i]);
+        }
         if (!cache || !sameKey(cache.key, key)) {
             const { state, problems } = key.index < 0 ? { state: null, problems: [] } : replay(arr, key.index);
             cache = { key, state, problems };
@@ -706,16 +737,43 @@ export function createStore({
             } finally {
                 holding -= 1;
                 if (!holding) {
+                    // The copies are written again as they are: a head cached before stays the head.
+                    const arr = list();
+                    const kept = cache && sameKey(cache.key, headKey(arr)) ? cache : null;
                     for (const message of held) {
                         const record = message.extra?.[KEY];
                         if (record) writeRecord(message, record);
                     }
                     held.clear();
+                    if (kept) retain(arr, kept.state, kept.problems);
                 }
             }
         },
 
+        /**
+         * B-b2-timeline-r2-2: chat `from` was renamed `to` (SillyTavern's CHAT_RENAMED). A change not yet
+         * saved, or left for its old chat's file, goes into the renamed chat's file instead: the old one
+         * is gone, and a renamed open chat is read back as new messages, which looks like another chat.
+         */
+        renamed(from, to) {
+            if (typeof from !== 'string' || typeof to !== 'string' || !from || !to || from === to) return false;
+            let moved = saver.renamed(from, to);
+            for (const entry of unsaved.values()) {
+                if (entry.chatId !== from) continue;
+                entry.chatId = to;
+                moved = true;
+            }
+            if (moved && saver.dirty()) saver.schedule();
+            return moved;
+        },
+
         scheduleSave(ms = 400) { saver.schedule(ms); },
+        /**
+         * Puts off a save that was only scheduled (not one already running): the turn's cues before a reply
+         * are saved with the reply's own save, one write of the chat file instead of two. The change stays
+         * dirty; the caller saves it (or schedules it again) when the reply comes or the generation ends.
+         */
+        deferSave() { saver.cancel(); },
         /** Saves now (a reader's action is saved at once); → Promise<true | false>, never throws: a failure is told and tried again. */
         saveSoon(options) { return saver.saveSoon(options); },
         flush() { return saver.flush(); },

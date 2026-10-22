@@ -20,7 +20,9 @@ const INDEX = /^(?:0|[1-9]\d*)$/;
 
 /** A JSON Pointer segment for an object key: `~` → `~0`, `/` → `~1`. */
 export function escapeKey(key) {
-    return String(key).replace(/~/g, '~0').replace(/\//g, '~1');
+    const text = String(key);
+    if (!text.includes('~') && !text.includes('/')) return text;
+    return text.replace(/~/g, '~0').replace(/\//g, '~1');
 }
 
 /** The keys of a JSON Pointer ('' is the whole document); throws on a malformed pointer. */
@@ -78,33 +80,106 @@ function setKey(target, key, value) {
  * without a prototype (a change line's labels) stays one, so a key it lacks is never an inherited one.
  */
 export function clone(value) {
+    if (value === null || typeof value !== 'object') return value;
     if (Array.isArray(value)) return value.map(clone);
-    if (isPlainObject(value)) {
-        const out = Object.getPrototypeOf(value) === null ? Object.create(null) : {};
-        for (const key of Object.keys(value)) setKey(out, key, clone(value[key]));
-        return out;
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) return value;
+    const out = proto === null ? Object.create(null) : {};
+    const keys = Object.keys(value);
+    for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        const item = value[key];
+        setKey(out, key, item === null || typeof item !== 'object' ? item : clone(item));
     }
-    return value;
+    return out;
 }
 
 /** Deep equality for plain JSON. */
 export function equal(a, b) {
     if (a === b) return true;
+    if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
     if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((item, i) => equal(item, b[i]));
     if (isPlainObject(a) && isPlainObject(b)) {
         const keys = Object.keys(a);
-        return keys.length === Object.keys(b).length && keys.every(key => Object.hasOwn(b, key) && equal(a[key], b[key]));
+        if (keys.length !== Object.keys(b).length) return false;
+        for (const key of keys) if (!Object.hasOwn(b, key) || !equal(a[key], b[key])) return false;
+        return true;
     }
     return false;
 }
+
+// Values known to be frozen all the way down, so a state that shares most of its branches with the one
+// before it is looked through only where it is new (isDeepFrozen).
+const frozenDeep = new WeakSet();
+const knownFrozen = value => value === null || typeof value !== 'object' || frozenDeep.has(value);
 
 /** Freezes a value and everything in it; returns it. */
 export function deepFreeze(value) {
     if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
         Object.freeze(value);
-        for (const key of Object.keys(value)) deepFreeze(value[key]);
+        let deep = true;
+        for (const key of Object.keys(value)) {
+            deepFreeze(value[key]);
+            if (deep && !knownFrozen(value[key])) deep = false;
+        }
+        if (deep) frozenDeep.add(value);
     }
     return value;
+}
+
+/** True when `value` and everything in it is frozen (plain values are). Remembered per object. */
+export function isDeepFrozen(value) {
+    if (knownFrozen(value)) return true;
+    if (!Object.isFrozen(value)) return false;
+    for (const key of Object.keys(value)) if (!isDeepFrozen(value[key])) return false;
+    frozenDeep.add(value);
+    return true;
+}
+
+/**
+ * frozenCopy(value, base?) → what `deepFreeze(clone(value))` gives, except that wherever `value` holds
+ * the same as `base` (same keys in the same order, equal values), that branch of `base` itself is used,
+ * and a part of `value` that is deep-frozen already is used as it is. `base` must be deep-frozen (a
+ * branch of a state). A frozen view of a changed copy then costs a walk of it, not a copy of all of it.
+ */
+export function frozenCopy(value, base) {
+    if (value === null || typeof value !== 'object') return value;
+    if (value === base || isDeepFrozen(value)) return value;
+    if (Array.isArray(value)) {
+        const like = Array.isArray(base) && base.length === value.length ? base : null;
+        const out = new Array(value.length);
+        let same = like !== null;
+        for (let i = 0; i < value.length; i++) {
+            if (!(i in value)) {   // a hole stays one, as clone keeps it
+                same = false;
+                continue;
+            }
+            out[i] = frozenCopy(value[i], like?.[i]);
+            if (same && !Object.is(out[i], like[i])) same = false;
+        }
+        return same ? like : frozenCopyDone(out);
+    }
+    if (!isPlainObject(value)) return deepFreeze(value);   // clone keeps such a value as it is
+    const proto = Object.getPrototypeOf(value);
+    const like = isPlainObject(base) && Object.getPrototypeOf(base) === proto ? base : null;
+    const keys = Object.keys(value);
+    const baseKeys = like === null ? null : Object.keys(like);
+    const out = proto === null ? Object.create(null) : {};
+    let same = like !== null && baseKeys.length === keys.length;
+    for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        const child = frozenCopy(value[key], like !== null && Object.hasOwn(like, key) ? like[key] : undefined);
+        if (same && (baseKeys[i] !== key || !Object.is(child, like[key]))) same = false;
+        setKey(out, key, child);
+    }
+    return same ? like : frozenCopyDone(out);
+}
+
+// Each branch of `out` is deep-frozen already.
+function frozenCopyDone(out) {
+    Object.freeze(out);
+    if (Object.keys(out).every(key => knownFrozen(out[key]))) frozenDeep.add(out);
+    return out;
 }
 
 /** diff(before, after, basePath = '') → Op[]: the minimal changes as described at the top. */
@@ -114,16 +189,31 @@ export function diff(before, after, basePath = '') {
     return ops;
 }
 
+// Only the keys whose values differ are sorted and walked: a key whose values are `equal` writes no op,
+// so the ops are the ones a walk over every key in sorted order writes, without that walk's cost for
+// what stayed the same.
 function walkDiff(a, b, path, ops) {
     if (a === b) return;
     if (isPlainObject(a) && isPlainObject(b)) {
-        const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].sort();
-        for (const key of keys) {
+        const keysA = Object.keys(a);
+        const keysB = Object.keys(b);
+        const changed = [];
+        let added = 0;
+        for (const key of keysB) {
+            if (!Object.hasOwn(a, key)) {
+                changed.push(key);
+                added++;
+            } else if (!equal(a[key], b[key])) {
+                changed.push(key);
+            }
+        }
+        // `b` holds every key of `a` exactly when it has no more keys than the ones it added.
+        if (keysA.length !== keysB.length - added) for (const key of keysA) if (!Object.hasOwn(b, key)) changed.push(key);
+        changed.sort();
+        for (const key of changed) {
             const at = `${path}/${escapeKey(key)}`;
-            const inA = Object.hasOwn(a, key);
-            const inB = Object.hasOwn(b, key);
-            if (!inB) ops.push({ op: 'remove', path: at });
-            else if (!inA) ops.push({ op: 'add', path: at, value: clone(b[key]) });
+            if (!Object.hasOwn(b, key)) ops.push({ op: 'remove', path: at });
+            else if (!Object.hasOwn(a, key)) ops.push({ op: 'add', path: at, value: clone(b[key]) });
             else walkDiff(a[key], b[key], at, ops);
         }
         return;
@@ -131,7 +221,9 @@ function walkDiff(a, b, path, ops) {
     if (Array.isArray(a) && Array.isArray(b)) {
         if (equal(a, b)) return;
         if (b.length > a.length && a.every((item, i) => equal(item, b[i]))) {
-            for (let i = a.length; i < b.length; i++) ops.push({ op: 'add', path: `${path}/${i}`, value: clone(b[i]) });
+            // Appended at the end ("-"), not at a position: replayed after an earlier reply that added to
+            // the list was deleted, an append still lands at the end (a position past it would not fit).
+            for (let i = a.length; i < b.length; i++) ops.push({ op: 'add', path: `${path}/-`, value: clone(b[i]) });
         } else {
             ops.push({ op: 'replace', path, value: clone(b) });
         }
@@ -214,7 +306,8 @@ function applyOne(root, op, fresh) {
 // (`was`) and where it is inside the thing (`count`, '/qty'). On replay, when the thing holds another
 // number (an earlier reply was deleted), it is taken from instead: `was` comes off and the rest stays;
 // holding less than `was` goes below zero, which the validator refuses (that block is skipped). Holding
-// `was` exactly, it goes, as written.
+// `was` exactly, it goes, as written. The other way round, a moved `replace` of a counter named `qty`
+// that comes to exactly 0 removes the thing holding it (r2-3: a stack is never kept at 0).
 
 /** True when `path` (/domains/<name>/…) is one of the domain's `counters` patterns. */
 export function isCounterPath(path, patterns) {
@@ -249,19 +342,135 @@ export function counterInside(path, patterns) {
     return null;
 }
 
+// ---------- per-reply scratch ----------
+//
+// A domain may name top-level fields that hold per-reply bookkeeping (`scratch`, the inventory's
+// `perReply`): each reply adds its own entry under its record ID and drops the others. On replay, after
+// an earlier reply was deleted (or one of this reply's own blocks was skipped), what an op inside such a
+// field expects may not be there: a `remove` of something not there is passed over, missing objects on
+// the way are made ({}), and a `replace` of something not there becomes an `add`. Bookkeeping only
+// counts what did happen, so fitting it never makes anything. Nothing outside scratch fields changes.
+
+/** The pointer of the scratch field `path` (/domains/<name>/<field>/…) lies in (`scratchOf(name)` lists it), or null. */
+export function scratchRoot(path, scratchOf) {
+    if (typeof scratchOf !== 'function') return null;
+    let keys;
+    try { keys = parsePath(path); } catch { return null; }
+    if (keys[0] !== 'domains' || keys.length < 3) return null;
+    const fields = scratchOf(keys[1]);
+    return Array.isArray(fields) && fields.includes(keys[2]) ? `/domains/${escapeKey(keys[1])}/${escapeKey(keys[2])}` : null;
+}
+
+function scratchOps(state, ops, scratchOf) {
+    // What each scratch field holds as the block goes (a copy; the ops are what is returned).
+    const shadow = new Map();
+    const out = [];
+    for (const op of ops) {
+        const root = op && typeof op.path === 'string' ? scratchRoot(op.path, scratchOf) : null;
+        if (!root || !OPS.has(op.op)) {
+            out.push(op);
+            continue;
+        }
+        if (!shadow.has(root)) shadow.set(root, { value: clone(valueAt(state, root)) });
+        const held = shadow.get(root);
+        const keys = parsePath(op.path).slice(3);
+        if (!keys.length) {
+            if (op.op === 'remove') {
+                if (held.value === undefined) continue;
+                held.value = undefined;
+            } else held.value = clone(op.value);
+            out.push(op);
+            continue;
+        }
+        if (op.op === 'remove') {
+            const parent = keys.slice(0, -1).reduce((node, key) => (isPlainObject(node) && Object.hasOwn(node, key) ? node[key] : undefined), held.value);
+            if (!isPlainObject(parent) || !Object.hasOwn(parent, keys.at(-1))) continue;
+            delete parent[keys.at(-1)];
+            out.push(op);
+            continue;
+        }
+        if (!isPlainObject(held.value)) {
+            held.value = {};
+            out.push({ op: 'add', path: root, value: {} });
+        }
+        let node = held.value;
+        let at = root;
+        for (const key of keys.slice(0, -1)) {
+            at = `${at}/${escapeKey(key)}`;
+            if (!isPlainObject(node[key])) {
+                node[key] = {};
+                out.push({ op: 'add', path: at, value: {} });
+            }
+            node = node[key];
+        }
+        const last = keys.at(-1);
+        out.push(op.op === 'replace' && !Object.hasOwn(node, last) ? { op: 'add', path: op.path, value: op.value } : op);
+        node[last] = clone(op.value);
+    }
+    return out;
+}
+
 /**
  * `ops` with each counter op (`replace` with a numeric `was`) moved onto the value `state` holds
  * there, and each `remove` of a thing holding a counter (`was`, `count`) that now holds another
  * number turned into taking `was` from it: { ops, rebased: Set of domain names whose counts moved }.
- * Ops are not changed in place.
+ * With `scratch` (a domain name → its scratch fields), ops inside those fields are fitted as above.
+ * With `replayed` (stored ops replayed, never a live command), a `remove` of an object key that is not
+ * there (the reply that added it was deleted) is passed over; one that carries a counted `was` (a take
+ * of a stack) is not, so a take of something gone still fails its block. And (rule c) a `replace` of an
+ * object key inside a domain that is not there, in an object that is, becomes an `add`: only a deleted reply had added
+ * the key, and the value is the one this later reply set. Counted ops (`was`) keep the counter rules
+ * above. Ops are not changed in place.
  */
-export function rebaseOps(state, ops) {
+export function rebaseOps(state, ops, { scratch = null, replayed = false } = {}) {
     const rebased = new Set();
     const moved = path => {
         const keys = parsePath(path);
         if (keys[0] === 'domains' && keys[1]) rebased.add(keys[1]);
     };
-    const out = ops.map(op => {
+    // Paths earlier ops in the list put something at: a count under one of them stands as they left it.
+    const written = [];
+    const writtenAbove = path => written.some(at => path === at || path.startsWith(`${at}/`));
+    const out = [];
+    for (const op of scratch ? scratchOps(state, ops, scratch) : ops) {
+        if (!(replayed && goneKey(op))) out.push(replayed && newKey(op) ? { op: 'add', path: op.path, value: op.value } : fit(op));
+        if ((op?.op === 'add' || op?.op === 'replace') && typeof op.path === 'string') written.push(op.path);
+    }
+    return { ops: out, rebased };
+
+    // A `remove` (no counted `was`) of an object key that is not there, nor put there earlier in the list.
+    function goneKey(op) {
+        if (op?.op !== 'remove' || typeof op.was === 'number' || typeof op.path !== 'string' || writtenAbove(op.path)) return false;
+        let keys;
+        try { keys = parsePath(op.path); } catch { return false; }
+        let node = state;
+        for (const key of keys) {
+            if (!isPlainObject(node)) return false;   // a list position, or nothing to walk: as written
+            if (!Object.hasOwn(node, key)) return true;
+            node = node[key];
+        }
+        return false;
+    }
+
+    // Rule (c): a `replace` (no counted `was`) of an object key inside a domain that is not there, nor put
+    // there earlier in the list, whose parent is an object that is there.
+    function newKey(op) {
+        if (op?.op !== 'replace' || typeof op.was === 'number' || typeof op.path !== 'string' || writtenAbove(op.path)) return false;
+        let keys;
+        try { keys = parsePath(op.path); } catch { return false; }
+        // Inside a domain that is there (never a domain of its own, nor /meta).
+        if (keys[0] !== 'domains' || keys.length < 3) return false;
+        let node = state;
+        for (const key of keys.slice(0, -1)) {
+            if (!isPlainObject(node) || !Object.hasOwn(node, key)) return false;
+            node = node[key];
+        }
+        return isPlainObject(node) && !Object.hasOwn(node, keys.at(-1));
+    }
+
+    function fit(op) {
+        // Under something an earlier op in the list put there, the op stands as it was made.
+        if (typeof op?.path === 'string' && typeof op.was === 'number' && writtenAbove(op.path)) return op;
         if (op?.op === 'remove' && typeof op.was === 'number' && typeof op.count === 'string' && op.count.startsWith('/')) {
             const at = `${op.path}${op.count}`;
             const now = valueAt(state, at);
@@ -273,11 +482,38 @@ export function rebaseOps(state, ops) {
         }
         if (op?.op !== 'replace' || typeof op.was !== 'number' || typeof op.value !== 'number') return op;
         const now = valueAt(state, op.path);
+        if (now === undefined) {
+            // The count, or the thing holding it, is not there (the reply that made it was deleted): it
+            // counts from 0, as the op's change alone. Its holder is made for it only when a holder is
+            // nothing but that count (a wallet { coin }: every other one there is so); a thing with more
+            // to it (a stack) is not made up, so the op stays as written and that block is skipped.
+            const key = parsePath(op.path).at(-1);
+            const parent = op.path.slice(0, op.path.lastIndexOf('/'));
+            const holder = valueAt(state, parent);
+            const value = op.value - op.was;
+            if (isPlainObject(holder)) {
+                moved(op.path);
+                return { op: 'add', path: op.path, value };
+            }
+            const above = holder === undefined ? valueAt(state, parent.slice(0, parent.lastIndexOf('/'))) : null;
+            const bare = other => isPlainObject(other) && Object.keys(other).every(field => field === key);
+            if (isPlainObject(above) && Object.values(above).every(bare)) {
+                moved(op.path);
+                return { op: 'add', path: parent, value: { [key]: value } };
+            }
+            return op;
+        }
         if (typeof now !== 'number' || now === op.was) return op;
         moved(op.path);
-        return { ...op, value: now + (op.value - op.was), was: now };
-    });
-    return { ops: out, rebased };
+        const value = now + (op.value - op.was);
+        // A `qty` brought to exactly 0 removes the thing that holds it, as a live take to 0 does (a stack
+        // is never kept at 0, §2.5); below 0 stays a number, which the validator refuses.
+        const keys = parsePath(op.path);
+        if (value === 0 && keys.length > 3 && keys[keys.length - 1] === 'qty') {
+            return { op: 'remove', path: op.path.slice(0, op.path.lastIndexOf('/')) };
+        }
+        return { ...op, value, was: now };
+    }
 }
 
 /** The value at a JSON Pointer, or undefined when the path does not exist. Never throws. */

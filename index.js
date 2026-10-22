@@ -5298,13 +5298,12 @@ function editorValue(value) {
     return escapeHtml(String(value ?? ''));
 }
 
-// (v2 meters, F90) Hidden notes: shown in the editor only while hosted (they unlock by v2 meters).
-const SECRETS_EDITOR_ID = 'npc_state_delta_edit_secrets';
+// (v2 meters, F90, TRS 1-4) Hidden notes, the meter preset and limits, milestones and custom meters:
+// shown in the editor only while hosted (src/storysuite-v2.js editorHtml / readEditor).
 function hostedSecretsEditorHtml(npc) {
     const adapter = storySuiteV2Meters();
     if (!adapter) return '';
-    return `
-      <label class="npc-state-delta-editor-wide">Hidden notes <small>Never sent to the story while locked. One per line: meter, threshold, colon, note (e.g. "trust 40: She is the duke's daughter."). Opens when the meter reaches the threshold (at or below it for a negative one); then given to the story while this NPC is present.</small><textarea id="${SECRETS_EDITOR_ID}" class="text_pole" rows="3">${editorValue(adapter.secretLines(npc.secrets))}</textarea></label>`;
+    try { return String(adapter.editorHtml(npc) || ''); } catch { return ''; }
 }
 
 function openNpcEditor(npcId) {
@@ -5795,12 +5794,13 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
         meterEdits = Object.keys(edited).length ? edited : null;
         next.relationship = { ...oldRelationship };
     }
-    const secretsInput = hostedMeters ? document.getElementById(SECRETS_EDITOR_ID) : null;
-    if (secretsInput) {
-        const parsedSecrets = hostedMeters.parseSecrets(secretsInput.value, current.secrets);
-        next.secrets = parsedSecrets.secrets;
-        if (parsedSecrets.problems.length && !silent) globalThis.toastr?.warning?.(`NPC State Delta: these hidden notes were not kept (write "meter number: note"): ${parsedSecrets.problems.join(' / ').slice(0, 300)}`);
+    const v2Edits = hostedMeters ? hostedMeters.readEditor(id => document.getElementById(id)?.value, current) : null;
+    if (v2Edits?.secrets) next.secrets = v2Edits.secrets;
+    if (v2Edits && v2Edits.meterSetup !== undefined) {
+        if (v2Edits.meterSetup) next.meterSetup = v2Edits.meterSetup;
+        else delete next.meterSetup;
     }
+    if (v2Edits?.problems?.length && !silent) globalThis.toastr?.warning?.(`NPC State Delta: ${v2Edits.problems.join('; ').slice(0, 300)}`);
     const relationshipDelta = Object.fromEntries(['trust', 'affection', 'desire', 'tension'].map(key => [key, next.relationship[key] - Number(oldRelationship[key] || 0)]));
     if (Object.values(relationshipDelta).some(value => value !== 0)) {
         const progress = normalizeRelationshipProgress(current.relationshipProgress);
@@ -5859,9 +5859,9 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
         if (!silent) globalThis.toastr?.warning?.(`NPC State Delta: the edits for ${savedName} are applied in this browser but could not be saved to the server yet. Save again to retry.`);
         return false;
     }
-    if (hostedMeters && (meterEdits || secretsInput)) {
+    if (hostedMeters && (meterEdits || v2Edits)) {
         if (meterEdits) await hostedMeters.setMeters({ name: current.name, meters: meterEdits });
-        if (secretsInput) await hostedMeters.refresh(savedName);
+        if (v2Edits) await hostedMeters.applyEditor(savedName, v2Edits);
         updateInjection();
     }
     if (close) closeNpcEditor();
@@ -7676,7 +7676,8 @@ window.NPCStateDelta = Object.freeze({
             formPortraits[npcId] = Object.fromEntries(Object.values(forms || {}).filter(portrait => portrait?.dataUrl)
                 .map(portrait => [portrait.form, { dataUrl: portrait.dataUrl, appearanceFingerprint: portrait.appearanceFingerprint || '' }]));
         }
-        return { turn: state.turn, reply: latestReplyIndex(), npcs: structuredClone(hostedMeterView(state.npcs)), portraitAssets: {}, formPortraits, customFieldNames: [...getSettings().customFieldNames] };
+        const meterViews = storySuiteV2Meters()?.dossierMeters?.(state.npcs) ?? {};
+        return { turn: state.turn, reply: latestReplyIndex(), npcs: structuredClone(hostedMeterView(state.npcs)), portraitAssets: {}, formPortraits, customFieldNames: [...getSettings().customFieldNames], meterViews };
     },
     persistenceStatus: () => {
         const key = getChatKey();
