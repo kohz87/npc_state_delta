@@ -12,7 +12,7 @@
 // `capabilities` (the capability names this Story Block has, or null when unknown: then
 // requires.capabilities is checked for form only).
 
-import { CALENDAR_FIELDS, CALENDAR_HOLIDAY_FIELDS, CALENDAR_LIMITS, CALENDAR_START_FIELDS, CHOICE_FIELDS, CONTENT_KINDS, COMMAND, CRAFT_FIELDS, ECONOMY_FIELDS, ECONOMY_LIMITS, CRAFTS_LIMITS, DEFAULT_CRAFTS, METER_FIELDS, METER_LIMITS, METER_PRESET_FIELDS, METER_RESERVED, METER_STAGE_FIELDS, RECIPE_LIMITS, STAT_SUM, DEF_ID, EVENT_FIELDS, EVENT_LIMITS, ITEM_FIELDS, ITEM_KINDS, LIMITS, MOUNTS, PACK_FIELDS, PACK_ID, PLACE_FIELDS, PRESET_FIELDS, RARITIES, ROUTE_FIELDS, SCREEN_FIELDS, SCREEN_ID, SEMVER, SKILL_FIELDS, SKILL_TARGETS, SKILL_TYPES, SLUG, START_FIELDS, STAT_NAME, RANK_FIELDS, RANK_ID, RANKS_LIMITS, TERM_SEPARATORS, ITEM_CARRY, MARKET_FIELDS, MARKET_LIMITS, MARKET_WORD, TERMS_FIELDS, TERMS_LIMITS, TERMS_NUMERALS, TERMS_TIER_FIELDS } from './limits.js';
+import { CALENDAR_FIELDS, CALENDAR_HOLIDAY_FIELDS, CALENDAR_LIMITS, CALENDAR_START_FIELDS, CHOICE_FIELDS, CONTENT_KINDS, COMMAND, CRAFT_FIELDS, ECONOMY_FIELDS, ECONOMY_LIMITS, CRAFTS_LIMITS, DEFAULT_CRAFTS, METER_FIELDS, METER_LIMITS, METER_PRESET_FIELDS, METER_RESERVED, METER_STAGE_FIELDS, RECIPE_LIMITS, STAT_SUM, DEF_ID, EVENT_FIELDS, EVENT_LIMITS, ITEM_FIELDS, ITEM_KINDS, LIMITS, MOUNTS, PACK_FIELDS, PACK_ID, PLACE_FIELDS, PRESET_FIELDS, RARITIES, ROUTE_FIELDS, SCREEN_FIELDS, SCREEN_ID, SEMVER, SKILL_FIELDS, SKILL_TARGETS, SKILL_TYPES, SLUG, START_FIELDS, STAT_NAME, RANK_FIELDS, RANK_ID, RANKS_LIMITS, TERM_SEPARATORS, ITEM_CARRY, MARKET_FIELDS, MARKET_LIMITS, MARKET_WORD, TERMS_FIELDS, TERMS_LIMITS, TERMS_NUMERALS, TERMS_TIER_FIELDS, WEATHER_FIELDS, WEATHER_LIMITS, WEATHER_SEASON_FIELDS, WEATHER_TABLE_FIELDS } from './limits.js';
 import { byteLength, checkPlain } from './safety.js';
 import { parseRange, satisfies } from './version.js';
 import { foldKey, oneLine } from '../../text.js';
@@ -82,6 +82,7 @@ function normalize(raw, { add, hostVersion, capabilities, limits }) {
     const currency = raw.currency === undefined ? null : checkCurrency(raw.currency, add);
     const calendar = raw.calendar === undefined ? null : checkCalendar(raw.calendar, add);
     const economy = raw.economy === undefined ? null : checkEconomy(raw.economy, add);
+    const weather = raw.weather === undefined ? null : checkWeather(raw.weather, add);
 
     const content = {};
     if (raw.content !== undefined && !isObject(raw.content)) add('BAD_CONTENT', 'content', 'content must be an object of lists: { "items": [ … ], "events": [ … ] }.');
@@ -144,6 +145,8 @@ function normalize(raw, { add, hostVersion, capabilities, limits }) {
         currency,
         economy,
         calendar,
+        // Kept only when given, so older packs normalize as they always did.
+        ...(weather ? { weather } : {}),
         content,
         start,
         layouts,
@@ -591,6 +594,55 @@ function checkEconomy(economy, add) {
     const note = economy.note ?? '';
     if (!isText(note, ECONOMY_LIMITS.note)) say('economy.note', `economy.note must be text of at most ${ECONOMY_LIMITS.note} characters.`);
     return ok ? { scale, note: note.trim() } : null;
+}
+
+/*
+ * A pack's weather (MODULES §F122): `{ seasons?, tables }`, plain data a module that sets the weather by
+ * rule reads (Story Director, from its calendar and the scene's region). `seasons`: at most 12
+ * `{ name, months: [month name] }` (a month in one season only; the names are the calendar's months);
+ * `tables`: 1 to 120 `{ season?, region?, weather: [1 to 24 texts of at most 60 characters] }`, a table
+ * without `season` or `region` for any. Texts are kept on one line. Problems are `BAD_WEATHER`.
+ */
+function checkWeather(weather, add) {
+    let ok = true;
+    const say = (path, message, code = 'BAD_WEATHER') => { ok = false; add(code, path, message); };
+    const L = WEATHER_LIMITS;
+    if (!isObject(weather)) {
+        say('weather', 'weather must be { "seasons": [ … ], "tables": [{ "season", "region", "weather": [ … ] }] }.');
+        return null;
+    }
+    for (const key of Object.keys(weather)) if (!WEATHER_FIELDS.includes(key)) say(`weather.${key}`, `"${key}" is not a weather field (expected ${WEATHER_FIELDS.join(', ')}).`, 'UNKNOWN_FIELD');
+    const word = (value, max) => (typeof value === 'string' && value.trim() && value.length <= max ? oneLine(value, max) : '');
+    const seasons = [];
+    if (weather.seasons !== undefined) {
+        const months = new Set();
+        if (!Array.isArray(weather.seasons) || weather.seasons.length > L.seasons) say('weather.seasons', `seasons must be a list of at most ${L.seasons} { "name", "months" }.`);
+        else weather.seasons.forEach((season, index) => {
+            const at = `weather.seasons[${index}]`;
+            if (!isObject(season) || Object.keys(season).some(key => !WEATHER_SEASON_FIELDS.includes(key))) return say(at, `${at} must be { "name", "months" }.`);
+            const name = word(season.name, L.season);
+            if (!name) return say(`${at}.name`, `name must be text of at most ${L.season} characters (a season, like "winter").`);
+            const list = Array.isArray(season.months) ? season.months.map(month => word(month, CALENDAR_LIMITS.monthName)) : [];
+            if (!list.length || list.length > L.months || list.some(month => !month)) return say(`${at}.months`, `months must be a list of 1 to ${L.months} month names.`);
+            for (const month of list) {
+                if (months.has(foldKey(month))) return say(`${at}.months`, `"${month}" is in two seasons.`);
+                months.add(foldKey(month));
+            }
+            seasons.push({ name, months: list });
+        });
+    }
+    const tables = [];
+    if (!Array.isArray(weather.tables) || !weather.tables.length || weather.tables.length > L.tables) say('weather.tables', `tables must be a list of 1 to ${L.tables} { "season", "region", "weather": [ … ] }.`);
+    else weather.tables.forEach((table, index) => {
+        const at = `weather.tables[${index}]`;
+        if (!isObject(table) || Object.keys(table).some(key => !WEATHER_TABLE_FIELDS.includes(key))) return say(at, `${at} must be { "season", "region", "weather": [ … ] }.`);
+        if (table.season !== undefined && !isText(table.season, L.season)) say(`${at}.season`, `season must be text of at most ${L.season} characters.`);
+        if (table.region !== undefined && !isText(table.region, L.region)) say(`${at}.region`, `region must be text of at most ${L.region} characters.`);
+        const kinds = Array.isArray(table.weather) ? table.weather.map(text => word(text, L.text)) : [];
+        if (!kinds.length || kinds.length > L.kinds || kinds.some(text => !text)) return say(`${at}.weather`, `weather must be a list of 1 to ${L.kinds} texts of at most ${L.text} characters ("cold drizzle, low fog").`);
+        tables.push({ season: typeof table.season === 'string' ? oneLine(table.season, L.season) : '', region: typeof table.region === 'string' ? oneLine(table.region, L.region) : '', weather: kinds });
+    });
+    return ok ? { ...(seasons.length ? { seasons } : {}), tables } : null;
 }
 
 // A race or talent for the character creation wizard: { id?, name, note?, stats?, tags? }.

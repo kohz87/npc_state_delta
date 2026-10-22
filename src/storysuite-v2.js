@@ -32,7 +32,7 @@
 // runtime api, the host global, the document, timers) is injectable for tests.
 import { resolveDossierTarget } from '../suite-handshake.js';
 import {
-    FEATURE_PRESETS, FEATURE_STAGES, MILESTONE_KIND, NPC_KIND, createNpcPart, limitsFromLines, limitsToLines, meterValue,
+    FEATURE_PRESETS, FEATURE_SOCIAL, FEATURE_STAGES, MILESTONE_KIND, NPC_KIND, SOCIAL_QUERY, createNpcPart, limitsFromLines, limitsToLines, meterValue,
     normalizeSecrets, secretsFromLines, secretsToLines, wordKey,
 } from './npc-meters.js';
 import { normalizeLimits, presetCatalog, presetIds } from './npc-meters-presets.js';
@@ -71,7 +71,7 @@ export const WORLD_FEATURE = 'story-director.world';
  */
 export const PAGE_API = 'NPCStateDeltaCast';
 export const PAGE_SLOT_CLASS = 'npc-state-delta-v2-slot';
-export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next']);
+export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.socialModifier']);
 export const COMMAND_NAMES = Object.freeze(['npc.adjust', 'npc.set', 'npc.refresh', 'npc.milestone', 'npc.tick']);
 // The replies after which Delta takes its per-reply step (npc.tick): a new reply or a new swipe of
 // one, never a Continue, a Re-read or late change lines (the same reply again).
@@ -495,6 +495,21 @@ export function createStorySuiteV2Adapter({
         'npc.cast': (state, args) => castFor(state, args),
         /** npc.next({ name }) → the NPC's ladder from here: { rank, next, risk, text } ("what's missing"), or null. */
         'npc.next': (state, args) => part.queries['npc.next'](state, args ?? {}),
+        /**
+         * npc.socialModifier({ name, skill }) → { mod, name, skill, reasons: [{ text, value }] } | null:
+         * what an NPC's meters, stage and disposition do to a social check against them (src/social-check.js).
+         * Null while Delta is off, for a skill that is not social, an unknown name, or the feature off
+         * (the host answers null itself then). Reads the state it is given; never calls the model.
+         */
+        [SOCIAL_QUERY]: Object.assign((state, args) => {
+            if (!enabled()) return null;
+            try {
+                return part.queries[SOCIAL_QUERY](state, args ?? {});
+            } catch (error) {
+                warn('Story Suite v2 social check query failed', error);
+                return null;
+            }
+        }, { feature: FEATURE_SOCIAL }),
     });
 
     // ---- the drawer copy ----

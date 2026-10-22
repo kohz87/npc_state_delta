@@ -60,7 +60,7 @@ Every test file needs `--import ./tests/active-runtime-test-setup.mjs` (source-e
    swipes, middle deletes, rewinds, reloads (Story Block SPEC §2.2).
 4. **Static prompt part byte-identical** reply to reply (names flattened with `flatPromptName`, ≤ 80 code points);
    only the dynamic part changes. New static lines only via a Feature or a setting.
-5. **Features (F100):** `npc-state-delta.stages`, `.drift`, `.presets` (meters); check `ctx.feature(id)`.
+5. **Features (F100):** `npc-state-delta.stages`, `.drift`, `.presets` (meters), `.social` (social checks); check `ctx.feature(id)`.
 6. **No markup from text:** escape (`src/util/html.js`), safe image URLs only (`safeImageUrl`).
 7. **Tests for every rule,** run once after the fix, through production functions and the synthetic host.
 8. Keep one owner per responsibility (settings, dispatcher, state, persistence, injection); no second engine.

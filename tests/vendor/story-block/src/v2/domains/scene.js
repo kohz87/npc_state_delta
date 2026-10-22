@@ -14,6 +14,8 @@ const MAX_PRESENT = 40;
 export const WEATHER_CHARS = 60;
 /** The weather in the tail's Place line is cut to this many code points (about 8 tokens with its separator). */
 export const WEATHER_TAIL_CHARS = 26;
+/** The mark a module's rule leaves on the weather it set (`scene.weather` command `key`), at most this many code points. */
+export const WEATHER_KEY_CHARS = 80;
 export const WEATHER_FEATURE = CORE_FEATURE.weather;
 
 export function initialScene() {
@@ -54,6 +56,7 @@ export function validateScene(slice) {
             if (typeof weather.text !== 'string' || !weather.text.trim()) errors.push('The weather has no text.');
             else if (Array.from(weather.text).length > WEATHER_CHARS) errors.push(`The weather is longer than ${WEATHER_CHARS} characters.`);
             if (!Number.isSafeInteger(weather.rev) || weather.rev < 0) errors.push('The weather\'s rev is not a whole number.');
+            if (weather.key !== undefined && (typeof weather.key !== 'string' || !weather.key || Array.from(weather.key).length > WEATHER_KEY_CHARS)) errors.push(`The weather's key is not text of at most ${WEATHER_KEY_CHARS} characters.`);
         }
     }
     return errors;
@@ -165,11 +168,44 @@ function changePresent(ctx, { add, remove }) {
     };
 }
 
+/**
+ * `scene.weather({ text?, key? })`: the weather a module's rule sets (Story Director's weather from its
+ * calendar and the region, MODULES §F122), cause `system` (or `ui`), never the story (it writes `~ weather`).
+ * With `text`: the weather now, cleaned as a `~ weather` line is, marked with `key` (what the rule chose it
+ * for, such as the story day and region; one line, at most WEATHER_KEY_CHARS). Without `text`: the weather
+ * as it is (the story's own `~ weather`) is marked with `key`, its words kept, so the rule knows the story's
+ * word stands for that key. The same text and key again change nothing. A story `~ weather` line writes
+ * `{ text, rev }` without a key, so the mark goes with it.
+ */
+function setWeather(ctx, { text, key } = {}) {
+    if (ctx.cause === 'story') ctx.fail('REFUSED', 'The story writes the weather with a ~ weather line.');
+    if (key !== undefined && key !== null && typeof key !== 'string') ctx.fail('INVALID', 'The weather\'s key must be text.');
+    const mark = flatten(String(key ?? ''));
+    if (Array.from(mark).length > WEATHER_KEY_CHARS) ctx.fail('INVALID', `The weather's key is longer than ${WEATHER_KEY_CHARS} characters.`);
+    const scene = ctx.draft('scene');
+    const keyed = mark ? { key: mark } : {};
+    if (text === undefined || text === null || text === '') {
+        if (!scene.weather?.text) ctx.fail('NOT_FOUND', 'There is no weather to mark yet; give its text.');
+        if ((scene.weather.key ?? '') === mark) return { summary: `The weather stays: ${scene.weather.text}.`, data: { text: scene.weather.text, key: mark, same: true }, narrate: false };
+        const { key: _old, ...rest } = scene.weather;
+        scene.weather = { ...rest, ...keyed };
+        return { summary: `The weather stays: ${scene.weather.text}.`, data: { text: scene.weather.text, key: mark, kept: true }, narrate: false };
+    }
+    if (typeof text !== 'string') ctx.fail('INVALID', 'The weather must be text.');
+    const clean = weatherText(`~ weather ${text}`);
+    if (!clean) ctx.fail('INVALID', 'The weather has no words.');
+    if (scene.weather?.text === clean && (scene.weather.key ?? '') === mark) return { summary: `The weather stays: ${clean}.`, data: { text: clean, key: mark, same: true }, narrate: false };
+    scene.weather = { text: clean, rev: Number.isSafeInteger(ctx.rev) ? ctx.rev : 0, ...keyed };
+    return { summary: `The weather: ${clean}.`, data: { text: clean, key: mark }, narrate: false };
+}
+
 export const sceneCommands = {
     // { name, kind?, region?, with?: name | name[] } (a move leaves behind everyone not named in `with`)
     'scene.place': (ctx, payload = {}) => setPlace(ctx, payload),
     // { add?: name | name[], remove?: name | name[] }
     'scene.present': (ctx, payload = {}) => changePresent(ctx, payload),
+    // { text?, key? } (a module's rule; the story writes `~ weather`)
+    'scene.weather': Object.assign((ctx, payload = {}) => setWeather(ctx, payload), { feature: WEATHER_FEATURE }),
 };
 
 /** `~ place Name | kind | region | with: who came along` (or `+ place`). */

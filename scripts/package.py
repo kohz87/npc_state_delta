@@ -20,8 +20,9 @@ assert all(name.endswith('.js') and ('/' not in name or (src_module.match(name) 
 assert all((root / name).is_file() for name in runtime_files), 'runtime inventory declares a missing module'
 
 # src/storysuite-v2.js is the optional Story Suite v2 adapter, imported by index.js at runtime;
-# src/npc-meters.js, src/npc-meters-screen.js and src/npc-meters-presets.js are its npc slice, NPC card and meter presets.
-support_files = ['style.css', 'suite.css', 'manifest.json', 'runtime-modules.json', 'LICENSE', 'README.md', 'src/storysuite-v2.js', 'src/npc-meters.js', 'src/npc-meters-screen.js', 'src/npc-meters-presets.js']
+# src/npc-meters.js, src/npc-meters-screen.js and src/npc-meters-presets.js are its npc slice, NPC card and meter presets;
+# src/social-check.js is the social check rules (npc.socialModifier).
+support_files = ['style.css', 'suite.css', 'manifest.json', 'runtime-modules.json', 'LICENSE', 'README.md', 'src/storysuite-v2.js', 'src/npc-meters.js', 'src/npc-meters-screen.js', 'src/npc-meters-presets.js', 'src/social-check.js']
 files = runtime_files + support_files
 src_js = sorted(p.relative_to(root).as_posix() for p in (root / 'src').rglob('*.js'))
 assert all(name in files for name in src_js), 'every src/ module must be packaged'

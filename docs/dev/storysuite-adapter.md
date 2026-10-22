@@ -12,7 +12,7 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
   While hosted it checks every `HOST_ALIVE_MS` (5 s) that the host is still there, and restores the drawer copy
   when it is not. The v1 handshake (`suite-handshake.js`) offers nothing to a v2 host (`storyBlockIsV2`).
 - Registers module `npc-state-delta`: queries `QUERY_NAMES` (`npc.present`, `npc.dossier`, `npc.known`,
-  `npc.portrait`, `npc.meters`, `npc.cast`, `npc.next`), commands `COMMAND_NAMES` (`npc.adjust`, `npc.set`,
+  `npc.portrait`, `npc.meters`, `npc.cast`, `npc.next`, `npc.socialModifier`), commands `COMMAND_NAMES` (`npc.adjust`, `npc.set`,
   `npc.refresh`, `npc.milestone`, `npc.tick`), the Cast / Dossiers tab and screen (`CAST_SCREEN_ID`,
   widget `CAST_WIDGET`), its settings section, and hooks `diagnostics` and `ownPrompt`.
 - **`npc` domain** (only numbers, stage and milestone names, ids of unlocked notes; prose stays in NSD's
@@ -30,13 +30,32 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
 - Who is present: `director.world.here` when Story Director answers, else Story Block's `scene.present`.
 - NSD's own prompt keys (`story_suite_tail_4_npc_state_delta…`) are sent by NSD; Story Block only counts them
   (`ownPrompt`). The scanner and roleplay prompts stay byte-identical (core contract C10).
-- Features: `npc-state-delta.stages`, `npc-state-delta.drift`, `npc-state-delta.presets` (`FEATURES`).
+- Features: `npc-state-delta.stages`, `npc-state-delta.drift`, `npc-state-delta.presets`, `npc-state-delta.social` (`FEATURES`).
+
+## Social checks (`npc.socialModifier`)
+
+- `npc.socialModifier({ name, skill })` → `{ mod, name, skill, reasons: [{ text, value }] } | null`, for a dice
+  module's check (RPG Battle reads it through its check-modifier hook, by `tryQuery`; Delta never calls RPG Battle).
+  Delta owns the rules, all in `src/social-check.js` (header comment): `socialSkill` (skill words → persuade,
+  charm, intimidate, deceive, social; anything else null), `SKILL_METERS` (meters and weights per skill),
+  `STEPS` (25/50/75% of a meter's reach → 1/2/3), `RANK_BONUS_MAX`, `DISPOSITION_WORDS`, `socialSettings`
+  (settings `socialScale` %, `socialCap`), `socialModifier` (pure).
+- The query lives in the part (`npc-meters.js`, beside `npc.next`): the name resolves like `npc.dossier`
+  (name, alias or id, any case) or to a slice entry; a dossier with no entry stands at its seed values.
+  It reads only the `state` it is given (the view of the check's reply), the stored settings and the
+  dossier; it writes nothing and calls no model. The adapter tags it `feature: npc-state-delta.social` (the
+  host answers null while off) and also checks the switch and `enabled()` itself.
+- Invariants (tests/storysuite-v2-social.test.js): |mod| ≤ cap, reasons add up to mod, null for non-social
+  skills / unknown names / feature off / Delta off, aliases, state at a reply / swipe / delete, and the
+  host's prompt log identical with the feature off and on (asked every reply). No prompt text: C10 holds.
 - Everything outside (runtime api, host global, document, timers) is injectable: no SillyTavern import here.
 
 ## Key files and functions
 
 - `src/storysuite-v2.js`: `createStorySuiteV2Adapter`, `startStorySuiteV2`, `isV2Host`, `sliceView`,
   `ownPrompt`, `dossierFields`, `safeImageUrl`, `portraitUrl`, `meterBarHtml`, `V2_HOST_EVENT`, `HOSTED_FLAG`.
+- `src/social-check.js`: `socialModifier`, `socialSkill`, `socialSettings`, `meterPoints`, `SKILL_WORDS`,
+  `SKILL_METERS`, `DISPOSITION_WORDS`, `FEATURE_SOCIAL`, `SOCIAL_QUERY`.
 - `src/npc-meters.js`: `createNpcPart`, `initialNpcSlice`, `validateNpcSlice`, `meterDefs`, `stageAt`,
   `thresholdReached`, `rungMet`, `findNpcKey`, `npcKey`, `SETTINGS_SCHEMA`; `npc-meters-presets.js`
   (`presetCatalog`, `normalizeLimits`); `npc-meters-screen.js` (`metersCardScreen`).
@@ -44,7 +63,7 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
 
 ## Tests that guard it
 
-- `tests/storysuite-v2.test.js`, `storysuite-v2-host`, `-hosted`, `-meters`, `-meters-ladder`,
+- `tests/storysuite-v2.test.js`, `storysuite-v2-host`, `-hosted`, `-meters`, `-meters-ladder`, `-social`,
   `-meters-runtime`, `-cast-screen`, `-fresh-chat`, `-own-prompt-date`, `v2-r2-fixes`, `v2-world-scene-present`,
   `b7-*` (hosted capture, Cast tab, register refused).
 - `tests/v2/break/` (`a1-meter-window-after-delete`, `b5b-r2-capture-rule-names`,

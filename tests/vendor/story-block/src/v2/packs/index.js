@@ -15,6 +15,8 @@
 // * query `packs.calendar` → the first enabled pack's calendar for the story clock, or null.
 // * query `packs.crafts` → the craft table (default crafts, enabled packs' `crafts` laid over them:
 //   `[{ craft, title, stats, stations, note?, pack }]`) that RPG Battle's crafting reads with recipes.
+// * query `packs.weather` → the first enabled pack's weather table `{ pack, seasons, tables }`, or null
+//   (MODULES §F122: Story Director's weather by rule).
 // * query `packs.economy` → the first enabled pack's money scale `{ pack, scale, note }`, or null. Modules
 //   read the settled scale through Story Block's `inventory.economy` instead (MODULES §F104).
 // * query `packs.markets` → what sets a place's prices (PACKS.md "Markets"): `{ types, tags, places }`,
@@ -30,13 +32,13 @@
 //   `applyStart(state, start, { id })` writes it into an initial State.
 
 import { createInstalled } from './installed.js';
-import { calendarOf, contentOf, craftsOf, economyOf, mergeStart, resolveItemIn, applyStart } from './content.js';
+import { calendarOf, contentOf, craftsOf, economyOf, mergeStart, resolveItemIn, applyStart, weatherOf } from './content.js';
 import { renderPacksPanel } from './panel.js';
 import { HOST_VERSION, validatePack, slugify } from './validate.js';
 import { readCharacterLorebook, stCapabilities, stHostVersion, stSettings } from './st-adapter.js';
 import { marketEntries } from './lorebook.js';
 
-export { validatePack, slugify, applyStart, mergeStart, resolveItemIn, contentOf, calendarOf, craftsOf, economyOf, createInstalled, renderPacksPanel };
+export { validatePack, slugify, applyStart, mergeStart, resolveItemIn, contentOf, calendarOf, craftsOf, economyOf, weatherOf, createInstalled, renderPacksPanel };
 export { LIMITS, CONTENT_KINDS, DEFAULT_CRAFTS, STATIONS } from './limits.js';
 export { findPackEntries, marketEntries, readMarketLine, PACK_TAG } from './lorebook.js';
 export { readerRanks, rankLine } from './ranks.js';
@@ -93,6 +95,7 @@ export function createPacksPart({ settings, readLorebook = async () => ({ charac
             'packs.item': (_state, { name } = {}) => resolveItem(name),
             'packs.start': () => startState(),
             'packs.calendar': () => calendarOf(packs.packs()),
+            'packs.weather': () => weatherOf(packs.packs()),
             'packs.crafts': () => craftsOf(packs.packs()),
             'packs.economy': () => economy(),
             'packs.markets': () => markets(),

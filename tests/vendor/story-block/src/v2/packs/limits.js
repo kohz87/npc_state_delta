@@ -30,7 +30,7 @@ export const CONTENT_KINDS = Object.freeze(['items', 'creatures', 'shops', 'reci
 export const OPTIONAL_KINDS = Object.freeze(['skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets']);
 
 // Top-level fields of pack.json; anything else is refused so a typo is not silently ignored.
-export const PACK_FIELDS = Object.freeze(['id', 'version', 'name', 'author', 'description', 'requires', 'currency', 'economy', 'calendar', 'content', 'start', 'layouts', 'screens', 'theme']);
+export const PACK_FIELDS = Object.freeze(['id', 'version', 'name', 'author', 'description', 'requires', 'currency', 'economy', 'calendar', 'weather', 'content', 'start', 'layouts', 'screens', 'theme']);
 // A pack's money scale (MODULES §F104): `{ scale?: 0.001–1000 (default 1), note? }`. `scale` multiplies the
 // built-in money defaults (Story Block's coin budget by level, a module's default loot and prices) when
 // this pack's currency is in use; numbers the pack writes itself (ranks, item values, prices) stay as written.
@@ -121,6 +121,12 @@ export const CALENDAR_FIELDS = Object.freeze(['era', 'months', 'start', 'holiday
 export const CALENDAR_HOLIDAY_FIELDS = Object.freeze(['name', 'month', 'day']);
 export const CALENDAR_START_FIELDS = Object.freeze(['year', 'month', 'day', 'hour', 'minute']);
 export const CALENDAR_LIMITS = Object.freeze({ era: 24, months: 60, monthName: 40, days: 400, holidays: 60, holidayName: 60 });
+// A pack's weather table (MODULES §F122), read by a module that sets the weather by rule (Story Director):
+// `{ seasons?: [{ name, months }], tables: [{ season?, region?, weather: [text] }] }`.
+export const WEATHER_FIELDS = Object.freeze(['seasons', 'tables']);
+export const WEATHER_SEASON_FIELDS = Object.freeze(['name', 'months']);
+export const WEATHER_TABLE_FIELDS = Object.freeze(['season', 'region', 'weather']);
+export const WEATHER_LIMITS = Object.freeze({ seasons: 12, months: 60, season: 24, region: 80, tables: 120, kinds: 24, text: 60 });
 export const START_FIELDS = Object.freeze(['scene', 'inventory']);
 // Screens (SPEC §13.1) a pack adds or overrides by id.
 export const SCREEN_FIELDS = Object.freeze(['id', 'title', 'icon', 'mounts', 'template', 'layout', 'css', 'theme', 'data', 'steps']);

@@ -57,6 +57,16 @@ export function calendarOf(packs) {
 }
 
 /**
+ * The weather table of the first enabled pack (in list order) that has one (MODULES §F122), as
+ * `{ pack, seasons: [{ name, months }], tables: [{ season, region, weather: [text] }] }`, or null.
+ * Tables are not mixed across packs. Read by a module that sets the weather by rule (Story Director).
+ */
+export function weatherOf(packs) {
+    const pack = packs.find(entry => entry.weather);
+    return pack ? copy({ pack: pack.id, seasons: pack.weather.seasons ?? [], tables: pack.weather.tables }) : null;
+}
+
+/**
  * The money scale of the first enabled pack (in list order) that sets one, as `{ pack, scale, note }`, or
  * null (MODULES §F104). Scales are not mixed across packs. Story Block's `inventory.economy` reads it.
  */
