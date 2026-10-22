@@ -298,8 +298,10 @@ function takeAcross(inv, stacks, qty) {
 // that buys things back or counts what they are worth (RPG Battle's trade and crafting) counts it as 0.
 // It never joins another stack, nor another stack it (looseMatch, inventory.merge), and the part of it
 // that is given away or split off stays a key stack.
-// The story's own (`story: true` on its stack, B-a2-2): what a story line (`+ item`) gave, whatever its
-// def (a pack's item named in the story too). Its worth was counted in that reply's goods budget, so a
+// The story's own (`story: true` on its stack, B-a2-2): what a story line (`+ item`) gave, or the reader
+// took from a story's loot (`? loot`, inventory.lootTake, FB-2), whatever its def (a pack's item named in
+// the story too). inventory.grant never sets it: no story line reaches it (modules and pack events call it
+// with what their code chose) and it moves no stack. Its worth was counted in that reply's goods budget, so a
 // module that buys things back holds what it pays for it to its worth at the sell rate (RPG Battle's
 // trade). It stacks with the rest of that item; a stack it joins, or that joins it, is the story's too,
 // and the part of it that is given away or split off stays the story's.
@@ -903,7 +905,9 @@ function lootTake(ctx, payload, env) {
     }
     if (!wanted.length && !coin) ctx.fail('REFUSED', `${joinNames(skipped)} ${skipped.length === 1 ? 'is' : 'are'} already carried.`);
     if (wanted.length) readerCarry(ctx, wanted.map(entry => ({ defId: entry.def.id, qty: entry.qty })), 'party');
-    const stacks = wanted.flatMap(entry => grantInto(ctx, inv, entry.def, entry.qty, 'party', ''));
+    // FB-2: what the story offered is the story's own (`story: true`, as a `+ item` line's), whatever its
+    // def (a pack's item named in the `? loot` line): its worth was held to that reply's goods budget.
+    const stacks = wanted.flatMap(entry => grantInto(ctx, inv, entry.def, entry.qty, 'party', '', false, true));
     // The money was held to its reply's coin budget when the loot was read: it is paid as held.
     const currency = currencyOf(ctx.settings());
     if (coin) receive(ctx, env, { owner: 'party', amount: coin, note: 'loot' });

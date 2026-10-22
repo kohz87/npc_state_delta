@@ -63,6 +63,9 @@ const blank = pair => ' '.repeat(pair.end - pair.start);
 // so a Re-read leaves them too (strayLines), and an open block's unfinished last line in <Changes-cut>…
 // </Changes-cut>, for a Continue that finishes it (continuation()), and the story lines that echoed a
 // line of the blocks (C-1), taken out of the story but never read, in <Changes-echo>…</Changes-echo>.
+// The lines a read took from the story are one body of their own, marked `<Changes story>…</Changes>`:
+// read like any other, and known as the story's to a Continue, whose block lines that repeat one of them
+// are its echo (FB-1, earlierLines): kept in that Continue's <Changes-echo>, never read.
 // `open`: the reply was cut off inside its last block. `off:`: display kinds (written words) whose lines were read while their feature was
 // off, so they are not shown when it is turned on later, until a Re-read reads them again (markOff).
 //
@@ -77,7 +80,7 @@ const commentText = text => String(text).replace(/\u2060\u2060|(?<=-)\u2060(?=-)
 const sectionTags = tag => ({ story: `${tag}-story`, cut: `${tag}-cut`, echo: `${tag}-echo` });
 
 // The parts of a hidden pair's body beside its blocks: { head: Set of header words, off: Set, story:
-// lines, cut: line | null }.
+// lines, cut: line | null, echo: lines }.
 function commentParts(text, pair, tag = 'Changes') {
     const body = text.slice(pair.bodyStart, pair.bodyEnd);
     const nl = body.indexOf('\n');
@@ -86,17 +89,18 @@ function commentParts(text, pair, tag = 'Changes') {
     const names = sectionTags(tag);
     const story = [];
     const cut = [];
-    let into = null;
-    if (body.includes(`<${names.story}>`) || body.includes(`<${names.cut}>`)) {
+    const echo = [];
+    const into = { [`<${names.story}>`]: story, [`<${names.cut}>`]: cut, [`<${names.echo}>`]: echo };
+    let list = null;
+    if (Object.keys(into).some(open => body.includes(open))) {
         for (const line of body.split('\n')) {
             const trimmed = line.trim();
-            if (trimmed === `<${names.story}>`) into = story;
-            else if (trimmed === `<${names.cut}>`) into = cut;
-            else if (trimmed === `</${names.story}>` || trimmed === `</${names.cut}>`) into = null;
-            else if (into && trimmed) into.push(commentText(trimmed));
+            if (into[trimmed]) list = into[trimmed];
+            else if ([names.story, names.cut, names.echo].some(name => trimmed === `</${name}>`)) list = null;
+            else if (list && trimmed) list.push(commentText(trimmed));
         }
     }
-    return { head: new Set(head), off, story, cut: cut[0] ?? null };
+    return { head: new Set(head), off, story, cut: cut[0] ?? null, echo };
 }
 
 /** True when `mes` holds Story Suite's hidden comment (whatever is in it). */
@@ -407,11 +411,85 @@ function goesOn(mes, tag, from, cut = null) {
 // listed it) is one change: it is taken out of the story and kept in the hidden comment (<Changes-echo>),
 // never read. Lines are the same when they are equal without decoration, bold and extra spaces.
 const sameLine = line => stripDecoration(stripMarkdown(line).trim()).trim().replace(/\s+/g, ' ');
-function splitEchoes(strays, bodies) {
+// `earlier` (a Continue's read, earlierLines): the block lines the reply's earlier reads kept count as listed.
+function splitEchoes(strays, bodies, earlier = null) {
     if (!strays.length) return { strays, echoes: [] };
     const listed = new Set(bodies.flatMap(body => body.split('\n')).map(sameLine).filter(Boolean));
+    for (const key of earlier?.listed ?? []) listed.add(key);
     const echoes = strays.filter(line => listed.has(sameLine(line.line)));
     return echoes.length ? { strays: strays.filter(line => !echoes.includes(line)), echoes } : { strays, echoes };
+}
+
+// The open tag of the body that holds the lines a read took from the story (hideBlock).
+const STORY_WORD = 'story';
+const storyTag = (text, block, tag) => new RegExp(`^<${escapeRe(tag)}[ \\t]+${STORY_WORD}[ \\t]*>`, 'i')
+    .test(text.slice(block.start, block.start + tag.length + 40));
+
+// FB-1, C-1 across a Continue: the story line and the block line that lists it can come in different reads
+// of one reply (it was cut off before or inside its block, and the Continue writes the block). What the
+// hidden comments before `from` (the reply's earlier reads) hold, keyed by sameLine: `story`, how many of
+// each line they took from the story (their `<Changes story>` bodies) that no later block line echoed yet
+// (the comments' <Changes-echo> lines, in order), and `listed`, the lines of their other blocks.
+// → null for a read that is not a Continue's, or a reply with no earlier comment.
+function earlierLines(mes, tag, from) {
+    if (!(from > 0)) return null;
+    const text = String(mes ?? '');
+    const pairs = hiddenPairs(text).filter(pair => pair.end <= from);
+    if (!pairs.length) return null;
+    const story = new Map();
+    const listed = new Set();
+    for (const pair of pairs) {
+        const inner = text.slice(pair.bodyStart, pair.bodyEnd);
+        for (const block of findBlocks(commentBlocks(inner, tag), tag)) {
+            const keys = commentText(block.body).split('\n').map(sameLine).filter(Boolean);
+            if (storyTag(inner, block, tag)) for (const key of keys) story.set(key, (story.get(key) ?? 0) + 1);
+            else for (const key of keys) listed.add(key);
+        }
+        for (const key of commentParts(text, pair, tag).echo.map(sameLine)) {
+            if (story.get(key) > 0) story.set(key, story.get(key) - 1);
+        }
+    }
+    return { story, listed };
+}
+
+// A Continue's block lines (`bodies`, whole lines) that repeat a line an earlier read of the reply took
+// from the story, one block line for each such story line: that line was read, so these are its echo,
+// never read again. → { bodies (without them), echoes: lines }.
+function dropEchoed(bodies, earlier) {
+    if (!earlier?.story.size) return { bodies, echoes: [] };
+    const left = new Map(earlier.story);
+    const echoes = [];
+    const out = bodies.map(body => body.split('\n').filter(line => {
+        const key = sameLine(line);
+        if (!key || !(left.get(key) > 0)) return true;
+        left.set(key, left.get(key) - 1);
+        echoes.push(line.trim());
+        return false;
+    }).join('\n'));
+    return echoes.length ? { bodies: out, echoes } : { bodies, echoes };
+}
+
+// What one read of `mes` reads, the same for extractBlock and hideBlock: its blocks (readBlocks), their
+// whole lines without the echoes of earlier story lines (`bodies`; `emptied`: a body left with no line by
+// that), the story lines it reads (`strays`) and the ones that echo a block line (`echoes`), and the block
+// lines that echo an earlier read's story line (`repeated`). `found`: strayLines' taken lines.
+function readParts(mes, tag, at, found) {
+    const blocks = readBlocks(mes, tag, at);
+    const whole = blocks.map(block => wholeLines(block).body);
+    const earlier = at ? earlierLines(mes, tag, at.from) : null;
+    const { strays, echoes } = splitEchoes(found, whole, earlier);
+    const { bodies, echoes: repeated } = dropEchoed(whole, earlier);
+    const emptied = bodies.map((body, i) => body !== whole[i] && !body.trim());
+    return { blocks, bodies, emptied, strays, echoes, repeated };
+}
+
+// The part of a hidden comment's body that holds its blocks: up to its first section (<Changes-story>,
+// -cut, -echo; hideBlock writes them after the blocks), so a kept body with an open tag in it (a Continue's
+// block that held a second open tag) never reads the sections' lines as its own.
+function commentBlocks(inner, tag) {
+    const names = Object.values(sectionTags(tag)).map(escapeRe).join('|');
+    const found = new RegExp(`\\n[ \\t]*<(?:${names})>[ \\t]*(?=\\n|$)`).exec(inner);
+    return found ? inner.slice(0, found.index + 1) : inner;
 }
 
 // The blocks of `mes` that extractBlock reads, in order: with `at`, the bare ones a Continue added (the
@@ -431,7 +509,7 @@ function readBlocks(mes, tag, at) {
     const out = [];
     for (const pair of pairs) {
         const off = commentParts(text, pair, tag).off;
-        for (const block of findBlocks(text.slice(pair.bodyStart, pair.bodyEnd), tag)) {
+        for (const block of findBlocks(commentBlocks(text.slice(pair.bodyStart, pair.bodyEnd), tag), tag)) {
             out.push({ ...block, start: block.start + pair.bodyStart, end: block.end + pair.bodyStart, body: commentText(block.body), off });
         }
     }
@@ -446,25 +524,26 @@ const OFF_LINE = '(read while its feature was off)';
  * The text inside the reply's <Changes> block (or `tag`), or null when there is none. Found
  * whether the block is bare or already hidden in Story Suite's comment; several blocks are
  * read as one, in order, so no line is lost. Blocks inside closed reasoning are not read.
- * `at` ({ from, skip, tail?, cut? }, from continuation()): only the bare blocks a Continue added are read.
+ * `at` ({ from, skip, tail?, cut? }, from continuation()): only the bare blocks a Continue added are read,
+ * without their lines that repeat a line an earlier read of the reply took from the story (FB-1).
  * An open block's unfinished last line is left out (wholeLines); `stopped` is accepted and changes nothing.
  * `heads` (grammarHeads): change lines written in the story near the block (strayLines) are read
  * too, after the blocks, and count as a block when there is none.
  * `display` (extras.js displayLines): a line of a kind its hidden comment marks as off is not read.
  */
 export function extractBlock(mes, tag = 'Changes', at = null, { stopped = false, heads = null, display = false } = {}) {
-    const blocks = readBlocks(mes, tag, at);
     const found = heads ? strayLines(mes, heads, { tag, from: at?.from ?? 0, tail: at?.tail === true, stopped }).taken : [];
-    const { strays } = splitEchoes(found, blocks.map(block => wholeLines(block).body));
+    const { blocks, bodies: whole, emptied, strays } = readParts(mes, tag, at, found);
     if (!blocks.length && !strays.length) return null;
-    const bodies = blocks.map(block => {
-        const body = blockBody(wholeLines(block).body);
+    // (A Continue's block that held only echoes of the reply's story lines is read as an empty one.)
+    const bodies = blocks.map((block, i) => {
+        const body = blockBody(whole[i]);
         if (!display || !block.off?.size) return body;
         return body.split('\n').map(line => {
             const parsed = line.trim() ? parseLine(line) : { error: 'blank' };
             return !parsed.error && block.off.has(parsed.kind) ? OFF_LINE : line;
         }).join('\n');
-    });
+    }).filter((body, i) => !emptied[i] || i === blocks.length - 1);
     return inOrder(bodies, strays, blocks.at(-1)?.open === true).join('\n');
 }
 
@@ -506,9 +585,9 @@ export function hideBlock(mes, tag = 'Changes', { from = 0, skip = 0, tail = fal
     const left = found.problems.filter(item => item.keep).map(item => item.line);
     // Taking whole lines out after `from` leaves `from`, `skip` and `tail` true of the text.
     const text = dropLines(given, found.taken);
-    const bare = readBlocks(text, tag, { from, skip, tail, cut });
-    // (Echoes are judged against this read's blocks, as extractBlock judges them.)
-    const { strays, echoes } = splitEchoes(found.taken, bare.map(block => wholeLines(block).body));
+    // (Echoes are judged as extractBlock judges them: against this read's blocks and, for a Continue, the
+    // reply's earlier reads, readParts.)
+    const { blocks: bare, bodies: whole, emptied, strays, echoes, repeated } = readParts(text, tag, { from, skip, tail, cut }, found.taken);
     if (!bare.length && !found.taken.length && !left.length) return text;
     // C2-6: the bodies were found in the text with reasoning blanked (what extractBlock reads), so
     // reasoning inside a block is left in the story where it stood, never written back as spaces.
@@ -521,11 +600,16 @@ export function hideBlock(mes, tag = 'Changes', { from = 0, skip = 0, tail = fal
     // (Spaces left at line ends, where reasoning was blanked, go.)
     const lineEnds = body => body.split('\n').map(line => line.trimEnd()).join('\n');
     const open = bare.at(-1)?.open === true;
-    const parts = inOrder(bare.map(block => blockBody(wholeLines(block).body)), strays, open)
-        .map(body => `<${tag}>\n${commentSafe(lineEnds(body))}\n</${tag}>`);
+    // The lines taken from the story are their own body, marked as the story's (`<tag story>`); a body that
+    // held only echoes of an earlier read's story lines (readParts) is left out.
+    const body = (text, mark = '') => `<${tag}${mark}>\n${commentSafe(lineEnds(text))}\n</${tag}>`;
+    const kept = bare.map((block, i) => (emptied[i] ? null : body(blockBody(whole[i])))).filter(part => part !== null);
+    const taken = strays.length ? [body(strays.map(line => line.line).join('\n'), ` ${STORY_WORD}`)] : [];
+    const parts = open ? [...taken, ...kept] : [...kept, ...taken];
     const names = sectionTags(tag);
     if (left.length) parts.push(`<${names.story}>\n${commentSafe(left.join('\n'))}\n</${names.story}>`);
-    if (echoes.length) parts.push(`<${names.echo}>\n${commentSafe(echoes.map(line => line.line).join('\n'))}\n</${names.echo}>`);
+    const echoed = [...echoes.map(line => line.line), ...repeated];
+    if (echoed.length) parts.push(`<${names.echo}>\n${commentSafe(echoed.join('\n'))}\n</${names.echo}>`);
     // The unfinished line, unless a tag sits in it (then no Continue can finish it as a line).
     const unfinished = open ? wholeLines(bare.at(-1)).cut : '';
     if (unfinished && !unfinished.includes('<')) parts.push(`<${names.cut}>\n${commentSafe(unfinished)}\n</${names.cut}>`);
