@@ -15,7 +15,7 @@ const checkModule = await import('./check.js').catch(() => null);
 export const EVENTS = Object.freeze(['committed', 'head', 'turn', 'feature']);
 // The most change lines one reply's block may hold; the rest are one Problem (turn.js).
 export const MAX_CHANGE_LINES = 150;
-export const HOST_SETTINGS_DEFAULTS = Object.freeze({ tailBudget: 1500, contextShare: 40, maxChangeLines: MAX_CHANGE_LINES });
+export const HOST_SETTINGS_DEFAULTS = Object.freeze({ tailBudget: 1500, contextShare: 40, maxChangeLines: MAX_CHANGE_LINES, callQueue: true });
 export const HOST_SETTINGS_SCHEMA = Object.freeze({
     tailBudget: Object.freeze({
         type: 'int', min: 100, max: 20000, label: 'Notes per reply (tokens)',
@@ -28,6 +28,10 @@ export const HOST_SETTINGS_SCHEMA = Object.freeze({
     maxChangeLines: Object.freeze({
         type: 'int', min: 10, max: 1000, label: 'Change lines per reply',
         help: 'The most change lines one reply may hold; any after them are not used and the Problems list says so.',
+    }),
+    callQueue: Object.freeze({
+        type: 'bool', label: 'Run extra calls one at a time per connection',
+        help: 'Story Suite\'s own model calls (Delta\'s scan, the arc planner, Assist) wait for each other when they use the same connection profile, so a local server that answers one request at a time is never asked twice at once. Calls on different profiles still go side by side.',
     }),
 });
 

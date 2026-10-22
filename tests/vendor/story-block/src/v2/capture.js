@@ -77,10 +77,12 @@ const JOIN = '\u2060';
 const commentSafe = text => String(text).replace(/\u2060/g, JOIN + JOIN).replace(/-(?=-)/g, `-${JOIN}`);
 const commentText = text => String(text).replace(/\u2060\u2060|(?<=-)\u2060(?=-)/g, found => (found.length === 2 ? JOIN : ''));
 
-const sectionTags = tag => ({ story: `${tag}-story`, cut: `${tag}-cut`, echo: `${tag}-echo` });
+const sectionTags = tag => ({ story: `${tag}-story`, cut: `${tag}-cut`, echo: `${tag}-echo`, assist: `${tag}-assist`, next: `${tag}-assist-next` });
 
 // The parts of a hidden pair's body beside its blocks: { head: Set of header words, off: Set, story:
-// lines, cut: line | null, echo: lines }.
+// lines, cut: line | null, echo: lines, assist: lines, next: lines }. `assist` and `next` are the Assist
+// extractor's stored output (assistSections): the lines it read on this reply, and the ones it read here
+// after the reader had sent, which the next reply applies.
 function commentParts(text, pair, tag = 'Changes') {
     const body = text.slice(pair.bodyStart, pair.bodyEnd);
     const nl = body.indexOf('\n');
@@ -90,17 +92,19 @@ function commentParts(text, pair, tag = 'Changes') {
     const story = [];
     const cut = [];
     const echo = [];
-    const into = { [`<${names.story}>`]: story, [`<${names.cut}>`]: cut, [`<${names.echo}>`]: echo };
+    const assist = [];
+    const next = [];
+    const into = { [`<${names.story}>`]: story, [`<${names.cut}>`]: cut, [`<${names.echo}>`]: echo, [`<${names.assist}>`]: assist, [`<${names.next}>`]: next };
     let list = null;
     if (Object.keys(into).some(open => body.includes(open))) {
         for (const line of body.split('\n')) {
             const trimmed = line.trim();
             if (into[trimmed]) list = into[trimmed];
-            else if ([names.story, names.cut, names.echo].some(name => trimmed === `</${name}>`)) list = null;
+            else if (Object.values(names).some(name => trimmed === `</${name}>`)) list = null;
             else if (list && trimmed) list.push(commentText(trimmed));
         }
     }
-    return { head: new Set(head), off, story, cut: cut[0] ?? null, echo };
+    return { head: new Set(head), off, story, cut: cut[0] ?? null, echo, assist, next };
 }
 
 /** True when `mes` holds Story Suite's hidden comment (whatever is in it). */
@@ -407,10 +411,43 @@ function goesOn(mes, tag, from, cut = null) {
     return !!line && !parseLine(line).error;
 }
 
+/**
+ * The Assist extractor's stored output in `mes` (MODULES §F100, §F123): { now, next }, the lines of every
+ * hidden comment's <Changes-assist> section (applied on this reply) and <Changes-assist-next> section (read
+ * from this reply after the reader had sent; the next reply applies them), in order. Never read as the
+ * reply's own block (extractBlock leaves sections out), so Re-read and replay take them from here.
+ */
+export function assistSections(mes, tag = 'Changes') {
+    const text = withoutReasoning(String(mes ?? ''));
+    const now = [];
+    const next = [];
+    for (const pair of hiddenPairs(text)) {
+        const parts = commentParts(text, pair, tag);
+        now.push(...parts.assist);
+        next.push(...parts.next);
+    }
+    return { now, next };
+}
+
+/**
+ * `mes` with `lines` kept as the Assist extractor's output, in a hidden comment of their own at the end:
+ * a <Changes-assist> section, or with `next` a <Changes-assist-next> one. Hidden like a block (stripBlock
+ * takes it out of the shown text and the prompt history); no line is ever read from it as the reply's own.
+ */
+export function withAssist(mes, lines, { next = false, tag = 'Changes' } = {}) {
+    const list = (lines ?? []).map(line => cutAt(String(line ?? '').replace(/[\r\n]+/g, ' ').trim(), MAX_LINE)).filter(Boolean);
+    const text = String(mes ?? '');
+    if (!list.length) return text;
+    const name = sectionTags(tag)[next ? 'next' : 'assist'];
+    return `${trimEnd(text)}\n\n<!-- ${HIDDEN_MARKER}\n<${name}>\n${commentSafe(list.join('\n'))}\n</${name}>\n-->`;
+}
+
 // C-1: a change line written in the story that the reply's blocks also hold (the model wrote it, then
 // listed it) is one change: it is taken out of the story and kept in the hidden comment (<Changes-echo>),
 // never read. Lines are the same when they are equal without decoration, bold and extra spaces.
 const sameLine = line => stripDecoration(stripMarkdown(line).trim()).trim().replace(/\s+/g, ' ');
+/** C-1's matching, for other readers (the Assist extractor): the key two change lines share when they are the same line. */
+export const sameChangeLine = line => sameLine(String(line ?? ''));
 // `earlier` (a Continue's read, earlierLines): the block lines the reply's earlier reads kept count as listed.
 function splitEchoes(strays, bodies, earlier = null) {
     if (!strays.length) return { strays, echoes: [] };
@@ -560,7 +597,8 @@ export function stripBlock(mes, tag = 'Changes', { heads = null } = {}) {
         const body = raw.slice(pair.bodyStart, pair.bodyEnd);
         if (findBlocks(body, tag).length) return true;
         const parts = commentParts(raw, pair, tag);
-        return parts.story.length > 0 || parts.cut !== null || body.includes(`<${sectionTags(tag).echo}>`);
+        return parts.story.length > 0 || parts.cut !== null || body.includes(`<${sectionTags(tag).echo}>`)
+            || parts.assist.length > 0 || parts.next.length > 0;
     };
     let text = replacePairs(raw, hiddenPairs(raw), pair => (ours(pair) ? '' : raw.slice(pair.start, pair.end)));
     const blocks = findBlocks(text, tag);

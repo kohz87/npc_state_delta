@@ -1,4 +1,4 @@
-// sdk.callModel (MODULES §G): a module's own model call, on the chat's connection or on one of
+// sdk.callModel (MODULES §G, §F124): a module's own model call, on the chat's connection or on one of
 // SillyTavern's Connection Manager profiles. It never posts to the chat and never touches its history,
 // and it never switches the reader's connection: a profile's call goes straight to that profile's API
 // with its settings (ConnectionManagerRequestService.sendRequest, SillyTavern 1.19), so there is nothing
@@ -15,6 +15,14 @@
 // prompt-ready events, which the turn reads): a call there waits while a reply is being built or awaited
 // (the `gate`, turn.js whenIdle), and its prompt is marked as our own (createOwnCalls) so the turn never
 // takes it for the reply's. A profile's call (sendRequest) runs none of that and goes at once.
+//
+// One queue per connection (createCallQueue, MODULES §G): Delta's scan, the arc planner and Assist can ask
+// at the same moment, and a single-slot local server answers one at a time (or not at all). Calls on the
+// same named profile run one at a time, in the order they came, each with its own time limit and signal
+// (a call that runs out of time or is cancelled while it waits leaves the queue and never runs); calls on
+// different profiles still run side by side. The chat's connection ('' / 'chat', generateRaw) has a lane
+// of its own too, entered only after the turn's whenIdle wait, so a reply in progress never holds it.
+// The host setting `callQueue` (default on) turns the queue off; Diagnostics shows its length and waits.
 //
 // Everything of SillyTavern is read when called, never at import.
 
@@ -202,6 +210,106 @@ export function createOwnCalls() {
 }
 
 const now = () => (typeof globalThis.performance?.now === 'function' ? globalThis.performance.now() : Date.now());
+
+class QueueLeft extends Error {
+    constructor() {
+        super('The call left the queue before its turn.');
+        this.code = 'QUEUE_LEFT';
+    }
+}
+
+/**
+ * The per-connection queue. `deps`: { enabled() → bool (the host's `callQueue` setting; default on),
+ * clock() → ms (for the waits' report only, never state) }. Returns { run(key, fn, { signal }) → fn()'s
+ * result, stats() → { on, waiting, running, waited, waitedMs, longestMs, lanes: { [key]: waiting } } }.
+ * `key` is the profile's stored name ('' the chat's). A call waits while another of its key runs; one
+ * whose `signal` aborts while it waits leaves the queue and rejects (code QUEUE_LEFT) without running.
+ * A running call frees its key when it settles or when its signal aborts (a timed-out chat call cannot be
+ * stopped; the next one does not wait for its late answer).
+ */
+export function createCallQueue({ enabled = () => true, clock = now } = {}) {
+    const lanes = new Map();
+    let waited = 0;
+    let waitedMs = 0;
+    let longestMs = 0;
+    const lane = key => {
+        let found = lanes.get(key);
+        if (!found) {
+            found = { running: false, waiting: [] };
+            lanes.set(key, found);
+        }
+        return found;
+    };
+    const isOn = () => {
+        try { return enabled() !== false; } catch { return true; }
+    };
+    function next(key) {
+        const item = lanes.get(key);
+        if (!item || item.running) return;
+        const first = item.waiting.shift();
+        if (!first) {
+            lanes.delete(key);
+            return;
+        }
+        item.running = true;
+        first.start();
+    }
+    async function run(key, fn, { signal = null } = {}) {
+        if (!isOn()) return fn();
+        const name = String(key ?? '');
+        const item = lane(name);
+        if (signal?.aborted) throw new QueueLeft();
+        if (item.running || item.waiting.length) {
+            const asked = clock();
+            await new Promise((resolve, reject) => {
+                const entry = {
+                    start: () => {
+                        signal?.removeEventListener?.('abort', leave);
+                        const ms = Math.max(0, clock() - asked);
+                        waited += 1;
+                        waitedMs += ms;
+                        longestMs = Math.max(longestMs, ms);
+                        resolve();
+                    },
+                };
+                const leave = () => {
+                    const at = item.waiting.indexOf(entry);
+                    if (at >= 0) item.waiting.splice(at, 1);
+                    reject(new QueueLeft());
+                };
+                signal?.addEventListener?.('abort', leave, { once: true });
+                item.waiting.push(entry);
+                next(name);
+            });
+        } else item.running = true;
+        let freed = false;
+        const free = () => {
+            if (freed) return;
+            freed = true;
+            signal?.removeEventListener?.('abort', free);
+            item.running = false;
+            next(name);
+        };
+        signal?.addEventListener?.('abort', free, { once: true });
+        try {
+            return await fn();
+        } finally {
+            free();
+        }
+    }
+    function stats() {
+        let waiting = 0;
+        let running = 0;
+        const byLane = {};
+        for (const [key, item] of lanes) {
+            waiting += item.waiting.length;
+            if (item.running) running += 1;
+            if (item.waiting.length) byLane[key || CHAT_PROFILE] = item.waiting.length;
+        }
+        return { on: isOn(), waiting, running, waited, waitedMs: Math.round(waitedMs), longestMs: Math.round(longestMs), lanes: byLane };
+    }
+    return { run, stats };
+}
 const intIn = (value, min, max, fallback) => (Number.isFinite(value) && value > 0 ? Math.min(max, Math.max(min, Math.round(value))) : fallback);
 
 /**
@@ -209,13 +317,14 @@ const intIn = (value, min, max, fallback) => (Number.isFinite(value) && value > 
  * (stModelCall by default; the runtime's `callModel` option, the testkit's fake), featureOn(id) → bool,
  * featureModule(id) → the module id that declares it (or null), timeoutMs (MODEL_CALL_TIMEOUT_MS), log(line),
  * timer ({ setTimeout, clearTimeout }), gate?: { whenIdle() → Promise } (a call on the chat's connection
- * waits for it: no reply in progress; a profile's call does not) }.
+ * waits for it: no reply in progress; a profile's call does not), queue?: createCallQueue() (one call at a time
+ * per connection; default: a queue of its own) }.
  * Returns { callModel(request), busy(module) }: `callModel({ profile, system, prompt, maxTokens, signal,
  * feature, module, timeoutMs })` → Promise<{ ok: true, text, error: null } | { ok: false, text: '', error
  * (a MODEL_CALL_ERRORS code), message }>, never rejecting. The module is `module`, else the owner of
  * `feature`, else '' (callers that name neither share one slot).
  */
-export function createModelCalls({ call = stModelCall, featureOn = () => true, featureModule = () => null, timeoutMs = MODEL_CALL_TIMEOUT_MS, log = line => console.info(line), timer = globalThis, gate = null } = {}) {
+export function createModelCalls({ call = stModelCall, featureOn = () => true, featureModule = () => null, timeoutMs = MODEL_CALL_TIMEOUT_MS, log = line => console.info(line), timer = globalThis, gate = null, queue = createCallQueue() } = {}) {
     const inFlight = new Set();
     const defaultTimeout = intIn(timeoutMs, MODEL_CALL_TIMEOUT_MIN, MODEL_CALL_TIMEOUT_MAX, MODEL_CALL_TIMEOUT_MS);
     const fail = (error, message) => ({ ok: false, text: '', error, message });
@@ -225,7 +334,9 @@ export function createModelCalls({ call = stModelCall, featureOn = () => true, f
         } catch { /* a log that fails changes nothing */ }
     };
 
-    async function callModel(request = {}) {
+    // `internal` (the host's own calls, never the sdk's): { idle: false } skips the whenIdle wait (the
+    // pre-roll asks while the reply is being prepared).
+    async function callModel(request = {}, internal = {}) {
         const started = now();
         const req = request && typeof request === 'object' ? request : {};
         const feature = typeof req.feature === 'string' && req.feature.trim() ? req.feature.trim() : null;
@@ -264,14 +375,17 @@ export function createModelCalls({ call = stModelCall, featureOn = () => true, f
             const answer = (async () => {
                 try {
                     // The chat's connection waits for a reply in progress (the time limit and signal still hold).
-                    if (!profile && typeof gate?.whenIdle === 'function') {
+                    if (!profile && internal?.idle !== false && typeof gate?.whenIdle === 'function') {
                         await Promise.race([gate.whenIdle(), new Promise(resolve => inner.signal.addEventListener('abort', resolve, { once: true }))]);
                         if (inner.signal.aborted) return fail(MODEL_CALL_ERRORS.ABORTED, MODEL_CALL_TEXT.aborted);
                     }
-                    const text = await call(req.prompt, { maxTokens, profile, system: typeof req.system === 'string' ? req.system : '', signal: inner.signal });
+                    // One at a time per connection (the queue); a call that runs out of time or is cancelled
+                    // while it waits leaves it (inner.signal) and is never made.
+                    const text = await queue.run(profile, () => call(req.prompt, { maxTokens, profile, system: typeof req.system === 'string' ? req.system : '', signal: inner.signal }), { signal: inner.signal });
                     const out = typeof text === 'string' ? text : answerText(text);
                     return out.trim() ? { ok: true, text: out, error: null } : fail(MODEL_CALL_ERRORS.EMPTY, MODEL_CALL_TEXT.empty);
                 } catch (error) {
+                    if (error?.code === 'QUEUE_LEFT') return fail(MODEL_CALL_ERRORS.ABORTED, MODEL_CALL_TEXT.aborted);
                     if (error instanceof CallError) return fail(error.code, error.message);
                     return fail(MODEL_CALL_ERRORS.FAILED, fill(MODEL_CALL_TEXT.failed, { why: safeReason(error) }));
                 }
@@ -290,5 +404,5 @@ export function createModelCalls({ call = stModelCall, featureOn = () => true, f
         }
     }
 
-    return { callModel, busy: module => inFlight.has(String(module ?? '')) };
+    return { callModel, busy: module => inFlight.has(String(module ?? '')), queue };
 }

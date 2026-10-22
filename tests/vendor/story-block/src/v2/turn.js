@@ -21,7 +21,9 @@
 // turn.js receives the SillyTavern context and the host parts; it never imports the store or
 // the command bus (their interfaces are docs/v2/SPEC.md §12).
 
-import { continuation, cutLine, defangMarker, extractBlock, grammarHeads, hasHidden, hideBlock, markOff, parseChanges, strayLines, stripBlock } from './capture.js';
+import { assistSections, continuation, cutLine, defangMarker, extractBlock, grammarHeads, hasHidden, hideBlock, markOff, parseChanges, strayLines, stripBlock, withAssist } from './capture.js';
+import { notWritten } from './assist/extractor.js';
+import { refusedWhy } from './assist/safety.js';
 import { displayLines, readDisplayLine } from './extras.js';
 import { hash, readRecord } from './persist.js';
 import { CAPTURE_PREFIX } from './registry.js';
@@ -52,6 +54,9 @@ export const HOOK_TIMEOUT_MS = 2500;
 // A reply that never ends (no MESSAGE_RECEIVED, GENERATION_ENDED or STOPPED) stops counting as in progress
 // after this long, so Story Suite's own model calls on the chat's connection are not held up for good.
 export const REPLY_BUSY_MAX_MS = 5 * 60_000;
+// How long a send waits for the Assist safety net still reading the last reply (MODULES §F123): briefly.
+// Lines that come later are kept on that reply and applied on the next one, right after its own lines.
+export const ASSIST_WAIT_MS = 1500;
 const TIMED_OUT = Symbol('timed out');
 
 // `value`, or TIMED_OUT when it is a promise that has not settled within `ms`.
@@ -218,6 +223,8 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
     // A reply in progress: from its interceptor until it is received, ended, stopped or held back (or the
     // chat changes). Story Suite's own model calls on the chat's connection wait for it (whenIdle).
     let replyBusy = false;
+    // The Assist safety net's runs on the last reply (afterReply), until they settle.
+    let assistPending = null;
     let busyTimer = null;
     let idleWaiters = [];
     function markBusy() {
@@ -461,6 +468,8 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             return;
         }
         if (!ctx?.chat) return;
+        // The safety net still reading the last reply: waited for briefly, so its lines are in this prompt.
+        if (assistPending) await within(assistPending, ASSIST_WAIT_MS);
         markBusy();
         if (Number.isFinite(Number(contextSize)) && Number(contextSize) > 0) lastSize = Number(contextSize);
         // B-b2-timeline-r2-1: never a dry run (SillyTavern runs interceptors only for real generations).
@@ -604,6 +613,42 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         return all.slice(0, cap);
     }
 
+    // The Assist safety net's marks on its receipts and Problems (MODULES §F123).
+    const NOW = 'now';
+    const LATE = 'late';
+    // The safety net's lines that fit the reply's cap after `used` lines; the rest are one Problem.
+    function assistRoom(index, items, used, found) {
+        const room = Math.max(0, lineCap() - used);
+        if (items.length > room) {
+            const more = items.length - room;
+            found.push(problem({ index, code: 'TOO_MANY', assist: items[room].mark, message: `(assist) The reply's lines fill its cap of ${lineCap()}, so ${more} safety-net ${more === 1 ? 'line was' : 'lines were'} not used (from "${cutAt(items[room].line.raw, 60)}").` }));
+        }
+        return items.slice(0, room);
+    }
+
+    // The previous reply's safety-net lines read after the reader had sent (its <Changes-assist-next>),
+    // for reply `index` (not a Continue's): parsed, through the stricter wall for late lines, without the
+    // ones the reply's own lines (`own`, raw) already hold.
+    function lateLines(index, own = []) {
+        const chat = ctx?.chat ?? [];
+        const from = chat.slice(0, Math.max(0, index)).findLastIndex(isCarrier);
+        if (from < 0) return [];
+        const stored = assistSections(String(chat[from]?.mes ?? '')).next;
+        if (!stored.length) return [];
+        const safe = parseChanges(stored.join('\n')).lines.filter(line => !refusedWhy(line, null, { late: true }));
+        const keep = new Set(notWritten(safe.map(line => line.raw), own));
+        return safe.filter(line => keep.has(line.raw));
+    }
+
+    // A reply's own safety-net lines (its <Changes-assist>), parsed, without the ones `own` already holds.
+    function nowLines(mes, own = []) {
+        const stored = assistSections(String(mes ?? '')).now;
+        if (!stored.length) return [];
+        const parsed = parseChanges(stored.join('\n')).lines.filter(line => !refusedWhy(line, null));
+        const keep = new Set(notWritten(parsed.map(line => line.raw), own));
+        return parsed.filter(line => keep.has(line.raw));
+    }
+
     // How many lines of each display kind `mes` already shows (extras.js displayLines, the rule the card
     // draws by): lines a Continue or the extractor adds count after these against the cap (F115), so a
     // choice past it is told as one of the original reply's would be.
@@ -612,16 +657,24 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
 
     // `before`: the reply's text before these lines were added (a Continue's, the extractor's), or null.
     // `type`: the generation's (normal, swipe, regenerate, continue) or 'late' (the extractor's lines).
-    async function captureLines(index, all, before = null, type = 'normal') {
+    // `late` / `assist` (MODULES §F123): the Assist safety net's lines, run after the reply's own as story
+    // lines marked as its (late: read from the reply before, after the reader had sent), within the same
+    // cap per reply (`used`: lines the reply already read in an earlier call).
+    async function captureLines(index, all, before = null, type = 'normal', { late = [], assist = [], used = 0 } = {}) {
         const receipts = [];
         const found = [];
         const lines = capped(index, all, found);
+        const extra = assistRoom(index, [...late.map(line => ({ line, mark: LATE })), ...assist.map(line => ({ line, mark: NOW }))], used + lines.length, found);
         const shown = typeof before === 'string' ? shownIn(before) : new Map();
         // One write of the reply's record for all its lines and its afterCapture steps (store.batch).
         let off = [];
         let steps = [];
         await (store.batch ?? (fn => fn()))(async () => {
             ({ off } = await captureEach(index, lines, receipts, found, null, null, shown));
+            for (const mark of [LATE, NOW]) {
+                const group = extra.filter(item => item.mark === mark).map(item => item.line);
+                if (group.length) off = [...new Set([...off, ...(await captureEach(index, group, receipts, found, null, null, shown, mark)).off])];
+            }
             // Only after a capture that kept a story line (never for an empty one, a click or a system step).
             if (receipts.length) steps = await afterCapture(index, { type, problems: found });
         });
@@ -693,8 +746,9 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
     // Runs `lines` as story captures on carrier `index`, each on the state the one before left. Stored on
     // the head as they go (append), or, with `base` (a Re-read), run on that state and returned as
     // { ops } for store.replaceStory, nothing stored.
-    async function captureEach(index, lines, receipts, found, base = null, seeds = null, shown = new Map()) {
+    async function captureEach(index, lines, receipts, found, base = null, seeds = null, shown = new Map(), assist = null) {
         const collected = [];
+        const firstProblem = found.length;
         // Display kinds (written words) whose lines were read while their feature was off (capture.js markOff).
         const off = new Set();
         let state = base ?? store.head();
@@ -743,7 +797,8 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
                 // Refused by a feature that is off (a command it called, ctx.feature): run as it ran before.
                 if (again && !entry.off && result?.code === 'FEATURE_OFF') result = await run({ again: true });
                 // The receipt remembers which line made it (`line`), so a Re-read can give the line its seed again.
-                if (result?.ok) result = { ...result, receipt: { ...result.receipt, line: mark } };
+                // The safety net's lines are marked as its (receipt `assist`: 'now' | 'late', and the line).
+                if (result?.ok) result = { ...result, receipt: { ...result.receipt, line: mark, ...(assist ? { assist, assistLine: cutAt(line.raw, 200) } : {}) } };
                 if (result?.ok && base) collected.push(...result.ops);
                 else if (result?.ok) store.append({ ops: result.ops, receipt: result.receipt });
             } catch (error) {
@@ -762,6 +817,14 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
                 found.push(problem({ module: entry.moduleId, index, line: line.raw, code: 'LIMITED', message: result.problem }));
             }
             if (!base) events?.emit('committed', { receipt: result.receipt });
+        }
+        // What the safety net's lines met is marked as its in the Problems list.
+        if (assist) {
+            for (const item of found.slice(firstProblem)) {
+                if (item.assist) continue;
+                item.assist = assist;
+                item.message = `(assist${assist === LATE ? ', from the previous reply' : ''}) ${item.message}`;
+            }
         }
         return { ops: collected, off: [...off], state };
     }
@@ -815,13 +878,27 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         const problems = [...parsed.problems, ...strayProblems(index, mes, heads)];
         const receipts = [];
         const lines = capped(index, parsed.lines, problems);
+        // The safety net's stored lines (MODULES §F123): the previous reply's late ones, then this reply's
+        // own, as the live capture ran them. Never a new model call.
+        const own = lines.map(line => line.raw);
+        const late = lateLines(index, own);
+        const extra = assistRoom(index, [...late.map(line => ({ line, mark: LATE })), ...nowLines(mes, [...own, ...late.map(line => line.raw)]).map(line => ({ line, mark: NOW }))], lines.length, problems);
         const swipe = message.swipe_id;
         let ops;
         let off = [];
         let steps = [];
         try {
             let after;
-            ({ ops, off, state: after } = await captureEach(index, lines, receipts, problems, base, storySeeds(readRecord(message))));
+            const seeds = storySeeds(readRecord(message));
+            ({ ops, off, state: after } = await captureEach(index, lines, receipts, problems, base, seeds));
+            for (const mark of [LATE, NOW]) {
+                const group = extra.filter(item => item.mark === mark).map(item => item.line);
+                if (!group.length) continue;
+                const more = await captureEach(index, group, receipts, problems, after, seeds, new Map(), mark);
+                ops = [...ops, ...more.ops];
+                off = [...new Set([...off, ...more.off])];
+                after = more.state;
+            }
             // The reply's afterCapture steps, run again after its new story lines (none when none was kept).
             const reply = store.carrierSid?.(index) ? { index, sid: store.carrierSid(index) } : null;
             if (receipts.length) steps = await afterCapture(index, { type: 'reread', problems, state: after, reply, seeds: stepSeeds(readRecord(message)) });
@@ -907,7 +984,9 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             const problems = [...parsed.problems, ...strayProblems(id, text, heads, { from: at?.from ?? 0, tail: at?.tail === true, stopped })];
             const cut = block === null ? null : cutLine(text, 'Changes', at);
             if (cut) problems.push(problem({ index: id, line: cut, code: 'CUT_OFF', message: `The reply ended in the middle of the change line "${cutAt(cut, 80)}" (nothing after it on its line, and the block was not closed), so it was not used. Continue finishes it; or end the line and close the block by hand, then Re-read.` }));
-            const result = await captureLines(id, parsed.lines, at ? current.base : null, current.type);
+            // The previous reply's safety-net lines that came after the reader sent (not for a Continue).
+            const late = current.type === 'continue' ? [] : lateLines(id, parsed.lines.map(line => line.raw));
+            const result = await captureLines(id, parsed.lines, at ? current.base : null, current.type, { late });
             problems.push(...result.problems);
 
             // What this reply was told; a Continue keeps what the reply was told before.
@@ -935,7 +1014,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             if (edited) redraw(id, message);
             const turn = { index: id, type: current.type, receipts: result.receipts, steps: result.steps, problems, told: current.untold };
             events?.emit('turn', turn);
-            if (!parsed.lines.length) afterReply(id, current.type, message);
+            afterReply(id, current.type, message, [...parsed.lines, ...late].map(line => line.raw));
             return turn;
         } catch (error) {
             problem({ index: id, code: 'FAILED', message: `The reply's changes could not be kept: ${error?.message ?? error}` });
@@ -946,21 +1025,28 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
     // afterReply (the assist extractor): a reply that came without change lines may get them from a
     // module after all. Not awaited; a failure is logged. `capture(text, { index, swipe })` runs the
     // lines as story captures on that reply when it is still the head on the same swipe.
-    function afterReply(index, type, message) {
+    // (The Assist safety net runs after every reply; `lines` are the change lines its capture read.) A send
+    // waits for these runs briefly (assistPending, ASSIST_WAIT_MS).
+    function afterReply(index, type, message, lines = []) {
         const swipe = Number.isInteger(message?.swipe_id) ? message.swipe_id : 0;
+        const runs = [];
         for (const { moduleId, fn } of registry.hookEntries('afterReply')) {
-            Promise.resolve()
-                .then(() => fn({ index, swipe, type, mes: String(message?.mes ?? ''), capture: (text, at = { index, swipe }) => captureLate(at, text) }))
+            runs.push(Promise.resolve()
+                .then(() => fn({ index, swipe, type, lines: [...lines], mes: String(message?.mes ?? ''), capture: (text, at = { index, swipe }, opts = {}) => captureLate(at, text, opts) }))
                 .catch(error => problem({ module: moduleId, index, code: 'FAILED', message: `afterReply failed: ${error?.message ?? error}` }))
                 // C2-ext: what the hook made of the reply (the extractor read it, or failed to) can change
                 // the reply's note, so the notes are drawn again.
-                .finally(() => { if (store.headIndex() === index) events?.emit('head', { index }); });
+                .finally(() => { if (store.headIndex() === index) events?.emit('head', { index }); }));
         }
+        if (!runs.length) return;
+        const all = Promise.allSettled(runs).then(() => { if (assistPending === all) assistPending = null; });
+        assistPending = all;
     }
 
     /** Change lines found after the reply (afterReply): captured on it and kept in its hidden block. */
-    async function captureLate({ index, swipe } = {}, text = '') {
+    async function captureLate({ index, swipe } = {}, text = '', { assist = false } = {}) {
         const message = ctx?.chat?.[index];
+        if (assist) return captureAssist({ index, swipe }, text, message);
         if (!isCarrier(message) || store.headIndex() !== index || (Number.isInteger(message.swipe_id) ? message.swipe_id : 0) !== swipe || session) {
             return { receipts: [], problems: ['The reply changed before its late change lines arrived; they were not used.'] };
         }
@@ -982,6 +1068,47 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         } else if (parsed.lines.length) await saveText();
         if (parsed.lines.length) redraw(index, message);
         const turn = { index, type: 'late', receipts: result.receipts, steps: result.steps, problems, told: [] };
+        events?.emit('turn', turn);
+        return turn;
+    }
+
+    /**
+     * The Assist safety net's lines for reply `index` (MODULES §F123). Still the head on the same swipe and
+     * no send begun: run now as story lines marked `assist: 'now'`, after the reply's own, and kept in its
+     * <Changes-assist> section. A send already begun (the brief wait is over): kept on the reply as
+     * <Changes-assist-next>, through the stricter wall, for the next reply to apply after its own lines;
+     * nothing changes now. Anything else (swiped, deleted, the next reply already in): not used.
+     */
+    async function captureAssist({ index, swipe }, text, message) {
+        const same = isCarrier(message) && store.headIndex() === index && (Number.isInteger(message.swipe_id) ? message.swipe_id : 0) === swipe;
+        if (!same) return { receipts: [], problems: ['The reply changed before the safety net\'s lines arrived; they were not used.'], dropped: true };
+        const heads = changeHeads();
+        const mes = String(message.mes ?? '');
+        const block = extractBlock(mes, 'Changes', null, { heads });
+        const own = [...(block === null ? [] : parseChanges(block).lines.map(line => line.raw)), ...lateLines(index, []).map(line => line.raw)];
+        const parsed = parseChanges(String(text ?? '')).lines;
+        const fresh = new Set(notWritten(parsed.map(line => line.raw), own));
+        const kept = parsed.filter(line => fresh.has(line.raw) && !refusedWhy(line, null, { late: Boolean(session || replyBusy) }));
+        const store1 = mes2 => {
+            message.mes = mes2;
+            if (Array.isArray(message.swipes) && Number.isInteger(message.swipe_id)) message.swipes[message.swipe_id] = mes2;
+        };
+        if (session || replyBusy) {
+            if (!kept.length) return { receipts: [], problems: [], deferred: true };
+            // Saved with the next reply (its own save writes the chat).
+            store1(withAssist(mes, kept.map(line => line.raw), { next: true }));
+            redraw(index, message);
+            return { receipts: [], problems: [], deferred: true, lines: kept.map(line => line.raw) };
+        }
+        if (!kept.length) return { index, type: 'late', receipts: [], steps: [], problems: [], told: [] };
+        const used = block === null ? 0 : readBlock(index, block).lines.length;
+        const result = await captureLines(index, [], mes, 'late', { assist: kept, used });
+        store1(markOff(withAssist(mes, kept.map(line => line.raw)), result.off, mes.trimEnd().length));
+        if (store.dirty()) {
+            if (store.saveIdle?.() !== true) await trySave('after the safety net\'s lines');
+        } else await saveText();
+        redraw(index, message);
+        const turn = { index, type: 'late', receipts: result.receipts, steps: result.steps, problems: result.problems, told: [] };
         events?.emit('turn', turn);
         return turn;
     }
