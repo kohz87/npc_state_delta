@@ -72,6 +72,8 @@ export function createPacksPart({ settings, readLorebook = async () => ({ charac
         },
         settings: {
             section: 'Packs',
+            // Its own fold in the settings, right after Story Suite's (host-ui.js), shown with no pack installed too.
+            fold: { id: 'packs', hint: 'import a pack' },
             defaults: {},
             schema: {},
             render: (el, api) => renderPacksPanel(el, { packs, readLorebook, notify: text => api?.notify?.(text) }),

@@ -2,6 +2,7 @@
 
 Story Suite v2. NSD stays standalone; with Story Block v2 it registers as a hosted module (queries, Cast tab, settings in the overlay). Integration in progress. Status: https://github.com/kohz87/Story_block/blob/v2/docs/v2/STATUS.md
 
+- **Cast in Story Block's game view** (live test: Cast was in the Story panel's tabs but not in the full game view's sidebar). The game view lists screens (mount `screen`), not module tabs, so Delta now also gives the screen `npc-state-delta/cast` (title Cast, mount `screen` only so the panel keeps its one Cast tab, order 35: after Scene, before Inventory). Its template is one widget, `npc-state-delta.cast`, that draws exactly what the Cast tab draws (Delta's present-cast cards and the meters) and redraws with `npc.cast` / `npc.present` and with Delta's own page events; it never takes over the tab's pane. UI only: prompts, queries, state and the standalone engine are unchanged. Story Block testkit re-synced to v2 head.
 - Queries `npc.present`, `npc.known`, `npc.dossier({ name })` and `npc.portrait({ name })` (the portrait Delta shows, as a safe `data:` image, `https:` or same-origin URL, or null).
 - With Story Block v2 (`apiVersion: 2`) Delta adds none of v1's Story Block tabs, Story Suite announcement or overlay button; with Story Block 1 or none, nothing changes.
 - The package ships `src/storysuite-v2.js`.

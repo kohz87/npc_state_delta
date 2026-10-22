@@ -16,7 +16,11 @@
 //   random     a command type, or { type, payload }: shows Random (payload defaults to the draft)
 //   onDone     (result) → called with the command or commit result after a success
 //   onClose    (result | null) → called whenever the dialog closes
-// → handle { el, draft, step(), stepCount(), next(), back(), submit(), random(), accept(), close(), closed }
+// → handle { el, draft, step(), stepCount(), next(), back(), submit(), random(), accept(), close(), closed },
+//   or null when there is no such screen to show (no module, pack or card has it, or its feature is off,
+//   MODULES §F100): nothing opens, as on a page with no dialogs. A screen that is there but cannot be
+//   drawn still opens, with the reason in its body.
+// The mount also has closeWhere(test): closes each open dialog whose screen id passes `test`.
 
 import { button, documentOf, drawScreen, headIndexOf, headState, icon, make, plainCopy } from './common.js';
 
@@ -61,6 +65,7 @@ export function createDialogMount(deps) {
 
     function mount(el, screenId, opts = {}) {
         const resolved = deps.screens.resolve(screenId);
+        if (!resolved) return null;
         const screen = resolved?.screen ?? null;
         const steps = screen?.steps?.length ? screen.steps : [null];
         const draft = plainCopy(opts.draft ?? {});
@@ -296,5 +301,7 @@ export function createDialogMount(deps) {
         open: (screenId, opts = {}) => mount(deps.container?.() ?? doc.body, screenId, opts),
         current: () => open[open.length - 1] ?? null,
         closeAll() { [...open].reverse().forEach(handle => handle.close()); },
+        /** Closes each open dialog whose screen id passes `test(screenId)` (topmost first). */
+        closeWhere(test) { [...open].reverse().filter(handle => test(handle.screenId)).forEach(handle => handle.close()); },
     };
 }

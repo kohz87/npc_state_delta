@@ -52,6 +52,7 @@ export function renderInventoryTab(el, view, api, { currency = DEFAULT_CURRENCY 
             row.append(make(doc, 'span', 'ss-inv-name', item.name));
             if (item.qty !== 1) row.append(make(doc, 'span', 'ss-inv-qty', `×${item.qty}`));
             row.append(make(doc, 'span', 'ss-inv-rarity', item.rarity));
+            if (item.key) row.append(make(doc, 'span', 'ss-inv-key', 'key item'));
             if (item.equipped) row.append(make(doc, 'span', 'ss-inv-equipped', `equipped: ${item.equipped}`));
             if (item.owner !== 'party') row.append(make(doc, 'span', 'ss-inv-owner', ownerName(state, item.owner)));
             if (item.note) row.append(make(doc, 'div', 'ss-inv-note', item.note));

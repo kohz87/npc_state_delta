@@ -89,7 +89,8 @@ export function sharedPrefix(a, b) {
 /**
  * The fake. `options`: { chat?: Message[] (default: one greeting), greeting?, chatId?,
  * mainApi? ('openai' = chat completion, anything else = text completion), mainPrompt? (false:
- * the preset has no Main Prompt), interceptorName?, extensionSettings?, user?, char? }.
+ * the preset has no Main Prompt), interceptorName?, extensionSettings?, user?, char?, contextSize? (what the
+ * interceptor is handed: SillyTavern's context size less the reply's length; default 8192) }.
  * Returns the fake (see the returned object's comments); `fake.ctx` is what getContext() gives.
  */
 export function createFakeContext(options = {}) {
@@ -100,6 +101,7 @@ export function createFakeContext(options = {}) {
         mainPrompt = true,
         interceptorName = 'storyBlockGenerationInterceptor',
         extensionSettings = {},
+        contextSize = 8192,
         user = 'You',
         char = 'Narrator',
     } = options;
@@ -118,6 +120,8 @@ export function createFakeContext(options = {}) {
         failSaves: 0,
         /** Set to use this function as the interceptor (else globalThis[interceptorName]). */
         interceptor: null,
+        /** The context size the interceptor is handed (set it to try a small context). */
+        contextSize,
         mainPrompt,
         eventSource,
     };
@@ -238,7 +242,7 @@ export function createFakeContext(options = {}) {
             // An interceptor may stop the generation (SillyTavern's abort argument): nothing is sent.
             // A dry run runs none (SillyTavern 1.19's Generate: `if (!dryRun) runGenerationInterceptors`).
             let aborted = false;
-            if (typeof interceptor === 'function' && !dryRun) await interceptor(clone(ctx.chat), 8192, () => { aborted = true; }, type);
+            if (typeof interceptor === 'function' && !dryRun) await interceptor(clone(ctx.chat), fake.contextSize, () => { aborted = true; }, type);
             if (aborted) {
                 await emit(EVENT_TYPES.GENERATION_STOPPED);
                 return { request: null, reply: '', index: -1, aborted: true };

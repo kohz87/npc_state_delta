@@ -276,6 +276,21 @@
     display: none;
 }
 
+/* A strip wider than the screen (a phone): it scrolls sideways, and the side with more fades, a shorter
+   fade than the navigation's since the strip is one thin line (scroll-cue.js sets data-ss-more). */
+.ss-hud[data-ss-more="end"] {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--ss-hud-fade, 24px)), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - var(--ss-hud-fade, 24px)), transparent);
+}
+.ss-hud[data-ss-more="start"] {
+    -webkit-mask-image: linear-gradient(to left, #000 calc(100% - var(--ss-hud-fade, 24px)), transparent);
+    mask-image: linear-gradient(to left, #000 calc(100% - var(--ss-hud-fade, 24px)), transparent);
+}
+.ss-hud[data-ss-more="both"] {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--ss-hud-fade, 24px), #000 calc(100% - var(--ss-hud-fade, 24px)), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 var(--ss-hud-fade, 24px), #000 calc(100% - var(--ss-hud-fade, 24px)), transparent);
+}
+
 .ss-hud[hidden],
 .ss-hud-empty {
     display: none;

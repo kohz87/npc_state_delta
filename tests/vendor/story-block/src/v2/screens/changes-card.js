@@ -1,7 +1,8 @@
 // `story-block/changes-card` (SPEC §13.1, §13.4): the inline card under a reply, "Changed this reply".
 // The card mount gives it **that reply's** state and the JSON Pointers that reply's ops touched, so the
 // template lists only what `changed()` says moved: the stacks touched (with what is held now), the
-// wallet, the place and who is present.
+// wallet, the place and who is present, and the loot the reply laid out (`? loot`) as chips to tick
+// with a "Take selected" button (`inventory.lootTake`; once taken, "Taken.").
 //
 // The card's collapsed header is one line from the mount's `summary` hook. `changesSummary` (below)
 // writes it from the reply's state and the state before it, so it can say what was gained and lost:
@@ -45,6 +46,18 @@ const TEMPLATE = `
       <span data-if="len(state.scene.present) == 0">${html(C.nobodyNow)}</span>
     </li>
   </ul>
+  <div class="loot" data-each="state.inventory.loot as o, sid" data-if="changed(o)">
+    <p class="loot-head"><i class="fa-solid fa-sack-dollar" aria-hidden="true"></i> <b>${html(C.loot)}</b><span class="where" data-if="o.where"> — {{ o.where }}</span></p>
+    <div class="offer" data-if="state.meta.claims[o.claim] != true">
+      <div class="chips">
+        <label class="chip pick" data-each="o.items as it, i"><input type="checkbox" data-draft="pick" value="{{ i }}"> <span>{{ it.name }}</span><span class="n" data-if="it.qty != 1"> ×{{ it.qty }}</span></label>
+      </div>
+      <p class="hint muted">${html(C.lootPick)}</p>
+      <button class="btn take" data-command="inventory.lootTake" data-payload='{"sid":"{{ sid }}","pick":{{ draft.pick }}}'
+              title="${html(C.lootTakeTitle)}"><i class="fa-solid fa-hand" aria-hidden="true"></i> ${html(C.lootTake)}</button>
+    </div>
+    <p class="taken muted" data-if="state.meta.claims[o.claim] == true">${html(C.lootTaken)}</p>
+  </div>
   <p class="none muted" data-if="!changed('state.inventory') && !changed('state.scene')">${html(C.nothing)}</p>
   <ul class="refused" data-if="len(refused) > 0">
     <li class="line" data-each="refused as r">
@@ -64,6 +77,15 @@ const CSS = `${BASE_CSS}
 .coin > span, .place > span, .present > span { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
 .name { font-weight: 600; }
 .none { margin: 0; }
+.loot { margin-top: 4px; padding-top: 4px; border-top: 1px dashed var(--sb-border); display: grid; gap: 4px; }
+.loot-head { margin: 0; }
+.loot .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.loot .pick { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; padding: 1px 8px; border-radius: 999px;
+              border: 1px solid var(--sb-border); background: var(--sb-surface); }
+.loot .pick:has(input:checked) { border-color: var(--sb-accent); color: var(--sb-accent); }
+.loot .pick input { width: 1em; height: 1em; min-width: 0; margin: 0; accent-color: var(--sb-accent); }
+.loot .hint, .loot .taken { margin: 0; font-size: 0.9em; }
+.loot .take { justify-self: start; }
 .refused { display: grid; gap: 2px; margin-top: 4px; padding-top: 4px; border-top: 1px dashed var(--sb-border);
            color: var(--sb-em); opacity: 0.75; font-size: 0.95em; }
 .refused .line { flex-wrap: nowrap; }
@@ -92,6 +114,7 @@ const STACK = /^\/domains\/inventory\/stacks\/([^/]+)/;
 const WALLETS = /^\/domains\/inventory\/wallets(\/|$)/;
 const PLACE = /^\/domains\/scene\/place(\/|$)|^\/domains\/scene$/;
 const PRESENT = /^\/domains\/scene\/present(\/|$)|^\/domains\/scene$/;
+const LOOT = /^\/domains\/inventory\/loot(?:\/([^/]+))?$/;
 const MAX_ITEMS = 3;
 
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -135,7 +158,7 @@ function defName(def, ...states) {
  */
 export function changesDigest({ state = null, before = null, changes = [] } = {}) {
     const paths = (Array.isArray(changes) ? changes : [...(changes ?? [])]).filter(path => typeof path === 'string');
-    const digest = { gained: [], lost: [], held: [], coin: null, coinNow: null, place: null, arrived: [], left: [], presentNow: null, other: false };
+    const digest = { gained: [], lost: [], held: [], coin: null, coinNow: null, place: null, arrived: [], left: [], presentNow: null, other: false, loot: 0 };
     const touched = test => paths.some(path => test.test(path));
     const known = isRecord(before);
 
@@ -161,6 +184,16 @@ export function changesDigest({ state = null, before = null, changes = [] } = {}
             if (touched(WALLETS)) digest.coinNow = coinOf(state);
         }
     }
+    // Loot laid out by this reply (`? loot`): how many things its offer holds.
+    const offers = isRecord(inventoryOf(state).loot) ? inventoryOf(state).loot : {};
+    const laid = new Set();
+    for (const path of paths) {
+        const m = LOOT.exec(path);
+        if (!m) continue;
+        if (m[1]) laid.add(m[1].replace(/~1/g, '/').replace(/~0/g, '~'));
+        else Object.keys(offers).forEach(key => laid.add(key));
+    }
+    for (const key of laid) if (isRecord(offers[key]?.items)) digest.loot += Object.keys(offers[key].items).length;
     if (touched(PLACE)) {
         const name = placeName(state);
         if (!known || name !== placeName(before)) digest.place = name;
@@ -214,6 +247,7 @@ export function changesSummary({ state = null, before = null, changes = [], curr
     if (d.arrived.length) parts.push(fill(T.arrived, { names: people(d.arrived) }));
     if (d.left.length) parts.push(fill(T.left, { names: people(d.left) }));
     if (d.presentNow) parts.push(d.presentNow.length ? fill(T.here, { names: people(d.presentNow) }) : T.nobody);
+    if (d.loot > 0) parts.push(d.loot === 1 ? T.lootOne : fill(T.lootMany, { n: d.loot }));
     const count = Number.isSafeInteger(refused) && refused > 0 ? refused : 0;
     const notApplied = count === 0 ? null : count === 1 ? T.refusedOne : fill(T.refusedMany, { n: count });
     if (parts.length) return [...parts, ...(notApplied ? [notApplied] : [])].join(' · ');

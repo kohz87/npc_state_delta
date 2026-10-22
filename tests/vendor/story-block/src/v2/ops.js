@@ -374,6 +374,14 @@ function scratchOps(state, ops, scratchOf) {
         if (!shadow.has(root)) shadow.set(root, { value: clone(valueAt(state, root)) });
         const held = shadow.get(root);
         const keys = parsePath(op.path).slice(3);
+        // A list inside a scratch field is not fitted (fix-fuzz150): an append (`/-`) or a position in it
+        // applies as written, as anywhere else. Fitted, the list was made an object and the append a key
+        // named "-", and a remove of a list item was dropped, live as well as on replay.
+        if (keys.length && throughList(held.value, keys)) {
+            try { held.value = apply({ v: held.value }, [{ ...op, path: `/v${op.path.slice(root.length)}` }]).v; } catch { /* its block fails as written */ }
+            out.push(op);
+            continue;
+        }
         if (!keys.length) {
             if (op.op === 'remove') {
                 if (held.value === undefined) continue;
@@ -408,6 +416,19 @@ function scratchOps(state, ops, scratchOf) {
         node[last] = clone(op.value);
     }
     return out;
+}
+
+// True when the path `keys` (inside a scratch field holding `value`) ends in an append (`-`) or goes
+// into a list that is there.
+function throughList(value, keys) {
+    if (keys.at(-1) === '-') return true;
+    let node = value;
+    for (const key of keys) {
+        if (Array.isArray(node)) return true;
+        if (!isPlainObject(node) || !Object.hasOwn(node, key)) return false;
+        node = node[key];
+    }
+    return false;
 }
 
 /**

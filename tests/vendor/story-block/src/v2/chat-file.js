@@ -14,8 +14,10 @@
 //   where()                          → place | null: the open chat's file ({ chatId, name, avatar } or
 //                                      { chatId, group }), null where this page has no such file (no
 //                                      SillyTavern, a temporary chat): the caller falls back to ctx.saveChat.
-//   write(place, messages, metadata, { keepalive }) → Promise: the request is sent before this returns;
-//                                      rejects with a plain-words error when the server refuses it.
+//   write(place, messages, metadata, { keepalive, signal }) → Promise: the request is sent before this
+//                                      returns; rejects with a plain-words error when the server refuses
+//                                      it. `signal` (an AbortSignal) gives the request up (persist.js
+//                                      createSaver's timeout).
 //   read(place)                      → Promise<[header, ...messages]>: the file as the server has it.
 
 const SAVE = { character: '/api/chats/save', group: '/api/chats/group/save' };
@@ -37,7 +39,7 @@ export function createChatFile({ context, fetch = (...args) => globalThis.fetch(
         return { chatId, name: String(character.name ?? ''), avatar: character.avatar };
     }
 
-    function post(url, body, { keepalive = false } = {}) {
+    function post(url, body, { keepalive = false, signal = null } = {}) {
         const text = JSON.stringify(body);
         return fetch(url, {
             method: 'POST',
@@ -45,6 +47,7 @@ export function createChatFile({ context, fetch = (...args) => globalThis.fetch(
             cache: 'no-cache',
             body: text,
             ...(keepalive && text.length <= KEEPALIVE_MAX ? { keepalive: true } : {}),
+            ...(signal ? { signal } : {}),
         });
     }
 

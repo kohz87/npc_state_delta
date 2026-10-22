@@ -26,6 +26,7 @@ export const FEATURE_TEXT = Object.freeze({
     classifier: Object.freeze({
         label: 'Roll checks before the reply',
         describe: 'One small extra model call per message: when you try something risky, the check is rolled first and the reply tells how it went.',
+        needs: 'Needs a module that keeps checks, like RPG Battle.',
     }),
     extractor: Object.freeze({
         label: 'Read changes from replies that forgot them',

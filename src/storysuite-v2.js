@@ -3,7 +3,7 @@
 // NPC State Delta stays a standalone engine: its storage, capture, prompts and history rules are
 // its own and nothing here changes them. When a Story Block v2 host is on the page, Delta also
 // registers as module `npc-state-delta` with read-only queries, a Cast tab that shows Delta's own
-// present-cast cards, and a settings section that carries Delta's own settings panel into the Story
+// present-cast cards (and the same Cast as a screen in Story Block's game view), and a settings section that carries Delta's own settings panel into the Story
 // Suite overlay. It also owns one small domain, `npc` (src/npc-meters.js; F81, F90): each NPC's
 // meters, stages and unlocked hidden notes in the per-reply state, so they swipe and delete back
 // with the replies. While hosted that slice is the truth for meter values: index.js reads it back
@@ -40,6 +40,15 @@ import { escapeHtml } from './util/html.js';
 export const MODULE_ID = 'npc-state-delta';
 export const MODULE_NAME = 'NPC State Delta';
 export const CAST_TAB_ID = 'cast';
+/**
+ * The Cast as a game-view screen (Story Block's full-screen view lists screens, not module tabs): mount
+ * `screen` only, so the Story panel keeps its one Cast tab. Its template is one widget,
+ * CAST_WIDGET, that draws exactly what the Cast tab draws (Delta's present-cast cards and the meters).
+ */
+export const CAST_SCREEN_ID = 'npc-state-delta/cast';
+export const CAST_WIDGET = 'npc-state-delta.cast';
+// After Scene (30), before Inventory (40): Story Block's navigation order (view/screens.js DEFAULT_ORDER).
+export const CAST_SCREEN_ORDER = 35;
 export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next']);
 export const COMMAND_NAMES = Object.freeze(['npc.adjust', 'npc.set', 'npc.refresh', 'npc.milestone', 'npc.tick']);
 // The replies after which Delta takes its per-reply step (npc.tick): a new reply or a new swipe of
@@ -238,6 +247,7 @@ export function createStorySuiteV2Adapter({
     let mounted = null;          // { el, node, placeholder, drawer } while the panel is in the overlay
     let pendingSection = null;   // a section element waiting for the panel to mount
     let castEl = null;           // the last element the Cast tab rendered into
+    const castViews = new Set(); // the game view's Cast screens (CAST_WIDGET) drawn now
     let listening = false;
     let pending = null;          // the connection attempt in progress, if any
     let sectionLead = null;      // the meter presets block above Delta's panel in the settings section
@@ -605,9 +615,10 @@ export function createStorySuiteV2Adapter({
         return blocks.length ? `<div class="npc-state-delta-v2-meters"><span class="npc-state-delta-kicker">METERS</span>${blocks.join('')}</div>` : '';
     }
     // Delta's own present-cast cards (the same markup as v1's Present NPCs tab), or why it is empty.
-    function renderCast(el) {
+    // `track: false` (the game view's Cast screen) leaves castEl, the Story panel's tab pane, alone.
+    function renderCast(el, { track = true } = {}) {
         if (!el) return;
-        castEl = el;
+        if (track) castEl = el;
         bindCastActions(el);
         const api = runtime();
         let body;
@@ -637,6 +648,58 @@ export function createStorySuiteV2Adapter({
         if (drawn) return drawn.parentNode === el;
         return typeof el.__npcStateDeltaV2Cast === 'string' && el.innerHTML === el.__npcStateDeltaV2Cast;
     }
+
+    // ---- the Cast in the game view ----
+
+    // Each drawn Cast screen again (Delta's page events: a cast drawn in the chat, Delta on or off);
+    // one no longer on the page is let go.
+    function redrawCastViews() {
+        for (const box of castViews) {
+            if (box.isConnected === false) {
+                castViews.delete(box);
+                continue;
+            }
+            try { renderCast(box, { track: false }); } catch (error) { warn('Story Suite v2 Cast screen failed', error); }
+        }
+    }
+
+    // CAST_WIDGET: render(el, props, api) → { update, destroy }. Props are the screen's data (npc.cast,
+    // npc.present), passed only so the widget redraws when they change; what it draws is renderCast's.
+    const castWidget = Object.freeze({
+        props: Object.freeze({}),
+        validate: () => [],
+        render(el) {
+            const owner = el?.ownerDocument ?? doc;
+            if (typeof owner?.createElement !== 'function') return { update() {}, destroy() {} };
+            const box = owner.createElement('div');
+            box.className = 'npc-state-delta-v2-cast-view';
+            el.append(box);
+            castViews.add(box);
+            bindCastActions(box);
+            const draw = () => {
+                try { renderCast(box, { track: false }); } catch (error) { warn('Story Suite v2 Cast screen failed', error); }
+            };
+            draw();
+            return {
+                update: draw,
+                destroy() {
+                    castViews.delete(box);
+                    box.remove?.();
+                },
+            };
+        },
+    });
+
+    const castScreen = Object.freeze({
+        id: CAST_SCREEN_ID,
+        title: 'Cast',
+        icon: 'fa-masks-theater',
+        mounts: Object.freeze(['screen']),
+        order: CAST_SCREEN_ORDER,
+        data: Object.freeze({ cast: Object.freeze({ query: 'npc.cast' }), present: Object.freeze({ query: 'npc.present' }) }),
+        template: `<ss-widget name="${CAST_WIDGET}" data-props='{"cast":{{ q.cast }},"present":{{ q.present }}}'></ss-widget>`,
+        css: '.npc-state-delta-v2-cast-view { display: block; }',
+    });
 
     // ---- the meter presets (settings section) ----
 
@@ -747,7 +810,8 @@ export function createStorySuiteV2Adapter({
             schema: part.settings.schema,
             section: (el, api) => mountSection(el, presetsBlock(api)),
         },
-        screens: [metersCardScreen],
+        screens: [metersCardScreen, castScreen],
+        widgets: { [CAST_WIDGET]: castWidget },
         tabs: [{
             id: CAST_TAB_ID,
             title: 'Cast',
@@ -791,7 +855,9 @@ export function createStorySuiteV2Adapter({
         // tab only while the pane still shows it; once the reader has moved to another tab the pane
         // is let go until the host renders the Cast tab again.
         const rerender = () => {
-            if (!hosted || !castEl) return;
+            if (!hosted) return;
+            redrawCastViews();
+            if (!castEl) return;
             if (!castEl.isConnected || !castStillShown(castEl)) {
                 castEl = null;
                 return;

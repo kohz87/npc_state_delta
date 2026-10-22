@@ -13,9 +13,22 @@
 // must tell. Past half the total budget (and the first MIN_HAPPENED of them) the rest are told as one
 // counted line, "…and N more things happened." Names (`{{user}}`, `{{char}}`) are filled in before
 // anything is counted, so a long name cannot push a text past its budget. Pure: no DOM, no SillyTavern.
+//
+// The context size (final soak): SillyTavern fits the extension prompts first and drops the conversation
+// when the rest no longer fits, so Story Suite in all (static + tail) is held to a share of the room the
+// prompt has (the context size less the reply's length; `contextShare` percent, default 40). Only the
+// tail is cut for it, never below MIN_TAIL_BUDGET: the static part stays byte-identical reply to reply.
+// When the static part alone is over the share, `fit.tooSmall` says so (turn.js tells the reader).
 
 export const TAIL_ORDER = Object.freeze(['scene', 'inventory', 'party', 'combat', 'trade', 'director']);
 export const DEFAULT_TAIL_BUDGET = 1500;
+// The most of the prompt's room (percent) Story Suite's static and tail may take together, by default.
+export const DEFAULT_CONTEXT_SHARE = 40;
+export const CONTEXT_SHARE_MIN = 10;
+export const CONTEXT_SHARE_MAX = 90;
+// A tail cut for a small context keeps at least this many tokens (the [Happened] lines and the first
+// required lines are what the reply must tell).
+export const MIN_TAIL_BUDGET = 200;
 export const HAPPENED = '[Happened]';
 // [Happened] lines always kept, however long they are; the rest share half the tail budget.
 export const MIN_HAPPENED = 5;
@@ -115,22 +128,52 @@ function happenedLines(lines, budget) {
 }
 
 /**
+ * How Story Suite fits the context: `context` = { size, reply, room } (the context size the reader set, the
+ * reply's length or null, the tokens the prompt may take; turn.js contextRoom) or null when not known,
+ * `staticTokens` the static part's size, `settings` the host settings ({ tailBudget, contextShare }).
+ * → { size, reply, room, percent, share, static, budget, tooSmall } or null (no context known: the tail
+ * budget is the setting's).
+ */
+export function contextFit(context, staticTokens, settings = {}) {
+    const tail = Number.isInteger(settings?.tailBudget) && settings.tailBudget > 0 ? settings.tailBudget : DEFAULT_TAIL_BUDGET;
+    const room = Number(context?.room);
+    if (!Number.isFinite(room) || room <= 0) return null;
+    const asked = settings?.contextShare;
+    const percent = Number.isInteger(asked) ? Math.min(CONTEXT_SHARE_MAX, Math.max(CONTEXT_SHARE_MIN, asked)) : DEFAULT_CONTEXT_SHARE;
+    const share = Math.floor(room * percent / 100);
+    const budget = Math.min(tail, Math.max(MIN_TAIL_BUDGET, share - staticTokens));
+    const size = Number.isFinite(Number(context.size)) && Number(context.size) > 0 ? Math.round(Number(context.size)) : Math.round(room);
+    const reply = Number.isFinite(Number(context.reply)) && Number(context.reply) > 0 ? Math.round(Number(context.reply)) : null;
+    return { size, reply, room: Math.round(room), percent, share, static: staticTokens, budget, tooSmall: staticTokens > share };
+}
+
+/** What the reader is told when the static part alone is over the share (`fit` from contextFit). */
+export function contextNotice(fit) {
+    const n = value => Math.round(Number(value) || 0).toLocaleString('en-US');
+    return `Your context size (${n(fit?.size)} tokens) is too small for Story Suite's instructions (about ${n(fit?.static)} tokens). Raise the context size or turn features off.`;
+}
+
+/**
  * Builds both texts for the next reply.
  * - `registry`: createRegistry() result; `view`: { state, query, settings, chat } (§6).
  * - `untold`: receipts to tell (oldest first); only those with narrate !== false and a summary.
- * - `settings`: the host settings ({ tailBudget } in tokens, default 1500).
+ * - `settings`: the host settings ({ tailBudget } in tokens, default 1500; { contextShare } percent, 40).
+ * - `context` (optional): { size, reply, room } of the reader's context (contextFit); the tail is cut so
+ *   static + tail fit the share, the static part never is.
  * - `cues` (optional): { [moduleId]: string[] } extra required tail lines (beforeGenerate hooks).
  * - `substitute` (optional): text → text, run on every text before it is counted (turn.js fills in
  *   `{{user}}` and `{{char}}` with it).
  * Returns { staticText, tailText, parts: [{ module, label, place, text, tokens, dropped? }],
- * problems }. `parts` is what the What's-sent preview lists, in prompt order.
+ * problems, fit (contextFit, or null) }. `parts` is what the What's-sent preview lists, in prompt order.
  */
-export function assemble({ registry, view, untold = [], settings = {}, cues = {}, substitute = null }) {
+export function assemble({ registry, view, untold = [], settings = {}, cues = {}, substitute = null, context = null }) {
     const problems = [];
     const fill = typeof substitute === 'function' ? text => String(substitute(text) ?? '') : text => text;
     const statics = staticParts(registry, problems).map(part => ({ ...part, text: fill(part.text) }));
     const staticText = statics.map(part => part.text).join('\n\n');
-    const total = Number.isInteger(settings?.tailBudget) && settings.tailBudget > 0 ? settings.tailBudget : DEFAULT_TAIL_BUDGET;
+    const fitted = contextFit(context, estimateTokens(staticText), settings);
+    const total = fitted ? fitted.budget
+        : Number.isInteger(settings?.tailBudget) && settings.tailBudget > 0 ? settings.tailBudget : DEFAULT_TAIL_BUDGET;
 
     const happened = untold
         .filter(receipt => receipt && receipt.narrate !== false && typeof receipt.summary === 'string' && receipt.summary.trim())
@@ -173,5 +216,5 @@ export function assemble({ registry, view, untold = [], settings = {}, cues = {}
             .filter(part => part.text || part.dropped),
     ];
     const parts = [...statics, ...tailParts].map(part => ({ ...part, tokens: estimateTokens(part.text) }));
-    return { staticText, tailText: tailText(), parts, problems };
+    return { staticText, tailText: tailText(), parts, problems, fit: fitted };
 }

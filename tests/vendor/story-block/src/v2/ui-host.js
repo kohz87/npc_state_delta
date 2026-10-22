@@ -15,14 +15,19 @@
 // * The tab panel: the tab host (src/v2/host-ui.js) with every module tab and every `tab` screen, a
 //   side sheet on wide screens and a bottom sheet on phones. Redrawn from the head on every change.
 // * The Story Block drawer in Extensions: version, modules, the same buttons.
-// * The wand menu: Story Suite (the overlay).
+// * The wand menu: Story Suite (the overlay). The overlay's prompt size counts what the next reply would
+//   be sent (turn.preview) with SillyTavern's tokenizer when there is one; `openSettings({ fold })` opens
+//   it at one fold (Home's "Import a pack" → the Packs fold, while no pack is installed).
 // * The five mounts (SPEC §13.4) over the screen registry, drawn by the layout renderer (and the
-//   template renderer when it is in this checkout), with the standard and module widgets.
+//   template renderer when it is in this checkout), with the standard and module widgets, and the
+//   host's own two that need the store and the chat: `story-block.inspector` (the Inspector screen,
+//   MODULES §F92; feature `story-block.inspector`, off by default) and `story-block.savepoints` (the
+//   save points on Home, §F93; feature `story-block.savepoints`, on).
 //
 // Every text is set with textContent; nothing a module or a pack wrote becomes markup here. The texts are
 // in src/v2/strings.js.
 
-import { createTabHost, openSettingsOverlay } from './host-ui.js';
+import { PACKS_FOLD, createTabHost, openSettingsOverlay } from './host-ui.js';
 import { mountQuery } from './sdk.js';
 import { createMounts } from './view/mounts/index.js';
 import { createScreenRenderer } from './view/render-screen.js';
@@ -33,6 +38,12 @@ import { createReplyNotes } from './reply-notes.js';
 import { STRINGS, fill } from './strings.js';
 import { readRecord } from './persist.js';
 import { CORE_FEATURE } from './features.js';
+import { createInspectorSource } from './inspect.js';
+import { createSavePoints } from './rewind.js';
+import { createInspectorWidget, INSPECTOR_WIDGET } from './screens/inspector.js';
+import { createSavePointsWidget, SAVEPOINTS_WIDGET } from './screens/savepoints.js';
+import { createPacksHintWidget, PACKS_HINT_WIDGET } from './screens/packs-hint.js';
+import { createReadyHintWidget, READY_HINT_WIDGET } from './screens/ready-hint.js';
 
 const IDS = Object.freeze({ bar: 'story_suite_v2_bar', panel: 'story_suite_v2_panel', drawer: 'story_suite_v2_drawer', menu: 'story_suite_v2_menu' });
 
@@ -102,7 +113,7 @@ function readerStore(ctx) {
 /**
  * mountUi({ runtime, ctx, doc?, version? }) → { refresh(), blocked(reason, moduleId), clearBlocked(),
  * openPanel(), closePanel(), openSettings(), toggleGameView(), setHud(on), hudOn(), screens, mounts,
- * renderer, notes, syncScreens(), destroy() }.
+ * renderer, notes, savePoints, inspector, syncScreens(), destroy() }.
  * Re-read uses `sdk.reread(index)` (or `runtime.turn.reread(index)`) when the runtime has one.
  */
 export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' }) {
@@ -113,12 +124,51 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
     const queryAt = (name, args, state) => (registry.query(name) ? runAt(name, args, state) : null);
     // A widget whose feature is off draws nothing (instead of "there is no widget called …").
     const hiddenWidget = Object.freeze({ render: el => { el.hidden = true; return null; } });
-    const widgets = () => Object.fromEntries([
-        ...(registry.widgetsOff?.() ?? []).map(name => [name, { ...hiddenWidget, name }]),
-        ...registry.widgets().map(widget => [widget.name, widget]),
-    ]);
+    // The host's own two (the Inspector, the save points) after the modules' ones; each checks its
+    // feature itself (the Inspector's screen is left out while it is off, the save points draw nothing).
+    const widgets = () => ({
+        ...Object.fromEntries([
+            ...(registry.widgetsOff?.() ?? []).map(name => [name, { ...hiddenWidget, name }]),
+            ...registry.widgets().map(widget => [widget.name, widget]),
+        ]),
+        ...hostWidgets,
+    });
     // A feature of a module that is not here (a runtime without Story Block's core) counts as on.
     const coreOn = id => (registry.feature?.(id) ? registry.featureOn(id) : true);
+    // The host's own widgets: the Inspector (over the store's replay) and the save points (over the chat).
+    const liveCtx = () => globalThis.SillyTavern?.getContext?.() ?? ctx;
+    const savePoints = createSavePoints({ ctx, store, live: liveCtx, ...(runtime.createBranch ? { createBranch: runtime.createBranch } : {}) });
+    const inspector = createInspectorSource({
+        store,
+        chat: () => ctx.chat ?? [],
+        chatId: () => (typeof ctx.getCurrentChatId === 'function' ? ctx.getCurrentChatId() : ctx.chatId),
+        problems: index => inspectorProblems(index),
+    });
+    const hostWidgets = {
+        [INSPECTOR_WIDGET]: createInspectorWidget(inspector, { enabled: () => coreOn(CORE_FEATURE.inspector) }),
+        [SAVEPOINTS_WIDGET]: createSavePointsWidget({
+            points: savePoints,
+            enabled: () => coreOn(CORE_FEATURE.savepoints),
+            notify: text => globalThis.toastr?.warning?.(text, S.savepoints.title),
+        }),
+        // Home's "Before you start" while a module's canGenerate holds the story back (MODULES §F12).
+        [READY_HINT_WIDGET]: createReadyHintWidget({
+            blockers: () => (typeof runtime.turn?.blockers === 'function' ? runtime.turn.blockers() : []),
+            unblock: (moduleId, reason) => runtime.turn?.unblock?.(moduleId, reason) ?? false,
+        }),
+        // Home's "Import a pack" while no pack is installed: the settings, open at the Packs fold.
+        [PACKS_HINT_WIDGET]: createPacksHintWidget({
+            list: () => {
+                if (typeof runtime.packs?.packs?.list === 'function') return runtime.packs.packs.list();
+                try { return registry.query('packs.list') ? sdk.query('packs.list') ?? [] : null; } catch { return null; }
+            },
+            subscribe: fn => runtime.packs?.packs?.subscribe?.(fn) ?? null,
+            open: () => {
+                mounts.screen.close?.();
+                openSettings({ fold: PACKS_FOLD });
+            },
+        }),
+    };
     const renderer = createScreenRenderer({
         queryAt,
         widgets,
@@ -181,7 +231,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         on: (name, fn) => sdk.on(name, fn),
         rewind: options => sdk.rewind(options),
         substitute: text => sdk.substitute(text),
-        dialog: Object.freeze({ open: (screenId, opts) => sdk.dialog.open(screenId, opts) }),
+        dialog: Object.freeze({ open: (screenId, opts) => sdk.dialog.open(screenId, opts), current: () => sdk.dialog.current?.() ?? null }),
     });
     const carriers = () => (ctx.chat ?? []).map((message, index) => (message && !message.is_user ? index : -1)).filter(index => index >= 0);
     // Cards go under replies with a story record of their own; never under the greeting (every message
@@ -199,8 +249,28 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         extractorOn: () => {
             try { return typeof sdk.feature === 'function' ? sdk.feature(CORE_FEATURE.extractor) : sdk.settings('story-block')?.assistExtractor === true; } catch { return false; }
         },
+        // The extractor ran on reply `index` (this swipe, this chat) and its call failed: the note shows.
+        extractorFailed: (index, swipe) => {
+            try {
+                const chat = String(ctx.getCurrentChatId?.() ?? ctx.chatId ?? '');
+                const runs = sdk.query('assist.status')?.runs ?? [];
+                const last = runs.findLast(run => run?.helper === 'extractor' && run.index === index && run.swipe === swipe && (run.chat ?? '') === chat);
+                return last?.outcome === 'failed' || last?.outcome === 'timeout';
+            } catch { return false; }
+        },
         onChanged: index => mounts?.card?.refresh?.(index, { force: true }),
     });
+    // What the Inspector lists as a reply's problems: blocks its replay skipped, and what the turn met
+    // reading it in this session (change lines not used, with why); the refused lines the notes keep
+    // stand in when the turn's list has nothing for that reply.
+    function inspectorProblems(index) {
+        const out = [];
+        for (const item of store.problems?.() ?? []) if (item.index === index) out.push({ code: item.code ?? 'SKIPPED', message: item.message });
+        const told = (runtime.turn?.problems?.() ?? []).filter(item => item?.index === index);
+        for (const item of told) out.push({ code: item.code ?? '', message: item.line ? `"${item.line}": ${item.message}` : item.message });
+        if (!told.length) for (const item of notes.refusedAt(index)) out.push({ code: 'REFUSED', message: item.reason ? `"${item.line}": ${item.reason}` : `"${item.line}"` });
+        return out;
+    }
     // A card's scope also gets `refused`: that reply's change lines the code did not apply.
     const drawScreen = renderer.render;
     renderer.render = (el, screen, scope) => drawScreen(el, screen, scope?.mount === 'card' ? { ...scope, refused: notes.refusedAt(scope.index) } : scope);
@@ -242,7 +312,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         },
         document: doc,
     });
-    runtime.setDialog?.((screenId, opts) => mounts.dialog.open(screenId, opts));
+    runtime.setDialog?.((screenId, opts) => mounts.dialog.open(screenId, opts), () => mounts.dialog.current?.() ?? null);
     // The tab host sees the module tabs and the tab screens as one list, in navigation order (Home's
     // neighbours first: Party, Quests, Scene, Inventory, Map, then the rest; a tab's `order` moves it).
     const tabSource = { tabs: () => byNavOrder([...registry.tabs(), ...extraTabs.map(tab => ({ ...tab, moduleId: 'screens' }))]) };
@@ -274,7 +344,25 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
     }
     panelClose.addEventListener('click', closePanel);
 
-    const openSettings = () => openSettingsOverlay({ registry, settings, doc, sdk, features: runtime.features ?? null });
+    // The settings overlay. Its prompt size is what the next ordinary reply would be sent (turn.preview:
+    // built on demand, never sent, nothing changed), counted with SillyTavern's tokenizer when the context
+    // has one; it is counted again when a feature flips or the story moves while the overlay is open.
+    let overlay = null;
+    const countTokens = () => {
+        const live = liveCtx();
+        return typeof live?.getTokenCountAsync === 'function' ? text => live.getTokenCountAsync(text) : null;
+    };
+    function openSettings(options = null) {
+        const fold = typeof options?.fold === 'string' ? options.fold : null;
+        overlay = openSettingsOverlay({
+            registry, settings, doc, sdk, features: runtime.features ?? null, fold,
+            promptParts: typeof runtime.turn?.previewFit === 'function' ? () => runtime.turn.previewFit()
+                : typeof runtime.turn?.preview === 'function' ? () => runtime.turn.preview() : null,
+            countTokens: countTokens(),
+            onClose: () => { overlay = null; },
+        });
+        return overlay;
+    }
 
     // ---- the bar above the message box ------------------------------------------------------
     const bar = el(doc, 'div', 'story-suite-bar');
@@ -294,7 +382,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
     bar.append(storyButton, gameButton, settingsButton, notice);
     storyButton.addEventListener('click', () => (panel.hidden ? openPanel() : closePanel()));
     gameButton.addEventListener('click', () => mounts.screen.open(HOME_SCREEN_ID));
-    settingsButton.addEventListener('click', openSettings);
+    settingsButton.addEventListener('click', () => openSettings());
     noticeClose.addEventListener('click', () => clearBlocked());
 
     // Alt+G: the game view, open or closed (MODULES §F53). The bar button stays the visible way in.
@@ -335,7 +423,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         const buttons = el(doc, 'div', 'story-suite-drawer-buttons');
         const one = iconButton(doc, '', 'fa-sliders', S.drawer.settings);
         const two = iconButton(doc, '', 'fa-book-open', S.drawer.panel);
-        one.addEventListener('click', openSettings);
+        one.addEventListener('click', () => openSettings());
         two.addEventListener('click', openPanel);
         buttons.append(one, two);
         // The status strip's switch (on by default, MODULES §F54).
@@ -358,20 +446,23 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         item.id = IDS.menu;
         item.tabIndex = 0;
         item.append(el(doc, 'div', 'fa-solid fa-sliders extensionsMenuExtensionButton'), el(doc, 'span', '', S.menu.suite));
-        item.addEventListener('click', openSettings);
+        item.addEventListener('click', () => openSettings());
         host.appendChild(item);
     }
     drawer();
     menu();
 
     // ---- the canGenerate notice ------------------------------------------------------------
+    let blockedBy = null;
     function blocked(reason, moduleId) {
+        blockedBy = moduleId ?? null;
         const name = registry.module(moduleId)?.name ?? moduleId ?? S.bar.label;
         noticeText.textContent = fill(S.bar.blocked, { module: name, reason });
         notice.hidden = false;
         bar.classList.add('story-suite-bar-blocked');
     }
     function clearBlocked() {
+        blockedBy = null;
         notice.hidden = true;
         noticeText.textContent = '';
         bar.classList.remove('story-suite-bar-blocked');
@@ -413,10 +504,23 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
     const offs = [];
     for (const name of ['head', 'committed']) offs.push(events.on(name, () => { if (!panel.hidden) tabHost?.refresh(); }));
     // A feature turned on or off: its screens, tabs, widgets and cards come and go; nothing else changes.
+    for (const name of ['head', 'committed', 'turn']) offs.push(events.on(name, () => overlay?.refreshSize?.()));
     offs.push(events.on('feature', () => {
+        // The overlay draws the switch and the fields of that feature again, and the prompt size.
+        overlay?.refresh?.();
         syncScreens();
+        // A dialog open on a screen that is gone now closes: its controls belong to a part turned off.
+        mounts.dialog?.closeWhere?.(screenId => !screens.resolve(screenId));
         refresh();
         mounts.card?.refreshAll?.({ force: true });
+    }));
+    // The notice goes once the module that held the story back no longer does (the character was made).
+    offs.push(events.on('committed', async () => {
+        if (!blockedBy || typeof runtime.turn?.blockers !== 'function') return;
+        const was = blockedBy;
+        let still = true;
+        try { still = (await runtime.turn.blockers()).some(entry => entry.moduleId === was); } catch { still = true; }
+        if (!still && blockedBy === was) clearBlocked();
     }));
     offs.push(events.on('turn', done => {
         clearBlocked();
@@ -444,7 +548,10 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         mounts,
         renderer,
         notes,
+        savePoints,
+        inspector,
         destroy() {
+            overlay?.close?.();
             doc.removeEventListener?.('keydown', onKey);
             offs.splice(0).forEach(off => off?.());
             notes.destroy();
