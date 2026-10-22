@@ -186,15 +186,16 @@ export const mountQuery = (registry, receipts = () => []) => (name, args, state)
 /**
  * What modules read (§6): { state (frozen head), query(name, args), settings(id), feature(id), chat:
  * { length, lastUser } }. `chat`: SillyTavern's chat array (or nothing). `feature(id)`: whether the
- * reader has that feature on (MODULES §F100); false for an id no module declares.
+ * reader has that feature on (MODULES §F100); false for an id no module declares. `state` and `reply`
+ * (optional): another state than the head and the reply it stands for (`tools.reply`), for a Re-read's
+ * afterCapture hook, which reads the reply's state after its new story lines (turn.js).
  */
-export function makeView({ store, registry, settings, chat = [] }) {
-    const state = store.head();
+export function makeView({ store, registry, settings, chat = [], state = store.head(), reply = headReply(store) }) {
     const messages = Array.isArray(chat) ? chat : [];
     const lastUser = [...messages].reverse().find(message => message?.is_user);
     return Object.freeze({
         state,
-        query: (name, args) => runQuery(registry, state, name, args, { receipts: () => store.receipts?.() ?? [], reply: headReply(store) }),
+        query: (name, args) => runQuery(registry, state, name, args, { receipts: () => store.receipts?.() ?? [], reply }),
         settings,
         feature: id => featureOn(registry, id),
         chat: Object.freeze({ length: messages.length, lastUser: String(lastUser?.mes ?? '') }),

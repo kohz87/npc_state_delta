@@ -390,7 +390,7 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
     }
 
     // Runs one command against `head` and returns { ok, ops, receipt, state } without storing anything.
-    function transact(head, type, payload, { cause, seed: seedValue, receiptId, capture, carrier = null, chat = null, again = false, standing = null }) {
+    function transact(head, type, payload, { cause, seed: seedValue, receiptId, capture, carrier = null, chat = null, again = false, standing = null, reply = null }) {
         let tx = null;
         try {
             if (!CAUSES.includes(cause)) fail('INVALID', `"${cause}" is not a cause (ui, story or system).`);
@@ -412,7 +412,9 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
                 standing: cause === 'story' && isRecord(standing) ? (isDeepFrozen(standing) ? standing : deepFreeze(clone(standing))) : null,
                 drafts: new Map(), meta: null, failure: null, closed: false, absolute: new Set(), within: new Set(),
             };
-            tx.reply = tx.carrier ? replyOf(tx.carrier.index, tx.carrier.sid ?? tx.carrier.key) : headReply(store);
+            // `reply` (run, a system step only): the reply a Re-read's step is kept on, which need not be the head.
+            const given = cause === 'system' && isRecord(reply) ? replyOf(reply.index, reply.sid) : null;
+            tx.reply = tx.carrier ? replyOf(tx.carrier.index, tx.carrier.sid ?? tx.carrier.key) : given ?? headReply(store);
             const out = invoke(tx, type, target, payload, 0);
             if (tx.failure) throw tx.failure;
             const { summary, narrate, data, problem, replan } = resultOf(type, out, cause);
@@ -561,10 +563,11 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
          * { moduleId, apply } runs that capture handler as command `type`; `carrier` ({ index, swipe, sid? })
          * and `chat` ({ lastUser, reply }) become ctx.carrier and ctx.chat. `again` (story only): a Re-read
          * of a line that made a change before, run with its features as on (C3-4). `standing` (story only): a
-         * Re-read's reply state as it stood before it, ctx.standing (a2-3).
+         * Re-read's reply state as it stood before it, ctx.standing (a2-3). `reply` ({ index, sid }, system only):
+         * ctx.reply for a step kept on a reply that is not the head (a Re-read's afterCapture and replan steps).
          */
-        run(type, payload, { cause = 'story', seed: seedValue, state, capture, carrier = null, chat = null, again = false, standing = null } = {}) {
-            return guarded(() => transact(state ?? store.head(), type, payload, { ...fresh(cause, seedValue), capture, carrier, chat, again: again === true && cause === 'story', standing }));
+        run(type, payload, { cause = 'story', seed: seedValue, state, capture, carrier = null, chat = null, again = false, standing = null, reply = null } = {}) {
+            return guarded(() => transact(state ?? store.head(), type, payload, { ...fresh(cause, seedValue), capture, carrier, chat, again: again === true && cause === 'story', standing, reply }));
         },
     };
 }
