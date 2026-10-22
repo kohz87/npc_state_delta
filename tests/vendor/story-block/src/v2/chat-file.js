@@ -22,8 +22,23 @@
 
 const SAVE = { character: '/api/chats/save', group: '/api/chats/group/save' };
 const GET = { character: '/api/chats/get', group: '/api/chats/group/get' };
-// Browsers send a keepalive request (one that outlives the page) only up to 64 KiB.
+// Browsers send a keepalive request (one that outlives the page) only up to 64 KiB of body, counted in
+// bytes as sent (UTF-8), not in characters: a chat in Japanese or with emoji is 2-4 bytes a character
+// (B-a3-1). Kept under 64 KiB for the headers and other keepalive requests on their way.
 export const KEEPALIVE_MAX = 60 * 1024;
+
+const encoder = typeof TextEncoder === 'function' ? new TextEncoder() : null;
+/** The length of `text` in UTF-8 bytes, what the browser's keepalive limit counts. */
+export function utf8Bytes(text) {
+    const value = String(text ?? '');
+    if (encoder) return encoder.encode(value).length;
+    let bytes = 0;
+    for (const char of value) {
+        const code = char.codePointAt(0);
+        bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+    }
+    return bytes;
+}
 
 export function createChatFile({ context, fetch = (...args) => globalThis.fetch(...args) } = {}) {
     if (typeof context !== 'function') throw new TypeError('createChatFile needs a context() function.');
@@ -46,7 +61,7 @@ export function createChatFile({ context, fetch = (...args) => globalThis.fetch(
             headers: context().getRequestHeaders(),
             cache: 'no-cache',
             body: text,
-            ...(keepalive && text.length <= KEEPALIVE_MAX ? { keepalive: true } : {}),
+            ...(keepalive && utf8Bytes(text) <= KEEPALIVE_MAX ? { keepalive: true } : {}),
             ...(signal ? { signal } : {}),
         });
     }

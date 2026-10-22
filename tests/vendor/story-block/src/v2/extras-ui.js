@@ -21,6 +21,8 @@ import { STRINGS, fill } from './strings.js';
 
 const X = STRINGS.extras;
 export const EXTRAS_CLASS = 'story-suite-extras';
+/** How many of the last drawn messages a redraw after a new message, a turn or a rebuild goes over. */
+export const RECENT_MESSAGES = 30;
 
 function byId(doc, id) {
     if (typeof doc?.getElementById === 'function') return doc.getElementById(id);
@@ -57,7 +59,10 @@ export function fillInput(text, { document: doc = globalThis.document } = {}) {
 /**
  * createReplyExtras({ ctx, doc?, display(mes) → { choice?, chatter? }, featureOn(id) → bool,
  * query?(name, args), openDossier?(name) → any, events?, messageElement?(index), fill?(text) })
- * → { refresh(index), refreshAll(), extrasAt(index), destroy() }.
+ * → { refresh(index), refreshAll({ recent }), extrasAt(index), destroy() }.
+ * Long chats: a new message, a turn or a rebuild redraws the last RECENT_MESSAGES drawn messages only (it can
+ * only change the latest reply's Choices, and its own strip); a chat opened, a delete, more messages loaded
+ * or a feature switched go over every drawn message. Each pass finds the messages with one query.
  * `openDossier` defaults to NPC State Delta's own (`globalThis.NPCStateDelta.openDossier`) when present.
  */
 export function createReplyExtras({
@@ -185,8 +190,8 @@ export function createReplyExtras({
     }
 
     /** Draws, updates or removes the extras under reply `index` (when SillyTavern has drawn it). */
-    function refresh(index) {
-        const message = elementOf(index);
+    function refresh(index, element = null) {
+        const message = element ?? elementOf(index);
         if (!message) return null;
         const old = message.querySelector(`.${EXTRAS_CLASS}`);
         const shown = extrasAt(index);
@@ -206,10 +211,11 @@ export function createReplyExtras({
         return node;
     }
 
-    function refreshAll() {
-        for (const message of doc.querySelectorAll('.mes[mesid]')) {
+    function refreshAll({ recent = false } = {}) {
+        const drawn = Array.from(doc.querySelectorAll('.mes[mesid]'));
+        for (const message of recent ? drawn.slice(Math.max(0, drawn.length - RECENT_MESSAGES)) : drawn) {
             const index = Number(message.getAttribute('mesid'));
-            if (Number.isInteger(index)) refresh(index);
+            if (Number.isInteger(index)) refresh(index, messageElement ? null : message);
         }
     }
 
@@ -220,12 +226,12 @@ export function createReplyExtras({
     const source = ctx?.eventSource;
     const types = ctx?.eventTypes ?? ctx?.event_types ?? {};
     if (typeof source?.on === 'function') {
-        const all = () => refreshAll();
+        const all = () => refreshAll({ recent: true });
         const forget = () => { opened.clear(); refreshAll(); };
         const wire = [
             [types.CHARACTER_MESSAGE_RENDERED, all], [types.USER_MESSAGE_RENDERED, all], [types.MESSAGE_SWIPED, all],
             [types.MESSAGE_EDITED, all], [types.MESSAGE_UPDATED, all], [types.MESSAGE_SENT, all],
-            [types.MESSAGE_DELETED, forget], [types.CHAT_CHANGED, forget], [types.MORE_MESSAGES_LOADED, all],
+            [types.MESSAGE_DELETED, forget], [types.CHAT_CHANGED, forget], [types.MORE_MESSAGES_LOADED, () => refreshAll()],
         ].filter(([type]) => type);
         for (const [type, fn] of wire) source.on(type, fn);
         offs.push(() => {
@@ -234,7 +240,7 @@ export function createReplyExtras({
     }
     if (typeof events?.on === 'function') {
         for (const name of ['turn', 'head', 'feature']) {
-            const off = events.on(name, () => refreshAll());
+            const off = events.on(name, () => refreshAll({ recent: name !== 'feature' }));
             if (typeof off === 'function') offs.push(off);
         }
     }

@@ -1,4 +1,10 @@
-## Story Suite v2: 2.0.0-alpha.1 (in progress, `v2` branch)
+## Story Suite v2: 2.0.0-beta.1 (`v2` branch; Delta 1.2.20)
+
+Story Suite v2, first beta. Delta keeps its own version line: this beta build is **Delta 1.2.20**, and the suite release is named only in this heading. It needs Story Block `>=2.0.0-beta.1` (`requires`). Update Story Block first: an alpha Story Block refuses Delta's hosted module (no meters, Cast tab or overlay section), and Delta keeps working on its own, with a console warning. What's new across the suite, known issues and every module's version: [Story Block docs/v2/RELEASES.md](https://github.com/kohz87/Story_block/blob/v2/docs/v2/RELEASES.md).
+
+- In this beta, from Delta: NPC meters kept with each reply, with stage ladders, milestones, ceilings and floors, presets and drift (features); hidden notes and locked-note teasers; the Cast in Story Block's game view; fewer model calls while hosted; the user-approved prompt alignment (cleanup steps 12-13); settings two folds deep and Delta's lines in Story Block's Diagnostics; Story Director's date while hosted, its own prompt in Story Block's prompt size, and quiet fresh chats (no 404, the Cast shows story-set meters at once).
+
+### All v2 changes so far (2.0.0-alpha.1 to beta.1)
 
 Story Suite v2. NSD stays standalone; with Story Block v2 it registers as a hosted module (queries, Cast tab, settings in the overlay). Integration in progress. Status: https://github.com/kohz87/Story_block/blob/v2/docs/v2/STATUS.md
 
@@ -41,7 +47,7 @@ Story Suite v2. NSD stays standalone; with Story Block v2 it registers as a host
 
 # NPC State Delta changes
 
-## Unreleased
+## 1.2.20 - Story Suite 2.0.0-beta.1 (`v2` branch)
 
 - **Fewer model calls with one-pass capture** (user decision 5 and the b6 soak findings). No prompt text changes; only when Delta's requests run, and when the one-pass rules are sent.
   - **Hosted by Story Block v2 with the NPC meters**, an ordinary one-pass reply makes no model call of Delta's own. There is no relationship evaluator after a block and none for a new NPC, because the story's `~ npc` lines move the meters and code clamps and caps them; a new NPC starts at the base meter values. The backfill queue (new dossiers, missed participants) runs only with the one-pass catch-up, at most 2 each time, or when the reader presses **Scan**. Measured on the synthetic host, two ordinary replies (a new NPC, then an open relationship) made 1 + 1 extra calls before and 0 + 0 now. Without a host the same replies still make 1 + 1.

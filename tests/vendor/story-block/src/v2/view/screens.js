@@ -11,9 +11,11 @@
 // * Data bindings (`data: { alias: { query, args } }`) run in dependency order: an argument written as
 //   `$alias.path` takes the value of an earlier binding. An unknown alias or a cycle is an error.
 //
-// * Navigation order (the game view, the Story panel's tabs): a screen may say `order` (a number, lower
-//   first); without one, `screenOrder` gives the usual ones (Party, Quests, Scene, Inventory, Map) a
-//   place and puts the rest after them. Home is always first: no order a module gives can move it down.
+// * Navigation order (the game view, the Story panel's tabs), before the reader's own (view/tab-order.js):
+//   the suite's own screens in DEFAULT_ORDER (Home, Party, Inventory, Quests, World, Map, Fight,
+//   Crafting, Trade, Cast, Scene, Chronicle, then any other screen, and the Director, the game master's
+//   view, last); another screen may say `order` (a number, lower first) or takes DEFAULT_ORDER's place for
+//   the last part of its id, else REST_ORDER. Home is always first: no order a module gives can move it down.
 //
 // * A theme's values pass the same checks the page applies (css.js themeVars: one CSS value each, nothing
 //   that loads or runs anything but data:/https:); a screen with one unsafe value is skipped as a whole.
@@ -37,19 +39,34 @@ const isRecord = value => value !== null && typeof value === 'object' && !Array.
 
 /** The game view's landing page: always the first screen and the first tab. */
 export const HOME_ID = 'story-block/home';
-// Where the usual screens go when they give no `order`, by the last part of their id ('rpg-battle/party').
-export const DEFAULT_ORDER = Object.freeze({ party: 10, quests: 20, scene: 30, inventory: 40, map: 50 });
-export const REST_ORDER = 100;
+// The default places, by the last part of an id ('rpg-battle/party' → party): the party and what it
+// carries, what it is doing and where, the activities, the people and the scene, the record, and the
+// Director (the game master's view, with what the reader has not been told) last.
+export const DEFAULT_ORDER = Object.freeze({
+    party: 10, inventory: 20, quests: 30, world: 40, map: 50, fight: 60, crafting: 70, trade: 80,
+    cast: 90, scene: 100, chronicle: 110, director: 200,
+});
+// A screen with no `order` and no default place: after the suite's own, before the Director.
+export const REST_ORDER = 150;
+// The suite's own screens and tabs: always in DEFAULT_ORDER, whatever `order` an older module still gives
+// (Cast once said 35); the reader moves them in Settings → Story Suite → Tabs.
+export const SUITE_NAV = Object.freeze([
+    'rpg-battle/party', 'story-block/inventory', 'story-director/quests', 'story-director/world', 'story-director/map',
+    'rpg-battle/fight', 'rpg-battle/crafting', 'rpg-battle/trade', 'npc-state-delta/cast', 'story-block/scene',
+    'story-director/chronicle', 'story-director/director',
+]);
 
 /**
- * A screen's (or a tab's) place in the navigation, lower first: 0 for Home, else its own `order` (at
- * least 1, so nothing goes before Home), else DEFAULT_ORDER by the id's last part, else REST_ORDER.
+ * A screen's (or a tab's) place in the navigation, lower first: 0 for Home; one of the suite's own
+ * (SUITE_NAV) its DEFAULT_ORDER place; else its own `order` (at least 1, so nothing goes before Home),
+ * else DEFAULT_ORDER by the id's last part, else REST_ORDER.
  */
 export function screenOrder(id, order = null) {
     const text = String(id ?? '');
     if (text === HOME_ID) return 0;
-    if (typeof order === 'number' && Number.isFinite(order)) return Math.max(1, order);
     const name = text.split('/').pop().toLowerCase();
+    if (SUITE_NAV.includes(text)) return DEFAULT_ORDER[name];
+    if (typeof order === 'number' && Number.isFinite(order)) return Math.max(1, order);
     return Object.hasOwn(DEFAULT_ORDER, name) ? DEFAULT_ORDER[name] : REST_ORDER;
 }
 

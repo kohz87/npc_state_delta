@@ -20,7 +20,7 @@
 //   reply's; sdk.callModel's waits while a reply is being built or awaited (the assist's run inside the
 //   turn and do not). A profile's call goes at once.
 
-import { KEEPALIVE_MAX, createChatFile } from './chat-file.js';
+import { KEEPALIVE_MAX, createChatFile, utf8Bytes } from './chat-file.js';
 import { createCommandBus as realBus } from './commands.js';
 import { CORE_MODULE_ID, createCoreModule } from './domains/index.js';
 import { WALLET_KEY } from './domains/money.js';
@@ -37,7 +37,7 @@ import { createRewind } from './rewind.js';
 import { createStore as realStore } from './store.js';
 import { createTurn, substituteNames } from './turn.js';
 
-export const VERSION = '2.0.0-alpha.2';
+export const VERSION = '2.0.0-beta.1';
 
 /**
  * Settings where Story Block's `currency` (and `currencyShort`, `currencyPlural`, `coins`) fall back to
@@ -137,13 +137,13 @@ export function storeSaving({ ctx, live = () => ctx, fetch = null, onSaveError =
     const memoKey = chatId => `${MEMO_PREFIX}${chatId}`;
     return {
         /**
-         * Would a save of the open chat now go out with keepalive (a body of at most KEEPALIVE_MAX)? Measured
-         * only when asked (the page is closing). True where this page does not write the file itself.
+         * Would a save of the open chat now go out with keepalive (a body of at most KEEPALIVE_MAX bytes as
+         * UTF-8, B-a3-1)? Measured only when asked (the page is closing). True where this page does not write the file itself.
          */
         keepaliveFits() {
             if (!file.where()) return true;
             try {
-                return JSON.stringify({ chat: [context().chatMetadata ?? {}, ...(ctx.chat ?? [])] }).length + 256 <= KEEPALIVE_MAX;
+                return utf8Bytes(JSON.stringify({ chat: [context().chatMetadata ?? {}, ...(ctx.chat ?? [])] })) + 256 <= KEEPALIVE_MAX;
             } catch { return false; }
         },
         chat: () => ctx.chat,

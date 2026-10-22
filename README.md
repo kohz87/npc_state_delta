@@ -1,11 +1,11 @@
-# NPC State Delta v1.2.19
+# NPC State Delta v1.2.20
 
-> **Story Suite v2 is being built on the `v2` branch.** NSD stays standalone; with Story Block v2 it registers as a hosted module (queries, Cast tab, settings in the overlay; see [With Story Block v2](#with-story-block-v2)). Integration in progress. Progress for the whole suite: [Story Block docs/v2/STATUS.md](https://github.com/kohz87/Story_block/blob/v2/docs/v2/STATUS.md). The rest of this README describes v1 until v2 is released.
+> **Story Suite v2 beta (2.0.0-beta.1) is on the `v2` branch; Delta's build there is 1.2.20.** Delta stays a standalone extension. With Story Block 2.0.0-beta.1 or later it also joins Story Block as a hosted module: NPC meters (trust, affection, desire, tension and your own) kept with each reply, a Cast tab, and its settings in the Story Suite overlay (see [With Story Block v2](#with-story-block-v2)). The beta is for test play, not your real campaigns yet. Player guide: [Story Block docs/v2/GUIDE.md](https://github.com/kohz87/Story_block/blob/v2/docs/v2/GUIDE.md). Release notes: [RELEASES.md](https://github.com/kohz87/Story_block/blob/v2/docs/v2/RELEASES.md).
 
 
 A SillyTavern extension that keeps a living dossier for every NPC in your roleplay: who they are, how they look, how they talk and behave, what they remember, and how they feel about you. After each reply it scans the story, updates the dossiers carefully, and feeds the present NPCs back to the roleplay model so they stay in character.
 
-**Current release:** 1.2.19 · [Changelog](CHANGELOG.md) · [Development guide](DEVELOPMENT.md)
+**Current release:** 1.2.20 · [Changelog](CHANGELOG.md) · [Development guide](DEVELOPMENT.md)
 
 ---
 
@@ -122,7 +122,7 @@ With two or more installed, **Manage all in Story Suite** at the top of Delta's 
 
 ### With Story Block v2
 
-Story Block 2 (Story Suite v2, in preview on Story Block's `v2` branch) hosts the suite's modules itself. Delta stays a standalone extension: its dossiers, scans, prompts, saved data and swipe handling are exactly as without it. When Story Block 2 is on the page, Delta also joins it as the module `npc-state-delta`:
+Story Block 2 (Story Suite v2, in beta on Story Block's `v2` branch) hosts the suite's modules itself. Delta stays a standalone extension: its dossiers, scans, prompts, saved data and swipe handling are exactly as without it. When Story Block 2 is on the page, Delta also joins it as the module `npc-state-delta`:
 
 - **Cast tab:** Story Block's tab bar gets a **Cast** tab with Delta's present-cast cards (the same cards, Scan now and Add NPC as the v1 Present NPCs tab).
 - **Settings:** Delta's settings panel moves into the Story Suite overlay as its section, and the copy in the extensions drawer is hidden meanwhile. If Story Block 2 goes away, the panel goes back to the drawer where it was.

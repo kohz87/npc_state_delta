@@ -129,7 +129,8 @@ export function readDisplayLine(entry, line, counts) {
  */
 export function displayLines(mes, { entryOf, max = Infinity } = {}) {
     const out = {};
-    const block = extractBlock(String(mes ?? ''));
+    // (A line its hidden comment marks as read while its feature was off is left out, B-a1-5.)
+    const block = extractBlock(String(mes ?? ''), 'Changes', null, { display: true });
     if (block === null || typeof entryOf !== 'function') return out;
     const lines = parseChanges(block, { max }).lines.slice(0, Number.isFinite(max) ? max : undefined);
     const counts = new Map();

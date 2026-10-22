@@ -94,10 +94,20 @@ export function createStore({
     let writes = 0;
     const unsaved = new Map(); // message → { index, chatId, n }: records written since their chat was saved
     const reserved = new WeakMap();   // message → { swipe, sid }: a record ID handed out before the record
+    // Memos of what a reply reads over the whole chat (docs/v2/PERFORMANCE.md, "Long chats"): the stored
+    // receipts and the untold ones, each kept until a record is written or the store rebuilds (`epoch`) or
+    // the chat's last carrier, length or array changes (headKey); the state at an earlier carrier, kept
+    // while the messages it was replayed from are the same objects with the same records and text.
+    let epoch = 0;
+    let lineMemo = null;       // { epoch, key, receipts?, untold? }
+    let atMemo = new Map();    // index → { arr, epoch, from, refs: [message, record, swipe, mes][], state }
+    const AT_MEMO_MAX = 64;
+    const counts = { replays: 0, recordsRead: 0, lineScans: 0 };
 
     // Every record goes through here, so a save can be checked against the last one written, and a change
     // left in a chat that is no longer open can be found again (rescue).
     function write(message, record) {
+        epoch++;
         if (holding) held.add(message);
         const keep = keeps(message);
         const stored = writeRecord(message, record, { mirror: !holding && keep });
@@ -133,6 +143,7 @@ export function createStore({
                     unsaved.delete(message);
                     unsaved.set(arr[entry.index], { ...entry, n: ++writes });
                     cache = null;
+                    forgetMemos();
                     left = true;
                 }
             }
@@ -306,6 +317,7 @@ export function createStore({
     // of ops that no longer applies (a hand-edited chat, a middle reply deleted) is skipped and reported
     // on its own, so a bad change cannot take the rest of its carrier, or anything later, with it.
     function replay(arr, upTo) {
+        counts.replays++;
         const { from } = chain(arr, upTo);
         // A damaged record (B-b2-timeline-7) is skipped, and said so.
         const problems = [];
@@ -321,9 +333,10 @@ export function createStore({
         for (let i = from; i <= upTo && i < arr.length; i++) {
             const record = readRecord(arr[i]);
             if (!record) continue;
+            counts.recordsRead++;
             state = replayRecord(state, record, i, problems);
         }
-        return { state, problems };
+        return { state, problems, from };
     }
 
     // One carrier's ops, block by block. `skip` (a Set of "index:block") names blocks to pass over
@@ -401,6 +414,54 @@ export function createStore({
         }
         if (!isCarrier(arr[index])) throw new RangeError(`Message ${index} is the user's; it holds no story state.`);
         return arr[index];
+    }
+
+    // The state after carrier `index` (not the head), replayed once and then kept (atMemo) while every
+    // message it was replayed from (its checkpoint's carrier through `index`) is the same object at the same
+    // place with the same record, swipe and text. A card drawn again, or a card under each of several replies
+    // on screen, then costs a look at those messages, not a replay with every domain's validator.
+    function memoAt(arr, index) {
+        const hit = atMemo.get(index);
+        if (hit && hit.arr === arr && hit.refs.every(([message, record, swipe, mes], at) => {
+            const now = arr[hit.from + at];
+            return now === message && now?.extra?.[KEY] === record && now?.swipe_id === swipe && now?.mes === mes;
+        })) {
+            atMemo.delete(index);
+            atMemo.set(index, hit);
+            return hit.state;
+        }
+        const { state, from = -1 } = replay(arr, index);
+        if (from >= 0) {
+            const refs = [];
+            for (let i = from; i <= index; i++) refs.push([arr[i], arr[i]?.extra?.[KEY], arr[i]?.swipe_id, arr[i]?.mes]);
+            atMemo.delete(index);
+            atMemo.set(index, { arr, from, refs, state });
+            while (atMemo.size > AT_MEMO_MAX) atMemo.delete(atMemo.keys().next().value);
+        }
+        return state;
+    }
+
+    // A record's receipts as frozen copies, made once per record (a record is never changed in place: each
+    // write puts a new one), so a pass over the chat copies only the receipts it has not seen yet.
+    const receiptCopies = new WeakMap();
+    function frozenReceipts(record) {
+        let list = receiptCopies.get(record);
+        if (!list) receiptCopies.set(record, list = deepFreeze(structuredClone(record.receipts.filter(isObject))));
+        return list;
+    }
+
+    // Forgets the memos (a rebuild, or a write that is not on the head carrier alone).
+    function forgetMemos() {
+        epoch++;
+        lineMemo = null;
+        atMemo = new Map();
+    }
+
+    // The memo of the whole line of history (receipts, untold) for the chat as it is now.
+    function lineOf(arr) {
+        const key = headKey(arr);
+        if (!lineMemo || lineMemo.epoch !== epoch || !sameKey(lineMemo.key, key)) lineMemo = { epoch, key };
+        return lineMemo;
     }
 
     function stateBefore(arr, index) {
@@ -530,7 +591,7 @@ export function createStore({
             }
             const head = current();
             if (index >= head.key.index) return head.state;
-            return replay(arr, index).state;
+            return memoAt(arr, index);
         },
 
         headIndex() {
@@ -589,6 +650,7 @@ export function createStore({
             write(message, record);
             saver.touch();
             cache = null;
+            forgetMemos();
             return notes;
         },
 
@@ -645,9 +707,13 @@ export function createStore({
 
         // Re-read: the carrier's `story` receipts and their ops are replaced; ui and system receipts stay,
         // after the new story ops. A kept block whose rev (its `/meta/rev` op and its receipt) is not after
-        // the new story ops' last one is numbered on from it, so no two receipts on the carrier share one. Later carriers are replayed on top so their checkpoints stay true; if any
+        // the new story ops' last one is numbered on from it, so no two receipts on the carrier share one.
+        // A kept system step marked `replan` (its receipt's `replan: { payload }`, B-a1-13: planned from the
+        // story state, like a story-time heal) is not applied again as it was: `rerun(state, receipt)` runs
+        // it again on the state as it now stands at its place (→ { ok, ops, receipt }); when it is not
+        // done, its block goes. Later carriers are replayed on top so their checkpoints stay true; if any
         // later change no longer applies, nothing is written and this throws.
-        replaceStory(index, { ops, receipts = [] } = {}) {
+        replaceStory(index, { ops, receipts = [], rerun = null } = {}) {
             const arr = list();
             const message = carrierAt(arr, index);
             if (!Array.isArray(receipts) || receipts.some(receipt => !isObject(receipt) || receipt.cause !== 'story')) {
@@ -660,44 +726,73 @@ export function createStore({
             const { record } = take(arr, index, before);
             const spans = spansOf(record);
             if (!spans) throw new Error('The story changes on this reply cannot be told apart from the others.');
-            const kept = [];
-            const keptSpans = [];
+            // The kept blocks, each with its receipt when they line up one to one (every append stores one).
+            const blocks = [];
             let at = 0;
             for (const span of spans) {
-                if (!span.story) {
-                    kept.push(...record.ops.slice(at, at + span.n));
-                    keptSpans.push({ n: span.n, story: false });
-                }
+                if (!span.story) blocks.push(record.ops.slice(at, at + span.n));
                 at += span.n;
             }
-            const fresh = asOps(ops);
-            // The kept blocks' revs follow the new story ops' last one (they ran after the old ones).
             const keptReceipts = record.receipts.filter(receipt => receipt?.cause !== 'story').map(receipt => structuredClone(receipt));
-            let rev = [...fresh].reverse().find(op => op?.path === '/meta/rev' && Number.isInteger(op.value))?.value ?? revOf(base);
-            const renumbered = new Map();
-            const keptOps = kept.map(op => {
-                if (op?.path !== '/meta/rev' || !Number.isInteger(op.value)) return op;
-                if (op.value > rev) {
-                    rev = op.value;   // already after the new story ops: kept as it is
-                    return op;
-                }
-                rev += 1;
-                renumbered.set(op.value, rev);
-                return { ...op, value: rev };
-            });
-            for (const receipt of keptReceipts) if (renumbered.has(receipt.rev)) receipt.rev = renumbered.get(receipt.rev);
-            kept.splice(0, kept.length, ...keptOps);
-            const nextOps = [...fresh, ...kept];
+            const paired = keptReceipts.length === blocks.length;
+            const fresh = asOps(ops);
             let state;
+            const fail = error => new Error(`The new story changes and this reply's other changes do not fit together: ${error?.message ?? error}`);
             try {
-                state = step(base, nextOps);
+                state = step(base, fresh);
             } catch (error) {
-                throw new Error(`The new story changes and this reply's other changes do not fit together: ${error?.message ?? error}`);
+                throw fail(error);
+            }
+            // The kept blocks' revs follow the new story ops' last one (they ran after the old ones).
+            let rev = [...fresh].reverse().find(op => op?.path === '/meta/rev' && Number.isInteger(op.value))?.value ?? revOf(base);
+            const nextOps = [...fresh];
+            const nextReceipts = [];
+            const keptSpans = [];
+            const moved = new Map();
+            for (const [n, block] of blocks.entries()) {
+                const receipt = paired ? keptReceipts[n] : null;
+                let blockOps;
+                let kept = receipt;
+                if (receipt?.replan && typeof rerun === 'function') {
+                    let out = null;
+                    try { out = rerun(deepFreeze(structuredClone(state)), receipt); } catch { out = null; }
+                    if (!out?.ok) continue;
+                    blockOps = asOps(out.ops);
+                    kept = { ...structuredClone(out.receipt), id: receipt.id };
+                    const own = [...blockOps].reverse().find(op => op?.path === '/meta/rev' && Number.isInteger(op.value))?.value;
+                    if (Number.isInteger(own)) rev = Math.max(rev, own);
+                } else {
+                    let renumbered = null;
+                    blockOps = block.map(op => {
+                        if (op?.path !== '/meta/rev' || !Number.isInteger(op.value)) return op;
+                        if (op.value > rev) {
+                            rev = op.value;   // already after the new story ops: kept as it is
+                            return op;
+                        }
+                        rev += 1;
+                        renumbered = [op.value, rev];
+                        moved.set(op.value, rev);
+                        return { ...op, value: rev };
+                    });
+                    if (renumbered && kept?.rev === renumbered[0]) kept.rev = renumbered[1];
+                }
+                try {
+                    state = step(state, blockOps);
+                } catch (error) {
+                    throw fail(error);
+                }
+                nextOps.push(...blockOps);
+                keptSpans.push({ n: blockOps.length, story: false });
+                if (kept) nextReceipts.push(kept);
+            }
+            if (!paired) {
+                for (const receipt of keptReceipts) if (moved.has(receipt.rev)) receipt.rev = moved.get(receipt.rev);
+                nextReceipts.push(...keptReceipts);
             }
             const writes = [[message, {
                 ...record,
                 ops: nextOps,
-                receipts: [...structuredClone(receipts), ...keptReceipts],
+                receipts: [...structuredClone(receipts), ...nextReceipts],
                 spans: [{ n: fresh.length, story: true }, ...keptSpans],
                 rev: revOf(state),
             }]];
@@ -716,6 +811,7 @@ export function createStore({
             }
             for (const [target, next] of writes) write(target, next);
             saver.touch();
+            forgetMemos();
             cache = null;   // rebuilt on the next read, with the blocks that stay skipped reported
         },
 
@@ -737,15 +833,19 @@ export function createStore({
         // (the carriers the head is built from; frozen copies).
         receipts() {
             const arr = list();
+            const memo = lineOf(arr);
+            if (memo.receipts) return memo.receipts;
+            counts.lineScans++;
             const out = [];
             let started = false;
             for (const i of carrierIndexes(arr)) {
                 const record = readRecord(arr[i]);
                 if (record?.checkpoint) started = true;
                 if (!started || !record) continue;
-                for (const receipt of record.receipts) if (isObject(receipt)) out.push({ index: i, receipt });
+                for (const receipt of frozenReceipts(record)) out.push(Object.freeze({ index: i, receipt }));
             }
-            return deepFreeze(structuredClone(out));
+            memo.receipts = Object.freeze(out);
+            return memo.receipts;
         },
 
         // Return in time (MODULES §F17): drops the head carrier's receipts with rev >= beforeRev and
@@ -803,6 +903,9 @@ export function createStore({
 
         untold() {
             const arr = list();
+            const memo = lineOf(arr);
+            if (memo.untold) return memo.untold;
+            counts.lineScans++;
             const records = [];
             for (const i of carrierIndexes(arr)) {
                 const record = readRecord(arr[i]);
@@ -817,12 +920,23 @@ export function createStore({
                     if (receipts[k]?.narrate === true && !told.has(receipts[k].id)) out.push(receipts[k]);
                 }
             }
-            return deepFreeze(structuredClone(out.reverse()));
+            memo.untold = deepFreeze(structuredClone(out.reverse()));
+            return memo.untold;
+        },
+
+        /**
+         * How much replay work the store has done (for tests that count work rather than time): `replays`
+         * (state rebuilt from a checkpoint), `recordsRead` (carriers replayed), `lineScans` (whole-chat
+         * passes for receipts or untold). A copy.
+         */
+        work() {
+            return { ...counts };
         },
 
         rebuild() {
             frozenCheckpoints = new WeakMap();
             cache = null;
+            forgetMemos();
             // The record copies and old receipts are settled over the whole chat, and a record whose
             // swipe moved is stamped again (settleAll).
             if (settleAll(list())) saver.touch();
@@ -877,7 +991,25 @@ export function createStore({
          * are saved with the reply's own save, one write of the chat file instead of two. The change stays
          * dirty; the caller saves it (or schedules it again) when the reply comes or the generation ends.
          */
-        deferSave() { saver.cancel(); },
+        deferSave() { saver.defer(); },
+        /**
+         * The turn's save (docs/v2/PERFORMANCE.md, "Long chats"): the reply's capture and the reader's actions
+         * after it are written once, a moment after the last of them (persist.js IDLE_MS, at most IDLE_MAX_MS
+         * after the first). Only where a change left behind by a chat switch can still be put into its own
+         * chat's file (a chat file and `rescue`): then → true. Elsewhere (no chat file this page can write,
+         * e.g. a temporary chat) → false, and the caller saves at once as before.
+         */
+        saveIdle(wait, max) {
+            let where = null;
+            try { where = typeof rescue === 'function' ? place() : null; } catch { where = null; }
+            if (!where) return false;
+            saver.idle(wait, max);
+            return true;
+        },
+        /** True when changes are saved by the turn's idle save here (see saveIdle). */
+        idleSaves() {
+            try { return typeof rescue === 'function' && !!place(); } catch { return false; }
+        },
         /** Saves now (a reader's action is saved at once); → Promise<true | false>, never throws: a failure is told and tried again. */
         saveSoon(options) { return saver.saveSoon(options); },
         /** The page is closing: the newest state goes out at once, even past a save still on its way. */
