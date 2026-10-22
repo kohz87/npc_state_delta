@@ -210,7 +210,7 @@ function setup({ hostValue, delta = fakeDelta(), loadEmptyCast } = {}) {
     const adapter = createStorySuiteV2Adapter({
         suiteApi: delta.suiteApi,
         delta: () => delta.api,
-        version: '1.2.19',
+        version: '1.2.20',
         host: () => box.host,
         doc,
         timers,
@@ -266,7 +266,7 @@ test('registers module npc-state-delta once, with the npc domain, its queries an
     assert.equal(sdk.registered.length, 1);
     assert.equal(def.id, MODULE_ID);
     assert.equal(def.name, 'NPC State Delta');
-    assert.equal(def.version, '1.2.19');
+    assert.equal(def.version, '1.2.20');
     assert.deepEqual(Object.keys(def.domains), ['npc'], 'one small domain: the NPC meters (F81, F90)');
     assert.deepEqual(Object.keys(def.queries).sort(), ['npc.cast', 'npc.dossier', 'npc.known', 'npc.meters', 'npc.portrait', 'npc.present']);
     assert.deepEqual([...QUERY_NAMES].sort(), Object.keys(def.queries).sort());
@@ -720,13 +720,13 @@ test('with a v2 Story Block, Delta withdraws from v1\'s Story Suite registry and
     const v1 = { apiVersion: 1, registerTab() {} };
     const v2 = { apiVersion: 2, ready: Promise.resolve({}) };
 
-    assert.equal(announceNpcStateDelta({ enabled: true, version: '1.2.19', settings: '#npc_state_delta_settings', storyBlock: v1 }, registry), true);
+    assert.equal(announceNpcStateDelta({ enabled: true, version: '1.2.20', settings: '#npc_state_delta_settings', storyBlock: v1 }, registry), true);
     assert.equal(registry.has('npc-state-delta'), true, 'v1: announced as before');
     assert.equal(suiteManageAvailable(registry, v1), true);
     assert.equal(openSuiteOverlay(registry, v1), true);
     assert.deepEqual(registry.opened, ['npc-state-delta']);
 
-    assert.equal(announceNpcStateDelta({ enabled: true, version: '1.2.19', settings: '#npc_state_delta_settings', storyBlock: v2 }, registry), false);
+    assert.equal(announceNpcStateDelta({ enabled: true, version: '1.2.20', settings: '#npc_state_delta_settings', storyBlock: v2 }, registry), false);
     assert.equal(registry.has('npc-state-delta'), false, 'v2: withdrawn, so v1\'s overlay cannot carry the panel too');
     registry.announce({ id: 'npc-state-delta' });
     assert.equal(suiteManageAvailable(registry, v2), false, 'no "Open Story Suite" button');

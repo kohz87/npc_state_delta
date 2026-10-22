@@ -1,4 +1,8 @@
-## Story Suite v2: 2.0.0-alpha.1 (in progress, `v2` branch)
+## Story Suite v2: 2.0.0-beta.1 (`v2` branch; Delta 1.2.20)
+
+Story Suite v2, first beta. Delta keeps its own version line: this beta build is **Delta 1.2.20**, and the suite release is named only in this heading. It needs Story Block `>=2.0.0-beta.1` (`requires`). Update Story Block first: an alpha Story Block refuses Delta's hosted module (no meters, Cast tab or overlay section), and Delta keeps working on its own, with a console warning. What's new across the suite, known issues and every module's version: [Story Block docs/v2/RELEASES.md](https://github.com/kohz87/Story_block/blob/v2/docs/v2/RELEASES.md).
+
+### Earlier in v2 (2.0.0-alpha.1 and alpha.2)
 
 Story Suite v2. NSD stays standalone; with Story Block v2 it registers as a hosted module (queries, Cast tab, settings in the overlay). Integration in progress. Status: https://github.com/kohz87/Story_block/blob/v2/docs/v2/STATUS.md
 
@@ -21,7 +25,7 @@ Story Suite v2. NSD stays standalone; with Story Block v2 it registers as a host
 
 # NPC State Delta changes
 
-## Unreleased
+## 1.2.20 - Story Suite 2.0.0-beta.1 (`v2` branch)
 
 - **Prompt alignment (cleanup steps 12-13).** These change what the model is sent. Contract C10 keeps the prompts as they are by default; the user approved this change as an exception, recorded in C10. Request counts, response lengths and routing are unchanged.
   - **Refine no longer drops text the model never saw.** The scanner, one-pass, backfill and import prompts used to show shortened copies of Personality, Speech, Mannerisms, Key Relationships and memories (280/240/140/180/180 characters, cut mid-word). A FULL refine built on that copy then removed the rest. They now show the whole stored value (320/280/160/360/220), and a longer locked value is cut between words. The caps the prompts state are the stored limits too, and Refresh shows bonds up to 360. The relationship evaluator, told to copy the summary when it still fits, gets the whole summary, not the first 220 characters.

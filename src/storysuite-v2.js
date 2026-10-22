@@ -524,8 +524,10 @@ export function createStorySuiteV2Adapter({
         id: MODULE_ID,
         name: MODULE_NAME,
         version: String(version),
-        // Story Block 2.0.0-alpha.2 or later (an older host ignores the field).
-        requires: Object.freeze({ storyBlock: '>=2.0.0-alpha.2' }),
+        // Story Block 2.0.0-beta.1 or later, the beta host this was built and tested with. An alpha.2 host
+        // refuses the hosted module and Delta keeps working on its own; a host before 2.0.0-alpha.2
+        // compares without the pre-release tag and takes it.
+        requires: Object.freeze({ storyBlock: '>=2.0.0-beta.1' }),
         domains: part.domains,
         commands: part.commands,
         queries,
