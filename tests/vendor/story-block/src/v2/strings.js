@@ -124,6 +124,8 @@ export const STRINGS = deepFreeze({
         many: '{first} and {n} more',
         lootOne: '1 thing to pick up',
         lootMany: '{n} things to pick up',
+        assistedOne: '1 line from the safety net (assist)',
+        assistedMany: '{n} lines from the safety net (assist)',
         refusedOne: '1 line not applied',
         refusedMany: '{n} lines not applied',
         defaultMoney: 'gold',

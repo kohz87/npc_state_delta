@@ -297,11 +297,12 @@ function people(names) {
  * to Bluewatch Village · Fenna arrived", or "No changes" ("No item, coin or place changes" when only
  * another module's state moved). `currency` is `inventory.currency`'s
  * `{ name }` (default gold). `refused` is how many of the reply's change lines were not applied
- * (MODULES §F41): "… · 1 line not applied". `lines`: the modules' own lines (replyCardLines), each told by its
+ * (MODULES §F41): "… · 1 line not applied". `assisted` is how many lines the Assist safety net applied on the reply
+ * (MODULES §F123): "… · 1 line from the safety net (assist)", so a folded card says so too (the lines are in its body). `lines`: the modules' own lines (replyCardLines), each told by its
  * `summary` (else its `text`) after the rest: "+1 Rope · AGI check 14 vs 10: success". Takes the same fields
  * as changesDigest, or a digest as `digest`.
  */
-export function changesSummary({ state = null, before = null, changes = [], currency = null, digest = null, refused = 0, lines = [] } = {}) {
+export function changesSummary({ state = null, before = null, changes = [], currency = null, digest = null, refused = 0, assisted = 0, lines = [] } = {}) {
     const d = digest ?? changesDigest({ state, before, changes });
     // The currency word for an amount: its name for exactly 1, else its plural (MODULES §F1).
     const name = typeof currency?.name === 'string' && currency.name ? currency.name : T.defaultMoney;
@@ -326,6 +327,8 @@ export function changesSummary({ state = null, before = null, changes = [], curr
         const told = oneLine(line?.summary || line?.text || '', 80);
         if (told) parts.push(told);
     }
+    const helped = Number.isSafeInteger(assisted) && assisted > 0 ? assisted : 0;
+    if (helped) parts.push(helped === 1 ? T.assistedOne : fill(T.assistedMany, { n: helped }));
     const count = Number.isSafeInteger(refused) && refused > 0 ? refused : 0;
     const notApplied = count === 0 ? null : count === 1 ? T.refusedOne : fill(T.refusedMany, { n: count });
     if (parts.length) return [...parts, ...(notApplied ? [notApplied] : [])].join(' · ');

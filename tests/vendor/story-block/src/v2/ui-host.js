@@ -328,7 +328,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
             if (screen?.id !== CHANGES_CARD_SCREEN_ID) return null;
             let currency = null;
             try { currency = sdk.query('inventory.currency'); } catch { currency = null; }
-            return changesSummary({ state, before, changes, currency, refused: notes.refusedAt(index).length, lines: cardLines(index, state, changes) });
+            return changesSummary({ state, before, changes, currency, refused: notes.refusedAt(index).length, assisted: assistedAt(index).length, lines: cardLines(index, state, changes) });
         },
         settings: screenId => {
             const owner = String(screenId ?? '').split('/')[0];
