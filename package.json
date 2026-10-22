@@ -6,6 +6,7 @@
   "engines": { "node": ">=24" },
   "scripts": {
     "test": "node --import ./tests/active-runtime-test-setup.mjs --test tests/*.test.js tests/v2/break/*.test.js && node --import ./tests/active-runtime-test-setup.mjs tests/compatibility-check.js && node --import ./tests/active-runtime-test-setup.mjs tests/runtime-smoke.mjs",
+    "test:dot": "node --import ./tests/active-runtime-test-setup.mjs --test --test-reporter=dot tests/*.test.js tests/v2/break/*.test.js && node --import ./tests/active-runtime-test-setup.mjs tests/compatibility-check.js && node --import ./tests/active-runtime-test-setup.mjs tests/runtime-smoke.mjs",
     "validate": "node scripts/validate.mjs",
     "measure:prompts": "node scripts/measure-prompts.mjs",
     "package": "node scripts/package.mjs"
