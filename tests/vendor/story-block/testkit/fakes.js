@@ -165,6 +165,9 @@ export function createFakeBus({ store, registry, settings = () => ({}) }) {
             settings: id => settings(id ?? owner),
             rng: () => 0.5,
             time: () => null,
+            // A count set rather than moved (SPEC §2.2): the fake bus stores whole domains, so nothing to mark.
+            absolute() {},
+            ifThere() {},
         };
         let out;
         try { out = handler(ctx, clone(payload)); } catch (error) {

@@ -6460,6 +6460,40 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
     return truncateInjectionText(finalLines.join('\n'), budgetChars);
 }
 
+/**
+ * (v2 World view) The scene's present list for the scanner: `{ names, ids, npcs }` with the names as the
+ * scene gives them (at most 12, each cut to 80 characters) and the dossiers they name (by name or alias,
+ * not archived), or null when there is no list or it names no one, so the prompt stays as it was.
+ */
+export function scenePresentFocus(existingNpcs = [], sceneNames = null) {
+    if (!Array.isArray(sceneNames)) return null;
+    const names = [];
+    const seen = new Set();
+    for (const raw of sceneNames) {
+        const name = String(raw ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80).trim();
+        const key = normalizeName(name);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        names.push(name);
+        if (names.length >= 12) break;
+    }
+    if (!names.length) return null;
+    const npcs = (Array.isArray(existingNpcs) ? existingNpcs : []).filter(npc => npc && !npc.archived
+        && [npc.name, ...(npc.aliases || [])].map(normalizeName).some(label => label && seen.has(label)));
+    return { names, ids: new Set(npcs.map(npc => npc.id)), npcs };
+}
+
+/** The scanner's context NPCs with the scene's present dossiers added after them, within `limit`. */
+export function withScenePresent(selected = [], present = [], limit = 4) {
+    const cap = Math.max(1, Math.min(8, Number(limit) || 4));
+    const out = [...selected];
+    for (const npc of present) {
+        if (out.length >= cap) break;
+        if (!out.some(other => other.id === npc.id)) out.push(npc);
+    }
+    return out.slice(0, cap);
+}
+
 export function selectScannerContextNpcs(existingNpcs = [], transcript = '', limit = 4) {
     const cap = Math.max(1, Math.min(8, Number(limit) || 4));
     const list = Array.isArray(existingNpcs) ? existingNpcs : [];
@@ -6871,6 +6905,7 @@ export function buildScannerPrompt({
     narrationCapture = false,
     dossierAbove = '',
     compactCapture = false,
+    sceneNames = null,
 }) {
     const baseline = normalizeRelationshipBaseline(relationshipBaseline);
     const caps = normalizeRelationshipCaps(relationshipCaps);
@@ -6907,7 +6942,11 @@ export function buildScannerPrompt({
 
     const relevantLimit = fullScanMode ? 8 : Math.min(4, Number(detailLimit) || 4);
     const profileLimit = fullScanMode ? Math.min(6, relevantLimit) : 3;
-    const relevantExisting = selectScannerContextNpcs(existingNpcs, transcript, relevantLimit);
+    // (v2 World view) While Story Block keeps the scene, who it lists as present now (`sceneNames`, from
+    // Story Director's `director.world.here` or Story Block's `scene.present`): those dossiers join the live
+    // context after the mentioned ones, their `present` is the scene's, and one dynamic line names them.
+    const scene = scenePresentFocus(existingNpcs, sceneNames);
+    const relevantExisting = scene ? withScenePresent(selectScannerContextNpcs(existingNpcs, transcript, relevantLimit), scene.npcs, relevantLimit) : selectScannerContextNpcs(existingNpcs, transcript, relevantLimit);
     const profileIds = new Set(selectScannerProfileContextNpcs(relevantExisting, transcript, profileLimit).map(npc => npc.id));
     const runtimeExisting = relevantExisting.map(npc => {
         const stronglyRelevant = profileIds.has(npc.id);
@@ -6930,7 +6969,7 @@ export function buildScannerPrompt({
             ...(role ? { role } : {}),
             ...(gender ? { gender } : {}),
             currentRelationship: npc.relationship || baseline,
-            present: Boolean(npc.present),
+            present: scene ? scene.ids.has(npc.id) : Boolean(npc.present),
             worldActive: Boolean(npc.worldActive),
             ...(lifeState !== 'unknown' ? { lifeState } : {}),
             ...(lifeStateCertainty ? { lifeStateCertainty } : {}),
@@ -7030,6 +7069,7 @@ export function buildScannerPrompt({
     // character about to speak does. So the capture rules name roles and this line, in the context
     // part, names the people.
     const captureNames = narrationCapture ? `\nNot NPCs: the player is ${userName}; the character you play is ${charName}.` : '';
+    const sceneLine = scene ? `\nIn the scene now (the story's scene list): ${scene.names.join(', ')}.` : '';
     if (rulesBlock) {
         return `${NARRATION_CAPTURE_HEADER}
 Admission: ${admissionPolicy}
@@ -7041,7 +7081,7 @@ Memory criteria: ${memoryRubric || '(none configured; store only clearly durable
 Delta caps: ordinary ${caps.ordinary}; meaningful ${caps.meaningful}; major ${caps.major}; extreme ${caps.extreme}. New-NPC baseline: ${JSON.stringify(baseline)}
 
 Identity index (matching only):
-${JSON.stringify(identityIndex)}${captureNames}
+${JSON.stringify(identityIndex)}${captureNames}${sceneLine}
 
 Relevant live context (dynamic fields only):
 ${JSON.stringify(liveSent)}
@@ -7077,7 +7117,7 @@ Memory criteria: ${memoryRubric || '(none configured; store only clearly durable
 Delta caps: ordinary ${caps.ordinary}; meaningful ${caps.meaningful}; major ${caps.major}; extreme ${caps.extreme}. New-NPC baseline: ${JSON.stringify(baseline)}
 
 Identity index (matching only):
-${JSON.stringify(identityIndex)}${captureNames}
+${JSON.stringify(identityIndex)}${captureNames}${sceneLine}
 
 Relevant live context (dynamic fields only):
 ${JSON.stringify(liveSent)}

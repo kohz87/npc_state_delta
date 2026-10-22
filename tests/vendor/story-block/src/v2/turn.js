@@ -21,7 +21,7 @@
 // the command bus (their interfaces are docs/v2/SPEC.md §12).
 
 import { continuation, cutLine, defangMarker, extractBlock, grammarHeads, hideBlock, parseChanges, strayLines, stripBlock } from './capture.js';
-import { readDisplayLine } from './extras.js';
+import { displayLines, readDisplayLine } from './extras.js';
 import { hash, readRecord } from './persist.js';
 import { CAPTURE_PREFIX } from './registry.js';
 import { STATIC_MARKER, assemble, contextNotice, estimateTokens } from './prompt.js';
@@ -598,19 +598,27 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         return all.slice(0, cap);
     }
 
-    async function captureLines(index, all) {
+    // How many lines of each display kind `mes` already shows (extras.js displayLines, the rule the card
+    // draws by): lines a Continue or the extractor adds count after these against the cap (F115), so a
+    // choice past it is told as one of the original reply's would be.
+    const shownIn = mes => new Map(Object.entries(displayLines(mes, { entryOf: word => registry.capture(word), max: lineCap() }))
+        .map(([kind, values]) => [kind, values.length]));
+
+    // `before`: the reply's text before these lines were added (a Continue's, the extractor's), or null.
+    async function captureLines(index, all, before = null) {
         const receipts = [];
         const found = [];
         const lines = capped(index, all, found);
+        const shown = typeof before === 'string' ? shownIn(before) : new Map();
         // One write of the reply's record for all its lines (store.batch), not one per line.
-        await (store.batch ?? (fn => fn()))(() => captureEach(index, lines, receipts, found));
+        await (store.batch ?? (fn => fn()))(() => captureEach(index, lines, receipts, found, null, null, shown));
         return { receipts, problems: found };
     }
 
     // Runs `lines` as story captures on carrier `index`, each on the state the one before left. Stored on
     // the head as they go (append), or, with `base` (a Re-read), run on that state and returned as
     // { ops } for store.replaceStory, nothing stored.
-    async function captureEach(index, lines, receipts, found, base = null, seeds = null) {
+    async function captureEach(index, lines, receipts, found, base = null, seeds = null, shown = new Map()) {
         const collected = [];
         let state = base ?? store.head();
         // ctx.carrier and ctx.chat for the capture handlers (MODULES §F2's capture context).
@@ -622,8 +630,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         // A Re-read (a2-3): the reply as it stands now, for bookkeeping its kept blocks wrote (ctx.standing).
         let standing = null;
         if (base) { try { standing = store.at(index); } catch { standing = null; } }
-        // How many lines of each display kind this reply has shown so far (their cap per reply).
-        const shown = new Map();
+        // `shown`: how many lines of each display kind this reply has shown so far (their cap per reply).
         for (const line of lines) {
             const entry = registry.capture(line.kind);
             if (!entry) {
@@ -809,7 +816,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             const problems = [...parsed.problems, ...strayProblems(id, text, heads, { from: at?.from ?? 0, tail: at?.tail === true, stopped })];
             const cut = block === null ? null : cutLine(text, 'Changes', at, { stopped });
             if (cut) problems.push(problem({ index: id, line: cut, code: 'CUT_OFF', message: `The reply stopped in the middle of the change line "${cutAt(cut, 80)}", so it was not used.` }));
-            const result = await captureLines(id, parsed.lines);
+            const result = await captureLines(id, parsed.lines, at ? current.base : null);
             problems.push(...result.problems);
 
             // What this reply was told; a Continue keeps what the reply was told before.
@@ -865,7 +872,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         }
         const parsed = readBlock(index, String(text ?? ''));
         const problems = [...parsed.problems];
-        const result = await captureLines(index, parsed.lines);
+        const result = await captureLines(index, parsed.lines, String(message.mes ?? ''));
         problems.push(...result.problems);
         if (parsed.lines.length) {
             // Kept in the reply's hidden block, so Re-read finds them too.

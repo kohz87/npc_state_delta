@@ -1231,6 +1231,20 @@ export function createStorySuiteV2Adapter({
                 return null;
             }
         },
+        /**
+         * While hosted: who is in the scene now, for the scanner: Story Director's World view
+         * (`director.world.here` → `present`) when it answers, else Story Block's `scene.present`; null
+         * when neither can answer. Both are optional: Delta alone (or Story Block alone) still works.
+         */
+        presentNow: () => {
+            if (!hosted || typeof sdkRef?.query !== 'function') return null;
+            const ask = name => {
+                try { return sdkRef.query(name, {}); } catch { return undefined; }
+            };
+            const here = ask('director.world.here');
+            const list = Array.isArray(here?.present) ? here.present : ask('scene.present');
+            return Array.isArray(list) ? list.map(name => String(name ?? '').trim()).filter(Boolean) : null;
+        },
         /** A dossier's hidden notes as editor lines, and editor lines back to notes (src/npc-meters.js). */
         secretLines: list => secretsToLines(list),
         parseSecrets: (text, previous) => secretsFromLines(text, previous),

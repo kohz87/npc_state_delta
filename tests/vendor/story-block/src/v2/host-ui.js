@@ -462,9 +462,38 @@ function listControl(doc, field, items, onChange, id, memo = null) {
     return root;
 }
 
+/**
+ * Whether a schema field is read-only now (SPEC §6): its `readOnly` is `true`, or a function of the
+ * module's current values (`settings(id)`) that returns true. A function that throws counts as false.
+ */
+export function fieldReadOnly(field, values) {
+    const flag = normalizeField(field)?.readOnly;
+    if (typeof flag !== 'function') return flag === true;
+    try { return Boolean(flag(values)); } catch { return false; }
+}
+
+/**
+ * The value a settings row shows: the stored value (else the default, else the field's empty value); a
+ * read-only field with `shows(values)` shows what that returns instead, for display only (the stored value
+ * is kept, so it is back when the field is editable again). A `shows` that throws or returns undefined
+ * shows the stored value.
+ */
+export function rowValue(key, field, values) {
+    const stored = Object.hasOwn(values, key) ? values[key] : emptyValue(field);
+    const shows = normalizeField(field)?.shows;
+    if (typeof shows !== 'function' || !fieldReadOnly(field, values)) return stored;
+    try {
+        const value = shows(values);
+        return value === undefined ? stored : value;
+    } catch {
+        return stored;
+    }
+}
+
 // `label.story-suite-row`: the label and its help on the left, the control on the right (stacked on a
-// phone, host.css). A list's row is a `div` whose list group is named by the label.
-function fieldRow(doc, key, field, value, onChange, prefix, memo = null) {
+// phone, host.css). A list's row is a `div` whose list group is named by the label. A read-only row
+// shows its value and help with every control in it disabled, and stores nothing.
+function fieldRow(doc, key, field, value, onChange, prefix, memo = null, readOnly = false) {
     const f = normalizeField(field);
     // A type this Story Block does not know (a newer module's): hidden, its value left alone.
     if (!FIELD_TYPES.includes(f?.type)) {
@@ -486,10 +515,18 @@ function fieldRow(doc, key, field, value, onChange, prefix, memo = null) {
     const note = f.type === 'profile' ? profileNote(doc, value) : null;
     if (note) text.appendChild(note);
     row.appendChild(text);
-    const input = control(doc, f, value, onChange, id, memo);
+    const input = control(doc, f, value, readOnly ? () => {} : onChange, id, memo);
     input.id = id;
     if (f.type === 'list') input.setAttribute('aria-labelledby', name.id);
     row.appendChild(input);
+    if (readOnly) {
+        row.classList.add('story-suite-row-readonly');
+        row.dataset.readonly = 'true';
+        for (const node of [input, ...input.querySelectorAll('input, select, textarea, button')]) {
+            node.disabled = true;
+            node.setAttribute('aria-disabled', 'true');
+        }
+    }
     return row;
 }
 
@@ -781,6 +818,21 @@ export function renderSettingsHost(root, { registry, settings, doc = globalThis.
         const { details, body } = fold(doc, def.moduleId, def.name, def.title !== def.name ? def.title : def.moduleId);
         const values = settings(def.moduleId);
         const subs = [];
+        // The rows whose `readOnly` is a function of the values: drawn again (value, help, disabled) after
+        // any other field of this module changes, so switching Calendar to Custom makes its fields editable.
+        const follows = [];
+        const rowOf = (key, field, now) => fieldRow(doc, key, field, rowValue(key, field, now), next => {
+            settings.set(def.moduleId, key, next);
+            if (!follows.length) return;
+            const fresh = settings(def.moduleId);
+            for (const item of follows) {
+                if (item.key === key || !item.row.parentNode) continue;
+                const row = rowOf(item.key, item.field, fresh);
+                item.row.before(row);
+                item.row.remove();
+                item.row = row;
+            }
+        }, `story_suite_${def.moduleId}`, openState, fieldReadOnly(field, now));
         // Its features are switched in the Features fold; here one line says how many are on and goes there.
         if (own.length) body.appendChild(featureLink(def, own));
         const shown = Object.fromEntries(Object.entries(def.schema).filter(([, field]) => !hiddenByFeature(field)));
@@ -793,8 +845,9 @@ export function renderSettingsHost(root, { registry, settings, doc = globalThis.
                 hint: settingsCount(visible.length),
                 draw: into => {
                     for (const { key, field } of group.fields) {
-                        const value = Object.hasOwn(values, key) ? values[key] : emptyValue(field);
-                        into.appendChild(fieldRow(doc, key, field, value, next => settings.set(def.moduleId, key, next), `story_suite_${def.moduleId}`, openState));
+                        const item = { key, field, row: rowOf(key, field, values) };
+                        if (typeof normalizeField(field)?.readOnly === 'function' || typeof normalizeField(field)?.shows === 'function') follows.push(item);
+                        into.appendChild(item.row);
                     }
                 },
             });

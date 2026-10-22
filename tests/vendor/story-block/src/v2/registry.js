@@ -100,10 +100,16 @@ function fieldProblem(field, where) {
     if (type === 'int') {
         for (const bound of ['min', 'max']) if (field[bound] !== undefined && !Number.isInteger(field[bound])) return `${where}.${bound} is not a whole number`;
     }
+    if (!Array.isArray(field) && typeof field === 'object' && field.readOnly !== undefined && typeof field.readOnly !== 'boolean' && typeof field.readOnly !== 'function') {
+        return `${where}.readOnly is not true, false or a function of the values`;
+    }
+    if (!Array.isArray(field) && typeof field === 'object' && field.shows !== undefined && typeof field.shows !== 'function') {
+        return `${where}.shows is not a function of the values`;
+    }
     return '';
 }
 
-/** A schema field in its long form: { type, label?, help?, min?, max?, options?, of? }. */
+/** A schema field in its long form: { type, label?, help?, min?, max?, options?, of?, readOnly?, shows? }. */
 export function normalizeField(field) {
     if (typeof field === 'string') return { type: field };
     if (Array.isArray(field)) return { type: 'choice', options: field };

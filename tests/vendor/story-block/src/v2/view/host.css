@@ -198,6 +198,8 @@ body.story-suite-open { overflow: hidden; }
 .story-suite-row[data-type="bool"] { grid-template-columns: minmax(0, 1fr) auto; }
 .story-suite-row[data-type="bool"] > input { justify-self: end; margin: 0; }
 .story-suite-row[data-type="list"] { grid-template-columns: minmax(0, 1fr); }
+/* A read-only field (`readOnly`): its value and help shown, its controls disabled. */
+.story-suite-row-readonly :disabled { opacity: 0.75; cursor: not-allowed; }
 .story-suite-subsection { margin-top: 12px; }
 .story-suite-subsection > h4 { margin: 8px 0 4px; }
 @media (max-width: 560px) {
