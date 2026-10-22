@@ -65,7 +65,7 @@ test('Cast is a game-view screen (mount screen only) beside the one Cast tab', (
     assert.ok(screen, 'the Cast screen is registered');
     assert.equal(CAST_SCREEN_ID, 'npc-state-delta/cast');
     assert.deepEqual([...screen.mounts], ['screen'], 'not a second Cast tab in the Story panel');
-    assert.equal(screen.title, 'Cast');
+    assert.equal(screen.title, 'Dossiers');
     assert.equal(screen.icon, def.tabs[0].icon);
     assert.equal(screen.order, CAST_SCREEN_ORDER);
     assert.deepEqual(def.tabs.map(tab => tab.id), [CAST_TAB_ID]);

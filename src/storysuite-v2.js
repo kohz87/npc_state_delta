@@ -2,14 +2,17 @@
 //
 // NPC State Delta stays a standalone engine: its storage, capture, prompts and history rules are
 // its own and nothing here changes them. When a Story Block v2 host is on the page, Delta also
-// registers as module `npc-state-delta` with read-only queries, a Cast tab that shows Delta's own
-// present-cast cards (and the same Cast as a screen in Story Block's game view), and a settings section that carries Delta's own settings panel into the Story
-// Suite overlay. It also owns one small domain, `npc` (src/npc-meters.js; F81, F90): each NPC's
+// registers as module `npc-state-delta` with read-only queries, a Dossiers tab (id `cast`, the tab once
+// called Cast) that is the dossier browser (and the same Dossiers as a screen in Story Block's game view),
+// and a settings section that carries Delta's own settings panel into the Story Suite overlay. The present
+// cast's cards are on Story Director's World screen (World → Now → Here) when it is there, drawn by Delta
+// through the page API `globalThis.NPCStateDeltaCast` (PAGE_API, below); without Story Director they stay
+// at the top of Dossiers (Story Block MODULES §F119). It also owns one small domain, `npc` (src/npc-meters.js; F81, F90): each NPC's
 // meters, stages and unlocked hidden notes in the per-reply state, so they swipe and delete back
 // with the replies. While hosted that slice is the truth for meter values: index.js reads it back
 // through sliceView() for the dossier view and the injection, and sends its scanner's relationship
 // changes as `npc.adjust` (adjust()); the `~ npc` change line, an NPC card under each reply and the
-// meters in the Cast tab come from here. While hosted, the copy in SillyTavern's extensions drawer is
+// meters beside the present cast's cards come from here. While hosted, the copy in SillyTavern's extensions drawer is
 // hidden; if the host goes away it comes back exactly where it was. While hosted, <html> also carries
 // HOSTED_FLAG, which index.js and the CSS read (launcher, in-chat cast default, sidecar checks).
 //
@@ -39,16 +42,35 @@ import { escapeHtml } from './util/html.js';
 
 export const MODULE_ID = 'npc-state-delta';
 export const MODULE_NAME = 'NPC State Delta';
+// The tab's id stays `cast` (and the screen's `npc-state-delta/cast`) so a reader's saved tab order still
+// finds it; its title is Dossiers (MODULES §F119).
 export const CAST_TAB_ID = 'cast';
+export const DOSSIERS_TITLE = 'Dossiers';
+export const DOSSIERS_ICON = 'fa-address-book';
 /**
- * The Cast as a game-view screen (Story Block's full-screen view lists screens, not module tabs): mount
- * `screen` only, so the Story panel keeps its one Cast tab. Its template is one widget,
- * CAST_WIDGET, that draws exactly what the Cast tab draws (Delta's present-cast cards and the meters).
+ * Dossiers as a game-view screen (Story Block's full-screen view lists screens, not module tabs): mount
+ * `screen` only, so the Story panel keeps its one Dossiers tab. Its template is one widget,
+ * CAST_WIDGET, that draws exactly what the tab draws (the dossier list, and the present cast's cards and
+ * meters above it while Story Director's World does not show them).
  */
 export const CAST_SCREEN_ID = 'npc-state-delta/cast';
 export const CAST_WIDGET = 'npc-state-delta.cast';
-// After Scene (30), before Inventory (40): Story Block's navigation order (view/screens.js DEFAULT_ORDER).
+// Story Block places the suite's own screens itself (view/screens.js SUITE_NAV: Dossiers last); an older
+// host reads this number.
 export const CAST_SCREEN_ORDER = 35;
+/** Story Director's World view: while it is on, the present cast's cards are drawn there, not in Dossiers. */
+export const WORLD_FEATURE = 'story-director.world';
+/**
+ * The page API for Story Director's World screen, on `globalThis` while the adapter runs (read-only; it
+ * changes nothing in Delta): { version, available(), render(el, { slot }) → number of present cards drawn,
+ * onChange(fn) → off }. `render` draws Delta's own present-cast cards and meters into `el` (the markup and
+ * classes the Cast tab drew) and, with `slot(name, aliases)` → a node or null, puts that node inside each
+ * present person's card (class PAGE_SLOT_CLASS; drawn again on every render). `onChange(fn)` calls `fn`
+ * after Delta's cast or state may have changed (a cast drawn, a scan or edit, Delta on or off, hosted or
+ * not); the caller redraws then.
+ */
+export const PAGE_API = 'NPCStateDeltaCast';
+export const PAGE_SLOT_CLASS = 'npc-state-delta-v2-slot';
 export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next']);
 export const COMMAND_NAMES = Object.freeze(['npc.adjust', 'npc.set', 'npc.refresh', 'npc.milestone', 'npc.tick']);
 // The replies after which Delta takes its per-reply step (npc.tick): a new reply or a new swipe of
@@ -237,6 +259,11 @@ export function createStorySuiteV2Adapter({
     logger = console,
     // True while the reader keeps the calendar in Delta (Source of truth: calendar "mine"): no story clock.
     calendarOwn = () => false,
+    // Delta's dossier list markup and projection (story-block-tabs.js, dossier-ui.js), as v1's Dossiers tab.
+    loadDossierList = () => Promise.all([import('../story-block-tabs.js'), import('../dossier-ui.js')])
+        .then(([tabs, ui]) => ({ rowsHtml: tabs.dossierTabRowsHtml, project: ui.dossierIndexProjection, filter: ui.filterDossierIndex })),
+    // Where the page API (PAGE_API) goes; null for none.
+    page = globalThis,
 } = {}) {
     let started = false;
     let pollTimer = null;
@@ -255,6 +282,9 @@ export function createStorySuiteV2Adapter({
     let sectionLead = null;      // the meter presets block above Delta's panel in the settings section
     let offTurn = null;          // unsubscribes from the host's 'turn' event
     let lastTick = Promise.resolve(null);
+    let listParts = null;        // loadDossierList's { rowsHtml, project, filter } once loaded
+    let rowsCache = { key: null, rows: [] };
+    const watchers = new Set();  // the page API's onChange subscribers
     const savedDisplay = new WeakMap();
     // Delta's own commands on their way to the host, by type and payload: npc.adjust takes a reader's
     // action at the top only when it is one of these (the scanner's), never a button that names it.
@@ -566,7 +596,7 @@ export function createStorySuiteV2Adapter({
         return () => { if (mounted?.el === el) unmountSection(); };
     }
 
-    // ---- the Cast tab ----
+    // ---- the Dossiers tab (once Cast) ----
 
     function bindCastActions(el) {
         if (el.__npcStateDeltaV2Actions) return;
@@ -575,7 +605,84 @@ export function createStorySuiteV2Adapter({
             const action = event.target?.closest?.('[data-npc-state-delta-action]')?.dataset?.npcStateDeltaAction;
             if (action === 'scan') return void runtime()?.scan?.();
             if (action === 'add') return void runtime()?.addNpc?.();
+            // A dossier row opens that dossier (v1's Dossiers tab did the same).
+            const row = event.target?.closest?.('.npc-state-delta-story-row');
+            if (row?.dataset?.npcId) runtime()?.openDossier?.(row.dataset.npcId);
         });
+        // The search box filters the list in place: only the list is drawn again, so the box keeps its focus.
+        el.addEventListener?.('input', event => {
+            const box = event.target;
+            if (!box?.classList?.contains?.('npc-state-delta-story-search')) return;
+            el.__npcStateDeltaV2Find = String(box.value ?? '').slice(0, 80);
+            const list = el.querySelector?.('.npc-state-delta-story-list');
+            if (list) list.innerHTML = dossierRowsHtml(el.__npcStateDeltaV2Find);
+        });
+    }
+
+    // Whether Story Director's World screen shows the present cast (its feature on); a host without the
+    // Features API: whether Story Director is registered.
+    function worldShown() {
+        if (!hosted) return false;
+        const on = hostFeature(WORLD_FEATURE);
+        if (on !== undefined) return on === true;
+        try { return (sdkRef?.modules?.() ?? []).some(module => module?.id === 'story-director'); } catch { return false; }
+    }
+
+    // Every dossier as a row of v1's list (dossier-ui.js dossierIndexProjection), kept until Delta's state
+    // changes (dossierRevision); before that list has loaded, plain rows from the dossiers' names.
+    function dossierRows() {
+        const api = runtime();
+        let revision = '';
+        try { revision = String(api?.dossierRevision?.() ?? ''); } catch { revision = ''; }
+        const key = revision ? `${listParts ? 'full' : 'plain'}|${revision}` : null;
+        if (key && rowsCache.key === key) return rowsCache.rows;
+        let rows = [];
+        try {
+            const state = listParts?.project ? api?.getDossierState?.() : null;
+            if (state && Array.isArray(state.npcs)) rows = state.npcs.map(npc => listParts.project(npc, state.portraitAssets || {}));
+            else {
+                rows = npcList().map(npc => ({
+                    id: String(npc.id ?? ''), name: String(npc.name ?? '').trim() || 'Unnamed NPC', aliases: Array.isArray(npc.aliases) ? npc.aliases : [],
+                    role: '', statusLabel: npc.archived ? 'Archived' : npc.present ? 'Present' : '', bucket: npc.archived ? 'archived' : 'active', portrait: '',
+                }));
+            }
+        } catch (error) {
+            warn('Story Suite v2 dossier list failed', error);
+            rows = [];
+        }
+        rowsCache = { key, rows };
+        return rows;
+    }
+    function plainRowsHtml(rows, { query = '', total = 0 } = {}) {
+        if (!rows.length) return `<p class="npc-state-delta-story-empty">${total ? 'No dossier matches.' : 'No dossiers yet. An NPC gets one when a scan finds them in the story.'}</p>`;
+        return rows.map(row => `<button type="button" class="npc-state-delta-story-row" data-npc-id="${escapeHtml(row.id)}" aria-label="Open ${escapeHtml(row.name)} dossier"><span class="npc-state-delta-story-thumb"><span>${escapeHtml(Array.from(row.name.trim())[0]?.toUpperCase() ?? '?')}</span></span><span class="npc-state-delta-story-text"><b>${escapeHtml(row.name)}</b><small>${escapeHtml(row.statusLabel ?? '')}</small></span></button>`).join('');
+    }
+    // The rows a search shows, as markup: v1's filter and rows when loaded, else names that contain it.
+    function dossierRowsHtml(query = '') {
+        const rows = dossierRows();
+        let visible;
+        try {
+            if (listParts?.filter) visible = listParts.filter(rows, { query });
+            else {
+                const needle = String(query).trim().toLocaleLowerCase();
+                visible = rows.filter(row => !needle || [row.name, ...(row.aliases ?? [])].some(name => String(name).toLocaleLowerCase().includes(needle)));
+            }
+        } catch { visible = rows; }
+        try {
+            return listParts?.rowsHtml ? listParts.rowsHtml(visible, { query, total: rows.length }) : plainRowsHtml(visible, { query, total: rows.length });
+        } catch {
+            return plainRowsHtml(visible, { query, total: rows.length });
+        }
+    }
+    // The dossier browser: a search box and every dossier, each opening its dossier view (Delta's own).
+    function dossierListHtml(el) {
+        const api = runtime();
+        if (!api) return emptyCast({ text: 'NPC State Delta is still loading.' });
+        if (!enabled()) return emptyCast({ text: 'NPC State Delta is off.' });
+        const query = typeof el?.__npcStateDeltaV2Find === 'string' ? el.__npcStateDeltaV2Find : '';
+        return `<div class="npc-state-delta-story-dossiers npc-state-delta-v2-dossiers"><span class="npc-state-delta-kicker">DOSSIERS</span>`
+            + `<input type="search" class="text_pole npc-state-delta-story-search" placeholder="Search dossiers" aria-label="Search dossiers" maxlength="80" value="${escapeHtml(query)}">`
+            + `<div class="npc-state-delta-story-list">${dossierRowsHtml(query)}</div></div>`;
     }
 
     // The present NPCs' meters under the cards: one bar per shown meter, drawn with ss.meter's own
@@ -633,19 +740,27 @@ export function createStorySuiteV2Adapter({
         }
         return blocks.length ? `<div class="npc-state-delta-v2-meters"><span class="npc-state-delta-kicker">METERS</span>${blocks.join('')}</div>` : '';
     }
-    // Delta's own present-cast cards (the same markup as v1's Present NPCs tab), or why it is empty.
-    // `track: false` (the game view's Cast screen) leaves castEl, the Story panel's tab pane, alone.
-    function renderCast(el, { track = true } = {}) {
+    // Delta's own present-cast cards (the same markup as v1's Present NPCs tab), or why it is empty, and
+    // their meters (`cast`); then the dossier list (`list`). `track: false` (the game view's screen, the
+    // World screen) leaves castEl, the Story panel's tab pane, alone.
+    function renderCast(el, { track = true, cast = true, list = false } = {}) {
         if (!el) return;
         if (track) castEl = el;
         bindCastActions(el);
         const api = runtime();
-        let body;
-        if (!api) body = emptyCast({ text: 'NPC State Delta is still loading.' });
-        else if (!enabled()) body = emptyCast({ text: 'NPC State Delta is off.' });
-        else body = String(api.presentCastHtml?.() || '') || emptyCast(api.castEmptyReason?.());
-        const meters = api && enabled() ? castMetersHtml() : '';
-        const html = `<div class="${PANE_CLASS}">${body}${meters}</div>`;
+        let body = '';
+        let meters = '';
+        if (cast) {
+            if (!api) body = emptyCast({ text: 'NPC State Delta is still loading.' });
+            else if (!enabled()) body = emptyCast({ text: 'NPC State Delta is off.' });
+            else body = String(api.presentCastHtml?.() || '') || emptyCast(api.castEmptyReason?.());
+            meters = api && enabled() ? castMetersHtml() : '';
+        }
+        const dossiers = list && !(cast && (!api || !enabled())) ? dossierListHtml(el) : '';
+        const html = `<div class="${PANE_CLASS}">${body}${meters}${dossiers}</div>`;
+        // A full redraw replaces the search box: the reader typing in it keeps the focus and the caret.
+        const owner = el.ownerDocument ?? doc;
+        const typing = list && owner?.activeElement?.classList?.contains?.('npc-state-delta-story-search') && el.contains?.(owner.activeElement);
         // Skip an unchanged redraw only while the pane still holds what was drawn: Story Block's tab
         // host empties the shared pane (replaceChildren) before every render.
         const drawn = el.__npcStateDeltaV2CastNode;
@@ -655,7 +770,75 @@ export function createStorySuiteV2Adapter({
         el.__npcStateDeltaV2Cast = html;
         el.__npcStateDeltaV2CastNode = el.firstElementChild ?? null;
         // The now lines and chatter bubbles get their text through textContent, never markup.
-        api?.fillPresentCast?.(el);
+        if (cast) api?.fillPresentCast?.(el);
+        if (typing) {
+            const box = el.querySelector?.('.npc-state-delta-story-search');
+            try {
+                box?.focus?.();
+                const end = String(box?.value ?? '').length;
+                box?.setSelectionRange?.(end, end);
+            } catch { /* focus is a convenience */ }
+        }
+    }
+
+    // The Dossiers tab and screen: the present cast at the top only while Story Director's World does not
+    // show it, then the dossier list.
+    function renderDossiers(el, { track = true } = {}) {
+        renderCast(el, { track, cast: !worldShown(), list: true });
+    }
+
+    // ---- the page API for Story Director's World (PAGE_API) ----
+
+    function notifyChange() {
+        for (const fn of [...watchers]) {
+            try { fn(); } catch (error) { warn('Story Suite v2 cast listener failed', error); }
+        }
+    }
+    // Each `slot(name, aliases)` node inside its present person's card (the card's text, under the now lines).
+    function fillSlots(el, slot) {
+        for (const old of [...(el.querySelectorAll?.(`.${PAGE_SLOT_CLASS}`) ?? [])]) old.remove?.();
+        const cells = [...(el.querySelectorAll?.('.npc-state-delta-present-cell[data-npc-id]') ?? [])];
+        if (typeof slot !== 'function' || !cells.length) return cells.length;
+        const list = npcList();
+        for (const cell of cells) {
+            const npc = list.find(item => String(item.id ?? '') === String(cell.dataset?.npcId ?? ''));
+            if (!npc) continue;
+            let node = null;
+            try { node = slot(String(npc.name ?? '').trim(), Array.isArray(npc.aliases) ? [...npc.aliases] : []); } catch { node = null; }
+            if (!node || typeof node !== 'object' || typeof node.nodeType !== 'number') continue;
+            node.classList?.add?.(PAGE_SLOT_CLASS);
+            (cell.querySelector?.('.npc-state-delta-present-card-text') ?? cell).append?.(node);
+        }
+        return cells.length;
+    }
+    const pageApi = Object.freeze({
+        version: 1,
+        /** True while Delta is hosted, loaded and on: its cards can be drawn. */
+        available: () => hosted && Boolean(runtime()) && enabled(),
+        /** Draws the present cast's cards and meters into `el`; → how many present cards it drew (0: none, or not available). */
+        render(el, { slot = null } = {}) {
+            if (!el || !pageApi.available()) return 0;
+            try {
+                renderCast(el, { track: false });
+                return fillSlots(el, slot);
+            } catch (error) {
+                warn('Story Suite v2 World cast failed', error);
+                return 0;
+            }
+        },
+        /** `fn()` after Delta's cast or state may have changed; → unsubscribe. */
+        onChange(fn) {
+            if (typeof fn !== 'function') return () => {};
+            watchers.add(fn);
+            return () => { watchers.delete(fn); };
+        },
+    });
+    function offerPage(on) {
+        if (!page || (typeof page !== 'object' && typeof page !== 'function')) return;
+        try {
+            if (on) page[PAGE_API] = pageApi;
+            else if (page[PAGE_API] === pageApi) delete page[PAGE_API];
+        } catch (error) { warn('Story Suite v2 page API failed', error); }
     }
 
     // Story Block's tab host has ONE pane for every module's tab (host-ui.js createTabHost marks it
@@ -678,7 +861,7 @@ export function createStorySuiteV2Adapter({
                 castViews.delete(box);
                 continue;
             }
-            try { renderCast(box, { track: false }); } catch (error) { warn('Story Suite v2 Cast screen failed', error); }
+            try { renderDossiers(box, { track: false }); } catch (error) { warn('Story Suite v2 Dossiers screen failed', error); }
         }
     }
 
@@ -696,7 +879,7 @@ export function createStorySuiteV2Adapter({
             castViews.add(box);
             bindCastActions(box);
             const draw = () => {
-                try { renderCast(box, { track: false }); } catch (error) { warn('Story Suite v2 Cast screen failed', error); }
+                try { renderDossiers(box, { track: false }); } catch (error) { warn('Story Suite v2 Dossiers screen failed', error); }
             };
             draw();
             return {
@@ -711,8 +894,8 @@ export function createStorySuiteV2Adapter({
 
     const castScreen = Object.freeze({
         id: CAST_SCREEN_ID,
-        title: 'Cast',
-        icon: 'fa-masks-theater',
+        title: DOSSIERS_TITLE,
+        icon: DOSSIERS_ICON,
         mounts: Object.freeze(['screen']),
         order: CAST_SCREEN_ORDER,
         data: Object.freeze({ cast: Object.freeze({ query: 'npc.cast' }), present: Object.freeze({ query: 'npc.present' }) }),
@@ -892,10 +1075,10 @@ export function createStorySuiteV2Adapter({
         widgets: { [CAST_WIDGET]: castWidget },
         tabs: [{
             id: CAST_TAB_ID,
-            title: 'Cast',
-            icon: 'fa-masks-theater',
+            title: DOSSIERS_TITLE,
+            icon: DOSSIERS_ICON,
             render: (el) => {
-                try { renderCast(el); } catch (error) { warn('Story Suite v2 Cast tab failed', error); }
+                try { renderDossiers(el); } catch (error) { warn('Story Suite v2 Dossiers tab failed', error); }
             },
         }],
     });
@@ -919,6 +1102,7 @@ export function createStorySuiteV2Adapter({
         } catch (error) {
             warn('Story Suite v2 host event failed', error);
         }
+        notifyChange();
     }
 
     function listen() {
@@ -934,13 +1118,15 @@ export function createStorySuiteV2Adapter({
         // is let go until the host renders the Cast tab again.
         const rerender = () => {
             if (!hosted) return;
+            // Story Director's World screen (the page API's subscribers) redraws its cards too.
+            notifyChange();
             redrawCastViews();
             if (!castEl) return;
             if (!castEl.isConnected || !castStillShown(castEl)) {
                 castEl = null;
                 return;
             }
-            try { renderCast(castEl); } catch (error) { warn('Story Suite v2 Cast tab failed', error); }
+            try { renderDossiers(castEl); } catch (error) { warn('Story Suite v2 Dossiers tab failed', error); }
         };
         doc.addEventListener(EVENTS.castRendered, rerender);
         doc.addEventListener(EVENTS.enabledChanged, rerender);
@@ -985,6 +1171,10 @@ export function createStorySuiteV2Adapter({
         const cast = Promise.resolve().then(() => loadEmptyCast()).then(fn => {
             if (typeof fn === 'function') emptyCast = fn;
         }, () => { /* keep the fallback line */ });
+        // The dossier list's markup; until it loads (or if it cannot), plain rows of names.
+        Promise.resolve().then(() => loadDossierList?.()).then(parts => {
+            if (parts && typeof parts.rowsHtml === 'function') listParts = parts;
+        }, () => { /* plain rows */ });
         return Promise.all([ready, cast])
             .then(([sdk]) => register(sdk, sb, attempt))
             .catch(error => {
@@ -1206,6 +1396,8 @@ export function createStorySuiteV2Adapter({
 
     return Object.freeze({
         definition,
+        /** The page API Story Director's World screen uses (PAGE_API). */
+        pageApi,
         /** While hosted: Delta's scanner changes for one NPC → `npc.adjust` (a promise of the result, or null). */
         adjust: ({ name, meters, start, reply } = {}) => send('npc.adjust', { name, meters, ...(start ? { start } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}) }, { own: true }),
         /** While hosted: the reader's own values from the dossier editor → `npc.set` (the host's latest reply; headReply). */
@@ -1273,11 +1465,14 @@ export function createStorySuiteV2Adapter({
         start() {
             if (started) return;
             started = true;
+            offerPage(true);
             poll(0);
         },
         /** Stop looking and give everything back (tests; a reload of Delta). */
         stop() {
             started = false;
+            offerPage(false);
+            watchers.clear();
             if (pollTimer !== null) timers.clearTimeout?.(pollTimer);
             pollTimer = null;
             unhost();

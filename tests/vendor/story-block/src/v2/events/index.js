@@ -9,11 +9,11 @@
 //   query   → globalThis.StoryBlock.sdk.query                  (for events.status outside a view)
 
 import { FIRE, createEngine, createFireEvent } from './engine.js';
-import { renderEventsSection } from './section.js';
+import { EVENTS_NOTE, renderEventsSection } from './section.js';
 
 export { CALLS, LIMITS, compile, evaluate, evaluateCondition, parse, tokenize } from './condition.js';
 export { FIRE, claimKey, createEngine, createFireEvent, fireEvent, inspect, normalizeEvents, repeatKey } from './engine.js';
-export { renderEventsSection, summaryLine } from './section.js';
+export { EVENTS_NOTE, renderEventsSection, summaryLine } from './section.js';
 
 const sdk = () => globalThis.StoryBlock?.sdk ?? null;
 
@@ -49,14 +49,29 @@ export function createEventsPart({
         hooks: { beforeGenerate: (view, info) => engine.beforeGenerate(view, info) },
         settings: {
             section: 'Events',
+            // Debug information that tells what is coming (every pack event, its condition, its time): a fold
+            // in Settings → Diagnostics, folded, not among the settings (SPEC §6 `place`).
+            place: 'diagnostics',
+            fold: { id: 'events', hint: 'every pack event' },
             defaults: {},
             schema: {},
-            // The custom debug panel (SPEC §6 `section(el, api)`); `api.query` when the host offers it.
-            render: (el, api) => renderEventsSection(el, () => {
-                if (typeof api?.query === 'function') return api.query('events.status');
-                const host = sdk();
-                return typeof host?.query === 'function' ? host.query('events.status') : status(null);
-            }),
+            // The custom debug panel (SPEC §6 `section(el, api)`), under a one-line note that it can spoil
+            // the story; `api.query` when the host offers it.
+            render: (el, api) => {
+                const doc = el.ownerDocument ?? globalThis.document;
+                const note = doc.createElement('p');
+                note.className = 'story-suite-muted ss-events-note';
+                note.textContent = EVENTS_NOTE;
+                const body = doc.createElement('div');
+                el.textContent = '';
+                el.appendChild(note);
+                el.appendChild(body);
+                return renderEventsSection(body, () => {
+                    if (typeof api?.query === 'function') return api.query('events.status');
+                    const host = sdk();
+                    return typeof host?.query === 'function' ? host.query('events.status') : status(null);
+                });
+            },
         },
         tabs: [],
     };

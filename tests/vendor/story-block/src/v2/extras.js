@@ -161,6 +161,27 @@ export function answeredReply(chat) {
     return -1;
 }
 
+/**
+ * The newest reply's Inner chatter (query `chatter.head`, MODULES §F115): what its strip shows, read
+ * the same way (`display(mes)`, displayLines), as [{ name, text }] in reply order. The newest reply is
+ * the last message that is neither the reader's nor a system one, after the reader's first message
+ * (the greeting has no strip). [] when there is none or it has no chatter. Story Director's World
+ * screen puts each thought under the person who had it.
+ */
+export function headChatter(chat, display) {
+    const list = Array.isArray(chat) ? chat : [];
+    const firstUser = list.findIndex(message => message?.is_user);
+    if (firstUser < 0 || typeof display !== 'function') return [];
+    for (let i = list.length - 1; i > firstUser; i -= 1) {
+        const message = list[i];
+        if (!message || message.is_user || message.is_system) continue;
+        let read = {};
+        try { read = display(String(message.mes ?? '')) ?? {}; } catch { read = {}; }
+        return (Array.isArray(read.chatter) ? read.chatter : []).map(item => ({ name: item.name, text: item.text }));
+    }
+    return [];
+}
+
 /** The one optional tail line for the reader's "send it back" setting, or '' when there is nothing. */
 export function chatterTail(chatter) {
     const list = (Array.isArray(chatter) ? chatter : []).filter(item => item?.name && item?.text);
