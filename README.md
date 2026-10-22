@@ -87,7 +87,7 @@ The settings panel has a quick bar that is always visible, plus seven groups.
 | **What's sent** | (since 1.2.13) The text your next reply gets from Delta, each part with its size: the live dossier and, with one-pass capture on, the capture reminder. Filled when you open it, and on **Refresh** |
 | **Data & maintenance** | Backup / Export, Restore / Import, Diagnostics, and clearing this chat's dossiers |
 
-Leave the scanner connection profile empty to use SillyTavern's current connection. If you pick a profile that isn't available, scanning fails visibly instead of silently switching.
+Leave the scanner connection profile empty to use SillyTavern's current connection. If you pick a profile that isn't available, scanning fails visibly instead of silently switching. With no connection profile yet, the list says so: make one in SillyTavern's Connection Manager and it appears. With Story Block v2, Delta's lines (scanner route, profile, the last call's outcome) are also in Story Block's **Settings → Diagnostics** report.
 
 ### Story Block tabs
 

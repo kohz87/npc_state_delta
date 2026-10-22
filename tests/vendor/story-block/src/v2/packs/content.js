@@ -13,10 +13,14 @@ const DEF_FIELDS = ['id', 'name', 'kind', 'rarity', 'value', 'stack', 'slot', 's
 
 const copy = value => JSON.parse(JSON.stringify(value));
 
-/** The item as an inventory def (SPEC §7): `{ id: 'pack.<id>/<slug>', name, kind, … }`. */
+/**
+ * The item as an inventory def (SPEC §7): `{ id: 'pack.<id>/<slug>', name, kind, … }`, with its `carry`
+ * (the carry capacity it adds, PACKS.md "Carry capacity") when it has one.
+ */
 export function itemDef(item) {
     const def = {};
     for (const field of DEF_FIELDS) def[field] = copy(item[field]);
+    if (Number.isSafeInteger(item.carry) && item.carry > 0) def.carry = item.carry;
     return def;
 }
 

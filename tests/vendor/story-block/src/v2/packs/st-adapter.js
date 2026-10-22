@@ -28,7 +28,7 @@ export function stSettings() {
 
 /**
  * The open character's lorebook entries as plain objects:
- * `{ character, entries: [{ book, uid, title, content }], problem }` (`problem` is '' or why
+ * `{ character, entries: [{ book, uid, title, keys, content }], problem }` (`problem` is '' or why
  * nothing could be read, in plain words).
  */
 export async function readCharacterLorebook() {
@@ -50,6 +50,7 @@ export async function readCharacterLorebook() {
             book: linked,
             uid: entry?.uid ?? '',
             title: String(entry?.comment ?? ''),
+            keys: Array.isArray(entry?.key) ? entry.key.map(String) : [],
             content: String(entry?.content ?? ''),
         }));
         return { character: name, entries, problem: '' };
@@ -60,6 +61,7 @@ export async function readCharacterLorebook() {
             book: String(book.name || name),
             uid: entry?.id ?? index,
             title: String(entry?.comment || entry?.name || ''),
+            keys: Array.isArray(entry?.keys) ? entry.keys.map(String) : [],
             content: String(entry?.content ?? ''),
         }));
         return { character: name, entries, problem: '' };

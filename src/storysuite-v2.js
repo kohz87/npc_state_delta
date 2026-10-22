@@ -776,6 +776,20 @@ export function createStorySuiteV2Adapter({
         lastTick = send('npc.tick', {}, { own: true });
     }
 
+    // ---- Diagnostics (Story Block's Settings → Diagnostics) ----
+
+    function diagnosticsLines() {
+        const api = runtime();
+        if (typeof api?.scannerReport !== 'function') return ['NPC State Delta is still loading (no scanner report yet).'];
+        const lines = [...api.scannerReport()];
+        try {
+            const npcs = suiteApi?.npcs?.() ?? [];
+            if (Array.isArray(npcs)) lines.push(`Dossiers in this chat: ${npcs.filter(npc => !npc?.archived).length} active, ${npcs.filter(npc => npc?.archived).length} archived, ${npcs.filter(npc => npc?.present).length} present.`);
+        } catch { /* the counts are optional */ }
+        lines.push(`Hosted in Story Block: ${hosted ? 'yes' : 'no'}. Settings panel in the overlay: ${mounted ? 'yes' : 'no'}.`);
+        return lines;
+    }
+
     // ---- the module definition ----
 
     const definition = Object.freeze({
@@ -810,6 +824,9 @@ export function createStorySuiteV2Adapter({
             schema: part.settings.schema,
             section: (el, api) => mountSection(el, presetsBlock(api)),
         },
+        // Story Block's Settings → Diagnostics (its optional hooks.diagnostics; an older host ignores it):
+        // the scanner's route, profile, call counts and last outcome (index.js scannerReport).
+        hooks: Object.freeze({ diagnostics: () => diagnosticsLines() }),
         screens: [metersCardScreen, castScreen],
         widgets: { [CAST_WIDGET]: castWidget },
         tabs: [{

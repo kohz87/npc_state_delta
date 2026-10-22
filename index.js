@@ -6,6 +6,7 @@ import {
     scannerRoutingError,
     scannerRoutingMetrics,
     scannerProfileOptions,
+    scannerDiagnosticLines,
     normalizeScannerMaxOutputTokens,
 } from './scanner-routing.js';
 import { normalizeRelationshipMapSettings } from './relationship-map-core.js';
@@ -4090,7 +4091,7 @@ function settingsSlot(name) {
 // (full cast, scanner output, calendar) mount their own controls into the named slots.
 function buildSettingsHtml() {
     const scanning = [
-        settingRow('npc_state_delta_scanner_connection_profile', 'Scanner connection profile', '<select id="npc_state_delta_scanner_connection_profile" class="text_pole"></select>', 'Routes every NPC scan, Refresh, focused pass and retry. Default keeps the current roleplay route; an unavailable profile never falls back silently.'),
+        settingRow('npc_state_delta_scanner_connection_profile', 'Scanner connection profile', '<select id="npc_state_delta_scanner_connection_profile" class="text_pole"></select>', 'Routes every NPC scan, Refresh, focused pass and retry. Default keeps the current roleplay route; an unavailable profile never falls back silently.<span id="npc_state_delta_scanner_profile_none" class="npc-state-delta-scanner-profile-none" hidden> There is no connection profile yet: make one in SillyTavern\'s Connection Manager and it is listed here.</span>'),
         settingRow('npc_state_delta_full_scan_every_turn', 'Full scan every turn', '<input id="npc_state_delta_full_scan_every_turn" type="checkbox">', 'With Auto scan, reconcile the whole scan context after every reply instead of only the latest exchange. Overrides Scan every; relationship deltas still come only from the newest exchange.'),
         settingRow('npc_state_delta_narration_capture', 'One-pass narration capture (experimental)', '<input id="npc_state_delta_narration_capture" type="checkbox">', 'With Auto scan, the roleplay model ends each reply with a hidden NPC update block that replaces the separate scan request. Adds about 2,000-3,000 tokens to every roleplay prompt plus the block to each reply; a missing or broken block falls back to the normal scan. Not used with Full scan every turn.'),
         settingRow('npc_state_delta_narration_capture_compact', 'Compact one-pass instruction', '<input id="npc_state_delta_narration_capture_compact" type="checkbox">', 'With one-pass capture, the same rules in fewer words: about 1,500 tokens instead of 2,000 on every asked-for reply. Every field, gate and cap is kept, but check the blocks your model writes before relying on it; off sends the full rules.'),
@@ -4327,6 +4328,9 @@ function syncScannerProfileControl() {
         .map(option => `<option value="${escapeHtml(option.id)}">${escapeHtml(option.name)}</option>`).join('');
     if (control.html() !== html) control.html(html);
     control.val(selected);
+    // No profile to pick (only the current connection, or a missing one): say so under the list.
+    const usable = scannerProfileOptions(getContext(), '').length > 1;
+    $('#npc_state_delta_scanner_profile_none').prop('hidden', usable);
 }
 
 function syncSettingsControls() {
@@ -7525,6 +7529,8 @@ window.NPCStateDelta = Object.freeze({
     scan: () => scanNow({ manual: true }),
     cancelScan: () => { const key = getChatKey(); pendingAutoScans.delete(key); return cancelScanOperation(key, 'user cancelled'); },
     scannerRouting: scannerRoutingMetrics,
+    // (v2 Diagnostics) The scanner's plain lines for Story Block's report: route, profile, calls, last outcome.
+    scannerReport: () => scannerDiagnosticLines({ ctx: getContext(), settings: getSettings(), enabled: !!getSettings().enabled }),
     processBackfills: processPendingBackfills,
     scanDossier: async value => {
         const key = getChatKey();

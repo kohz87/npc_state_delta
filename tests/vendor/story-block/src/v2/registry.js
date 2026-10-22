@@ -38,7 +38,7 @@ export const STANDARD_PREFIX = 'ss.';
 const KNOWN_KEYS = ['id', 'name', 'version', 'description', 'requires', 'domains', 'commands', 'queries', 'capture', 'context', 'hooks', 'settings', 'tabs', 'screens', 'widgets', 'features'];
 const CONTEXT_KEYS = ['static', 'tail', 'budget', 'feature', 'parts'];
 const COMMAND_KEYS = ['handler', 'internal', 'feature'];
-export const FIELD_TYPES = Object.freeze(['bool', 'int', 'choice', 'text', 'list']);
+export const FIELD_TYPES = Object.freeze(['bool', 'int', 'choice', 'text', 'list', 'profile']);
 
 const MODULE_ID = /^[a-z0-9][a-z0-9._-]*$/;
 // Domain names are JSON Pointer segments (/domains/<name>/…): no `/` or `~`.

@@ -29,6 +29,7 @@ import { scrollCue } from './view/scroll-cue.js';
 import { DEFAULT_TAIL_BUDGET, contextNotice, estimateTokens } from './prompt.js';
 import { fill } from './strings.js';
 import { cutAt } from '../text.js';
+import { profileNote, profileSelect } from './profile-field.js';
 
 export const OPEN_CLASS = 'story-suite-open';
 export const HOST_FOLD = 'story-suite';
@@ -160,6 +161,8 @@ function control(doc, field, value, onChange, id, memo = null) {
         select.addEventListener('change', () => onChange(select.value));
         return select;
     }
+    // A Connection Manager profile's name, or '' for the chat's connection (profile-field.js).
+    if (f.type === 'profile') return profileSelect(doc, value, onChange);
     if (f.type === 'int') {
         const input = el(doc, 'input', 'text_pole');
         input.type = 'number';
@@ -437,6 +440,8 @@ function fieldRow(doc, key, field, value, onChange, prefix, memo = null) {
     name.id = `${id}-label`;
     text.appendChild(name);
     if (f.help) text.appendChild(el(doc, 'small', '', f.help));
+    const note = f.type === 'profile' ? profileNote(doc, value) : null;
+    if (note) text.appendChild(note);
     row.appendChild(text);
     const input = control(doc, f, value, onChange, id, memo);
     input.id = id;

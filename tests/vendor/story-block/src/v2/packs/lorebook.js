@@ -39,3 +39,60 @@ export function findPackEntries(entries) {
     }
     return out;
 }
+
+// ---------------------------------------------------------------------------------------
+// Market lines (PACKS.md "Markets"): a lorebook entry about a place may say what kind of market it is
+// with one plain line of its content,
+//
+//   market: town; coastal, port
+//   market: village; river; buy 0.9, sell 0.85
+//
+// the settlement type, then its environment tags (comma separated, may be left out), then, optionally,
+// the place's own buy and sell factors (0.25 to 4). The place is the entry's title (SillyTavern's
+// "Title/Memo"), else its first key; its other keys are other names for it. Entries the line is not in
+// are passed over; the entry stays an ordinary lorebook entry for the story. A line that does not read
+// is passed over too. Code reads the line; the story's own words never set a price.
+
+const MARKET_LINE = /^\s*market\s*:\s*(.+?)\s*$/im;
+const WORD = /^[a-z][a-z0-9]*(?:-[a-z0-9]+){0,3}$/;
+const FACTOR = { min: 0.25, max: 4 };
+const MAX_TAGS = 8;
+const oneLine = (text, max = 80) => String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, max).trim();
+const word = text => oneLine(text, 40).toLowerCase().replace(/\s+/g, '-');
+
+/** `market: town; coastal, port; buy 1.1` → { type, tags, buy?, sell? }, or null when it does not read. */
+export function readMarketLine(text) {
+    const found = MARKET_LINE.exec(String(text ?? ''));
+    if (!found) return null;
+    const [typePart, tagPart = '', pricePart = ''] = found[1].split(';').map(part => part.trim());
+    const type = word(typePart);
+    if (!WORD.test(type)) return null;
+    const tags = [...new Set(tagPart.split(',').map(word).filter(tag => WORD.test(tag)))].slice(0, MAX_TAGS);
+    const out = { type, tags };
+    for (const pair of pricePart.split(',')) {
+        const at = /^\s*(buy|sell)\s*:?\s*(\d+(?:\.\d+)?)\s*$/i.exec(pair);
+        const n = at ? Number(at[2]) : NaN;
+        if (at && n >= FACTOR.min && n <= FACTOR.max) out[at[1].toLowerCase()] = n;
+    }
+    return out;
+}
+
+/**
+ * The places lorebook entries give a market line for, in lorebook order, one per place (the first
+ * entry naming it wins): entries `[{ book, uid, title, keys?, content }]` →
+ * `[{ place, aliases, type, tags, buy?, sell?, origin }]`.
+ */
+export function marketEntries(entries) {
+    const out = [];
+    for (const entry of Array.isArray(entries) ? entries : []) {
+        if (!entry || isPackTitle(entry.title)) continue;
+        const market = readMarketLine(entry.content);
+        if (!market) continue;
+        const keys = (Array.isArray(entry.keys) ? entry.keys : []).map(key => oneLine(key)).filter(Boolean);
+        const place = oneLine(entry.title) || keys[0] || '';
+        if (!place || out.some(other => other.place.toLowerCase() === place.toLowerCase())) continue;
+        const aliases = [...new Set(keys.filter(key => key.toLowerCase() !== place.toLowerCase()))].slice(0, 12);
+        out.push({ place, aliases, ...market, origin: `lorebook:${entry.book ?? ''}#${entry.uid ?? ''}` });
+    }
+    return out;
+}

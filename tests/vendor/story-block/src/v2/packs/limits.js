@@ -21,11 +21,13 @@ export const LIMITS = Object.freeze({
 // routes are the map Story Director's atlas reads; terms are the words a world uses for levels and XP
 // (MODULES §F25), which RPG Battle reads under the reader's own; ranks are a ladder of quest ranks
 // (Story Director's `quest.ranks`, RPG Battle's foe strength); crafts change which stats a craft rolls
-// with (MODULES §F102); meterPresets are ready-made NPC meter sets for NPC State Delta (MODULES §F81, §F90).
-export const CONTENT_KINDS = Object.freeze(['items', 'creatures', 'shops', 'recipes', 'events', 'quests', 'races', 'talents', 'skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets']);
+// with (MODULES §F102); meterPresets are ready-made NPC meter sets for NPC State Delta (MODULES §F81, §F90);
+// markets are the price factors of settlement types and environment tags RPG Battle's trade reads (PACKS.md
+// "Markets").
+export const CONTENT_KINDS = Object.freeze(['items', 'creatures', 'shops', 'recipes', 'events', 'quests', 'races', 'talents', 'skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets']);
 // Kinds added after the first pack format: a normalized pack has them only when the file gives
 // them, so what older packs list (counts) stays as it was.
-export const OPTIONAL_KINDS = Object.freeze(['skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets']);
+export const OPTIONAL_KINDS = Object.freeze(['skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets']);
 
 // Top-level fields of pack.json; anything else is refused so a typo is not silently ignored.
 export const PACK_FIELDS = Object.freeze(['id', 'version', 'name', 'author', 'description', 'requires', 'currency', 'economy', 'calendar', 'content', 'start', 'layouts', 'screens', 'theme']);
@@ -38,7 +40,10 @@ export const ECONOMY_LIMITS = Object.freeze({ min: 0.001, max: 1000, note: 500 }
 // Item definitions follow Story Block's inventory def (SPEC §7).
 export const ITEM_KINDS = Object.freeze(['goods', 'material', 'consumable', 'equipment', 'quest', 'money']);
 export const RARITIES = Object.freeze(['common', 'uncommon', 'rare', 'epic', 'legendary']);
-export const ITEM_FIELDS = Object.freeze(['name', 'slug', 'aliases', 'kind', 'rarity', 'value', 'stack', 'slot', 'stats', 'effect', 'tags', 'note']);
+export const ITEM_FIELDS = Object.freeze(['name', 'slug', 'aliases', 'kind', 'rarity', 'value', 'stack', 'slot', 'stats', 'effect', 'tags', 'note', 'carry']);
+// `carry`: the carry capacity an item adds while it is owned (worn, when it is equipment), a whole number
+// (PACKS.md "Carry capacity"). Only a pack (or the reader's settings in a carry module) sets it; the story never does.
+export const ITEM_CARRY = Object.freeze({ min: 1, max: 1000 });
 export const EVENT_FIELDS = Object.freeze(['id', 'when', 'cue', 'once', 'after', 'then']);
 // The events part's own limits (src/v2/events), so a pack that passes here also runs there.
 export const EVENT_LIMITS = Object.freeze({ when: 500, cue: 500, then: 8 });
@@ -52,7 +57,9 @@ export const PRESET_FIELDS = Object.freeze(['id', 'name', 'note', 'race', 'talen
 export const STAT_NAME = /^[A-Z]{2,12}$/;
 // Map data for Story Director's atlas (coordinates in map units, distances in km).
 // `hidden: true` (or its alias `secret: true`): the map keeps the place off until the story goes there.
-export const PLACE_FIELDS = Object.freeze(['name', 'slug', 'aliases', 'region', 'kind', 'layer', 'x', 'y', 'note', 'hidden', 'secret']);
+// `market` and `tags` (PACKS.md "Markets"): the place's settlement type ('village', 'city') and environment
+// tags ('river', 'port') that set its prices.
+export const PLACE_FIELDS = Object.freeze(['name', 'slug', 'aliases', 'region', 'kind', 'layer', 'x', 'y', 'note', 'hidden', 'secret', 'market', 'tags']);
 export const ROUTE_FIELDS = Object.freeze(['slug', 'from', 'to', 'kind', 'km', 'hours', 'corridor', 'note']);
 // Display terms a pack suggests (MODULES §F25): `{ id?, name?, levelName?, xpName?, tiers? }`, `tiers`
 // being `true` or `{ size?, numerals?, enabled? }`. A term is a label in RPG Battle's blocks
@@ -67,6 +74,16 @@ export const TERM_SEPARATORS = /[|:#<>\r\n]/;
 export const RANK_FIELDS = Object.freeze(['id', 'title', 'levels', 'reward']);
 export const RANK_ID = /^[\p{L}\p{N}+-]{1,8}$/u;
 export const RANKS_LIMITS = Object.freeze({ records: 12, title: 30, level: 999 });
+// Markets (PACKS.md "Markets"): price factors a pack adds or changes, each record one of
+// `{ type: 'town', buy?, sell?, stock?: [least, most], note? }` (a settlement type) or
+// `{ tag: 'coastal', prices: { fish: 0.8, all: 1.05 }, note? }` (an environment tag: a factor per item
+// category, `all` for every thing). Factors are multipliers (1 = as usual). A place gets its type and tags
+// from its `market` and `tags` (places), or a lorebook entry's `market:` line.
+export const MARKET_FIELDS = Object.freeze(['type', 'tag', 'buy', 'sell', 'stock', 'prices', 'note']);
+export const MARKET_LIMITS = Object.freeze({ records: 60, factorMin: 0.25, factorMax: 4, stock: 20, categories: 20, tags: 8, note: 200 });
+// A settlement type, an environment tag or an item category: a lowercase word or two joined by dashes.
+export const MARKET_WORD = /^[a-z][a-z0-9]*(?:-[a-z0-9]+){0,3}$/;
+
 // Crafting (MODULES §F102). A recipe may say which craft it is, how hard (`dc`), where it is made
 // (`station`), which stats it rolls with (`stat`, overriding the craft's), whether a character knows
 // it from the start (`known`) and who teaches it. RPG Battle's craft part reads them; code sets every

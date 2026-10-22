@@ -7,7 +7,7 @@
 import { button, el, plural } from '../../ui/dom.js';
 import { LIMITS } from './limits.js';
 
-const COUNT_WORDS = { items: 'item', creatures: 'creature', shops: 'shop', recipes: 'recipe', events: 'event', quests: 'quest', races: 'race', talents: 'talent', skills: 'skill', presets: 'ready-made character', places: 'place', routes: 'route', terms: 'term set', ranks: 'rank', crafts: 'craft', meterPresets: 'meter preset' };
+const COUNT_WORDS = { items: 'item', creatures: 'creature', shops: 'shop', recipes: 'recipe', events: 'event', quests: 'quest', races: 'race', talents: 'talent', skills: 'skill', presets: 'ready-made character', places: 'place', routes: 'route', terms: 'term set', ranks: 'rank', crafts: 'craft', meterPresets: 'meter preset', markets: 'market' };
 
 /** One line of what a pack holds: "3 items, 1 shop, start state". */
 export function countsLine(counts, hasStart) {
@@ -21,10 +21,11 @@ const errorLines = errors => errors.slice(0, 5).map(error => error.message);
 /**
  * Renders into `root`. `options`:
  * `packs` (installed.js), `readLorebook()` → `{ character, entries, problem }` (st-adapter.js),
- * `notify(text)` optional, `doc` the document to build in.
+ * `notify(text)` optional, `doc` the document to build in; `lore`: `{ read() → places, count() }`, the
+ * lorebook's market lines (packs/index.js refreshLore), read again with the lorebook's packs.
  * Returns `{ refresh() }`.
  */
-export function renderPacksPanel(root, { packs, readLorebook, notify = () => {}, doc = globalThis.document } = {}) {
+export function renderPacksPanel(root, { packs, readLorebook, notify = () => {}, doc = globalThis.document, lore = null } = {}) {
     const make = (tag, className = '', text = '') => el(tag, className, text, doc);
     const status = { text: '', errors: [] };
     const removing = new Set();
@@ -53,13 +54,18 @@ export function renderPacksPanel(root, { packs, readLorebook, notify = () => {},
     async function importLorebook() {
         const read = await readLorebook();
         if (read.problem) return say(read.problem);
+        // The places' `market:` lines (PACKS.md "Markets") are read again at the same time.
+        let places = null;
+        try { places = typeof lore?.read === 'function' ? await lore.read() : null; } catch { places = null; }
+        const marketText = Number.isInteger(places) && places > 0 ? ` ${plural(places, 'place')} with a market line.` : '';
         const { found, results } = await packs.importLorebook(read.entries);
-        if (!found) return say(`No lorebook entry of ${read.character || 'this character'} is tagged [storysuite:pack].`);
+        if (!found) return say(`No lorebook entry of ${read.character || 'this character'} is tagged [storysuite:pack].${marketText}`);
         const good = results.filter(result => result.ok);
         const bad = results.filter(result => !result.ok);
         const text = [
             good.length ? `Read ${plural(good.length, 'pack')} from the lorebook: ${good.map(result => result.name).join(', ')}.` : '',
             bad.length ? `${bad.length} ${bad.length === 1 ? 'entry was' : 'entries were'} not imported.` : '',
+            marketText.trim(),
         ].filter(Boolean).join(' ');
         say(text, bad.flatMap(result => errorLines(result.errors).map(line => `${result.title || result.origin}: ${line}`)));
     }

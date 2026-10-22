@@ -839,3 +839,9 @@ html:not([data-npc-state-delta-story-block-v2="1"]) .npc-state-delta-v2-hosted-o
 html[data-npc-state-delta-story-block-v2="1"] .npc-state-delta-v2-hosted-hide { display: none !important; }
 #npc_state_delta_settings .npc-state-delta-v2-hosted-only > .npc-state-delta-setting-row,
 #npc_state_delta_settings .npc-state-delta-v2-hosted-hide > .npc-state-delta-setting-row { border-bottom: 1px solid rgba(255,255,255,.055); }
+
+/* (v2) Delta's panel in Story Block v2's settings, right in the NPC State Delta fold: its drawer held
+   open with no header (the fold names it), so its groups are the second level, never a third. Story
+   Block 2's own host.css says the same; this keeps it with a host that does not. */
+.story-suite-section .story-suite-drawer > .inline-drawer-content { display: block !important; }
+.story-suite-section .story-suite-drawer > .inline-drawer-header { display: none !important; }
