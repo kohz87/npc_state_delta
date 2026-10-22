@@ -40,6 +40,7 @@ import {
 } from './src/scanner-request.js';
 import {
     applyFocusedRelationshipDecisions,
+    rawScanMatchesExisting,
     runFocusedRelationshipPass,
     stampNpcChanges,
     suppressPrimaryRelationshipForFocusedDecisions,
@@ -318,6 +319,15 @@ let lastCaptureBlockChars = 0;
 // Swipe and regenerate rebuild the branch after the reply arrives, so their instruction would
 // describe the replaced sibling; only fresh replies and continues are asked for a block.
 const NARRATION_CAPTURE_TYPES = new Set(['', 'normal', 'continue']);
+// (b6-soak-3) The capture's rules, which never change from reply to reply, stay in the system prompt
+// on these roleplay generations too, swipes and regenerates included, so the prompt's cached head is
+// the same on a swipe; only the reminder and context (the request for a block) follow the arming.
+// Quiet and impersonate generations never carry them.
+const CAPTURE_RULES_TYPES = new Set([...NARRATION_CAPTURE_TYPES, 'swipe', 'regenerate']);
+let captureRulesWithheld = false;
+// (b6-soak-5) Replies whose capture block was removed at MESSAGE_RECEIVED, re-rendered once the host
+// has drawn them (CHARACTER_MESSAGE_RENDERED): at MESSAGE_RECEIVED the reply is not fully drawn.
+const captureRerenderPending = new Set();
 let narrationCaptureArmed = '';
 let narrationCaptureVersion = null;
 const stateWriteTimers = new Map();
@@ -2126,7 +2136,7 @@ async function drainPendingAutoScan(chatKey) {
     pendingAutoScans.delete(chatKey);
     const succeeded = await scanNow({ manual: false, messageId: pending.messageId });
     if (succeeded && getChatKey() === chatKey && latestMessageId(true) === pending.messageId) {
-        await processPendingBackfills(pending.messageId);
+        scheduleReplyBackfills(chatKey, pending.messageId);
     }
     return succeeded;
 }
@@ -2526,13 +2536,15 @@ function updateInjection() {
     // The recent story and who the player's message names: worked out once for both parts.
     const transcript = recentTranscript(4);
     const armed = narrationCaptureArmed === injectionKey && narrationCaptureEnabled(settings);
-    if (!settings.inject && !armed) return clear('"Inject present NPC state" is off.');
+    const rulesSent = narrationCaptureEnabled(settings) && !captureRulesWithheld;
+    if (!settings.inject && !armed && !rulesSent) return clear('"Inject present NPC state" is off.');
     const namedNpcIds = namedByPlayerNpcIds(state);
     const prompt = settings.inject ? liveInjectionText(state, settings, { namedNpcIds, transcript }) : '';
     // (1.2.17) The capture's context leaves out what this dossier already gives word for word.
-    const captureParts = armed
+    const builtParts = armed || rulesSent
         ? buildNarrationCaptureParts(scannerPromptOptions(state, settings, transcript, { dossierAbove: prompt }))
         : { rules: '', context: '' };
+    const captureParts = { rules: armed || rulesSent ? builtParts.rules : '', context: armed ? builtParts.context : '' };
     const capture = captureParts.context;
     const present = (state.npcs || []).filter(npc => npc?.present && !npc?.archived);
     const depth = injectDepthOf(settings);
@@ -3356,12 +3368,31 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
     });
 }
 
-async function processPendingBackfills(messageId = null) {
+// (b6-soak-2) One capture block admits at most this many new people. A crowd scene (a block naming
+// forty dockhands) otherwise makes forty dossiers, each with its own backfill request later; the
+// people left out are admitted from a later reply that names them again.
+const CAPTURE_NEW_NPCS_PER_BLOCK = 4;
+function capCaptureAdmissions(parsed, npcs = []) {
+    const rows = Array.isArray(parsed?.npcs) ? parsed.npcs : [];
+    let fresh = 0;
+    const kept = rows.filter(raw => {
+        if (npcs.some(npc => rawScanMatchesExisting(raw, npc))) return true;
+        fresh += 1;
+        return fresh <= CAPTURE_NEW_NPCS_PER_BLOCK;
+    });
+    if (kept.length === rows.length) return;
+    console.info(`[NPC State Delta] a one-pass block named ${fresh} new people; ${CAPTURE_NEW_NPCS_PER_BLOCK} were admitted from it, the others wait for a later reply.`);
+    parsed.npcs = kept;
+}
+
+async function processPendingBackfills(messageId = null, { limit = Infinity } = {}) {
     const chatKey = getChatKey();
     if (chatKey === 'no-chat' || !requireReadyChatMutation('process queued dossier backfills', chatKey, { notify: false }) || isScanBusy(chatKey) || isHostSwipeActive()) return 0;
     let processed = 0;
+    // Model calls made (each backfill is one request, plus a compact retry at most).
+    let calls = 0;
     const attemptedNpcIds = new Set();
-    while (getChatKey() === chatKey && !isScanBusy(chatKey)) {
+    while (getChatKey() === chatKey && !isScanBusy(chatKey) && calls < limit) {
         const state = getChatState(chatKey);
         if (!Array.isArray(state.pendingBackfills) || !state.pendingBackfills.length) break;
         const request = state.pendingBackfills.find(item => item?.npcId && !attemptedNpcIds.has(item.npcId));
@@ -3384,6 +3415,7 @@ async function processPendingBackfills(messageId = null) {
         const lastAttemptAt = Math.max(0, Number(request.lastAttemptAt || 0) || 0);
         if (attempts > 0 && lastAttemptAt && Date.now() - lastAttemptAt < BACKFILL_RETRY_COOLDOWN_MS) continue;
 
+        calls += 1;
         const succeeded = await backfillNpcFromHistory(request, messageId, { automatic: true });
         if (succeeded === null) break;
         if (getChatKey() !== chatKey || !requireReadyChatMutation('settle queued dossier backfill', chatKey, { notify: false })) break;
@@ -3516,10 +3548,36 @@ async function runCaptureCatchUp(chatKey, ids, tries = 0) {
         if (!getChatState(chatKey).npcs.some(npc => npc.id === id && !npc.archived)) continue;
         await refreshNpcFromChat(id, { automatic: true });
     }
+    // (user decision 5) Hosted one-pass mode runs the backfill queue here, on the catch-up schedule.
+    if (getChatKey() === chatKey && hostedOnePass()) await processPendingBackfills(latestMessageId(true), { limit: BACKFILLS_PER_REPLY });
 }
 
 function narrationCaptureEnabled(settings = getSettings()) {
     return Boolean(settings.enabled && settings.narrationCapture && settings.autoScan && !settings.fullScanEveryTurn);
+}
+// (user decision 5) Hosted by Story Block v2 with the npc meters slice, the story's `~ npc` lines move
+// the meters, and code clamps and caps them. So Delta adds no model call of its own to a reply there:
+// no focused relationship pass after a one-pass block, no new-NPC relationship pass (a new NPC starts
+// at the base meter values), and, in one-pass mode, the backfill queue runs only with the one-pass
+// catch-up or when the reader asks. Without a host none of this applies.
+function hostedMeters() {
+    return Boolean(storySuiteV2Meters());
+}
+function hostedOnePass(settings = getSettings()) {
+    return hostedMeters() && narrationCaptureEnabled(settings);
+}
+// (b6-soak-2) Queued backfills never hold a reply: SillyTavern waits for every MESSAGE_RECEIVED
+// listener before it draws the reply and gives back the Send button. The queue is started, not
+// awaited, so the handler returns at once; at most BACKFILLS_PER_REPLY model calls per reply, the
+// rest stay queued for the next one.
+const BACKFILLS_PER_REPLY = 2;
+function scheduleReplyBackfills(chatKey, messageId) {
+    if (hostedOnePass()) return;
+    queueMicrotask(() => {
+        if (getChatKey() !== chatKey || latestMessageId(true) !== messageId) return;
+        processPendingBackfills(messageId, { limit: BACKFILLS_PER_REPLY })
+            .catch(error => console.warn('[NPC State Delta] queued dossier backfills stopped.', error));
+    });
 }
 // Bound to the reply's position and the lineage before it, not to the reply's own text: other
 // extensions may rewrite a reply on arrival (wrapping their blocks, for example). Editing an earlier
@@ -3545,7 +3603,14 @@ function stripNarrationSwipes(message, lenient) {
     }
 }
 // On MESSAGE_RECEIVED the reply is not drawn yet (the host draws it next, from the stripped text);
-// re-render only a message already in the chat.
+// re-render only a message already in the chat. (b6-soak-5) A reply's own receipt re-renders it only
+// once the host says it is drawn (CHARACTER_MESSAGE_RENDERED, renderCapturedReply below).
+function renderCapturedReply(messageId) {
+    const id = Number(messageId);
+    if (!captureRerenderPending.delete(id)) return;
+    const message = getContext().chat?.[id];
+    if (message && !message.is_user && !message.is_system) rerenderNarrationMessage(id, message);
+}
 function rerenderNarrationMessage(messageId, message) {
     if (!globalThis.document?.querySelector?.(`#chat .mes[mesid="${Number(messageId)}"]`)) return;
     try { getContext().updateMessageBlock?.(messageId, message); }
@@ -3559,7 +3624,7 @@ function captureNarrationBlock(chatKey, messageId, message, armed) {
         return;
     }
     message.mes = extracted.text;
-    rerenderNarrationMessage(messageId, message);
+    captureRerenderPending.add(Number(messageId));
     // Only a reply written under the instruction may stand in for a scan; a block in any other
     // message (sendas, card text, another extension) is removed and ignored.
     if (!armed || !narrationCaptureEnabled() || !extracted.text.trim()) return;
@@ -3729,6 +3794,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         // later reply counts as a second sighting (a manual or full-window scan reads many replies).
         const singleReply = !manual && !fullWindowScan && Number.isInteger(messageId);
         const resolvedParsed = resolveInterimIdentityPromotions(singleReply ? tagScanEvidence(parsed, messageId) : parsed, state.npcs, state.candidates);
+        if (capture) capCaptureAdmissions(resolvedParsed, state.npcs);
         profileUpdateCount = Array.isArray(resolvedParsed.profileUpdates) ? resolvedParsed.profileUpdates.length : (Array.isArray(resolvedParsed.profile_updates) ? resolvedParsed.profile_updates.length : 0);
         // Relationship-edge extraction is a separate channel from ordinary NPC delta admission.
         // Add a deterministic fallback for explicit binary statements so a missed lifecycle field
@@ -3744,7 +3810,8 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         const fullWindowRelationship = (manual || fullWindowScan)
             ? prepareFullWindowRelationshipPayload(resolvedParsed, state.npcs)
             : { evaluation: resolvedParsed, mergeSafe: resolvedParsed };
-        const relationshipPass = await runFocusedRelationshipPass(
+        // (user decision 5) Hosted, a one-pass block's own rows are the reply's relationship decision.
+        const relationshipPass = capture && hostedMeters() ? { decisions: new Map(), used: false, responseChars: 0, retried: false, targetCount: 0 } : await runFocusedRelationshipPass(
             ctx,
             fullWindowRelationship.evaluation,
             state.npcs,
@@ -3817,7 +3884,8 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         });
         const newlyAdmittedIds = [...new Set([...(merged.report?.created || []), ...(merged.report?.promoted || [])])];
         let newNpcRelationshipPass = { decisions: new Map(), used: false, targetCount: 0, responseChars: 0, retried: false };
-        if (fullWindowScan && newlyAdmittedIds.length) {
+        // (user decision 5) Hosted, a new NPC starts at the base meter values: no evaluator request.
+        if (fullWindowScan && newlyAdmittedIds.length && !hostedMeters()) {
             const newTargets = merged.state.npcs.filter(npc => newlyAdmittedIds.includes(npc.id) && !npc.archived);
             if (newTargets.length) {
                 const combinedDecisions = new Map();
@@ -6932,7 +7000,11 @@ function bindUi() {
     });
     $(document).on('click.npcStateDelta', '.npc-state-delta-retry-hydration', () => { void retryCurrentChatHydration(); });
     $(document).on('click.npcStateDelta', '.npc-state-delta-detach-sidecar', () => { void detachBrokenSidecar(); });
-    $(document).on('click.npcStateDelta', '#npc_state_delta_scan_now', () => scanNow({ manual: true, messageId: latestMessageId(true) }));
+    $(document).on('click.npcStateDelta', '#npc_state_delta_scan_now', async () => {
+        const scanned = await scanNow({ manual: true, messageId: latestMessageId(true) });
+        // (user decision 5) The reader's own Scan also runs the backfill queue hosted one-pass mode holds.
+        if (scanned && hostedOnePass()) await processPendingBackfills(latestMessageId(true));
+    });
     // (1.2.13) What's sent: filled when opened and on Refresh, never while closed.
     $(document).on('click.npcStateDelta', '#npc_state_delta_sent_refresh', () => renderWhatsSent());
     globalThis.document?.addEventListener?.('toggle', event => {
@@ -7082,7 +7154,7 @@ async function handleAssistantMessageReceived(messageId, { bypassSwipeGuard = fa
         if (await scanNow({ manual: false, messageId, allowDuringSwipe: bypassSwipeGuard }) === false) return;
     }
     if (getChatKey() !== eventChatKey || latestMessageId(true) !== messageId || !sourceStillHere()) return;
-    await processPendingBackfills(messageId);
+    scheduleReplyBackfills(eventChatKey, messageId);
 }
 
 async function refreshCurrentChatFromServer(reason = 'resume') {
@@ -7192,9 +7264,17 @@ function registerEvents() {
             // The capture block is asked for only in fresh replies and continues; quiet, impersonate,
             // swipe and regenerate generations never carry the instruction.
             const captureType = NARRATION_CAPTURE_TYPES.has(String(type ?? '')) && narrationCaptureEnabled();
+            captureRulesWithheld = !CAPTURE_RULES_TYPES.has(String(type ?? ''));
             if (type === 'quiet') {
                 sentCaptureRules = '';
                 disarmNarrationCapture();
+                // Another extension's background request never carries the capture rules. Nothing else
+                // of the injection is rebuilt for it.
+                if (lastInjection.captureRules || lastInjection.captureContext) {
+                    getContext().setExtensionPrompt?.(CAPTURE_RULES_KEY, '', extension_prompt_types.IN_PROMPT, 0, false, extension_prompt_roles.SYSTEM);
+                    getContext().setExtensionPrompt?.(CAPTURE_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, CAPTURE_PROMPT_DEPTH, false, extension_prompt_roles.SYSTEM);
+                    lastInjection = { ...lastInjection, captureChars: 0, captureRules: '', captureContext: '' };
+                }
                 return;
             }
             narrationCaptureArmed = '';
@@ -7209,8 +7289,8 @@ function registerEvents() {
             narrationCaptureArmed = captureType ? key : '';
             updateInjection();
             // Armed only when the instruction actually went out (hydration may have withheld it).
-            if (!lastInjection.captureChars) narrationCaptureArmed = '';
-            if (narrationCaptureArmed) holdCaptureRules();
+            if (!lastInjection.captureContext) narrationCaptureArmed = '';
+            if (lastInjection.captureRules) holdCaptureRules();
             else sentCaptureRules = '';
             noteNarrationCaptureVersion(key);
         });
@@ -7228,7 +7308,7 @@ function registerEvents() {
             await handleAssistantMessageReceived(messageId);
         });
     }
-    if (events.CHARACTER_MESSAGE_RENDERED) source.on(events.CHARACTER_MESSAGE_RENDERED, () => queueInlineRender(0));
+    if (events.CHARACTER_MESSAGE_RENDERED) source.on(events.CHARACTER_MESSAGE_RENDERED, messageId => { renderCapturedReply(messageId); queueInlineRender(0); });
     if (events.MESSAGE_UPDATED) source.on(events.MESSAGE_UPDATED, () => queueInlineRender(30));
     if (events.MORE_MESSAGES_LOADED) source.on(events.MORE_MESSAGES_LOADED, () => queueInlineRender(30));
     if (events.CHAT_LOADED) source.on(events.CHAT_LOADED, async () => {
