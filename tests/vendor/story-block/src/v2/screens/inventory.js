@@ -2,7 +2,9 @@
 // rarity colours, quantities, an equipped marker, the wallet in the chat's one currency (MODULES §F1),
 // an Equipped section per wearer with Take off, "Equip on…" (only the members who can wear the piece,
 // `inventory.equipOn`, MODULES §F99) and "Give…" (`inventory.transfer`) pickers once the party has
-// members (a party with none keeps the plain Equip), RPG Battle's item detail widget when it is there,
+// members (a party with none keeps the plain Equip), "Use on…" for a consumable (`item.use { stack, target }`,
+// only the members `items.useOn` says a dose would help now: a module's rule, none without one), RPG
+// Battle's item detail widget when it is there,
 // a "To pick up" section with the loot still waiting (the same chips and Take selected as the reply's
 // card, so loot works with the cards off), Unequip and Drop buttons, and filters that fill the view's draft (§13.2, §13.6): a name box
 // ("Filter…", `draft.find`), what kind, what rarity, equipped only. Its texts are in src/v2/strings.js. Nothing here writes state; the buttons run the core commands with
@@ -60,6 +62,13 @@ function group(kind) {
             <span class="choices">
               <button class="btn" data-each="q.gear.wearers[it.stack] as who" data-command="inventory.equipOn"
                       data-payload='{"stack":"{{ it.stack }}","actor":"{{ who.id }}"}' title="${html(S.equipOnWho, { name: '{{ it.name }}' })}">{{ who.name }}</button>
+            </span>
+          </details>
+          <details class="pick use-on" data-if="it.kind == 'consumable' && len(q.gear.users[it.stack]) > 0">
+            <summary class="btn" title="${html(S.useOnTitle, { name: '{{ it.name }}' })}"><i class="fa-solid fa-flask" aria-hidden="true"></i> ${html(S.useOn)}</summary>
+            <span class="choices">
+              <button class="btn" data-each="q.gear.users[it.stack] as who" data-command="item.use"
+                      data-payload='{"stack":"{{ it.stack }}","target":"{{ who.id }}"}' title="${html(S.useOnWho, { name: '{{ it.name }}' })}">{{ who.name }}</button>
             </span>
           </details>
           <button class="btn" data-if="it.equipped" data-command="inventory.unequip"

@@ -1666,7 +1666,8 @@ const asker = tools => (name, args) => {
  * { members: [{ id, name }], worn: [{ id, name, items: [item] }] (each wearer's pieces, by slot key),
  *   wearers: { [stack]: [{ id, name }] } (who may put on each piece of equipment, not its wearer),
  *   givers: { [stack]: [{ id, name }] } (where Give may hand each stack: the party's bag and members,
- *   not its owner), limits: { accessory, worn }, detail: bool (RPG Battle's item detail is there) }.
+ *   not its owner), users: { [stack]: [{ id, name }] } (whom Use on… offers for a consumable: usersOf),
+ *   limits: { accessory, worn }, detail: bool (RPG Battle's item detail is there) }.
  */
 export function equipmentView(state, tools) {
     const query = asker(tools);
@@ -1700,7 +1701,26 @@ export function equipmentView(state, tools) {
         query('rpg-battle.itemDetail', { stack: '' });
         detail = true;
     } catch { detail = false; }
-    return { members, worn, wearers, givers, limits, detail };
+    return { members, worn, wearers, givers, users: usersOf(query, inventory, items, members), limits, detail };
+}
+
+/**
+ * Who a Use on… picker offers for each consumable (bag management, beta.1 live test): the module that
+ * answers `items.useOn` (RPG Battle: the members a dose would help now, none while a fight has the
+ * party; its Use runs `item.use { stack, target }`). Only consumables the party holds, only members;
+ * {} without such a module, so the picker is not drawn.
+ */
+function usersOf(query, inventory, items, members) {
+    const given = asking(query, 'items.useOn', {});
+    if (!isPlainObject(given)) return {};
+    const names = new Map(members.map(member => [member.id, member.name]));
+    const out = {};
+    for (const item of items) {
+        if (inventory.defs[item.def]?.kind !== 'consumable' || !Object.hasOwn(given, item.stack) || !Array.isArray(given[item.stack])) continue;
+        const ids = [...new Set(given[item.stack].map(entry => (isPlainObject(entry) ? entry.id : entry)).filter(id => names.has(id)))];
+        if (ids.length) out[item.stack] = ids.map(id => ({ id, name: names.get(id) }));
+    }
+    return out;
 }
 
 // The encumbered condition (`story-block.encumbrance`): derived from the load the carry module reports
