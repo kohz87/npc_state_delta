@@ -1,356 +1,136 @@
-# NPC State Delta v1.2.20
+# NPC State Delta v1.2.20 ("Delta")
 
-> **Story Suite v2 beta (2.0.0-beta.1) is on the `v2` branch; Delta's build there is 1.2.20.** Delta stays a standalone extension. With Story Block 2.0.0-beta.1 or later it also joins Story Block as a hosted module: NPC meters (trust, affection, desire, tension and your own) kept with each reply, a Dossiers tab (once Cast), its present-cast cards on Story Director's World screen, and its settings in the Story Suite overlay (see [With Story Block v2](#with-story-block-v2)). The beta is for test play, not your real campaigns yet. Player guide: [Story Block docs/v2/GUIDE.md](https://github.com/kohz87/Story_block/blob/v2/docs/v2/GUIDE.md). Release notes: [RELEASES.md](https://github.com/kohz87/Story_block/blob/v2/docs/v2/RELEASES.md).
+> This is the **`v2` branch**, the build that goes with Story Suite v2 **2.0.0-beta.1**. It is for test play, not
+> for your real campaigns yet. Delta 1.2.x for Story Block 1 is on the
+> [`main` branch](https://github.com/kohz87/npc_state_delta/tree/main).
 
+## What it is
 
-A SillyTavern extension that keeps a living dossier for every NPC in your roleplay: who they are, how they look, how they talk and behave, what they remember, and how they feel about you. After each reply it scans the story, updates the dossiers carefully, and feeds the present NPCs back to the roleplay model so they stay in character.
+Delta keeps a living dossier for every NPC in your roleplay: who they are, how they look, how they talk, what they
+remember and how they feel about you. After each reply it reads the scene, updates the dossiers only where the
+story gives evidence, and sends the NPCs who are present back to the roleplay model so they stay in character.
 
-**Current release:** 1.2.20 · [Changelog](CHANGELOG.md) · [Development guide](DEVELOPMENT.md)
+In Story Suite v2 it is the people part of the suite. It works on its own, and beside
+[Story Block](https://github.com/kohz87/Story_block) (the host) it also keeps trust, affection, desire and tension
+with every reply, shows a **Dossiers** tab, feeds its cards to
+[Story Director](https://github.com/kohz87/Story_director)'s World screen and gives
+[RPG Battle](https://github.com/kohz87/rpg_battle) its social checks.
 
----
+## Install
 
-## Contents
+1. SillyTavern **1.18.0 or newer** for Delta alone (Story Suite v2 itself targets 1.19). Delta needs a model
+   connection for its scans: your chat's, or a separate connection profile.
+2. **Extensions → Install extension**, paste `https://github.com/kohz87/npc_state_delta`, choose the branch
+   **`v2`**, reload.
+3. For the suite, install **Story Block first** (`https://github.com/kohz87/Story_block`, branch `v2`), then Delta;
+   Story Director and RPG Battle can come before or after.
 
-- [What it does](#what-it-does)
-- [Screenshots](#screenshots)
-- [Requirements](#requirements)
-- [Install and update](#install-and-update)
-- [Getting started](#getting-started)
-- [Settings](#settings)
-- [How dossiers work](#how-dossiers-work)
-- [Swipes, edits and rollback](#swipes-edits-and-rollback)
-- [Data, backups and multiple devices](#data-backups-and-multiple-devices)
-- [Troubleshooting](#troubleshooting)
-- [For developers](#for-developers)
-- [License](#license)
-- [Credits](#credits)
+Needs (`requires`): nothing to run on its own. To join the suite it needs Story Block **2.0.0-beta.1 or later**;
+with an older Story Block 2 Delta keeps working alone, without meters, the Dossiers tab or its Story Suite
+section, and logs a console warning. Before updating an existing install, export a backup from
+**Data & maintenance → Backup / Export**.
 
----
+## What you get
 
-## What it does
+Switches are in Story Suite **Settings → Features**. "No switch" means it is always on.
 
-- **Dossiers for every NPC.** Identity, species, gender, age, home base, appearance, personality, speech, mannerisms, Behavioral Levers, background, goals, important memories and bonds with other NPCs.
-- **Automatic scanning.** After each story exchange, a scanner request reads the latest scene and proposes changes. Only changes the story supports are accepted.
-- **Stays in character.** Present NPCs are injected into the next roleplay request, so the model sees their personality, voice and behaviour, not just their name. An off-screen NPC you name in your message is sent too, so she arrives as herself.
-- **Relationships.** Trust, Affection, Desire and Tension toward the player move in small, capped steps with a reason recorded for each change.
-- **Appearance that keeps up.** Outfits change without erasing hair, eyes or scars. Shapeshifters can have several named forms.
-- **Portraits.** Upload one, or generate one through SillyTavern Image Generation, with prompts built from the dossier.
-- **Calendar and birthdays.** Custom fantasy calendars, and birthdays that age NPCs correctly.
-- **Swipe and edit safe.** Deleting, editing or swiping messages rolls the dossiers back to match.
-- **Backups and diagnostics.** Export and import dossiers and portraits, and see why each profile change was accepted or held.
+- **Dossiers** (tab, last by default; no switch): every dossier in the chat, with search; tap one for the dossier
+  view (portrait, role, status, relationship). It was the Cast tab and keeps the id `npc-state-delta/cast`, so a
+  tab order you saved stays. Without Story Director, the cards of the people here sit at its top.
+- **The page API for World** (no switch): Delta exposes `NPCStateDeltaCast` so Story Director's **World → Now →
+  Here** draws Delta's own cards for the people present, with each person's Inner chatter thought inside the card,
+  and redraws when a scan finishes. No copy of the markup.
+- **NPC meters** (no switch): trust, affection, desire and tension from -100 to 100, plus up to six meters of your
+  own, kept with each reply. The story moves them with a `~ npc` line; code clamps and caps them (**Most a meter
+  moves per reply**, default 15).
+- **Stage ladders and milestones** (`npc-state-delta.stages`, on): named rungs that need several meters and a story
+  milestone; code moves the stage and tells the next reply.
+- **Meter presets and rules** (`npc-state-delta.presets`, on): one-click Companion, Rival and Mentor sets, plus
+  any a pack brings. **Meters drift each story day** (`npc-state-delta.drift`, **off**; needs Story Director's clock).
+- **Hidden notes** (dossier editor): a note stays out of every prompt until its meter reaches a threshold; while
+  locked, a screen shows only "Her past, unlocks at Trust 60".
+- **Social checks** (`npc-state-delta.social`, on): a persuade, charm, intimidate or deceive check against an NPC
+  gets a bonus or penalty from their meters, stage and disposition, for a dice module such as RPG Battle
+  ("Elula trusts you (+2)"). Delta only reads; it sends nothing to the model. Settings **Social checks: strength
+  (%)** (default 100) and **Social checks: most a check moves** (default 5).
+- **Questions other modules can ask** (read-only): `npc.present`, `npc.known`, `npc.dossier`, `npc.meters`,
+  `npc.cast`, `npc.portrait`, `npc.socialModifier`.
+- **Scans and dossiers** (Quick bar: **Enable NPC State Delta**, **Auto scan**, both on): portraits, calendar and
+  birthdays, relationships, swipe and edit rollback, backup and diagnostics, as in Delta 1.2.
 
-## Screenshots
+## Looking after a dossier
 
-From a demo session with [Story Block](https://github.com/kohz87/Story_block), [Story Director](https://github.com/kohz87/Story_director) and [RPG Battle](https://github.com/kohz87/rpg_battle). Portraits show the NPC's initial until you generate or upload one.
+- **Appearance keeps up.** Outfits change without erasing hair, eyes or scars. An NPC who transforms can have several
+  **named forms** (human, dragon, ...), each with one complete description, body and outfit together.
+- **If someone is missing**, use **Add NPC**. If a dossier looks stale, open it and use **Refresh**, which re-reads
+  the recent story for that one NPC. For an NPC with named forms, the body belongs in each form instead; Refresh or
+  edit the form.
+- Deleting, editing or swiping a message rolls the dossiers back to match. Backup, restore and a diagnostics report are
+  under **Data & maintenance**.
 
-| Present NPCs in Story Block's sidebar | On a phone | A dossier |
-| --- | --- | --- |
-| <img src="docs/images/present-npcs.png" alt="Present NPCs: Captain Kael's card with his mood, condition and look, and Lyra's card with her Inner Chatter thought bubble" width="260"> | <img src="docs/images/present-npcs-phone.png" alt="Present NPCs on a phone: each card on the left, mood, condition and look or the chatter bubble on the right" width="220"> | <img src="docs/images/dossier.png" alt="Lyra's dossier: relationship, identity and current state" width="420"> |
+## How a turn works
 
----
+Delta's own scan runs after the reply, as a separate request, and updates the dossier text only where the story
+gives evidence. The numbers go through Story Block: the model ends the reply with a hidden `<Changes>` list, and
+Delta's lines look like this:
 
-## Requirements
+```
+<Changes>
+~ npc Mira | trust: +5 | affection: -2
+~ npc Mira | disposition: wary
++ milestone Saved her brother — the bridge rescue
+</Changes>
+```
 
-- SillyTavern **1.18.0** or later.
-- A model connection for scanning. It can be the same one you roleplay with, or a separate connection profile.
-
-## Install and update
-
-1. In SillyTavern, open **Extensions → Install extension** and paste this repository's URL.
-   Or unpack `npc_state_delta-1.2.19.zip` so that a single `npc_state_delta` folder contains `manifest.json` directly.
-2. Reload SillyTavern.
-3. **Before updating an existing install,** export a backup from **Data & maintenance → Backup / Export**.
-
-## Getting started
-
-1. Open **Extensions → NPC State Delta** and make sure **Enable NPC State Delta** and **Auto scan** are on.
-2. Play normally. After each reply the scanner picks up named NPCs and starts their dossiers.
-3. Click the floating launcher, or **Open dossiers**, to browse the cast. With Story Block, use its **Present NPCs** and **Dossiers** tabs instead; the floating button hides there (**Floating button with Story Block** keeps it).
-4. If someone is missing, use **Add NPC**. If a dossier looks stale, open it and use **Refresh**, which re-reads the recent story for that one NPC.
-
-> **Tip:** Automatic scans only read the latest exchange. **Refresh** reads a longer recent window, so it is the quickest way to fill in or fix one NPC.
+Code clamps each meter to its range and holds each change to the cap; the story cannot set a stage. Swipe, delete,
+Re-read and reload take the changes back with the reply. Delta's own prompts are unchanged from earlier 1.2 builds. Details: Story Block's
+[GUIDE](https://github.com/kohz87/Story_block/blob/v2/docs/v2/GUIDE.md) and
+[MODULES](https://github.com/kohz87/Story_block/blob/v2/docs/v2/MODULES.md) (section D), and
+[docs/dev/storysuite-adapter.md](docs/dev/storysuite-adapter.md).
 
 ## Settings
 
-The settings panel has a quick bar that is always visible, plus seven groups.
+With Story Block 2 Delta's panel moves into the Story Suite overlay (Settings on the Story Suite bar) as its own
+fold; without it, it is under **Extensions → NPC State Delta**.
 
-| Where | What you'll find |
-|---|---|
-| **Quick bar** | Enable, Auto scan, Open dossiers, Scan dossier now, Full scan current cast, Add NPC |
-| **Scanning** | Scanner connection profile, how often to scan, how readily new NPCs get a dossier (Conservative, Balanced or Manual only), and the experimental one-pass narration capture |
-| **Roster & continuity** | Present NPCs in chat (Full cards, Compact strip, Only in Story Block or Off), injection on/off, relationship map (on/off, default distance), custom fields, maximum active NPCs, death and return handling, stale NPC cleanup |
-| **Calendar & birthdays** | Month names and lengths, optional era, optional campaign date |
-| **Source of truth** | Who leads each shared area (NPCs, calendar, scene, game stats) when Story Block, Story Director or RPG Battle is installed: Automatic, This extension or The other one |
-| **Portrait generation** | Style presets, positive and negative prompts, composition, prompt format |
-| **Scanner rules** | Advanced: relationship starting values and per-scan caps, memory criteria, behaviour rubric |
-| **Advanced** | (since 1.2.15) Settings most readers never touch: Scan context (how much story full, manual and Refresh scans read), Maximum output tokens for the scanner, NPCs in the dossier (how many present NPCs the live dossier carries, default 3), Injection budget (a ceiling, default 4000 tokens), Rewind dossiers on middle deletion, Rescan changed branches |
-| **What's sent** | (since 1.2.13) The text your next reply gets from Delta, each part with its size: the live dossier and, with one-pass capture on, the capture reminder. Filled when you open it, and on **Refresh** |
-| **Data & maintenance** | Backup / Export, Restore / Import, Diagnostics, and clearing this chat's dossiers |
-
-Leave the scanner connection profile empty to use SillyTavern's current connection. If you pick a profile that isn't available, scanning fails visibly instead of silently switching. With no connection profile yet, the list says so: make one in SillyTavern's Connection Manager and it appears. With Story Block v2, Delta's lines (scanner route, profile, the last call's outcome) are also in Story Block's **Settings → Diagnostics** report.
-
-### Story Block tabs
-
-With [Story Block](https://github.com/kohz87/Story_block) installed, Delta adds two tabs to its sidebar and card, next to your inventory, World State and other blocks (Story Block 2 gets a **Dossiers** tab instead, see [With Story Block v2](#with-story-block-v2)):
-
-- **🎭 Present NPCs:** the same cards as in the chat, for whoever is present in the latest scene.
-- **📇 Dossiers:** every dossier with a search box. The dead stay out of the list until you search for them. Tap a row to open that dossier.
-
-Each present NPC shows what they are like now as labelled lines: **Mood**, **Condition** and **Outfit** (only those known; when the line comes from the dossier rather than World State it is the NPC's current **Look**). In Story Block's sidebar or sheet and on phones each NPC is a row in two halves: on the left a portrait card with the name over the image, on the right the NPC's chatter bubble (below), or else those lines in full, or else their role and *No changes this turn*; a very narrow pane stacks the two, the card as a short banner. Wider places show a grid of cards with the lines under the portrait (hover a line for its full text). The lines come from Story Block's World State for the latest reply while Story Block keeps the scene (Source of truth → Scene), otherwise from the dossier. With Story Block's **NPC Inner Chatter** block on, each line of chatter appears as a bubble by the speaker, in the chatter's order: speech bubbles when two or more NPCs whisper, a thought bubble when only one has a line. In narrow places the bubble fills the right half of the NPC's row, pointing at the card (under the card when the pane is very narrow); in the wider grid it sits under the card. Someone who speaks without a present card gets a card of their own after the present NPCs, their bubble beside it the same way: their portrait if Delta tracks them (tap to open the dossier), else their initial and *Not in the dossiers yet*. Lines with no recognisable speaker go to *Others*. Story Block then hides its own Chatter tab (the block is still written as before). All of this is display only.
-
-An empty tab says why (since 1.2.13). **Present NPCs** names the reason: no NPC has a dossier in this chat yet (the story or the World State may name someone Delta has not scanned), the latest reply has not been scanned, or the latest scan found no one. It offers **Scan now**. **Dossiers** with none at all says *No dossiers yet* and offers **Add NPC** and **Scan now**.
-
-While Story Block is installed, the cast shows only in Story Block until you pick a choice under **Roster & continuity → Present NPCs in chat**. Pick **Full cards** or **Compact strip** to keep it in the chat as well; **Only in Story Block** shows full cards in the chat when Story Block isn't installed. The tabs are display only and change nothing in prompts, scans or saved data; switching Delta off takes them out of the sidebar at once (since 1.2.15). Without Story Block nothing changes.
-
-### Story Suite: Story Block, Story Director and RPG Battle
-
-Delta works alone and alongside [Story Block](https://github.com/kohz87/Story_block), Story Director and RPG Battle. Installed together, they agree on one source of truth per area so the model is not told the same thing twice ([how it works](docs/STORY_SUITE.md)):
-
-- **NPCs:** Delta leads; Story Director's agenda lines then describe only an NPC's plans. Delta keeps its dossiers whatever is chosen here.
-- **Scene:** when Story Block's World State block is on, the present NPCs' cards leave out the live mood and current outfit that World State already gives; personality, voice, goals, bonds, custom fields and enduring features are still sent.
-- **Calendar:** with Story Director installed, Delta uses its months and era for birthdays and ages, and keeps its own calendar if Story Director's is missing.
-- **Game stats:** with RPG Battle installed, **Custom fields** warns when a field name looks like a game stat (Level, HP, Class…) that RPG Battle keeps.
-- Delta also reads the World State inside Story Block's hidden block, as it reads Megumin Suite's.
-- **Shared with the others (read-only):** the current chat's NPCs (`npcs()`) and NPC profiles (`npcProfiles()`: name, aliases, present, a short role and a summary of up to 200 characters built from the dossier), which RPG Battle can offer as companions, and `openDossier(id)`, which opens Delta's dossier view on that NPC (an exact name or alias also works; archived NPCs open nothing) for RPG Battle's **Dossier** button. Archived and dead NPCs are left out of the profiles; nothing extra is scanned or sent to the model.
-- **Tokens per reply:** the Story Suite overlay shows Delta's estimate (about four characters a token) of what it adds to the next ordinary reply: the dossier injection by section (instructions, present NPC cards, mentioned and deceased references, relationship rubric) and, with one-pass capture on, its instruction plus the block the model writes back. Scans are separate requests and are not counted.
-- **Chatter on the cards:** Delta tells Story Block it shows NPC Inner Chatter on its Present NPCs cards, so Story Block hides its own Chatter tab while Delta is on.
-- **One look:** Delta's settings panel is the shared Story Suite look (`suite.css`, loaded once for all four extensions).
-
-**Source of truth** in the settings lets you choose per area: **Automatic** (the order above), **This extension** or **The other one**. Alone, every choice behaves like Automatic and Delta works exactly as before.
-
-With two or more installed, **Manage all in Story Suite** at the top of Delta's settings opens Story Block's Story Suite overlay: one Source of truth table and on/off switch for all of them, with Delta's own settings in its tab ([how it works](docs/STORY_SUITE.md)).
-
-### With Story Block v2
-
-Story Block 2 (Story Suite v2, in beta on Story Block's `v2` branch) hosts the suite's modules itself. Delta stays a standalone extension: its dossiers, scans, prompts, saved data and swipe handling are exactly as without it. When Story Block 2 is on the page, Delta also joins it as the module `npc-state-delta`:
-
-- **Dossiers tab** (once **Cast**; its id is still `npc-state-delta/cast`, so a tab order you saved keeps it where you put it; by default it is the last tab, after the Director): every dossier in this chat, with a search box, each opening its dossier view (v1's Dossiers list: portrait, role, status); with none yet, Add NPC and Scan now. The present cast's cards (the same cards, now lines and meters as the v1 Present NPCs tab) are on **Story Director's World screen**, World → Now → Here, each with the person's thought from the latest reply's Inner chatter inside it; without Story Director (or with its World view off) they stay at the top of Dossiers, so nothing is lost. Story Director draws them through a small page API Delta offers, `globalThis.NPCStateDeltaCast`: `available()`, `render(el, { slot })` (Delta's own cards and meters into `el`, with the `slot(name, aliases)` node inside each present card) and `onChange(fn)` → unsubscribe (called when Delta draws its cast again, after a scan or an edit, when it is turned on or off and when it joins or leaves Story Block), so World follows a scan that ends after the reply without a tab switch. Display only: no prompt, query or saved value changes.
-- **Settings:** Delta's settings panel moves into the Story Suite overlay as its section, and the copy in the extensions drawer is hidden meanwhile. If Story Block 2 goes away, the panel goes back to the drawer where it was.
-- **Questions other modules can ask** (read-only; nothing in Delta changes):
-  - `npc.present` → the names of the NPCs in the current scene (`npc.present({ meters: true })` → `[{ name, meters, stages }]`);
-  - `npc.known` → the names of every tracked NPC (archived ones left out);
-  - `npc.dossier({ name })` → one NPC's dossier fields (by name, alias or id), or `null`; with a meters entry, `relationship` is the story state's and `meters`, `stages` and `unlocked` (note ids) are added. Hidden notes are never part of it;
-  - `npc.meters({ name })` → `{ key, name, meters, stages, unlocked }` from the story state, or `null` (no name: every entry); `npc.cast()` → the entries with their bars, for the NPCs card;
-  - `npc.socialModifier({ name, skill })` → the bonus or penalty a social check against that NPC gets, with its reasons, or `null` (see [Social checks](#social-checks));
-  - `npc.portrait({ name })` → the portrait Delta shows for that NPC (the current form's own image when it has one, else the main portrait), or `null`. It is the image you uploaded or generated in the dossier, as a `data:` image, an `https:` address or a path on your SillyTavern server; anything else (a `javascript:` or `http:` address, an SVG) gives `null`. RPG Battle and other modules use it for companion and NPC portraits. Delta never generates an image for it.
-- **NPC meters in the story state** (F81, F90): each NPC's trust, affection, desire and tension (-100..100, starting from your base values, or from the dossier's own numbers for an NPC Delta already knows), plus up to six meters of your own, are kept in Story Block 2's per-reply state, so swiping or deleting a reply takes their changes back. While Story Block 2 is on the page these are the numbers the dossier view, the dossier editor and Delta's injection show; Delta's own saved numbers are left as they are and come back if Story Block 2 goes away. The story changes them with a line in its `<Changes>` block, `~ npc Mira | trust: +5 | lust: +3` (`+N`/`-N` moves a meter, `=N` or a bare number sets it); code keeps each in its range and moves it at most **Most a meter moves per reply** (default 15) within one reply, story lines and Delta's scans together. A meter name that is not in use, or a `stage:` label, is noted in the module's problems and the rest of the line still counts. Delta's own scans send their relationship changes the same way. An **NPCs** card under each reply (turn it on per screen in the Story Suite overlay) and the **Cast** tab show one bar per meter, with its stage. The prompt gets one fixed line naming the meters, and, at its end, the present NPCs' meters when they moved in the last two replies.
-- **Meter settings** (in Delta's fold of the Story Suite overlay, above Delta's own panel):
-  - **Most a meter moves per reply** (1-200, default 15);
-  - **Custom meters**: up to six, each with a name, lowest, highest and starting value, and whether its bar is shown;
-  - **Meter stages**: named thresholds per meter (meter, at, name). A stage at 0 or above is reached at or above it, a negative one at or below it; code moves the stage when the meter crosses it either way and notes it on the reply ("Mira: trust reached Friend"), which the next reply is told. The story cannot set a stage.
-- **Hidden notes** (dossier editor, only while Story Block 2 is on the page): one per line, `trust 40: She is the duke's daughter.` (an optional `[title]` before the text is what screens show while it is locked). A note stays out of every prompt until its meter reaches the threshold (at or below it for a negative one); code then opens it on that reply, it stays open on that line of history, and its text is given to the story while the NPC is present.
-- **Stage ladders and milestones** (feature **Stage ladders and milestones**, on by default): **Stage ladder** rows in Delta's fold, in order, each with a name, its needs (`trust 60, affection 40`; `tension <= -10` for a "below") and optionally a milestone (`saved her brother`). Code moves an NPC up as soon as the next rung's needs all hold and its milestone has happened, never while a conflict is on (tension above **Conflict: tension above**, default 50), and tells the next reply ("Mira: now Confidant"). A rung is lost only after its needs failed **Replies before a stage is lost** replies in a row (default 3, 0 never). The story marks a milestone with `+ milestone Mira — saved her brother` (once; the same words again are one milestone, and the story cannot take one away); the dossier editor's **Milestones** box adds and removes them by hand. A milestone writes nothing to the prompt by itself. The Cast tab, the NPCs card and the dossier view say what the next rung still needs ("Next: Confidant — affection 40/55, milestone “saved her brother”"); query `npc.next({ name })` gives the same as data. A ladder row with a **Track** applies only to the NPCs given that track (or preset) in the dossier editor.
-- **Ceilings and floors per NPC** (dossier editor, **Meter limits**: `affection: ceiling 40`, `trust: floor -20, ceiling 60`; or from the NPC's preset): story lines and Delta's scans never raise a meter past its ceiling or lower it past its floor; a change back from a limit always lands in full, and a value you set yourself past one is never pulled back to it. The ceiling shows as a notch on the bar.
-- **Fuller custom meters:** each custom meter may also have a **Rule** (one line telling the story what moves it, sent in the fixed line while **Meter presets and rules** is on), **Words** (`doubtful 25, steady 60, devoted`: the story is told the word instead of the number), a **Colour**, and a **Drift a day** toward **Rests at** (feature **Meters drift each story day**, off by default; it needs Story Director's clock and moves the meter once per story day passed, on Delta's step after each reply).
-- **Meter presets** (feature **Meter presets and rules**, on by default): the **Meter presets** block above Delta's panel turns a set on in one click: **Companion** (loyalty), **Rival** (respect, rivalry; affection ceiling 40), **Mentor** (approval; desire ceiling 0), plus any `meterPresets` an enabled pack brings (Story Block's pack format: a pack stage is reached on its needs alone, and its `milestone` line is told to the story when it is reached). A preset adds its meters after your own (six custom meters in all) and its ladder and limits for the NPCs you give it in the dossier editor (**Meter preset**). Meters, stages, milestones, limits, presets and teasers need only Story Block 2 (a dating sim with no RPG Battle or Story Director works as is); only drift needs Story Director's clock, and without it nothing drifts.
-- **Locked-note teasers:** a hidden note may have a title in brackets (`trust 60: [Her past] She is the duke's daughter.`). While locked, the Cast tab, the NPCs card and the dossier view show only "🔒 Her past — unlocks at Trust 60"; the text reaches the screen and the prompt only once it opens.
-- **Custom meters in the dossier view:** the dossier's Player relationship card shows the custom meters beside the four axes, with the stage, the next rung's needs, the milestones and the locked-note teasers.
-- **Scans know who is here** (Story Suite v2's World view): while Story Block 2 keeps the scene (Source of truth for the scene is Story Block), a scan of the newest reply asks who the story's scene lists as present now, from Story Director's World view (`director.world.here`) when it is there, else from Story Block's `scene.present`. The scanner is then told those names in one line of its dynamic context ("In the scene now (the story's scene list): Mira, Brecht."), their dossiers join the live context after the ones the reply mentions (within the same limit), and their `present` there is the scene's, so someone who left is not taken as still present from the last scan. The fixed scanner rules, request counts and output allowances are unchanged, and without a list (Delta alone, Story Block alone with no `+ present` lines yet, a scan of an older reply, the reader keeping the scene in Delta) the prompt is byte-identical to before.
-- **The story's date from Story Director:** with Story Director on Story Block 2, birthdays and ages follow its clock, as they followed the World State date in v1. Delta keeps its own calendar, so the clock is used when the two agree: Delta with no calendar of its own and Story Director's usual (Gregorian) one, or the same months in both. Otherwise, without Story Director, before the story sets the time, or with **Source of truth → Calendar: This extension**, Delta's own dates stand (its manual fallback clock).
-- **Story Block's prompt size counts Delta:** the dossier and one-pass instruction Delta sends show as their own row in Story Block's prompt size and its **Show what's sent**, and count toward Story Suite's share of the context.
-- **Meters before any dossier:** the Cast tab shows the meters the story's `~ npc` lines set at once, for people in Story Block's scene, even before a scan makes their dossier.
-- **No v1 doubles:** with Story Block 2, Delta does not add its v1 **Present NPCs** / **Dossiers** tabs, does not announce itself to v1's Story Suite registry, and hides **Manage all in Story Suite** (Story Block 2's own overlay carries its settings instead). With Story Block 1, or without Story Block, everything works as described above.
-
-### Social checks
-
-With Story Block 2 and a dice module (RPG Battle), a social check the player makes against an NPC gets a small bonus or penalty from what Delta knows about that NPC. Delta owns these rules; the dice module rolls and shows them ("Persuade DC 12 · Elula trusts you (+2) · Old Hob is wary of you (−1)"). It is the feature **Social checks use the dossier** (`npc-state-delta.social`, on by default); turned off, every check is as before. Nothing is sent to the model and no prompt changes: it only reads the NPC's meters, stage and disposition at the reply the check is made on, so a swipe or a delete changes the answer with the story.
-
-- **Which checks:** persuade (persuasion, convince, diplomacy, negotiate, haggle…), charm (seduce, flirt…), intimidate (threaten, coerce…), deceive (deception, lie, bluff…) and a generic social one (social, charisma, CHA). Any other skill (Athletics, Stealth, Insight…) gets nothing.
-- **Which NPC:** the dossier's name or an alias, in any case (as the dossier lookup finds it), or someone the story already gave meters with a `~ npc` line. Anyone else gets nothing.
-- **How much** (each part a whole number, added together):
-  - each meter the skill reads, by how far it is from 0 as a share of its range: 25% or more ±1, 50% ±2, 75% ±3;
-
-    | Skill | Helps (high) | Works against (high) |
-    | --- | --- | --- |
-    | persuade | trust, loyalty, respect, approval | tension, suspicion, rivalry |
-    | charm | affection, desire | tension |
-    | intimidate | tension, fear | trust, respect |
-    | deceive | trust | tension, suspicion |
-    | social | trust, affection, loyalty, respect, approval | tension |
-
-    A low value counts the other way ("Mira is at ease with you": tension −40 helps a persuade check). Loyalty, respect and approval come with the Companion, Rival and Mentor presets; fear and suspicion count when you add a custom meter with that name;
-  - the stage ladder (feature **Stage ladders and milestones**): +1 per rung reached, at most +2, for every skill but intimidate;
-  - the NPC's disposition word (`~ npc Mira | disposition: wary`): a warm word (friendly, fond, grateful…) +1 and a cold one (wary, hostile, suspicious…) −1, for every skill but intimidate; for intimidate a frightened word (afraid, nervous…) +1 and a defiant one (defiant, fearless…) −1.
-- **Settings** (Delta's fold of the Story Suite overlay, while the feature is on): **Social checks: strength (%)** (0-200, default 100: 50 halves every part, 0 turns the modifiers off) and **Social checks: most a check moves** (1-10, default 5: the total never goes past ± this on a d20 roll).
-- **For module authors:** `npc.socialModifier({ name, skill })` → `{ mod, name, skill, reasons: [{ text, value }] }` or `null` (Delta off, the feature off, a skill that is not social, an unknown NPC). `mod` is the whole number to add to the roll (or take off the DC), within the cap; `reasons` add up to `mod` (a held total gets one more reason, "Held to the most a check moves (+5)") and each shows as `text (value)`. Ask it through the view your check is made on (`view.query`), so it reads that reply's state. Rules and numbers: `src/social-check.js`.
-
-### One-pass narration capture (experimental)
-
-Off by default. **Scanning → One-pass narration capture** asks the roleplay model to end each reply with a hidden NPC update block. Delta removes the block from the message and uses it instead of the separate scan request for that reply.
-
-- **When it applies:** with Auto scan on and Full scan every turn off, for new replies and continues. Swipes and regenerates use the normal scan, and impersonate and background (quiet) generations never get the instruction.
-- **Cost:** every asked-for reply's prompt grows by about 8,900-10,300 characters (roughly 2,500-2,950 tokens, estimated), plus the JSON block at the end of the reply. In return, a reply with a good block needs no scan request.
-- **The slow fields** (since 1.2.11): Mannerisms, Behavioral Levers and important memories fill from evidence gathered over scenes, and a block written beside the story tends to leave them out. The instruction's last lines name them, so the model checks each NPC for a habit, how they decide or treat people, and a consequential event, and writes the evidence even when the field itself must wait. Each block's evidence is tagged with its reply, so a habit seen again in a later reply counts as a second sighting however alike the words.
-- **Relationships settled in the block** (since 1.2.12): the instruction asks for a full relationship row (impact and all four values, 0 for no change) for each existing NPC the story names, plus the block's own word: `"relationshipsCovered": true` when its rows hold everyone whose feelings could have changed, and `"relationshipReview": ["Name"]` for anyone it wants checked. NPCs it covered need no relationship evaluator request; anyone it lists for review, or skipped without saying it covered everyone, still gets one.
-- **One-pass catch-up** (since 1.2.11, **Scanning → One-pass catch-up**, default every 8 captured replies, 0 for never): the two NPCs most in those replies get a quiet Refresh, one scanner request each, which reads the scan context window and fills what the blocks missed. It says something only when it changed a dossier (*caught up Verna … (mannerisms, memories)*), skips a dossier open in the editor, and waits for any scan in progress.
-- **Read last** (since 1.2.13): the reminder goes in its own system message at the very end of the prompt, after your latest message, where the model reads it last. It is replaced on every generation and emptied when not asked for, so a spent reminder is never sent again.
-- **Cache-friendly** (since 1.2.16): the instruction is sent in two parts. Its rules (about 7,600 characters) do not change from reply to reply, so they go early, in the system prompt, word for word the same each time (they name the player and "the character you play" by role, so in a group chat they stay the same when the next speaker changes; the names go with the context); providers that cache the start of a prompt (OpenAI, DeepSeek and Gemini do it on their own; Claude with SillyTavern's caching option) can reuse them. The dossier context and the reminder change each reply, so they go at the very end with the live dossier. Since the v2 cleanup, swipes and regenerates keep the rules too (so a swipe reuses the cached start of the prompt) but carry no context or reminder, so they are never asked for a block; background (quiet) generations and impersonate carry neither part.
-- **No repeats** (since 1.2.17): an NPC value the live dossier above already gives word for word is left out of the capture's own NPC context (it says `"inDossier": true`), about 45-125 tokens fewer per present NPC with a full dossier. Ids, presence, the relationship numbers, evidence and locks always stay.
-- **Compact one-pass instruction** (since 1.2.17, **Scanning**, off by default): the same rules in fewer words, every field, state word, gate and cap kept; about 1,780 tokens instead of about 2,175. Compare the blocks your model writes before relying on it.
-- **Same checks as a scan:** the block goes through the same evidence checks as an ordinary scan, so it can only propose changes the story supports. It is used once, kept only in memory, and never saved, exported or shown in diagnostics.
-- **Fallback:** the normal scan runs on its usual schedule if the block is missing, broken or cut off, if the dossiers changed while the reply was being written (outdated), if the reply or an earlier message was edited, or if the page was reloaded first. Focused relationship passes, Refresh and backfills still run as separate scanner requests.
-- **Extra requests per reply:** a new dossier's backfill (and a missed participant's) never holds the reply: it starts after SillyTavern has the reply, at most 2 per reply, the rest waiting in the queue for the next replies. One block admits at most 4 new people; the others get a dossier from a later reply that names them again.
-- **With Story Block v2 and its NPC meters** (hosted), a one-pass reply makes no request of Delta's own: the story's `~ npc` lines move the meters (code clamps and caps them), so there is no relationship evaluator after a block and none for a new NPC (it starts at the base meter values), and the backfill queue runs only with the one-pass catch-up (at most 2 each time) or when you press **Scan**. With **One-pass catch-up** at 0, only **Scan** or **Scan dossier** fills new dossiers.
-- **Your story's own text is safe:** with the setting off, Delta removes only its own hidden `npc_state_delta` comment; JSON blocks and tags the story writes are left alone.
-- **Scanner connection profile:** replies with a good block are scanned by your roleplay model; the scanner profile still handles everything else.
-- **Check it live before relying on it:** watch a reply while it streams (the block should stay hidden), reload the chat to confirm the saved message has no block, and compare narration quality and length with the setting off. **Data & maintenance → Diagnostics → Roleplay injection** shows the instruction's size and how many replies were asked, used, missing, invalid, cut off or outdated.
-
-### The relationship evaluator
-
-After a scan (or a one-pass block), any existing NPC who **takes part in the latest exchange** without a complete relationship decision gets a focused relationship evaluator request, so a change is never skipped silently. Since 1.2.12 taking part means being **named in the story itself** (narration or dialogue): a name that only appears in the World State's lists, such as the Off-Screen section another extension fills with every active agenda, is no part in the scene. The evaluator reads only the exchange's story, not the World State or other blocks, which keeps each request small; the evidence it returns is still checked against the whole exchange.
-
-## How dossiers work
-
-### The golden rule: evidence first
-
-Nothing changes because the model guessed. A proposed change is accepted only when the story (or the model's quoted evidence) supports it, and only story text about **that** NPC counts. One NPC's scene can never rewrite another NPC's profile. If a field isn't mentioned, it stays as it is.
-
-### Personality, speech and mannerisms
-
-These are meant to be stable, like a real person's character:
-
-- **One scene is not enough** to rewrite them. A change needs repeated evidence across separate scenes (three, or two for Personality and Speech when they are a week or more apart in story time), or an explicit event or time skip in the story ("after a winter at the academy, she speaks with formal precision").
-- **Story time, not message count.** When your World State block carries a date (for example Megumin Suite's World State, parsed with your **Calendar** months), development is measured in story days: a tendency shown once and confirmed a week or more later can change Personality or Speech, however few messages passed. A later sighting of the opposite ("timid" after "confident") breaks the trend and it starts again. Without dates, Personality falls back to 20+ messages apart.
-- **Speech is recorded as a style.** Evidence names how the NPC talks ("formal aphorisms"), with a quoted line only as an example, so repeated scenes can add up to a Speech change.
-- **Mood is not personality.** Fear, anger, flirting or behaviour only toward you never becomes a global trait.
-- **Refine vs evolve.** A *refine* adds detail without changing the meaning. A real change of character is an *evolve*, which needs a reason and the evidence above.
-
-### Behavioral Levers
-
-Levers describe how an NPC **generally** responds and decides, with anyone. Each lever is written as `Category: level - effect`, for example:
-
-> `Conflict/Assertiveness: avoidant - answers challenges with cold politeness`
-
-There are twelve categories:
-
-| | | |
+| Setting | Where | Default |
 |---|---|---|
-| Disposition | Care/Warmth | Expressiveness |
-| Independence/Agency | Conflict/Assertiveness | Threat Sensitivity |
-| Analytical Style | Social Presentation | Cruelty/Mercy |
-| Loyalty | Drive/Ambition | Honesty/Candor |
+| Enable NPC State Delta, Auto scan | Quick bar | on |
+| Scanner connection profile, how often to scan | Scanning | the chat's connection |
+| Source of truth (NPCs, calendar, scene, game stats) | Source of truth | Automatic |
+| NPCs in the dossier, Injection budget | Advanced | 3, 4000 tokens |
+| Most a meter moves per reply, Custom meters, Meter stages | Delta's fold, above the panel | 15, none, none |
+| Social checks: strength (%), most a check moves | Delta's fold | 100, 5 |
 
-- An NPC has at most six levers.
-- **Habits and routines are not levers.** "Keeps a quiet household and enforces curfews" belongs in Mannerisms and is kept out of the lever list.
-- **How a lever swings:** the first scene showing a different tendency is stored as pending evidence, and the lever changes when the behaviour shows up again in a later scene. Each category keeps its own pending evidence, so unrelated behaviour in between doesn't push it out. An explicit event or time skip changes it at once. Kind ↔ cruel and independence reversals face extra safety checks.
-- Old entries that don't fit a category are listed for rewriting at the next **Refresh**.
-- **Outdated traits:** Personality, Speech or levers unchanged for 30+ story days (30+ turns when the chat has no dates), or written before the NPC's background or home base later changed (a servant who now owns the inn), are re-checked at the next **Refresh**. A clause tied to something that has ended (a former job, an abuser who has died) is rewritten from the recent story; everything else is kept.
+Story Block's prompt size shows Delta's dossier as its own row ("sent by itself", often 2,000-4,000 tokens) and it
+counts toward the Share of the context. Delta's scanner route and last call are in Story Block's **Diagnostics**.
 
-### Relationship with the player
+## With the other extensions
 
-- **Trust, Affection, Desire and Tension** each run from −100 to +100 and only describe how the NPC feels about **you**.
-- Each scan can move them by a small amount capped by how big the moment was (ordinary, meaningful, major, extreme). Every change records its reason, shown on the dossier's Player relationship card. Since 1.2.15 the meters also show what the latest reply moved, beside each value (▲3 / ▼2, green when better for the relationship, red when worse; tension rising counts as worse).
-- The roleplay model gets a short qualitative description, never raw numbers. Personality and levers come first, and the relationship only tints them. A reserved NPC stays reserved even when they like you.
-- **Reply numbers:** the dossier header shows **Reply #N**, the latest reply's number in the chat as Story Block counts it (the greeting is reply #0). Changed fields (• #14), the *Updated at reply #14* line and each relationship change show the reply they were recorded at. Changes recorded before 1.2.3 show Delta's older internal count, labelled *turn N*, instead.
-- **Map view:** the **Dossier | Map** switch in the dossier panel (or **See on map** on the Player relationship card) puts you at the centre and every NPC around you. The closer they sit, the higher the chosen value (Warmth, Trust, Affection, Desire or Tension); lines are Important Bonds between NPCs, and a gold badge marks this turn's change. Picking someone on the map selects their dossier. Everyone in the scene and active off-screen is always shown, plus the strongest of the rest (24, or 16 on a phone); archived NPCs appear dimmed, while the dead and stale removals are left out. The map only reads the dossiers and never changes them.
+- **Alone:** dossiers, scans, portraits, calendar and birthdays work as in Delta 1.2.
+- **With Story Block 2:** meters kept with each reply, the Dossiers tab, and its settings in the Story Suite overlay.
+- **With Story Director:** its World screen draws Delta's cards; birthdays and ages follow its clock when the two
+  calendars agree.
+- **With RPG Battle:** social checks and companion portraits.
 
-### Appearance, outfits and forms
+## Known issues in this beta
 
-- **Physical features** (hair, eyes, build, scars) are kept separate from the **current outfit & presentation**. Changing clothes never erases physical traits unless the story re-describes them (dyed hair, a new scar).
-- NPCs who transform can have several **named forms** (human, dragon, …), each with one complete description, body and outfit together; Physical features apply only when no form is selected. Switching form keeps every form's own anatomy, and outfit and hairstyle changes keep the form's body traits.
-- Edit appearance under **Edit dossier → Appearance**.
+- A brand-new chat can still log one `404` line for Delta's data file in the browser console (low priority).
+- The dossier cards are tall: the portrait takes the space and the text becomes a wall. The cards are redesigned
+  after the beta.
+- Each scan is a separate model call (**Scanning** sets how often). Pick a cheaper scanner connection profile if
+  that matters.
+- Meters drift needs Story Director's clock; without it nothing drifts.
 
-### Custom fields
+The suite's full list is in Story Block's
+[RELEASES](https://github.com/kohz87/Story_block/blob/v2/docs/v2/RELEASES.md).
 
-- Name up to six fields under **Roster & continuity → Custom fields** (for example `Level, Class, Faction`). Every dossier gets them.
-- The scanner fills a value only when the story or World State states it, keeps it while it goes unmentioned, and changes it only when the story says so ("reached level 5"). An NPC who returns after a long absence keeps the value they left with.
-- Present NPCs' values are sent to the roleplay model with the rest of their dossier. You can edit them under **Edit dossier**, and **Protect edits** locks them like other fields.
-- Leave the setting empty to turn custom fields off; prompts are then exactly as before.
-- With RPG Battle installed, a field named like a game stat (Level, HP, Class…) gets a warning under the setting, since RPG Battle already keeps those numbers. Nothing is blocked.
+## Links
 
-### Important memories and bonds
+- [Player guide](https://github.com/kohz87/Story_block/blob/v2/docs/v2/GUIDE.md), [Changelog](CHANGELOG.md),
+  [Releases and known issues](https://github.com/kohz87/Story_block/blob/v2/docs/v2/RELEASES.md)
+- Developers: [docs/dev](docs/dev/), [DEVELOPMENT.md](DEVELOPMENT.md), [CLAUDE.md](CLAUDE.md), [docs/STORY_SUITE.md](docs/STORY_SUITE.md)
+- History, decisions and the after-beta list: `suite-notes/` in
+  [kohz87/inventory-block](https://github.com/kohz87/inventory-block/tree/claude/hopeful-babbage-tipaw8/suite-notes)
 
-- **Important memories:** up to five consequential events (promises, betrayals, rescues, discoveries). Routine chatter is ignored. New ones are added to the ones an NPC already has (since 1.2.19 also when the capture files them with the NPC's other durable facts), a repeat or a reworded copy of a stored one is not added twice, and when there are more than five the most consequential are kept.
-- **Important bonds:** relationships between NPCs, written as `Name — relation | dynamic` and kept in step on both sides. Deleting a bond by hand keeps it deleted.
-
-### Life and death
-
-- A confirmed on-page death is final for automatic updates. Later scans cannot bring the NPC back.
-- If a death was recorded by mistake, open the dossier and use **Restore**. The correction is recorded.
-- With **Archive confirmed deaths** on (the default), dead NPCs are archived rather than deleted. They don't take roster slots and never get a full dossier in the roleplay prompt, but the scanner still recognises their name, so a later mention doesn't create a new, living duplicate.
-- When the recent story mentions an NPC who isn't in the scene (off-screen, or archived after a long absence), the roleplay model gets one short line of their established facts, such as role, home base, custom fields and how they feel about you, so a returning NPC arrives as they left. The full dossier is sent once they're back in the scene.
-- When someone in the story talks about a confirmed-dead NPC, the roleplay model gets one short line about them (who they were and how they died) so it neither revives nor reinvents them. Mention lines are capped at four per reply, living NPCs first.
-- A new NPC who shares only a job title with someone you know (a different innkeeper in another town) gets their own dossier instead of overwriting the one you know.
-- An NPC is recognised by their full name, an alias, or any distinctive part of their name ("Hask" or "Orrin" for "Capt. Orrin Hask"). Surnames, one-word nicknames and names that are everyday words ("Will") must be capitalised; titles such as "Capt." or "Dr." and role descriptions such as "the innkeeper" never recall anyone on their own.
-- The dossier list (**All · Active · Archived**) leaves the dead out. Search by name to find one; a dead dossier you open stays listed while it is selected.
-
-### Portraits
-
-- Upload, replace or remove a portrait, or generate one through **SillyTavern Image Generation** from the dossier's prompt.
-- Generated images stay a preview until you apply them, and nothing silently replaces an uploaded image.
-- An optional per-NPC seed makes regeneration repeatable.
-- Each named form can have its own portrait, and a portrait is flagged when the appearance has moved on since it was made.
-
-### Calendar and birthdays
-
-- Define months as `Month name:days` lines, with an optional era.
-- A full date in the story's World State can drive chronology.
-- An NPC with a known birthday ages on the right day. Apparent age (how old they look) is tracked separately and never used to work out real age.
-- See [birthday continuity](docs/birthday-continuity.md) for supported formats.
-
-### Manual control
-
-- **Edit dossier** changes any field, including **Aliases / nicknames**. Distinctive nicknames help the extension recognise an NPC; role descriptions ("the innkeeper") are kept for reference only.
-- Tick **Protect edited stable profile fields** to stop scans from rewriting the fields you edited.
-- **Add NPC, Archive, Remove and Restore** are always manual.
-- Commands typed into the story text are never executed.
-
-## Swipes, edits and rollback
-
-- **Swipes:** each swipe keeps its own dossier state. Switching back to a known swipe restores it. A swipe that was never scanned starts from the state before it and is scanned again.
-- **Hidden messages:** hiding or unhiding messages (for example memory extensions that hide summarised ones) does not affect rollback.
-- **Delete or regenerate:** dossiers roll back to the message you returned to. NPCs who only appeared in the removed messages are removed too.
-- **Deleting a message from the middle:** later messages were scanned on top of it, so dossiers are not rewound. Instead, everything the deleted message itself changed is undone wherever nothing later touched it: each field returns to how it was before the message (relationship values and the Last relationship change card, mood, appearance, memories the message added, an NPC who only appeared in it, and so on). A field a later message also changed is kept, and confirmed deaths stay unless the deleted message caused the death. Delta tells you when this happens. To rewind everything instead, turn on **Rewind dossiers on middle deletion** (Advanced): every dossier returns to exactly how it was just before the deleted message and whatever the later messages changed is discarded, with no model requests.
-- **Edits deep in the past:** if an edit can't be replayed exactly, current dossiers are kept rather than guessed.
-- **Reply numbers** follow the branch: a swipe or a rolled-back delete restores them with the rest of the dossier. After a message is deleted from the middle (without **Rewind dossiers on middle deletion**), changes recorded at later replies keep the number the reply had when they were recorded until that field changes again.
-- The rollback journal covers the last 256 messages. Full snapshots are size-limited (8 MB total, 2 MB each).
-
-## Data, backups and multiple devices
-
-- Dossiers are stored on your SillyTavern server, in `/user/files/npc-state-delta-*.json`. Any browser or device using the same SillyTavern server sees the same data.
-- **Backup / Export** saves dossiers and portraits as a Delta bundle, and **Restore / Import** loads one into the current chat. Importing into a different chat never pretends that chat's history happened.
-- Only import Delta's own bundles. Data from other NPC extensions or older generations is not supported.
-- Don't run several NPC-tracking extensions that write automatically at the same time.
-
-## Troubleshooting
-
-| Problem | Try |
-|---|---|
-| Behavioral Levers read like habits or routines | Open the dossier and **Refresh**. Entries outside the twelve categories get rewritten or moved to Mannerisms. |
-| An outfit or appearance change was missed | **Refresh** that NPC. Automatic scans only see the latest exchange. |
-| Physical features are empty, or body traits sit under the current outfit | **Refresh** that NPC. Enduring traits move into Physical features and the outfit keeps only clothing and condition. For an NPC with named forms, the body belongs in each form instead; Refresh or edit the form (for example a dragon form that still lists human hair). |
-| Personality or levers never seem to change | Expected for one-off scenes. They change after repeated scenes or an explicit event or time skip. If the dossier still describes who they *were* (an old job, an old situation), **Refresh** them: long-unchanged traits are re-checked against the recent story. |
-| An NPC is missing | **Add NPC**, or use **Full scan current cast**. |
-| A scan failed | Check the scanner connection profile in **Scanning**, then use **Scan dossier now**. |
-| NPCs contradict their dossier (appearance, voice, levers) | Check **Advanced → Injection budget** is at least 4000 (the default). It's a ceiling: only what the present NPCs need is sent, and detailed dossiers arrive in full. |
-| An NPC walks back in and doesn't match her dossier | Name her in your message when you call her in; her dossier is then sent with that reply. If the story brings her in unprompted, the dossier arrives from the next reply, or swipe once she's marked present. |
-| An NPC's dossier doesn't seem to reach the story | Open **Data & maintenance → Diagnostics**. The **Roleplay injection** section shows exactly what is sent with each generation, or why nothing is (NPC not present, chat not loaded, injection off). With one-pass capture on, the capture instruction goes in its own message at the very end of the prompt (since 1.2.13) and is shown there only as a size; **What's sent** shows its text. |
-| You want to know why a field didn't change | Open the dossier's diagnostics (**Show**) or export them from **Data & maintenance → Diagnostics**. Each field has an outcome such as `applied-refine`, `not-provided` or `waiting-for-revised-candidate`. |
-
-Diagnostics are bounded and read-only. They never store whole stories, full prompts or credentials, and their token counts are local estimates.
-
-## For developers
-
-The extension is plain ES modules with no runtime dependencies. Node.js 24 and Python 3 run the development workflow.
-
-```sh
-npm test                        # unit, compatibility and synthetic-host tests
-npm run validate                # inventory, isolation, version and ownership checks
-npm run measure:prompts         # prompt size measurements
-node scripts/measure-stage9.mjs # prompt/request budget baseline
-npm run package                 # builds dist/npc_state_delta-1.2.19.zip and its SHA-256
-git diff --check
-```
-
-- `runtime-modules.json` is the single inventory of shipped modules. The package contains only the runtime modules, stylesheet, manifest, inventory, license and README.
-- Application version 1.2.19 is independent of the unchanged storage and bundle formats. Branch lineage remains v5, with guarded v4 compatibility.
-- Behaviour is governed by [AGENTS.md](AGENTS.md), [the core contract](docs/core-contract.md) and [the workplan](docs/WORKPLAN.md). Development commands, evidence and limits are in [DEVELOPMENT.md](DEVELOPMENT.md).
-- Historical reviews: [1.0.28](docs/v1.0.28-review.md), [1.0.27 prefix cache](docs/v1.0.27-review.md), [Stage 9](docs/stage9-review.md). Seed provenance is in `docs/seed-provenance.*`.
-
-## License
-
-GPL-3.0. See [LICENSE](LICENSE). The seed and history records in `docs/` are preserved as provenance.
-
-## Credits
-
-With thanks to [Arif-salah](https://github.com/Arif-salah).
+Licence: see [LICENSE](LICENSE).
