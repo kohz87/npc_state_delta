@@ -12,13 +12,13 @@ import {
     FEATURE, INVENTORY_FEATURES, createInventoryCommands, createInventoryQueries, captureCoin, captureItem, captureLoot, encumbranceTail,
     featureOn, initialInventory, inventoryTail, validateInventory,
 } from './inventory.js';
-import { capturePlace, capturePresent, initialScene, sceneCommands, sceneQueries, sceneTail, validateScene } from './scene.js';
+import { WEATHER_CHARS, capturePlace, capturePresent, captureWeather, initialScene, sceneCommands, sceneQueries, sceneTail, validateScene } from './scene.js';
 import { DEFAULT_CURRENCY, MAX_COIN_VALUE, coinLine, currencyOf } from './money.js';
 import { renderInventoryTab } from '../ui/inventory-tab.js';
 import { renderSceneTab } from '../ui/scene-tab.js';
 import { FEATURE_TEXT, createAssistPart } from '../assist/index.js';
 import { CORE_FEATURE } from '../features.js';
-import { EXTRA_KINDS, answeredReply, chatterTail, headChatter } from '../extras.js';
+import { EXTRA_KINDS, answeredReply, chatterTail, headChatter, sceneChatter } from '../extras.js';
 import { STRINGS } from '../strings.js';
 import { createEventsPart } from '../events/index.js';
 import { standardWidgets } from '../view/widgets/index.js';
@@ -44,6 +44,8 @@ export const CORE_KINDS = Object.freeze({
     coin: Object.freeze({ grammar: '+ coin 30 | from: who (- coin 5 | to: who when paid; one number, in the wallet\'s currency)' }),
     place: Object.freeze({ grammar: '~ place Name | kind: settlement|wild|dungeon|… | region: wider area | with: who came along (the rest stay behind)' }),
     present: Object.freeze({ grammar: '+ present Name when someone arrives, - present Name when they leave' }),
+    // MODULES §F120: the weather, descriptive only; its grammar line only while `story-block.weather` is on.
+    weather: Object.freeze({ grammar: `~ weather cold drizzle, low fog (only when the weather changes, not every reply; a few words, at most ${WEATHER_CHARS} characters)`, feature: CORE_FEATURE.weather }),
     // MODULES §F100: off, the kind and its grammar line are left out (a host without Features keeps it).
     loot: Object.freeze({ grammar: '? loot Thing, Other Thing x2 — where it lies (things the party could pick up; the reader chooses what to take)', feature: FEATURE.loot }),
     // MODULES §F115: display kinds, read for the reader alone (src/v2/extras.js); each under its feature.
@@ -66,6 +68,8 @@ export const CORE_FEATURES = Object.freeze([
     // Choices and Inner chatter (MODULES §F115): off; on, each adds its grammar line to the static part.
     Object.freeze({ id: CORE_FEATURE.choices, label: STRINGS.features.choices, describe: STRINGS.features.choicesDescribe, default: false }),
     Object.freeze({ id: CORE_FEATURE.chatter, label: STRINGS.features.chatter, describe: STRINGS.features.chatterDescribe, default: false }),
+    // The weather (MODULES §F120): on; its grammar line is in the static part while it is on.
+    Object.freeze({ id: CORE_FEATURE.weather, label: STRINGS.features.weather, describe: STRINGS.features.weatherDescribe, default: true }),
 ]);
 
 // The chat's one currency (MODULES.md F1): its name (singular) and plural, renamable by the reader,
@@ -133,7 +137,8 @@ export function createCorePart({ hooks = () => [], settings = () => ({}), hookEn
     const kind = (grammar, apply) => ({ grammar, apply });
     return {
         domains: {
-            scene: { initial: initialScene, validate: slice => validateScene(slice) },
+            // `weather` is scratch: a later reply's `~ weather` replays whole after the first one's reply is deleted.
+            scene: { initial: initialScene, validate: slice => validateScene(slice), scratch: ['weather'] },
             // Coin and stack sizes are counts: a replay after a deleted reply adds each change to them.
             inventory: { initial: initialInventory, validate: slice => validateInventory(slice), counters: ['wallets/*/coin', 'stacks/*/qty'], scratch: ['perReply', 'storyClicks', 'loot', 'condLog'] },
         },
@@ -144,6 +149,7 @@ export function createCorePart({ hooks = () => [], settings = () => ({}), hookEn
             coin: kind(CORE_KINDS.coin.grammar, (ctx, line) => captureCoin(ctx, line, env)),
             place: kind(CORE_KINDS.place.grammar, (ctx, line) => capturePlace(ctx, line)),
             present: kind(CORE_KINDS.present.grammar, (ctx, line) => capturePresent(ctx, line)),
+            weather: { ...kind(CORE_KINDS.weather.grammar, (ctx, line) => captureWeather(ctx, line)), feature: CORE_FEATURE.weather },
             loot: { ...kind(CORE_KINDS.loot.grammar, (ctx, line) => captureLoot(ctx, line, env)), feature: FEATURE.loot },
         },
         context: {
@@ -152,7 +158,7 @@ export function createCorePart({ hooks = () => [], settings = () => ({}), hookEn
             // Half the budget for the lines that always go, half for the optional overflow.
             tail(view) {
                 const chars = CORE_BUDGET * 4;
-                const scene = sceneTail(view?.state);
+                const scene = sceneTail(view?.state, { weather: featureOn(view, CORE_FEATURE.weather) });
                 // The encumbered condition, when the carry module reports it (one short line).
                 // Asked through the query, which a host with Features answers with null while it is off.
                 let found = null;
@@ -322,11 +328,17 @@ export function createCoreModule({ hooks = () => [], settings = () => ({}), vers
         features: [...CORE_FEATURES, ...INVENTORY_FEATURES].map(feature => ({ ...feature })),
         domains: merged.domains,
         commands: merged.commands,
-        // The newest reply's Inner chatter, [{ name, text }] (MODULES §F115; null while the feature is off), and
+        // The newest reply's Inner chatter, [{ name, text }] (MODULES §F115; null while the feature is off), the
+        // same under each present person for the Scene screen while Story Director's World is not there, and
         // whether the head reply moved the scene to another place (Story Director's World → Here, §F119).
         queries: {
             ...merged.queries,
             'chatter.head': Object.assign(() => headChatter(extras?.chat?.(), extras?.display), { feature: CORE_FEATURE.chatter }),
+            'scene.chatter': Object.assign(state => {
+                let world = false;
+                try { world = extras?.worldShown?.() === true; } catch { world = false; }
+                return world ? [] : sceneChatter(state?.domains?.scene?.present, headChatter(extras?.chat?.(), extras?.display));
+            }, { feature: CORE_FEATURE.chatter }),
             'scene.moved': (_state, _args, tools) => headMoved(tools, extras?.headIndex),
         },
         capture: {

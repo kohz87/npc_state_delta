@@ -41,6 +41,8 @@ export const CORE_FEATURE = Object.freeze({
     // Display-only lines a reply may carry for the reader (src/v2/extras.js, MODULES §F115).
     choices: 'story-block.choices',
     chatter: 'story-block.chatter',
+    // The scene's weather line (`~ weather`, src/v2/domains/scene.js, MODULES §F120).
+    weather: 'story-block.weather',
 });
 
 // Where Story Block kept these switches before they were features: a reader who set one keeps that

@@ -21,6 +21,7 @@
 
 import { extractBlock, lineBody, parseChanges } from './capture.js';
 import { CORE_FEATURE } from './features.js';
+import { foldKey } from '../text.js';
 
 export const CHOICES_FEATURE = CORE_FEATURE.choices;
 export const CHATTER_FEATURE = CORE_FEATURE.chatter;
@@ -180,6 +181,29 @@ export function headChatter(chat, display) {
         return (Array.isArray(read.chatter) ? read.chatter : []).map(item => ({ name: item.name, text: item.text }));
     }
     return [];
+}
+
+/**
+ * The newest reply's chatter under the people present (query `scene.chatter`, for Story Block's Scene
+ * screen while Story Director's World is not there to show it): [{ name, text }] in `present`'s order,
+ * `name` as the scene lists the person, one thought each (their last line). A thinker is matched to a
+ * present name ignoring case (foldKey); a thought of someone not present is left out.
+ */
+export function sceneChatter(present, chatter) {
+    const thoughts = new Map();
+    for (const item of Array.isArray(chatter) ? chatter : []) {
+        const key = typeof item?.name === 'string' ? foldKey(item.name) : '';
+        if (key && typeof item.text === 'string' && item.text) thoughts.set(key, item.text);
+    }
+    const out = [];
+    const seen = new Set();
+    for (const name of Array.isArray(present) ? present : []) {
+        const key = typeof name === 'string' ? foldKey(name) : '';
+        if (!key || seen.has(key) || !thoughts.has(key)) continue;
+        seen.add(key);
+        out.push({ name, text: thoughts.get(key) });
+    }
+    return out;
 }
 
 /** The one optional tail line for the reader's "send it back" setting, or '' when there is nothing. */
