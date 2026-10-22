@@ -1,7 +1,11 @@
-// The Events debug section of the Story Suite settings overlay: which events have happened, which are
-// due, which wait and why, which a pack got wrong, and what the last reply fired. Read-only.
+// The Events debug section of the Story Suite settings overlay (a fold in Settings → Diagnostics):
+// which events have happened, which are due, which wait and why, which a pack got wrong, and what the
+// last reply fired. Read-only.
 //
 // Everything a pack wrote (ids, cues, conditions) is set as text, never as markup.
+
+/** The line above the Events panel (Settings → Diagnostics → Events). */
+export const EVENTS_NOTE = 'For checking packs. It shows upcoming events and their conditions, so it can spoil the story.';
 
 const LABELS = { fired: 'happened', due: 'due', waiting: 'waiting', error: 'can\'t check', invalid: 'problem' };
 

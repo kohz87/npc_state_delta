@@ -214,6 +214,8 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         },
     });
     const extraTabs = [];
+    // Whether a screen is there now (a screen hidden by default while another is: Scene while World is).
+    const navPresent = id => Boolean(screens.resolve(id));
 
     // ---- screens from the modules and the packs ----------------------------------------------
     function syncScreens() {
@@ -333,7 +335,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         eventSource: ctx.eventSource,
         eventTypes: ctx.eventTypes ?? ctx.event_types,
         // The game view's navigation leaves out the screens the reader hid (they still open by name).
-        inNav: screenId => !isHiddenNav(tabOrder.choice(), screenId),
+        inNav: screenId => !isHiddenNav(tabOrder.choice(), screenId, navPresent),
         addTab(tab) {
             extraTabs.push(tab);
             return () => {
@@ -348,7 +350,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
     // default: screens.js screenOrder), without the ones the reader hid. A module tab goes by
     // "<module>/<id>" there, so NPC State Delta's Cast tab and its Cast screen are one entry.
     const panelTabs = () => [...registry.tabs(), ...extraTabs.map(tab => ({ ...tab, moduleId: 'screens' }))];
-    const tabSource = { tabs: () => visibleNav(panelTabs(), tabOrder.choice(), navKey, tab => tab.order) };
+    const tabSource = { tabs: () => visibleNav(panelTabs(), tabOrder.choice(), navKey, tab => tab.order, navPresent) };
 
     // Settings → Story Suite → Tabs: every tab and screen once (by id), where it shows, in the reader's order.
     function tabRows() {
@@ -365,7 +367,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         return orderNav([...rows.values()], choice).map(row => ({
             ...row,
             fixed: row.id === HOME_ID,
-            hidden: isHiddenNav(choice, row.id),
+            hidden: isHiddenNav(choice, row.id, navPresent),
         }));
     }
     // After a change: the tab strip and the game view's navigation follow at once.

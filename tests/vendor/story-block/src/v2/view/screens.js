@@ -13,8 +13,8 @@
 //
 // * Navigation order (the game view, the Story panel's tabs), before the reader's own (view/tab-order.js):
 //   the suite's own screens in DEFAULT_ORDER (Home, Party, Inventory, Quests, World, Map, Fight,
-//   Crafting, Trade, Cast, Scene, Chronicle, then any other screen, and the Director, the game master's
-//   view, last); another screen may say `order` (a number, lower first) or takes DEFAULT_ORDER's place for
+//   Crafting, Trade, Scene, Chronicle, then any other screen, the Director, the game master's view, and
+//   NPC State Delta's Dossiers, the dossier browser, last); another screen may say `order` (a number, lower first) or takes DEFAULT_ORDER's place for
 //   the last part of its id, else REST_ORDER. Home is always first: no order a module gives can move it down.
 //
 // * A theme's values pass the same checks the page applies (css.js themeVars: one CSS value each, nothing
@@ -40,20 +40,27 @@ const isRecord = value => value !== null && typeof value === 'object' && !Array.
 /** The game view's landing page: always the first screen and the first tab. */
 export const HOME_ID = 'story-block/home';
 // The default places, by the last part of an id ('rpg-battle/party' → party): the party and what it
-// carries, what it is doing and where, the activities, the people and the scene, the record, and the
-// Director (the game master's view, with what the reader has not been told) last.
+// carries, what it is doing and where, the activities, the scene, the record, the Director (the game
+// master's view, with what the reader has not been told) and, last, NPC State Delta's Dossiers (its old
+// Cast id, `npc-state-delta/cast`: the people present are on the World screen now, so the dossier
+// browser goes to the end; a reader's saved order keeps its own place for it, tab-order.js).
 export const DEFAULT_ORDER = Object.freeze({
     party: 10, inventory: 20, quests: 30, world: 40, map: 50, fight: 60, crafting: 70, trade: 80,
-    cast: 90, scene: 100, chronicle: 110, director: 200,
+    scene: 100, chronicle: 110, director: 200, cast: 210,
 });
+// Screens hidden by default while another screen is registered, the one that shows the same and more
+// (MODULES §F119): Story Block's Scene (place, kind, region, story time, the people with portraits) while
+// Story Director's World is there, whose Now → Here has all of it. The reader shows it again in Settings →
+// Story Suite → Tabs; their saved choice wins (view/tab-order.js). Home's scene panel is not a screen here.
+export const DEFAULT_HIDDEN = Object.freeze({ 'story-block/scene': 'story-director/world' });
 // A screen with no `order` and no default place: after the suite's own, before the Director.
 export const REST_ORDER = 150;
 // The suite's own screens and tabs: always in DEFAULT_ORDER, whatever `order` an older module still gives
-// (Cast once said 35); the reader moves them in Settings → Story Suite → Tabs.
+// (Cast, now Dossiers, once said 35); the reader moves them in Settings → Story Suite → Tabs.
 export const SUITE_NAV = Object.freeze([
     'rpg-battle/party', 'story-block/inventory', 'story-director/quests', 'story-director/world', 'story-director/map',
-    'rpg-battle/fight', 'rpg-battle/crafting', 'rpg-battle/trade', 'npc-state-delta/cast', 'story-block/scene',
-    'story-director/chronicle', 'story-director/director',
+    'rpg-battle/fight', 'rpg-battle/crafting', 'rpg-battle/trade', 'story-block/scene',
+    'story-director/chronicle', 'story-director/director', 'npc-state-delta/cast',
 ]);
 
 /**

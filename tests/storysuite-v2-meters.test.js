@@ -633,13 +633,15 @@ test('without a host the adapter changes nothing and sends nothing', async () =>
     adapter.stop();
 });
 
-test('the Cast tab shows a meter bar per shown meter for the present NPCs, escaped', async () => {
+test('the Dossiers tab (once Cast) shows a meter bar per shown meter for the present NPCs, escaped', async () => {
     const h = await host({ settings: { stages: STAGES, customMeters: [{ name: 'Lust', show: 'bar' }, { name: 'Secretive', show: 'hidden' }] } });
     h.reply('Warm.', '~ npc Mira | trust: +12 | lust: +3\n~ npc Oren | trust: +1\n+ npc <b>Bold</b> | trust: +1');
     h.delta.records.npc_bold = { id: 'npc_bold', name: '<b>Bold</b>', aliases: [], present: true, archived: false, relationship: {} };
     const el = { innerHTML: '', addEventListener() {}, isConnected: true };
     h.def.tabs[0].render(el);
-    const html = el.innerHTML;
+    // The present cast and its meters, before the dossier list (which names everyone, Oren too).
+    const html = el.innerHTML.split('npc-state-delta-v2-dossiers')[0];
+    assert.match(el.innerHTML, /npc-state-delta-v2-dossiers/, 'the dossier list under them');
     assert.match(html, /<section class="npc-state-delta-present-roster">cast<\/section>/, 'Delta\'s own cards first');
     const bars = html.match(/role="meter"/g) ?? [];
     assert.equal(bars.length, 10, 'five bars each for Mira and Bold; Oren is not present; the hidden meter has none');

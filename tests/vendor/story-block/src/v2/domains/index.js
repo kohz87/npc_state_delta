@@ -18,7 +18,7 @@ import { renderInventoryTab } from '../ui/inventory-tab.js';
 import { renderSceneTab } from '../ui/scene-tab.js';
 import { FEATURE_TEXT, createAssistPart } from '../assist/index.js';
 import { CORE_FEATURE } from '../features.js';
-import { EXTRA_KINDS, answeredReply, chatterTail } from '../extras.js';
+import { EXTRA_KINDS, answeredReply, chatterTail, headChatter } from '../extras.js';
 import { STRINGS } from '../strings.js';
 import { createEventsPart } from '../events/index.js';
 import { standardWidgets } from '../view/widgets/index.js';
@@ -178,7 +178,9 @@ export function createCorePart({ hooks = () => [], settings = () => ({}), hookEn
  * concatenated, budgets summed, a hook name shared by parts called in part order (beforeGenerate
  * lines and commands added up; for any other hook the first answer that is not null/undefined),
  * and each part's settings section drawn as its own block in the module's settings panel (or, with
- * `settings.fold`, as a fold of its own at the top of the settings: `folds`).
+ * `settings.fold`, as a fold of its own at the top of the settings: `folds`; with `settings.place:
+ * 'diagnostics'`, a fold of its own in Settings → Diagnostics, its id `settings.fold.id` else its title
+ * in lowercase: the Events).
  */
 export function mergeParts(parts) {
     const out = { domains: {}, commands: {}, queries: {}, kinds: {}, hooks: {}, tabs: [], statics: [], tails: [], budget: 0, sections: [], folds: [], defaults: {}, schema: {} };
@@ -204,7 +206,12 @@ export function mergeParts(parts) {
         const title = typeof settings.section === 'string' ? settings.section : '';
         // A part whose panel is a fold of its own (`settings.fold: { id, hint? }`, the Packs) goes to the top
         // of the settings instead of the module's section.
-        if (render && settings.fold && typeof settings.fold.id === 'string') out.folds.push({ id: settings.fold.id, title: title || settings.fold.id, hint: settings.fold.hint ?? '', render });
+        // A part whose panel is debug information (`settings.place: 'diagnostics'`, the Events) is a fold of
+        // its own in Settings → Diagnostics.
+        if (render && settings.place === 'diagnostics') {
+            const id = typeof settings.fold?.id === 'string' ? settings.fold.id : title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+            out.folds.push({ id, title: title || id, hint: settings.fold?.hint ?? '', render, place: 'diagnostics' });
+        } else if (render && settings.fold && typeof settings.fold.id === 'string') out.folds.push({ id: settings.fold.id, title: title || settings.fold.id, hint: settings.fold.hint ?? '', render });
         else if (render) out.sections.push({ title, render });
     }
     for (const [name, fns] of Object.entries(hookLists)) {
@@ -251,9 +258,25 @@ export function chatterBack(settings, extras) {
 }
 
 /**
+ * `scene.moved` → true when the head reply (the last carrier) moved the scene to another place: one of
+ * its receipts is a `scene.place` (a `~ place` line: `capture.place`) that says `moved`. From the line's receipts (tools.receipts), so a
+ * swipe, a delete or a Re-read answers as a rebuild does. False without a head or receipts.
+ */
+const PLACE_RECEIPTS = new Set(['scene.place', 'capture.place']);
+export function headMoved(tools, headIndex) {
+    let head = -1;
+    try { head = typeof headIndex === 'function' ? headIndex() : -1; } catch { head = -1; }
+    if (!Number.isInteger(head) || head < 0) return false;
+    let list = [];
+    try { list = typeof tools?.receipts === 'function' ? tools.receipts() ?? [] : []; } catch { list = []; }
+    return list.some(entry => entry?.index === head && PLACE_RECEIPTS.has(entry.receipt?.type) && entry.receipt?.data?.moved === true);
+}
+
+/**
  * The core module definition for `sdk.registerModule` (§6): the core part (scene, inventory), the
  * packs part (item.resolve before story defs, the start state, pack queries and its settings
- * section) and the events part (beforeGenerate, events.fire, events.status, its debug section).
+ * section) and the events part (beforeGenerate, events.fire, events.status, its debug section, in
+ * Settings → Diagnostics).
  * `packs`: a createPacksPart() result (default: the one bound to SillyTavern); `command` / `query`:
  * what the events part commits and asks through (default: the public sdk, looked up lazily);
  * `assist`: the assist part (pre-roll classifier, after-reply extractor; both off by default).
@@ -299,7 +322,13 @@ export function createCoreModule({ hooks = () => [], settings = () => ({}), vers
         features: [...CORE_FEATURES, ...INVENTORY_FEATURES].map(feature => ({ ...feature })),
         domains: merged.domains,
         commands: merged.commands,
-        queries: merged.queries,
+        // The newest reply's Inner chatter, [{ name, text }] (MODULES §F115; null while the feature is off), and
+        // whether the head reply moved the scene to another place (Story Director's World → Here, §F119).
+        queries: {
+            ...merged.queries,
+            'chatter.head': Object.assign(() => headChatter(extras?.chat?.(), extras?.display), { feature: CORE_FEATURE.chatter }),
+            'scene.moved': (_state, _args, tools) => headMoved(tools, extras?.headIndex),
+        },
         capture: {
             kinds: CORE_KINDS,
             apply(ctx, line) {
@@ -328,9 +357,10 @@ export function createCoreModule({ hooks = () => [], settings = () => ({}), vers
         settings: {
             defaults: merged.defaults,
             schema: merged.schema,
-            // The Packs: a fold of its own, second after Story Suite's, so it is found (host-ui.js).
+            // The Packs: a fold of its own, second after Story Suite's, so it is found; the Events: a fold
+            // in Settings → Diagnostics (`place`), since it lists what is coming (host-ui.js).
             folds: merged.folds.map(item => ({ ...item, render: (el, api) => item.render(el, { ...api, query: (name, args) => api?.sdk?.query?.(name, args), notify: text => globalThis.toastr?.info?.(text, 'Story Suite') }) })),
-            // Each part's own panel (Packs, Events) under its title, below the schema rows.
+            // Each other part's own panel (Assist) under its title, below the schema rows.
             render(el, api) {
                 const doc = el.ownerDocument ?? globalThis.document;
                 const extra = { query: (name, args) => api?.sdk?.query?.(name, args), notify: text => globalThis.toastr?.info?.(text, 'Story Suite') };

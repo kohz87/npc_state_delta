@@ -35,6 +35,11 @@ export const INIT_PREFIX = 'module.init.';
 export const HOST_MODULE = 'story-block';
 export const STANDARD_PREFIX = 'ss.';
 
+// The settings fields this host knows, and the places a module's settings may ask for (`settings.place`,
+// or a fold's `place`): 'diagnostics' draws it as a sub-fold of Settings → Diagnostics (SPEC §6).
+const SETTINGS_KEYS = ['defaults', 'schema', 'section', 'render', 'folds', 'place'];
+export const SETTINGS_PLACES = Object.freeze(['diagnostics']);
+const placeOf = value => (SETTINGS_PLACES.includes(value) ? value : null);
 const KNOWN_KEYS = ['id', 'name', 'version', 'description', 'requires', 'domains', 'commands', 'queries', 'capture', 'context', 'hooks', 'settings', 'tabs', 'screens', 'widgets', 'features'];
 const CONTEXT_KEYS = ['static', 'tail', 'budget', 'feature', 'parts'];
 const COMMAND_KEYS = ['handler', 'internal', 'feature'];
@@ -300,7 +305,11 @@ export function definitionWarnings(def) {
     }
     out.push(...featureWarnings(def));
     if (isObject(def.settings)) {
-        for (const key of Object.keys(def.settings)) if (!['defaults', 'schema', 'section', 'render', 'folds'].includes(key)) out.push(`"settings.${key}" is not a settings field this Story Block knows; it is ignored`);
+        for (const key of Object.keys(def.settings)) if (!SETTINGS_KEYS.includes(key)) out.push(`"settings.${key}" is not a settings field this Story Block knows; it is ignored`);
+        // `place`: where the module's fold (or one of its own folds) goes; only 'diagnostics' is known.
+        const placeWarning = (value, where) => (value !== undefined && !SETTINGS_PLACES.includes(value) ? [`${where} is ${JSON.stringify(value)}, a place this Story Block does not know; the fold stays where it was`] : []);
+        out.push(...placeWarning(def.settings.place, '"settings.place"'));
+        if (Array.isArray(def.settings.folds)) def.settings.folds.forEach((item, index) => { if (isObject(item)) out.push(...placeWarning(item.place, `settings fold ${index + 1}'s place`)); });
         const fields = isObject(def.settings.schema) ? Object.entries(def.settings.schema) : [];
         for (const [key, field] of fields) {
             const subs = fieldType(field) === 'list' && isObject(field?.of) ? Object.entries(field.of).map(([sub, inner]) => [`${key}.${sub}`, inner]) : [];
@@ -691,10 +700,11 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         /** The feature command `type` belongs to, or null; the bus refuses it with FEATURE_OFF while that is off. */
         commandFeature,
         /**
-         * [{ moduleId, name, title, defaults, schema, section, folds }] for modules with settings, in
+         * [{ moduleId, name, title, defaults, schema, section, folds, place }] for modules with settings, in
          * module-id order. `section` is the custom panel function (from either form) or null; `title` the
          * section's title when one was given as text, else the module's name; `folds` the module's own
-         * top-level panels, [{ id, title, hint, render }] (empty when it has none).
+         * top-level panels, [{ id, title, hint, render, place }] (empty when it has none); `place`
+         * 'diagnostics' (the fold goes in Settings → Diagnostics) or null (an unknown place is null).
          */
         settingsDefs: () => sorted().filter(def => def.settings).map(def => ({
             moduleId: def.id,
@@ -704,7 +714,8 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
             title: typeof def.settings.section === 'string' && def.settings.section.trim() ? def.settings.section.trim() : def.name ?? def.id,
             section: typeof def.settings.section === 'function' ? def.settings.section : def.settings.render ?? null,
             folds: (Array.isArray(def.settings.folds) ? def.settings.folds : [])
-                .map(item => ({ id: item.id, title: item.title.trim(), hint: typeof item.hint === 'string' ? item.hint : '', render: item.render })),
+                .map(item => ({ id: item.id, title: item.title.trim(), hint: typeof item.hint === 'string' ? item.hint : '', render: item.render, place: placeOf(item.place) })),
+            place: placeOf(def.settings.place),
         })),
         /** [{ moduleId, name, domains, kinds: [{ kind, grammar }], static, tail, budget }] in module-id order. */
         // Kinds and context (parts) under a feature that is off are left out (MODULES §F100).

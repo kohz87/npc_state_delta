@@ -7,7 +7,8 @@
 //   one fold per module with settings, Versions. Inside a module's fold: one line saying how many of its
 //   features are on (it opens the Features fold there), its custom `section` right there (no sub-fold of
 //   its own), then a sub-fold per settings group (a field's `group`, else its label's "Group: …" prefix,
-//   else General). Diagnostics (a report to copy or save, diagnostics.js) is last before Versions. Fields are rows (bool, int,
+//   else General). Diagnostics (a report to copy or save, diagnostics.js, then the folds a module placed
+//   there with `settings.place: 'diagnostics'`, folded: Story Block's Events) is last before Versions. Fields are rows (bool, int,
 //   choice, text, list of {…}; a list one compact line per item, or, when its fields are text and whole
 //   numbers, a textarea with one item per line: `form: 'lines'` starts there); values are read and
 //   written through createSettings() (extension_settings.storySuite.modules[id]). Open folds stay open
@@ -44,6 +45,8 @@ export const SENT_FOLD = 'story-suite::sent';
 export const TABS_FOLD = 'story-suite::tabs';
 // Story Block's Packs fold (its `settings.folds`), second after Story Suite's; Home's "Import a pack" opens it.
 export const PACKS_FOLD = 'story-block/packs';
+// Story Block's Events (the events part's debug panel), a sub-fold of Diagnostics (its `place`).
+export const EVENTS_FOLD = 'story-block/events';
 // A sub-fold's key: its module's id, this, and the part ("rpg-battle::features", "story-director::group:Calendar").
 export const SUB_FOLD = '::';
 // A module's sub-fold in the Features fold ("story-suite-features::rpg-battle"); its fold's line opens it.
@@ -122,7 +125,7 @@ export const SETTINGS_TEXT = Object.freeze({
 export const TABS_TEXT = Object.freeze({
     title: 'Tabs',
     hint: 'order, show or hide',
-    help: 'The order of the Story panel\'s tabs and the game view\'s screens, one list for both. Up and Down move one; a hidden one leaves the tabs and the game view and stays here to show again. Home is always first and always shown.',
+    help: 'The order of the Story panel\'s tabs and the game view\'s screens, one list for both. Up and Down move one; a hidden one leaves the tabs and the game view and stays here to show again. Home is always first and always shown. Scene starts hidden while Story Director\'s World is installed (its Now shows the same place, time and people).',
     none: 'No module has a tab or a screen yet.',
     listLabel: 'Tabs and screens, in order',
     up: 'Up',
@@ -148,6 +151,7 @@ export const TABS_TEXT = Object.freeze({
 export const DIAGNOSTICS_TEXT = Object.freeze({
     title: 'Diagnostics',
     hint: 'a report for a bug report',
+    checksHint: 'checks for packs and modules',
     help: 'A plain report of what Story Suite sees: versions, features, settings, the prompt size, the last problems, saving and the size of this chat, and what each module adds. It holds no API keys, passwords or addresses and no chat text. Read it before you share it.',
     copy: 'Copy report',
     save: 'Save report',
@@ -697,7 +701,8 @@ const FOLD_SELECTOR = 'details.story-suite-fold, details.story-suite-subfold';
  * Renders the settings into `root` (emptied first), as one centred column of folds: Story Suite (the
  * host's own, with the prompt size), the modules' own folds (Story Block's Packs), Features (a sub-fold
  * per module), one fold per module with settings (a line to its features, its custom panel, then a
- * sub-fold per settings group), Diagnostics (with `diagnostics`) and Versions.
+ * sub-fold per settings group), Diagnostics (the report with `diagnostics`, then as folded sub-folds the
+ * folds and module folds placed there with `place: 'diagnostics'`; drawn when either is there) and Versions.
  *
  * `options`: { registry, settings (createSettings), doc?, sdk?, features? (createFeatureStore; without
  * it no Features are shown), promptParts?() (the parts of the prompt the next reply would get, as
@@ -842,8 +847,8 @@ export function renderSettingsHost(root, { registry, settings, doc = globalThis.
         return line;
     }
     const settingsCount = n => fill(n === 1 ? SETTINGS_TEXT.oneSetting : SETTINGS_TEXT.settings, { n });
-    function moduleFold(def, own = []) {
-        const { details, body } = fold(doc, def.moduleId, def.name, def.title !== def.name ? def.title : def.moduleId);
+    function moduleFold(def, own = [], className = 'story-suite-fold') {
+        const { details, body } = fold(doc, def.moduleId, def.name, def.title !== def.name ? def.title : def.moduleId, className);
         const values = settings(def.moduleId);
         const subs = [];
         // The rows whose `readOnly` is a function of the values: drawn again (value, help, disabled) after
@@ -901,9 +906,9 @@ export function renderSettingsHost(root, { registry, settings, doc = globalThis.
         return remember(details);
     }
     // A module's own top-level folds (`settings.folds`: Story Block's Packs), drawn even with nothing in them.
-    function ownFolds(def) {
-        return def.folds.map(item => {
-            const { details, body } = fold(doc, `${def.moduleId}/${item.id}`, item.title, item.hint);
+    function ownFolds(def, folds = def.folds, className = 'story-suite-fold') {
+        return folds.map(item => {
+            const { details, body } = fold(doc, `${def.moduleId}/${item.id}`, item.title, item.hint, className);
             details.classList.add(`story-suite-fold-${item.id}`);
             try { item.render(body, panelApi(def.moduleId)); } catch (error) {
                 body.replaceChildren(el(doc, 'p', 'story-suite-muted', `This part of ${def.name}'s settings could not be shown: ${error?.message ?? error}`));
@@ -1213,9 +1218,16 @@ export function renderSettingsHost(root, { registry, settings, doc = globalThis.
     // Diagnostics: the report (built when the fold opens, and again on Refresh, Copy and Save) shown as
     // it will be shared, then Copy (the clipboard; else the text is selected for copying by hand) and Save
     // (a .txt download).
-    function diagnosticsFold() {
+    // `subs`: the sub-folds placed in Diagnostics (`place: 'diagnostics'`), below the report; without a
+    // report (no `diagnostics`) the fold holds only them.
+    function diagnosticsFold(subs = []) {
         const T = DIAGNOSTICS_TEXT;
-        const { details, body } = fold(doc, DIAGNOSTICS_FOLD, T.title, T.hint);
+        const hasReport = Boolean(diagnostics && typeof diagnostics.report === 'function');
+        const { details, body } = fold(doc, DIAGNOSTICS_FOLD, T.title, hasReport ? T.hint : T.checksHint);
+        if (!hasReport) {
+            body.append(...subs);
+            return remember(details);
+        }
         body.appendChild(el(doc, 'p', 'story-suite-muted', T.help));
         const report = el(doc, 'pre', 'story-suite-diagnostics-report');
         report.tabIndex = 0;
@@ -1235,7 +1247,7 @@ export function renderSettingsHost(root, { registry, settings, doc = globalThis.
         const save = action('story-suite-diagnostics-save', 'fa-download', T.save);
         const again = action('story-suite-diagnostics-refresh', 'fa-rotate', T.refresh);
         actions.appendChild(status);
-        body.append(report, actions);
+        body.append(report, actions, ...subs);
         let run = 0;
         const build = async () => {
             const mine = ++run;
@@ -1303,16 +1315,30 @@ export function renderSettingsHost(root, { registry, settings, doc = globalThis.
         // A module with features and no settings has no fold of its own: its features are in the Features fold.
         const defs = registry.settingsDefs().map(def => ({ ...def, folds: Array.isArray(def.folds) ? def.folds : [] }));
         const byId = (a, b) => (a.moduleId < b.moduleId ? -1 : a.moduleId > b.moduleId ? 1 : 0);
-        const modules = [...defs]
-            .filter(def => Object.keys(def.schema).length || def.section)
-            .sort(byId)
-            .map(def => moduleFold(def, ownOf(def.moduleId)));
-        const own = [...defs].sort(byId).flatMap(def => ownFolds(def));
-        const diag = diagnostics && typeof diagnostics.report === 'function' ? [diagnosticsFold()] : [];
+        // A module fold or own fold placed in Diagnostics (`place: 'diagnostics'`, debug information like
+        // Story Block's Events) is a sub-fold there, folded until the reader opens it, not a fold of its own.
+        const inDiagnostics = item => item.place === 'diagnostics';
+        const shown = [...defs].filter(def => Object.keys(def.schema).length || def.section).sort(byId);
+        const modules = shown.filter(def => !inDiagnostics(def)).map(def => moduleFold(def, ownOf(def.moduleId)));
+        const own = [...defs].sort(byId).flatMap(def => ownFolds(def, def.folds.filter(item => !inDiagnostics(item))));
+        const subs = [
+            ...[...defs].sort(byId).flatMap(def => ownFolds(def, def.folds.filter(inDiagnostics), 'story-suite-subfold')),
+            ...shown.filter(inDiagnostics).map(def => moduleFold(def, ownOf(def.moduleId), 'story-suite-subfold')),
+        ];
+        const diag = (diagnostics && typeof diagnostics.report === 'function') || subs.length ? [diagnosticsFold(subs)] : [];
         for (const node of [hostFold(), ...own, ...(all.length ? [featuresFold(all)] : []), ...modules, ...diag, versionsFold()]) root.appendChild(node);
     }
     refresh();
     return { refresh, refreshSize };
+}
+
+/** The fold keys a module placed in Settings → Diagnostics (`place: 'diagnostics'`): "story-block/events". */
+export function diagnosticsKeys(registry) {
+    const defs = typeof registry?.settingsDefs === 'function' ? registry.settingsDefs() : [];
+    return defs.flatMap(def => [
+        ...(def.place === 'diagnostics' ? [def.moduleId] : []),
+        ...(Array.isArray(def.folds) ? def.folds : []).filter(item => item.place === 'diagnostics').map(item => `${def.moduleId}/${item.id}`),
+    ]);
 }
 
 // One overlay's folds stay as the reader left them when it is opened again (this page load).
@@ -1352,8 +1378,9 @@ export function openSettingsOverlay({ registry, settings, doc = globalThis.docum
     if (typeof target === 'string' && target.endsWith(`${SUB_FOLD}features`)) target = featuresFoldOf(target.slice(0, -`${SUB_FOLD}features`.length));
     if (typeof target === 'string' && target) {
         openState.set(target, true);
-        // A sub-fold opens its module's fold too.
+        // A sub-fold opens its module's fold too, and one placed in Diagnostics opens Diagnostics.
         if (target.includes(SUB_FOLD)) openState.set(target.split(SUB_FOLD)[0], true);
+        if (diagnosticsKeys(registry).includes(target)) openState.set(DIAGNOSTICS_FOLD, true);
     }
     const host = renderSettingsHost(body, { registry, settings, doc, sdk, features, promptParts, countTokens, openState, diagnostics, tabs });
     let open = true;

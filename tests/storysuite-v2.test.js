@@ -277,7 +277,7 @@ test('registers module npc-state-delta once, with the npc domain, its queries an
     assert.equal(typeof def.context.static, 'function', 'one static line for the npc kind; Delta keeps its own prompt keys besides');
     assert.equal(typeof def.settings.section, 'function');
     assert.deepEqual(Object.keys(def.settings.schema), ['changeCap', 'customMeters', 'stages', 'ladder', 'conflictAt', 'demoteAfter']);
-    assert.deepEqual(def.tabs.map(tab => [tab.id, tab.title]), [[CAST_TAB_ID, 'Cast']]);
+    assert.deepEqual(def.tabs.map(tab => [tab.id, tab.title]), [[CAST_TAB_ID, 'Dossiers']], 'the Cast tab is Dossiers now; its id stays `cast`');
     adapter.start();
     adapter.check();
     timers.runIntervals();
@@ -603,7 +603,8 @@ test('the Cast tab renders Delta\'s own present-cast markup and fills its text',
     const el = doc.body.appendChild(doc.createElement('div'));
     el.dataset.tabId = CAST_TAB_ID;   // Story Block's tab host marks its pane with the shown tab
     def.tabs[0].render(el, { state: {} }, {});
-    assert.match(el.innerHTML, /^<div class="npc-state-delta-story-pane"><section class="npc-state-delta-present-roster">Mira<\/section><\/div>$/);
+    // Without Story Director the present cast stays at the top of Dossiers, the dossier list under it.
+    assert.match(el.innerHTML, /^<div class="npc-state-delta-story-pane"><section class="npc-state-delta-present-roster">Mira<\/section><div class="npc-state-delta-story-dossiers npc-state-delta-v2-dossiers">.*<\/div><\/div>$/);
     assert.deepEqual(delta.filled, [el]);
     def.tabs[0].render(el, { state: {} }, {});
     assert.equal(el.writes, 1, 'unchanged cast is not rewritten');

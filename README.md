@@ -1,6 +1,6 @@
 # NPC State Delta v1.2.20
 
-> **Story Suite v2 beta (2.0.0-beta.1) is on the `v2` branch; Delta's build there is 1.2.20.** Delta stays a standalone extension. With Story Block 2.0.0-beta.1 or later it also joins Story Block as a hosted module: NPC meters (trust, affection, desire, tension and your own) kept with each reply, a Cast tab, and its settings in the Story Suite overlay (see [With Story Block v2](#with-story-block-v2)). The beta is for test play, not your real campaigns yet. Player guide: [Story Block docs/v2/GUIDE.md](https://github.com/kohz87/Story_block/blob/v2/docs/v2/GUIDE.md). Release notes: [RELEASES.md](https://github.com/kohz87/Story_block/blob/v2/docs/v2/RELEASES.md).
+> **Story Suite v2 beta (2.0.0-beta.1) is on the `v2` branch; Delta's build there is 1.2.20.** Delta stays a standalone extension. With Story Block 2.0.0-beta.1 or later it also joins Story Block as a hosted module: NPC meters (trust, affection, desire, tension and your own) kept with each reply, a Dossiers tab (once Cast), its present-cast cards on Story Director's World screen, and its settings in the Story Suite overlay (see [With Story Block v2](#with-story-block-v2)). The beta is for test play, not your real campaigns yet. Player guide: [Story Block docs/v2/GUIDE.md](https://github.com/kohz87/Story_block/blob/v2/docs/v2/GUIDE.md). Release notes: [RELEASES.md](https://github.com/kohz87/Story_block/blob/v2/docs/v2/RELEASES.md).
 
 
 A SillyTavern extension that keeps a living dossier for every NPC in your roleplay: who they are, how they look, how they talk and behave, what they remember, and how they feel about you. After each reply it scans the story, updates the dossiers carefully, and feeds the present NPCs back to the roleplay model so they stay in character.
@@ -91,7 +91,7 @@ Leave the scanner connection profile empty to use SillyTavern's current connecti
 
 ### Story Block tabs
 
-With [Story Block](https://github.com/kohz87/Story_block) installed, Delta adds two tabs to its sidebar and card, next to your inventory, World State and other blocks (Story Block 2 gets a **Cast** tab instead, see [With Story Block v2](#with-story-block-v2)):
+With [Story Block](https://github.com/kohz87/Story_block) installed, Delta adds two tabs to its sidebar and card, next to your inventory, World State and other blocks (Story Block 2 gets a **Dossiers** tab instead, see [With Story Block v2](#with-story-block-v2)):
 
 - **🎭 Present NPCs:** the same cards as in the chat, for whoever is present in the latest scene.
 - **📇 Dossiers:** every dossier with a search box. The dead stay out of the list until you search for them. Tap a row to open that dossier.
@@ -124,7 +124,7 @@ With two or more installed, **Manage all in Story Suite** at the top of Delta's 
 
 Story Block 2 (Story Suite v2, in beta on Story Block's `v2` branch) hosts the suite's modules itself. Delta stays a standalone extension: its dossiers, scans, prompts, saved data and swipe handling are exactly as without it. When Story Block 2 is on the page, Delta also joins it as the module `npc-state-delta`:
 
-- **Cast tab:** Story Block's tab bar gets a **Cast** tab with Delta's present-cast cards (the same cards, Scan now and Add NPC as the v1 Present NPCs tab).
+- **Dossiers tab** (once **Cast**; its id is still `npc-state-delta/cast`, so a tab order you saved keeps it where you put it; by default it is the last tab, after the Director): every dossier in this chat, with a search box, each opening its dossier view (v1's Dossiers list: portrait, role, status); with none yet, Add NPC and Scan now. The present cast's cards (the same cards, now lines and meters as the v1 Present NPCs tab) are on **Story Director's World screen**, World → Now → Here, each with the person's thought from the latest reply's Inner chatter inside it; without Story Director (or with its World view off) they stay at the top of Dossiers, so nothing is lost. Story Director draws them through a small page API Delta offers, `globalThis.NPCStateDeltaCast`: `available()`, `render(el, { slot })` (Delta's own cards and meters into `el`, with the `slot(name, aliases)` node inside each present card) and `onChange(fn)` → unsubscribe (called when Delta draws its cast again, after a scan or an edit, when it is turned on or off and when it joins or leaves Story Block), so World follows a scan that ends after the reply without a tab switch. Display only: no prompt, query or saved value changes.
 - **Settings:** Delta's settings panel moves into the Story Suite overlay as its section, and the copy in the extensions drawer is hidden meanwhile. If Story Block 2 goes away, the panel goes back to the drawer where it was.
 - **Questions other modules can ask** (read-only; nothing in Delta changes):
   - `npc.present` → the names of the NPCs in the current scene (`npc.present({ meters: true })` → `[{ name, meters, stages }]`);

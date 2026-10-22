@@ -10,10 +10,13 @@
 //   An id it names that is not there (a module removed) is passed over, and kept for when it comes back.
 // * Home is always first and always shown: it cannot be moved or hidden.
 // * Hidden ids leave the tab strip and the game view's navigation; Settings still lists them to show again.
+// * Hidden by default (screens.js DEFAULT_HIDDEN): Scene while Story Director's World is registered. The
+//   reader's choice wins: `shown` lists the ones the reader showed again, `hidden` the ones they hid. An
+//   order saved before `shown` existed that names Scene counts as showing it (the reader had it in view).
 //
 // Pure, apart from createTabOrderStore (which reads and writes the reader's settings through `ctx`).
 
-import { HOME_ID, byNavOrder } from './screens.js';
+import { DEFAULT_HIDDEN, HOME_ID, byNavOrder } from './screens.js';
 
 export const TAB_SETTINGS_KEY = 'tabs';
 // Bounds on what is kept (the settings file is the reader's, but it is read on every redraw).
@@ -31,14 +34,22 @@ const cleanIds = list => {
     return out;
 };
 
-/** A saved choice made safe: { order, hidden }, strings only, no repeats, no Home, bounded. */
+/** A saved choice made safe: { order, hidden, shown }, strings only, no repeats, no Home, bounded. */
 export function readTabChoice(raw) {
     const value = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
-    return { order: cleanIds(value.order), hidden: cleanIds(value.hidden) };
+    const order = cleanIds(value.order);
+    const hidden = cleanIds(value.hidden);
+    // Before `shown`: a default-hidden id the saved order names was in the reader's view, so it stays.
+    const shown = Array.isArray(value.shown) ? cleanIds(value.shown)
+        : order.filter(id => Object.hasOwn(DEFAULT_HIDDEN, id) && !hidden.includes(id));
+    return { order, hidden, shown };
 }
 
-/** True when the reader has changed nothing (the default order, nothing hidden). */
-export const isDefaultChoice = choice => !readTabChoice(choice).order.length && !readTabChoice(choice).hidden.length;
+/** True when the reader has changed nothing (the default order, nothing hidden or shown). */
+export const isDefaultChoice = choice => {
+    const clean = readTabChoice(choice);
+    return !clean.order.length && !clean.hidden.length && !clean.shown.length;
+};
 
 /**
  * The id one entry of the Story panel's tab list goes by: a tab screen's own id, a module tab's
@@ -66,12 +77,28 @@ export function orderNav(list, choice, keyOf = entry => entry.id, orderOf = entr
     return [...home, ...named, ...fresh];
 }
 
-/** Is `id` hidden by the choice? Home never is. */
-export const isHiddenNav = (choice, id) => id !== HOME_ID && readTabChoice(choice).hidden.includes(String(id));
+/**
+ * Is `id` hidden? Home never is; one the reader hid is; one hidden by default (DEFAULT_HIDDEN) is while
+ * its partner is there (`present(id)` → true; without `present`, no default applies) and the reader has
+ * not shown it again.
+ */
+export function isHiddenNav(choice, id, present = null) {
+    const key = String(id);
+    if (key === HOME_ID) return false;
+    const clean = readTabChoice(choice);
+    if (clean.hidden.includes(key)) return true;
+    if (!Object.hasOwn(DEFAULT_HIDDEN, key) || clean.shown.includes(key) || typeof present !== 'function') return false;
+    try { return present(DEFAULT_HIDDEN[key]) === true; } catch { return false; }
+}
 
-/** orderNav without the hidden ones: what the tab strip and the game view's navigation show. */
-export function visibleNav(list, choice, keyOf = entry => entry.id, orderOf = entry => entry.order) {
-    return orderNav(list, choice, keyOf, orderOf).filter(entry => !isHiddenNav(choice, keyOf(entry)));
+/**
+ * orderNav without the hidden ones: what the tab strip and the game view's navigation show. `present`
+ * (for DEFAULT_HIDDEN) defaults to "in `list`".
+ */
+export function visibleNav(list, choice, keyOf = entry => entry.id, orderOf = entry => entry.order, present = null) {
+    const keys = new Set([...(list ?? [])].map(keyOf));
+    const there = typeof present === 'function' ? present : id => keys.has(id);
+    return orderNav(list, choice, keyOf, orderOf).filter(entry => !isHiddenNav(choice, keyOf(entry), there));
 }
 
 /**
@@ -90,15 +117,20 @@ export function moveNav(choice, current, id, delta) {
     [ids[at], ids[to]] = [ids[to], ids[at]];
     const queue = [...ids];
     const order = clean.order.map(item => (ids.includes(item) ? queue.shift() : item));
-    return { order: [...order, ...queue].slice(0, TAB_LIST_MAX), hidden: clean.hidden };
+    return { order: [...order, ...queue].slice(0, TAB_LIST_MAX), hidden: clean.hidden, shown: clean.shown };
 }
 
-/** The choice with `id` hidden or shown again. Home cannot be hidden (the choice comes back unchanged). */
+/**
+ * The choice with `id` hidden or shown again. Home cannot be hidden (the choice comes back unchanged). Showing
+ * one that is hidden by default (DEFAULT_HIDDEN) keeps it in `shown`, so the default no longer hides it.
+ */
 export function setNavHidden(choice, id, hidden) {
     const clean = readTabChoice(choice);
     if (typeof id !== 'string' || !id || id === HOME_ID) return clean;
     const rest = clean.hidden.filter(item => item !== id);
-    return { order: clean.order, hidden: hidden ? cleanIds([...rest, id]) : rest };
+    const shown = clean.shown.filter(item => item !== id);
+    if (hidden) return { order: clean.order, hidden: cleanIds([...rest, id]), shown };
+    return { order: clean.order, hidden: rest, shown: Object.hasOwn(DEFAULT_HIDDEN, id) ? cleanIds([...shown, id]) : shown };
 }
 
 /**

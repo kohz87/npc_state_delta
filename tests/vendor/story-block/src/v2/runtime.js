@@ -384,7 +384,8 @@ export function createRuntime({
             problem: entry => turn?.report(entry),
             settings: () => settings(CORE_MODULE_ID),
             // The chatter the reader may send back to the story (its setting): the replies and how to read one.
-            extras: { chat: () => ctx.chat, display },
+            // The head reply's index too, for `scene.moved` (the store is made below; asked only later).
+            extras: { chat: () => ctx.chat, display, headIndex: () => store.headIndex() },
             version: VERSION,
             packs: packPart,
             // Due events are the host's own system cues: straight to the bus (the public sdk only runs
