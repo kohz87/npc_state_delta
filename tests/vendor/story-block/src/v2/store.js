@@ -711,13 +711,20 @@ export function createStore({
         // A kept system step marked `replan` (its receipt's `replan: { payload }`, B-a1-13: planned from the
         // story state, like a story-time heal) is not applied again as it was: `rerun(state, receipt)` runs
         // it again on the state as it now stands at its place (→ { ok, ops, receipt }); when it is not
-        // done, its block goes. Later carriers are replayed on top so their checkpoints stay true; if any
-        // later change no longer applies, nothing is written and this throws.
-        replaceStory(index, { ops, receipts = [], rerun = null } = {}) {
+        // done, its block goes. `settled` ([{ ops, receipt }], system steps; SPEC §4.2 step 3): the reply's
+        // afterCapture steps as the Re-read ran them again after the new story lines. They take the place
+        // of the kept blocks whose receipt is marked `afterCapture` and go right after the new story ops,
+        // before the reader's actions; without `settled` such a block is kept as any other system step.
+        // Later carriers are replayed on top so their checkpoints stay true; if any later change no longer
+        // applies, nothing is written and this throws.
+        replaceStory(index, { ops, receipts = [], rerun = null, settled = null } = {}) {
             const arr = list();
             const message = carrierAt(arr, index);
             if (!Array.isArray(receipts) || receipts.some(receipt => !isObject(receipt) || receipt.cause !== 'story')) {
                 throw new TypeError('Re-read takes story receipts only.');
+            }
+            if (settled !== null && (!Array.isArray(settled) || settled.some(ran => !isObject(ran?.receipt) || ran.receipt.cause !== 'system'))) {
+                throw new TypeError('Re-read\'s afterCapture steps are system steps, each { ops, receipt }.');
             }
             const before = stateBefore(arr, index);
             const startsHere = readRecord(message)?.checkpoint;
@@ -733,8 +740,17 @@ export function createStore({
                 if (!span.story) blocks.push(record.ops.slice(at, at + span.n));
                 at += span.n;
             }
-            const keptReceipts = record.receipts.filter(receipt => receipt?.cause !== 'story').map(receipt => structuredClone(receipt));
+            let keptReceipts = record.receipts.filter(receipt => receipt?.cause !== 'story').map(receipt => structuredClone(receipt));
             const paired = keptReceipts.length === blocks.length;
+            // The old afterCapture steps go when the Re-read ran them again (only told apart one to one).
+            const resettle = Array.isArray(settled) && paired;
+            if (resettle) {
+                for (let n = blocks.length - 1; n >= 0; n -= 1) {
+                    if (keptReceipts[n]?.afterCapture !== true) continue;
+                    blocks.splice(n, 1);
+                    keptReceipts.splice(n, 1);
+                }
+            }
             const fresh = asOps(ops);
             let state;
             const fail = error => new Error(`The new story changes and this reply's other changes do not fit together: ${error?.message ?? error}`);
@@ -749,6 +765,20 @@ export function createStore({
             const nextReceipts = [];
             const keptSpans = [];
             const moved = new Map();
+            // The afterCapture steps run again, right after the new story ops (their revs follow them).
+            for (const ran of resettle ? settled : []) {
+                const blockOps = asOps(ran.ops);
+                try {
+                    state = step(state, blockOps);
+                } catch (error) {
+                    throw fail(error);
+                }
+                const own = [...blockOps].reverse().find(op => op?.path === '/meta/rev' && Number.isInteger(op.value))?.value;
+                if (Number.isInteger(own)) rev = Math.max(rev, own);
+                nextOps.push(...blockOps);
+                keptSpans.push({ n: blockOps.length, story: false });
+                nextReceipts.push(structuredClone(ran.receipt));
+            }
             for (const [n, block] of blocks.entries()) {
                 const receipt = paired ? keptReceipts[n] : null;
                 let blockOps;

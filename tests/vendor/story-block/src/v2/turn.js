@@ -12,7 +12,8 @@
 // A module's canGenerate hook may stop a story generation first (the interceptor's abort).
 // After the reply (MESSAGE_RECEIVED for the carrier the interceptor prepared): read its
 // <Changes> block, run each line as its owner's capture command (cause 'story'), append what
-// was accepted, record what the reply was told, save once. A line no module takes, or one its
+// was accepted, run each module's afterCapture hook once after the reply's last story line (its
+// commands as `system` steps kept on the reply), record what the reply was told, save once. A line no module takes, or one its
 // owner rejects, goes to the Problems list; nothing is thrown at the reader.
 // A failed save (before or after the reply) is told and logged but never drops the turn: the state
 // stays in memory, marked unsaved, and the save is tried again after the reply.
@@ -610,15 +611,83 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         .map(([kind, values]) => [kind, values.length]));
 
     // `before`: the reply's text before these lines were added (a Continue's, the extractor's), or null.
-    async function captureLines(index, all, before = null) {
+    // `type`: the generation's (normal, swipe, regenerate, continue) or 'late' (the extractor's lines).
+    async function captureLines(index, all, before = null, type = 'normal') {
         const receipts = [];
         const found = [];
         const lines = capped(index, all, found);
         const shown = typeof before === 'string' ? shownIn(before) : new Map();
-        // One write of the reply's record for all its lines (store.batch), not one per line.
+        // One write of the reply's record for all its lines and its afterCapture steps (store.batch).
         let off = [];
-        await (store.batch ?? (fn => fn()))(async () => { ({ off } = await captureEach(index, lines, receipts, found, null, null, shown)); });
-        return { receipts, problems: found, off };
+        let steps = [];
+        await (store.batch ?? (fn => fn()))(async () => {
+            ({ off } = await captureEach(index, lines, receipts, found, null, null, shown));
+            // Only after a capture that kept a story line (never for an empty one, a click or a system step).
+            if (receipts.length) steps = await afterCapture(index, { type, problems: found });
+        });
+        return { receipts, problems: found, off, steps: steps.map(step => step.receipt) };
+    }
+
+    /**
+     * afterCapture (SPEC §4.2 step 3): once the reply's story lines have run, each module's
+     * `afterCapture(view, { index, type })` hook may return `{ commands: [{ type, payload }] }` to run as
+     * `system` steps on the scene the reply ended up in (a turn-in its line read before the reply's own
+     * `~ place` line). A step is stored on the reply right after its story lines, as part of that reply, its
+     * receipt marked `afterCapture` (and `replan`), so a swipe or delete of the reply takes it back and a
+     * Re-read runs the hook again on the new story lines. A Continue runs it again after the Continue's
+     * lines. A hook that fails or takes longer than HOOK_TIMEOUT_MS, or a step that is refused, is a Problem.
+     * Live (no `state`): each step is appended to the head as it runs. A Re-read passes `state` (the reply's
+     * state after its new story lines), `reply` and `seeds` (the old steps' seeds by type, in order): nothing
+     * is stored, and the steps come back as [{ ops, receipt }] for store.replaceStory.
+     */
+    async function afterCapture(index, { type = 'normal', problems = [], state = null, reply = null, seeds = null } = {}) {
+        const steps = [];
+        const live = state === null;
+        let now = live ? store.head() : state;
+        for (const { moduleId, fn } of registry.hookEntries('afterCapture')) {
+            const seen = live ? view() : makeView({ store, registry, settings, chat: ctx?.chat, state: now, reply });
+            let out;
+            try { out = await within(fn(seen, { index, type }), HOOK_TIMEOUT_MS); } catch (error) {
+                problems.push(problem({ module: moduleId, index, code: 'FAILED', message: `afterCapture failed: ${error?.message ?? error}` }));
+                continue;
+            }
+            if (out === TIMED_OUT) {
+                problems.push(problem({ module: moduleId, index, code: 'TIMEOUT', message: `afterCapture did not answer within ${HOOK_TIMEOUT_MS / 1000} s; its steps after the reply's lines were not run.` }));
+                continue;
+            }
+            for (const command of Array.isArray(out?.commands) ? out.commands : []) {
+                const payload = command?.payload ?? {};
+                const seed = seeds?.(command?.type);
+                const result = bus.run(command?.type, payload, { cause: 'system', state: live ? store.head() : now, ...(reply ? { reply } : {}), ...(seed === undefined ? {} : { seed }) });
+                if (!result?.ok) {
+                    problems.push(problem({ module: moduleId, index, code: result?.code ?? 'FAILED', message: `The step "${command?.type}" after the reply's lines was not run: ${result?.message ?? 'unknown error'}` }));
+                    continue;
+                }
+                let replan = result.receipt.replan;
+                if (!replan) { try { replan = { payload: structuredClone(payload) }; } catch { replan = undefined; } }
+                const receipt = { ...result.receipt, afterCapture: true, ...(replan ? { replan } : {}) };
+                if (live) {
+                    store.append({ ops: result.ops, receipt });
+                    now = store.head();
+                    events?.emit('committed', { receipt });
+                } else now = result.state;
+                steps.push({ ops: result.ops, receipt });
+            }
+        }
+        return steps;
+    }
+
+    // For a Re-read: each afterCapture step run again gets the seed of the old one of its type, in order.
+    function stepSeeds(record) {
+        const stored = (Array.isArray(record?.receipts) ? record.receipts : [])
+            .filter(receipt => receipt?.cause === 'system' && receipt.afterCapture === true && Number.isInteger(receipt.seed));
+        const used = new Set();
+        return type => {
+            const at = stored.findIndex((receipt, n) => !used.has(n) && receipt.type === type);
+            if (at < 0) return undefined;
+            used.add(at);
+            return stored[at].seed;
+        };
     }
 
     // Runs `lines` as story captures on carrier `index`, each on the state the one before left. Stored on
@@ -694,7 +763,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             }
             if (!base) events?.emit('committed', { receipt: result.receipt });
         }
-        return { ops: collected, off: [...off] };
+        return { ops: collected, off: [...off], state };
     }
 
     const refusal = (code, message) => ({ ok: false, code, message });
@@ -749,8 +818,13 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         const swipe = message.swipe_id;
         let ops;
         let off = [];
+        let steps = [];
         try {
-            ({ ops, off } = await captureEach(index, lines, receipts, problems, base, storySeeds(readRecord(message))));
+            let after;
+            ({ ops, off, state: after } = await captureEach(index, lines, receipts, problems, base, storySeeds(readRecord(message))));
+            // The reply's afterCapture steps, run again after its new story lines (none when none was kept).
+            const reply = store.carrierSid?.(index) ? { index, sid: store.carrierSid(index) } : null;
+            if (receipts.length) steps = await afterCapture(index, { type: 'reread', problems, state: after, reply, seeds: stepSeeds(readRecord(message)) });
             // B-b2-timeline-r2: the lines ran while the reader could act (a capture handler may wait). A
             // message deleted, another chat opened, the reply swiped or edited, or a reply begun in that
             // time: what was read is no longer this reply's, so nothing is stored (not even on the
@@ -761,8 +835,8 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             }
             // A kept system step marked `replan` (B-a1-13) runs again on the new story changes, as it ran
             // before: a system step, its own seed.
-            const rerun = (state, receipt) => bus.run(receipt.type, receipt.replan?.payload ?? {}, { cause: 'system', state, seed: receipt.seed });
-            store.replaceStory(index, { ops, receipts, rerun });
+            const rerun = (state, receipt) => bus.run(receipt.type, receipt.replan?.payload ?? {}, { cause: 'system', state, seed: receipt.seed, ...(reply ? { reply } : {}) });
+            store.replaceStory(index, { ops, receipts, rerun, settled: steps });
         } catch (error) {
             return refusal('CONFLICT', `${error?.message ?? error}`);
         }
@@ -775,10 +849,10 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             redraw(index, message);
         }
         await trySave('after the Re-read');
-        for (const receipt of receipts) events?.emit('committed', { receipt });
+        for (const receipt of [...receipts, ...steps.map(step => step.receipt)]) events?.emit('committed', { receipt });
         events?.emit('head', { index: store.headIndex() });
-        events?.emit('turn', { index, type: 'reread', receipts, problems, told: [] });
-        return { ok: true, receipts, problems };
+        events?.emit('turn', { index, type: 'reread', receipts, steps: steps.map(step => step.receipt), problems, told: [] });
+        return { ok: true, receipts, steps: steps.map(step => step.receipt), problems };
     }
 
     // Only the reply's text changed (its block hidden): SillyTavern's own save, told like any other.
@@ -833,7 +907,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             const problems = [...parsed.problems, ...strayProblems(id, text, heads, { from: at?.from ?? 0, tail: at?.tail === true, stopped })];
             const cut = block === null ? null : cutLine(text, 'Changes', at);
             if (cut) problems.push(problem({ index: id, line: cut, code: 'CUT_OFF', message: `The reply ended in the middle of the change line "${cutAt(cut, 80)}" (nothing after it on its line, and the block was not closed), so it was not used. Continue finishes it; or end the line and close the block by hand, then Re-read.` }));
-            const result = await captureLines(id, parsed.lines, at ? current.base : null);
+            const result = await captureLines(id, parsed.lines, at ? current.base : null, current.type);
             problems.push(...result.problems);
 
             // What this reply was told; a Continue keeps what the reply was told before.
@@ -859,7 +933,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             // At MESSAGE_RECEIVED SillyTavern has not drawn the reply yet (it draws the text as saved), so
             // redrawing can fail; that is not a reason to lose the turn.
             if (edited) redraw(id, message);
-            const turn = { index: id, type: current.type, receipts: result.receipts, problems, told: current.untold };
+            const turn = { index: id, type: current.type, receipts: result.receipts, steps: result.steps, problems, told: current.untold };
             events?.emit('turn', turn);
             if (!parsed.lines.length) afterReply(id, current.type, message);
             return turn;
@@ -892,7 +966,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         }
         const parsed = readBlock(index, String(text ?? ''));
         const problems = [...parsed.problems];
-        const result = await captureLines(index, parsed.lines, String(message.mes ?? ''));
+        const result = await captureLines(index, parsed.lines, String(message.mes ?? ''), 'late');
         problems.push(...result.problems);
         if (parsed.lines.length) {
             // Kept in a hidden block of their own after the reply's, so Re-read finds them too (and what the
@@ -907,7 +981,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             if (store.saveIdle?.() !== true) await trySave('after the late change lines');
         } else if (parsed.lines.length) await saveText();
         if (parsed.lines.length) redraw(index, message);
-        const turn = { index, type: 'late', receipts: result.receipts, problems, told: [] };
+        const turn = { index, type: 'late', receipts: result.receipts, steps: result.steps, problems, told: [] };
         events?.emit('turn', turn);
         return turn;
     }
