@@ -23,6 +23,7 @@ import { createEventsPart } from '../events/index.js';
 import { standardWidgets } from '../view/widgets/index.js';
 import { screens as defaultScreens } from '../screens/index.js';
 import { createPacksPart, packs as liveInstalled, part as livePart, resolveItem as liveResolve, startState as liveStart } from '../packs/index.js';
+import { firstPackRanks, readerRanks } from '../packs/ranks.js';
 
 // The packs part bound to SillyTavern (src/v2/packs/index.js), in createPacksPart()'s shape.
 const livePacks = Object.freeze({ part: livePart, packs: liveInstalled, resolveItem: liveResolve, startState: liveStart });
@@ -65,7 +66,7 @@ export const CORE_FEATURES = Object.freeze([
 // never a second one.
 export const CORE_SETTINGS = Object.freeze({
     section: 'Story Block',
-    defaults: Object.freeze({ currency: DEFAULT_CURRENCY.name, currencyPlural: '', currencyShort: '', storyCoinPerReply: 0, economyScale: '0' }),
+    defaults: Object.freeze({ currency: DEFAULT_CURRENCY.name, currencyPlural: '', currencyShort: '', storyCoinPerReply: 0, economyScale: '0', ranks: Object.freeze([]) }),
     schema: Object.freeze({
         currency: Object.freeze({ type: 'text', label: 'Currency (one coin: mark, crown, gold)', max: 24 }),
         currencyPlural: Object.freeze({ type: 'text', label: 'Currency, plural (blank: the name with an s)', max: 24 }),
@@ -78,6 +79,12 @@ export const CORE_SETTINGS = Object.freeze({
         economyScale: Object.freeze({
             type: 'text', max: 12, label: 'Money scale (0: the pack\'s)',
             help: 'How many of your coins one coin of the built-in defaults is worth, from 0.001 to 1000: 0.01 for a copper-coin world, 1 for gold. 0 or blank: the enabled pack\'s scale, else 1. Numbers a pack writes are never scaled.',
+        }),
+        // The world's rank ladder (packs/ranks.js): every module reads it through packs.content({ kind: 'ranks' }).
+        ranks: Object.freeze({
+            type: 'list', group: 'Terms', label: 'Rank ladder (lowest first)', form: 'lines',
+            of: Object.freeze({ rank: Object.freeze({ type: 'text', label: 'Rank', max: 40 }) }),
+            help: 'The ranks of this world, one per line from lowest to highest: "Soul Class I" to "Soul Class IX", or F, E, D, C, B, A, S, SS, SSS. Add the first level of each to set their levels ("Soul Class II: 11"). Quest ranks, foe ranks and the party\'s rank all use it. Empty: the enabled pack\'s ladder, else the built-in F to S.',
         }),
     }),
 });
@@ -112,7 +119,7 @@ export function createCorePart({ hooks = () => [], settings = () => ({}), hookEn
         domains: {
             scene: { initial: initialScene, validate: slice => validateScene(slice) },
             // Coin and stack sizes are counts: a replay after a deleted reply adds each change to them.
-            inventory: { initial: initialInventory, validate: slice => validateInventory(slice), counters: ['wallets/*/coin', 'stacks/*/qty'], scratch: ['perReply', 'loot', 'condLog'] },
+            inventory: { initial: initialInventory, validate: slice => validateInventory(slice), counters: ['wallets/*/coin', 'stacks/*/qty'], scratch: ['perReply', 'storyClicks', 'loot', 'condLog'] },
         },
         commands: { ...createInventoryCommands(env), ...sceneCommands },
         queries: { ...createInventoryQueries(env), ...sceneQueries },
@@ -224,6 +231,20 @@ export function createCoreModule({ hooks = () => [], settings = () => ({}), vers
         ...(query ? { query } : {}),
     });
     const merged = mergeParts([core, packs.part, events, assist ?? createAssistPart({ settings: () => settings() })]);
+    // The reader's rank ladder (Terms: Rank ladder, packs/ranks.js) answers packs.content's ranks in
+    // place of the packs', with the first pack's numbers at each place; a call for one pack's own ranks
+    // (`pack`) is the pack's as before.
+    const content = merged.queries['packs.content'];
+    if (typeof content === 'function') {
+        merged.queries['packs.content'] = (state, args = {}, tools) => {
+            const answer = content(state, args, tools);
+            if (args?.kind !== 'ranks' || args?.pack) return answer;
+            let rows = null;
+            try { rows = settings()?.ranks; } catch { rows = null; }
+            const own = readerRanks(rows, firstPackRanks(answer));
+            return own.length ? own : answer;
+        };
+    }
     return {
         id: CORE_MODULE_ID,
         name: 'Story Block',

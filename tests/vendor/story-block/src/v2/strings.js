@@ -134,6 +134,8 @@ export const STRINGS = deepFreeze({
         equippedTitle: 'Equipped',
         key: 'Key',
         keyTitle: 'A key item: yours to use, but it can\'t be sold',
+        carry: 'carry',
+        carryTitle: 'Adds this much carry capacity while it is owned (equipment: while it is worn)',
         equip: 'Equip',
         equipTitle: 'Equip {name}',
         unequip: 'Unequip',

@@ -322,18 +322,22 @@ export function carryRecord(from, to) {
 // count, and the change is saved again, into the renamed chat's file.
 // A save given up that way may still be written: its body can already be at the server, which writes it
 // when it gets to it, after the retry that carried a newer change (SillyTavern's integrity token is the
-// same on both). So after a timeout the saver is "suspect" for that chat: each later save is stamped
-// (`confirm.mark(target)` → token, right before it starts: a rising number in the chat's metadata), and
-// once one of them is answered the file is read back after each of `recheck` ms
-// (`confirm.holds(target, token)` → true when the file holds that save or a newer one). A file holding
-// an older one is saved again at once. The read-backs end when the last delay has passed (about five
-// minutes: a server drops a request whose body has not arrived by then). Without a timeout nothing is
-// stamped or read. The read-backs never hold a save, the reader's command or the next reply.
+// same on both). So after a timeout of a save or a rescue, that chat is "suspect" (by its chat ID, kept
+// through a rename, and in `memo` so a reload of the page goes on with it): each later write of it (a save
+// or a rescue) is asked to stamp its file (`{ stamp: true }`; it resolves to `{ stamp }`, a rising number
+// in the chat's metadata), and once one is answered the file is read back after each of `recheck` ms
+// (`confirm.holds(target, stamp)` → true when the file holds that write or a newer one), whether the chat
+// is open or not. A file holding an older one is put right at once: the open chat is saved again when it
+// holds at least that write (`confirm.fresh(stamp)`); otherwise that write is put back
+// (`confirm.restore(target, stamp)`, the page's copy of it), and when that is not possible either the
+// reader is told. The read-backs end when the last delay has passed (about five minutes: a server drops a
+// request whose body has not arrived by then). Without a timeout nothing is stamped or read. The
+// read-backs never hold a save, the reader's command or the next reply.
 export const RECHECK_MS = Object.freeze([10000, 20000, 40000, 80000, 160000]);
 export function createSaver({
     save, onError = null, timers = globalThis, verify = null, target = null, check = null, rescue = null,
     retry = [1000, 2000, 4000, 8000, 15000], waitMs = 200, waits = 50, timeout = 20000,
-    confirm = null, recheck = RECHECK_MS,
+    confirm = null, recheck = RECHECK_MS, memo = null,
 } = {}) {
     if (typeof save !== 'function') throw new TypeError('createSaver needs a save function.');
     let version = 0;
@@ -346,7 +350,8 @@ export function createSaver({
     let told = false;           // the reader was told about this run of failures
     let waited = 0;             // saves put off in a row because a chat was being opened
     let sending = null;         // { chatId, renamed } of the save on its way
-    let suspect = null;         // { chatId, good: token | null, step, timer }: a save of that chat timed out
+    // chat ID → { target, good: stamp | null, step, stale, timer }: a write of that chat timed out.
+    const suspects = new Map();
 
     const dirty = () => version !== saved || orphans.length > 0;
     const backoff = () => retry[Math.max(0, Math.min(failures, retry.length) - 1)];
@@ -386,38 +391,104 @@ export function createSaver({
         if (orphans.length && timer === null) later(backoff());
     }
 
-    // After a timeout: is the newest answered save of the suspect chat still the one in its file? Read
-    // back after each delay; an older save found there is written over at once (a new save, stamped anew).
-    function startRechecks() {
-        if (!suspect || suspect.timer !== null || typeof confirm?.holds !== 'function') return;
-        if (suspect.step >= recheck.length) {
-            suspect = null;
+    // The suspect chats, kept in `memo` (a reload of the page goes on with their read-backs).
+    function remember(chatId, entry) {
+        try { memo?.set?.(chatId, entry ? { good: entry.good, step: entry.step, place: entry.target?.place ?? null } : null); } catch { /* only a convenience */ }
+    }
+    function forgetStamp(stamp) {
+        if (stamp === null || stamp === undefined) return;
+        try { confirm?.forget?.(stamp); } catch { /* nothing kept */ }
+    }
+    function markSuspect(where, good = null) {
+        const chatId = where?.chatId;
+        if (chatId === undefined || chatId === null) return null;
+        const old = suspects.get(chatId);
+        if (old?.timer !== null && old?.timer !== undefined) timers.clearTimeout(old.timer);
+        const entry = { target: where, good: good ?? old?.good ?? null, step: 0, stale: 0, timer: null };
+        suspects.set(chatId, entry);
+        remember(chatId, entry);
+        return entry;
+    }
+    // A write of a suspect chat was answered: its stamp is what the file must hold from now on.
+    function confirmed(entry, result) {
+        const stamp = result?.stamp;
+        if (!entry || stamp === null || stamp === undefined || ![...suspects.values()].includes(entry)) return;
+        if (entry.good !== stamp) forgetStamp(entry.good);
+        entry.good = stamp;
+        remember(entry.target.chatId, entry);
+    }
+    function finish(entry) {
+        const chatId = entry.target?.chatId;
+        if (suspects.get(chatId) !== entry) return;
+        suspects.delete(chatId);
+        remember(chatId, null);
+        forgetStamp(entry.good);
+    }
+    const suspectOf = chatId => (chatId === undefined || chatId === null ? null : suspects.get(chatId) ?? null);
+
+    // After a timeout: is the newest answered write of the suspect chat still the one in its file? Read
+    // back after each delay; an older one found there is put right at once, and read again at that delay.
+    const MAX_STALE = 5;
+    function startRechecks(chatId) {
+        const run = suspectOf(chatId);
+        if (!run || run.timer !== null || run.good === null || run.good === undefined || typeof confirm?.holds !== 'function') return;
+        if (run.step >= recheck.length) {
+            finish(run);
             return;
         }
-        const run = suspect;
         run.timer = timers.setTimeout(async () => {
-            run.step++;
-            const now = latest;
-            const open = now && now.chatId === run.chatId && (typeof check !== 'function' || !check(now));
             let holds = true;
-            if (open && run.good !== null && run.good !== undefined) {
-                try { holds = await answered(() => confirm.holds(now, run.good)) !== false; } catch { holds = true; }
-            }
-            if (suspect !== run) return;     // a newer timeout started its own read-backs
+            try { holds = await answered(() => confirm.holds(run.target, run.good)) !== false; } catch { holds = true; }
             run.timer = null;
-            if (!holds) {
-                if (version === saved) version++;
-                cancel();
-                saveNow().then(followUp, failed);
-            }
-            startRechecks();
+            if (suspects.get(run.target?.chatId) !== run) return;     // a newer timeout started its own
+            if (!holds && run.stale < MAX_STALE) {
+                run.stale++;
+                await putBack(run);
+            } else run.step++;
+            // (a put-back that timed out made the chat suspect anew: that entry goes on instead)
+            const chatId = run.target?.chatId;
+            if (suspects.get(chatId) === run) remember(chatId, run);
+            startRechecks(chatId);
         }, recheck[run.step]);
         run.timer?.unref?.();
     }
+    function startAll() {
+        for (const chatId of [...suspects.keys()]) startRechecks(chatId);
+    }
 
-    function markSuspect(chatId) {
-        if (suspect?.timer !== null && suspect?.timer !== undefined) timers.clearTimeout(suspect.timer);
-        suspect = { chatId, good: null, step: 0, timer: null };
+    // The file holds an older write than `run.good`.
+    async function putBack(run) {
+        const now = typeof target === 'function' ? target() : null;
+        const open = now && now.chatId === run.target.chatId;
+        if (open && (typeof confirm?.fresh !== 'function' || confirm.fresh(run.good) !== false)) {
+            // The open chat holds that write or a newer one: saved again (stamped anew).
+            if (version === saved) {
+                version++;
+                latest = now;
+            }
+            cancel();
+            await saveNow().then(followUp, failed);
+            return;
+        }
+        let why = '';
+        try {
+            const done = typeof confirm?.restore === 'function'
+                ? await exclusive(() => answered(() => confirm.restore(run.target, run.good), () => markSuspect(run.target, run.good)))
+                : false;
+            if (done === false) {
+                // Nothing of that write is kept on this page (it was reloaded since): it cannot be put back.
+                run.stale = MAX_STALE;
+                why = 'this page no longer holds the newer copy, so the latest changes before the reload may be missing';
+            } else if (open) why = 'the newer copy is back in the file: reload the chat to see it';
+        } catch (error) {
+            why = `putting the newer copy back failed (${String(error?.message ?? error).trim().replace(/[.\s]*$/, '')}); it is tried again`;
+        }
+        if (!why || run.told) return;
+        run.told = true;
+        try {
+            onError?.(new Error(`A save of chat "${run.target.chatId}" that took too long reached the server late and put an older copy of the chat back: ${why}.`));
+        } catch { /* told in the console below */ }
+        console.warn(`[Story Suite] a late save put an older copy of chat "${run.target.chatId}" back`);
     }
 
     // `start(signal)`'s promise, failed after `timeout` ms without an answer (and `signal` aborted).
@@ -470,8 +541,12 @@ export function createSaver({
             }
             try {
                 if (typeof rescue !== 'function') throw new Error('this page cannot write to another chat');
-                await exclusive(() => answered(() => rescue(orphan.target)));
+                // A1-5: a rescue is a write of that chat's file too: the same stamp and read-backs.
+                const watched = suspectOf(orphan.target?.chatId);
+                const result = await exclusive(() => answered(() => rescue(orphan.target, watched ? { stamp: true } : {}), () => markSuspect(orphan.target)));
+                confirmed(watched, result);
                 orphans.splice(orphans.indexOf(orphan), 1);
+                startRechecks(orphan.target?.chatId);
             } catch (error) {
                 orphan.tries++;
                 if (orphan.tries < 3) continue;
@@ -514,15 +589,12 @@ export function createSaver({
             token = verify?.before?.();
             const trip = { chatId: now?.chatId, renamed: false };
             sending = trip;
-            // After a timeout of this chat's save, this one is stamped, so a read-back can tell it from the
+            // After a timeout of this chat's write, this one is stamped, so a read-back can tell it from the
             // late one (startRechecks).
-            const watched = suspect && suspect.chatId === trip.chatId ? suspect : null;
-            let stamp = null;
-            if (watched && typeof confirm?.mark === 'function') {
-                try { stamp = confirm.mark(now); } catch { stamp = null; }
-            }
-            return answered(signal => save(now, signal ? { ...options, signal } : options), () => markSuspect(trip.chatId)).then(() => {
-                if (watched && suspect === watched && stamp !== null && stamp !== undefined) watched.good = stamp;
+            const watched = suspectOf(trip.chatId);
+            const opts = watched ? { ...options, stamp: true } : options;
+            return answered(signal => save(now, signal ? { ...opts, signal } : opts), () => markSuspect(now)).then(result => {
+                confirmed(watched, result);
                 return trip.renamed ? 'renamed' : 'saved';
             }, error => {
                 failures++;
@@ -549,7 +621,7 @@ export function createSaver({
         saved = goal;
         failures = 0;
         told = false;
-        if (suspect?.good !== null && suspect?.good !== undefined) startRechecks();
+        startAll();
     }
 
     return {
@@ -575,6 +647,16 @@ export function createSaver({
             };
             latest = move(latest);
             for (const orphan of orphans) orphan.target = move(orphan.target);
+            // A1-3: a suspect chat's read-backs follow it to its new name.
+            const entry = suspects.get(from);
+            if (entry) {
+                suspects.delete(from);
+                remember(from, null);
+                entry.target = move(entry.target) ?? { chatId: to };
+                suspects.set(to, entry);
+                remember(to, entry);
+                moved = true;
+            }
             if (sending && sending.chatId === from) {
                 sending.renamed = true;
                 moved = true;
@@ -582,8 +664,44 @@ export function createSaver({
             return moved;
         },
         pending: () => timer !== null || running !== null,
-        /** True while a save of the open chat timed out and the file is still to be read back (createSaver). */
-        suspect: () => suspect !== null,
+        /** True while a write of some chat timed out and its file is still to be read back. */
+        suspect: () => suspects.size > 0,
+        /** True while a save of the open chat is on its way (the server has not answered yet). */
+        inFlight: () => sending !== null,
+        /**
+         * A1-2: chat `now` (a target) was opened: the read-backs a reload of the page left (`memo`) go on.
+         */
+        resume(now) {
+            const chatId = now?.chatId;
+            if (chatId === undefined || chatId === null || suspects.has(chatId)) return false;
+            let kept = null;
+            try { kept = memo?.get?.(chatId) ?? null; } catch { kept = null; }
+            if (!kept || !Number.isFinite(kept.good)) return false;
+            const step = Number.isInteger(kept.step) && kept.step >= 0 ? kept.step : 0;
+            suspects.set(chatId, { target: { ...now, place: now.place ?? kept.place ?? null }, good: kept.good, step, stale: 0, timer: null });
+            startRechecks(chatId);
+            return true;
+        },
+        /**
+         * A1-4: the page is closing. With a save of the open chat still on its way, the newest state goes
+         * out at once (with `options`, e.g. keepalive), not behind it; it is stamped and the chat is
+         * suspect, as after a timeout (the page may stay). Otherwise as saveSoon. Never throws.
+         */
+        urgent(options = {}) {
+            if (!sending || version === saved || !latest) return this.saveSoon(options);
+            const now = latest;
+            const verdict = typeof check === 'function' ? check(now) : '';
+            if (verdict) return this.saveSoon(options);
+            const entry = markSuspect(now);
+            try {
+                return Promise.resolve(save(now, { ...options, stamp: true })).then(result => {
+                    confirmed(entry, result);
+                    return false;
+                }, () => false);
+            } catch {
+                return Promise.resolve(false);
+            }
+        },
         /** True while the last save failed (until one works again). */
         failing: () => failures > 0,
         schedule(ms = 400) {

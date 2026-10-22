@@ -323,19 +323,24 @@ function goesOn(mes, tag, from) {
  * read as one, in order, so no line is lost. Blocks inside closed reasoning are not read.
  * `at` ({ from, skip }, from continuation()): only the bare blocks a Continue added are read.
  * `stopped`: the reader stopped the reply, so an open block's unfinished last line is left out.
+ * `heads` (grammarHeads): change lines written in the story near the block (strayLines) are read
+ * too, after the blocks, and count as a block when there is none.
  */
-export function extractBlock(mes, tag = 'Changes', at = null, { stopped = false } = {}) {
+export function extractBlock(mes, tag = 'Changes', at = null, { stopped = false, heads = null } = {}) {
     const blocks = at ? laterBlocks(mes, tag, at) : findBlocks(withoutReasoning(mes), tag);
-    if (!blocks.length) return null;
-    return blocks.map(block => blockBody(wholeLines(block, stopped).body)).join('\n');
+    const strays = heads ? strayLines(mes, heads, { tag, from: at?.from ?? 0, tail: at?.tail === true, stopped }).taken : [];
+    if (!blocks.length && !strays.length) return null;
+    return inOrder(blocks.map(block => blockBody(wholeLines(block, stopped).body)), strays, blocks.at(-1)?.open === true).join('\n');
 }
 
 /**
  * `mes` without its <Changes> blocks (bare or hidden), for display and for the prompt history.
  * Whitespace left at the end is trimmed.
  */
-export function stripBlock(mes, tag = 'Changes') {
-    const raw = String(mes ?? '');
+export function stripBlock(mes, tag = 'Changes', { heads = null } = {}) {
+    const given = String(mes ?? '');
+    // `heads` (grammarHeads): the change lines written in the story near the block go too.
+    const raw = heads ? dropLines(given, strayLines(given, heads, { tag }).taken) : given;
     let text = replacePairs(raw, hiddenPairs(raw), pair => (findBlocks(raw.slice(pair.bodyStart, pair.bodyEnd), tag).length ? '' : raw.slice(pair.start, pair.end)));
     const blocks = findBlocks(text, tag);
     for (const block of blocks.reverse()) text = text.slice(0, block.start) + text.slice(block.end);
@@ -352,10 +357,15 @@ const commentSafe = text => text.replace(/-(?=-)/g, '- ');
  * block on (a Continue's own text), are moved; the ones before are left as they are. A block left
  * open is kept with the word `open` after the marker, so a Continue can tell it goes on with it.
  */
-export function hideBlock(mes, tag = 'Changes', { from = 0, skip = 0, tail = false, stopped = false } = {}) {
-    const text = String(mes ?? '');
+export function hideBlock(mes, tag = 'Changes', { from = 0, skip = 0, tail = false, stopped = false, heads = null } = {}) {
+    const given = String(mes ?? '');
+    // `heads` (grammarHeads): the change lines written in the story near the block (strayLines) are
+    // taken out of the story and kept after the blocks, in a block of their own.
+    const strays = heads ? strayLines(given, heads, { tag, from, tail, stopped }).taken : [];
+    // Taking whole lines out after `from` leaves `from`, `skip` and `tail` true of the text.
+    const text = dropLines(given, strays);
     const bare = laterBlocks(text, tag, { from, skip, tail });
-    if (!bare.length) return text;
+    if (!bare.length && !strays.length) return text;
     // C2-6: the bodies were found in the text with reasoning blanked (what extractBlock reads), so
     // reasoning inside a block is left in the story where it stood, never written back as spaces.
     const thoughts = reasoningPairs(replacePairs(text, hiddenPairs(text), blank));
@@ -366,9 +376,11 @@ export function hideBlock(mes, tag = 'Changes', { from = 0, skip = 0, tail = fal
     }
     // (Spaces left at line ends, where reasoning was blanked, go.)
     const lineEnds = body => body.split('\n').map(line => line.trimEnd()).join('\n');
-    const kept = bare.map(block => `<${tag}>\n${commentSafe(lineEnds(blockBody(wholeLines(block, stopped).body)))}\n</${tag}>`).join('\n');
+    const open = bare.at(-1)?.open === true;
+    const kept = inOrder(bare.map(block => blockBody(wholeLines(block, stopped).body)), strays, open)
+        .map(body => `<${tag}>\n${commentSafe(lineEnds(body))}\n</${tag}>`).join('\n');
     // A block left open (the reply was cut off in it) is said so, for a Continue (continuation()).
-    const mark = bare.at(-1).open ? ` ${CUT_MARK}` : '';
+    const mark = open ? ` ${CUT_MARK}` : '';
     return `${trimEnd(story)}\n\n<!-- ${HIDDEN_MARKER}${mark}\n${kept}\n-->`;
 }
 
@@ -448,4 +460,174 @@ export function parseChanges(text, { max = Infinity } = {}) {
         else lines.push({ ...parsed, raw, index: lines.length });
     }
     return over ? { lines, problems, over: { ...over, total: read } } : { lines, problems };
+}
+
+// --- Change lines written in the story (fix-encounter) ---------------------------------------------
+// Models put a change line in the story now and then, on its own line just before the block (or with
+// no block at all): "! encounter 8 Weir Rat — cellar pack | tier: weak". Such a line is read as one of
+// the reply's changes and hidden like the block, but narrowly: only a whole line that starts exactly
+// as a kind's grammar line does (its `heads`, grammarHeads: the op, one space, the kind in lower case),
+// parses, and sits near the end of the reply: in its last STRAY_PARAGRAPHS story paragraphs before the
+// first block, or after it. A paragraph made only of change lines is not counted, so taking its lines
+// out never brings an earlier line into reach (Re-read reads what the live capture left). A line with
+// `-` (a Markdown bullet too) is taken only from a paragraph of change lines. A line close to one but
+// not taken (another op, a capital, a colon, too far up) is told as a Problem, never dropped quietly.
+// The lines taken are read after the blocks, and hideBlock keeps them after the blocks in the hidden
+// comment, so the live capture and every Re-read read them in the same order.
+
+/** How many story paragraphs before the block a change line written in the story is looked for in. */
+export const STRAY_PARAGRAPHS = 3;
+
+const KIND_WORD = /^\p{L}[\p{L}\p{N}_-]*$/u;
+
+/**
+ * The heads each kind's grammar line writes, from [{ kind, grammar }] (registry.contexts()' kinds):
+ * a Set of "op kind" ("! encounter", "+ present", "- present").
+ */
+export function grammarHeads(kinds) {
+    const heads = new Set();
+    for (const entry of Array.isArray(kinds) ? kinds : []) {
+        const word = String(entry?.kind ?? '').toLowerCase();
+        if (!KIND_WORD.test(word)) continue;
+        const re = new RegExp(`(?:^|[\\s(;,])([+\\-~!?]) ${escapeRe(word)}(?![\\p{L}\\p{N}_-])`, 'gu');
+        for (const found of String(entry?.grammar ?? '').matchAll(re)) heads.add(`${found[1]} ${word}`);
+    }
+    return heads;
+}
+
+// A story line as a change line: 'C' (a known head, exactly, and it parses), 'N' (close to one: an op
+// and a known kind word, but not as the grammar writes it, or it does not parse), or null.
+function strayClass(raw, heads, words) {
+    if (raw.length > MAX_LINE) return null;
+    const line = stripDecoration(stripMarkdown(raw).trim()).trim();
+    const found = /^([+\-~!?])([ \t]*)(\p{L}[\p{L}\p{N}_-]*)(.?)/u.exec(line);
+    if (!found || !words.has(found[3].toLowerCase())) return null;
+    const [, op, gap, word, next] = found;
+    const parsed = parseLine(line);
+    const exact = gap === ' ' && heads.has(`${op} ${word}`) && (next === ' ' || next === '\t');
+    return { type: exact && !parsed.error ? 'C' : 'N', op, word: word.toLowerCase(), error: parsed.error ?? null };
+}
+
+const STRAY_HINT = 'change lines go inside the <Changes> block at the end of the reply';
+
+/**
+ * The change lines written in the story of `mes` (see above): { taken: [{ start, end, line }], problems:
+ * [{ line, reason }] }, `start`/`end` the line's place in `mes` (without its line break), `line` trimmed.
+ * `heads` from grammarHeads. `from`, `tail` (continuation()): only a Continue's own text is looked at.
+ * `stopped`: the reader stopped the reply, so a last line with no line break after it is left out.
+ */
+export function strayLines(mes, heads, { tag = 'Changes', from = 0, tail = false, stopped = false } = {}) {
+    const text = String(mes ?? '');
+    const known = heads instanceof Set ? heads : new Set(heads ?? []);
+    const words = new Map();
+    for (const head of known) {
+        const word = head.slice(2);
+        if (!words.has(word)) words.set(word, []);
+        words.get(word).push(head);
+    }
+    if (!words.size || !text) return { taken: [], problems: [] };
+    const at = Math.max(0, Math.min(text.length, from | 0));
+    // The story alone: reasoning, hidden comments and bare blocks blanked, places kept.
+    const spans = [...hiddenPairs(text), ...(tail ? bareBlocks(text, tag, at) : bareBlocks(text, tag))].sort((a, b) => a.start - b.start);
+    const scan = replacePairs(maskReasoning(text), spans, blank);
+    const later = spans.filter(span => span.end > at);
+    const anchor = later.length ? later[0].start : text.length;
+    // A stopped reply's last line, when no line break follows it, may be cut.
+    const lastEnd = text.trimEnd().length;
+    const cutStart = stopped && text.indexOf('\n', lastEnd) < 0 ? text.lastIndexOf('\n', lastEnd - 1) + 1 : -1;
+
+    // Paragraphs: runs of lines with something on them, in order; lines before `from` are story.
+    const paragraphs = [];
+    let current = null;
+    for (let start = 0; start <= scan.length;) {
+        const nl = scan.indexOf('\n', start);
+        const end = nl < 0 ? scan.length : nl;
+        const raw = scan.slice(start, end).trim();
+        if (!raw) current = null;
+        else {
+            if (!current) paragraphs.push(current = { start, lines: [] });
+            // (A line reasoning was blanked in is not taken: its text is not the line alone.)
+            const kind = start >= at && text.slice(start, end).trim() === raw ? strayClass(raw, known, words) : null;
+            current.lines.push({ start, end, raw, kind });
+        }
+        if (nl < 0) break;
+        start = nl + 1;
+    }
+    const inRegion = new Set();
+    let counted = 0;
+    for (const paragraph of paragraphs) {
+        paragraph.changes = paragraph.lines.every(line => line.kind);
+        if (paragraph.start >= anchor) inRegion.add(paragraph);
+    }
+    for (let i = paragraphs.length - 1; i >= 0; i -= 1) {
+        const paragraph = paragraphs[i];
+        if (paragraph.start >= anchor) continue;
+        if (paragraph.lines.at(-1).start < at) break;
+        if (!paragraph.changes) {
+            counted += 1;
+            if (counted > STRAY_PARAGRAPHS) break;
+        }
+        inRegion.add(paragraph);
+    }
+
+    const taken = [];
+    const problems = [];
+    const refuse = (line, reason) => problems.push({ line: line.raw, reason });
+    for (const paragraph of paragraphs) {
+        const near = inRegion.has(paragraph);
+        for (const line of paragraph.lines) {
+            const kind = line.kind;
+            if (!kind) continue;
+            if (kind.type === 'N') {
+                if (!near && !paragraph.changes) continue;
+                const how = (words.get(kind.word) ?? []).map(head => `"${head} …"`).join(' or ');
+                refuse(line, kind.error ? `it is not a change line: ${kind.error}; ${STRAY_HINT}` : `it is in the story and does not start the way a ${kind.word} line does (${how}); ${STRAY_HINT}`);
+            } else if (line.start === cutStart) {
+                refuse(line, 'the reply stopped in the middle of it');
+            } else if (near && (paragraph.changes || kind.op !== '-')) {
+                taken.push({ start: line.start, end: line.end, line: line.raw });
+            } else if (near) {
+                refuse(line, `it is part of a story paragraph, so it was read as story; ${STRAY_HINT}`);
+            } else if (paragraph.changes || kind.op !== '-') {
+                refuse(line, `it is in the story, far from the end of the reply, so it was read as story; ${STRAY_HINT}`);
+            }
+        }
+    }
+    return { taken, problems };
+}
+
+// The bodies to read, in the order extractBlock reads them and hideBlock keeps them: the blocks' bodies,
+// then the lines taken from the story as one body; before the blocks when the last block was left open
+// (the reply was cut off in it), so the block a Continue goes on with stays last.
+function inOrder(bodies, strays, open) {
+    if (!strays.length) return bodies;
+    const lines = strays.map(line => line.line).join('\n');
+    return open ? [lines, ...bodies] : [...bodies, lines];
+}
+
+// `text` without the whole lines `taken` (strayLines, places in `text`); a blank line left doubled
+// where a paragraph of them stood goes too.
+function dropLines(text, taken) {
+    if (!taken.length) return text;
+    const drop = new Set(taken.map(line => line.start));
+    const out = [];
+    let lastBlank = true;
+    let dropped = false;
+    for (let start = 0; start <= text.length;) {
+        const nl = text.indexOf('\n', start);
+        const end = nl < 0 ? text.length : nl;
+        const line = text.slice(start, end);
+        if (drop.has(start)) dropped = true;
+        else {
+            const isBlank = !line.trim();
+            if (!(dropped && isBlank && lastBlank)) {
+                out.push(line);
+                lastBlank = isBlank;
+            }
+            dropped = false;
+        }
+        if (nl < 0) break;
+        start = nl + 1;
+    }
+    return out.join('\n');
 }

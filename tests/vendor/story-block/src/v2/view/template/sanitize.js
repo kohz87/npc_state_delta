@@ -148,6 +148,27 @@ export function paintAllowed(value) {
     return true;
 }
 
+/**
+ * SillyTavern's DOMPurify drops the `type` of a template's <input> and <button> (a radio or checkbox came
+ * out as a text box showing its value; a type="button" in a form became a submit). compileTemplate
+ * renames the attribute to TYPE_MARK before DOMPurify (data attributes pass it) and the allow-list reads
+ * it back as `type`, held to INPUT_TYPES / BUTTON_TYPES like a written one. A pack writing TYPE_MARK
+ * itself gets no more than writing `type`.
+ */
+export const TYPE_MARK = 'data-ss-type';
+// Names and bare values stop at `<`, so a tag left open stops at the next one: the scan stays linear.
+const TYPED_TAG = /<(input|button)\b((?:\s+[^\s"'<>\/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)(\s*\/?)>/gi;
+const TAG_ATTR = /(\s+)([^\s"'<>\/=]+)((?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)/g;
+
+/** `html` with each <input>'s and <button>'s `type` attribute renamed to TYPE_MARK (nothing else changes). */
+export function markControlTypes(html) {
+    return String(html ?? '').replace(TYPED_TAG, (whole, tag, attrs, end) => {
+        const renamed = attrs.replace(TAG_ATTR, (attr, space, name, value) => (name.toLowerCase() === 'type' ? `${space}${TYPE_MARK}${value}` : attr));
+        return `<${tag}${renamed}${end}>`;
+    });
+}
+
+const BUTTON_TYPES = ['button', 'submit', 'reset'];
 const INPUT_TYPES = new Set(['text', 'number', 'range', 'checkbox', 'radio', 'search', 'color', 'hidden', 'submit', 'reset', 'button', 'email', 'tel', 'date', 'time']);
 
 /** The DOMPurify options Story Block passes (`sanitize(html, PURIFY_CONFIG)`); the allow-list runs after. */
@@ -234,7 +255,15 @@ export function filterNodes(nodes, warnings = []) {
 
 function filterAttrs(tag, svg, attrs, warnings) {
     const out = [];
-    for (const [name, value] of attrs) {
+    // TYPE_MARK (markControlTypes, before DOMPurify) is the control's `type`; one type per control, the first.
+    const typed = !svg && (tag === 'input' || tag === 'button');
+    let hasType = false;
+    for (let [name, value] of attrs) {
+        if (typed && (name.toLowerCase() === TYPE_MARK || name.toLowerCase() === 'type')) {
+            if (hasType) continue;
+            hasType = true;
+            name = 'type';
+        }
         if (!attrAllowed(tag, svg, name)) {
             warnings.push(`Removed ${name} from <${tag}>.`);
             continue;
@@ -273,7 +302,7 @@ function filterAttrs(tag, svg, attrs, warnings) {
         }
         if (tag === 'button' && name === 'type') {
             const type = value.trim().toLowerCase();
-            out.push([name, ['button', 'submit', 'reset'].includes(type) ? type : 'button']);
+            out.push([name, BUTTON_TYPES.includes(type) ? type : 'button']);
             continue;
         }
         if (tag === 'a' && name === 'target') {

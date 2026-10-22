@@ -12,7 +12,7 @@
 // `capabilities` (the capability names this Story Block has, or null when unknown: then
 // requires.capabilities is checked for form only).
 
-import { CALENDAR_FIELDS, CALENDAR_LIMITS, CALENDAR_START_FIELDS, CHOICE_FIELDS, CONTENT_KINDS, COMMAND, CRAFT_FIELDS, ECONOMY_FIELDS, ECONOMY_LIMITS, CRAFTS_LIMITS, DEFAULT_CRAFTS, METER_FIELDS, METER_LIMITS, METER_PRESET_FIELDS, METER_RESERVED, METER_STAGE_FIELDS, RECIPE_LIMITS, STAT_SUM, DEF_ID, EVENT_FIELDS, EVENT_LIMITS, ITEM_FIELDS, ITEM_KINDS, LIMITS, MOUNTS, PACK_FIELDS, PACK_ID, PLACE_FIELDS, PRESET_FIELDS, RARITIES, ROUTE_FIELDS, SCREEN_FIELDS, SCREEN_ID, SEMVER, SKILL_FIELDS, SKILL_TARGETS, SKILL_TYPES, SLUG, START_FIELDS, STAT_NAME, RANK_FIELDS, RANK_ID, RANKS_LIMITS, TERM_SEPARATORS, TERMS_FIELDS, TERMS_LIMITS, TERMS_NUMERALS, TERMS_TIER_FIELDS } from './limits.js';
+import { CALENDAR_FIELDS, CALENDAR_LIMITS, CALENDAR_START_FIELDS, CHOICE_FIELDS, CONTENT_KINDS, COMMAND, CRAFT_FIELDS, ECONOMY_FIELDS, ECONOMY_LIMITS, CRAFTS_LIMITS, DEFAULT_CRAFTS, METER_FIELDS, METER_LIMITS, METER_PRESET_FIELDS, METER_RESERVED, METER_STAGE_FIELDS, RECIPE_LIMITS, STAT_SUM, DEF_ID, EVENT_FIELDS, EVENT_LIMITS, ITEM_FIELDS, ITEM_KINDS, LIMITS, MOUNTS, PACK_FIELDS, PACK_ID, PLACE_FIELDS, PRESET_FIELDS, RARITIES, ROUTE_FIELDS, SCREEN_FIELDS, SCREEN_ID, SEMVER, SKILL_FIELDS, SKILL_TARGETS, SKILL_TYPES, SLUG, START_FIELDS, STAT_NAME, RANK_FIELDS, RANK_ID, RANKS_LIMITS, TERM_SEPARATORS, ITEM_CARRY, MARKET_FIELDS, MARKET_LIMITS, MARKET_WORD, TERMS_FIELDS, TERMS_LIMITS, TERMS_NUMERALS, TERMS_TIER_FIELDS } from './limits.js';
 import { byteLength, checkPlain } from './safety.js';
 import { parseRange, satisfies } from './version.js';
 import { foldKey, oneLine } from '../../text.js';
@@ -117,6 +117,7 @@ function normalize(raw, { add, hostVersion, capabilities, limits }) {
         else content.terms = records(given.terms, 'terms', { add, packId, check: (record, path, label) => checkTerms(record, path, label, add), slugField: 'id', named: false, autoSlug: termsSlug() });
     }
     if (given.ranks !== undefined) content.ranks = checkRanks(given.ranks, packId, add);
+    if (given.markets !== undefined) content.markets = checkMarkets(given.markets, packId, add);
     if (crafts !== null) content.crafts = crafts;
     if (given.meterPresets !== undefined) {
         if (Array.isArray(given.meterPresets) && given.meterPresets.length > METER_LIMITS.presets) add('BAD_CONTENT', 'content.meterPresets', `content.meterPresets holds at most ${METER_LIMITS.presets} presets.`);
@@ -244,12 +245,15 @@ function checkItem(record, path, label, add) {
     if (!Array.isArray(aliases) || aliases.some(alias => typeof alias !== 'string' || !alias.trim() || alias.length > LIMITS.name)) say('aliases', 'aliases must be a list of other names for the item.');
     const note = record.note ?? '';
     if (typeof note !== 'string' || note.length > 500) say('note', 'note must be text of at most 500 characters.');
+    // The carry capacity it adds while owned (worn, for equipment): PACKS.md "Carry capacity".
+    if (record.carry !== undefined && !(isInt(record.carry, ITEM_CARRY.min) && record.carry <= ITEM_CARRY.max)) say('carry', `carry must be a whole number from ${ITEM_CARRY.min} to ${ITEM_CARRY.max} (the carry capacity it adds), or left out.`);
     if (!ok) return null;
     return {
         name: oneLine(record.name, LIMITS.name), kind, rarity, value, stack,
         slot: slot === null ? null : slot.trim(), stats: { ...stats }, effect: { ...effect },
         tags: tags.map(tag => tag.trim()), note,
         aliases: [...new Set(aliases.map(alias => oneLine(alias, LIMITS.name)))],
+        ...(record.carry !== undefined ? { carry: record.carry } : {}),
     };
 }
 
@@ -723,6 +727,10 @@ function checkPlace(record, path, label, add) {
     const note = record.note ?? '';
     if (!isText(note, 500)) say('note', 'note must be text of at most 500 characters.');
     for (const flag of ['hidden', 'secret']) if (record[flag] !== undefined && typeof record[flag] !== 'boolean') say(flag, `${flag} must be true or false.`);
+    // Its market (PACKS.md "Markets"): a settlement type and environment tags, each a lowercase word.
+    if (record.market !== undefined && !(typeof record.market === 'string' && MARKET_WORD.test(record.market))) say('market', 'market must be a settlement type, a lowercase word like "village" or "city".');
+    const placeTags = record.tags ?? [];
+    if (!Array.isArray(placeTags) || placeTags.length > MARKET_LIMITS.tags || placeTags.some(tag => typeof tag !== 'string' || !MARKET_WORD.test(tag))) say('tags', `tags must be a list of at most ${MARKET_LIMITS.tags} lowercase words like "river" or "port".`);
     if (!ok) return null;
     return {
         name: oneLine(record.name, LIMITS.name), aliases: [...new Set(aliases.map(alias => oneLine(alias, LIMITS.name)))],
@@ -730,6 +738,8 @@ function checkPlace(record, path, label, add) {
         x: record.x, y: record.y, note,
         // `secret` is another word for `hidden`; the map reads either.
         ...(record.hidden === true || record.secret === true ? { hidden: true } : {}),
+        ...(record.market !== undefined ? { market: record.market } : {}),
+        ...(placeTags.length ? { tags: [...new Set(placeTags)] } : {}),
     };
 }
 
@@ -874,6 +884,54 @@ function checkRanks(list, packId, add) {
             last[field] = { id: rank.id, range: rank[field] };
         }
         out.push(rank);
+    });
+    return ok ? out : [];
+}
+
+// Markets (PACKS.md "Markets"): settlement types and environment tags with their price factors, as
+// RPG Battle's trade reads them over its built-in ones. Each record is a type (`type`, with `buy`, `sell`
+// and `stock`) or a tag (`tag`, with `prices` per item category); one of each name per pack.
+function checkMarkets(list, packId, add) {
+    if (!Array.isArray(list)) {
+        add('BAD_CONTENT', 'content.markets', 'content.markets must be a list like [{ "type": "town", "buy": 1 }, { "tag": "coastal", "prices": { "fish": 0.8 } }].');
+        return [];
+    }
+    if (list.length > MARKET_LIMITS.records) {
+        add('BAD_CONTENT', 'content.markets', `content.markets holds at most ${MARKET_LIMITS.records} records.`);
+        return [];
+    }
+    const { factorMin: lo, factorMax: hi } = MARKET_LIMITS;
+    const isFactor = value => isNumber(value) && value >= lo && value <= hi;
+    const out = [];
+    const seen = new Set();
+    let ok = true;
+    list.forEach((record, index) => {
+        const path = `content.markets[${index}]`;
+        if (!isObject(record)) { ok = false; return add('BAD_RECORD', path, `${path} must be an object like { "type": "town", "buy": 1.1 }.`); }
+        const name = record.type ?? record.tag;
+        const label = typeof name === 'string' ? `Market "${name}"` : path;
+        let good = true;
+        const say = (field, message, code = 'BAD_RECORD') => { good = false; add(code, `${path}.${field}`, `${label}: ${message}`); };
+        for (const key of Object.keys(record)) if (!MARKET_FIELDS.includes(key)) say(key, `"${key}" is not a market field (expected ${MARKET_FIELDS.join(', ')}).`, 'UNKNOWN_FIELD');
+        const isType = record.type !== undefined;
+        if (isType === (record.tag !== undefined)) say(isType ? 'tag' : 'type', 'a market record is either a settlement type ("type") or an environment tag ("tag").');
+        else if (typeof name !== 'string' || !MARKET_WORD.test(name)) say(isType ? 'type' : 'tag', 'it must be a lowercase word like "village" or "coastal".');
+        else if (seen.has(`${isType ? 'type' : 'tag'}:${name}`)) say(isType ? 'type' : 'tag', `"${name}" is in this list twice.`, 'DUPLICATE');
+        else seen.add(`${isType ? 'type' : 'tag'}:${name}`);
+        const fields = isType ? ['buy', 'sell', 'stock'] : ['prices'];
+        for (const field of ['buy', 'sell', 'stock', 'prices']) if (record[field] !== undefined && !fields.includes(field)) say(field, `${field} belongs to ${isType ? 'an environment tag' : 'a settlement type'}.`);
+        for (const field of ['buy', 'sell']) if (isType && record[field] !== undefined && !isFactor(record[field])) say(field, `${field} must be a factor from ${lo} to ${hi} (1 = as usual).`);
+        const stock = record.stock;
+        if (isType && stock !== undefined && !(Array.isArray(stock) && stock.length === 2 && stock.every(n => isInt(n, 1) && n <= MARKET_LIMITS.stock) && stock[0] <= stock[1])) say('stock', `stock must be [least, most] things a trader has, whole numbers from 1 to ${MARKET_LIMITS.stock}.`);
+        const prices = record.prices;
+        if (!isType && prices !== undefined) {
+            if (!isObject(prices) || Object.keys(prices).length > MARKET_LIMITS.categories || Object.entries(prices).some(([key, value]) => !MARKET_WORD.test(key) || !isFactor(value))) say('prices', `prices must map item categories (like "fish" or "all") to factors from ${lo} to ${hi}, at most ${MARKET_LIMITS.categories}.`);
+        }
+        if (record.note !== undefined && !isText(record.note, MARKET_LIMITS.note)) say('note', `note must be text of at most ${MARKET_LIMITS.note} characters.`);
+        if (!good) { ok = false; return; }
+        out.push(isType
+            ? { type: name, ...(record.buy !== undefined ? { buy: record.buy } : {}), ...(record.sell !== undefined ? { sell: record.sell } : {}), ...(stock ? { stock: [...stock] } : {}), ...(record.note ? { note: oneLine(record.note, MARKET_LIMITS.note) } : {}), pack: packId }
+            : { tag: name, prices: { ...(prices ?? {}) }, ...(record.note ? { note: oneLine(record.note, MARKET_LIMITS.note) } : {}), pack: packId });
     });
     return ok ? out : [];
 }

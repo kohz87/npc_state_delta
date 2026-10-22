@@ -13,6 +13,9 @@
 // * the reader's features (MODULES §F100, features.js) under extension_settings.storySuite.features: the
 //   registry leaves out what is off, a change is the sdk's `feature` event, and the assist helpers get
 //   their two switches from Story Block's preroll and extractor features.
+// * sdk.callModel (MODULES §G, model-call.js) over the `callModel` option (the one the assist helpers
+//   use), else SillyTavern's own (stModelCall): one call per module at a time, a time limit
+//   (`modelTimeoutMs`), FEATURE_OFF while the calling module's feature is off.
 
 import { createChatFile } from './chat-file.js';
 import { createCommandBus as realBus } from './commands.js';
@@ -21,6 +24,7 @@ import { WALLET_KEY } from './domains/money.js';
 import { SETTING as ASSIST_SETTING, createAssistPart } from './assist/index.js';
 import { CORE_FEATURE, createFeatureStore } from './features.js';
 import { applyStart, createPacksPart } from './packs/index.js';
+import { createModelCalls, stModelCall } from './model-call.js';
 import { carryRecord } from './persist.js';
 import { createRegistry } from './registry.js';
 import { createEvents, createSdk, createSettings, newId } from './sdk.js';
@@ -99,43 +103,91 @@ export function packsFor(ctx, options = {}) {
  *   been failing.
  * Returns the createStore() options for it.
  */
-export function storeSaving({ ctx, live = () => ctx, fetch = null, onSaveError = null }) {
+export function storeSaving({ ctx, live = () => ctx, fetch = null, onSaveError = null, storage = null }) {
     const context = () => {
         try { return live() ?? ctx; } catch { return ctx; }
     };
     const file = createChatFile({ context, ...(fetch ? { fetch } : {}) });
-    let stamp = 0;
+    // After a write timed out (persist.js createSaver): each later write of that chat carries a rising number
+    // in its metadata (`stamp`), and this page keeps a copy of what it wrote (`kept`, by stamp, only until the
+    // read-backs end) to put back when the file is found older and the chat is not the open one. Nothing is
+    // stamped, kept or read without a timeout.
+    let counter = 0;
+    const kept = new Map();
+    const seqOf = metadata => {
+        const n = Number(isPlain(metadata) ? metadata[SAVE_SEQ_KEY] : NaN);
+        return Number.isSafeInteger(n) ? n : 0;
+    };
+    function stampInto(metadata, messages) {
+        counter = Math.max(counter, seqOf(metadata)) + 1;
+        metadata[SAVE_SEQ_KEY] = counter;
+        kept.set(counter, JSON.stringify({ metadata, messages }));
+        while (kept.size > MAX_KEPT) kept.delete(kept.keys().next().value);
+        return counter;
+    }
+    const memoKey = chatId => `${MEMO_PREFIX}${chatId}`;
     return {
         chat: () => ctx.chat,
         chatId: () => (typeof ctx.getCurrentChatId === 'function' ? ctx.getCurrentChatId() : ctx.chatId),
         place: () => file.where(),
-        save: (change, { keepalive = false, signal = null } = {}) => {
+        save: (change, { keepalive = false, signal = null, stamp: wanted = false } = {}) => {
             markUsed(context().chatMetadata, ctx.chat);
             const place = file.where();
-            if (!place) return ctx.saveChat();
-            return file.write(place, ctx.chat, context().chatMetadata ?? {}, { keepalive, signal });
+            let metadata = context().chatMetadata;
+            if (!isPlain(metadata)) metadata = {};
+            const stamp = wanted ? stampInto(metadata, ctx.chat) : null;
+            const out = stamp === null ? null : { stamp };
+            if (!place) return Promise.resolve(ctx.saveChat()).then(() => out);
+            return file.write(place, ctx.chat, metadata, { keepalive, signal }).then(() => out);
         },
-        // After a save timed out (persist.js createSaver): each later save carries a rising number in the
-        // chat's metadata, and the file read back tells whether a late write of the timed-out one (which
-        // carries none, or a lower one) replaced it. Nothing is stamped or read without a timeout.
         confirm: {
-            mark() {
-                const metadata = context().chatMetadata;
-                const there = Number(isPlain(metadata) ? metadata[SAVE_SEQ_KEY] : 0);
-                stamp = Math.max(stamp, Number.isSafeInteger(there) ? there : 0) + 1;
-                if (isPlain(metadata)) metadata[SAVE_SEQ_KEY] = stamp;
-                return stamp;
-            },
-            async holds(change, token) {
-                const place = change?.place ?? file.where();
+            /** Does the file of `change`'s chat hold the write stamped `stamp`, or a newer one? */
+            async holds(change, stamp) {
+                const place = change?.place ?? null;
                 if (!place) return true;     // no file this page can read (ctx.saveChat saved it)
                 const [header] = await file.read(place);
-                const there = Number(isPlain(header?.chat_metadata) ? header.chat_metadata[SAVE_SEQ_KEY] : 0);
-                return Number.isFinite(there) && there >= token;
+                return seqOf(header?.chat_metadata) >= stamp;
             },
+            /**
+             * Does the open chat hold the write stamped `stamp`, or a newer one (not a copy read back after the
+             * late write landed)? By the newest record of the copy kept of that write, found in the open chat by
+             * its `sid` with at least its `rev`; else by the number in the open chat's metadata.
+             */
+            fresh(stamp) {
+                const copy = kept.get(stamp);
+                const head = copy ? newestRecord(JSON.parse(copy).messages) : null;
+                const mine = head ? (ctx.chat ?? []).map(message => message?.extra?.storySuite).find(record => isPlain(record) && record.sid === head.sid) : null;
+                if (mine) return Number(mine.rev) >= Number(head.rev);
+                return seqOf(context().chatMetadata) >= stamp;
+            },
+            /** Writes the copy kept of the write stamped `stamp` into `change`'s chat file; false when none is kept. */
+            async restore(change, stamp) {
+                const copy = kept.get(stamp);
+                if (!copy || !change?.place) return false;
+                const { metadata, messages } = JSON.parse(copy);
+                await file.write(change.place, messages, metadata);
+                return true;
+            },
+            forget: stamp => { kept.delete(stamp); },
         },
-        async rescue(change, entries) {
-            if (!entries.length) return;
+        // A1-2: a suspect chat's read-backs, kept over a reload of the page (browser storage; a missing or
+        // full one only loses that convenience).
+        memo: storage ? {
+            get(chatId) {
+                try {
+                    const text = storage.getItem(memoKey(chatId));
+                    return text ? JSON.parse(text) : null;
+                } catch { return null; }
+            },
+            set(chatId, value) {
+                try {
+                    if (value) storage.setItem(memoKey(chatId), JSON.stringify(value));
+                    else storage.removeItem(memoKey(chatId));
+                } catch { /* only a convenience */ }
+            },
+        } : null,
+        async rescue(change, entries, { stamp: wanted = false } = {}) {
+            if (!entries.length) return null;
             if (!change?.place) throw new Error('this page cannot write to that chat\'s file');
             const [header, ...messages] = await file.read(change.place);
             if (!header || !messages.length) throw new Error('its chat file is no longer on the server (deleted, or renamed elsewhere)');
@@ -147,11 +199,14 @@ export function storeSaving({ ctx, live = () => ctx, fetch = null, onSaveError =
                 if (!carryRecord(message, messages[at])) throw new Error(`its chat file no longer holds message ${index} as it was`);
                 wrote = true;
             }
-            if (!wrote) return;    // the file holds every change already (SillyTavern saved it itself)
+            if (!wrote) return null;    // the file holds every change already (SillyTavern saved it itself)
             // C4-5: the rescued file is marked as used too (markUsed), as a save of the open chat is.
             const metadata = isPlain(header.chat_metadata) ? header.chat_metadata : {};
             markUsed(metadata, messages);
+            // A1-5: after a timeout of a write of this chat, the rescue is stamped as a save is.
+            const stamp = wanted ? stampInto(metadata, messages) : null;
             await file.write(change.place, messages, metadata);
+            return stamp === null ? null : { stamp };
         },
         onSaveError,
     };
@@ -159,6 +214,21 @@ export function storeSaving({ ctx, live = () => ctx, fetch = null, onSaveError =
 
 // chat_metadata key of the rising save number written after a save timed out (storeSaving confirm).
 export const SAVE_SEQ_KEY = 'storySuiteSave';
+// Browser-storage key prefix of a suspect chat's read-backs (createSaver memo), and the copies kept at most.
+export const MEMO_PREFIX = 'storySuite.saveCheck:';
+const MAX_KEPT = 8;
+// The record of the last carrier that has one (with a `sid`), or null.
+function newestRecord(messages) {
+    for (let i = (messages?.length ?? 0) - 1; i >= 0; i--) {
+        const record = messages[i]?.extra?.storySuite;
+        if (isPlain(record) && typeof record.sid === 'string') return record;
+    }
+    return null;
+}
+// The page's localStorage, or null (none, or blocked: reading it can throw).
+function pageStorage(page) {
+    try { return page?.localStorage ?? null; } catch { return null; }
+}
 const isPlain = value => !!value && typeof value === 'object' && !Array.isArray(value);
 const sidOf = message => message?.extra?.storySuite?.sid;
 // The story text before any tag (the change block, hidden or not, comes after it).
@@ -200,13 +270,20 @@ export function markUsed(metadata, chat) {
     if ((chat ?? []).some(message => message?.extra?.storySuite)) metadata.tainted = true;
 }
 
-/** On a page: the unsaved story goes out when the page is closed (keepalive); see storeSaving. */
+/**
+ * On a page: the unsaved story goes out when the page is closed (keepalive), at once even while an earlier
+ * save is still on its way; the browser asks first while saves fail or one is on its way. See storeSaving.
+ */
 export function saveOnUnload(store, page) {
     if (typeof page?.addEventListener !== 'function') return () => {};
     const onUnload = event => {
-        if (!store.dirty?.()) return;
-        store.saveSoon?.({ keepalive: true });
-        if (store.failing?.()) {
+        // A1-4: a save still on its way (the server has not answered) would hold a queued one until the
+        // page is gone: the newest state goes out at once past it, and the browser asks first, as it does
+        // while saves are failing (the one on its way may still land after it, or be cut off by the close).
+        const inFlight = store.inFlight?.() === true;
+        if (!store.dirty?.() && !inFlight) return;
+        if (store.dirty?.()) (store.saveUrgent ?? store.saveSoon)?.call(store, { keepalive: true });
+        if (store.failing?.() || inFlight) {
             event.preventDefault?.();
             event.returnValue = true;
         }
@@ -217,7 +294,8 @@ export function saveOnUnload(store, page) {
 
 /**
  * createRuntime({ ctx, packs?, core = true, modules = [], createStore?, createCommandBus?, notify?,
- * onBlocked?, onSaveError?, onRegister?(def), branch?(index) (src/v2/rewind.js stBranch), callModel? (assist),
+ * onBlocked?, onSaveError?, onRegister?(def), branch?(index) (src/v2/rewind.js stBranch), callModel?(prompt, { maxTokens,
+ * profile, system, signal }) → text (the assist helpers' and sdk.callModel's model call), modelTimeoutMs? (sdk.callModel's default limit),
  * live?() (SillyTavern's live getContext(); default: globalThis.SillyTavern's, else ctx), fetch?, page? (for
  * beforeunload; default: globalThis.window) }) → { registry, settings, features, store, bus, events, sdk, turn,
  * markReady, initial, packs, setDialog }. `features` is createFeatureStore() (the reader's choices). `ctx` is SillyTavern's context (or the testkit's fake); `packs` a
@@ -225,7 +303,7 @@ export function saveOnUnload(store, page) {
  */
 export function createRuntime({
     ctx, packs = null, core = true, modules = [], createStore = realStore, createCommandBus = realBus,
-    notify, onBlocked = null, onSaveError = null, onRegister = null, branch = null, callModel = null,
+    notify, onBlocked = null, onSaveError = null, onRegister = null, branch = null, callModel = null, modelTimeoutMs = undefined,
     live = () => globalThis.SillyTavern?.getContext?.() ?? ctx, fetch = null, page = globalThis.window ?? null,
 } = {}) {
     let features = null;
@@ -298,16 +376,22 @@ export function createRuntime({
             return [`The ${name} check failed: ${error?.message ?? error}`];
         }
     });
-    const store = createStore({ ...storeSaving({ ctx, live, fetch, onSaveError }), validate, scratch: name => registry.scratch(name) });
+    const store = createStore({ ...storeSaving({ ctx, live, fetch, onSaveError, storage: pageStorage(page) }), validate, scratch: name => registry.scratch(name) });
     saveOnUnload(store, page);
     bus = createCommandBus({ store, registry, settings });
     events = createEvents();
     const rewind = createRewind({ ctx, store, events, ...(branch ? { branch } : {}) });
     let dialogOpener = null;
     let dialogCurrent = null;
+    const modelCalls = createModelCalls({
+        call: callModel ?? stModelCall,
+        featureOn: id => registry.featureOn(id),
+        featureModule: id => (registry.features?.() ?? []).find(feature => feature?.id === id)?.moduleId ?? null,
+        ...(modelTimeoutMs !== undefined ? { timeoutMs: modelTimeoutMs } : {}),
+    });
     const made = createSdk({ store, bus, registry, settings, events, chat: () => ctx.chat, onRegister: def => onRegister?.(def), rewind,
         substitute: text => substituteNames(text, ctx), dialog: (screenId, opts) => dialogOpener?.(screenId, opts) ?? null,
-        dialogCurrent: () => dialogCurrent?.() ?? null, reread: index => turn?.reread(index) });
+        dialogCurrent: () => dialogCurrent?.() ?? null, reread: index => turn?.reread(index), callModel: modelCalls.callModel });
     sdk = made.sdk;
     const initial = () => initialWithStart(registry);
     turn = createTurn({ ctx, live, store, bus, registry, settings, events, onBlocked, initial, ...(notify ? { notify } : {}) });

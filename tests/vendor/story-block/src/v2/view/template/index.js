@@ -25,7 +25,7 @@
 //   <ss-widget name="ss.meter" data-props='{"bind":"q.pc.hp"}'></ss-widget>   a registered widget
 
 import { compileExpr, isLoopName, parseInterpolation, parsePath, splitPairs } from '../bind.js';
-import { PURIFY_CONFIG, attrAllowed, sanitizeNodes, strictSanitize } from './sanitize.js';
+import { PURIFY_CONFIG, attrAllowed, markControlTypes, sanitizeNodes, strictSanitize } from './sanitize.js';
 import { MAX_JSON_DEPTH, compileJson, jsonDepth } from './json.js';
 import { destroyTemplate, renderTemplate } from './render.js';
 
@@ -49,7 +49,8 @@ export function compileTemplate(html, { sanitize = null } = {}) {
     let text = String(html ?? '');
     if (typeof sanitize === 'function') {
         try {
-            text = String(sanitize(text, { ...PURIFY_CONFIG }) ?? '');
+            // SillyTavern's DOMPurify drops controls' `type`: it travels as TYPE_MARK and comes back below.
+            text = String(sanitize(markControlTypes(text), { ...PURIFY_CONFIG }) ?? '');
         } catch (error) {
             warnings.push(`The sanitiser failed (${error?.message ?? error}); the strict allow-list was used alone.`);
         }

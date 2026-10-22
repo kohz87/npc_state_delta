@@ -39,7 +39,7 @@ export async function hostAvailable() {
 /**
  * Builds a host. `options`: { modules?: def[] (registered after the core ones), core?: true
  * (register Story Block's core module: scene, inventory, packs, events, assist), callModel?(prompt, opts)
- * (the assist helpers' model call), fakes?: false (use fakes.js), st?: options for
+ * (the model behind sdk.callModel and the assist helpers; createFakeModel in model.js scripts one), fakes?: false (use fakes.js), st?: options for
  * createFakeContext (plus onBlocked?), settings?: initial extension_settings.storySuite }.
  * Returns { st, ctx, registry, settings, features, store, bus, events, sdk, turn, packs, send(text, reply, { stopped }),
  * swipe(reply), regenerate(reply), cont(reply), quiet(), head(), close() }; `st` is the fake

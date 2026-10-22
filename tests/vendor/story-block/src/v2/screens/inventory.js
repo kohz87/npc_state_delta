@@ -46,6 +46,7 @@ function group(kind) {
           <span class="qty" data-if="it.qty != 1">×{{ it.qty }}</span>
           <span class="chip eq" data-if="it.equipped" title="${html(S.equippedTitle)}"><i class="fa-solid fa-check" aria-hidden="true"></i> {{ it.equipped }}</span>
           <span class="chip key" data-if="it.key" title="${html(S.keyTitle)}">${html(S.key)}</span>
+          <span class="chip carry" data-if="it.carry" title="${html(S.carryTitle)}">+{{ it.carry }} ${html(S.carry)}</span>
           <span class="rarity">{{ it.rarity }}</span>
           <span class="owner muted" data-if="it.owner != 'party'">{{ state.party.actors[it.owner].name }}</span>
         </div>

@@ -4,3 +4,5 @@
 export { EVENT_TYPES, EXTENSION_PROMPT_ROLES, EXTENSION_PROMPT_TYPES, MAIN_PROMPT, aiMessage, createEventSource, createFakeContext, sharedPrefix, userMessage } from './fake-st.js';
 export { applyOps, createFakeBus, createFakeStore } from './fakes.js';
 export { createHost, hostAvailable } from './host.js';
+export { createFakeModel } from './model.js';
+export { stPurify } from './purify.js';

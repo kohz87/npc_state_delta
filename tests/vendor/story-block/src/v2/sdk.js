@@ -6,6 +6,7 @@
 import { INIT_PREFIX, normalizeField } from './registry.js';
 import { headReply } from './commands.js';
 import { cutAt } from '../text.js';
+import { MODEL_CALL_ERRORS, MODEL_CALL_TEXT, profileName } from './model-call.js';
 
 // sdk.check comes from check.js (SB-commands); the sdk still loads without it.
 const checkModule = await import('./check.js').catch(() => null);
@@ -37,7 +38,8 @@ export const SETTING_LIST_ROWS = 100;
 /**
  * A value as `field` (a settings schema entry) allows it: text is text, cut at `max` characters
  * (SETTING_TEXT_MAX when the field sets none), never inside a character; a whole number is kept inside
- * min/max (null when it is not one); a choice must be one of its options (null when not); a list is at
+ * min/max (null when it is not one); a choice must be one of its options (null when not); a profile is a
+ * Connection Manager profile's name, trimmed and cut at 100 ('' for the chat's connection); a list is at
  * most SETTING_LIST_ROWS rows of records, each holding its `of` fields as they allow them (other keys
  * dropped). Other types pass unchanged.
  */
@@ -64,6 +66,8 @@ export function settingValue(field, value) {
         if (Number.isInteger(f.max)) out = Math.min(f.max, out);
         return out;
     }
+    // A Connection Manager profile's name, trimmed and cut at 100; '' (or 'chat') is the chat's connection.
+    if (f.type === 'profile') return profileName(typeof value === 'string' ? value : '');
     if (f.type === 'bool') return Boolean(value);
     if (f.type === 'choice' && Array.isArray(f.options) && f.options.length) {
         const options = (f.options ?? []).map(option => String(option && typeof option === 'object' ? option.value : option));
@@ -242,11 +246,12 @@ export async function ensureModules({ store, bus, registry, events = null }) {
 /**
  * The public sdk. `deps`: { store, bus, registry, settings (createSettings), events
  * (createEvents), chat?: () => Message[], check?, onRegister?(def) (after each registerModule),
- * rewind?({ index, beforeRev }) (src/v2/rewind.js), substitute?(text), dialog?(screenId, opts), dialogCurrent?(), reread?(index) (turn.js) }.
+ * rewind?({ index, beforeRev }) (src/v2/rewind.js), substitute?(text), dialog?(screenId, opts), dialogCurrent?(), reread?(index) (turn.js),
+ * callModel?(request) (model-call.js createModelCalls().callModel) }.
  * Returns { sdk, events, markReady }:
  * `sdk.ready` resolves to the sdk once the host calls markReady().
  */
-export function createSdk({ store, bus, registry, settings, events = createEvents(), chat = () => [], check = checkModule, onRegister = null, rewind = null, substitute = text => String(text ?? ''), dialog = null, dialogCurrent = null, reread = null }) {
+export function createSdk({ store, bus, registry, settings, events = createEvents(), chat = () => [], check = checkModule, onRegister = null, rewind = null, substitute = text => String(text ?? ''), dialog = null, dialogCurrent = null, reread = null, callModel = null }) {
     let markReady;
     const ready = new Promise(resolve => { markReady = () => resolve(sdk); });
     const refused = message => ({ ok: false, code: 'REFUSED', message });
@@ -302,6 +307,19 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
          * | { ok: false, code, message }> (turn.js reread).
          */
         reread: async index => (typeof reread === 'function' ? reread(index) : { ok: false, code: 'FAILED', message: 'Re-read is not available here.' }),
+        /**
+         * A module's own model call (MODULES §G): `({ profile, system, prompt, maxTokens, signal, feature?,
+         * module?, timeoutMs? })` → Promise<{ ok, text, error }> (error null, or a code with `message`). Never
+         * posts to the chat or changes the reader's connection; never rejects.
+         */
+        callModel: async request => {
+            if (typeof callModel !== 'function') return { ok: false, text: '', error: MODEL_CALL_ERRORS.UNAVAILABLE, message: MODEL_CALL_TEXT.unavailable };
+            try {
+                return await callModel(request);
+            } catch {
+                return { ok: false, text: '', error: MODEL_CALL_ERRORS.FAILED, message: MODEL_CALL_TEXT.unavailable };
+            }
+        },
         /** The view tabs and contexts get: { state, query, settings, chat }. */
         view: () => makeView({ store, registry, settings, chat: chat() }),
         on: (name, fn) => events.on(name, fn),

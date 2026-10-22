@@ -149,8 +149,14 @@ function defErrors(key, def) {
     if (!isPlainObject(def.effect)) errors.push(`${label} has an effect that is not a record.`);
     if (!Array.isArray(def.tags) || def.tags.some(tag => typeof tag !== 'string')) errors.push(`${label} has tags that are not a list of words.`);
     if (typeof def.note !== 'string') errors.push(`${label} has a note that is not text.`);
+    if (def.carry !== undefined && !(isCount(def.carry, 1) && def.carry <= CARRY_MAX)) errors.push(`${label} adds a carry capacity of ${def.carry}; it is a whole number from 1 to ${CARRY_MAX}.`);
     return errors;
 }
+
+// The carry capacity a def may add (PACKS.md "Carry capacity"): only a pack's item has one, so the story's
+// words never make or raise it (WAVE rule 1); a carry module (RPG Battle's items.carry) reads it.
+export const CARRY_MAX = 1000;
+const packCarry = (id, value) => (typeof id === 'string' && id.startsWith('pack.') && isCount(value, 1) && value <= CARRY_MAX ? value : null);
 
 /** §2.5 validator for the inventory slice: [] when fine, else plain sentences. */
 export function validateInventory(slice) {
@@ -346,13 +352,22 @@ const freeId = (inv, base) => {
 // that the hooks may not change; the ID is never theirs to change, and equipment never stacks.
 // A hook that throws leaves the def as it was before that hook and goes to the Problems list: one
 // module's bug never stops the item being gained.
+// The money scale the item.define hooks price a new thing with (MODULES §F104): the reader's, else the pack's, else 1.
+function hookScale(env) {
+    try {
+        return economyOf(env.settings?.(), typeof env.economy === 'function' ? env.economy() : null).scale;
+    } catch {
+        return 1;
+    }
+}
+
 function addDef(inv, def, env, about, keep = {}) {
     const id = def.id;
     const hooks = env.hookEntries?.('item.define') ?? env.hooks('item.define').map(fn => ({ moduleId: null, fn }));
     for (const { moduleId, fn } of hooks) {
         const before = clone(def);
         try {
-            const out = fn(def, { note: about.note ?? '', owner: about.owner ?? 'party' });
+            const out = fn(def, { note: about.note ?? '', owner: about.owner ?? 'party', scale: hookScale(env) });
             if (isPlainObject(out) && out !== def) Object.assign(def, out);
         } catch (error) {
             for (const key of Object.keys(def)) delete def[key];
@@ -361,6 +376,10 @@ function addDef(inv, def, env, about, keep = {}) {
         }
     }
     Object.assign(def, keep, { id });
+    // A carry capacity only a pack's def keeps (whatever a hook wrote): the story never sets one.
+    const carry = packCarry(id, def.carry);
+    if (carry === null) delete def.carry;
+    else def.carry = carry;
     if (def.kind === 'equipment') def.stack = false;   // MODULES.md F6
     inv.defs[id] = clone(def);
     inv.aliases[aliasKey(def.name)] ??= id;
@@ -392,6 +411,8 @@ function packDef(ctx, inv, name, env) {
         const def = known ?? defaultDef(found.id, cleanName(found.name));
         if (!known) {
             for (const field of Object.keys(def)) if (field !== 'id' && found[field] !== undefined && found[field] !== null) def[field] = clone(found[field]);
+            const carry = packCarry(def.id, found.carry);
+            if (carry !== null) def.carry = carry;
             if (def.kind === 'equipment') def.stack = false;   // MODULES.md F6
             inv.defs[def.id] = def;
             inv.aliases[aliasKey(def.name)] ??= def.id;
@@ -419,6 +440,8 @@ function defineGiven(ctx, inv, given, env, about) {
     for (const field of Object.keys(def)) if (field !== 'id' && field !== 'name' && given[field] !== undefined) def[field] = clone(given[field]);
     const keep = {};
     for (const field of ['rarity', 'value']) if (given[field] !== undefined) keep[field] = given[field];
+    // A pack item's carry capacity comes with it (a pack shop's stock bought through a module).
+    if (packCarry(id, given.carry) !== null) keep.carry = given.carry;
     return { def: addDef(inv, def, env, about, keep), created: true };
 }
 
@@ -1143,8 +1166,12 @@ export function createInventoryCommands(env) {
 // deleted), so it rolls back with the reply and starts again on the next one or another swipe. A reply
 // adds its own entry and drops the others; `perReply` is the domain's `scratch` (ops.js): on replay a
 // drop of an entry already gone (its reply deleted) is passed over, so no reply's gains hang on another's.
-// A click's vouched payout writes the same entry from the click's receipt, on the same carrier: a swipe
-// or delete of the reply takes it back with the reply, and a Continue's lines count on from it.
+// A click's vouched payout (a2-3) adds its own key instead, `storyClicks[<sid>][<receipt id>] = paid`
+// (scratch too, add-only, on the same carrier), and never writes the reply's entry: a swipe or delete of
+// the reply takes it back with the reply, a Continue's lines count on from it, and a Re-read, whose
+// capture runs on the state before the reply, counts it from the reply as it stood (ctx.standing), so
+// the re-read lines and the clicks kept after them share one budget. The reply's money given is its
+// entry's `coin` plus its clicks.
 export const STORY_ITEM_QTY = 20;
 export const STORY_COIN_PER_LEVEL = 1000;
 export const STORY_WORTH_TIMES = 2;
@@ -1241,11 +1268,32 @@ function tallyOf(ctx, inv, vouched = false) {
     return tally;
 }
 
-// This reply's entry, alone: other replies' entries (and an older shape's fields) go.
+// This reply's entry, alone: other replies' entries (and an older shape's fields) go, their clicks too.
 function keepTally(inv, { id, ...tally }) {
     if (!isPlainObject(inv.perReply)) inv.perReply = {};
     for (const key of Object.keys(inv.perReply)) if (key !== id) delete inv.perReply[key];
     inv.perReply[id] = tally;
+    if (isPlainObject(inv.storyClicks)) for (const key of Object.keys(inv.storyClicks)) if (key !== id) delete inv.storyClicks[key];
+}
+
+// What the clicks after reply `id` paid of its budget (storyClicks): from `inv`, or in a Re-read's capture
+// (whose state is the one before the reply) from the reply as it stood (`standing`, ctx.standing).
+function clicksOf(inv, id, standing = null) {
+    const own = isPlainObject(inv?.storyClicks) && Object.hasOwn(inv.storyClicks, id) ? inv.storyClicks[id] : null;
+    const stood = standing?.domains?.inventory?.storyClicks;
+    const log = own ?? (isPlainObject(stood) && Object.hasOwn(stood, id) ? stood[id] : null);
+    return isPlainObject(log) ? Object.values(log).reduce((sum, paid) => sum + tallied(paid), 0) : 0;
+}
+
+// A click's vouched payout: its own key under the reply (add-only), the reply's entry left as it is.
+// Other replies' entries go here too (pruned by key), as keepTally drops them.
+function keepClick(ctx, inv, id, paid) {
+    if (isPlainObject(inv.perReply)) for (const key of Object.keys(inv.perReply)) if (key !== id) delete inv.perReply[key];
+    if (!isPlainObject(inv.storyClicks)) inv.storyClicks = {};
+    for (const key of Object.keys(inv.storyClicks)) if (key !== id) delete inv.storyClicks[key];
+    if (!isPlainObject(inv.storyClicks[id])) inv.storyClicks[id] = {};
+    const key = String(ctx.receiptId ?? 'click');
+    inv.storyClicks[id][key] = tallied(inv.storyClicks[id][key]) + paid;
 }
 
 // `amount` held to what this reply may still give: { amount, problem }.
@@ -1253,14 +1301,20 @@ function storyCoin(ctx, inv, amount, currency, vouched = false) {
     const tally = tallyOf(ctx, inv, vouched);
     if (!tally) return { amount, problem: null };
     const budget = storyCoinBudget(ctx);
-    const left = Math.max(0, budget - tally.coin);
+    // A click (a module's vouched payout outside a capture) is kept as its own key (keepClick).
+    const click = vouched && ctx.cause !== 'story';
+    const left = Math.max(0, budget - tally.coin - clicksOf(inv, tally.id, ctx.standing ?? null));
     // A module's vouched payout is never refused (its caller cannot catch a sub-command's failure): it
     // is paid what is left, which may be nothing, and told so.
     if (!left && !vouched) ctx.fail('REFUSED', `This reply has already given all the money one reply may give (${formatAmount(budget, currency)}); the rest was not paid.`);
     const paid = Math.min(amount, left);
-    tally.coin += paid;
-    if (vouched && paid) tally.vouched = (tally.vouched ?? 0) + paid;
-    keepTally(inv, tally);
+    if (click) {
+        if (paid) keepClick(ctx, inv, tally.id, paid);
+    } else {
+        tally.coin += paid;
+        if (vouched && paid) tally.vouched = (tally.vouched ?? 0) + paid;
+        keepTally(inv, tally);
+    }
     return {
         amount: paid,
         problem: paid < amount ? `${formatAmount(amount, currency)} was written, but one reply may give at most ${formatAmount(budget, currency)}; ${formatAmount(paid, currency)} was paid.` : null,
@@ -1543,7 +1597,17 @@ const ownerRank = owner => (owner === 'party' ? 0 : 1);
 const kindRank = kind => (KIND_ORDER.includes(kind) ? KIND_ORDER.indexOf(kind) : KIND_ORDER.length);
 
 /** Stacks joined with their defs, the party's first, then by kind, name and ID. */
-export function listItems(inventory, owner = null) {
+/** The carry capacity each stack adds, by stack id, as the carry module reports it (`items.carry` → `bonuses`), or null. */
+export function carryBonuses(tools) {
+    let view = null;
+    try { view = typeof tools?.query === 'function' ? tools.query('items.carry', {}) : null; } catch { view = null; }
+    if (!isPlainObject(view) || !Array.isArray(view.bonuses)) return null;
+    const out = {};
+    for (const entry of view.bonuses) if (typeof entry?.stack === 'string' && isCount(entry.carry, 1)) out[entry.stack] = Math.min(CARRY_MAX, entry.carry);
+    return out;
+}
+
+export function listItems(inventory, owner = null, carry = null) {
     const defs = inventory?.defs ?? {};
     return Object.values(inventory?.stacks ?? {})
         .filter(stack => defs[stack.def] && (owner === null || stack.owner === owner))
@@ -1554,12 +1618,16 @@ export function listItems(inventory, owner = null) {
                 slot: def.slot, qty: stack.qty, owner: stack.owner, equipped: stack.equipped, note: stack.note, from: stack.from,
                 ...(condOf(stack, inventory) < COND_MAX ? { cond: condOf(stack, inventory) } : {}),
                 ...(stack.key === true ? { key: true } : {}),
+                ...(carryOfStack(stack, def, carry) ? { carry: carryOfStack(stack, def, carry) } : {}),
             };
         })
         .sort((a, b) => ownerRank(a.owner) - ownerRank(b.owner) || (a.owner < b.owner ? -1 : a.owner > b.owner ? 1 : 0)
             || kindRank(a.kind) - kindRank(b.kind) || a.name.localeCompare(b.name, 'en', { numeric: true })
             || (a.stack < b.stack ? -1 : a.stack > b.stack ? 1 : 0));
 }
+
+// What a stack adds to carrying: the carry module's word for it when one answers, else its pack def's `carry`.
+const carryOfStack = (stack, def, carry) => (carry ? carry[stack.id] ?? null : packCarry(def.id, def.carry));
 
 // A query's own way to ask other queries (tools.query over the same state); throws when there is none.
 const asker = tools => (name, args) => {
@@ -1660,7 +1728,9 @@ export const createInventoryQueries = env => ({
     },
     // { name, plural, short }: the chat's one currency (MODULES.md F1); name singular ("mark").
     'inventory.currency': () => currencyOf(env.settings()),
-    'inventory.items': (state, args = {}) => listItems(state?.domains?.inventory, args?.owner ?? null),
+    // Each row's `carry` (the capacity the thing adds, PACKS.md "Carry capacity") is the carry module's
+    // (`items.carry` → bonuses by stack: a pack's `carry` or the reader's own) when one answers, else the def's.
+    'inventory.items': (state, args = {}, tools) => listItems(state?.domains?.inventory, args?.owner ?? null, carryBonuses(tools)),
     // { budget, paid, left, vouched }: the story money (`+ coin` lines and modules' `wallet.receive { story:
     // true }`) the current reply may give, has given and has left (RX-E-2); `vouched` is the part of
     // `paid` that modules' vouched payouts gave (quest rewards), so a module can tell a reply whose
@@ -1671,8 +1741,9 @@ export const createInventoryQueries = env => ({
     'inventory.storyBudget': (state, args, tools) => {
         const budget = storyCoinBudget({ settings: () => env.settings(), query: (name, more) => tools.query(name, more) });
         const stored = storedTally(state?.domains?.inventory, tools?.reply?.sid);
-        const paid = Math.min(budget, tallied(stored?.coin));
-        return { budget, paid, left: Math.max(0, budget - paid), vouched: Math.min(paid, tallied(stored?.vouched)) };
+        const clicks = tools?.reply?.sid ? clicksOf(state?.domains?.inventory, tools.reply.sid) : 0;
+        const paid = Math.min(budget, tallied(stored?.coin) + clicks);
+        return { budget, paid, left: Math.max(0, budget - paid), vouched: Math.min(paid, tallied(stored?.vouched) + clicks) };
     },
     'inventory.wallet': (state, args = {}) => ({ ...(state?.domains?.inventory?.wallets?.[args?.owner ?? 'party'] ?? {}) }),
     // { status: 'found' | 'ambiguous' | 'none', defs: [def copies], stacks: [items of the found def] }

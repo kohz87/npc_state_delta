@@ -60,8 +60,9 @@ const revOf = state => (Number.isInteger(state?.meta?.rev) ? state.meta.rev : 0)
  * @param {() => *} [options.place]          where the open chat is saved (kept in a change's target for rescue)
  * @param {(target, entries) => Promise<void>} [options.rescue]  writes changes made in a chat that is no
  *     longer open into that chat's file; `entries` = [{ message, index }] of the messages written
- * @param {{ mark(target), holds(target, token) }} [options.confirm]  after a save timed out: stamps the
- *     saves after it and reads the file back, so a late write of the timed-out one is found (persist.js createSaver)
+ * @param {{ holds, fresh, restore, forget }} [options.confirm]  after a write timed out: reads the stamped
+ *     file back, so a late write of the timed-out one is found and put right (persist.js createSaver)
+ * @param {{ get(chatId), set(chatId, value) }} [options.memo]  keeps a suspect chat's read-backs over a reload
  * @param {() => number} [options.now]       accepted for the §12 interface; the store keeps no clock
  * @param {(state, ops) => object} [options.apply]  defaults to ops.js; tests inject a fake
  * @param {(error) => void} [options.onSaveError]   told when a scheduled (not flushed) save fails, once until one works
@@ -78,7 +79,7 @@ export function createStore({
     chat, save, now = null, apply = applyOps, onSaveError = null, timers = globalThis,
     checkpointEvery = CHECKPOINT_EVERY, checkpointBytes = CHECKPOINT_BYTES, recordId = newRecordId, validate = null,
     chatId = () => undefined, place = () => null, rescue = null, scratch = null, receiptKeep = RECEIPT_KEEP,
-    confirm = null,
+    confirm = null, memo = null,
 } = {}) {
     if (typeof chat !== 'function') throw new TypeError('createStore needs a chat() function.');
     if (typeof apply !== 'function') throw new TypeError('createStore needs an apply(state, ops) function.');
@@ -169,14 +170,20 @@ export function createStore({
     const saver = createSaver({
         save: (change, options) => {
             const upTo = writes;
-            return Promise.resolve(save(change, options)).then(() => forget(change ? change.chatId : chatId(), upTo));
+            return Promise.resolve(save(change, options)).then(result => {
+                forget(change ? change.chatId : chatId(), upTo);
+                return result;
+            });
         },
-        rescue: typeof rescue === 'function' ? change => {
+        rescue: typeof rescue === 'function' ? (change, options = {}) => {
             const entries = [...unsaved].filter(([, entry]) => entry.chatId === change.chatId)
                 .map(([message, entry]) => ({ message, index: entry.index }));
-            return Promise.resolve(rescue(change, entries)).then(() => forget(change.chatId, Infinity));
+            return Promise.resolve(rescue(change, entries, options)).then(result => {
+                forget(change.chatId, Infinity);
+                return result;
+            });
         } : null,
-        target, check, onError: onSaveError, timers, verify, confirm,
+        target, check, onError: onSaveError, timers, verify, confirm, memo,
     });
 
     const list = () => {
@@ -873,6 +880,14 @@ export function createStore({
         deferSave() { saver.cancel(); },
         /** Saves now (a reader's action is saved at once); → Promise<true | false>, never throws: a failure is told and tried again. */
         saveSoon(options) { return saver.saveSoon(options); },
+        /** The page is closing: the newest state goes out at once, even past a save still on its way. */
+        saveUrgent(options) { return saver.urgent(options); },
+        /** True while a save of the open chat is on its way. */
+        inFlight() { return saver.inFlight(); },
+        /** True while a timed-out write's file is still to be read back. */
+        suspect() { return saver.suspect(); },
+        /** A chat was opened: read-backs a reload of the page left for it go on (persist.js createSaver.resume). */
+        resume() { return saver.resume(target()); },
         flush() { return saver.flush(); },
         dirty() { return saver.dirty(); },
         /** True while saves are failing (until one works again). */
