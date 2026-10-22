@@ -441,7 +441,8 @@ function throughList(value, keys) {
  * of a stack) is not, so a take of something gone still fails its block. And (rule c) a `replace` of an
  * object key inside a domain that is not there, in an object that is, becomes an `add`: only a deleted reply had added
  * the key, and the value is the one this later reply set. Counted ops (`was`) keep the counter rules
- * above. Ops are not changed in place.
+ * above. And (rule d) an op marked `within` a thing (ctx.ifThere) is passed over when that thing is not
+ * there. Ops are not changed in place.
  */
 export function rebaseOps(state, ops, { scratch = null, replayed = false } = {}) {
     const rebased = new Set();
@@ -454,10 +455,22 @@ export function rebaseOps(state, ops, { scratch = null, replayed = false } = {})
     const writtenAbove = path => written.some(at => path === at || path.startsWith(`${at}/`));
     const out = [];
     for (const op of scratch ? scratchOps(state, ops, scratch) : ops) {
+        // Rule (d): an op marked `within` a thing (ctx.ifThere) whose thing is gone is passed over.
+        if (replayed && goneHolder(op)) continue;
         if (!(replayed && goneKey(op))) out.push(replayed && newKey(op) ? { op: 'add', path: op.path, value: op.value } : fit(op));
         if ((op?.op === 'add' || op?.op === 'replace') && typeof op.path === 'string') written.push(op.path);
     }
     return { ops: out, rebased };
+
+    // Rule (d): an op inside the thing it is marked `within` (ctx.ifThere) when that thing is not there,
+    // nor put there earlier in the list: the reply that made it was deleted.
+    function goneHolder(op) {
+        const within = op?.within;
+        if (typeof within !== 'string' || !within.startsWith('/domains/') || typeof op.path !== 'string') return false;
+        if (op.path !== within && !op.path.startsWith(`${within}/`)) return false;
+        if (op.op === 'add' && op.path === within) return false;   // the thing made here
+        return !writtenAbove(within) && valueAt(state, within) === undefined;
+    }
 
     // A `remove` (no counted `was`) of an object key that is not there, nor put there earlier in the list.
     function goneKey(op) {

@@ -264,6 +264,26 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
                     return fail('INVALID', error.message);
                 }
             },
+            // A count this command sets to a number rather than moves (a clock set to a date; SPEC §2.2):
+            // its write keeps no `was`, so replay applies it as written and later moves add on top. It is
+            // written even when it holds that number already, so replay after a delete sets it too.
+            absolute(domain, path) {
+                open();
+                const owner = registry.domainOwner(domain);
+                if (owner !== moduleId) fail('NOT_OWNER', `${moduleId} cannot set a count in ${domain}: only its owner can.`);
+                if (typeof path !== 'string' || !/^\/[^~]/.test(path)) fail('INVALID', `A count to set is a path inside the domain, like "/time/minutes", not "${path}".`);
+                tx.absolute.add(`/domains/${escapeKey(domain)}${path}`);
+            },
+            // This command's writes inside a thing (a thread, `/threads/th_x`) only make sense while it is
+            // there (SPEC §2.2 rule d): marked `within` it, they are passed over on replay when the reply
+            // that made it was deleted, and the rest of the block still applies.
+            ifThere(domain, path) {
+                open();
+                const owner = registry.domainOwner(domain);
+                if (owner !== moduleId) fail('NOT_OWNER', `${moduleId} cannot mark changes in ${domain}: only its owner can.`);
+                if (typeof path !== 'string' || !/^\/[^~]/.test(path)) fail('INVALID', `A thing to mark is a path inside the domain, like "/threads/th_x", not "${path}".`);
+                tx.within.add(`/domains/${escapeKey(domain)}${path}`);
+            },
             claim(key) {
                 open();
                 if (typeof key !== 'string' || !key) fail('INVALID', 'A claim key must be non-empty text.');
@@ -340,9 +360,20 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
                         continue;
                     }
                     if (change.op !== 'replace' || typeof change.value !== 'number' || !isCounterPath(change.path, counters)) continue;
+                    if (tx.absolute.has(change.path)) continue;   // a set (ctx.absolute): no `was`
                     const was = valueAt(tx.head, change.path);
                     if (typeof was === 'number') change.was = was;
                 }
+            }
+            // A set that left the count as it was is still written, as a set.
+            for (const at of tx.absolute) {
+                if (!at.startsWith(`${path}/`) || changes.some(change => change.path === at)) continue;
+                const value = valueAt(tx.head, at);
+                if (typeof value === 'number' && valueAt(draft, at.slice(path.length)) === value) changes.push({ op: 'replace', path: at, value });
+            }
+            // Changes inside a thing marked with ctx.ifThere carry it (`within`, rule d).
+            for (const change of changes) {
+                for (const at of tx.within) if (change.path === at || change.path.startsWith(`${at}/`)) { change.within = at; break; }
             }
             if (changes.length) touched.push(name);
             ops.push(...changes);
@@ -375,7 +406,7 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
                 head, cause, receiptId, random: makeRng(seedValue), idRandom: makeRng((seedValue ^ ID_STREAM) >>> 0),
                 rev: headRev + 1, carrier: carrierOf(carrier), chat: chatOf(chat), again: again === true && cause === 'story',
                 standing: cause === 'story' && isRecord(standing) ? (isDeepFrozen(standing) ? standing : deepFreeze(clone(standing))) : null,
-                drafts: new Map(), meta: null, failure: null, closed: false,
+                drafts: new Map(), meta: null, failure: null, closed: false, absolute: new Set(), within: new Set(),
             };
             tx.reply = tx.carrier ? replyOf(tx.carrier.index, tx.carrier.sid ?? tx.carrier.key) : headReply(store);
             const out = invoke(tx, type, target, payload, 0);

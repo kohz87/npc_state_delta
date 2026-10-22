@@ -920,6 +920,21 @@ function scenePresenceView(npcs) {
     });
     return changed ? out : npcs;
 }
+// (v2 World view) Who the story's scene lists as present now, for the scanner's dynamic context: only
+// while hosted with Story Block keeping the scene (as scenePresenceView) and only for a scan of the
+// head reply (the scene is the head's). Story Director's World view first, else Story Block's scene;
+// null otherwise, and the scanner prompt is then exactly as before.
+function scanScenePresent(messageId) {
+    const adapter = storySuiteV2Meters();
+    if (!adapter || !defersArea('scene', getSettings().sourceOfTruth)) return null;
+    if (Number.isInteger(messageId) && messageId !== latestMessageId(true)) return null;
+    try {
+        const names = adapter.presentNow?.();
+        return Array.isArray(names) && names.length ? names : null;
+    } catch {
+        return null;
+    }
+}
 // The chat state a scan works from: with the slice's relationship numbers while hosted (a copy;
 // the stored state is never changed here), the state itself otherwise.
 function hostedScanState(state) {
@@ -3773,7 +3788,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         ? takeNarrationCapture(scanChatKey, messageId)
         : null;
     const scanLabel = capture ? 'narration-capture' : (manual ? 'manual' : (fullWindowScan ? 'automatic-full' : 'automatic'));
-    const prompt = capture ? '' : buildScannerPrompt(scannerPromptOptions(state, settings, transcript, { currentTranscript, fullScanMode: fullWindowScan }));
+    const prompt = capture ? '' : buildScannerPrompt(scannerPromptOptions(state, settings, transcript, { currentTranscript, fullScanMode: fullWindowScan, sceneNames: scanScenePresent(messageId) }));
 
     let relationshipEdgeCount = 0;
     let relationshipEdgeFallbacks = 0;
