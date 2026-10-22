@@ -2,10 +2,12 @@
 //
 // - the settings host: one centred column of folds. Story Suite's own (the tail budget and the prompt
 //   size: what Story Suite adds to the prompt, per module, against the tail budget, counted with
-//   SillyTavern's tokenizer when there is one), the modules' own folds (Story Block's Packs), Features,
+//   SillyTavern's tokenizer when there is one, with what a module sends on its own as a row of its own,
+//   and "Show what's sent": the exact text of each part, with Copy), the modules' own folds (Story Block's Packs), Features,
 //   one fold per module with settings, Versions. Inside a module's fold: one line saying how many of its
-//   features are on (it opens the Features fold there), a sub-fold per settings group (a field's `group`,
-//   else its label's "Group: …" prefix, else General) and its custom `section`. Fields are rows (bool, int,
+//   features are on (it opens the Features fold there), its custom `section` right there (no sub-fold of
+//   its own), then a sub-fold per settings group (a field's `group`, else its label's "Group: …" prefix,
+//   else General). Diagnostics (a report to copy or save, diagnostics.js) is last before Versions. Fields are rows (bool, int,
 //   choice, text, list of {…}; a list one compact line per item, or, when its fields are text and whole
 //   numbers, a textarea with one item per line: `form: 'lines'` starts there); values are read and
 //   written through createSettings() (extension_settings.storySuite.modules[id]). Open folds stay open
@@ -35,6 +37,9 @@ export const OPEN_CLASS = 'story-suite-open';
 export const HOST_FOLD = 'story-suite';
 export const FEATURES_FOLD = 'story-suite-features';
 export const VERSIONS_FOLD = 'story-suite-versions';
+export const DIAGNOSTICS_FOLD = 'story-suite-diagnostics';
+// "Show what's sent", a sub-fold of Story Suite's own under the prompt size.
+export const SENT_FOLD = 'story-suite::sent';
 // Story Block's Packs fold (its `settings.folds`), second after Story Suite's; Home's "Import a pack" opens it.
 export const PACKS_FOLD = 'story-block/packs';
 // A sub-fold's key: its module's id, this, and the part ("rpg-battle::features", "story-director::group:Calendar").
@@ -87,7 +92,45 @@ export const SETTINGS_TEXT = Object.freeze({
         share: 'Story Suite\'s share',
         shareValue: '{share} of {room} tokens ({percent}%)',
         contextUnknown: 'The context size is shown after the next reply.',
+        // A module's own prompt (its `ownPrompt` hook): sent by the module itself, counted here and in the share.
+        own: '{name}, sent by itself',
     }),
+    // "Show what's sent": the exact text the next reply would get, per module, with Copy. Read-only.
+    sent: Object.freeze({
+        title: 'Show what\'s sent',
+        hint: 'the exact text',
+        help: 'The exact text Story Suite would add to the prompt of the next reply, built now from this chat. Nothing is sent from here.',
+        static: 'Instructions (the same every reply)',
+        tail: 'This reply\'s part',
+        own: 'Sent by the modules themselves',
+        part: '{name}: {label}',
+        tokens: '{n} tokens',
+        about: 'about {n} tokens',
+        dropped: '{n} lines left out to fit the budget.',
+        droppedOne: '1 line left out to fit the budget.',
+        nothing: 'Nothing (no module adds text here now).',
+        copy: 'Copy',
+        copyTitle: 'Copy all of the text below',
+        copied: 'Copied.',
+        copyFailed: 'It could not be copied here: the text is selected, so copy it by hand (Ctrl+C, or long-press on a phone).',
+        textLabel: 'What is sent: {part}',
+    }),
+});
+// The Diagnostics fold (diagnostics.js builds the report).
+export const DIAGNOSTICS_TEXT = Object.freeze({
+    title: 'Diagnostics',
+    hint: 'a report for a bug report',
+    help: 'A plain report of what Story Suite sees: versions, features, settings, the prompt size, the last problems, saving and the size of this chat, and what each module adds. It holds no API keys, passwords or addresses and no chat text. Read it before you share it.',
+    copy: 'Copy report',
+    save: 'Save report',
+    refresh: 'Refresh',
+    reportLabel: 'The diagnostics report',
+    building: 'Building the report…',
+    copied: 'Copied the report.',
+    copyFailed: 'The report could not be copied here: it is selected above, so copy it by hand (Ctrl+C, or long-press on a phone).',
+    saved: 'Saved the report as {name}.',
+    saveFailed: 'The report could not be saved: {why}',
+    failed: 'The report could not be built: {why}',
 });
 export const FEATURE_TEXT = Object.freeze({
     title: 'Features',
@@ -497,10 +540,12 @@ export function groupFields(schema) {
 
 /**
  * What Story Suite adds to the prompt, counted per module: `parts` as prompt.js assemble() gives them
- * ({ module, place, text }), `tokensOf(text)` → a number. → { modules: [{ id, name, static, tail }],
- * static, tail, total, budget }. The totals count the texts as sent (joined), the rows their own parts.
+ * ({ module, place, text }), `tokensOf(text)` → a number, `own` what modules send on their own (turn.js
+ * previewFit's `own`: { module, label, text }). → { modules: [{ id, name, static, tail }], static, tail,
+ * own: [{ id, name, tokens }], total, budget }. The totals count the texts as sent (joined), the rows
+ * their own parts; `total` takes in the modules' own prompts.
  */
-export function promptSize(parts, { tokensOf = estimateTokens, names = id => id, budget = DEFAULT_TAIL_BUDGET } = {}) {
+export function promptSize(parts, { tokensOf = estimateTokens, names = id => id, budget = DEFAULT_TAIL_BUDGET, own = [] } = {}) {
     const list = Array.isArray(parts) ? parts.filter(part => part && typeof part.text === 'string') : [];
     const rows = new Map();
     for (const part of list) {
@@ -512,7 +557,38 @@ export function promptSize(parts, { tokensOf = estimateTokens, names = id => id,
     const tailText = list.filter(part => part.place !== 'static').map(part => part.text).filter(Boolean).join('\n');
     const stat = staticText ? tokensOf(staticText) : 0;
     const tail = tailText ? tokensOf(tailText) : 0;
-    return { modules: [...rows.values()], static: stat, tail, total: stat + tail, budget };
+    const ownRows = new Map();
+    for (const part of ownParts(own)) {
+        const id = String(part.module ?? '');
+        if (!ownRows.has(id)) ownRows.set(id, { id, name: names(id), tokens: 0 });
+        ownRows.get(id).tokens += tokensOf(part.text);
+    }
+    const ownTotal = [...ownRows.values()].reduce((sum, row) => sum + row.tokens, 0);
+    return { modules: [...rows.values()], static: stat, tail, own: [...ownRows.values()], total: stat + tail + ownTotal, budget };
+}
+
+// turn.js previewFit's `own` list, its parts with text only.
+const ownParts = own => (Array.isArray(own) ? own.filter(part => part && typeof part.text === 'string' && part.text) : []);
+
+/**
+ * The texts the next reply would get, as "Show what's sent" lists them: { static: [part], tail: [part],
+ * own: [part] } (each part { module, label, text, dropped }, empty texts left out unless lines were
+ * dropped), and `copy`, all of it as one text: each section's heading, then its parts as sent (the
+ * static ones joined by a blank line, the tail's by a line break, as prompt.js joins them).
+ */
+export function sentText(parts, own = [], { names = id => id } = {}) {
+    const list = Array.isArray(parts) ? parts.filter(part => part && typeof part.text === 'string') : [];
+    const T = SETTINGS_TEXT.sent;
+    const stat = list.filter(part => part.place === 'static' && part.text);
+    const tail = list.filter(part => part.place !== 'static' && (part.text || part.dropped));
+    const titled = part => ({ module: String(part.module ?? ''), title: String(part.label ?? names(part.module)), text: part.text, dropped: Number(part.dropped) || 0 });
+    const mine = ownParts(own).map(part => ({ ...titled(part), title: fill(T.part, { name: names(part.module), label: String(part.label ?? '') }) }));
+    const sections = [
+        [T.static, stat.map(part => part.text).join('\n\n')],
+        [T.tail, tail.map(part => part.text).filter(Boolean).join('\n')],
+        ...mine.map(part => [part.title, part.text]),
+    ].filter(([, text]) => text);
+    return { static: stat.map(titled), tail: tail.map(titled), own: mine, copy: sections.map(([head, text]) => `[${head}]\n${text}`).join('\n\n') };
 }
 
 // One feature's row: its switch, label, description and (when it changes the static prompt) the hint.
@@ -555,19 +631,20 @@ const FOLD_SELECTOR = 'details.story-suite-fold, details.story-suite-subfold';
 /**
  * Renders the settings into `root` (emptied first), as one centred column of folds: Story Suite (the
  * host's own, with the prompt size), the modules' own folds (Story Block's Packs), Features (a sub-fold
- * per module), one fold per module with settings (a line to its features, then a sub-fold per settings
- * group, then its custom panel) and Versions.
+ * per module), one fold per module with settings (a line to its features, its custom panel, then a
+ * sub-fold per settings group), Diagnostics (with `diagnostics`) and Versions.
  *
  * `options`: { registry, settings (createSettings), doc?, sdk?, features? (createFeatureStore; without
  * it no Features are shown), promptParts?() (the parts of the prompt the next reply would get, as
  * prompt.js assemble() lists them, or { parts, fit } with how they fit the context (prompt.js contextFit);
  * without it no prompt size is shown), countTokens?(text) (SillyTavern's
  * tokenizer, a number or a promise of one; without it the size is estimated at four characters a token),
- * openState? (a Map of fold key → open, kept across redraws; a new one by default) }.
+ * openState? (a Map of fold key → open, kept across redraws; a new one by default), diagnostics? ({ report()
+ * → text or a promise of it, fileName?() }: the Diagnostics fold, built when it opens; without it none) }.
  * A module's `section(el, api)` gets api = { get(key), set(key, value), values(), sdk } (a section
  * given as a title plus render(el, api) is the same panel). Returns { refresh(), refreshSize() }.
  */
-export function renderSettingsHost(root, { registry, settings, doc = globalThis.document, sdk = null, features = null, promptParts = null, countTokens = null, openState = new Map() }) {
+export function renderSettingsHost(root, { registry, settings, doc = globalThis.document, sdk = null, features = null, promptParts = null, countTokens = null, openState = new Map(), diagnostics = null }) {
     const featureList = () => (features && typeof features.list === 'function' ? features.list() : []);
     // A settings field or panel under a feature that is off is not drawn (its stored value is kept).
     const hiddenByFeature = item => {
@@ -722,26 +799,23 @@ export function renderSettingsHost(root, { registry, settings, doc = globalThis.
                 },
             });
         }
+        // Its custom panel sits in the module's fold itself, right under the features line (never in a
+        // sub-fold: a module's own panel may have folds of its own, and three levels is too deep). A
+        // titled section ("Assist") gets its title as a heading.
         if (def.section && !hiddenByFeature(def.section)) {
-            subs.push({
-                key: 'section',
-                title: def.title !== def.name ? def.title : SETTINGS_TEXT.more,
-                hint: '',
-                draw: into => {
-                    const section = el(doc, 'div', 'story-suite-section');
-                    section.dataset.module = def.moduleId;
-                    try { def.section(section, panelApi(def.moduleId)); } catch (error) {
-                        section.replaceChildren(el(doc, 'p', 'story-suite-muted', `This part of ${def.name}'s settings could not be shown: ${error?.message ?? error}`));
-                    }
-                    into.appendChild(section);
-                },
-            });
+            const section = el(doc, 'div', 'story-suite-section');
+            section.dataset.module = def.moduleId;
+            if (def.title !== def.name) body.appendChild(el(doc, 'h4', 'story-suite-section-title', def.title));
+            body.appendChild(section);
+            try { def.section(section, panelApi(def.moduleId)); } catch (error) {
+                section.replaceChildren(el(doc, 'p', 'story-suite-muted', `This part of ${def.name}'s settings could not be shown: ${error?.message ?? error}`));
+            }
         }
-        // Each part in a sub-fold of its own; one alone opens with its module.
+        // The schema's groups below it, each in a sub-fold of its own; one alone opens with its module.
         for (const sub of subs) {
             const inner = fold(doc, `${def.moduleId}${SUB_FOLD}${sub.key}`, sub.title, sub.hint, 'story-suite-subfold');
             sub.draw(inner.body);
-            body.appendChild(remember(inner.details, subs.length === 1));
+            body.appendChild(remember(inner.details, subs.length === 1 && !(def.section && !hiddenByFeature(def.section))));
         }
         return remember(details);
     }
@@ -764,7 +838,81 @@ export function renderSettingsHost(root, { registry, settings, doc = globalThis.
         const value = settings()?.tailBudget;
         return Number.isInteger(value) && value > 0 ? value : DEFAULT_TAIL_BUDGET;
     };
-    function paintSize(block, size, exact, fit = null) {
+    // "Show what's sent" (a sub-fold under the prompt size): every part's exact text, by place, with its
+    // size, and Copy (the clipboard, else the text is selected for copying by hand). It only reads. The
+    // texts are drawn only while it is open (they are long, and the size is drawn again on every change).
+    function sentFold(parts, own, tokensOf, exact) {
+        const T = SETTINGS_TEXT.sent;
+        const { details, body } = fold(doc, SENT_FOLD, T.title, T.hint, 'story-suite-subfold');
+        details.classList.add('story-suite-sent');
+        const draw = () => {
+            if (!details.open || body.children.length) return;
+            drawSent(body, sentText(parts, own, { names: moduleName }), tokensOf, exact);
+        };
+        details.addEventListener('toggle', draw);
+        remember(details);
+        draw();
+        return details;
+    }
+    function drawSent(body, text, tokensOf, exact) {
+        const T = SETTINGS_TEXT.sent;
+        body.appendChild(el(doc, 'p', 'story-suite-muted', T.help));
+        const actions = el(doc, 'div', 'story-suite-sent-actions');
+        const copy = button(doc, 'menu_button story-suite-sent-copy', '', T.copyTitle);
+        const glyph = el(doc, 'i', 'fa-solid fa-copy');
+        glyph.setAttribute('aria-hidden', 'true');
+        copy.append(glyph, el(doc, 'span', '', T.copy));
+        const status = el(doc, 'span', 'story-suite-sent-status');
+        status.setAttribute('role', 'status');
+        actions.append(copy, status);
+        body.appendChild(actions);
+        const texts = el(doc, 'div', 'story-suite-sent-texts');
+        const sections = [['static', T.static, text.static], ['tail', T.tail, text.tail]];
+        if (text.own.length) sections.push(['own', T.own, text.own]);
+        for (const [place, heading, list] of sections) {
+            const section = el(doc, 'section', 'story-suite-sent-section');
+            section.dataset.place = place;
+            section.appendChild(el(doc, 'h5', '', heading));
+            if (!list.length) section.appendChild(el(doc, 'p', 'story-suite-muted', T.nothing));
+            for (const part of list) {
+                const item = el(doc, 'div', 'story-suite-sent-part');
+                item.dataset.module = part.module;
+                const n = part.text ? tokensOf(part.text) : 0;
+                const head = el(doc, 'p', 'story-suite-sent-head');
+                head.append(el(doc, 'b', '', part.title), doc.createTextNode(' · '), el(doc, 'small', '', fill(exact ? T.tokens : T.about, { n: n.toLocaleString('en-US') })));
+                item.appendChild(head);
+                if (part.text) {
+                    const pre = el(doc, 'pre', 'story-suite-sent-text', part.text);
+                    pre.tabIndex = 0;
+                    pre.setAttribute('aria-label', fill(T.textLabel, { part: part.title }));
+                    item.appendChild(pre);
+                }
+                if (part.dropped) item.appendChild(el(doc, 'p', 'story-suite-muted story-suite-sent-dropped', part.dropped === 1 ? T.droppedOne : fill(T.dropped, { n: part.dropped })));
+                section.appendChild(item);
+            }
+            texts.appendChild(section);
+        }
+        body.appendChild(texts);
+        copy.addEventListener('click', async () => {
+            const clipboard = (doc.defaultView ?? globalThis).navigator?.clipboard;
+            try {
+                if (typeof clipboard?.writeText !== 'function') throw new Error('no clipboard');
+                await clipboard.writeText(text.copy);
+                status.textContent = T.copied;
+            } catch {
+                const win = doc.defaultView ?? globalThis;
+                const range = doc.createRange?.();
+                const selection = win.getSelection?.();
+                if (range && selection) {
+                    range.selectNodeContents(texts);
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                }
+                status.textContent = T.copyFailed;
+            }
+        });
+    }
+    function paintSize(block, size, exact, fit = null, sent = null) {
         const T = SETTINGS_TEXT.size;
         const amount = n => fill(exact ? T.exact : T.about, { n: n.toLocaleString('en-US') });
         const num = n => Number(n).toLocaleString('en-US');
@@ -790,6 +938,11 @@ export function renderSettingsHost(root, { registry, settings, doc = globalThis.
         meter.setAttribute('aria-label', T.tail);
         tail.appendChild(meter);
         if (size.tail > size.budget) tail.classList.add('story-suite-size-over');
+        // What modules send on their own (NPC State Delta's dossiers): a row each, counted in the total.
+        for (const row of size.own ?? []) {
+            const item = line(fill(T.own, { name: row.name }), amount(row.tokens), 'story-suite-size-own');
+            item.dataset.module = row.id;
+        }
         line(T.total, amount(size.total), 'story-suite-size-total');
         const table = el(doc, 'table', 'story-suite-size-table');
         table.appendChild(el(doc, 'caption', '', T.perModule));
@@ -822,16 +975,19 @@ export function renderSettingsHost(root, { registry, settings, doc = globalThis.
             table,
             fit ? null : el(doc, 'p', 'story-suite-muted story-suite-size-context-unknown', T.contextUnknown),
             el(doc, 'p', 'story-suite-muted story-suite-size-how', exact ? T.howExact : T.howAbout),
+            sent ? sentFold(sent.parts, sent.own, sent.tokensOf, exact) : null,
         ].filter(Boolean));
     }
     function drawSize(block) {
         const run = ++sizeRun;
         let parts = null;
         let fit = null;
+        let own = [];
         try {
             const got = promptParts();
             parts = Array.isArray(got) ? got : got?.parts;
             fit = Array.isArray(got) ? null : got?.fit ?? null;
+            own = Array.isArray(got?.own) ? got.own : [];
         } catch { parts = null; }
         if (!Array.isArray(parts)) {
             block.replaceChildren(el(doc, 'h4', '', SETTINGS_TEXT.size.title), el(doc, 'p', 'story-suite-muted', SETTINGS_TEXT.size.none));
@@ -840,19 +996,21 @@ export function renderSettingsHost(root, { registry, settings, doc = globalThis.
         // A small context cuts the tail's budget (prompt.js contextFit).
         const budget = Number.isInteger(fit?.budget) ? fit.budget : tailBudget();
         const names = moduleName;
-        paintSize(block, promptSize(parts, { names, budget }), false, fit);
+        paintSize(block, promptSize(parts, { names, budget, own }), false, fit, { parts, own, tokensOf: estimateTokens });
         if (typeof countTokens !== 'function') return;
         // SillyTavern's tokenizer: every text counted once, then the same sums with its numbers.
         const texts = [...new Set([
             ...parts.map(part => String(part?.text ?? '')),
             parts.filter(part => part?.place === 'static').map(part => part.text).join('\n\n'),
             parts.filter(part => part?.place !== 'static').map(part => part.text).filter(Boolean).join('\n'),
+            ...ownParts(own).map(part => part.text),
         ])];
         Promise.all(texts.map(text => Promise.resolve().then(() => countTokens(text))))
             .then(counts => {
                 if (run !== sizeRun || !counts.every(n => Number.isFinite(n) && n >= 0)) return;
                 const known = new Map(texts.map((text, at) => [text, Math.round(counts[at])]));
-                paintSize(block, promptSize(parts, { names, budget, tokensOf: text => known.get(text) ?? estimateTokens(text) }), true, fit);
+                const tokensOf = text => known.get(text) ?? estimateTokens(text);
+                paintSize(block, promptSize(parts, { names, budget, own, tokensOf }), true, fit, { parts, own, tokensOf });
             })
             .catch(() => { /* the estimate stays */ });
     }
@@ -886,6 +1044,90 @@ export function renderSettingsHost(root, { registry, settings, doc = globalThis.
         renderCompat(body, report, { doc });
         return remember(details);
     }
+    // Diagnostics: the report (built when the fold opens, and again on Refresh, Copy and Save) shown as
+    // it will be shared, then Copy (the clipboard; else the text is selected for copying by hand) and Save
+    // (a .txt download).
+    function diagnosticsFold() {
+        const T = DIAGNOSTICS_TEXT;
+        const { details, body } = fold(doc, DIAGNOSTICS_FOLD, T.title, T.hint);
+        body.appendChild(el(doc, 'p', 'story-suite-muted', T.help));
+        const report = el(doc, 'pre', 'story-suite-diagnostics-report');
+        report.tabIndex = 0;
+        report.setAttribute('aria-label', T.reportLabel);
+        const status = el(doc, 'span', 'story-suite-diagnostics-status');
+        status.setAttribute('role', 'status');
+        const actions = el(doc, 'div', 'story-suite-diagnostics-actions');
+        const action = (className, icon, label) => {
+            const node = button(doc, `menu_button ${className}`, '');
+            const glyph = el(doc, 'i', `fa-solid ${icon}`);
+            glyph.setAttribute('aria-hidden', 'true');
+            node.append(glyph, el(doc, 'span', '', label));
+            actions.appendChild(node);
+            return node;
+        };
+        const copy = action('story-suite-diagnostics-copy', 'fa-copy', T.copy);
+        const save = action('story-suite-diagnostics-save', 'fa-download', T.save);
+        const again = action('story-suite-diagnostics-refresh', 'fa-rotate', T.refresh);
+        actions.appendChild(status);
+        body.append(report, actions);
+        let run = 0;
+        const build = async () => {
+            const mine = ++run;
+            report.textContent = T.building;
+            let text;
+            try { text = String(await diagnostics.report()); } catch (error) {
+                text = fill(T.failed, { why: error?.message ?? error });
+            }
+            if (mine === run) report.textContent = text;
+            return text;
+        };
+        const selectReport = () => {
+            const win = doc.defaultView ?? globalThis;
+            const range = doc.createRange?.();
+            const selection = win.getSelection?.();
+            if (!range || !selection) return;
+            range.selectNodeContents(report);
+            selection.removeAllRanges();
+            selection.addRange(range);
+        };
+        copy.addEventListener('click', async () => {
+            const text = await build();
+            const clipboard = (doc.defaultView ?? globalThis).navigator?.clipboard;
+            try {
+                if (typeof clipboard?.writeText !== 'function') throw new Error('no clipboard');
+                await clipboard.writeText(text);
+                status.textContent = T.copied;
+            } catch {
+                selectReport();
+                status.textContent = T.copyFailed;
+            }
+        });
+        save.addEventListener('click', async () => {
+            const text = await build();
+            const name = typeof diagnostics.fileName === 'function' ? diagnostics.fileName() : 'story-suite-diagnostics.txt';
+            try {
+                const win = doc.defaultView ?? globalThis;
+                const blob = new win.Blob([text], { type: 'text/plain;charset=utf-8' });
+                const url = win.URL.createObjectURL(blob);
+                const link = el(doc, 'a');
+                link.href = url;
+                link.download = name;
+                link.hidden = true;
+                doc.body.appendChild(link);
+                link.click();
+                link.remove();
+                setTimeout(() => win.URL.revokeObjectURL(url), 1000);
+                status.textContent = fill(T.saved, { name });
+            } catch (error) {
+                status.textContent = fill(T.saveFailed, { why: error?.message ?? error });
+            }
+        });
+        again.addEventListener('click', () => { status.textContent = ''; build(); });
+        details.addEventListener('toggle', () => { if (details.open) build(); });
+        remember(details);
+        if (details.open) build();
+        return details;
+    }
     function refresh() {
         for (const node of root.querySelectorAll(FOLD_SELECTOR)) if (!node.dataset.filtered) openState.set(node.dataset.fold, node.open === true);
         root.replaceChildren();
@@ -900,7 +1142,8 @@ export function renderSettingsHost(root, { registry, settings, doc = globalThis.
             .sort(byId)
             .map(def => moduleFold(def, ownOf(def.moduleId)));
         const own = [...defs].sort(byId).flatMap(def => ownFolds(def));
-        for (const node of [hostFold(), ...own, ...(all.length ? [featuresFold(all)] : []), ...modules, versionsFold()]) root.appendChild(node);
+        const diag = diagnostics && typeof diagnostics.report === 'function' ? [diagnosticsFold()] : [];
+        for (const node of [hostFold(), ...own, ...(all.length ? [featuresFold(all)] : []), ...modules, ...diag, versionsFold()]) root.appendChild(node);
     }
     refresh();
     return { refresh, refreshSize };
@@ -917,7 +1160,7 @@ let currentOverlay = null;
  * bring into view (PACKS_FOLD for Home's "Import a pack"). The other options are renderSettingsHost's.
  * Returns { root, close(), refresh(), refreshSize(), isOpen() }.
  */
-export function openSettingsOverlay({ registry, settings, doc = globalThis.document, sdk = null, features = null, promptParts = null, countTokens = null, fold: target = null, openState = overlayOpenState, onClose = null }) {
+export function openSettingsOverlay({ registry, settings, doc = globalThis.document, sdk = null, features = null, promptParts = null, countTokens = null, diagnostics = null, fold: target = null, openState = overlayOpenState, onClose = null }) {
     // One overlay at a time: opening it again closes the one there (its listeners with it).
     if (currentOverlay?.root?.ownerDocument === doc) currentOverlay.close();
     doc.querySelector?.('#story_suite_v2_overlay')?.remove();
@@ -946,7 +1189,7 @@ export function openSettingsOverlay({ registry, settings, doc = globalThis.docum
         // A sub-fold opens its module's fold too.
         if (target.includes(SUB_FOLD)) openState.set(target.split(SUB_FOLD)[0], true);
     }
-    const host = renderSettingsHost(body, { registry, settings, doc, sdk, features, promptParts, countTokens, openState });
+    const host = renderSettingsHost(body, { registry, settings, doc, sdk, features, promptParts, countTokens, openState, diagnostics });
     let open = true;
     // The focus stays in the dialog: a Tab that would leave it, or a click on the page behind, comes back.
     const onFocus = event => {

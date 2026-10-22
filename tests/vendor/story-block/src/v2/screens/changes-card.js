@@ -11,6 +11,7 @@
 // Pure: no DOM.
 
 import { STRINGS, fill, html } from '../strings.js';
+import { formatAmount } from '../domains/money.js';
 import { BASE_CSS } from './style.js';
 
 export const CHANGES_CARD_SCREEN_ID = 'story-block/changes-card';
@@ -33,7 +34,8 @@ const TEMPLATE = `
     </li>
     <li class="line coin" data-if="changed('state.inventory.wallets.party')">
       <i class="fa-solid fa-coins" aria-hidden="true"></i>
-      <span>${html(C.wallet, { coin: '<b>{{ state.inventory.wallets.party.coin }}</b>', money: '<span data-if="state.inventory.wallets.party.coin == 1">{{ q.currency.name }}</span><span data-if="state.inventory.wallets.party.coin != 1">{{ q.currency.plural }}</span>' })}</span>
+      <span data-if="len(q.currency.coins) == 0">${html(C.wallet, { coin: '<b>{{ state.inventory.wallets.party.coin }}</b>', money: '<span data-if="state.inventory.wallets.party.coin == 1">{{ q.currency.name }}</span><span data-if="state.inventory.wallets.party.coin != 1">{{ q.currency.plural }}</span>' })}</span>
+      <span data-if="len(q.currency.coins) > 0">${html(C.wallet, { coin: '<b>{{ fmt.money(state.inventory.wallets.party.coin) }}</b>', money: '' })}</span>
     </li>
     <li class="line place" data-if="changed('state.scene.place')">
       <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
@@ -236,13 +238,16 @@ export function changesSummary({ state = null, before = null, changes = [], curr
     const name = typeof currency?.name === 'string' && currency.name ? currency.name : T.defaultMoney;
     const plural = typeof currency?.plural === 'string' && currency.plural ? currency.plural : name;
     const money = n => (Math.abs(n) === 1 ? name : plural);
+    // With coins (MODULES §F108) an amount is its mixed coins ("+3 silver 5 copper").
+    const coined = Array.isArray(currency?.coins) && currency.coins.length > 0;
+    const amount = n => (coined ? formatAmount(Math.abs(n), currency) : `${Math.abs(n)} ${money(n)}`);
     const parts = [];
     const items = [...itemList(d.gained, '+'), ...itemList(d.lost, '−')];
     if (items.length) parts.push(items.join(', '));
     if (d.held.length) parts.push(d.held.slice(0, MAX_ITEMS).map(entry => fill(T.held, { name: entry.name, qty: entry.qty })).join(', ')
         + (d.held.length > MAX_ITEMS ? fill(T.moreTail, { n: d.held.length - MAX_ITEMS }) : ''));
-    if (d.coin !== null) parts.push(`${d.coin > 0 ? '+' : '−'}${Math.abs(d.coin)} ${money(d.coin)}`);
-    else if (d.coinNow !== null) parts.push(fill(T.coinNow, { n: d.coinNow, money: money(d.coinNow) }));
+    if (d.coin !== null) parts.push(`${d.coin > 0 ? '+' : '−'}${amount(d.coin)}`);
+    else if (d.coinNow !== null) parts.push(coined ? fill(T.coinNow, { n: formatAmount(d.coinNow, currency), money: '' }).replace(/\s{2,}/g, ' ').trim() : fill(T.coinNow, { n: d.coinNow, money: money(d.coinNow) }));
     if (d.place !== null) parts.push(d.place ? fill(T.to, { place: d.place }) : T.placeCleared);
     if (d.arrived.length) parts.push(fill(T.arrived, { names: people(d.arrived) }));
     if (d.left.length) parts.push(fill(T.left, { names: people(d.left) }));

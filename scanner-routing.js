@@ -36,6 +36,14 @@ export function isScannerRoutingError(error) {
     return error?.name === 'NPCStateDeltaScannerRouteError';
 }
 
+/**
+ * (beta) True when a scanner call failed only because the model answered nothing (SillyTavern's
+ * generateRaw "No message generated", or an empty response): index.js notes it quietly, once per chat.
+ */
+export function isEmptyScannerAnswer(error) {
+    return /\bno message generated\b|\bempty (?:response|reply|answer)\b/i.test(String(error?.message ?? error ?? ''));
+}
+
 function stoppedError(timeout = false) {
     return scannerRoutingError(timeout
         ? 'The scan request timed out. Retry Scan or check the selected connection profile.'

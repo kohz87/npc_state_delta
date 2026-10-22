@@ -23,7 +23,7 @@
 const SAVE = { character: '/api/chats/save', group: '/api/chats/group/save' };
 const GET = { character: '/api/chats/get', group: '/api/chats/group/get' };
 // Browsers send a keepalive request (one that outlives the page) only up to 64 KiB.
-const KEEPALIVE_MAX = 60 * 1024;
+export const KEEPALIVE_MAX = 60 * 1024;
 
 export function createChatFile({ context, fetch = (...args) => globalThis.fetch(...args) } = {}) {
     if (typeof context !== 'function') throw new TypeError('createChatFile needs a context() function.');

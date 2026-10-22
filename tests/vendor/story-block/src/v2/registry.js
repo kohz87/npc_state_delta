@@ -180,6 +180,16 @@ export function definitionProblems(def) {
                 if (spec.aliases !== undefined && (!Array.isArray(spec.aliases) || spec.aliases.some(alias => typeof alias !== 'string' || !KIND.test(alias)))) {
                     problems.push(`capture kind "${kind}" aliases must be a list of lowercase words`);
                 }
+                // A display kind (SPEC §4.4): read for the reader alone, no command runs (extras.js).
+                if (spec.display !== undefined && spec.display !== false) {
+                    const display = spec.display;
+                    if (display !== true && !isObject(display)) problems.push(`capture kind "${kind}" display is not true or an object`);
+                    else if (isObject(display)) {
+                        if (display.perReply !== undefined && !(Number.isInteger(display.perReply) && display.perReply > 0)) problems.push(`capture kind "${kind}" display.perReply is not a positive whole number`);
+                        if (display.read !== undefined && typeof display.read !== 'function') problems.push(`capture kind "${kind}" display.read is not a function`);
+                        if (display.noun !== undefined && typeof display.noun !== 'string') problems.push(`capture kind "${kind}" display.noun is not text`);
+                    }
+                }
             }
         }
         fn(def.capture.apply, 'capture.apply');
@@ -478,12 +488,15 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         return { static: joined, tail };
     }
 
+    // A display kind's options ({ perReply?, noun?, read? }), or null for a kind that runs a command.
+    const displayOf = spec => (spec.display === true ? Object.freeze({}) : isObject(spec.display) ? spec.display : null);
+
     function captureEntry(word) {
         const kind = canonical.get(String(word ?? '').toLowerCase());
         if (!kind) return null;
         const def = defs.get(owners.kind.get(kind));
         const spec = def.capture.kinds[kind];
-        return { moduleId: def.id, kind, grammar: spec.grammar.trim(), apply: def.capture.apply, feature: featureOf(spec), off: off(spec) };
+        return { moduleId: def.id, kind, grammar: spec.grammar.trim(), apply: def.capture.apply, feature: featureOf(spec), off: off(spec), display: displayOf(spec) };
     }
 
     // The feature a command belongs to (a capture.<kind> command: its kind's), or null.
@@ -608,7 +621,7 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         command,
         /** True for a command only the host runs (capture.*, module.init.*, commands marked internal). */
         isInternal,
-        /** { moduleId, kind, grammar, apply, feature, off } for a capture kind or alias, or null. */
+        /** { moduleId, kind, grammar, apply, feature, off, display } (display: a display kind's options, else null) for a capture kind or alias, or null. */
         capture: captureEntry,
         /** The canonical kind a written kind word stands for, or null. */
         kindOf: word => canonical.get(String(word ?? '').toLowerCase()) ?? null,

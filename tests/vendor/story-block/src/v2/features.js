@@ -38,6 +38,9 @@ export const CORE_FEATURE = Object.freeze({
     extractor: 'story-block.extractor',
     inspector: 'story-block.inspector',
     savepoints: 'story-block.savepoints',
+    // Display-only lines a reply may carry for the reader (src/v2/extras.js, MODULES §F115).
+    choices: 'story-block.choices',
+    chatter: 'story-block.chatter',
 });
 
 // Where Story Block kept these switches before they were features: a reader who set one keeps that

@@ -34,13 +34,15 @@ export const FEATURE_TEXT = Object.freeze({
     }),
 });
 
-// The overlay's field types (registry.js: bool, int, choice, text, list).
+// The overlay's field types (registry.js). The profile is a `profile` field (profile-field.js, MODULES §G):
+// a dropdown of SillyTavern's Connection Manager profiles after "Same as chat", storing the profile's name
+// ('' the chat's connection; a name typed by an older version is the same value), in its own "Assist" group.
 export const SCHEMA = Object.freeze({
     [SETTING.profile]: Object.freeze({
-        type: 'text',
+        type: 'profile',
+        group: 'Assist',
         label: 'Connection profile for these calls',
-        help: 'The name of a Connection Manager profile (a cheaper model, say). Blank: the current connection.',
-        max: 80,
+        help: 'The Connection Manager profile the two helpers\' extra calls use (a cheaper model, say). Same as chat: the chat\'s connection.',
     }),
 });
 
