@@ -50,6 +50,24 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
   host's prompt log identical with the feature off and on (asked every reply). No prompt text: C10 holds.
 - Everything outside (runtime api, host global, document, timers) is injectable: no SillyTavern import here.
 
+## Screens on the glass look (UI 4c)
+
+- **Present cards** (`index.js` `inlineCardHtml`, `style.css` `.npc-state-delta-present-card*`): one compact row per person, one
+  column at every width: a 44px portrait, the name on one line, the stage line (role · mood) under it; the now lines and chatter sit
+  under the row. The meters under the cards are the `castMetersHtml` bars (`ss.meter` markup).
+- **Dossiers** (`story-block-tabs.js` `dossierTabRowsHtml`, `dossierRowHtml`): a listcard (`ss-listcard`) of rows. A row is the
+  row button (class `npc-state-delta-story-row`, `data-npc-id`), the portrait, the name, the role and status, the stage as an `ss-pill`
+  and up to `DOSSIER_BAR_MAX` (6, ss.hero's `BAR_MAX`) meters as `ss-bar` bars. `storysuite-v2.js` `withMeters` adds each row's
+  `stage` and `bars` from `npc.cast` when the list is drawn (never cached with the rows).
+- **Colours** are Story Block tokens everywhere a Story Suite root holds the screen (`--ss-text`, `--ss-muted`, `--ss-glass`,
+  `--ss-border`, `--ss-accent`, …). In the chat and the drawer, and wherever a token is unset (Solid, Follow SillyTavern without a
+  root), each rule keeps Delta's own value as the fallback. No new colour.
+- **The dossier panel** (`dossier-ui.js`, `#npc_state_delta_dossier_root .delta-panel`) carries the `ss-cards` root class; its
+  `--delta-*` variables read the tokens with Delta's values as fallbacks. Its scrolling is its own (`.delta-document`).
+- **Social check lines**: Delta draws none. `npc.socialModifier` only answers; the reasons list is drawn by RPG Battle's check table.
+- **Delta's warning** under Custom fields keeps its own rule (`#npc_state_delta_settings .npc-state-delta-suite-warning`); the
+  `story-suite-notice` glass in Story Block is scoped to the bar.
+
 ## Key files and functions
 
 - `src/storysuite-v2.js`: `createStorySuiteV2Adapter`, `startStorySuiteV2`, `isV2Host`, `sliceView`,

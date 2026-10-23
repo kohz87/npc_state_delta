@@ -1,3 +1,27 @@
+## Unreleased: UI 4c (Story Block glass screens)
+
+Delta's screens move onto Story Block's glass design (`--ss-*` tokens, the blocks' classes). No prompt, command, id or
+data attribute changes; the Cast page API (`NPCStateDeltaCast`) and the Dossiers screen id stay as they were. The version
+is not bumped (no release is authorized here).
+
+- **Present cards are one compact row** (World → Here, the game view, the Story panel): a 44px portrait on the left, the name on
+  one line (an unbroken name is cut with an ellipsis), the stage line (role and mood) under it, the now lines and the chatter
+  bubble under the row, two short lines at most. The grid is one column at every width, so the cards are full width at 360–412 px.
+- **The Dossiers list is a Story Block listcard**: each dossier is a row with its portrait, name, role and status, the stage as an
+  `ss-pill` and its meters as thin `ss-bar` bars (up to six, the host's `ss.hero` BAR_MAX). The meters come from `npc.cast` when the
+  list is drawn. The search box is a glass field. Rows keep the same button, class and `data-npc-id`.
+- **The dossier panel takes the glass tokens**: its colours, radius and blur read `--ss-*` inside its `ss-cards` root, each with
+  Delta's own value as the fallback (Solid and Follow SillyTavern keep the old look). Its sections are glass cards.
+- **The NPC meters card** (under a reply) and the World meter blocks are glass cards with the stage as a pill; the bars are the same
+  `ss.meter` widgets.
+- **The dossier panel and the settings reveal scroll only their own scroller** (no `scrollIntoView`), so a phone never moves the
+  window behind them.
+- Delta's own warning under Custom fields keeps its own rule (`#npc_state_delta_settings .npc-state-delta-suite-warning`): Story
+  Block now scopes the `story-suite-notice` glass to its bar, and Delta's notice still shows its gold rule in the drawer.
+- Testkit re-synced to Story Block v2 0d2505c (the glass CSS, the scroll helper and the theme helpers).
+- Tests: the card, row and dossier-panel CSS assertions now check the compact row and the token fallbacks; `ui4c-dossier-rows.test.js`
+  (new) checks the listcard row structure, the stage pill, the six-bar cap, the bar fill and the escaping of long names.
+
 ## Story Suite v2: 2.0.0-beta.1 (`v2` branch; Delta 1.2.20)
 
 Story Suite v2, first beta. Delta keeps its own version line: this beta build is **Delta 1.2.20**, and the suite release is named only in this heading. It needs Story Block `>=2.0.0-beta.1` (`requires`). Update Story Block first: an alpha Story Block refuses Delta's hosted module (no meters, Cast tab or overlay section), and Delta keeps working on its own, with a console warning. What's new across the suite, known issues and every module's version: [Story Block docs/v2/RELEASES.md](https://github.com/kohz87/Story_block/blob/v2/docs/v2/RELEASES.md).
