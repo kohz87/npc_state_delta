@@ -204,43 +204,66 @@
 .npc-state-delta-story-empty-state .npc-state-delta-story-empty { opacity: .8; line-height: 1.4; }
 .npc-state-delta-story-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 2px 4px; }
 .npc-state-delta-story-actions .menu_button { display: inline-flex; gap: 6px; align-items: center; min-height: 2rem; margin: 0; padding: 4px 10px; font-size: .85rem; }
-.npc-state-delta-story-dossiers { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.npc-state-delta-story-search { width: 100%; box-sizing: border-box; margin: 0; }
-.npc-state-delta-story-list { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+/* The Dossiers browser (UI 4c): the list is a Story Block listcard and each dossier one row: the portrait, the name,
+   the role and status line, the stage as a pill and the meters as thin ss.bar bars under the name. The search is a glass
+   field. Inside a Story Suite root these are Story Block's tokens; the fallbacks keep the same look in the chat. */
+.npc-state-delta-story-dossiers { display: flex; flex-direction: column; gap: var(--ss-space-2, 8px); min-width: 0; }
+.npc-state-delta-story-search {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 40px;
+  margin: 0;
+  padding: 0 var(--ss-space-3, 12px);
+  border: 1px solid var(--ss-border, rgba(216,190,145,.22));
+  border-radius: var(--ss-radius-pill, 999px);
+  background: var(--ss-field, rgba(0,0,0,.22));
+  color: var(--ss-text, inherit);
+  font: inherit;
+  font-size: 14px;
+}
+.npc-state-delta-story-search::placeholder { color: var(--ss-muted, inherit); opacity: 1; }
+.npc-state-delta-story-search:focus-visible { outline: 2px solid var(--ss-accent, #d8bc78); outline-offset: 2px; }
+.npc-state-delta-story-list {
+  min-width: 0;
+  padding: var(--ss-space-2, 8px) var(--ss-space-3, 12px);
+  border: 1px solid var(--ss-border, rgba(216,190,145,.22));
+  border-radius: var(--ss-radius-l, 18px);
+  background: var(--ss-glass, rgba(0,0,0,.2));
+  color: var(--ss-text, inherit);
+}
 .npc-state-delta-story-row {
   appearance: none;
   -webkit-appearance: none;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
-  min-width: 0;
-  margin: 0;
-  padding: 5px 7px;
-  border: 1px solid rgba(216, 190, 145, .18);
-  border-radius: 9px;
-  background: rgba(245, 238, 220, .05);
-  color: var(--SmartThemeBodyColor, #ddd);
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 6px;
+  font: inherit;
   text-align: left;
+  color: inherit;
   cursor: pointer;
   touch-action: manipulation;
 }
-.npc-state-delta-story-row:hover, .npc-state-delta-story-row:focus-visible { border-color: rgba(216, 188, 120, .6); }
+.npc-state-delta-story-row:active { transform: translateY(1px); background: var(--ss-accent-soft, rgba(216,190,145,.14)); }
+.npc-state-delta-story-row:focus-visible { outline: 2px solid var(--ss-accent, #d8bc78); outline-offset: -2px; }
 .npc-state-delta-story-thumb {
-  flex: 0 0 34px;
-  width: 34px;
-  height: 34px;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
   overflow: hidden;
-  border-radius: 50%;
-  background: rgba(0,0,0,.28);
-  font-weight: 600;
+  border-radius: var(--ss-radius-m, 11px);
+  background: var(--ss-tile, rgba(0,0,0,.28));
+  color: var(--ss-text, inherit);
+  font-weight: 800;
 }
 .npc-state-delta-story-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.npc-state-delta-story-text { display: flex; flex-direction: column; min-width: 0; }
+.npc-state-delta-story-text { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .npc-state-delta-story-text b, .npc-state-delta-story-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.npc-state-delta-story-text small { opacity: .62; font-size: .74rem; }
+.npc-state-delta-story-text small { color: var(--ss-muted, inherit); font-size: 12px; }
+.npc-state-delta-story-bars { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 8em), 1fr)); gap: 4px 12px; margin-top: 4px; min-width: 0; }
+.npc-state-delta-story-stage { flex: 0 1 auto; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Present NPCs in chat (full cards and compact strip). Tapping either opens the launcher dossier. */
 .npc-state-delta-present-roster {

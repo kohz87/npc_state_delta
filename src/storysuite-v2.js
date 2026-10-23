@@ -670,7 +670,27 @@ export function createStorySuiteV2Adapter({
     }
     function plainRowsHtml(rows, { query = '', total = 0 } = {}) {
         if (!rows.length) return `<p class="npc-state-delta-story-empty">${total ? 'No dossier matches.' : 'No dossiers yet. An NPC gets one when a scan finds them in the story.'}</p>`;
-        return rows.map(row => `<button type="button" class="npc-state-delta-story-row" data-npc-id="${escapeHtml(row.id)}" aria-label="Open ${escapeHtml(row.name)} dossier"><span class="npc-state-delta-story-thumb"><span>${escapeHtml(Array.from(row.name.trim())[0]?.toUpperCase() ?? '?')}</span></span><span class="npc-state-delta-story-text"><b>${escapeHtml(row.name)}</b><small>${escapeHtml(row.statusLabel ?? '')}</small></span></button>`).join('');
+        // The same listcard rows as story-block-tabs.js dossierRowHtml (UI 4c), without stage or meters yet.
+        return `<ul class="ss-listcard-rows">${rows.map(row => `<li class="ss-listcard-row"><button type="button" class="ss-listcard-item npc-state-delta-story-row" data-npc-id="${escapeHtml(row.id)}" aria-label="Open ${escapeHtml(row.name)} dossier"><span class="npc-state-delta-story-thumb ss-listcard-icon"><span>${escapeHtml(Array.from(row.name.trim())[0]?.toUpperCase() ?? '?')}</span></span><span class="npc-state-delta-story-text ss-listcard-main"><b class="ss-listcard-title">${escapeHtml(row.name)}</b><small class="ss-listcard-sub">${escapeHtml(row.statusLabel ?? '')}</small></span></button></li>`).join('')}</ul>`;
+    }
+    // Each row's stage and meters (npc.cast: the ranks and bars the present cards' meters show; the row draws at most DOSSIER_BAR_MAX).
+    // Read when the list is drawn and never cached with the rows: a reply moves them without changing any dossier.
+    function withMeters(rows) {
+        if (!hosted || !rows.length || typeof sdkRef?.query !== 'function') return rows;
+        let cast;
+        try {
+            const head = headReply?.();
+            cast = sdkRef.query('npc.cast', Number.isInteger(head) ? { headReply: head } : {});
+        } catch {
+            return rows;
+        }
+        if (!Array.isArray(cast) || !cast.length) return rows;
+        const byKey = Object.fromEntries(cast.map(entry => [entry.key, entry]));
+        return rows.map(row => {
+            const who = part.identify(byKey, row.name);
+            const entry = who && Object.hasOwn(byKey, who.key) ? byKey[who.key] : null;
+            return entry ? { ...row, stage: entry.rank || '', bars: entry.bars ?? [] } : row;
+        });
     }
     // The rows a search shows, as markup: v1's filter and rows when loaded, else names that contain it.
     function dossierRowsHtml(query = '') {
@@ -684,7 +704,7 @@ export function createStorySuiteV2Adapter({
             }
         } catch { visible = rows; }
         try {
-            return listParts?.rowsHtml ? listParts.rowsHtml(visible, { query, total: rows.length }) : plainRowsHtml(visible, { query, total: rows.length });
+            return listParts?.rowsHtml ? listParts.rowsHtml(withMeters(visible), { query, total: rows.length }) : plainRowsHtml(visible, { query, total: rows.length });
         } catch {
             return plainRowsHtml(visible, { query, total: rows.length });
         }
@@ -697,7 +717,7 @@ export function createStorySuiteV2Adapter({
         const query = typeof el?.__npcStateDeltaV2Find === 'string' ? el.__npcStateDeltaV2Find : '';
         return `<div class="npc-state-delta-story-dossiers npc-state-delta-v2-dossiers"><span class="npc-state-delta-kicker">DOSSIERS</span>`
             + `<input type="search" class="text_pole npc-state-delta-story-search" placeholder="Search dossiers" aria-label="Search dossiers" maxlength="80" value="${escapeHtml(query)}">`
-            + `<div class="npc-state-delta-story-list">${dossierRowsHtml(query)}</div></div>`;
+            + `<div class="npc-state-delta-story-list ss-listcard ss-glass">${dossierRowsHtml(query)}</div></div>`;
     }
 
     // The present NPCs' meters under the cards: one bar per shown meter, drawn with ss.meter's own

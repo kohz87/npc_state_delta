@@ -226,14 +226,14 @@ test('v1.1.11 with Story Block, Only in Story Block clears the chat cast and the
     });
 });
 
-test('v1.1.12 a choice made in settings is remembered; the Story Block pane is padded and keeps cards small', () => {
+test('v1.1.12 a choice made in settings is remembered; the Story Block pane is padded and keeps its cards to one column (UI 4c)', () => {
     const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
     const css = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
     assert.match(index, /presentCastDisplayChosen: false,/);
     assert.match(index, /getSettings\(\)\.presentCastDisplayChosen = true;/, 'picking any choice marks it deliberate');
     assert.match(index, /\$\('#npc_state_delta_present_cast_display'\)\.val\(effectivePresentCastChoice\(\)\)/, 'the menu shows the choice in effect');
     assert.match(css, /\.npc-state-delta-story-pane \{ padding: 8px 12px 12px;/);
-    assert.match(css, /\.npc-state-delta-story-pane \.npc-state-delta-present-grid \{ grid-template-columns: repeat\(auto-fill, minmax\(104px, 1fr\)\); \}/);
+    assert.match(css, /\.npc-state-delta-present-grid \{ display: grid; grid-template-columns: minmax\(0, 1fr\);/, 'the cards are one row each in the pane (UI 4c)');
 });
 
 test('1.2.13 an empty Present NPCs tab says why, and offers Scan now when a scan could help', () => {

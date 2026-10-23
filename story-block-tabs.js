@@ -19,20 +19,46 @@ export function emptyCastHtml(reason = null) {
 const paneHtml = html => `<div class="npc-state-delta-story-pane">${html}</div>`;
 
 
+// UI 4c: each dossier is a row of Story Block's listcard (ss.listcard's classes): the portrait, the name, the role and
+// status line, the stage as a pill and the NPC's meters as thin ss.bar bars (the widget's markup). The stage and the
+// bars come from npc.cast (storysuite-v2.js). The bars are at most DOSSIER_BAR_MAX: ss.hero's BAR_MAX (Story Block,
+// src/v2/view/widgets/hero.js). The rows are not capped: the list is Delta's, and a dossier is never hidden.
+export const DOSSIER_BAR_MAX = 6;
+const barFraction = bar => {
+    const min = Number.isFinite(Number(bar.min)) ? Number(bar.min) : 0;
+    const max = Number.isFinite(Number(bar.max)) ? Number(bar.max) : 100;
+    const value = Number(bar.value);
+    if (!Number.isFinite(value) || max <= min) return 0;
+    return Math.min(1, Math.max(0, (value - min) / (max - min)));
+};
+function meterBarsHtml(bars) {
+    const shown = (Array.isArray(bars) ? bars : []).filter(bar => bar && typeof bar === 'object').slice(0, DOSSIER_BAR_MAX);
+    if (!shown.length) return '';
+    const bar = item => {
+        const label = escapeHtml(String(item.label || item.id || ''));
+        const text = escapeHtml(String(item.text ?? item.value ?? ''));
+        return `<span class="ss-bar"><span class="ss-bar-head"><span class="ss-bar-label">${label}</span><span class="ss-bar-value">${text}</span></span><span class="ss-bar-track"><span class="ss-bar-fill" style="--ss-fill: ${barFraction(item).toFixed(3)}"></span></span></span>`;
+    };
+    return `<span class="npc-state-delta-story-bars" aria-hidden="true">${shown.map(bar).join('')}</span>`;
+}
+/** One dossier's listcard row (a list item holding the row's button); `row` is a dossier row with optional stage and bars. */
+export function dossierRowHtml(row) {
+    const initial = escapeHtml((row.name || '?').trim().charAt(0).toUpperCase() || '?');
+    const portrait = row.portrait
+        ? `<img src="${escapeHtml(row.portrait)}" alt="" loading="lazy">`
+        : `<span>${initial}</span>`;
+    const detail = [row.role, row.statusLabel].filter(Boolean).join(' · ');
+    const stage = row.stage ? `<span class="ss-pill ss-listcard-value npc-state-delta-story-stage">${escapeHtml(row.stage)}</span>` : '';
+    return `<li class="ss-listcard-row"><button type="button" class="ss-listcard-item npc-state-delta-story-row" data-npc-id="${escapeHtml(row.id)}" aria-label="Open ${escapeHtml(row.name)} dossier"><span class="npc-state-delta-story-thumb ss-listcard-icon">${portrait}</span><span class="npc-state-delta-story-text ss-listcard-main"><b class="ss-listcard-title">${escapeHtml(row.name)}</b><small class="ss-listcard-sub">${escapeHtml(detail)}</small>${meterBarsHtml(row.bars)}</span>${stage}</button></li>`;
+}
+
 export function dossierTabRowsHtml(rows = [], { query = '', total = null } = {}) {
     if (!rows.length && String(query).trim()) return `<p class="npc-state-delta-story-empty">No dossier matches “${escapeHtml(String(query).trim())}”.</p>`;
     if (!rows.length && total === 0) {
         return `<div class="npc-state-delta-story-empty-state"><p class="npc-state-delta-story-empty">No dossiers yet. An NPC gets one when a scan finds them in the story, or you can add one yourself.</p><div class="npc-state-delta-story-actions">${actionButton('add', 'fa-user-plus', 'Add NPC')}${actionButton('scan', 'fa-wand-magic-sparkles', 'Scan now')}</div></div>`;
     }
     if (!rows.length) return '<p class="npc-state-delta-story-empty">No dossier matches.</p>';
-    return rows.map(row => {
-        const initial = escapeHtml((row.name || '?').trim().charAt(0).toUpperCase() || '?');
-        const portrait = row.portrait
-            ? `<img src="${escapeHtml(row.portrait)}" alt="" loading="lazy">`
-            : `<span>${initial}</span>`;
-        const detail = [row.role, row.statusLabel].filter(Boolean).join(' · ');
-        return `<button type="button" class="npc-state-delta-story-row" data-npc-id="${escapeHtml(row.id)}" aria-label="Open ${escapeHtml(row.name)} dossier"><span class="npc-state-delta-story-thumb">${portrait}</span><span class="npc-state-delta-story-text"><b>${escapeHtml(row.name)}</b><small>${escapeHtml(detail)}</small></span></button>`;
-    }).join('');
+    return `<ul class="ss-listcard-rows">${rows.map(dossierRowHtml).join('')}</ul>`;
 }
 
 // Story Block re-renders external tabs on every refresh, so both panes keep their own DOM and

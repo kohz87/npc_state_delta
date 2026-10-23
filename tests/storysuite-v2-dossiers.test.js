@@ -149,7 +149,7 @@ test('Dossiers lists every dossier with v1\'s rows; a row opens its dossier; sea
     el.dataset.tabId = CAST_TAB_ID;
     def.tabs[0].render(el, {}, {});
     assert.match(el.innerHTML, /npc-state-delta-v2-dossiers/);
-    for (const id of ['npc_mira', 'npc_oren']) assert.match(el.innerHTML, new RegExp(`class="npc-state-delta-story-row" data-npc-id="${id}"`));
+    for (const id of ['npc_mira', 'npc_oren']) assert.match(el.innerHTML, new RegExp(`class="ss-listcard-item npc-state-delta-story-row" data-npc-id="${id}"`));
     assert.match(el.innerHTML, /Guard/, 'v1\'s row detail (role, status)');
     el.fire('click', { target: { closest: selector => (selector === '.npc-state-delta-story-row' ? { dataset: { npcId: 'npc_oren' } } : null) } });
     assert.deepEqual(delta.opened, ['npc_oren'], 'Delta\'s own dossier view');
@@ -193,7 +193,7 @@ test('before v1\'s list has loaded (or if it cannot), Dossiers is a plain list o
     const { doc, delta, def, adapter } = await setup({ world: true, loadDossierList: () => Promise.reject(new Error('no list')) });
     const el = element(doc);
     def.tabs[0].render(el, {}, {});
-    for (const name of ['Mira', 'Oren', 'Kael']) assert.match(el.innerHTML, new RegExp(`<b>${name}</b>`));
+    for (const name of ['Mira', 'Oren', 'Kael']) assert.match(el.innerHTML, new RegExp(`<b class="ss-listcard-title">${name}</b>`));
     el.fire('click', { target: { closest: selector => (selector === '.npc-state-delta-story-row' ? { dataset: { npcId: 'npc_mira' } } : null) } });
     assert.deepEqual(delta.opened, ['npc_mira']);
     adapter.stop();
