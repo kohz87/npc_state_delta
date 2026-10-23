@@ -12,6 +12,22 @@ import { parseChanges } from '../capture.js';
 // conditions (no heal), and an item handed over or used up (`- item`: only what the party holds).
 export const DEFAULT_KINDS = '! time, ~ time, ~ place, + present, - present, ~ weather, ~ quest, - quest, ~ wound, - item';
 
+// The kinds the settings page offers as chips, one per entry of the default allow-list and in its order: the kinds the wall
+// lets through. Coin, new items, XP, loot, heals and rewards have no chip: the wall never writes them, whatever is stored
+// (a test keeps every chip on the right side of it).
+export const KIND_CHOICES = Object.freeze([
+    Object.freeze({ value: '! time', label: 'Time set' }),
+    Object.freeze({ value: '~ time', label: 'Time moves on' }),
+    Object.freeze({ value: '~ place', label: 'Place' }),
+    Object.freeze({ value: '+ present', label: 'Someone arrives' }),
+    Object.freeze({ value: '- present', label: 'Someone leaves' }),
+    Object.freeze({ value: '~ weather', label: 'Weather' }),
+    Object.freeze({ value: '~ quest', label: 'Quest progress' }),
+    Object.freeze({ value: '- quest', label: 'Quest turned in' }),
+    Object.freeze({ value: '~ wound', label: 'Wounds' }),
+    Object.freeze({ value: '- item', label: 'Item handed over' }),
+]);
+
 // Kinds whose `+` line adds value or something only the reader decides, under any setting.
 const ADDS = new Set(['item', 'coin', 'coins', 'money', 'gold', 'loot', 'xp', 'exp', 'level', 'reward', 'join', 'skill', 'craft', 'buy', 'sell', 'grant']);
 // Kinds never taken from the extractor at all.

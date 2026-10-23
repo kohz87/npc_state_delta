@@ -106,14 +106,20 @@ export function createReplyExtras({
         return node;
     }
 
+    // The strip is folded by default (the beta test's request): its summary says what is under it and how many
+    // there are; opened, one option per row, each a full-width glass button that fills the message box.
     function build(index, shown) {
         const root = el('div', EXTRAS_CLASS);
         root.setAttribute('data-ss-index', String(index));
         if (shown.choices.length) {
+            const fold = el('details', 'story-suite-choices-fold');
+            const summary = el('summary', 'story-suite-choices-summary');
+            const chevron = glyph('fa-chevron-down');
+            chevron.classList.add('story-suite-choices-chevron');
+            summary.append(glyph('fa-signs-post'), el('span', 'story-suite-choices-label', X.choices), el('span', 'story-suite-choices-count', String(shown.choices.length)), chevron);
             const row = el('div', 'story-suite-choices');
             row.setAttribute('role', 'group');
             row.setAttribute('aria-label', X.choices);
-            row.appendChild(glyph('fa-signs-post'));
             for (const choice of shown.choices) {
                 const node = button('story-suite-choice', choice.text, X.choiceTitle);
                 node.addEventListener('click', event => {
@@ -123,7 +129,8 @@ export function createReplyExtras({
                 });
                 row.appendChild(node);
             }
-            root.appendChild(row);
+            fold.append(summary, row);
+            root.appendChild(fold);
         }
         return root;
     }

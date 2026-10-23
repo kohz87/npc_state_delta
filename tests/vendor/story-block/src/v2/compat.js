@@ -86,7 +86,13 @@ export function compatReport({ hostVersion = '', modules = [], refusals = [], wa
     return { host, rows, outOfStep: rows.filter(row => OUT.has(row.state)).length };
 }
 
-/** The Versions fold's body: one line per module, its fix sentence under it when out of step. */
+/** "needs ≥2.0.0-beta.1": a `>=` range is said with ≥, any other range as it is written. */
+const needsText = requires => (requires ? `needs ${requires.replace(/^>=\s*/, '≥')}` : 'needs: not said');
+
+/**
+ * The Versions card's body: one line per module, each said once ("RPG Battle 2.0.0-beta.1 · needs ≥2.0.0-beta.1 · In step"); what a
+ * module that is out of step makes of it (its note and the fix) goes under its line, and nothing is repeated for one that fits.
+ */
 export function renderCompat(el, report, { doc = el?.ownerDocument ?? globalThis.document } = {}) {
     const make = (tag, className, value) => {
         const node = doc.createElement(tag);
@@ -104,13 +110,17 @@ export function renderCompat(el, report, { doc = el?.ownerDocument ?? globalThis
         item.dataset.module = row.id;
         item.dataset.state = row.state;
         const head = make('div', 'story-suite-compat-head');
-        head.appendChild(make('b', '', row.name));
+        head.appendChild(make('b', 'story-suite-compat-name', row.name));
         head.appendChild(make('span', 'story-suite-compat-version', row.version || 'no version'));
-        if (row.id !== 'story-block') head.appendChild(make('span', 'story-suite-muted story-suite-compat-requires', row.requires ? `needs Story Block ${row.requires}` : 'needs: not said'));
+        // Story Block itself needs nothing; every other row says which Story Block it needs.
+        if (row.id !== 'story-block') head.appendChild(make('span', 'story-suite-muted story-suite-compat-requires', needsText(row.requires)));
         head.appendChild(make('span', 'story-suite-compat-state', STATES[row.state] ?? row.state));
         item.appendChild(head);
-        if (row.note) item.appendChild(make('small', 'story-suite-muted story-suite-compat-note', row.note));
-        if (row.fix) item.appendChild(make('p', 'story-suite-compat-fix', row.fix));
+        // A module that fits says nothing more; one that does not says why and what to do.
+        if (row.state !== 'ok' && row.state !== 'unstated') {
+            if (row.note) item.appendChild(make('small', 'story-suite-muted story-suite-compat-note', row.note));
+            if (row.fix) item.appendChild(make('p', 'story-suite-compat-fix', row.fix));
+        }
         list.appendChild(item);
     }
     el.appendChild(list);

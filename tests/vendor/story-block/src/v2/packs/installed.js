@@ -18,6 +18,20 @@ import { byteLength } from './safety.js';
 
 const SOURCES = ['file', 'lorebook'];
 
+const countOf = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+/** What a normalized pack adds beside its content lists, in words: "coins", "a calendar", "3 weather tables"… */
+export function extrasOf(pack) {
+    const out = [];
+    if (pack.currency) out.push(Array.isArray(pack.currency.coins) && pack.currency.coins.length ? `${countOf(pack.currency.coins.length, 'coin')}` : 'a money word');
+    if (pack.economy) out.push('a money scale');
+    if (pack.calendar) out.push('a calendar');
+    if (pack.weather?.tables?.length) out.push(countOf(pack.weather.tables.length, 'weather table'));
+    if (pack.screens?.length) out.push(countOf(pack.screens.length, 'screen'));
+    if (pack.layouts?.length) out.push(countOf(pack.layouts.length, 'layout'));
+    if (pack.theme && Object.keys(pack.theme).length) out.push('a theme');
+    return out;
+}
+
 /**
  * `settings`: `{ read() → the storySuite settings object (created by the caller), save() }`.
  * `capabilities()`: the capability names this Story Block has, or null when unknown.
@@ -64,6 +78,8 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
                     origin: String(entry.origin ?? ''),
                     counts: pack ? Object.fromEntries(Object.entries(pack.content).map(([kind, list]) => [kind, list.length])) : {},
                     hasStart: Boolean(pack?.start),
+                    // What else it adds, beside its content lists: its coins, a money scale, a calendar, weather tables, screens, a theme.
+                    extras: pack ? extrasOf(pack) : [],
                     missing: pack && have ? pack.requires.capabilities.filter(name => !have.includes(name)) : [],
                     problem: result.ok ? '' : result.errors[0].message,
                 };

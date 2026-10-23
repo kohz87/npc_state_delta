@@ -51,12 +51,12 @@ export const DEFAULT_ORDER = Object.freeze({
 // Screens hidden by default while another screen is registered, the one that shows the same and more
 // (MODULES §F119): Story Block's Scene (place, kind, region, story time, the people with portraits) while
 // Story Director's World is there, whose Now → Here has all of it. The reader shows it again in Settings →
-// Story Suite → Tabs; their saved choice wins (view/tab-order.js). Home's scene panel is not a screen here.
+// Tabs & Packs → Tabs; their saved choice wins (view/tab-order.js). Home's scene panel is not a screen here.
 export const DEFAULT_HIDDEN = Object.freeze({ 'story-block/scene': 'story-director/world' });
 // A screen with no `order` and no default place: after the suite's own, before the Director.
 export const REST_ORDER = 150;
 // The suite's own screens and tabs: always in DEFAULT_ORDER, whatever `order` an older module still gives
-// (Cast, now Dossiers, once said 35); the reader moves them in Settings → Story Suite → Tabs.
+// (Cast, now Dossiers, once said 35); the reader moves them in Settings → Tabs & Packs → Tabs.
 export const SUITE_NAV = Object.freeze([
     'rpg-battle/party', 'story-block/inventory', 'story-director/quests', 'story-director/world', 'story-director/map',
     'rpg-battle/fight', 'rpg-battle/crafting', 'rpg-battle/trade', 'story-block/scene',

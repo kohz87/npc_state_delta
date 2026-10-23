@@ -4,7 +4,7 @@
 // with a fade on the edge where more items are scrolled out of sight (scroll-cue.js), a close button, and
 // Escape closes it. It shows the head state and redraws when the head changes while it is open.
 //
-// The reader's order and hidden screens (Settings → Story Suite → Tabs, view/tab-order.js) come in through
+// The reader's order and hidden screens (Settings → Tabs & Packs → Tabs, view/tab-order.js) come in through
 // `deps.screens.list` (the order) and `deps.inNav` (hidden ones leave the navigation, but a screen opened by
 // name, a fight starting, still opens). The current item is scrolled into view when the bar overflows.
 //

@@ -34,6 +34,7 @@ export const STRINGS = deepFreeze({
     panel: {
         title: 'Story',
         close: 'Close the story panel',
+        tabs: 'Story panel tabs',
     },
     drawer: {
         title: 'Story Block',

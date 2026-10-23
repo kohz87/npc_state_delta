@@ -16,12 +16,15 @@
 //   that only fill the message box. Inner chatter is not drawn under replies (World → Now or Scene shows it).
 // * The tab panel: the tab host (src/v2/host-ui.js) with every module tab and every `tab` screen, a
 //   side sheet on wide screens and a bottom sheet on phones. Redrawn from the head on every change.
-// * The reader's tab order (src/v2/view/tab-order.js, Settings → Story Suite → Tabs): one list for the
+// * The reader's tab order (src/v2/view/tab-order.js, Settings → Tabs & Packs → Tabs): one list for the
 //   panel's tabs and the game view's screens, Up/Down, Shown, Reset to default. Hidden ones leave the
 //   tab strip and the game view's navigation; Home is always first and shown.
 // * The Story Block drawer in Extensions: version, modules, the same buttons.
 // * Settings → Diagnostics (src/v2/diagnostics.js): a report to copy or save, made from the runtime's
-//   parts and each module's `hooks.diagnostics`; Story Suite's console errors are caught for it.
+//   parts and each module's `hooks.diagnostics`; Story Suite's console errors are caught for it. And
+//   "Show the UI sample" (src/v2/screens/ui-sample.js): every building block of the look, light and dark.
+// * The look (src/v2/view/theme.js): the theme bridge writes Story Suite's tokens (light or dark from
+//   SillyTavern's theme, Settings → Story Suite → Panel style and Font) for every Story Suite root.
 // * The wand menu: Story Suite (the overlay). The overlay's prompt size counts what the next reply would
 //   be sent (turn.preview) with SillyTavern's tokenizer when there is one; `openSettings({ fold })` opens
 //   it at one fold (Home's "Import a pack" → the Packs fold, while no pack is installed).
@@ -35,7 +38,8 @@
 // in src/v2/strings.js.
 
 import { formatAmount } from './domains/money.js';
-import { PACKS_FOLD, createTabHost, openSettingsOverlay } from './host-ui.js';
+import { PACKS_FOLD, createTabHost } from './host-ui.js';
+import { openSettingsWindow } from './view/settings/window.js';
 import { mountQuery } from './sdk.js';
 import { createMounts } from './view/mounts/index.js';
 import { createScreenRenderer } from './view/render-screen.js';
@@ -56,6 +60,8 @@ import { createSavePointsWidget, SAVEPOINTS_WIDGET } from './screens/savepoints.
 import { createPacksHintWidget, PACKS_HINT_WIDGET } from './screens/packs-hint.js';
 import { createReadyHintWidget, READY_HINT_WIDGET } from './screens/ready-hint.js';
 import { buildReport, captureConsole, caughtSoFar, reportFileName } from './diagnostics.js';
+import { createThemeBridge } from './view/theme.js';
+import { openUiSample } from './screens/ui-sample.js';
 
 const IDS = Object.freeze({ bar: 'story_suite_v2_bar', panel: 'story_suite_v2_panel', drawer: 'story_suite_v2_drawer', menu: 'story_suite_v2_menu' });
 
@@ -201,7 +207,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         },
     });
     // The screen registry as the mounts see it: a screen under a feature that is off is not there, and the
-    // game view's and the tab strip's screens come in the reader's order (Settings → Story Suite → Tabs).
+    // game view's and the tab strip's screens come in the reader's order (Settings → Tabs & Packs → Tabs).
     const allScreens = createScreens(readerStore(ctx));
     const screenOff = id => registry.screenOff?.(id) === true;
     const tabOrder = createTabOrderStore(ctx);
@@ -361,7 +367,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
     const panelTabs = () => [...registry.tabs(), ...extraTabs.map(tab => ({ ...tab, moduleId: 'screens' }))];
     const tabSource = { tabs: () => visibleNav(panelTabs(), tabOrder.choice(), navKey, tab => tab.order, navPresent) };
 
-    // Settings → Story Suite → Tabs: every tab and screen once (by id), where it shows, in the reader's order.
+    // Settings → Tabs & Packs → Tabs: every tab and screen once (by id), where it shows, in the reader's order.
     function tabRows() {
         const rows = new Map();
         const add = (id, { title, icon, order }, where) => {
@@ -451,7 +457,16 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         const data = answer?.ok ? await answer.json() : null;
         return data?.pkgVersion ? `SillyTavern ${data.pkgVersion}` : '';
     };
+    // Story Suite's look (view/theme.js): light or dark from SillyTavern's theme, the reader's panel style
+    // and font, on every Story Suite root; SillyTavern's own elements are never touched.
+    const theme = createThemeBridge({ doc, settings: () => settings() });
+    const sanitizer = globalThis.SillyTavern?.libs?.DOMPurify?.sanitize?.bind(globalThis.SillyTavern.libs.DOMPurify) ?? null;
     const diagnostics = Object.freeze({
+        // Settings → Diagnostics → Show the UI sample: every building block, light and dark (screens/ui-sample.js).
+        sample: () => {
+            overlay?.close?.();
+            return openUiSample({ doc, widgets, sanitize: sanitizer });
+        },
         report: () => buildReport({
             stVersion,
             hostVersion: version || registry.hostVersion?.() || '',
@@ -473,9 +488,9 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
     });
     function openSettings(options = null) {
         const fold = typeof options?.fold === 'string' ? options.fold : null;
-        overlay = openSettingsOverlay({
+        overlay = openSettingsWindow({
             registry, settings, doc, sdk, features: runtime.features ?? null, fold, diagnostics,
-            promptParts, tabs: tabsControl,
+            promptParts, tabs: tabsControl, theme,
             countTokens: countTokens(),
             onClose: () => { overlay = null; },
         });
@@ -673,8 +688,10 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         extras,
         savePoints,
         inspector,
+        theme,
         destroy() {
             overlay?.close?.();
+            theme.destroy();
             doc.removeEventListener?.('keydown', onKey);
             offs.splice(0).forEach(off => off?.());
             notes.destroy();

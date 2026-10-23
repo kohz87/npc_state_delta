@@ -35,6 +35,8 @@ export function renderAssistSection(target, status) {
     const doc = target.ownerDocument ?? globalThis.document;
     const root = el(doc, 'div', 'ss-assist');
     const draw = value => {
+        // Refresh draws the panel again: if the focus was inside it (on Refresh), it goes to the new button, not to the page.
+        const hadFocus = Boolean(doc.activeElement) && root.contains(doc.activeElement);
         root.textContent = '';
         const onOff = on => (on ? 'on' : 'off');
         root.appendChild(el(doc, 'div', 'ss-assist-state', `Pre-roll checks: ${onOff(value?.classifier?.on)}. Reading forgotten changes: ${onOff(value?.extractor?.on)}.`));
@@ -52,6 +54,7 @@ export function renderAssistSection(target, status) {
         refresh.type = 'button';
         refresh.addEventListener('click', () => load());
         root.appendChild(refresh);
+        if (hadFocus) refresh.focus?.();
     };
     const load = () => {
         let value;

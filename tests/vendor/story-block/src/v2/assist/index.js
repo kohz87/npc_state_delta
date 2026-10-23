@@ -27,7 +27,7 @@ export {
     checkLine, claimKey, classifierPrompt, createClassifier, normalizeDc, parseClassifierAnswer, pendingCheckId, precheck,
 } from './classifier.js';
 export { EXTRACTOR_FOOT, EXTRACTOR_HEAD, MAX_LINES, REPLY_HEAD, REPLY_LIMIT, WRITTEN_HEAD, allowedGrammar, createExtractor, extractorPrompt, grammarKind, notWritten, parseExtractorAnswer } from './extractor.js';
-export { DEFAULT_KINDS, allowedKinds, refusedWhy, safeLines } from './safety.js';
+export { DEFAULT_KINDS, KIND_CHOICES, allowedKinds, refusedWhy, safeLines } from './safety.js';
 export { renderAssistSection, runLine } from './section.js';
 export { answerText, findProfile, stCallModel, stChat, stChatId } from './st-adapter.js';
 

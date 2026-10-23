@@ -116,11 +116,13 @@ const TEMPLATE = `
 
 const CSS = `${BASE_CSS}
 .home { display: grid; gap: var(--sb-gap); grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: start; }
-.hero { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; }
-.who { flex: 1; min-width: 0; }
+.hero { grid-column: 1 / -1; display: flex; flex-direction: row; gap: 12px; align-items: center; text-align: start; }
+.hero .face { flex: none; }
+.who { flex: 1 1 0; min-width: 0; }
 .who h3 { margin: 0; color: var(--sb-accent); }
 .sub { margin: 0 0 4px; font-size: 0.85em; }
-.pools { display: grid; gap: 4px; }
+.pools { display: grid; gap: 4px; min-width: 0; }
+.pools > * { min-width: 0; }
 .conds { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .party ul, .quests ul { display: grid; gap: 6px; }
 .fight { border-color: color-mix(in srgb, var(--sb-bad) 55%, var(--sb-border)); }
@@ -129,6 +131,8 @@ const CSS = `${BASE_CSS}
 .chip.status[data-state="here"], .chip.status[data-state="ready"] { color: var(--sb-good); }
 .chip.status[data-state="offered"] { color: var(--sb-accent); }
 .panel p { margin: 2px 0; }
+.quest { min-width: 0; overflow-wrap: anywhere; }
+.chip.status { max-width: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .worn { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .progress { margin-top: 4px; }
 .saves-slot:empty, .packs-slot:empty { display: none; }
@@ -155,7 +159,6 @@ const CSS = `${BASE_CSS}
 .sb-save-when { font-size: 0.8em; }
 .sb-save-actions { display: flex; gap: 4px; }
 .sb-save-status { margin: 0; font-size: 0.85em; }
-@media (max-width: 480px) { .hero { flex-direction: column; text-align: center; } }
 `;
 
 export const homeScreen = Object.freeze({

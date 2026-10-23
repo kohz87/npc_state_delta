@@ -1,4 +1,4 @@
-// Story Suite v2: the reader's order for the tabs and screens (Settings → Story Suite → Tabs). One list
+// Story Suite v2: the reader's order for the tabs and screens (Settings → Tabs & Packs → Tabs). One list
 // covers both places: the Story panel's tab strip (module tabs and tab screens) and the game view's
 // navigation (screens), so moving Fight up moves it in both.
 //
