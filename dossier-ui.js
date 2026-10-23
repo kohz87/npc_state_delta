@@ -1108,13 +1108,13 @@ const STYLES = `
      Story Block, or in Solid and Follow SillyTavern where a token is unset, each keeps Delta's own value (the fallback). */
   --delta-bg: var(--ss-sheet-bg, var(--SmartThemeBlurTintColor, #18191d));
   --delta-text: var(--ss-text, var(--SmartThemeBodyColor, #f0eee9));
-  --delta-muted: var(--ss-muted, color-mix(in srgb, var(--delta-text) 66%, transparent));
+  --delta-muted: var(--ss-text, color-mix(in srgb, var(--delta-text) 66%, transparent));
   --delta-surface: var(--ss-glass, rgba(255,255,255,.055));
   --delta-surface-strong: var(--ss-glass-strong, rgba(255,255,255,.085));
   --delta-line: var(--ss-border, rgba(218,193,148,.24));
   --delta-line-strong: rgba(218,193,148,.52);
   --delta-accent: var(--ss-accent, #d8bc78);
-  --delta-accent-soft: var(--ss-accent, #f0ddb0);
+  --delta-accent-soft: var(--ss-text, #f0ddb0);
   --delta-good: #9ed5b6;
   --delta-warn: #e9c98d;
   --delta-danger: #efaaaa;

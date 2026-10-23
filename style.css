@@ -228,7 +228,7 @@
   padding: var(--ss-space-2, 8px) var(--ss-space-3, 12px);
   border: 1px solid var(--ss-border, rgba(216,190,145,.22));
   border-radius: var(--ss-radius-l, 18px);
-  background: var(--ss-glass, rgba(0,0,0,.2));
+  background: var(--ss-glass-strong, rgba(0,0,0,.2));
   color: var(--ss-text, inherit);
 }
 .npc-state-delta-story-row {
