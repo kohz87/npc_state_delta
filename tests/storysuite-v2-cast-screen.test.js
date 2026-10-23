@@ -23,6 +23,11 @@ function element(owner, tag = 'div') {
         addEventListener(type, fn) { this.listeners.push({ type, fn }); },
         querySelectorAll: () => [],
         querySelector: () => null,
+        classList: { add() {}, remove() {}, contains: () => false },
+        setAttribute() {},
+        getAttribute: () => null,
+        textContent: '',
+        value: '',
     };
     return node;
 }
@@ -35,6 +40,7 @@ function fakePage() {
         addEventListener(type, fn) { (handlers[type] ??= []).push(fn); },
         dispatchEvent() { return true; },
         createElement: tag => element(doc, tag),
+        createTextNode: text => ({ nodeType: 3, textContent: String(text) }),
         fire(type) { for (const fn of handlers[type] ?? []) fn({ type }); },
         handlers,
     };

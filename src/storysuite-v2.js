@@ -200,34 +200,6 @@ export function portraitUrl(npc, formPortraits = {}) {
 
 const METER_TONES = new Set(['neutral', 'accent', 'good', 'warn', 'bad', 'info']);
 
-/**
- * One meter bar as ss.meter draws it (WIDGETS.md: role="meter", aria values, `ss-w-meter-*` parts,
- * `--ss-w-ratio` on the track), as markup for the Cast tab. `def`: { id, label, min, max, tone }.
- * `extra` (all optional): { text (the value as shown), ceiling (a notch on the track), ticks: [{ at,
- * label }] (thresholds as marks), delta (▲3 / ▼2 beside the value) }.
- */
-export function meterBarHtml(def, value, stage = '', extra = {}) {
-    const min = Number.isFinite(def?.min) ? def.min : -100;
-    const max = Number.isFinite(def?.max) && def.max > min ? def.max : min + 100;
-    const now = Math.min(max, Math.max(min, Number.isFinite(Number(value)) ? Math.round(Number(value)) : min));
-    const at = point => Math.round(((Math.min(max, Math.max(min, point)) - min) / (max - min)) * 10000) / 10000;
-    const ratio = at(now);
-    const text = typeof extra?.text === 'string' && extra.text ? extra.text : stage ? `${now} · ${stage}` : String(now);
-    const tone = METER_TONES.has(def?.tone) ? def.tone : 'neutral';
-    const label = escapeHtml(def?.label ?? def?.id ?? '');
-    const delta = Number.isInteger(extra?.delta) && extra.delta !== 0 ? extra.delta : 0;
-    const deltaHtml = delta ? `<span class="npc-state-delta-v2-delta ${delta > 0 ? 'npc-state-delta-v2-delta-up' : 'npc-state-delta-v2-delta-down'}" aria-hidden="true">${delta > 0 ? '▲' : '▼'}${Math.abs(delta)}</span>` : '';
-    const marks = [];
-    for (const tick of (Array.isArray(extra?.ticks) ? extra.ticks : []).slice(0, 8)) {
-        if (!Number.isFinite(tick?.at)) continue;
-        marks.push(`<span class="npc-state-delta-v2-tick" style="--npc-state-delta-at: ${at(tick.at)}" title="${escapeHtml(`${tick.label ?? ''} ${tick.at}`.trim())}"></span>`);
-    }
-    if (Number.isFinite(extra?.ceiling) && extra.ceiling < max) marks.push(`<span class="npc-state-delta-v2-ceiling" style="--npc-state-delta-at: ${at(extra.ceiling)}" title="${escapeHtml(`Ceiling ${extra.ceiling}`)}"></span>`);
-    return `<div class="ss-w ss-w-meter ss-w-tone-${tone}${ratio >= 1 ? ' ss-w-full' : ''}${ratio <= 0 ? ' ss-w-empty' : ''}" role="meter" aria-label="${label}" aria-valuemin="${min}" aria-valuemax="${max}" aria-valuenow="${now}" aria-valuetext="${escapeHtml(text)}" data-meter="${escapeHtml(def?.id ?? '')}">`
-        + `<div class="ss-w-meter-head"><span class="ss-w-meter-label">${label}</span><span class="ss-w-meter-value" aria-hidden="true">${escapeHtml(text)}${deltaHtml}</span></div>`
-        + `<div class="ss-w-meter-track" style="--ss-w-ratio: ${ratio}"><div class="ss-w-meter-fill"></div>${marks.join('')}</div></div>`;
-}
-
 // Used only if story-block-tabs.js cannot be loaded: the same empty line, without the Scan button.
 const fallbackEmptyCast = reason => `<div class="npc-state-delta-story-empty-state"><p class="npc-state-delta-story-empty">${escapeHtml(reason?.text || 'No NPC is present in the latest scene.')}</p></div>`;
 
@@ -242,6 +214,59 @@ const fallbackEmptyCast = reason => `<div class="npc-state-delta-story-empty-sta
  *   headReply  () => the index of the latest reply (the reader's own meter values start its window).
  *   doc, timers, loadEmptyCast (() => Promise<emptyCastHtml>), logger.
  */
+// DOM helpers for the Cast markup (text is set with textContent; nothing is parsed as markup).
+const elementOf = (doc, tag, className = '', text = null) => {
+    const node = doc.createElement(tag);
+    if (className) node.className = className;
+    if (text !== null && text !== undefined) node.textContent = String(text);
+    return node;
+};
+// One meter as ss.meter draws it (WIDGETS.md: role="meter", aria values, `ss-w-meter-*` parts, `--ss-w-ratio` on the track).
+// `def`: { id, label, min, max, tone }. `extra` (optional): { text, ceiling, ticks: [{ at, label }], delta }.
+export function meterBarNode(doc, def, value, stage = '', extra = {}) {
+    const min = Number.isFinite(def?.min) ? def.min : -100;
+    const max = Number.isFinite(def?.max) && def.max > min ? def.max : min + 100;
+    const now = Math.min(max, Math.max(min, Number.isFinite(Number(value)) ? Math.round(Number(value)) : min));
+    const at = point => Math.round(((Math.min(max, Math.max(min, point)) - min) / (max - min)) * 10000) / 10000;
+    const ratio = at(now);
+    const text = typeof extra?.text === 'string' && extra.text ? extra.text : stage ? `${now} · ${stage}` : String(now);
+    const tone = METER_TONES.has(def?.tone) ? def.tone : 'neutral';
+    const label = String(def?.label ?? def?.id ?? '');
+    const delta = Number.isInteger(extra?.delta) && extra.delta !== 0 ? extra.delta : 0;
+    const node = elementOf(doc, 'div', `ss-w ss-w-meter ss-w-tone-${tone}${ratio >= 1 ? ' ss-w-full' : ''}${ratio <= 0 ? ' ss-w-empty' : ''}`);
+    node.setAttribute('role', 'meter');
+    node.setAttribute('aria-label', label);
+    node.setAttribute('aria-valuemin', String(min));
+    node.setAttribute('aria-valuemax', String(max));
+    node.setAttribute('aria-valuenow', String(now));
+    node.setAttribute('aria-valuetext', text);
+    node.dataset.meter = String(def?.id ?? '');
+    const head = elementOf(doc, 'div', 'ss-w-meter-head');
+    head.append(elementOf(doc, 'span', 'ss-w-meter-label', label));
+    const value_ = elementOf(doc, 'span', 'ss-w-meter-value', text);
+    value_.setAttribute('aria-hidden', 'true');
+    if (delta) value_.append(elementOf(doc, 'span', `npc-state-delta-v2-delta ${delta > 0 ? 'npc-state-delta-v2-delta-up' : 'npc-state-delta-v2-delta-down'}`, `${delta > 0 ? '▲' : '▼'}${Math.abs(delta)}`));
+    head.append(value_);
+    const track = elementOf(doc, 'div', 'ss-w-meter-track');
+    track.setAttribute('style', `--ss-w-ratio: ${ratio}`);
+    track.append(elementOf(doc, 'div', 'ss-w-meter-fill'));
+    for (const tick of (Array.isArray(extra?.ticks) ? extra.ticks : []).slice(0, 8)) {
+        if (!Number.isFinite(tick?.at)) continue;
+        const mark = elementOf(doc, 'span', 'npc-state-delta-v2-tick');
+        mark.setAttribute('style', `--npc-state-delta-at: ${at(tick.at)}`);
+        mark.setAttribute('title', `${tick.label ?? ''} ${tick.at}`.trim());
+        track.append(mark);
+    }
+    if (Number.isFinite(extra?.ceiling) && extra.ceiling < max) {
+        const mark = elementOf(doc, 'span', 'npc-state-delta-v2-ceiling');
+        mark.setAttribute('style', `--npc-state-delta-at: ${at(extra.ceiling)}`);
+        mark.setAttribute('title', `Ceiling ${extra.ceiling}`);
+        track.append(mark);
+    }
+    node.append(head, track);
+    return node;
+}
+
 export function createStorySuiteV2Adapter({
     suiteApi = null,
     delta = () => globalThis.NPCStateDelta,
@@ -261,7 +286,7 @@ export function createStorySuiteV2Adapter({
     calendarOwn = () => false,
     // Delta's dossier list markup and projection (story-block-tabs.js, dossier-ui.js), as v1's Dossiers tab.
     loadDossierList = () => Promise.all([import('../story-block-tabs.js'), import('../dossier-ui.js')])
-        .then(([tabs, ui]) => ({ rowsHtml: tabs.dossierTabRowsHtml, project: ui.dossierIndexProjection, filter: ui.filterDossierIndex })),
+        .then(([tabs, ui]) => ({ rowNodes: tabs.dossierRowNodes, project: ui.dossierIndexProjection, filter: ui.filterDossierIndex })),
     // Where the page API (PAGE_API) goes; null for none.
     page = globalThis,
 } = {}) {
@@ -282,7 +307,7 @@ export function createStorySuiteV2Adapter({
     let sectionLead = null;      // the meter presets block above Delta's panel in the settings section
     let offTurn = null;          // unsubscribes from the host's 'turn' event
     let lastTick = Promise.resolve(null);
-    let listParts = null;        // loadDossierList's { rowsHtml, project, filter } once loaded
+    let listParts = null;        // loadDossierList's { rowNodes, project, filter } once loaded
     let rowsCache = { key: null, rows: [] };
     const watchers = new Set();  // the page API's onChange subscribers
     const savedDisplay = new WeakMap();
@@ -630,7 +655,7 @@ export function createStorySuiteV2Adapter({
             if (!box?.classList?.contains?.('npc-state-delta-story-search')) return;
             el.__npcStateDeltaV2Find = String(box.value ?? '').slice(0, 80);
             const list = el.querySelector?.('.npc-state-delta-story-list');
-            if (list) list.innerHTML = dossierRowsHtml(el.__npcStateDeltaV2Find);
+            if (list) list.replaceChildren(...dossierRowNodesFor(el.__npcStateDeltaV2Find, list.ownerDocument ?? doc));
         });
     }
 
@@ -668,10 +693,40 @@ export function createStorySuiteV2Adapter({
         rowsCache = { key, rows };
         return rows;
     }
-    function plainRowsHtml(rows, { query = '', total = 0 } = {}) {
-        if (!rows.length) return `<p class="npc-state-delta-story-empty">${total ? 'No dossier matches.' : 'No dossiers yet. An NPC gets one when a scan finds them in the story.'}</p>`;
-        // The same listcard rows as story-block-tabs.js dossierRowHtml (UI 4c), without stage or meters yet.
-        return `<ul class="ss-listcard-rows">${rows.map(row => `<li class="ss-listcard-row"><button type="button" class="ss-listcard-item npc-state-delta-story-row" data-npc-id="${escapeHtml(row.id)}" aria-label="Open ${escapeHtml(row.name)} dossier"><span class="npc-state-delta-story-thumb ss-listcard-icon"><span>${escapeHtml(Array.from(row.name.trim())[0]?.toUpperCase() ?? '?')}</span></span><span class="npc-state-delta-story-text ss-listcard-main"><b class="ss-listcard-title">${escapeHtml(row.name)}</b><small class="ss-listcard-sub">${escapeHtml(row.statusLabel ?? '')}</small></span></button></li>`).join('')}</ul>`;
+    // The dossier rows and the meters are DOM nodes built with textContent: a name, a role, a stage or a note is text, never
+    // markup. Story Block's list-row classes are the same as story-block-tabs.js dossierRowNodes (its builder, once loaded).
+    // Before story-block-tabs.js has loaded: plain rows of names that still open each dossier.
+    function plainRowNodes(rows, doc, total = 0) {
+        if (!rows.length) return [elementOf(doc, 'p', 'npc-state-delta-story-empty', total ? 'No dossier matches.' : 'No dossiers yet. An NPC gets one when a scan finds them in the story.')];
+        return rows.map(row => {
+            const item = elementOf(doc, 'li', 'ss-listcard-row');
+            const button = elementOf(doc, 'button', 'ss-listcard-item npc-state-delta-story-row');
+            button.dataset.npcId = String(row.id ?? '');
+            button.setAttribute('aria-label', `Open ${row.name} dossier`);
+            button.setAttribute('type', 'button');
+            const text = elementOf(doc, 'span', 'npc-state-delta-story-text ss-listcard-main');
+            text.append(elementOf(doc, 'b', 'ss-listcard-title', row.name), elementOf(doc, 'small', 'ss-listcard-sub', row.statusLabel ?? ''));
+            button.append(elementOf(doc, 'span', 'npc-state-delta-story-thumb ss-listcard-icon', Array.from(String(row.name ?? '').trim())[0]?.toUpperCase() ?? '?'), text);
+            item.append(button);
+            return item;
+        });
+    }
+    // The dossier rows for a search, as nodes (story-block-tabs.js when loaded; the plain rows before that).
+    function dossierRowNodesFor(query, doc) {
+        const rows = dossierRows();
+        let visible;
+        try {
+            if (listParts?.filter) visible = listParts.filter(rows, { query });
+            else {
+                const needle = String(query).trim().toLocaleLowerCase();
+                visible = rows.filter(row => !needle || [row.name, ...(row.aliases ?? [])].some(name => String(name).toLocaleLowerCase().includes(needle)));
+            }
+        } catch { visible = rows; }
+        try {
+            return listParts?.rowNodes ? listParts.rowNodes(withMeters(visible), doc, { query, total: rows.length }) : plainRowNodes(visible, doc, rows.length);
+        } catch {
+            return plainRowNodes(visible, doc, rows.length);
+        }
     }
     // Each row's stage and meters (npc.cast: the ranks and bars the present cards' meters show; the row draws at most DOSSIER_BAR_MAX).
     // Read when the list is drawn and never cached with the rows: a reply moves them without changing any dossier.
@@ -692,57 +747,38 @@ export function createStorySuiteV2Adapter({
             return entry ? { ...row, stage: entry.rank || '', bars: entry.bars ?? [] } : row;
         });
     }
-    // The rows a search shows, as markup: v1's filter and rows when loaded, else names that contain it.
-    function dossierRowsHtml(query = '') {
-        const rows = dossierRows();
-        let visible;
-        try {
-            if (listParts?.filter) visible = listParts.filter(rows, { query });
-            else {
-                const needle = String(query).trim().toLocaleLowerCase();
-                visible = rows.filter(row => !needle || [row.name, ...(row.aliases ?? [])].some(name => String(name).toLocaleLowerCase().includes(needle)));
-            }
-        } catch { visible = rows; }
-        try {
-            return listParts?.rowsHtml ? listParts.rowsHtml(withMeters(visible), { query, total: rows.length }) : plainRowsHtml(visible, { query, total: rows.length });
-        } catch {
-            return plainRowsHtml(visible, { query, total: rows.length });
-        }
-    }
     // The dossier browser: a search box and every dossier, each opening its dossier view (Delta's own).
-    function dossierListHtml(el) {
-        const api = runtime();
-        if (!api) return emptyCast({ text: 'NPC State Delta is still loading.' });
-        if (!enabled()) return emptyCast({ text: 'NPC State Delta is off.' });
+    function dossierListNode(el, doc) {
         const query = typeof el?.__npcStateDeltaV2Find === 'string' ? el.__npcStateDeltaV2Find : '';
-        return `<div class="npc-state-delta-story-dossiers npc-state-delta-v2-dossiers"><span class="npc-state-delta-kicker">DOSSIERS</span>`
-            + `<input type="search" class="text_pole npc-state-delta-story-search" placeholder="Search dossiers" aria-label="Search dossiers" maxlength="80" value="${escapeHtml(query)}">`
-            + `<div class="npc-state-delta-story-list ss-listcard ss-glass">${dossierRowsHtml(query)}</div></div>`;
+        const wrap = elementOf(doc, 'div', 'npc-state-delta-story-dossiers npc-state-delta-v2-dossiers');
+        wrap.append(elementOf(doc, 'span', 'npc-state-delta-kicker', 'DOSSIERS'));
+        const box = elementOf(doc, 'input', 'text_pole npc-state-delta-story-search');
+        box.setAttribute('type', 'search');
+        box.setAttribute('placeholder', 'Search dossiers');
+        box.setAttribute('aria-label', 'Search dossiers');
+        box.setAttribute('maxlength', '80');
+        box.value = query;
+        wrap.append(box);
+        const list = elementOf(doc, 'div', 'npc-state-delta-story-list ss-listcard ss-glass');
+        list.append(...dossierRowNodesFor(query, doc));
+        wrap.append(list);
+        return wrap;
     }
 
-    // The present NPCs' meters under the cards: one bar per shown meter, drawn with ss.meter's own
-    // markup and classes (role="meter", the --ss-w-ratio fill) so Story Block's widget styles apply,
-    // with the NPC's ceiling as a notch, stage thresholds as marks and the latest reply's change.
-    // Under them: the stage reached on the ladder and what the next one still needs, the hidden
-    // notes still locked (title and rule only) and the ones opened (with their text). A module tab
-    // is given no widget renderer (SPEC §6 tabs get el, view, api), so the bars are written here; the
-    // NPC card under each reply uses the real ss.meter widget (npc-meters-screen.js).
-    function castMetersHtml() {
-        if (!hosted || typeof sdkRef?.query !== 'function') return '';
+    // The NPCs the meters show, in order: the present dossiers' (dossier order), then (beta) the people the story's change
+    // lines gave meters who have no dossier yet (no scan has made one), straight from the state: those Story Block's scene has
+    // here, or all of them when the scene cannot say. → { shown, byKey, cast } or null.
+    function meterEntries() {
+        if (!hosted || typeof sdkRef?.query !== 'function') return null;
         let cast;
         try {
             const head = headReply?.();
             cast = sdkRef.query('npc.cast', Number.isInteger(head) ? { headReply: head } : {});
         } catch {
-            return '';
+            return null;
         }
-        if (!Array.isArray(cast) || !cast.length) return '';
+        if (!Array.isArray(cast) || !cast.length) return null;
         const byKey = Object.fromEntries(cast.map(entry => [entry.key, entry]));
-        const defs = part.defs();
-        const blocks = [];
-        // The present dossiers' entries, in dossier order; then (beta) the entries of people the story's
-        // change lines gave meters who have no dossier yet (no scan has made one), straight from the
-        // state: those Story Block's scene has here, or all of them when the scene cannot say.
         const shown = [];
         for (const npc of presentList()) {
             const who = part.identify(byKey, npc.name);
@@ -759,57 +795,111 @@ export function createStorySuiteV2Adapter({
             if (scene && !scene.includes(entry.key)) continue;
             shown.push(entry);
         }
-        for (const entry of shown) {
-            const npc = { name: entry.name };
-            const bars = entry.bars.map(bar => meterBarHtml(defs.find(def => def.id === bar.id) ?? bar, bar.value, bar.stage, bar)).join('');
-            const lines = [];
-            if (entry.rank) lines.push(`<p class="npc-state-delta-v2-rank"><b>${escapeHtml(entry.rank)}</b></p>`);
-            if (entry.next) lines.push(`<p class="npc-state-delta-v2-next">${escapeHtml(entry.next)}</p>`);
-            const texts = entry.opened?.length ? normalizeSecrets(dossierOf(npc.name)?.secrets) : [];
-            for (const note of entry.opened ?? []) {
-                const text = texts.find(secret => secret.id === note.id)?.text ?? '';
-                lines.push(`<p class="npc-state-delta-v2-note npc-state-delta-v2-note-open">🔓 <b>${escapeHtml(note.title)}</b>${text ? `: ${escapeHtml(text)}` : ''}</p>`);
-            }
-            for (const note of entry.locked ?? []) lines.push(`<p class="npc-state-delta-v2-note npc-state-delta-v2-note-locked">${escapeHtml(note.text)}</p>`);
-            blocks.push(`<section class="npc-state-delta-v2-meter-npc" data-npc-key="${escapeHtml(entry.key)}"><h4>${escapeHtml(entry.name)}</h4><div class="npc-state-delta-v2-meter-bars">${bars}</div>${lines.join('')}</section>`);
-        }
-        return blocks.length ? `<div class="npc-state-delta-v2-meters"><span class="npc-state-delta-kicker">METERS</span>${blocks.join('')}</div>` : '';
+        return { shown, byKey, cast };
     }
-    // Delta's own present-cast cards (the same markup as v1's Present NPCs tab), or why it is empty, and
-    // their meters (`cast`); then the dossier list (`list`). `track: false` (the game view's screen, the
-    // World screen) leaves castEl, the Story panel's tab pane, alone.
+    const barNodesOf = (doc, entry, defs) => entry.bars.map(bar => meterBarNode(doc, defs.find(def => def.id === bar.id) ?? bar, bar.value, bar.stage, bar));
+    // The notes and the next-stage line of one NPC (text only). A card shows its stage on its name line, so it leaves the rank out.
+    function noteNodes(doc, entry, { card = false } = {}) {
+        const nodes = [];
+        if (!card && entry.rank) { const p = elementOf(doc, 'p', 'npc-state-delta-v2-rank'); p.append(elementOf(doc, 'b', '', entry.rank)); nodes.push(p); }
+        if (entry.next) nodes.push(elementOf(doc, 'p', 'npc-state-delta-v2-next', entry.next));
+        const texts = entry.opened?.length ? normalizeSecrets(dossierOf(entry.name)?.secrets) : [];
+        for (const note of entry.opened ?? []) {
+            const text = texts.find(secret => secret.id === note.id)?.text ?? '';
+            const p = elementOf(doc, 'p', 'npc-state-delta-v2-note npc-state-delta-v2-note-open');
+            p.append(doc.createTextNode('🔓 '), elementOf(doc, 'b', '', note.title ?? ''));
+            if (text) p.append(doc.createTextNode(`: ${text}`));
+            nodes.push(p);
+        }
+        for (const note of entry.locked ?? []) nodes.push(elementOf(doc, 'p', 'npc-state-delta-v2-note npc-state-delta-v2-note-locked', note.text ?? ''));
+        return nodes;
+    }
+    // Delta's own present-cast cards (the same markup as v1's Present NPCs tab; the cards' text is set by fillPresentCast),
+    // each with its NPC's stage on the name line, its meters inside the row and its notes under it. Then the NPCs with meters
+    // but no card (a block of their own), then the dossier list (`list`). `track: false` (the game view's screen, the World
+    // screen) leaves castEl, the Story panel's tab pane, alone.
     function renderCast(el, { track = true, cast = true, list = false } = {}) {
         if (!el) return;
         if (track) castEl = el;
         bindCastActions(el);
         const api = runtime();
+        const owner = el.ownerDocument ?? doc;
         let body = '';
-        let meters = '';
         if (cast) {
             if (!api) body = emptyCast({ text: 'NPC State Delta is still loading.' });
             else if (!enabled()) body = emptyCast({ text: 'NPC State Delta is off.' });
             else body = String(api.presentCastHtml?.() || '') || emptyCast(api.castEmptyReason?.());
-            meters = api && enabled() ? castMetersHtml() : '';
         }
-        const dossiers = list && !(cast && (!api || !enabled())) ? dossierListHtml(el) : '';
-        const html = `<div class="${PANE_CLASS}">${body}${meters}${dossiers}</div>`;
+        const meters = cast && api && enabled() ? meterEntries() : null;
+        let listPart = null;
+        let listText = '';
+        if (list && !(cast && (!api || !enabled()))) {
+            if (!api) listText = emptyCast({ text: 'NPC State Delta is still loading.' });
+            else if (!enabled()) listText = emptyCast({ text: 'NPC State Delta is off.' });
+            else listPart = dossierListNode(el, owner);
+        }
+        const pane = `<div class="${PANE_CLASS}">${body}${listText}</div>`;
+        const rowsKey = list ? JSON.stringify([el.__npcStateDeltaV2Find ?? '', dossierRows().map(row => [row.id, row.name, row.statusLabel, row.role]), meters?.cast ?? null]) : '';
+        const key = `${pane}\u0001${meters ? JSON.stringify(meters.cast) : ''}\u0001${rowsKey}`;
         // A full redraw replaces the search box: the reader typing in it keeps the focus and the caret.
-        const owner = el.ownerDocument ?? doc;
         const typing = list && owner?.activeElement?.classList?.contains?.('npc-state-delta-story-search') && el.contains?.(owner.activeElement);
-        // Skip an unchanged redraw only while the pane still holds what was drawn: Story Block's tab
-        // host empties the shared pane (replaceChildren) before every render.
+        // Skip an unchanged redraw only while the element still holds what was drawn: Story Block's tab host empties the
+        // shared pane (replaceChildren) before every render.
         const drawn = el.__npcStateDeltaV2CastNode;
         const stillShown = drawn ? drawn.parentNode === el : Boolean(el.innerHTML);
-        if (el.__npcStateDeltaV2Cast === html && stillShown) return;
-        el.innerHTML = html;
-        el.__npcStateDeltaV2Cast = html;
+        if (el.__npcStateDeltaV2Cast === key && stillShown) return;
+        el.innerHTML = pane;
+        el.__npcStateDeltaV2Cast = key;
+        el.__npcStateDeltaV2CastPane = pane;
         el.__npcStateDeltaV2CastNode = el.firstElementChild ?? null;
+        const extras = [];
+        if (meters && cast) {
+            const defs = part.defs();
+            const used = new Set();
+            for (const cell of el.querySelectorAll?.('.npc-state-delta-present-cell[data-npc-id]') ?? []) {
+                const npc = npcList().find(item => String(item.id ?? '') === String(cell.dataset?.npcId ?? ''));
+                const who = npc ? part.identify(meters.byKey, npc.name) : null;
+                const entry = who && Object.hasOwn(meters.byKey, who.key) ? meters.byKey[who.key] : null;
+                if (!entry || used.has(entry)) continue;
+                used.add(entry);
+                const text = cell.querySelector?.('.npc-state-delta-present-card-text');
+                const stage = cell.querySelector?.('.npc-state-delta-present-card-stage');
+                if (stage) stage.textContent = entry.rank ?? '';
+                if (text) {
+                    const bars = elementOf(owner, 'div', 'npc-state-delta-present-card-bars');
+                    bars.append(...barNodesOf(owner, entry, defs));
+                    text.append(bars);
+                }
+                for (const line of noteNodes(owner, entry, { card: true })) cell.append(line);
+            }
+            const apart = meters.shown.filter(entry => !used.has(entry));
+            if (apart.length) {
+                const block = elementOf(owner, 'div', 'npc-state-delta-v2-meters');
+                block.append(elementOf(owner, 'span', 'npc-state-delta-kicker', 'METERS'));
+                for (const entry of apart) {
+                    const section = elementOf(owner, 'section', 'npc-state-delta-v2-meter-npc');
+                    section.dataset.npcKey = String(entry.key ?? '');
+                    section.append(elementOf(owner, 'h4', '', entry.name ?? ''));
+                    const bars = elementOf(owner, 'div', 'npc-state-delta-v2-meter-bars');
+                    bars.append(...barNodesOf(owner, entry, defs));
+                    section.append(bars, ...noteNodes(owner, entry));
+                    block.append(section);
+                }
+                extras.push(block);
+            }
+        }
+        if (listPart) extras.push(listPart);
+        if (extras.length) {
+            const wrap = elementOf(owner, 'div', PANE_CLASS);
+            wrap.append(...extras);
+            el.append(wrap);
+        }
         // The now lines and chatter bubbles get their text through textContent, never markup.
         if (cast) api?.fillPresentCast?.(el);
         if (typing) {
             const box = el.querySelector?.('.npc-state-delta-story-search');
             try {
-                box?.focus?.();
+                box?.focus?.({ preventScroll: true });
                 const end = String(box?.value ?? '').length;
                 box?.setSelectionRange?.(end, end);
             } catch { /* focus is a convenience */ }
@@ -883,7 +973,7 @@ export function createStorySuiteV2Adapter({
         if (el?.dataset?.tabId !== CAST_TAB_ID) return false;
         const drawn = el.__npcStateDeltaV2CastNode;
         if (drawn) return drawn.parentNode === el;
-        return typeof el.__npcStateDeltaV2Cast === 'string' && el.innerHTML === el.__npcStateDeltaV2Cast;
+        return typeof el.__npcStateDeltaV2CastPane === 'string' && el.innerHTML.startsWith(el.__npcStateDeltaV2CastPane);
     }
 
     // ---- the Cast in the game view ----
@@ -1208,7 +1298,7 @@ export function createStorySuiteV2Adapter({
         }, () => { /* keep the fallback line */ });
         // The dossier list's markup; until it loads (or if it cannot), plain rows of names.
         Promise.resolve().then(() => loadDossierList?.()).then(parts => {
-            if (parts && typeof parts.rowsHtml === 'function') listParts = parts;
+            if (parts && typeof parts.rowNodes === 'function') listParts = parts;
         }, () => { /* plain rows */ });
         return Promise.all([ready, cast])
             .then(([sdk]) => register(sdk, sb, attempt))

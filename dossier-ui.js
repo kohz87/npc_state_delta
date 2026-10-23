@@ -1180,6 +1180,18 @@ const STYLES = `
 #${ROOT_ID} .delta-document-head p { margin:0; }
 #${ROOT_ID} .delta-section { margin:0 0 14px; padding:14px 15px; border:1px solid var(--ss-border, rgba(218,193,148,.14)); border-radius:var(--ss-radius-l, 10px); background:var(--delta-surface); }
 #${ROOT_ID} .delta-panel.ss-cards { margin:0; gap:0; }
+#${ROOT_ID} .delta-panel.ss-cards {
+  /* UI 4c: the aliases are read where the tokens exist: inside the panel's ss-cards root (the root above is outside it). */
+  --delta-bg: var(--ss-sheet-bg, var(--SmartThemeBlurTintColor, #18191d));
+  --delta-text: var(--ss-text, var(--SmartThemeBodyColor, #f0eee9));
+  --delta-muted: var(--ss-text, color-mix(in srgb, var(--delta-text) 66%, transparent));
+  --delta-surface: var(--ss-glass, rgba(255,255,255,.055));
+  --delta-surface-strong: var(--ss-glass-strong, rgba(255,255,255,.085));
+  --delta-line: var(--ss-border, rgba(218,193,148,.24));
+  --delta-line-strong: rgba(218,193,148,.52);
+  --delta-accent: var(--ss-accent, #d8bc78);
+  --delta-accent-soft: var(--ss-text, #f0ddb0);
+}
 #${ROOT_ID} .delta-section h3 { margin:0 0 11px; font-size:.92rem; letter-spacing:.08em; text-transform:uppercase; color:var(--delta-accent-soft); }
 #${ROOT_ID} .delta-section h4 { margin:0 0 5px; font-size:.77rem; letter-spacing:.05em; text-transform:uppercase; color:var(--delta-muted); }
 #${ROOT_ID} .delta-section p { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }

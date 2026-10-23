@@ -13,59 +13,88 @@ import assert from 'node:assert/strict';
 import {
     CAST_SCREEN_ID, CAST_TAB_ID, CAST_WIDGET, DOSSIERS_TITLE, PAGE_API, PAGE_SLOT_CLASS, WORLD_FEATURE, createStorySuiteV2Adapter,
 } from '../src/storysuite-v2.js';
-import { dossierTabRowsHtml } from '../story-block-tabs.js';
+import { dossierRowNodes } from '../story-block-tabs.js';
 import { dossierIndexProjection, filterDossierIndex } from '../dossier-ui.js';
 
-// ---- a small element: innerHTML is kept as text; the present cells it holds are found by their data-npc-id ----
-function node(owner, className = '') {
+// ---- a small DOM: elements keep their children, classes, attributes and text. A root's innerHTML is the markup it was
+// given plus its children serialised, so a test reads what a reader sees; the present cells it was given are found by
+// their data-npc-id, as before. Text is escaped when serialised, so a name with markup is shown as text. ----
+const esc = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+function matches(n, selector) {
+    const parts = selector.split('.').map(part => part.trim()).filter(Boolean);
+    const tag = selector.startsWith('.') ? null : selector.split('.')[0];
+    if (tag && n.tagName?.toLowerCase() !== tag) return false;
+    return parts.every(part => n.classList.contains(part.replace(/\[.*$/, '')));
+}
+function find(root, selector, first) {
+    const out = [];
+    const walk = list => { for (const child of list) { if (child.nodeType === 1 && matches(child, selector)) { out.push(child); if (first) return true; } if (walk(child.children)) return true; } return false; };
+    walk(root.children);
+    return out;
+}
+function node(owner, tag = 'div', className = '') {
     const classes = new Set(String(className).split(/\s+/).filter(Boolean));
-    return {
-        nodeType: 1, ownerDocument: owner, children: [], parentNode: null, dataset: {}, listeners: {}, value: '', focused: false,
-        classList: { add: name => classes.add(name), contains: name => classes.has(name) },
-        append(child) { child.parentNode = this; this.children.push(child); },
+    const attrs = {};
+    const n = {
+        nodeType: 1, tagName: String(tag).toUpperCase(), ownerDocument: owner, children: [], parentNode: null, dataset: {}, listeners: {}, value: '', focused: false, text: '',
+        classList: { add: name => classes.add(name), remove: name => classes.delete(name), contains: name => classes.has(name) },
+        get className() { return [...classes].join(' '); },
+        set className(value) { classes.clear(); String(value).split(/\s+/).filter(Boolean).forEach(name => classes.add(name)); },
+        setAttribute(key, value) { attrs[key] = String(value); },
+        getAttribute(key) { return key in attrs ? attrs[key] : null; },
+        get textContent() { return this.text + this.children.map(child => child.textContent ?? '').join(''); },
+        set textContent(value) { this.text = String(value); this.children = []; },
+        append(...items) { for (const item of items) { item.parentNode = this; this.children.push(item); } },
+        appendChild(item) { this.append(item); return item; },
+        replaceChildren(...items) { for (const child of this.children) child.parentNode = null; this.children = []; this.append(...items); },
         remove() { if (this.parentNode) this.parentNode.children = this.parentNode.children.filter(item => item !== this); this.parentNode = null; },
+        addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
+        querySelector(selector) { return find(this, selector, true)[0] ?? null; },
+        querySelectorAll(selector) { return find(this, selector, false); },
+        focus() { owner.activeElement = this; },
+        setSelectionRange() {},
+        serialize() {
+            const data = Object.entries(this.dataset).map(([key, value]) => ` data-${key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}="${esc(value)}"`).join('');
+            const extra = Object.entries(attrs).map(([key, value]) => ` ${key}="${esc(value)}"`).join('') + (this.tagName === 'INPUT' ? ` value="${esc(this.value)}"` : '');
+            const cls = classes.size ? ` class="${esc([...classes].join(' '))}"` : '';
+            return `<${this.tagName.toLowerCase()}${cls}${data}${extra}>${esc(this.text)}${this.children.map(child => child.serialize()).join('')}</${this.tagName.toLowerCase()}>`;
+        },
     };
+    n.contains = other => other === n || n.children.some(child => child.contains?.(other));
+    return n;
 }
 function element(owner) {
-    const el = node(owner);
+    const el = node(owner, 'div');
     let html = '';
     let cells = [];
-    let list = null;
-    let search = null;
     el.isConnected = true;
     el.writes = 0;
     Object.defineProperty(el, 'innerHTML', {
-        get: () => html,
+        get: () => html + el.children.map(child => child.serialize()).join(''),
         set(value) {
             html = String(value);
+            el.children = [];
             el.writes += 1;
             el.firstElementChild = html ? { parentNode: el } : null;
             cells = [...html.matchAll(/class="npc-state-delta-present-cell[^"]*" data-npc-id="([^"]+)"/g)].map(([, id]) => {
-                const cell = node(owner, 'npc-state-delta-present-cell');
+                const cell = node(owner, 'div', 'npc-state-delta-present-cell');
                 cell.dataset.npcId = id;
-                const text = node(owner, 'npc-state-delta-present-card-text');
+                const text = node(owner, 'div', 'npc-state-delta-present-card-text');
+                text.append(node(owner, 'span', 'npc-state-delta-present-card-stage'));
                 cell.append(text);
-                cell.querySelector = selector => (selector === '.npc-state-delta-present-card-text' ? text : null);
                 return cell;
             });
-            list = html.includes('npc-state-delta-story-list') ? Object.assign(node(owner, 'npc-state-delta-story-list'), { innerHTML: '' }) : null;
-            search = html.includes('npc-state-delta-story-search') ? Object.assign(node(owner, 'npc-state-delta-story-search'), {
-                value: /value="([^"]*)"/.exec(html)?.[1] ?? '', focus() { owner.activeElement = this; }, setSelectionRange() {},
-            }) : null;
         },
     });
-    el.addEventListener = (type, fn) => { (el.listeners[type] ||= []).push(fn); };
-    el.fire = (type, event) => (el.listeners[type] ?? []).forEach(fn => fn(event));
-    el.contains = other => other === search;
-    el.querySelector = selector => (selector === '.npc-state-delta-story-list' ? list : selector === '.npc-state-delta-story-search' ? search : null);
     el.querySelectorAll = selector => {
         if (selector.startsWith('.npc-state-delta-present-cell')) return cells;
         if (selector === `.${PAGE_SLOT_CLASS}`) return cells.flatMap(cell => cell.children[0].children.filter(child => child.classList.contains(PAGE_SLOT_CLASS)));
-        return [];
+        return find(el, selector, false);
     };
+    el.fire = (type, event) => (el.listeners[type] ?? []).forEach(fn => fn(event));
     el.cells = () => cells;
-    el.list = () => list;
-    el.search = () => search;
+    el.list = () => el.querySelector('.npc-state-delta-story-list');
+    el.search = () => el.querySelector('.npc-state-delta-story-search');
     return el;
 }
 function fakePage() {
@@ -76,7 +105,8 @@ function fakePage() {
         getElementById: () => null,
         addEventListener(type, fn) { (handlers[type] ??= []).push(fn); },
         dispatchEvent() { return true; },
-        createElement: () => element(doc),
+        createElement: tag => (tag === 'div' ? element(doc) : node(doc, tag)),
+        createTextNode: text => Object.assign(node(doc, '#text'), { nodeType: 3, text: String(text), serialize() { return esc(this.text); } }),
         fire(type) { for (const fn of handlers[type] ?? []) fn({ type }); },
     };
     return doc;
@@ -113,7 +143,7 @@ function fakeSdk({ world = false } = {}) {
         settings: () => ({}),
     };
 }
-const v1List = async () => ({ rowsHtml: dossierTabRowsHtml, project: dossierIndexProjection, filter: filterDossierIndex });
+const v1List = async () => ({ rowNodes: dossierRowNodes, project: dossierIndexProjection, filter: filterDossierIndex });
 
 async function setup({ world = false, hostValue = 'v2', loadDossierList = v1List } = {}) {
     const doc = fakePage();
@@ -159,8 +189,8 @@ test('Dossiers lists every dossier with v1\'s rows; a row opens its dossier; sea
     box.value = 'mil';
     el.fire('input', { target: box });
     assert.equal(el.writes, writes, 'the pane is not rewritten');
-    assert.match(el.list().innerHTML, /Oren/);
-    assert.doesNotMatch(el.list().innerHTML, /Mira/);
+    assert.match(el.list().serialize(), /Oren/);
+    assert.doesNotMatch(el.list().serialize(), /Mira/);
     // A redraw (Delta's state moved) keeps the search text and the focus in the box.
     doc.activeElement = box;
     delta.setPresent(['npc_mira', 'npc_oren']);
@@ -213,13 +243,14 @@ test('the page API: on the page while the adapter runs; draws the present cards 
     assert.doesNotMatch(el.innerHTML, /npc-state-delta-v2-dossiers/, 'no dossier list in the World screen');
     assert.deepEqual(asked, [['Mira', ['Captain']]], 'the dossier\'s name and aliases');
     const text = el.cells()[0].children[0];
-    assert.equal(text.children.length, 1);
-    assert.ok(text.children[0].classList.contains(PAGE_SLOT_CLASS), 'inside the card, marked');
+    const slots = text.children.filter(child => child.classList.contains(PAGE_SLOT_CLASS));
+    assert.equal(slots.length, 1);
+    assert.ok(text.children.includes(slots[0]), 'inside the card, marked');
     // Drawn again: the old slot goes, the new one comes (never two).
     api.render(el, { slot: () => node(doc, 'thought') });
-    assert.equal(el.cells()[0].children[0].children.length, 1);
+    assert.equal(el.cells()[0].children[0].children.filter(child => child.classList.contains(PAGE_SLOT_CLASS)).length, 1);
     api.render(el, {});
-    assert.equal(el.cells()[0].children[0].children.length, 0, 'no slot asked: none left');
+    assert.equal(el.cells()[0].children[0].children.filter(child => child.classList.contains(PAGE_SLOT_CLASS)).length, 0, 'no slot asked: none left');
     adapter.stop();
     assert.equal(page[PAGE_API], undefined);
 });

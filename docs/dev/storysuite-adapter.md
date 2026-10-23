@@ -53,9 +53,9 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
 ## Screens on the glass look (UI 4c)
 
 - **Present cards** (`index.js` `inlineCardHtml`, `style.css` `.npc-state-delta-present-card*`): one compact row per person, one
-  column at every width: a 44px portrait, the name on one line, the stage line (role · mood) under it; the now lines and chatter sit
-  under the row. The meters under the cards are the `castMetersHtml` bars (`ss.meter` markup).
-- **Dossiers** (`story-block-tabs.js` `dossierTabRowsHtml`, `dossierRowHtml`): a listcard (`ss-listcard`) of rows. A row is the
+  column at every width: a 44px portrait; the name and the relationship stage on the first line, the role and mood on the second; the now lines and
+  chatter sit under the row; the NPC's meters sit inside its row. The meters are built by `renderCast` (`meterEntries`, `meterBarNode`) as DOM, not strings.
+- **Dossiers** (`story-block-tabs.js` `dossierRowNodes`, DOM with textContent): a listcard (`ss-listcard`) of rows. A row is the
   row button (class `npc-state-delta-story-row`, `data-npc-id`), the portrait, the name, the role and status, the stage as an `ss-pill`
   and up to `DOSSIER_BAR_MAX` (6, ss.hero's `BAR_MAX`) meters as `ss-bar` bars. `storysuite-v2.js` `withMeters` adds each row's
   `stage` and `bars` from `npc.cast` when the list is drawn (never cached with the rows).
@@ -71,7 +71,7 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
 ## Key files and functions
 
 - `src/storysuite-v2.js`: `createStorySuiteV2Adapter`, `startStorySuiteV2`, `isV2Host`, `sliceView`,
-  `ownPrompt`, `dossierFields`, `safeImageUrl`, `portraitUrl`, `meterBarHtml`, `V2_HOST_EVENT`, `HOSTED_FLAG`.
+  `ownPrompt`, `dossierFields`, `safeImageUrl`, `portraitUrl`, `meterBarNode`, `V2_HOST_EVENT`, `HOSTED_FLAG`.
 - `src/social-check.js`: `socialModifier`, `socialSkill`, `socialSettings`, `meterPoints`, `SKILL_WORDS`,
   `SKILL_METERS`, `DISPOSITION_WORDS`, `FEATURE_SOCIAL`, `SOCIAL_QUERY`.
 - `src/npc-meters.js`: `createNpcPart`, `initialNpcSlice`, `validateNpcSlice`, `meterDefs`, `stageAt`,

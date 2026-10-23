@@ -4574,7 +4574,7 @@ function inlineCardHtml(npc, messageId, scene = null) {
       <button type="button" class="npc-state-delta-present-card" data-npc-id="${escapeHtml(npc.id)}" data-message-id="${messageId}" aria-label="Open ${escapeHtml(displayName)} dossier">
         <span class="npc-state-delta-present-card-portrait">${portrait}</span>
         <span class="npc-state-delta-present-card-text">
-          <b class="npc-state-delta-present-card-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</b>
+          <span class="npc-state-delta-present-card-head"><b class="npc-state-delta-present-card-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</b><span class="npc-state-delta-present-card-stage"></span></span>
           <small class="npc-state-delta-present-card-role" title="${escapeHtml(identityLine)}">${escapeHtml(identityLine)}</small>${now}
         </span>
       </button>`;

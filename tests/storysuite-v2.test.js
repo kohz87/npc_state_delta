@@ -44,9 +44,20 @@ class FakeNode {
             contains: name => classes.has(name),
         };
     }
-    set className(value) { String(value).split(/\s+/).filter(Boolean).forEach(name => this.classList.add(name)); }
-    get innerHTML() { return this.html; }
-    set innerHTML(value) { this.html = String(value); this.writes += 1; }
+    set className(value) { this._cls = String(value); String(value).split(/\s+/).filter(Boolean).forEach(name => this.classList.add(name)); }
+    get innerHTML() { return this.html + this.children.map(child => child.serialize()).join(''); }
+    set innerHTML(value) { this.html = String(value); this.children = []; this.writes += 1; }
+    append(...nodes) { for (const node of nodes) this.appendChild(node); }
+    setAttribute(key, value) { (this.attrs ??= {})[key] = String(value); }
+    getAttribute(key) { return this.attrs?.[key] ?? null; }
+    // The markup a reader sees for DOM-built children (class, data-*, attributes, text escaped).
+    serialize() {
+        if (this.tagName === '#text') return this.html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const cls = this._cls ? ` class="${this._cls}"` : '';
+        const data = Object.entries(this.dataset ?? {}).map(([key, value]) => ` data-${key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}="${String(value)}"`).join('');
+        const extra = Object.entries(this.attrs ?? {}).map(([key, value]) => ` ${key}="${value}"`).join('');
+        return `<${String(this.tagName).toLowerCase()}${cls}${data}${extra}>${this.html}${this.children.map(child => child.serialize()).join('')}</${String(this.tagName).toLowerCase()}>`;
+    }
     set textContent(value) { this.replaceChildren(); this.html = String(value); }
     get textContent() { return this.html; }
     get isConnected() {
@@ -101,6 +112,7 @@ class FakeNode {
 function fakeDocument() {
     const doc = { listeners: {} };
     doc.createElement = tag => new FakeNode(doc, tag);
+    doc.createTextNode = text => Object.assign(new FakeNode(doc, '#text'), { html: String(text) });
     doc.documentElement = new FakeNode(doc, 'html');
     doc.body = doc.documentElement.appendChild(new FakeNode(doc, 'body'));
     doc.getElementById = id => {
@@ -604,7 +616,8 @@ test('the Cast tab renders Delta\'s own present-cast markup and fills its text',
     el.dataset.tabId = CAST_TAB_ID;   // Story Block's tab host marks its pane with the shown tab
     def.tabs[0].render(el, { state: {} }, {});
     // Without Story Director the present cast stays at the top of Dossiers, the dossier list under it.
-    assert.match(el.innerHTML, /^<div class="npc-state-delta-story-pane"><section class="npc-state-delta-present-roster">Mira<\/section><div class="npc-state-delta-story-dossiers npc-state-delta-v2-dossiers">.*<\/div><\/div>$/);
+    // The cards in one padded pane; the dossier list (DOM, its rows as text) in a second padded pane under them.
+    assert.match(el.innerHTML, /^<div class="npc-state-delta-story-pane"><section class="npc-state-delta-present-roster">Mira<\/section><\/div><div class="npc-state-delta-story-pane"><div class="npc-state-delta-story-dossiers npc-state-delta-v2-dossiers">.*<\/div><\/div>$/);
     assert.deepEqual(delta.filled, [el]);
     def.tabs[0].render(el, { state: {} }, {});
     assert.equal(el.writes, 1, 'unchanged cast is not rewritten');

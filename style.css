@@ -208,7 +208,7 @@
    the role and status line, the stage as a pill and the meters as thin ss.bar bars under the name. The search is a glass
    field. Inside a Story Suite root these are Story Block's tokens; the fallbacks keep the same look in the chat. */
 .npc-state-delta-story-dossiers { display: flex; flex-direction: column; gap: var(--ss-space-2, 8px); min-width: 0; }
-.npc-state-delta-story-search {
+.npc-state-delta-v2-dossiers .npc-state-delta-story-search {
   box-sizing: border-box;
   width: 100%;
   min-height: 40px;
@@ -221,9 +221,9 @@
   font: inherit;
   font-size: 14px;
 }
-.npc-state-delta-story-search::placeholder { color: var(--ss-muted, inherit); opacity: 1; }
-.npc-state-delta-story-search:focus-visible { outline: 2px solid var(--ss-accent, #d8bc78); outline-offset: 2px; }
-.npc-state-delta-story-list {
+.npc-state-delta-v2-dossiers .npc-state-delta-story-search::placeholder { color: var(--ss-muted, inherit); opacity: 1; }
+.npc-state-delta-v2-dossiers .npc-state-delta-story-search:focus-visible { outline: 2px solid var(--ss-accent, #d8bc78); outline-offset: 2px; }
+.npc-state-delta-v2-dossiers .npc-state-delta-story-list {
   min-width: 0;
   padding: var(--ss-space-2, 8px) var(--ss-space-3, 12px);
   border: 1px solid var(--ss-border, rgba(216,190,145,.22));
@@ -231,7 +231,7 @@
   background: var(--ss-glass-strong, rgba(0,0,0,.2));
   color: var(--ss-text, inherit);
 }
-.npc-state-delta-story-row {
+.npc-state-delta-v2-dossiers .npc-state-delta-story-row {
   appearance: none;
   -webkit-appearance: none;
   align-items: flex-start;
@@ -244,9 +244,9 @@
   cursor: pointer;
   touch-action: manipulation;
 }
-.npc-state-delta-story-row:active { transform: translateY(1px); background: var(--ss-accent-soft, rgba(216,190,145,.14)); }
-.npc-state-delta-story-row:focus-visible { outline: 2px solid var(--ss-accent, #d8bc78); outline-offset: -2px; }
-.npc-state-delta-story-thumb {
+.npc-state-delta-v2-dossiers .npc-state-delta-story-row:active { transform: translateY(1px); background: var(--ss-accent-soft, rgba(216,190,145,.14)); }
+.npc-state-delta-v2-dossiers .npc-state-delta-story-row:focus-visible { outline: 2px solid var(--ss-accent, #d8bc78); outline-offset: -2px; }
+.npc-state-delta-v2-dossiers .npc-state-delta-story-thumb {
   flex: 0 0 44px;
   width: 44px;
   height: 44px;
@@ -258,12 +258,12 @@
   color: var(--ss-text, inherit);
   font-weight: 800;
 }
-.npc-state-delta-story-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.npc-state-delta-story-text { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.npc-state-delta-story-text b, .npc-state-delta-story-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.npc-state-delta-story-text small { color: var(--ss-muted, inherit); font-size: 12px; }
-.npc-state-delta-story-bars { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 8em), 1fr)); gap: 4px 12px; margin-top: 4px; min-width: 0; }
-.npc-state-delta-story-stage { flex: 0 1 auto; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.npc-state-delta-v2-dossiers .npc-state-delta-story-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.npc-state-delta-v2-dossiers .npc-state-delta-story-text { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.npc-state-delta-v2-dossiers .npc-state-delta-story-text b, .npc-state-delta-v2-dossiers .npc-state-delta-story-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.npc-state-delta-v2-dossiers .npc-state-delta-story-text small { color: var(--ss-muted, inherit); font-size: 12px; }
+.npc-state-delta-v2-dossiers .npc-state-delta-story-bars { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 8em), 1fr)); gap: 4px 12px; margin-top: 4px; min-width: 0; }
+.npc-state-delta-v2-dossiers .npc-state-delta-story-stage { flex: 0 1 auto; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Present NPCs in chat (full cards and compact strip). Tapping either opens the launcher dossier. */
 .npc-state-delta-present-roster {
@@ -320,12 +320,16 @@
 .npc-state-delta-present-card-placeholder { display: grid; place-items: center; width: 100%; height: 100%; background: var(--ss-tile, rgba(216,190,145,.12)); color: var(--ss-accent, #d8bc78); font-family: Georgia, 'Times New Roman', serif; }
 .npc-state-delta-present-card-placeholder span { font-size: 18px; opacity: .8; }
 .npc-state-delta-present-card-text { display: grid; align-content: center; min-width: 0; gap: 2px; line-height: 1.25; pointer-events: none; }
-.npc-state-delta-present-card-name { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 14px; font-weight: 800; color: var(--ss-text, #f4f1e9); }
-.npc-state-delta-present-card-role { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--ss-muted, #d8d2c0); }
+.npc-state-delta-present-card-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.npc-state-delta-present-card-name { display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 14px; font-weight: 800; color: var(--ss-text, #f4f1e9); }
+.npc-state-delta-present-card-stage:empty { display: none; }
+.npc-state-delta-present-card-stage { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; font-weight: 600; color: var(--ss-accent, var(--npc-gold, #d8bc78)); }
+.npc-state-delta-present-card-bars { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px 10px; margin-top: 3px; min-width: 0; }
+.npc-state-delta-present-card-role { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: 12px; color: var(--ss-muted, var(--npc-ink, inherit)); }
 .npc-state-delta-present-card .npc-state-delta-present-now { display: none; }
 .npc-state-delta-present-cell { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 4px; min-width: 0; }
 .npc-state-delta-present-cell .npc-state-delta-chatter { cursor: pointer; }
-.npc-state-delta-present-side { display: grid; gap: 2px; min-width: 0; padding: 0 10px 0 64px; font-size: 12px; line-height: 1.3; color: var(--ss-muted, #d8d2c0); }
+.npc-state-delta-present-side { display: grid; gap: 2px; min-width: 0; padding: 0 10px 0 64px; font-size: 12px; line-height: 1.3; color: var(--ss-muted, var(--npc-ink, inherit)); }
 .npc-state-delta-present-side .npc-state-delta-present-now { display: grid; gap: 2px; min-width: 0; margin: 0; }
 .npc-state-delta-present-side .npc-state-delta-present-now-part { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: 12px; color: var(--ss-text, #f6e7c4); }
 .npc-state-delta-present-now-label { font-weight: 600; opacity: .7; }

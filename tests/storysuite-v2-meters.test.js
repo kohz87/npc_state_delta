@@ -4,13 +4,15 @@ import { CAPTURE_PREFIX, createRegistry } from './vendor/story-block/src/v2/regi
 import { createStore } from './vendor/story-block/src/v2/store.js';
 import { createCommandBus } from './vendor/story-block/src/v2/commands.js';
 import { parseChanges } from './vendor/story-block/src/v2/capture.js';
-import { MODULE_ID, createStorySuiteV2Adapter, meterBarHtml } from '../src/storysuite-v2.js';
+import { MODULE_ID, createStorySuiteV2Adapter, meterBarNode } from '../src/storysuite-v2.js';
 import {
     DEFAULT_CHANGE_CAP, MAX_CUSTOM_METERS, MAX_NPCS, meterDefs, normalizeMeterSettings, npcKey, parseMeterValue,
     secretId, secretsFromLines, secretsToLines, stageAt, validateNpcSlice,
 } from '../src/npc-meters.js';
 import { METERS_CARD_ID, metersCardScreen } from '../src/npc-meters-screen.js';
 import { buildInjection, buildNarrationCapturePrompt, buildProfileRefreshPrompt, buildScannerPrompt } from '../core.js';
+import { fakeRoot } from './helpers/fake-dom.js';
+import { fakeDocument } from './helpers/fake-dom.js';
 
 // NPC meters in v2's per-reply state (F81, F90), against Story Block's real registry, store, command
 // bus and change-line parser (tests/vendor/story-block, see its VERSION). The adapter registers
@@ -284,7 +286,7 @@ test('hostile NPC and meter names never reach prototypes, keys or markup', async
     assert.equal(npcs.mira.meters.lust, 13, 'a custom meter starts at its own start');
     assert.deepEqual(validateNpcSlice(h.store.head().domains.npc), []);
     // Markup: names and labels are escaped in the Cast tab bars.
-    const bar = meterBarHtml({ id: '<b>', label: '<img src=x onerror=alert(1)>', min: 0, max: 50, tone: '"><script>' }, 7, '<i>stage</i>');
+    const bar = meterBarNode(fakeDocument(), { id: '<b>', label: '<img src=x onerror=alert(1)>', min: 0, max: 50, tone: '"><script>' }, 7, '<i>stage</i>').serialize();
     assert.doesNotMatch(bar, /<img|<script|<i>|<b>/);
     assert.match(bar, /ss-w-tone-neutral/, 'a tone outside the list is neutral');
     assert.match(bar, /--ss-w-ratio: 0\.14/);
@@ -637,7 +639,7 @@ test('the Dossiers tab (once Cast) shows a meter bar per shown meter for the pre
     const h = await host({ settings: { stages: STAGES, customMeters: [{ name: 'Lust', show: 'bar' }, { name: 'Secretive', show: 'hidden' }] } });
     h.reply('Warm.', '~ npc Mira | trust: +12 | lust: +3\n~ npc Oren | trust: +1\n+ npc <b>Bold</b> | trust: +1');
     h.delta.records.npc_bold = { id: 'npc_bold', name: '<b>Bold</b>', aliases: [], present: true, archived: false, relationship: {} };
-    const el = { innerHTML: '', addEventListener() {}, isConnected: true };
+    const el = fakeRoot();
     h.def.tabs[0].render(el);
     // The present cast and its meters, before the dossier list (which names everyone, Oren too).
     const html = el.innerHTML.split('npc-state-delta-v2-dossiers')[0];

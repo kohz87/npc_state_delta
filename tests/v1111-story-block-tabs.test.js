@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { connectStoryBlock, dossierTabRowsHtml, emptyCastHtml, STORY_BLOCK_TAB_IDS } from '../story-block-tabs.js';
+import { connectStoryBlock, dossierRowNodes, emptyCastHtml, STORY_BLOCK_TAB_IDS } from '../story-block-tabs.js';
+import { fakeDocument } from './helpers/fake-dom.js';
 
 // Story Block integration: Present NPCs and Dossiers tabs registered through Story Block's public
 // registerTab API. Unit tests drive the adapter with fakes; the host scenario runs the real
@@ -12,7 +13,8 @@ import { connectStoryBlock, dossierTabRowsHtml, emptyCastHtml, STORY_BLOCK_TAB_I
 function fakePane() {
     const listeners = {};
     const input = { value: '', listeners: {}, addEventListener(name, fn) { this.listeners[name] = fn; } };
-    const list = { innerHTML: '', writes: 0 };
+    const list = { innerHTML: '', writes: 0, ownerDocument: fakeDocument() };
+    list.replaceChildren = (...nodes) => { list.writes += 1; list.innerHTML = nodes.map(node => node.serialize()).join(''); };
     let html = '';
     const pane = {
         writes: 0,
@@ -116,16 +118,17 @@ test('v1.1.11 the Dossiers tab searches, keeps its box across refreshes, hides t
     assert.deepEqual(runtime.opened, ['npc_brenn'], 'a tap outside a row opens nothing');
 });
 
-test('v1.1.11 dossier rows escape names and fall back to an initial without a portrait', () => {
-    const html = dossierTabRowsHtml([{ id: 'x"1', name: '<Ilsa>', role: 'a & b', statusLabel: 'Off-screen', portrait: '' }]);
+test('v1.1.11 dossier rows: names are text (never markup), and an initial stands in without a portrait', () => {
+    const markup = (rows, opts) => dossierRowNodes(rows, fakeDocument(), opts).map(node => node.serialize()).join('');
+    const html = markup([{ id: 'x"1', name: '<Ilsa>', role: 'a & b', statusLabel: 'Off-screen', portrait: '' }]);
     assert.match(html, /data-npc-id="x&quot;1"/);
     assert.match(html, /&lt;Ilsa&gt;/);
     assert.match(html, /a &amp; b · Off-screen/);
-    assert.match(html, /<span>&lt;<\/span>/);
-    assert.match(dossierTabRowsHtml([]), /No dossier matches/);
+    assert.match(html, /<span class="npc-state-delta-story-thumb ss-listcard-icon"><span class="">&lt;<\/span><\/span>|<span>&lt;<\/span>/);
+    assert.match(markup([]), /No dossier matches\./);
     // (1.2.13) With no dossier at all: say so, and offer Add NPC and Scan now; a search says what it searched.
-    assert.match(dossierTabRowsHtml([], { total: 0 }), /No dossiers yet\.[\s\S]*data-npc-state-delta-action="add"[\s\S]*data-npc-state-delta-action="scan"/);
-    assert.match(dossierTabRowsHtml([], { query: 'Ly<ra', total: 3 }), /No dossier matches “Ly&lt;ra”/);
+    assert.match(markup([], { total: 0 }), /No dossiers yet\.[\s\S]*data-npc-state-delta-action="add"[\s\S]*data-npc-state-delta-action="scan"/);
+    assert.match(markup([], { query: 'Ly<ra', total: 3 }), /No dossier matches “Ly&lt;ra”/);
 });
 
 const TRY_MARKER = '\ntry {\n    await import(pathToFileURL(path.join(extRoot, \'index.js\'))';
