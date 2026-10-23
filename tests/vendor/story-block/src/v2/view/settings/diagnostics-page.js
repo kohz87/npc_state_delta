@@ -1,14 +1,16 @@
 // The Diagnostics section's body (UI stage, step 3g): the last page on the form engine's look, in place of the Diagnostics fold. Cards:
 //
 // * Report: the plain-text report a reader copies or saves for a bug report (diagnostics.js builds it from what the settings host gives:
-//   `diagnostics.report()`), shown as it will be shared, with Copy (the clipboard; else the text is selected for copying by hand), Save (a
-//   .txt download), Refresh and, when the page offers one, "Show the UI sample". The report holds no API keys, tokens, addresses or chat
-//   text (diagnostics.js scrubs it; tests/v2/diagnostics-scrub.test.js and the page's own test keep that). It is built when the page is
-//   first shown, and again on Refresh, Copy and Save, not while the window opens.
+//   `diagnostics.report()`), shown as it will be shared, in a fold that is closed until it is opened (its summary says what it holds:
+//   versions, modules, settings). Under the fold: Copy (the clipboard; else the text is selected for copying by hand), Save (a .txt
+//   download), Refresh and, when the page offers one, "Show the UI sample", then the status line and the icon credit. Those stay usable
+//   while the report is folded. The report holds no API keys, tokens, addresses or chat text (diagnostics.js scrubs it;
+//   tests/v2/diagnostics-scrub.test.js and the page's own test keep that). It is built when the page is first shown, and again on
+//   Refresh, Copy and Save, not while the window opens.
 // * What modules place here with `settings.place: 'diagnostics'`: their own folds (Story Block's Events: debug information that can spoil
 //   the story, so folded until opened) and the settings of a module whose whole settings are placed here (its card, a fold too).
 //
-// Fold keys keep working: `story-suite-diagnostics` (the Report card), `<module id>/<fold id>` (an own fold placed here, opened),
+// Fold keys keep working: `story-suite-diagnostics` (the Report fold), `<module id>/<fold id>` (an own fold placed here, opened),
 // `<module id>` (a module placed here, opened).
 //
 // Built with createElement and textContent only: the report and module text are never markup.
@@ -38,13 +40,15 @@ export function diagnosticsBody(pane, ctx) {
     const modules = new Map((typeof registry?.modules === 'function' ? registry.modules() : []).map(def => [def.id, def]));
     const hasReport = Boolean(diagnostics && typeof diagnostics.report === 'function');
 
-    // ---- the report
+    // ---- the report: a fold (closed by default, its state kept as the other folds keep theirs) holding the text; the buttons, the
+    // status line and the credits stay outside it, so Copy, Save and Refresh work while the report is folded.
     let report = null;
     if (hasReport) {
-        const card = sectionBlock(doc, { title: T.title, hint: T.hint, id: newId('diagnostics') });
-        card.el.classList.add('ss-diagnostics-card');
+        const open = ctx.openState?.get(DIAGNOSTICS_FOLD) === true;
+        const card = sectionBlock(doc, { title: T.reportTitle, hint: T.reportHint, id: newId('diagnostics'), collapsible: true, open });
+        card.el.classList.add('ss-diagnostics-card', 'ss-section-fold', 'ss-diagnostics-report-fold');
+        card.el.classList.toggle('ss-section-fold-open', open);
         card.el.dataset.fold = DIAGNOSTICS_FOLD;
-        card.title.tabIndex = -1;
         const text = h(doc, 'pre', 'story-suite-diagnostics-report');
         text.tabIndex = 0;
         text.setAttribute('aria-label', T.reportLabel);
@@ -69,8 +73,16 @@ export function diagnosticsBody(pane, ctx) {
             sample.title = T.sampleTitle;
             sample.addEventListener('click', () => { try { diagnostics.sample(); } catch (error) { status.textContent = fill(T.sampleFailed, { why: error?.message ?? error }); } });
         }
-        actions.appendChild(status);
-        card.body.append(h(doc, 'p', 'ss-card-help', T.help), text, actions);
+        // The tools below the fold, in a glass card of their own (the credit needs a surface behind it, as the cards have): the
+        // buttons, the status line, then the icon credit with a hairline above it.
+        const tools = h(doc, 'div', 'ss-diagnostics-tools ss-glass');
+        const credits = h(doc, 'p', 'ss-card-help ss-diagnostics-credits', T.credits);
+        tools.append(actions, status, credits);
+        card.body.append(h(doc, 'p', 'ss-card-help', T.help), text);
+        card.el.addEventListener('toggle', () => {
+            card.el.classList.toggle('ss-section-fold-open', card.el.open === true);
+            ctx.openState?.set(DIAGNOSTICS_FOLD, card.el.open === true);
+        });
         let run = 0;
         let built = false;
         const build = async () => {
@@ -126,8 +138,8 @@ export function diagnosticsBody(pane, ctx) {
             }
         });
         again.addEventListener('click', () => { status.textContent = ''; build(); });
-        root.appendChild(card.el);
-        report = { card, build, built: () => built, text };
+        root.append(card.el, tools);
+        report = { card, tools, build, built: () => built, text };
     }
 
     // ---- what modules place here: their own folds, and a module whose settings are placed here
@@ -163,7 +175,7 @@ export function diagnosticsBody(pane, ctx) {
         root.appendChild(entry.el);
     }
 
-    const reportHit = text => matchesSearch('diagnostics.report', { label: `${T.title} ${T.copy} ${T.save} ${T.sample}`, help: T.help }, T.title, text);
+    const reportHit = text => matchesSearch('diagnostics.report', { label: `${T.reportTitle} ${T.copy} ${T.save} ${T.sample}`, help: `${T.help} ${T.credits}` }, T.title, text);
     return {
         filter(text) {
             const query = String(text ?? '').trim();
@@ -171,6 +183,7 @@ export function diagnosticsBody(pane, ctx) {
             if (report) {
                 const hit = !query || reportHit(text);
                 report.card.setHidden(!hit);
+                report.tools.hidden = !hit;
                 if (query && hit) shown += 1;
             }
             for (const fold of placedFolds) {
@@ -202,8 +215,12 @@ export function diagnosticsBody(pane, ctx) {
         },
         open(key) {
             if (key === DIAGNOSTICS_FOLD) {
-                report?.build?.();
-                return showAndFocus(report?.card.title);
+                if (!report) return false;
+                report.build();
+                report.card.el.open = true;
+                report.card.el.classList.add('ss-section-fold-open');
+                ctx.openState?.set(DIAGNOSTICS_FOLD, true);
+                return showAndFocus(report.card.el.querySelector('summary'));
             }
             const fold = placedFolds.find(item => item.key === key);
             if (fold) {

@@ -52,6 +52,7 @@ const SHARED = Object.freeze({
     '--ss-radius-l': '18px',
     '--ss-radius-xl': '22px',
     '--ss-radius-xxl': '26px',
+    '--ss-radius-button': '12px',
     '--ss-radius-pill': '999px',
     '--ss-space-1': '4px',
     '--ss-space-2': '8px',
@@ -86,6 +87,8 @@ export const PALETTES = Object.freeze({
         pill: 'rgba(255, 255, 255, 0.14)', pillText: '#f1f2f8', badge: '#f1f2f8', badgeText: '#141720',
         field: 'rgba(0, 0, 0, 0.22)', overlay: 'rgba(24, 27, 42, 0.72)', scrim: 'rgba(8, 10, 20, 0.6)', off: 'rgba(255, 255, 255, 0.22)', accentSoft: 'rgba(123, 108, 240, 0.24)',
         good: '#72dea4', chatter: '#d2cbff',
+        // the accent as TEXT on the glass (the bar's current label, a tile's icon): >= 4.5:1 on the dark glass (the accent itself is ~4:1)
+        accentText: '#a99dff',
     }),
     light: Object.freeze({
         base: [255, 255, 255], solid: '#f6f5fb',
@@ -94,6 +97,8 @@ export const PALETTES = Object.freeze({
         pill: '#2c2f46', pillText: '#ffffff', badge: '#2c2f46', badgeText: '#ffffff',
         field: 'rgba(255, 255, 255, 0.85)', overlay: 'rgba(255, 255, 255, 0.78)', scrim: 'rgba(35, 37, 58, 0.38)', off: 'rgba(35, 37, 58, 0.22)', accentSoft: 'rgba(123, 108, 240, 0.16)',
         good: '#1d7c4a', chatter: '#5544c4',
+        // the accent as text on the light glass: >= 4.5:1
+        accentText: '#5a48d6',
     }),
 });
 
@@ -235,6 +240,8 @@ export function schemeTokens(scheme, panel, { opaque = false, strength = DEFAULT
             ['--ss-glass-strong', 'var(--SmartThemeBlurTintColor, rgba(23, 23, 23, 1))'],
             ['--ss-tile', 'color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 8%, transparent)'],
             ['--ss-border', 'var(--SmartThemeBorderColor, rgba(0, 0, 0, 0.5))'],
+            // the current tab's edge (UI 5b): SillyTavern's text colour, since its quote colour can be faint on a light track
+            ['--ss-tab-edge', 'var(--SmartThemeBodyColor, #dcdcd2)'],
             // the section-label hairline: SillyTavern's text colour at 40% over its tint, so it reads against the card (>= 1.5:1)
             ['--ss-rule', 'color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 40%, var(--SmartThemeBlurTintColor, rgba(23, 23, 23, 1)))'],
             ['--ss-shadow', '0 2px 8px var(--SmartThemeShadowColor, rgba(0, 0, 0, 0.5))'],
@@ -251,6 +258,9 @@ export function schemeTokens(scheme, panel, { opaque = false, strength = DEFAULT
             ['--ss-off', 'color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 22%, transparent)'],
             ['--ss-accent', 'var(--SmartThemeQuoteColor, #e18a24)'],
             ['--ss-accent-soft', 'color-mix(in srgb, var(--SmartThemeQuoteColor, #e18a24) 20%, transparent)'],
+            // the accent as text, following SillyTavern's own colours: its quote colour mixed with its text colour (40:60), so it reads
+            // on a light theme too (the quote colour alone is ~2:1 there); on a dark theme it stays light
+            ['--ss-accent-text', 'color-mix(in srgb, var(--SmartThemeQuoteColor, #e18a24) 40%, var(--SmartThemeBodyColor, #dcdcd2))'],
             ['--ss-good', '#4caf6e'],
             ['--ss-chatter', 'var(--SmartThemeEmColor, #919191)'],
             ['--ss-blur', 'blur(var(--SmartThemeBlurStrength, 0px))'],
@@ -284,6 +294,8 @@ export function schemeTokens(scheme, panel, { opaque = false, strength = DEFAULT
         ['--ss-scrim', p.scrim],
         ['--ss-off', p.off],
         ['--ss-accent', ACCENT],
+        ['--ss-accent-text', p.accentText],
+        ['--ss-tab-edge', 'var(--ss-accent)'],
         ['--ss-accent-soft', p.accentSoft],
         ['--ss-good', p.good],
         ['--ss-chatter', p.chatter],

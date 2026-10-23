@@ -15,6 +15,7 @@ import { LIMITS } from './limits.js';
 import { validatePack, HOST_VERSION } from './validate.js';
 import { findPackEntries } from './lorebook.js';
 import { byteLength } from './safety.js';
+import { packTag } from './kind.js';
 
 const SOURCES = ['file', 'lorebook'];
 
@@ -80,6 +81,8 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
                     hasStart: Boolean(pack?.start),
                     // What else it adds, beside its content lists: its coins, a money scale, a calendar, weather tables, screens, a theme.
                     extras: pack ? extrasOf(pack) : [],
+                    // Which module the pack is for, in words (kind.js): "World pack · Story Director", or "Pack" when it says neither.
+                    tag: packTag(pack),
                     missing: pack && have ? pack.requires.capabilities.filter(name => !have.includes(name)) : [],
                     problem: result.ok ? '' : result.errors[0].message,
                 };

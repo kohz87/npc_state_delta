@@ -1,5 +1,6 @@
 ## Unreleased: UI 4c (Story Block glass screens)
 
+- **World → Here present card** (`storysuite-v2.js`, `style.css`): no meters on the card (they stay on the Dossiers screen); Mood, Condition and Look sit inside the card, one line each, clamped with an ellipsis; the chatter goes under the card, 10px below it. The launcher hides while Story Block's game view is open (`body:has(.ss-gameview)`). Prompts unchanged.
 Delta's screens move onto Story Block's glass design (`--ss-*` tokens, the blocks' classes). No prompt, command, id or
 data attribute changes; the Cast page API (`NPCStateDeltaCast`) and the Dossiers screen id stay as they were. The version
 is not bumped (no release is authorized here).

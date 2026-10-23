@@ -7,8 +7,10 @@
 
 import { widgetCss } from './styles.js';
 import { cutAt } from '../../../text.js';
+import { hasIcon, svgIcon } from '../icons/index.js';
 
 export const SVG_NS = 'http://www.w3.org/2000/svg';
+export const DEFAULT_FA_ICON = 'fa-table-columns';
 
 /** Tones a widget accepts; anything else is shown as `neutral` (data never picks an arbitrary class). */
 export const TONES = Object.freeze(['neutral', 'accent', 'good', 'warn', 'bad', 'info']);
@@ -121,10 +123,18 @@ export function faClasses(value) {
 }
 
 /**
- * An icon node from a Font Awesome class name, a data:/https: image, or a short glyph (an emoji, a
- * letter); null when the value is none of these. Icons are decorative: the label lives next to them.
+ * An icon node from a `ph-*` icon id (view/icons, `ph-name:fill` for the solid weight), a Font Awesome class name,
+ * a data:/https: image, or a short glyph (an emoji, a letter); null when the value is none of these. An unknown
+ * `ph-*` id falls back to the default Font Awesome icon. Icons are decorative: the label lives next to them.
  */
 export function iconNode(doc, value, className = 'ss-w-icon') {
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    if (trimmed && hasIcon(trimmed)) return svgIcon(doc, trimmed, { className });
+    if (trimmed.startsWith('ph-')) {
+        const node = h(doc, 'i', `${className ? `${className} ` : ''}fa-solid ${DEFAULT_FA_ICON}`);
+        node.setAttribute('aria-hidden', 'true');
+        return node;
+    }
     const fa = faClasses(value);
     if (fa) {
         const node = h(doc, 'i', `${className} ${fa.join(' ')}`);

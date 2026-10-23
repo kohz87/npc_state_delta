@@ -13,7 +13,7 @@
     --story-suite-bg: var(--SmartThemeBlurTintColor, rgba(20, 20, 24, 0.96));
     --story-suite-fg: var(--SmartThemeBodyColor, inherit);
     --story-suite-accent: var(--SmartThemeQuoteColor, #e1a95f);
-    --story-suite-sheet-width: min(420px, 34vw);
+    --story-suite-sheet-width: clamp(300px, 34vw, 420px);
 }
 
 /* Screen themes (SPEC §13.3) reach the layout tokens (MODULES §F10); a layout's own tokens still win. */
@@ -66,9 +66,11 @@
 .story-suite-notice-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: 0.9em; }
 .story-suite-bar .story-suite-notice .menu_button { min-height: 28px; padding: 0 10px; }
 
-/* ---- the story panel: a bottom sheet on phones, a side sheet on wide screens ----
+/* ---- the story panel: a bottom sheet on phones, a side sheet from 760px (the line the game view switches at) ----
    Placed from the top with a height, not with bottom: 0: SillyTavern's mobile layout gives <html> a transform
-   and no height, which makes it the box fixed elements are placed in, so bottom: 0 would be its top edge. */
+   and no height, which makes it the box fixed elements are placed in, so bottom: 0 would be its top edge.
+   The panel is a column: the head, the body (the pane, scrolling) and the screen bar at its foot (floating over the
+   body; the body keeps room for it). */
 .story-suite-sheet {
     position: fixed; left: 0; right: 0; top: 22dvh; bottom: auto; z-index: 3001;
     height: 78dvh; display: flex; flex-direction: column;
@@ -93,8 +95,18 @@
     border: 1px solid var(--ss-border, var(--story-suite-line)); border-radius: var(--ss-radius-m, 8px);
     background: var(--ss-tile, transparent); color: var(--ss-text, inherit);
 }
-.story-suite-sheet-body { overflow: auto; padding: 8px 12px 16px; min-height: 0; }
-@media (min-width: 900px) {
+.story-suite-sheet-body { flex: 1 1 auto; overflow: auto; padding: 8px 12px 0; min-height: 0; }
+/* the screen bar at the foot of the panel (view/screen-bar.js, className story-suite-sheet-bar): the game view's floating pill */
+.story-suite-sheet-bar {
+    position: absolute; left: 12px; right: 12px; bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    height: 72px; z-index: 3;
+}
+/* the body ends with room for the bar, so the last thing in the pane can be scrolled above it */
+.story-suite-sheet-body::after {
+    content: ''; display: block;
+    height: calc(72px + 14px + 12px + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 760px) {
     .story-suite-sheet {
         top: var(--topBarBlockSize, 40px); left: auto; right: 0; bottom: auto; width: var(--story-suite-sheet-width);
         height: calc(100dvh - var(--topBarBlockSize, 40px));
@@ -113,8 +125,7 @@
     }
 }
 
-/* ---- the tab host: the tab bar is the ss.tabs block (glass.css draws it, its list scrolls); the pane under it ---- */
-.story-suite-tabs { min-width: 0; }
+/* ---- the tab host: the pane under the head; the tabs are the screen bar at the foot (mounts/screen-bar: glass.css) ---- */
 .story-suite-pane { padding-top: 8px; min-width: 0; }
 
 /* ---- the settings window ----

@@ -41,11 +41,12 @@ function group(kind) {
   <section class="group" data-kind="${kind}" data-if="${anyKind(kind)}">
     <h4 class="ss-section-label"><i class="fa-solid ${KIND_ICONS[kind]}" aria-hidden="true"></i> ${html(KIND_TITLES[kind])}</h4>
     <ul>
-      <li class="item" data-each="q.items as it" data-if="it.kind == '${kind}' && ${ITEM_FILTER}"
+      <li class="item ss-glass" data-each="q.items as it" data-if="it.kind == '${kind}' && ${ITEM_FILTER}"
           data-class="${RARITY_CLASSES}; equipped: it.equipped != null">
+        <span class="ss-tile-box" aria-hidden="true"><i class="fa-solid ${KIND_ICONS[kind]}"></i><span class="ss-tile-count" data-if="it.qty != 1">{{ it.qty }}</span></span>
+        <div class="body">
         <div class="line">
           <span class="name">{{ it.name }}</span>
-          <span class="qty" data-if="it.qty != 1">×{{ it.qty }}</span>
           <span class="chip eq" data-if="it.equipped" title="${html(S.equippedTitle)}"><i class="fa-solid fa-check" aria-hidden="true"></i> {{ it.equipped }}</span>
           <span class="chip key" data-if="it.key" title="${html(S.keyTitle)}">${html(S.key)}</span>
           <span class="chip carry" data-if="it.carry" title="${html(S.carryTitle)}">+{{ it.carry }} ${html(S.carry)}</span>
@@ -89,6 +90,7 @@ function group(kind) {
                       data-payload='{"stack":"{{ it.stack }}","qty":{{ it.qty }}}'><span data-if="it.qty != 1">${html(S.dropAll, { qty: '{{ it.qty }}' })}</span><span data-if="it.qty == 1">${html(S.dropIt)}</span></button>
             </span>
           </details>
+        </div>
         </div>
       </li>
     </ul>
@@ -174,9 +176,12 @@ const CSS = `${BASE_CSS}
 .group:not(:has(.item)) { display: none; }
 .nomatch { display: none; }
 .groups:not(:has(.item)) + .nomatch { display: block; }
-.item, .piece { --rarity: var(--sb-common); padding: 6px 8px; margin: 0 0 4px; border-radius: 6px;
-        border-left: 3px solid var(--rarity); background: var(--sb-raised); transition: background-color 0.15s ease, box-shadow 0.15s ease; }
-.item:hover, .piece:hover { background: color-mix(in srgb, var(--sb-fg) 9%, transparent); }
+.item, .piece { --rarity: var(--sb-common); padding: 12px; margin: 0 0 4px; border-radius: var(--ss-radius-l, 14px); transition: box-shadow 0.15s ease; }
+/* UI 5b: an item is a glass card: its tile (the kind's icon, the count in the corner) with the rarity ring, the name and the actions beside it */
+.item { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: start; }
+.item > .body { display: grid; gap: 6px; min-width: 0; }
+.item .ss-tile-box { --rarity-ring: var(--rarity); width: 44px; height: 44px; border: 2px solid var(--rarity); border-radius: var(--ss-radius-m, 12px); }
+.item .ss-tile-count { right: -6px; bottom: -6px; }
 .item.r-uncommon, .piece.r-uncommon { --rarity: var(--sb-uncommon); }
 .item.r-rare, .piece.r-rare { --rarity: var(--sb-rare); }
 .item.r-epic, .piece.r-epic { --rarity: var(--sb-epic); }

@@ -20,8 +20,10 @@
 // and for cards also { before, replyOps } (the state before the reply, the reply's own ops).
 
 import { themeVars } from '../css.js';
+import { hasIcon, svgIcon } from '../icons/index.js';
 import { resolveData } from '../screens.js';
 
+const DEFAULT_FA_ICON = 'fa-table-columns';
 const disposers = new WeakMap();
 const themed = new WeakMap();      // el → the theme properties last set on it
 
@@ -74,7 +76,10 @@ export function button(doc, className, text, title = null) {
 }
 
 export function icon(doc, name) {
-    const node = make(doc, 'i', `fa-solid ${name || 'fa-table-columns'}`);
+    const trimmed = typeof name === 'string' ? name.trim() : '';
+    if (hasIcon(trimmed)) return svgIcon(doc, trimmed);
+    const fa = !trimmed || trimmed.startsWith('ph-') ? DEFAULT_FA_ICON : name;
+    const node = make(doc, 'i', `fa-solid ${fa}`);
     node.setAttribute('aria-hidden', 'true');
     return node;
 }

@@ -30,9 +30,8 @@ import { FIELD_TYPES, normalizeField } from './registry.js';
 import { SETTING_LIST_ROWS } from './sdk.js';
 import { PROMPT_HINT, featureOf } from './features.js';
 import { compatReport, renderCompat } from './compat.js';
-import { scrollCue } from './view/scroll-cue.js';
-import { renderTabStrip } from './view/widgets/nav.js';
-import { TAB_ID_MAX } from './view/tab-order.js';
+import { createScreenBar } from './view/screen-bar.js';
+import { iconFor } from './view/icons/index.js';
 import { DEFAULT_TAIL_BUDGET, contextNotice, estimateTokens } from './prompt.js';
 import { STRINGS, fill } from './strings.js';
 import { cutAt } from '../text.js';
@@ -40,10 +39,6 @@ import { profileNote, profileSelect } from './profile-field.js';
 import { focusNode, revealIn } from './view/scroll.js';
 
 const S = STRINGS;
-/** The story panel's tab strip (createTabHost): a longer list than the block's default, and its labels in full. */
-const PANEL_TABS_MAX = 100;
-const PANEL_TAB_LABEL_MAX = 200;
-const TAB_COMMAND = 'story-suite.tab';
 
 export const OPEN_CLASS = 'story-suite-open';
 export const HOST_FOLD = 'story-suite';
@@ -164,7 +159,9 @@ export const TABS_TEXT = Object.freeze({
 // The Diagnostics page (diagnostics.js builds the report; view/settings/diagnostics-page.js draws it).
 export const DIAGNOSTICS_TEXT = Object.freeze({
     title: 'Diagnostics',
-    hint: 'a report for a bug report',
+    // The report's fold: its summary line says what the report holds (the fold is closed until it is opened).
+    reportTitle: 'Report',
+    reportHint: 'versions, modules, settings',
     checksHint: 'checks for packs and modules',
     help: 'A plain report of what Story Suite sees: versions, features, settings, the prompt size, the last problems, saving and the size of this chat, and what each module adds. It holds no API keys, passwords or addresses and no chat text. Read it before you share it.',
     copy: 'Copy report',
@@ -180,6 +177,7 @@ export const DIAGNOSTICS_TEXT = Object.freeze({
     sample: 'Show the UI sample',
     sampleTitle: 'Every building block of Story Suite\'s look, in light and dark, for checking a theme and for screenshots',
     sampleFailed: 'The UI sample could not be shown: {why}',
+    credits: 'Icons: Phosphor Icons (phosphoricons.com), MIT License.',
 });
 export const FEATURE_TEXT = Object.freeze({
     title: 'Features',
@@ -1061,56 +1059,34 @@ export function diagnosticsKeys(registry) {
 }
 
 /**
- * The story panel's tab host, drawn into `root`: a tab bar (the `ss.tabs` block, view/widgets/nav.js) with one button
- * per tab `registry.tabs()` gives, in its order (Story Block's panel gives the module tabs and the tab screens in the
- * reader's order, without the hidden ones), and one pane under it, the chosen tab's, rendered with
- * `tab.render(pane, view(), api)`. The block takes the keys (arrows, Home, End; one Tab stop) and scrolls the strip
- * sideways when the tabs do not fit; it moves the strip only when the chosen tab changes, so a redraw keeps the
- * reader's scroll. Each button's `title` is its full label. A tab that is gone falls back to the first.
- * `options`: { registry, view: () => view, api (the sdk), doc?, active? }. Tabs read the head state's view only,
- * never message text. Returns { refresh(), select(id), active() }.
+ * The story panel's tab host, drawn into `root`: one pane, the chosen tab's, rendered with `tab.render(pane, view(), api)`,
+ * and the screen bar (view/screen-bar.js) at the foot of the panel, in `barHost` (the panel itself; `root` if none): four
+ * tabs and More, as the game view's bar (More holds the rest). The tabs are `registry.tabs()`, in its order (Story Block's
+ * panel gives the module tabs and the tab screens in the reader's order, without the hidden ones). A tab that is gone falls
+ * back to the first. The pane scrolls inside `root`; the bar stays where it is.
+ * `options`: { registry, view: () => view, api (the sdk), doc?, active?, barHost? }. Tabs read the head state's view only,
+ * never message text. Returns { refresh(), select(id), active(), bar }.
  */
-export function createTabHost(root, { registry, view, api = null, doc = globalThis.document, active = null }) {
+export function createTabHost(root, { registry, view, api = null, doc = globalThis.document, active = null, barHost = null }) {
     let current = active;
-    // The story panel's tab bar is the `ss.tabs` block (view/widgets/nav.js): one Tab stop, the arrows, Home and End,
-    // aria-current on the chosen tab. Its choice runs `TAB_COMMAND` with { tabs: id }; here that is `select`. The block is
-    // drawn once and updated on each draw, so the focus stays on the tab it was on.
-    const bar = el(doc, 'div', 'story-suite-tabs');
     const pane = el(doc, 'div', 'story-suite-pane');
-    root.replaceChildren(bar, pane);
-    const choice = Object.freeze({ command: (type, payload) => select(payload?.tabs ?? null) });
-    const renderStrip = renderTabStrip({ max: PANEL_TABS_MAX, labelMax: PANEL_TAB_LABEL_MAX, idMax: TAB_ID_MAX });
-    let strip = null;
-    // Tabs that do not fit scroll sideways; the edge with more of them fades (scroll-cue.js).
-    let cue = null;
-
-    // The block's buttons also carry the panel's own names: `story-suite-tab` and `data-tab-id` (the tests and the modules use them).
-    function decorate() {
-        for (const node of bar.querySelectorAll('.ss-tabs-item')) {
+    root.replaceChildren(pane);
+    // The panel's own names on each tab's button and its More tile: `story-suite-tab` and `data-tab-id` (the tests and the
+    // modules use them), and the full label as the title (the bar cuts a long one).
+    const bar = createScreenBar(doc, barHost ?? root, {
+        label: S.panel.tabs,
+        className: 'story-suite-sheet-bar',
+        onSelect: id => select(id),
+        decorate(node, item) {
             node.classList.add('story-suite-tab');
-            node.setAttribute('data-tab-id', node.getAttribute('data-id') ?? '');
-            // The label is ellipsised on a narrow strip: the full label is the button's title.
-            node.setAttribute('title', node.querySelector('.ss-tabs-label')?.textContent ?? '');
-        }
-        for (const node of bar.querySelectorAll('.ss-tabs-label')) node.classList.add('story-suite-tab-label');
-    }
+            node.setAttribute('data-tab-id', item.id);
+        },
+    });
 
     function draw() {
         const tabs = registry.tabs();
         if (!tabs.some(tab => tab.id === current)) current = tabs[0]?.id ?? null;
-        const props = {
-            items: tabs.map(tab => ({ id: tab.id, label: tab.title, icon: tab.icon || '' })),
-            current: current ?? '',
-            onSelect: TAB_COMMAND,
-            label: S.panel.tabs,
-        };
-        if (strip) strip.update(props);
-        else {
-            strip = renderStrip(bar, props, choice);
-            cue = scrollCue(bar.querySelector('.ss-tabs-list'), { win: doc.defaultView ?? globalThis });
-        }
-        decorate();
-        cue?.update();
+        bar.update({ items: tabs.map(tab => ({ id: tab.id, label: tab.title, icon: iconFor(tab.id, tab.icon) })), current: current ?? '' });
         pane.replaceChildren();
         const tab = tabs.find(item => item.id === current);
         pane.dataset.tabId = tab?.id ?? '';
@@ -1127,5 +1103,5 @@ export function createTabHost(root, { registry, view, api = null, doc = globalTh
         draw();
     }
     draw();
-    return { refresh: draw, select, active: () => current };
+    return { refresh: draw, select, active: () => current, bar };
 }

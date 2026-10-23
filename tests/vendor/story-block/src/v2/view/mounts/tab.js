@@ -7,6 +7,7 @@
 // → { mount(el, screenId, opts) → handle, register() → ids, unregister() }
 
 import { mountHead, screensFor } from './common.js';
+import { iconFor } from '../icons/index.js';
 
 export function createTabMount(deps) {
     if (typeof deps?.render !== 'function') throw new TypeError('The tab mount needs a render(el, screen, scope) function.');
@@ -31,7 +32,7 @@ export function createTabMount(deps) {
             removers.push(deps.addTab({
                 id: entry.id,
                 title: entry.screen.title ?? entry.id,
-                icon: entry.screen.icon ?? 'fa-table-columns',
+                icon: iconFor(entry.id, entry.screen.icon) || 'fa-table-columns',
                 ...(entry.screen.order !== undefined ? { order: entry.screen.order } : {}),
                 render: (el, view, api) => mount(el, entry.id, {
                     ...(view?.state ? { state: view.state } : {}),

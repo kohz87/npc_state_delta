@@ -761,3 +761,10 @@ html[data-npc-state-delta-story-block-v2="1"] .npc-state-delta-v2-hosted-hide { 
    Block 2's own host.css says the same; this keeps it with a host that does not. */
 .story-suite-section .story-suite-drawer > .inline-drawer-content { display: block !important; }
 .story-suite-section .story-suite-drawer > .inline-drawer-header { display: none !important; }
+
+/* World → Here (the present card, storysuite-v2.js): Mood, Condition and Look inside the card, one line each, clamped with
+   an ellipsis (the full line is in its title); the chatter under the card, 10px below it and outside its box; no meters. */
+.npc-state-delta-world-cell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; }
+.npc-state-delta-world-cell > .npc-state-delta-present-card .npc-state-delta-present-now { display: grid; gap: 2px; min-width: 0; margin-top: 4px; }
+.npc-state-delta-world-cell > .npc-state-delta-present-card .npc-state-delta-present-now-part { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--ss-text, #f6e7c4); }
+.npc-state-delta-world-cell > .npc-state-delta-chatter .npc-state-delta-bubble { margin-top: 0; }
