@@ -33,32 +33,50 @@ const TEMPLATE = `
 </div>`;
 
 const CSS = `${BASE_CSS}
-.inspector { display: grid; gap: var(--sb-gap); }
-.sb-insp { display: grid; gap: var(--sb-gap); min-width: 0; }
-.sb-insp-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.sb-insp-bar select { flex: 1 1 14em; min-width: 0; max-width: 100%; }
-.sb-insp-bar input { flex: 1 1 12em; min-width: 0; }
-.sb-insp-head { margin: 0; font-size: 1em; }
+.inspector { display: grid; gap: var(--ss-space-3, 12px); }
+.sb-insp { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--ss-space-3, 12px); min-width: 0; color: var(--ss-text, inherit); font-family: var(--ss-font, inherit); }
+.sb-insp-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--ss-space-3, 12px); min-width: 0; }
+.sb-insp-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sb-insp-bar .sb-insp-pick { flex: 1 1 14em; min-width: 0; max-width: 100%; }
+.sb-insp-bar .sb-insp-search { flex: 1 1 12em; min-width: 0; }
+/* The bar's buttons are glass pills on the look's tokens. Hover and focus take the accent edge and a soft accent fill laid
+   over the dense glass; the text stays the text colour (accent text on glass is hard to read). */
+.sb-insp-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 40px; min-height: 40px; padding: 0 12px; box-sizing: border-box; border: 1px solid var(--ss-border, currentColor); border-radius: var(--ss-radius-pill, 999px); background: var(--ss-tile, transparent); color: var(--ss-text, inherit); font: inherit; font-weight: 600; cursor: pointer; transition: border-color var(--ss-motion, 0.2s) ease, background-color var(--ss-motion, 0.2s) ease; }
+.sb-insp-btn:hover:not(:disabled), .sb-insp-btn:focus-visible:not(:disabled) { border-color: var(--ss-accent, currentColor); background: linear-gradient(var(--ss-accent-soft, transparent), var(--ss-accent-soft, transparent)), var(--ss-glass-strong, var(--ss-tile, transparent)); }
+.sb-insp-btn:focus-visible { outline: 2px solid var(--ss-accent, currentColor); outline-offset: 2px; }
+.sb-insp-btn:active:not(:disabled) { border-color: var(--ss-accent, currentColor); background: linear-gradient(var(--ss-accent-soft, transparent), var(--ss-accent-soft, transparent)), var(--ss-glass-strong, var(--ss-tile, transparent)); }
+.sb-insp-btn:disabled { opacity: 0.45; cursor: default; }
+.sb-insp-head { margin: 0; font-size: 1.1em; font-weight: 700; overflow-wrap: anywhere; }
+.sb-insp-card { margin: 0; }
+.sb-insp-card-title { margin: 0; }
 .sb-insp-count { font-size: 0.85em; }
-.sb-insp-diff li, .sb-insp-ops li { display: flex; gap: 6px; align-items: baseline; font-family: var(--monoFontFamily, monospace); font-size: 0.85em; overflow-wrap: anywhere; }
-.sb-insp-mark { flex: 0 0 1em; text-align: center; font-weight: bold; }
-.sb-insp-add .sb-insp-mark { color: var(--sb-good); }
-.sb-insp-remove .sb-insp-mark { color: var(--sb-bad); }
-.sb-insp-change .sb-insp-mark { color: var(--sb-accent); }
-.sb-insp-path { color: var(--sb-em); }
-.sb-insp-receipts li, .sb-insp-problems li { padding: 3px 0; border-bottom: 1px solid var(--sb-border); }
-.sb-insp-receipts li:last-child, .sb-insp-problems li:last-child { border-bottom: 0; }
-.sb-insp-meta { display: block; font-size: 0.8em; }
-.sb-insp-problems li { color: var(--sb-bad); }
-.sb-insp-tree { font-family: var(--monoFontFamily, monospace); font-size: 0.85em; overflow-x: auto; }
-.sb-insp-tree details > .sb-insp-kids { padding-left: 1.1em; border-left: 1px dashed var(--sb-border); margin-left: 0.3em; }
-.sb-insp-tree summary { cursor: pointer; }
-.sb-insp-leaf { padding-left: 1.1em; overflow-wrap: anywhere; }
-.sb-insp-key { color: var(--sb-accent); }
-.sb-insp-str { color: var(--sb-good); }
-.sb-insp-num, .sb-insp-bool, .sb-insp-null { color: var(--sb-em); }
-.sb-insp-hit > summary, .sb-insp-leaf.sb-insp-hit { background: color-mix(in srgb, var(--sb-accent) 22%, transparent); border-radius: 3px; }
+.sb-insp-diff, .sb-insp-ops, .sb-insp-receipts, .sb-insp-problems { margin: 0; }
+.sb-insp-diff li, .sb-insp-ops li, .sb-insp-receipts li, .sb-insp-problems li { min-width: 0; }
+.sb-insp-diff .ss-listcard-title, .sb-insp-ops .ss-listcard-title, .sb-insp-receipts .ss-listcard-title, .sb-insp-problems .ss-listcard-title { font-weight: 600; overflow-wrap: anywhere; }
+/* Raw values (paths, state values, operations) in monospace; the words around them in the look's own font. */
+.sb-insp-path, .sb-insp-ops .ss-listcard-title, .sb-insp-diff .ss-listcard-sub, .sb-insp-problems .ss-listcard-sub { font-family: var(--monoFontFamily, monospace); font-size: 0.85em; }
+.sb-insp-diff .ss-listcard-title, .sb-insp-ops .ss-listcard-title { font-family: var(--monoFontFamily, monospace); font-size: 0.85em; font-weight: 600; }
+.sb-insp-mark { font-weight: 700; color: var(--ss-text, inherit); }
+.sb-insp-add .sb-insp-mark { background: color-mix(in srgb, var(--ss-good, #2fbf71) 22%, transparent); }
+.sb-insp-remove .sb-insp-mark { background: color-mix(in srgb, var(--ss-bad, #e5484d) 22%, transparent); }
+.sb-insp-change .sb-insp-mark { background: color-mix(in srgb, var(--ss-accent, currentColor) 22%, transparent); }
+.sb-insp-path { color: var(--ss-text, inherit); }
+.sb-insp-receipts .ss-listcard-sub, .sb-insp-meta { display: block; font-size: 0.8em; color: var(--ss-muted, inherit); }
+.sb-insp-problems li .ss-listcard-title { color: var(--ss-text, inherit); }
+.sb-insp-problems .ss-listcard-tag { color: var(--ss-text, inherit); }
+.sb-insp-tree { font-size: 0.9em; overflow-x: auto; }
+.sb-insp-tree details > .sb-insp-kids { padding-left: 1.1em; border-left: 1px dashed var(--ss-border, currentColor); margin-left: 0.3em; }
+.sb-insp-tree summary, .sb-insp-tree .sb-insp-leaf { border-radius: var(--ss-radius-s, 10px); }
+.sb-insp-tree summary { cursor: pointer; padding: 2px 4px; overflow-wrap: anywhere; }
+.sb-insp-tree summary:hover { background: var(--ss-tile, transparent); }
+.sb-insp-tree summary:focus-visible { outline: 2px solid var(--ss-accent, currentColor); outline-offset: 1px; }
+.sb-insp-leaf { padding: 2px 4px 2px 1.1em; overflow-wrap: anywhere; }
+.sb-insp-key { color: var(--ss-text, inherit); font-weight: 600; }
+.sb-insp-str, .sb-insp-num, .sb-insp-bool, .sb-insp-null { font-family: var(--monoFontFamily, monospace); color: var(--ss-text, inherit); }
+.sb-insp-num, .sb-insp-bool, .sb-insp-null { color: var(--ss-muted, inherit); }
+.sb-insp-hit > summary, .sb-insp-leaf.sb-insp-hit { background: color-mix(in srgb, var(--ss-accent, currentColor) 22%, transparent); border-radius: 6px; }
 .sb-insp-empty { font-style: italic; }
+.sb-insp .muted { color: var(--ss-muted, var(--sb-em, inherit)); }  /* the look's muted text on the glass, not SillyTavern's emphasis colour */
 `;
 
 export const inspectorScreen = Object.freeze({
@@ -80,7 +98,7 @@ function el(doc, tag, className = '', text) {
 }
 
 function button(doc, className, text, title) {
-    const node = el(doc, 'button', `btn ${className}`, text);
+    const node = el(doc, 'button', `sb-insp-btn ${className}`, text);
     node.type = 'button';
     node.setAttribute('type', 'button');
     if (title) {
@@ -90,9 +108,10 @@ function button(doc, className, text, title) {
     return node;
 }
 
+// A section is a glass card (the look's `ss-glass`); its title is the section label.
 function section(doc, className, title) {
-    const box = el(doc, 'section', `panel ${className}`);
-    box.appendChild(el(doc, 'h4', '', title));
+    const box = el(doc, 'section', `ss-glass sb-insp-card ${className}`);
+    box.appendChild(el(doc, 'h4', 'ss-label sb-insp-card-title', title));
     return box;
 }
 
@@ -165,22 +184,31 @@ export function drawTree(parent, value, ctx, path = '') {
 
 const MARKS = { add: '+', remove: '−', change: '~' };
 
+// A row of the look's list card: the mark in a tile, the path (raw, so monospace) and the values.
 function diffLine(doc, entry) {
-    const row = el(doc, 'li', `sb-insp-${entry.kind}`);
+    const row = el(doc, 'li', `ss-listcard-row sb-insp-${entry.kind}`);
     row.setAttribute('data-path', entry.path);
-    const mark = el(doc, 'span', 'sb-insp-mark', MARKS[entry.kind] ?? '?');
+    const item = el(doc, 'div', 'ss-listcard-item');
+    const mark = el(doc, 'span', 'ss-listcard-icon sb-insp-mark', MARKS[entry.kind] ?? '?');
     mark.setAttribute('aria-label', entry.kind);
     const text = entry.kind === 'add' ? preview(entry.after) : entry.kind === 'remove' ? `(was ${preview(entry.before)})` : `${preview(entry.before)} → ${preview(entry.after)}`;
-    row.append(mark, el(doc, 'span', 'sb-insp-path', entry.path || '/'), el(doc, 'span', '', text));
+    const main = el(doc, 'span', 'ss-listcard-main');
+    main.append(el(doc, 'span', 'ss-listcard-title sb-insp-path', entry.path || '/'), el(doc, 'span', 'ss-listcard-sub', text));
+    item.append(mark, main);
+    row.appendChild(item);
     return row;
 }
 
 function opLine(doc, op) {
-    const row = el(doc, 'li', `sb-insp-${op?.op === 'add' ? 'add' : op?.op === 'remove' ? 'remove' : 'change'}`);
+    const row = el(doc, 'li', `ss-listcard-row sb-insp-${op?.op === 'add' ? 'add' : op?.op === 'remove' ? 'remove' : 'change'}`);
     const parts = [op?.op ?? '?', String(op?.path ?? '')];
     if (op && 'value' in op) parts.push(`= ${preview(op.value)}`);
     if (op && 'was' in op) parts.push(`(was ${preview(op.was)}${op.count ? ` at ${op.count}` : ''})`);
-    row.append(el(doc, 'span', 'sb-insp-mark', MARKS[op?.op === 'replace' ? 'change' : op?.op] ?? '?'), el(doc, 'span', '', parts.join(' ')));
+    const item = el(doc, 'div', 'ss-listcard-item');
+    const main = el(doc, 'span', 'ss-listcard-main');
+    main.appendChild(el(doc, 'span', 'ss-listcard-title', parts.join(' ')));
+    item.append(el(doc, 'span', 'ss-listcard-icon sb-insp-mark', MARKS[op?.op === 'replace' ? 'change' : op?.op] ?? '?'), main);
+    row.appendChild(item);
     return row;
 }
 
@@ -209,12 +237,12 @@ export function createInspectorWidget(source, { enabled = () => true } = {}) {
             root.setAttribute('role', 'region');
             root.setAttribute('aria-label', S.title);
             const bar = el(doc, 'div', 'sb-insp-bar');
-            const picker = el(doc, 'select', 'text_pole sb-insp-pick');
+            const picker = el(doc, 'select', 'ss-input ss-select sb-insp-pick');
             picker.setAttribute('aria-label', S.pick);
             const older = button(doc, 'sb-insp-older', '◀', S.older);
             const newer = button(doc, 'sb-insp-newer', '▶', S.newer);
             const latest = button(doc, 'sb-insp-latest', S.latest, S.latest);
-            const search = el(doc, 'input', 'text_pole sb-insp-search');
+            const search = el(doc, 'input', 'ss-input ss-text sb-insp-search');
             search.setAttribute('type', 'search');
             search.setAttribute('placeholder', S.searchHint);
             search.setAttribute('aria-label', S.search);
@@ -268,21 +296,21 @@ export function createInspectorWidget(source, { enabled = () => true } = {}) {
                     return;
                 }
                 const heading = el(doc, 'h3', 'sb-insp-head', fill(S.heading, { index: view.index, name: view.name ? ` · ${view.name}` : '', rev: view.rev ?? '—' }));
-                if (view.checkpoint) heading.appendChild(el(doc, 'span', 'chip muted', S.checkpoint));
+                if (view.checkpoint) heading.appendChild(el(doc, 'span', 'ss-pill ss-pill-soft', S.checkpoint));
                 body.appendChild(heading);
 
                 // What changed since the reply before.
                 const changed = section(doc, 'sb-insp-changes', S.changed);
                 if (!view.diff.entries.length) changed.appendChild(el(doc, 'p', 'muted sb-insp-empty', S.noChange));
                 else {
-                    const list = el(doc, 'ul', 'sb-insp-diff');
+                    const list = el(doc, 'ul', 'ss-listcard-rows sb-insp-diff');
                     list.append(...view.diff.entries.map(entry => diffLine(doc, entry)));
                     if (view.diff.more) list.appendChild(el(doc, 'li', 'muted', fill(S.moreChanges, { n: view.diff.more })));
                     changed.appendChild(list);
                 }
                 const ops = el(doc, 'details', 'sb-insp-ops-box');
                 ops.appendChild(el(doc, 'summary', 'muted', fill(S.ops, { n: view.ops.length })));
-                const opList = el(doc, 'ul', 'sb-insp-ops');
+                const opList = el(doc, 'ul', 'ss-listcard-rows sb-insp-ops');
                 opList.append(...view.ops.slice(0, MAX_OPS).map(op => opLine(doc, op)));
                 if (view.ops.length > MAX_OPS) opList.appendChild(el(doc, 'li', 'muted', fill(S.moreChanges, { n: view.ops.length - MAX_OPS })));
                 ops.appendChild(opList);
@@ -293,13 +321,17 @@ export function createInspectorWidget(source, { enabled = () => true } = {}) {
                 const receipts = section(doc, 'sb-insp-receipts-box', `${S.receipts} (${view.receipts.length})`);
                 if (!view.receipts.length) receipts.appendChild(el(doc, 'p', 'muted sb-insp-empty', S.noReceipts));
                 else {
-                    const list = el(doc, 'ul', 'sb-insp-receipts');
+                    const list = el(doc, 'ul', 'ss-listcard-rows sb-insp-receipts');
                     for (const receipt of view.receipts) {
-                        const row = el(doc, 'li');
+                        const row = el(doc, 'li', 'ss-listcard-row');
                         row.setAttribute('data-receipt', receipt.id);
-                        row.appendChild(el(doc, 'span', '', receipt.summary || receipt.type));
+                        const item = el(doc, 'div', 'ss-listcard-item');
+                        const main = el(doc, 'span', 'ss-listcard-main');
+                        main.appendChild(el(doc, 'span', 'ss-listcard-title', receipt.summary || receipt.type));
                         const meta = [receipt.type, receipt.module, receipt.cause, receipt.rev !== null ? `rev ${receipt.rev}` : '', receipt.narrate ? '' : S.untold].filter(Boolean).join(' · ');
-                        row.appendChild(el(doc, 'span', 'muted sb-insp-meta', meta));
+                        main.appendChild(el(doc, 'span', 'ss-listcard-sub sb-insp-meta', meta));
+                        item.appendChild(main);
+                        row.appendChild(item);
                         list.appendChild(row);
                     }
                     receipts.appendChild(list);
@@ -310,8 +342,17 @@ export function createInspectorWidget(source, { enabled = () => true } = {}) {
                 const problems = section(doc, 'sb-insp-problems-box', `${S.problems} (${view.problems.length})`);
                 if (!view.problems.length) problems.appendChild(el(doc, 'p', 'muted sb-insp-empty', S.noProblems));
                 else {
-                    const list = el(doc, 'ul', 'sb-insp-problems');
-                    for (const problem of view.problems) list.appendChild(el(doc, 'li', '', problem.code ? `${problem.message} (${problem.code})` : problem.message));
+                    const list = el(doc, 'ul', 'ss-listcard-rows sb-insp-problems');
+                    for (const problem of view.problems) {
+                        const row = el(doc, 'li', 'ss-listcard-row');
+                        const item = el(doc, 'div', 'ss-listcard-item');
+                        const main = el(doc, 'span', 'ss-listcard-main');
+                        main.appendChild(el(doc, 'span', 'ss-listcard-title', problem.message));
+                        if (problem.code) main.appendChild(el(doc, 'span', 'ss-listcard-sub', problem.code));
+                        item.appendChild(main);
+                        row.appendChild(item);
+                        list.appendChild(row);
+                    }
                     problems.appendChild(list);
                 }
                 body.appendChild(problems);

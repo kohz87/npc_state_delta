@@ -592,7 +592,7 @@ class DeltaDossierUi {
             <button type="button" class="delta-launcher" aria-haspopup="dialog" aria-expanded="false" title="Open NPC dossiers">
                 <span class="delta-launcher-mark" aria-hidden="true">D</span><span>Dossiers</span>
             </button>
-            <section class="delta-panel" role="dialog" aria-modal="true" aria-label="NPC State Delta dossiers" tabindex="-1" hidden>
+            <section class="delta-panel ss-cards" role="dialog" aria-modal="true" aria-label="NPC State Delta dossiers" tabindex="-1" hidden>
                 <header class="delta-topbar">
                     <div class="delta-brand"><span class="delta-kicker">NPC DOSSIER</span><strong>NPC State Delta</strong><span class="delta-chat-state"></span></div>
                     <div class="delta-top-actions">
@@ -646,8 +646,13 @@ class DeltaDossierUi {
             if (event.target.closest('.delta-portrait-expand') || event.target.closest('.delta-hero-media img.delta-hero-portrait')) return void this.openLightbox();
             const jump = event.target.closest('.delta-section-jump')?.dataset?.deltaJump;
             if (jump) {
-                const target = this.root.querySelector(`.delta-document [data-delta-section="${CSS.escape(jump)}"]`);
-                target?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+                // UI 4c: the document is the only thing that moves (a phone never scrolls the window or the page behind it).
+                const scroller = this.root.querySelector('.delta-document');
+                const target = scroller?.querySelector(`[data-delta-section="${CSS.escape(jump)}"]`);
+                if (scroller && target) {
+                    const cover = scroller.querySelector('.delta-section-nav')?.getBoundingClientRect().height ?? 0;
+                    scroller.scrollTop += target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - cover;
+                }
                 return;
             }
             const edit = event.target.closest('.delta-edit');
@@ -1053,7 +1058,10 @@ class DeltaDossierUi {
         }
         settings.classList.add('npc-state-delta-stage1-settings-target');
         setTimeout(() => {
-            settings.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+            // UI 4c: only the settings' own scroller moves (the nearest one that scrolls), never the window or the page.
+            let box = settings.parentElement;
+            while (box && box !== document.body && !(/(auto|scroll)/.test(getComputedStyle(box).overflowY) && box.scrollHeight > box.clientHeight)) box = box.parentElement;
+            if (box && box !== document.body) box.scrollTop += settings.getBoundingClientRect().top - box.getBoundingClientRect().top;
             setTimeout(() => settings.classList.remove('npc-state-delta-stage1-settings-target'), 1800);
         }, 0);
     }
@@ -1096,15 +1104,17 @@ if (typeof document !== 'undefined') {
 
 const STYLES = `
 #${ROOT_ID} {
-  --delta-bg: var(--SmartThemeBlurTintColor, #18191d);
-  --delta-text: var(--SmartThemeBodyColor, #f0eee9);
-  --delta-muted: color-mix(in srgb, var(--delta-text) 66%, transparent);
-  --delta-surface: rgba(255,255,255,.055);
-  --delta-surface-strong: rgba(255,255,255,.085);
-  --delta-line: rgba(218,193,148,.24);
+  /* UI 4c: the panel takes Story Block's glass tokens inside its .ss-cards root (the panel carries that class); outside
+     Story Block, or in Solid and Follow SillyTavern where a token is unset, each keeps Delta's own value (the fallback). */
+  --delta-bg: var(--ss-sheet-bg, var(--SmartThemeBlurTintColor, #18191d));
+  --delta-text: var(--ss-text, var(--SmartThemeBodyColor, #f0eee9));
+  --delta-muted: var(--ss-text, color-mix(in srgb, var(--delta-text) 66%, transparent));
+  --delta-surface: var(--ss-glass, rgba(255,255,255,.055));
+  --delta-surface-strong: var(--ss-glass-strong, rgba(255,255,255,.085));
+  --delta-line: var(--ss-border, rgba(218,193,148,.24));
   --delta-line-strong: rgba(218,193,148,.52);
-  --delta-accent: #d8bc78;
-  --delta-accent-soft: #f0ddb0;
+  --delta-accent: var(--ss-accent, #d8bc78);
+  --delta-accent-soft: var(--ss-text, #f0ddb0);
   --delta-good: #9ed5b6;
   --delta-warn: #e9c98d;
   --delta-danger: #efaaaa;
@@ -1131,8 +1141,8 @@ const STYLES = `
 #${ROOT_ID} .delta-panel {
   position: fixed; z-index: 2147483500; left:50%; top:50%; transform:translate(-50%,-50%);
   width:min(1320px,97vw); height:min(940px,96dvh); overflow:hidden;
-  display:flex; flex-direction:column; border:1px solid var(--delta-line); border-radius:15px;
-  color:var(--delta-text); background:var(--delta-bg);
+  display:flex; flex-direction:column; border:1px solid var(--delta-line); border-radius:var(--ss-radius-xl, 15px);
+  color:var(--delta-text); background:var(--delta-bg); backdrop-filter:var(--ss-blur, none); -webkit-backdrop-filter:var(--ss-blur, none);
   box-shadow:0 0 0 100vmax rgba(0,0,0,.72),0 20px 70px rgba(0,0,0,.55);
 }
 #${ROOT_ID} .delta-topbar { flex:0 0 auto; min-height:56px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px 8px 16px; border-bottom:1px solid var(--delta-line); background:color-mix(in srgb,var(--delta-bg) 94%,black 6%); }
@@ -1168,7 +1178,20 @@ const STYLES = `
 #${ROOT_ID} .delta-document-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:15px; padding-bottom:12px; border-bottom:1px solid var(--delta-line); }
 #${ROOT_ID} .delta-document-head h2 { margin:3px 0 4px; font:700 1.65rem/1.15 Georgia,"Times New Roman",serif; color:var(--delta-accent-soft); }
 #${ROOT_ID} .delta-document-head p { margin:0; }
-#${ROOT_ID} .delta-section { margin:0 0 14px; padding:14px 15px; border:1px solid rgba(218,193,148,.14); border-radius:10px; background:var(--delta-surface); }
+#${ROOT_ID} .delta-section { margin:0 0 14px; padding:14px 15px; border:1px solid var(--ss-border, rgba(218,193,148,.14)); border-radius:var(--ss-radius-l, 10px); background:var(--delta-surface); }
+#${ROOT_ID} .delta-panel.ss-cards { margin:0; gap:0; }
+#${ROOT_ID} .delta-panel.ss-cards {
+  /* UI 4c: the aliases are read where the tokens exist: inside the panel's ss-cards root (the root above is outside it). */
+  --delta-bg: var(--ss-sheet-bg, var(--SmartThemeBlurTintColor, #18191d));
+  --delta-text: var(--ss-text, var(--SmartThemeBodyColor, #f0eee9));
+  --delta-muted: var(--ss-text, color-mix(in srgb, var(--delta-text) 66%, transparent));
+  --delta-surface: var(--ss-glass, rgba(255,255,255,.055));
+  --delta-surface-strong: var(--ss-glass-strong, rgba(255,255,255,.085));
+  --delta-line: var(--ss-border, rgba(218,193,148,.24));
+  --delta-line-strong: rgba(218,193,148,.52);
+  --delta-accent: var(--ss-accent, #d8bc78);
+  --delta-accent-soft: var(--ss-text, #f0ddb0);
+}
 #${ROOT_ID} .delta-section h3 { margin:0 0 11px; font-size:.92rem; letter-spacing:.08em; text-transform:uppercase; color:var(--delta-accent-soft); }
 #${ROOT_ID} .delta-section h4 { margin:0 0 5px; font-size:.77rem; letter-spacing:.05em; text-transform:uppercase; color:var(--delta-muted); }
 #${ROOT_ID} .delta-section p { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }

@@ -13,7 +13,7 @@
    SillyTavern's checkbox and slider rules (input[type=…], 0,1,1) keep theirs. Nothing outside these roots
    is touched. */
 
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen]) {
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) {
     --ss-field-fg: var(--SmartThemeBodyColor, #dcdcd2);
     --ss-field-bg: color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 8%, var(--SmartThemeBlurTintColor, #171717));
     --ss-field-border: color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 28%, var(--SmartThemeBorderColor, rgba(0, 0, 0, 0.5)));
@@ -22,11 +22,11 @@
 }
 
 /* Text-like boxes: text, search, number and their kin (and an input with no type, which is a text box). */
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen])
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note)
     input:where(:not([type]), [type="text"], [type="search"], [type="number"], [type="email"], [type="url"], [type="tel"],
         [type="password"], [type="date"], [type="time"], [type="datetime-local"], [type="month"], [type="week"]),
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen]) textarea,
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen]) select {
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) textarea,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) select {
     color: var(--ss-field-fg);
     background-color: var(--ss-field-bg);
     border: 1px solid var(--ss-field-border);
@@ -37,48 +37,48 @@
     box-sizing: border-box;
     max-width: 100%;
 }
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen])
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note)
     input:where(:not([type]), [type="text"], [type="search"], [type="number"], [type="email"], [type="url"], [type="tel"],
         [type="password"], [type="date"], [type="time"], [type="datetime-local"], [type="month"], [type="week"]) {
     padding: 3px 8px;
 }
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen]) textarea {
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) textarea {
     padding: 5px 8px;
 }
 /* SillyTavern's own select arrow (a background image) stays: only the colour is set above, never the shorthand. */
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen]) select {
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) select {
     padding: 3px 22px 3px 8px;
 }
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen]) select option {
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) select option {
     color: var(--ss-field-fg);
     background-color: var(--SmartThemeBlurTintColor, #171717);
 }
 
 /* The quiet hint inside an empty box. */
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen]) :is(input, textarea)::placeholder {
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) :is(input, textarea)::placeholder {
     color: var(--ss-field-muted);
     opacity: 0.8;
 }
 
 /* Focus: the theme's accent on the border and a ring (keyboard focus), instead of the browser's blue. */
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen])
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note)
     :is(input:where(:not([type]), [type="text"], [type="search"], [type="number"], [type="email"], [type="url"], [type="tel"],
         [type="password"], [type="date"], [type="time"], [type="datetime-local"], [type="month"], [type="week"]), textarea, select):focus {
     border-color: var(--ss-field-focus);
     outline: none;
 }
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen])
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note)
     :is(input, textarea, select):focus-visible {
     outline: 2px solid color-mix(in srgb, var(--ss-field-focus) 70%, transparent);
     outline-offset: 1px;
 }
 
 /* Disabled: dimmed, and says so with the cursor. Read-only: no field colour, a dashed edge (it shows a value). */
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen]) :is(input, textarea, select):disabled {
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) :is(input, textarea, select):disabled {
     opacity: 0.55;
     cursor: not-allowed;
 }
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen]) :is(input, textarea)[readonly] {
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) :is(input, textarea)[readonly] {
     background-color: transparent;
     border-style: dashed;
     cursor: default;
@@ -86,13 +86,13 @@
 
 /* Radios and checkboxes the theme does not draw (SillyTavern draws checkboxes itself), sliders' tracks, and
    a colour picker's well: the accent colour, and the field's edge around the well. */
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen]) input:where([type="radio"], [type="checkbox"], [type="range"]) {
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) input:where([type="radio"], [type="checkbox"], [type="range"]) {
     accent-color: var(--ss-field-focus);
 }
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen]) input:where([type="radio"]):disabled + * {
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) input:where([type="radio"]):disabled + * {
     opacity: 0.55;
 }
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen]) input:where([type="color"]) {
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) input:where([type="color"]) {
     inline-size: 2.4em;
     block-size: 1.8em;
     padding: 2px;

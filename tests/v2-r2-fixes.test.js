@@ -30,7 +30,8 @@ function fakeDoc() {
         getElementById: () => null,
         addEventListener(type, fn) { if (!listeners.has(type)) listeners.set(type, []); listeners.get(type).push(fn); },
         dispatchEvent(event) { for (const fn of listeners.get(event.type) ?? []) fn(event); return true; },
-        createElement: () => ({ dataset: {}, style: {}, classList: { add() {}, remove() {} } }),
+        createElement: () => ({ dataset: {}, style: {}, className: '', textContent: '', value: '', classList: { add() {}, remove() {}, contains: () => false }, setAttribute() {}, append() {}, replaceChildren() {} }),
+        createTextNode: text => ({ nodeType: 3, textContent: String(text) }),
         fire(type) { for (const fn of listeners.get(type) ?? []) fn({ type }); },
     };
 }

@@ -10,6 +10,7 @@
 
 import { STRINGS, fill } from '../strings.js';
 import { SAVEPOINT_LIMITS } from '../rewind.js';
+import { capToggle } from './show-more.js';
 
 const S = STRINGS.savepoints;
 
@@ -23,7 +24,7 @@ function el(doc, tag, className = '', text) {
 }
 
 function button(doc, className, icon, text, title = '') {
-    const node = el(doc, 'button', `btn ${className}`);
+    const node = el(doc, 'button', `ss-button ${className}`);
     node.type = 'button';
     node.setAttribute('type', 'button');
     if (icon) {
@@ -80,7 +81,11 @@ export function createSavePointsWidget({ points, enabled = () => true, notify = 
                 }
             }
 
+            // The list's toggle (capToggle): its ResizeObserver is disconnected on each redraw and on destroy.
+            let capOff = null;
             function draw() {
+                capOff?.();
+                capOff = null;
                 if (!enabled()) {
                     root = null;
                     host.replaceChildren();
@@ -90,7 +95,7 @@ export function createSavePointsWidget({ points, enabled = () => true, notify = 
                 const here = points.chatId?.();
                 root = el(doc, 'section', 'panel saves');
                 root.setAttribute('aria-label', S.title);
-                const head = el(doc, 'h4');
+                const head = el(doc, 'h4', 'ss-section-label');
                 const glyph = el(doc, 'i', 'fa-solid fa-flag');
                 glyph.setAttribute('aria-hidden', 'true');
                 head.append(glyph, doc.createTextNode(` ${S.title}`));
@@ -181,6 +186,12 @@ export function createSavePointsWidget({ points, enabled = () => true, notify = 
                         rows.appendChild(row);
                     }
                     root.appendChild(rows);
+                    // A long list is capped with "Show all" (no scrollbar), like the other long cards on Home.
+                    const more = capToggle(doc, rows, { key: 'story-block/home:saves' });
+                    capOff = more.destroy;
+                    root.appendChild(more.button);
+                    doc.defaultView?.requestAnimationFrame?.(() => more.refresh());
+                    more.refresh();
                 }
                 host.replaceChildren(root);
             }
@@ -202,6 +213,8 @@ export function createSavePointsWidget({ points, enabled = () => true, notify = 
             return {
                 update: () => draw(),
                 destroy() {
+                    capOff?.();
+                    capOff = null;
                     for (const off of offs.splice(0)) off();
                     host.replaceChildren();
                 },

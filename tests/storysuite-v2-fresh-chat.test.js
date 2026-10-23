@@ -4,6 +4,7 @@ import { createHost } from './vendor/story-block/testkit/index.js';
 import { createStorySuiteV2Adapter } from '../src/storysuite-v2.js';
 import { inspectNpcStateDataFile, dataFileExists, readNpcStateDataFile } from '../storage.js';
 import { isEmptyScannerAnswer } from '../scanner-routing.js';
+import { fakeRoot } from './helpers/fake-dom.js';
 
 // The final breaker's NSD lows on a fresh chat (B-final-13 / a3-4), with Story Block v2:
 //  1. A new chat has no per-chat data file yet. Fetching it only to be told so put a red 404 in the
@@ -104,7 +105,7 @@ async function suite(t, records = []) {
     assert.equal(await adapter.settled(), true);
     t.after(() => adapter.stop());
     const cast = () => {
-        const el = { innerHTML: '', addEventListener() {}, isConnected: true, dataset: {} };
+        const el = fakeRoot(undefined, { dataset: {} });
         adapter.definition.tabs[0].render(el);
         return el.innerHTML;
     };

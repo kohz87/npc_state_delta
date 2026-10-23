@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHost } from './vendor/story-block/testkit/index.js';
 import { compileTemplate } from './vendor/story-block/src/v2/view/template/index.js';
 import { validateScreen } from './vendor/story-block/src/v2/view/screens.js';
-import { MODULE_ID, createStorySuiteV2Adapter, meterBarHtml } from '../src/storysuite-v2.js';
+import { MODULE_ID, createStorySuiteV2Adapter, meterBarNode } from '../src/storysuite-v2.js';
 import {
     DEFAULT_CHANGE_CAP, FEATURE_DRIFT, FEATURE_PRESETS, FEATURE_STAGES, bandWord, createNpcPart, limitsFromLines, limitsToLines, normalizeMeterSettings,
     parseBands, parseNeeds, secretId, secretsFromLines, secretsToLines, validateNpcSlice,
@@ -11,6 +11,8 @@ import {
 import { BUILT_IN_PRESETS, presetCatalog } from '../src/npc-meters-presets.js';
 import { metersCardScreen } from '../src/npc-meters-screen.js';
 import { v2MetersHtml, v2MetersProjection } from '../dossier-ui.js';
+import { fakeRoot } from './helpers/fake-dom.js';
+import { fakeDocument } from './helpers/fake-dom.js';
 
 // TRS ideas 1-4 on the NPC meters (stage ladders with several needs and milestones, per-NPC ceilings
 // and floors, fuller custom meters with presets and drift, locked-note teasers), against Story
@@ -330,7 +332,7 @@ test('teasers: a locked note shows its title and rule on the card and in the Cas
     const mira = () => s.host.sdk.query('npc.cast').find(entry => entry.key === 'mira');
     assert.deepEqual(mira().locked, [{ title: 'Her past', meter: 'trust', at: 30, text: '🔒 Her past — unlocks at Trust 30' }]);
     assert.equal(leaks(), false);
-    const el = { innerHTML: '', addEventListener() {}, isConnected: true };
+    const el = fakeRoot();
     s.def.tabs[0].render(el);
     assert.match(el.innerHTML, /🔒 Her past — unlocks at Trust 30/);
     assert.doesNotMatch(el.innerHTML, /lost heir/);
@@ -384,7 +386,7 @@ test('bars carry ceiling, ticks and the latest reply\'s delta; a host whose ss.m
     assert.deepEqual(bar.ticks, [{ at: 20, label: 'Friend' }, { at: 50, label: 'Close' }, { at: 60, label: 'Confidant' }]);
     assert.equal(bar.ceiling, 70);
     assert.equal(bar.delta, 12);
-    const html = meterBarHtml({ id: 'trust', label: 'Trust', min: -100, max: 100, tone: 'info' }, 22, '', bar);
+    const html = meterBarNode(fakeDocument(), { id: 'trust', label: 'Trust', min: -100, max: 100, tone: 'info' }, 22, '', bar).serialize();
     assert.match(html, /npc-state-delta-v2-ceiling" style="--npc-state-delta-at: 0\.85"/);
     assert.match(html, /▲12/);
     assert.equal((html.match(/npc-state-delta-v2-tick/g) ?? []).length, 3);

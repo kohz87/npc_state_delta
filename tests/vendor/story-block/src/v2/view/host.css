@@ -1,8 +1,12 @@
 /* Story Block v2: the host's own furniture (src/v2/ui-host.js, src/v2/host-ui.js), on SillyTavern's theme
-   colours. The mounts' styles come from mounts.css, the form controls' from controls.css; layouts and
+   colours. The mounts' styles come from mounts.css, the form controls' from controls.css, Story Suite's
+   building blocks (glass card, tile, bar, status, pill, label) from glass.css; layouts and
    widgets inject their own sheets. */
 @import url('./mounts.css');
 @import url('./controls.css');
+@import url('./glass.css');
+@import url('./settings.css');
+@import url('./fonts.css');
 
 :root {
     --story-suite-line: var(--SmartThemeBorderColor, rgba(128, 128, 128, 0.35));
@@ -26,24 +30,41 @@
 
 .story-suite-muted { opacity: 0.75; font-size: 0.9em; margin: 4px 0; }
 
-/* ---- the bar above the message box ---- */
+/* ---- the bar above the message box: glass pills, as Main.dc.html's bottom area (the bar is a theme root, so the
+   tokens reach it under Glass, Solid and Follow SillyTavern). The buttons keep SillyTavern's menu_button class. ---- */
 .story-suite-bar {
-    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-    padding: 4px 8px; box-sizing: border-box; width: 100%;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 6px 8px; box-sizing: border-box; width: 100%;
+    color: var(--ss-text, inherit); font-family: var(--ss-font, inherit);
 }
 .story-suite-bar .menu_button {
-    display: inline-flex; align-items: center; gap: 6px; width: auto; margin: 0;
-    padding: 4px 10px; min-height: 32px; white-space: nowrap; font-size: 0.9em;
+    display: inline-flex; align-items: center; gap: 8px; width: auto; margin: 0;
+    min-height: 36px; padding: 0 14px; white-space: nowrap; font-family: inherit; font-size: 0.9em; font-weight: 600;
+    border: 1px solid var(--ss-border, var(--story-suite-line)); border-radius: var(--ss-radius-pill, 999px);
+    background: var(--ss-glass, var(--story-suite-bg)); color: var(--ss-text, inherit);
+    -webkit-backdrop-filter: var(--ss-blur, none); backdrop-filter: var(--ss-blur, none);
+    box-shadow: var(--ss-shadow, none);
+}
+/* Hover and focus: the text stays the look's text colour (accent text on glass is unreadable); the accent is the edge and
+   a soft fill laid over the dense glass, so the label keeps its contrast on a busy background. The selector matches
+   SillyTavern's own .menu_button:not(.disabled):not([disabled]):hover (its white fill would otherwise win). */
+.story-suite-bar .menu_button:not(.disabled):not([disabled]):hover, .story-suite-bar .menu_button:not(.disabled):not([disabled]):focus-visible {
+    border-color: var(--ss-accent, var(--story-suite-accent)); color: var(--ss-text, inherit);
+    background: linear-gradient(var(--ss-accent-soft, transparent), var(--ss-accent-soft, transparent)), var(--ss-glass-strong, var(--story-suite-bg));
 }
 .story-suite-bar .menu_button[hidden] { display: none; }
-.story-suite-notice {
-    display: flex; align-items: center; gap: 6px; flex: 1 1 220px; min-width: 0;
-    padding: 4px 8px; border-radius: 8px; border: 1px solid var(--story-suite-accent);
-    background: color-mix(in srgb, var(--story-suite-accent) 14%, transparent);
+.story-suite-bar .story-suite-notice {
+    display: flex; align-items: center; gap: 8px; flex: 1 1 220px; min-width: 0;
+    padding: 6px 8px 6px 14px; border-radius: var(--ss-radius-l, 14px);
+    border: 1px solid var(--ss-accent, var(--story-suite-accent));
+    background: var(--ss-glass-strong, var(--story-suite-bg));
+    -webkit-backdrop-filter: var(--ss-blur, none); backdrop-filter: var(--ss-blur, none);
+    box-shadow: var(--ss-shadow, none);
 }
+/* The notice's class is shared with the other modules' own notices (their Extensions drawers): only the bar's gets the glass. */
 .story-suite-notice[hidden] { display: none; }
 .story-suite-notice-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: 0.9em; }
-.story-suite-notice .menu_button { min-height: 28px; padding: 2px 8px; }
+.story-suite-bar .story-suite-notice .menu_button { min-height: 28px; padding: 0 10px; }
 
 /* ---- the story panel: a bottom sheet on phones, a side sheet on wide screens ----
    Placed from the top with a height, not with bottom: 0: SillyTavern's mobile layout gives <html> a transform
@@ -51,16 +72,27 @@
 .story-suite-sheet {
     position: fixed; left: 0; right: 0; top: 22dvh; bottom: auto; z-index: 3001;
     height: 78dvh; display: flex; flex-direction: column;
-    background: var(--story-suite-bg); color: var(--story-suite-fg);
+    /* Under Glass the theme (view/theme.js) sets --ss-sheet-bg and --ss-sheet-blur: the dense glass, so the page
+       shows through and the glass cards inside blur it. Solid and Follow SillyTavern leave them unset: the tint, as ever. */
+    background: var(--ss-sheet-bg, var(--story-suite-bg)); color: var(--story-suite-fg);
     border-top: 1px solid var(--story-suite-line); border-radius: 14px 14px 0 0;
-    box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.35); backdrop-filter: blur(var(--SmartThemeBlurStrength, 8px));
+    box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.35);
+    -webkit-backdrop-filter: var(--ss-sheet-blur, blur(var(--SmartThemeBlurStrength, 8px)));
+    backdrop-filter: var(--ss-sheet-blur, blur(var(--SmartThemeBlurStrength, 8px)));
 }
 .story-suite-sheet[hidden] { display: none; }
+/* The head as Panel.dc.html draws the panel: 12px gutters, the title and Close, no rule; the tab bar (the ss.tabs
+   block) sits under it. Close is a glass tile, on the tokens, so it reads on either look. */
 .story-suite-sheet-head {
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    padding: 8px 12px; border-bottom: 1px solid var(--story-suite-line);
+    padding: 12px 12px 0;
 }
-.story-suite-sheet-head .menu_button { width: auto; margin: 0; min-height: 32px; padding: 4px 10px; }
+.story-suite-sheet-head > b { min-width: 0; font-size: 1.1em; font-weight: 800; color: var(--ss-text, var(--story-suite-fg)); }
+.story-suite-sheet-head .story-suite-sheet-close {
+    flex: none; width: 40px; height: 40px; min-height: 40px; margin: 0; padding: 0;
+    border: 1px solid var(--ss-border, var(--story-suite-line)); border-radius: var(--ss-radius-m, 8px);
+    background: var(--ss-tile, transparent); color: var(--ss-text, inherit);
+}
 .story-suite-sheet-body { overflow: auto; padding: 8px 12px 16px; min-height: 0; }
 @media (min-width: 900px) {
     .story-suite-sheet {
@@ -81,42 +113,27 @@
     }
 }
 
-/* ---- the tab host ---- */
-.story-suite-tabs { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 6px; border-bottom: 1px solid var(--story-suite-line); }
-.story-suite-tab {
-    display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto;
-    padding: 6px 10px; border: 1px solid transparent; border-radius: 8px;
-    background: transparent; color: inherit; cursor: pointer; font: inherit;
-}
-.story-suite-tab.active { border-color: var(--story-suite-line); background: rgba(128, 128, 128, 0.14); color: var(--story-suite-accent); }
+/* ---- the tab host: the tab bar is the ss.tabs block (glass.css draws it, its list scrolls); the pane under it ---- */
+.story-suite-tabs { min-width: 0; }
 .story-suite-pane { padding-top: 8px; min-width: 0; }
 
-/* ---- the settings overlay ----
-   A header with Close, then one scrolling area (the whole width, so the scroll bar sits at the window's
-   edge) holding a centred column of folds. The folds never shrink: a closed one keeps its full summary
-   row however long an open one is, and the area scrolls instead (no fixed heights, no negative margins). */
+/* ---- the settings window ----
+   `.story-suite-overlay` is the layer over the page (the window is `.ss-settings`, settings.css): a dimmed page beside
+   the window on a wide screen, the window itself on a phone. The layer paints a see-through scrim and has no blur or
+   filter of its own: one on a parent would hide the page from the window's glass. The folds the sections still hold
+   (the old overlay's) never shrink: a closed one keeps its full summary row however long an open one is, and the
+   page scrolls instead (no fixed heights, no negative margins). */
 body.story-suite-open { overflow: hidden; }
 .story-suite-overlay {
     position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; height: 100dvh; z-index: 3100;
-    display: flex; flex-direction: column; box-sizing: border-box;
-    background: var(--story-suite-bg); color: var(--story-suite-fg);
-    backdrop-filter: blur(var(--SmartThemeBlurStrength, 8px));
-    padding-top: env(safe-area-inset-top, 0px);
+    display: flex; align-items: center; justify-content: center; box-sizing: border-box;
+    background: color-mix(in srgb, var(--ss-scrim, rgba(0, 0, 0, 0.55)) 60%, transparent);
+    /* A script (a focus, a scrollIntoView) must never scroll the layer: `hidden` still lets it, `clip` does not. */
+    overflow: hidden; overflow: clip; overscroll-behavior: none;
 }
 .story-suite-overlay *, .story-suite-overlay *::before, .story-suite-overlay *::after { box-sizing: border-box; }
-.story-suite-overlay-header {
-    flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    padding: 8px 16px; border-bottom: 1px solid var(--story-suite-line);
-}
-.story-suite-overlay-title { font-size: 1.1em; }
-.story-suite-overlay-header .menu_button { width: auto; margin: 0; min-height: 36px; padding: 4px 14px; }
-.story-suite-scroll {
-    flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto;
-    overscroll-behavior: contain; -webkit-overflow-scrolling: touch; scrollbar-gutter: stable;
-}
-.story-suite-overlay .story-suite-panel {
-    width: 100%; max-width: 760px; margin: 0 auto;
-    padding: 12px 16px calc(32px + env(safe-area-inset-bottom, 0px));
+@media (min-width: 760px) {
+    .story-suite-overlay { padding: 24px; }
 }
 .story-suite-folds { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .story-suite-folds > * { flex: none; min-width: 0; }
@@ -201,6 +218,9 @@ body.story-suite-open { overflow: hidden; }
 .story-suite-row[data-type="bool"] > input { justify-self: end; margin: 0; }
 .story-suite-row[data-type="list"] { grid-template-columns: minmax(0, 1fr); }
 /* A read-only field (`readOnly`): its value and help shown, its controls disabled. */
+.story-suite-slider { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.story-suite-slider > input { flex: 1 1 auto; min-width: 0; margin: 0; }
+.story-suite-slider-value { min-width: 2.5em; text-align: right; font-variant-numeric: tabular-nums; }
 .story-suite-row-readonly :disabled { opacity: 0.75; cursor: not-allowed; }
 .story-suite-subsection { margin-top: 12px; }
 .story-suite-subsection > h4 { margin: 8px 0 4px; }
@@ -287,58 +307,67 @@ body.story-suite-open { overflow: hidden; }
 .story-suite-drawer-buttons .menu_button { width: auto; display: inline-flex; gap: 6px; align-items: center; }
 .story-suite-hud-toggle { display: flex; align-items: center; gap: 6px; margin-top: 8px; cursor: pointer; }
 
-/* ---- Settings → Story Suite → Tabs: one row per tab or screen, Up / Down / Shown; Reset to default ---- */
-.story-suite-taborder { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 4px; min-width: 0; }
-.story-suite-taborder-row {
-    display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 6px;
-    border: 1px solid var(--story-suite-line); border-radius: 8px;
-}
-.story-suite-taborder-hidden { opacity: 0.65; border-style: dashed; }
-.story-suite-taborder-icon { flex: 0 0 1.4em; text-align: center; color: var(--story-suite-accent); }
-.story-suite-taborder-name { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; overflow-wrap: anywhere; }
-.story-suite-taborder-name small { opacity: 0.7; }
-.story-suite-taborder-row .menu_button {
-    flex: 0 0 auto; width: auto; margin: 0; min-height: 32px; min-width: 36px; padding: 4px 8px;
-    display: inline-flex; gap: 4px; align-items: center; justify-content: center;
-}
-.story-suite-taborder-row .menu_button:disabled { opacity: 0.35; cursor: default; filter: none; }
-.story-suite-taborder-shown { flex: 0 0 auto; display: inline-flex; gap: 4px; align-items: center; margin: 0; white-space: nowrap; }
-.story-suite-taborder-actions { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
-.story-suite-taborder-actions .menu_button { width: auto; margin: 0; }
-.story-suite-taborder-status { font-size: 0.9em; opacity: 0.8; }
-/* A phone: the arrows alone (each button keeps its "Move … up" name). */
-@media (max-width: 520px) { .story-suite-taborder-word { display: none; } }
-
-/* ---- the notes under a reply (src/v2/reply-notes.js): quiet, one line, on the theme ---- */
+/* ---- the notes under a reply (src/v2/reply-notes.js): one glass row, as Reply.dc.html's card: the icon in a tile, the
+   line, Re-read as a pill. The note is a theme root (the tokens reach it under Glass, Solid and Follow SillyTavern). ---- */
 .story-suite-reply-note {
-    display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin: 4px 0 2px; padding: 3px 8px;
-    border-radius: 6px; border: 1px dashed var(--story-suite-line);
-    font-size: 0.85em; color: var(--story-suite-fg); opacity: 0.8;
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px;
+    margin: 6px 0 4px; padding: 8px 12px; box-sizing: border-box;
+    border-radius: var(--ss-radius-m, 14px); border: 1px solid var(--ss-border, var(--story-suite-line));
+    background: var(--ss-glass, transparent); -webkit-backdrop-filter: var(--ss-blur, none); backdrop-filter: var(--ss-blur, none);
+    box-shadow: var(--ss-shadow, none);
+    color: var(--ss-text, var(--story-suite-fg)); font-family: var(--ss-font, inherit); font-size: 0.9em;
     animation: story-suite-fade-in 0.2s ease-out;
 }
-.story-suite-reply-note[data-kind="missing"] > i { color: var(--story-suite-accent); }
-.story-suite-reply-note-text { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+.story-suite-reply-note > i {
+    flex: none; display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: var(--ss-radius-s, 10px);
+    background: var(--ss-tile, transparent); color: var(--ss-muted, inherit);
+}
+.story-suite-reply-note[data-kind="missing"] > i { color: var(--ss-accent, var(--story-suite-accent)); }
+.story-suite-reply-note-text { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; color: var(--ss-muted, inherit); }
 .story-suite-reply-note-reread {
-    flex: 0 0 auto; padding: 1px 10px; border-radius: 6px; cursor: pointer; font: inherit;
-    color: inherit; background: transparent; border: 1px solid var(--story-suite-line);
+    flex: 0 0 auto; min-height: 30px; padding: 0 12px; cursor: pointer; font: inherit; font-weight: 600;
+    border-radius: var(--ss-radius-pill, 999px); border: 1px solid var(--ss-border, var(--story-suite-line));
+    background: var(--ss-tile, transparent); color: var(--ss-text, inherit);
     transition: border-color 0.15s ease, color 0.15s ease;
 }
-.story-suite-reply-note-reread:hover, .story-suite-reply-note-reread:focus-visible { border-color: var(--story-suite-accent); color: var(--story-suite-accent); }
+.story-suite-reply-note-reread:hover, .story-suite-reply-note-reread:focus-visible {
+    border-color: var(--ss-accent, var(--story-suite-accent)); color: var(--ss-text, inherit);
+}
 .story-suite-reply-note-reread[disabled] { cursor: progress; opacity: 0.7; }
-.story-suite-reply-note-error { flex: 1 1 100%; color: var(--story-suite-accent); }
+.story-suite-reply-note-error { flex: 1 1 100%; color: var(--ss-text, inherit); font-weight: 600; }
 .story-suite-reply-note-error[hidden] { display: none; }
 
-/* ---- Choices under a reply (src/v2/extras-ui.js, MODULES §F115) ---- */
-.story-suite-extras { display: grid; gap: 4px; margin: 4px 0 2px; font-size: 0.9em; color: var(--story-suite-fg); animation: story-suite-fade-in 0.2s ease-out; }
-.story-suite-choices { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
-.story-suite-choices > i { color: var(--story-suite-accent); opacity: 0.85; }
+/* ---- Choices under a reply (src/v2/extras-ui.js, MODULES §F115): folded by default; the summary is a glass row, the
+   options one per row, each a full-width glass button (the strip is a theme root: the tokens reach it) ---- */
+.story-suite-extras { display: grid; gap: 4px; margin: 6px 0 4px; font-size: 0.9em; color: var(--ss-text, var(--story-suite-fg)); animation: story-suite-fade-in 0.2s ease-out; }
+.story-suite-choices-fold { min-width: 0; }
+.story-suite-choices-summary {
+    display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 6px 12px; box-sizing: border-box;
+    border-radius: var(--ss-radius-m, 14px); border: 1px solid var(--ss-border, var(--story-suite-line));
+    background: var(--ss-glass, transparent); -webkit-backdrop-filter: var(--ss-blur, none); backdrop-filter: var(--ss-blur, none);
+    box-shadow: var(--ss-shadow, none); color: var(--ss-text, inherit); cursor: pointer; list-style: none; font-weight: 600;
+}
+.story-suite-choices-summary::-webkit-details-marker { display: none; }
+.story-suite-choices-summary:hover, .story-suite-choices-summary:focus-visible { border-color: var(--ss-accent, var(--story-suite-accent)); }
+.story-suite-choices-summary > i { flex: none; color: var(--ss-accent, var(--story-suite-accent)); }
+.story-suite-choices-label { flex: 1 1 auto; min-width: 0; }
+.story-suite-choices-count {
+    min-width: 20px; padding: 0 6px; border-radius: 10px; line-height: 20px; text-align: center; font-size: 0.9em;
+    background: var(--ss-badge, var(--story-suite-accent)); color: var(--ss-badge-text, inherit);
+}
+.story-suite-choices-chevron { transition: transform 0.15s ease; }
+.story-suite-choices-fold[open] > .story-suite-choices-summary > .story-suite-choices-chevron { transform: rotate(180deg); }
+.story-suite-choices { display: grid; gap: 6px; margin-top: 6px; }
 .story-suite-choice {
-    flex: 0 1 auto; max-width: 100%; min-width: 0; padding: 3px 10px; border-radius: 999px; cursor: pointer;
-    font: inherit; text-align: left; overflow-wrap: anywhere; white-space: normal;
-    color: inherit; background: color-mix(in srgb, var(--story-suite-fg) 4%, transparent); border: 1px solid var(--story-suite-line);
+    display: flex; align-items: center; justify-content: flex-start; width: 100%; min-width: 0; min-height: 44px; margin: 0;
+    padding: 8px 14px; box-sizing: border-box; text-align: left; overflow-wrap: anywhere; white-space: normal;
+    border-radius: var(--ss-radius-m, 14px); border: 1px solid var(--ss-border, var(--story-suite-line));
+    background: var(--ss-glass, transparent); -webkit-backdrop-filter: var(--ss-blur, none); backdrop-filter: var(--ss-blur, none);
+    box-shadow: var(--ss-shadow, none); color: var(--ss-text, inherit); font: inherit; cursor: pointer;
     transition: border-color 0.15s ease, color 0.15s ease;
 }
-.story-suite-choice:hover, .story-suite-choice:focus-visible { border-color: var(--story-suite-accent); color: var(--story-suite-accent); }
+.story-suite-choice:hover, .story-suite-choice:focus-visible { border-color: var(--ss-accent, var(--story-suite-accent)); color: var(--ss-text, inherit); }
 
 /* ---- subtle motion (MODULES §F57): cards open, meters move, the views come in ---- */
 @keyframes story-suite-fade-in {
@@ -347,7 +376,7 @@ body.story-suite-open { overflow: hidden; }
 }
 .ss-card { transition: border-color 0.15s ease, background-color 0.15s ease; }
 .ss-card-head { transition: background-color 0.15s ease; }
-.ss-card-head:hover { background: color-mix(in srgb, var(--story-suite-fg) 5%, transparent); }
+.ss-card-head:hover { background: color-mix(in srgb, var(--ss-text, var(--story-suite-fg)) 6%, transparent); }
 .ss-card-open > .ss-card-body { animation: story-suite-fade-in 0.18s ease-out; }
 .ss-l-meter-fill { transition: width 0.3s ease; }
 .ss-hud-item { animation: story-suite-fade-in 0.2s ease-out; }

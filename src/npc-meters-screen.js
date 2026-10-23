@@ -12,8 +12,11 @@ export const METERS_CARD_ID = 'npc-state-delta/meters';
 // the next one needs follow, then the hidden notes still locked: their titles and rules only.
 const TEMPLATE = `
 <div class="nsd-meters">
-  <section class="nsd-meters-npc" data-each="q.cast as n" data-if="n.present == true || changed(state.npc.npcs[n.key])" data-class="nsd-meters-new: changed(state.npc.npcs[n.key])">
-    <h4 class="nsd-meters-name">{{ n.name }}<span class="nsd-meters-rank" data-if="n.rank"> · {{ n.rank }}</span></h4>
+  <section class="ss-glass nsd-meters-npc" data-each="q.cast as n" data-if="n.present == true || changed(state.npc.npcs[n.key])" data-class="nsd-meters-new: changed(state.npc.npcs[n.key])">
+    <div class="nsd-meters-head">
+      <h4 class="nsd-meters-name">{{ n.name }}</h4>
+      <span class="ss-pill nsd-meters-rank" data-if="n.rank">{{ n.rank }}</span>
+    </div>
     <div class="nsd-meters-bars" data-if="changed(state.npc.npcs[n.key])">
       <div class="nsd-meters-bar" data-each="n.bars as b">
         <ss-widget name="ss.meter" data-props='{"bind":"b"}'></ss-widget>
@@ -28,18 +31,20 @@ const TEMPLATE = `
     <p class="nsd-meters-locked" data-each="n.locked as l">{{ l.text }}</p>
   </section>
 </div>
-`;
+`
 
 const CSS = `
-.nsd-meters { display: grid; gap: 8px; padding: 6px 8px; font-size: 0.9em; }
-.nsd-meters-npc { display: grid; gap: 4px; padding: 6px 8px; border-left: 3px solid var(--ss-accent, var(--SmartThemeQuoteColor)); border-radius: 6px; background: var(--SmartThemeBlurTintColor, transparent); }
-.nsd-meters-name { margin: 0; font-size: 0.95em; }
-.nsd-meters-rank { font-weight: normal; opacity: 0.8; }
-.nsd-meters-new .nsd-meters-name::after { content: " •"; color: var(--ss-accent, var(--SmartThemeQuoteColor)); }
-.nsd-meters-bars { display: grid; grid-template-columns: repeat(auto-fill, minmax(9em, 1fr)); gap: 4px 12px; }
+.nsd-meters { display: grid; gap: var(--ss-space-2); }
+.nsd-meters-npc { padding: var(--ss-space-3); }
+.nsd-meters-new { border-color: var(--ss-accent); }
+.nsd-meters-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
+.nsd-meters-name { margin: 0; min-width: 0; font-size: 15px; font-weight: 800; color: var(--ss-text); overflow-wrap: anywhere; }
+.nsd-meters-new .nsd-meters-name::after { content: " •"; color: var(--ss-accent); }
+.nsd-meters-rank { max-width: 100%; overflow-wrap: anywhere; }
+.nsd-meters-bars { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 9em), 1fr)); gap: 8px 12px; min-width: 0; }
 .nsd-meters .ss-w-meter-value { font-variant-numeric: tabular-nums; }
-.nsd-meters-next, .nsd-meters-locked { margin: 0; font-size: 0.9em; opacity: 0.8; }
-`;
+.nsd-meters-next, .nsd-meters-locked { margin: 0; font-size: 13px; color: var(--ss-muted); overflow-wrap: anywhere; }
+`
 
 export const metersCardScreen = Object.freeze({
     id: METERS_CARD_ID,

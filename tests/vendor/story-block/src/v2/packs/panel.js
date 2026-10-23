@@ -16,6 +16,9 @@ export function countsLine(counts, hasStart) {
     return parts.join(', ') || 'no content';
 }
 
+/** Everything a pack adds, in words: its content lists, a start state, then its coins, calendar, weather tables, screens… */
+export const addsLine = pack => [countsLine(pack.counts, pack.hasStart), ...(pack.extras ?? [])].filter(part => part !== 'no content' || !(pack.extras ?? []).length).join(', ');
+
 const errorLines = errors => errors.slice(0, 5).map(error => error.message);
 
 /**
@@ -28,12 +31,14 @@ const errorLines = errors => errors.slice(0, 5).map(error => error.message);
 export function renderPacksPanel(root, { packs, readLorebook, notify = () => {}, doc = globalThis.document, lore = null } = {}) {
     const make = (tag, className = '', text = '') => el(tag, className, text, doc);
     const status = { text: '', errors: [] };
-    const removing = new Set();
+    let confirming = '';
+    let focusAfter = null;
 
     const say = (text, errors = []) => {
         status.text = text;
         status.errors = errors;
         notify(text);
+        focusAfter ??= () => root.querySelector('.ss-packs-import');
         render();
     };
 
@@ -70,37 +75,77 @@ export function renderPacksPanel(root, { packs, readLorebook, notify = () => {},
         say(text, bad.flatMap(result => errorLines(result.errors).map(line => `${result.title || result.origin}: ${line}`)));
     }
 
+    const rowOf = id => [...root.querySelectorAll('.ss-packs-row')].find(node => node.dataset.packId === id);
+
+    // A row is an ss.listcard row (name and version, what it adds, who made it and where it came from) with its on/off switch and
+    // Remove. Remove asks first: the row says what goes and offers Remove and Cancel, the focus on Cancel.
     function row(pack) {
-        const item = make('div', 'ss-packs-row');
+        const item = make('li', 'ss-listcard-row ss-packs-row');
         item.dataset.packId = pack.id;
-        const toggle = make('input', 'ss-packs-enabled');
-        toggle.type = 'checkbox';
-        toggle.checked = pack.enabled;
+        const body = make('div', 'ss-listcard-item ss-packs-item');
+        const main = make('span', 'ss-listcard-main');
+        main.append(make('span', 'ss-listcard-title ss-packs-name', `${pack.name} ${pack.version}`.trim()));
+        const facts = [addsLine(pack), pack.author ? `by ${pack.author}` : '', pack.source === 'lorebook' ? 'from a lorebook' : pack.origin].filter(Boolean).join(' · ');
+        main.append(make('span', 'ss-listcard-sub ss-packs-facts', facts));
+        if (pack.description) main.append(make('span', 'ss-listcard-sub ss-packs-description', pack.description));
+        if (pack.problem) main.append(make('span', 'ss-listcard-sub ss-packs-problem', `Not usable: ${pack.problem}`));
+        else if (pack.missing.length) main.append(make('span', 'ss-listcard-sub ss-packs-problem', `Needs ${pack.missing.join(', ')}; its content is offered but those parts will not use it.`));
+        const toggle = make('button', `ss-switch ss-packs-enabled${pack.enabled ? ' ss-switch-on' : ''}`);
+        toggle.type = 'button';
+        toggle.setAttribute('role', 'switch');
+        toggle.setAttribute('aria-checked', String(pack.enabled));
+        toggle.setAttribute('aria-label', `${pack.name}: on`);
+        toggle.append(make('span', 'ss-switch-knob'));
         toggle.disabled = Boolean(pack.problem);
         toggle.title = pack.enabled ? 'Switch this pack off' : 'Switch this pack on';
-        toggle.addEventListener('change', async () => {
-            await packs.setEnabled(pack.id, toggle.checked);
+        toggle.addEventListener('click', async () => {
+            if (toggle.disabled) return;
+            focusAfter = () => rowOf(pack.id)?.querySelector('.ss-packs-enabled');
+            await packs.setEnabled(pack.id, !pack.enabled);
             render();
         });
-        const label = make('label', 'checkbox_label ss-packs-label');
-        label.append(toggle, make('span', 'ss-packs-name', `${pack.name} ${pack.version}`.trim()));
-        const facts = [countsLine(pack.counts, pack.hasStart), pack.author ? `by ${pack.author}` : '', pack.source === 'lorebook' ? 'from a lorebook' : pack.origin].filter(Boolean).join(' · ');
-        const remove = button('menu_button ss-packs-remove', { text: removing.has(pack.id) ? 'Remove? Click again' : 'Remove', title: `Remove ${pack.name}`, icon: 'fa-trash-can' });
-        remove.addEventListener('click', async () => {
-            if (!removing.has(pack.id)) {
-                removing.add(pack.id);
-                return render();
-            }
-            removing.delete(pack.id);
+        const remove = button('ss-button ss-button-quiet ss-packs-remove', { text: 'Remove', title: `Remove ${pack.name}`, icon: 'fa-trash-can' });
+        remove.addEventListener('click', () => {
+            confirming = pack.id;
+            focusAfter = () => root.querySelector('.ss-packs-confirm-no');
+            render();
+        });
+        body.append(main, toggle, remove);
+        item.append(body);
+        if (confirming === pack.id) item.append(confirm(pack));
+        return item;
+    }
+
+    function confirm(pack) {
+        const box = make('div', 'ss-packs-confirm');
+        box.setAttribute('role', 'group');
+        box.setAttribute('aria-label', `Remove ${pack.name}?`);
+        box.append(make('p', 'ss-packs-confirm-text', `Remove ${pack.name}? Its content leaves the game. Stories already told keep what they used from it.`));
+        const yes = button('ss-button ss-button-danger ss-packs-confirm-yes', { text: 'Remove', title: `Remove ${pack.name} now`, icon: 'fa-trash-can' });
+        const no = button('ss-button ss-packs-confirm-no', { text: 'Cancel', title: `Keep ${pack.name}` });
+        yes.addEventListener('click', async () => {
+            confirming = '';
+            focusAfter = () => root.querySelector('.ss-packs-import');
             await packs.remove(pack.id);
             say(`Removed ${pack.name}.`);
         });
-        item.append(label, make('small', 'ss-packs-facts', facts));
-        if (pack.description) item.append(make('small', 'ss-packs-description', pack.description));
-        if (pack.problem) item.append(make('small', 'ss-packs-problem', `Not usable: ${pack.problem}`));
-        else if (pack.missing.length) item.append(make('small', 'ss-packs-problem', `Needs ${pack.missing.join(', ')}; its content is offered but those parts will not use it.`));
-        item.append(remove);
-        return item;
+        const cancel = () => {
+            confirming = '';
+            focusAfter = () => rowOf(pack.id)?.querySelector('.ss-packs-remove');
+            render();
+        };
+        no.addEventListener('click', cancel);
+        // Escape here cancels the question, not the window around it.
+        box.addEventListener('keydown', event => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            cancel();
+        });
+        const actions = make('div', 'ss-packs-confirm-actions');
+        actions.append(yes, no);
+        box.append(actions);
+        return box;
     }
 
     function render() {
@@ -109,29 +154,35 @@ export function renderPacksPanel(root, { packs, readLorebook, notify = () => {},
         file.accept = '.json,application/json';
         file.style.display = 'none';
         file.addEventListener('change', () => importFile(file.files?.[0]));
-        const pick = button('menu_button ss-packs-import', { text: 'Import pack file', title: 'Install a pack.json file', icon: 'fa-file-import' });
+        const pick = button('ss-button ss-button-primary ss-packs-import', { text: 'Import pack file', title: 'Install a pack.json file', icon: 'fa-file-import' });
         pick.addEventListener('click', () => file.click());
-        const lore = button('menu_button ss-packs-lorebook', { text: 'Read from character lorebook', title: 'Install packs from the open character\'s lorebook entries tagged [storysuite:pack]', icon: 'fa-book' });
+        const lore = button('ss-button ss-packs-lorebook', { text: 'Read from character lorebook', title: 'Install packs from the open character\'s lorebook entries tagged [storysuite:pack]', icon: 'fa-book' });
         lore.addEventListener('click', () => importLorebook());
         const actions = make('div', 'ss-packs-actions');
         actions.append(pick, lore, file);
 
-        const list = make('div', 'ss-packs-list');
+        const list = make('ul', 'ss-listcard-rows ss-packs-list');
         const installed = packs.list();
-        if (!installed.length) list.append(make('small', 'ss-packs-empty', 'No packs installed.'));
+        if (!installed.length) list.append(make('li', 'ss-packs-empty ss-listcard-empty', 'No packs installed.'));
         for (const pack of installed) list.append(row(pack));
 
         const message = make('div', 'ss-packs-message', status.text);
+        message.setAttribute('role', 'status');
         const errors = make('ul', 'ss-packs-errors');
         for (const line of status.errors) errors.append(make('li', '', line));
 
         root.replaceChildren(
-            make('small', 'ss-packs-hint', 'Packs add items, creatures, shops, recipes, events and a start state. They are data only: nothing in a pack runs as code.'),
+            make('p', 'ss-packs-hint ss-card-help', 'Packs add items, creatures, shops, recipes, events and a start state. They are data only: nothing in a pack runs as code.'),
             actions,
             message,
             errors,
             list,
         );
+        if (focusAfter) {
+            const find = focusAfter;
+            focusAfter = null;
+            find()?.focus?.();
+        }
     }
 
     render();

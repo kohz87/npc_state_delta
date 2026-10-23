@@ -19,20 +19,88 @@ export function emptyCastHtml(reason = null) {
 const paneHtml = html => `<div class="npc-state-delta-story-pane">${html}</div>`;
 
 
-export function dossierTabRowsHtml(rows = [], { query = '', total = null } = {}) {
-    if (!rows.length && String(query).trim()) return `<p class="npc-state-delta-story-empty">No dossier matches “${escapeHtml(String(query).trim())}”.</p>`;
-    if (!rows.length && total === 0) {
-        return `<div class="npc-state-delta-story-empty-state"><p class="npc-state-delta-story-empty">No dossiers yet. An NPC gets one when a scan finds them in the story, or you can add one yourself.</p><div class="npc-state-delta-story-actions">${actionButton('add', 'fa-user-plus', 'Add NPC')}${actionButton('scan', 'fa-wand-magic-sparkles', 'Scan now')}</div></div>`;
+// UI 4c: each dossier is a row of Story Block's listcard (ss.listcard's classes): the portrait, the name, the role and
+// status line, the stage as a pill and the NPC's meters as thin ss.bar bars (the widget's markup). The stage and the
+// bars come from npc.cast (storysuite-v2.js). The bars are at most DOSSIER_BAR_MAX: ss.hero's BAR_MAX (Story Block,
+// src/v2/view/widgets/hero.js). The rows are not capped: the list is Delta's, and a dossier is never hidden.
+// Built with DOM APIs: every name, role, stage and meter label is set with textContent, never parsed as markup.
+export const DOSSIER_BAR_MAX = 6;
+const make = (doc, tag, className = '', text = null) => {
+    const node = doc.createElement(tag);
+    if (className) node.className = className;
+    if (text !== null && text !== undefined) node.textContent = String(text);
+    return node;
+};
+const barFraction = bar => {
+    const min = Number.isFinite(Number(bar.min)) ? Number(bar.min) : 0;
+    const max = Number.isFinite(Number(bar.max)) ? Number(bar.max) : 100;
+    const value = Number(bar.value);
+    if (!Number.isFinite(value) || max <= min) return 0;
+    return Math.min(1, Math.max(0, (value - min) / (max - min)));
+};
+function barNode(doc, bar) {
+    const item = make(doc, 'span', 'ss-bar');
+    const head = make(doc, 'span', 'ss-bar-head');
+    head.append(make(doc, 'span', 'ss-bar-label', bar.label || bar.id || ''), make(doc, 'span', 'ss-bar-value', bar.text ?? bar.value ?? ''));
+    const track = make(doc, 'span', 'ss-bar-track');
+    const fill = make(doc, 'span', 'ss-bar-fill');
+    fill.setAttribute('style', `--ss-fill: ${barFraction(bar).toFixed(3)}`);
+    track.append(fill);
+    item.append(head, track);
+    return item;
+}
+function rowNode(doc, row) {
+    const item = make(doc, 'li', 'ss-listcard-row');
+    const button = make(doc, 'button', 'ss-listcard-item npc-state-delta-story-row');
+    button.dataset.npcId = String(row.id ?? '');
+    button.setAttribute('aria-label', `Open ${row.name} dossier`);
+    button.setAttribute('type', 'button');
+    const thumb = make(doc, 'span', 'npc-state-delta-story-thumb ss-listcard-icon');
+    if (row.portrait) {
+        const img = make(doc, 'img');
+        img.setAttribute('src', row.portrait);
+        img.setAttribute('alt', '');
+        img.setAttribute('loading', 'lazy');
+        thumb.append(img);
+    } else {
+        thumb.append(make(doc, 'span', '', Array.from(String(row.name ?? '').trim())[0]?.toUpperCase() || '?'));
     }
-    if (!rows.length) return '<p class="npc-state-delta-story-empty">No dossier matches.</p>';
-    return rows.map(row => {
-        const initial = escapeHtml((row.name || '?').trim().charAt(0).toUpperCase() || '?');
-        const portrait = row.portrait
-            ? `<img src="${escapeHtml(row.portrait)}" alt="" loading="lazy">`
-            : `<span>${initial}</span>`;
-        const detail = [row.role, row.statusLabel].filter(Boolean).join(' · ');
-        return `<button type="button" class="npc-state-delta-story-row" data-npc-id="${escapeHtml(row.id)}" aria-label="Open ${escapeHtml(row.name)} dossier"><span class="npc-state-delta-story-thumb">${portrait}</span><span class="npc-state-delta-story-text"><b>${escapeHtml(row.name)}</b><small>${escapeHtml(detail)}</small></span></button>`;
-    }).join('');
+    const text = make(doc, 'span', 'npc-state-delta-story-text ss-listcard-main');
+    text.append(make(doc, 'b', 'ss-listcard-title', row.name), make(doc, 'small', 'ss-listcard-sub', [row.role, row.statusLabel].filter(Boolean).join(' · ')));
+    const bars = (Array.isArray(row.bars) ? row.bars : []).filter(bar => bar && typeof bar === 'object').slice(0, DOSSIER_BAR_MAX);
+    if (bars.length) {
+        const wrap = make(doc, 'span', 'npc-state-delta-story-bars');
+        wrap.setAttribute('aria-hidden', 'true');
+        for (const bar of bars) wrap.append(barNode(doc, bar));
+        text.append(wrap);
+    }
+    button.append(thumb, text);
+    if (row.stage) button.append(make(doc, 'span', 'ss-pill ss-listcard-value npc-state-delta-story-stage', row.stage));
+    item.append(button);
+    return item;
+}
+function actionNode(doc, action, icon, label) {
+    const button = make(doc, 'button', 'menu_button npc-state-delta-story-action');
+    button.dataset.npcStateDeltaAction = action;
+    button.setAttribute('type', 'button');
+    button.append(make(doc, 'i', `fa-solid ${icon}`), textNodeOf(doc, ` ${label}`));
+    return button;
+}
+const textNodeOf = (doc, text) => doc.createTextNode ? doc.createTextNode(text) : make(doc, 'span', '', text);
+/** The dossier list's nodes: the rows, or the one line that says why there are none (with the actions that fill it). */
+export function dossierRowNodes(rows = [], doc = globalThis.document, { query = '', total = null } = {}) {
+    const needle = String(query).trim();
+    if (!rows.length && needle) return [make(doc, 'p', 'npc-state-delta-story-empty', `No dossier matches “${needle}”.`)];
+    if (!rows.length && total === 0) {
+        const box = make(doc, 'div', 'npc-state-delta-story-empty-state');
+        box.append(make(doc, 'p', 'npc-state-delta-story-empty', 'No dossiers yet. An NPC gets one when a scan finds them in the story, or you can add one yourself.'));
+        const actions = make(doc, 'div', 'npc-state-delta-story-actions');
+        actions.append(actionNode(doc, 'add', 'fa-user-plus', 'Add NPC'), actionNode(doc, 'scan', 'fa-wand-magic-sparkles', 'Scan now'));
+        box.append(actions);
+        return [box];
+    }
+    if (!rows.length) return [make(doc, 'p', 'npc-state-delta-story-empty', 'No dossier matches.')];
+    return rows.map(row => rowNode(doc, row));
 }
 
 // Story Block re-renders external tabs on every refresh, so both panes keep their own DOM and
@@ -92,7 +160,7 @@ export function connectStoryBlock(api, storyBlock) {
         const visible = filterDossierIndex(currentRows(), { query });
         const key = `${revision}|${query}`;
         if (view.list && view.key !== key) {
-            view.list.innerHTML = dossierTabRowsHtml(visible, { query, total: rows.length });
+            view.list.replaceChildren(...dossierRowNodes(visible, view.list.ownerDocument, { query, total: rows.length }));
             view.key = key;
         }
     };

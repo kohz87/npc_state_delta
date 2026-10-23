@@ -11,21 +11,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createStorySuiteV2Adapter } from '../src/storysuite-v2.js';
+import { fakeRoot } from './helpers/fake-dom.js';
 
 function pane() {
-    const node = {
-        html: '',
-        dataset: {},
-        isConnected: true,
-        get innerHTML() { return this.html; },
-        set innerHTML(value) { this.html = String(value); },
-        // What Story Block's tab host does before each render.
-        replaceChildren() { this.html = ''; },
-        addEventListener() {},
-        querySelectorAll: () => [],
-        querySelector: () => null,
-    };
-    return node;
+    // A root element: its innerHTML is the markup Delta wrote plus what it appended; the host empties it before a render.
+    return fakeRoot();
 }
 
 test('the Cast tab draws its cards again after the host empties the pane', () => {

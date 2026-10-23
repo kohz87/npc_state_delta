@@ -11,6 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createStorySuiteV2Adapter } from '../../../src/storysuite-v2.js';
+import { fakeRoot } from '../../helpers/fake-dom.js';
 
 function fakeDoc() {
     const listeners = new Map();
@@ -26,19 +27,8 @@ function fakeDoc() {
 
 // The tab host's pane: children are what a tab rendered (a Cast card or another module's tab).
 function pane() {
-    const node = {
-        children: [],
-        dataset: {},
-        isConnected: true,
-        get firstElementChild() { return this.children[0] ?? null; },
-        get innerHTML() { return this.children.map(child => child.html).join(''); },
-        set innerHTML(value) { this.replaceChildren({ html: String(value) }); },
-        replaceChildren(...nodes) { for (const child of this.children) child.parentNode = null; this.children = nodes; for (const child of nodes) child.parentNode = this; },
-        addEventListener() {},
-        querySelectorAll: () => [],
-        querySelector: () => null,
-    };
-    return node;
+    // A root element: its innerHTML is the markup written plus what Delta appended; the host empties it before a render.
+    return fakeRoot();
 }
 
 test('a Delta page event does not draw the Cast cards over another module\'s tab', async () => {
@@ -62,7 +52,7 @@ test('a Delta page event does not draw the Cast cards over another module\'s tab
     adapter.definition.tabs[0].render(el, {}, {});
     assert.match(el.innerHTML, /Fenna/);
     // The reader opens RPG Battle's Party tab: the host empties the pane and Party draws into it.
-    el.replaceChildren({ html: '<div class="rpg-party">Ren · HP 98/98</div>' });
+    el.innerHTML = '<div class="rpg-party">Ren · HP 98/98</div>';
     el.dataset.tabId = 'party';
     // SillyTavern draws a message; Delta's in-chat cast render sends its page event.
     doc.fire('npc-state-delta:cast-rendered');

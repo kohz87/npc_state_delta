@@ -92,16 +92,19 @@ const TEMPLATE = `
 </div>`;
 
 const CSS = `${BASE_CSS}
-.chg { font-size: 0.9em; padding: 4px 8px; border-left: 3px solid var(--sb-accent); border-radius: 6px; background: var(--sb-raised); }
-.lines { display: grid; gap: 2px; }
-.line { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
-.line > i { width: 1.1em; text-align: center; color: var(--sb-accent); }
+/* The row's icon tile and the gap after it: the indent of a row's second line is their sum, so the lines align under the text. */
+.chg { --chg-tile: 34px; --chg-gap: 10px; font-size: 0.95em; display: grid; gap: 10px; }
+.lines { display: grid; gap: 8px; }
+.line { display: flex; flex-wrap: wrap; gap: 4px var(--chg-gap); align-items: center; }
+/* Each row's icon sits in a tile, as Reply.dc.html's rows (the tokens are the card's own: the look's tile colour). */
+.line > i { flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--chg-tile); height: var(--chg-tile);
+            border-radius: var(--ss-radius-s, 10px); background: var(--ss-tile, transparent); color: var(--ss-accent, var(--sb-accent)); }
 /* One text after the icon (the wallet, the place, who is here): it wraps beside the icon, never under it. */
 .coin, .place, .present { flex-wrap: nowrap; }
-.coin > span, .place > span, .present > span { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+.coin > span, .place > span, .present > span { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }
 .name { font-weight: 600; }
 .none { margin: 0; }
-.loot { margin-top: 4px; padding-top: 4px; border-top: 1px dashed var(--sb-border); display: grid; gap: 4px; }
+.loot { margin-top: 2px; padding-top: 10px; border-top: 1px solid var(--ss-border, var(--sb-border)); display: grid; gap: 6px; }
 .loot-head { margin: 0; }
 .loot .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .loot .pick { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; padding: 1px 8px; border-radius: 999px;
@@ -110,14 +113,14 @@ const CSS = `${BASE_CSS}
 .loot .pick input { width: 1em; height: 1em; min-width: 0; margin: 0; accent-color: var(--sb-accent); }
 .loot .hint, .loot .taken { margin: 0; font-size: 0.9em; }
 .loot .take { justify-self: start; }
-.extra .flag, .extra .note { flex-basis: 100%; padding-left: calc(1.1em + 6px); font-size: 0.95em; }
+.extra .flag, .extra .note { flex-basis: 100%; padding-left: calc(var(--chg-tile) + var(--chg-gap)); font-size: 0.95em; }
 .extra .flag { color: var(--sb-em); font-weight: 600; }
-.refused { display: grid; gap: 2px; margin-top: 4px; padding-top: 4px; border-top: 1px dashed var(--sb-border);
-           color: var(--sb-em); opacity: 0.75; font-size: 0.95em; }
+.refused { display: grid; gap: 8px; margin-top: 2px; padding-top: 10px; border-top: 1px solid var(--ss-border, var(--sb-border));
+           color: var(--ss-muted, var(--sb-em)); font-size: 0.95em; }
 .refused .line { flex-wrap: nowrap; }
-.refused .line > i { color: var(--sb-em); }
+.refused .line > i { color: var(--ss-bad, var(--sb-em)); }
 .refused .line > span { flex: 1 1 0; min-width: 0; }
-.assisted { display: grid; gap: 2px; margin-top: 4px; padding-top: 4px; border-top: 1px dashed var(--sb-border); }
+.assisted { display: grid; gap: 8px; margin-top: 2px; padding-top: 10px; border-top: 1px solid var(--ss-border, var(--sb-border)); }
 .assisted .line { flex-wrap: nowrap; }
 .assisted .line > span { flex: 1 1 0; min-width: 0; }
 .assisted .raw { font-family: var(--monoFontFamily, monospace); font-size: 0.95em; overflow-wrap: anywhere; }
