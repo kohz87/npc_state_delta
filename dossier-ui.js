@@ -646,8 +646,13 @@ class DeltaDossierUi {
             if (event.target.closest('.delta-portrait-expand') || event.target.closest('.delta-hero-media img.delta-hero-portrait')) return void this.openLightbox();
             const jump = event.target.closest('.delta-section-jump')?.dataset?.deltaJump;
             if (jump) {
-                const target = this.root.querySelector(`.delta-document [data-delta-section="${CSS.escape(jump)}"]`);
-                target?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+                // UI 4c: the document is the only thing that moves (a phone never scrolls the window or the page behind it).
+                const scroller = this.root.querySelector('.delta-document');
+                const target = scroller?.querySelector(`[data-delta-section="${CSS.escape(jump)}"]`);
+                if (scroller && target) {
+                    const cover = scroller.querySelector('.delta-section-nav')?.getBoundingClientRect().height ?? 0;
+                    scroller.scrollTop += target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - cover;
+                }
                 return;
             }
             const edit = event.target.closest('.delta-edit');
@@ -1053,7 +1058,10 @@ class DeltaDossierUi {
         }
         settings.classList.add('npc-state-delta-stage1-settings-target');
         setTimeout(() => {
-            settings.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+            // UI 4c: only the settings' own scroller moves (the nearest one that scrolls), never the window or the page.
+            let box = settings.parentElement;
+            while (box && box !== document.body && !(/(auto|scroll)/.test(getComputedStyle(box).overflowY) && box.scrollHeight > box.clientHeight)) box = box.parentElement;
+            if (box && box !== document.body) box.scrollTop += settings.getBoundingClientRect().top - box.getBoundingClientRect().top;
             setTimeout(() => settings.classList.remove('npc-state-delta-stage1-settings-target'), 1800);
         }, 0);
     }
