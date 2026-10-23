@@ -85,6 +85,8 @@ export function renderPacksPanel(root, { packs, readLorebook, notify = () => {},
         const body = make('div', 'ss-listcard-item ss-packs-item');
         const main = make('span', 'ss-listcard-main');
         main.append(make('span', 'ss-listcard-title ss-packs-name', `${pack.name} ${pack.version}`.trim()));
+        // Which module it is for: a small labelled tag under the name (kind.js), plain text.
+        main.append(make('span', 'ss-packs-tag', pack.tag || 'Pack'));
         const facts = [addsLine(pack), pack.author ? `by ${pack.author}` : '', pack.source === 'lorebook' ? 'from a lorebook' : pack.origin].filter(Boolean).join(' · ');
         main.append(make('span', 'ss-listcard-sub ss-packs-facts', facts));
         if (pack.description) main.append(make('span', 'ss-listcard-sub ss-packs-description', pack.description));

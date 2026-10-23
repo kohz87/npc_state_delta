@@ -130,6 +130,15 @@
     background: transparent;
     cursor: pointer;
 }
+/* the close button's keyboard focus: the bar's outline (the text colour), never the host's own ring */
+.ss-gameview-close:focus-visible,
+.ss-dialog-close:focus-visible {
+    outline: 2px solid var(--ss-text);
+    outline-offset: 2px;
+}
+.ss-gameview:focus {
+    outline: none;
+}
 
 .ss-gameview-body {
     flex: 1;
@@ -141,91 +150,62 @@
     scroll-padding-top: 8px;
 }
 
+/* The screen bar (view/screen-bar.js, glass.css) in the game view: on a phone a floating pill at the foot of the window, over
+   the screen (the body keeps room for it, below); from 760px one row under the header (the wide block below). With one screen
+   or none the bar is not drawn. */
 .ss-gameview-nav {
-    display: flex;
-    overflow-x: auto;
-    /* The navbar's glass pill (Main.dc.html's bottom bar), floating above the screen's foot on a phone. */
-    margin: 8px 12px calc(12px + env(safe-area-inset-bottom, 0px));
-    padding: 4px;
-    box-sizing: border-box;
-    border: 1px solid var(--ss-border);
-    border-radius: var(--ss-radius-xxl, 26px);
-    background: var(--ss-glass-strong, transparent);
-    -webkit-backdrop-filter: var(--ss-blur, none);
-    backdrop-filter: var(--ss-blur, none);
-    box-shadow: var(--ss-shadow, none);
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    height: 72px;
+    z-index: 3;
 }
 
 .ss-gameview-single .ss-gameview-nav {
     display: none;
 }
 
-.ss-gameview-navitem {
-    flex: 1 0 64px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    min-height: 64px;
-    padding: 4px;
-    border: 0;
-    border-radius: var(--ss-radius-xl, 22px);
-    color: var(--ss-muted, inherit);
-    background: transparent;
-    font-size: 0.8em;
-    font-weight: 600;
-    cursor: pointer;
-}
-
-/* The current screen: the label in the text colour on the soft accent (accent text on glass is hard to read); the icon
-   carries the accent. */
-.ss-gameview-navitem[aria-current="page"] {
-    color: var(--ss-text);
-    background: var(--ss-accent-soft, transparent);
-}
-
-.ss-gameview-navitem[aria-current="page"] > i {
-    color: var(--ss-accent);
+/* Screens scroll under the bar: the body ends with room for it (a phone; the wide row is above the body, no room needed). */
+@media (max-width: 759.98px) {
+    .ss-gameview-body::after {
+        content: '';
+        display: block;
+        height: calc(72px + 14px + 12px + env(safe-area-inset-bottom, 0px));
+    }
 }
 
 /* More items than fit (a phone's bottom bar, the tab bar): the edge with more fades (scroll-cue.js). */
-:is(.ss-gameview-nav, .ss-tabs-list)[data-ss-axis="x"][data-ss-more="end"] {
+.ss-tabs-list[data-ss-axis="x"][data-ss-more="end"] {
     -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--ss-fade)), transparent);
     mask-image: linear-gradient(to right, #000 calc(100% - var(--ss-fade)), transparent);
 }
-:is(.ss-gameview-nav, .ss-tabs-list)[data-ss-axis="x"][data-ss-more="start"] {
+.ss-tabs-list[data-ss-axis="x"][data-ss-more="start"] {
     -webkit-mask-image: linear-gradient(to left, #000 calc(100% - var(--ss-fade)), transparent);
     mask-image: linear-gradient(to left, #000 calc(100% - var(--ss-fade)), transparent);
 }
-:is(.ss-gameview-nav, .ss-tabs-list)[data-ss-axis="x"][data-ss-more="both"] {
+.ss-tabs-list[data-ss-axis="x"][data-ss-more="both"] {
     -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--ss-fade), #000 calc(100% - var(--ss-fade)), transparent);
     mask-image: linear-gradient(to right, transparent, #000 var(--ss-fade), #000 calc(100% - var(--ss-fade)), transparent);
 }
-:is(.ss-gameview-nav, .ss-tabs-list)[data-ss-axis="y"][data-ss-more="end"] {
+.ss-tabs-list[data-ss-axis="y"][data-ss-more="end"] {
     -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--ss-fade)), transparent);
     mask-image: linear-gradient(to bottom, #000 calc(100% - var(--ss-fade)), transparent);
 }
-:is(.ss-gameview-nav, .ss-tabs-list)[data-ss-axis="y"][data-ss-more="start"] {
+.ss-tabs-list[data-ss-axis="y"][data-ss-more="start"] {
     -webkit-mask-image: linear-gradient(to top, #000 calc(100% - var(--ss-fade)), transparent);
     mask-image: linear-gradient(to top, #000 calc(100% - var(--ss-fade)), transparent);
 }
-:is(.ss-gameview-nav, .ss-tabs-list)[data-ss-axis="y"][data-ss-more="both"] {
+.ss-tabs-list[data-ss-axis="y"][data-ss-more="both"] {
     -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--ss-fade), #000 calc(100% - var(--ss-fade)), transparent);
     mask-image: linear-gradient(to bottom, transparent, #000 var(--ss-fade), #000 calc(100% - var(--ss-fade)), transparent);
 }
 
-.ss-gameview-navlabel {
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-/* Wide screens (desktop): the wide header across the top, the screens' tab row under it (ss.tabs: the same buttons, the
-   same keys, a row instead of the phone's bottom bar), then the body. A screen that asks for a side column gets the room
-   (the body's grid), and the body takes the rest. */
-@media (min-width: 768px) {
+/* Wide screens (desktop and tablet, from 760px: the line the bar switches at): the wide header across the top, then one row
+   of every screen (the screen bar: all screens spread evenly, no More; each an icon with its label under it, the current one
+   in the accent with a dot, no pill), then the body. A screen that asks for a side column gets the room (the body's grid), and
+   the body takes the rest. */
+@media (min-width: 760px) {
     .ss-gameview-bar {
         order: 0;
         padding: 12px 24px;
@@ -238,45 +218,18 @@
 
     .ss-gameview-nav {
         order: 2;
-        flex-direction: row;
-        justify-content: flex-start;
-        width: auto;
-        height: auto;
-        overflow-x: auto;
-        overflow-y: hidden;
-        /* air between the header card and the tab row (the row's own padding stays) */
-        margin: var(--ss-space-3, 12px) 0 0;
-        padding: 0 24px;
-        border: 0;
-        border-bottom: 1px solid var(--ss-border);
-        border-radius: 0;
-        background: transparent;
-        -webkit-backdrop-filter: none;
-        backdrop-filter: none;
-        box-shadow: none;
-    }
-
-    .ss-gameview-navitem {
-        flex: 0 0 auto;
-        flex-direction: row;
-        justify-content: flex-start;
-        gap: var(--ss-gap);
-        min-height: 44px;
-        padding: 8px 14px;
-        /* the labels in the text colour (the muted one missed 4.5:1 on busy glass); the current tab is told by its fill and underline */
-        color: var(--ss-text, inherit);
-        border-radius: var(--ss-radius-m, 14px) var(--ss-radius-m, 14px) 0 0;
-        font-size: 1em;
-    }
-
-    .ss-gameview-navitem[aria-current="page"] {
-        background: var(--ss-accent-soft, transparent);
-        box-shadow: inset 0 -2px 0 var(--ss-accent);
+        position: static;
+        left: auto;
+        right: auto;
+        bottom: auto;
+        z-index: auto;
+        height: 68px;
+        margin: var(--ss-space-3, 12px) 24px 0;
     }
 
     .ss-gameview-body {
         order: 3;
-        /* air between the tab row's underline and the first row of cards */
+        /* air between the tab row and the first row of cards */
         padding: var(--ss-space-4, 16px) 24px 16px;
     }
 }
@@ -370,10 +323,12 @@
 
 .ss-hud {
     display: flex;
-    gap: var(--ss-gap);
+    /* Items 10px apart; 8px of air above and below, so a bar, a badge's tag or a pill that reaches past its item is not cut
+       by the strip's own edge (`overflow-x: auto` also clips vertically). */
+    gap: 10px;
     overflow-x: auto;
     scrollbar-width: none;
-    padding: 2px 4px;
+    padding: 8px 10px;
     color: var(--ss-text);
     /* Under Glass the theme sets --ss-sheet-*: the glass strip with its edge, radius, blur and shadow. Solid and
        Follow SillyTavern leave them unset: the opaque strip with a hairline on top, as before. */
@@ -412,18 +367,29 @@
 }
 
 .ss-hud-item {
+    /* keeps its own width (its content's, max-content): a full strip scrolls sideways (the phone's strip does) rather than
+       squeezing an item so its bars and badges run past its edge, where the overflow cut them (a long place is cut in its pill) */
     flex: 0 0 auto;
-    max-height: 48px;
+    /* the item takes its content's width, but never more than the strip: a long place is cut inside the item (its own ellipsis),
+       not pushed past the strip's edge (min-width: min-content did that: an unbroken 80-character place scrolled the strip) */
+    width: max-content;
+    max-width: 100%;
+    /* a full screen of content (a portrait, two bars, a badge and its tag) is about 44px; the cap is for a runaway item, not a
+       normal one, so it sits above that rather than clipping a bar at the bottom */
+    max-height: 64px;
+    /* room for what a badge hangs out of its own square (its time tag: 5px past the right and the bottom), inside the cut */
+    padding: 0 5px 5px 0;
     overflow: hidden;
 }
 
-/* An item sizes to its content. A screen's css can make its root (this item) a size container
-   (`:root { container: x / inline-size }`), and a size container gets no width from its content, so
-   the item would shrink to nothing: the strip keeps its items plain boxes. Containers further in still work. */
+/* A screen's css can make its root (this item) a size container (`:root { container: x / inline-size }`), and a size container
+   gets no width from its content: the strip keeps its items plain boxes (container-type normal), and the width above comes from
+   the content. Containers further in still work. */
 .ss-hud > .ss-hud-item {
     container-type: normal;
-    min-width: min-content;
+    min-width: 0;
 }
+/* the items keep their content on a wide strip; a full strip shrinks them, and each cuts its own text (overflow hidden) */
 
 /* The HUD strip on a phone, under Glass: the tint layered over itself, so the story behind does not read through the name and
    the level (the full-screen window's rule, for the strip). Solid and Follow SillyTavern leave the token unset: no layers. */

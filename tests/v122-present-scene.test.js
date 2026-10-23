@@ -160,7 +160,7 @@ test('v1.2.3 now lines: labelled Mood, Condition and Outfit, only those with a v
 test('v1.2.2 now line source: World State while Story Block keeps the scene, otherwise Delta\'s own', () => {
     const owned = presentSceneModel({ cards, sceneText: WORLD_STATE, sceneOwned: true });
     const text = (model, now) => now.parts.map(part => `${part.label}: ${model.texts[part.text]}`).join(' | ');
-    assert.deepEqual([text(owned, owned.now.yun), owned.now.yun.source], ['Mood: nervous, hopeful | Outfit: red ribbon, black robe', 'world-state']);
+    assert.deepEqual([text(owned, owned.now.yun), owned.now.yun.source], ['Mood: nervous, hopeful | Look: red ribbon, black robe', 'world-state']);
     assert.deepEqual([text(owned, owned.now.orrin), owned.now.orrin.source], ['Mood: stern | Condition: bandaged left arm', 'world-state']);
     assert.deepEqual([text(owned, owned.now.wiz), owned.now.wiz.source], ['Mood: cheerful | Look: shop apron', 'dossier'], 'an NPC World State leaves empty keeps Delta\'s own line (1.2.8: its look, labelled Look)');
     assert.equal(owned.texts[owned.now.yun.parts[0].title], 'nervous, hopeful', 'each line has its full text for the tooltip');

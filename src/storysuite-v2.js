@@ -830,6 +830,8 @@ export function createStorySuiteV2Adapter({
             else if (!enabled()) body = emptyCast({ text: 'NPC State Delta is off.' });
             else body = String(api.presentCastHtml?.() || '') || emptyCast(api.castEmptyReason?.());
         }
+        // World → Here (track false) shows no meters: its present cards keep the stage, notes and now lines; the Dossiers screen keeps the meters.
+        const world = track === false;
         const meters = cast && api && enabled() ? meterEntries() : null;
         let listPart = null;
         let listText = '';
@@ -853,6 +855,13 @@ export function createStorySuiteV2Adapter({
         el.__npcStateDeltaV2CastPane = pane;
         el.__npcStateDeltaV2CastNode = el.firstElementChild ?? null;
         const extras = [];
+        if (world && cast) {
+            // The chatter sits under the card (its own cell row); the side copy of the now lines and the idle line go.
+            for (const cell of el.querySelectorAll?.('.npc-state-delta-present-cell') ?? []) {
+                cell.classList?.add?.('npc-state-delta-world-cell');
+                for (const node of [...(cell.children ?? [])]) if (node.classList?.contains?.('npc-state-delta-present-side')) node.remove?.();
+            }
+        }
         if (meters && cast) {
             const defs = part.defs();
             const used = new Set();
@@ -865,14 +874,14 @@ export function createStorySuiteV2Adapter({
                 const text = cell.querySelector?.('.npc-state-delta-present-card-text');
                 const stage = cell.querySelector?.('.npc-state-delta-present-card-stage');
                 if (stage) stage.textContent = entry.rank ?? '';
-                if (text) {
+                if (text && !world) {
                     const bars = elementOf(owner, 'div', 'npc-state-delta-present-card-bars');
                     bars.append(...barNodesOf(owner, entry, defs));
                     text.append(bars);
                 }
                 for (const line of noteNodes(owner, entry, { card: true })) cell.append(line);
             }
-            const apart = meters.shown.filter(entry => !used.has(entry));
+            const apart = world ? [] : meters.shown.filter(entry => !used.has(entry));
             if (apart.length) {
                 const block = elementOf(owner, 'div', 'npc-state-delta-v2-meters');
                 block.append(elementOf(owner, 'span', 'npc-state-delta-kicker', 'METERS'));

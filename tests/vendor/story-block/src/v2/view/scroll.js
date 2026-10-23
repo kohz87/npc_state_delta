@@ -30,7 +30,9 @@ export function scrollerOf(node) {
 // The height the page's own heading strip covers at the top of the scroller (a sticky strip from 760px), 0 when there is none.
 function coveredTop(scroller, box) {
     const view = scroller.ownerDocument?.defaultView;
-    const head = scroller.querySelector?.('.ss-settings-page-head:not([hidden])') ?? null;
+    // a document that cannot answer the selector (a test's fake DOM) has no heading strip: nothing is covered
+    let head = null;
+    try { head = scroller.querySelector?.('.ss-settings-page-head:not([hidden])') ?? null; } catch { head = null; }
     if (!head || typeof head.getBoundingClientRect !== 'function' || typeof view?.getComputedStyle !== 'function') return 0;
     if (view.getComputedStyle(head).position !== 'sticky') return 0;
     const rect = head.getBoundingClientRect();

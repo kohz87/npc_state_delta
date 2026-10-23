@@ -1,6 +1,6 @@
 // ss.hero (view/glass.css): the hero card, a character's one-glance sheet. A portrait (the persona avatar for
 // the PC, the character card's image, or an NPC's from a query such as Delta's `npc.portrait`; the initial
-// when there is none), the name, a level/class pill, bars for HP, MP and SP and one for experience under the
+// when there is none), the name, a level badge on the portrait (a star and the number), the class · title line, bars for HP, MP and SP and one for experience under the
 // Terms' own word ("Soul growth"), a place / time / weather corner, and a row of status badges. `compact`
 // is the one-row variant for the strip under a reply.
 //
@@ -15,6 +15,7 @@ import { h, iconNode, initials, safeImageUrl, shell, str } from './dom.js';
 import { defineWidget, resolveProps } from './props.js';
 import { bar, status } from './glass.js';
 import { cutAt } from '../../../text.js';
+import { svgIcon } from '../icons/index.js';
 
 export const BAR_MAX = 6;
 export const STATUS_MAX = 12;
@@ -26,10 +27,10 @@ const heroProps = {
     portraits: { type: 'array', default: Object.freeze([]) }, // more pictures, in the order to try them (after `portrait`'s own place: see pictureCandidates)
     portraitQuery: { type: 'string', default: '' },     // a query that answers a picture URL (`npc.portrait`); asked first
     portraitArgs: { type: 'object', default: null },    // its arguments ({ name })
-    line: { type: 'string', default: '' },               // the pill's whole text ("Soul Class II · Lv 12 · Wayfarer")
-    className: { type: 'string', default: '' },          // else the pill is built from the class,
-    level: { type: 'string', default: '' },              // the level ("Lv 12")
+    line: { type: 'string', default: '' },               // the line under the name, whole ("Soul Class II · Wayfarer")
+    className: { type: 'string', default: '' },          // else it is built from the class
     title: { type: 'string', default: '' },              // and a title ("Wayfarer")
+    level: { type: 'string', default: '' },              // the level ("Lv 12"): the badge on the portrait (a star and the number)
     bars: { type: 'array', default: Object.freeze([]) }, // [{ kind: hp|mp|sp|exp, label, value, max, text }]
     place: { type: 'string', default: '' },
     time: { type: 'string', default: '' },
@@ -40,11 +41,23 @@ const heroProps = {
 
 const short = (value, max) => cutAt(str(value).replace(/\s+/g, ' ').trim(), max);
 
-/** The pill's text: `line`, else "Class · Lv 12 · Title" from the parts that are given. */
+/** The line under the name: `line`, else "Class · Title" from the parts that are given (the level is the portrait's badge). */
 export function heroLine(p) {
     if (p.line) return short(p.line, 120);
-    const level = short(p.level, 12);
-    return [short(p.className, 40), level ? (/^\d/.test(level) ? `Lv ${level}` : level) : '', short(p.title, 40)].filter(Boolean).join(' · ');
+    return [short(p.className, 40), short(p.title, 40)].filter(Boolean).join(' · ');
+}
+
+/**
+ * The level badge: { number, label }. The label is the whole level for screen readers ("Lv 12"; a bare "12" → "Lv 12"),
+ * the number the badge's short text: the level's last run of digits ("Level of the Ancients 73" → 73), else the level,
+ * cut to 8. The level is taken whole (up to 60) before either is made, so a long one keeps its number.
+ */
+export function heroLevel(p) {
+    const level = short(p.level, 60);
+    if (!level) return { number: '', label: '' };
+    const digits = level.match(/(\d+)\D*$/);
+    const label = /^\d+$/.test(level) ? `Lv ${level}` : level;
+    return { number: short(digits ? digits[1] : level, 8), label };
 }
 
 /** The bars as drawn: at most BAR_MAX, each { kind, label, value, max, text }; a bar with no max or no label is kept as given. */
@@ -116,13 +129,28 @@ function renderHero(el, input, api) {
         const main = h(doc, 'div', 'ss-hero-main');
         const who = h(doc, 'div', 'ss-hero-who');
         const name = h(doc, 'h3', 'ss-hero-name');
-        const pill = h(doc, 'span', 'ss-pill ss-hero-pill');
+        // the line under the name (class · title): plain muted text, it wraps (the class name stays for older styles and tests)
+        const pill = h(doc, 'span', 'ss-hero-pill ss-hero-line');
         who.append(name, pill);
+        // the level: a badge on the portrait's lower edge, a star and the number; the whole level is said to screen readers
+        const badge = h(doc, 'span', 'ss-hero-level');
+        const star = svgIcon(doc, 'ph-star:fill', { className: 'ss-hero-level-icon' });
+        const levelNumber = h(doc, 'span', 'ss-hero-level-number');
+        levelNumber.setAttribute('aria-hidden', 'true');
+        const levelSaid = h(doc, 'span', 'ss-visually-hidden');
+        badge.append(...(star ? [star] : []), levelNumber, levelSaid);
         const corner = h(doc, 'ul', 'ss-hero-corner');
         const statuses = h(doc, 'div', 'ss-hero-statuses');
-        main.append(who, corner, statuses);
+        // the text block: the name, the class line, the place and weather, the statuses: one stacked group, which the portrait is
+        // centred against (grid areas "portrait text", glass.css)
+        const text = h(doc, 'div', 'ss-hero-text');
+        text.append(who, corner, statuses);
+        main.append(text);
         const vitals = h(doc, 'div', 'ss-hero-vitals');
-        body.append(portrait, main, vitals);
+        // the portrait and its badge in one cell: the badge hangs on the portrait's lower edge, inside the room the cell keeps
+        const face = h(doc, 'div', 'ss-hero-face');
+        face.append(portrait, badge);
+        body.append(face, main, vitals);
         root.appendChild(body);
         // The pictures that failed to load (kept for this widget: a redraw does not ask for them again), the candidates for the
         // current props, and the picture on screen: an error moves on to the next candidate, the initial past the last.
@@ -168,6 +196,10 @@ function renderHero(el, input, api) {
             const line = heroLine(p);
             pill.textContent = line;
             pill.hidden = !line;
+            const level = heroLevel(p);
+            levelNumber.textContent = level.number;
+            levelSaid.textContent = level.label;
+            badge.hidden = !level.number;
             corner.replaceChildren();
             for (const [kind, icon, text] of [['time', 'fa-clock', p.time], ['place', 'fa-location-dot', p.place], ['weather', 'fa-cloud-sun', p.weather]]) {
                 const said = short(text, 40);

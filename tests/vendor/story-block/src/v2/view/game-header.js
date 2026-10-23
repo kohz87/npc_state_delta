@@ -36,7 +36,9 @@ export function readHeroContext(context = globalThis.SillyTavern?.getContext?.()
     } catch { card = null; }
     return {
         personaName: textOf(context?.name1),
-        personaFile: textOf(context?.user_avatar ?? context?.userAvatar),
+        // the persona's avatar file: the context's, else SillyTavern's global (as RPG Battle's persona reader reads it), else the
+        // default persona of the settings (power user's `default_persona`: the file a new chat uses)
+        personaFile: textOf(context?.user_avatar ?? context?.userAvatar ?? globalThis.user_avatar ?? context?.powerUserSettings?.default_persona),
         cardName: textOf(card?.name),
         cardFile: textOf(card?.avatar),
     };

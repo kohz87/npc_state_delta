@@ -30,6 +30,13 @@ export const STRINGS = deepFreeze({
         suiteTitle: 'Story Suite settings',
         dismiss: 'Dismiss',
         blocked: '{module}: {reason}',
+        // The screen bar (view/screen-bar.js): the navigation of the game view and the Story panel, and its More sheet.
+        screens: 'Screens',
+        more: 'More',
+        moreSheet: 'More screens',
+        moreWith: 'More, {title}',
+        moreHint: 'Pin your {count} in Settings → Tabs',
+        moreEmpty: 'Every screen is in the bar.',
     },
     panel: {
         title: 'Story',

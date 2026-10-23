@@ -257,7 +257,10 @@ function renderStatus(el, input) {
             const glyph = iconNode(doc, p.icon);
             icon.replaceChildren(...(glyph ? [glyph] : []));
             if (!glyph) icon.textContent = Array.from(short(p.label, LABEL_MAX))[0] ?? '?';
-            left.textContent = leftText(p.left, unit);
+            // A condition with no count (no set end) shows no counter at all, as the old badges did: the "∞" is only in the words.
+            const counted = p.left !== null && p.left !== undefined && p.left !== '' && Number.isFinite(Number(p.left));
+            left.hidden = !counted;
+            left.textContent = counted ? leftText(p.left, unit) : '';
             const spoken = `${short(p.label, LABEL_MAX) || 'Status'}: ${leftSpoken(p.left, unit)}`;
             root.setAttribute('aria-label', spoken);
             root.setAttribute('title', spoken);
