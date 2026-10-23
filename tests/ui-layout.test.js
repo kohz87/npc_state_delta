@@ -27,12 +27,13 @@ test('present NPC pane uses portrait-first cards that open the launcher dossier'
     assert.match(index, /openDossier: value =>/);
     assert.match(dossierUi, /addEventListener\('npc-state-delta:open-dossier'[\s\S]*event\.detail\.handled = true;[\s\S]*ui\.openNpc\(npcId\)/);
     assert.match(dossierUi, /if \(this\.pendingNpcId\) \{\s*this\.selectedNpcId = this\.pendingNpcId;[\s\S]*this\.filter = 'all';/, 'the requested NPC survives the chat-change reset and is not hidden by a filter');
-    assert.match(css, /\.npc-state-delta-present-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fill, minmax\(118px, 160px\)\)[^}]*justify-content:\s*start/s);
-    // 1.2.3: a fixed-ratio portrait with the text in a footer under it (the name wraps to two lines).
-    assert.match(css, /\.npc-state-delta-present-card\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column/s);
-    assert.match(css, /\.npc-state-delta-present-card-portrait\s*\{[^}]*position:\s*relative[^}]*aspect-ratio:\s*4\s*\/\s*5/s);
-    assert.match(css, /\.npc-state-delta-present-card-name\s*\{[^}]*-webkit-line-clamp:\s*2/s);
-    assert.doesNotMatch(css + index, /present-card-overlay/);
+    // UI 4c: one compact row per person, full width at every size: a 44px portrait on the left, the name on one
+    // line (an unbroken name is cut with an ellipsis, never pushes the row wider), the stage line under it.
+    assert.match(css, /\.npc-state-delta-present-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
+    assert.match(css, /\.npc-state-delta-present-card\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*44px minmax\(0, 1fr\)/s);
+    assert.match(css, /\.npc-state-delta-present-card-portrait\s*\{[^}]*width:\s*44px;[^}]*height:\s*44px/s);
+    assert.match(css, /\.npc-state-delta-present-card-name\s*\{[^}]*white-space:\s*nowrap;[^}]*text-overflow:\s*ellipsis/s);
+    assert.doesNotMatch(css, /present-card-overlay/);
 });
 
 test('present NPCs in chat support Full, Compact, Only in Story Block and Off display modes', () => {
@@ -47,10 +48,13 @@ test('present NPCs in chat support Full, Compact, Only in Story Block and Off di
 });
 
 
-test('present NPC gallery keeps sparse rosters card-sized on tablet instead of stretching to the block', () => {
-    assert.match(css, /@media \(min-width: 701px\) and \(max-width: 1180px\)[\s\S]*?\.npc-state-delta-present-grid \{[^}]*grid-template-columns:\s*repeat\(auto-fill, minmax\(145px, 180px\)\)[^}]*justify-content:\s*start/s);
-    assert.doesNotMatch(css, /npc-state-delta-present-grid \{[^}]*repeat\(auto-fit, minmax\(145px, 1fr\)\)/s);
-    assert.match(css, /@media \(max-width: 700px\)[\s\S]*?\.npc-state-delta-present-grid \{[^}]*repeat\(2, minmax\(0, 1fr\)\)/s);
+test('present cards are one full-width row at every size: no tablet or phone grid of tall cards', () => {
+    // UI 4c: the grid is a single column from the widest pane to the narrowest, so a card never stretches to a
+    // block or shrinks to a tile on a phone; the row is what the reader asked for (beta feedback).
+    assert.match(css, /\.npc-state-delta-present-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
+    assert.doesNotMatch(css, /present-grid[^{]*\{[^}]*repeat\(/s, 'no repeat() columns for the cards');
+    assert.doesNotMatch(css, /@media[^{]*\{[^@]*?\.npc-state-delta-present-grid \{[^}]*repeat\(2/s, 'no two-column phone grid');
+    assert.doesNotMatch(css, /@container npc-present/, 'the old container split for the card row is gone');
 });
 
 test('present cards resolve the current canonical NPC name after identity promotion', () => {
@@ -384,7 +388,7 @@ test('portrait generator is a review-before-apply workflow with per-NPC prompt o
     assert.match(index, /portraitPromptNegative/);
     assert.match(index, /portraitPromptReplace/);
     assert.match(css, /\.npc-state-delta-portrait-generator-overlay\s*\{[^}]*position:\s*fixed[^}]*inset:\s*0/s);
-    assert.match(css, /@media \(min-width: 701px\) and \(max-width: 1180px\)[\s\S]*?\.npc-state-delta-portrait-generator-dialog\s*\{[^}]*width:\s*100vw;[^}]*height:\s*100dvh/s);
+    assert.match(css, /@media \(max-width: 1180px\)[\s\S]*?\.npc-state-delta-portrait-generator-dialog\s*\{[^}]*width:\s*100vw;[^}]*height:\s*100dvh/s);
 });
 
 test('native portrait bridge uses quiet SillyTavern imagine command and separate negative prompt', () => {
