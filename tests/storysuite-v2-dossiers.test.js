@@ -15,6 +15,7 @@ import {
 } from '../src/storysuite-v2.js';
 import { dossierRowNodes } from '../story-block-tabs.js';
 import { dossierIndexProjection, filterDossierIndex } from '../dossier-ui.js';
+import { fakeRoot } from './helpers/fake-dom.js';
 
 // ---- a small DOM: elements keep their children, classes, attributes and text. A root's innerHTML is the markup it was
 // given plus its children serialised, so a test reads what a reader sees; the present cells it was given are found by
@@ -283,4 +284,23 @@ test('not hosted (no Story Block v2): the page API is there but draws nothing, a
     assert.equal(api.render(el, { slot: () => node(doc) }), 0);
     assert.equal(el.innerHTML, '');
     adapter.stop();
+});
+
+test('a present card: the stage is set on its name line, the NPC\'s meters are inside its card, and the text is never markup', async () => {
+    const { def, sdk, doc } = await setup();
+    const cast = [{ key: 'mira', name: 'Mira <i>x</i>', present: true, rank: 'Close <b>now</b>', next: '', bars: [{ id: 'trust', label: 'Trust', value: 40, min: -100, max: 100, text: '40', tone: 'info' }], still: [], opened: [], locked: [] }];
+    const query = sdk.query;
+    sdk.query = name => (name === 'npc.cast' ? cast : query(name));
+    const el = element(doc);
+    def.tabs[0].render(el, {}, {});
+    const cell = el.cells()[0];
+    assert.ok(cell, 'Mira has a present card');
+    const text = cell.children[0];
+    const stage = text.querySelector('.npc-state-delta-present-card-stage');
+    assert.equal(stage.textContent, 'Close <b>now</b>', 'the stage is the NPC\'s rank, as text');
+    assert.equal(stage.parentNode, text, 'on the card\'s name line, in the card');
+    const bars = text.querySelector('.npc-state-delta-present-card-bars');
+    assert.ok(bars, 'the meters sit in the card');
+    assert.match(bars.serialize(), /role="meter"[^>]*aria-valuenow="40"/);
+    assert.doesNotMatch(bars.serialize(), /<b>|<i>/, 'no markup from the rank or the name');
 });
