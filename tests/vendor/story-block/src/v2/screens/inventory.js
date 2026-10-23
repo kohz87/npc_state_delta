@@ -39,7 +39,7 @@ const RARITY_CLASSES = rarityClasses('it');
 function group(kind) {
     return `
   <section class="group" data-kind="${kind}" data-if="${anyKind(kind)}">
-    <h4><i class="fa-solid ${KIND_ICONS[kind]}" aria-hidden="true"></i> ${html(KIND_TITLES[kind])}</h4>
+    <h4 class="ss-section-label"><i class="fa-solid ${KIND_ICONS[kind]}" aria-hidden="true"></i> ${html(KIND_TITLES[kind])}</h4>
     <ul>
       <li class="item" data-each="q.items as it" data-if="it.kind == '${kind}' && ${ITEM_FILTER}"
           data-class="${RARITY_CLASSES}; equipped: it.equipped != null">
@@ -55,37 +55,37 @@ function group(kind) {
         <p class="note muted" data-if="it.note">{{ it.note }}</p>
         <div class="detail" data-if="q.gear.detail == true"><ss-widget name="rpg-battle.item-detail" data-props='{"stack":"{{ it.stack }}"}'></ss-widget></div>
         <div class="actions">
-          <button class="btn" data-if="it.kind == 'equipment' && it.equipped == null && len(q.gear.members) == 0" data-command="inventory.equip"
+          <button class="ss-button" data-if="it.kind == 'equipment' && it.equipped == null && len(q.gear.members) == 0" data-command="inventory.equip"
                   data-payload='{"stack":"{{ it.stack }}"}' title="${html(S.equipTitle, { name: '{{ it.name }}' })}"><i class="fa-solid fa-hand-fist" aria-hidden="true"></i> ${html(S.equip)}</button>
           <details class="pick equip-on" data-if="it.kind == 'equipment' && len(q.gear.wearers[it.stack]) > 0">
-            <summary class="btn" title="${html(S.equipOnTitle, { name: '{{ it.name }}' })}"><i class="fa-solid fa-hand-fist" aria-hidden="true"></i> ${html(S.equipOn)}</summary>
+            <summary class="ss-button" title="${html(S.equipOnTitle, { name: '{{ it.name }}' })}"><i class="fa-solid fa-hand-fist" aria-hidden="true"></i> ${html(S.equipOn)}</summary>
             <span class="choices">
-              <button class="btn" data-each="q.gear.wearers[it.stack] as who" data-command="inventory.equipOn"
+              <button class="ss-button" data-each="q.gear.wearers[it.stack] as who" data-command="inventory.equipOn"
                       data-payload='{"stack":"{{ it.stack }}","actor":"{{ who.id }}"}' title="${html(S.equipOnWho, { name: '{{ it.name }}' })}">{{ who.name }}</button>
             </span>
           </details>
           <details class="pick use-on" data-if="it.kind == 'consumable' && len(q.gear.users[it.stack]) > 0">
-            <summary class="btn" title="${html(S.useOnTitle, { name: '{{ it.name }}' })}"><i class="fa-solid fa-flask" aria-hidden="true"></i> ${html(S.useOn)}</summary>
+            <summary class="ss-button" title="${html(S.useOnTitle, { name: '{{ it.name }}' })}"><i class="fa-solid fa-flask" aria-hidden="true"></i> ${html(S.useOn)}</summary>
             <span class="choices">
-              <button class="btn" data-each="q.gear.users[it.stack] as who" data-command="item.use"
+              <button class="ss-button" data-each="q.gear.users[it.stack] as who" data-command="item.use"
                       data-payload='{"stack":"{{ it.stack }}","target":"{{ who.id }}"}' title="${html(S.useOnWho, { name: '{{ it.name }}' })}">{{ who.name }}</button>
             </span>
           </details>
-          <button class="btn" data-if="it.equipped" data-command="inventory.unequip"
+          <button class="ss-button" data-if="it.equipped" data-command="inventory.unequip"
                   data-payload='{"stack":"{{ it.stack }}"}' title="${html(S.unequipTitle, { name: '{{ it.name }}' })}">${html(S.unequip)}</button>
           <details class="pick give" data-if="len(q.gear.members) > 0 && len(q.gear.givers[it.stack]) > 0">
-            <summary class="btn" title="${html(S.giveTitle, { name: '{{ it.name }}' })}"><i class="fa-solid fa-hand-holding" aria-hidden="true"></i> ${html(S.give)}</summary>
+            <summary class="ss-button" title="${html(S.giveTitle, { name: '{{ it.name }}' })}"><i class="fa-solid fa-hand-holding" aria-hidden="true"></i> ${html(S.give)}</summary>
             <span class="choices">
-              <button class="btn" data-each="q.gear.givers[it.stack] as to" data-command="inventory.transfer"
+              <button class="ss-button" data-each="q.gear.givers[it.stack] as to" data-command="inventory.transfer"
                       data-payload='{"stack":"{{ it.stack }}","to":"{{ to.id }}"}' title="${html(S.giveTo, { name: '{{ to.name }}' })}">{{ to.name }}</button>
             </span>
           </details>
           <details class="drop">
-            <summary class="btn danger" title="${html(S.dropTitle, { name: '{{ it.name }}' })}"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> ${html(S.drop)}</summary>
+            <summary class="ss-button ss-button-danger" title="${html(S.dropTitle, { name: '{{ it.name }}' })}"><i class="fa-solid fa-trash-can" aria-hidden="true"></i> ${html(S.drop)}</summary>
             <span class="confirm">
-              <button class="btn danger" data-if="it.qty != 1" data-command="inventory.drop"
+              <button class="ss-button ss-button-danger" data-if="it.qty != 1" data-command="inventory.drop"
                       data-payload='{"stack":"{{ it.stack }}","qty":1}'>${html(S.dropOne)}</button>
-              <button class="btn danger" data-command="inventory.drop"
+              <button class="ss-button ss-button-danger" data-command="inventory.drop"
                       data-payload='{"stack":"{{ it.stack }}","qty":{{ it.qty }}}'><span data-if="it.qty != 1">${html(S.dropAll, { qty: '{{ it.qty }}' })}</span><span data-if="it.qty == 1">${html(S.dropIt)}</span></button>
             </span>
           </details>
@@ -123,19 +123,19 @@ ${RARITIES.map(rarity => `          <option value="${rarity}">${html(S.rarities[
     </div>
   </header>
   <section class="loot" data-if="len(q.loot) > 0">
-    <h4><i class="fa-solid fa-sack-dollar" aria-hidden="true"></i> ${html(S.lootTitle)}</h4>
+    <h4 class="ss-section-label"><i class="fa-solid fa-sack-dollar" aria-hidden="true"></i> ${html(S.lootTitle)}</h4>
     <div class="offer" data-each="q.loot as o">
       <p class="loot-head"><b>${html(S.lootWhere)}</b><span class="where" data-if="o.where"> — {{ o.where }}</span></p>
       <div class="chips">
         <label class="chip pick" data-each="o.items as it, i"><input type="checkbox" data-draft="loot[o.sid]" value="{{ i }}"> <span>{{ it.name }}</span><span class="n" data-if="it.qty != 1"> ×{{ it.qty }}</span></label>
       </div>
       <p class="hint muted">${html(S.lootPick)}</p>
-      <button class="btn take" data-command="inventory.lootTake" data-payload='{"sid":"{{ o.sid }}","pick":{{ draft.loot[o.sid] }}}'
+      <button class="ss-button ss-button-primary take" data-command="inventory.lootTake" data-payload='{"sid":"{{ o.sid }}","pick":{{ draft.loot[o.sid] }}}'
               title="${html(S.lootTakeTitle)}"><i class="fa-solid fa-hand" aria-hidden="true"></i> ${html(S.lootTake)}</button>
     </div>
   </section>
   <section class="worn" data-if="len(q.gear.worn) > 0">
-    <h4><i class="fa-solid fa-user-shield" aria-hidden="true"></i> ${html(S.wornTitle)}</h4>
+    <h4 class="ss-section-label"><i class="fa-solid fa-user-shield" aria-hidden="true"></i> ${html(S.wornTitle)}</h4>
     <div class="wearer" data-each="q.gear.worn as w">
       <h5>{{ w.name }}</h5>
       <ul>
@@ -144,7 +144,7 @@ ${RARITIES.map(rarity => `          <option value="${rarity}">${html(S.rarities[
             <span class="chip eq">{{ p.equipped }}</span>
             <span class="name">{{ p.name }}</span>
             <span class="cond muted" data-if="p.cond != null" title="${html(S.condTitle)}">{{ p.cond }}/100</span>
-            <button class="btn" data-command="inventory.unequip" data-payload='{"stack":"{{ p.stack }}"}'
+            <button class="ss-button" data-command="inventory.unequip" data-payload='{"stack":"{{ p.stack }}"}'
                     title="${html(S.takeOffTitle, { name: '{{ p.name }}' })}">${html(S.takeOff)}</button>
           </div>
         </li>
@@ -210,7 +210,7 @@ const CSS = `${BASE_CSS}
 .loot .take { justify-self: start; }
 .worn { display: grid; gap: 4px; }
 .worn h5 { margin: 4px 0 2px; font-size: 0.9em; }
-.worn .line .btn { margin-left: auto; }
+.worn .line .ss-button { margin-left: auto; }
 .cond { font-size: 0.8em; font-variant-numeric: tabular-nums; }
 @media (max-width: 480px) { .filter { width: 100%; } }
 `;

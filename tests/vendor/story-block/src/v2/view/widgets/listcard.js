@@ -12,6 +12,7 @@ import { h, iconNode, runCommand, shell, str } from './dom.js';
 import { defineWidget, resolveProps } from './props.js';
 import { GLASS_TONES, setGlassTone } from './glass.js';
 import { cutAt } from '../../../text.js';
+import { focusNode } from '../scroll.js';
 
 export const ROW_MAX = 100;
 
@@ -105,7 +106,7 @@ function renderListcard(el, input, api) {
                 list.appendChild(item);
             }
             mark();
-            if (keep) buttons.find(button => button.getAttribute('data-id') === keep)?.focus?.();
+            if (keep) focusNode(buttons.find(button => button.getAttribute('data-id') === keep));
             list.hidden = rows.length === 0;
             const note = rows.length ? '' : short(p.empty, 120);
             empty.textContent = note;

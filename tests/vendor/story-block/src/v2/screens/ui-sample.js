@@ -193,6 +193,18 @@ export const UI_SAMPLE_DATA = Object.freeze({
             Object.freeze({ id: 'trade', label: 'Trade', icon: 'fa-scale-balanced' }),
         ]),
     }),
+    // The map (ss.map): four places, a route between them, the reader's place, and one place not yet found (the fog, unknown).
+    map: Object.freeze({
+        label: 'Sample map', current: 'hollow', fog: 'unknown', discovered: Object.freeze(['hollow', 'mill', 'gate']),
+        nodes: Object.freeze([
+            Object.freeze({ id: 'hollow', name: 'Hollow Tree', x: 18, y: 66, icon: 'fa-tree', kind: 'camp' }),
+            Object.freeze({ id: 'mill', name: 'Old Mill', x: 44, y: 44, icon: 'fa-gear', kind: 'town' }),
+            Object.freeze({ id: 'gate', name: 'North Gate', x: 70, y: 28, icon: 'fa-torii-gate', kind: 'town' }),
+            Object.freeze({ id: 'keep', name: 'Keep', x: 88, y: 10, icon: 'fa-chess-rook', kind: 'town' }),
+        ]),
+        edges: Object.freeze([Object.freeze({ from: 'hollow', to: 'mill' }), Object.freeze({ from: 'mill', to: 'gate' }), Object.freeze({ from: 'gate', to: 'keep' })]),
+        kinds: Object.freeze({ camp: Object.freeze({ label: 'Camp', icon: 'fa-campground' }), town: Object.freeze({ label: 'Town', icon: 'fa-city' }) }),
+    }),
     dialog: Object.freeze({
         title: 'Rest at the Guild Office?', text: 'Resting takes about eight hours of story time.\n\nThe wolf\'s bleeding will be closed, and Haste will run out.',
         actions: Object.freeze([Object.freeze({ id: 'cancel', label: 'Not now' }), Object.freeze({ id: 'rest', label: 'Rest', kind: 'primary', icon: 'fa-moon' })]),
@@ -257,6 +269,8 @@ function pane(scheme) {
   <ss-widget name="ss.listcard" data-props='{"bind":"q.ready"}'></ss-widget>
   <ss-widget name="ss.listcard" data-props='{"bind":"q.here","onSelect":"sample.pick"}'></ss-widget>
   <ss-widget name="ss.listcard" data-props='{"bind":"q.people"}'></ss-widget>
+  <p class="ss-label ss-glass-strong ss-sample-tag">Map · places, a route, the reader's place, fog, legend</p>
+  <ss-widget name="ss.map" data-props='{"bind":"q.map"}'></ss-widget>
   <p class="ss-label ss-glass-strong ss-sample-tag">Tabs and navbar · arrows move, Enter chooses</p>
   <ss-widget name="ss.tabs" data-props='{"bind":"q.tabs","onSelect":"sample.go"}'></ss-widget>
   <ss-widget name="ss.navbar" data-props='{"bind":"q.nav","onSelect":"sample.go"}'></ss-widget>

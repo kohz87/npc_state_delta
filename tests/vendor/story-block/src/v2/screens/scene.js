@@ -35,7 +35,7 @@ const TEMPLATE = `
     </div>
   </header>
   <section class="present panel" data-class="moved: changed('state.scene.present')">
-    <h4><i class="fa-solid fa-users" aria-hidden="true"></i> ${html(S.here)} <span class="count" data-if="len(q.present) > 0">{{ len(q.present) }}</span></h4>
+    <h4 class="ss-section-label"><i class="fa-solid fa-users" aria-hidden="true"></i> ${html(S.here)} <span class="count" data-if="len(q.present) > 0">{{ len(q.present) }}</span></h4>
     <p class="nobody muted" data-if="len(q.present) == 0">${html(S.nobody)}</p>
     <ul class="cast" data-class="faces: q.cast != null">
       <li class="who" data-each="q.present as p">

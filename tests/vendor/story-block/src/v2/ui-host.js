@@ -44,6 +44,7 @@ import { mountQuery } from './sdk.js';
 import { createMounts } from './view/mounts/index.js';
 import { createScreenRenderer } from './view/render-screen.js';
 import { formatStoryTime, storyCalendar } from './view/clock.js';
+import { gameHeroProps, readHeroContext } from './view/game-header.js';
 import { HOME_ID, createScreens } from './view/screens.js';
 import { createTabOrderStore, isDefaultChoice, isHiddenNav, moveNav, navKey, orderNav, setNavHidden, visibleNav } from './view/tab-order.js';
 import { CHANGES_CARD_SCREEN_ID, HOME_SCREEN_ID, changesSummary, replyCardLines } from './screens/index.js';
@@ -57,8 +58,8 @@ import { createInspectorSource } from './inspect.js';
 import { createSavePoints } from './rewind.js';
 import { createInspectorWidget, INSPECTOR_WIDGET } from './screens/inspector.js';
 import { createSavePointsWidget, SAVEPOINTS_WIDGET } from './screens/savepoints.js';
-import { createPacksHintWidget, PACKS_HINT_WIDGET } from './screens/packs-hint.js';
 import { createReadyHintWidget, READY_HINT_WIDGET } from './screens/ready-hint.js';
+import { createShowMoreWidget, SHOW_MORE_WIDGET } from './screens/show-more.js';
 import { buildReport, captureConsole, caughtSoFar, reportFileName } from './diagnostics.js';
 import { createThemeBridge } from './view/theme.js';
 import { openUiSample } from './screens/ui-sample.js';
@@ -171,21 +172,11 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
             notify: text => globalThis.toastr?.warning?.(text, S.savepoints.title),
         }),
         // Home's "Before you start" while a module's canGenerate holds the story back (MODULES §F12).
+        // A long card's "Show all" / "Show less" (screens/show-more.js).
+        [SHOW_MORE_WIDGET]: createShowMoreWidget(),
         [READY_HINT_WIDGET]: createReadyHintWidget({
             blockers: () => (typeof runtime.turn?.blockers === 'function' ? runtime.turn.blockers() : []),
             unblock: (moduleId, reason) => runtime.turn?.unblock?.(moduleId, reason) ?? false,
-        }),
-        // Home's "Import a pack" while no pack is installed: the settings, open at the Packs fold.
-        [PACKS_HINT_WIDGET]: createPacksHintWidget({
-            list: () => {
-                if (typeof runtime.packs?.packs?.list === 'function') return runtime.packs.packs.list();
-                try { return registry.query('packs.list') ? sdk.query('packs.list') ?? [] : null; } catch { return null; }
-            },
-            subscribe: fn => runtime.packs?.packs?.subscribe?.(fn) ?? null,
-            open: () => {
-                mounts.screen.close?.();
-                openSettings({ fold: PACKS_FOLD });
-            },
         }),
     };
     const renderer = createScreenRenderer({
@@ -343,6 +334,14 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         // Cards: the reader's switch per card screen, under Story Block's `story-block.cards` feature.
         enabled: (mount, screenId) => (mount === 'card' ? coreOn(CORE_FEATURE.cards) && screens.cardsOn(screenId) : true),
         api,
+        // The game view's header (UI stage 5a): the lead and the scene, read through the queries, the story time through
+        // the host's own calendar formatter (the same one the screens' fmt.time uses).
+        heroOf: state => gameHeroProps({
+            state,
+            query: (name, args) => queryAt(name, args, state),
+            context: readHeroContext(),
+            formatTime: minutes => formatStoryTime(minutes, storyCalendar((name, args) => (registry.query(name) ? sdk.query(name, args) : null))),
+        }),
         on: (name, fn) => events.on(name, fn),
         carriers,
         hasCard,

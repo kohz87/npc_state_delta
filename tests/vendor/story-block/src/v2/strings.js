@@ -247,16 +247,15 @@ export const STRINGS = deepFreeze({
         failed: 'The save point was not made: {reason}',
         returnFailed: 'Could not return there: {reason}',
     },
-    // Home's line while no pack is installed (screens/packs-hint.js).
+    // A long card's toggle (screens/show-more.js).
+    showMore: {
+        more: 'Show all',
+        less: 'Show less',
+    },
+    // Home's "Before you start" while a module holds the story back (screens/ready-hint.js).
     readyHint: {
         title: 'Before you start',
         go: 'Get started',
-    },
-    packsHint: {
-        title: 'Packs',
-        none: 'No pack installed. A pack adds a ready-made setting: items, shops, places, quests and a start.',
-        import: 'Import a pack',
-        importTitle: 'Open the Story Suite settings at Packs',
     },
     home: {
         title: 'Home',

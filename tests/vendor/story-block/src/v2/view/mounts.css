@@ -58,16 +58,48 @@
 /* A phone, full screen: the story behind must not read through the glass. The dense tint is layered over itself (Solid and Follow
    SillyTavern are opaque or untouched already). */
 @media (max-width: 759.98px) {
+    /* Glass only (the theme sets --ss-gameview-phone-floor and -layers for Glass): an opaque floor under three layers of the tint,
+       so blur off hides the story behind the cards too. Solid and Follow SillyTavern keep the rules above (no layers). */
     .ss-gameview {
-        background-image: linear-gradient(var(--ss-sheet-bg, var(--ss-surface)), var(--ss-sheet-bg, var(--ss-surface))), linear-gradient(var(--ss-sheet-bg, var(--ss-surface)), var(--ss-sheet-bg, var(--ss-surface))), linear-gradient(var(--ss-sheet-bg, var(--ss-surface)), var(--ss-sheet-bg, var(--ss-surface)));
+        background-image: var(--ss-gameview-phone-layers, var(--ss-sheet-layers, none));
+    }
+}
+
+@supports (color: rgb(from red r g b)) {
+    @media (max-width: 759.98px) {
+        .ss-gameview {
+            background-color: var(--ss-gameview-phone-floor, var(--ss-sheet-bg, rgb(from var(--ss-surface) r g b / 1)));
+        }
+    }
+}
+
+@media (max-width: 759.98px) {
+    /* the phone title bar: slimmer, so the header and the screen have the room (the header is about 150 to 170 px) */
+    .ss-gameview-bar {
+        padding-top: max(6px, env(safe-area-inset-top));
+        padding-bottom: 6px;
     }
 }
 
 .ss-gameview-main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
+    /* The bar, the header and the body are the game view's own flex items (the nav's order is set per width below). */
+    display: contents;
+}
+
+/* The game view's header (UI stage 5a): the ss.hero block of the lead and the scene, above every screen. Hidden when the
+   head state gives no header (no chat). */
+.ss-gameview-hero {
+    flex: none;
+    padding: 8px 12px 0;
+    min-width: 0;
+}
+
+.ss-gameview-hero[hidden] {
+    display: none;
+}
+
+.ss-gameview-hero > .ss-hero {
+    margin: 0;
 }
 
 .ss-gameview-bar {
@@ -105,6 +137,8 @@
     overflow: auto;
     overscroll-behavior: contain;
     padding: 12px;
+    /* Screens scroll under the header and the bottom bar; the scroller is the body, not the page. */
+    scroll-padding-top: 8px;
 }
 
 .ss-gameview-nav {
@@ -188,22 +222,37 @@
     white-space: nowrap;
 }
 
+/* Wide screens (desktop): the wide header across the top, the screens' tab row under it (ss.tabs: the same buttons, the
+   same keys, a row instead of the phone's bottom bar), then the body. A screen that asks for a side column gets the room
+   (the body's grid), and the body takes the rest. */
 @media (min-width: 768px) {
-    .ss-gameview {
-        flex-direction: row;
+    .ss-gameview-bar {
+        order: 0;
+        padding: 12px 24px;
+    }
+
+    .ss-gameview-hero {
+        order: 1;
+        padding: 16px 24px 0;
     }
 
     .ss-gameview-nav {
-        order: -1;
-        flex-direction: column;
-        width: 200px;
-        overflow-x: hidden;
-        overflow-y: auto;
-        margin: 0;
-        padding: 8px;
+        order: 2;
+        flex-direction: row;
+        justify-content: flex-start;
+        width: auto;
+        height: auto;
+        overflow-x: auto;
+        overflow-y: hidden;
+        /* air between the header card and the tab row (the row's own padding stays) */
+        margin: var(--ss-space-3, 12px) 0 0;
+        padding: 0 24px;
         border: 0;
-        border-right: 1px solid var(--ss-border);
+        border-bottom: 1px solid var(--ss-border);
         border-radius: 0;
+        background: transparent;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
         box-shadow: none;
     }
 
@@ -213,17 +262,22 @@
         justify-content: flex-start;
         gap: var(--ss-gap);
         min-height: 44px;
-        padding: 8px 12px;
+        padding: 8px 14px;
+        /* the labels in the text colour (the muted one missed 4.5:1 on busy glass); the current tab is told by its fill and underline */
+        color: var(--ss-text, inherit);
+        border-radius: var(--ss-radius-m, 14px) var(--ss-radius-m, 14px) 0 0;
         font-size: 1em;
     }
 
     .ss-gameview-navitem[aria-current="page"] {
         background: var(--ss-accent-soft, transparent);
-        box-shadow: inset 3px 0 0 var(--ss-accent);
+        box-shadow: inset 0 -2px 0 var(--ss-accent);
     }
 
     .ss-gameview-body {
-        padding: 16px 24px;
+        order: 3;
+        /* air between the tab row's underline and the first row of cards */
+        padding: var(--ss-space-4, 16px) 24px 16px;
     }
 }
 
@@ -369,6 +423,14 @@
 .ss-hud > .ss-hud-item {
     container-type: normal;
     min-width: min-content;
+}
+
+/* The HUD strip on a phone, under Glass: the tint layered over itself, so the story behind does not read through the name and
+   the level (the full-screen window's rule, for the strip). Solid and Follow SillyTavern leave the token unset: no layers. */
+@media (max-width: 759.98px) {
+    .ss-hud {
+        background-image: var(--ss-sheet-hud-layers, none);
+    }
 }
 
 /* ---- Dialogs: a sheet from the bottom on narrow widths, centred on wide ones ---- */

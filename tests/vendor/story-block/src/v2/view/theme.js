@@ -81,7 +81,7 @@ const SHARED = Object.freeze({
 export const PALETTES = Object.freeze({
     dark: Object.freeze({
         base: [30, 33, 50], solid: '#1e2132',
-        tile: 'rgba(255, 255, 255, 0.09)', border: 'rgba(255, 255, 255, 0.16)', shadow: '0 10px 30px rgba(0, 0, 0, 0.35)',
+        tile: 'rgba(255, 255, 255, 0.09)', border: 'rgba(255, 255, 255, 0.16)', rule: 'rgba(255, 255, 255, 0.22)', shadow: '0 10px 30px rgba(0, 0, 0, 0.35)',
         text: '#f1f2f8', muted: '#b6bacb', track: 'rgba(255, 255, 255, 0.14)',
         pill: 'rgba(255, 255, 255, 0.14)', pillText: '#f1f2f8', badge: '#f1f2f8', badgeText: '#141720',
         field: 'rgba(0, 0, 0, 0.22)', overlay: 'rgba(24, 27, 42, 0.72)', scrim: 'rgba(8, 10, 20, 0.6)', off: 'rgba(255, 255, 255, 0.22)', accentSoft: 'rgba(123, 108, 240, 0.24)',
@@ -89,7 +89,7 @@ export const PALETTES = Object.freeze({
     }),
     light: Object.freeze({
         base: [255, 255, 255], solid: '#f6f5fb',
-        tile: 'rgba(255, 255, 255, 0.72)', border: 'rgba(255, 255, 255, 0.9)', shadow: '0 10px 30px rgba(70, 60, 130, 0.14)',
+        tile: 'rgba(255, 255, 255, 0.72)', border: 'rgba(255, 255, 255, 0.9)', rule: 'rgba(35, 37, 58, 0.22)', shadow: '0 10px 30px rgba(70, 60, 130, 0.14)',
         text: '#23253a', muted: '#5b5e74', track: 'rgba(35, 37, 58, 0.1)',
         pill: '#2c2f46', pillText: '#ffffff', badge: '#2c2f46', badgeText: '#ffffff',
         field: 'rgba(255, 255, 255, 0.85)', overlay: 'rgba(255, 255, 255, 0.78)', scrim: 'rgba(35, 37, 58, 0.38)', off: 'rgba(35, 37, 58, 0.22)', accentSoft: 'rgba(123, 108, 240, 0.16)',
@@ -108,8 +108,16 @@ const mixTint = base => `color-mix(in srgb, ${TINT} ${TINT_SHARE}%, ${base})`;
 // Set for Glass only, so Solid and Follow SillyTavern keep those frames' own shape (the frames read each with a fallback).
 const SHEET_TOKENS = Object.freeze([
     ['--ss-sheet-bg', 'var(--ss-glass-strong)'], ['--ss-sheet-blur', 'var(--ss-blur)'], ['--ss-sheet-layers', 'none'],
+    // the same tint with its alpha dropped: the floor under the translucent sheet, so the story behind cannot be read through it
+    // on a phone with blur off (mounts.css stacks the tint over this floor). Relative colours; without them the floor is unset.
+    ['--ss-sheet-floor', 'rgb(from var(--ss-glass-strong) r g b / 1)'],
+    // the phone game view's floor and its three layers of the tint, Glass only (mounts.css, the phone rule); unset for the other styles
+    ['--ss-gameview-phone-floor', 'var(--ss-sheet-floor)'],
+    ['--ss-gameview-phone-layers', 'linear-gradient(var(--ss-sheet-bg), var(--ss-sheet-bg)), linear-gradient(var(--ss-sheet-bg), var(--ss-sheet-bg)), linear-gradient(var(--ss-sheet-bg), var(--ss-sheet-bg))'],
     ['--ss-sheet-radius', 'var(--ss-radius-l)'], ['--ss-sheet-radius-top', 'var(--ss-radius-l) var(--ss-radius-l) 0 0'],
     ['--ss-sheet-edge', '1px solid var(--ss-border)'], ['--ss-sheet-shadow', 'var(--ss-shadow)'],
+    // the HUD strip on a phone: the Glass tint three times over (the same compounding as the full-screen window), Glass only
+    ['--ss-sheet-hud-layers', 'linear-gradient(var(--ss-sheet-bg), var(--ss-sheet-bg)), linear-gradient(var(--ss-sheet-bg), var(--ss-sheet-bg)), linear-gradient(var(--ss-sheet-bg), var(--ss-sheet-bg))'],
 ]);
 const SHEET_RESET = Object.freeze(SHEET_TOKENS.map(([name]) => [name, 'initial']));
 
@@ -227,6 +235,8 @@ export function schemeTokens(scheme, panel, { opaque = false, strength = DEFAULT
             ['--ss-glass-strong', 'var(--SmartThemeBlurTintColor, rgba(23, 23, 23, 1))'],
             ['--ss-tile', 'color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 8%, transparent)'],
             ['--ss-border', 'var(--SmartThemeBorderColor, rgba(0, 0, 0, 0.5))'],
+            // the section-label hairline: SillyTavern's text colour at 40% over its tint, so it reads against the card (>= 1.5:1)
+            ['--ss-rule', 'color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 40%, var(--SmartThemeBlurTintColor, rgba(23, 23, 23, 1)))'],
             ['--ss-shadow', '0 2px 8px var(--SmartThemeShadowColor, rgba(0, 0, 0, 0.5))'],
             ['--ss-text', 'var(--SmartThemeBodyColor, #dcdcd2)'],
             ['--ss-muted', 'var(--SmartThemeEmColor, #919191)'],
@@ -260,6 +270,7 @@ export function schemeTokens(scheme, panel, { opaque = false, strength = DEFAULT
         ['--ss-glass-strong', solid ? opaqueOf(mixTint(p.solid)) : glassOf(alpha.strong)],
         ['--ss-tile', p.tile],
         ['--ss-border', p.border],
+        ['--ss-rule', p.rule],
         ['--ss-shadow', p.shadow],
         ['--ss-text', p.text],
         ['--ss-muted', p.muted],

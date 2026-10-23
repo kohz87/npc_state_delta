@@ -15,6 +15,7 @@
 import { h, iconNode, runCommand, shell, str } from './dom.js';
 import { defineWidget, resolveProps } from './props.js';
 import { cutAt } from '../../../text.js';
+import { focusNode } from '../scroll.js';
 
 export const ACTION_MAX = 4;
 export const ACTION_KINDS = Object.freeze(['primary', 'plain', 'danger']);
@@ -108,20 +109,20 @@ function renderDialog(el, input, api) {
             const nodes = focusablesIn(panel);
             if (!nodes.length) {
                 event.preventDefault?.();
-                panel.focus?.();
+                focusNode(panel);
                 return;
             }
             const at = nodes.indexOf(doc.activeElement);
             const next = event.shiftKey ? (at <= 0 ? nodes.at(-1) : null) : (at === -1 || at === nodes.length - 1 ? nodes[0] : null);
             if (next) {
                 event.preventDefault?.();
-                next.focus?.();
+                focusNode(next);
             }
         }
         // A focus that lands outside the panel (a click on the page behind, a script) is brought back in.
         function onFocus(event) {
             if (!isOpen || !top() || !event.target || panel.contains?.(event.target)) return;
-            (focusablesIn(panel)[0] ?? panel).focus?.();
+            focusNode(focusablesIn(panel)[0] ?? panel);
         }
         function release() {
             const at = stack.indexOf(token);
@@ -141,7 +142,7 @@ function renderDialog(el, input, api) {
             later(() => {
                 if (!isOpen) return;
                 const main = foot.querySelector('.ss-modal-primary');
-                (main ?? focusablesIn(panel)[0] ?? panel).focus?.();
+                focusNode(main ?? focusablesIn(panel)[0] ?? panel);
             });
         }
         function hide() {
@@ -151,7 +152,7 @@ function renderDialog(el, input, api) {
             release();
             const back = before;
             before = null;
-            if (back && back.isConnected !== false) back.focus?.();
+            if (back && back.isConnected !== false) focusNode(back);
         }
         // An answer: the command, then close.
         function finish(answer) {
@@ -205,7 +206,7 @@ function renderDialog(el, input, api) {
                 foot.appendChild(button);
             }
             foot.hidden = !actions.length;
-            if (keep) [...foot.querySelectorAll('button')].find(button => button.getAttribute('data-id') === keep)?.focus?.();
+            if (keep) focusNode([...foot.querySelectorAll('button')].find(button => button.getAttribute('data-id') === keep));
         }
         update();
         lastProp = p.open;

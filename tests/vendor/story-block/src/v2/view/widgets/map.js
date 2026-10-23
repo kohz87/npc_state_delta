@@ -165,9 +165,10 @@ function render(el, input, api) {
         const miniNodes = s(doc, 'g', { class: 'ss-w-map-mini-nodes' });
         const viewport = s(doc, 'rect', { class: 'ss-w-map-viewport', 'vector-effect': 'non-scaling-stroke' });
         mini.append(miniEdges, miniNodes, viewport);
-        const legend = h(doc, 'div', 'ss-w-map-legend');
+        // The legend is a strong-glass list card (cards over busy art use the strong glass; the ss.listcard classes): a label, then one row per kind on show.
+        const legend = h(doc, 'div', 'ss-w-map-legend ss-glass-strong ss-listcard');
         const legendTitle = h(doc, 'p', 'ss-w-map-legend-title', 'Legend');
-        const legendList = h(doc, 'ul', 'ss-w-map-legend-list');
+        const legendList = h(doc, 'ul', 'ss-listcard-rows ss-w-map-legend-list');
         legend.append(legendTitle, legendList);
         side.append(mini, legend);
         body.append(stage, side);
@@ -314,8 +315,10 @@ function render(el, input, api) {
         function drawLegend() {
             const entries = [];
             const entry = (sample, text) => {
-                const li = h(doc, 'li', 'ss-w-map-legend-item');
-                li.append(sample, h(doc, 'span', 'ss-w-map-legend-text', text));
+                const li = h(doc, 'li', 'ss-listcard-row ss-w-map-legend-item');
+                const item = h(doc, 'div', 'ss-listcard-item');
+                item.append(sample, h(doc, 'span', 'ss-w-map-legend-text', text));
+                li.appendChild(item);
                 entries.push(li);
             };
             const kinds = [];

@@ -55,6 +55,35 @@
     color: var(--ss-muted);
 }
 
+/* ---- the section label (UI stage 5a, Panel.dc.html "option A"): the label, then a 1px hairline in --ss-border that fills the
+   rest of the row. Any template or module uses it: <h4 class="ss-section-label">Where</h4>. The icon before the text keeps its size. ---- */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-section-label {
+    display: flex;
+    align-items: center;
+    gap: var(--ss-space-2);
+    min-width: 0;
+    margin: 0;
+    font-family: var(--ss-font);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 1.4px;
+    line-height: 1.3;
+    text-transform: uppercase;
+    color: var(--ss-muted);
+    overflow-wrap: anywhere;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-section-label > i {
+    flex: none;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-section-label::after {
+    content: "";
+    flex: 1 1 auto;
+    min-width: var(--ss-space-3);
+    height: 1px;
+    /* the rule colour (its own token: the border is near-white in light, a 1px line of it cannot be seen) */
+    background: var(--ss-rule, var(--ss-border));
+}
+
 /* ---- pill ---- */
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-pill {
     display: inline-flex;
@@ -375,7 +404,12 @@
     color: var(--ss-text);
 }
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-pill {
+    /* a long class or role wraps inside the card, even as one unbroken word: never past the card's edge (a 360 px phone) */
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
     white-space: normal;
+    overflow-wrap: anywhere;
     text-overflow: clip;
     overflow: visible;
     line-height: 1.25;
@@ -463,7 +497,7 @@
 }
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-compact .ss-hero-body {
     grid-template-columns: 36px minmax(0, 1fr) auto;
-    grid-template-areas: "portrait who status" "vitals vitals vitals";
+    grid-template-areas: "portrait who status" "portrait corner corner" "vitals vitals vitals";
     column-gap: 10px;
     row-gap: 6px;
 }
@@ -487,9 +521,36 @@
     padding: 1px 8px;
     font-size: 12px;
 }
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-compact .ss-hero-corner,
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-compact .ss-hero-exp {
     display: none;
+}
+/* the scene on a phone: one line under the name, the items side by side, each one ellipsised */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-compact .ss-hero-corner {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 2px 10px;
+    min-width: 0;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    font-size: 12px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-compact .ss-hero-corner-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    flex: 0 1 auto;
+    overflow: hidden;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-compact .ss-hero-corner-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-compact .ss-hero-pools {
     grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
@@ -1568,7 +1629,7 @@
 }
 
 /* ---- buttons the settings pages share: a pill button, a small icon button (move up and down), a danger tone ---- */
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-button {
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) button.ss-button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1579,16 +1640,18 @@
     /* an edge that shows in a light scheme, where the glass border is faint */
     border: 1px solid color-mix(in srgb, var(--ss-muted) 55%, var(--ss-border));
     border-radius: var(--ss-radius-pill);
-    background: var(--ss-tile);
+    /* the strong glass under the tile: the label keeps 4.5:1 over busy art. filter: none beats SillyTavern's menu_button grey-out */
+    background: var(--ss-glass-strong);
     color: var(--ss-text);
+    filter: none;
     font-family: var(--ss-font);
     font-size: 14px;
     font-weight: 700;
     cursor: pointer;
 }
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-button-primary {
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) button.ss-button.ss-button-primary {
     border-color: var(--ss-accent);
-    background: var(--ss-accent-soft);
+    background: linear-gradient(var(--ss-accent-soft), var(--ss-accent-soft)), var(--ss-glass-strong);
 }
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-button-quiet {
     background: none;
@@ -1602,10 +1665,29 @@
     outline: 2px solid var(--ss-accent);
     outline-offset: 2px;
 }
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-button:disabled,
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-iconbutton:disabled {
     cursor: default;
     opacity: 0.45;
+}
+/* the states of .ss-button: hover, active and disabled are written with the same :not() chain SillyTavern's own menu_button
+   hover uses, so they are (0,5,0) and beat `.menu_button:not(.disabled):not([disabled]):hover` (0,4,0). Tokens only. */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) button.ss-button:not(:disabled):not(.disabled):not([disabled]):hover,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) button.ss-button:not(:disabled):not(.disabled):not([disabled]):active {
+    border-color: var(--ss-accent);
+    background: linear-gradient(var(--ss-accent-soft), var(--ss-accent-soft)), var(--ss-glass-strong);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) button.ss-button:not(:disabled):not(.disabled):not([disabled]):active {
+    box-shadow: inset 0 0 0 999px color-mix(in srgb, var(--ss-accent) 10%, transparent);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) button.ss-button:disabled,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) button.ss-button.disabled,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) button.ss-button[disabled] {
+    cursor: default;
+    opacity: 1;
+    filter: none;
+    border-color: var(--ss-border);
+    background: var(--ss-glass-strong);
+    color: var(--ss-text);
 }
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-iconbutton {
     flex: none;

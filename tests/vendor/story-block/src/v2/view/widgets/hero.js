@@ -23,6 +23,7 @@ const QUERY_NAME = /^[a-z][a-zA-Z0-9_-]{0,39}(?:\.[a-zA-Z0-9_-]{1,40}){0,3}$/;
 const heroProps = {
     name: { type: 'string', required: true, default: '' },
     portrait: { type: 'string', default: '' },          // the persona avatar or the card's image
+    portraits: { type: 'array', default: Object.freeze([]) }, // more pictures, in the order to try them (after `portrait`'s own place: see pictureCandidates)
     portraitQuery: { type: 'string', default: '' },     // a query that answers a picture URL (`npc.portrait`); asked first
     portraitArgs: { type: 'object', default: null },    // its arguments ({ name })
     line: { type: 'string', default: '' },               // the pill's whole text ("Soul Class II · Lv 12 · Wayfarer")
@@ -67,19 +68,32 @@ function heroStatuses(list) {
     return out;
 }
 
-/** The picture to show: the query's answer when it gives a safe one, else `portrait`; '' for the initial. */
-export function heroPicture(p, api) {
+/** A picture's URL from a value that is a string or an answer `{ url }` / `{ src }`: a safe one, else ''. */
+export function pictureUrl(value) {
+    return safeImageUrl(typeof value === 'string' ? value : value?.url ?? value?.src ?? '');
+}
+
+/**
+ * The pictures to try, in order, each a safe URL and once: the query's answer (`portraitQuery`), then `portraits`, then
+ * `portrait`. A picture that fails to load is skipped by the widget (the next is tried), and the initial past the last.
+ */
+export function pictureCandidates(p, api) {
+    const out = [];
+    const add = value => { const url = pictureUrl(value); if (url && !out.includes(url)) out.push(url); };
     const name = typeof p.portraitQuery === 'string' ? p.portraitQuery : '';
     if (name && QUERY_NAME.test(name) && typeof api?.query === 'function') {
-        try {
-            const answer = api.query(name, p.portraitArgs && typeof p.portraitArgs === 'object' ? p.portraitArgs : undefined);
-            const url = safeImageUrl(typeof answer === 'string' ? answer : answer?.url ?? answer?.src ?? '');
-            if (url) return url;
-        } catch {
+        try { add(api.query(name, p.portraitArgs && typeof p.portraitArgs === 'object' ? p.portraitArgs : undefined)); } catch {
             // The query is the host's to report; the card falls back to the next picture.
         }
     }
-    return safeImageUrl(p.portrait);
+    for (const value of Array.isArray(p.portraits) ? p.portraits : []) add(value);
+    add(p.portrait);
+    return out;
+}
+
+/** The first picture to show (see pictureCandidates); '' for the initial. */
+export function heroPicture(p, api) {
+    return pictureCandidates(p, api)[0] ?? '';
 }
 
 function renderHero(el, input, api) {
@@ -92,7 +106,6 @@ function renderHero(el, input, api) {
         const portrait = h(doc, 'div', 'ss-hero-portrait');
         portrait.setAttribute('role', 'img');
         const img = h(doc, 'img', 'ss-hero-img');
-        img.setAttribute('alt', '');
         img.setAttribute('draggable', 'false');
         img.setAttribute('loading', 'lazy');
         img.setAttribute('decoding', 'async');
@@ -111,12 +124,28 @@ function renderHero(el, input, api) {
         const vitals = h(doc, 'div', 'ss-hero-vitals');
         body.append(portrait, main, vitals);
         root.appendChild(body);
-        let failed = '';
+        // The pictures that failed to load (kept for this widget: a redraw does not ask for them again), the candidates for the
+        // current props, and the picture on screen: an error moves on to the next candidate, the initial past the last.
+        const broken = new Set();
+        let shown = [];
+        function showPicture() {
+            const url = shown.find(candidate => !broken.has(candidate)) ?? '';
+            if (url) {
+                if (img.getAttribute('src') !== url) img.setAttribute('src', url);
+                img.hidden = false;
+                letter.hidden = true;
+                portrait.classList.remove('ss-hero-fallback');
+            } else {
+                img.removeAttribute('src');
+                img.hidden = true;
+                letter.hidden = false;
+                portrait.classList.add('ss-hero-fallback');
+            }
+        }
         listen(img, 'error', () => {
-            failed = img.getAttribute('src') ?? '';
-            img.hidden = true;
-            letter.hidden = false;
-            portrait.classList.add('ss-hero-fallback');
+            const src = img.getAttribute('src') ?? '';
+            if (src) broken.add(src);
+            showPicture();
         });
         function clear() {
             for (const handle of handles) handle.destroy();
@@ -133,18 +162,9 @@ function renderHero(el, input, api) {
             name.textContent = label;
             letter.textContent = initials(label);
             portrait.setAttribute('aria-label', label ? `Portrait of ${label}` : 'Portrait');
-            const url = heroPicture(p, api);
-            if (url && url !== failed) {
-                if (img.getAttribute('src') !== url) img.setAttribute('src', url);
-                img.hidden = false;
-                letter.hidden = true;
-                portrait.classList.remove('ss-hero-fallback');
-            } else {
-                if (!url) img.removeAttribute('src');
-                img.hidden = true;
-                letter.hidden = false;
-                portrait.classList.add('ss-hero-fallback');
-            }
+            img.setAttribute('alt', label ? `Portrait of ${label}` : '');
+            shown = pictureCandidates(p, api);
+            showPicture();
             const line = heroLine(p);
             pill.textContent = line;
             pill.hidden = !line;

@@ -47,7 +47,7 @@ export function createReadyHintWidget({ blockers = () => [], unblock = () => fal
                 }
                 const root = el(doc, 'section', 'panel ready-hint');
                 root.setAttribute('aria-label', S.title);
-                const head = el(doc, 'h4');
+                const head = el(doc, 'h4', 'ss-section-label');
                 const glyph = el(doc, 'i', 'fa-solid fa-flag-checkered');
                 glyph.setAttribute('aria-hidden', 'true');
                 head.append(glyph, doc.createTextNode(` ${S.title}`));
@@ -59,7 +59,7 @@ export function createReadyHintWidget({ blockers = () => [], unblock = () => fal
                     text.append(el(doc, 'b', '', cut(entry.name ?? entry.moduleId, 80)), doc.createTextNode(`: ${cut(entry.reason, REASON_LIMIT)}`));
                     row.append(text);
                     if (entry.canOpen) {
-                        const go = el(doc, 'button', 'btn sb-ready-go');
+                        const go = el(doc, 'button', 'ss-button ss-button-primary sb-ready-go');
                         go.type = 'button';
                         go.setAttribute('type', 'button');
                         const icon = el(doc, 'i', 'fa-solid fa-arrow-right');
