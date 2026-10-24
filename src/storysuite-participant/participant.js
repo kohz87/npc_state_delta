@@ -108,11 +108,14 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
      * written into the state (durably) when it changed. The chat is looked at again after every await: a chat that changed meanwhile ends it.
      * → the session { key, lineage, index } or null (no chat, or it changed).
      */
-    async function hydrate() {
+    async function hydrate({ create = true } = {}) {
         const key = keyNow();
         if (!usable(key)) return null;
         const state = port.readState();
         const block = timelineOf(state);
+        // A chat with no dossiers and no line yet has nothing to name: opening it writes nothing (a new chat has no file until it is saved), and
+        // the line is made by the first thing that needs one (a save point, a death, a dossier).
+        if (!create && !block.lineage && !(Array.isArray(state?.npcs) && state.npcs.length)) return null;
         let write = false;
         if (!block.lineage) {
             block.lineage = mintLineage(random);
@@ -420,7 +423,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
                 const state = port.readState();
                 const block = timelineOf(state);
                 const npcs = state?.npcs;
-                const unsettled = !block.lineage || (Array.isArray(npcs) && npcs.some(npc => typeof npc?.id === 'string' && !Object.hasOwn(block.identity.byKey, npc.id)));
+                const unsettled = Array.isArray(npcs) && npcs.some(npc => typeof npc?.id === 'string' && !Object.hasOwn(block.identity.byKey, npc.id));
                 if (unsettled && !hydrating) {
                     hydrating = true;
                     void exclusive(async () => { try { await hydrate(); } finally { hydrating = false; } });
@@ -428,7 +431,9 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
                 return resolveIdentity(block.identity, npcs, args);
             },
         },
-        /** Hydrates the open chat now (also what a chat opening runs, so the ids are there before the first ask). */
+        /** Opens the chat's line: the ids exist before the first ask. A chat with nothing to name is left alone (nothing is written). */
+        prime: () => exclusive(async () => { const s = await hydrate({ create: false }); return s ? { ok: true, lineage: s.lineage } : { ok: true, lineage: null }; }),
+        /** Hydrates the open chat now, making its line if it has none. */
         hydrate: () => exclusive(async () => { const s = await hydrate(); return s ? { ok: true, npcs: Object.keys(timelineOf(port.readState()).identity.byKey).length, lineage: s.lineage } : fail('FAILED', 'There is no open chat.'); }),
         nativeChange,
         /** Delta's state was written durably by something other than the participant: publish it as a native change (debounced). */

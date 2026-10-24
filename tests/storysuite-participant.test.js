@@ -482,3 +482,22 @@ test('N2: a host that gives no Source for the head cannot take the change yet (U
     assert.equal(seen.length, 2, 'the head was read again after STALE');
     assert.equal(seen[0].input.source.ordinal, 1, 'the port gave the Source');
 });
+
+test('N2: opening a chat primes its ids before the first ask, and writes nothing for a chat with nothing to name', async () => {
+    const empty = setup({ state: { npcs: [], socialGraph: { edges: [] }, checkpoints: [], lineage: [], turn: 0 } });
+    assert.deepEqual(await empty.prime(), { ok: true, lineage: null });
+    assert.equal(empty.live.writes, 0, 'a new chat has no file until it is saved');
+    assert.equal(empty.queries['npc.identity'](null, { name: 'Mira' }), null);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(empty.live.writes, 0, 'and asking about a person nobody has met does not make one');
+    // The first thing that needs a line makes it: a save point.
+    const saved = await empty.participant.checkpoint({});
+    assert.equal(saved.ok, true);
+    assert.equal(empty.live.writes, 1);
+    assert.match(empty.timeline().lineage, LINEAGE_ID);
+    // A chat with dossiers is primed at once: the first ask after the reload finds the ids.
+    const full = setup();
+    const primed = await full.prime();
+    assert.match(primed.lineage, LINEAGE_ID);
+    assert.equal(full.queries['npc.identity'](null, { name: 'Mira' }).nativeKey, 'npc_mira');
+});
