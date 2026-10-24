@@ -10,7 +10,7 @@ the page, `src/storysuite-v2.js` registers read-only queries, the Cast / Dossier
 section in the Story Suite overlay, and one small per-reply domain, `npc` (meters, stages, unlocked notes;
 `src/npc-meters.js`). Without a v2 host the adapter does nothing and NSD works as before. The other repos:
 Story Block (kohz87/Story_block, the host), RPG Battle (kohz87/rpg_battle), Story Director
-(kohz87/Story_director). NSD must work alone and with any of them absent. Work is on the `v2` branch.
+(kohz87/Story_director). NSD must work alone and with any of them absent. Work is on `main`.
 
 ## Directory map
 
@@ -43,7 +43,7 @@ node scripts/measure-stage9.mjs   # exact scanner request bytes; fails if they d
 npm run package             # dist/npc_state_delta-<version>.zip, verified (dist/ is gitignored)
 node --import ./tests/active-runtime-test-setup.mjs --test --test-reporter=dot tests/storysuite-v2.test.js  # one file
 node ../Story_block/scripts/sync-testkit.mjs --to .             # re-vendor the Story Block testkit
-git diff --check origin/v2
+git diff --check origin/main
 ```
 
 Full suite: about 1,430 tests, about 3 minutes. Skills: `.claude/skills/run-tests`, `sync-testkit`.
@@ -69,7 +69,7 @@ Every test file needs `--import ./tests/active-runtime-test-setup.mjs` (source-e
 
 - No model names anywhere in the repo (existing history documents excepted). Commit trailers and PR
   attribution: the lines the session gives.
-- Branch off `v2`, PR into `v2`; agents never merge their own PR. Rebase on `origin/v2` before pushing.
+- Branch off `main`, PR into `main`; agents never merge their own PR. Rebase on `origin/main` before pushing.
 - A version bump changes `manifest.json`, `package.json`, `runtime-modules.json`, `core.js`
   (`NPC_STATE_VERSION`), the `bootstrap.js` banner, README title and CHANGELOG head together, and only for an
   authorized release.
