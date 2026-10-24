@@ -88,6 +88,10 @@ test('N2: every durable write of the chat\'s state ends in the one function that
     // The server's newer copy adopted as the working state is a change no persist call announces: it announces itself.
     assert.match(index.slice(index.indexOf('function installCanonicalServerState('), index.indexOf('async function reconcileCrossSessionWriteConflict(')), /announceNativeChange\(key\)/);
     // The participant's own writes are not changes.
-    assert.match(index, /return quietly\(async \(\) => \{\s*setChatState\(key, state, \{ markLoaded: true \}\);/);
-    assert.match(index, /writeTimeline: async block =>[\s\S]*?return quietly\(/);
+    assert.match(index, /return quietly\(key, async \(\) => \{\s*setChatState\(key, state, \{ markLoaded: true \}\);/);
+    assert.match(index, /const participantWrites = new Map\(\);/, 'the participant\'s own writes are counted per chat');
+    assert.match(index, /writeTimeline: async block =>[\s\S]*?return quietly\(key, /);
+    // Scan intent: the entry points that start dossier work hold it for their whole run, and the probe counts it with the queued automatic scans.
+    for (const name of ['scanNow', 'drainPendingAutoScan', 'processPendingBackfills', 'runTargetedDossierPass', 'handleAssistantMessageReceived']) assert.match(index, new RegExp(`function ${name}\\([^)]*\\) \\{ return withScanIntent\\(`), name);
+    assert.match(index, /function scanWorkPending\(key = getChatKey\(\)\) \{\s*return isScanBusy\(key\) \|\| \(scanIntents.get\(key\) \|\| 0\) > 0 \|\| pendingAutoScans.has\(key\);/);
 });

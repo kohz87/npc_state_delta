@@ -13,7 +13,7 @@ This folder is Delta's: `src/storysuite-participant/` (new files only; Delta's o
 - `timeline.js`: **what the participant keeps lives in Delta's own chat state**, `state.timeline = { v, lineage, identity: { map }, reserved, applied }`:
   - `lineage` (`lg_xxxxxxxx`) is the id of the story's native line, minted once and stored in the state. A checkpoint belongs to a lineage, never to a
     chat key or a file name. A chat rename moves the state file (the block goes with it), a branch inherits the block (`branch.js` `bestAncestorState`),
-    a bundle export carries it (`bundle.js`, and an import into a chat with no lineage adopts it).
+    a bundle export carries it (`bundle.js`); an import into a chat with no lineage adopts the map, and takes a lineage of its own when the bundle came from another chat.
   - `identity.map` is the np_ of every dossier (below), `reserved` every np_ ever issued in the lineage, `applied` the confirmed deaths applied.
 - `checkpoint.js`: a native checkpoint is one plain-JSON document `{ schema, kind, lineage, cursor, headHash, state }`: Delta's whole chat state as
   `getState()` gives it (dossiers, candidates, the social graph, rollback checkpoints and lineage, portraits, and `timeline`). Its hash is the contract's
@@ -28,9 +28,14 @@ This folder is Delta's: `src/storysuite-participant/` (new files only; Delta's o
 
 ## The callbacks
 
-- `checkpoint({ cursor, headHash })`: **quiet**. It waits for a scan or dossier pass in flight (`port.idle`, 20 s), and answers a retryable `STALE` if Delta
-  will not be quiet or the state moves while the checkpoint is made, never a save that would miss the scan. Then it hydrates, snapshots, stores, answers
-  `{ checkpoint, hash, schema }`.
+- `checkpoint({ cursor, headHash })`: **quiet**. It waits for dossier work (`port.idle`, 20 s), and answers a retryable `STALE` if Delta will not be quiet, the
+  state moves while the checkpoint is made, or Delta has **saved a change the story has not recorded yet** (the live state is not the baseline the timeline stands
+  on; the publish is asked for, and the save made again). When the host gives no way to publish (`UNSUPPORTED`) nothing is waited for. Then it hydrates,
+  snapshots, stores, answers `{ checkpoint, hash, schema }`.
+- `current({ checkpoint, hash })` -> `{ ok: true, current: boolean }`, **synchronous**: for the host's commit-time probe (Story Block E6a, being written): asked
+  inside the synchronous commit section, after the host holds the checkpoint it will store. `current` is true only when the checkpoint is one this participant
+  handed over, the native state still hashes to what it was when it was handed over, and no dossier work is running, due or queued. False makes the host
+  cancel and ask again. The shape is this participant's reading of that interface and follows it when it lands.
 - `prepare({ return, checkpoint, hash })`: verifies the bytes (gone: `SNAPSHOT_UNAVAILABLE`; another hash, another lineage or a return already
   prepared for another checkpoint: `CONFLICT`; a newer schema: `SNAPSHOT_UNAVAILABLE`) and shows nothing. The same prepare answers the same.
 - `activate({ return, prepared })`: installs the saved state through the port (`restoredState`: its map and deaths, this lineage's id, every np_ either
@@ -40,6 +45,14 @@ This folder is Delta's: `src/storysuite-participant/` (new files only; Delta's o
 - `applyEvent({ event, nativeKey, kind: 'confirmed-death' })`: the dossier becomes Delta's explicit, terminal death (`manualLifeStateRecord` with the
   event as the reason), the event is put in `timeline.applied`, a checkpoint is made, the ack is recorded; the same event again returns the same ack (and
   finishes an install that was lost); another person for the same event is `CONFLICT`; an unknown native key is `NOT_FOUND` (the death is held, never guessed).
+
+## What counts as "Delta is at work" (scan intent)
+
+The scan registry (`isScanBusy`) holds only the operations that have begun, so it is false between one scan ending and the queued one beginning (`scanNow` awaits
+the server first), and for a reply whose scan is due but not started. `index.js` therefore counts **intent** per chat: from the reply arriving
+(`handleAssistantMessageReceived`) and for the whole run of every `scanNow`, queued drain, backfill pass and targeted pass (`withScanIntent`); `scanWorkPending`
+is the registry, the intents and a queued automatic scan (`pendingAutoScans`). That is what `scanActive`/`scanIdle` (the port's `busy`/`idle`) answer. The
+participant's own writes are counted per chat too, so one chat's install never hides another chat's change.
 
 ## Every native change is published (N2)
 
