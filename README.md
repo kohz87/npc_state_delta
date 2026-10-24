@@ -134,4 +134,4 @@ The suite's full list is in Story Block's
 - History, decisions and the after-beta list: `suite-notes/` in
   [kohz87/inventory-block](https://github.com/kohz87/inventory-block/tree/claude/hopeful-babbage-tipaw8/suite-notes)
 
-Licence: see [LICENSE](LICENSE).
+Licence: [AGPL-3.0](LICENSE). RPG Battle and Story Director are MIT-licensed, so you can start your own module from either of them.

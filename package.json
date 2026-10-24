@@ -1,6 +1,7 @@
 {
   "name": "npc_state_delta",
   "version": "1.2.21",
+  "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
   "engines": { "node": ">=24" },
