@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Licence: AGPL-3.0 (was GPL-3.0). Releases already published keep the licence they shipped with.
+
 ## Story Suite v2: 2.0.0-beta.2 (`v2` branch; Delta 1.2.21)
 
 Story Suite v2, second beta. Delta keeps its own version line: this beta build is **Delta 1.2.21**, and the suite release is named only in this heading. It needs Story Block `>=2.0.0-beta.2` (`requires`). Update Story Block first: a Story Block 2.0.0-beta.1 or an alpha refuses Delta's hosted module (no meters, Cast tab or overlay section), and Delta keeps working on its own, with a console warning. What's new across the suite, known issues and every module's version: [Story Block docs/v2/RELEASES.md](https://github.com/kohz87/Story_block/blob/v2/docs/v2/RELEASES.md).
