@@ -51,8 +51,43 @@ export function isEnabled(deps, mount, screenId) {
     return true;
 }
 
-/** Usable screens for `mount` the reader has not turned off. */
-export const screensFor = (deps, mount) => deps.screens.list(mount).filter(entry => isEnabled(deps, mount, entry.id));
+/** The head state the mounts show, or null (no chat, no story yet). */
+export const headStateSafe = deps => {
+    try { return headState(deps); } catch { return null; }
+};
+
+/**
+ * The words of an alert badge, or null when the badge is no alert: text is an alert when it has any (cut to one short line), a count
+ * when it is above 0 (`badge: 0` is none), `true` is one without words (''). Anything else (false, null, undefined, NaN, an object) is none.
+ */
+export function badgeText(badge) {
+    if (badge === true) return '';
+    if (typeof badge === 'number') return Number.isFinite(badge) && badge > 0 ? String(Math.floor(badge) || badge) : null;
+    if (typeof badge === 'string') return badge.replace(/\s+/g, ' ').trim().slice(0, 40) || null;
+    return null;
+}
+
+/**
+ * Whether a screen (or a tab) is on now: its `active(state, ctx)` answer `{ on, badge? }` (ctx.query(name, args) reads the queries at
+ * that state). No `active` is always on; an answer that fails is off. `alert` is true when it is on with an alert badge (`badgeText`: the
+ * bar's red dot, no number is drawn); then `badge` is its words ('your move', '3', or '' for `true`) for the slot's accessible name.
+ */
+export function activeNow(screen, state, query) {
+    if (typeof screen?.active !== 'function') return { on: true, alert: false };
+    try {
+        const out = screen.active(state ?? null, { query: (name, args) => query?.(name, args, state) ?? null });
+        const on = out?.on === true;
+        const words = on ? badgeText(out.badge) : null;
+        return words === null ? { on, alert: false } : { on, alert: true, badge: words };
+    } catch {
+        return { on: false, alert: false };
+    }
+}
+
+/** Usable screens for `mount` the reader has not turned off; on the bars ('screen', 'tab') also only those active now. */
+export const screensFor = (deps, mount) => deps.screens.list(mount)
+    .filter(entry => isEnabled(deps, mount, entry.id))
+    .filter(entry => (mount !== 'screen' && mount !== 'tab') || activeNow(entry.screen, headStateSafe(deps), deps.query).on);
 
 /** Plain JSON copy (drafts, payloads): drops functions and undefined. */
 export const plainCopy = value => (value === undefined ? {} : JSON.parse(JSON.stringify(value)));
@@ -103,10 +138,12 @@ function problem(el, doc, message) {
 
 /**
  * Draws screen `screenId` into `el` for `mount`.
- * ctx: { deps, state, changes = [], draft = null, index = null, screen = <override, e.g. a wizard step> }
+ * ctx: { deps, state, changes = [], draft = null, index = null, screen = <override, e.g. a wizard step>, keep = false }
+ * `keep`: the element's own view is updated in place where the renderer can do that (a template's view keeps its
+ * controls, so the focus in them stays); a layout, or a screen with no keep, is drawn again from nothing.
  * → { ok: true, screen, scope, problems } | { ok: false, message }
  */
-export function drawScreen(el, screenId, mount, { deps, state, changes = [], draft = null, index = null, screen: override = null, extra = null }) {
+export function drawScreen(el, screenId, mount, { deps, state, changes = [], draft = null, index = null, screen: override = null, extra = null, keep = false }) {
     const doc = documentOf(deps);
     const resolved = deps.screens.resolve(screenId);
     if (!resolved?.screen) {
@@ -143,9 +180,10 @@ export function drawScreen(el, screenId, mount, { deps, state, changes = [], dra
         query: (name, args) => deps.query(name, args, state),
         ...(extra ?? {}),
     };
-    dispose(el);
+    const drawn = override ?? screen;
+    if (!(keep && typeof drawn.template === 'string' && !drawn.layout)) dispose(el);
     try {
-        const out = deps.render(el, override ?? screen, scope);
+        const out = deps.render(el, drawn, scope);
         if (typeof out === 'function') disposers.set(el, out);
         else if (out && typeof out.destroy === 'function') disposers.set(el, () => out.destroy());
     } catch (error) {

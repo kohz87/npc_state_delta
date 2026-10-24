@@ -210,6 +210,8 @@ class View {
         this.seen = new Set(this.warnings);
         this.seed = undefined;
         this.draftValue = {};
+        this.stale = [];
+        this.settling = false;
         this.base = null;
         this.blocks = null;
         this.idPrefix = null;
@@ -289,10 +291,24 @@ class View {
             this.blocks = this.compiled.nodes.map(node => makeBlock(node, this));
             for (const block of this.blocks) for (const node of block.nodes()) this.el.appendChild(node);
         }
+        this.stale = [];
         for (const block of this.blocks) block.update(current);
+        // A select whose draft value is no longer one of its options (the option left with the data it came from) goes back to "no
+        // choice": drawn once more with the draft cleared. One extra pass at most: a cleared value is never stale.
+        if (this.stale.length && !this.settling) {
+            const stale = this.stale;
+            this.stale = [];
+            this.settling = true;
+            try {
+                for (const keys of stale) this.writeDraft(keys, '');
+                this.update(this.base);
+            } finally {
+                this.settling = false;
+            }
+        }
     }
 
-    setDraft(keys, value) {
+    writeDraft(keys, value) {
         if (this.inPlace) writeInPlace(this.draftValue, keys, value);
         else this.draftValue = setIn(this.draftValue, keys, value);
         try {
@@ -300,6 +316,10 @@ class View {
         } catch (error) {
             this.warn(`onDraft failed: ${error?.message ?? error}`);
         }
+    }
+
+    setDraft(keys, value) {
+        this.writeDraft(keys, value);
         this.update(this.base);
     }
 
@@ -479,10 +499,15 @@ class ElementBlock {
         if (node.submit) listen(form ? 'submit' : 'click', event => this.onSubmit(event));
         // A form without data-submit still never submits: the browser would load the page again.
         else if (form) listen('submit', event => event?.preventDefault?.());
-        if (node.draft) {
+        if (node.draft?.type === 'button') listen('click', event => this.onPick(event));
+        else if (node.draft) {
             const handler = () => this.onInput();
             listen('input', handler);
             listen('change', handler);
+        }
+        if (node.draftClose) {
+            listen('keydown', event => this.onCloseKey(event));
+            listen('click', event => this.onCloseClick(event));
         }
     }
     nodes() { return [this.el]; }
@@ -558,6 +583,7 @@ class ElementBlock {
         if (!keys) return;
         const value = valueAtKeys(this.view.draftValue, keys);
         const { type } = node.draft;
+        if (type === 'button') return;
         const list = this.isList();
         if (type === 'checkbox') {
             el.checked = list ? Array.isArray(value) && value.map(String).includes(this.inputValue()) : Boolean(value);
@@ -570,7 +596,18 @@ class ElementBlock {
         // Leave a field alone while the reader is typing in it.
         if (this.view.doc?.activeElement === el) return;
         const text = value === null || value === undefined ? '' : toText(value);
+        if (type === 'select' && text !== '' && !this.hasOption(text)) {
+            this.view.stale.push(keys);
+            return;
+        }
         if (el.value !== text) el.value = text;
+    }
+
+    /** Whether this select has an option with that value (a select with no options yet is left alone: true). */
+    hasOption(text) {
+        const options = this.el.querySelectorAll?.('option') ?? [];
+        if (!options.length) return true;
+        return options.some(option => String(option.getAttribute('value') ?? option.textContent ?? '') === text);
     }
 
     /** A checkbox with a value (static or bound) collects a list; without one it is true/false. */
@@ -613,6 +650,48 @@ class ElementBlock {
         const before = valueAtKeys(this.view.draftValue, keys);
         if (before === value) return;
         this.view.setDraft(keys, value);
+    }
+
+    /** A button with data-draft and a value: a press picks that value, and a press on the picked one clears it (a disclosure's toggle). */
+    onPick(event) {
+        event?.preventDefault?.();
+        if (!this.scope || isDisabled(this.el)) return;
+        const keys = this.draftKeys();
+        if (!keys) return;
+        const value = this.el.getAttribute('value') ?? '';
+        const before = valueAtKeys(this.view.draftValue, keys);
+        this.view.setDraft(keys, before !== undefined && before !== null && String(before) === value ? '' : value);
+    }
+
+    /**
+     * data-draft-close="path" on a container: Escape inside it, or a press on an inner [data-draft-cancel], clears that draft value (closes
+     * the disclosure it holds). The focus goes first to the container's open toggle (aria-expanded="true"), so closing never drops it to
+     * the page. Escape with nothing open is left alone (the window around may close).
+     */
+    closeDraft() {
+        if (!this.scope || !this.node.draftClose) return false;
+        const keys = pathKeys(this.scope, this.node.draftClose.path);
+        const open = keys ? valueAtKeys(this.view.draftValue, keys) : undefined;
+        if (open === undefined || open === null || open === '') return false;
+        const opener = this.el.querySelectorAll('button[aria-expanded="true"]').find(node => !isDisabled(node));
+        opener?.focus?.();
+        this.view.setDraft(keys, '');
+        return true;
+    }
+
+    onCloseKey(event) {
+        if (event?.key !== 'Escape' || event.defaultPrevented) return;
+        if (this.closeDraft()) {
+            event.preventDefault?.();
+            event.stopPropagation?.();
+        }
+    }
+
+    onCloseClick(event) {
+        const cancel = event?.target?.closest?.('[data-draft-cancel]');
+        if (!cancel || !this.el.contains?.(cancel)) return;
+        event.preventDefault?.();
+        this.closeDraft();
     }
 
     // --- commands ----------------------------------------------------------------------------------

@@ -8,6 +8,10 @@
    draw (the old overlay's `story-suite-*` classes, until steps 3b–3g move each section to the form engine) start with
    `.ss-settings` so they outweigh host.css, which loads after this sheet. */
 
+/* The help lines of the settings window (field, card and feature help, the Diagnostics credit) have their own tone, so they read
+   over a busy background (see theme.js PALETTES.help); opacity stays 1, so a faded class (.ss-packs-hint) does not take it down. */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings :is(.ss-card-help, .ss-field-help, .ss-feature-help) { color: var(--ss-help, var(--ss-muted)); opacity: 1; }
+
 /* ---- the window */
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings {
     position: relative;
@@ -284,7 +288,7 @@
     border-top-color: var(--ss-border);
 }
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-fold-warn > summary small {
-    color: var(--ss-warn);
+    color: var(--ss-warn-text);
 }
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-fold-packs {
     border-color: var(--ss-accent);
@@ -494,5 +498,15 @@
     :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-row > input[type="checkbox"],
     :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-row > input[type="checkbox"]::before {
         transition: none;
+    }
+}
+
+/* The desktop window (a centred glass window, 760px and up): Glass lays its translucent glass over an opaque floor (--ss-sheet-floor,
+   set for Glass only, as the phone's full-screen window has), so the busy page behind does not reach the text. Solid and Follow
+   SillyTavern leave the token unset: the floor is transparent and the window stays as it was. */
+@media (min-width: 760px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings {
+        background-color: var(--ss-sheet-floor, transparent);
+        background-image: linear-gradient(var(--ss-glass), var(--ss-glass));
     }
 }

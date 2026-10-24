@@ -40,7 +40,7 @@ export const STANDARD_PREFIX = 'ss.';
 const SETTINGS_KEYS = ['defaults', 'schema', 'section', 'render', 'folds', 'place'];
 export const SETTINGS_PLACES = Object.freeze(['diagnostics']);
 const placeOf = value => (SETTINGS_PLACES.includes(value) ? value : null);
-const KNOWN_KEYS = ['id', 'name', 'version', 'description', 'requires', 'domains', 'commands', 'queries', 'capture', 'context', 'hooks', 'settings', 'tabs', 'screens', 'widgets', 'features'];
+const KNOWN_KEYS = ['id', 'name', 'version', 'description', 'requires', 'domains', 'commands', 'queries', 'capture', 'context', 'hooks', 'settings', 'tabs', 'screens', 'widgets', 'features', 'cards'];
 const CONTEXT_KEYS = ['static', 'tail', 'budget', 'feature', 'parts'];
 const COMMAND_KEYS = ['handler', 'internal', 'feature'];
 export const FIELD_TYPES = Object.freeze(['bool', 'int', 'choice', 'text', 'list', 'profile']);
@@ -222,6 +222,13 @@ export function definitionProblems(def) {
         }
     }
     if (map(def.hooks, 'hooks')) for (const [name, hook] of Object.entries(def.hooks)) fn(hook, `hook "${name}"`);
+    // Cards under replies (reply-cards.js): each is { for(state, message, ctx) }.
+    if (map(def.cards, 'cards')) {
+        for (const [id, card] of Object.entries(def.cards)) {
+            if (!isObject(card)) problems.push(`card "${id}" is not an object`);
+            else fn(card.for, `card "${id}" for`);
+        }
+    }
     if (map(def.settings, 'settings')) {
         const { defaults, schema, section, render, folds } = def.settings;
         if (defaults !== undefined) {
@@ -669,6 +676,9 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         hooks: name => sorted().map(def => def.hooks?.[name]).filter(hook => typeof hook === 'function' && !off(hook)),
         /** Same, with the module each comes from: [{ moduleId, fn }]. */
         hookEntries: name => sorted().filter(def => typeof def.hooks?.[name] === 'function' && !off(def.hooks[name])).map(def => ({ moduleId: def.id, fn: def.hooks[name] })),
+        /** [{ moduleId, id: "<module>/<card>", fn }] for the cards under replies (reply-cards.js), in module-id order; a card off is left out. */
+        cardEntries: () => sorted().flatMap(def => Object.entries(def.cards ?? {}).filter(([, card]) => typeof card?.for === 'function' && !off(card))
+            .map(([id, card]) => ({ moduleId: def.id, id: `${def.id}/${id}`, fn: card.for }))),
         /** [{ moduleId, id, title, icon, render }] in module-id order, each module's in its own order. */
         tabs: () => sorted().flatMap(def => (def.tabs ?? []).filter(tab => !off(tab)).map(tab => ({ ...tab, moduleId: def.id }))),
         /** [{ moduleId, ...screen }] in module-id order, each module's in its own order (§13.1). */

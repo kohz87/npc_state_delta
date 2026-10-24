@@ -20,7 +20,8 @@
 //   data-if="expr"                 keep the element only while truthy (applied per item inside data-each)
 //   data-class="name: expr; …"     toggle classes
 //   data-command="type" [data-payload='{"stack":"{{ s.id }}"}']   a click runs a command
-//   data-draft="path"              an input fills the draft (text, number, range, select, radio, checkbox, textarea)
+//   data-draft="path"              an input fills the draft (text, number, range, select, radio, checkbox, textarea); a <button value="x"> picks x (again: clears)
+//   data-draft-close="path"        Escape inside, or a press on an inner [data-draft-cancel], clears that draft value
 //   data-submit="type"             a form's submit (or an element's click) sends the draft as one command
 //   <ss-widget name="ss.meter" data-props='{"bind":"q.pc.hp"}'></ss-widget>   a registered widget
 
@@ -33,7 +34,7 @@ export { PURIFY_CONFIG, strictSanitize, renderTemplate, destroyTemplate };
 
 const COMPILED = Symbol.for('storySuite.template.compiled');
 const COMMAND_TYPE = /^[a-z0-9][\w-]*(?:\.[\w-]+)+$/i;
-const DRAFT_TAGS = new Set(['input', 'select', 'textarea']);
+const DRAFT_TAGS = new Set(['input', 'select', 'textarea', 'button']);
 const BINDING_ATTRS = new Set(['data-each', 'data-if', 'data-bind', 'data-bind-attr', 'data-bind-var', 'data-class', 'data-payload', 'data-props']);
 const BOOLEAN_ATTRS = new Set(['checked', 'disabled', 'selected', 'hidden', 'open', 'readonly', 'required', 'multiple', 'reversed', 'novalidate']);
 
@@ -105,7 +106,7 @@ function compileElement(node, warnings) {
     const out = {
         kind: 'element', tag, svg,
         attrs: [], dynamicAttrs: [], bindText: null, bindAttrs: [], vars: [], classes: [],
-        each: null, cond: null, command: null, payload: null, draft: null, submit: null, widget: null, children: [],
+        each: null, cond: null, command: null, payload: null, draft: null, draftClose: null, submit: null, widget: null, children: [],
     };
 
     const each = take('data-each');
@@ -164,11 +165,18 @@ function compileElement(node, warnings) {
     const draft = attrs.get('data-draft');
     if (draft !== undefined) {
         const path = parsePath(draft.trim().replace(/^draft\./, ''));
-        if (!DRAFT_TAGS.has(tag)) warnings.push(`data-draft belongs on an input, select or textarea, not <${tag}>.`);
+        if (!DRAFT_TAGS.has(tag)) warnings.push(`data-draft belongs on an input, select, textarea or button, not <${tag}>.`);
         else if (!path) warnings.push(`data-draft="${draft}" is not a path.`);
         else {
             out.draft = { path, type: tag === 'input' ? (attrs.get('type') ?? 'text') : tag };
         }
+    }
+
+    const close = take('data-draft-close');
+    if (close !== undefined) {
+        const path = parsePath(close.trim().replace(/^draft\./, ''));
+        if (path) out.draftClose = { path };
+        else warnings.push(`data-draft-close="${close}" is not a path.`);
     }
 
     const submit = attrs.get('data-submit');
@@ -196,7 +204,7 @@ function compileElement(node, warnings) {
         if (parts) out.dynamicAttrs.push({ name, parts });
         else out.attrs.push([name, value]);
     }
-    if (out.command && tag === 'button' && !attrs.has('type')) out.attrs.push(['type', 'button']);
+    if ((out.command || out.draft) && tag === 'button' && !attrs.has('type')) out.attrs.push(['type', 'button']);
     if (!out.bindText && !out.widget) out.children = compileChildren(node.children, warnings);
     return out;
 }

@@ -24,6 +24,7 @@
 
 import { h, iconNode, str } from './widgets/dom.js';
 import { focusNode, revealIn } from './scroll.js';
+import { stackOf } from './modal-stack.js';
 import { hasIcon } from './icons/index.js';
 import { STRINGS, fill } from '../strings.js';
 
@@ -44,9 +45,24 @@ export function barItems(list) {
         if (!id || seen.has(id)) continue;
         seen.add(id);
         const label = str(raw.label).replace(/\s+/g, ' ').trim().slice(0, LABEL_MAX) || id;
-        out.push({ id, label, icon: typeof raw.icon === 'string' ? raw.icon : '' });
+        // `alert`: the tab is active with something to show (a red dot, no number); `alertText` is the badge's words for its name; see pinAlerts.
+        const alert = raw.alert === true;
+        out.push({ id, label, icon: typeof raw.icon === 'string' ? raw.icon : '', alert, alertText: alert ? str(raw.alertText).replace(/\s+/g, ' ').trim().slice(0, 40) : '' });
     }
     return out;
+}
+
+/**
+ * An active tab with an alert takes the last pinned slot while it has something to show, and the item that held that slot goes to
+ * More (the rest keep their order). The first alert only. Items without one are returned as they are.
+ */
+export function pinAlerts(items, pinned = PINNED) {
+    const list = Array.isArray(items) ? items : [];
+    const at = list.findIndex(item => item.alert === true);
+    if (at < 0 || at < pinned - 1) return list;
+    const alert = list[at];
+    const rest = list.filter((_, i) => i !== at);
+    return [...rest.slice(0, pinned - 1), alert, ...rest.slice(pinned - 1)];
 }
 
 /** The reader's order split into the slots (the first `pinned`) and what More holds (the rest). */
@@ -71,6 +87,18 @@ function glyph(doc, value, className, solid = false) {
 
 function labelNode(doc, text) {
     return h(doc, 'span', 'ss-screenbar-label', text);
+}
+
+// The alert's red dot (an active tab with something to show): at the icon's top-right, decorative; the name says it.
+function alertNode(doc) {
+    const alert = h(doc, 'span', 'ss-screenbar-alert');
+    alert.setAttribute('aria-hidden', 'true');
+    return alert;
+}
+
+// The name of a slot or tile: its label, and the alert's words after it when it has one ("Fight, your move"; "Fight, alert" with none).
+function nameOf(item) {
+    return item.alert ? fill(S.alertSlot, { title: item.label, alert: item.alertText || S.alertWord }) : item.label;
 }
 
 // The dot under the current slot: decorative (the state is in aria-current).
@@ -119,14 +147,17 @@ export function createScreenBar(doc, host, options = {}) {
     let current = null;
     let row = false;
     let open = false;
+    let layer = null;         // the sheet's entry in the shared stack (modal-stack.js) while it is open
     const slots = new Map();   // id → the slot button (kept across draws, so a focused slot keeps its focus)
     const tiles = new Map();   // id → the sheet's tile
 
     // The slot's content: the icon, the label, the dot (the dot is what marks the current one, besides the colour).
     function paint(node, item, isCurrent) {
         node.replaceChildren(glyph(doc, item.icon, 'ss-screenbar-icon', isCurrent), labelNode(doc, item.label), dotNode(doc));
+        // The alert: a small red dot at the icon's top-right (Cards.dc.html); the slot's name and tooltip say it ("Fight, your move").
+        if (item.alert) node.appendChild(alertNode(doc));
         node.setAttribute('data-id', item.id);
-        node.setAttribute('title', item.label);
+        name(node, item);
         if (isCurrent) {
             node.setAttribute('aria-current', 'page');
             node.classList.add('ss-screenbar-current');
@@ -134,6 +165,13 @@ export function createScreenBar(doc, host, options = {}) {
             node.removeAttribute('aria-current');
             node.classList.remove('ss-screenbar-current');
         }
+    }
+
+    // The accessible name and the tooltip: the label alone, or with the alert's words.
+    function name(node, item) {
+        node.setAttribute('title', nameOf(item));
+        if (item.alert) node.setAttribute('aria-label', nameOf(item));
+        else node.removeAttribute('aria-label');
     }
 
     function slotFor(item) {
@@ -176,19 +214,23 @@ export function createScreenBar(doc, host, options = {}) {
     }
 
     // After a redraw: the focus goes where it was, or to its nearest equivalent: a slot that moved under More gives More; in the
-    // row More's held screen (else the current one, else the first) takes the focus; a tile that is gone gives the first tile.
+    // row (where More is hidden and takes no focus) More's held screen, else the current slot, else the first one takes it; a tile
+    // that is gone gives the first tile.
     function restoreFocus(before) {
         if (!before) return;
-        const firstSlot = [...slots.values()][0] ?? null;
+        // the first slot as drawn (the map holds them in the order they were made, which is not the bar's)
+        const firstSlot = [...nav.children].find(node => node !== more && node.getAttribute?.('data-id')) ?? null;
         const firstTile = [...tiles.values()][0] ?? null;
         let target = null;
+        // Where a slot that is gone sends the focus: More on the phone's bar; in the row, which hides More, the current slot or the first.
+        const fallback = row ? (slots.get(current) ?? firstSlot) : more;
         if (before.more) {
             const held = row ? moreHolds(items, current, pinnedCount) : null;
             target = row ? (slots.get(held?.id ?? current) ?? firstSlot) : more;
         } else if (before.slot) {
-            target = slots.get(before.slot) ?? more;
+            target = slots.get(before.slot) ?? fallback;
         } else if (before.tile) {
-            target = row ? (slots.get(before.tile) ?? more) : (open ? (tiles.get(before.tile) ?? firstTile ?? sheet) : more);
+            target = row ? (slots.get(before.tile) ?? fallback) : (open ? (tiles.get(before.tile) ?? firstTile ?? sheet) : more);
         } else if (before.sheet) {
             target = open ? sheet : more;
         }
@@ -219,21 +261,26 @@ export function createScreenBar(doc, host, options = {}) {
 
         // More: its own icon and label, unless a screen under it is current.
         const held = row ? null : moreHolds(items, current, pinnedCount);
+        // An alerting tab under More (the second one: only the first is pinned) gives More the dot.
+        const hidden = rest.find(item => item.alert);
         more.replaceChildren(
             glyph(doc, held ? held.icon : MORE_ICON, 'ss-screenbar-icon', Boolean(held)),
             labelNode(doc, held ? held.label : S.more),
             dotNode(doc),
+            ...(hidden ? [alertNode(doc)] : []),
         );
         more.classList.toggle('ss-screenbar-current', Boolean(held));
+        const moreName = held ? fill(S.moreWith, { title: held.label }) : S.more;
+        const shown = hidden ? fill(S.moreAlert, { more: moreName, title: hidden.label, alert: hidden.alertText || S.alertWord }) : moreName;
         if (held) {
             more.setAttribute('aria-current', 'page');
-            more.setAttribute('aria-label', fill(S.moreWith, { title: held.label }));
-            more.setAttribute('title', held.label);
+            more.setAttribute('title', shown);
         } else {
             more.removeAttribute('aria-current');
-            more.removeAttribute('aria-label');
-            more.setAttribute('title', S.more);
+            more.setAttribute('title', hidden ? shown : S.more);
         }
+        if (held || hidden) more.setAttribute('aria-label', shown);
+        else more.removeAttribute('aria-label');
 
         // The sheet's tiles: the rest, in order; the current one marked.
         const tileKeep = new Set(rest.map(item => item.id));
@@ -241,9 +288,9 @@ export function createScreenBar(doc, host, options = {}) {
         rest.forEach((item, at) => {
             const node = tileFor(item);
             const isCurrent = item.id === current;
-            node.replaceChildren(glyph(doc, item.icon, 'ss-screenbar-tile-icon', isCurrent), labelNode(doc, item.label));
+            node.replaceChildren(glyph(doc, item.icon, 'ss-screenbar-tile-icon', isCurrent), labelNode(doc, item.label), ...(item.alert ? [alertNode(doc)] : []));
             node.setAttribute('data-id', item.id);
-            node.setAttribute('title', item.label);
+            name(node, item);
             if (isCurrent) node.setAttribute('aria-current', 'page');
             else node.removeAttribute('aria-current');
             decorate(node, item);
@@ -257,40 +304,14 @@ export function createScreenBar(doc, host, options = {}) {
         return [...grid.children].filter(node => node.getAttribute?.('data-id') && !node.hidden);
     }
 
-    function onKey(event) {
-        if (!open) return;
-        if (event.key === 'Escape') {
-            event.preventDefault?.();
-            event.stopPropagation?.();
-            closeMore({ focus: true });
-            return;
-        }
-        if (event.key !== 'Tab') return;
-        const nodes = tileNodes();
-        if (!nodes.length) {
-            event.preventDefault?.();
-            focusNode(sheet);
-            return;
-        }
-        // Tab stays inside the sheet: it wraps from the last tile to the first and back.
-        const at = nodes.indexOf(doc.activeElement);
-        let next = null;
-        if (event.shiftKey) next = at <= 0 ? nodes.at(-1) : null;
-        else next = at === -1 || at === nodes.length - 1 ? nodes[0] : null;
-        if (next) {
-            event.preventDefault?.();
-            focusNode(next);
-            revealIn(sheet, next, 'nearest');
-        }
-    }
-
     function openMore() {
         if (open || row) return false;
         open = true;
         more.setAttribute('aria-expanded', 'true');
         scrim.hidden = false;
         sheet.hidden = false;
-        doc.addEventListener?.('keydown', onKey, true);
+        // A layer of the shared stack: Escape closes the sheet first, Tab stays in it (modal-stack.js).
+        layer = stackOf(doc).push({ name: 'more', root: sheet, onEscape: () => { closeMore({ focus: true }); return true; }, reveal: node => revealIn(sheet, node, 'nearest') });
         const target = tileNodes().find(node => node.getAttribute('aria-current') === 'page') ?? tileNodes()[0] ?? sheet;
         focusNode(target);
         if (target !== sheet) revealIn(sheet, target, 'nearest');
@@ -303,7 +324,8 @@ export function createScreenBar(doc, host, options = {}) {
         more.setAttribute('aria-expanded', 'false');
         scrim.hidden = true;
         sheet.hidden = true;
-        doc.removeEventListener?.('keydown', onKey, true);
+        stackOf(doc).pop(layer, { focus: false });
+        layer = null;
         if (focus) focusNode(more);
         return true;
     }

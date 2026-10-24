@@ -6,7 +6,7 @@
 //
 // → { mount(el, screenId, opts) → handle, register() → ids, unregister() }
 
-import { mountHead, screensFor } from './common.js';
+import { activeNow, headStateSafe, mountHead, screensFor } from './common.js';
 import { iconFor } from '../icons/index.js';
 
 export function createTabMount(deps) {
@@ -34,6 +34,9 @@ export function createTabMount(deps) {
                 title: entry.screen.title ?? entry.id,
                 icon: iconFor(entry.id, entry.screen.icon) || 'fa-table-columns',
                 ...(entry.screen.order !== undefined ? { order: entry.screen.order } : {}),
+                // Read when the bar is drawn: an active tab's alert (a red dot) follows the story.
+                get alert() { return activeNow(entry.screen, headStateSafe(deps), deps.query).alert; },
+                get alertText() { return activeNow(entry.screen, headStateSafe(deps), deps.query).badge ?? ''; },
                 render: (el, view, api) => mount(el, entry.id, {
                     ...(view?.state ? { state: view.state } : {}),
                     ...(api ? { api } : {}),

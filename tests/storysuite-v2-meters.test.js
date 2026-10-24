@@ -553,9 +553,9 @@ test('npc.set from the UI ignores a caller-chosen reply: the window starts at th
     assert.equal(h.npc('Mira').reply, 2);
 });
 
-test('the definition asks for Story Block 2.0.0-beta.1 or later', async () => {
+test('the definition asks for Story Block 2.0.0-beta.2 or later', async () => {
     const h = await host();
-    assert.deepEqual(h.def.requires, { storyBlock: '>=2.0.0-beta.1' });
+    assert.deepEqual(h.def.requires, { storyBlock: '>=2.0.0-beta.2' });
 });
 
 test('the slice is the truth while hosted: npc.dossier, npc.present and sliceView read it', async () => {

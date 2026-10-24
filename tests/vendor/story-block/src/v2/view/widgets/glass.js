@@ -236,7 +236,7 @@ export function leftText(left, unit = 'turns') {
 export function leftSpoken(left, unit = 'turns') {
     if (left === null || left === undefined || left === '' || !Number.isFinite(Number(left))) return 'no set end';
     const n = Math.max(0, Math.floor(Number(left)));
-    const word = unit === 'minutes' ? (n === 1 ? 'story minute' : 'story minutes') : unit === 'rounds' ? (n === 1 ? 'round' : 'rounds') : n === 1 ? 'turn' : 'turns';
+    const word = unit === 'minutes' ? (n === 1 ? 'minute' : 'minutes') : unit === 'rounds' ? (n === 1 ? 'round' : 'rounds') : n === 1 ? 'turn' : 'turns';
     return `${fmt(n)} ${word} left`;
 }
 
@@ -261,7 +261,8 @@ function renderStatus(el, input) {
             const counted = p.left !== null && p.left !== undefined && p.left !== '' && Number.isFinite(Number(p.left));
             left.hidden = !counted;
             left.textContent = counted ? leftText(p.left, unit) : '';
-            const spoken = `${short(p.label, LABEL_MAX) || 'Status'}: ${leftSpoken(p.left, unit)}`;
+            // the name a screen reader says: "Bleeding, 10 minutes left"
+            const spoken = `${short(p.label, LABEL_MAX) || 'Status'}, ${leftSpoken(p.left, unit)}`;
             root.setAttribute('aria-label', spoken);
             root.setAttribute('title', spoken);
         }

@@ -323,7 +323,9 @@ function renderWidget(widget, node, ctx, scope, where) {
     if (node.bind !== undefined) props.value = copy(resolve(node.bind, ctx, scope, `${where}.bind`));
     const api = { query: ctx.query, command: ctx.command, evaluate: ctx.evaluate, ...ctx.extra, item: copy(scope.item), index: scope.index };
     try {
-        widget.render(out, props, api);
+        const handle = widget.render(out, props, api);
+        // Kept, so the layout can take the widget down (its observers, its modal layer) when it is drawn again or disposed.
+        if (handle && (typeof handle === 'function' || typeof handle.destroy === 'function')) ctx.handles?.push(handle);
     } catch (error) {
         problem(ctx, where, `widget ${node.type} failed: ${error?.message ?? error}`);
         out.replaceChildren();
@@ -363,8 +365,22 @@ function invalid(doc, errors) {
  * of them); `problems` are what went wrong while drawing (a failed query, a bad image
  * from a query, a condition that could not be checked), each with its place.
  */
+// The widgets each host's layout drew (their handles: destroy(), or the function they returned). A layout drawn again into the host
+// takes the last drawing's down first; the owner of the host calls the `dispose` renderLayout returns when it takes the layout away.
+const DRAWN = new WeakMap();
+function takeDown(handles) {
+    for (const handle of handles) {
+        try {
+            if (typeof handle === 'function') handle();
+            else handle?.destroy?.();
+        } catch { /* a widget's cleanup failing must not block the next draw */ }
+    }
+}
+
 export function renderLayout(host, layout, { query, command, evaluate, widgets, preview, commit, on, onDraft } = {}) {
     const doc = host?.ownerDocument ?? globalThis.document;
+    takeDown(DRAWN.get(host) ?? []);
+    DRAWN.delete(host);
     const registry = widgetRegistry(widgets);
     const errors = validateLayout(layout, { widgets: registry, meta: false });
     if (errors.length) return showErrors(host, errors);
@@ -372,7 +388,7 @@ export function renderLayout(host, layout, { query, command, evaluate, widgets, 
         doc, query, command, evaluate, widgets: registry,
         // Passed on to widgets only (SPEC §13.5); built-in nodes use query, command, evaluate.
         extra: Object.fromEntries(Object.entries({ preview, commit, on, onDraft }).filter(([, fn]) => typeof fn === 'function')),
-        problems: [], cache: new Map(), count: 0, pages: memoryFor(host, layout.id),
+        problems: [], cache: new Map(), count: 0, pages: memoryFor(host, layout.id), handles: [],
     };
     const root = el('div', 'ss-l-root', '', doc);
     if (layout.id !== undefined) root.dataset.layout = layout.id;
@@ -381,5 +397,15 @@ export function renderLayout(host, layout, { query, command, evaluate, widgets, 
     const child = renderNode(layout.root, ctx, { item: undefined, index: undefined }, 'root');
     if (child) root.appendChild(child);
     host.replaceChildren(root);
-    return { ok: true, errors: [], problems: ctx.problems };
+    DRAWN.set(host, ctx.handles);
+    return {
+        ok: true,
+        errors: [],
+        problems: ctx.problems,
+        /** Takes the widgets this drawing made down (their listeners, observers and any layer they opened). */
+        dispose() {
+            takeDown(ctx.handles);
+            if (DRAWN.get(host) === ctx.handles) DRAWN.delete(host);
+        },
+    };
 }

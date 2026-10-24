@@ -30,13 +30,14 @@ import { FIELD_TYPES, normalizeField } from './registry.js';
 import { SETTING_LIST_ROWS } from './sdk.js';
 import { PROMPT_HINT, featureOf } from './features.js';
 import { compatReport, renderCompat } from './compat.js';
-import { createScreenBar } from './view/screen-bar.js';
+import { createScreenBar, pinAlerts } from './view/screen-bar.js';
 import { iconFor } from './view/icons/index.js';
 import { DEFAULT_TAIL_BUDGET, contextNotice, estimateTokens } from './prompt.js';
 import { STRINGS, fill } from './strings.js';
 import { cutAt } from '../text.js';
 import { profileNote, profileSelect } from './profile-field.js';
 import { focusNode, revealIn } from './view/scroll.js';
+import { dispose } from './view/mounts/common.js';
 
 const S = STRINGS;
 
@@ -142,6 +143,7 @@ export const TABS_TEXT = Object.freeze({
     shownTitle: 'Show {name} in the tabs and the game view',
     homeTitle: 'Home is always first and always shown',
     hidden: 'hidden',
+    activeNote: 'Shown only while it is active (during a battle, for example).',
     both: 'Story panel and game view',
     tab: 'Story panel',
     screen: 'game view',
@@ -230,27 +232,6 @@ export function readInt(text, field) {
     return out;
 }
 
-// A whole number as a slider: the value is stored when the reader lets go (change), shown beside it while moving.
-function sliderControl(doc, f, value, onChange) {
-    const root = el(doc, 'div', 'story-suite-slider');
-    const input = el(doc, 'input');
-    input.type = 'range';
-    input.min = String(f.min);
-    input.max = String(f.max);
-    input.step = '1';
-    const now = Number.isInteger(value) ? Math.min(f.max, Math.max(f.min, value)) : f.min;
-    input.value = String(now);
-    const out = el(doc, 'output', 'story-suite-slider-value', `${now}`);
-    const show = () => { out.textContent = input.value; input.setAttribute('aria-valuetext', `${input.value}`); };
-    input.addEventListener('input', show);
-    input.addEventListener('change', () => { show(); onChange(Number(input.value)); });
-    show();
-    root.append(input, out);
-    // The row's label points at the control by id: the input takes it (see fieldRow).
-    root.focusTarget = input;
-    return root;
-}
-
 // One control for one field; `onChange(value)` gets the new value.
 function control(doc, field, value, onChange, id, memo = null) {
     const f = normalizeField(field);
@@ -274,8 +255,6 @@ function control(doc, field, value, onChange, id, memo = null) {
     }
     // A Connection Manager profile's name, or '' for the chat's connection (profile-field.js).
     if (f.type === 'profile') return profileSelect(doc, value, onChange);
-    // `form: 'slider'` (with whole-number min and max): a range with its value beside it (Glass strength).
-    if (f.type === 'int' && f.form === 'slider' && Number.isInteger(f.min) && Number.isInteger(f.max)) return sliderControl(doc, f, value, onChange);
     if (f.type === 'int') {
         const input = el(doc, 'input', 'text_pole');
         input.type = 'number';
@@ -1069,6 +1048,7 @@ export function diagnosticsKeys(registry) {
  */
 export function createTabHost(root, { registry, view, api = null, doc = globalThis.document, active = null, barHost = null }) {
     let current = active;
+    let release = null;       // what the last drawing of the pane left behind (a dispose function or { destroy }), taken down on the next draw
     const pane = el(doc, 'div', 'story-suite-pane');
     root.replaceChildren(pane);
     // The panel's own names on each tab's button and its More tile: `story-suite-tab` and `data-tab-id` (the tests and the
@@ -1086,7 +1066,12 @@ export function createTabHost(root, { registry, view, api = null, doc = globalTh
     function draw() {
         const tabs = registry.tabs();
         if (!tabs.some(tab => tab.id === current)) current = tabs[0]?.id ?? null;
-        bar.update({ items: tabs.map(tab => ({ id: tab.id, label: tab.title, icon: iconFor(tab.id, tab.icon) })), current: current ?? '' });
+        // An active tab's alert (a red dot) takes the last pinned slot while it has something to show (screen-bar.js pinAlerts).
+        bar.update({ items: pinAlerts(tabs.map(tab => ({ id: tab.id, label: tab.title, icon: iconFor(tab.id, tab.icon), alert: tab.alert === true, alertText: tab.alertText ?? '' }))), current: current ?? '' });
+        // The pane's widgets go before the pane is drawn again (a redraw of the same tab too): their listeners and observers.
+        dispose(pane);
+        if (typeof release === 'function') { try { release(); } catch { /* a tab's cleanup failing must not block the redraw */ } }
+        release = null;
         pane.replaceChildren();
         const tab = tabs.find(item => item.id === current);
         pane.dataset.tabId = tab?.id ?? '';
@@ -1094,7 +1079,11 @@ export function createTabHost(root, { registry, view, api = null, doc = globalTh
             pane.appendChild(el(doc, 'p', 'story-suite-muted', 'No module has a tab yet.'));
             return;
         }
-        try { tab.render(pane, view(), api); } catch (error) {
+        try {
+            const out = tab.render(pane, view(), api);
+            if (typeof out === 'function') release = out;
+            else if (out && typeof out.destroy === 'function') release = () => out.destroy();
+        } catch (error) {
             pane.replaceChildren(el(doc, 'p', 'story-suite-muted', `${tab.title} could not be shown: ${error?.message ?? error}`));
         }
     }
@@ -1103,5 +1092,16 @@ export function createTabHost(root, { registry, view, api = null, doc = globalTh
         draw();
     }
     draw();
-    return { refresh: draw, select, active: () => current, bar };
+    return {
+        refresh: draw,
+        select,
+        active: () => current,
+        bar,
+        /** Takes the open tab's widgets down (its pane disposed, and what its render returned). */
+        destroy() {
+            dispose(pane);
+            if (typeof release === 'function') { try { release(); } catch { /* a tab's cleanup failing must not block teardown */ } }
+            release = null;
+        },
+    };
 }

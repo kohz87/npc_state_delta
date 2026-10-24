@@ -10,6 +10,10 @@
 // deps (see common.js); `api` must have command(type, payload, { cause }), preview(type, payload) and
 // commit(token) (plain results or promises).
 //
+// deps.chatScope() → { chat, branch } (optional, ui-host.js): the chat the reader is in and the story's head. A window
+// opened in one chat, or before the story moved on, sends nothing after either changed: a submit, a roll or an accept is
+// refused with the reason, and the chat change itself closes the window (ui-host.js).
+//
 // mount(el, screenId, opts) adds the modal to `el` (open() uses document.body). opts:
 //   draft      the starting draft (copied)
 //   submit     the command the last step sends (default: the step's `[data-submit]` attribute)
@@ -22,45 +26,51 @@
 //   drawn still opens, with the reason in its body.
 // The mount also has closeWhere(test): closes each open dialog whose screen id passes `test`.
 
-import { button, documentOf, drawScreen, headIndexOf, headState, icon, make, plainCopy } from './common.js';
+import { button, dispose, documentOf, drawScreen, headIndexOf, headState, icon, make, plainCopy } from './common.js';
+import { focusNode } from '../scroll.js';
+import { focusablesIn, stackOf } from '../modal-stack.js';
 
-const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+export { focusablesIn };
 
-/** The controls in `root` Tab can reach, in document order (hidden and disabled ones left out). */
-export function focusablesIn(root) {
-    return Array.from(root?.querySelectorAll?.(FOCUSABLE) ?? []).filter(node => !node.disabled && !node.hidden && !node.closest?.('[hidden]'));
+const MOVED_ON = 'This window was opened in another chat or before the story moved on, so nothing was sent. Close it and open it again.';
+
+const within = (node, root) => {
+    for (let at = node; at; at = at.parentNode) if (at === root) return true;
+    return false;
+};
+
+/**
+ * Runs `draw` (which may build the body's controls again) and puts the focus back where it was: on the same field, found by its
+ * draft key, with its caret and the body's scroll. A field that is still in the body is left alone.
+ */
+function keepFocus(body, draw) {
+    const doc = body.ownerDocument ?? globalThis.document;
+    const active = doc.activeElement;
+    const was = active && within(active, body) ? active : null;
+    const key = was?.getAttribute?.('data-draft') ?? null;
+    const at = was ? focusablesIn(body).indexOf(was) : -1;
+    const caret = was && typeof was.selectionStart === 'number' ? [was.selectionStart, was.selectionEnd ?? was.selectionStart] : null;
+    const top = body.scrollTop ?? 0;
+    const out = draw();
+    if (!was || within(was, body)) return out;
+    const same = key === null ? null : Array.from(body.querySelectorAll('[data-draft]')).find(node => node.getAttribute('data-draft') === key);
+    const target = same ?? focusablesIn(body)[at] ?? null;
+    if (!target) return out;
+    focusNode(target);
+    if (caret && typeof target.setSelectionRange === 'function') {
+        try { target.setSelectionRange(caret[0], caret[1]); } catch { /* a control with no caret */ }
+    }
+    body.scrollTop = top;
+    return out;
 }
 
 export function createDialogMount(deps) {
     if (typeof deps?.render !== 'function') throw new TypeError('The dialog mount needs a render(el, screen, scope) function.');
     const doc = documentOf(deps);
     const open = [];          // handles, the topmost last
-
-    const onKey = event => {
-        if (!open.length) return;
-        const top = open[open.length - 1];
-        if (event.key === 'Escape') {
-            event.preventDefault?.();
-            event.stopPropagation?.();
-            top.close();
-            return;
-        }
-        if (event.key !== 'Tab') return;
-        // Tab stays inside the topmost dialog: past its last control to its first, and back.
-        const nodes = focusablesIn(top.root);
-        if (!nodes.length) return;
-        const at = nodes.indexOf(doc.activeElement);
-        const next = event.shiftKey ? (at <= 0 ? nodes.at(-1) : null) : (at === -1 || at === nodes.length - 1 ? nodes[0] : null);
-        if (next) {
-            event.preventDefault?.();
-            next.focus?.();
-        }
-    };
-    // Focus that lands outside the topmost dialog (a click on the page behind, a script) goes back in.
-    const onFocus = event => {
-        const top = open[open.length - 1];
-        if (!top || !event.target || top.root.contains?.(event.target)) return;
-        (focusablesIn(top.root)[0] ?? top.root).focus?.();
+    // The chat and the head now (deps.chatScope); null when the wiring gives none.
+    const scopeNow = () => {
+        try { return deps.chatScope?.() ?? null; } catch { return null; }
     };
 
     function mount(el, screenId, opts = {}) {
@@ -74,6 +84,8 @@ export function createDialogMount(deps) {
         let busy = null;
         let token = null;
         let closed = false;
+        let layer = null;         // the shared stack's entry for this window
+        let drawnAt = -1;         // the step the body was last drawn for (a redraw of that step keeps its controls)
         let resolveClosed;
         const closedPromise = new Promise(resolve => { resolveClosed = resolve; });
 
@@ -113,6 +125,16 @@ export function createDialogMount(deps) {
             error.textContent = message ?? '';
             error.hidden = !message;
         };
+        // The chat and the head the window was opened on; a change to either refuses what it would send.
+        const openedOn = scopeNow();
+        const movedOn = () => {
+            const now = scopeNow();
+            return !!(openedOn && now && (now.chat !== openedOn.chat || now.branch !== openedOn.branch));
+        };
+        const refuseMoved = () => {
+            showError(MOVED_ON);
+            return { ok: false, code: 'CHAT_CHANGED', message: MOVED_ON };
+        };
         const isLast = () => at === steps.length - 1;
         const submitType = () => opts.submit ?? body.querySelector('[data-submit]')?.getAttribute('data-submit') ?? null;
 
@@ -145,7 +167,10 @@ export function createDialogMount(deps) {
                 const { steps: _steps, template: _template, layout: _layout, ...rest } = screen;
                 override = { ...rest, title: step.title ?? screen.title, ...(step.template !== undefined ? { template: step.template } : { layout: step.layout }) };
             }
-            drawScreen(body, screenId, 'dialog', { deps: stepDeps, state: headState(deps), draft, index: headIndexOf(deps), screen: override });
+            // A redraw of the same step updates its view in place; a field that is built again gets the focus, the caret and the
+            // scroll back (keepFocus), so typing in a field never drops it.
+            keepFocus(body, () => drawScreen(body, screenId, 'dialog', { deps: stepDeps, state: headState(deps), draft, index: headIndexOf(deps), screen: override, keep: drawnAt === at }));
+            drawnAt = at;
             backButton.hidden = at === 0;
             nextButton.hidden = isLast();
             // The last step's own [data-submit] button sends the draft; the footer button only stands in
@@ -166,10 +191,10 @@ export function createDialogMount(deps) {
             closed = true;
             const i = open.indexOf(handle);
             if (i >= 0) open.splice(i, 1);
-            if (!open.length) {
-                doc.removeEventListener?.('keydown', onKey, true);
-                doc.removeEventListener?.('focusin', onFocus, true);
-            }
+            stackOf(doc).pop(layer);
+            // The body's widgets go with the window (their listeners, their observers): a closed window keeps nothing alive.
+            dispose(body);
+            body.replaceChildren();
             backdrop.remove();
             opts.onClose?.(result);
             resolveClosed(result);
@@ -201,6 +226,7 @@ export function createDialogMount(deps) {
 
         function submit() {
             if (closed) return Promise.resolve({ ok: false, code: 'CLOSED', message: 'This window is closed.' });
+            if (movedOn()) return Promise.resolve(refuseMoved());
             return once(async () => {
                 const type = submitType();
                 if (!type) {
@@ -218,6 +244,7 @@ export function createDialogMount(deps) {
 
         function random() {
             if (closed || !randomSpec) return Promise.resolve({ ok: false, code: 'NO_COMMAND', message: 'There is nothing to roll here.' });
+            if (movedOn()) return Promise.resolve(refuseMoved());
             return once(async () => {
                 showError('');
                 const result = await deps.api.preview(randomSpec.type, plainCopy(randomSpec.payload ?? draft));
@@ -236,6 +263,7 @@ export function createDialogMount(deps) {
 
         function accept() {
             if (closed || !token) return Promise.resolve({ ok: false, code: 'NO_PREVIEW', message: 'Roll first, then accept.' });
+            if (movedOn()) return Promise.resolve(refuseMoved());
             return once(async () => {
                 const kept = token;
                 token = null;
@@ -282,17 +310,19 @@ export function createDialogMount(deps) {
             close,
             closed: closedPromise,
             isOpen: () => !closed,
+            /** The element that had the focus when the window opened (the one it gives the focus back to), or null. */
+            opener: () => layer?.opener ?? null,
         };
 
         (el ?? doc.body).appendChild(backdrop);
         open.push(handle);
-        if (open.length === 1) {
-            doc.addEventListener?.('keydown', onKey, true);
-            doc.addEventListener?.('focusin', onFocus, true);
-        }
+        // The dialog is a layer of the shared stack: Escape closes it (only while it is the topmost), Tab stays in it, and closing
+        // it hands the focus back to what opened it.
+        layer = { name: `dialog ${screenId}`, root, onEscape: () => { close(); return true; }, handle };
+        stackOf(doc).push(layer);
         root.setAttribute('aria-label', screen?.title ?? screenId);
         drawStep();
-        closer.focus?.();
+        focusNode(root);
         return handle;
     }
 
@@ -303,5 +333,9 @@ export function createDialogMount(deps) {
         closeAll() { [...open].reverse().forEach(handle => handle.close()); },
         /** Closes each open dialog whose screen id passes `test(screenId)` (topmost first). */
         closeWhere(test) { [...open].reverse().filter(handle => test(handle.screenId)).forEach(handle => handle.close()); },
+        /** Closes each open dialog that was opened from inside `node` (its opener is in `node`), topmost first. */
+        closeOpenedIn(node) {
+            [...open].reverse().filter(handle => { const at = handle.opener(); for (let n = at; n; n = n.parentNode) if (n === node) return true; return false; }).forEach(handle => handle.close());
+        },
     };
 }

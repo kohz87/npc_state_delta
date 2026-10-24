@@ -23,6 +23,35 @@ import { compileTemplate, renderTemplate } from './template/index.js';
 export const TEMPLATES = Object.freeze({ compileTemplate, renderTemplate, scopeCss });
 const templateEvaluate = conditionEvaluator({ compile, evaluate: evaluateAst });
 
+// The screen css each stylesheet in the head was scoped from (style element → the source css).
+const SHEET_SOURCE = new WeakMap();
+
+/**
+ * A screen's stylesheet in the head, `#ss-css-<id>`: put there scoped (`scopeFn(css, id)`), replacing the one there when the
+ * screen's css changed, and removed when the screen has none now (`css` '' or missing). A pack that is replaced or disabled
+ * takes its screens' sheets away this way before the new ones are added. Returns true when a sheet is in the head.
+ */
+export function applyScreenCss(doc, screen, scopeFn = TEMPLATES.scopeCss) {
+    const id = `ss-css-${String(screen?.id ?? '').replace(/[^\w-]/g, '_')}`;
+    const source = typeof screen?.css === 'string' && screen.css.trim() ? screen.css : '';
+    const current = doc?.querySelector?.(`#${id}`) ?? doc?.head?.querySelector?.(`#${id}`) ?? null;
+    if (current && SHEET_SOURCE.get(current) === source) return Boolean(source);
+    current?.remove?.();
+    if (!source || typeof scopeFn !== 'function' || !doc?.createElement) return false;
+    let text = '';
+    try {
+        const out = scopeFn(source, screen.id);
+        text = typeof out === 'string' ? out : String(out?.css ?? '');
+    } catch { text = ''; }
+    if (!text) return false;
+    const style = doc.createElement('style');
+    style.id = id;
+    style.textContent = text;
+    SHEET_SOURCE.set(style, source);
+    doc.head?.appendChild(style);
+    return true;
+}
+
 /** A condition evaluator for layouts: (cond, { item, index, query }) → true only when it holds. */
 export function layoutEvaluator(scope) {
     return (cond, row = {}) => {
@@ -52,20 +81,8 @@ export function createScreenRenderer({ queryAt, widgets = () => ({}), headIndex 
     }
 
     function css(el, screen) {
-        if (typeof screen.css !== 'string' || !screen.css.trim() || typeof tpl?.scopeCss !== 'function') return;
-        const doc = el.ownerDocument ?? globalThis.document;
-        const id = `ss-css-${screen.id.replace(/[^\w-]/g, '_')}`;
-        if (doc.querySelector?.(`#${id}`) ?? doc.head?.querySelector?.(`#${id}`)) return;
-        let text = '';
-        try {
-            const out = tpl.scopeCss(screen.css, screen.id);
-            text = typeof out === 'string' ? out : String(out?.css ?? '');
-        } catch { text = ''; }
-        if (!text) return;
-        const style = doc.createElement('style');
-        style.id = id;
-        style.textContent = text;
-        doc.head?.appendChild(style);
+        if (typeof tpl?.scopeCss !== 'function') return;
+        applyScreenCss(el.ownerDocument ?? globalThis.document, screen, tpl.scopeCss);
     }
 
     function render(el, screen, scope) {
@@ -80,7 +97,8 @@ export function createScreenRenderer({ queryAt, widgets = () => ({}), headIndex 
                 preview: api.preview, commit: api.commit, on: api.on, onDraft: api.onDraft,
             });
             if (result?.problems?.length) console.warn(`[Story Suite] ${screen.id}:`, result.problems.join(' '));
-            return undefined;
+            // The mount takes the layout's widgets down when it draws the element again or closes it.
+            return result?.dispose ? () => result.dispose() : undefined;
         }
         if (typeof screen.template === 'string') {
             if (!tpl?.renderTemplate || !tpl?.compileTemplate) {

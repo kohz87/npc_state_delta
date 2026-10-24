@@ -1,9 +1,18 @@
-## Unreleased: UI 4c (Story Block glass screens)
+## Unreleased
+
+## Story Suite v2: 2.0.0-beta.2 (`v2` branch; Delta 1.2.21)
+
+Story Suite v2, second beta. Delta keeps its own version line: this beta build is **Delta 1.2.21**, and the suite release is named only in this heading. It needs Story Block `>=2.0.0-beta.2` (`requires`). Update Story Block first: a Story Block 2.0.0-beta.1 or an alpha refuses Delta's hosted module (no meters, Cast tab or overlay section), and Delta keeps working on its own, with a console warning. What's new across the suite, known issues and every module's version: [Story Block docs/v2/RELEASES.md](https://github.com/kohz87/Story_block/blob/v2/docs/v2/RELEASES.md).
+
+- Prompts are byte-identical to 2.0.0-beta.1: this release changes screens and the version only.
+- Story Block testkit re-synced to Story Block `release-beta2` 87da9fe (Story Block 2.0.0-beta.2).
+
+### UI 4c (Story Block glass screens)
+
+Delta's screens move onto Story Block's glass design (`--ss-*` tokens, the blocks' classes). No prompt, command, id or
+data attribute changes; the Cast page API (`NPCStateDeltaCast`) and the Dossiers screen id stay as they were. The version is Delta 1.2.21.
 
 - **World → Here present card** (`storysuite-v2.js`, `style.css`): no meters on the card (they stay on the Dossiers screen); Mood, Condition and Look sit inside the card, one line each, clamped with an ellipsis; the chatter goes under the card, 10px below it. The launcher hides while Story Block's game view is open (`body:has(.ss-gameview)`). Prompts unchanged.
-Delta's screens move onto Story Block's glass design (`--ss-*` tokens, the blocks' classes). No prompt, command, id or
-data attribute changes; the Cast page API (`NPCStateDeltaCast`) and the Dossiers screen id stay as they were. The version
-is not bumped (no release is authorized here).
 
 - **Present cards are one compact row** (World → Here and the Story panel's Cast tab; the in-chat roster uses the same card): a
   44px portrait on the left; on the first line the name and the relationship stage (for example "Elula · Close", bounded to one
@@ -81,6 +90,12 @@ Story Suite v2. NSD stays standalone; with Story Block v2 it registers as a host
   - The module asks for Story Block `>=2.0.0-alpha.2` (`requires`); an older host ignores the field.
 
 # NPC State Delta changes
+
+## 1.2.21 - Story Suite 2.0.0-beta.2 (`v2` branch)
+
+- Delta's screens are on Story Block's glass design (present cards as one compact row, the Dossiers list as list cards, the dossier panel and the meters card on the `--ss-*` tokens); see the Story Suite v2: 2.0.0-beta.2 entry at the top for the list. No prompt text, command, id or data attribute changes.
+- While hosted it asks for Story Block `>=2.0.0-beta.2` (`src/storysuite-v2.js` `requires`).
+- Version 1.2.21 (manifest, package, runtime inventory, `NPC_STATE_VERSION`, bootstrap banner, README title).
 
 ## 1.2.20 - Story Suite 2.0.0-beta.1 (`v2` branch)
 

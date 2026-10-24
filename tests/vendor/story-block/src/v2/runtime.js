@@ -38,7 +38,7 @@ import { createRewind } from './rewind.js';
 import { createStore as realStore } from './store.js';
 import { createTurn, substituteNames } from './turn.js';
 
-export const VERSION = '2.0.0-beta.1';
+export const VERSION = '2.0.0-beta.2';
 
 /**
  * Settings where Story Block's `currency` (and `currencyShort`, `currencyPlural`, `coins`) fall back to

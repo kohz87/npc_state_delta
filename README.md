@@ -1,6 +1,6 @@
-# NPC State Delta v1.2.20 ("Delta")
+# NPC State Delta v1.2.21 ("Delta")
 
-> This is the **`v2` branch**, the build that goes with Story Suite v2 **2.0.0-beta.1**. It is for test play, not
+> This is the **`v2` branch**, the build that goes with Story Suite v2 **2.0.0-beta.2**. It is for test play, not
 > for your real campaigns yet. Delta 1.2.x for Story Block 1 is on the
 > [`main` branch](https://github.com/kohz87/npc_state_delta/tree/main).
 
@@ -25,7 +25,7 @@ with every reply, shows a **Dossiers** tab, feeds its cards to
 3. For the suite, install **Story Block first** (`https://github.com/kohz87/Story_block`, branch `v2`), then Delta;
    Story Director and RPG Battle can come before or after.
 
-Needs (`requires`): nothing to run on its own. To join the suite it needs Story Block **2.0.0-beta.1 or later**;
+Needs (`requires`): nothing to run on its own. To join the suite it needs Story Block **2.0.0-beta.2 or later**;
 with an older Story Block 2 Delta keeps working alone, without meters, the Dossiers tab or its Story Suite
 section, and logs a console warning. Before updating an existing install, export a backup from
 **Data & maintenance → Backup / Export**.
