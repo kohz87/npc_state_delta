@@ -1,8 +1,7 @@
 # NPC State Delta v1.2.21 ("Delta")
 
-> This is the **`v2` branch**, the build that goes with Story Suite v2 **2.0.0-beta.2**. It is for test play, not
-> for your real campaigns yet. Delta 1.2.x for Story Block 1 is on the
-> [`main` branch](https://github.com/kohz87/npc_state_delta/tree/main).
+> This is the build that goes with Story Suite v2, second beta (**2.0.0-beta.2**). It is for test play, not
+> for your real campaigns yet.
 
 ## What it is
 
@@ -20,10 +19,12 @@ with every reply, shows a **Dossiers** tab, feeds its cards to
 
 1. SillyTavern **1.18.0 or newer** for Delta alone (Story Suite v2 itself targets 1.19). Delta needs a model
    connection for its scans: your chat's, or a separate connection profile.
-2. **Extensions → Install extension**, paste `https://github.com/kohz87/npc_state_delta`, choose the branch
-   **`v2`**, reload.
-3. For the suite, install **Story Block first** (`https://github.com/kohz87/Story_block`, branch `v2`), then Delta;
+2. **Extensions → Install extension**, paste `https://github.com/kohz87/npc_state_delta` and install (no branch to
+   pick), reload.
+3. For the suite, install **Story Block first** (`https://github.com/kohz87/Story_block`), then Delta;
    Story Director and RPG Battle can come before or after.
+
+For the old version (Delta for Story Block 1, Story Suite v1), install the `v1` branch of the same repo instead: paste the URL and type `v1` as the branch.
 
 Needs (`requires`): nothing to run on its own. To join the suite it needs Story Block **2.0.0-beta.2 or later**;
 with an older Story Block 2 Delta keeps working alone, without meters, the Dossiers tab or its Story Suite
@@ -84,8 +85,8 @@ Delta's lines look like this:
 
 Code clamps each meter to its range and holds each change to the cap; the story cannot set a stage. Swipe, delete,
 Re-read and reload take the changes back with the reply. Delta's own prompts are unchanged from earlier 1.2 builds. Details: Story Block's
-[GUIDE](https://github.com/kohz87/Story_block/blob/v2/docs/v2/GUIDE.md) and
-[MODULES](https://github.com/kohz87/Story_block/blob/v2/docs/v2/MODULES.md) (section D), and
+[GUIDE](https://github.com/kohz87/Story_block/blob/main/docs/v2/GUIDE.md) and
+[MODULES](https://github.com/kohz87/Story_block/blob/main/docs/v2/MODULES.md) (section D), and
 [docs/dev/storysuite-adapter.md](docs/dev/storysuite-adapter.md).
 
 ## Settings
@@ -123,12 +124,12 @@ counts toward the Share of the context. Delta's scanner route and last call are 
 - Meters drift needs Story Director's clock; without it nothing drifts.
 
 The suite's full list is in Story Block's
-[RELEASES](https://github.com/kohz87/Story_block/blob/v2/docs/v2/RELEASES.md).
+[RELEASES](https://github.com/kohz87/Story_block/blob/main/docs/v2/RELEASES.md).
 
 ## Links
 
-- [Player guide](https://github.com/kohz87/Story_block/blob/v2/docs/v2/GUIDE.md), [Changelog](CHANGELOG.md),
-  [Releases and known issues](https://github.com/kohz87/Story_block/blob/v2/docs/v2/RELEASES.md)
+- [Player guide](https://github.com/kohz87/Story_block/blob/main/docs/v2/GUIDE.md), [Changelog](CHANGELOG.md),
+  [Releases and known issues](https://github.com/kohz87/Story_block/blob/main/docs/v2/RELEASES.md)
 - Developers: [docs/dev](docs/dev/), [DEVELOPMENT.md](DEVELOPMENT.md), [CLAUDE.md](CLAUDE.md), [docs/STORY_SUITE.md](docs/STORY_SUITE.md)
 - History, decisions and the after-beta list: `suite-notes/` in
   [kohz87/inventory-block](https://github.com/kohz87/inventory-block/tree/claude/hopeful-babbage-tipaw8/suite-notes)
