@@ -14,8 +14,18 @@
 // its hooks, tabs, screens and widgets; its queries answer null (query); its commands are known but
 // refused by the bus (commandFeature); a change line of its kinds is told quietly (capture().off).
 // `featureValue(id)` gives the reader's stored choice (true, false or undefined for the default).
+//
+// Lifecycle (docs/v2/LIFECYCLE.md, RB_CONTRACT §2 P22): a module may name the peers it needs
+// (`requires: { peers: { 'story-director': '^2' } }`). A module whose peer is missing, of another
+// version, turned off or not ready itself, or whose peers need each other, is dormant: it is
+// registered and its names stay reserved, but it has no domain set up, no capture, hooks, context or
+// cards, its commands are not found and its queries answer null. A module with no peers is always
+// ready. A restore barrier (`setRestore('pending')`, driven by the save-point package) holds every
+// module but Story Block's own the same way. The status is worked out when asked, so a peer that
+// registers or comes back is seen at the next view, action or generation, and nothing registers twice.
 
 import { compareVersions, formatVersion, parseRange, parseVersion, satisfies } from './packs/version.js';
+import { HOST_DOMAIN } from './timeline/gate.js';
 import { NEEDS_HINT, affectsStatic, featureOf, featureProblems, featureWarnings } from './features.js';
 
 // Commands the registry makes itself, so the command bus can run them like any other:
@@ -33,15 +43,19 @@ export const CAPTURE_PREFIX = 'capture.';
 export const INIT_PREFIX = 'module.init.';
 // The host's module id and the namespace of its standard widgets (MODULES §F9).
 export const HOST_MODULE = 'story-block';
+// The states of the restore barrier (setRestore); only 'pending' holds modules back.
+export const RESTORE_STATES = Object.freeze(['idle', 'pending', 'failed']);
 export const STANDARD_PREFIX = 'ss.';
 
 // The settings fields this host knows, and the places a module's settings may ask for (`settings.place`,
 // or a fold's `place`): 'diagnostics' draws it as a sub-fold of Settings → Diagnostics (SPEC §6).
-const SETTINGS_KEYS = ['defaults', 'schema', 'section', 'render', 'folds', 'place'];
+const SETTINGS_KEYS = ['defaults', 'schema', 'section', 'render', 'folds', 'place', 'rules'];
 export const SETTINGS_PLACES = Object.freeze(['diagnostics']);
 const placeOf = value => (SETTINGS_PLACES.includes(value) ? value : null);
-const KNOWN_KEYS = ['id', 'name', 'version', 'description', 'requires', 'domains', 'commands', 'queries', 'capture', 'context', 'hooks', 'settings', 'tabs', 'screens', 'widgets', 'features', 'cards'];
+const KNOWN_KEYS = ['id', 'name', 'version', 'description', 'requires', 'domains', 'commands', 'queries', 'replayQueries', 'capture', 'context', 'hooks', 'settings', 'tabs', 'screens', 'widgets', 'features', 'cards', 'participant', 'batchResults'];
 const CONTEXT_KEYS = ['static', 'tail', 'budget', 'feature', 'parts'];
+// What `requires` may name: the Story Block it needs, and the peers (modules) it needs registered.
+const REQUIRES_KEYS = ['storyBlock', 'peers'];
 const COMMAND_KEYS = ['handler', 'internal', 'feature'];
 export const FIELD_TYPES = Object.freeze(['bool', 'int', 'choice', 'text', 'list', 'profile']);
 
@@ -141,11 +155,19 @@ export function definitionProblems(def) {
         else if (def.requires.storyBlock !== undefined && (typeof def.requires.storyBlock !== 'string' || !parseRange(def.requires.storyBlock))) {
             problems.push('requires.storyBlock is not a version range (like ">=2.0.0" or "^2")');
         }
+        if (def.requires.peers !== undefined) {
+            if (!isObject(def.requires.peers)) problems.push('requires.peers is not an object (like { "story-director": "^2" })');
+            else for (const [peer, range] of Object.entries(def.requires.peers)) {
+                if (!MODULE_ID.test(peer)) problems.push(`requires.peers names "${peer}", which is not a module id (like "story-director")`);
+                else if (typeof range !== 'string' || !parseRange(range)) problems.push(`requires.peers["${peer}"] is not a version range (like ">=2.0.0" or "^2")`);
+            }
+        }
     }
 
     if (map(def.domains, 'domains')) {
         for (const [name, domain] of Object.entries(def.domains)) {
             if (!DOMAIN.test(name)) { problems.push(`the domain name "${name}" must start with a letter and use letters, digits, "_" or "-"`); continue; }
+            if (name === HOST_DOMAIN) { problems.push(`the domain name "${name}" is the host's own (the timeline's save points); a module cannot declare it`); continue; }
             if (!isObject(domain)) { problems.push(`domain "${name}" is not an object`); continue; }
             fn(domain.initial, `domain "${name}" initial`);
             if (domain.validate !== undefined) fn(domain.validate, `domain "${name}" validate`);
@@ -177,6 +199,17 @@ export function definitionProblems(def) {
         for (const [name, query] of Object.entries(def.queries)) {
             if (!COMMAND.test(name)) problems.push(`the query name "${name}" must be words joined by dots (like "party.actors")`);
             fn(query, `query "${name}"`);
+        }
+    }
+    // The queries a guard may ask on replay (docs/v2/REPLAY.md): the module's own, named here, and a promise that each depends on
+    // the state and its arguments alone.
+    if (def.replayQueries !== undefined) {
+        if (!Array.isArray(def.replayQueries)) problems.push('replayQueries is not a list of query names');
+        else {
+            for (const name of def.replayQueries) {
+                if (typeof name !== 'string') problems.push('replayQueries names something that is not a query name');
+                else if (typeof def.queries?.[name] !== 'function') problems.push(`replayQueries names "${name}", which is not one of this module's queries`);
+            }
         }
     }
     if (map(def.capture, 'capture')) {
@@ -299,7 +332,7 @@ export function definitionWarnings(def) {
     if (!isObject(def)) return [];
     const out = Object.keys(def).filter(key => !KNOWN_KEYS.includes(key)).map(key => `"${key}" is not a module field this Story Block knows; it is ignored`);
     if (isObject(def.requires)) {
-        for (const key of Object.keys(def.requires)) if (key !== 'storyBlock') out.push(`"requires.${key}" is not a requires field this Story Block knows; it is ignored`);
+        for (const key of Object.keys(def.requires)) if (!REQUIRES_KEYS.includes(key)) out.push(`"requires.${key}" is not a requires field this Story Block knows; it is ignored`);
     }
     // One level down the same (R2-b7-2): a newer module's command option, settings part or field type.
     if (isObject(def.commands)) {
@@ -425,6 +458,8 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
             for (const alias of spec.aliases ?? []) canonical.set(alias, kind);
         }
         defs.set(id, def);
+        peerNeeds.set(id, Object.freeze(Object.entries(isObject(def.requires?.peers) ? def.requires.peers : {}).map(([peer, range]) => Object.freeze({ peer, range }))));
+        lifeCache = null;
         declared.set(id, Object.freeze((def.features ?? []).map(feature => Object.freeze({
             id: feature.id,
             label: feature.label.trim(),
@@ -446,7 +481,9 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         const feature = declared.get(owner)?.find(item => item.id === id);
         if (!feature) return null;
         const { needs } = feature;
-        const available = availableFor(needs);
+        // A feature of a module held back (dormant, restore barrier) is not available, whatever it needs.
+        const heldOwner = held(owner);
+        const available = !heldOwner && availableFor(needs);
         return Object.freeze({
             id: feature.id,
             moduleId: owner,
@@ -457,7 +494,7 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
             prompt: feature.prompt,
             needs,
             available,
-            why: available ? '' : needs.why,
+            why: available ? '' : heldOwner ? lifecycle(owner).reason : needs.why,
         });
     }
     // `needs` in full: { kinds, commands, queries, why } (lists of names; why: the overlay's reason).
@@ -469,9 +506,11 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
     }
     // Available: every kind, command and query it needs is registered (by any module, whatever its
     // features say: a feature never waits on another's switch).
-    const availableFor = needs => needs.kinds.every(kind => canonical.has(kind.toLowerCase()))
-        && needs.commands.every(type => owners.command.has(type))
-        && needs.queries.every(name => owners.query.has(name));
+    // Held back, a module's kinds, commands and queries are not there for another's feature to need.
+    const there = (table, name) => table.has(name) && !held(table.get(name));
+    const availableFor = needs => needs.kinds.every(kind => canonical.has(kind.toLowerCase()) && !held(owners.kind.get(canonical.get(kind.toLowerCase()))))
+        && needs.commands.every(type => there(owners.command, type))
+        && needs.queries.every(name => there(owners.query, name));
     // On: the reader's choice when there is one, else the feature's default; an id no module declares, or
     // a feature whose `needs` no module meets, is off.
     function featureOn(id) {
@@ -487,6 +526,94 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         return id !== null && !featureOn(id);
     };
     const offQuery = () => null;
+
+    // ---- lifecycle (docs/v2/LIFECYCLE.md) ---------------------------------------------------------
+
+    // Each module's peers as they were when it registered (module id → [{ peer, range }]), like
+    // `declared` above: a definition changed afterwards changes nothing.
+    const peerNeeds = new Map();
+    // Modules switched off by the host (id → reason), and the restore barrier (setRestore).
+    const switchedOff = new Map();
+    let barrier = { state: 'idle', reason: '' };
+    // id → { status: 'ready'|'dormant', reason }: the peers' verdict, without the barrier. Cleared
+    // whenever a module registers or is switched on or off; worked out again when next asked.
+    let lifeCache = null;
+    const nameOf = id => (typeof defs.get(id)?.name === 'string' && defs.get(id).name ? defs.get(id).name : id);
+
+    // The ids from `id` back to `id` along registered peers (['a', 'b', 'a']), or null when `id` is on no cycle.
+    function cycleFrom(id) {
+        const seen = new Set();
+        const walk = (at, path) => {
+            for (const { peer } of peerNeeds.get(at) ?? []) {
+                if (!defs.has(peer)) continue;
+                if (peer === id) return [...path, id];
+                if (seen.has(peer)) continue;
+                seen.add(peer);
+                const found = walk(peer, [...path, peer]);
+                if (found) return found;
+            }
+            return null;
+        };
+        return walk(id, [id]);
+    }
+
+    function peerVerdicts() {
+        if (lifeCache) return lifeCache;
+        const verdicts = new Map();
+        const ids = [...defs.keys()].sort();
+        for (const id of ids) {
+            if (switchedOff.has(id)) { verdicts.set(id, { status: 'dormant', reason: switchedOff.get(id) }); continue; }
+            const cycle = cycleFrom(id);
+            if (cycle) verdicts.set(id, { status: 'dormant', reason: `Its peers need each other (${cycle.join(' → ')}), so none of them can start.` });
+            else verdicts.set(id, { status: 'ready', reason: null });
+        }
+        // A peer's own readiness can only take more modules down, so this settles in a few rounds.
+        for (let changed = true; changed;) {
+            changed = false;
+            for (const id of ids) {
+                if (verdicts.get(id).status !== 'ready') continue;
+                const unmet = [];
+                for (const { peer, range } of peerNeeds.get(id) ?? []) {
+                    const other = defs.get(peer);
+                    if (!other) { unmet.push(`Needs ${peer} ${range}, which is not installed.`); continue; }
+                    const version = typeof other.version === 'string' ? other.version : '';
+                    if (!satisfies(version, range)) { unmet.push(`Needs ${peer} ${range}; the one installed is ${version || 'of unknown version'}.`); continue; }
+                    const theirs = verdicts.get(peer);
+                    if (theirs.status !== 'ready') unmet.push(`Needs ${nameOf(peer)}, which is not ready: ${theirs.reason}`);
+                }
+                if (unmet.length) { verdicts.set(id, { status: 'dormant', reason: unmet.join(' ') }); changed = true; }
+            }
+        }
+        lifeCache = verdicts;
+        return verdicts;
+    }
+
+    const BARRIER_REASON = 'A restore is in progress; every part must agree before the story goes on.';
+
+    /** `{ status: 'ready'|'dormant'|'restore-pending', reason: string|null }` of a registered module, else null. */
+    function lifecycle(id) {
+        const base = peerVerdicts().get(id);
+        if (!base) return null;
+        if (barrier.state === 'pending') return { status: 'restore-pending', reason: barrier.reason || BARRIER_REASON };
+        return { status: base.status, reason: base.reason };
+    }
+
+    // Is module `id` held back (dormant, or the restore barrier is up and it is not Story Block's own)?
+    function held(id) {
+        const base = peerVerdicts().get(id);
+        if (!base) return false;
+        return base.status === 'dormant' || (barrier.state === 'pending' && id !== HOST_MODULE);
+    }
+
+    // The refusal for a reader's action on command `type` whose module is held back, else null.
+    function refusal(type) {
+        const owner = commandOwner(type);
+        if (!owner || !held(owner)) return null;
+        const life = lifecycle(owner);
+        return life.status === 'restore-pending'
+            ? { code: 'RESTORE_PENDING', message: `${nameOf(owner)} is waiting: ${life.reason}` }
+            : { code: 'DEPENDENCY_UNAVAILABLE', message: `${nameOf(owner)} is not running: ${life.reason}` };
+    }
 
     // A context with its parts folded in: one static() and one tail(view) of what is on.
     function contextOf(def) {
@@ -584,12 +711,16 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         const name = String(type ?? '');
         if (name.startsWith(CAPTURE_PREFIX)) {
             const entry = captureEntry(name.slice(CAPTURE_PREFIX.length));
-            return entry ? (ctx, line) => entry.apply(ctx, line) : null;
+            return entry && !held(entry.moduleId) ? (ctx, line) => entry.apply(ctx, line) : null;
         }
         if (name.startsWith(INIT_PREFIX)) {
             const def = defs.get(name.slice(INIT_PREFIX.length));
-            return def && Object.keys(def.domains ?? {}).length ? initHandler(def) : null;
+            return def && !held(def.id) && Object.keys(def.domains ?? {}).length ? initHandler(def) : null;
         }
+        // A command of a module held back is not found (the bus says UNKNOWN_COMMAND, which a caller of
+        // ctx.call may catch); the reader's actions get the reason first (`refusal`, sdk.js).
+        const owner = owners.command.get(name);
+        if (owner && held(owner)) return null;
         const entry = commandEntry(name);
         return entry ? (isObject(entry) ? entry.handler : entry) : null;
     }
@@ -614,10 +745,11 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         return owners.command.get(name) ?? null;
     }
 
-    // A domain whose initial() fails is left out (logged once); sdk.js ensureModules adds it later.
+    // A domain whose initial() fails is left out (logged once); sdk.js ensureModules adds it later. So is
+    // that of a module held back (dormant, restore barrier): it is set up when it becomes ready.
     function initialState() {
         const domains = {};
-        const names = [...owners.domain.keys()].sort();
+        const names = [...owners.domain.keys()].sort().filter(name => !held(owners.domain.get(name)));
         for (const name of names) {
             const slice = initialSlice(name);
             if (slice) domains[name] = slice;
@@ -644,7 +776,10 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         /** True for a command only the host runs (capture.*, module.init.*, commands marked internal). */
         isInternal,
         /** { moduleId, kind, grammar, apply, feature, off, display } (display: a display kind's options, else null) for a capture kind or alias, or null. */
-        capture: captureEntry,
+        capture: word => {
+            const entry = captureEntry(word);
+            return entry && held(entry.moduleId) ? null : entry;
+        },
         /** The canonical kind a written kind word stands for, or null. */
         kindOf: word => canonical.get(String(word ?? '').toLowerCase()) ?? null,
         validator(name) {
@@ -668,16 +803,55 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
             const owner = owners.query.get(name);
             if (!owner) return null;
             const fn = defs.get(owner).queries[name];
-            return off(fn) ? offQuery : fn;
+            return off(fn) || held(owner) ? offQuery : fn;
         },
         initialState,
+        /**
+         * Where module `id` stands (docs/v2/LIFECYCLE.md): `{ status: 'ready'|'dormant'|'restore-pending',
+         * reason: string|null }`, or null for a module that is not registered. Worked out when asked.
+         */
+        lifecycle,
+        /** Every module's lifecycle: [{ id, status, reason }] in id order. */
+        lifecycles: () => sorted().map(def => ({ id: def.id, ...lifecycle(def.id) })),
+        /** The ids of the modules held back now, in id order. */
+        heldModules: () => sorted().map(def => def.id).filter(held),
+        /** True when module `id` is held back: dormant, or the restore barrier is up (Story Block's own is never held by it). */
+        held,
+        /** `{ code, message }` that refuses the reader's action `type` because its module is held back, else null. */
+        refusal,
+        /** [{ module, range }] the peers module `id` named when it registered. */
+        peers: id => (peerNeeds.get(id) ?? []).map(({ peer, range }) => ({ module: peer, range })),
+        /**
+         * Host-internal: switch module `id` off (dormant, with `reason`) or on again. Story Block's own
+         * module cannot be switched off. → whether anything changed.
+         */
+        setEnabled(id, on, reason = 'Turned off.') {
+            if (!defs.has(id) || id === HOST_MODULE) return false;
+            const was = switchedOff.has(id);
+            if (on === false) switchedOff.set(id, String(reason || 'Turned off.'));
+            else switchedOff.delete(id);
+            lifeCache = null;
+            return was !== switchedOff.has(id);
+        },
+        /** The restore barrier: `{ state: 'idle'|'pending'|'failed', reason }`. */
+        restore: () => ({ ...barrier }),
+        /**
+         * Host-internal: raise or drop the restore barrier (the save-point package drives it; tests use it).
+         * While 'pending', no module but Story Block's own is ready (see held). 'failed' is only reported
+         * (sdk.preflight): it holds nothing.
+         */
+        setRestore(state, reason = '') {
+            if (!RESTORE_STATES.includes(state)) throw new Error(`Story Suite: a restore is ${RESTORE_STATES.join(', ')}, not "${state}".`);
+            barrier = { state, reason: state === 'idle' ? '' : String(reason ?? '') };
+        },
         /** The functions modules registered under hook `name`, in module-id order. */
         // Hooks, tabs, screens and widgets under a feature that is off are left out of these lists.
-        hooks: name => sorted().map(def => def.hooks?.[name]).filter(hook => typeof hook === 'function' && !off(hook)),
+        // A module held back (lifecycle above) has no hooks and no cards, and no context.
+        hooks: name => sorted().filter(def => !held(def.id)).map(def => def.hooks?.[name]).filter(hook => typeof hook === 'function' && !off(hook)),
         /** Same, with the module each comes from: [{ moduleId, fn }]. */
-        hookEntries: name => sorted().filter(def => typeof def.hooks?.[name] === 'function' && !off(def.hooks[name])).map(def => ({ moduleId: def.id, fn: def.hooks[name] })),
+        hookEntries: name => sorted().filter(def => !held(def.id) && typeof def.hooks?.[name] === 'function' && !off(def.hooks[name])).map(def => ({ moduleId: def.id, fn: def.hooks[name] })),
         /** [{ moduleId, id: "<module>/<card>", fn }] for the cards under replies (reply-cards.js), in module-id order; a card off is left out. */
-        cardEntries: () => sorted().flatMap(def => Object.entries(def.cards ?? {}).filter(([, card]) => typeof card?.for === 'function' && !off(card))
+        cardEntries: () => sorted().filter(def => !held(def.id)).flatMap(def => Object.entries(def.cards ?? {}).filter(([, card]) => typeof card?.for === 'function' && !off(card))
             .map(([id, card]) => ({ moduleId: def.id, id: `${def.id}/${id}`, fn: card.for }))),
         /** [{ moduleId, id, title, icon, render }] in module-id order, each module's in its own order. */
         tabs: () => sorted().flatMap(def => (def.tabs ?? []).filter(tab => !off(tab)).map(tab => ({ ...tab, moduleId: def.id }))),
@@ -729,7 +903,7 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         })),
         /** [{ moduleId, name, domains, kinds: [{ kind, grammar }], static, tail, budget }] in module-id order. */
         // Kinds and context (parts) under a feature that is off are left out (MODULES §F100).
-        contexts: () => sorted().map(def => {
+        contexts: () => sorted().filter(def => !held(def.id)).map(def => {
             const context = contextOf(def);
             return {
                 moduleId: def.id,

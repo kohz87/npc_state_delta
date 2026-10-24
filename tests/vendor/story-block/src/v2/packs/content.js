@@ -25,6 +25,25 @@ export function itemDef(item) {
 }
 
 /**
+ * The enabled packs' items as inventory defs by definition ID: `[def…]`, ID-sorted, each ID once (the first
+ * pack that has it wins, as for names). `ids` narrows to those full IDs (`pack.<id>/<slug>`; unknown ones
+ * are left out). A rules module freezes these into the chat (inventory.registerDefinition), after which the
+ * chat's own copy answers `inventory.definitions` whether or not the pack is still installed; this is the
+ * lookup that reads them while it is. Fresh copies.
+ */
+export function itemDefsIn(packs, ids = null) {
+    const wanted = Array.isArray(ids) ? new Set(ids.filter(id => typeof id === 'string')) : null;
+    const found = new Map();
+    for (const pack of packs) {
+        for (const item of pack.content.items) {
+            if (found.has(item.id) || (wanted && !wanted.has(item.id))) continue;
+            found.set(item.id, itemDef(item));
+        }
+    }
+    return [...found.keys()].sort().map(id => found.get(id));
+}
+
+/**
  * Records of one kind from every enabled pack, in pack order then file order.
  * `kind`: a content kind (items, creatures, shops, recipes, events, quests, races, talents,
  * skills, presets, places, routes, terms: `{ id, slug, pack, name?, levelName?, xpName?, tiers? }`, the

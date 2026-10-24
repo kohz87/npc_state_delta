@@ -628,6 +628,9 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
             hooks: () => registry.hookEntries?.('diagnostics') ?? [],
         }),
         fileName: () => reportFileName(),
+        // A story Story Block keeps as it is (read-only) can be repaired, only when the reader says so (turn.repair).
+        repairActions: () => runtime.turn?.repairActions?.() ?? [],
+        repair: id => runtime.turn?.repair?.(id, { confirmed: true }),
     });
     function openSettings(options = null) {
         const fold = typeof options?.fold === 'string' ? options.fold : null;

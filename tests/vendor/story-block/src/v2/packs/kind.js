@@ -6,6 +6,9 @@
 // * Without a declared module, what it holds decides: places, routes, markets, a calendar or weather are a World pack's (Story Director
 //   reads them); races, talents, skills, presets, crafts, terms and meter presets are a Rules pack's (RPG Battle reads them). Creatures,
 //   quests and ranks are read by both modules, so they say nothing here.
+// * A rules manifest (`content.rules`, the rules pack format) makes it a Rules pack whatever else it declares: the manifest is RPG Battle's
+//   alone, and such a pack lists Story Director too only because its quests and places are Story Director's. The capability
+//   `rb-rules-v2` alone says nothing here (it is the host's, not a module's): only a manifest makes it a Rules pack.
 // * A pack that declares several modules, or holds both World and Rules content, is not classified: "Pack".
 //
 // The tag is plain text; the panel writes it with textContent.
@@ -17,7 +20,7 @@ const AREA_KIND = Object.freeze({
 });
 const WORLD_CONTENT = Object.freeze(['places', 'routes', 'markets']);
 const SHARED = Object.freeze(['creatures', 'quests', 'ranks']);
-const RULES_CONTENT = Object.freeze(['races', 'talents', 'skills', 'presets', 'crafts', 'terms', 'meterPresets']);
+const RULES_CONTENT = Object.freeze(['races', 'talents', 'skills', 'presets', 'crafts', 'terms', 'meterPresets', 'rules']);
 const LABEL = Object.freeze({
     world: 'World pack · Story Director',
     rules: 'Rules pack · RPG Battle',
@@ -30,6 +33,7 @@ const listOf = (content, kind) => (Array.isArray(content?.[kind]) ? content[kind
 /** The tag for a pack (a validated pack object, or null for one that is not usable): "World pack · Story Director" and the rest. */
 export function packTag(pack) {
     if (!pack || typeof pack !== 'object') return LABEL.unknown;
+    if (listOf(pack.content, 'rules').length) return LABEL.rules;
     const declared = new Set((Array.isArray(pack.requires?.capabilities) ? pack.requires.capabilities : []).map(name => AREA_KIND[name]).filter(Boolean));
     const modules = [...declared].filter(kind => kind !== 'core');
     if (modules.length > 1) return LABEL.unknown;

@@ -11,6 +11,18 @@ export function useTranscriptSource({ context, scanDepth }) {
     if (typeof scanDepth === 'function') readScanDepth = scanDepth;
 }
 
+// (timeline participant) Which of the chat's messages the story still stands on. After a restore Story Block fades the replies of the dead
+// timeline; they stay in SillyTavern's chat array, and a scan must not read them. `gate` = { refresh(): Promise, faded(): boolean,
+// active(index): boolean } from the Story Suite adapter, or none (the chat as it is, byte for byte). A faded message reads as a system
+// message: skipped by every walk below, and its index is kept.
+let gate = null;
+export function useMessageGate(next) { gate = next && typeof next.active === 'function' ? next : null; }
+export async function refreshMessageGate() { try { await gate?.refresh?.(); } catch { /* the chat as it is */ } }
+function storyChat(chat) {
+    if (!gate || gate.faded?.() !== true) return chat;
+    return chat.map((message, index) => (message && gate.active(index) === false ? { ...message, is_system: true } : message));
+}
+
 export function cleanMessage(message) {
     if (!message || message.is_system) return '';
     const speaker = message.name || (message.is_user ? readContext().name1 : readContext().name2) || '';
@@ -19,7 +31,7 @@ export function cleanMessage(message) {
 }
 
 export function recentTranscript(limit = null, { messageIds = false } = {}) {
-    const chat = readContext().chat || [];
+    const chat = storyChat(readContext().chat || []);
     const count = Math.max(2, Math.min(30, Number(limit ?? readScanDepth()) || 6));
     const lines = [];
     // Walk backward and stop as soon as the requested meaningful window is full.
@@ -33,7 +45,7 @@ export function recentTranscript(limit = null, { messageIds = false } = {}) {
 }
 
 export function recentUserDevelopmentContext(limit = null, { messageIds = true } = {}) {
-    const chat = readContext().chat || [];
+    const chat = storyChat(readContext().chat || []);
     const count = Math.max(2, Math.min(30, Number(limit ?? readScanDepth()) || 6));
     const selected = [];
     let meaningful = 0;
@@ -50,7 +62,7 @@ export function recentUserDevelopmentContext(limit = null, { messageIds = true }
 
 export function currentExchangeUserDevelopmentContext(messageId = null) {
     const ctx = readContext();
-    const chat = ctx.chat || [];
+    const chat = storyChat(ctx.chat || []);
     let assistantId = Number.isInteger(messageId) ? messageId : chat.length - 1;
     while (assistantId >= 0 && (chat[assistantId]?.is_system || chat[assistantId]?.is_user)) assistantId -= 1;
     if (assistantId < 0) return '';
@@ -69,7 +81,7 @@ export function currentExchangeUserDevelopmentContext(messageId = null) {
 // message it answers, oldest first; null when there is no reply.
 export function currentExchangeMessages(messageId = null) {
     const ctx = readContext();
-    const chat = ctx.chat || [];
+    const chat = storyChat(ctx.chat || []);
     let assistantId = Number.isInteger(messageId) ? messageId : chat.length - 1;
     while (assistantId >= 0 && (chat[assistantId]?.is_system || chat[assistantId]?.is_user)) assistantId -= 1;
     if (assistantId < 0) return null;
@@ -105,7 +117,7 @@ export function currentExchangeProse(messageId = null) {
 export const STORY_DAY_LOOKBACK = 12;
 
 export function storyDayAt(messageId) {
-    const chat = readContext().chat || [];
+    const chat = storyChat(readContext().chat || []);
     const start = Number.isInteger(messageId) ? Math.min(messageId, chat.length - 1) : chat.length - 1;
     for (let i = start; i >= 0 && i > start - STORY_DAY_LOOKBACK; i -= 1) {
         const day = storyDayFromText(chat[i]?.mes || '');

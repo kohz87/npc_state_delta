@@ -5,6 +5,7 @@
 
 import { INIT_PREFIX, normalizeField } from './registry.js';
 import { headReply } from './commands.js';
+import { KEY as RECORD_KEY, isCarrier, recordFault } from './persist.js';
 import { cutAt } from '../text.js';
 import { MODEL_CALL_ERRORS, MODEL_CALL_TEXT, profileName } from './model-call.js';
 
@@ -12,7 +13,9 @@ import { MODEL_CALL_ERRORS, MODEL_CALL_TEXT, profileName } from './model-call.js
 const checkModule = await import('./check.js').catch(() => null);
 
 // `feature` ({ id, on, prompt }) fires when the reader turns a feature on or off (MODULES §F100).
-export const EVENTS = Object.freeze(['committed', 'head', 'turn', 'feature']);
+// `modules` ({ changes: [{ id, status, reason, from }] }) fires when a module becomes ready, dormant or
+// restore-pending (docs/v2/LIFECYCLE.md); `from` is the status it had been announced with, null when new.
+export const EVENTS = Object.freeze(['committed', 'head', 'turn', 'feature', 'modules']);
 // The most change lines one reply's block may hold; the rest are one Problem (turn.js).
 export const MAX_CHANGE_LINES = 150;
 export const HOST_SETTINGS_DEFAULTS = Object.freeze({ tailBudget: 1500, contextShare: 40, maxChangeLines: MAX_CHANGE_LINES, callQueue: true, panelStyle: 'glass', glassStrength: 50, font: 'nunito' });
@@ -184,17 +187,20 @@ export function createSettings({ root, registry, save = () => {} }) {
 /**
  * Runs a registered query on `state`; the answer is a plain copy. Throws for an unknown query.
  * A query is called (state, args, tools) with tools.query(name, args) over the same state,
- * tools.receipts() → [{ index, receipt }], the stored receipts in chat order (`receipts` option), and
+ * tools.receipts() → [{ index, receipt }], the stored receipts in chat order (`receipts` option),
+ * tools.pendingProofs() → [{ proof }], a Re-read's planned proof (`pendingProofs` option, story.evidence), and
  * tools.reply ({ index, sid } or null, the `reply` option): the reply the state is the head of, as a
  * command's ctx.reply (commands.js).
  */
-export function runQuery(registry, state, name, args, { receipts = () => [], reply = null } = {}) {
+export function runQuery(registry, state, name, args, { receipts = () => [], reply = null, pendingProofs = null } = {}) {
     const query = registry.query(name);
     if (!query) throw new Error(`Story Suite: no module answers the query "${name}".`);
     const tools = Object.freeze({
         reply,
-        query: (other, otherArgs) => runQuery(registry, state, other, otherArgs, { receipts, reply }),
+        query: (other, otherArgs) => runQuery(registry, state, other, otherArgs, { receipts, reply, pendingProofs }),
         receipts: () => receipts() ?? [],
+        // The proof a Re-read has planned but not stored (evidence.js), for story.evidence; none otherwise.
+        ...(typeof pendingProofs === 'function' ? { pendingProofs } : {}),
     });
     const answer = query(state, args === undefined ? undefined : structuredClone(args), tools);
     return answer === undefined ? undefined : structuredClone(answer);
@@ -214,12 +220,12 @@ export const mountQuery = (registry, receipts = () => []) => (name, args, state)
  * (optional): another state than the head and the reply it stands for (`tools.reply`), for a Re-read's
  * afterCapture hook, which reads the reply's state after its new story lines (turn.js).
  */
-export function makeView({ store, registry, settings, chat = [], state = store.head(), reply = headReply(store) }) {
+export function makeView({ store, registry, settings, chat = [], state = store.head(), reply = headReply(store), pendingProofs = null }) {
     const messages = Array.isArray(chat) ? chat : [];
     const lastUser = [...messages].reverse().find(message => message?.is_user);
     return Object.freeze({
         state,
-        query: (name, args) => runQuery(registry, state, name, args, { receipts: () => store.receipts?.() ?? [], reply }),
+        query: (name, args) => runQuery(registry, state, name, args, { receipts: () => store.receipts?.() ?? [], reply, pendingProofs }),
         settings,
         feature: id => featureOn(registry, id),
         chat: Object.freeze({ length: messages.length, lastUser: String(lastUser?.mes ?? '') }),
@@ -231,13 +237,44 @@ export const featureOn = (registry, id) => typeof registry?.featureOn === 'funct
 
 /**
  * The registered modules whose domains the head state lacks (enabled after the chat began, or a
- * newer version with a domain more): [{ def, missing: [domain names] }], in module-id order.
+ * newer version with a domain more): [{ def, missing: [domain names] }], in module-id order. A module
+ * held back (dormant, or the restore barrier is up; registry.held) is left out: it is set up when it is ready.
  */
 export function missingModules(registry, state) {
     const domains = state?.domains ?? {};
     return registry.modules()
+        .filter(def => registry.held?.(def.id) !== true)
         .map(def => ({ def, missing: Object.keys(def.domains ?? {}).filter(name => !Object.hasOwn(domains, name)) }))
         .filter(entry => entry.missing.length);
+}
+
+// The timeline a registry's sdk was made with (createSdk), so ensureModules can recover it.
+const timelines = new WeakMap();
+
+// What each registry's modules were last announced as (`modules` event): id → "status\u0000reason".
+const announced = new WeakMap();
+
+/**
+ * Tells the `modules` event what changed in the modules' lifecycle (registry.lifecycles()) since the
+ * last time: a module that turned ready, dormant or restore-pending, or one that appeared dormant
+ * (a new module that is ready is not news). Each change is announced once. Returns the changes
+ * ([{ id, status, reason, from }]); the event carries them as { changes }.
+ */
+export function announceModules(registry, events = null) {
+    if (typeof registry?.lifecycles !== 'function') return [];
+    if (!announced.has(registry)) announced.set(registry, new Map());
+    const known = announced.get(registry);
+    const changes = [];
+    for (const { id, status, reason } of registry.lifecycles()) {
+        const before = known.get(id);
+        const now = `${status}\u0000${reason ?? ''}`;
+        if (before === now) continue;
+        known.set(id, now);
+        if (before === undefined && status === 'ready') continue;
+        changes.push({ id, status, reason, from: before === undefined ? null : before.split('\u0000')[0] });
+    }
+    if (changes.length) events?.emit('modules', { changes });
+    return changes;
 }
 
 // Set-up failures already logged, per registry: a domain whose initial() keeps failing is tried
@@ -251,6 +288,14 @@ const toldFailures = new WeakMap();
  * command results.
  */
 export async function ensureModules({ store, bus, registry, events = null }) {
+    announceModules(registry, events);
+    // A save point or a restore the last run left half way is finished or aborted before anything else (docs/v2/TIMELINE.md); a
+    // chat that never used the timeline has nothing to recover and costs one look.
+    const line = timelines.get(registry);
+    line?.settle?.();
+    if (line?.needsRecovery()) await line.recover();
+    // A restore barrier changes nothing until every part agrees (registry.setRestore).
+    if (registry.restore?.().state === 'pending') return [];
     if (store.headIndex() < 0 || !store.head()) return [];
     if (!toldFailures.has(registry)) toldFailures.set(registry, new Set());
     const told = toldFailures.get(registry);
@@ -268,15 +313,148 @@ export async function ensureModules({ store, bus, registry, events = null }) {
     return results;
 }
 
+// ---- sdk.preflight (RB_CONTRACT §2, §9; docs/v2/LIFECYCLE.md) --------------------------------------
+
+/** The classes a module's stored data can be in, as sdk.preflight tells them. */
+export const PREFLIGHT_CLASSES = Object.freeze(['empty', 'current', 'legacy', 'mixed', 'future', 'damaged']);
+// The version of the store records this Story Block reads (record `v`, state `v`).
+const STORE_VERSION = 2;
+// The slice whose root carries a module's rules marker (rulesVersion, rulesHash): RPG Battle's `rules`.
+const RULES_DOMAIN = 'rules';
+// What a module not registered yet is known by: the domains it keeps and the peers it needs, for the
+// suite's own modules, so `preflight({ module: 'rpg-battle' })` can look before it registers. Any
+// other module (or a different list) passes `domains` and `peers` itself.
+export const SUITE_MODULES = Object.freeze({
+    'rpg-battle': Object.freeze({
+        domains: Object.freeze(['party', 'effects', 'creation', 'gear', 'combat', 'bestiary', 'trade', 'craft', 'rules', 'progress', 'training', 'death']),
+        peers: Object.freeze(['story-director']),
+    }),
+});
+const MODULE_ID_TEXT = /^[a-z0-9][a-z0-9._-]*$/;
+const DOMAIN_TEXT = /^[a-z][a-zA-Z0-9_-]*$/;
+
+/**
+ * What Story Block can tell about a chat before `module` registers, with nothing written (no set-up,
+ * receipt, record repair or save): `{ hostApi, hostVersion, storeVersion, classification, domains,
+ * rulesVersion, rulesHash, peers, restore }` (docs/v2/LIFECYCLE.md has each field).
+ *
+ * `options`: { module (id), rulesVersion? (a whole number ≥ 1: the rules generation the caller runs),
+ * domains? (the module's domain names), peers? (module ids it needs) }. A module marks its rules
+ * generation by `rulesVersion` (a whole number) and `rulesHash` (text) at the root of any of its domain
+ * slices; Story Block only reads them. Data it cannot read is `damaged`, never `empty`.
+ */
+export function preflight({ store, registry, chat = () => [], apiVersion = 2 }, options) {
+    if (!isObject(options) || typeof options.module !== 'string' || !MODULE_ID_TEXT.test(options.module)) {
+        throw new TypeError('Story Suite: preflight needs { module } with a module id (like "rpg-battle").');
+    }
+    const wanted = options.rulesVersion;
+    if (wanted !== undefined && wanted !== null && !(Number.isInteger(wanted) && wanted >= 1)) {
+        throw new TypeError('Story Suite: preflight rulesVersion is a whole number from 1, or left out.');
+    }
+    const id = options.module;
+    const def = registry.module?.(id) ?? null;
+    const suite = SUITE_MODULES[id] ?? null;
+    // `domains` and `peers`, when given, are lists of valid names; a bad one throws, it is never left out
+    // (a list that lost a name would read `empty`).
+    const listed = (name, pattern) => {
+        const list = options[name];
+        if (list === undefined || list === null) return null;
+        if (!Array.isArray(list) || list.some(item => typeof item !== 'string' || !pattern.test(item))) {
+            throw new TypeError(`Story Suite: preflight ${name} is a list of ${name === 'domains' ? 'domain names (like "party")' : 'module ids (like "story-director")'}.`);
+        }
+        return list;
+    };
+    const domainNames = listed('domains', DOMAIN_TEXT) ?? (def ? Object.keys(def.domains ?? {}) : suite ? [...suite.domains] : []);
+    const peerIds = listed('peers', MODULE_ID_TEXT) ?? (def ? registry.peers(id).map(peer => peer.module) : suite ? [...suite.peers] : []);
+
+    const result = {
+        hostApi: apiVersion,
+        hostVersion: registry.hostVersion?.() ?? '',
+        storeVersion: null,
+        classification: 'empty',
+        domains: [],
+        rulesVersion: null,
+        rulesHash: null,
+        peers: peerIds.map(peer => {
+            const other = registry.module?.(peer) ?? null;
+            return { module: peer, version: typeof other?.version === 'string' && other.version ? other.version : null, enabled: Boolean(other) && registry.lifecycle?.(peer)?.status !== 'dormant' };
+        }),
+        restore: registry.restore?.().state ?? 'idle',
+    };
+    const done = classification => Object.assign(result, { classification });
+
+    // The chat's records, read as they are. Anything that cannot be read is damaged.
+    let messages;
+    let state;
+    try {
+        messages = chat();
+        if (messages === undefined || messages === null) messages = [];
+        if (!Array.isArray(messages)) return done('damaged');
+        state = store.head();
+    } catch {
+        return done('damaged');
+    }
+    let version = null;
+    let damaged = false;
+    for (const message of messages) {
+        if (!isCarrier(message)) continue;
+        let record;
+        try { record = message.extra?.[RECORD_KEY]; } catch { damaged = true; continue; }
+        if (record === undefined) continue;
+        if (!isObject(record) || !Number.isInteger(record.v) || record.v < STORE_VERSION) { damaged = true; continue; }
+        version = Math.max(version ?? 0, record.v);
+        if (record.v === STORE_VERSION && recordFault(message)) damaged = true;
+    }
+    if (state !== null && state !== undefined) {
+        if (!isObject(state) || !Number.isInteger(state.v) || !isObject(state.domains)) damaged = true;
+        else version = Math.max(version ?? 0, state.v);
+    } else if (version === STORE_VERSION) damaged = true;   // records that did not replay into a state
+    result.storeVersion = version;
+    if (damaged) return done('damaged');
+    if (version !== null && version > STORE_VERSION) return done('future');
+    if (!state) return done('empty');
+
+    // The module's own slices, and its rules marker: the `rules` slice's `rulesVersion` and `rulesHash` at its
+    // root. Only that slice says which rules generation the data is; another slice that carries a marker is
+    // read only to see whether it disagrees. A module without a `rules` domain has no marker to look for,
+    // unless the caller asks for a generation.
+    const has = name => Object.hasOwn(state.domains, name) && state.domains[name] !== undefined && state.domains[name] !== null;
+    const present = domainNames.filter(has);
+    const marked = domainNames.includes(RULES_DOMAIN) || (wanted !== undefined && wanted !== null);
+    result.domains = present;
+    if (!present.length) return done('empty');
+    const markOf = name => {
+        const slice = state.domains[name];
+        if (!isObject(slice)) return undefined;
+        if (!Object.hasOwn(slice, 'rulesVersion') && !Object.hasOwn(slice, 'rulesHash')) return null;
+        const { rulesVersion, rulesHash = null } = slice;
+        if (!(Number.isInteger(rulesVersion) && rulesVersion >= 1) || !(rulesHash === null || (typeof rulesHash === 'string' && rulesHash))) return undefined;
+        return { rulesVersion, rulesHash };
+    };
+    const marks = new Map(present.map(name => [name, markOf(name)]));
+    if ([...marks.values()].includes(undefined)) return done('damaged');
+    if (!marked) return done('current');
+    const rules = marks.get(RULES_DOMAIN) ?? null;   // none when the module has no such slice here
+    if (!rules) return done('legacy');
+    result.rulesVersion = rules.rulesVersion;
+    result.rulesHash = rules.rulesHash;
+    const conflict = [...marks.entries()].some(([name, mark]) => name !== RULES_DOMAIN && mark && (mark.rulesVersion !== rules.rulesVersion || (mark.rulesHash && rules.rulesHash && mark.rulesHash !== rules.rulesHash)));
+    if (conflict) return done('mixed');
+    if (wanted === undefined || wanted === null) return done('current');
+    if (rules.rulesVersion > wanted) return done('future');
+    return done(rules.rulesVersion < wanted ? 'legacy' : 'current');
+}
+
 /**
  * The public sdk. `deps`: { store, bus, registry, settings (createSettings), events
  * (createEvents), chat?: () => Message[], check?, onRegister?(def) (after each registerModule),
  * rewind?({ index, beforeRev }) (src/v2/rewind.js), substitute?(text), dialog?(screenId, opts), dialogCurrent?(), reread?(index) (turn.js),
- * callModel?(request) (model-call.js createModelCalls().callModel) }.
+ * callModel?(request) (model-call.js createModelCalls().callModel), timeline? (timeline/coordinator.js createTimeline: sdk.timeline,
+ * savepoint.make, the participants of the modules registered) }.
  * Returns { sdk, events, markReady }:
  * `sdk.ready` resolves to the sdk once the host calls markReady().
  */
-export function createSdk({ store, bus, registry, settings, events = createEvents(), chat = () => [], check = checkModule, onRegister = null, rewind = null, substitute = text => String(text ?? ''), dialog = null, dialogCurrent = null, reread = null, callModel = null }) {
+export function createSdk({ store, bus, registry, settings, events = createEvents(), chat = () => [], check = checkModule, onRegister = null, rewind = null, substitute = text => String(text ?? ''), dialog = null, dialogCurrent = null, reread = null, callModel = null, timeline = null }) {
     let markReady;
     const ready = new Promise(resolve => { markReady = () => resolve(sdk); });
     const refused = message => ({ ok: false, code: 'REFUSED', message });
@@ -293,12 +471,37 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
         if (result?.ok && !store.saveIdle?.()) await store.saveSoon?.();
         return result;
     };
+    // A module that became ready (a peer registered, a switch, the barrier dropped) is set up before the
+    // reader's action runs. What is asked is the need itself (a ready module whose domain the chat lacks),
+    // not whether a change was announced: a view may have announced it already. A quiet host costs a scan.
+    const settle = () => {
+        announceModules(registry, events);
+        if (registry.restore?.().state === 'pending' || store.headIndex?.() < 0) return null;
+        const head = store.head?.();
+        return head && missingModules(registry, head).length ? ensureModules({ store, bus, registry, events }) : null;
+    };
+    // The reason a reader's action cannot run: its module is dormant or a restore is pending.
+    const held = type => {
+        const why = registry.refusal?.(type);
+        return why ? { ok: false, code: why.code, message: why.message } : null;
+    };
+    // The participants of the modules already registered (the runtime's `modules`, the core), and of each one registered later.
+    const attachParticipant = def => {
+        const done = timeline?.attach(def);
+        if (done && done.ok === false) console.warn(`[Story Suite] ${def?.id}'s participant was not registered: ${done.message}`);
+    };
+    if (timeline) {
+        timelines.set(registry, timeline);
+        for (const def of registry.modules()) attachParticipant(def);
+    }
+    const noTimeline = async () => ({ ok: false, code: 'UNSUPPORTED', message: 'This host has no timeline.' });
     const sdk = Object.freeze({
         apiVersion: 2,
         ready,
         /** Registers a module (§6); a module enabled mid-chat gets its initial state now. */
         async registerModule(def) {
             registry.register(def);
+            attachParticipant(def);
             if (typeof onRegister === 'function') {
                 try { onRegister(def); } catch (error) { console.warn('[Story Suite] a module was registered, but the screens could not follow', error); }
             }
@@ -314,11 +517,19 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
             const cause = isObject(options) && options.cause !== undefined ? options.cause : 'ui';
             if (cause !== 'ui') return refused(`A command sent from a screen, widget or module runs as the reader's action ("ui"); "${cause}" is kept for Story Block itself.`);
             if (registry.isInternal?.(type)) return refused(`"${type}" is a step Story Block takes itself; it cannot be sent as an action.`);
-            return saved(committed(await bus.command(type, payload, { cause: 'ui' })));
+            const waiting = settle();
+            if (waiting) await waiting;
+            // A save point waits for the participants' checkpoints, which a command handler cannot: the timeline makes it
+            // (docs/v2/TIMELINE.md) and answers with the same receipt envelope.
+            if (type === 'savepoint.make' && timeline) return saved(await timeline.makeCommand(payload));   // (the timeline tells the `committed` event itself)
+            return held(type) ?? saved(committed(await bus.command(type, payload, { cause: 'ui' })));
         },
-        preview: async (type, payload) => (registry.isInternal?.(type)
-            ? refused(`"${type}" is a step Story Block takes itself; it cannot be sent as an action.`)
-            : bus.preview(type, payload)),
+        preview: async (type, payload) => {
+            if (registry.isInternal?.(type)) return refused(`"${type}" is a step Story Block takes itself; it cannot be sent as an action.`);
+            const waiting = settle();
+            if (waiting) await waiting;
+            return held(type) ?? bus.preview(type, payload);
+        },
         commit: async token => saved(committed(await bus.commit(token))),
         query: (name, args) => runQuery(registry, store.head(), name, args, { receipts: () => store.receipts?.() ?? [], reply: headReply(store) }),
         /** The stored receipts on the current line of history, in chat order: [{ index, receipt }]. */
@@ -348,7 +559,16 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
             }
         },
         /** The view tabs and contexts get: { state, query, settings, chat }. */
-        view: () => makeView({ store, registry, settings, chat: chat() }),
+        view: () => {
+            announceModules(registry, events);
+            return makeView({ store, registry, settings, chat: chat() });
+        },
+        /**
+         * What the chat holds for `module`, read-only and usable before it registers (docs/v2/LIFECYCLE.md):
+         * `{ hostApi, hostVersion, storeVersion, classification, domains, rulesVersion, rulesHash, peers, restore }`.
+         * `options`: { module, rulesVersion?, domains?, peers? }. Nothing is set up, repaired or saved.
+         */
+        preflight: options => preflight({ store, registry, chat, apiVersion: 2 }, options),
         on: (name, fn) => events.on(name, fn),
         /** `{{user}}` / `{{char}}` in a text → the persona's and the character's names (for tabs, screens). */
         substitute: text => substitute(text),
@@ -361,6 +581,13 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
             open: (screenId, opts = {}) => (typeof dialog === 'function' ? dialog(screenId, opts) : null),
             current: () => (typeof dialogCurrent === 'function' ? dialogCurrent() ?? null : null),
         }),
+        /**
+         * The timeline coordinator (RB_CONTRACT §8; docs/v2/TIMELINE.md): `head`, `make` (a manual save), `list`, `status`,
+         * `history`, `forget` for a reader; `prepare`, `activate`, `abort`, `recover`, `nativeEvent`, `registerParticipant`
+         * refuse without the host's capability, which no module is given. Every method answers `{ ok: true, … }` or
+         * `{ ok: false, code, message }`, as a promise.
+         */
+        timeline: timeline ? timeline.api : Object.freeze(Object.fromEntries(['head', 'make', 'list', 'status', 'history', 'forget', 'registerParticipant', 'prepare', 'activate', 'abort', 'recover', 'nativeEvent', 'nativeMutation'].map(name => [name, noTimeline]))),
         id: newId,
         check: check ? Object.freeze({ ...check }) : null,
         settings: id => settings(id),
@@ -368,17 +595,27 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
         feature: id => featureOn(registry, id),
         /** Every declared feature: [{ id, moduleId, moduleName, label, describe, default, prompt, on }]. */
         features: () => (registry.features?.() ?? []).map(feature => Object.freeze({ ...feature, on: featureOn(registry, feature.id) })),
-        /** [{ id, name, version, domains, commands, kinds, tabs, features }] in id order. */
-        modules: () => registry.modules().map(def => Object.freeze({
-            id: def.id,
-            name: def.name ?? def.id,
-            version: def.version ?? '',
-            domains: Object.keys(def.domains ?? {}),
-            commands: Object.keys(def.commands ?? {}),
-            kinds: Object.keys(def.capture?.kinds ?? {}),
-            tabs: (def.tabs ?? []).map(tab => tab.id),
-            features: (def.features ?? []).map(feature => feature.id),
-        })),
+        /**
+         * [{ id, name, version, domains, commands, kinds, tabs, features, status, reason }] in id order.
+         * `domains`, `commands` and `kinds` are what the module declares; it is available only while
+         * `status` is 'ready' ('dormant': waiting for a peer; 'restore-pending': a restore holds it), and
+         * `reason` says why when it is not (null when ready).
+         */
+        modules: () => registry.modules().map(def => {
+            const life = registry.lifecycle?.(def.id);
+            return Object.freeze({
+                id: def.id,
+                name: def.name ?? def.id,
+                version: def.version ?? '',
+                domains: Object.keys(def.domains ?? {}),
+                commands: Object.keys(def.commands ?? {}),
+                kinds: Object.keys(def.capture?.kinds ?? {}),
+                tabs: (def.tabs ?? []).map(tab => tab.id),
+                features: (def.features ?? []).map(feature => feature.id),
+                status: life?.status ?? 'ready',
+                reason: life?.reason ?? null,
+            });
+        }),
     });
     return { sdk, events, markReady };
 }

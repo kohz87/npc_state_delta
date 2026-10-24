@@ -111,6 +111,8 @@ export function encodeNpcStateBundle(state, { appVersion = 'unknown', chatKey = 
             socialGraph: normalizeSocialGraph(source.socialGraph),
             dismissed: Array.isArray(source.dismissed) ? [...source.dismissed] : [],
             ...(formPortraits.length ? { formPortraits } : {}),
+            // (timeline participant) The story line's np_ map travels with the dossiers it names.
+            ...(source.timeline && typeof source.timeline === 'object' && !Array.isArray(source.timeline) ? { timeline: structuredClone(source.timeline) } : {}),
         },
     };
 
@@ -260,6 +262,7 @@ export function decodeNpcStateBundle(input) {
             socialGraph: normalizeSocialGraph(manifest.state.socialGraph),
             dismissed: Array.isArray(manifest.state.dismissed) ? [...manifest.state.dismissed] : [],
             formPortraitAssets: normalizeFormPortraitAssets(formPortraitAssets),
+            ...(manifest.state.timeline && typeof manifest.state.timeline === 'object' && !Array.isArray(manifest.state.timeline) ? { timeline: structuredClone(manifest.state.timeline) } : {}),
         },
     };
 }

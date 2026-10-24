@@ -23,11 +23,17 @@ export const LIMITS = Object.freeze({
 // (Story Director's `quest.ranks`, RPG Battle's foe strength); crafts change which stats a craft rolls
 // with (MODULES §F102); meterPresets are ready-made NPC meter sets for NPC State Delta (MODULES §F81, §F90);
 // markets are the price factors of settlement types and environment tags RPG Battle's trade reads (PACKS.md
-// "Markets").
-export const CONTENT_KINDS = Object.freeze(['items', 'creatures', 'shops', 'recipes', 'events', 'quests', 'races', 'talents', 'skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets']);
+// "Markets"); rules is the one manifest of RPG Battle's rules pack format (schema 2: classes, skills, branches,
+// item rules, trainers; PACKS.md "Rules packs"), read by the rules checker (rules-v2.js) before anything is wrapped.
+export const CONTENT_KINDS = Object.freeze(['items', 'creatures', 'shops', 'recipes', 'events', 'quests', 'races', 'talents', 'skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'rules']);
 // Kinds added after the first pack format: a normalized pack has them only when the file gives
 // them, so what older packs list (counts) stays as it was.
-export const OPTIONAL_KINDS = Object.freeze(['skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets']);
+export const OPTIONAL_KINDS = Object.freeze(['skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'rules']);
+// Capabilities Story Block itself has, beside the module ids and state areas the modules give: a pack that
+// lists one is refused where the host lacks it (validate.js, with the capability list supplied). `rb-rules-v2`:
+// this host knows the rules content kind, so a pack with a rules manifest can be installed (an older host
+// refuses the kind itself, UNKNOWN_KIND).
+export const HOST_CAPABILITIES = Object.freeze(['rb-rules-v2']);
 
 // Top-level fields of pack.json; anything else is refused so a typo is not silently ignored.
 export const PACK_FIELDS = Object.freeze(['id', 'version', 'name', 'author', 'description', 'requires', 'currency', 'economy', 'calendar', 'weather', 'content', 'start', 'layouts', 'screens', 'theme']);

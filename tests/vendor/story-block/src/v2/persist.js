@@ -14,7 +14,19 @@
 //   an edit changes the text but not the date, so neither costs a reply its record (see `markFits`), and a
 //   chat without dates is never judged by its text alone.
 // * `spans` = [{ n, story }]: how many of `ops` each append added and whether it came from a story capture,
-//   so a Re-read can replace the story ops and keep the rest.
+//   so a Re-read can replace the story ops and keep the rest. A block a module guarded (ctx.replayGuard)
+//   carries more on its span: id, module, source, guard, claims, evidence (the proof it gave, docs/v2/EVIDENCE.md),
+//   boundaries, operation, recorded, result, replan (docs/v2/REPLAY.md, contract §6); a span without an `id` is a
+//   legacy block and replays as ever.
+// * `source` = { logical, swipeKey, evidence, next }: the carrier source map (contract §4). `logical` is the
+//   canonical sid of the logical message (`sr_` + 8 base36, shared by all its swipes), `swipeKey` this
+//   swipe's own (`sw_` + 8), `evidence` the id of the swipe's text as evidence (`ev_` + 8), `next` the
+//   next block ordinal. Worked out from the stored `sid` (the shipped `sw_<12 hex>`, which is kept as it
+//   is), persisted with the record, so a deleted earlier swipe shifts the index but never the identity.
+//   A block's Source (`{ sid, swipeKey, evidence, ordinal }`) is built from it; numeric message and swipe
+//   indexes are never part of either.
+// * `coverHash` (with a checkpoint that has `covers`) = the hash of what the covered records hold when
+//   any of them carries guarded blocks: their swipe keys, block ids, op digests and text (store.js chain).
 // * `rev` = meta.rev of the state after this carrier, for the host's check after a save.
 // * `covers` (with a checkpoint) = the `sid`s of the records from the checkpoint before it up to this one,
 //   so the store can tell a checkpoint made over a reply since deleted (store.js chain).
@@ -40,7 +52,8 @@
 //   (SPEC §2.2): receipt data older than 200 carriers may be dropped, and modules must not rely on it;
 //   what a module needs later it keeps in its own state. Story Block itself never reads it then (claims
 //   live in meta.claims, Re-read uses `line` and `seed`, narration `summary` and `narrate`). Every other
-//   field stays.
+//   field stays. The one exception is `data.v2` (contract §6: the guard, source, result and evidence of a
+//   guarded block), which is kept: `data: { v2 }`.
 
 import { randomId } from '../id.js';
 
@@ -102,6 +115,17 @@ export function hash(text) {
 const MARK_CHARS = 40;
 // (trimmed at the end: hiding the change block puts a blank line before it)
 const opening = message => String(message?.mes ?? '').split('<')[0].trimEnd();
+/**
+ * The text of the shown swipe a guarded block takes as its evidence payload: the reply as written, up to its
+ * <Changes> block (or the hidden comment that holds it once it is read), without trailing space. Markup in the
+ * prose (a status panel, reasoning tags) is part of it. It changes when the reply is edited or continued, which
+ * is what makes a stored payload hash stale (store.js sourceAt, REPLAY.md). Cached per message by its text.
+ */
+export function payloadText(message) {
+    const mes = String(message?.mes ?? '');
+    const at = mes.search(/<Changes\b|<!--\s*STORY_SUITE_V2\b/i);
+    return (at < 0 ? mes : mes.slice(0, at)).trimEnd();
+}
 const dateOf = value => {
     if (value === undefined || value === null || value === '') return '';
     if (value instanceof Date) return Number.isNaN(value.getTime()) ? '' : value.toISOString();
@@ -217,11 +241,35 @@ export function keepsCopy(message, last) {
     return !!last || (Array.isArray(message?.swipes) && message.swipes.length > 1);
 }
 
+/**
+ * SillyTavern's deleteSwipe tells of the deletion (MESSAGE_SWIPE_DELETED) before it shows the swipe that takes the
+ * deleted one's place (then MESSAGE_SWIPED): until then `extra` and `mes` are the deleted swipe's and `swipe_id` is the
+ * next one's. `deleted` is the index of the swipe that went (the event's `swipeId`). True while the shown swipe is in
+ * that state, told by whose record `extra` holds, not by its text: the record is stamped with the deleted swipe's
+ * index, or the shown slot holds another swipe's own record than `extra` does, or the text is not the slot's.
+ * Nothing is written to a record meanwhile.
+ */
+export function swipeLoading(message, deleted = null) {
+    if (!isCarrier(message) || !Array.isArray(message.swipes) || !Array.isArray(message.swipe_info)) return false;
+    const swipe = message.swipe_id;
+    if (!Number.isInteger(swipe) || swipe < 0 || swipe >= message.swipes.length) return false;     // (no swipe left to show)
+    const record = message.extra?.[KEY];
+    if (Number.isInteger(deleted) && isObject(record) && record.swipe === deleted) return true;
+    const there = message.swipe_info[swipe]?.extra?.[KEY];
+    if (isObject(record) && isObject(there) && message.swipe_info[swipe].extra !== message.extra && there.sid !== record.sid
+        && !message.swipe_info.some(info => info?.extra?.[KEY]?.sid === record.sid)) return true;
+    return message.swipes[swipe] !== message.mes;
+}
+
 /** Copies the record in `message.extra` into the shown swipe's `swipe_info` (when it has one). */
 export function mirrorCopy(message) {
     const record = message?.extra?.[KEY];
     const info = Array.isArray(message?.swipe_info) ? message.swipe_info[swipeOf(message)] : null;
     if (!isObject(record) || !isObject(info)) return false;
+    // The slot already holds the record of another swipe that is stamped as this slot's own (a deleted shown swipe's record
+    // is in `extra` until the next swipe is loaded): it is never written over.
+    const there = info.extra?.[KEY];
+    if (info.extra !== message.extra && isObject(there) && there.sid !== record.sid && there.swipe === swipeOf(message)) return false;
     if (!isObject(info.extra)) info.extra = {};
     if (info.extra !== message.extra) info.extra[KEY] = structuredClone(record);
     return true;
@@ -261,19 +309,33 @@ export function dropCopy(message) {
 /** How many carriers back (the head is 0) a record's receipts keep their `data`. */
 export const RECEIPT_KEEP = 200;
 
+// A receipt without its display data: `data` goes, except `data.v2` (a guarded block's guard, source and
+// result), which stays alone. Returns the receipt itself when there is nothing to drop.
+function trimmedReceipt(receipt) {
+    if (!isObject(receipt) || !Object.hasOwn(receipt, 'data')) return receipt;
+    const { data, ...rest } = receipt;
+    if (isObject(data) && data.v2 !== undefined) {
+        if (Object.keys(data).length === 1) return receipt;
+        return { ...rest, data: { v2: data.v2 } };
+    }
+    return rest;
+}
+
 /**
  * Drops `data` from the receipts of the record shown on `message` (and from its kept copy), keeping
- * every other field. Nothing else in the record changes (no new mark or swipe stamp). True when it did.
+ * every other field, and `data.v2` of the receipts that have one. Nothing else in the record changes (no
+ * new mark or swipe stamp). True when it did.
  */
 export function trimReceipts(message) {
     const record = readRecord(message);
-    if (!record || !record.receipts.some(receipt => isObject(receipt) && Object.hasOwn(receipt, 'data'))) return false;
+    if (!record) return false;
+    let changed = false;
     const receipts = record.receipts.map(receipt => {
-        if (!isObject(receipt) || !Object.hasOwn(receipt, 'data')) return receipt;
-        const { data, ...rest } = receipt;
-        void data;
-        return rest;
+        const out = trimmedReceipt(receipt);
+        if (out !== receipt) changed = true;
+        return out;
     });
+    if (!changed) return false;
     const info = Array.isArray(message.swipe_info) ? message.swipe_info[swipeOf(message)] : null;
     const copied = isObject(info?.extra) && info.extra !== message.extra && isObject(info.extra[KEY]) && info.extra[KEY].sid === record.sid;
     message.extra[KEY] = { ...record, receipts };

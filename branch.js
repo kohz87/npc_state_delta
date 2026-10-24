@@ -1601,6 +1601,9 @@ export function bestAncestorState(chats = {}, currentKey = '', currentChat = [])
     inherited.formPortraitAssets = structuredClone(best.state.formPortraitAssets || {});
     inherited.userDismissedGroups = structuredClone(branchCore.normalizeUserDismissedGroups(best.state.userDismissedGroups));
     enforceUserDismissals(inherited, inherited.userDismissedGroups);
+    // (timeline participant) A branch is the same story line: it keeps the parent's lineage, np_ map, reserved ids and applied deaths
+    // (src/storysuite-participant/timeline.js); a dossier the fork point does not have is archived by the participant's next hydration.
+    if (best.state.timeline && typeof best.state.timeline === 'object' && !Array.isArray(best.state.timeline)) inherited.timeline = structuredClone(best.state.timeline);
     inherited.branchParent = best.key;
     inherited.branchForkMessageId = best.checkpoint.messageId;
     inherited.branchFamilyId = String(best.state.branchFamilyId || '');

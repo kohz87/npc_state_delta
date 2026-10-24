@@ -25,6 +25,10 @@
 //   (`from: 'lorebook'`), then the packs' places that name a `market` or `tags` (`from: 'pack'`).
 //   RPG Battle's trade lays them over its built-in factors. The lorebook is read when a chat opens
 //   (`refreshLore()`) and from the Packs panel, never by a query.
+// * query `packs.rules({ pack? })` → the enabled packs' rules manifests, one entry per pack that has one, in list order
+//   (rulesOf below): `[{ pack, version, id, name, manifest }]`. Rules are never mixed across packs, so the reader
+//   (RPG Battle) takes one entry; the manifest is the checked, normalized `content.rules[0]` (RB_CONTRACT §7).
+//   `packs.content({ kind: 'rules' })` gives the bare manifests, `packs.list` counts them (`counts.rules`).
 // * query `packs.item({ name })` and hook `item.resolve(name)` → the pack item def a story
 //   name means (`pack.<packId>/<slug>`, SPEC §7 shape) or null. Inventory capture calls it
 //   after its own aliases and before it creates a `story/<slug>` def.
@@ -32,7 +36,7 @@
 //   `applyStart(state, start, { id })` writes it into an initial State.
 
 import { createInstalled } from './installed.js';
-import { calendarOf, contentOf, craftsOf, economyOf, mergeStart, resolveItemIn, applyStart, weatherOf } from './content.js';
+import { calendarOf, contentOf, craftsOf, economyOf, itemDefsIn, mergeStart, resolveItemIn, applyStart, weatherOf } from './content.js';
 import { renderPacksPanel } from './panel.js';
 import { HOST_VERSION, validatePack, slugify } from './validate.js';
 import { readCharacterLorebook, stCapabilities, stHostVersion, stSettings } from './st-adapter.js';
@@ -92,7 +96,11 @@ export function createPacksPart({ settings, readLorebook = async () => ({ charac
         queries: {
             'packs.list': () => packs.list(),
             'packs.content': (_state, { kind, pack = null } = {}) => contentOf(packs.packs(), kind, { pack }),
+            'packs.rules': (_state, { pack = null } = {}) => rulesOf(packs.packs(), { pack }),
             'packs.item': (_state, { name } = {}) => resolveItem(name),
+            // The enabled packs' items as inventory defs by definition ID, ID-sorted (content.js itemDefsIn): what a
+            // rules module freezes with inventory.registerDefinition. `ids` narrows to those IDs.
+            'packs.itemDefs': (_state, args) => itemDefsIn(packs.packs(), args && typeof args === 'object' && Array.isArray(args.ids) ? args.ids : null),
             'packs.start': () => startState(),
             'packs.calendar': () => calendarOf(packs.packs()),
             'packs.weather': () => weatherOf(packs.packs()),
@@ -120,6 +128,20 @@ export function createPacksPart({ settings, readLorebook = async () => ({ charac
 }
 
 const copy = value => JSON.parse(JSON.stringify(value));
+
+/**
+ * `packs.rules`' answer from the enabled packs (in list order): `[{ pack, version, id, name, manifest }]`, one per pack
+ * with a rules manifest (`id` is `pack.<pack>/rules`). `pack` narrows to one pack id. Fresh copies.
+ */
+export function rulesOf(list, { pack = null } = {}) {
+    const out = [];
+    for (const entry of Array.isArray(list) ? list : []) {
+        const manifest = entry.content.rules?.[0];
+        if (!manifest || (pack && entry.id !== pack)) continue;
+        out.push({ pack: entry.id, version: entry.version, id: manifest.id, name: manifest.name, manifest: copy(manifest) });
+    }
+    return out;
+}
 
 /**
  * `packs.markets`' answer from the enabled packs (in list order) and the lorebook's market places

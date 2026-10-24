@@ -12,7 +12,9 @@
 //              made for a newer Story Block): those parts are ignored;
 //   refused    not registered: it needs another Story Block, or clashes with a module already here;
 //   twice      a second copy of a module that is registered was refused.
-// `outOfStep` counts newer, refused and twice. Pure except renderCompat (textContent only: names and
+// A row also says where the module stands in the lifecycle (`status`, `reason`: 'ready', 'dormant' with the
+// peer it waits for, 'restore-pending'; docs/v2/LIFECYCLE.md) when `lifecycle(id)` is given. It is shown
+// under the module's line, read-only, and is not "out of step". `outOfStep` counts newer, refused and twice. Pure except renderCompat (textContent only: names and
 // versions come from other extensions).
 
 import { definitionWarnings } from './registry.js';
@@ -21,6 +23,8 @@ import { cutAt } from '../text.js';
 
 const STATES = Object.freeze({ ok: 'In step', unstated: 'In step', newer: 'Newer than this Story Block', refused: 'Not loaded', twice: 'Installed twice' });
 const OUT = new Set(['newer', 'refused', 'twice']);
+/** What the lifecycle statuses are called for the reader (the card's and the Versions line). */
+export const LIFE_TEXT = Object.freeze({ dormant: 'Waiting', 'restore-pending': 'Waiting for a restore' });
 
 const text = value => (typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '');
 // What other extensions give is shown cut (B-rxui-12): a name, a version, a range, a refusal's words.
@@ -33,9 +37,10 @@ const clip = (value, max) => {
 /**
  * `modules`: the registered definitions (registry.modules()); `refusals`: registry.refusals();
  * `warnings(def)` → plain sentences about fields this Story Block does not know (default
- * definitionWarnings). Story Block itself comes first.
+ * definitionWarnings). `lifecycle(id)` → { status, reason } | null (registry.lifecycle) adds each row's
+ * status and reason. Story Block itself comes first.
  */
-export function compatReport({ hostVersion = '', modules = [], refusals = [], warnings = definitionWarnings } = {}) {
+export function compatReport({ hostVersion = '', modules = [], refusals = [], warnings = definitionWarnings, lifecycle = null } = {}) {
     const host = text(hostVersion);
     const rows = [];
     const registered = new Set();
@@ -45,7 +50,13 @@ export function compatReport({ hostVersion = '', modules = [], refusals = [], wa
         const name = clip(def.name, CUT.name) || clip(def.id, CUT.name);
         const version = clip(def.version, CUT.version);
         const requires = clip(def.requires?.storyBlock, CUT.range);
-        const row = { id: clip(def.id, CUT.name), name, version, requires, state: 'ok', note: '', fix: '' };
+        const row = { id: clip(def.id, CUT.name), name, version, requires, state: 'ok', note: '', fix: '', status: 'ready', reason: '' };
+        let life = null;
+        try { life = typeof lifecycle === 'function' ? lifecycle(def.id) : null; } catch { life = null; }
+        if (life && typeof life.status === 'string' && life.status !== 'ready') {
+            row.status = clip(life.status, CUT.version);
+            row.reason = clip(life.reason, CUT.note);
+        }
         if (def.id === 'story-block') {
             row.note = host ? `This Story Block is ${host}.` : '';
             rows.unshift(row);
@@ -116,6 +127,11 @@ export function renderCompat(el, report, { doc = el?.ownerDocument ?? globalThis
         if (row.id !== 'story-block') head.appendChild(make('span', 'story-suite-muted story-suite-compat-requires', needsText(row.requires)));
         head.appendChild(make('span', 'story-suite-compat-state', STATES[row.state] ?? row.state));
         item.appendChild(head);
+        // Where it stands in the lifecycle, when it is not running (read-only).
+        if (row.status && row.status !== 'ready') {
+            item.dataset.status = row.status;
+            item.appendChild(make('small', 'story-suite-muted story-suite-compat-status', `${LIFE_TEXT[row.status] ?? row.status}${row.reason ? `: ${row.reason}` : ''}`));
+        }
         // A module that fits says nothing more; one that does not says why and what to do.
         if (row.state !== 'ok' && row.state !== 'unstated') {
             if (row.note) item.appendChild(make('small', 'story-suite-muted story-suite-compat-note', row.note));

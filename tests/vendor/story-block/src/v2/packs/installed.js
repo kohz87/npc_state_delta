@@ -11,7 +11,7 @@
 // settings file cannot slip anything past the validator; a stored pack that no longer
 // passes stays listed with its problem and gives no content.
 
-import { LIMITS } from './limits.js';
+import { HOST_CAPABILITIES, LIMITS } from './limits.js';
 import { validatePack, HOST_VERSION } from './validate.js';
 import { findPackEntries } from './lorebook.js';
 import { byteLength } from './safety.js';
@@ -41,6 +41,11 @@ export function extrasOf(pack) {
 export function createInstalled({ settings, hostVersion = HOST_VERSION, capabilities = () => null, limits = LIMITS } = {}) {
     if (!settings || typeof settings.read !== 'function') throw new Error('createInstalled needs settings.read().');
     const host = () => (typeof hostVersion === 'function' ? hostVersion() : hostVersion) || HOST_VERSION;
+    // The capability names this Story Block has: the modules' (still null when unknown) and its own (limits.js HOST_CAPABILITIES).
+    const have = () => {
+        const names = capabilities();
+        return Array.isArray(names) ? [...new Set([...names, ...HOST_CAPABILITIES])] : null;
+    };
     const checked = new WeakMap();  // stored pack object → validatePack result
     const listeners = new Set();
 
@@ -64,7 +69,7 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
     return {
         /** The installed packs for the settings list, in order. */
         list() {
-            const have = capabilities();
+            const names = have();
             return entries().map(entry => {
                 const result = check(entry);
                 const pack = result.ok ? result.pack : null;
@@ -83,7 +88,7 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
                     extras: pack ? extrasOf(pack) : [],
                     // Which module the pack is for, in words (kind.js): "World pack · Story Director", or "Pack" when it says neither.
                     tag: packTag(pack),
-                    missing: pack && have ? pack.requires.capabilities.filter(name => !have.includes(name)) : [],
+                    missing: pack && names ? pack.requires.capabilities.filter(name => !names.includes(name)) : [],
                     problem: result.ok ? '' : result.errors[0].message,
                 };
             });
@@ -100,7 +105,7 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
          * → `{ ok: true, id, name, action: 'installed' | 'updated' | 'unchanged' }` | `{ ok: false, errors }`
          */
         async install(input, { source = 'file', origin = '' } = {}) {
-            const result = validatePack(input, { hostVersion: host(), capabilities: capabilities(), limits });
+            const result = validatePack(input, { hostVersion: host(), capabilities: have(), limits });
             if (!result.ok) return result;
             const { pack, raw } = result;
             const list = root().packs;
