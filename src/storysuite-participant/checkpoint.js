@@ -1,18 +1,17 @@
 // NPC State Delta, the participant's native checkpoint (contract §8: "persists full native state/history/evidence/identity map and applied
 // death IDs"). A checkpoint is one document, immutable once made, named by its own hash:
 //
-//   { schema, kind, chatKey, cursor, headHash,
-//     state,      the chat's whole native state as Delta keeps it: dossiers (with their evidence and locks), candidates, the social graph
-//                 (the relationship map), the rollback checkpoints and lineage (its history), portraits, pending work
-//     identity,   the np_ map (nativeKey <-> np_, archived entries kept)
-//     applied }   the confirmed deaths applied, by event id
+//   { schema, kind, lineage, cursor, headHash,
+//     state }     the chat's whole native state as Delta keeps it: dossiers (with their evidence and locks), candidates, the social graph
+//                 (the relationship map), the rollback checkpoints and lineage (its history), portraits, pending work, and `timeline`: the
+//                 np_ map, the reserved ids and the applied deaths (timeline.js)
 //
-// Restoring one installs `state`, `identity` and `applied` **together**, so a dossier and its np_ can never come from different times.
-// The document is plain JSON (the state is persisted as JSON anyway: a value JSON cannot hold does not survive into a checkpoint), its hash
-// is the contract's Hash of it, and its id is derived from the hash, so the same native state at the same head is the same checkpoint.
+// Restoring one installs the state, and with it the np_ map and the deaths, **together**, so a dossier and its np_ can never come from different
+// times. A checkpoint belongs to a lineage (the story's native line, stored in the state), not to a chat's key or file name: renamed, branched
+// or exported, the chat still finds its checkpoints. The document is plain JSON, its hash is the contract's Hash of it, and its id is derived from
+// the hash, so the same native state at the same head is the same checkpoint.
 
 import { hashJson } from './hash.js';
-import { cleanIdentity } from './identity.js';
 
 export const PARTICIPANT_SCHEMA = 1;
 export const KIND = 'npc-state-delta-native';
@@ -44,16 +43,14 @@ export function cleanApplied(raw) {
 }
 
 /** → { id, hash, doc } for the native state now. `cursor` and `headHash` are the host's (or null for a checkpoint made outside a head). */
-export function buildCheckpoint({ chatKey, state, identity, applied, cursor = null, headHash = null }) {
+export function buildCheckpoint({ lineage, state, cursor = null, headHash = null }) {
     const doc = {
         schema: PARTICIPANT_SCHEMA,
         kind: KIND,
-        chatKey: String(chatKey ?? ''),
+        lineage: String(lineage ?? ''),
         cursor: plain(cursor),
         headHash: typeof headHash === 'string' ? headHash : null,
         state: plain(state),
-        identity: cleanIdentity(identity),
-        applied: cleanApplied(applied),
     };
     const hash = hashJson(doc);
     return { id: checkpointIdOf(hash), hash, doc };
@@ -63,7 +60,7 @@ export function buildCheckpoint({ chatKey, state, identity, applied, cursor = nu
 export function checkpointProblem(doc, hash) {
     if (!isRecord(doc) || doc.kind !== KIND) return 'It is not a native checkpoint of NPC State Delta.';
     if (!Number.isInteger(doc.schema) || doc.schema > PARTICIPANT_SCHEMA) return 'It was made by a newer NPC State Delta than this one.';
-    if (!isRecord(doc.state) || !isRecord(doc.identity) || !isRecord(doc.applied) || typeof doc.chatKey !== 'string') return 'It is missing the native state, the identity map or the applied deaths.';
+    if (!isRecord(doc.state) || !isRecord(doc.state.timeline) || typeof doc.lineage !== 'string') return 'It is missing the native state, its lineage or the identity map and applied deaths in it.';
     let actual;
     try { actual = hashJson(doc); } catch { return 'It is not plain JSON.'; }
     return actual === hash ? '' : 'Its bytes do not hash to its hash.';

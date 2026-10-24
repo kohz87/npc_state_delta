@@ -5,4 +5,5 @@
 export { MODULE_ID, confirmedDeath, createParticipant } from './participant.js';
 export { PARTICIPANT_SCHEMA, buildCheckpoint, checkpointIdOf, checkpointProblem } from './checkpoint.js';
 export { NP_ID, hydrateIdentity, resolveIdentity } from './identity.js';
+export { LINEAGE_ID, cleanTimeline, mintLineage, restoredState, storedTimeline, timelineOf } from './timeline.js';
 export { fileVault, memoryVault } from './vault.js';

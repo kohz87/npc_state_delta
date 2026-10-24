@@ -2,7 +2,7 @@
 // the story (dossiers with their evidence, the relationship map, its own rollback history), so a save point and a restore must take its
 // checkpoint with them, and a character's confirmed death must reach it.
 //
-//   checkpoint({ cursor, headHash })            -> { checkpoint, hash, schema }    the native state, the np_ map and the applied deaths
+//   checkpoint({ cursor, headHash })            -> { checkpoint, hash, schema }    the native state (with its np_ map and applied deaths), once Delta is quiet
 //   prepare({ return, checkpoint, hash })       -> { prepared, hash }              verifies the bytes; shows nothing
 //   activate({ return, prepared })              -> { checkpoint, hash }            installs state, map and deaths together; idempotent
 //   abort({ return, prepared })                 -> { aborted: true }               before the commit only
@@ -15,12 +15,20 @@
 // `port` is what the participant needs of Delta's runtime (index.js, the lead's wiring):
 //   chatKey()            the open chat's key (a string)
 //   readState()          the chat's native state now, synchronously (a copy; window.NPCStateDelta.getState())
-//   installState(state)  replaces the chat's native state absolutely and makes it durable (asynchronous)
-// `vault` keeps the bytes (vault.js).
+//   installState(state)  replaces the chat's native state absolutely and makes it durable (asynchronous); not a native change
+//   writeTimeline(block) writes the participant's block (`state.timeline`) into the chat's state and makes it durable; not a native change
+//   busy()               whether a scan or dossier pass is in flight for the open chat (optional)
+//   idle(ms)             resolves true when none is, false after `ms` (optional)
+//   headSource()         the Source of the reply at the head, when the host's head() does not carry one (optional; see the dev note)
+//   restored()           told after a restore installed a state (optional)
+//   warn(text)           where problems are told (optional)
+// `vault` keeps the bytes (vault.js). The np_ map, the reserved ids and the applied deaths live in the chat's state (timeline.js), the restores
+// in flight and the acknowledged deaths in the vault's index of the state's lineage.
 
-import { PARTICIPANT_SCHEMA, buildCheckpoint, checkpointProblem, cleanApplied } from './checkpoint.js';
-import { cleanIdentity, hydrateIdentity, resolveIdentity } from './identity.js';
+import { PARTICIPANT_SCHEMA, buildCheckpoint, checkpointProblem } from './checkpoint.js';
+import { hydrateIdentity, resolveIdentity } from './identity.js';
 import { hashJson } from './hash.js';
+import { mintLineage, restoredState, storedTimeline, timelineOf } from './timeline.js';
 import { isTerminalNpcDeath, manualLifeStateRecord } from '../../terminal-lifecycle.js';
 
 export const MODULE_ID = 'npc-state-delta';
@@ -39,20 +47,21 @@ function preparedId(seed) {
     return `pn_${text}`;
 }
 
-/** The index as stored, checked. */
+const HASH = /^[0-9a-f]{64}$/;
+
+/** The lineage's index as stored, checked. */
 function cleanIndex(raw) {
-    const index = { v: 1, identity: cleanIdentity(raw?.identity), applied: cleanApplied(raw?.applied), reserved: [], acks: {}, prepared: {}, returns: {}, selected: null };
-    if (isRecord(raw)) {
-        index.reserved = Array.isArray(raw.reserved) ? raw.reserved.filter(id => typeof id === 'string') : [];
-        for (const [event, ack] of Object.entries(isRecord(raw.acks) ? raw.acks : {})) if (isRecord(ack) && typeof ack.checkpoint === 'string' && typeof ack.hash === 'string') index.acks[event] = { checkpoint: ack.checkpoint, hash: ack.hash };
-        for (const [id, entry] of Object.entries(isRecord(raw.prepared) ? raw.prepared : {})) {
-            if (isRecord(entry) && typeof entry.checkpoint === 'string' && typeof entry.hash === 'string') index.prepared[id] = { checkpoint: entry.checkpoint, hash: entry.hash, return: typeof entry.return === 'string' ? entry.return : null };
-        }
-        for (const [id, entry] of Object.entries(isRecord(raw.returns) ? raw.returns : {})) {
-            if (isRecord(entry) && typeof entry.prepared === 'string' && typeof entry.checkpoint === 'string' && ['prepared', 'active', 'aborted'].includes(entry.status)) index.returns[id] = { prepared: entry.prepared, checkpoint: entry.checkpoint, hash: String(entry.hash ?? ''), status: entry.status };
-        }
-        index.selected = typeof raw.selected === 'string' ? raw.selected : null;
+    const index = { v: 2, acks: {}, prepared: {}, returns: {}, selected: null, base: null };
+    if (!isRecord(raw)) return index;
+    for (const [event, ack] of Object.entries(isRecord(raw.acks) ? raw.acks : {})) if (isRecord(ack) && typeof ack.checkpoint === 'string' && typeof ack.hash === 'string') index.acks[event] = { checkpoint: ack.checkpoint, hash: ack.hash };
+    for (const [id, entry] of Object.entries(isRecord(raw.prepared) ? raw.prepared : {})) {
+        if (isRecord(entry) && typeof entry.checkpoint === 'string' && typeof entry.hash === 'string') index.prepared[id] = { checkpoint: entry.checkpoint, hash: entry.hash, return: typeof entry.return === 'string' ? entry.return : null, inPlace: entry.inPlace === true, stateHash: typeof entry.stateHash === 'string' ? entry.stateHash : null };
     }
+    for (const [id, entry] of Object.entries(isRecord(raw.returns) ? raw.returns : {})) {
+        if (isRecord(entry) && typeof entry.prepared === 'string' && typeof entry.checkpoint === 'string' && ['prepared', 'active', 'aborted'].includes(entry.status)) index.returns[id] = { prepared: entry.prepared, checkpoint: entry.checkpoint, hash: String(entry.hash ?? ''), status: entry.status };
+    }
+    index.selected = typeof raw.selected === 'string' ? raw.selected : null;
+    if (isRecord(raw.base) && typeof raw.base.checkpoint === 'string' && HASH.test(String(raw.base.hash)) && typeof raw.base.stateHash === 'string') index.base = { checkpoint: raw.base.checkpoint, hash: raw.base.hash, stateHash: raw.base.stateHash };
     return index;
 }
 
@@ -63,12 +72,21 @@ export function confirmedDeath(npc, { event, now }) {
     return dead;
 }
 
-export function createParticipant({ port, vault, module = MODULE_ID, now = () => Date.now() }) {
-    let index = null;
-    let indexKey = null;
+const RETRY_CODES = new Set(['STALE', 'RESTORE_PENDING']);
+
+export function createParticipant({ port, vault, module = MODULE_ID, now = () => Date.now(), random, schedule = (fn, ms) => setTimeout(fn, ms), cancel = id => clearTimeout(id), debounceMs = 300, retryMs = 1500, idleMs = 20000 }) {
+    let session = null;      // { key, lineage, index }
     let handle = null;
     let queue = Promise.resolve();
     let hydrating = false;
+    let timer = null;
+    let publishing = null;
+    let again = false;
+    let retries = 0;
+    let last = null;
+    const warn = text => { try { port.warn?.(text); } catch { /* telling is best effort */ } };
+    const keyNow = () => String(port.chatKey() ?? '');
+    const usable = key => Boolean(key) && key !== 'no-chat';
 
     /** Runs `fn` after every earlier callback is done; a thrown error is a FAILED answer, never a crash of the queue. */
     const exclusive = fn => {
@@ -83,30 +101,50 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         return run;
     };
 
-    async function load() {
-        const key = String(port.chatKey());
-        if (index && indexKey === key) return index;
-        index = cleanIndex(await vault.getIndex(key));
-        indexKey = key;
-        return index;
-    }
-    const save = () => vault.putIndex(indexKey, index);
+    const save = () => vault.putIndex(session.lineage, session.index);
 
-    /** Every dossier has its np_ and an entry whose dossier is gone is archived; written down when it changed. */
+    /**
+     * Brings the open chat's state up to date: it has a lineage, every dossier has its np_ and a dossier that is gone has its np_ archived;
+     * written into the state (durably) when it changed. The chat is looked at again after every await: a chat that changed meanwhile ends it.
+     * → the session { key, lineage, index } or null (no chat, or it changed).
+     */
     async function hydrate() {
-        const idx = await load();
-        const out = hydrateIdentity(idx.identity, port.readState()?.npcs, { chatKey: indexKey, reserved: idx.reserved });
-        if (out.changed || out.reserved.length !== idx.reserved.length) {
-            idx.identity = out.identity;
-            idx.reserved = out.reserved;
+        const key = keyNow();
+        if (!usable(key)) return null;
+        const state = port.readState();
+        const block = timelineOf(state);
+        let write = false;
+        if (!block.lineage) {
+            block.lineage = mintLineage(random);
+            write = true;
+        }
+        const out = hydrateIdentity(block.identity, state?.npcs, { seed: block.lineage, reserved: block.reserved });
+        if (out.changed || out.reserved.length !== block.reserved.length) write = true;
+        block.identity = out.identity;
+        block.reserved = out.reserved;
+        if (write) {
+            await port.writeTimeline(storedTimeline(block));
+            if (keyNow() !== key) return null;
+        }
+        if (!session || session.key !== key || session.lineage !== block.lineage) {
+            const index = cleanIndex(await vault.getIndex(block.lineage));
+            if (keyNow() !== key) return null;
+            session = { key, lineage: block.lineage, index };
+        }
+        if (!session.index.base) {
+            const built = buildCheckpoint({ lineage: block.lineage, state: port.readState() });
+            await vault.put(built.id, built.doc);
+            if (keyNow() !== key) return null;
+            session.index.base = { checkpoint: built.id, hash: built.hash, stateHash: hashJson(port.readState()) };
             await save();
         }
-        return idx;
+        return session;
     }
 
-    async function made({ state = port.readState(), identity, applied, cursor = null, headHash = null }) {
-        const idx = await load();
-        const built = buildCheckpoint({ chatKey: indexKey, state, identity: identity ?? idx.identity, applied: applied ?? idx.applied, cursor, headHash });
+    async function made({ state = port.readState(), cursor = null, headHash = null }) {
+        const s = session ?? await hydrate();
+        if (!s) throw new Error('There is no open chat to take a checkpoint of.');
+        const built = buildCheckpoint({ lineage: s.lineage, state, cursor, headHash });
         await vault.put(built.id, built.doc);
         return built;
     }
@@ -118,36 +156,55 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         const problem = checkpointProblem(doc, doc?.kind ? hashJson(doc) : '');
         if (problem && /newer|not a native|missing|plain/.test(problem)) return fail('SNAPSHOT_UNAVAILABLE', problem);
         if (hashJson(doc) !== hash) return fail('CONFLICT', `The native checkpoint ${id} is not the one that was saved (another hash).`);
-        if (doc.chatKey !== indexKey) return fail('CONFLICT', `The native checkpoint ${id} belongs to another chat.`);
+        if (doc.lineage !== session?.lineage) return fail('CONFLICT', `The native checkpoint ${id} belongs to another story line.`);
         return { ok: true, doc };
     }
+
+    const busy = () => (typeof port.busy === 'function' ? port.busy() === true : false);
+    const quiet = async () => (typeof port.idle === 'function' ? (await port.idle(idleMs)) !== false : true);
 
     const participant = {
         schema: PARTICIPANT_SCHEMA,
 
+        // A save point is a moment: Delta must be at rest in it. A scan or dossier pass still reading the latest reply would land after the
+        // checkpoint and be missing from it (a restore would then drop a person the story still has), so the checkpoint waits for it, and when
+        // it does not finish or the state moves while the checkpoint is made, answers a retryable STALE rather than a save that is not true.
         checkpoint: ({ cursor = null, headHash = null } = {}) => exclusive(async () => {
-            await hydrate();
-            const built = await made({ cursor, headHash });
-            return { ok: true, checkpoint: built.id, hash: built.hash, schema: PARTICIPANT_SCHEMA };
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+                if (!await quiet()) return fail('STALE', 'NPC State Delta is still reading the latest reply; save again in a moment.');
+                const s = await hydrate();
+                if (!s) return fail('FAILED', 'There is no open chat to save.');
+                const at = hashJson(port.readState());
+                const built = await made({ cursor, headHash });
+                if (busy() || hashJson(port.readState()) !== at) continue;
+                s.index.base = { checkpoint: built.id, hash: built.hash, stateHash: at };
+                await save();
+                return { ok: true, checkpoint: built.id, hash: built.hash, schema: PARTICIPANT_SCHEMA };
+            }
+            return fail('STALE', 'NPC State Delta kept changing while the save point was made; save again in a moment.');
         }),
 
         prepare: input => exclusive(async () => {
-            const idx = await load();
+            const s = await hydrate();
+            if (!s) return fail('FAILED', 'There is no open chat.');
+            const idx = s.index;
             if (!isRecord(input) || typeof input.checkpoint !== 'string' || typeof input.return !== 'string' || typeof input.hash !== 'string') return fail('INVALID', 'prepare takes { return, checkpoint, hash }.');
             const held = idx.returns[input.return];
             if (held && held.status !== 'aborted' && (held.checkpoint !== input.checkpoint || held.hash !== input.hash)) return fail('CONFLICT', 'That return was prepared for another checkpoint.');
             if (held && held.status !== 'aborted') return { ok: true, prepared: held.prepared, hash: held.hash };
             const got = await verified(input.checkpoint, input.hash);
             if (!got.ok) return got;
-            const prepared = preparedId({ return: input.return, checkpoint: input.checkpoint, hash: input.hash, chat: indexKey, again: held ? 1 : 0 });
-            idx.prepared[prepared] = { checkpoint: input.checkpoint, hash: input.hash, return: input.return };
+            const prepared = preparedId({ return: input.return, checkpoint: input.checkpoint, hash: input.hash, lineage: s.lineage, again: held ? 1 : 0 });
+            idx.prepared[prepared] = { checkpoint: input.checkpoint, hash: input.hash, return: input.return, inPlace: false, stateHash: null };
             idx.returns[input.return] = { prepared, checkpoint: input.checkpoint, hash: input.hash, status: 'prepared' };
             await save();
             return { ok: true, prepared, hash: input.hash };
         }),
 
         activate: input => exclusive(async () => {
-            const idx = await load();
+            const s = await hydrate();
+            if (!s) return fail('FAILED', 'There is no open chat.');
+            const idx = s.index;
             if (!isRecord(input) || typeof input.prepared !== 'string' || typeof input.return !== 'string') return fail('INVALID', 'activate takes { return, prepared }.');
             const entry = idx.prepared[input.prepared];
             if (!entry) return fail('NOT_FOUND', 'Nothing was prepared under that id.');
@@ -158,11 +215,16 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
             if (ret.status === 'aborted') return fail('REFUSED', 'That preparation was aborted.');
             const got = await verified(entry.checkpoint, entry.hash);
             if (!got.ok) return got;
-            await port.installState(plain(got.doc.state));
-            idx.identity = cleanIdentity(got.doc.identity);
-            idx.applied = cleanApplied(got.doc.applied);
-            // Ids the dead timeline issued stay reserved: inactive, resolving through no query, never issued again.
-            idx.reserved = [...new Set([...idx.reserved, ...Object.keys(idx.identity.map)])].sort();
+            if (entry.inPlace) {
+                // A change Delta already made and published after the fact: the state is live, nothing is installed over a newer one.
+                idx.base = { checkpoint: entry.checkpoint, hash: entry.hash, stateHash: entry.stateHash ?? idx.base?.stateHash ?? '' };
+            } else {
+                // The saved state, its np_ map and its deaths together; the ids either timeline issued stay reserved (inactive, never issued again).
+                const installed = restoredState(got.doc.state, port.readState());
+                await port.installState(installed);
+                try { port.restored?.(); } catch { /* the restore is done; telling is best effort */ }
+                idx.base = { checkpoint: entry.checkpoint, hash: entry.hash, stateHash: hashJson(port.readState()) };
+            }
             idx.selected = entry.checkpoint;
             entry.return = input.return;
             idx.returns[input.return] = { ...ret, status: 'active' };
@@ -171,7 +233,9 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         }),
 
         abort: input => exclusive(async () => {
-            const idx = await load();
+            const s = await hydrate();
+            if (!s) return { ok: true, aborted: true };
+            const idx = s.index;
             const entry = isRecord(input) ? idx.prepared[input.prepared] : null;
             if (!entry) return { ok: true, aborted: true };
             const ret = idx.returns[input.return];
@@ -183,16 +247,18 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         }),
 
         status: input => exclusive(async () => {
-            const idx = await load();
-            const ret = isRecord(input) ? idx.returns[input.return] : null;
+            const s = await hydrate();
+            const ret = s && isRecord(input) ? s.index.returns[input.return] : null;
             return ret ? { ok: true, checkpoint: ret.checkpoint, hash: ret.hash, status: ret.status } : fail('NOT_FOUND', 'No such return.');
         }),
 
         applyEvent: input => exclusive(async () => {
             if (!isRecord(input) || typeof input.event !== 'string' || !input.event || typeof input.nativeKey !== 'string' || !input.nativeKey) return fail('INVALID', 'applyEvent takes { event, nativeKey, kind }.');
             if (input.kind !== 'confirmed-death') return fail('INVALID', 'The only native event is a confirmed-death.');
-            const idx = await hydrate();
-            const prior = idx.applied[input.event];
+            const s = await hydrate();
+            if (!s) return fail('FAILED', 'There is no open chat.');
+            const idx = s.index;
+            const prior = timelineOf(port.readState()).applied[input.event];
             if (prior) {
                 if (prior.nativeKey !== input.nativeKey) return fail('CONFLICT', 'That event was delivered already for another person.');
                 const ack = idx.acks[input.event];
@@ -201,7 +267,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
                 const live = port.readState()?.npcs?.find(npc => npc?.id === input.nativeKey);
                 if (!live || !isTerminalNpcDeath(live)) {
                     const got = await verified(ack.checkpoint, ack.hash);
-                    if (got.ok) await port.installState(plain(got.doc.state));
+                    if (got.ok) await port.installState(restoredState(got.doc.state, port.readState()));
                 }
                 return { ok: true, event: input.event, checkpoint: ack.checkpoint, hash: ack.hash, ack: true };
             }
@@ -209,19 +275,34 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
             const at = Array.isArray(state.npcs) ? state.npcs.findIndex(npc => npc?.id === input.nativeKey) : -1;
             if (at < 0) return fail('NOT_FOUND', 'No dossier answers to that native key, so the death is held rather than guessed.');
             if (!isTerminalNpcDeath(state.npcs[at])) state.npcs[at] = confirmedDeath(state.npcs[at], { event: input.event, now: now() });
-            const applied = { ...idx.applied, [input.event]: { nativeKey: input.nativeKey, at: now() } };
-            const built = await made({ state, applied });
-            idx.applied = applied;
+            const block = timelineOf(state);
+            block.applied[input.event] = { nativeKey: input.nativeKey, at: now() };
+            state.timeline = storedTimeline(block);
+            const built = await made({ state });
             idx.acks[input.event] = { checkpoint: built.id, hash: built.hash };
             idx.selected = built.id;
             await save();
             await port.installState(state);
+            idx.base = { checkpoint: built.id, hash: built.hash, stateHash: hashJson(port.readState()) };
+            await save();
             return { ok: true, event: input.event, checkpoint: built.id, hash: built.hash, ack: true };
         }),
 
         /** The host gives the module its own handle { head(), nativeMutation(input) } when it registers the participant. */
         attach: given => { handle = given; },
     };
+
+    /** Both checkpoints of a change, made durable: `before` is the one the story stands on, `after` the state in `state`. */
+    async function pairFor(state, head) {
+        const s = await hydrate();
+        if (!s) throw new Error('There is no open chat.');
+        const base = s.index.base;
+        const kept = base ? await vault.get(base.checkpoint) : null;
+        const before = kept && hashJson(kept) === base.hash ? base : null;
+        const after = await made({ state, cursor: head.cursor, headHash: head.headHash });
+        return { before: before ?? { checkpoint: after.id, hash: after.hash }, after };
+    }
+    const shaped = built => ({ module, checkpoint: built.checkpoint ?? built.id, hash: built.hash, schema: PARTICIPANT_SCHEMA });
 
     /**
      * A native change published through the timeline (contract §8: "scan, manual dossier edit, meter/native synchronization and confirmed
@@ -238,45 +319,125 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
             source,
             expectedHead: head.headHash,
             prepare: () => exclusive(async () => {
-                const idx = await hydrate();
-                const before = await made({ cursor: head.cursor, headHash: head.headHash });
+                const s = await hydrate();
+                if (!s) throw new Error('There is no open chat.');
                 const state = plain(port.readState());
                 edit(state);
-                const next = hydrateIdentity(idx.identity, state.npcs, { chatKey: indexKey, reserved: idx.reserved });
-                const after = await made({ state, identity: next.identity, cursor: head.cursor, headHash: head.headHash });
-                const prepared = preparedId({ native: true, before: before.id, after: after.id, chat: indexKey, n: Object.keys(idx.prepared).length });
-                idx.prepared[prepared] = { checkpoint: after.id, hash: after.hash, return: null };
-                idx.reserved = next.reserved;
+                const block = timelineOf(state);
+                block.lineage = s.lineage;
+                const next = hydrateIdentity(block.identity, state.npcs, { seed: s.lineage, reserved: block.reserved });
+                block.identity = next.identity;
+                block.reserved = next.reserved;
+                state.timeline = storedTimeline(block);
+                const { before, after } = await pairFor(state, head);
+                const prepared = preparedId({ native: true, before: before.checkpoint, after: after.id, lineage: s.lineage, n: Object.keys(s.index.prepared).length });
+                s.index.prepared[prepared] = { checkpoint: after.id, hash: after.hash, return: null, inPlace: false, stateHash: null };
                 await save();
-                return { before: { module, checkpoint: before.id, hash: before.hash, schema: PARTICIPANT_SCHEMA }, after: { module, checkpoint: after.id, hash: after.hash, schema: PARTICIPANT_SCHEMA }, prepared };
+                return { before: shaped(before), after: shaped(after), prepared };
             }),
         });
+    }
+
+    /**
+     * Publishes the change Delta already made (a scan, an edit, a meter step: every durable write of its state ends here, see `noteChange`):
+     * the checkpoint the story stood on, and the checkpoint of the state now, as one native mutation at the head. Nothing to publish when the
+     * state is the one the story stands on. The host's refusal to publish (the head moved, a restore is pending) is retried by `noteChange`.
+     */
+    async function publish() {
+        if (!handle) return fail('UNSUPPORTED', 'The host has not given this participant its handle.');
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            const settled = await exclusive(async () => ({ ok: true, session: await hydrate(), stateHash: hashJson(port.readState()) }));
+            if (!settled.ok || !settled.session) return settled.ok ? { ok: true, unchanged: true } : settled;
+            if (settled.session.index.base?.stateHash === settled.stateHash) return { ok: true, unchanged: true };
+            const head = await handle.head();
+            if (!head?.ok) return head;
+            const source = head.source ?? (typeof port.headSource === 'function' ? port.headSource() : null);
+            if (!isRecord(source)) return fail('UNSUPPORTED', 'The host gives no Source for the reply at the head, so a native change cannot be published yet.');
+            const out = await handle.nativeMutation({
+                participant: module,
+                source,
+                expectedHead: head.headHash,
+                prepare: () => exclusive(async () => {
+                    const s = await hydrate();
+                    if (!s) throw new Error('There is no open chat.');
+                    const state = port.readState();
+                    const { before, after } = await pairFor(state, head);
+                    const prepared = preparedId({ inPlace: true, before: before.checkpoint, after: after.id, lineage: s.lineage, n: Object.keys(s.index.prepared).length });
+                    s.index.prepared[prepared] = { checkpoint: after.id, hash: after.hash, return: null, inPlace: true, stateHash: hashJson(state) };
+                    await save();
+                    return { before: shaped(before), after: shaped(after), prepared };
+                }),
+            });
+            if (out?.ok || out?.code !== 'STALE') return out;
+        }
+        return fail('STALE', 'The head kept moving; the change is published with the next one.');
+    }
+
+    function runPublish() {
+        if (publishing) {
+            again = true;
+            return publishing;
+        }
+        publishing = (async () => {
+            try {
+                do {
+                    again = false;
+                    last = await publish();
+                    if (last && last.ok === false && RETRY_CODES.has(last.code) && retries < 5) {
+                        retries += 1;
+                        schedulePublish(retryMs);
+                    } else {
+                        retries = 0;
+                        if (last && last.ok === false && last.code !== 'UNSUPPORTED') warn(`NPC State Delta could not publish a native change (${last.code}): ${last.message}`);
+                    }
+                } while (again);
+            } catch (error) {
+                last = fail('FAILED', String(error?.message ?? error));
+                warn(`NPC State Delta could not publish a native change: ${last.message}`);
+            } finally {
+                publishing = null;
+            }
+            return last;
+        })();
+        return publishing;
+    }
+    function schedulePublish(ms) {
+        if (timer) return;
+        timer = schedule(() => { timer = null; void runPublish(); }, ms);
     }
 
     return {
         module,
         participant,
-        /** The query the host resolves a death's npc with and Story Director a check's target with. Null until the identity is hydrated. */
+        /**
+         * The query the host resolves a death's npc with and Story Director a check's target with. It reads the chat's state, where the ids
+         * are, so it answers at once after a reload; a dossier with no np_ yet (a scan, an import) is hydrated behind it, never inside it.
+         */
         queries: {
             'npc.identity': (_state, args) => {
-                const key = String(port.chatKey());
-                const npcs = port.readState()?.npcs;
-                // Not yet hydrated for this chat, or a dossier with no np_ yet (a scan, an import): the answer is null now, the hydration
-                // runs behind it (never inside a query), and the next ask finds the ids.
-                const unsettled = !index || indexKey !== key || (Array.isArray(npcs) && npcs.some(npc => typeof npc?.id === 'string' && !Object.hasOwn(index.identity.byKey, npc.id)));
-                if (unsettled) {
-                    if (key && key !== 'no-chat' && !hydrating) {
-                        hydrating = true;
-                        void exclusive(async () => { try { await hydrate(); } finally { hydrating = false; } });
-                    }
-                    if (!index || indexKey !== key) return null;
+                const key = keyNow();
+                if (!usable(key)) return null;
+                const state = port.readState();
+                const block = timelineOf(state);
+                const npcs = state?.npcs;
+                const unsettled = !block.lineage || (Array.isArray(npcs) && npcs.some(npc => typeof npc?.id === 'string' && !Object.hasOwn(block.identity.byKey, npc.id)));
+                if (unsettled && !hydrating) {
+                    hydrating = true;
+                    void exclusive(async () => { try { await hydrate(); } finally { hydrating = false; } });
                 }
-                return resolveIdentity(index.identity, npcs, args);
+                return resolveIdentity(block.identity, npcs, args);
             },
         },
-        hydrate: () => exclusive(async () => { const idx = await hydrate(); return { ok: true, npcs: Object.keys(idx.identity.byKey).length }; }),
+        /** Hydrates the open chat now (also what a chat opening runs, so the ids are there before the first ask). */
+        hydrate: () => exclusive(async () => { const s = await hydrate(); return s ? { ok: true, npcs: Object.keys(timelineOf(port.readState()).identity.byKey).length, lineage: s.lineage } : fail('FAILED', 'There is no open chat.'); }),
         nativeChange,
-        identity: () => (index ? plain(index.identity) : null),
-        index: () => (index ? plain(index) : null),
+        /** Delta's state was written durably by something other than the participant: publish it as a native change (debounced). */
+        noteChange: () => { if (handle) schedulePublish(debounceMs); },
+        /** Publishes now what is pending and resolves with the answer (tests; and a chat closing). */
+        flush: async () => { if (timer) { cancel(timer); timer = null; } return runPublish(); },
+        lastPublish: () => last,
+        identity: () => timelineOf(port.readState()).identity,
+        timeline: () => timelineOf(port.readState()),
+        index: () => (session ? plain(session.index) : null),
     };
 }

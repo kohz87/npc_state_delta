@@ -20,13 +20,23 @@ const sealer = () => ({
     batchResults: { resolve: ({ id, state }) => { const bytes = state.domains.death?.batches?.[id]; return bytes === undefined ? null : { id, hash: hashJson(bytes), bytes }; } },
 });
 
-async function started(t) {
+async function started(t, { quiet = {} } = {}) {
     const live = { chatKey: 'chat:avatar.png:one', state: { npcs: [npc('npc_mira', 'Mira', { aliases: ['The Weaver'] }), npc('npc_tom', 'Old Tom')], socialGraph: { edges: [{ a: 'npc_mira', b: 'npc_tom', kind: 'friends' }] }, checkpoints: [], lineage: [], turn: 1 }, installs: 0 };
-    const port = { chatKey: () => live.chatKey, readState: () => structuredClone(live.state), installState: async state => { live.installs += 1; live.state = structuredClone(state); } };
-    const delta = createParticipant({ port, vault: memoryVault() });
+    const ref = { host: null };
+    const port = {
+        chatKey: () => live.chatKey,
+        readState: () => structuredClone(live.state),
+        installState: async state => { live.installs += 1; live.state = structuredClone(state); },
+        writeTimeline: async block => { live.state = { ...live.state, timeline: structuredClone(block) }; },
+        // The host's own head Source (the testkit's seam; production reads head().source once Story Block carries it: docs/dev/storysuite-participant.md).
+        headSource: () => ref.host.store.sourceAt(ref.host.store.headIndex()),
+        ...quiet,
+    };
+    const delta = createParticipant({ port, vault: memoryVault(), debounceMs: 1 });
     await delta.hydrate();
     const def = { id: MODULE_ID, name: 'NPC State Delta (test)', version: '0.0.1', domains: { marks: { initial: () => ({ n: 0 }) } }, participant: delta.participant, queries: delta.queries };
     const host = await createHost({ modules: [sealer(), def] });
+    ref.host = host;
     t.after(() => host.close());
     await host.send('Hello.', reply('The road.'));
     return { host, live, delta };
@@ -113,7 +123,7 @@ test('a confirmed death reaches the dossier once, by np_ id resolved through npc
     assert.equal((await host.timeline.host.activate({ prepared: prepared.prepared, expectedHead: now.headHash })).status, 'complete');
     assert.equal(isTerminalNpcDeath(live.state.npcs.find(item => item.id === 'npc_tom')), false);
     assert.equal(host.sdk.query('npc.identity', { id: tom }).nativeKey, 'npc_tom');
-    assert.deepEqual(delta.index().applied, {});
+    assert.deepEqual(delta.timeline().applied, {}, 'the death is not applied any more');
 });
 
 test('a participant that cannot be registered is a missing participant, not a silent one: the host says so', async t => {
@@ -123,4 +133,82 @@ test('a participant that cannot be registered is a missing participant, not a si
     const host = await createHost({ modules: [broken] });
     t.after(() => host.close());
     assert.equal(warned.some(line => /participant was not registered/.test(line)), true);
+});
+
+// ---- the reviewer's cases, on the real host ----
+
+async function restoreTo(host, snapshot) {
+    assert.equal((await host.sdk.command('tl.seal', { id: BATCH.id })).ok, true);
+    const head = await host.sdk.timeline.head();
+    const prepared = await host.timeline.host.prepare({ snapshot: snapshot.id, deathEvents: ['ev_death001'], batchResult: BATCH, expectedHead: head.headHash });
+    if (!prepared.ok) return prepared;
+    return host.timeline.host.activate({ prepared: prepared.prepared, expectedHead: head.headHash });
+}
+
+test('N2: a scan that lands while the reader presses Save is waited for: the save point has the person, and a restore to it keeps him', async t => {
+    let scanning = false;
+    let landed = false;
+    const ref = { live: null };
+    const { host, live, delta } = await started(t, {
+        quiet: {
+            busy: () => scanning,
+            idle: async () => { while (scanning) await new Promise(resolve => setTimeout(resolve, 2)); return true; },
+        },
+    });
+    ref.live = live;
+    // The scan of the reply just shown is running when Save is pressed, and lands a moment later.
+    scanning = true;
+    setTimeout(() => { live.state.npcs.push(npc('npc_vale', 'Vale')); landed = true; scanning = false; }, 20);
+    const made = await host.sdk.timeline.make({ kind: 'manual', name: 'Save' });
+    assert.equal(made.ok, true, made.message);
+    assert.equal(landed, true, 'the save waited for the scan');
+    await host.send('Onward.', reply('Further.'));
+    live.state.npcs = live.state.npcs.filter(item => item.id !== 'npc_vale');
+    const restored = await restoreTo(host, made.snapshot);
+    assert.equal(restored.ok, true, restored.message);
+    assert.deepEqual(live.state.npcs.map(item => item.name), ['Mira', 'Old Tom', 'Vale'], 'the person the story still has is still there');
+    void delta;
+});
+
+test('N2: a save the participant cannot make true is refused as a retryable STALE', async t => {
+    const { host } = await started(t, { quiet: { busy: () => true, idle: async () => false } });
+    const made = await host.sdk.timeline.make({ kind: 'manual', name: 'Save' });
+    assert.equal(made.ok, false);
+    assert.equal(made.code, 'STALE');
+});
+
+test('N2: every change Delta saves is published: a scan after a save point is a native mutation at the head, and a restore to the save point drops it', async t => {
+    const { host, live, delta } = await started(t);
+    const made = await host.sdk.timeline.make({ kind: 'manual', name: 'Before the scan' });
+    assert.equal(made.ok, true, made.message);
+    await host.send('Onward.', reply('A stranger.'));
+    const before = (await host.sdk.timeline.head()).headHash;
+    // A scan lands, Delta saves it (its persist hook tells the participant), and the participant publishes it.
+    live.state.npcs.push(npc('npc_vale', 'Vale'));
+    delta.noteChange();
+    const out = await delta.flush();
+    assert.equal(out.ok, true, out.message);
+    assert.notEqual((await host.sdk.timeline.head()).headHash, before, 'the native change moved the head');
+    assert.equal(host.sdk.query('npc.identity', { name: 'Vale' }).nativeKey, 'npc_vale');
+    const second = await host.sdk.timeline.make({ kind: 'manual', name: 'After the scan' });
+    assert.equal(second.ok, true, second.message);
+    const restored = await restoreTo(host, made.snapshot);
+    assert.equal(restored.ok, true, restored.message);
+    assert.deepEqual(live.state.npcs.map(item => item.name), ['Mira', 'Old Tom'], 'the save point before the scan');
+    assert.equal(host.sdk.query('npc.identity', { name: 'Vale' }), null);
+});
+
+test('N1: the chat is renamed (Delta moves its state to a new key): the ids are the same and a save point made before it still restores', async t => {
+    const { host, live, delta } = await started(t);
+    const mira = delta.identity().byKey.npc_mira;
+    const made = await host.sdk.timeline.make({ kind: 'manual', name: 'Save' });
+    assert.equal(made.ok, true, made.message);
+    live.chatKey = 'chat:avatar.png:renamed';
+    await delta.hydrate();
+    assert.equal(delta.identity().byKey.npc_mira, mira);
+    live.state.npcs[0].trust = 9;
+    const restored = await restoreTo(host, made.snapshot);
+    assert.equal(restored.ok, true, restored.message);
+    assert.equal(live.state.npcs[0].trust, 3);
+    assert.equal(host.sdk.query('npc.identity', { id: mira }).nativeKey, 'npc_mira');
 });

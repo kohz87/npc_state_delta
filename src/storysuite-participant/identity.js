@@ -1,5 +1,6 @@
 // NPC State Delta, the participant's NPC identity (contract §8, P24): one `np_` surrogate per dossier, so other modules can name a person
-// without a name that can change. The pair nativeKey <-> np_ is persisted with the native state (it is part of every checkpoint) and:
+// without a name that can change. The pair nativeKey <-> np_ lives in the native state itself (timeline.js: state.timeline), so it is part of every
+// checkpoint, moves with a chat rename, is inherited by a branch and travels in an export, and:
 //   * is assigned to every admitted dossier before the new native head is published (hydration, import, creation, scan, manual edit all
 //     go through `hydrateIdentity`);
 //   * survives a rename (the nativeKey is the dossier's own id, `npc_<slug>`, which a rename does not change) and an alias change;
@@ -34,10 +35,10 @@ export function cleanIdentity(raw) {
     return out;
 }
 
-/** A fresh np_ id for a dossier: from the chat, the native key and a counter past every id in use or ever issued. */
-export function newNpId(chatKey, nativeKey, taken) {
+/** A fresh np_ id for a dossier: from the lineage, the native key and a counter past every id in use or ever issued. */
+export function newNpId(seed, nativeKey, taken) {
     for (let n = 0; n < 10000; n += 1) {
-        const hex = sha256(`${chatKey}\u0000${nativeKey}\u0000${n}`);
+        const hex = sha256(`${seed}\u0000${nativeKey}\u0000${n}`);
         let value = BigInt(`0x${hex.slice(0, 12)}`);
         let text = '';
         for (let i = 0; i < 8; i += 1) {
@@ -52,10 +53,11 @@ export function newNpId(chatKey, nativeKey, taken) {
 
 /**
  * Brings an identity up to date with the dossiers: every dossier has a live np_ (assigned in dossier order), and an entry whose dossier is
- * gone is archived. `reserved`: every id ever issued for this chat (outside the checkpoints), which is never issued again.
+ * gone is archived. `reserved`: every id ever issued in this lineage, which is never issued again; a native key that comes back after its
+ * dossier was deleted gets a new id, never the archived one.
  * → { identity, reserved, assigned: [np_], archived: [np_], changed }; the inputs are not changed.
  */
-export function hydrateIdentity(identity, npcs, { chatKey, reserved = [] } = {}) {
+export function hydrateIdentity(identity, npcs, { seed, reserved = [] } = {}) {
     const next = cleanIdentity(identity);
     const used = new Set([...Object.keys(next.map), ...reserved]);
     const keys = new Set((Array.isArray(npcs) ? npcs : []).map(npc => (typeof npc?.id === 'string' ? npc.id : '')).filter(Boolean));
@@ -70,7 +72,7 @@ export function hydrateIdentity(identity, npcs, { chatKey, reserved = [] } = {})
     }
     for (const nativeKey of keys) {
         if (Object.hasOwn(next.byKey, nativeKey)) continue;
-        const id = newNpId(chatKey, nativeKey, used);
+        const id = newNpId(seed, nativeKey, used);
         used.add(id);
         next.map[id] = { nativeKey, archived: false, since: Object.keys(next.map).length + 1 };
         next.byKey[nativeKey] = id;
