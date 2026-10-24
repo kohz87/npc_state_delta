@@ -13,18 +13,20 @@ import {
     featureOn, initialInventory, inventoryTail, validateInventory,
 } from './inventory.js';
 import { WEATHER_CHARS, capturePlace, capturePresent, captureWeather, initialScene, sceneCommands, sceneQueries, sceneTail, validateScene } from './scene.js';
-import { DEFAULT_CURRENCY, MAX_COIN_VALUE, coinLine, currencyOf } from './money.js';
+import { DEFAULT_CURRENCY, MAX_COIN_VALUE, coinLine, resolveCurrency } from './money.js';
 import { renderInventoryTab } from '../ui/inventory-tab.js';
 import { renderSceneTab } from '../ui/scene-tab.js';
 import { FEATURE_TEXT, createAssistPart } from '../assist/index.js';
 import { CORE_FEATURE } from '../features.js';
 import { EXTRA_KINDS, answeredReply, chatterTail, headChatter, sceneChatter } from '../extras.js';
+import { createEvidenceQuery } from '../evidence.js';
 import { STRINGS } from '../strings.js';
 import { createEventsPart } from '../events/index.js';
 import { standardWidgets } from '../view/widgets/index.js';
 import { screens as defaultScreens } from '../screens/index.js';
 import { createPacksPart, packs as liveInstalled, part as livePart, resolveItem as liveResolve, startState as liveStart } from '../packs/index.js';
 import { firstPackRanks, readerRanks } from '../packs/ranks.js';
+import { createTimelinePart } from '../timeline/part.js';
 
 // The packs part bound to SillyTavern (src/v2/packs/index.js), in createPacksPart()'s shape.
 const livePacks = Object.freeze({ part: livePart, packs: liveInstalled, resolveItem: liveResolve, startState: liveStart });
@@ -114,7 +116,7 @@ export const CORE_SETTINGS = Object.freeze({
  * tabs }), for a host that merges parts. `hooks(name) → fn[]` in module-id order (the registry's
  * `hooks`); `settings()` → this module's settings. Without them no hooks run and the currency is gold.
  */
-export function createCorePart({ hooks = () => [], settings = () => ({}), hookEntries = null, problem = null, economy = () => null } = {}) {
+export function createCorePart({ hooks = () => [], settings = () => ({}), hookEntries = null, problem = null, economy = () => null, query = null } = {}) {
     const hookList = name => {
         const fns = hooks(name);
         return Array.isArray(fns) ? fns.filter(fn => typeof fn === 'function') : [];
@@ -133,7 +135,8 @@ export function createCorePart({ hooks = () => [], settings = () => ({}), hookEn
         economy,
         problem: entry => { try { problem?.(entry); } catch { /* the Problems list is not essential */ } },
     };
-    const currency = () => currencyOf(env.settings());
+    // The chat's currency: a ready rules module's (`purse.currency`, when `query` reaches it), else the reader's / pack's / gold.
+    const currency = () => resolveCurrency(env.settings(), typeof query === 'function' ? query : null);
     const kind = (grammar, apply) => ({ grammar, apply });
     return {
         domains: {
@@ -299,13 +302,13 @@ export function readerLadder(hooks) {
     return null;
 }
 
-export function createCoreModule({ hooks = () => [], settings = () => ({}), version = '2.0.0-alpha.1', packs = livePacks, command, query, assist = null, hookEntries = null, problem = null, extras = null } = {}) {
-    const core = createCorePart({ hooks, settings, hookEntries, problem, economy: () => (typeof packs.economy === 'function' ? packs.economy() : null) });
+export function createCoreModule({ hooks = () => [], settings = () => ({}), version = '2.0.0-alpha.1', packs = livePacks, command, query, assist = null, hookEntries = null, problem = null, extras = null, timeline = () => null } = {}) {
+    const core = createCorePart({ hooks, settings, hookEntries, problem, query, economy: () => (typeof packs.economy === 'function' ? packs.economy() : null) });
     const events = createEventsPart({
         ...(command ? { command } : {}),
         ...(query ? { query } : {}),
     });
-    const merged = mergeParts([core, packs.part, events, assist ?? createAssistPart({ settings: () => settings() })]);
+    const merged = mergeParts([core, packs.part, events, assist ?? createAssistPart({ settings: () => settings() }), createTimelinePart({ timeline })]);
     // The reader's rank ladder answers packs.content's ranks in place of the packs', with the first pack's
     // numbers at each place (packs/ranks.js); a call for one pack's own ranks (`pack`) is the pack's as
     // before. The ladder is a module's setting (RPG Battle's Terms: Rank ladder and Levels per rank),
@@ -340,6 +343,8 @@ export function createCoreModule({ hooks = () => [], settings = () => ({}), vers
                 return world ? [] : sceneChatter(state?.domains?.scene?.present, headChatter(extras?.chat?.(), extras?.display));
             }, { feature: CORE_FEATURE.chatter }),
             'scene.moved': (_state, _args, tools) => headMoved(tools, extras?.headIndex),
+            // The active, visible, code-validated proof (contract §6, docs/v2/EVIDENCE.md); the stored proof comes from the store.
+            'story.evidence': createEvidenceQuery({ stored: () => extras?.proofs?.() ?? [] }),
         },
         capture: {
             kinds: CORE_KINDS,

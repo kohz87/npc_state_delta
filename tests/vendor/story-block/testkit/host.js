@@ -40,8 +40,10 @@ export async function hostAvailable() {
  * Builds a host. `options`: { modules?: def[] (registered after the core ones), core?: true
  * (register Story Block's core module: scene, inventory, packs, events, assist), callModel?(prompt, opts)
  * (the model behind sdk.callModel and the assist helpers; createFakeModel in model.js scripts one), fakes?: false (use fakes.js), st?: options for
- * createFakeContext (plus onBlocked?), settings?: initial extension_settings.storySuite }.
- * Returns { st, ctx, registry, settings, features, store, bus, events, sdk, turn, packs, send(text, reply, { stopped }),
+ * createFakeContext (plus onBlocked?), settings?: initial extension_settings.storySuite, timelineFaults?: { at(phase) } (the
+ * timeline calls it at every phase; a test makes it throw to stop there) }.
+ * Returns { st, ctx, registry, settings, features, store, bus, events, sdk, turn, packs, timeline (the host's side of the
+ * timeline: { host, capability, … }, docs/v2/TIMELINE.md), send(text, reply, { stopped }),
  * swipe(reply), regenerate(reply), cont(reply), quiet(), head(), close() }; `st` is the fake
  * SillyTavern (fake-st.js), with `st.notices` = [{ reason, moduleId }] for held-back generations; `features` is the
  * reader's feature choices (createFeatureStore: `features.set('my-module.wear', false)`). Throws when the runtime is missing and `fakes` is not set.
@@ -66,18 +68,18 @@ export async function createHost(options = {}) {
     // The same wiring as index.js (src/v2/runtime.js): the core module with its packs part over the
     // fake extension settings, then the given modules.
     const runtime = createRuntime({
-        ctx, core, modules, createStore, createCommandBus, callModel,
+        ctx, core, modules, createStore, createCommandBus, callModel, timelineFaults: options.timelineFaults ?? null,
         onBlocked: stOptions.onBlocked ?? null,
         notify: (reason, moduleId) => st.notices.push({ reason, moduleId }),
     });
-    const { registry, settings, store, bus, events, sdk, turn, markReady } = runtime;
+    const { registry, settings, store, bus, events, sdk, turn, markReady, timeline } = runtime;
     turn.install({ globalName: null });
     st.interceptor = turn.interceptor;
     await turn.onChatChanged();
     markReady();
 
     return {
-        st, ctx, registry, settings, features: runtime.features, store, bus, events, sdk, turn, packs: runtime.packs,
+        st, ctx, registry, settings, features: runtime.features, store, bus, events, sdk, turn, packs: runtime.packs, timeline,
         send: (text, reply = '', { stopped = false } = {}) => st.send(text, { reply, stopped }),
         swipe: (reply = '') => st.generate('swipe', { reply }),
         regenerate: (reply = '') => st.generate('regenerate', { reply }),
