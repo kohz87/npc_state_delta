@@ -8,9 +8,9 @@ description: Re-vendor Story Block's testkit and v2 runtime into tests/vendor/st
 This repo has no `sync-testkit` npm script: Story Block's script does the copy. The vendored copy is used by
 the adapter tests (`tests/storysuite-v2-*.test.js`, `tests/v2/break/a1-meter-window-after-delete.test.js`, ...).
 
-1. Have a clean Story Block checkout at the commit you want (normally `origin/v2`), e.g. beside this repo:
+1. Have a clean Story Block checkout at the commit you want (normally `origin/main`), e.g. beside this repo:
    ```sh
-   git -C ../Story_block fetch -q origin v2 && git -C ../Story_block checkout -q v2 && git -C ../Story_block pull -q --ff-only
+   git -C ../Story_block fetch -q origin main && git -C ../Story_block checkout -q main && git -C ../Story_block pull -q --ff-only
    ```
    With local changes there, VERSION records `<sha>+local-changes`.
 2. Sync (replaces `tests/vendor/story-block/` as a whole, so dropped files do not linger):

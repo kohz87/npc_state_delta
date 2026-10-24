@@ -21,7 +21,7 @@ Node 24 (`engines`). No install step. Every test file needs the alias setup
    npm run validate
    npm run measure:prompts
    npm run package
-   git diff --check origin/v2
+   git diff --check origin/main
    ```
    `npm test` is the same with the default reporter. Run it once; do not re-run old code to show a failure.
 3. Reading the output:
