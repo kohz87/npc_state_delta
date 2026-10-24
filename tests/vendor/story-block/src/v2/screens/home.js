@@ -82,13 +82,15 @@ const TEMPLATE = `
     <div class="sb-cap" data-capped="true">
       <ul>
         <li class="quest" data-each="q.board.active as t, i">
-          <b>{{ t.key }}</b> <span class="chip status" data-state="{{ t.status.state }}">{{ t.status.text }}</span><span class="muted" data-if="t.goal"> — {{ t.goal }}</span>
+          <div class="quest-head"><b class="quest-title">{{ t.key }}</b> <span class="chip status" data-state="{{ t.status.state }}">{{ t.status.text }}</span></div>
+          <p class="quest-goal muted" data-if="t.goal">{{ t.goal }}</p>
           <div class="progress" data-if="i == 0 && t.meter">
             <ss-widget name="ss.meter" data-props='{"value":"{{ t.progress.have }}","max":"{{ t.progress.need }}","label":"${jsonText(S.progress)}","tone":"accent"}'></ss-widget>
           </div>
         </li>
         <li class="quest offer" data-each="q.board.offers as t, i">
-          <b>{{ t.key }}</b> <span class="chip status" data-state="{{ t.status.state }}">{{ t.status.text }}</span><span class="muted" data-if="t.goal"> — {{ t.goal }}</span>
+          <div class="quest-head"><b class="quest-title">{{ t.key }}</b> <span class="chip status" data-state="{{ t.status.state }}">{{ t.status.text }}</span></div>
+          <p class="quest-goal muted" data-if="t.goal">{{ t.goal }}</p>
         </li>
       </ul>
     </div>
@@ -110,7 +112,9 @@ const CSS = `${BASE_CSS}
 .more-slot { display: block; }
 .more-slot:empty { display: none; }
 .more-slot .sb-show-more { justify-self: start; }
-.party ul, .quests ul { display: grid; gap: 6px; }
+.party ul { display: grid; gap: 6px; }
+/* A quest is a small stacked block: title and status pill on one line when they fit, the goal under it; a hairline and 8px either side between quests. */
+.quests ul { display: grid; gap: 0; }
 .fight { border-color: color-mix(in srgb, var(--sb-bad) 55%, var(--sb-border)); }
 .fight .on b { color: var(--sb-bad); }
 .chip.danger { color: var(--sb-bad); }
@@ -118,7 +122,12 @@ const CSS = `${BASE_CSS}
 .chip.status[data-state="offered"] { color: var(--sb-accent); }
 .panel p { margin: 2px 0; }
 .quest { min-width: 0; overflow-wrap: anywhere; }
+.quest + .quest { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--sb-border); }
 .chip.status { max-width: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.quest-head { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; min-width: 0; }
+.quest-title { min-width: 0; overflow-wrap: anywhere; }
+.quest-head > .status { flex-shrink: 0; max-width: none; white-space: nowrap; }
+.quest-goal { margin: 2px 0 0; font-size: 0.9em; overflow-wrap: anywhere; }
 .worn { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .progress { margin-top: 4px; }
 .saves-slot:empty { display: none; }

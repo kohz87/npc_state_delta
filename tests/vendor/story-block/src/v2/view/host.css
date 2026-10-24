@@ -229,9 +229,6 @@ body.story-suite-open { overflow: hidden; }
 .story-suite-row[data-type="bool"] > input { justify-self: end; margin: 0; }
 .story-suite-row[data-type="list"] { grid-template-columns: minmax(0, 1fr); }
 /* A read-only field (`readOnly`): its value and help shown, its controls disabled. */
-.story-suite-slider { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.story-suite-slider > input { flex: 1 1 auto; min-width: 0; margin: 0; }
-.story-suite-slider-value { min-width: 2.5em; text-align: right; font-variant-numeric: tabular-nums; }
 .story-suite-row-readonly :disabled { opacity: 0.75; cursor: not-allowed; }
 .story-suite-subsection { margin-top: 12px; }
 .story-suite-subsection > h4 { margin: 8px 0 4px; }
@@ -239,6 +236,8 @@ body.story-suite-open { overflow: hidden; }
     .story-suite-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
     .story-suite-fold-body { padding: 8px 10px 12px; }
     .story-suite-subfold-body { padding-left: 4px; }
+    /* A finger's target: the bar's buttons are 44px tall on a phone (the 36px pill stays on desktop). */
+    .story-suite-bar .menu_button { min-height: 44px; }
 }
 
 /* A list of {…}: one line per item, its fields side by side, × at the end, Add under them. */
@@ -284,13 +283,13 @@ body.story-suite-open { overflow: hidden; }
 .ss-packs-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .ss-packs-actions .menu_button { display: inline-flex; align-items: center; gap: 6px; width: auto; margin: 0; min-height: 36px; }
 .ss-packs-message:empty, .ss-packs-errors:empty { display: none; }
-.ss-packs-errors { margin: 4px 0; padding-left: 18px; color: var(--warning, #d9a33a); }
+.ss-packs-errors { margin: 4px 0; padding-left: 18px; color: var(--ss-bad-text, var(--warning, #d9a33a)); }
 .ss-packs-list { display: grid; gap: 8px; }
 .ss-packs-row { display: grid; gap: 2px; padding: 8px 0; border-top: 1px solid var(--story-suite-line); min-width: 0; overflow-wrap: anywhere; }
 .ss-packs-row .menu_button { justify-self: start; width: auto; margin: 4px 0 0; display: inline-flex; align-items: center; gap: 6px; }
 .ss-packs-label { display: flex; align-items: center; gap: 6px; font-weight: bold; }
 .ss-packs-facts, .ss-packs-description, .ss-packs-empty { opacity: 0.75; }
-.ss-packs-problem { color: var(--warning, #d9a33a); }
+.ss-packs-problem { color: var(--ss-bad-text, var(--warning, #d9a33a)); }
 
 /* The prompt size in Story Suite's fold. */
 .story-suite-size-sum { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 4px; }

@@ -136,7 +136,13 @@ export function renderTabsCard(parent, { doc, tabs, onChange = null }) {
             toggle.el.title = row.fixed ? T.homeTitle : fill(T.shownTitle, { name: row.title });
             if (lockId) toggle.el.setAttribute('aria-describedby', lockId);
             toggle.el.classList.add('ss-tabrow-shown');
-            item.append(glyph, name, up, down, toggle.el);
+            // A tab shown only while active has no switch: its note says when it shows (the screen's own, or the default).
+            if (row.activeNote) {
+                const note = h(doc, 'small', 'ss-tabrow-note', row.activeNote);
+                item.append(glyph, name, up, down, note);
+            } else {
+                item.append(glyph, name, up, down, toggle.el);
+            }
             list.appendChild(item);
         });
         reset.disabled = typeof tabs?.isDefault === 'function' ? tabs.isDefault() : true;

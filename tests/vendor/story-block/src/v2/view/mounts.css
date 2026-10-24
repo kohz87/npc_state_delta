@@ -234,6 +234,52 @@
     }
 }
 
+/* ---- The game view as a window (from 760px): the chat stays visible under a scrim and the window is centred over it. The layer
+   (\`.ss-gameview\`) is the scrim; \`.ss-gameview-main\` is the window, with the Settings window's frame: the glass (or the solid
+   surface), a 24px radius, its border and shadow. From 1024px it is min(1200px, 92vw) by min(900px, 90vh); from 760px to 1023px
+   the same window keeps a 16px margin on every side. The screen scrolls inside it (the body is the scroller), and the page behind
+   does not scroll while it is open. A phone is unchanged: full screen, the bar at the foot. */
+@media (min-width: 760px) {
+    .ss-gameview {
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        padding: 16px;
+        background-color: color-mix(in srgb, var(--ss-scrim, rgba(0, 0, 0, 0.55)) 60%, transparent);
+        background-image: none;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        overflow: hidden;
+        overscroll-behavior: none;
+    }
+    .ss-gameview-main {
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+        border: 1px solid var(--ss-border);
+        border-radius: 24px;
+        box-shadow: var(--ss-shadow);
+        background-color: var(--ss-sheet-bg, var(--ss-surface));
+        background-image: var(--ss-sheet-layers, none);
+        -webkit-backdrop-filter: var(--ss-sheet-blur, none);
+        backdrop-filter: var(--ss-sheet-blur, none);
+    }
+}
+@media (min-width: 1024px) {
+    .ss-gameview-main {
+        width: min(1200px, 92vw);
+        height: min(900px, 90vh);
+    }
+}
+@media (min-width: 760px) {
+    body.ss-gameview-open { overflow: hidden; }
+}
+
 /* ---- Inline cards under replies ---- */
 
 .ss-cards {
@@ -340,6 +386,8 @@
     border-radius: var(--ss-sheet-radius, 0);
     box-shadow: var(--ss-sheet-shadow, none);
     font-size: 0.85em;
+    /* 8px of clear space between the strip and SillyTavern's message box (#send_form, the strip sits right above it) */
+    margin: 0 0 8px;
 }
 
 .ss-hud::-webkit-scrollbar {
@@ -544,3 +592,61 @@
         transition: none;
     }
 }
+
+/* ---- Cards under replies (fix 8e; view/reply-cards-ui.js, Cards.dc.html): a glass card in the reply strip, a 1px ring in its
+   tone, a 34px tone icon tile, the rows, and a button row of 44px buttons (the primary in the accent, at most three; Later after
+   them). Folded by Later it is one 44px line. Tokens only: the text is the theme's, the tones are its tones. */
+.ss-rc {
+    --ring: var(--ss-info);
+    margin: 6px 0 0 46px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    border-radius: var(--ss-radius-l, 18px);
+    border: 1px solid var(--ring);
+    background: var(--ss-glass, var(--ss-tile));
+    box-shadow: var(--ss-shadow);
+    color: var(--ss-text);
+}
+.ss-rc-accent { --ring: var(--ss-accent); }
+.ss-rc-bad { --ring: var(--ss-bad); }
+.ss-rc-good { --ring: var(--ss-good); }
+.ss-rc-info { --ring: var(--ss-info); }
+.ss-rc-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ss-rc-tile { flex: none; width: 34px; height: 34px; border-radius: var(--ss-radius-s, 10px); background: var(--ss-tile);
+              color: var(--ring); display: flex; align-items: center; justify-content: center; }
+.ss-rc-texts { display: grid; gap: 2px; min-width: 0; }
+.ss-rc-title { font-size: 15px; overflow-wrap: anywhere; }
+.ss-rc-text { margin: 0; font-size: 13px; color: var(--ss-muted); overflow-wrap: anywhere; }
+.ss-rc-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 14px; }
+.ss-rc-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ss-rc-row-icon { flex: none; color: var(--ring); }
+.ss-rc-row-text { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+.ss-rc-tag { --tag-ring: currentColor; flex: none; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--tag-ring); color: var(--ss-text); }
+/* The tag is text: >= 4.5:1 on the glass in both schemes (the base tones are not: good 4.1 and info 3.9 on the light glass's darker backgrounds). The
+   tones that have a text token use it; good and info keep the tone as the ring only. */
+.ss-rc-tag-good { --tag-ring: var(--ss-good); }
+.ss-rc-tag-bad { color: var(--ss-bad-text, var(--ss-bad)); }
+.ss-rc-tag-warn { color: var(--ss-warn-text, var(--ss-warn)); }
+.ss-rc-tag-accent { color: var(--ss-accent-text, var(--ss-accent)); }
+.ss-rc-tag-info { --tag-ring: var(--ss-info); }
+.ss-rc-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ss-rc-action { flex: 1 1 auto; min-height: 44px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--ss-border);
+                background: none; color: var(--ss-text); font: inherit; font-weight: 600; cursor: pointer;
+                display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.ss-rc-action:disabled { opacity: 0.55; cursor: default; }
+.ss-rc-primary { border-color: var(--ss-accent); background: var(--ss-accent-soft); font-weight: 700; }
+.ss-rc-later { flex: 0 0 auto; }
+.ss-rc-action:focus-visible, .ss-rc-line:focus-visible { outline: 2px solid var(--ss-text); outline-offset: 2px; }
+.ss-rc-line { display: block; width: 100%; min-height: 44px; margin: 0; padding: 0 14px; text-align: left;
+              border-radius: 14px; border: 1px solid var(--ring); background: var(--ss-glass, var(--ss-tile)); color: var(--ss-text);
+              font: inherit; font-weight: 600; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* An active tab's alert (view/screen-bar.js): a red dot at the top-right of the icon, with a ring in the bar's own colour. It is a dot, never
+   a number: the badge's words are the slot's name and tooltip. More gets one when an alerting tab sits under it; a sheet tile too. */
+.ss-screenbar-alert { position: absolute; top: 8px; right: calc(50% - 20px); width: 9px; height: 9px; border-radius: 50%;
+                      background: var(--ss-bad); border: 2px solid var(--ss-badge, #1e2132); pointer-events: none; }
+.ss-screenbar-tile { position: relative; }
+.ss-screenbar-tile > .ss-screenbar-alert { top: 8px; right: 8px; }

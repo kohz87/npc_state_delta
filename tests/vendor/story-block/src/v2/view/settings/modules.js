@@ -144,11 +144,25 @@ export function createModuleCard(env, mod, sdef = null, { placed = null, collaps
             box.append(...[heading4, section].filter(Boolean));
             entry.panelBox = box;
             entry.panelTitle = sdef.title;
+            // What the module's section function returned is its unmount (NPC State Delta returns one): it takes the module's own nodes
+            // back out of the section. It runs before the section is cleared and again when the card goes, so the module finds its panel
+            // in the page on the next draw instead of a node this card has detached.
+            let release = null;
+            const unmount = () => {
+                const done = release;
+                release = null;
+                try { done?.(); } catch { /* a module's unmount that fails does not keep the card from drawing */ }
+            };
+            entry.release = unmount;
             entry.panel = () => {
+                unmount();
                 section.replaceChildren();
                 box.hidden = hiddenByFeature(sdef.section);
                 if (box.hidden) return;
-                try { sdef.section(section, panelApi); } catch (error) {
+                try {
+                    const back = sdef.section(section, panelApi);
+                    release = typeof back === 'function' ? back : null;
+                } catch (error) {
                     section.replaceChildren(h(doc, 'p', 'story-suite-muted', fill(MODULES_TEXT.panelFailed, { name: mod.name ?? mod.id, why: error?.message ?? error })));
                 }
             };
@@ -211,6 +225,7 @@ export function createModuleCard(env, mod, sdef = null, { placed = null, collaps
             entry.form?.refresh();
         },
         destroy() {
+            entry.release?.();
             entry.form?.destroy();
         },
         has(key) {

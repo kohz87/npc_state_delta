@@ -8,8 +8,9 @@
 // card's avatar (`/thumbnail?type=avatar&file=…`), a picture a module answers for the lead (`npc.portrait`, Delta's
 // query, asked with `{ name }`), else '' (the hero draws the initial). Nothing here runs a command.
 //
-// The reader's SillyTavern is read through `readHeroContext()` (getContext(): name1, user_avatar, characters and
-// characterId, the same fields RPG Battle's persona reader uses); tests pass their own context.
+// The reader's SillyTavern is read through `readHeroContext()` (getContext(): name1, characters and characterId; the
+// current persona's file from the context when it has one, else from the page: personaFileOnPage). Tests pass their own
+// context and document.
 
 const TEXT_MAX = 120;
 
@@ -27,18 +28,48 @@ export function cardAvatarUrl(file) {
     return name ? `/thumbnail?type=avatar&file=${encodeURIComponent(name)}` : '';
 }
 
-/** What the reader's SillyTavern says about the persona and the open character: names and avatar files, '' for none. */
-export function readHeroContext(context = globalThis.SillyTavern?.getContext?.() ?? null) {
+// The persona thumbnail a user message or the persona list shows: `/thumbnail?type=persona&file=…` (SillyTavern's getThumbnailUrl).
+const personaFileOfSrc = src => {
+    try {
+        const url = new URL(textOf(src), 'http://local.invalid');
+        return url.pathname === '/thumbnail' && url.searchParams.get('type') === 'persona' ? textOf(url.searchParams.get('file')) : '';
+    } catch { return ''; }
+};
+
+/**
+ * The current persona's avatar file from the page, '' when none is found. SillyTavern 1.19's getContext() does not carry it
+ * (`user_avatar` is personas.js's own state): the persona list marks the current persona's row `selected` (its
+ * `data-avatar-id` is the file), and the newest user message shows the persona's picture unless it was given another one.
+ */
+export function personaFileOnPage(doc = globalThis.document) {
+    try {
+        const row = doc?.querySelector?.('#user_avatar_block .avatar-container.selected');
+        const listed = textOf(row?.getAttribute?.('data-avatar-id') ?? row?.getAttribute?.('imgfile') ?? '');
+        if (listed) return listed;
+        const pictures = [...(doc?.querySelectorAll?.('.mes[is_user="true"] .avatar img') ?? [])];
+        for (let i = pictures.length - 1; i >= 0; i -= 1) {
+            const file = personaFileOfSrc(pictures[i]?.getAttribute?.('src') ?? '');
+            if (file) return file;
+        }
+    } catch { /* no page here (a test, or SillyTavern not drawn yet): none */ }
+    return '';
+}
+
+/**
+ * What the reader's SillyTavern says about the persona and the open character: names and avatar files, '' for none.
+ * The persona's file is the first of: the context's `user_avatar` (or SillyTavern's global, as RPG Battle's persona reader reads it),
+ * the current persona on the page (personaFileOnPage), and the settings' default persona (power user's `default_persona`).
+ */
+export function readHeroContext(context = globalThis.SillyTavern?.getContext?.() ?? null, doc = globalThis.document) {
     let card = null;
     try {
         const id = context?.characterId;
         card = id != null && Array.isArray(context?.characters) ? context.characters[id] ?? null : null;
     } catch { card = null; }
+    const fromContext = textOf(context?.user_avatar ?? context?.userAvatar ?? globalThis.user_avatar);
     return {
         personaName: textOf(context?.name1),
-        // the persona's avatar file: the context's, else SillyTavern's global (as RPG Battle's persona reader reads it), else the
-        // default persona of the settings (power user's `default_persona`: the file a new chat uses)
-        personaFile: textOf(context?.user_avatar ?? context?.userAvatar ?? globalThis.user_avatar ?? context?.powerUserSettings?.default_persona),
+        personaFile: fromContext || personaFileOnPage(doc) || textOf(context?.powerUserSettings?.default_persona),
         cardName: textOf(card?.name),
         cardFile: textOf(card?.avatar),
     };
@@ -62,6 +93,35 @@ export function portraitCandidates({ personaFile = '', cardFile = '', npcPicture
 /** The first of portraitCandidates: '' when there is none. */
 export function portraitOf(args = {}) {
     return portraitCandidates(args)[0] ?? '';
+}
+
+// A condition's icon, from the icon set (view/icons/set.js). The set has no flame, so burning is a warning, as is any kind not listed.
+const CONDITION_ICONS = Object.freeze({ bleeding: 'ph-drop', poison: 'ph-skull', poisoned: 'ph-skull', stunned: 'ph-lightning', dazed: 'ph-lightning', slowed: 'ph-clock' });
+export const conditionIcon = kind => CONDITION_ICONS[String(kind ?? '').trim().toLowerCase()] ?? 'ph-warning';
+
+// A condition's name for the badge: its kind with the first letter up ("bleeding" → "Bleeding").
+const conditionLabel = kind => {
+    const words = String(kind ?? '').replace(/[_-]+/g, ' ').trim();
+    return words ? (words.charAt(0).toUpperCase() + words.slice(1)).slice(0, TEXT_MAX) : '';
+};
+
+// A number from an entry's field, or null when it is missing or not one.
+const numberOf = value => (value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value));
+
+/**
+ * What a condition entry says of its time left and the unit it is in: `minutes` (or `until`, a story minute, against `minutesNow`),
+ * `left` in the unit it names, or `rounds`. `{ left: null, unit: 'turns' }` when none is given: the badge then shows no count.
+ */
+export function conditionLeft(entry, minutesNow = null) {
+    const minutes = numberOf(entry?.minutes);
+    if (minutes !== null) return { left: minutes, unit: 'minutes' };
+    const until = numberOf(entry?.until);
+    if (until !== null && minutesNow !== null) return { left: Math.max(0, until - minutesNow), unit: 'minutes' };
+    const left = numberOf(entry?.left);
+    if (left !== null) return { left, unit: ['turns', 'rounds', 'minutes'].includes(entry?.unit) ? entry.unit : 'turns' };
+    const rounds = numberOf(entry?.rounds);
+    if (rounds !== null) return { left: rounds, unit: 'rounds' };
+    return { left: null, unit: 'turns' };
 }
 
 function safeQuery(query, name, args) {
@@ -97,10 +157,12 @@ export function gameHeroProps({ state = null, query = null, context = {}, format
         if (max == null || max <= 0) continue;
         bars.push({ kind, label, value: count(pool.cur) ?? 0, max, text: `${count(pool.cur) ?? 0} / ${max}` });
     }
+    // A condition is named by its kind (or its name); its icon and its time left come from the kind and the entry's own fields.
+    const kindOf = entry => (typeof entry?.kind === 'string' && entry.kind ? entry.kind : typeof entry?.name === 'string' ? entry.name : '');
     const statuses = (Array.isArray(lead?.conditions) ? lead.conditions : [])
-        .filter(entry => entry && typeof entry.kind === 'string' && entry.kind)
+        .filter(entry => entry && typeof entry === 'object' && kindOf(entry))
         .slice(0, 12)
-        .map(entry => ({ id: entry.kind, label: entry.kind, tone: 'bad', kind: entry.kind }));
+        .map(entry => ({ id: kindOf(entry), label: conditionLabel(kindOf(entry)), icon: conditionIcon(kindOf(entry)), tone: 'bad', kind: kindOf(entry), ...conditionLeft(entry, minutes) }));
     const when = minutes != null && typeof formatTime === 'function' ? textOf(formatTime(minutes)) : '';
     return {
         name: name.slice(0, 60),

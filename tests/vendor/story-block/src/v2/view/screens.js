@@ -99,6 +99,9 @@ export function validateScreen(def, { id = null } = {}) {
     }
     if (def.title !== undefined && typeof def.title !== 'string') errors.push(`${name}: the title must be text.`);
     if (def.defaultOn !== undefined && typeof def.defaultOn !== 'boolean') errors.push(`${name}: defaultOn must be true or false.`);
+    // A tab or screen that is shown only while it is active: active(state, ctx) → { on, badge? }, and the note Settings shows for it.
+    if (def.active !== undefined && typeof def.active !== 'function') errors.push(`${name}: active must be a function (state, ctx) → { on, badge? }.`);
+    if (def.activeNote !== undefined && typeof def.activeNote !== 'string') errors.push(`${name}: activeNote must be text.`);
     if (def.icon !== undefined && typeof def.icon !== 'string') errors.push(`${name}: the icon must be text.`);
     if (def.order !== undefined && !(typeof def.order === 'number' && Number.isFinite(def.order))) errors.push(`${name}: order must be a number (lower comes first).`);
 

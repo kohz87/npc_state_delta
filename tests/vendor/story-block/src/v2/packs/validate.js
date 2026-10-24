@@ -19,7 +19,7 @@ import { foldKey, oneLine } from '../../text.js';
 import { MAX_DEPTH as MAX_TEMPLATE_DEPTH, tooDeep } from '../view/template/html.js';
 import { MAX_LOOP_DEPTH, templateShape } from '../view/template/index.js';
 import { MAX_JSON_DEPTH } from '../view/template/json.js';
-import { MAX_AT_DEPTH, cssDepth } from '../view/css.js';
+import { MAX_AT_DEPTH, cssDepth, sheetEscape } from '../view/css.js';
 import { MAX_COINS, MAX_COIN_VALUE, coinsOf } from '../domains/money.js';
 
 export const HOST_VERSION = '2.0.0';
@@ -1154,6 +1154,9 @@ export function unsafeCss(css) {
     // A rule's own braces are one level; each @media/@supports around it one more.
     if (cssDepth(css) > MAX_AT_DEPTH + 1) return `may nest @-rules at most ${MAX_AT_DEPTH} deep`;
     if (CSS_UNSAFE.test(css)) return 'may not use @import, expression(), behavior, -moz-binding, < or backslashes';
+    // A selector that reaches past the screen's root (the page beside it, its siblings, a :has() on them) is refused whole.
+    const reach = sheetEscape(css);
+    if (reach) return `may style only inside its own screen (a selector ${reach})`;
     for (const [, , target] of css.matchAll(CSS_URL)) if (!CSS_SAFE_URL.test(target.trim())) return `may load only https or image data URLs (not "${target.trim().slice(0, 40)}")`;
     return cssUrlProblem(css);
 }

@@ -27,6 +27,7 @@ import { PROMPT_FOLD, createPromptReader } from './prompt.js';
 import { FORM_TEXT } from '../form/schema.js';
 import { searchField } from '../form/fields.js';
 import { followViewport, holdPage, revealIn } from '../scroll.js';
+import { stackOf } from '../modal-stack.js';
 import { tabs as tabsBlock } from '../widgets/nav.js';
 import { SECTION_BODIES, createLegacySettings } from './bodies.js';
 import { DEFAULT_SECTION, SECTION_IDS, SETTINGS_SECTIONS, WINDOW_TEXT } from './sections.js';
@@ -62,7 +63,6 @@ const windowOpenState = new Map();
 export function openSettingsWindow({ registry, settings, doc = globalThis.document, sdk = null, features = null, promptParts = null, countTokens = null, diagnostics = null, tabs = null, theme = null, profiles = null, fold: target = null, openState = windowOpenState, onClose = null, bodies = SECTION_BODIES }) {
     if (current?.root?.ownerDocument === doc) current.close();
     doc.querySelector?.(`#${WINDOW_ID}`)?.remove();
-    const before = doc.activeElement ?? null;
 
     // ---- the frame
     const layer = h(doc, 'div', 'story-suite-overlay');
@@ -192,42 +192,10 @@ export function openSettingsWindow({ registry, settings, doc = globalThis.docume
         content.scrollTop = 0;
     }
 
-    // ---- keeping the focus inside, Escape, Close
+    // ---- Escape, Tab and the focus: the window is a layer of the shared stack (modal-stack.js). Escape closes it unless a field
+    // in it takes the key first (the search box empties itself); Tab stays in it; a focus that lands on the page comes back in.
     let open = true;
-    const onFocus = event => {
-        if (open && event?.target && !win.contains(event.target)) (focusablesIn(win)[0] ?? win).focus?.({ preventScroll: true });
-    };
-    const onKey = event => {
-        if (event?.key === 'Escape') {
-            event.preventDefault?.();
-            event.stopPropagation?.();
-            api.close();
-            return;
-        }
-        if (event?.key !== 'Tab') return;
-        const nodes = focusablesIn(win);
-        if (!nodes.length) {
-            event.preventDefault?.();
-            return;
-        }
-        const at = nodes.indexOf(doc.activeElement);
-        const next = event.shiftKey ? (at <= 0 ? nodes.at(-1) : null) : (at === -1 || at === nodes.length - 1 ? nodes[0] : null);
-        if (next) {
-            event.preventDefault?.();
-            next.focus?.({ preventScroll: true });
-        }
-    };
-    layer.addEventListener('keydown', onKey);
-    // Escape closes the window even when the focus has fallen to the page (a control that held it was disabled or taken out): a key
-    // that starts outside the window never reaches the layer's own listener.
-    const onPageKey = event => {
-        if (open && event?.key === 'Escape' && !layer.contains(event.target)) {
-            event.preventDefault?.();
-            api.close();
-        }
-    };
-    doc.addEventListener?.('keydown', onPageKey);
-    doc.addEventListener?.('focusin', onFocus, true);
+    const modal = stackOf(doc).push({ name: 'settings', root: win, onEscape: () => { api.close(); return true; } });
     // A click on the dimmed page beside the window closes it, but a drag that starts inside (selecting text) and ends
     // outside does not.
     let pressedOnLayer = false;
@@ -256,8 +224,7 @@ export function openSettingsWindow({ registry, settings, doc = globalThis.docume
             if (!open) return;
             open = false;
             if (current === api) current = null;
-            doc.removeEventListener?.('focusin', onFocus, true);
-            doc.removeEventListener?.('keydown', onPageKey);
+            stackOf(doc).pop(modal);
             releasePage();
             stopViewport();
             layer.removeEventListener('scroll', pinLayer);
@@ -268,7 +235,6 @@ export function openSettingsWindow({ registry, settings, doc = globalThis.docume
             layer.remove();
             doc.body.classList.remove(OPEN_CLASS);
             try { onClose?.(); } catch { /* the window is closed either way */ }
-            if (before && before !== doc.body && before.isConnected !== false) before.focus?.({ preventScroll: true });
         },
     };
     current = api;

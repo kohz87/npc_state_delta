@@ -64,9 +64,6 @@ const SHARED = Object.freeze({
     '--ss-sp': '#e8b04b',
     '--ss-exp': 'var(--ss-accent)',
     '--ss-tick': '#2fbf71',
-    '--ss-bad': '#ff6b6b',
-    '--ss-warn': '#e8b04b',
-    '--ss-info': '#4fa3ff',
     '--ss-uncommon': '#2fbf71',
     '--ss-rare': '#4fa3ff',
     '--ss-epic': '#b07cff',
@@ -86,9 +83,13 @@ export const PALETTES = Object.freeze({
         text: '#f1f2f8', muted: '#b6bacb', track: 'rgba(255, 255, 255, 0.14)',
         pill: 'rgba(255, 255, 255, 0.14)', pillText: '#f1f2f8', badge: '#f1f2f8', badgeText: '#141720',
         field: 'rgba(0, 0, 0, 0.22)', overlay: 'rgba(24, 27, 42, 0.72)', scrim: 'rgba(8, 10, 20, 0.6)', off: 'rgba(255, 255, 255, 0.22)', accentSoft: 'rgba(123, 108, 240, 0.24)',
-        good: '#72dea4', chatter: '#d2cbff',
+        good: '#72dea4', bad: '#ff6b6b', warn: '#e8b04b', info: '#4fa3ff', chatter: '#d2cbff',
         // the accent as TEXT on the glass (the bar's current label, a tile's icon): >= 4.5:1 on the dark glass (the accent itself is ~4:1)
         accentText: '#a99dff',
+        // warning and error TEXT (not fills): >= 4.5:1 on the glass; the base tones (--ss-bad, --ss-warn) stay for fills and bars
+        badText: '#ff8a8a', warnText: '#f5c35b',
+        // the settings window's help lines (field, card and feature help, the credit): >= 4.5:1 at the 5th percentile of the busy background
+        help: '#d0d4e2',
     }),
     light: Object.freeze({
         base: [255, 255, 255], solid: '#f6f5fb',
@@ -96,9 +97,12 @@ export const PALETTES = Object.freeze({
         text: '#23253a', muted: '#5b5e74', track: 'rgba(35, 37, 58, 0.1)',
         pill: '#2c2f46', pillText: '#ffffff', badge: '#2c2f46', badgeText: '#ffffff',
         field: 'rgba(255, 255, 255, 0.85)', overlay: 'rgba(255, 255, 255, 0.78)', scrim: 'rgba(35, 37, 58, 0.38)', off: 'rgba(35, 37, 58, 0.22)', accentSoft: 'rgba(123, 108, 240, 0.16)',
-        good: '#1d7c4a', chatter: '#5544c4',
+        good: '#1d7c4a', bad: '#b3261e', warn: '#8a5a00', info: '#1f6fd0', chatter: '#5544c4',
         // the accent as text on the light glass: >= 4.5:1
         accentText: '#5a48d6',
+        // warning and error TEXT on the light glass: >= 4.5:1 (the base tones are 2.56:1 and 1.80:1 on #f6f5fb)
+        badText: '#a4262c', warnText: '#8a4b00',
+        help: '#23253a',
     }),
 });
 
@@ -261,7 +265,16 @@ export function schemeTokens(scheme, panel, { opaque = false, strength = DEFAULT
             // the accent as text, following SillyTavern's own colours: its quote colour mixed with its text colour (40:60), so it reads
             // on a light theme too (the quote colour alone is ~2:1 there); on a dark theme it stays light
             ['--ss-accent-text', 'color-mix(in srgb, var(--SmartThemeQuoteColor, #e18a24) 40%, var(--SmartThemeBodyColor, #dcdcd2))'],
+            // warning and error text: the scheme's fixed text tones (the theme's own colours are not known to be readable)
+            ['--ss-bad-text', PALETTES[scheme]?.badText ?? PALETTES.dark.badText],
+            ['--ss-warn-text', PALETTES[scheme]?.warnText ?? PALETTES.dark.warnText],
+            ['--ss-help', PALETTES[scheme]?.help ?? PALETTES.dark.help],
             ['--ss-good', '#4caf6e'],
+            // the other tones (module borders, tints and tags use them): the scheme's fixed tones, each >= 4.5:1 as text on that scheme's
+            // surface; without them a `var(--ss-bad)` here would be invalid and the ring or tint would vanish
+            ['--ss-bad', PALETTES[scheme]?.bad ?? PALETTES.dark.bad],
+            ['--ss-warn', PALETTES[scheme]?.warn ?? PALETTES.dark.warn],
+            ['--ss-info', PALETTES[scheme]?.info ?? PALETTES.dark.info],
             ['--ss-chatter', 'var(--SmartThemeEmColor, #919191)'],
             ['--ss-blur', 'blur(var(--SmartThemeBlurStrength, 0px))'],
         ];
@@ -295,9 +308,16 @@ export function schemeTokens(scheme, panel, { opaque = false, strength = DEFAULT
         ['--ss-off', p.off],
         ['--ss-accent', ACCENT],
         ['--ss-accent-text', p.accentText],
+        ['--ss-bad-text', p.badText],
+        ['--ss-warn-text', p.warnText],
+        ['--ss-help', p.help],
         ['--ss-tab-edge', 'var(--ss-accent)'],
         ['--ss-accent-soft', p.accentSoft],
         ['--ss-good', p.good],
+        // The tones as text and rings on the glass: each scheme's own, every one >= 4.5:1 for text on its solid surface.
+        ['--ss-bad', p.bad],
+        ['--ss-warn', p.warn],
+        ['--ss-info', p.info],
         ['--ss-chatter', p.chatter],
         ['--ss-blur', solid ? 'none' : 'blur(16px) saturate(1.2)'],
         // The legacy surfaces (`.story-suite-sheet`, `.ss-gameview`: host.css, mounts.css) paint these when they are set,

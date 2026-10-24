@@ -16,6 +16,7 @@ import { h, iconNode, runCommand, shell, str } from './dom.js';
 import { defineWidget, resolveProps } from './props.js';
 import { cutAt } from '../../../text.js';
 import { focusNode } from '../scroll.js';
+import { focusablesIn as keyFocusables, stackOf } from '../modal-stack.js';
 
 export const ACTION_MAX = 4;
 export const ACTION_KINDS = Object.freeze(['primary', 'plain', 'danger']);
@@ -34,8 +35,6 @@ const dialogProps = {
 
 const short = (value, max) => cutAt(str(value).replace(/\s+/g, ' ').trim(), max);
 let serial = 0;
-// The dialogs that are open, the topmost last: only that one takes the keys.
-const stack = [];
 
 /** The actions as drawn: at most ACTION_MAX, each { id, label, kind, icon }; one without a label is left out. */
 export function dialogActions(list) {
@@ -89,70 +88,31 @@ function renderDialog(el, input, api) {
 
         let isOpen = false;
         let lastProp = null;
-        let before = null;
         let alive = true;
         const win = doc.defaultView;
         const later = fn => (typeof win?.requestAnimationFrame === 'function' ? win.requestAnimationFrame(() => alive && fn()) : fn());
 
-        const top = () => stack[stack.length - 1] === token;
-        const token = {};
-        function onKey(event) {
-            if (!isOpen || !top()) return;
-            if (event.key === 'Escape') {
-                if (!p.closable) return;
-                event.preventDefault?.();
-                event.stopPropagation?.();
-                finish('close');
-                return;
-            }
-            if (event.key !== 'Tab') return;
-            const nodes = focusablesIn(panel);
-            if (!nodes.length) {
-                event.preventDefault?.();
-                focusNode(panel);
-                return;
-            }
-            const at = nodes.indexOf(doc.activeElement);
-            const next = event.shiftKey ? (at <= 0 ? nodes.at(-1) : null) : (at === -1 || at === nodes.length - 1 ? nodes[0] : null);
-            if (next) {
-                event.preventDefault?.();
-                focusNode(next);
-            }
-        }
-        // A focus that lands outside the panel (a click on the page behind, a script) is brought back in.
-        function onFocus(event) {
-            if (!isOpen || !top() || !event.target || panel.contains?.(event.target)) return;
-            focusNode(focusablesIn(panel)[0] ?? panel);
-        }
-        function release() {
-            const at = stack.indexOf(token);
-            if (at >= 0) stack.splice(at, 1);
-            doc.removeEventListener?.('keydown', onKey, true);
-            doc.removeEventListener?.('focusin', onFocus, true);
-        }
+        let layer = null;         // the dialog's entry in the shared stack (modal-stack.js) while it is open
+        // Escape closes it (unless it is not closable), Tab stays in the panel and a focus that lands outside is brought back in:
+        // the shared stack does that for the topmost layer only.
         function show() {
             if (isOpen) return;
             isOpen = true;
             root.hidden = false;
-            const active = doc.activeElement;
-            before = active && active !== doc.body ? active : null;
-            stack.push(token);
-            doc.addEventListener?.('keydown', onKey, true);
-            doc.addEventListener?.('focusin', onFocus, true);
+            layer = stackOf(doc).push({ name: 'dialog', root: panel, onEscape: () => { if (!p.closable) return false; finish('close'); return true; } });
             later(() => {
                 if (!isOpen) return;
                 const main = foot.querySelector('.ss-modal-primary');
-                focusNode(main ?? focusablesIn(panel)[0] ?? panel);
+                focusNode(main ?? keyFocusables(panel)[0] ?? panel);
             });
         }
         function hide() {
             if (!isOpen) return;
             isOpen = false;
             root.hidden = true;
-            release();
-            const back = before;
-            before = null;
-            if (back && back.isConnected !== false) focusNode(back);
+            const was = layer;
+            layer = null;
+            if (was) stackOf(doc).pop(was);
         }
         // An answer: the command, then close.
         function finish(answer) {
@@ -171,7 +131,6 @@ function renderDialog(el, input, api) {
         cleanup(() => {
             alive = false;
             hide();
-            release();
         });
 
         function update() {
