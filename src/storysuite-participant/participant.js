@@ -68,6 +68,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     let indexKey = null;
     let handle = null;
     let queue = Promise.resolve();
+    let hydrating = false;
 
     /** Runs `fn` after every earlier callback is done; a thrown error is a FAILED answer, never a crash of the queue. */
     const exclusive = fn => {
@@ -257,7 +258,21 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         participant,
         /** The query the host resolves a death's npc with and Story Director a check's target with. Null until the identity is hydrated. */
         queries: {
-            'npc.identity': (_state, args) => (index && indexKey === String(port.chatKey()) ? resolveIdentity(index.identity, port.readState()?.npcs, args) : null),
+            'npc.identity': (_state, args) => {
+                const key = String(port.chatKey());
+                const npcs = port.readState()?.npcs;
+                // Not yet hydrated for this chat, or a dossier with no np_ yet (a scan, an import): the answer is null now, the hydration
+                // runs behind it (never inside a query), and the next ask finds the ids.
+                const unsettled = !index || indexKey !== key || (Array.isArray(npcs) && npcs.some(npc => typeof npc?.id === 'string' && !Object.hasOwn(index.identity.byKey, npc.id)));
+                if (unsettled) {
+                    if (key && key !== 'no-chat' && !hydrating) {
+                        hydrating = true;
+                        void exclusive(async () => { try { await hydrate(); } finally { hydrating = false; } });
+                    }
+                    if (!index || indexKey !== key) return null;
+                }
+                return resolveIdentity(index.identity, npcs, args);
+            },
         },
         hydrate: () => exclusive(async () => { const idx = await hydrate(); return { ok: true, npcs: Object.keys(idx.identity.byKey).length }; }),
         nativeChange,

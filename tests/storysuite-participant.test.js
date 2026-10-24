@@ -278,3 +278,21 @@ test('the file vault writes SillyTavern\'s user files and reads them back; a che
     const refusing = fileVault({ fetchFn: async () => ({ ok: false, status: 500 }) });
     await assert.rejects(() => refusing.putIndex('chat:x', {}));
 });
+
+test('the query hydrates behind itself: null until the map is made for the chat, then the ids; a dossier admitted later is found on the next ask', async () => {
+    const { queries, live, identity } = setup();
+    const ask = args => queries['npc.identity'](null, args);
+    assert.equal(ask({ name: 'Mira' }), null, 'the first ask: nothing yet');
+    await new Promise(resolve => setTimeout(resolve, 5));
+    const mira = identity().byKey.npc_mira;
+    assert.equal(ask({ name: 'Mira' }).id, mira);
+    live.state.npcs.push(npc('npc_late', 'Late'));
+    assert.equal(ask({ name: 'Late' }), null, 'a scan admitted a dossier: no np_ yet');
+    assert.equal(ask({ name: 'Mira' }).id, mira, 'the others still answer');
+    await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(ask({ name: 'Late' }).nativeKey, 'npc_late');
+    live.chatKey = 'chat:avatar.png:two';
+    assert.equal(ask({ name: 'Mira' }), null, 'another chat: not hydrated for it yet');
+    live.chatKey = 'no-chat';
+    assert.equal(ask({ name: 'Mira' }), null);
+});
