@@ -1191,7 +1191,7 @@ export function createStorySuiteV2Adapter({
             readState: () => runtime()?.getState?.() ?? { npcs: [] },
             installState: state => runtime().installState(state),
             writeTimeline: block => runtime().writeTimeline(block),
-            busy: () => runtime()?.scanBusy?.() === true,
+            busy: () => runtime()?.scanActive?.() === true,
             idle: ms => (typeof runtime()?.scanIdle === 'function' ? runtime().scanIdle(ms) : Promise.resolve(true)),
             restored: () => { void refreshActive(); },
             warn: text => warn(text),
@@ -1205,7 +1205,7 @@ export function createStorySuiteV2Adapter({
         const key = String(api.chatKey?.() ?? '');
         if (!key || key === 'no-chat' || key === primedKey) return;
         primedKey = key;
-        void timeline.hydrate();
+        void timeline.prime();
         void refreshActive();
     }
     function startTimeline() {

@@ -102,7 +102,7 @@ test('the registered module declares the participant and answers npc.identity; a
         await api.installState(structuredClone(api.getState()));
         await api.writeTimeline(structuredClone(api.getState().timeline));
         assert.equal(again, 0, 'the participant\'s own writes are not native changes');
-        assert.equal(api.scanBusy(), false);
+        assert.equal(api.scanActive(), false);
         assert.equal(await api.scanIdle(50), true);
         stopAgain();
         await assert.rejects(() => api.installState(null), /object/);

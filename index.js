@@ -1220,6 +1220,8 @@ function installCanonicalServerState(key, pointer, inspected, { reason = 'freshn
         latestObservedServerWriterId: inspected.writerId,
     });
     persistSettings();
+    // (timeline participant) The server's newer copy is now the working state: a native change that no persist call announces.
+    announceNativeChange(key);
     if (getChatKey() === key) {
         renderDossier();
         updateInjection();
@@ -7779,7 +7781,7 @@ window.NPCStateDelta = Object.freeze({
     },
     // Whether the open chat's dossier state is loaded (the participant hydrates its ids at chat open), and whether a scan or pass is in flight.
     stateReady: () => chatHydrationStatus() === 'ready',
-    scanBusy: () => isScanBusy(),
+    scanActive: () => isScanBusy(),
     scanIdle: ms => scanIdle(ms),
     // Which messages the story stands on (the Story Suite adapter's gate): scans do not read what Story Block faded.
     useMessageGate: gate => useMessageGate(gate),

@@ -85,6 +85,8 @@ test('N2: every durable write of the chat\'s state ends in the one function that
     // The three ways to save a chat's state, and the queue every scan, edit, import and reconcile goes through, all pass through it.
     for (const name of ['queueStateFileWrite', 'persistCritical']) assert.match(body(name), /markStateDirty\(key\)/, name);
     assert.match(index.slice(index.indexOf('async function persistCriticalDurable('), index.indexOf('async function persistCriticalDurable(') + 400), /markStateDirty\(key\)/);
+    // The server's newer copy adopted as the working state is a change no persist call announces: it announces itself.
+    assert.match(index.slice(index.indexOf('function installCanonicalServerState('), index.indexOf('async function reconcileCrossSessionWriteConflict(')), /announceNativeChange\(key\)/);
     // The participant's own writes are not changes.
     assert.match(index, /return quietly\(async \(\) => \{\s*setChatState\(key, state, \{ markLoaded: true \}\);/);
     assert.match(index, /writeTimeline: async block =>[\s\S]*?return quietly\(/);
