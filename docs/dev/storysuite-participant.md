@@ -41,8 +41,8 @@ This folder is Delta's: `src/storysuite-participant/` (new files only; Delta's o
 
 The participant needs three things of Delta's runtime (the `port`): `chatKey()`, `readState()` (synchronous, a copy) and `installState(state)`
 (an absolute, durable replacement). `chatKey` and `installState` are new on `window.NPCStateDelta` (`index.js`), and the module definition in
-`src/storysuite-v2.js` declares `participant` and answers `npc.identity`: that registration is the lead's ("lead-owned:" commit on this
-branch). Not done, written down:
+`src/storysuite-v2.js` declares `participant` and answers `npc.identity`: that registration and the two runtime entries are the lead's (the
+"lead-owned:" commit on this branch; `tests/storysuite-participant-runtime.test.js` runs them in the real runtime). Not done, written down:
 
 - Delta's scan, manual edit and meter paths do **not** yet publish through `nativeChange`; until they do, a native change made between two save
   points is carried by the next checkpoint (state is whole in every checkpoint) but is not a head of its own. The np_ of a dossier admitted by
