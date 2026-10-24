@@ -23,7 +23,7 @@ assert all((root / name).is_file() for name in runtime_files), 'runtime inventor
 # src/npc-meters.js, src/npc-meters-screen.js and src/npc-meters-presets.js are its npc slice, NPC card and meter presets;
 # src/social-check.js is the social check rules (npc.socialModifier);
 # src/storysuite-participant/ is the Story Block restore participant (checkpoint, prepare, activate, npc.identity).
-support_files = ['style.css', 'suite.css', 'manifest.json', 'runtime-modules.json', 'LICENSE', 'README.md', 'src/storysuite-v2.js', 'src/npc-meters.js', 'src/npc-meters-screen.js', 'src/npc-meters-presets.js', 'src/social-check.js', 'src/storysuite-participant/checkpoint.js', 'src/storysuite-participant/hash.js', 'src/storysuite-participant/identity.js', 'src/storysuite-participant/index.js', 'src/storysuite-participant/participant.js', 'src/storysuite-participant/vault.js']
+support_files = ['style.css', 'suite.css', 'manifest.json', 'runtime-modules.json', 'LICENSE', 'README.md', 'src/storysuite-v2.js', 'src/npc-meters.js', 'src/npc-meters-screen.js', 'src/npc-meters-presets.js', 'src/social-check.js', 'src/storysuite-participant/checkpoint.js', 'src/storysuite-participant/hash.js', 'src/storysuite-participant/identity.js', 'src/storysuite-participant/index.js', 'src/storysuite-participant/participant.js', 'src/storysuite-participant/timeline.js', 'src/storysuite-participant/vault.js']
 files = runtime_files + support_files
 src_js = sorted(p.relative_to(root).as_posix() for p in (root / 'src').rglob('*.js'))
 assert all(name in files for name in src_js), 'every src/ module must be packaged'
