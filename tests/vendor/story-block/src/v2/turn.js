@@ -25,6 +25,7 @@ import { assistSections, continuation, cutLine, defangMarker, extractBlock, gram
 import { notWritten } from './assist/extractor.js';
 import { refusedWhy } from './assist/safety.js';
 import { displayLines, readDisplayLine } from './extras.js';
+import { replacedProofs } from './evidence.js';
 import { hash, readRecord, swipeLoading } from './persist.js';
 import { CAPTURE_PREFIX, HOST_MODULE } from './registry.js';
 import { STATIC_MARKER, assemble, contextNotice, estimateTokens } from './prompt.js';
@@ -332,7 +333,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         const reply = own ?? (at !== null && store.carrierSid?.(at) ? { index: at, sid: store.carrierSid(at) } : null);
         const ordinal = info?.span?.source?.ordinal;
         // The proof of the block being planned again may be given again: the step keeps its ids.
-        const replacing = (info?.span?.evidence ?? []).map(proof => proof?.id).filter(Boolean);
+        const replacing = Array.isArray(info?.span?.evidence) ? info.span.evidence : [];
         return bus.run(plan.type, plan.payload ?? {}, { cause: 'system', state, seed: plan.seed, replacing, ...(reply ? { reply: Number.isInteger(ordinal) ? { ...reply, ordinal } : reply } : {}) });
     }
 
@@ -967,15 +968,6 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         return { code: life?.status === 'restore-pending' ? 'RESTORE_PENDING' : 'DEPENDENCY_UNAVAILABLE', name: registry.module?.(id)?.name ?? id, reason: life?.reason ?? 'It is not running.' };
     }
 
-    // The proof ids on the blocks a Re-read replaces: its story lines' and its planned steps' (spans marked `story` or `replan`).
-    function replacedProof(record) {
-        const ids = new Set();
-        for (const span of Array.isArray(record?.spans) ? record.spans : []) {
-            if (span && (span.story === true || span.replan)) for (const proof of Array.isArray(span.evidence) ? span.evidence : []) if (typeof proof?.id === 'string') ids.add(proof.id);
-        }
-        return ids;
-    }
-
     async function reread(index) {
         const chat = ctx?.chat ?? [];
         const message = Number.isInteger(index) ? chat[index] : undefined;
@@ -1006,9 +998,9 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         let ops;
         let off = [];
         let steps = [];
-        // `replacing`: the proof ids of the blocks this Re-read replaces (the story lines and the steps), free to be given
-        // again, so a line that reads as it did keeps its ids and what the reader built on them.
-        const plan = { blocks: [], pending: 0, replacing: replacedProof(readRecord(message)) };
+        // `replacing`: the proof of the blocks this Re-read replaces (its story lines and its steps). A proof given again keeps the id of the
+        // old one of the same kind and key at the same place among those, so a line that reads as it did keeps its ids and what was built on them.
+        const plan = { blocks: [], pending: 0, replacing: replacedProofs(readRecord(message)) };
         try {
             let after;
             const seeds = storySeeds(readRecord(message));

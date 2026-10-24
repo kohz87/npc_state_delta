@@ -52,7 +52,7 @@ export const STANDARD_PREFIX = 'ss.';
 const SETTINGS_KEYS = ['defaults', 'schema', 'section', 'render', 'folds', 'place', 'rules'];
 export const SETTINGS_PLACES = Object.freeze(['diagnostics']);
 const placeOf = value => (SETTINGS_PLACES.includes(value) ? value : null);
-const KNOWN_KEYS = ['id', 'name', 'version', 'description', 'requires', 'domains', 'commands', 'queries', 'capture', 'context', 'hooks', 'settings', 'tabs', 'screens', 'widgets', 'features', 'cards', 'participant', 'batchResults'];
+const KNOWN_KEYS = ['id', 'name', 'version', 'description', 'requires', 'domains', 'commands', 'queries', 'replayQueries', 'capture', 'context', 'hooks', 'settings', 'tabs', 'screens', 'widgets', 'features', 'cards', 'participant', 'batchResults'];
 const CONTEXT_KEYS = ['static', 'tail', 'budget', 'feature', 'parts'];
 // What `requires` may name: the Story Block it needs, and the peers (modules) it needs registered.
 const REQUIRES_KEYS = ['storyBlock', 'peers'];
@@ -199,6 +199,17 @@ export function definitionProblems(def) {
         for (const [name, query] of Object.entries(def.queries)) {
             if (!COMMAND.test(name)) problems.push(`the query name "${name}" must be words joined by dots (like "party.actors")`);
             fn(query, `query "${name}"`);
+        }
+    }
+    // The queries a guard may ask on replay (docs/v2/REPLAY.md): the module's own, named here, and a promise that each depends on
+    // the state and its arguments alone.
+    if (def.replayQueries !== undefined) {
+        if (!Array.isArray(def.replayQueries)) problems.push('replayQueries is not a list of query names');
+        else {
+            for (const name of def.replayQueries) {
+                if (typeof name !== 'string') problems.push('replayQueries names something that is not a query name');
+                else if (typeof def.queries?.[name] !== 'function') problems.push(`replayQueries names "${name}", which is not one of this module's queries`);
+            }
         }
     }
     if (map(def.capture, 'capture')) {

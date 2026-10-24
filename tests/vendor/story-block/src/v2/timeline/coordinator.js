@@ -64,26 +64,35 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
     let sessionId = null;
     const session = () => (sessionId ??= makeId('ss'));
     let busy = Promise.resolve();
-    let running = 0;   // operations started and not ended: they own their journal entries
+    // Operations started and not ended, by the chat they were made for: they own that chat's journal entries. A chat's work is its own.
+    const running = new Map();
+    const runningIn = holder => running.get(holder) ?? 0;
+    const bump = (holder, by) => { if (runningIn(holder) + by > 0) running.set(holder, runningIn(holder) + by); else running.delete(holder); };
     // In-memory state belongs to one chat. A block stored and not yet told is owed to the listeners once the chat file has it, and
     // carries the chat and the receipt it was stored with; the barrier this raised carries the chat it was raised for. On a change of
     // chat what belongs to another is dropped (`settle`), and before anything is told the chat and the receipt are looked at again.
     let owed = [];     // [{ stored, holder, id }]
     let barrierOwner = null;   // the chat whose restore or native change raised the barrier (null: not raised by the timeline)
+    let barrierEarly = false;  // raised by `settle` as the chat opened, before its recovery had its turn (not by a running operation)
 
     // ---- helpers -----------------------------------------------------------------------------------------
 
     // One thing at a time: a make, a prepare, an activate or a recover starts when the one before it has ended.
-    const scoped = async fn => {
+    // Work carries its chat from the moment it is made (`holder`, taken when it is queued, not when its turn comes): if another chat is
+    // open when its turn comes, it is STALE and does not run. The queue is one line for the whole host, so two chats' work never
+    // overlaps, but nothing in it is anonymous.
+    const scoped = async (fn, holder) => {
         settle();
-        scope = { holder: archive.holder() };
+        if (archive.holder() !== holder) return fail('STALE', 'Another chat was opened before this was done; nothing was changed in the chat that is open now.');
+        scope = { holder };
         try { return await fn(); } finally { scope = null; }
     };
     const exclusive = fn => {
-        running += 1;
-        const run = busy.then(() => scoped(fn), () => scoped(fn));
+        const holder = archive.holder();
+        bump(holder, 1);
+        const run = busy.then(() => scoped(fn, holder), () => scoped(fn, holder));
         busy = run.then(() => {}, () => {});
-        run.then(() => { running -= 1; }, () => { running -= 1; });
+        run.then(() => bump(holder, -1), () => bump(holder, -1));
         return run;
     };
     const guarded = async fn => {
@@ -139,7 +148,15 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         owed = owed.filter(each => each.holder === holder);
         if (barrierOwner !== null && barrierOwner !== holder) {
             barrierOwner = null;
+            barrierEarly = false;
             barrier('idle', '');
+        }
+        // A chat whose journal has work unfinished is barred from the moment it is open; its recovery follows when the queue gives it
+        // its turn (a make of another chat may be holding the line meanwhile).
+        if (holder && barrierOwner === null && pendingEntry() !== null) {
+            barrierOwner = holder;
+            barrierEarly = true;
+            barrier('pending', 'A restore is finishing; every part must agree before the story goes on.');
         }
     }
     // A clean-up after a failure that is not itself a durable step: the journal word it writes rides with the next save (a
@@ -152,8 +169,8 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
     };
     const owe = stored => { owed.push({ stored, holder: archive.holder(), id: stored.receipt.id }); return stored; };
     // The host's restore barrier, raised or dropped only for the chat the operation is in, and remembered as that chat's.
-    const raise = reason => { here(); barrierOwner = archive.holder(); barrier('pending', reason); };
-    const lower = () => { here(); barrierOwner = null; barrier('idle', ''); };
+    const raise = reason => { here(); barrierOwner = archive.holder(); barrierEarly = false; barrier('pending', reason); };
+    const lower = () => { here(); barrierOwner = null; barrierEarly = false; barrier('idle', ''); };
     const isHost = auth => auth === capability || auth?.capability === capability;
     const pendingEntry = () => archive.entries().find(entry => entry.kind === 'restore' && ['committed', 'participants-pending', 'acked'].includes(entry.phase))
         ?? archive.entries().find(entry => ['native-mutation', 'native-event'].includes(entry.kind) && entry.phase === 'prepared')
@@ -774,9 +791,26 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
 
     // ---- recover -----------------------------------------------------------------------------------------------
 
+    // The story as it stands with the modules not held back, read in one synchronous step while commands stay barred: the barrier is
+    // put back before anything else can run and nothing is announced, so no listener sees the host ready (or acts) on a story whose
+    // native state has not caught up. Internal to recovery; nothing outside this file can ask it.
+    function wholeStory() {
+        const was = registry.restore();
+        if (was.state !== 'pending') return store.head();
+        registry.setRestore('idle', '');
+        try {
+            store.lifecycleChanged?.();   // (the guarded blocks are asked again with the modules not held: no 'modules' event, no 'head' event)
+            return store.head();
+        } finally {
+            registry.setRestore(was.state, was.reason);
+            store.lifecycleChanged?.();
+        }
+    }
+
     // Host startup: what was committed is finished, what was only prepared is aborted. No clock, no target is chosen again.
     async function recover() {
         if (!archive.exists()) return { ok: true, state: 'idle', return: null };
+        const early = barrierEarly && barrierOwner === archive.holder();
         let ret = null;
         for (const entry of archive.entries()) {
             if (entry.kind === 'make') {
@@ -793,13 +827,13 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
                 } else if (['committed', 'participants-pending', 'acked'].includes(entry.phase)) {
                     // A start finds the story whole and asks whether it still holds the restore. Within a run that already has the
                     // barrier up it cannot ask: with the modules held, their guarded blocks are off and the story is not whole.
-                    const state = store.head();
+                    // (the barrier `settle` raised when this chat opened is not one of a run: the story is looked at whole, as it was before)
+                    const state = early ? wholeStory() : store.head();
                     const there = state?.domains?.[HOST_DOMAIN]?.returns?.[entry.return];
-                    if (registry.restore?.().state !== 'pending' && !isObject(there)) {
+                    if ((early || registry.restore?.().state !== 'pending') && !isObject(there)) {
                         // The story no longer holds the restore (its reply was swiped or deleted): its participants are the next package's.
                         archive.patch(entry.id, { phase: 'retracted', why: 'the story no longer holds the restore' });
-                        lower();
-                        continue;
+                        continue;   // (the barrier comes down once, below, when nothing else is left to finish)
                     }
                     raise('A restore is finishing; every part must agree before the story goes on.');
                     const done = await finish(archive.get(entry.id));
@@ -815,6 +849,8 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
                 }
             }
         }
+        // (a barrier raised as this chat opened, for work that turned out to be nothing to finish, does not stay up)
+        if (barrierOwner === archive.holder() && pendingEntry() === null) lower();
         await durable();
         const left = pendingEntry();
         return { ok: true, state: left ? 'pending' : 'idle', return: left?.kind === 'restore' ? left.return : ret };
@@ -1106,7 +1142,7 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         settle,
         available: hash => archive.hasPayload(hash),
         /** Whether the journal holds work no operation owns (a crashed make, a restore left half way): the host recovers it. */
-        needsRecovery: () => running === 0 && archive.exists() && archive.entries().some(entry => !settled(entry)),
+        needsRecovery: () => runningIn(archive.holder()) === 0 && archive.exists() && archive.entries().some(entry => !settled(entry)),
         archive,
         pending: pendingNow,
         /** Points of `state` with their bytes checked, in target order (the savepoint.list query). */

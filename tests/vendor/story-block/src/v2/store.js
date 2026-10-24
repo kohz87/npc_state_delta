@@ -41,10 +41,9 @@ import {
     KEY, RECEIPT_KEEP, carrierIndexes, carryRecord, createSaver, dropCopy, isCarrier, keepsCopy, lastCarrier,
     newRecordId, payloadText, readRecord, recordFault, restamp, restoreCopy, swipeOf, trimReceipts, writeRecord,
 } from './persist.js';
-import { claimKeys, deriveId, hashJson, isMetaSpan, isRecordId, spanProblem } from './replay.js';
-import { evidenceDigest, evidenceProblem, merged, pinOps, reachesBranch, recordEntries, touchesProof } from './evidence.js';
+import { claimKeys, deriveId, hashJson, isMetaSpan, isRecordId, replayInputsOf, spanProblem } from './replay.js';
+import { evidenceDigest, evidenceProblem, merged, opShapeProblem, pinOps, reachesBranch, recordEntries, touchesProof } from './evidence.js';
 import { HOST_DOMAIN, gateProblem } from './timeline/gate.js';
-
 
 export const CHECKPOINT_EVERY = 100;
 export const CHECKPOINT_BYTES = 128 * 1024;
@@ -500,20 +499,13 @@ export function createStore({
     }
 
     // The exact prefix a checkpoint was made over (the gate of trust, REPLAY.md "Checkpoints and covers"): a hash chained over
-    // every record before it as it is shown now, from the first: its swipe key, the block contents, the span sizes, each
-    // receipt's id, rev, cause and guarded mark (not the data a trim drops), the text of records that hold guarded blocks,
-    // and the first record's own starting point. Each link is kept per record while its input stays, so a read costs a lookup
+    // every record before it as it is shown now, from the first: all of replay.js replayInputsOf (everything replay reads
+    // from a record), the text of records that hold guarded blocks, and the first record's own starting point. Each link is kept per record while its input stays, so a read costs a lookup
     // per record and a change costs the records from it on.
     const spineDigests = new WeakMap();
     function spineDigest(record) {
         let digest = spineDigests.get(record);
-        if (!digest) {
-            spineDigests.set(record, digest = hashJson({
-                b: bodyDigest(record),
-                n: Array.isArray(record.spans) ? record.spans.map(span => [span?.n ?? null, span?.story === true]) : null,
-                r: record.receipts.map(receipt => [receipt?.id ?? null, receipt?.rev ?? null, receipt?.cause ?? null, receipt?.guarded === true]),
-            }));
-        }
+        if (!digest) spineDigests.set(record, digest = hashJson(replayInputsOf(record)));
         return digest;
     }
     const spineLinks = new WeakMap();
@@ -600,15 +592,31 @@ export function createStore({
     // A block with no metadata (a legacy block) never pins proof: only a guarded or proof block that holds the proof it
     // pins does (replayGuarded), so a hand-edited record cannot publish a proof by writing its pin on another block.
     function replayLegacy(state, ops) {
-        if (ops.some(touchesProof)) throw prerequisite('it changes the record of proof pins (or the state around it), and a block with no proof of its own cannot');
+        if (ops.some(op => op && typeof op === 'object' && touchesProof(op))) throw prerequisite('it changes the record of proof pins (or the state around it), and a block with no proof of its own cannot');
         if (ops.some(touchesHostDomain)) throw prerequisite('it writes the host\'s savepoints, and only the host\'s own blocks do');
         return step(state, ops, { replayed: true });
+    }
+
+    // A guarded block is stored only if its guard holds on the state before it when replayed (the context a replay asks in:
+    // the state and what it recorded). What a replay would refuse is refused here, so a state that was built live and one that
+    // is built again by replay cannot disagree about it. Nothing is asked of a store with no guard check attached.
+    const arr0 = index => list()[index];
+    function guardHolds(state, span, message) {
+        if (typeof guardCheck !== 'function' || !isMetaSpan(span) || !span.guard) return;
+        // (the epoch and rules gate first, as a replay does: docs/v2/TIMELINE.md)
+        const gate = gateProblem(state, span.guard);
+        if (gate) throw new Error(`Its guard would not hold when this is replayed, so it is not stored: ${gate}`);
+        const answer = askGuard(state, span, message);
+        if (!answer.ok) throw new Error(`Its guard would not hold when this is replayed, so it is not stored: ${answer.reason}`);
     }
 
     // A guarded block on replay (and in a Re-read's kept blocks): its record must be whole, from this
     // carrier, make the claims it lists, and pass its owner's guard on `state`; then its ops (claims among
     // them) are applied together. Throws a REPLAY_PREREQUISITE error otherwise, with nothing applied.
-    function replayGuarded(state, record, ops, span, message = null, receipt = null) {
+    // What a guarded block must be on its own, whatever the state: its record whole, the guard its receipt kept the one it holds, the
+    // reply and swipe it was recorded for, the claims its ops make. Throws a REPLAY_PREREQUISITE otherwise. A block that is not
+    // intact is not planned again either: planning would bring back what replay keeps off.
+    function blockIntact(record, ops, span, receipt) {
         const bad = spanProblem(span);
         if (bad) throw prerequisite(`its saved guard record is damaged: ${bad}`);
         // A guard the receipt kept (data.v2, set by the host) must be the one the span holds.
@@ -626,6 +634,13 @@ export function createStore({
         if (ops.some(touchesHostDomain) && !hostBlock(span.module, span.operation?.type)) throw prerequisite('it writes the host\'s savepoints, and only the host\'s own blocks do');
         const proof = evidenceProblem(span, ops);
         if (proof) throw prerequisite(`the proof it saved is not the proof its changes pin: ${proof}`);
+    }
+    const intactReason = (record, ops, span, receipt) => {
+        try { blockIntact(record, ops, span, receipt); return null; } catch (error) { return error.message; }
+    };
+
+    function replayGuarded(state, record, ops, span, message = null, receipt = null) {
+        blockIntact(record, ops, span, receipt);
         // A proof id belongs to the block that applied with it first: a later block that gives the same id collides and does not apply.
         const owned = state?.meta?.proofs;
         const collides = isObject(owned) ? span.evidence.find(each => Object.hasOwn(owned, each.id)) : undefined;
@@ -654,6 +669,19 @@ export function createStore({
     // after the blocks `earlier` ([{ ops, span }]) and `offset` ops: the host stamps the id (kept when the
     // block is planned again), the source, the claims its ops make and the boundary it starts at. `block` is
     // what the bus handed over: { module, source, guard, operation, recorded, result, id? }.
+    // The proof of a block that has applied, for the guards asked on the rest of a Re-read or a reconcile (walkProofs). Called only
+    // after the block applied: a block that was refused or collided publishes nothing.
+    // The first of `evidence`'s proofs whose id a block that has applied already owns in `state`, else undefined. A block planned again that
+    // would give such an id is refused before it applies and before it publishes: replacing a block's own ids never exempts another owner.
+    function ownedAlready(state, evidence) {
+        const pins = state?.meta?.proofs;
+        return isObject(pins) && Array.isArray(evidence) ? evidence.find(proof => Object.hasOwn(pins, proof?.id)) : undefined;
+    }
+
+    function publish(span) {
+        if (walkProofs && isMetaSpan(span) && Array.isArray(span.evidence)) for (const proof of span.evidence) walkProofs.set(proof.id, Object.freeze({ proof, block: span.id }));
+    }
+
     function stamp(arr, index, record, block, ops, receipt, earlier, offset, free = null) {
         const entry = record.source;
         const planned = block.source;
@@ -690,7 +718,6 @@ export function createStore({
         };
         const bad = spanProblem(span) || evidenceProblem(span, ops);
         if (bad) throw new Error(`The guarded block cannot be stored: ${bad}.`);
-        if (walkProofs) for (const proof of span.evidence) walkProofs.set(proof.id, Object.freeze({ proof, block: id }));
         if (span.guard) seeGuards();
         if (span.guard && span.replan) replanFrom = Math.min(replanFrom, index);
         return span;
@@ -721,7 +748,12 @@ export function createStore({
         staged = overlay;
         const outerApplying = applying;
         const head = current();
-        applying = head.state && !head.readOnly ? { list: [...appliedOf(arr, head).filter(entry => entry.index < first)], index: first, from: head.from ?? -1 } : null;
+        // Seeded from the walk's own base: the blocks before `first` that replay applied, counted once. A walk that starts before the
+        // checkpoint the head replays from lists the records before `first` as could-apply, and every record from `first` on is the walk's.
+        const rooted = first <= (head.from ?? -1);
+        applying = head.state && !head.readOnly
+            ? { list: rooted ? [] : [...appliedOf(arr, head).filter(entry => entry.index < first)], index: first, from: rooted ? first : head.from }
+            : null;
         try {
             let running = revOf(state);      // the rev the replies before ended on (a Re-read's new lines, a step planned again): the revs after are numbered on from it
             let history = false;     // guarded blocks before here: a checkpoint written here depends on their owners
@@ -848,6 +880,9 @@ export function createStore({
     // so a chat stored before a validator grew stricter still replays.
     function step(state, ops, { replayed = false, strict = false } = {}) {
         if (!ops.length) return state;
+        // Every change is looked at before any is rebased or passed over: a block with a change that is not one applies nothing.
+        const shape = opShapeProblem(ops);
+        if (shape) throw new Error(shape);
         const { ops: rebased, rebased: moved } = rebaseOps(state, ops, { scratch, replayed });
         const next = deepFreeze(apply(state, structuredClone(rebased)));
         if (typeof validate !== 'function') return next;
@@ -1022,6 +1057,19 @@ export function createStore({
         const out = rewrites ? { parts: [], gone: new Map(), changed: false, running, planned: 0, removed: 0 } : null;
         const anyGuardedReceipt = record.receipts.some(each => each?.guarded === true);
         const orphan = anyGuardedReceipt && quarantined(record);
+        // Quarantine is decided on the record as it is stored, before any rebase, renumbering or filtering below can touch it:
+        // it applies nothing and is never rewritten (so nothing renumbered can reattach the receipt that is detached).
+        if (orphan) {
+            parts.forEach(({ ops }, block) => {
+                problems.push({
+                    index, block, receipts: receiptsOf(record, ops), why: ORPHAN,
+                    message: `Some changes stored on message ${index} no longer apply and were skipped: ${ORPHAN}`,
+                    code: 'REPLAY_PREREQUISITE',
+                });
+                state = skipped(state, ops);
+            });
+            return { state, fields: null, running };
+        }
         parts.forEach(({ ops, span: stored }, block) => {
             let span = stored;
             // A block numbered at or below the rev the story is at (a swipe made before an earlier reply was read again, shown
@@ -1061,16 +1109,6 @@ export function createStore({
                 keep();
                 return;
             }
-            if (orphan) {
-                problems.push({
-                    index, block, receipts: receiptsOf(record, ops), why: ORPHAN,
-                    message: `Some changes stored on message ${index} no longer apply and were skipped: ${ORPHAN}`,
-                    code: 'REPLAY_PREREQUISITE',
-                });
-                state = skipped(state, blockOps);
-                keep();
-                return;
-            }
             const guarded = isGuardedBlock(span, anyGuardedReceipt ? stands : null);
             if (plans && isMetaSpan(span) && span.guard && span.replan && receipt) {
                 const done = replanned(state, record, index, span, receipt, blockOps, out, rerun);
@@ -1090,7 +1128,6 @@ export function createStore({
                 // It could not be asked: the block stays as it was, replayed as any block is (its guard decides).
             }
             try {
-                if (orphan && !isMetaSpan(span)) throw prerequisite(ORPHAN);
                 state = guarded ? replayGuarded(state, record, blockOps, span, message, receipt) : replayLegacy(state, blockOps);
                 keep();
             } catch (error) {
@@ -1121,6 +1158,8 @@ export function createStore({
     // be asked (the old block stays exactly as it was, and is replayed as it was: its guard decides). A new block that does not apply, or cannot be stored, throws:
     // nothing is changed.
     function replanned(state, record, index, span, receipt, blockOps, out, rerun) {
+        const broken = intactReason(record, blockOps, span, receipt);
+        if (broken) return { kept: true, why: broken };
         let planned = null;
         let failure = '';
         try {
@@ -1138,6 +1177,8 @@ export function createStore({
             const why = failure || `it was not asked (${planned?.code ?? 'no answer'}: ${planned?.message ?? 'nothing came back'})`;
             return { kept: true, why };
         }
+        const clash = ownedAlready(state, planned.block?.evidence);
+        if (clash) return { kept: true, why: `it would give proof ${clash.id}, which a block that applied already owns` };
         const fresh = asOps(planned.ops);
         let next;
         try {
@@ -1153,6 +1194,11 @@ export function createStore({
             const arr = list();
             const holder = withSource(arr[index], record);
             newSpan = { ...newSpan, ...stamp(arr, index, holder, { ...planned.block, id: span.id, source: { ...planned.block.source, ordinal: span.source.ordinal } }, fresh, newReceipt, out.parts, out.parts.reduce((sum, part) => sum + part.ops.length, 0)) };
+            publish(newSpan);     // it applied (step above)
+        }
+        // A block that would not hold on replay is not stored: the old block stays as it is, its own guard decides.
+        if (newSpan.guard) {
+            try { guardHolds(state, newSpan, arr0(index)); } catch (error) { return { kept: true, why: error.message }; }
         }
         // Planned to what it was: the old block stays as it is.
         const sameness = value => hashJson({ ops: value.ops, guard: value.span.guard ?? null, claims: value.span.claims ?? null, recorded: value.span.recorded ?? null,
@@ -1806,6 +1852,7 @@ export function createStore({
             const span = block
                 ? stamp(arr, index, record, block, added, receipt, blockParts({ ...record, spans, ops: record.ops }), record.ops.length)
                 : null;
+            if (span) guardHolds(base, span, message);
             write(message, {
                 ...record,
                 ops: [...record.ops, ...added],
@@ -1869,9 +1916,9 @@ export function createStore({
                 at += span.n;
             }
             let keptReceipts = record.receipts.filter(receipt => receipt?.cause !== 'story').map(receipt => structuredClone(receipt));
-            // A quarantined record applies nothing and is not rewritten (the receipts of its story lines go with the new lines,
-            // so it is the kept ones that are asked).
-            if (quarantined({ ops: record.ops, receipts: keptReceipts })) throw new Error(`This reply's story record is kept as it is and not read again: ${ORPHAN}.`);
+            // A quarantined record applies nothing and is not rewritten: decided on the record as stored, before the story
+            // receipts are filtered out or anything is renumbered.
+            if (quarantined(record)) throw new Error(`This reply's story record is kept as it is and not read again: ${ORPHAN}.`);
             const paired = keptReceipts.length === blocks.length;
             // The old afterCapture steps go when the Re-read ran them again (only told apart one to one).
             const resettle = Array.isArray(settled) && paired;
@@ -1902,15 +1949,18 @@ export function createStore({
                 && lines.reduce((sum, piece) => sum + piece.n, 0) === fresh.length && lines.some(piece => piece.block) ? lines : null;
             if (pieces) {
                 let offset = 0;
+                let upTo = base;         // the state before the piece
                 for (const piece of pieces) {
                     const own = fresh.slice(offset, offset + piece.n);
                     if (piece.block) {
                         let span;
                         try {
                             span = { n: piece.n, story: true, ...stamp(arr, index, record, piece.block, own, piece.receipt, nextParts, offset, replacedIds) };
+                            guardHolds(upTo, span, message);
                         } catch (error) {
                             throw fail(error);
                         }
+                        publish(span);     // the lines applied to the state before this point
                         storySpans.push(span);
                         nextParts.push({ ops: own, span });
                     } else if (storySpans.length && !isMetaSpan(storySpans.at(-1))) {
@@ -1921,6 +1971,7 @@ export function createStore({
                         storySpans.push(span);
                         nextParts.push({ ops: own, span });
                     }
+                    upTo = step(upTo, own);
                     offset += piece.n;
                 }
             } else {
@@ -1934,6 +1985,7 @@ export function createStore({
             // The afterCapture steps run again, right after the new story ops (their revs follow them).
             for (const ran of resettle ? settled : []) {
                 const blockOps = asOps(ran.ops);
+                const before = state;
                 try {
                     state = step(state, blockOps);
                 } catch (error) {
@@ -1945,6 +1997,8 @@ export function createStore({
                 if (ran.block) {
                     try {
                         span = { ...span, ...stamp(arr, index, record, ran.block, blockOps, ran.receipt, nextParts, nextOps.length) };
+                        guardHolds(before, span, message);
+                        publish(span);     // applied (step above)
                     } catch (error) {
                         throw fail(error);
                     }
@@ -1959,7 +2013,7 @@ export function createStore({
                 let blockOps;
                 let kept = receipt;
                 let again = null;      // the block as planned again, when it was
-                const asks = typeof rerun === 'function' && ((isMetaSpan(was) && was.guard && was.replan && receipt) || (receipt?.replan && !isGuardedBlock(was, paired ? receipt : receiptsFor({ receipts: keptReceipts }, block))));
+                const asks = typeof rerun === 'function' && !(isMetaSpan(was) && intactReason(record, block, was, receipt)) && ((isMetaSpan(was) && was.guard && was.replan && receipt) || (receipt?.replan && !isGuardedBlock(was, paired ? receipt : receiptsFor({ receipts: keptReceipts }, block))));
                 if (asks) {
                     let out = null;
                     try { out = rerun(deepFreeze(structuredClone(state)), receipt, { index, span: was, replan: was.replan ?? null }); } catch { out = null; }
@@ -1967,7 +2021,9 @@ export function createStore({
                     if (!out?.ok && isMetaSpan(was) && !(out?.ok === false && out.code === NO_LONGER_DONE)) {
                         // (it could not be asked: the block stays exactly as it was, replayed below as any kept block is)
                     } else if (!out?.ok) continue;
-                    else {
+                    else if (ownedAlready(state, out.block?.evidence)) {
+                        // (it would give a proof id a block that applied already owns: refused; the block stays as it was, replayed below)
+                    } else {
                         again = out;
                         blockOps = asOps(out.ops);
                         kept = { ...structuredClone(out.receipt), id: receipt.id };
@@ -1990,26 +2046,38 @@ export function createStore({
                 // A kept guarded block is asked again here (its guard may not hold on the new story): then
                 // it stays stored and inactive. A block planned again is applied as a live command is.
                 const meta = isMetaSpan(was);
+                const heldBy = state;     // the state before this block
                 const guarded = isGuardedBlock(was, paired ? receipt : receiptsFor({ receipts: keptReceipts }, block));       // (the one classifier: a stripped span is still a guarded block)
+                let applied = true;      // the block applied: only then is its proof the guards' to see
                 try {
                     state = again ? step(state, blockOps) : guarded ? replayGuarded(state, record, blockOps, was, message, receipt) : replayLegacy(state, blockOps);
                 } catch (error) {
                     if (!guarded || again) throw fail(error);
+                    applied = false;
                     state = skipped(state, blockOps);
-                    keptProblems.push({ index, block: storySpans.length + keptSpans.length, receipts: receiptsOf({ receipts: keptReceipts }, block), why: String(error?.message ?? error), code: 'REPLAY_PREREQUISITE' });
+                    keptProblems.push({ index, block: storySpans.filter(each => each.n).length + keptSpans.filter(each => each.n).length, receipts: receiptsOf({ receipts: keptReceipts }, block), why: String(error?.message ?? error), code: 'REPLAY_PREREQUISITE' });
                 }
                 let span = { n: blockOps.length, story: false };
                 try {
                     if (again?.block) {
                         span = { ...span, ...stamp(arr, index, record, { ...again.block, ...(meta ? { id: was.id, source: { ...again.block.source, ordinal: was.source.ordinal } } : {}) }, blockOps, kept, nextParts, nextOps.length) };
-                    } else if (meta && !again && !spanProblem(was)) {
-                        // Kept as it was; its boundary is where it stands now.
-                        span = { ...span, ...stamp(arr, index, record, { module: was.module, source: was.source, guard: was.guard, operation: was.operation, recorded: was.recorded, result: was.result, evidence: was.evidence, id: was.id }, blockOps, kept, nextParts, nextOps.length) };
+                        guardHolds(heldBy, span, message);
+                    } else if (meta && !again) {
+                        if (intactReason(record, block, was, receipt)) {
+                            // Not intact (damaged, another reply's, claims that are not its changes'): it stays exactly as stored, inactive.
+                            span = { ...was, n: blockOps.length };
+                        } else {
+                            // A Re-read moves a kept block's position and nothing else: its cursor and prefix hash follow where it stands now,
+                            // but its payload hash, evidence, claims, guard, source and results are the ones it was stored with.
+                            const placed = stamp(arr, index, record, { module: was.module, source: was.source, guard: was.guard, operation: was.operation, recorded: was.recorded, result: was.result, evidence: was.evidence, id: was.id }, blockOps, kept, nextParts, nextOps.length);
+                            span = { ...was, n: blockOps.length, story: false,
+                                boundaries: was.boundaries.map((boundary, at) => (at === 0 ? { ...boundary, cursor: placed.boundaries[0].cursor, prefixHash: placed.boundaries[0].prefixHash } : boundary)) };
+                        }
                     }
                 } catch (error) {
                     throw fail(error);
                 }
-                if (meta && !again && spanProblem(was)) span = { ...was, n: blockOps.length };   // damaged: kept as it is, inactive
+                if (applied) publish(span);
                 nextOps.push(...blockOps);
                 keptSpans.push(span);
                 nextParts.push({ ops: blockOps, span });
@@ -2145,6 +2213,7 @@ export function createStore({
             // replay rules: a remove of what a deleted reply added is passed over), so a chat that
             // replays fine is not refused. A kept block that still does not apply refuses the rewind.
             const problems = [];
+            const earlier = (dryRun ? [] : current().problems).filter(problem => problem.index < index);     // (read before anything is written)
             const state = replayRecord(base, { ...record, ops, spans, receipts }, index, problems, null, message);
             // (a guarded block whose guard no longer holds stays stored and inactive; it does not refuse)
             const refusing = problems.filter(problem => problem.code !== 'REPLAY_PREREQUISITE');
@@ -2159,8 +2228,8 @@ export function createStore({
                 rev: revOf(state),
             });
             saver.touch();
-            // Only this carrier was rewritten (and its kept changes all applied): earlier problems stay.
-            retain(arr, state, (cache?.problems ?? []).filter(problem => problem.index < index), null);
+            // Only this carrier was rewritten: earlier problems stay, and so do those of its kept blocks that are off.
+            retain(arr, state, [...earlier, ...problems], null);
             return { dropped, rev: revOf(state) };
         },
 
