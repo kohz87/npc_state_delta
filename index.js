@@ -1664,30 +1664,58 @@ function markStateDirty(key = getChatKey()) {
 // (timeline participant, src/storysuite-participant/) Every durable write of a chat's state ends in markStateDirty (persist, persistCritical,
 // persistCriticalDurable), whatever made it: a scan, a targeted pass, a branch reconcile, a manual add or delete or edit, an import, the
 // canonical server state, a rename, the v2 meter sync. The participant is told, and publishes the change to the timeline as a native mutation.
-// The participant's own writes (an install, its block) are not changes: they carry `participantWrites`.
+// The participant's own writes (an install, its block) are not changes: they carry a count **per chat**, so one chat's install never hides another's change.
 const nativeChangeListeners = new Set();
-let participantWrites = 0;
+const participantWrites = new Map();
 function announceNativeChange(key) {
-    if (participantWrites > 0 || key !== getChatKey()) return;
+    if ((participantWrites.get(key) || 0) > 0 || key !== getChatKey()) return;
     for (const listener of nativeChangeListeners) {
         try { listener({ key }); } catch (error) { console.debug('[NPC State Delta] a native-change listener failed', error); }
     }
 }
-async function quietly(task) {
-    participantWrites += 1;
-    try { return await task(); } finally { participantWrites -= 1; }
+async function quietly(key, task) {
+    participantWrites.set(key, (participantWrites.get(key) || 0) + 1);
+    try { return await task(); } finally {
+        const left = (participantWrites.get(key) || 1) - 1;
+        if (left > 0) participantWrites.set(key, left); else participantWrites.delete(key);
+    }
 }
-/** Resolves true when no scan or dossier pass is in flight for the open chat, false after `ms`. */
+
+// Scan **intent**: work that is going to change the dossiers but is not yet (or no longer) in the scan registry. `isScanBusy` is the registry's active set,
+// so it is false for the moment between one scan ending and a queued one beginning (scanNow awaits the server before it begins an operation), and
+// for a reply whose scan is due but not started. A save point taken then would miss what the scan writes a moment later. Counted per chat from the
+// reply arriving (handleAssistantMessageReceived) and from every scan, queued drain, backfill pass and targeted pass until it ends.
+const scanIntents = new Map();
+async function withScanIntent(key, task) {
+    scanIntents.set(key, (scanIntents.get(key) || 0) + 1);
+    try { return await task(); } finally {
+        const left = (scanIntents.get(key) || 1) - 1;
+        if (left > 0) scanIntents.set(key, left); else scanIntents.delete(key);
+    }
+}
+/** Whether dossier work is running, due or queued for the chat: an active operation, an intent, a queued automatic scan. */
+function scanWorkPending(key = getChatKey()) {
+    return isScanBusy(key) || (scanIntents.get(key) || 0) > 0 || pendingAutoScans.has(key);
+}
+/** Resolves true when no scan or dossier pass is in flight, due or queued for the open chat, false after `ms`. */
 async function scanIdle(ms = 20000) {
     const key = getChatKey();
     const until = Date.now() + Math.max(0, Number(ms) || 0);
-    while (isScanBusy(key)) {
+    while (scanWorkPending(key)) {
         if (Date.now() >= until) return false;
         await new Promise(resolve => setTimeout(resolve, 25));
         if (getChatKey() !== key) return true;
     }
     return true;
 }
+
+
+// (timeline participant) The entry points that start dossier work hold a scan intent for their whole run (see scanWorkPending).
+function scanNow(options) { return withScanIntent(getChatKey(), () => scanNowInner(options)); }
+function drainPendingAutoScan(chatKey) { return withScanIntent(chatKey, () => drainPendingAutoScanInner(chatKey)); }
+function processPendingBackfills(...args) { return withScanIntent(getChatKey(), () => processPendingBackfillsInner(...args)); }
+function runTargetedDossierPass(job) { return withScanIntent(job?.chatKey || getChatKey(), () => runTargetedDossierPassInner(job)); }
+function handleAssistantMessageReceived(...args) { return withScanIntent(getChatKey(), () => handleAssistantMessageReceivedInner(...args)); }
 
 function queueStateFileWrite(key = getChatKey(), delay = STATE_WRITE_DELAY) {
     if (!key || key === 'no-chat' || !isCanonicalChatKey(key) || !chatStateCache.has(key)) return;
@@ -2178,7 +2206,7 @@ function queuePendingAutoScan(chatKey, messageId, reason = 'automatic') {
     return true;
 }
 
-async function drainPendingAutoScan(chatKey) {
+async function drainPendingAutoScanInner(chatKey) {
     if (!chatKey || getChatKey() !== chatKey || isScanBusy(chatKey) || isHostSwipeActive()) return false;
     const pending = pendingAutoScans.get(chatKey);
     if (!pending) return false;
@@ -2944,7 +2972,7 @@ function endTargetedRewriteTolerance(messageId) {
     }
 }
 
-async function runTargetedDossierPass(job) {
+async function runTargetedDossierPassInner(job) {
     const { chatKey, ctx, id, label, prompt, systemPrompt, metricsLabel } = job;
     await refreshMessageGate();
     const lineage = chatLineage(ctx.chat || []);
@@ -3461,7 +3489,7 @@ function capCaptureAdmissions(parsed, npcs = []) {
     parsed.npcs = kept;
 }
 
-async function processPendingBackfills(messageId = null, { limit = Infinity } = {}) {
+async function processPendingBackfillsInner(messageId = null, { limit = Infinity } = {}) {
     const chatKey = getChatKey();
     if (chatKey === 'no-chat' || !requireReadyChatMutation('process queued dossier backfills', chatKey, { notify: false }) || isScanBusy(chatKey) || isHostSwipeActive()) return 0;
     let processed = 0;
@@ -3768,7 +3796,7 @@ function lineageMoved(previous, current, messageId) {
     return previous.slice(messageId + 1).some((entry, index) => entry !== current[messageId + 1 + index]);
 }
 
-async function scanNow({ manual = false, messageId = null, allowDuringSwipe = false } = {}) {
+async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe = false } = {}) {
     const settings = getSettings();
     if (!settings.enabled) return false;
     if (!allowDuringSwipe && isHostSwipeActive()) {
@@ -6310,7 +6338,11 @@ function importBundleBytes(bytes) {
     if (!merged.portraitAssets || typeof merged.portraitAssets !== 'object') merged.portraitAssets = {};
     for (const npc of merged.npcs) if (npc.portrait?.dataUrl) merged.portraitAssets[npc.id] = structuredClone(npc.portrait);
     // (timeline participant) A chat with no story line yet takes the bundle's (its dossiers keep their np_ ids); one that has its own keeps it.
-    if (!before.timeline?.lineage && decoded.state.timeline && typeof decoded.state.timeline === 'object') merged.timeline = structuredClone(decoded.state.timeline);
+    // A bundle from another chat is a copy of the story, not the same line of it: it keeps its np_ ids and gets a lineage of its own (the participant makes it).
+    if (!before.timeline?.lineage && decoded.state.timeline && typeof decoded.state.timeline === 'object') {
+        merged.timeline = structuredClone(decoded.state.timeline);
+        if (foreignOwnership) merged.timeline.lineage = null;
+    }
     const socialImport = reconcileSocialState(merged, { provenance: 'migration', confidence: 'migration' });
     merged.socialGraph = socialImport.socialGraph;
     merged.npcs = socialImport.state.npcs;
@@ -7166,7 +7198,7 @@ function scheduleSettingsMountRetries() {
     }, 250);
 }
 
-async function handleAssistantMessageReceived(messageId, { bypassSwipeGuard = false, forceBranchRescan = false } = {}) {
+async function handleAssistantMessageReceivedInner(messageId, { bypassSwipeGuard = false, forceBranchRescan = false } = {}) {
     const settings = getSettings();
     if (!settings.enabled) return;
     const eventChatKey = getChatKey();
@@ -7751,7 +7783,7 @@ window.NPCStateDelta = Object.freeze({
         if (!state || typeof state !== 'object' || Array.isArray(state)) throw new Error('A native state is an object.');
         if (!await ensureFreshMutationBoundary('restore a native checkpoint', key, { notify: false })) throw new Error('NPC State Delta canonical server dossier is unavailable.');
         if (getChatKey() !== key) throw new Error('The active chat changed before the native state was installed; nothing was installed.');
-        return quietly(async () => {
+        return quietly(key, async () => {
             setChatState(key, state, { markLoaded: true });
             if (!await persistCriticalDurable(key)) throw new Error('The restored native state could not be saved yet.');
             renderDossier();
@@ -7767,7 +7799,7 @@ window.NPCStateDelta = Object.freeze({
         if (!block || typeof block !== 'object' || Array.isArray(block)) throw new Error('A timeline block is an object.');
         if (!await ensureFreshMutationBoundary('record the story line', key, { notify: false })) throw new Error('NPC State Delta canonical server dossier is unavailable.');
         if (getChatKey() !== key) throw new Error('The active chat changed before the block was written.');
-        return quietly(async () => {
+        return quietly(key, async () => {
             getChatState(key).timeline = structuredClone(block);
             if (!await persistCriticalDurable(key)) throw new Error('The story line could not be saved yet.');
             return true;
@@ -7781,7 +7813,7 @@ window.NPCStateDelta = Object.freeze({
     },
     // Whether the open chat's dossier state is loaded (the participant hydrates its ids at chat open), and whether a scan or pass is in flight.
     stateReady: () => chatHydrationStatus() === 'ready',
-    scanActive: () => isScanBusy(),
+    scanActive: () => scanWorkPending(),
     scanIdle: ms => scanIdle(ms),
     // Which messages the story stands on (the Story Suite adapter's gate): scans do not read what Story Block faded.
     useMessageGate: gate => useMessageGate(gate),
