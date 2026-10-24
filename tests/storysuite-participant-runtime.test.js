@@ -71,13 +71,23 @@ test('the registered module declares the participant and answers npc.identity; a
         await sleep(30);
         const found = def.queries['npc.identity']({}, { name: 'Mira' });
         assert.match(found.id, /^np_[0-9a-z]{8}$/);
+        // N1: the ids and the lineage are in Delta's own chat state, so a rename, a branch and an export carry them.
+        const timeline = api.getState().timeline;
+        assert.match(timeline.lineage, /^lg_[0-9a-z]{8}$/);
+        assert.equal(timeline.identity.map[found.id].nativeKey, found.nativeKey);
         assert.equal(found.name, 'Mira');
         assert.equal(def.queries['npc.identity']({}, { id: found.id }).nativeKey, found.nativeKey);
         // A checkpoint, a change, then the restore: the dossier is as it was, and the state is durable.
         const saved = await def.participant.checkpoint({ cursor: null, headHash: 'a'.repeat(64) });
         assert.equal(saved.ok, true, saved.message);
+        // N2: whatever Delta saves is told to the participant (a manual add here; a scan, an edit, a delete or a meter step the same way);
+        // the participant's own writes are not changes.
+        let heard = 0;
+        const stop = api.onNativeChange(() => { heard += 1; });
         await manualAddNpc('Orrin');
         await api.flush();
+        assert.ok(heard > 0, 'a saved change was announced');
+        stop();
         assert.deepEqual(api.getState().npcs.map(npc => npc.name).sort(), ['Mira', 'Orrin']);
         const prepared = await def.participant.prepare({ return: 'rt_00000001', checkpoint: saved.checkpoint, hash: saved.hash });
         assert.equal(prepared.ok, true, prepared.message);
@@ -87,6 +97,14 @@ test('the registered module declares the participant and answers npc.identity; a
         assert.deepEqual(api.getState().npcs.map(npc => npc.name), ['Mira']);
         assert.equal(api.persistenceStatus().currentChatPending, false, 'the restored state is durable');
         assert.equal(def.queries['npc.identity']({}, { id: found.id }).name, 'Mira', 'the same np_');
+        let again = 0;
+        const stopAgain = api.onNativeChange(() => { again += 1; });
+        await api.installState(structuredClone(api.getState()));
+        await api.writeTimeline(structuredClone(api.getState().timeline));
+        assert.equal(again, 0, 'the participant\'s own writes are not native changes');
+        assert.equal(api.scanBusy(), false);
+        assert.equal(await api.scanIdle(50), true);
+        stopAgain();
         await assert.rejects(() => api.installState(null), /object/);
     });
 });

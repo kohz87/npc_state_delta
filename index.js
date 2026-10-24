@@ -33,6 +33,8 @@ import {
     storyDaysForTranscript,
     currentExclusions,
     useTranscriptSource,
+    refreshMessageGate,
+    useMessageGate,
 } from './src/transcript.js';
 import {
     BACKFILL_RESPONSE_LENGTH,
@@ -1654,6 +1656,35 @@ async function ensureChatStateLoaded(key = getChatKey(), { probeMissing = false 
 function markStateDirty(key = getChatKey()) {
     if (!key || key === 'no-chat') return;
     stateVersions.set(key, Number(stateVersions.get(key) || 0) + 1);
+    announceNativeChange(key);
+}
+
+// (timeline participant, src/storysuite-participant/) Every durable write of a chat's state ends in markStateDirty (persist, persistCritical,
+// persistCriticalDurable), whatever made it: a scan, a targeted pass, a branch reconcile, a manual add or delete or edit, an import, the
+// canonical server state, a rename, the v2 meter sync. The participant is told, and publishes the change to the timeline as a native mutation.
+// The participant's own writes (an install, its block) are not changes: they carry `participantWrites`.
+const nativeChangeListeners = new Set();
+let participantWrites = 0;
+function announceNativeChange(key) {
+    if (participantWrites > 0 || key !== getChatKey()) return;
+    for (const listener of nativeChangeListeners) {
+        try { listener({ key }); } catch (error) { console.debug('[NPC State Delta] a native-change listener failed', error); }
+    }
+}
+async function quietly(task) {
+    participantWrites += 1;
+    try { return await task(); } finally { participantWrites -= 1; }
+}
+/** Resolves true when no scan or dossier pass is in flight for the open chat, false after `ms`. */
+async function scanIdle(ms = 20000) {
+    const key = getChatKey();
+    const until = Date.now() + Math.max(0, Number(ms) || 0);
+    while (isScanBusy(key)) {
+        if (Date.now() >= until) return false;
+        await new Promise(resolve => setTimeout(resolve, 25));
+        if (getChatKey() !== key) return true;
+    }
+    return true;
 }
 
 function queueStateFileWrite(key = getChatKey(), delay = STATE_WRITE_DELAY) {
@@ -2913,6 +2944,7 @@ function endTargetedRewriteTolerance(messageId) {
 
 async function runTargetedDossierPass(job) {
     const { chatKey, ctx, id, label, prompt, systemPrompt, metricsLabel } = job;
+    await refreshMessageGate();
     const lineage = chatLineage(ctx.chat || []);
     const boundMessageId = latestMessageId(true);
     const startedAt = performance.now?.() ?? Date.now();
@@ -3751,6 +3783,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         && sourceFingerprint !== fingerprintMessage(getContext().chat?.[messageId] || {})
         && !sameReplyRewritten(scanChatKey, messageId, sourceParent));
     await ensureChatStateLoaded(scanChatKey);
+    await refreshMessageGate();
     if (sourceMoved()) return false;
     if (isScanBusy(scanChatKey)) {
         if (manual) globalThis.toastr?.info?.('NPC State Delta: another dossier scan is already running in this chat.');
@@ -6274,6 +6307,8 @@ function importBundleBytes(bytes) {
     }
     if (!merged.portraitAssets || typeof merged.portraitAssets !== 'object') merged.portraitAssets = {};
     for (const npc of merged.npcs) if (npc.portrait?.dataUrl) merged.portraitAssets[npc.id] = structuredClone(npc.portrait);
+    // (timeline participant) A chat with no story line yet takes the bundle's (its dossiers keep their np_ ids); one that has its own keeps it.
+    if (!before.timeline?.lineage && decoded.state.timeline && typeof decoded.state.timeline === 'object') merged.timeline = structuredClone(decoded.state.timeline);
     const socialImport = reconcileSocialState(merged, { provenance: 'migration', confidence: 'migration' });
     merged.socialGraph = socialImport.socialGraph;
     merged.npcs = socialImport.state.npcs;
@@ -7714,12 +7749,40 @@ window.NPCStateDelta = Object.freeze({
         if (!state || typeof state !== 'object' || Array.isArray(state)) throw new Error('A native state is an object.');
         if (!await ensureFreshMutationBoundary('restore a native checkpoint', key, { notify: false })) throw new Error('NPC State Delta canonical server dossier is unavailable.');
         if (getChatKey() !== key) throw new Error('The active chat changed before the native state was installed; nothing was installed.');
-        setChatState(key, state, { markLoaded: true });
-        if (!await persistCriticalDurable(key)) throw new Error('The restored native state could not be saved yet.');
-        renderDossier();
-        updateInjection();
-        return true;
+        return quietly(async () => {
+            setChatState(key, state, { markLoaded: true });
+            if (!await persistCriticalDurable(key)) throw new Error('The restored native state could not be saved yet.');
+            renderDossier();
+            updateInjection();
+            return true;
+        });
     },
+    // The participant's block (`state.timeline`: lineage, np_ map, reserved ids, applied deaths) written into the chat's state and made durable.
+    // Not a native change; the state object stays the one running scans hold.
+    writeTimeline: async block => {
+        const key = getChatKey();
+        if (!key || key === 'no-chat') throw new Error('There is no open chat.');
+        if (!block || typeof block !== 'object' || Array.isArray(block)) throw new Error('A timeline block is an object.');
+        if (!await ensureFreshMutationBoundary('record the story line', key, { notify: false })) throw new Error('NPC State Delta canonical server dossier is unavailable.');
+        if (getChatKey() !== key) throw new Error('The active chat changed before the block was written.');
+        return quietly(async () => {
+            getChatState(key).timeline = structuredClone(block);
+            if (!await persistCriticalDurable(key)) throw new Error('The story line could not be saved yet.');
+            return true;
+        });
+    },
+    // Told after every durable change of the open chat's state that is not the participant's own; returns the way to stop.
+    onNativeChange: listener => {
+        if (typeof listener !== 'function') return () => {};
+        nativeChangeListeners.add(listener);
+        return () => { nativeChangeListeners.delete(listener); };
+    },
+    // Whether the open chat's dossier state is loaded (the participant hydrates its ids at chat open), and whether a scan or pass is in flight.
+    stateReady: () => chatHydrationStatus() === 'ready',
+    scanBusy: () => isScanBusy(),
+    scanIdle: ms => scanIdle(ms),
+    // Which messages the story stands on (the Story Suite adapter's gate): scans do not read what Story Block faded.
+    useMessageGate: gate => useMessageGate(gate),
     // (v2 meters) Delta's base relationship values: where a new NPC's slice meters start.
     relationshipBaseline: () => normalizeRelationshipBaseline(getSettings().relationshipBaseline),
     presentCastHtml: () => storyBlockCastHtml(),
