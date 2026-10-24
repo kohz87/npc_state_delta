@@ -39,6 +39,7 @@ import { normalizeLimits, presetCatalog, presetIds } from './npc-meters-presets.
 import { METERS_CARD_ID, metersCardScreen } from './npc-meters-screen.js';
 import { DOSSIER_FIELDS } from './fields/registry.js';
 import { escapeHtml } from './util/html.js';
+import { createParticipant, fileVault } from './storysuite-participant/index.js';
 
 export const MODULE_ID = 'npc-state-delta';
 export const MODULE_NAME = 'NPC State Delta';
@@ -71,7 +72,7 @@ export const WORLD_FEATURE = 'story-director.world';
  */
 export const PAGE_API = 'NPCStateDeltaCast';
 export const PAGE_SLOT_CLASS = 'npc-state-delta-v2-slot';
-export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.socialModifier']);
+export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.socialModifier', 'npc.identity']);
 export const COMMAND_NAMES = Object.freeze(['npc.adjust', 'npc.set', 'npc.refresh', 'npc.milestone', 'npc.tick']);
 // The replies after which Delta takes its per-reply step (npc.tick): a new reply or a new swipe of
 // one, never a Continue, a Re-read or late change lines (the same reply again).
@@ -289,6 +290,8 @@ export function createStorySuiteV2Adapter({
         .then(([tabs, ui]) => ({ rowNodes: tabs.dossierRowNodes, project: ui.dossierIndexProjection, filter: ui.filterDossierIndex })),
     // Where the page API (PAGE_API) goes; null for none.
     page = globalThis,
+    // Where the timeline participant keeps its checkpoints (storysuite-participant/vault.js); SillyTavern's user files by default.
+    participantVault = null,
 } = {}) {
     let started = false;
     let pollTimer = null;
@@ -1167,6 +1170,16 @@ export function createStorySuiteV2Adapter({
 
     // ---- the module definition ----
 
+    // The timeline participant (Story Block docs/v2/TIMELINE.md, contract §8): Delta's native state takes part in save points and restores, and
+    // `npc.identity` names a person by an np_ id. It needs Delta's runtime for the open chat's key, its state and an absolute install.
+    const timeline = createParticipant({
+        port: {
+            chatKey: () => String(delta()?.chatKey?.() ?? ''),
+            readState: () => delta()?.getState?.() ?? { npcs: [] },
+            installState: state => delta().installState(state),
+        },
+        vault: participantVault ?? fileVault({ headers: () => delta()?.requestHeaders?.() ?? {} }),
+    });
     const definition = Object.freeze({
         id: MODULE_ID,
         name: MODULE_NAME,
@@ -1182,7 +1195,8 @@ export function createStorySuiteV2Adapter({
             ...part.commands,
             'npc.milestone': Object.freeze({ handler: part.commands['npc.milestone'], feature: FEATURE_STAGES }),
         }),
-        queries,
+        queries: Object.freeze({ ...queries, ...timeline.queries }),
+        participant: timeline.participant,
         capture: {
             kinds: {
                 [NPC_KIND]: { grammar: part.kinds[NPC_KIND].grammar },

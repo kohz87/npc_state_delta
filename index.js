@@ -7704,6 +7704,22 @@ window.NPCStateDelta = Object.freeze({
     },
     clearDiagnostics: () => diagnosticStore.clear(getChatKey()),
     getState: () => structuredClone(getChatState()),
+    // (timeline participant, src/storysuite-participant/) The open chat's key; SillyTavern's request headers for its user files; and an
+    // absolute, durable replacement of the chat's native state (a restore to a save point), refused unless it is the open chat's.
+    chatKey: () => getChatKey(),
+    requestHeaders: () => requestHeaders(),
+    installState: async state => {
+        const key = getChatKey();
+        if (!key || key === 'no-chat') throw new Error('There is no open chat to put a native state into.');
+        if (!state || typeof state !== 'object' || Array.isArray(state)) throw new Error('A native state is an object.');
+        if (!await ensureFreshMutationBoundary('restore a native checkpoint', key, { notify: false })) throw new Error('NPC State Delta canonical server dossier is unavailable.');
+        if (getChatKey() !== key) throw new Error('The active chat changed before the native state was installed; nothing was installed.');
+        setChatState(key, state, { markLoaded: true });
+        if (!await persistCriticalDurable(key)) throw new Error('The restored native state could not be saved yet.');
+        renderDossier();
+        updateInjection();
+        return true;
+    },
     // (v2 meters) Delta's base relationship values: where a new NPC's slice meters start.
     relationshipBaseline: () => normalizeRelationshipBaseline(getSettings().relationshipBaseline),
     presentCastHtml: () => storyBlockCastHtml(),
