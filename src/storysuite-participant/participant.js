@@ -84,6 +84,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     let again = false;
     let retries = 0;
     let last = null;
+    const handed = new Map();   // checkpoint id -> { hash, stateHash }: what the participant handed the host, for `current`
     const warn = text => { try { port.warn?.(text); } catch { /* telling is best effort */ } };
     const keyNow = () => String(port.chatKey() ?? '');
     const usable = key => Boolean(key) && key !== 'no-chat';
@@ -126,8 +127,11 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         block.identity = out.identity;
         block.reserved = out.reserved;
         if (write) {
+            const was = hashJson(state);
             await port.writeTimeline(storedTimeline(block));
             if (keyNow() !== key) return null;
+            // The participant's own write is not a change of the story's: a baseline that was the state before it is the state after it.
+            if (session?.index.base?.stateHash === was) session.index.base.stateHash = hashJson(port.readState());
         }
         if (!session || session.key !== key || session.lineage !== block.lineage) {
             const index = cleanIndex(await vault.getIndex(block.lineage));
@@ -178,14 +182,34 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
                 const s = await hydrate();
                 if (!s) return fail('FAILED', 'There is no open chat to save.');
                 const at = hashJson(port.readState());
+                // A change Delta saved that the timeline has not recorded yet is recorded first: the save point would carry it, but the host would
+                // commit the point at a head that does not know it. The publish is asked for and the save is refused, retryably. When the host gives no
+                // way to publish (no Source for the head: UNSUPPORTED) there is nothing to wait for.
+                if (handle && s.index.base && s.index.base.stateHash !== at && last?.code !== 'UNSUPPORTED') {
+                    schedulePublish(0);
+                    return fail('STALE', 'NPC State Delta has a change the story has not recorded yet; save again in a moment.');
+                }
                 const built = await made({ cursor, headHash });
                 if (busy() || hashJson(port.readState()) !== at) continue;
                 s.index.base = { checkpoint: built.id, hash: built.hash, stateHash: at };
+                handed.set(built.id, { hash: built.hash, stateHash: at });
+                while (handed.size > 16) handed.delete(handed.keys().next().value);
                 await save();
                 return { ok: true, checkpoint: built.id, hash: built.hash, schema: PARTICIPANT_SCHEMA };
             }
             return fail('STALE', 'NPC State Delta kept changing while the save point was made; save again in a moment.');
         }),
+
+        /**
+         * Asked by the host inside its synchronous commit section, after it holds the checkpoint it will store and before it commits: is the
+         * checkpoint still the native state? It answers at once (no waiting): the state is the one handed over, and nothing is running, due or
+         * queued that would change it. { ok: true, current: boolean }; false makes the host cancel the save and ask again.
+         */
+        current: input => {
+            const held = isRecord(input) ? handed.get(input.checkpoint) : null;
+            if (!held || held.hash !== input.hash) return { ok: true, current: false };
+            return { ok: true, current: !busy() && hashJson(port.readState()) === held.stateHash };
+        },
 
         prepare: input => exclusive(async () => {
             const s = await hydrate();

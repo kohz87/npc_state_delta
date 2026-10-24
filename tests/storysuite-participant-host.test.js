@@ -156,12 +156,15 @@ test('N2: a scan that lands while the reader presses Save is waited for: the sav
         },
     });
     ref.live = live;
-    // The scan of the reply just shown is running when Save is pressed, and lands a moment later.
+    // The scan of the reply just shown is running when Save is pressed, and lands (saved and announced) a moment later.
     scanning = true;
-    setTimeout(() => { live.state.npcs.push(npc('npc_vale', 'Vale')); landed = true; scanning = false; }, 20);
+    setTimeout(() => { live.state.npcs.push(npc('npc_vale', 'Vale')); landed = true; scanning = false; delta.noteChange(); }, 20);
+    const early = await host.sdk.timeline.make({ kind: 'manual', name: 'Save' });
+    assert.equal(landed, true, 'the save waited for the scan');
+    assert.equal(early.code, 'STALE', 'and asked to be made again once the story has recorded what the scan wrote');
+    assert.equal((await delta.flush()).ok, true);
     const made = await host.sdk.timeline.make({ kind: 'manual', name: 'Save' });
     assert.equal(made.ok, true, made.message);
-    assert.equal(landed, true, 'the save waited for the scan');
     await host.send('Onward.', reply('Further.'));
     live.state.npcs = live.state.npcs.filter(item => item.id !== 'npc_vale');
     const restored = await restoreTo(host, made.snapshot);
@@ -211,4 +214,66 @@ test('N1: the chat is renamed (Delta moves its state to a new key): the ids are 
     assert.equal(restored.ok, true, restored.message);
     assert.equal(live.state.npcs[0].trust, 3);
     assert.equal(host.sdk.query('npc.identity', { id: mira }).nativeKey, 'npc_mira');
+});
+
+test('N-B1: a queued scan that begins right after the idle look is caught by the second look; the change it makes is recorded before a save point stands on it', async t => {
+    let phase = 0;
+    let scanning = false;
+    const ref = {};
+    const { host, live, delta } = await started(t, {
+        quiet: {
+            // The first look finds Delta idle (the gap between one scan and the queued one); the queued scan begins right after.
+            idle: async () => { if (phase === 0) { phase = 1; return true; } while (scanning) await new Promise(resolve => setTimeout(resolve, 2)); return true; },
+            busy: () => {
+                if (phase === 1) {
+                    phase = 2;
+                    scanning = true;
+                    setTimeout(() => { live.state.npcs.push(npc('npc_vale', 'Vale')); scanning = false; ref.delta.noteChange(); }, 20);
+                    return true;
+                }
+                return scanning;
+            },
+        },
+    });
+    ref.delta = delta;
+    // The scan landed, was saved and announced while the save point was being made: the save is refused, retryably, until the story has recorded it.
+    const first = await host.sdk.timeline.make({ kind: 'manual', name: 'Save' });
+    assert.equal(first.ok, false);
+    assert.equal(first.code, 'STALE');
+    const published = await delta.flush();
+    assert.equal(published.ok, true, published.message);
+    const made = await host.sdk.timeline.make({ kind: 'manual', name: 'Save' });
+    assert.equal(made.ok, true, made.message);
+    await host.send('Onward.', reply('Further.'));
+    live.state.npcs = live.state.npcs.filter(item => item.id !== 'npc_vale');
+    const restored = await restoreTo(host, made.snapshot);
+    assert.equal(restored.ok, true, restored.message);
+    assert.deepEqual(live.state.npcs.map(item => item.name), ['Mira', 'Old Tom', 'Vale'], 'the person the story keeps is still there');
+});
+
+test('N-B1: when the host gives no way to publish a change, a save is not held up for it', async t => {
+    const { host, live, delta } = await started(t, { quiet: { headSource: () => null } });
+    live.state.npcs.push(npc('npc_vale', 'Vale'));
+    delta.noteChange();
+    assert.equal((await delta.flush()).code, 'UNSUPPORTED');
+    const made = await host.sdk.timeline.make({ kind: 'manual', name: 'Save' });
+    assert.equal(made.ok, true, made.message);
+});
+
+test('N-B1: current() answers at once whether a checkpoint is still the native state and nothing is running', async t => {
+    let scanning = false;
+    const { live, delta } = await started(t, { quiet: { busy: () => scanning } });
+    const saved = await delta.participant.checkpoint({ cursor: { sid: 'sr_1' }, headHash: 'a'.repeat(64) });
+    assert.equal(saved.ok, true, saved.message);
+    const ask = (id = saved.checkpoint, hash = saved.hash) => delta.participant.current({ checkpoint: id, hash });
+    assert.deepEqual(ask(), { ok: true, current: true });
+    assert.deepEqual(ask('nk_zzzzzzzz'), { ok: true, current: false }, 'a checkpoint it did not hand over');
+    assert.deepEqual(ask(saved.checkpoint, 'f'.repeat(64)), { ok: true, current: false }, 'another hash');
+    scanning = true;
+    assert.equal(ask().current, false, 'a scan is running, due or queued');
+    scanning = false;
+    live.state.npcs[0].trust = 9;
+    assert.equal(ask().current, false, 'the state moved');
+    live.state.npcs[0].trust = 3;
+    assert.equal(ask().current, true, 'and back');
 });
