@@ -62,7 +62,7 @@ jobs:
             .filter(entry => entry.isFile() && entry.name.endsWith('.js'))
             .map(entry => entry.name)
             .sort();
-          const configured = runtime.modules.map(item => item.path).sort();
+          const configured = runtime.modules.map(item => item.path).filter(item => !item.includes('/')).sort();
           if (manifest.version !== pkg.version) throw new Error(`version mismatch: manifest=${manifest.version} package=${pkg.version}`);
           if (runtime.applicationVersion !== manifest.version) throw new Error(`runtime inventory version mismatch: ${runtime.applicationVersion}`);
           if (runtime.entrypoint !== manifest.js) throw new Error(`runtime inventory entrypoint mismatch: ${runtime.entrypoint}`);

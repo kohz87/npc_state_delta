@@ -51,6 +51,10 @@ test('launcher hides while Story Block\'s Story Suite overlay is open', () => {
     assert.match(source, /body\.story-suite-open #\$\{LAUNCHER_ID\} \{ display: none !important; \}/);
 });
 
+test('launcher hides while Story Block\'s game view is open (its .ss-gameview close button is at the top right)', () => {
+    assert.match(source, /body:has\(\.ss-gameview\) #\$\{LAUNCHER_ID\} \{ display: none !important; \}/);
+});
+
 test('launcher hides while Story Block carries Delta\'s tabs, unless the player keeps it', () => {
     assert.match(source, /html\[data-npc-state-delta-story-block="1"\]:not\(\[data-npc-state-delta-launcher="keep"\]\) #\$\{LAUNCHER_ID\} \{ display: none !important; \}/);
     const index = fs.readFileSync(path.join(root, 'index.js'), 'utf8');

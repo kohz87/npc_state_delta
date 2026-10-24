@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { EDITOR_LOCKABLE_FIELDS, LOCKED_FIELD_KEYS } from '../src/fields/registry.js';
 import {
     buildBackfillPrompt,
     buildInjection,
@@ -93,9 +94,9 @@ test('settings, editor, scans and imports are wired to the custom fields', () =>
     assert.match(index, /customFieldNames: \[\],/);
     assert.match(index, /assign\('customFieldNames', normalizeCustomFieldNames\(settings\.customFieldNames\), sameJson\)/);
     assert.match(index, /id="npc_state_delta_custom_fields"/);
-    assert.equal((index.match(/customFieldNames: settings\.customFieldNames/g) || []).length, 7, 'three prompts, three merges and the injection');
+    assert.equal((index.match(/customFieldNames: settings\.customFieldNames/g) || []).length, 6, 'three prompts, the scan merge, the one targeted-pass merge (Refresh, backfill and import) and the injection');
     assert.match(index, /\$\{customFieldEditorHtml\(npc\)\}/);
     assert.match(index, /customFields: customFieldEditorValues\(current\)/);
-    assert.match(index, /'keyRelationships', 'customFields'/, 'manual edits lock custom fields like other stable fields');
-    assert.match(fs.readFileSync(new URL('../bundle.js', import.meta.url), 'utf8'), /customFields: \['customFields'\],/);
+    assert.ok(EDITOR_LOCKABLE_FIELDS.includes('customFields'), 'manual edits lock custom fields like other stable fields');
+    assert.deepEqual(LOCKED_FIELD_KEYS.customFields, ['customFields'], 'the lock map bundle import and branch restore share');
 });

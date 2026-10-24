@@ -296,8 +296,8 @@ export function presentSceneModel({ cards = [], roster = [], sceneText = '', sce
             if (parts.length) {
                 model.now[id] = {
                     // From the dossier the third line is the NPC's current look (appearance or
-                    // form), not only clothes: "Look" (1.2.8). From World State it is the outfit.
-                    parts: parts.map(part => ({ key: part.key, label: !section && part.key === 'outfit' ? DOSSIER_LOOK_LABEL : part.label, text: slot(part.text), title: slot(part.title) })),
+                    // form), not only clothes: "Look" (1.2.8). From World State it is the outfit, labelled Look too.
+                    parts: parts.map(part => ({ key: part.key, label: part.key === 'outfit' ? DOSSIER_LOOK_LABEL : part.label, text: slot(part.text), title: slot(part.title) })),
                     source: section ? 'world-state' : 'dossier',
                 };
             }

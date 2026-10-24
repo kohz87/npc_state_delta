@@ -24,7 +24,9 @@ Keep Delta settings, globals, DOM identifiers, storage files/locks, injection ke
 
 ## Active runtime and compactness
 
-`runtime-modules.json` is the canonical machine-readable inventory of shipped JavaScript modules. Every top-level runtime `.js` file must appear there exactly once with a current semantic role. No active runtime path may be retained under a source-version or legacy-labelled filename. Packaging and validation must consume this inventory rather than maintain independent runtime lists.
+`runtime-modules.json` is the canonical machine-readable inventory of shipped JavaScript modules. Every top-level runtime `.js` file must appear there exactly once with a current semantic role. A runtime module may also live under `src/` and be declared there by its `src/...` path; it then gets the same validation and ships in the package. No active runtime path may be retained under a source-version or legacy-labelled filename. Packaging and validation must consume this inventory rather than maintain independent runtime lists.
+
+`src/fields/registry.js` is the one table of the dossier's stored fields. A new NPC field gets an entry there (and joins the derived lists it belongs to) rather than being added to a list in a module.
 
 Keep application versioning synchronized during release preparation. The current application version lives in `manifest.json`, `package.json`, `runtime-modules.json`, `core.js` (`NPC_STATE_VERSION`), and the `bootstrap.js` banner; README/current release documentation, changelog head, package naming, and current-version tests must agree with those authorities. Validation should enforce the machine/runtime and current release markers. Do not bump persisted schema/version families just because the application version changes, and do not rewrite historical review/provenance/old-version regression references. Unreleased implementation work does not itself authorize a version bump or release.
 

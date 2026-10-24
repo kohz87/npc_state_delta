@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { snapshotNpc } from '../src/fields/registry.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -26,12 +27,13 @@ test('present NPC pane uses portrait-first cards that open the launcher dossier'
     assert.match(index, /openDossier: value =>/);
     assert.match(dossierUi, /addEventListener\('npc-state-delta:open-dossier'[\s\S]*event\.detail\.handled = true;[\s\S]*ui\.openNpc\(npcId\)/);
     assert.match(dossierUi, /if \(this\.pendingNpcId\) \{\s*this\.selectedNpcId = this\.pendingNpcId;[\s\S]*this\.filter = 'all';/, 'the requested NPC survives the chat-change reset and is not hidden by a filter');
-    assert.match(css, /\.npc-state-delta-present-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fill, minmax\(118px, 160px\)\)[^}]*justify-content:\s*start/s);
-    // 1.2.3: a fixed-ratio portrait with the text in a footer under it (the name wraps to two lines).
-    assert.match(css, /\.npc-state-delta-present-card\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column/s);
-    assert.match(css, /\.npc-state-delta-present-card-portrait\s*\{[^}]*position:\s*relative[^}]*aspect-ratio:\s*4\s*\/\s*5/s);
-    assert.match(css, /\.npc-state-delta-present-card-name\s*\{[^}]*-webkit-line-clamp:\s*2/s);
-    assert.doesNotMatch(css + index, /present-card-overlay/);
+    // UI 4c: one compact row per person, full width at every size: a 44px portrait on the left, the name on one
+    // line (an unbroken name is cut with an ellipsis, never pushes the row wider), the stage line under it.
+    assert.match(css, /\.npc-state-delta-present-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
+    assert.match(css, /\.npc-state-delta-present-card\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*44px minmax\(0, 1fr\)/s);
+    assert.match(css, /\.npc-state-delta-present-card-portrait\s*\{[^}]*width:\s*44px;[^}]*height:\s*44px/s);
+    assert.match(css, /\.npc-state-delta-present-card-name\s*\{[^}]*white-space:\s*nowrap;[^}]*text-overflow:\s*ellipsis/s);
+    assert.doesNotMatch(css, /present-card-overlay/);
 });
 
 test('present NPCs in chat support Full, Compact, Only in Story Block and Off display modes', () => {
@@ -46,10 +48,13 @@ test('present NPCs in chat support Full, Compact, Only in Story Block and Off di
 });
 
 
-test('present NPC gallery keeps sparse rosters card-sized on tablet instead of stretching to the block', () => {
-    assert.match(css, /@media \(min-width: 701px\) and \(max-width: 1180px\)[\s\S]*?\.npc-state-delta-present-grid \{[^}]*grid-template-columns:\s*repeat\(auto-fill, minmax\(145px, 180px\)\)[^}]*justify-content:\s*start/s);
-    assert.doesNotMatch(css, /npc-state-delta-present-grid \{[^}]*repeat\(auto-fit, minmax\(145px, 1fr\)\)/s);
-    assert.match(css, /@media \(max-width: 700px\)[\s\S]*?\.npc-state-delta-present-grid \{[^}]*repeat\(2, minmax\(0, 1fr\)\)/s);
+test('present cards are one full-width row at every size: no tablet or phone grid of tall cards', () => {
+    // UI 4c: the grid is a single column from the widest pane to the narrowest, so a card never stretches to a
+    // block or shrinks to a tile on a phone; the row is what the reader asked for (beta feedback).
+    assert.match(css, /\.npc-state-delta-present-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
+    assert.doesNotMatch(css, /present-grid[^{]*\{[^}]*repeat\(/s, 'no repeat() columns for the cards');
+    assert.doesNotMatch(css, /@media[^{]*\{[^@]*?\.npc-state-delta-present-grid \{[^}]*repeat\(2/s, 'no two-column phone grid');
+    assert.doesNotMatch(css, /@container npc-present/, 'the old container split for the card row is gone');
 });
 
 test('present cards resolve the current canonical NPC name after identity promotion', () => {
@@ -82,7 +87,7 @@ test('important memory criteria are editable and resettable from settings', () =
     assert.match(index, /Reset memory criteria/);
     assert.match(index, /Existing memories are shown to the scanner/i);
     assert.match(index, /Important memories <small>Max 5/i);
-    assert.match(index, /cleanEditorList\(editorField\('npc_state_delta_edit_memories'\), IMPORTANT_MEMORY_LIMIT\)/);
+    assert.match(index, /editorList\('memories', IMPORTANT_MEMORY_LIMIT\)/);
 });
 
 
@@ -94,7 +99,7 @@ test('present-only behavior injection and manual dossier editor controls are exp
     assert.match(index, /Save dossier/);
     assert.match(index, /Protect edited stable profile fields/);
     assert.match(index, /Leave off to use manual edits as an organic baseline/);
-    assert.match(index, /\$\{locked\.length \? 'checked' : ''\}/);
+    assert.match(index, /\$\{locked\.size \? 'checked' : ''\}/, 'locked is a Set: the protect box shows the existing locks');
     assert.match(index, /npc_state_delta_edit_trust/);
     assert.match(index, /npc_state_delta_edit_affection/);
     assert.match(index, /npc_state_delta_edit_desire/);
@@ -183,20 +188,20 @@ test('dossier exposes species/race, age, form-owned appearance, and portrait gen
 });
 
 test('scanner uses current-exchange auto context and keeps wider history for manual scans', () => {
-    assert.match(index, /function currentExchangeTranscript/);
+    assert.match(fs.readFileSync(path.join(root, 'src', 'transcript.js'), 'utf8'), /export function currentExchangeTranscript/);
     assert.match(index, /const fullWindowScan = Boolean\(!manual && settings\.fullScanEveryTurn\)/);
     assert.match(index, /\(manual \|\| fullWindowScan\) \? recentTranscript\(settings\.scanDepth\) : currentTranscript/);
-    assert.match(index, /SCAN_RESPONSE_LENGTH = 1800/);
-    assert.match(index, /FULL_SCAN_RESPONSE_LENGTH = 3200/);
+    assert.match(fs.readFileSync(path.join(root, 'src', 'scanner-request.js'), 'utf8'), /SCAN_RESPONSE_LENGTH = 1800/);
+    assert.match(fs.readFileSync(path.join(root, 'src', 'scanner-request.js'), 'utf8'), /FULL_SCAN_RESPONSE_LENGTH = 3200/);
     assert.match(index, /fullWindowScan \? FULL_SCAN_RESPONSE_LENGTH : SCAN_RESPONSE_LENGTH/);
-    assert.match(index, /BACKFILL_RESPONSE_LENGTH = 3200/);
-    assert.match(index, /JSON_RETRY_RESPONSE_LENGTH = 5200/);
-    assert.match(index, /CRITICAL COMPACT JSON RETRY/);
+    assert.match(fs.readFileSync(path.join(root, 'src', 'scanner-request.js'), 'utf8'), /BACKFILL_RESPONSE_LENGTH = 3200/);
+    assert.match(fs.readFileSync(path.join(root, 'src', 'scanner-request.js'), 'utf8'), /JSON_RETRY_RESPONSE_LENGTH = 5200/);
+    assert.match(fs.readFileSync(path.join(root, 'src', 'scanner-request.js'), 'utf8'), /CRITICAL COMPACT JSON RETRY/);
     assert.match(index, /'Scan context'/);
     assert.match(index, /Full scan every turn/);
     assert.match(index, /Quick automatic scans read only the latest user \+ assistant exchange/);
     assert.match(index, /settings\.fullScanEveryTurn \|\| state\.assistantSinceScan >= settings\.scanEvery/);
-    assert.match(index, /prepareFullWindowRelationshipEvaluation\(resolvedParsed, state\.npcs\)/);
+    assert.match(index, /prepareFullWindowRelationshipPayload\(resolvedParsed, state\.npcs\)/);
     assert.match(index, /runFocusedRelationshipPass\(\s*ctx,\s*fullWindowRelationship\.evaluation,\s*state\.npcs,\s*currentTranscript \|\| transcript,\s*settings,\s*\{\s*currentExchangeOnly: manual \|\| fullWindowScan,\s*requestScope: operation\.requestScope,\s*prose: currentProse,/);
     assert.match(index, /npc_state_delta_admission_mode/);
     assert.match(index, /Conservative/);
@@ -317,8 +322,8 @@ test('per-NPC Scan dossier workflow and Key Relationships controls are exposed',
     assert.match(index, /dossier-import/);
     assert.match(index, /npc_state_delta_edit_key_relationships/);
     assert.match(index, /Key relationships/);
-    assert.match(index, /cleanEditorList\(editorField\('npc_state_delta_edit_key_relationships'\), KEY_RELATIONSHIP_LIMIT\)/);
-    assert.match(index, /keyRelationships: \[\.\.\.\(npc\.keyRelationships \|\| \[\]\)\]/);
+    assert.match(index, /editorList\('keyRelationships', KEY_RELATIONSHIP_LIMIT\)/);
+    assert.deepEqual(snapshotNpc({ id: 'npc_x', keyRelationships: ['Ilse — sister'] }).keyRelationships, ['Ilse — sister'], 'the inline snapshot copies the bonds');
     assert.match(dossierUi, /Important bonds/);
 });
 
@@ -383,7 +388,7 @@ test('portrait generator is a review-before-apply workflow with per-NPC prompt o
     assert.match(index, /portraitPromptNegative/);
     assert.match(index, /portraitPromptReplace/);
     assert.match(css, /\.npc-state-delta-portrait-generator-overlay\s*\{[^}]*position:\s*fixed[^}]*inset:\s*0/s);
-    assert.match(css, /@media \(min-width: 701px\) and \(max-width: 1180px\)[\s\S]*?\.npc-state-delta-portrait-generator-dialog\s*\{[^}]*width:\s*100vw;[^}]*height:\s*100dvh/s);
+    assert.match(css, /@media \(max-width: 1180px\)[\s\S]*?\.npc-state-delta-portrait-generator-dialog\s*\{[^}]*width:\s*100vw;[^}]*height:\s*100dvh/s);
 });
 
 test('native portrait bridge uses quiet SillyTavern imagine command and separate negative prompt', () => {

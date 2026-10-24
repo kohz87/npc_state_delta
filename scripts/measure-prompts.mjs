@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { buildScannerPrompt, buildProfileRefreshPrompt, buildInjection, buildNarrationCapturePrompt, buildNarrationCaptureParts } from '../core.js';
+import { createNpcPart } from '../src/npc-meters.js';
 
 // Same short source scenes used in the legacy/Beta comparison. No provider calls.
 const cases = [
@@ -110,6 +111,41 @@ for (const fixture of captureFixtures) {
     contextEstimatedTokens: estimateTokens(parts.context),
     contextWithoutDossierRepeatsEstimatedTokens: estimateTokens(sentContext),
   }));
+}
+// Story Suite v2 (hosted only): the npc kind's grammar line and static line (Story Block's static
+// part), and the tail with two present NPCs whose meters moved last reply, one unlocked note.
+{
+  const settingsCases = {
+    builtIns: {},
+    withCustom: { customMeters: [{ name: 'Lust', min: 0, max: 100 }, { name: 'Respect', min: -50, max: 50 }], stages: [{ meter: 'trust', at: 20, name: 'Friend' }] },
+    // (TRS 1-4) Two custom meters with rules and words, and a ladder: the rule line is the static part's addition.
+    withRules: {
+      customMeters: [{ name: 'Lust', min: 0, max: 100, describe: 'rises with flirting and closeness; falls with coldness', bands: 'cool 30, warm 70, burning' }, { name: 'Respect', min: -50, max: 50, describe: 'rises when you keep your word', bands: 'scornful -10, wary 20, admiring' }],
+      stages: [{ meter: 'trust', at: 20, name: 'Friend' }], ladder: [{ name: 'Friend', needs: 'trust 20' }, { name: 'Confidant', needs: 'trust 60, affection 40', milestone: 'saved her brother' }],
+    },
+  };
+  for (const [name, settings] of Object.entries(settingsCases)) {
+    const part = createNpcPart({
+      settings: () => settings,
+      present: () => ['Mira', 'Oren'],
+      secretTexts: (who, ids) => (who === 'Mira' ? ids.map(id => ({ id, text: 'She is the lost heir of House Venn.' })) : []),
+    });
+    const grammar = `${part.kinds.npc.grammar}\n${part.kinds.milestone.grammar}`;
+    const staticLine = part.context.static();
+    const meters = settings.customMeters ? { trust: 22, affection: 5, desire: 0, tension: -3, lust: 3, respect: 0 } : { trust: 22, affection: 5, desire: 0, tension: -3 };
+    const state = { domains: { npc: { problems: [], npcs: {
+      mira: { name: 'Mira', meters, stages: settings.stages ? { trust: 'Friend' } : {}, unlocked: ['sec_00000001'], turn: { reply: 4, from: {} } },
+      oren: { name: 'Oren', meters: { ...meters, trust: -5 }, stages: {}, unlocked: [], turn: { reply: 4, from: {} } },
+    } } } };
+    const tail = part.context.tail({ state, chat: { length: 6 } }).lines.join('\n');
+    console.log(JSON.stringify({
+      name: `v2-npc-meters-${name}`,
+      staticChars: grammar.length + 1 + staticLine.length,
+      staticEstimatedTokens: estimateTokens(grammar) + estimateTokens(staticLine),
+      tailChars: tail.length,
+      tailEstimatedTokens: estimateTokens(tail),
+    }));
+  }
 }
 console.log('Estimator: ASCII/3.5 + non-ASCII*1.1, rounded per prompt component; not provider usage. Main scanner fixtures only; conditional focused passes/retries are additional requests.');
 console.log('Narration capture (opt-in, default off): added to every armed roleplay request; the JSON block in each reply is extra roleplay output not counted here. A missing/broken block falls back to the scanner request.');

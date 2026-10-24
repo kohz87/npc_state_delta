@@ -2,12 +2,15 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { extension_prompt_types, extension_prompt_roles, getRequestHeaders, saveSettings as saveHostSettings } from '../../../../script.js';
 import {
-    dispatchScannerRequest,
+    isEmptyScannerAnswer,
     isScannerRoutingError,
     scannerRoutingError,
     scannerRoutingMetrics,
     scannerProfileOptions,
+    scannerDiagnosticLines,
+    normalizeScannerMaxOutputTokens,
 } from './scanner-routing.js';
+import { normalizeRelationshipMapSettings } from './relationship-map-core.js';
 import {
     AUTOMATIC_BACKFILL_QUEUE_VERSION,
     AUTOMATIC_MISSED_PARTICIPANT_REPAIR_LIMIT,
@@ -17,6 +20,33 @@ import {
     npcParticipatesInExchange,
 } from './scan-context.js';
 import { createDiagnosticStore } from './diagnostics-core.js';
+import { EDITOR_FIELDS, editorManualMemories, editorProfileLocks, settleEditorSave, untouchedEditorFields } from './src/dossier-edit.js';
+import { REFRESH_CHANGED_FIELDS, snapshotNpc } from './src/fields/registry.js';
+import {
+    cleanMessage,
+    recentTranscript,
+    recentUserDevelopmentContext,
+    currentExchangeUserDevelopmentContext,
+    currentExchangeTranscript,
+    currentExchangeProse,
+    storyDayAt,
+    storyDaysForTranscript,
+    currentExclusions,
+    useTranscriptSource,
+} from './src/transcript.js';
+import {
+    BACKFILL_RESPONSE_LENGTH,
+    FULL_SCAN_RESPONSE_LENGTH,
+    SCAN_RESPONSE_LENGTH,
+    generateParsedNpcJson,
+} from './src/scanner-request.js';
+import {
+    applyFocusedRelationshipDecisions,
+    rawScanMatchesExisting,
+    runFocusedRelationshipPass,
+    stampNpcChanges,
+    suppressPrimaryRelationshipForFocusedDecisions,
+} from './src/relationship-pass.js';
 import {
     NPC_STATE_VERSION,
     DEFAULT_RELATIONSHIP,
@@ -25,7 +55,6 @@ import {
     DEFAULT_IMPACT_CRITERIA,
     DEFAULT_MEMORY_CRITERIA,
     DEFAULT_BEHAVIOR_CRITERIA,
-    relationshipHistoryLooksDuplicate,
     IMPORTANT_MEMORY_LIMIT,
     KEY_RELATIONSHIP_LIMIT,
     BEHAVIOR_PROFILE_LIMIT,
@@ -34,15 +63,8 @@ import {
     normalizeRelationshipCaps,
     normalizeRelationshipProgress,
     inferManualRelationshipMilestones,
-    applyRelationshipMilestoneCrossings,
     normalizeRelationshipEvidence,
-    normalizeRelationshipEventHistory,
     relationshipEventMessage,
-    appendRelationshipEvent,
-    applyRelationshipDelta,
-    relationshipChangeReasonGrounded,
-    relationshipAxisEvidenceGrounded,
-    filterRelationshipDeltaByEvidence,
     prepareFullWindowRelationshipPayload,
     relationshipSummaryConsistent,
     calibrateRelationshipSummary,
@@ -50,9 +72,7 @@ import {
     buildInjection,
     npcCurrentlyAbsentInText,
     npcNamedInText,
-    storyDayFromText,
     buildScannerPrompt,
-    buildRelationshipPassPrompt,
     buildBackfillPrompt,
     buildDossierImportPrompt,
     buildProfileRefreshPrompt,
@@ -61,22 +81,18 @@ import {
     isTerminalNpcDeath,
     manualLifeStateRecord,
     protectTerminalNpc,
-    parseScanJson,
     extractNarrationCapture,
     parseNarrationCapture,
     buildNarrationCapturePrompt,
     buildNarrationCaptureParts,
     tagScanEvidence,
-    storyProse,
     npcMatchesLabel,
     normalizeName,
     normalizeGender,
     normalizeNpcRecord,
     normalizeNpcCandidate,
-    normalizeScanNpc,
     resolveInterimIdentityPromotions,
     setNpcArchived,
-    stripUiNoise,
     hasCompactMeguminWorldState,
     extractExplicitKeyRelationshipEdges,
     applyStaleNpcLifecycle,
@@ -97,6 +113,7 @@ import {
     normalizeCustomFieldNames,
     normalizeCustomFields,
     setExternalCalendarSource,
+    setStoryClockSource,
     currentPresentationText,
 } from './core.js';
 import { applyNpcBirthdayUpdate, normalizeBirthDate } from './birthday.js';
@@ -176,6 +193,7 @@ import {
     ensureSuiteStylesheet,
     replyTokenEstimate,
     resolveDossierTarget,
+    storyBlockIsV2,
     externalCalendar,
     normalizeSourceOfTruth,
     openSuiteOverlay,
@@ -196,8 +214,11 @@ import {
     storyBlockTags,
     worldStatePeople,
 } from './present-scene.js';
+import { escapeHtml } from './src/util/html.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
+// The chat text helpers (src/transcript.js) read the host's chat and the Scan context setting.
+useTranscriptSource({ context: () => getContext(), scanDepth: () => getSettings().scanDepth });
 // (1.2.16) Cache-friendly layout (the Story Suite convention): text that never changes from reply
 // to reply goes early and byte-identical, text that changes goes last, so providers that cache the
 // prompt's head can reuse it. The live dossier and the one-pass capture's context and reminder are
@@ -278,6 +299,12 @@ const hydratedChatKeys = new Set();
 const hydratedStateMeta = new Map();
 const workingCopyAdoptions = new Map();
 const freshnessChecks = new Map();
+// Chats whose deterministic sidecar this session looked for and did not find: "no sidecar yet" is
+// an empty dossier. While a Story Block v2 host carries Delta, automatic boundaries (chat events,
+// scan start and commit) trust that miss instead of asking the server again each time
+// (sidecarMissTrusted). The reader's own actions, page resume and the first save still look, and
+// that save never overwrites a file another session created. Without a v2 host nothing changes.
+const missingSidecarChats = new Set();
 const freshnessEvents = [];
 const FRESHNESS_EVENT_LIMIT = 24;
 const loadingChatStates = new Map();
@@ -295,6 +322,15 @@ let lastCaptureBlockChars = 0;
 // Swipe and regenerate rebuild the branch after the reply arrives, so their instruction would
 // describe the replaced sibling; only fresh replies and continues are asked for a block.
 const NARRATION_CAPTURE_TYPES = new Set(['', 'normal', 'continue']);
+// (b6-soak-3) The capture's rules, which never change from reply to reply, stay in the system prompt
+// on these roleplay generations too, swipes and regenerates included, so the prompt's cached head is
+// the same on a swipe; only the reminder and context (the request for a block) follow the arming.
+// Quiet and impersonate generations never carry them.
+const CAPTURE_RULES_TYPES = new Set([...NARRATION_CAPTURE_TYPES, 'swipe', 'regenerate']);
+let captureRulesWithheld = false;
+// (b6-soak-5) Replies whose capture block was removed at MESSAGE_RECEIVED, re-rendered once the host
+// has drawn them (CHARACTER_MESSAGE_RENDERED): at MESSAGE_RECEIVED the reply is not fully drawn.
+const captureRerenderPending = new Set();
 let narrationCaptureArmed = '';
 let narrationCaptureVersion = null;
 const stateWriteTimers = new Map();
@@ -340,6 +376,8 @@ function beginScanOperation(key, label, metadata = {}) {
     const localRevision = Number(stateVersions.get(key) || 0);
     const canonicalRevision = hydratedRevision(key);
     operation.canonicalRevision = canonicalRevision;
+    // The chat's head when the scan began (forwardRelationshipChangesToHost).
+    operation.chatHead = chatHeadMark();
     operation.requestController = new AbortController();
     operation.requestScope = {
         route: { profileId: getSettings().scannerConnectionProfile },
@@ -545,6 +583,7 @@ const DEFAULTS = Object.freeze({
     // (1.2.16) 0: after the player's message, the cache-friendly tail. An install still on the old
     // default 1 is moved once (injectDepthTailUpgraded); any other depth the player set is kept.
     injectDepth: 0,
+    // How many present NPCs the live dossier carries at most (the most relevant first).
     injectLimit: 3,
     injectBudgetTokens: 4000,
     customFieldNames: [],
@@ -555,6 +594,8 @@ const DEFAULTS = Object.freeze({
     presentCastDisplayChosen: false,
     // The floating npc state button while Story Block carries Delta's Present NPCs and Dossiers tabs.
     launcherWithStoryBlock: false,
+    // The same button while a Story Block v2 host carries Delta (its Cast tab and overlay).
+    launcherWithStoryBlockV2: false,
     relationshipBaseline: { ...DEFAULT_RELATIONSHIP },
     relationshipCaps: { ...DEFAULT_RELATIONSHIP_CAPS },
     relationshipCriteria: DEFAULT_RELATIONSHIP_CRITERIA,
@@ -568,16 +609,13 @@ const DEFAULTS = Object.freeze({
     recoveryFiles: {},
     recoveryHistory: {},
     recoveryGarbage: {},
+    // Settings whose controls live in their own modules (full-cast.js, scanner-output-ui.js,
+    // relationship-map.js, calendar-settings.js); declared and normalized here, the one settings owner.
+    fullCastScanEveryTurn: false,
+    scannerMaxOutputTokens: 0,
+    relationshipMap: normalizeRelationshipMapSettings(),
 });
 
-function escapeHtml(value) {
-    return String(value ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('\"', '&quot;')
-        .replaceAll("'", '&#039;');
-}
 
 function persistSettings() {
     const ctx = getContext();
@@ -631,6 +669,7 @@ function getSettings() {
     assign('presentCastDisplay', normalizePresentCastDisplay(settings.presentCastDisplay));
     assign('presentCastDisplayChosen', settings.presentCastDisplayChosen === true);
     assign('launcherWithStoryBlock', settings.launcherWithStoryBlock === true);
+    assign('launcherWithStoryBlockV2', settings.launcherWithStoryBlockV2 === true);
     // 1.0.70 raised the default budget from 1800 to 4000 tokens. An install still on the old default
     // is moved once; any value the player chose, including a later deliberate 1800, is kept.
     const legacyDefaultBudget = settings.injectBudgetDefaultUpgraded !== true && Number(settings.injectBudgetTokens) === 1800;
@@ -672,6 +711,16 @@ function getSettings() {
     const archiveAfter = Math.max(10, Math.min(999, Math.round(Number(settings.staleArchiveAfter) || 30)));
     assign('staleArchiveAfter', archiveAfter);
     assign('staleDeleteAfter', Math.max(archiveAfter + 1, Math.min(1000, Math.round(Number(settings.staleDeleteAfter) || 50))));
+    assign('injectLimit', Math.max(1, Math.min(12, Math.round(Number(settings.injectLimit) || 3))));
+    assign('fullCastScanEveryTurn', settings.fullCastScanEveryTurn === true);
+    assign('scannerMaxOutputTokens', normalizeScannerMaxOutputTokens(settings.scannerMaxOutputTokens));
+    assign('relationshipMap', normalizeRelationshipMapSettings(settings.relationshipMap), sameJson);
+    // The fantasy calendar (calendar-settings.js) is optional: absent means none; only a stored
+    // object is a calendar.
+    if (settings.calendarConfig !== undefined && (!settings.calendarConfig || typeof settings.calendarConfig !== 'object' || Array.isArray(settings.calendarConfig))) {
+        delete settings.calendarConfig;
+        dirty = true;
+    }
     assign('schemaVersion', DEFAULTS.schemaVersion);
 
     if (dirty) persistSettings();
@@ -787,6 +836,7 @@ function forgetCachedChat(key) {
     hydratedChatKeys.delete(key);
     hydratedStateMeta.delete(key);
     freshnessChecks.delete(key);
+    missingSidecarChats.delete(key);
     hydrationErrors.delete(key);
     pendingAutoScans.delete(key);
     assistantReceipts.delete(key);
@@ -821,7 +871,126 @@ function bumpOwnershipEpoch(key) {
     const next = ownershipEpoch(normalized) + 1;
     ownershipEpochs.set(normalized, next);
     loadingChatStates.delete(normalized);
+    missingSidecarChats.delete(normalized);
     return next;
+}
+
+// Set by src/storysuite-v2.js while Delta is registered with a Story Block v2 host.
+function storyBlockV2Hosted() {
+    return globalThis.document?.documentElement?.dataset?.npcStateDeltaStoryBlockV2 === '1';
+}
+
+// (v2 meters, F81/F90) While hosted, Story Block's per-reply `npc` slice holds the meter values. Every
+// helper here is a no-op without a host: the records pass through untouched and nothing is sent.
+let storySuiteV2 = null;
+function storySuiteV2Meters() {
+    return storyBlockV2Hosted() && storySuiteV2?.hosted?.() ? storySuiteV2 : null;
+}
+// (v2) Story Director's clock while hosted ({ minutes, calendar }), for calendar.js; null otherwise (and
+// while the reader keeps the calendar here: the adapter's calendarOwn).
+function hostedStoryClock() {
+    const adapter = storySuiteV2Meters();
+    if (!adapter) return null;
+    try { return adapter.storyClock?.() ?? null; } catch { return null; }
+}
+// Delta's records with their relationship numbers read from the slice (views and the injection).
+function hostedMeterView(npcs) {
+    const adapter = storySuiteV2Meters();
+    if (!adapter) return npcs;
+    try { return adapter.sliceView(npcs) || npcs; } catch { return npcs; }
+}
+// (v2) While hosted, Story Block's scene says who is here unless the reader keeps the scene in Delta
+// ("scene: mine"): the dossier injection, the Cast tab and the module's queries all follow its
+// `scene.present`, so the prompt never carries two different casts. Delta's stored presence is not
+// changed. Without a host, or when the scene cannot answer, Delta's own presence stands.
+function scenePresenceView(npcs) {
+    const adapter = storySuiteV2Meters();
+    if (!adapter || !Array.isArray(npcs) || !defersArea('scene', getSettings().sourceOfTruth)) return npcs;
+    let names = null;
+    try { names = adapter.scenePresent?.(); } catch { names = null; }
+    if (!Array.isArray(names)) return npcs;
+    const here = new Set(names.map(name => resolveDossierTarget(npcs, name)).filter(Boolean));
+    let changed = false;
+    const out = npcs.map(npc => {
+        // (C-1) The scene cannot bring a confirmed-dead NPC back on stage.
+        const present = Boolean(npc?.id) && here.has(String(npc.id)) && !npc.archived && !isTerminalNpcDeath(npc);
+        if (Boolean(npc?.present) === present) return npc;
+        changed = true;
+        return { ...npc, present, worldActive: present ? false : Boolean(npc.worldActive) };
+    });
+    return changed ? out : npcs;
+}
+// (v2 World view) Who the story's scene lists as present now, for the scanner's dynamic context: only
+// while hosted with Story Block keeping the scene (as scenePresenceView) and only for a scan of the
+// head reply (the scene is the head's). Story Director's World view first, else Story Block's scene;
+// null otherwise, and the scanner prompt is then exactly as before.
+function scanScenePresent(messageId) {
+    const adapter = storySuiteV2Meters();
+    if (!adapter || !defersArea('scene', getSettings().sourceOfTruth)) return null;
+    if (Number.isInteger(messageId) && messageId !== latestMessageId(true)) return null;
+    try {
+        const names = adapter.presentNow?.();
+        return Array.isArray(names) && names.length ? names : null;
+    } catch {
+        return null;
+    }
+}
+// The chat state a scan works from: with the slice's relationship numbers while hosted (a copy;
+// the stored state is never changed here), the state itself otherwise.
+function hostedScanState(state) {
+    const npcs = hostedMeterView(state?.npcs);
+    return npcs === state?.npcs ? state : { ...state, npcs };
+}
+// Which message is the head of the chat, and which of its swipes is shown. Story Block writes a
+// module's command onto its head reply, so a scan's changes may go there only while it is the head
+// the scan started from: the same message object at the same place with the same swipe.
+function chatHeadMark() {
+    const chat = getContext().chat || [];
+    const message = chat[chat.length - 1] ?? null;
+    return { length: chat.length, message, swipe: Number.isInteger(message?.swipe_id) ? message.swipe_id : null };
+}
+function chatHeadUnchanged(mark) {
+    if (!mark) return true;
+    const now = chatHeadMark();
+    return now.length === mark.length && now.message === mark.message && now.swipe === mark.swipe;
+}
+// A committed scan's relationship changes go to the slice as npc.adjust (same clamps as a story
+// line), in dossier order; the sidecar keeps its own numbers by v1's rules. `head` (chatHeadMark,
+// taken when the scan started): when the reader swiped, or a reply was added or deleted, since
+// then, nothing is sent; the changes belonged to a reply that is no longer the one Story Block
+// would write them on, and the reply now shown gets its own scan.
+function forwardRelationshipChangesToHost(before, after, messageId, head = null) {
+    const adapter = storySuiteV2Meters();
+    if (!adapter) return;
+    const dropped = () => {
+        console.info('[NPC State Delta] the chat moved on during the scan (a swipe or a new or deleted reply); its relationship changes were not sent to Story Suite.');
+    };
+    if (!chatHeadUnchanged(head)) return dropped();
+    const prior = new Map((before || []).map(npc => [npc?.id, npc]));
+    const baseline = normalizeRelationshipBaseline(getSettings().relationshipBaseline);
+    const changes = [];
+    for (const npc of after || []) {
+        if (!npc?.id || npc.archived) continue;
+        const from = prior.has(npc.id) ? normalizeRelationshipBaseline(prior.get(npc.id).relationship) : baseline;
+        const to = normalizeRelationshipBaseline(npc.relationship);
+        const meters = Object.fromEntries(Object.keys(to).filter(key => to[key] !== from[key]).map(key => [key, to[key] - from[key]]));
+        if (Object.keys(meters).length) changes.push({ name: npc.name, meters, start: from, reply: messageId });
+    }
+    if (!changes.length) return;
+    void (async () => {
+        for (const change of changes) {
+            if (!chatHeadUnchanged(head)) return dropped();
+            await adapter.adjust(change);
+        }
+    })();
+}
+
+// A v2-hosted automatic boundary may skip the deterministic-path probe: this session already found
+// no sidecar for the chat, has no pointer for it and nothing has found or written one since.
+function sidecarMissTrusted(key) {
+    if (!missingSidecarChats.has(key) || !storyBlockV2Hosted()) return false;
+    const settings = getSettings();
+    return !settings.dataFiles?.[key]?.path && !settings.sidecarTombstones?.[key];
 }
 
 function ownershipEpochCurrent(key, epoch) {
@@ -1089,10 +1258,11 @@ async function reconcileCrossSessionWriteConflict(key, error, snapshot, knownPoi
     return inspected;
 }
 
-async function ensureHydratedStateFresh(key = getChatKey(), { reason = 'boundary', notify = false } = {}) {
+async function ensureHydratedStateFresh(key = getChatKey(), { reason = 'boundary', notify = false, probeMissing = false } = {}) {
     const normalized = String(key || '');
     if (!normalized || normalized === 'no-chat' || !isCanonicalChatKey(normalized)) return getChatState(normalized);
     if (!hydratedChatKeys.has(normalized)) return getChatState(normalized);
+    if (!probeMissing && sidecarMissTrusted(normalized)) return getChatState(normalized);
     if (freshnessChecks.has(normalized)) return freshnessChecks.get(normalized);
 
     let task;
@@ -1123,14 +1293,17 @@ async function ensureHydratedStateFresh(key = getChatKey(), { reason = 'boundary
 
         const localRevision = hydratedRevision(normalized);
         const localWriterId = String(hydratedStateMeta.get(normalized)?.writerId || pointer?.writerId || '');
-        const inspected = await inspectNpcStateDataFile(pointer, { expectedChatKey: normalized });
+        // (beta) Unpointered, a missing file is the usual answer: asked first, so no 404 is fetched.
+        const inspected = await inspectNpcStateDataFile(pointer, { expectedChatKey: normalized, probeHeaders: unpointered ? requestHeaders() : null });
         // A deletion, rename or retirement that completed while this read was in flight owns the
         // chat now; the late result must not restore its pointer, tombstone or cached dossier.
         if (!ownershipEpochCurrent(normalized, epoch) || getSettings().sidecarTombstones?.[normalized]) throw staleOwnershipError(normalized);
         if (unpointered && !inspected.exists) {
+            missingSidecarChats.add(normalized);
             updateHydratedStateMeta(normalized, 0, { lastCheckedAt: Date.now(), latestObservedServerRevision: 0 });
             return getChatState(normalized);
         }
+        if (inspected.exists) missingSidecarChats.delete(normalized);
         const writerFork = Boolean(inspected.exists && inspected.revision === localRevision
             && localWriterId && inspected.writerId && inspected.writerId !== localWriterId);
         updateHydratedStateMeta(normalized, localRevision, {
@@ -1208,7 +1381,7 @@ async function ensureFreshMutationBoundary(action, key = getChatKey(), { notify 
         return false;
     }
     try {
-        await ensureChatStateLoaded(normalized);
+        await ensureChatStateLoaded(normalized, { probeMissing: true });
     } catch (error) {
         if (notify) globalThis.toastr?.warning?.(`NPC State Delta: cannot ${action} because the canonical server dossier could not be verified. ${error?.message || error}`);
         return false;
@@ -1251,7 +1424,7 @@ async function retryCurrentChatHydration() {
     const key = getChatKey();
     if (!key || key === 'no-chat') return false;
     try {
-        await ensureChatStateLoaded(key);
+        await ensureChatStateLoaded(key, { probeMissing: true });
         if (getChatKey() !== key) return false;
         renderDossier();
         updateInjection();
@@ -1354,13 +1527,15 @@ function holdRetiredLocalWork(key) {
     return error;
 }
 
-async function ensureChatStateLoaded(key = getChatKey()) {
+// probeMissing: an explicit look (the reader's own action, page resume) that asks the server even
+// when this session already found no sidecar for the chat (sidecarMissTrusted).
+async function ensureChatStateLoaded(key = getChatKey(), { probeMissing = false } = {}) {
     if (!key || key === 'no-chat' || !isCanonicalChatKey(key)) return freshChatState();
     if (retiredInSessionChats.has(key)) {
         hydrationErrors.set(key, retiredInSessionChats.get(key));
         throw retiredInSessionChats.get(key);
     }
-    if (hydratedChatKeys.has(key)) return ensureHydratedStateFresh(key, { reason: 'hydrate-boundary' });
+    if (hydratedChatKeys.has(key)) return ensureHydratedStateFresh(key, { reason: 'hydrate-boundary', probeMissing });
     if (loadingChatStates.has(key)) return loadingChatStates.get(key);
     const epoch = ownershipEpoch(key);
     let task;
@@ -1388,7 +1563,8 @@ async function ensureChatStateLoaded(key = getChatKey()) {
             for (let attempt = 0; attempt < 3; attempt += 1) {
                 try {
                     discoveryError = null;
-                    const recovered = await readNpcStateDataFile(recoveryPointer, { expectedChatKey: key });
+                    // (beta) A new chat has no file: asked first, so no 404 is fetched for it.
+                    const recovered = await readNpcStateDataFile(recoveryPointer, { expectedChatKey: key, probeHeaders: requestHeaders() });
                     assertOwnershipEpoch(key, epoch);
                     if (recovered?.retired) {
                         settings.sidecarTombstones[key] = { reason: recovered.retireReason || 'retired-file', at: Date.now() };
@@ -1416,6 +1592,8 @@ async function ensureChatStateLoaded(key = getChatKey()) {
                 console.error(`[NPC State Delta] Could not read the existing data file for ${key}; blocking writes instead of starting an empty dossier.`, discoveryError);
                 throw discoveryError;
             }
+            if (!recoveredState && !settings.sidecarTombstones?.[key]) missingSidecarChats.add(key);
+            else missingSidecarChats.delete(key);
         }
         let loaded = recoveredState;
         if (pointer?.path && !loaded) {
@@ -1538,6 +1716,7 @@ async function flushStateFile(key = getChatKey()) {
             pointer = written;
             settings.dataFiles[key] = pointer;
             delete settings.sidecarTombstones[key];
+            missingSidecarChats.delete(key);
             persistedVersions.set(key, writeVersion);
             updateHydratedStateMeta(key, written.revision, {
                 lastCheckedAt: Date.now(),
@@ -1984,7 +2163,7 @@ async function drainPendingAutoScan(chatKey) {
     pendingAutoScans.delete(chatKey);
     const succeeded = await scanNow({ manual: false, messageId: pending.messageId });
     if (succeeded && getChatKey() === chatKey && latestMessageId(true) === pending.messageId) {
-        await processPendingBackfills(pending.messageId);
+        scheduleReplyBackfills(chatKey, pending.messageId);
     }
     return succeeded;
 }
@@ -2323,124 +2502,19 @@ function flushCurrentChatOnPageHide() {
     void settleStateFileWrite(key, { flush: true }).catch(error => console.debug('[NPC State Delta] page-hide flush deferred', error));
 }
 
-function cleanMessage(message) {
-    if (!message || message.is_system) return '';
-    const speaker = message.name || (message.is_user ? getContext().name1 : getContext().name2) || '';
-    const body = stripUiNoise(message.mes || '');
-    return body ? `${speaker}: ${body}` : '';
-}
-
-function recentTranscript(limit = null, { messageIds = false } = {}) {
-    const settings = getSettings();
-    const chat = getContext().chat || [];
-    const count = Math.max(2, Math.min(30, Number(limit ?? settings.scanDepth) || 6));
-    const lines = [];
-    // Walk backward and stop as soon as the requested meaningful window is full.
-    // Long chats no longer pay to clean every historical message on each scan/injection.
-    for (let i = chat.length - 1; i >= 0 && lines.length < count; i -= 1) {
-        if (!chat[i] || chat[i].is_system) continue;
-        const line = cleanMessage(chat[i]);
-        if (line) lines.push(messageIds ? `[m${i}] ${line}` : line);
+// (beta) A scanner call that came back with no text at all (SillyTavern's "No message generated") is a
+// quiet note, once per chat: nothing was changed and the next reply scans again, so it is not a red
+// console error with a stack on every reply. Every other failure is logged as before.
+const emptyAnswerChats = new Set();
+function noteScanFailure(label, error, chatKey = '') {
+    if (!isEmptyScannerAnswer(error)) {
+        console.error(`[NPC State Delta] ${label} failed`, error);
+        return;
     }
-    return lines.reverse().join('\n');
-}
-
-function recentUserDevelopmentContext(limit = null, { messageIds = true } = {}) {
-    const settings = getSettings();
-    const chat = getContext().chat || [];
-    const count = Math.max(2, Math.min(30, Number(limit ?? settings.scanDepth) || 6));
-    const selected = [];
-    let meaningful = 0;
-    for (let i = chat.length - 1; i >= 0 && meaningful < count; i -= 1) {
-        const message = chat[i];
-        if (!message || message.is_system) continue;
-        const line = cleanMessage(message);
-        if (!line) continue;
-        meaningful += 1;
-        if (message.is_user) selected.push(messageIds ? `[m${i}] ${line}` : line);
-    }
-    return selected.reverse().join('\n');
-}
-
-function currentExchangeUserDevelopmentContext(messageId = null) {
-    const ctx = getContext();
-    const chat = ctx.chat || [];
-    let assistantId = Number.isInteger(messageId) ? messageId : chat.length - 1;
-    while (assistantId >= 0 && (chat[assistantId]?.is_system || chat[assistantId]?.is_user)) assistantId -= 1;
-    if (assistantId < 0) return '';
-    for (let i = assistantId - 1; i >= 0; i -= 1) {
-        if (chat[i]?.is_system) continue;
-        if (chat[i]?.is_user) {
-            const line = cleanMessage(chat[i]);
-            return line ? `[m${i}] ${line}` : '';
-        }
-        break;
-    }
-    return '';
-}
-
-// The current exchange's messages: the assistant reply at (or before) `messageId` and the user
-// message it answers, oldest first; null when there is no reply.
-function currentExchangeMessages(messageId = null) {
-    const ctx = getContext();
-    const chat = ctx.chat || [];
-    let assistantId = Number.isInteger(messageId) ? messageId : chat.length - 1;
-    while (assistantId >= 0 && (chat[assistantId]?.is_system || chat[assistantId]?.is_user)) assistantId -= 1;
-    if (assistantId < 0) return null;
-    let userId = -1;
-    for (let i = assistantId - 1; i >= 0; i -= 1) {
-        if (chat[i]?.is_system) continue;
-        if (chat[i]?.is_user) { userId = i; break; }
-        // Do not walk across an older assistant turn looking for a distant user message.
-        if (!chat[i]?.is_user) break;
-    }
-    return [userId >= 0 ? chat[userId] : null, chat[assistantId]].filter(Boolean);
-}
-
-function currentExchangeTranscript(messageId = null) {
-    const messages = currentExchangeMessages(messageId);
-    if (!messages) return recentTranscript(2);
-    return messages.map(cleanMessage).filter(Boolean).join('\n');
-}
-
-// (1.2.12) The current exchange's story alone (narration and dialogue, no World State or blocks):
-// who a relationship moment involves, and what the relationship evaluator is sent.
-function currentExchangeProse(messageId = null) {
-    const ctx = getContext();
-    return (currentExchangeMessages(messageId) || []).map(message => {
-        const body = storyProse(message.mes || '');
-        const speaker = message.name || (message.is_user ? ctx.name1 : ctx.name2) || '';
-        return body ? `${speaker}: ${body}` : '';
-    }).filter(Boolean).join('\n');
-}
-
-// Story day of a message: its own dated World State block, else the nearest earlier dated message
-// (user turns and brief replies carry none). Null when nothing nearby is dated; callers then use turns.
-const STORY_DAY_LOOKBACK = 12;
-
-function storyDayAt(messageId) {
-    const chat = getContext().chat || [];
-    const start = Number.isInteger(messageId) ? Math.min(messageId, chat.length - 1) : chat.length - 1;
-    for (let i = start; i >= 0 && i > start - STORY_DAY_LOOKBACK; i -= 1) {
-        const day = storyDayFromText(chat[i]?.mes || '');
-        if (day !== null) return day;
-    }
-    return null;
-}
-
-function storyDaysForTranscript(transcript) {
-    const days = {};
-    for (const match of String(transcript || '').matchAll(/^\[m(\d+)\]/gm)) {
-        const id = Number(match[1]);
-        const day = storyDayAt(id);
-        if (Number.isInteger(id) && day !== null) days[id] = day;
-    }
-    return days;
-}
-
-function currentExclusions() {
-    const ctx = getContext();
-    return [ctx.name1, ctx.name2].filter(Boolean);
+    const key = String(chatKey || '');
+    if (emptyAnswerChats.has(key)) return;
+    emptyAnswerChats.add(key);
+    console.warn(`[NPC State Delta] ${label}: the model answered nothing, so nothing changed; the next reply scans again. (Said once per chat.)`);
 }
 
 // The text last handed to the host for roleplay generation, with the reason when it is empty, so
@@ -2477,7 +2551,10 @@ function namedByPlayerNpcIds(state) {
 // The live dossier injection under the current settings and scene defer (sent by updateInjection;
 // tokens() measures the same text).
 function liveInjectionText(state, settings, { namedNpcIds = namedByPlayerNpcIds(state), transcript = recentTranscript(4) } = {}) {
-    return buildInjection(state.npcs, transcript, state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: settings.customFieldNames, sceneDeferred: defersArea('scene', settings.sourceOfTruth) });
+    // v1's World State carries the live mood and outfit the cards then leave out; v2's scene keeps
+    // only the place and who is present, so under a v2 host the cards keep them.
+    const sceneDeferred = defersArea('scene', settings.sourceOfTruth) && !storyBlockIsV2();
+    return buildInjection(scenePresenceView(hostedMeterView(state.npcs)), transcript, state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: settings.customFieldNames, sceneDeferred });
 }
 
 function updateInjection() {
@@ -2501,13 +2578,15 @@ function updateInjection() {
     // The recent story and who the player's message names: worked out once for both parts.
     const transcript = recentTranscript(4);
     const armed = narrationCaptureArmed === injectionKey && narrationCaptureEnabled(settings);
-    if (!settings.inject && !armed) return clear('"Inject present NPC state" is off.');
+    const rulesSent = narrationCaptureEnabled(settings) && !captureRulesWithheld;
+    if (!settings.inject && !armed && !rulesSent) return clear('"Inject present NPC state" is off.');
     const namedNpcIds = namedByPlayerNpcIds(state);
     const prompt = settings.inject ? liveInjectionText(state, settings, { namedNpcIds, transcript }) : '';
     // (1.2.17) The capture's context leaves out what this dossier already gives word for word.
-    const captureParts = armed
+    const builtParts = armed || rulesSent
         ? buildNarrationCaptureParts(scannerPromptOptions(state, settings, transcript, { dossierAbove: prompt }))
         : { rules: '', context: '' };
+    const captureParts = { rules: armed || rulesSent ? builtParts.rules : '', context: armed ? builtParts.context : '' };
     const capture = captureParts.context;
     const present = (state.npcs || []).filter(npc => npc?.present && !npc?.archived);
     const depth = injectDepthOf(settings);
@@ -2702,26 +2781,6 @@ function transcriptMentionsBackfillTarget(transcript, label) {
     return (` ${haystack} `).includes(` ${target} `);
 }
 
-function transcriptMentionsNpcRecord(transcript, npc) {
-    const haystack = ` ${normalizeName(transcript)} `;
-    if (!haystack.trim() || !npc) return false;
-    const labels = [npc.name, ...(npc.aliases || [])]
-        .map(normalizeName)
-        .filter(label => label.length >= 2);
-    return labels.some(label => haystack.includes(` ${label} `));
-}
-
-function currentExchangeRelationshipRelevant(npc, transcript, raw = null, { currentExchangeOnly = false } = {}) {
-    if (!npc || npc.archived) return false;
-    // Full-window reconciliation must never turn historical presence or a previous live flag
-    // into a fresh relationship event. Only an explicit name/alias participation cue in the
-    // current exchange can make an omitted existing dossier a relationship target. Quick scans
-    // already operate on the current exchange, so their returned row remains sufficient.
-    if (transcriptMentionsNpcRecord(transcript, npc)) return true;
-    if (currentExchangeOnly) return false;
-    return Boolean(raw);
-}
-
 
 function dossierLabelsMatch(npc, candidateName) {
     const candidate = normalizeName(candidateName);
@@ -2807,6 +2866,160 @@ async function prepareCanonicalScanBase(key, label = 'scan') {
     }
 }
 
+// ---- The targeted dossier pass (cleanup step 8) ----
+// The Megumin dossier import (scanNpcDossier), Refresh (refreshNpcFromChat) and backfill
+// (backfillNpcFromHistory) each read one source for one NPC and may change only that NPC. They share
+// one runner: the scan's stale rule (a reply another extension rewrote in place is still the source),
+// the same isolation (every other dossier is put back verbatim after the merge), terminal-death
+// protection, a diagnostics receipt and, while hosted, the relationship forward to Story Block's slice.
+// Each kind keeps its own source, prompt, row scoping, merge options and messages.
+function targetedPassMetrics(label, { startedAt, prompt, raw, retried, parsed, merged = null, localEdges = [] }) {
+    return {
+        label,
+        durationMs: Math.max(0, Math.round((performance.now?.() ?? Date.now()) - startedAt)),
+        promptChars: prompt.length,
+        responseChars: String(raw ?? '').length,
+        retried: Boolean(retried),
+        relationshipPass: false,
+        relationshipTargets: 0,
+        relationshipResponseChars: 0,
+        relationshipRetried: false,
+        relationshipEdges: merged ? (parsed.keyRelationshipEdges || []).length : 0,
+        relationshipEdgeFallbacks: localEdges.length,
+        profileUpdates: merged ? (parsed.profileUpdates || []).length : 0,
+        profileApplied: Number(merged?.report?.profileUpdateStats?.applied || 0),
+        profileEvidenceAdded: Number(merged?.report?.profileUpdateStats?.evidenceAdded || 0),
+        profileDevelopment: Array.isArray(merged?.report?.profileDevelopment) ? structuredClone(merged.report.profileDevelopment) : [],
+        at: Date.now(),
+    };
+}
+
+// The single returned row a targeted pass may take for its target: one that names it, else the only
+// row when it may be the target (`soleRowAllowed`), never one that explicitly identifies someone else.
+function targetedRowFor(returned, target, roster, { npcId = target?.id, label = target?.name, labels = [], soleRowAllowed = true } = {}) {
+    let match = returned.find(npc => backfillScanMatchesTarget(npc, { npcId, label }));
+    if (!match && returned.length === 1 && soleRowAllowed && soleRowMayBeTarget(returned[0], { npcId, labels }, roster)) match = returned[0];
+    return match && !rowContradictsTarget(match, target, roster) ? match : null;
+}
+
+// Running targeted passes. An explicit edit or swipe of the reply a pass tolerates being rewritten in
+// place ends that tolerance: from then on any change to the history makes the result stale.
+const runningTargetedPasses = new Set();
+function endTargetedRewriteTolerance(messageId) {
+    for (const operation of runningTargetedPasses) {
+        if (!Number.isInteger(messageId) || operation.sourceMessageId === messageId) operation.sourceMessageId = null;
+    }
+}
+
+async function runTargetedDossierPass(job) {
+    const { chatKey, ctx, id, label, prompt, systemPrompt, metricsLabel } = job;
+    const lineage = chatLineage(ctx.chat || []);
+    const boundMessageId = latestMessageId(true);
+    const startedAt = performance.now?.() ?? Date.now();
+    const scanStateVersion = Number(stateVersions.get(chatKey) || 0);
+    const operation = beginScanOperation(chatKey, label, { npcId: id, indicator: job.indicator });
+    if (!operation) {
+        job.onBusy?.();
+        return false;
+    }
+    operation.sourceLineage = lineage;
+    // (1.2.9, as the scan) The latest reply rewritten in place by another extension is still the source.
+    operation.sourceMessageId = boundMessageId >= 0 ? boundMessageId : null;
+    runningTargetedPasses.add(operation);
+    setScanIndicator(true);
+    job.setIndicator?.(true);
+    try {
+        const { parsed, raw, retried } = await generateParsedNpcJson(ctx, {
+            systemPrompt, prompt, responseLength: BACKFILL_RESPONSE_LENGTH, label, requestScope: operation.requestScope,
+        });
+        if (!scanOperationCurrent(chatKey, operation) || !await scanCanonicalBaseCurrent(chatKey, operation, job.staleLabel)) {
+            console.info(`[NPC State Delta] discarded expired, superseded, or stale-canonical ${job.staleLabel}.`);
+            return false;
+        }
+        if (getChatKey() !== chatKey || lineageMoved(lineage, chatLineage(getContext().chat || []), operation.sourceMessageId)
+            || Number(stateVersions.get(chatKey) || 0) !== scanStateVersion) {
+            job.onStale();
+            return false;
+        }
+        const latest = getChatState(chatKey);
+        const liveBefore = latest.npcs.find(npc => npc.id === id) || null;
+        const scoped = job.scope(parsed, { latest, liveBefore });
+        if (!scoped.ok) {
+            if (scoped.noChange) {
+                const metrics = targetedPassMetrics(metricsLabel, { startedAt, prompt, raw, retried, parsed, localEdges: scoped.localEdges });
+                if (job.reportsScanMetrics) lastScanMetrics = metrics;
+                recordScanDiagnostics(chatKey, metrics, parsed, null, { targeted: true, npcIds: [id], sourceMessageId: latestMessageId(true) });
+            }
+            return scoped.result;
+        }
+        const settings = getSettings();
+        const targetMessageId = Number.isInteger(job.messageId) ? job.messageId : latestMessageId(true);
+        const merged = mergeScanResult(latest, parsed, {
+            maxNpcs: settings.maxNpcs,
+            excludeNames: [...currentExclusions(), ...(latest.dismissed || [])],
+            turn: latest.turn,
+            sourceMessageId: targetMessageId,
+            scenePresent: scenePresentAt(targetMessageId),
+            calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
+            storyDay: storyDayAt(targetMessageId),
+            customFieldNames: settings.customFieldNames,
+            relationshipBaseline: settings.relationshipBaseline,
+            relationshipCaps: settings.relationshipCaps,
+            autoArchiveDeaths: settings.autoArchiveDeaths !== false,
+            autoReactivateArchived: settings.autoReactivateArchived !== false,
+            admissionMode: settings.admissionMode,
+            preservePresence: true,
+            skipRelationshipUpdate: true,
+            ...job.mergeOptions,
+        });
+        // (I-17) One NPC only: social-edge and alias machinery may run inside the merge, but every other
+        // dossier is put back exactly as it was.
+        const latestById = new Map((latest.npcs || []).map(npc => [npc.id, structuredClone(npc)]));
+        merged.state.npcs = (merged.state.npcs || []).map(npc => (npc.id === id ? npc : (latestById.get(npc.id) || npc)));
+        const result = merged.state.npcs.find(npc => npc.id === id);
+        if (!result) return false;
+        job.afterMerge?.(result, { liveBefore, scoped, merged });
+        if (liveBefore) Object.assign(result, protectTerminalNpc(liveBefore, result));
+        if (!await scanCanonicalBaseCurrent(chatKey, operation, `${job.staleLabel} final commit`)) {
+            job.onLateStale?.();
+            return false;
+        }
+        if (targetMessageId >= 0) {
+            job.beforeCheckpoint?.(merged.state, result, targetMessageId);
+            commitBranchCheckpoint(merged.state, targetMessageId, job.checkpoint);
+        }
+        setChatState(chatKey, merged.state);
+        forwardRelationshipChangesToHost(latest.npcs, merged.state.npcs, targetMessageId, operation.chatHead);
+        persist();
+        renderDossier();
+        updateInjection();
+        // (I-19) Every kind leaves a diagnostics receipt; only Refresh reports as the last scan's metrics.
+        const metrics = targetedPassMetrics(metricsLabel, { startedAt, prompt, raw, retried, parsed, merged, localEdges: scoped.localEdges });
+        if (job.reportsScanMetrics) lastScanMetrics = metrics;
+        recordScanDiagnostics(chatKey, metrics, parsed, merged.report, { targeted: true, npcIds: [id], sourceMessageId: targetMessageId });
+        console.info(`[NPC State Delta] ${metricsLabel} metrics`, metrics);
+        return job.onDone(getChatState(chatKey).npcs.find(npc => npc.id === id));
+    } catch (error) {
+        return job.onError(error);
+    } finally {
+        runningTargetedPasses.delete(operation);
+        const owned = scanOperationCurrent(chatKey, operation);
+        endScanOperation(chatKey, operation);
+        if (getChatKey() === chatKey) setScanIndicator(isScanBusy(chatKey));
+        if (owned) job.setIndicator?.(false);
+        updateInjection();
+    }
+}
+
+// The single-target channels besides the NPC row: profile updates bound to the target, and social
+// edges touching it.
+function scopeTargetedChannels(parsed, target, roster) {
+    scopeProfileUpdatesToTarget(parsed, target, roster);
+    parsed.keyRelationshipEdges = (Array.isArray(parsed.keyRelationshipEdges) ? parsed.keyRelationshipEdges : (Array.isArray(parsed.key_relationship_edges) ? parsed.key_relationship_edges : []))
+        .filter(edge => edgeTouchesResolvedTarget(edge, target, roster));
+    delete parsed.key_relationship_edges;
+}
+
 async function scanNpcDossier(npcId) {
     const id = String(npcId || '').trim();
     const ctx = getContext();
@@ -2828,102 +3041,56 @@ async function scanNpcDossier(npcId) {
         return backfillNpcFromHistory({ npcId: existing.id, label: existing.name, requestedAt: Date.now() }, latestMessageId(true));
     }
     const sourceText = sources.map(item => `[message ${item.messageId + 1} · ${item.kind}]\n${item.text}`).join('\n\n');
-    const lineage = chatLineage(ctx.chat || []);
     const prompt = buildDossierImportPrompt({
         dossierText: sourceText,
         targetName: existing.name,
         existingNpc: existing,
         userName: ctx.name1 || 'User',
         charName: ctx.name2 || 'Character',
+        // (I-13) The configured custom fields, as the merge already accepts them from the import.
+        customFieldNames: getSettings().customFieldNames,
     });
-    const scanStateVersion = Number(stateVersions.get(chatKey) || 0);
-    const operation = beginScanOperation(chatKey, `dossier import for ${existing.name}`, { npcId: id, indicator: 'dossier' });
-    if (operation) operation.sourceLineage = lineage;
-    if (!operation) {
-        globalThis.toastr?.info?.('NPC State Delta: another dossier scan is already running in this chat.');
-        return false;
-    }
-    setScanIndicator(true);
-    setNpcDossierScanIndicator(id, true);
-    try {
-        const { parsed } = await generateParsedNpcJson(ctx, {
-            systemPrompt: "You are NPC State Delta's isolated structured dossier importer. Use only the supplied dossier payload. Return only the requested JSON object.",
-            prompt,
-            responseLength: BACKFILL_RESPONSE_LENGTH,
-            label: `dossier import for ${existing.name}`,
-            requestScope: operation.requestScope,
-        });
-        if (!scanOperationCurrent(chatKey, operation) || !await scanCanonicalBaseCurrent(chatKey, operation, 'dossier import')) {
-            console.info('[NPC State Delta] discarded expired, superseded, or stale-canonical dossier import.');
+    return runTargetedDossierPass({
+        chatKey, ctx, id, prompt,
+        label: `dossier import for ${existing.name}`,
+        systemPrompt: "You are NPC State Delta's isolated structured dossier importer. Use only the supplied dossier payload. Return only the requested JSON object.",
+        indicator: 'dossier',
+        staleLabel: 'dossier import',
+        checkpoint: 'dossier-import',
+        metricsLabel: 'dossier-import',
+        setIndicator: busy => setNpcDossierScanIndicator(id, busy),
+        onBusy: () => globalThis.toastr?.info?.('NPC State Delta: another dossier scan is already running in this chat.'),
+        onStale: () => globalThis.toastr?.info?.('NPC State Delta: chat changed during dossier import; stale result was discarded.'),
+        scope: (parsed, { latest }) => {
+            const returned = Array.isArray(parsed.npcs) ? parsed.npcs : [];
+            const match = targetedRowFor(returned, existing, latest.npcs, { labels: [existing.name, ...(existing.aliases || [])] });
+            if (!match) {
+                globalThis.toastr?.warning?.(`NPC State Delta: the dossier importer did not return ${existing.name}.`);
+                return { ok: false, result: false };
+            }
+            parsed.npcs = [{
+                ...match,
+                id,
+                present: Boolean(existing.present),
+                worldActive: Boolean(existing.worldActive) && !Boolean(existing.present),
+                relationshipImpact: 'none',
+                relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 },
+                relationshipChangeReason: '',
+            }];
+            scopeTargetedChannels(parsed, existing, latest.npcs);
+            return { ok: true };
+        },
+        mergeOptions: { developmentContext: sourceText, userDevelopmentContext: sourceText },
+        onDone: saved => {
+            globalThis.toastr?.success?.(`NPC State Delta: imported ${saved?.name || existing.name} from ${sources.length} Megumin dossier block${sources.length === 1 ? '' : 's'}.`);
+            return true;
+        },
+        onError: error => {
+            console.error('[NPC State Delta] structured dossier import failed', error);
+            globalThis.toastr?.warning?.(`NPC State Delta dossier import failed for ${existing.name}: ${error?.message || error}`);
             return false;
-        }
-        const currentLineage = chatLineage(getContext().chat || []);
-        if (getChatKey() !== chatKey || firstLineageDivergence(lineage, currentLineage) !== -1 || Number(stateVersions.get(chatKey) || 0) !== scanStateVersion) {
-            globalThis.toastr?.info?.('NPC State Delta: chat changed during dossier import; stale result was discarded.');
-            return false;
-        }
-        const returned = Array.isArray(parsed.npcs) ? parsed.npcs : [];
-        let match = returned.find(npc => backfillScanMatchesTarget(npc, { npcId: id, label: existing.name }))
-            || (returned.length === 1 && soleRowMayBeTarget(returned[0], { npcId: id, labels: [existing.name, ...(existing.aliases || [])] }, state.npcs) ? returned[0] : null);
-        if (match && rowContradictsTarget(match, existing, state.npcs)) match = null;
-        if (!match) {
-            globalThis.toastr?.warning?.(`NPC State Delta: the dossier importer did not return ${existing.name}.`);
-            return false;
-        }
-        parsed.npcs = [{
-            ...match,
-            id,
-            present: Boolean(existing.present),
-            worldActive: Boolean(existing.worldActive) && !Boolean(existing.present),
-            relationshipImpact: 'none',
-            relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 },
-            relationshipChangeReason: '',
-        }];
-        // The importer is single-target in every channel, like backfill and Refresh.
-        scopeProfileUpdatesToTarget(parsed, existing, state.npcs);
-        parsed.keyRelationshipEdges = (Array.isArray(parsed.keyRelationshipEdges) ? parsed.keyRelationshipEdges : (Array.isArray(parsed.key_relationship_edges) ? parsed.key_relationship_edges : []))
-            .filter(edge => edgeTouchesResolvedTarget(edge, existing, state.npcs));
-        delete parsed.key_relationship_edges;
-        const latest = getChatState(chatKey);
-        const targetMessageId = latestMessageId(true);
-        const merged = mergeScanResult(latest, parsed, {
-            maxNpcs: getSettings().maxNpcs,
-            excludeNames: [...currentExclusions(), ...(latest.dismissed || [])],
-            turn: latest.turn,
-            sourceMessageId: targetMessageId,
-            scenePresent: scenePresentAt(targetMessageId),
-            calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
-            storyDay: storyDayAt(targetMessageId),
-            relationshipBaseline: getSettings().relationshipBaseline,
-            relationshipCaps: getSettings().relationshipCaps,
-            autoArchiveDeaths: getSettings().autoArchiveDeaths !== false,
-            autoReactivateArchived: getSettings().autoReactivateArchived !== false,
-            admissionMode: getSettings().admissionMode,
-            preservePresence: true,
-            skipRelationshipUpdate: true,
-            developmentContext: sourceText,
-            userDevelopmentContext: sourceText,
-        });
-        const nextState = merged.state;
-        if (targetMessageId >= 0) commitBranchCheckpoint(nextState, targetMessageId, 'dossier-import');
-        setChatState(chatKey, nextState);
-        persist();
-        renderDossier();
-        updateInjection();
-        const saved = nextState.npcs.find(npc => npc.id === id);
-        globalThis.toastr?.success?.(`NPC State Delta: imported ${saved?.name || existing.name} from ${sources.length} Megumin dossier block${sources.length === 1 ? '' : 's'}.`);
-        return true;
-    } catch (error) {
-        console.error('[NPC State Delta] structured dossier import failed', error);
-        globalThis.toastr?.warning?.(`NPC State Delta dossier import failed for ${existing.name}: ${error?.message || error}`);
-        return false;
-    } finally {
-        const owned = scanOperationCurrent(chatKey, operation);
-        endScanOperation(chatKey, operation);
-        if (getChatKey() === chatKey) setScanIndicator(isScanBusy(chatKey));
-        if (owned) setNpcDossierScanIndicator(id, false);
-        updateInjection();
-    }
+        },
+    });
 }
 
 function setNpcChatRefreshIndicator(npcId, busy) {
@@ -2976,8 +3143,7 @@ function syncOpenNpcEditorFields(npc) {
 }
 
 function refreshChangedFields(before, after) {
-    const fields = ['name','role','species','gender','homeBase','age','apparentAge','appearance','personality','speech','behaviorProfile','background','keyRelationships','relationshipSummary','mood','location','goal','status','lifeState','mannerisms','memories'];
-    return fields.filter(field => JSON.stringify(before?.[field] ?? null) !== JSON.stringify(after?.[field] ?? null));
+    return REFRESH_CHANGED_FIELDS.filter(field => JSON.stringify(before?.[field] ?? null) !== JSON.stringify(after?.[field] ?? null));
 }
 
 // (1.2.11) `automatic`: a one-pass catch-up, not the reader's click. It stays quiet unless it
@@ -3015,8 +3181,6 @@ async function refreshNpcFromChat(npcId, { automatic = false } = {}) {
         return false;
     }
     const before = structuredClone(existing);
-    const lineage = chatLineage(ctx.chat || []);
-    const refreshStartedAt = performance.now?.() ?? Date.now();
     const prompt = buildProfileRefreshPrompt({
         transcript,
         targetNpc: existing,
@@ -3027,267 +3191,112 @@ async function refreshNpcFromChat(npcId, { automatic = false } = {}) {
         storyDay: storyDayAt(latestMessageId(true)),
         customFieldNames: settings.customFieldNames,
     });
-    const scanStateVersion = Number(stateVersions.get(chatKey) || 0);
-    const operation = beginScanOperation(chatKey, `chat refresh for ${existing.name}`, { npcId: id, indicator: 'refresh' });
-    if (operation) operation.sourceLineage = lineage;
-    if (!operation) {
-        notify('info', 'NPC State Delta: another dossier scan is already running in this chat.');
-        return false;
-    }
-    setScanIndicator(true);
-    setNpcChatRefreshIndicator(id, true);
-    try {
-        const { parsed, raw, retried } = await generateParsedNpcJson(ctx, {
-            systemPrompt: "You are NPC State Delta's targeted dossier reconciliation scanner. Re-read the supplied recent-story window for exactly one existing NPC. Return only the requested JSON object.",
-            prompt,
-            responseLength: BACKFILL_RESPONSE_LENGTH,
-            label: `chat refresh for ${existing.name}`,
-            requestScope: operation.requestScope,
-        });
-        if (!scanOperationCurrent(chatKey, operation) || !await scanCanonicalBaseCurrent(chatKey, operation, 'dossier refresh')) {
-            console.info('[NPC State Delta] discarded expired, superseded, or stale-canonical dossier refresh.');
-            return false;
-        }
-        const currentLineage = chatLineage(getContext().chat || []);
-        if (getChatKey() !== chatKey || firstLineageDivergence(lineage, currentLineage) !== -1 || Number(stateVersions.get(chatKey) || 0) !== scanStateVersion) {
-            notify('info', 'NPC State Delta: chat or dossier state changed during dossier refresh; stale result was discarded.');
-            return false;
-        }
-        const returned = Array.isArray(parsed.npcs) ? parsed.npcs : [];
-        let match = returned.find(npc => backfillScanMatchesTarget(npc, { npcId: id, label: existing.name }));
-        if (!match && returned.length === 1 && soleRowMayBeTarget(returned[0], { npcId: id, labels: [existing.name, ...(existing.aliases || [])] }, state.npcs)) match = returned[0];
-        if (match && rowContradictsTarget(match, existing, state.npcs)) match = null;
-        parsed.npcs = match ? [{
-            ...match,
-            id,
-            name: match.name || existing.name,
-            present: false,
-            worldActive: false,
-            relationshipImpact: 'none',
-            relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 },
-            relationshipChangeReason: '',
-        }] : [];
-        const rawProfileUpdates = Array.isArray(parsed.profileUpdates) ? parsed.profileUpdates : (Array.isArray(parsed.profile_updates) ? parsed.profile_updates : []);
-        if (rawProfileUpdates.length) {
-            const profile = rawProfileUpdates.find(item => (String(item?.id || '') === id || (item?.name && npcMatchesLabel(existing, item.name))) && profileRowBindsToTarget(item, existing, state.npcs))
-                || (rawProfileUpdates.length === 1 && soleRowMayBeTarget(rawProfileUpdates[0], { npcId: id, labels: [existing.name, ...(existing.aliases || [])] }, state.npcs) ? rawProfileUpdates[0] : null);
-            parsed.profileUpdates = profile && !rowContradictsTarget(profile, existing, state.npcs) ? [{ ...profile, id, name: existing.name }] : [];
-        }
-        const edgeTouchesTarget = edge => edgeTouchesResolvedTarget(edge, existing, state.npcs);
-        const localEdges = extractExplicitKeyRelationshipEdges(transcript, state.npcs, currentExclusions()).filter(edgeTouchesTarget);
-        const modelEdges = (Array.isArray(parsed.keyRelationshipEdges) ? parsed.keyRelationshipEdges : []).filter(edgeTouchesTarget);
-        parsed.keyRelationshipEdges = [...modelEdges, ...localEdges];
-        if (!parsed.npcs.length && !(parsed.profileUpdates || []).length && !parsed.keyRelationshipEdges.length) {
-            lastScanMetrics = {
-                label: 'targeted-refresh',
-                durationMs: Math.max(0, Math.round((performance.now?.() ?? Date.now()) - refreshStartedAt)),
-                promptChars: prompt.length,
-                responseChars: String(raw ?? '').length,
-                retried: Boolean(retried),
-                relationshipPass: false,
-                relationshipTargets: 0,
-                relationshipResponseChars: 0,
-                relationshipRetried: false,
-                relationshipEdges: 0,
-                relationshipEdgeFallbacks: localEdges.length,
-                profileUpdates: 0,
-                profileApplied: 0,
-                profileEvidenceAdded: 0,
-                profileDevelopment: [],
-                at: Date.now(),
-            };
-            recordScanDiagnostics(chatKey, lastScanMetrics, parsed, null, {
-                targeted: true,
-                npcIds: [id],
-                sourceMessageId: latestMessageId(true),
-            });
-            notify('info', `NPC State Delta: no grounded dossier changes found for ${existing.name} in the last ${settings.scanDepth} messages.`);
-            return true;
-        }
-        const latest = getChatState(chatKey);
-        const liveBefore = latest.npcs.find(npc => npc.id === id);
-        if (!liveBefore) return false;
-        const targetMessageId = latestMessageId(true);
-        const merged = mergeScanResult(latest, parsed, {
-            maxNpcs: settings.maxNpcs,
-            excludeNames: [...currentExclusions(), ...(latest.dismissed || [])],
-            turn: latest.turn,
-            sourceMessageId: targetMessageId,
-            scenePresent: scenePresentAt(targetMessageId),
-            calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
-            storyDay: storyDayAt(targetMessageId),
-            customFieldNames: settings.customFieldNames,
-            relationshipBaseline: settings.relationshipBaseline,
-            relationshipCaps: settings.relationshipCaps,
-            autoArchiveDeaths: settings.autoArchiveDeaths !== false,
+    return runTargetedDossierPass({
+        chatKey, ctx, id, prompt,
+        label: `chat refresh for ${existing.name}`,
+        systemPrompt: "You are NPC State Delta's targeted dossier reconciliation scanner. Re-read the supplied recent-story window for exactly one existing NPC. Return only the requested JSON object.",
+        indicator: 'refresh',
+        staleLabel: 'dossier refresh',
+        checkpoint: 'chat-refresh',
+        metricsLabel: 'targeted-refresh',
+        reportsScanMetrics: true,
+        setIndicator: busy => setNpcChatRefreshIndicator(id, busy),
+        onBusy: () => notify('info', 'NPC State Delta: another dossier scan is already running in this chat.'),
+        onStale: () => notify('info', 'NPC State Delta: chat or dossier state changed during dossier refresh; stale result was discarded.'),
+        onLateStale: () => notify('info', 'NPC State Delta: another session updated this chat during the refresh; the stale result was discarded.'),
+        scope: (parsed, { latest, liveBefore }) => {
+            const roster = latest.npcs;
+            const labels = [existing.name, ...(existing.aliases || [])];
+            const returned = Array.isArray(parsed.npcs) ? parsed.npcs : [];
+            const match = targetedRowFor(returned, existing, roster, { labels });
+            parsed.npcs = match ? [{
+                ...match,
+                id,
+                name: match.name || existing.name,
+                present: false,
+                worldActive: false,
+                relationshipImpact: 'none',
+                relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 },
+                relationshipChangeReason: '',
+            }] : [];
+            const rawProfileUpdates = Array.isArray(parsed.profileUpdates) ? parsed.profileUpdates : (Array.isArray(parsed.profile_updates) ? parsed.profile_updates : []);
+            if (rawProfileUpdates.length) {
+                const profile = rawProfileUpdates.find(item => (String(item?.id || '') === id || (item?.name && npcMatchesLabel(existing, item.name))) && profileRowBindsToTarget(item, existing, roster))
+                    || (rawProfileUpdates.length === 1 && soleRowMayBeTarget(rawProfileUpdates[0], { npcId: id, labels }, roster) ? rawProfileUpdates[0] : null);
+                parsed.profileUpdates = profile && !rowContradictsTarget(profile, existing, roster) ? [{ ...profile, id, name: existing.name }] : [];
+            }
+            const edgeTouchesTarget = edge => edgeTouchesResolvedTarget(edge, existing, roster);
+            const localEdges = extractExplicitKeyRelationshipEdges(transcript, roster, currentExclusions()).filter(edgeTouchesTarget);
+            const modelEdges = (Array.isArray(parsed.keyRelationshipEdges) ? parsed.keyRelationshipEdges : []).filter(edgeTouchesTarget);
+            parsed.keyRelationshipEdges = [...modelEdges, ...localEdges];
+            if (!parsed.npcs.length && !(parsed.profileUpdates || []).length && !parsed.keyRelationshipEdges.length) {
+                notify('info', `NPC State Delta: no grounded dossier changes found for ${existing.name} in the last ${settings.scanDepth} messages.`);
+                return { ok: false, noChange: true, result: true, localEdges };
+            }
+            if (!liveBefore) return { ok: false, result: false };
+            return { ok: true, match, localEdges };
+        },
+        mergeOptions: {
             autoReactivateArchived: false,
-            admissionMode: settings.admissionMode,
-            preservePresence: true,
-            skipRelationshipUpdate: true,
-            memoryInputLimit: IMPORTANT_MEMORY_LIMIT,
+            // (I-14) The Refresh prompt asks for at most three new memories (rule 14); its merge takes three.
+            memoryInputLimit: 3,
             allowTargetedDurableSeed: true,
             developmentSourceMessageIds,
             storyDays: storyDaysForTranscript(transcript),
             developmentContext: transcript,
             userDevelopmentContext: recentUserDevelopmentContext(settings.scanDepth, { messageIds: true }),
-        });
-        // A targeted refresh may use social-edge machinery internally, but it must never
-        // mutate a second dossier as a side effect. Restore every non-target record verbatim.
-        const latestById = new Map((latest.npcs || []).map(npc => [npc.id, structuredClone(npc)]));
-        merged.state.npcs = (merged.state.npcs || []).map(npc => npc.id === id ? npc : (latestById.get(npc.id) || npc));
-        const refreshed = merged.state.npcs.find(npc => npc.id === id);
-        if (!refreshed) return false;
-        // Manual history reconciliation must never pretend the NPC was just seen or change
-        // current presence merely because an older message in the window mentioned them.
-        refreshed.present = Boolean(liveBefore.present);
-        refreshed.worldActive = Boolean(liveBefore.worldActive);
-        refreshed.lastSeenTurn = liveBefore.lastSeenTurn;
-        refreshed.lastWorldActiveTurn = liveBefore.lastWorldActiveTurn;
-        refreshed.seenCount = liveBefore.seenCount;
-        refreshed.relationship = structuredClone(liveBefore.relationship || DEFAULT_RELATIONSHIP);
-        refreshed.lastRelationshipChange = structuredClone(liveBefore.lastRelationshipChange || refreshed.lastRelationshipChange);
-        const proposedSummary = String(match?.relationshipSummary ?? match?.relationship_summary ?? '').trim().slice(0, 900);
-        // The reconciled summary must pass the same canonical consistency gate as every other path;
-        // a proposal the merge rejected (for example an unsupported obligation) is not restored here.
-        if (proposedSummary && !(liveBefore.manualProfileFields || []).includes('relationshipSummary')
-            && relationshipSummaryConsistent(proposedSummary, refreshed.relationship, transcript, refreshed.relationshipMilestones)) {
-            refreshed.relationshipSummary = calibrateRelationshipSummary(proposedSummary, refreshed.relationship);
-        }
-        Object.assign(refreshed, protectTerminalNpc(liveBefore, refreshed));
-        if (!await scanCanonicalBaseCurrent(chatKey, operation, 'dossier refresh final commit')) {
-            notify('info', 'NPC State Delta: another session updated this chat during the refresh; the stale result was discarded.');
+        },
+        afterMerge: (refreshed, { liveBefore, scoped }) => {
+            // Manual history reconciliation must never pretend the NPC was just seen or change
+            // current presence merely because an older message in the window mentioned them.
+            refreshed.present = Boolean(liveBefore.present);
+            refreshed.worldActive = Boolean(liveBefore.worldActive);
+            refreshed.lastSeenTurn = liveBefore.lastSeenTurn;
+            refreshed.lastWorldActiveTurn = liveBefore.lastWorldActiveTurn;
+            refreshed.seenCount = liveBefore.seenCount;
+            refreshed.relationship = structuredClone(liveBefore.relationship || DEFAULT_RELATIONSHIP);
+            refreshed.lastRelationshipChange = structuredClone(liveBefore.lastRelationshipChange || refreshed.lastRelationshipChange);
+            const proposedSummary = String(scoped.match?.relationshipSummary ?? scoped.match?.relationship_summary ?? '').trim().slice(0, 900);
+            // The reconciled summary must pass the same canonical consistency gate as every other path;
+            // a proposal the merge rejected (for example an unsupported obligation) is not restored here.
+            if (proposedSummary && !(liveBefore.manualProfileFields || []).includes('relationshipSummary')
+                && relationshipSummaryConsistent(proposedSummary, refreshed.relationship, transcript, refreshed.relationshipMilestones)) {
+                refreshed.relationshipSummary = calibrateRelationshipSummary(proposedSummary, refreshed.relationship);
+            }
+        },
+        onDone: saved => {
+            syncOpenNpcEditorFields(saved);
+            const changed = refreshChangedFields(before, saved);
+            if (automatic) {
+                if (changed.length) globalThis.toastr?.info?.(`NPC State Delta: caught up ${saved?.name || existing.name} from the last ${settings.scanDepth} messages (${changed.join(', ')}).`);
+            } else {
+                globalThis.toastr?.success?.(changed.length
+                    ? `NPC State Delta: refreshed ${saved?.name || existing.name} from the last ${settings.scanDepth} messages (${changed.join(', ')}).`
+                    : `NPC State Delta: ${saved?.name || existing.name} is already consistent with the last ${settings.scanDepth} messages.`);
+            }
+            return true;
+        },
+        onError: error => {
+            console.error('[NPC State Delta] targeted chat refresh failed', error);
+            notify('warning', `NPC State Delta refresh failed for ${existing.name}: ${error?.message || error}`);
             return false;
-        }
-        if (targetMessageId >= 0) commitBranchCheckpoint(merged.state, targetMessageId, 'chat-refresh');
-        setChatState(chatKey, merged.state);
-        persist();
-        renderDossier();
-        updateInjection();
-        const saved = getChatState(chatKey).npcs.find(npc => npc.id === id);
-        syncOpenNpcEditorFields(saved);
-        const changed = refreshChangedFields(before, saved);
-        lastScanMetrics = {
-            label: 'targeted-refresh',
-            durationMs: Math.max(0, Math.round((performance.now?.() ?? Date.now()) - refreshStartedAt)),
-            promptChars: prompt.length,
-            responseChars: String(raw ?? '').length,
-            retried: Boolean(retried),
-            relationshipPass: false,
-            relationshipTargets: 0,
-            relationshipResponseChars: 0,
-            relationshipRetried: false,
-            relationshipEdges: parsed.keyRelationshipEdges.length,
-            relationshipEdgeFallbacks: localEdges.length,
-            profileUpdates: (parsed.profileUpdates || []).length,
-            profileApplied: Number(merged.report?.profileUpdateStats?.applied || 0),
-            profileEvidenceAdded: Number(merged.report?.profileUpdateStats?.evidenceAdded || 0),
-            profileDevelopment: Array.isArray(merged.report?.profileDevelopment) ? structuredClone(merged.report.profileDevelopment) : [],
-            at: Date.now(),
-        };
-        recordScanDiagnostics(chatKey, lastScanMetrics, parsed, merged.report, {
-            targeted: true,
-            npcIds: [id],
-            sourceMessageId: targetMessageId,
-        });
-        console.info('[NPC State Delta] targeted refresh metrics', lastScanMetrics);
-        if (automatic) {
-            if (changed.length) globalThis.toastr?.info?.(`NPC State Delta: caught up ${saved?.name || existing.name} from the last ${settings.scanDepth} messages (${changed.join(', ')}).`);
-        } else {
-            globalThis.toastr?.success?.(changed.length
-                ? `NPC State Delta: refreshed ${saved?.name || existing.name} from the last ${settings.scanDepth} messages (${changed.join(', ')}).`
-                : `NPC State Delta: ${saved?.name || existing.name} is already consistent with the last ${settings.scanDepth} messages.`);
-        }
-        return true;
-    } catch (error) {
-        console.error('[NPC State Delta] targeted chat refresh failed', error);
-        notify('warning', `NPC State Delta refresh failed for ${existing.name}: ${error?.message || error}`);
-        return false;
-    } finally {
-        const owned = scanOperationCurrent(chatKey, operation);
-        endScanOperation(chatKey, operation);
-        if (getChatKey() === chatKey) setScanIndicator(isScanBusy(chatKey));
-        if (owned) setNpcChatRefreshIndicator(id, false);
-        updateInjection();
-    }
+        },
+    });
 }
 
-const SCAN_RESPONSE_LENGTH = 1800;
-const FULL_SCAN_RESPONSE_LENGTH = 3200;
-const RELATIONSHIP_RESPONSE_LENGTH = 900;
-const BACKFILL_RESPONSE_LENGTH = 3200;
 const BACKFILL_MAX_ATTEMPTS = 3;
 const BACKFILL_RETRY_COOLDOWN_MS = 60 * 1000;
-const JSON_RETRY_RESPONSE_LENGTH = 5200;
 
-function isTruncatedScannerJsonError(error) {
-    const text = [error?.message, error?.cause?.message]
-        .filter(Boolean)
-        .join(' ');
-    return /unterminated string|unexpected end of json input|unexpected end of data|end of json input/i.test(text);
-}
-
-// A reply with no JSON object at all is usually a provider/host message or a model refusal rather
-// than broken JSON. Surface a short, whitespace-collapsed excerpt so the cause is visible; never the
-// whole provider response.
-const NON_JSON_REPLY_EXCERPT_CHARS = 200;
-function nonJsonReplyExcerpt(raw) {
-    if (raw && typeof raw === 'object') return '';
-    const text = String(raw ?? '').replace(/\s+/g, ' ').trim();
-    if (!text || text.includes('{')) return '';
-    return text.length > NON_JSON_REPLY_EXCERPT_CHARS ? `${text.slice(0, NON_JSON_REPLY_EXCERPT_CHARS)}…` : text;
-}
-
-function compactRetryPrompt(prompt, label = 'scanner', reason = 'malformed') {
-    const cause = reason === 'truncated'
-        ? 'Your previous response ended before the JSON was complete.'
-        : 'Your previous response was not valid JSON. Rebuild it from the beginning with correct commas, colons, quotes, arrays, and objects.';
-    const targetedMemoryLimit = /(?:backfill|chat refresh)/i.test(String(label || '')) ? IMPORTANT_MEMORY_LIMIT : 3;
-    return `${prompt}
-
-CRITICAL COMPACT JSON RETRY (${label}): ${cause} Return the full JSON object again from the beginning. Use MINIFIED JSON only. Keep every value concise; shorten prose instead of risking truncation. Omit unsupported optional facts rather than explaining them. Compact rather than append: appearance under 500 characters, personality 280, speech 240, behaviorProfile at most 6 short point-form rules, background/relationship summary 280-320, mannerisms at most 4 DISTINCT short items, key relationships one entry per counterpart, memories at most ${targetedMemoryLimit} distinct events, memoryRetention at most 5 distinct events. Close every quoted string, array, and object. No markdown, no commentary, no code fence.`;
-}
-
-async function generateParsedNpcJson(ctx, {
-    systemPrompt,
-    prompt,
-    responseLength,
-    label = 'scanner',
-    requestScope,
-}) {
-    if (!requestScope) throw scannerRoutingError('A scanner request needs an owning operation.', 'NPC_SCANNER_ROUTE_CANCELLED');
-    const invoke = async (retry = false, retryReason = 'malformed') => {
-        const raw = await dispatchScannerRequest(ctx, {
-            systemPrompt,
-            prompt: retry ? compactRetryPrompt(prompt, label, retryReason) : prompt,
-            quietToLoud: false,
-            instructOverride: true,
-            responseLength: retry ? Math.max(JSON_RETRY_RESPONSE_LENGTH, Number(responseLength) || 0) : responseLength,
-            trimNames: false,
-        }, { ...requestScope, label: retry ? `${label} (JSON retry)` : label });
-        try {
-            return { parsed: parseScanJson(raw), raw, retried: retry };
-        } catch (error) {
-            const truncated = isTruncatedScannerJsonError(error);
-            const reply = nonJsonReplyExcerpt(raw);
-            if (!retry) {
-                console.warn(`[NPC State Delta] ${label} returned invalid JSON; retrying once with a compact correction prompt.`, {
-                    responseChars: String(raw ?? '').length,
-                    truncated,
-                    error: error?.message || String(error),
-                    ...(reply ? { textReply: reply } : {}),
-                });
-                return invoke(true, truncated ? 'truncated' : 'malformed');
-            }
-            const wrapped = new Error(truncated
-                ? `${label} JSON was truncated twice; the model did not finish its JSON response. ${error?.message || error}`
-                : reply
-                    ? `${label} received a text reply instead of JSON twice. The provider/model said: "${reply}" This usually means the provider blocked or refused the request, the request exceeded the model's context, or the selected connection profile is not using a chat model that follows JSON instructions.`
-                    : `${label} returned malformed JSON twice; the model did not produce a valid dossier object. ${error?.message || error}`);
-            wrapped.cause = error;
-            throw wrapped;
-        }
+// The live state a backfill that preserves it keeps: the record's own, whatever the model returned.
+function backfillLiveState(liveBefore, keptPresent) {
+    return {
+        present: keptPresent,
+        worldActive: Boolean(liveBefore.worldActive) && !keptPresent,
+        mood: liveBefore.mood || '',
+        location: liveBefore.location || '',
+        goal: liveBefore.goal || '',
+        status: liveBefore.status || '',
     };
-    return invoke(false);
 }
 
 async function backfillNpcFromHistory(request, messageId = null, { automatic = false } = {}) {
@@ -3309,7 +3318,6 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
     } else if (!backfillNeedsRequest(existing, state.npcs)) {
         return true;
     }
-    const scanLineage = chatLineage(ctx.chat || []);
     const prompt = buildBackfillPrompt({
         transcript,
         targetName: request.label,
@@ -3319,155 +3327,114 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
         memoryCriteria: settings.memoryCriteria,
         customFieldNames: settings.customFieldNames,
     });
-
-    const scanStateVersion = Number(stateVersions.get(chatKey) || 0);
-    const operation = beginScanOperation(chatKey, `backfill for ${request.label}`, { npcId: request.npcId, indicator: 'backfill' });
-    if (operation) operation.sourceLineage = scanLineage;
-    if (!operation) return false;
-    setScanIndicator(true);
-    try {
-        const { parsed } = await generateParsedNpcJson(ctx, {
-            systemPrompt: "You are NPC State Delta's isolated dossier backfill scanner. Use only the supplied scanner payload. Return only the requested JSON object.",
-            prompt,
-            responseLength: BACKFILL_RESPONSE_LENGTH,
-            label: `backfill for ${request.label}`,
-            requestScope: operation.requestScope,
-        });
-        if (!scanOperationCurrent(chatKey, operation) || !await scanCanonicalBaseCurrent(chatKey, operation, 'dossier backfill')) {
-            console.info('[NPC State Delta] discarded expired, superseded, or stale-canonical dossier backfill.');
-            return false;
-        }
-        const currentLineage = chatLineage(getContext().chat || []);
-        if (getChatKey() !== chatKey || firstLineageDivergence(scanLineage, currentLineage) !== -1 || Number(stateVersions.get(chatKey) || 0) !== scanStateVersion) {
-            console.info('[NPC State Delta] discarded stale dossier backfill after chat or dossier state changed.');
-            return false;
-        }
-        const returned = Array.isArray(parsed.npcs) ? parsed.npcs : [];
-        let matches = returned.filter(npc => backfillScanMatchesTarget(npc, request));
-        // The backfill prompt is single-target by construction. If the model expands a short
-        // label (e.g. Toris -> Toris Vale) without repeating the alias, accept the sole result
-        // when the requested target is actually present in the supplied history.
-        if (!matches.length && returned.length === 1 && transcriptMentionsBackfillTarget(transcript, request.label)) {
-            const targetRecord = getChatState(chatKey).npcs.find(item => item.id === request.npcId);
-            const labels = [request.label, ...(targetRecord ? [targetRecord.name, ...(targetRecord.aliases || [])] : [])];
-            if (soleRowMayBeTarget(returned[0], { npcId: request.npcId, labels }, getChatState(chatKey).npcs)) matches = returned;
-        }
-        {
-            const roster = getChatState(chatKey).npcs;
-            const targetRecord = roster.find(item => item.id === request.npcId)
-                || { id: request.npcId, name: request.label, aliases: [], identityKind: inferNpcIdentityKind(request.label) };
-            matches = matches.filter(row => !rowContradictsTarget(row, targetRecord, roster));
-        }
-        const liveBeforeBackfill = request.preserveLiveState === true
-            ? getChatState(chatKey).npcs.find(item => item.id === request.npcId)
-            : null;
-        // A missed-participant repair exists because the NPC takes part in the current exchange;
-        // the broad scan's omission is not evidence of absence, so a grounded present=true stands.
-        // Other repairs keep the live presence (older history must not make an NPC present).
-        const repairedPresence = request.reason === 'missed-participant' && matches[0]?.present === true
-            && !npcCurrentlyAbsentInText(existing, currentExchangeTranscript(request.requestedMessageId));
-        const keptPresent = liveBeforeBackfill ? (repairedPresence || Boolean(liveBeforeBackfill.present)) : false;
-        parsed.npcs = matches
-            .slice(0, 1)
-            .map(npc => ({
+    return runTargetedDossierPass({
+        chatKey, ctx, prompt, messageId,
+        id: request.npcId,
+        label: `backfill for ${request.label}`,
+        systemPrompt: "You are NPC State Delta's isolated dossier backfill scanner. Use only the supplied scanner payload. Return only the requested JSON object.",
+        indicator: 'backfill',
+        staleLabel: 'dossier backfill',
+        checkpoint: 'dossier-backfill',
+        metricsLabel: 'dossier-backfill',
+        onStale: () => console.info('[NPC State Delta] discarded stale dossier backfill after chat or dossier state changed.'),
+        scope: (parsed, { latest, liveBefore }) => {
+            const roster = latest.npcs;
+            const target = liveBefore || { id: request.npcId, name: request.label, aliases: [], identityKind: inferNpcIdentityKind(request.label) };
+            const returned = Array.isArray(parsed.npcs) ? parsed.npcs : [];
+            // The backfill prompt is single-target by construction. If the model expands a short
+            // label (e.g. Toris -> Toris Vale) without repeating the alias, accept the sole result
+            // when the requested target is actually present in the supplied history.
+            const labels = [request.label, ...(liveBefore ? [liveBefore.name, ...(liveBefore.aliases || [])] : [])];
+            let matches = returned.filter(npc => backfillScanMatchesTarget(npc, request));
+            if (!matches.length && returned.length === 1 && transcriptMentionsBackfillTarget(transcript, request.label)
+                && soleRowMayBeTarget(returned[0], { npcId: request.npcId, labels }, roster)) matches = returned;
+            matches = matches.filter(row => !rowContradictsTarget(row, target, roster));
+            const preserved = request.preserveLiveState === true ? liveBefore : null;
+            // A missed-participant repair exists because the NPC takes part in the current exchange;
+            // the broad scan's omission is not evidence of absence, so a grounded present=true stands.
+            // Other repairs keep the live presence (older history must not make an NPC present).
+            const repairedPresence = request.reason === 'missed-participant' && matches[0]?.present === true
+                && !npcCurrentlyAbsentInText(existing, currentExchangeTranscript(request.requestedMessageId));
+            const keptPresent = preserved ? (repairedPresence || Boolean(preserved.present)) : false;
+            parsed.npcs = matches.slice(0, 1).map(npc => ({
                 ...npc,
                 id: request.npcId,
-                ...(liveBeforeBackfill ? {
-                    present: keptPresent,
-                    worldActive: Boolean(liveBeforeBackfill.worldActive) && !keptPresent,
-                    mood: liveBeforeBackfill.mood || npc.mood || '',
-                    location: liveBeforeBackfill.location || npc.location || '',
-                    goal: liveBeforeBackfill.goal || npc.goal || '',
-                    status: liveBeforeBackfill.status || npc.status || '',
-                } : {}),
+                // (C-3) The same live state the merge result keeps below, so the merge sees no change.
+                ...(preserved ? backfillLiveState(preserved, keptPresent) : {}),
                 relationshipImpact: 'none',
                 relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 },
                 relationshipChangeReason: '',
             }));
-        if (!parsed.npcs.length) {
-            const literalMention = transcriptMentionsBackfillTarget(transcript, request.label);
-            console.warn('[NPC State Delta] targeted backfill returned no accepted NPC', { target: request.label, literalMention, returnedCount: returned.length });
-            if (!request.silent) globalThis.toastr?.warning?.(`NPC State Delta: ${request.label} was added, but the backfill model returned no matching dossier details from the last ${settings.scanDepth} messages.`);
-            return false;
-        }
-        const latestState = getChatState(chatKey);
-        // A single-target backfill may change only its target, in every result channel: profile
-        // updates and social edges for other dossiers are dropped like their npc rows.
-        {
-            const target = latestState.npcs.find(item => item.id === request.npcId)
-                || { id: request.npcId, name: request.label, aliases: [], identityKind: inferNpcIdentityKind(request.label) };
-            scopeProfileUpdatesToTarget(parsed, target, latestState.npcs);
-            parsed.keyRelationshipEdges = (Array.isArray(parsed.keyRelationshipEdges) ? parsed.keyRelationshipEdges : []).filter(edge => edgeTouchesResolvedTarget(edge, target, latestState.npcs));
-        }
-        const targetMessageId = Number.isInteger(messageId) ? messageId : latestMessageId(true);
-        const merged = mergeScanResult(latestState, parsed, {
-            maxNpcs: settings.maxNpcs,
-            excludeNames: [...currentExclusions(), ...(latestState.dismissed || [])],
-            turn: latestState.turn,
-            sourceMessageId: targetMessageId,
-            scenePresent: scenePresentAt(targetMessageId),
-            calendarSource: getContext().chat?.[targetMessageId]?.mes || '',
-            storyDay: storyDayAt(targetMessageId),
-            customFieldNames: settings.customFieldNames,
-            relationshipBaseline: settings.relationshipBaseline,
-            relationshipCaps: settings.relationshipCaps,
-            autoArchiveDeaths: settings.autoArchiveDeaths !== false,
-            autoReactivateArchived: settings.autoReactivateArchived !== false,
-            admissionMode: settings.admissionMode,
-            preservePresence: true,
-            skipRelationshipUpdate: true,
+            if (!parsed.npcs.length) {
+                const literalMention = transcriptMentionsBackfillTarget(transcript, request.label);
+                console.warn('[NPC State Delta] targeted backfill returned no accepted NPC', { target: request.label, literalMention, returnedCount: returned.length });
+                if (!request.silent) globalThis.toastr?.warning?.(`NPC State Delta: ${request.label} was added, but the backfill model returned no matching dossier details from the last ${settings.scanDepth} messages.`);
+                return { ok: false, result: false };
+            }
+            // A single-target backfill may change only its target, in every result channel: profile
+            // updates and social edges for other dossiers are dropped like their npc rows.
+            scopeTargetedChannels(parsed, target, roster);
+            return { ok: true, preserved, keptPresent, repairedPresence };
+        },
+        mergeOptions: {
+            // The backfill prompt asks for up to five memories (a first, whole dossier).
             memoryInputLimit: IMPORTANT_MEMORY_LIMIT,
             allowTargetedDurableSeed: true,
             developmentContext: transcript,
             userDevelopmentContext: recentUserDevelopmentContext(settings.scanDepth, { messageIds: true }),
-        });
-        const nextState = merged.state;
-        const finalNpc = nextState.npcs.find(npc => npc.id === request.npcId);
-        if (request.preserveLiveState === true && liveBeforeBackfill && finalNpc) {
-            finalNpc.present = keptPresent;
-            finalNpc.worldActive = Boolean(liveBeforeBackfill.worldActive) && !finalNpc.present;
-            finalNpc.mood = liveBeforeBackfill.mood || '';
-            finalNpc.location = liveBeforeBackfill.location || '';
-            finalNpc.goal = liveBeforeBackfill.goal || '';
-            finalNpc.status = liveBeforeBackfill.status || '';
-            finalNpc.seenCount = Number(liveBeforeBackfill.seenCount || 0);
+        },
+        afterMerge: (finalNpc, { scoped }) => {
+            const { preserved, keptPresent, repairedPresence } = scoped;
+            if (!preserved) return;
+            Object.assign(finalNpc, backfillLiveState(preserved, keptPresent));
+            finalNpc.seenCount = Number(preserved.seenCount || 0);
             finalNpc.lastSeenTurn = repairedPresence
-                ? Math.max(Number(liveBeforeBackfill.lastSeenTurn || 0), Number(state.turn || 0))
-                : Number(liveBeforeBackfill.lastSeenTurn || 0);
-            finalNpc.lastWorldActiveTurn = Number(liveBeforeBackfill.lastWorldActiveTurn || 0);
-        }
-        if (finalNpc) Object.assign(finalNpc, protectTerminalNpc(existing, finalNpc));
-        if (!await scanCanonicalBaseCurrent(chatKey, operation, 'dossier backfill final commit')) return false;
-        if (targetMessageId >= 0 && finalNpc) {
+                ? Math.max(Number(preserved.lastSeenTurn || 0), Number(state.turn || 0))
+                : Number(preserved.lastSeenTurn || 0);
+            finalNpc.lastWorldActiveTurn = Number(preserved.lastWorldActiveTurn || 0);
+        },
+        beforeCheckpoint: (nextState, finalNpc, targetMessageId) => {
             if (!finalNpc.archived && finalNpc.present) recordInlineCardsInState(nextState, targetMessageId, [finalNpc.id], 'dossier-backfill');
             else removeNpcInlineCardAtMessage(nextState, targetMessageId, finalNpc.id);
-            commitBranchCheckpoint(nextState, targetMessageId, 'dossier-backfill');
-        }
-        setChatState(chatKey, nextState);
-        persist();
-        renderDossier();
-        updateInjection();
-        const savedNpc = nextState.npcs.find(npc => npc.id === request.npcId);
-        if (!request.silent) globalThis.toastr?.success?.(`NPC State Delta: backfilled ${savedNpc?.name || request.label} from recent story context.`);
-        return true;
-    } catch (error) {
-        console.error('[NPC State Delta] dossier backfill failed', error);
-        if (error?.code === 'NPC_SCANNER_ROUTE_CANCELLED' || error?.code === 'NPC_SCANNER_ROUTE_TIMEOUT') return null;
-        if (!request.silent || (isScannerRoutingError(error) && error.code !== 'NPC_SCANNER_ROUTE_CANCELLED')) globalThis.toastr?.warning?.(`NPC State Delta backfill failed for ${request.label}: ${error?.message || error}`);
-        return false;
-    } finally {
-        endScanOperation(chatKey, operation);
-        if (getChatKey() === chatKey) setScanIndicator(isScanBusy(chatKey));
-        updateInjection();
-    }
+        },
+        onDone: savedNpc => {
+            if (!request.silent) globalThis.toastr?.success?.(`NPC State Delta: backfilled ${savedNpc?.name || request.label} from recent story context.`);
+            return true;
+        },
+        onError: error => {
+            noteScanFailure('dossier backfill', error, getChatKey());
+            if (error?.code === 'NPC_SCANNER_ROUTE_CANCELLED' || error?.code === 'NPC_SCANNER_ROUTE_TIMEOUT') return null;
+            if (!request.silent || (isScannerRoutingError(error) && error.code !== 'NPC_SCANNER_ROUTE_CANCELLED')) globalThis.toastr?.warning?.(`NPC State Delta backfill failed for ${request.label}: ${error?.message || error}`);
+            return false;
+        },
+    });
 }
 
-async function processPendingBackfills(messageId = null) {
+// (b6-soak-2) One capture block admits at most this many new people. A crowd scene (a block naming
+// forty dockhands) otherwise makes forty dossiers, each with its own backfill request later; the
+// people left out are admitted from a later reply that names them again.
+const CAPTURE_NEW_NPCS_PER_BLOCK = 4;
+function capCaptureAdmissions(parsed, npcs = []) {
+    const rows = Array.isArray(parsed?.npcs) ? parsed.npcs : [];
+    let fresh = 0;
+    const kept = rows.filter(raw => {
+        if (npcs.some(npc => rawScanMatchesExisting(raw, npc))) return true;
+        fresh += 1;
+        return fresh <= CAPTURE_NEW_NPCS_PER_BLOCK;
+    });
+    if (kept.length === rows.length) return;
+    console.info(`[NPC State Delta] a one-pass block named ${fresh} new people; ${CAPTURE_NEW_NPCS_PER_BLOCK} were admitted from it, the others wait for a later reply.`);
+    parsed.npcs = kept;
+}
+
+async function processPendingBackfills(messageId = null, { limit = Infinity } = {}) {
     const chatKey = getChatKey();
     if (chatKey === 'no-chat' || !requireReadyChatMutation('process queued dossier backfills', chatKey, { notify: false }) || isScanBusy(chatKey) || isHostSwipeActive()) return 0;
     let processed = 0;
+    // Model calls made (each backfill is one request, plus a compact retry at most).
+    let calls = 0;
     const attemptedNpcIds = new Set();
-    while (getChatKey() === chatKey && !isScanBusy(chatKey)) {
+    while (getChatKey() === chatKey && !isScanBusy(chatKey) && calls < limit) {
         const state = getChatState(chatKey);
         if (!Array.isArray(state.pendingBackfills) || !state.pendingBackfills.length) break;
         const request = state.pendingBackfills.find(item => item?.npcId && !attemptedNpcIds.has(item.npcId));
@@ -3490,6 +3457,7 @@ async function processPendingBackfills(messageId = null) {
         const lastAttemptAt = Math.max(0, Number(request.lastAttemptAt || 0) || 0);
         if (attempts > 0 && lastAttemptAt && Date.now() - lastAttemptAt < BACKFILL_RETRY_COOLDOWN_MS) continue;
 
+        calls += 1;
         const succeeded = await backfillNpcFromHistory(request, messageId, { automatic: true });
         if (succeeded === null) break;
         if (getChatKey() !== chatKey || !requireReadyChatMutation('settle queued dossier backfill', chatKey, { notify: false })) break;
@@ -3517,244 +3485,10 @@ async function processPendingBackfills(messageId = null) {
     return processed;
 }
 
-function rawScanMatchesExisting(raw, npc) {
-    if (!raw || !npc) return false;
-    if (raw.id && String(raw.id) === String(npc.id)) return true;
-    if (raw.name && npcMatchesLabel(npc, raw.name)) return true;
-    return Array.isArray(raw.aliases) && raw.aliases.some(alias => npcMatchesLabel(npc, alias));
-}
-
-function hasCompletePrimaryRelationshipDecision(raw, transcript = '') {
-    if (!raw || typeof raw !== 'object') return false;
-    const delta = raw.relationshipDelta ?? raw.relationship_delta;
-    const hasFullDelta = delta && typeof delta === 'object'
-        && ['trust', 'affection', 'desire', 'tension'].every(key => Number.isFinite(Number(delta[key])));
-    if (!hasFullDelta) return false;
-    const rawImpact = String(raw.relationshipImpact ?? raw.impactLevel ?? raw.relationshipImpactLevel ?? '').trim().toLowerCase();
-    if (!['none', 'ordinary', 'meaningful', 'major', 'extreme'].includes(rawImpact)) return false;
-    const hasNonZero = ['trust', 'affection', 'desire', 'tension'].some(key => Number(delta[key]) !== 0);
-    if (hasNonZero && rawImpact === 'none') return false;
-    if (!hasNonZero && rawImpact !== 'none') return false;
-    if (hasNonZero) {
-        const reason = String(raw.relationshipChangeReason ?? raw.relationship_change_reason ?? raw.relationshipReason ?? '').trim();
-        if (!reason) return false;
-        const evidenceSource = raw.relationshipEvidence ?? raw.relationship_evidence;
-        if (!evidenceSource || typeof evidenceSource !== 'object') return false;
-        const evidence = normalizeRelationshipEvidence(evidenceSource);
-        for (const key of ['trust', 'affection', 'desire', 'tension']) {
-            if (Number(delta[key]) !== 0 && !relationshipAxisEvidenceGrounded(key, evidence[key], transcript)) return false;
-        }
-    }
-    if (hasNonZero && ['major', 'extreme'].includes(rawImpact)) {
-        const summary = raw.relationshipSummary ?? raw.relationship_summary;
-        if (typeof summary !== 'string' || !summary.trim()) return false;
-    }
-    return true;
-}
-
-async function runFocusedRelationshipPass(ctx, parsed, existingNpcs, transcript, settings, options = {}) {
-    const returned = Array.isArray(parsed?.npcs) ? parsed.npcs : [];
-    // (1.2.12) `prose`: the exchange's story alone. Who takes part is who it names (a name only in
-    // the World State's lists, Off-Screen above all, is no part in the scene), and it is what the
-    // evaluator reads; evidence is still checked against the whole exchange.
-    const prose = String(options.prose ?? '').trim();
-    const named = prose || transcript;
-    // (1.2.12) A one-pass block's own word: `covered` (its rows hold everyone whose feelings could
-    // have changed) settles anyone it left out; `review` names whom it wants checked anyway.
-    const review = Array.isArray(options.review) ? options.review.map(name => String(name ?? '').trim()).filter(Boolean).slice(0, 8) : [];
-    // Relationship reconciliation is keyed to the CURRENT exchange, not to whether the broad
-    // dossier scanner happened to return a row. This prevents an NPC who acts early in a long
-    // response from being skipped merely because the response ends with another cast/location.
-    const targets = (Array.isArray(existingNpcs) ? existingNpcs : [])
-        .filter(npc => !npc?.archived && !isTerminalNpcDeath(npc))
-        .filter(npc => {
-            if (review.some(name => npcMatchesLabel(npc, name))) return true;
-            const raw = returned.find(item => rawScanMatchesExisting(item, npc));
-            if (!currentExchangeRelationshipRelevant(npc, named, raw, options)) return false;
-            if (raw) return !hasCompletePrimaryRelationshipDecision(raw, transcript);
-            return options.covered !== true;
-        });
-    if (!targets.length) return { decisions: new Map(), used: false, responseChars: 0, retried: false, targetCount: 0 };
-
-    const decisions = new Map();
-    let responseChars = 0;
-    let retried = false;
-    let failed = false;
-    for (let offset = 0; offset < targets.length; offset += 4) {
-        const batch = targets.slice(offset, offset + 4);
-        try {
-            const relationshipPrompt = buildRelationshipPassPrompt({
-                transcript: prose || transcript,
-                targets: batch,
-                userName: ctx.name1 || 'User',
-                relationshipCriteria: settings.relationshipCriteria,
-                impactCriteria: settings.relationshipImpactCriteria,
-                relationshipCaps: settings.relationshipCaps,
-            });
-            const { parsed: relationshipParsed, raw, retried: batchRetried } = await generateParsedNpcJson(ctx, {
-                systemPrompt: "You are NPC State Delta's isolated relationship evaluator. Use only the supplied targets and current exchange. Return only the requested JSON object.",
-                prompt: relationshipPrompt,
-                responseLength: RELATIONSHIP_RESPONSE_LENGTH,
-                label: `relationship pass ${Math.floor(offset / 4) + 1}`,
-                requestScope: options.requestScope,
-            });
-            responseChars += String(raw ?? '').length;
-            retried ||= Boolean(batchRetried);
-            for (const target of batch) {
-                const rawDecision = (relationshipParsed.npcs || []).find(item => String(item?.id || '') === String(target.id) || (item?.name && npcMatchesLabel(target, item.name)));
-                if (!rawDecision) continue;
-                const deltaSource = rawDecision.relationshipDelta ?? rawDecision.relationship_delta;
-                const hasFullDelta = deltaSource && typeof deltaSource === 'object'
-                    && ['trust', 'affection', 'desire', 'tension'].every(key => Number.isFinite(Number(deltaSource[key])));
-                if (!hasFullDelta) continue;
-                const normalized = normalizeScanNpc(rawDecision);
-                const requestedHasDelta = Object.values(normalized.relationshipDelta).some(value => value !== 0);
-                const reasonPresent = Boolean(String(normalized.relationshipChangeReason || '').trim());
-                const relationshipDelta = requestedHasDelta && reasonPresent
-                    ? filterRelationshipDeltaByEvidence(normalized.relationshipDelta, normalized.relationshipEvidence, transcript)
-                    : { trust: 0, affection: 0, desire: 0, tension: 0 };
-                const hasNonZeroNormalizedDelta = Object.values(relationshipDelta).some(value => value !== 0);
-                const relationshipImpact = hasNonZeroNormalizedDelta ? normalized.relationshipImpact : 'none';
-                const rawSummary = rawDecision.relationshipSummary ?? rawDecision.relationship_summary;
-                const explicitSummaryProvided = typeof rawSummary === 'string';
-                const explicitSummary = explicitSummaryProvided ? String(rawSummary).trim().slice(0, 700) : '';
-                const hasNonZeroDelta = Object.values(relationshipDelta).some(value => value !== 0);
-                const needsTurningPointSummary = hasNonZeroDelta && ['major', 'extreme'].includes(relationshipImpact);
-                const fallbackSummary = needsTurningPointSummary && !explicitSummary && normalized.relationshipChangeReason
-                    ? `${target.name || 'This NPC'}'s relationship with the player changed ${normalized.relationshipImpact === 'extreme' ? 'fundamentally' : 'substantially'}: ${normalized.relationshipChangeReason}`.slice(0, 700)
-                    : '';
-                const relationshipSummary = explicitSummary || fallbackSummary;
-                const relationshipSummaryDecisionProvided = explicitSummaryProvided || Boolean(fallbackSummary);
-                decisions.set(target.id, {
-                    relationshipDelta,
-                    relationshipImpact,
-                    relationshipEvidence: normalized.relationshipEvidence,
-                    relationshipChangeReason: normalized.relationshipChangeReason,
-                    relationshipSummary,
-                    relationshipSummaryDecisionProvided,
-                    context: transcript,
-                });
-            }
-            const missing = batch.filter(target => !decisions.has(target.id));
-            if (missing.length) {
-                console.warn('[NPC State Delta] focused relationship pass omitted or malformed one or more target decisions.', {
-                    targets: batch.map(npc => npc.id),
-                    decided: batch.filter(npc => decisions.has(npc.id)).map(npc => npc.id),
-                });
-            }
-        } catch (error) {
-            if (isScannerRoutingError(error)) throw error;
-            failed = true;
-            console.warn('[NPC State Delta] focused relationship batch failed; retaining safe zero/primary output for that batch.', error);
-        }
-    }
-    return { decisions, used: true, responseChars, retried, targetCount: targets.length, failed };
-}
-
-function prepareFullWindowRelationshipEvaluation(parsed, existingNpcs) {
-    return prepareFullWindowRelationshipPayload(parsed, existingNpcs);
-}
-
-function suppressPrimaryRelationshipForFocusedDecisions(parsed, decisions) {
-    if (!decisions?.size) return parsed;
-    const clone = structuredClone(parsed || { npcs: [] });
-    for (const raw of clone.npcs || []) {
-        const matchedId = [...decisions.keys()].find(id => {
-            if (String(raw?.id || '') === String(id)) return true;
-            const stateNpc = getChatState().npcs.find(npc => npc.id === id);
-            return Boolean(stateNpc && raw?.name && npcMatchesLabel(stateNpc, raw.name));
-        });
-        if (!matchedId) continue;
-        delete raw.relationship;
-        delete raw.relationship_delta;
-        if (decisions.get(matchedId)?.relationshipSummaryDecisionProvided) {
-            delete raw.relationshipSummary;
-            delete raw.relationship_summary;
-        }
-        raw.relationshipImpact = 'none';
-        raw.relationshipDelta = { trust: 0, affection: 0, desire: 0, tension: 0 };
-        raw.relationshipEvidence = { trust: '', affection: '', desire: '', tension: '' };
-        raw.relationshipChangeReason = '';
-    }
-    return clone;
-}
-
-function applyFocusedRelationshipDecisions(state, decisions, caps, sourceMessageId, report = null) {
-    if (!decisions?.size) return state;
-    for (const [id, decision] of decisions) {
-        const npc = state.npcs.find(item => item.id === id);
-        if (!npc || isTerminalNpcDeath(npc)) continue;
-        const requestedHasDelta = Object.values(decision.relationshipDelta || {}).some(value => Number(value) !== 0);
-        const evidence = normalizeRelationshipEvidence(decision.relationshipEvidence);
-        const duplicateAward = requestedHasDelta && relationshipHistoryLooksDuplicate(npc.relationshipEventHistory, decision.relationshipChangeReason, {
-            sourceMessageId,
-            turn: state.turn,
-            evidence,
-        });
-        const validReason = !requestedHasDelta || (relationshipChangeReasonGrounded(decision.relationshipChangeReason, '') && !duplicateAward);
-        const update = applyRelationshipDelta(
-            npc.relationship || DEFAULT_RELATIONSHIP,
-            validReason ? decision.relationshipDelta : { trust: 0, affection: 0, desire: 0, tension: 0 },
-            validReason ? decision.relationshipImpact : 'none',
-            caps,
-            npc.relationshipProgress,
-            npc.relationshipMilestones,
-        );
-        npc.relationship = update.relationship;
-        npc.relationshipProgress = update.relationshipProgress;
-        npc.relationshipMilestones = applyRelationshipMilestoneCrossings(
-            npc.relationshipMilestones,
-            update.milestoneCrossings,
-            {
-                reason: decision.relationshipChangeReason || '',
-                sourceMessageId: Number.isInteger(sourceMessageId) ? sourceMessageId : null,
-                turn: Number.isFinite(Number(state.turn)) ? Number(state.turn) : null,
-            },
-        );
-        const eventAccepted = Boolean(validReason && update.evidenceAccepted);
-        const relationshipActuallyChanged = Object.values(update.appliedDelta || {}).some(value => Number(value) !== 0);
-        const relationshipStateAdvanced = relationshipActuallyChanged
-            || update.progressChanged
-            || update.milestoneCrossings.length > 0;
-        const narrativeAdvance = eventAccepted && (
-            relationshipStateAdvanced
-            || update.milestoneBlocks.length === 0
-        );
-        let summaryChanged = false;
-        const mayInitializeSummary = !String(npc.relationshipSummary || '').trim() && !requestedHasDelta;
-        if ((narrativeAdvance || mayInitializeSummary)
-            && decision.relationshipSummaryDecisionProvided
-            && !(Array.isArray(npc.manualProfileFields) && npc.manualProfileFields.includes('relationshipSummary'))) {
-            const proposedSummary = String(decision.relationshipSummary || '').trim().slice(0, 700);
-            if (relationshipSummaryConsistent(proposedSummary, npc.relationship, decision.context || '', npc.relationshipMilestones)) {
-                const calibrated = calibrateRelationshipSummary(proposedSummary, npc.relationship);
-                if (calibrated && calibrated !== String(npc.relationshipSummary || '').trim()) {
-                    npc.relationshipSummary = calibrated;
-                    summaryChanged = true;
-                }
-            }
-        }
-        if (eventAccepted) {
-            const event = {
-                impact: update.impact,
-                delta: update.appliedDelta,
-                evidence,
-                reason: decision.relationshipChangeReason || '',
-                sourceMessageId: Number.isInteger(sourceMessageId) ? sourceMessageId : null,
-                turn: Number.isFinite(Number(state.turn)) ? Number(state.turn) : null,
-                ...relationshipEventMessage({ message: sourceMessageId }),
-            };
-            npc.relationshipEventHistory = appendRelationshipEvent(npc.relationshipEventHistory, event);
-            if (relationshipStateAdvanced) npc.lastRelationshipChange = event;
-        } else {
-            npc.relationshipEventHistory = normalizeRelationshipEventHistory(npc.relationshipEventHistory);
-        }
-        if (eventAccepted || update.progressChanged || summaryChanged) {
-            npc.updatedAt = Date.now();
-            if (report?.updated && !report.updated.includes(id)) report.updated.push(id);
-        }
-    }
-    return state;
+// The stamps for one of the reader's own edits: Delta's turn and the latest reply.
+function stampManualEdit(state, npc, before) {
+    const reply = latestReplyIndex();
+    return stampNpcChanges(npc, before, { turn: state.turn, message: reply >= 0 ? reply : null, storyDay: storyDayAt(reply >= 0 ? reply : undefined) });
 }
 
 function collectStaleCleanupProtectedIds(state, scanResult, transcript = '') {
@@ -3856,10 +3590,36 @@ async function runCaptureCatchUp(chatKey, ids, tries = 0) {
         if (!getChatState(chatKey).npcs.some(npc => npc.id === id && !npc.archived)) continue;
         await refreshNpcFromChat(id, { automatic: true });
     }
+    // (user decision 5) Hosted one-pass mode runs the backfill queue here, on the catch-up schedule.
+    if (getChatKey() === chatKey && hostedOnePass()) await processPendingBackfills(latestMessageId(true), { limit: BACKFILLS_PER_REPLY });
 }
 
 function narrationCaptureEnabled(settings = getSettings()) {
     return Boolean(settings.enabled && settings.narrationCapture && settings.autoScan && !settings.fullScanEveryTurn);
+}
+// (user decision 5) Hosted by Story Block v2 with the npc meters slice, the story's `~ npc` lines move
+// the meters, and code clamps and caps them. So Delta adds no model call of its own to a reply there:
+// no focused relationship pass after a one-pass block, no new-NPC relationship pass (a new NPC starts
+// at the base meter values), and, in one-pass mode, the backfill queue runs only with the one-pass
+// catch-up or when the reader asks. Without a host none of this applies.
+function hostedMeters() {
+    return Boolean(storySuiteV2Meters());
+}
+function hostedOnePass(settings = getSettings()) {
+    return hostedMeters() && narrationCaptureEnabled(settings);
+}
+// (b6-soak-2) Queued backfills never hold a reply: SillyTavern waits for every MESSAGE_RECEIVED
+// listener before it draws the reply and gives back the Send button. The queue is started, not
+// awaited, so the handler returns at once; at most BACKFILLS_PER_REPLY model calls per reply, the
+// rest stay queued for the next one.
+const BACKFILLS_PER_REPLY = 2;
+function scheduleReplyBackfills(chatKey, messageId) {
+    if (hostedOnePass()) return;
+    queueMicrotask(() => {
+        if (getChatKey() !== chatKey || latestMessageId(true) !== messageId) return;
+        processPendingBackfills(messageId, { limit: BACKFILLS_PER_REPLY })
+            .catch(error => console.warn('[NPC State Delta] queued dossier backfills stopped.', error));
+    });
 }
 // Bound to the reply's position and the lineage before it, not to the reply's own text: other
 // extensions may rewrite a reply on arrival (wrapping their blocks, for example). Editing an earlier
@@ -3884,7 +3644,17 @@ function stripNarrationSwipes(message, lenient) {
         if (typeof message.swipes[index] === 'string') message.swipes[index] = extractNarrationCapture(message.swipes[index], { lenient }).text;
     }
 }
+// On MESSAGE_RECEIVED the reply is not drawn yet (the host draws it next, from the stripped text);
+// re-render only a message already in the chat. (b6-soak-5) A reply's own receipt re-renders it only
+// once the host says it is drawn (CHARACTER_MESSAGE_RENDERED, renderCapturedReply below).
+function renderCapturedReply(messageId) {
+    const id = Number(messageId);
+    if (!captureRerenderPending.delete(id)) return;
+    const message = getContext().chat?.[id];
+    if (message && !message.is_user && !message.is_system) rerenderNarrationMessage(id, message);
+}
 function rerenderNarrationMessage(messageId, message) {
+    if (!globalThis.document?.querySelector?.(`#chat .mes[mesid="${Number(messageId)}"]`)) return;
     try { getContext().updateMessageBlock?.(messageId, message); }
     catch (error) { console.warn('[NPC State Delta] could not re-render a reply after removing its capture block.', error); }
 }
@@ -3896,7 +3666,7 @@ function captureNarrationBlock(chatKey, messageId, message, armed) {
         return;
     }
     message.mes = extracted.text;
-    rerenderNarrationMessage(messageId, message);
+    captureRerenderPending.add(Number(messageId));
     // Only a reply written under the instruction may stand in for a scan; a block in any other
     // message (sendas, card text, another extension) is removed and ignored.
     if (!armed || !narrationCaptureEnabled() || !extracted.text.trim()) return;
@@ -4010,13 +3780,15 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
     }
     if (!operation) return false;
     setScanIndicator(true);
-    const state = getChatState(scanChatKey);
+    // (v2 meters) While hosted the slice is the truth: the scan shows, scores and forwards relationship
+    // changes from the slice's numbers (the sidecar then follows them). Without a host it is the record.
+    const state = hostedScanState(getChatState(scanChatKey));
     const scanStateVersion = Number(stateVersions.get(scanChatKey) || 0);
     const capture = !manual && !fullWindowScan && Number.isInteger(messageId)
         ? takeNarrationCapture(scanChatKey, messageId)
         : null;
     const scanLabel = capture ? 'narration-capture' : (manual ? 'manual' : (fullWindowScan ? 'automatic-full' : 'automatic'));
-    const prompt = capture ? '' : buildScannerPrompt(scannerPromptOptions(state, settings, transcript, { currentTranscript, fullScanMode: fullWindowScan }));
+    const prompt = capture ? '' : buildScannerPrompt(scannerPromptOptions(state, settings, transcript, { currentTranscript, fullScanMode: fullWindowScan, sceneNames: scanScenePresent(messageId) }));
 
     let relationshipEdgeCount = 0;
     let relationshipEdgeFallbacks = 0;
@@ -4064,6 +3836,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         // later reply counts as a second sighting (a manual or full-window scan reads many replies).
         const singleReply = !manual && !fullWindowScan && Number.isInteger(messageId);
         const resolvedParsed = resolveInterimIdentityPromotions(singleReply ? tagScanEvidence(parsed, messageId) : parsed, state.npcs, state.candidates);
+        if (capture) capCaptureAdmissions(resolvedParsed, state.npcs);
         profileUpdateCount = Array.isArray(resolvedParsed.profileUpdates) ? resolvedParsed.profileUpdates.length : (Array.isArray(resolvedParsed.profile_updates) ? resolvedParsed.profile_updates.length : 0);
         // Relationship-edge extraction is a separate channel from ordinary NPC delta admission.
         // Add a deterministic fallback for explicit binary statements so a missed lifecycle field
@@ -4077,9 +3850,10 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         // broad dossier scanner. Relationship movement is evaluated separately against the
         // current exchange only, so manual/full scans cannot replay older relationship events.
         const fullWindowRelationship = (manual || fullWindowScan)
-            ? prepareFullWindowRelationshipEvaluation(resolvedParsed, state.npcs)
+            ? prepareFullWindowRelationshipPayload(resolvedParsed, state.npcs)
             : { evaluation: resolvedParsed, mergeSafe: resolvedParsed };
-        const relationshipPass = await runFocusedRelationshipPass(
+        // (user decision 5) Hosted, a one-pass block's own rows are the reply's relationship decision.
+        const relationshipPass = capture && hostedMeters() ? { decisions: new Map(), used: false, responseChars: 0, retried: false, targetCount: 0 } : await runFocusedRelationshipPass(
             ctx,
             fullWindowRelationship.evaluation,
             state.npcs,
@@ -4123,7 +3897,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         }
         const targetMessageId = Number.isInteger(messageId) ? messageId : latestMessageId(true);
         const compactWorldStateTurn = hasCompactMeguminWorldState(ctx.chat?.[targetMessageId]?.mes || '');
-        const parsedForMerge = suppressPrimaryRelationshipForFocusedDecisions(fullWindowRelationship.mergeSafe, relationshipPass.decisions);
+        const parsedForMerge = suppressPrimaryRelationshipForFocusedDecisions(fullWindowRelationship.mergeSafe, relationshipPass.decisions, () => getChatState().npcs);
         // If the registry is already full, free truly stale slots before admission so a new
         // current NPC is not rejected just because a long-gone dossier still occupies the cap.
         const preCleanup = applyStaleLifecycleAfterScan(state, parsedForMerge, currentTranscript || transcript, settings, { onlyWhenAtCap: true });
@@ -4152,7 +3926,8 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         });
         const newlyAdmittedIds = [...new Set([...(merged.report?.created || []), ...(merged.report?.promoted || [])])];
         let newNpcRelationshipPass = { decisions: new Map(), used: false, targetCount: 0, responseChars: 0, retried: false };
-        if (fullWindowScan && newlyAdmittedIds.length) {
+        // (user decision 5) Hosted, a new NPC starts at the base meter values: no evaluator request.
+        if (fullWindowScan && newlyAdmittedIds.length && !hostedMeters()) {
             const newTargets = merged.state.npcs.filter(npc => newlyAdmittedIds.includes(npc.id) && !npc.archived);
             if (newTargets.length) {
                 const combinedDecisions = new Map();
@@ -4291,6 +4066,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         }
         if (targetMessageId >= 0) commitBranchCheckpoint(nextState, targetMessageId, 'scan');
         setChatState(chatKey, nextState);
+        forwardRelationshipChangesToHost(state.npcs, nextState.npcs, targetMessageId, operation.chatHead);
         persist();
         renderDossier();
         updateInjection();
@@ -4310,7 +4086,7 @@ async function scanNow({ manual = false, messageId = null, allowDuringSwipe = fa
         }
         return true;
     } catch (error) {
-        console.error('[NPC State Delta] dossier scan failed', error);
+        noteScanFailure('dossier scan', error, scanChatKey);
         if (manual || (isScannerRoutingError(error) && error.code !== 'NPC_SCANNER_ROUTE_CANCELLED')) globalThis.toastr?.error?.(`NPC State Delta scan failed: ${error?.message || error}`);
         return false;
     } finally {
@@ -4356,7 +4132,7 @@ function settingsSlot(name) {
 // (full cast, scanner output, calendar) mount their own controls into the named slots.
 function buildSettingsHtml() {
     const scanning = [
-        settingRow('npc_state_delta_scanner_connection_profile', 'Scanner connection profile', '<select id="npc_state_delta_scanner_connection_profile" class="text_pole"></select>', 'Routes every NPC scan, Refresh, focused pass and retry. Default keeps the current roleplay route; an unavailable profile never falls back silently.'),
+        settingRow('npc_state_delta_scanner_connection_profile', 'Scanner connection profile', '<select id="npc_state_delta_scanner_connection_profile" class="text_pole"></select>', 'Routes every NPC scan, Refresh, focused pass and retry. Default keeps the current roleplay route; an unavailable profile never falls back silently.<span id="npc_state_delta_scanner_profile_none" class="npc-state-delta-scanner-profile-none" hidden> There is no connection profile yet: make one in SillyTavern\'s Connection Manager and it is listed here.</span>'),
         settingRow('npc_state_delta_full_scan_every_turn', 'Full scan every turn', '<input id="npc_state_delta_full_scan_every_turn" type="checkbox">', 'With Auto scan, reconcile the whole scan context after every reply instead of only the latest exchange. Overrides Scan every; relationship deltas still come only from the newest exchange.'),
         settingRow('npc_state_delta_narration_capture', 'One-pass narration capture (experimental)', '<input id="npc_state_delta_narration_capture" type="checkbox">', 'With Auto scan, the roleplay model ends each reply with a hidden NPC update block that replaces the separate scan request. Adds about 2,000-3,000 tokens to every roleplay prompt plus the block to each reply; a missing or broken block falls back to the normal scan. Not used with Full scan every turn.'),
         settingRow('npc_state_delta_narration_capture_compact', 'Compact one-pass instruction', '<input id="npc_state_delta_narration_capture_compact" type="checkbox">', 'With one-pass capture, the same rules in fewer words: about 1,500 tokens instead of 2,000 on every asked-for reply. Every field, gate and cap is kept, but check the blocks your model writes before relying on it; off sends the full rules.'),
@@ -4368,7 +4144,8 @@ function buildSettingsHtml() {
     const roster = `
         <h4 class="delta-settings-subhead story-suite-subhead">In-chat display</h4>
         ${settingRow('npc_state_delta_present_cast_display', 'Present NPCs in chat', '<select id="npc_state_delta_present_cast_display" class="text_pole"><option value="full">Full cards</option><option value="compact">Compact strip</option><option value="storyblock">Only in Story Block</option><option value="off">Off</option></select>', 'Shown under the latest reply (or as a Megumin tab). With Story Block installed, Present NPCs and Dossiers tabs also appear in its sidebar, and until you pick a choice here the chat shows them only there; Only in Story Block keeps the chat clear (full cards without Story Block). Tapping an NPC opens its dossier. Off adds nothing to the chat; presence tracking and injection are unaffected.')}
-        ${settingRow('npc_state_delta_launcher_with_story_block', 'Floating button with Story Block', '<input id="npc_state_delta_launcher_with_story_block" type="checkbox">', 'Story Block\'s sidebar has the Present NPCs and Dossiers tabs, so the floating npc state button hides while it is there. Turn on to keep the button as well.')}
+        <div class="npc-state-delta-v2-hosted-hide">${settingRow('npc_state_delta_launcher_with_story_block', 'Floating button with Story Block', '<input id="npc_state_delta_launcher_with_story_block" type="checkbox">', 'Story Block\'s sidebar has the Present NPCs and Dossiers tabs, so the floating npc state button hides while it is there. Turn on to keep the button as well.')}</div>
+        <div class="npc-state-delta-v2-hosted-only">${settingRow('npc_state_delta_launcher_with_story_block_v2', 'Show NSD\'s own launcher with Story Block v2', '<input id="npc_state_delta_launcher_with_story_block_v2" type="checkbox">', 'Story Block v2 has Delta\'s Cast tab and its overlay, so the floating npc state button hides while it is there. Turn on to keep the button as well.')}</div>
         <h4 class="delta-settings-subhead story-suite-subhead">Generation injection</h4>
         ${settingRow('npc_state_delta_inject', 'Inject present NPC state', '<input id="npc_state_delta_inject" type="checkbox">', 'Only active NPCs present in the latest scanned scene are injected into generation.')}
         ${settingsSlot('relationship-map')}
@@ -4388,6 +4165,7 @@ function buildSettingsHtml() {
     const advanced = [
         settingRow('npc_state_delta_scan_depth', 'Scan context', numberControl('npc_state_delta_scan_depth', 2, 30, 'messages'), 'History window for full, manual and Refresh scans. Quick automatic scans read only the latest user + assistant exchange.'),
         settingsSlot('scanner-output'),
+        settingRow('npc_state_delta_inject_limit', 'NPCs in the dossier', numberControl('npc_state_delta_inject_limit', 1, 12, 'NPCs'), 'At most this many present NPCs go into the live dossier each reply, the most relevant first (default 3).'),
         settingRow('npc_state_delta_inject_budget', 'Injection budget', numberControl('npc_state_delta_inject_budget', 512, 6000, 'tokens', { step: 100, prefix: '<small>~</small>' }), 'Upper limit; only what the present NPCs need is used. The default 4000 lets detailed dossiers reach the roleplay model in full. When it runs short, lower-priority fields, then lower-ranked NPCs, are trimmed first.'),
         settingRow('npc_state_delta_mid_delete_rewind', 'Rewind dossiers on middle deletion', '<input id="npc_state_delta_mid_delete_rewind" type="checkbox">', 'Off (default): deleting a message from the middle undoes only what that message changed and keeps later changes. On: every dossier rewinds to how it was just before the deleted message, discarding what later messages changed (no model requests).'),
         settingRow('npc_state_delta_branch_rescan', 'Rescan changed branches', '<input id="npc_state_delta_branch_rescan" type="checkbox">', 'Re-evaluate the surviving branch after a swipe, edit or middle-message deletion.'),
@@ -4591,6 +4369,9 @@ function syncScannerProfileControl() {
         .map(option => `<option value="${escapeHtml(option.id)}">${escapeHtml(option.name)}</option>`).join('');
     if (control.html() !== html) control.html(html);
     control.val(selected);
+    // No profile to pick (only the current connection, or a missing one): say so under the list.
+    const usable = scannerProfileOptions(getContext(), '').length > 1;
+    $('#npc_state_delta_scanner_profile_none').prop('hidden', usable);
 }
 
 function syncSettingsControls() {
@@ -4611,6 +4392,7 @@ function syncSettingsControls() {
     $('#npc_state_delta_stale_delete_after').val(s.staleDeleteAfter);
     $('#npc_state_delta_inject').prop('checked', !!s.inject);
     $('#npc_state_delta_inject_budget').val(s.injectBudgetTokens);
+    $('#npc_state_delta_inject_limit').val(s.injectLimit);
     $('#npc_state_delta_custom_fields').val((s.customFieldNames || []).join(', '));
     syncSuiteControls();
     $('#npc_state_delta_archive_deaths').prop('checked', s.autoArchiveDeaths !== false);
@@ -4619,6 +4401,7 @@ function syncSettingsControls() {
     $('#npc_state_delta_mid_delete_rewind').prop('checked', s.midDeleteRewind === true);
     $('#npc_state_delta_present_cast_display').val(effectivePresentCastChoice());
     $('#npc_state_delta_launcher_with_story_block').prop('checked', s.launcherWithStoryBlock === true);
+    $('#npc_state_delta_launcher_with_story_block_v2').prop('checked', s.launcherWithStoryBlockV2 === true);
     applyLauncherFlag();
     if (!portraitSettingsDirty) writePortraitSettingsDraftToUi(portraitSettingsSnapshot(s));
     updatePortraitSettingsSaveUi();
@@ -4664,48 +4447,6 @@ function latestMessageId(preferAssistant = false) {
     return -1;
 }
 
-function snapshotNpc(npc) {
-    return {
-        id: npc.id,
-        name: npc.name || '',
-        aliases: [...(npc.aliases || [])],
-        role: npc.role || '',
-        species: npc.species || '',
-        gender: npc.gender || '',
-        homeBase: npc.homeBase || '',
-        age: npc.age || '',
-        apparentAge: npc.apparentAge || '',
-        appearance: npc.appearance || '',
-        personality: npc.personality || '',
-        speech: npc.speech || '',
-        behaviorProfile: [...(npc.behaviorProfile || [])],
-        background: npc.background || '',
-        relationshipSummary: npc.relationshipSummary || '',
-        mood: npc.mood || '',
-        location: npc.location || '',
-        goal: npc.goal || '',
-        status: npc.status || '',
-        memories: [...(npc.memories || [])],
-        mannerisms: [...(npc.mannerisms || [])],
-        keyRelationships: [...(npc.keyRelationships || [])],
-        present: Boolean(npc.present),
-        worldActive: Boolean(npc.worldActive),
-        lifeState: npc.lifeState || 'unknown',
-        lifeStateCertainty: npc.lifeStateCertainty || '',
-        lifeStateReason: npc.lifeStateReason || '',
-        archived: Boolean(npc.archived),
-        archiveReason: npc.archiveReason || '',
-        archivedAt: npc.archivedAt || null,
-        archiveSourceMessageId: Number.isInteger(npc.archiveSourceMessageId) ? npc.archiveSourceMessageId : null,
-        relationship: { ...(npc.relationship || {}) },
-        lastRelationshipChange: structuredClone(npc.lastRelationshipChange || { impact: 'none', delta: { trust: 0, affection: 0, desire: 0, tension: 0 }, reason: '', sourceMessageId: null }),
-        updatedAt: npc.updatedAt || Date.now(),
-        seenCount: Number(npc.seenCount || 0),
-        manualProfileFields: [...(npc.manualProfileFields || [])],
-        retentionProtected: Boolean(npc.retentionProtected),
-        minor: Boolean(npc.minor),
-    };
-}
 
 function currentLineageKeyForMessage(messageId) {
     const lineage = chatLineage(getContext().chat || []);
@@ -4833,7 +4574,7 @@ function inlineCardHtml(npc, messageId, scene = null) {
       <button type="button" class="npc-state-delta-present-card" data-npc-id="${escapeHtml(npc.id)}" data-message-id="${messageId}" aria-label="Open ${escapeHtml(displayName)} dossier">
         <span class="npc-state-delta-present-card-portrait">${portrait}</span>
         <span class="npc-state-delta-present-card-text">
-          <b class="npc-state-delta-present-card-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</b>
+          <span class="npc-state-delta-present-card-head"><b class="npc-state-delta-present-card-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</b><span class="npc-state-delta-present-card-stage"></span></span>
           <small class="npc-state-delta-present-card-role" title="${escapeHtml(identityLine)}">${escapeHtml(identityLine)}</small>${now}
         </span>
       </button>`;
@@ -5016,11 +4757,13 @@ function presentCastDisplayMode() {
     return normalizePresentCastDisplay(getSettings().presentCastDisplay);
 }
 
-// The floating launcher hides while Story Block carries Delta's tabs (CSS in launcher-ui.js keys on
-// these two flags), unless the player keeps it.
+// The floating launcher hides while Story Block carries Delta's tabs, or a Story Block v2 host
+// carries Delta (CSS in launcher-ui.js keys on these flags), unless the player keeps it.
 function applyLauncherFlag() {
     const data = document?.documentElement?.dataset;
-    if (data) data.npcStateDeltaLauncher = getSettings().launcherWithStoryBlock === true ? 'keep' : 'auto';
+    if (!data) return;
+    data.npcStateDeltaLauncher = getSettings().launcherWithStoryBlock === true ? 'keep' : 'auto';
+    data.npcStateDeltaLauncherV2 = getSettings().launcherWithStoryBlockV2 === true ? 'keep' : 'auto';
 }
 
 // Set by story-block-tabs.js once its Present NPCs and Dossiers tabs are registered with Story Block.
@@ -5028,27 +4771,32 @@ function storyBlockTabsActive() {
     return document?.documentElement?.dataset?.npcStateDeltaStoryBlock === '1';
 }
 
+// Story Block shows Delta's present cast: v1's Present NPCs tab, or a v2 host's Cast tab.
+function storyBlockCarriesCast() {
+    return storyBlockTabsActive() || storyBlockV2Hosted();
+}
+
 // The choice in effect. Until the player picks one, Full cards becomes "Only in Story Block" while
 // Story Block carries the cast, so it is not shown twice. Compact and Off are always deliberate.
 function effectivePresentCastChoice() {
     const mode = presentCastDisplayMode();
     const chosen = getSettings().presentCastDisplayChosen === true || mode !== 'full';
-    return !chosen && storyBlockTabsActive() ? 'storyblock' : mode;
+    return !chosen && storyBlockCarriesCast() ? 'storyblock' : mode;
 }
 
-// What the chat itself shows. "Only in Story Block" hides the in-chat cast while the Story Block tab
+// What the chat itself shows. "Only in Story Block" hides the in-chat cast while a Story Block tab
 // carries it, and falls back to full cards when Story Block is not installed.
 function inChatCastMode() {
     const mode = effectivePresentCastChoice();
     if (mode !== 'storyblock') return mode;
-    return storyBlockTabsActive() ? 'off' : 'full';
+    return storyBlockCarriesCast() ? 'off' : 'full';
 }
 
 // The Story Block tab's cast: the live present NPCs as full cards, whatever the in-chat choice.
 function storyBlockCastHtml() {
     const key = getChatKey();
     if (key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return '';
-    const present = getChatState(key).npcs.filter(npc => !npc.archived && npc.present && !npc.minor);
+    const present = scenePresenceView(getChatState(key).npcs).filter(npc => !npc.archived && npc.present && !npc.minor);
     // With nobody present the tab still shows chatter (as Others), so none is lost.
     return inlineRosterHtml(present, latestMessageId(true), 'full', { othersWithoutCast: true });
 }
@@ -5595,6 +5343,14 @@ function editorValue(value) {
     return escapeHtml(String(value ?? ''));
 }
 
+// (v2 meters, F90, TRS 1-4) Hidden notes, the meter preset and limits, milestones and custom meters:
+// shown in the editor only while hosted (src/storysuite-v2.js editorHtml / readEditor).
+function hostedSecretsEditorHtml(npc) {
+    const adapter = storySuiteV2Meters();
+    if (!adapter) return '';
+    try { return String(adapter.editorHtml(npc) || ''); } catch { return ''; }
+}
+
 function openNpcEditor(npcId) {
     const originChatKey = getChatKey();
     if (!requireReadyChatMutation('edit a dossier', originChatKey)) return null;
@@ -5610,7 +5366,8 @@ function openNpcEditor(npcId) {
     if (typeof Popup !== 'function' || !POPUP_TYPE?.TEXT || !POPUP_RESULT) {
         throw new Error('SillyTavern Popup API is unavailable. NPC State Delta requires SillyTavern 1.18+ for dossier editing.');
     }
-    const rel = npc.relationship || DEFAULT_RELATIONSHIP;
+    // While hosted the numbers shown (and edited) are the v2 slice's; without a host, the dossier's.
+    const rel = hostedMeterView([npc])[0].relationship || DEFAULT_RELATIONSHIP;
     const locked = new Set(npc.manualProfileFields || []);
     const content = document.createElement('div');
     content.id = 'npc_state_delta_editor_content';
@@ -5622,20 +5379,20 @@ function openNpcEditor(npcId) {
       <p class="npc-state-delta-muted">Edits save to NPC State Delta's extension-owned JSON data. Relationship numbers are authoritative current values on a -100 to +100 scale where 0 is neutral; future story deltas continue from them.</p>
       <div class="npc-state-delta-editor-lifecycle"><b>Lifecycle</b><span>${isTerminalNpcDeath(npc) ? 'Confirmed deceased' : (npc.archived ? 'Archived' : (npc.present ? 'Active · Present' : (npc.worldActive ? 'Active · Off-screen' : 'Active')))}${npc.archiveReason === 'deceased' ? ' · Deceased' : (npc.archiveReason === 'stale' ? ' · Stale auto-archive' : '')}</span>${npc.lifeStateReason ? `<small>${editorValue(npc.lifeStateReason)}</small>` : ''}</div>
       <div class="npc-state-delta-editor-grid npc-state-delta-editor-profile">
-        <label>Name<input id="npc_state_delta_edit_name" class="text_pole" value="${editorValue(npc.name)}"></label>
-        <label>Species / Race<input id="npc_state_delta_edit_species" class="text_pole" maxlength="160" placeholder="Half-elf, dwarf, dwelf, human, custom species..." value="${editorValue(npc.species)}"></label>
+        <label>Name<input id="npc_state_delta_edit_name" class="text_pole" maxlength="${EDITOR_FIELDS.name.max}" value="${editorValue(npc.name)}"></label>
+        <label>Species / Race<input id="npc_state_delta_edit_species" class="text_pole" maxlength="${EDITOR_FIELDS.species.max}" placeholder="Half-elf, dwarf, dwelf, human, custom species..." value="${editorValue(npc.species)}"></label>
         <label>Gender<select id="npc_state_delta_edit_gender" class="text_pole"><option value="" ${!npc.gender ? 'selected' : ''}>Unknown / not established</option><option value="male" ${npc.gender === 'male' ? 'selected' : ''}>Male</option><option value="female" ${npc.gender === 'female' ? 'selected' : ''}>Female</option></select></label>
-        <label>Role<input id="npc_state_delta_edit_role" class="text_pole" value="${editorValue(npc.role)}"></label>
+        <label>Role<input id="npc_state_delta_edit_role" class="text_pole" maxlength="${EDITOR_FIELDS.role.max}" value="${editorValue(npc.role)}"></label>
         <label>Aliases / nicknames <small>One per line, max 8. Distinctive nicknames ("Red", "the Butcher of Vell") recall this NPC when mentioned; role descriptions ("the innkeeper") are kept for reference only.</small><textarea id="npc_state_delta_edit_aliases" class="text_pole" rows="2">${editorValue((npc.aliases || []).join('\n'))}</textarea></label>
-        <label>Home Base / Usual Location<input id="npc_state_delta_edit_home_base" class="text_pole" maxlength="300" placeholder="Home, workplace, headquarters, or regular haunt" value="${editorValue(npc.homeBase)}"></label>
+        <label>Home Base / Usual Location<input id="npc_state_delta_edit_home_base" class="text_pole" maxlength="${EDITOR_FIELDS.homeBase.max}" placeholder="Home, workplace, headquarters, or regular haunt" value="${editorValue(npc.homeBase)}"></label>
         ${customFieldEditorHtml(npc)}
-        <label>Chronological age<input id="npc_state_delta_edit_age" class="text_pole" maxlength="80" placeholder="Actual stated age; leave blank if unknown" value="${editorValue(npc.age)}"></label>
+        <label>Chronological age<input id="npc_state_delta_edit_age" class="text_pole" maxlength="${EDITOR_FIELDS.age.max}" placeholder="Actual stated age; leave blank if unknown" value="${editorValue(npc.age)}"></label>
         <label>Birthday <small>${npc.birthDateSource === 'generated' ? 'Generated fallback; editing establishes a manual correction' : (npc.birthDateSource === 'established' ? 'Established date; editing records a manual correction' : 'Uses the active calendar')}</small><input id="npc_state_delta_edit_birthday" class="text_pole" maxlength="180" placeholder="MM-DD / YYYY-MM-DD or configured calendar date" value="${editorValue(npc.birthDateDisplay)}"></label>
-        <label>Apparent age<input id="npc_state_delta_edit_apparent_age" class="text_pole" maxlength="80" placeholder="~25, young, middle-aged..." value="${editorValue(npc.apparentAge)}"></label>
-        <label>Personality<textarea id="npc_state_delta_edit_personality" class="text_pole" rows="3">${editorValue(npc.personality)}</textarea></label>
+        <label>Apparent age<input id="npc_state_delta_edit_apparent_age" class="text_pole" maxlength="${EDITOR_FIELDS.apparentAge.max}" placeholder="~25, young, middle-aged..." value="${editorValue(npc.apparentAge)}"></label>
+        <label>Personality<textarea id="npc_state_delta_edit_personality" class="text_pole" rows="3" maxlength="${EDITOR_FIELDS.personality.max}">${editorValue(npc.personality)}</textarea></label>
         <label class="npc-state-delta-editor-wide">Behavioral Levers <small>Max ${BEHAVIOR_PROFILE_LIMIT} compact target-general response/decision rules, one per line</small><textarea id="npc_state_delta_edit_behavior_profile" class="text_pole" rows="6" placeholder="Disposition: kind - broadly considerate; avoids needless harm&#10;Expressiveness: low - strong feelings show subtly&#10;Independence: high - keeps own goals and boundaries&#10;Care: practical - helps through actions before reassurance&#10;Conflict: controlled - concise, firm, not gratuitously cruel">${editorValue((npc.behaviorProfile || []).join('\n'))}</textarea></label>
-        <label>Speech<textarea id="npc_state_delta_edit_speech" class="text_pole" rows="3">${editorValue(npc.speech)}</textarea></label>
-        <label>Background<textarea id="npc_state_delta_edit_background" class="text_pole" rows="3">${editorValue(npc.background)}</textarea></label>
+        <label>Speech<textarea id="npc_state_delta_edit_speech" class="text_pole" rows="3" maxlength="${EDITOR_FIELDS.speech.max}">${editorValue(npc.speech)}</textarea></label>
+        <label>Background<textarea id="npc_state_delta_edit_background" class="text_pole" rows="3" maxlength="${EDITOR_FIELDS.background.max}">${editorValue(npc.background)}</textarea></label>
         <label class="npc-state-delta-editor-wide">Established mannerisms <small>One per line</small><textarea id="npc_state_delta_edit_mannerisms" class="text_pole" rows="4">${editorValue((npc.mannerisms || []).join('\n'))}</textarea></label>
         <label class="npc-state-delta-editor-wide">Key relationships <small>Max ${KEY_RELATIONSHIP_LIMIT} · family, friends, rivals, mentors, partners · one per line</small><textarea id="npc_state_delta_edit_key_relationships" class="text_pole" rows="5" placeholder="Yunyun — friend / rival | competitive but loyal">${editorValue((npc.keyRelationships || []).join('\n'))}</textarea></label>
       </div>
@@ -5648,16 +5405,16 @@ function openNpcEditor(npcId) {
           <label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_portrait_replace" type="checkbox" ${npc.portraitPromptReplace ? 'checked' : ''}> Replace the automatic positive prompt entirely <small>Use only when this NPC needs a hand-authored model-specific prompt. The global negative prompt still applies.</small></label>
         </div>
       </details>
-      <label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_lock_profile" type="checkbox" ${locked.length ? 'checked' : ''}> Protect edited stable profile fields from future scanner rewrites <small>Leave off to use manual edits as an organic baseline. Existing locks stay protected until you uncheck and save.</small></label>
-      ${locked.length ? `<p class="npc-state-delta-muted">Currently protected: ${editorValue([...locked].join(', '))}</p>` : ''}
+      <label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_lock_profile" type="checkbox" ${locked.size ? 'checked' : ''}> Protect edited stable profile fields from future scanner rewrites <small>Leave off to use manual edits as an organic baseline. Existing locks stay protected until you uncheck and save. Also covers Player Dynamic, Mood, Location, Goal, Condition and Important memories. Memories you type are never pushed out by later scans, protected or not.</small></label>
+      ${locked.size ? `<p class="npc-state-delta-muted">Currently protected: ${editorValue([...locked].join(', '))}</p>` : ''}
       <label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_retention_protected" type="checkbox" ${npc.retentionProtected ? 'checked' : ''}> Keep this NPC from automatic stale cleanup <small>Use for recurring or major NPCs who may disappear for long arcs. This does not lock their profile fields.</small></label>
       <label class="npc-state-delta-editor-lock"><input id="npc_state_delta_edit_minor" type="checkbox" ${npc.minor ? 'checked' : ''}> Hide present-NPC card <small>The dossier still scans, updates, stores memories/relationships, and injects when present; only the present cast card is hidden.</small></label>
       <div class="npc-state-delta-editor-grid">
-        <label>Player Dynamic<textarea id="npc_state_delta_edit_relationship_summary" class="text_pole" rows="3">${editorValue(npc.relationshipSummary)}</textarea></label>
-        <label>Mood<input id="npc_state_delta_edit_mood" class="text_pole" value="${editorValue(npc.mood)}"></label>
-        <label>Location<input id="npc_state_delta_edit_location" class="text_pole" value="${editorValue(npc.location)}"></label>
-        <label>Goal<input id="npc_state_delta_edit_goal" class="text_pole" value="${editorValue(npc.goal)}"></label>
-        <label>Condition / Activity<input id="npc_state_delta_edit_status" class="text_pole" value="${editorValue(npc.status)}"></label>
+        <label>Player Dynamic<textarea id="npc_state_delta_edit_relationship_summary" class="text_pole" rows="3" maxlength="${EDITOR_FIELDS.relationshipSummary.max}">${editorValue(npc.relationshipSummary)}</textarea></label>
+        <label>Mood<input id="npc_state_delta_edit_mood" class="text_pole" maxlength="${EDITOR_FIELDS.mood.max}" value="${editorValue(npc.mood)}"></label>
+        <label>Location<input id="npc_state_delta_edit_location" class="text_pole" maxlength="${EDITOR_FIELDS.location.max}" value="${editorValue(npc.location)}"></label>
+        <label>Goal<input id="npc_state_delta_edit_goal" class="text_pole" maxlength="${EDITOR_FIELDS.goal.max}" value="${editorValue(npc.goal)}"></label>
+        <label>Condition / Activity<input id="npc_state_delta_edit_status" class="text_pole" maxlength="${EDITOR_FIELDS.status.max}" value="${editorValue(npc.status)}"></label>
         <label class="npc-state-delta-editor-wide">Important memories <small>Max 5 · one per line</small><textarea id="npc_state_delta_edit_memories" class="text_pole" rows="5">${editorValue((npc.memories || []).join('\n'))}</textarea></label>
       </div>
       <div class="npc-state-delta-editor-stats">
@@ -5665,7 +5422,7 @@ function openNpcEditor(npcId) {
         <label>Affection<input id="npc_state_delta_edit_affection" class="text_pole" type="number" min="-100" max="100" value="${relationshipNumber(rel.affection)}"></label>
         <label>Desire<input id="npc_state_delta_edit_desire" class="text_pole" type="number" min="-100" max="100" value="${relationshipNumber(rel.desire)}"></label>
         <label>Tension<input id="npc_state_delta_edit_tension" class="text_pole" type="number" min="-100" max="100" value="${relationshipNumber(rel.tension)}"></label>
-      </div>`;
+      </div>${hostedSecretsEditorHtml(npc)}`;
 
     let popup;
     popup = new Popup(content, POPUP_TYPE.TEXT, '', {
@@ -6005,22 +5762,30 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
     const beforeKeyRelationships = [...(current.keyRelationships || [])];
     const next = structuredClone(current);
     const oldRelationship = { ...(current.relationship || DEFAULT_RELATIONSHIP) };
+    // (v2 meters) While hosted the inputs showed the slice's numbers; edits to them go to the slice.
+    const hostedMeters = storySuiteV2Meters();
+    const shownRelationship = hostedMeters ? { ...hostedMeterView([current])[0].relationship } : null;
+    // A field whose control still shows the stored value is kept as stored (never re-cut or compacted).
+    const untouched = untouchedEditorFields(current, editorField);
+    const editorControl = key => editorField(`npc_state_delta_edit_${EDITOR_FIELDS[key].id}`);
+    const editorText = key => (untouched.has(key) ? String(current[key] ?? '') : String(editorControl(key)).trim().slice(0, EDITOR_FIELDS[key].max));
+    const editorList = (key, max) => (untouched.has(key) ? structuredClone(current[key] || []) : cleanEditorList(editorControl(key), max));
     const stableInputs = {
-        name: String(editorField('npc_state_delta_edit_name')).trim().slice(0, 120) || current.name,
-        role: String(editorField('npc_state_delta_edit_role')).trim().slice(0, 240),
-        species: String(editorField('npc_state_delta_edit_species')).trim().slice(0, 160),
-        gender: normalizeGender(editorField('npc_state_delta_edit_gender')),
-        homeBase: String(editorField('npc_state_delta_edit_home_base')).trim().slice(0, 300),
-        age: String(editorField('npc_state_delta_edit_age')).trim().slice(0, 80),
-        apparentAge: String(editorField('npc_state_delta_edit_apparent_age')).trim().slice(0, 80),
-        personality: String(editorField('npc_state_delta_edit_personality')).trim().slice(0, 900),
-        speech: String(editorField('npc_state_delta_edit_speech')).trim().slice(0, 600),
-        behaviorProfile: cleanEditorList(editorField('npc_state_delta_edit_behavior_profile'), BEHAVIOR_PROFILE_LIMIT),
-        background: String(editorField('npc_state_delta_edit_background')).trim().slice(0, 1200),
-        mannerisms: cleanEditorList(editorField('npc_state_delta_edit_mannerisms'), 8),
-        keyRelationships: cleanEditorList(editorField('npc_state_delta_edit_key_relationships'), KEY_RELATIONSHIP_LIMIT),
+        name: editorText('name') || current.name,
+        role: editorText('role'),
+        species: editorText('species'),
+        gender: untouched.has('gender') ? current.gender : normalizeGender(editorControl('gender')),
+        homeBase: editorText('homeBase'),
+        age: editorText('age'),
+        apparentAge: editorText('apparentAge'),
+        personality: editorText('personality'),
+        speech: editorText('speech'),
+        behaviorProfile: editorList('behaviorProfile', BEHAVIOR_PROFILE_LIMIT),
+        background: editorText('background'),
+        mannerisms: editorList('mannerisms', 8),
+        keyRelationships: editorList('keyRelationships', KEY_RELATIONSHIP_LIMIT),
         customFields: customFieldEditorValues(current),
-        aliases: cleanEditorList(editorField('npc_state_delta_edit_aliases'), 8),
+        aliases: editorList('aliases', 8),
     };
     const nameCollision = state.npcs.some((item, i) => i !== index && npcMatchesLabel(item, stableInputs.name));
     if (nameCollision) {
@@ -6055,19 +5820,32 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
     next.portraitPromptPositive = String(editorField('npc_state_delta_edit_portrait_positive')).trim().slice(0, PORTRAIT_NPC_PROMPT_LIMIT);
     next.portraitPromptNegative = String(editorField('npc_state_delta_edit_portrait_negative')).trim().slice(0, PORTRAIT_NPC_PROMPT_LIMIT);
     next.portraitPromptReplace = Boolean(document.getElementById('npc_state_delta_edit_portrait_replace')?.checked);
-    next.identityKind = inferNpcIdentityKind(stableInputs.name);
-    next.relationshipSummary = String(editorField('npc_state_delta_edit_relationship_summary')).trim().slice(0, 900);
-    next.mood = String(editorField('npc_state_delta_edit_mood')).trim().slice(0, 240);
-    next.location = String(editorField('npc_state_delta_edit_location')).trim().slice(0, 300);
-    next.goal = String(editorField('npc_state_delta_edit_goal')).trim().slice(0, 500);
-    next.status = String(editorField('npc_state_delta_edit_status')).trim().slice(0, 300);
-    next.memories = cleanEditorList(editorField('npc_state_delta_edit_memories'), IMPORTANT_MEMORY_LIMIT);
+    if (stableInputs.name !== current.name) next.identityKind = inferNpcIdentityKind(stableInputs.name);
+    next.relationshipSummary = editorText('relationshipSummary');
+    next.mood = editorText('mood');
+    next.location = editorText('location');
+    next.goal = editorText('goal');
+    next.status = editorText('status');
+    next.memories = editorList('memories', IMPORTANT_MEMORY_LIMIT);
     next.relationship = {
         trust: clampEditorRelationshipStat('npc_state_delta_edit_trust'),
         affection: clampEditorRelationshipStat('npc_state_delta_edit_affection'),
         desire: clampEditorRelationshipStat('npc_state_delta_edit_desire'),
         tension: clampEditorRelationshipStat('npc_state_delta_edit_tension'),
     };
+    let meterEdits = null;
+    if (shownRelationship) {
+        const edited = Object.fromEntries(Object.keys(next.relationship).filter(key => next.relationship[key] !== Number(shownRelationship[key] || 0)).map(key => [key, next.relationship[key]]));
+        meterEdits = Object.keys(edited).length ? edited : null;
+        next.relationship = { ...oldRelationship };
+    }
+    const v2Edits = hostedMeters ? hostedMeters.readEditor(id => document.getElementById(id)?.value, current) : null;
+    if (v2Edits?.secrets) next.secrets = v2Edits.secrets;
+    if (v2Edits && v2Edits.meterSetup !== undefined) {
+        if (v2Edits.meterSetup) next.meterSetup = v2Edits.meterSetup;
+        else delete next.meterSetup;
+    }
+    if (v2Edits?.problems?.length && !silent) globalThis.toastr?.warning?.(`NPC State Delta: ${v2Edits.problems.join('; ').slice(0, 300)}`);
     const relationshipDelta = Object.fromEntries(['trust', 'affection', 'desire', 'tension'].map(key => [key, next.relationship[key] - Number(oldRelationship[key] || 0)]));
     if (Object.values(relationshipDelta).some(value => value !== 0)) {
         const progress = normalizeRelationshipProgress(current.relationshipProgress);
@@ -6090,25 +5868,20 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
             ...relationshipEventMessage({ message: latestReplyIndex() }),
         };
     }
-    const stableKeys = ['name', 'role', 'species', 'gender', 'homeBase', 'age', 'apparentAge', 'personality', 'speech', 'behaviorProfile', 'background', 'mannerisms', 'keyRelationships', 'customFields', 'aliases'];
-    if (document.getElementById('npc_state_delta_edit_lock_profile')?.checked) {
-        const locks = new Set(current.manualProfileFields || []);
-        for (const key of stableKeys) {
-            const listField = key === 'mannerisms' || key === 'behaviorProfile' || key === 'keyRelationships' || key === 'aliases';
-            const before = key === 'customFields' ? JSON.stringify(normalizeCustomFields(current.customFields))
-                : (listField ? JSON.stringify(current[key] || []) : String(current[key] || ''));
-            const after = key === 'customFields' ? JSON.stringify(normalizeCustomFields(next.customFields))
-                : (listField ? JSON.stringify(next[key] || []) : String(next[key] || ''));
-            if (before !== after) locks.add(key);
-        }
-        next.manualProfileFields = [...locks];
-    } else {
-        next.manualProfileFields = [];
-    }
+    Object.assign(next, editorProfileLocks(current, next, { protect: Boolean(document.getElementById('npc_state_delta_edit_lock_profile')?.checked) }));
     next.retentionProtected = Boolean(document.getElementById('npc_state_delta_edit_retention_protected')?.checked);
     next.minor = Boolean(document.getElementById('npc_state_delta_edit_minor')?.checked);
     next.updatedAt = Date.now();
     state.npcs[index] = normalizeNpcRecord(next);
+    // A changed relationship recalibrates the Player Dynamic even when its text was not edited.
+    const relationshipMoved = Object.values(relationshipDelta).some(value => value !== 0);
+    const shortened = settleEditorSave(state.npcs[index], current, next, untouched, {
+        keepVerbatim: key => key !== 'relationshipSummary' || !relationshipMoved,
+    });
+    const manualMemories = editorManualMemories(current, state.npcs[index], untouched);
+    if (manualMemories.length) state.npcs[index].manualMemories = manualMemories;
+    else delete state.npcs[index].manualMemories;
+    stampManualEdit(state, state.npcs[index], current);
     if (next.lastRelationshipChange?.impact === 'manual') state.npcs[index].lastRelationshipChange = structuredClone(next.lastRelationshipChange);
     const targetMessageId = latestMessageId(false);
     applyManualKeyRelationshipEdit(state, npcId, beforeKeyRelationships, state.npcs[index].keyRelationships || [], {
@@ -6131,8 +5904,14 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
         if (!silent) globalThis.toastr?.warning?.(`NPC State Delta: the edits for ${savedName} are applied in this browser but could not be saved to the server yet. Save again to retry.`);
         return false;
     }
+    if (hostedMeters && (meterEdits || v2Edits)) {
+        if (meterEdits) await hostedMeters.setMeters({ name: current.name, meters: meterEdits });
+        if (v2Edits) await hostedMeters.applyEditor(savedName, v2Edits);
+        updateInjection();
+    }
     if (close) closeNpcEditor();
     if (!silent) globalThis.toastr?.success?.(`NPC State Delta: saved manual dossier edits for ${savedName}.`);
+    if (!silent && shortened.length) globalThis.toastr?.warning?.(`NPC State Delta: ${shortened.join(', ')} ${shortened.length === 1 ? 'was' : 'were'} shortened or adjusted to fit the dossier's limits for unprotected fields. Tick "Protect edited stable profile fields" to keep a longer Personality, Speech, Background or Mannerisms.`);
     return true;
 }
 
@@ -6149,9 +5928,12 @@ function updateNpcAppearance(npcId, draft, { chatKey, lockAppearance = false } =
     const state = getChatState(chatKey);
     const index = state.npcs.findIndex(item => item.id === String(npcId || ''));
     if (index < 0) return false;
-    const next = appearanceDraftRecord(state.npcs[index], draft, { lockAppearance });
+    const before = state.npcs[index];
+    const next = appearanceDraftRecord(before, draft, { lockAppearance });
+    // The appearance lock comes from the editor's protect checkbox: the reader's explicit choice.
+    next.manualProfileLocksExplicit = true;
     next.updatedAt = Date.now();
-    state.npcs[index] = normalizeNpcRecord(next);
+    state.npcs[index] = stampManualEdit(state, normalizeNpcRecord(next), before);
     const messageId = latestMessageId(false);
     if (messageId >= 0) commitBranchCheckpoint(state, messageId, 'manual-edit');
     persistCritical(chatKey);
@@ -6172,7 +5954,7 @@ function updateNpcLifeState(npcId, choice, { chatKey } = {}) {
     const corrected = correctingDeath ? setNpcArchived(current, false, {
         allowDeathCorrection: true, sourceMessageId: messageId,
     }) : current;
-    state.npcs[index] = normalizeNpcRecord(manualLifeStateRecord(corrected, choice));
+    state.npcs[index] = stampManualEdit(state, normalizeNpcRecord(manualLifeStateRecord(corrected, choice)), current);
     if (messageId >= 0) commitBranchCheckpoint(state, messageId, correctingDeath ? 'manual-death-correction' : 'manual-life-state');
     persistCritical(chatKey);
     renderDossier();
@@ -6757,7 +6539,7 @@ const SUITE_API = Object.freeze({
     npcs: () => {
         const key = getChatKey();
         if (key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return [];
-        return (getChatState(key).npcs || []).map(npc => ({
+        return scenePresenceView(getChatState(key).npcs || []).map(npc => ({
             id: String(npc?.id || ''),
             name: String(npc?.name || ''),
             aliases: [...(npc?.aliases || [])],
@@ -6858,7 +6640,14 @@ function castEmptyReason() {
     const key = getChatKey();
     if (key === 'no-chat') return { text: 'No chat is open.', scan: false };
     if (getSettings().enabled === false) return { text: 'NPC State Delta is off.', scan: false };
-    if (chatHydrationStatus(key) !== 'ready') return { text: "This chat's dossiers are still loading.", scan: false };
+    const hydration = chatHydrationStatus(key);
+    // (R2-5) A sidecar that could not be read is not "still loading": say so, and where to fix it
+    // (the settings section's roster, the same notice the drawer shows).
+    if (hydration === 'error') {
+        const detach = getSettings().dataFiles?.[key]?.path ? ' or Detach Broken Sidecar' : '';
+        return { text: `This chat's dossiers could not be loaded, so nothing is shown and nothing is changed. NPC State Delta's settings section has Retry Load${detach}.`, scan: false };
+    }
+    if (hydration !== 'ready') return { text: "This chat's dossiers are still loading.", scan: false };
     const state = getChatState(key);
     const latest = latestMessageId(true);
     if (!(state.npcs || []).some(npc => npc && !npc.archived)) {
@@ -6958,6 +6747,16 @@ function connectStorySuite() {
     } catch (error) {
         console.warn('[NPC State Delta] Story Suite is unavailable', error);
     }
+    // Story Suite v2: when Delta registers with a Story Block v2 host, or that host goes away, the v1
+    // announcement and the "Open Story Suite" button follow (suite-handshake.js, storyBlockIsV2), and
+    // so do the in-chat cast's "Only in Story Block" default and the settings shown for it.
+    globalThis.document?.addEventListener?.('npc-state-delta:v2-host', () => {
+        announceToSuite();
+        syncSuiteControls();
+        try { $('#npc_state_delta_present_cast_display').val(effectivePresentCastChoice()); } catch { /* settings not mounted */ }
+        startInlineWatchdog();
+        queueInlineRender(0);
+    });
 }
 
 function bindSourceOfTruthSettings() {
@@ -7001,6 +6800,7 @@ function bindUi() {
     bindSettingsCheckbox('#npc_state_delta_narration_capture_compact', 'narrationCaptureCompact');
     bindSettingsCheckbox('#npc_state_delta_inject', 'inject', updateInjection);
     bindSettingsNumber('#npc_state_delta_inject_budget', 'injectBudgetTokens', 512, 6000, 4000, updateInjection);
+    bindSettingsNumber('#npc_state_delta_inject_limit', 'injectLimit', 1, 12, 3, updateInjection);
     bindSettingsCheckbox('#npc_state_delta_archive_deaths', 'autoArchiveDeaths');
     bindCustomFieldSettings();
     bindSourceOfTruthSettings();
@@ -7179,6 +6979,7 @@ function bindUi() {
     });
     $(document).on('click.npcStateDelta', '#npc_state_delta_save_portrait_settings', () => { void savePortraitSettingsDraft(); });
     bindSettingsCheckbox('#npc_state_delta_launcher_with_story_block', 'launcherWithStoryBlock', applyLauncherFlag);
+    bindSettingsCheckbox('#npc_state_delta_launcher_with_story_block_v2', 'launcherWithStoryBlockV2', applyLauncherFlag);
     bindSettingsNumber('#npc_state_delta_scan_every', 'scanEvery', 1, 20, 2);
     bindSettingsNumber('#npc_state_delta_scan_depth', 'scanDepth', 2, 30, 6);
     bindSettingsNumber('#npc_state_delta_narration_capture_catch_up', 'narrationCaptureCatchUp', 0, 50, 8);
@@ -7244,7 +7045,11 @@ function bindUi() {
     });
     $(document).on('click.npcStateDelta', '.npc-state-delta-retry-hydration', () => { void retryCurrentChatHydration(); });
     $(document).on('click.npcStateDelta', '.npc-state-delta-detach-sidecar', () => { void detachBrokenSidecar(); });
-    $(document).on('click.npcStateDelta', '#npc_state_delta_scan_now', () => scanNow({ manual: true, messageId: latestMessageId(true) }));
+    $(document).on('click.npcStateDelta', '#npc_state_delta_scan_now', async () => {
+        const scanned = await scanNow({ manual: true, messageId: latestMessageId(true) });
+        // (user decision 5) The reader's own Scan also runs the backfill queue hosted one-pass mode holds.
+        if (scanned && hostedOnePass()) await processPendingBackfills(latestMessageId(true));
+    });
     // (1.2.13) What's sent: filled when opened and on Refresh, never while closed.
     $(document).on('click.npcStateDelta', '#npc_state_delta_sent_refresh', () => renderWhatsSent());
     globalThis.document?.addEventListener?.('toggle', event => {
@@ -7375,11 +7180,8 @@ async function handleAssistantMessageReceived(messageId, { bypassSwipeGuard = fa
     assistantReceipts.set(eventChatKey, receipts);
     if (Number.isInteger(messageId) && !staleHostActive(eventChatKey)) ensureBranchParentAnchor(state, getContext().chat || [], messageId, 'assistant-parent');
     state.turn = Number(state.turn || 0) + 1;
-    const receivedMessage = Number.isInteger(messageId) ? getContext().chat?.[messageId] : null;
-    const compactWorldStateTurn = hasCompactMeguminWorldState(receivedMessage?.mes || '');
     // Presence remains last-confirmed until a successful scanner observation replaces it.
     // A skipped, busy, failed, or timed-out scan must not make every NPC disappear.
-    if (!compactWorldStateTurn) for (const npc of state.npcs) npc.worldActive = Boolean(npc.worldActive);
     state.assistantSinceScan = Number(state.assistantSinceScan || 0) + 1;
     const shouldForceBranchScan = forceBranchRescan && settings.branchRescan !== false;
     const autoScanDue = settings.autoScan && (settings.fullScanEveryTurn || state.assistantSinceScan >= settings.scanEvery);
@@ -7397,14 +7199,14 @@ async function handleAssistantMessageReceived(messageId, { bypassSwipeGuard = fa
         if (await scanNow({ manual: false, messageId, allowDuringSwipe: bypassSwipeGuard }) === false) return;
     }
     if (getChatKey() !== eventChatKey || latestMessageId(true) !== messageId || !sourceStillHere()) return;
-    await processPendingBackfills(messageId);
+    scheduleReplyBackfills(eventChatKey, messageId);
 }
 
 async function refreshCurrentChatFromServer(reason = 'resume') {
     const key = getChatKey();
     if (key === 'no-chat' || !isCanonicalChatKey(key)) return false;
     try {
-        await ensureChatStateLoaded(key);
+        await ensureChatStateLoaded(key, { probeMissing: true });
         if (getChatKey() !== key) return false;
         renderDossier();
         updateInjection();
@@ -7507,9 +7309,17 @@ function registerEvents() {
             // The capture block is asked for only in fresh replies and continues; quiet, impersonate,
             // swipe and regenerate generations never carry the instruction.
             const captureType = NARRATION_CAPTURE_TYPES.has(String(type ?? '')) && narrationCaptureEnabled();
+            captureRulesWithheld = !CAPTURE_RULES_TYPES.has(String(type ?? ''));
             if (type === 'quiet') {
                 sentCaptureRules = '';
                 disarmNarrationCapture();
+                // Another extension's background request never carries the capture rules. Nothing else
+                // of the injection is rebuilt for it.
+                if (lastInjection.captureRules || lastInjection.captureContext) {
+                    getContext().setExtensionPrompt?.(CAPTURE_RULES_KEY, '', extension_prompt_types.IN_PROMPT, 0, false, extension_prompt_roles.SYSTEM);
+                    getContext().setExtensionPrompt?.(CAPTURE_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, CAPTURE_PROMPT_DEPTH, false, extension_prompt_roles.SYSTEM);
+                    lastInjection = { ...lastInjection, captureChars: 0, captureRules: '', captureContext: '' };
+                }
                 return;
             }
             narrationCaptureArmed = '';
@@ -7524,8 +7334,8 @@ function registerEvents() {
             narrationCaptureArmed = captureType ? key : '';
             updateInjection();
             // Armed only when the instruction actually went out (hydration may have withheld it).
-            if (!lastInjection.captureChars) narrationCaptureArmed = '';
-            if (narrationCaptureArmed) holdCaptureRules();
+            if (!lastInjection.captureContext) narrationCaptureArmed = '';
+            if (lastInjection.captureRules) holdCaptureRules();
             else sentCaptureRules = '';
             noteNarrationCaptureVersion(key);
         });
@@ -7543,7 +7353,7 @@ function registerEvents() {
             await handleAssistantMessageReceived(messageId);
         });
     }
-    if (events.CHARACTER_MESSAGE_RENDERED) source.on(events.CHARACTER_MESSAGE_RENDERED, () => queueInlineRender(0));
+    if (events.CHARACTER_MESSAGE_RENDERED) source.on(events.CHARACTER_MESSAGE_RENDERED, messageId => { renderCapturedReply(messageId); queueInlineRender(0); });
     if (events.MESSAGE_UPDATED) source.on(events.MESSAGE_UPDATED, () => queueInlineRender(30));
     if (events.MORE_MESSAGES_LOADED) source.on(events.MORE_MESSAGES_LOADED, () => queueInlineRender(30));
     if (events.CHAT_LOADED) source.on(events.CHAT_LOADED, async () => {
@@ -7574,6 +7384,7 @@ function registerEvents() {
         if (typeof source.makeFirst === 'function') source.makeFirst(events.MESSAGE_SWIPED, stripSwipedNarrationBlock);
         else source.on(events.MESSAGE_SWIPED, stripSwipedNarrationBlock);
         source.on(events.MESSAGE_SWIPED, (messageId) => {
+            endTargetedRewriteTolerance(messageId);
             queueSettledSwipeReconcile({
                 explicitDivergence: Number.isInteger(messageId) ? messageId : null,
                 operation: 'swipe',
@@ -7595,6 +7406,7 @@ function registerEvents() {
     }
     if (events.MESSAGE_EDITED) {
         source.on(events.MESSAGE_EDITED, (messageId) => {
+            endTargetedRewriteTolerance(messageId);
             dropNarrationCaptures();
             queueBranchReconcile({
                 explicitDivergence: Number.isInteger(messageId) ? messageId : null,
@@ -7689,6 +7501,11 @@ async function init() {
     getSettings();
     clearLegacyPromptKeys();
     connectStorySuite();
+    // Story Suite v2 (Story Block 2): optional; without a v2 host the adapter does nothing.
+    import('./src/storysuite-v2.js').then(v2 => { storySuiteV2 = v2.startStorySuiteV2({ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION, headReply: latestReplyIndex, calendarOwn: () => normalizeSourceOfTruth(getSettings().sourceOfTruth).calendar === 'mine' }); }).catch(error => console.debug('[NPC State Delta] Story Suite v2 adapter is not available', error));
+    // (v2) Hosted with Story Director, the story's date follows its clock (calendar.js hostedStoryDate)
+    // unless the reader keeps the calendar here (Source of truth: calendar "mine"). No host: none.
+    setStoryClockSource(hostedStoryClock);
     bindUi();
     installUiCaptureBridge();
     registerEvents();
@@ -7756,6 +7573,8 @@ window.NPCStateDelta = Object.freeze({
     scan: () => scanNow({ manual: true }),
     cancelScan: () => { const key = getChatKey(); pendingAutoScans.delete(key); return cancelScanOperation(key, 'user cancelled'); },
     scannerRouting: scannerRoutingMetrics,
+    // (v2 Diagnostics) The scanner's plain lines for Story Block's report: route, profile, calls, last outcome.
+    scannerReport: () => scannerDiagnosticLines({ ctx: getContext(), settings: getSettings(), enabled: !!getSettings().enabled }),
     processBackfills: processPendingBackfills,
     scanDossier: async value => {
         const key = getChatKey();
@@ -7842,8 +7661,8 @@ window.NPCStateDelta = Object.freeze({
     ensureFresh: async (options = {}) => {
         const key = getChatKey();
         if (!key || key === 'no-chat') return false;
-        if (!hydratedChatKeys.has(key)) await ensureChatStateLoaded(key);
-        else await ensureHydratedStateFresh(key, { reason: String(options?.reason || 'public-freshness-check'), notify: options?.notify === true });
+        if (!hydratedChatKeys.has(key)) await ensureChatStateLoaded(key, { probeMissing: true });
+        else await ensureHydratedStateFresh(key, { reason: String(options?.reason || 'public-freshness-check'), notify: options?.notify === true, probeMissing: true });
         return getChatKey() === key;
     },
     exportBytes: async ({ chatKey = '' } = {}) => {
@@ -7885,6 +7704,8 @@ window.NPCStateDelta = Object.freeze({
     },
     clearDiagnostics: () => diagnosticStore.clear(getChatKey()),
     getState: () => structuredClone(getChatState()),
+    // (v2 meters) Delta's base relationship values: where a new NPC's slice meters start.
+    relationshipBaseline: () => normalizeRelationshipBaseline(getSettings().relationshipBaseline),
     presentCastHtml: () => storyBlockCastHtml(),
     // (1.2.13) Why the present cast is empty ({ text, scan }), and Add NPC, for the Story Block tabs.
     castEmptyReason: () => castEmptyReason(),
@@ -7896,6 +7717,8 @@ window.NPCStateDelta = Object.freeze({
         const npc = getChatState().npcs.find(item => item.id === String(npcId || ''));
         return npc ? structuredClone(npc) : null;
     },
+    /** The configured custom field names (the dossier shows these; a stored value under another name stays in the editor only). */
+    customFieldNames: () => [...getSettings().customFieldNames],
     getDossierState: () => {
         const state = getChatState();
         const formPortraits = {};
@@ -7903,7 +7726,8 @@ window.NPCStateDelta = Object.freeze({
             formPortraits[npcId] = Object.fromEntries(Object.values(forms || {}).filter(portrait => portrait?.dataUrl)
                 .map(portrait => [portrait.form, { dataUrl: portrait.dataUrl, appearanceFingerprint: portrait.appearanceFingerprint || '' }]));
         }
-        return { turn: state.turn, reply: latestReplyIndex(), npcs: structuredClone(state.npcs), portraitAssets: {}, formPortraits };
+        const meterViews = storySuiteV2Meters()?.dossierMeters?.(state.npcs) ?? {};
+        return { turn: state.turn, reply: latestReplyIndex(), npcs: structuredClone(hostedMeterView(state.npcs)), portraitAssets: {}, formPortraits, customFieldNames: [...getSettings().customFieldNames], meterViews };
     },
     persistenceStatus: () => {
         const key = getChatKey();

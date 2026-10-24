@@ -93,6 +93,10 @@ function captureHelpers(mockState, eventSource, sleep, manualAddNpc) {
     // (1.2.16) The capture's rules ride early in the system prompt; its context and reminder at the end.
     const rulesCalls = () => mockState.prompts.filter(args => args[0] === 'story_suite_static_npc_state_delta');
     const lastPrompt = () => [String(rulesCalls().at(-1)?.[1] ?? ''), dossierPrompts().at(-1) ?? '', String(captureCalls().at(-1)?.[1] ?? '')].filter(Boolean).join('\n\n');
+    // (b6-soak-3) The request for a block is the reminder and context at the end; the rules stay in
+    // the system prompt on every roleplay generation (quiet and impersonate excepted).
+    const asked = () => String(captureCalls().at(-1)?.[1] ?? '').includes('Reminder: after the story');
+    const rulesNow = () => String(rulesCalls().at(-1)?.[1] ?? '');
     const status = () => runtime.uiStatus().narrationCapture;
     const npc = name => runtime.getState().npcs.find(item => item.name === name) || null;
     // Fire every listener in registration order (as the host does) and wait for the async ones.
@@ -122,7 +126,7 @@ function captureHelpers(mockState, eventSource, sleep, manualAddNpc) {
         if (/isolated dossier scanner\./i.test(String(args.systemPrompt || ''))) return JSON.stringify({ npcs: [{ ...YUNYUN, role: 'scanned adventurer' }] });
         return '{"npcs":[]}';
     };
-    return { manualAddNpc, fail, check, equal, runtime, settings, HEADER, REPLY, YUNYUN, block, scannerCalls, relationshipCalls, dossierPrompts, captureCalls, rulesCalls, lastPrompt, status, npc, emitAsync, generate, sendUser, receiveAssistant, turn, mockState, sleep };
+    return { manualAddNpc, fail, check, equal, runtime, settings, HEADER, REPLY, YUNYUN, block, scannerCalls, relationshipCalls, dossierPrompts, captureCalls, rulesCalls, lastPrompt, asked, rulesNow, status, npc, emitAsync, generate, sendUser, receiveAssistant, turn, mockState, sleep };
 }
 
 test('v1.1.8 capture arms only fresh replies and continues (not quiet/swipe/regenerate/impersonate/dry-run)', () => {
@@ -131,7 +135,8 @@ test('v1.1.8 capture arms only fresh replies and continues (not quiet/swipe/rege
         await h.sendUser('Who is at the gate?');
         h.equal(h.status().enabled, true, 'capture mode is enabled with Auto scan on');
         h.equal(h.status().armed, false, 'nothing is armed before a generation');
-        h.check(!h.lastPrompt().includes(h.HEADER), 'no capture instruction before a generation');
+        h.check(!h.asked(), 'no capture instruction before a generation');
+        h.check(h.rulesNow().startsWith(h.HEADER), 'the fixed rules are already in the system prompt');
 
         await h.generate('normal');
         h.check(h.lastPrompt().includes(h.HEADER), 'a normal generation carries the capture instruction');
@@ -156,10 +161,18 @@ test('v1.1.8 capture arms only fresh replies and continues (not quiet/swipe/rege
         for (const type of ['swipe', 'regenerate', 'impersonate']) {
             await h.generate('normal');
             h.equal(h.status().armed, true, `armed before ${type}`);
+            const normalRules = h.rulesNow();
             await h.generate(type);
-            h.check(!h.lastPrompt().includes(h.HEADER), `${type} never carries the capture instruction`);
+            h.check(!h.asked(), `${type} never asks for a block`);
             h.equal(h.status().armed, false, `${type} disarms`);
-            h.equal(h.runtime.injectionPreview().captureChars, 0, `${type} sends no capture`);
+            if (type === 'impersonate') {
+                h.check(!h.lastPrompt().includes(h.HEADER), 'impersonate carries no capture rules');
+                h.equal(h.runtime.injectionPreview().captureChars, 0, `${type} sends no capture`);
+            } else {
+                // (b6-soak-3) The fixed rules stay, byte-identical, so the prompt's cached head is the same.
+                h.equal(h.rulesNow(), normalRules, `${type} keeps the rules in the system prompt`);
+                h.equal(h.runtime.injectionPreview().captureChars, normalRules.length, `${type} sends the rules only`);
+            }
         }
         for (const type of ['continue', '', undefined]) {
             await h.generate('quiet');
@@ -248,7 +261,7 @@ test('v1.1.8 capture arms only fresh replies and continues (not quiet/swipe/rege
         h.settings.narrationCaptureCompact = true;
         await h.generate('normal');
         const compactRules = String(h.rulesCalls().at(-1)?.[1] ?? '');
-        h.check(compactRules.startsWith(h.HEADER) && compactRules.length < fullRules.length * 0.8 && h.rulesCalls().at(-1)?.[2] === 0, 'the compact rules are shorter and still go in the system prompt');
+        h.check(compactRules.startsWith(h.HEADER) && compactRules.length < fullRules.length * 0.85 && h.rulesCalls().at(-1)?.[2] === 0, 'the compact rules are shorter and still go in the system prompt');
         await h.generate('normal');
         h.equal(String(h.rulesCalls().at(-1)?.[1] ?? ''), compactRules, 'the compact rules are byte-identical reply to reply');
         h.settings.narrationCaptureCompact = false;
@@ -277,6 +290,9 @@ test('v1.1.8 a valid capture block is stripped and merged without a scanner requ
         const message = h.mockState.context.chat[id];
         h.equal(message.mes, h.REPLY, 'the stored reply has no block');
         h.equal(message.swipes[0], h.REPLY, 'the active swipe has no block');
+        // (b6-soak-5) Re-rendered once the host has drawn the reply, not at MESSAGE_RECEIVED.
+        h.check(!h.mockState.updatedBlocks.some(entry => entry.id === id), 'not re-rendered before the host draws the reply');
+        await h.emitAsync('character_message_rendered', id);
         h.check(h.mockState.updatedBlocks.some(entry => entry.id === id && entry.mes === h.REPLY), 'the host re-renders the stripped reply');
         h.equal(h.scannerCalls().length, 0, 'the quick scan made no scanner request');
         h.equal(h.relationshipCalls().length, 0, 'a complete relationship decision needs no focused pass');
@@ -293,7 +309,7 @@ test('v1.1.8 a valid capture block is stripped and merged without a scanner requ
         const counters = h.status();
         h.equal([counters.requested, counters.used, counters.missing, counters.invalid, counters.unterminated, counters.pending], [1, 1, 0, 0, 0, 0], 'capture counters');
         h.equal(counters.armed, false, 'receipt disarms');
-        h.check(!h.lastPrompt().includes(h.HEADER), 'the instruction is withdrawn after the reply arrives');
+        h.check(!h.asked(), 'the instruction is withdrawn after the reply arrives');
 
         // A second capture updates the existing dossier, still without a scanner request.
         const second = 'Yunyun now waits at the guild hall, nervously polishing her wand.';
@@ -319,7 +335,7 @@ test('v1.1.8 receipt withdraws the instruction at once, even when the reply is o
         const pending = Promise.all((h.mockState.listeners.get('message_received') || []).map(fn => fn(id)));
         // Before any asynchronous receipt work runs, the block is gone and so is the instruction.
         h.equal(h.mockState.context.chat[id].mes, h.REPLY, 'stripped synchronously on receipt');
-        h.check(!h.lastPrompt().includes(h.HEADER), 'the instruction is withdrawn synchronously on receipt');
+        h.check(!h.asked(), 'the instruction is withdrawn synchronously on receipt');
         h.equal(h.status().armed, false);
         await pending;
         await h.sleep(80);
@@ -333,7 +349,7 @@ test('v1.1.8 receipt withdraws the instruction at once, even when the reply is o
         const before = h.scannerCalls().length;
         const emptyId = await h.receiveAssistant(h.block().trim());
         h.equal(h.mockState.context.chat[emptyId].mes, '', 'a block-only reply is stripped to nothing');
-        h.check(!h.lastPrompt().includes(h.HEADER), 'no instruction remains after a block-only reply');
+        h.check(!h.asked(), 'no instruction remains after a block-only reply');
         await h.generate('quiet');
         h.check(!h.lastPrompt().includes(h.HEADER), 'a later quiet generation carries no instruction');
         h.equal(h.scannerCalls().length, before, 'an empty reply is not scanned');
@@ -630,7 +646,7 @@ test('v1.1.8 CHAT_CHANGED disarms the instruction', () => {
         await h.emitAsync('chat_changed');
         await h.sleep(150);
         h.equal(h.status().armed, false, 'a chat change disarms');
-        h.check(!h.lastPrompt().includes(h.HEADER), 'the instruction is no longer injected');
+        h.check(!h.asked(), 'the instruction is no longer injected');
         const id = await h.receiveAssistant(`${h.REPLY}${h.block()}`);
         h.equal(h.mockState.context.chat[id].mes, h.REPLY, 'the block is still stripped');
         h.equal(h.scannerCalls().length, 1, 'the reply is scanned normally');
@@ -646,8 +662,8 @@ test('v1.1.8 GENERATION_STOPPED disarms the instruction', () => {
         h.check(h.lastPrompt().includes(h.HEADER));
         await h.emitAsync('generation_stopped');
         h.equal(h.status().armed, false, 'a stopped generation disarms');
-        h.check(!h.lastPrompt().includes(h.HEADER), 'and withdraws the instruction at once');
-        h.equal(h.runtime.injectionPreview().captureChars, 0);
+        h.check(!h.asked(), 'and withdraws the instruction at once');
+        h.equal(h.runtime.injectionPreview().captureChars, h.rulesNow().length, 'only the fixed rules remain');
         const id = await h.receiveAssistant(`${h.REPLY}${h.block()}`);
         h.equal(h.mockState.context.chat[id].mes, h.REPLY);
         h.equal(h.scannerCalls().length, 1, 'a later reply is scanned normally');

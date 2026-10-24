@@ -1,6 +1,7 @@
 /* NPC State Delta dossier surface: bounded presentation of canonical state. */
 import { appearanceFingerprint, currentPresentationText, normalizeAppearanceModel, resolveNpcAppearance } from './appearance.js';
 import { formatBirthDate } from './birthday.js';
+import { escapeHtml } from './src/util/html.js';
 
 const ROOT_ID = 'npc_state_delta_dossier_root';
 const OPEN_REQUEST_GUARD = '__npcStateDeltaOpenDossierRequests';
@@ -9,14 +10,6 @@ const SETTINGS_ID = 'npc_state_delta_settings';
 const OBSERVER_RETRY_MS = 750;
 const OBSERVER_RETRY_LIMIT = 80;
 
-function escapeHtml(value) {
-    return String(value ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
-}
 
 function plain(value, fallback = '') {
     const text = String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -175,7 +168,17 @@ function displayedPortrait(npc = {}, portraitAssets = {}, formPortraits = {}) {
     return { src: portraitSource(npc, portraitAssets), fingerprint: plain(npc?.portrait?.appearanceFingerprint), form: plain(npc?.portrait?.appearanceForm), fromForm: false };
 }
 
-export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortraits = {}) {
+// (cleanup step 7) With `customFieldNames` (the configured names), only those custom fields are shown,
+// as the injection and the suite profile show them; without it, every stored one (older callers).
+function shownCustomFields(npc, customFieldNames) {
+    const stored = Object.entries(npc?.customFields && typeof npc.customFields === 'object' ? npc.customFields : {});
+    const configured = Array.isArray(customFieldNames) ? customFieldNames.map(name => plain(name).toLowerCase()).filter(Boolean) : null;
+    return stored
+        .filter(([name]) => !configured || configured.includes(plain(name).toLowerCase()))
+        .map(([name, value]) => [plain(name), plain(value)]).filter(([name, value]) => name && value).slice(0, 12);
+}
+
+export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortraits = {}, { customFieldNames } = {}) {
     const rel = npc?.relationship && typeof npc.relationship === 'object' ? npc.relationship : {};
     const shown = displayedPortrait(npc, portraitAssets, formPortraits);
     return {
@@ -196,8 +199,7 @@ export function dossierDetailProjection(npc = {}, portraitAssets = {}, formPortr
         background: plain(npc?.background),
         memories: stringList(npc?.memories, 8),
         keyRelationships: stringList(npc?.keyRelationships, 12),
-        customFields: Object.entries(npc?.customFields && typeof npc.customFields === 'object' ? npc.customFields : {})
-            .map(([name, value]) => [plain(name), plain(value)]).filter(([name, value]) => name && value).slice(0, 12),
+        customFields: shownCustomFields(npc, customFieldNames),
         relationshipSummary: plain(npc?.relationshipSummary),
         lastRelationshipChange: relationshipChangeProjection(npc?.lastRelationshipChange),
         fieldChanges: fieldChangesProjection(npc?.fieldChanges, npc?.fieldChangeMessages),
@@ -277,7 +279,13 @@ export function projectDossierState(state = {}, status = {}) {
     const portraitAssets = state?.portraitAssets && typeof state.portraitAssets === 'object' ? state.portraitAssets : {};
     const records = Array.isArray(state?.npcs) ? state.npcs : [];
     const formPortraits = state?.formPortraits && typeof state.formPortraits === 'object' ? state.formPortraits : {};
-    const details = records.map(npc => dossierDetailProjection(npc, portraitAssets, formPortraits[npc?.id] || {})).filter(npc => npc.id);
+    const customFieldNames = Array.isArray(state?.customFieldNames) ? state.customFieldNames : undefined;
+    const meterViews = state?.meterViews && typeof state.meterViews === 'object' ? state.meterViews : {};
+    const details = records.map(npc => {
+        const detail = dossierDetailProjection(npc, portraitAssets, formPortraits[npc?.id] || {}, { customFieldNames });
+        const meters = v2MetersProjection(Object.hasOwn(meterViews, String(npc?.id ?? '')) ? meterViews[npc.id] : null);
+        return meters ? { ...detail, v2Meters: meters } : detail;
+    }).filter(npc => npc.id);
     return {
         chatKey: plain(status?.chatKey, 'no-chat'),
         hydrationStatus: plain(status?.hydrationStatus, 'ready'),
@@ -425,6 +433,45 @@ export function relationshipStepHtml(axis, label, change, latestReply) {
     return `<span class="delta-rel-step delta-rel-step-${good ? 'good' : 'bad'}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}">${up ? '▲' : '▼'}${Math.abs(step)}</span>`;
 }
 
+// (v2 meters, hosted) An NPC's Story Suite meters beyond the four axes: custom meters, the stage on
+// the ladder and what the next one needs, milestones, and the hidden notes still locked (their
+// titles and rules only; a locked note's text never reaches the dossier view). Null without a host.
+export function v2MetersProjection(view) {
+    if (!view || typeof view !== 'object') return null;
+    const bars = (Array.isArray(view.bars) ? view.bars : []).filter(bar => bar && !bar.builtIn && plain(bar.id)).slice(0, 12).map(bar => {
+        const min = Number.isFinite(Number(bar.min)) ? Number(bar.min) : 0;
+        const max = Number.isFinite(Number(bar.max)) && Number(bar.max) > min ? Number(bar.max) : min + 100;
+        const value = Math.max(min, Math.min(max, Math.round(Number(bar.value) || 0)));
+        const ceiling = Number.isInteger(bar.ceiling) && bar.ceiling < max ? bar.ceiling : null;
+        return { id: plain(bar.id), label: plain(bar.label, plain(bar.id)), value, min, max, text: plain(bar.text, String(value)), ceiling, delta: Number.isInteger(bar.delta) ? bar.delta : 0 };
+    });
+    return {
+        bars,
+        rank: plain(view.rank),
+        next: plain(view.next),
+        milestones: stringList(view.milestones, 16),
+        locked: stringList(view.locked, 8),
+        opened: stringList(view.opened, 8),
+    };
+}
+
+export function v2MetersHtml(view) {
+    if (!view) return '';
+    const at = (bar, point) => Math.max(0, Math.min(100, ((point - bar.min) / (bar.max - bar.min)) * 100));
+    const bars = view.bars.map(bar => `<div class="delta-rel-axis delta-rel-custom" data-meter="${escapeHtml(bar.id)}">
+        <div class="delta-rel-label"><span>${escapeHtml(bar.label)}</span><b>${escapeHtml(bar.text)}${bar.delta ? `<span class="delta-rel-step delta-rel-step-${bar.delta > 0 ? 'good' : 'bad'}">${bar.delta > 0 ? '▲' : '▼'}${Math.abs(bar.delta)}</span>` : ''}</b></div>
+        <div class="delta-rel-track" aria-label="${escapeHtml(`${bar.label} ${bar.value}`)}">${bar.ceiling !== null ? `<span class="delta-rel-ceiling" style="left:${at(bar, bar.ceiling)}%" title="${escapeHtml(`Ceiling ${bar.ceiling}`)}"></span>` : ''}<i style="left:${at(bar, bar.value)}%"></i></div>
+    </div>`).join('');
+    const lines = [
+        view.rank ? `<p class="delta-v2-rank"><b>${escapeHtml(view.rank)}</b></p>` : '',
+        view.next ? `<p class="delta-muted delta-v2-next">${escapeHtml(view.next)}</p>` : '',
+        view.milestones.length ? `<p class="delta-v2-milestones"><span class="delta-kicker">MILESTONES</span> ${view.milestones.map(escapeHtml).join(' · ')}</p>` : '',
+        ...view.opened.map(title => `<p class="delta-v2-note">🔓 ${escapeHtml(title)}</p>`),
+        ...view.locked.map(text => `<p class="delta-muted delta-v2-note">${escapeHtml(text)}</p>`),
+    ].filter(Boolean).join('');
+    return `${bars ? `<div class="delta-rel-grid delta-v2-meters">${bars}</div>` : ''}${lines}`;
+}
+
 function relationshipAxis(label, value, axis, change = null, latestReply = null) {
     const score = relationshipValue(value);
     const position = Math.max(0, Math.min(100, (score + 100) / 2));
@@ -545,7 +592,7 @@ class DeltaDossierUi {
             <button type="button" class="delta-launcher" aria-haspopup="dialog" aria-expanded="false" title="Open NPC dossiers">
                 <span class="delta-launcher-mark" aria-hidden="true">D</span><span>Dossiers</span>
             </button>
-            <section class="delta-panel" role="dialog" aria-modal="true" aria-label="NPC State Delta dossiers" tabindex="-1" hidden>
+            <section class="delta-panel ss-cards" role="dialog" aria-modal="true" aria-label="NPC State Delta dossiers" tabindex="-1" hidden>
                 <header class="delta-topbar">
                     <div class="delta-brand"><span class="delta-kicker">NPC DOSSIER</span><strong>NPC State Delta</strong><span class="delta-chat-state"></span></div>
                     <div class="delta-top-actions">
@@ -599,8 +646,13 @@ class DeltaDossierUi {
             if (event.target.closest('.delta-portrait-expand') || event.target.closest('.delta-hero-media img.delta-hero-portrait')) return void this.openLightbox();
             const jump = event.target.closest('.delta-section-jump')?.dataset?.deltaJump;
             if (jump) {
-                const target = this.root.querySelector(`.delta-document [data-delta-section="${CSS.escape(jump)}"]`);
-                target?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+                // UI 4c: the document is the only thing that moves (a phone never scrolls the window or the page behind it).
+                const scroller = this.root.querySelector('.delta-document');
+                const target = scroller?.querySelector(`[data-delta-section="${CSS.escape(jump)}"]`);
+                if (scroller && target) {
+                    const cover = scroller.querySelector('.delta-section-nav')?.getBoundingClientRect().height ?? 0;
+                    scroller.scrollTop += target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - cover;
+                }
                 return;
             }
             const edit = event.target.closest('.delta-edit');
@@ -920,6 +972,7 @@ class DeltaDossierUi {
                 <div class="delta-rel-grid">
                     ${RELATIONSHIP_AXES.map(([axis, label]) => relationshipAxis(label, selected.relationship[axis], axis, selected.lastRelationshipChange, this.projection?.reply)).join('')}
                 </div>
+                ${v2MetersHtml(selected.v2Meters)}
                 ${lastRelationshipChangeHtml(selected.lastRelationshipChange)}
             </section>
             <section class="delta-section" data-delta-section="identity">
@@ -1005,7 +1058,10 @@ class DeltaDossierUi {
         }
         settings.classList.add('npc-state-delta-stage1-settings-target');
         setTimeout(() => {
-            settings.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+            // UI 4c: only the settings' own scroller moves (the nearest one that scrolls), never the window or the page.
+            let box = settings.parentElement;
+            while (box && box !== document.body && !(/(auto|scroll)/.test(getComputedStyle(box).overflowY) && box.scrollHeight > box.clientHeight)) box = box.parentElement;
+            if (box && box !== document.body) box.scrollTop += settings.getBoundingClientRect().top - box.getBoundingClientRect().top;
             setTimeout(() => settings.classList.remove('npc-state-delta-stage1-settings-target'), 1800);
         }, 0);
     }
@@ -1048,15 +1104,17 @@ if (typeof document !== 'undefined') {
 
 const STYLES = `
 #${ROOT_ID} {
-  --delta-bg: var(--SmartThemeBlurTintColor, #18191d);
-  --delta-text: var(--SmartThemeBodyColor, #f0eee9);
-  --delta-muted: color-mix(in srgb, var(--delta-text) 66%, transparent);
-  --delta-surface: rgba(255,255,255,.055);
-  --delta-surface-strong: rgba(255,255,255,.085);
-  --delta-line: rgba(218,193,148,.24);
+  /* UI 4c: the panel takes Story Block's glass tokens inside its .ss-cards root (the panel carries that class); outside
+     Story Block, or in Solid and Follow SillyTavern where a token is unset, each keeps Delta's own value (the fallback). */
+  --delta-bg: var(--ss-sheet-bg, var(--SmartThemeBlurTintColor, #18191d));
+  --delta-text: var(--ss-text, var(--SmartThemeBodyColor, #f0eee9));
+  --delta-muted: var(--ss-text, color-mix(in srgb, var(--delta-text) 66%, transparent));
+  --delta-surface: var(--ss-glass, rgba(255,255,255,.055));
+  --delta-surface-strong: var(--ss-glass-strong, rgba(255,255,255,.085));
+  --delta-line: var(--ss-border, rgba(218,193,148,.24));
   --delta-line-strong: rgba(218,193,148,.52);
-  --delta-accent: #d8bc78;
-  --delta-accent-soft: #f0ddb0;
+  --delta-accent: var(--ss-accent, #d8bc78);
+  --delta-accent-soft: var(--ss-text, #f0ddb0);
   --delta-good: #9ed5b6;
   --delta-warn: #e9c98d;
   --delta-danger: #efaaaa;
@@ -1083,8 +1141,8 @@ const STYLES = `
 #${ROOT_ID} .delta-panel {
   position: fixed; z-index: 2147483500; left:50%; top:50%; transform:translate(-50%,-50%);
   width:min(1320px,97vw); height:min(940px,96dvh); overflow:hidden;
-  display:flex; flex-direction:column; border:1px solid var(--delta-line); border-radius:15px;
-  color:var(--delta-text); background:var(--delta-bg);
+  display:flex; flex-direction:column; border:1px solid var(--delta-line); border-radius:var(--ss-radius-xl, 15px);
+  color:var(--delta-text); background:var(--delta-bg); backdrop-filter:var(--ss-blur, none); -webkit-backdrop-filter:var(--ss-blur, none);
   box-shadow:0 0 0 100vmax rgba(0,0,0,.72),0 20px 70px rgba(0,0,0,.55);
 }
 #${ROOT_ID} .delta-topbar { flex:0 0 auto; min-height:56px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px 8px 16px; border-bottom:1px solid var(--delta-line); background:color-mix(in srgb,var(--delta-bg) 94%,black 6%); }
@@ -1120,7 +1178,20 @@ const STYLES = `
 #${ROOT_ID} .delta-document-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:15px; padding-bottom:12px; border-bottom:1px solid var(--delta-line); }
 #${ROOT_ID} .delta-document-head h2 { margin:3px 0 4px; font:700 1.65rem/1.15 Georgia,"Times New Roman",serif; color:var(--delta-accent-soft); }
 #${ROOT_ID} .delta-document-head p { margin:0; }
-#${ROOT_ID} .delta-section { margin:0 0 14px; padding:14px 15px; border:1px solid rgba(218,193,148,.14); border-radius:10px; background:var(--delta-surface); }
+#${ROOT_ID} .delta-section { margin:0 0 14px; padding:14px 15px; border:1px solid var(--ss-border, rgba(218,193,148,.14)); border-radius:var(--ss-radius-l, 10px); background:var(--delta-surface); }
+#${ROOT_ID} .delta-panel.ss-cards { margin:0; gap:0; }
+#${ROOT_ID} .delta-panel.ss-cards {
+  /* UI 4c: the aliases are read where the tokens exist: inside the panel's ss-cards root (the root above is outside it). */
+  --delta-bg: var(--ss-sheet-bg, var(--SmartThemeBlurTintColor, #18191d));
+  --delta-text: var(--ss-text, var(--SmartThemeBodyColor, #f0eee9));
+  --delta-muted: var(--ss-text, color-mix(in srgb, var(--delta-text) 66%, transparent));
+  --delta-surface: var(--ss-glass, rgba(255,255,255,.055));
+  --delta-surface-strong: var(--ss-glass-strong, rgba(255,255,255,.085));
+  --delta-line: var(--ss-border, rgba(218,193,148,.24));
+  --delta-line-strong: rgba(218,193,148,.52);
+  --delta-accent: var(--ss-accent, #d8bc78);
+  --delta-accent-soft: var(--ss-text, #f0ddb0);
+}
 #${ROOT_ID} .delta-section h3 { margin:0 0 11px; font-size:.92rem; letter-spacing:.08em; text-transform:uppercase; color:var(--delta-accent-soft); }
 #${ROOT_ID} .delta-section h4 { margin:0 0 5px; font-size:.77rem; letter-spacing:.05em; text-transform:uppercase; color:var(--delta-muted); }
 #${ROOT_ID} .delta-section p { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
@@ -1142,6 +1213,9 @@ const STYLES = `
 #${ROOT_ID} .delta-rel-step-good { color:#9fd8b4; }
 #${ROOT_ID} .delta-rel-step-bad { color:#eba3a3; }
 #${ROOT_ID} .delta-rel-track { position:relative; height:8px; border-radius:999px; background:rgba(0,0,0,.34); border:1px solid rgba(255,255,255,.07); }
+#${ROOT_ID} .delta-v2-meters { margin-top:9px; }
+#${ROOT_ID} .delta-rel-ceiling { position:absolute; top:-3px; bottom:-3px; width:2px; background:rgba(235,163,163,.8); }
+#${ROOT_ID} .delta-v2-rank, #${ROOT_ID} .delta-v2-next, #${ROOT_ID} .delta-v2-milestones, #${ROOT_ID} .delta-v2-note { margin:6px 0 0; font-size:.8rem; }
 #${ROOT_ID} .delta-rel-zero { position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:rgba(255,255,255,.32); }
 #${ROOT_ID} .delta-rel-track i { position:absolute; top:50%; width:10px; height:10px; transform:translate(-50%,-50%); border-radius:50%; background:var(--delta-accent); box-shadow:0 0 0 2px rgba(0,0,0,.45); }
 #${ROOT_ID} .delta-summary { margin-top:12px; padding-top:10px; border-top:1px solid rgba(218,193,148,.12); }

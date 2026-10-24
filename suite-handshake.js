@@ -18,6 +18,20 @@ export function normalizeSourceOfTruth(raw = {}) {
 export const SUITE_STYLESHEET_ID = 'story-suite-css';
 
 /**
+ * True when the page's Story Block is version 2 (`apiVersion: 2`). A v2 host carries Delta through
+ * its sdk (src/storysuite-v2.js: the Cast tab and the settings section), so Delta then offers it
+ * nothing of v1's: no Present NPCs / Dossiers tabs, no Story Suite announcement for v1's overlay,
+ * no "Open Story Suite" button. A v1 Story Block (apiVersion 1) or none changes nothing.
+ */
+export function storyBlockIsV2(storyBlock = globalThis.StoryBlock) {
+    try {
+        return storyBlock?.apiVersion === 2;
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Load the shared suite.css once per page as <link id="story-suite-css">: the first suite
  * extension to load wins (the copies are identical). True when this call added it.
  */
@@ -47,6 +61,9 @@ function safeSuite(suite) {
 
 /** True when another suite extension is the source of truth for `area` under the reader's choice. */
 export function defersArea(area, choices = {}, suite = null) {
+    // A Story Block v2 host keeps the scene (its `scene.present`) but never fills v1's registry: the
+    // reader's "theirs" (and "auto", where the scene specialist wins) defer to it; "mine" keeps it here.
+    if (area === 'scene' && storyBlockIsV2()) return normalizeSourceOfTruth(choices).scene !== 'mine';
     const registry = safeSuite(suite);
     if (!registry) return false;
     try {
@@ -372,7 +389,8 @@ export function buildManageApi({ sources, setSource, enabled, setEnabled, tokens
  * Whether Delta's panel shows "Manage all in Story Suite": two or more extensions announced (on
  * or off, as the overlay counts them) and Story Block sharing openSuite.
  */
-export function suiteManageAvailable(suite = null) {
+export function suiteManageAvailable(suite = null, storyBlock = globalThis.StoryBlock) {
+    if (storyBlockIsV2(storyBlock)) return false;
     const registry = safeSuite(suite);
     if (!registry) return false;
     try {
@@ -383,9 +401,9 @@ export function suiteManageAvailable(suite = null) {
 }
 
 /** Open Story Suite's overlay on Delta's tab; false when the overlay is unavailable or fails. */
-export function openSuiteOverlay(suite = null) {
+export function openSuiteOverlay(suite = null, storyBlock = globalThis.StoryBlock) {
     const registry = safeSuite(suite);
-    if (!suiteManageAvailable(registry)) return false;
+    if (!suiteManageAvailable(registry, storyBlock)) return false;
     try {
         registry.api('story-block').openSuite(SUITE_ID);
         return true;
@@ -403,13 +421,14 @@ export const SUITE_SHOWS = Object.freeze(['chatter']);
  * Announce Delta. Enabled, it offers its four areas and `shows` what it displays for others.
  * Disabled, it announces `enabled: false` without `shows` (keeping `settings` and the api) when
  * its api can switch it back on, so the overlay can; otherwise it withdraws. Returns true while
- * Delta is announced as enabled.
+ * Delta is announced as enabled. With a Story Block v2 host on the page it withdraws (v1's overlay
+ * would otherwise carry the same settings panel the v2 section carries).
  */
-export function announceNpcStateDelta({ enabled = true, version = '', api = null, settings = '', shows = [] } = {}, suite = null) {
+export function announceNpcStateDelta({ enabled = true, version = '', api = null, settings = '', shows = [], storyBlock = globalThis.StoryBlock } = {}, suite = null) {
     const registry = safeSuite(suite);
     if (!registry) return false;
     try {
-        if (!enabled && typeof api?.manage?.setEnabled !== 'function') {
+        if (storyBlockIsV2(storyBlock) || (!enabled && typeof api?.manage?.setEnabled !== 'function')) {
             registry.withdraw(SUITE_ID);
             return false;
         }

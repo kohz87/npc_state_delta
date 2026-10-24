@@ -9,13 +9,16 @@ const root = path.resolve(process.argv[2] || fileURLToPath(new URL('..', import.
 const core = await import(pathToFileURL(path.join(root, 'core.js')));
 const routing = await import(pathToFileURL(path.join(root, 'scanner-routing.js')));
 const source = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
-const lengths = Object.fromEntries([...source.matchAll(/const (\w+RESPONSE_LENGTH) = (\d+);/g)].map(match => [match[1], Number(match[2])]));
-const systems = [...source.matchAll(/systemPrompt: "([^"]+)"/g)].map(match => match[1]);
+// The scanner request (response lengths, JSON retry) lives in src/scanner-request.js.
+const request = await import(pathToFileURL(path.join(root, 'src', 'scanner-request.js')));
+const lengths = Object.fromEntries(Object.entries(request).filter(([name]) => /RESPONSE_LENGTH$/.test(name)));
+const systemPrompts = text => [...text.matchAll(/systemPrompt: "([^"]+)"/g)].map(match => match[1]);
+const systems = systemPrompts(source);
+// The focused relationship pass (systems[3]) lives in src/relationship-pass.js.
+const relationshipPassPath = path.join(root, 'src', 'relationship-pass.js');
+if (fs.existsSync(relationshipPassPath)) systems.splice(3, 0, ...systemPrompts(fs.readFileSync(relationshipPassPath, 'utf8')));
 assert.equal(systems.length, 5, 'Review measurement fixture when request owners change.');
-function definition(start, end) { return source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start) + start.length)); }
-const requestOwner = new Function('dispatchScannerRequest', 'parseScanJson', 'scannerRoutingError', 'IMPORTANT_MEMORY_LIMIT', 'JSON_RETRY_RESPONSE_LENGTH',
-    definition('function isTruncatedScannerJsonError(', '\nasync function backfillNpcFromHistory(') + '\nreturn generateParsedNpcJson;')(
-    routing.dispatchScannerRequest, core.parseScanJson, routing.scannerRoutingError, core.IMPORTANT_MEMORY_LIMIT, lengths.JSON_RETRY_RESPONSE_LENGTH);
+const requestOwner = request.generateParsedNpcJson;
 const npc = core.normalizeNpcRecord({ id: 'survey-clerk', name: 'Mara', age: '26', apparentAge: '~26', present: true,
     role: 'Survey clerk', species: 'Human', personality: 'Patient and observant.', speech: 'Concise formal sentences.',
     behaviorProfile: ['Keeps firm boundaries.'], mannerisms: ['Squares the ledger.'], goal: 'Finish the route survey.',

@@ -1,0 +1,652 @@
+/* Story Suite v2 mounts (SPEC §13.4): the game view, inline cards, the hud strip and dialogs.
+   Mobile first: the narrow layout is the base, wider screens adjust. Colours come from SillyTavern's
+   theme variables; a screen's own `theme` sets --ss-* properties on its root. */
+
+:root {
+    --ss-text: var(--SmartThemeBodyColor, CanvasText);
+    --ss-surface: var(--SmartThemeBlurTintColor, Canvas);
+    --ss-chat-surface: var(--SmartThemeChatTintColor, var(--ss-surface));
+    --ss-border: var(--SmartThemeBorderColor, currentColor);
+    --ss-accent: var(--SmartThemeQuoteColor, currentColor);
+    --ss-muted: var(--SmartThemeEmColor, currentColor);
+    --ss-shadow: var(--SmartThemeShadowColor, transparent);
+    --ss-radius: 10px;
+    --ss-gap: 8px;
+    --ss-fade: 40px;
+}
+
+[data-ss-mount] {
+    color: var(--ss-text);
+    min-width: 0;
+}
+
+.ss-mount-problem {
+    margin: 0;
+    padding: var(--ss-gap);
+    opacity: 0.8;
+    font-style: italic;
+}
+
+/* ---- Game view: full screen, bottom navigation on narrow widths ---- */
+
+.ss-gameview {
+    position: fixed;
+    inset: 0;
+    /* Above SillyTavern's top bar (3005): the game view is full screen. */
+    z-index: 3020;
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    color: var(--ss-text);
+    /* Opaque unless Glass: the theme's tint often lets the chat show through (light themes most). Three layers of
+       the tint where relative colours are missing, the tint at full alpha where they are not. */
+    background-color: var(--ss-sheet-bg, var(--ss-surface));
+    background-image: var(--ss-sheet-layers, linear-gradient(var(--ss-surface), var(--ss-surface)), linear-gradient(var(--ss-surface), var(--ss-surface)));
+    /* Glass: the theme (view/theme.js) sets --ss-sheet-* so the page shows through (the chat, blurred) and the glass
+       cards on it blur it; with Solid or Follow SillyTavern they are unset and the surface is opaque as before. */
+    -webkit-backdrop-filter: var(--ss-sheet-blur, none);
+    backdrop-filter: var(--ss-sheet-blur, none);
+}
+
+@supports (color: rgb(from red r g b)) {
+    .ss-gameview {
+        background-color: var(--ss-sheet-bg, rgb(from var(--ss-surface) r g b / 1));
+        background-image: var(--ss-sheet-layers, none);
+    }
+}
+
+/* A phone, full screen: the story behind must not read through the glass. The dense tint is layered over itself (Solid and Follow
+   SillyTavern are opaque or untouched already). */
+@media (max-width: 759.98px) {
+    /* Glass only (the theme sets --ss-gameview-phone-floor and -layers for Glass): an opaque floor under three layers of the tint,
+       so blur off hides the story behind the cards too. Solid and Follow SillyTavern keep the rules above (no layers). */
+    .ss-gameview {
+        background-image: var(--ss-gameview-phone-layers, var(--ss-sheet-layers, none));
+    }
+}
+
+@supports (color: rgb(from red r g b)) {
+    @media (max-width: 759.98px) {
+        .ss-gameview {
+            background-color: var(--ss-gameview-phone-floor, var(--ss-sheet-bg, rgb(from var(--ss-surface) r g b / 1)));
+        }
+    }
+}
+
+@media (max-width: 759.98px) {
+    /* the phone title bar: slimmer, so the header and the screen have the room (the header is about 150 to 170 px) */
+    .ss-gameview-bar {
+        padding-top: max(6px, env(safe-area-inset-top));
+        padding-bottom: 6px;
+    }
+}
+
+.ss-gameview-main {
+    /* The bar, the header and the body are the game view's own flex items (the nav's order is set per width below). */
+    display: contents;
+}
+
+/* The game view's header (UI stage 5a): the ss.hero block of the lead and the scene, above every screen. Hidden when the
+   head state gives no header (no chat). */
+.ss-gameview-hero {
+    flex: none;
+    padding: 8px 12px 0;
+    min-width: 0;
+}
+
+.ss-gameview-hero[hidden] {
+    display: none;
+}
+
+.ss-gameview-hero > .ss-hero {
+    margin: 0;
+}
+
+.ss-gameview-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--ss-gap);
+    padding: var(--ss-gap) 12px;
+    padding-top: max(var(--ss-gap), env(safe-area-inset-top));
+    border-bottom: 1px solid var(--ss-border);
+}
+
+.ss-gameview-title {
+    flex: 1;
+    margin: 0;
+    font-size: 1.1em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ss-gameview-close,
+.ss-dialog-close {
+    min-width: 44px;
+    min-height: 44px;
+    border: 0;
+    border-radius: var(--ss-radius);
+    color: inherit;
+    background: transparent;
+    cursor: pointer;
+}
+/* the close button's keyboard focus: the bar's outline (the text colour), never the host's own ring */
+.ss-gameview-close:focus-visible,
+.ss-dialog-close:focus-visible {
+    outline: 2px solid var(--ss-text);
+    outline-offset: 2px;
+}
+.ss-gameview:focus {
+    outline: none;
+}
+
+.ss-gameview-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 12px;
+    /* Screens scroll under the header and the bottom bar; the scroller is the body, not the page. */
+    scroll-padding-top: 8px;
+}
+
+/* The screen bar (view/screen-bar.js, glass.css) in the game view: on a phone a floating pill at the foot of the window, over
+   the screen (the body keeps room for it, below); from 760px one row under the header (the wide block below). With one screen
+   or none the bar is not drawn. */
+.ss-gameview-nav {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    height: 72px;
+    z-index: 3;
+}
+
+.ss-gameview-single .ss-gameview-nav {
+    display: none;
+}
+
+/* Screens scroll under the bar: the body ends with room for it (a phone; the wide row is above the body, no room needed). */
+@media (max-width: 759.98px) {
+    .ss-gameview-body::after {
+        content: '';
+        display: block;
+        height: calc(72px + 14px + 12px + env(safe-area-inset-bottom, 0px));
+    }
+}
+
+/* More items than fit (a phone's bottom bar, the tab bar): the edge with more fades (scroll-cue.js). */
+.ss-tabs-list[data-ss-axis="x"][data-ss-more="end"] {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--ss-fade)), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - var(--ss-fade)), transparent);
+}
+.ss-tabs-list[data-ss-axis="x"][data-ss-more="start"] {
+    -webkit-mask-image: linear-gradient(to left, #000 calc(100% - var(--ss-fade)), transparent);
+    mask-image: linear-gradient(to left, #000 calc(100% - var(--ss-fade)), transparent);
+}
+.ss-tabs-list[data-ss-axis="x"][data-ss-more="both"] {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--ss-fade), #000 calc(100% - var(--ss-fade)), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 var(--ss-fade), #000 calc(100% - var(--ss-fade)), transparent);
+}
+.ss-tabs-list[data-ss-axis="y"][data-ss-more="end"] {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--ss-fade)), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - var(--ss-fade)), transparent);
+}
+.ss-tabs-list[data-ss-axis="y"][data-ss-more="start"] {
+    -webkit-mask-image: linear-gradient(to top, #000 calc(100% - var(--ss-fade)), transparent);
+    mask-image: linear-gradient(to top, #000 calc(100% - var(--ss-fade)), transparent);
+}
+.ss-tabs-list[data-ss-axis="y"][data-ss-more="both"] {
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--ss-fade), #000 calc(100% - var(--ss-fade)), transparent);
+    mask-image: linear-gradient(to bottom, transparent, #000 var(--ss-fade), #000 calc(100% - var(--ss-fade)), transparent);
+}
+
+/* Wide screens (desktop and tablet, from 760px: the line the bar switches at): the wide header across the top, then one row
+   of every screen (the screen bar: all screens spread evenly, no More; each an icon with its label under it, the current one
+   in the accent with a dot, no pill), then the body. A screen that asks for a side column gets the room (the body's grid), and
+   the body takes the rest. */
+@media (min-width: 760px) {
+    .ss-gameview-bar {
+        order: 0;
+        padding: 12px 24px;
+    }
+
+    .ss-gameview-hero {
+        order: 1;
+        padding: 16px 24px 0;
+    }
+
+    .ss-gameview-nav {
+        order: 2;
+        position: static;
+        left: auto;
+        right: auto;
+        bottom: auto;
+        z-index: auto;
+        height: 68px;
+        margin: var(--ss-space-3, 12px) 24px 0;
+    }
+
+    .ss-gameview-body {
+        order: 3;
+        /* air between the tab row and the first row of cards */
+        padding: var(--ss-space-4, 16px) 24px 16px;
+    }
+}
+
+/* ---- The game view as a window (from 760px): the chat stays visible under a scrim and the window is centred over it. The layer
+   (\`.ss-gameview\`) is the scrim; \`.ss-gameview-main\` is the window, with the Settings window's frame: the glass (or the solid
+   surface), a 24px radius, its border and shadow. From 1024px it is min(1200px, 92vw) by min(900px, 90vh); from 760px to 1023px
+   the same window keeps a 16px margin on every side. The screen scrolls inside it (the body is the scroller), and the page behind
+   does not scroll while it is open. A phone is unchanged: full screen, the bar at the foot. */
+@media (min-width: 760px) {
+    .ss-gameview {
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        padding: 16px;
+        background-color: color-mix(in srgb, var(--ss-scrim, rgba(0, 0, 0, 0.55)) 60%, transparent);
+        background-image: none;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        overflow: hidden;
+        overscroll-behavior: none;
+    }
+    .ss-gameview-main {
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+        border: 1px solid var(--ss-border);
+        border-radius: 24px;
+        box-shadow: var(--ss-shadow);
+        background-color: var(--ss-sheet-bg, var(--ss-surface));
+        background-image: var(--ss-sheet-layers, none);
+        -webkit-backdrop-filter: var(--ss-sheet-blur, none);
+        backdrop-filter: var(--ss-sheet-blur, none);
+    }
+}
+@media (min-width: 1024px) {
+    .ss-gameview-main {
+        width: min(1200px, 92vw);
+        height: min(900px, 90vh);
+    }
+}
+@media (min-width: 760px) {
+    body.ss-gameview-open { overflow: hidden; }
+}
+
+/* ---- Inline cards under replies ---- */
+
+.ss-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+/* SillyTavern's swipe row (the arrows and the 1/1 counter) sits at the bottom right of the last message, over its cards:
+   the last message's cards keep clear of it (the row is SillyTavern's; it shows on .last_mes only). */
+.last_mes .ss-cards {
+    margin-bottom: 52px;
+}
+
+.ss-card {
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius);
+    background: var(--ss-chat-surface);
+    overflow: hidden;
+}
+
+/* A card is a glass card under a reply, as Reply.dc.html's "Changed this reply" (the card is a theme root: its own
+   tokens, so Solid and Follow SillyTavern take their colours from the look). The shape of Glass: a larger radius,
+   the blur and the soft shadow. */
+.ss-card {
+    border-radius: var(--ss-radius-l, var(--ss-radius));
+    background: var(--ss-glass, var(--ss-chat-surface));
+    -webkit-backdrop-filter: var(--ss-blur, none);
+    backdrop-filter: var(--ss-blur, none);
+    box-shadow: var(--ss-shadow, none);
+}
+
+.ss-card-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ss-gap);
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 14px;
+    border: 0;
+    color: var(--ss-text, inherit);
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.ss-card-title {
+    font-weight: 700;
+    font-size: 1.05em;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+
+/* The summary line of the header, muted, on the right (Reply.dc.html's "+1 Wolf Pelt · …"). On a phone it takes the
+   next line when the title leaves no room, and runs to two lines at most. */
+.ss-card-summary {
+    flex: 1 1 160px;
+    min-width: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    color: var(--ss-muted, inherit);
+    font-size: 0.85em;
+    text-align: right;
+}
+
+.ss-card-chevron {
+    transition: transform 0.15s ease;
+}
+
+.ss-card-open .ss-card-chevron {
+    transform: rotate(180deg);
+}
+
+.ss-card-body {
+    padding: 12px 14px 14px;
+    border-top: 1px solid var(--ss-border);
+    overflow-x: auto;
+}
+
+/* ---- HUD strip above the message box ---- */
+
+.ss-hud {
+    display: flex;
+    /* Items 10px apart; 8px of air above and below, so a bar, a badge's tag or a pill that reaches past its item is not cut
+       by the strip's own edge (`overflow-x: auto` also clips vertically). */
+    gap: 10px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 8px 10px;
+    color: var(--ss-text);
+    /* Under Glass the theme sets --ss-sheet-*: the glass strip with its edge, radius, blur and shadow. Solid and
+       Follow SillyTavern leave them unset: the opaque strip with a hairline on top, as before. */
+    background: var(--ss-sheet-bg, var(--ss-surface));
+    -webkit-backdrop-filter: var(--ss-sheet-blur, none);
+    backdrop-filter: var(--ss-sheet-blur, none);
+    border: var(--ss-sheet-edge, 0);
+    border-top: var(--ss-sheet-edge, 1px solid var(--ss-border));
+    border-radius: var(--ss-sheet-radius, 0);
+    box-shadow: var(--ss-sheet-shadow, none);
+    font-size: 0.85em;
+    /* 8px of clear space between the strip and SillyTavern's message box (#send_form, the strip sits right above it) */
+    margin: 0 0 8px;
+}
+
+.ss-hud::-webkit-scrollbar {
+    display: none;
+}
+
+/* A strip wider than the screen (a phone): it scrolls sideways, and the side with more fades, a shorter
+   fade than the navigation's since the strip is one thin line (scroll-cue.js sets data-ss-more). */
+.ss-hud[data-ss-more="end"] {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--ss-hud-fade, 24px)), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - var(--ss-hud-fade, 24px)), transparent);
+}
+.ss-hud[data-ss-more="start"] {
+    -webkit-mask-image: linear-gradient(to left, #000 calc(100% - var(--ss-hud-fade, 24px)), transparent);
+    mask-image: linear-gradient(to left, #000 calc(100% - var(--ss-hud-fade, 24px)), transparent);
+}
+.ss-hud[data-ss-more="both"] {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--ss-hud-fade, 24px), #000 calc(100% - var(--ss-hud-fade, 24px)), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 var(--ss-hud-fade, 24px), #000 calc(100% - var(--ss-hud-fade, 24px)), transparent);
+}
+
+.ss-hud[hidden],
+.ss-hud-empty {
+    display: none;
+}
+
+.ss-hud-item {
+    /* keeps its own width (its content's, max-content): a full strip scrolls sideways (the phone's strip does) rather than
+       squeezing an item so its bars and badges run past its edge, where the overflow cut them (a long place is cut in its pill) */
+    flex: 0 0 auto;
+    /* the item takes its content's width, but never more than the strip: a long place is cut inside the item (its own ellipsis),
+       not pushed past the strip's edge (min-width: min-content did that: an unbroken 80-character place scrolled the strip) */
+    width: max-content;
+    max-width: 100%;
+    /* a full screen of content (a portrait, two bars, a badge and its tag) is about 44px; the cap is for a runaway item, not a
+       normal one, so it sits above that rather than clipping a bar at the bottom */
+    max-height: 64px;
+    /* room for what a badge hangs out of its own square (its time tag: 5px past the right and the bottom), inside the cut */
+    padding: 0 5px 5px 0;
+    overflow: hidden;
+}
+
+/* A screen's css can make its root (this item) a size container (`:root { container: x / inline-size }`), and a size container
+   gets no width from its content: the strip keeps its items plain boxes (container-type normal), and the width above comes from
+   the content. Containers further in still work. */
+.ss-hud > .ss-hud-item {
+    container-type: normal;
+    min-width: 0;
+}
+/* the items keep their content on a wide strip; a full strip shrinks them, and each cuts its own text (overflow hidden) */
+
+/* The HUD strip on a phone, under Glass: the tint layered over itself, so the story behind does not read through the name and
+   the level (the full-screen window's rule, for the strip). Solid and Follow SillyTavern leave the token unset: no layers. */
+@media (max-width: 759.98px) {
+    .ss-hud {
+        background-image: var(--ss-sheet-hud-layers, none);
+    }
+}
+
+/* ---- Dialogs: a sheet from the bottom on narrow widths, centred on wide ones ---- */
+
+.ss-dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    /* <html> may be the 0-high box fixed elements sit in (SillyTavern's mobile layout): give the height. */
+    height: 100dvh;
+    z-index: 3030;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    /* A real dim and a light blur: the page behind is out of play while the dialog is open (the
+       backdrop takes the clicks; dialog.js keeps the focus inside). */
+    background: rgba(0, 0, 0, 0.55);
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+}
+
+.ss-dialog {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-height: 92dvh;
+    color: var(--ss-text);
+    /* Glass (--ss-sheet-*, set by the theme under Glass only): the glass panel, its blur, radius and shadow. */
+    background: var(--ss-sheet-bg, var(--ss-surface));
+    backdrop-filter: var(--ss-sheet-blur, blur(var(--SmartThemeBlurStrength, 10px)));
+    -webkit-backdrop-filter: var(--ss-sheet-blur, blur(var(--SmartThemeBlurStrength, 10px)));
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-sheet-radius-top, var(--ss-radius) var(--ss-radius) 0 0);
+    box-shadow: var(--ss-sheet-shadow, none);
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
+.ss-dialog-head {
+    display: flex;
+    align-items: center;
+    gap: var(--ss-gap);
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--ss-border);
+}
+
+.ss-dialog-title {
+    flex: 1;
+    margin: 0;
+    font-size: 1.1em;
+}
+
+.ss-dialog-steps {
+    display: flex;
+    gap: 4px;
+    margin: 0;
+    padding: 6px 12px;
+    list-style: none;
+    overflow-x: auto;
+    font-size: 0.85em;
+}
+
+.ss-dialog-steps[hidden] {
+    display: none;
+}
+
+.ss-dialog-step {
+    flex: 0 0 auto;
+    padding: 2px 8px;
+    border-radius: 999px;
+    opacity: 0.6;
+}
+
+.ss-dialog-step[aria-current="step"] {
+    opacity: 1;
+    color: var(--ss-accent);
+    outline: 1px solid var(--ss-accent);
+}
+
+.ss-dialog-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 12px;
+}
+
+.ss-dialog-receipt {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ss-gap);
+    margin: 0 12px;
+    padding: 8px 10px;
+    border-left: 3px solid var(--ss-accent);
+    background: var(--ss-chat-surface);
+}
+
+.ss-dialog-receipt-text {
+    flex: 1 1 200px;
+    margin: 0;
+}
+
+.ss-dialog-error {
+    margin: 6px 12px 0;
+    color: var(--ss-muted);
+    font-weight: 600;
+}
+
+.ss-dialog-foot {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--ss-gap);
+    padding: 8px 12px;
+    border-top: 1px solid var(--ss-border);
+}
+
+.ss-dialog-foot > button,
+.ss-dialog-accept {
+    min-height: 44px;
+}
+
+.ss-dialog-back {
+    margin-right: auto;
+}
+
+.ss-gameview [hidden],
+.ss-dialog [hidden],
+.ss-card [hidden] {
+    display: none !important;
+}
+
+@media (min-width: 768px) {
+    .ss-dialog-backdrop {
+        align-items: center;
+    }
+
+    .ss-dialog {
+        width: min(640px, 92vw);
+        max-height: 85dvh;
+        border-radius: var(--ss-sheet-radius, var(--ss-radius));
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ss-card-chevron {
+        transition: none;
+    }
+}
+
+/* ---- Cards under replies (fix 8e; view/reply-cards-ui.js, Cards.dc.html): a glass card in the reply strip, a 1px ring in its
+   tone, a 34px tone icon tile, the rows, and a button row of 44px buttons (the primary in the accent, at most three; Later after
+   them). Folded by Later it is one 44px line. Tokens only: the text is the theme's, the tones are its tones. */
+.ss-rc {
+    --ring: var(--ss-info);
+    margin: 6px 0 0 46px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+    border-radius: var(--ss-radius-l, 18px);
+    border: 1px solid var(--ring);
+    background: var(--ss-glass, var(--ss-tile));
+    box-shadow: var(--ss-shadow);
+    color: var(--ss-text);
+}
+.ss-rc-accent { --ring: var(--ss-accent); }
+.ss-rc-bad { --ring: var(--ss-bad); }
+.ss-rc-good { --ring: var(--ss-good); }
+.ss-rc-info { --ring: var(--ss-info); }
+.ss-rc-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ss-rc-tile { flex: none; width: 34px; height: 34px; border-radius: var(--ss-radius-s, 10px); background: var(--ss-tile);
+              color: var(--ring); display: flex; align-items: center; justify-content: center; }
+.ss-rc-texts { display: grid; gap: 2px; min-width: 0; }
+.ss-rc-title { font-size: 15px; overflow-wrap: anywhere; }
+.ss-rc-text { margin: 0; font-size: 13px; color: var(--ss-muted); overflow-wrap: anywhere; }
+.ss-rc-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 14px; }
+.ss-rc-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ss-rc-row-icon { flex: none; color: var(--ring); }
+.ss-rc-row-text { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+.ss-rc-tag { --tag-ring: currentColor; flex: none; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--tag-ring); color: var(--ss-text); }
+/* The tag is text: >= 4.5:1 on the glass in both schemes (the base tones are not: good 4.1 and info 3.9 on the light glass's darker backgrounds). The
+   tones that have a text token use it; good and info keep the tone as the ring only. */
+.ss-rc-tag-good { --tag-ring: var(--ss-good); }
+.ss-rc-tag-bad { color: var(--ss-bad-text, var(--ss-bad)); }
+.ss-rc-tag-warn { color: var(--ss-warn-text, var(--ss-warn)); }
+.ss-rc-tag-accent { color: var(--ss-accent-text, var(--ss-accent)); }
+.ss-rc-tag-info { --tag-ring: var(--ss-info); }
+.ss-rc-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ss-rc-action { flex: 1 1 auto; min-height: 44px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--ss-border);
+                background: none; color: var(--ss-text); font: inherit; font-weight: 600; cursor: pointer;
+                display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.ss-rc-action:disabled { opacity: 0.55; cursor: default; }
+.ss-rc-primary { border-color: var(--ss-accent); background: var(--ss-accent-soft); font-weight: 700; }
+.ss-rc-later { flex: 0 0 auto; }
+.ss-rc-action:focus-visible, .ss-rc-line:focus-visible { outline: 2px solid var(--ss-text); outline-offset: 2px; }
+.ss-rc-line { display: block; width: 100%; min-height: 44px; margin: 0; padding: 0 14px; text-align: left;
+              border-radius: 14px; border: 1px solid var(--ring); background: var(--ss-glass, var(--ss-tile)); color: var(--ss-text);
+              font: inherit; font-weight: 600; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* An active tab's alert (view/screen-bar.js): a red dot at the top-right of the icon, with a ring in the bar's own colour. It is a dot, never
+   a number: the badge's words are the slot's name and tooltip. More gets one when an alerting tab sits under it; a sheet tile too. */
+.ss-screenbar-alert { position: absolute; top: 8px; right: calc(50% - 20px); width: 9px; height: 9px; border-radius: 50%;
+                      background: var(--ss-bad); border: 2px solid var(--ss-badge, #1e2132); pointer-events: none; }
+.ss-screenbar-tile { position: relative; }
+.ss-screenbar-tile > .ss-screenbar-alert { top: 8px; right: 8px; }

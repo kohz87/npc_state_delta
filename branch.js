@@ -3,6 +3,7 @@ import { isTerminalNpcDeath, normalizeName, normalizeNpcRecord } from './core.js
 import { parseQualifiedChatKey } from './identity.js';
 import { prunePortraitAssetsInPlace } from './storage.js';
 import { normalizeSocialGraph, removeNpcFromSocialGraph, purgeNpcStructuredReferences } from './social.js';
+import { NPC_REVERT_GROUPS, NPC_REVERT_LIST_FIELDS } from './src/fields/registry.js';
 
 export * from './branch-core.js';
 
@@ -1050,16 +1051,8 @@ function retainLinearPrefixHistory(target, source, checkpoints, currentLineage, 
 
 // Fields that describe one thing and must be reverted (or kept) together, so a partial revert
 // never leaves an NPC in a state no scan could have produced.
-const NPC_REVERT_GROUPS = Object.freeze([
-    ['relationship', 'relationshipProgress', 'relationshipMilestones', 'relationshipEventHistory', 'lastRelationshipChange'],
-    ['appearance', 'overallAppearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'appearanceModelVersion'],
-    ['age', 'apparentAge', 'birthDate', 'birthDateSource', 'birthDatePrecision', 'birthDateYearSource', 'birthDateReason',
-        'birthDateSourceMessageId', 'birthDateCalendarFingerprint', 'birthDateDisplay', 'calendarAge', 'apparentAgeAnchor'],
-    ['lifeState', 'lifeStateCertainty', 'lifeStateReason', 'archived', 'archiveReason', 'archivedAt', 'archiveSourceMessageId'],
-    ['personality', 'personalityDevelopment'],
-    ['speech', 'speechDevelopment'],
-]);
-const NPC_REVERT_LIST_FIELDS = Object.freeze(['memories', 'mannerisms', 'behaviorProfile', 'keyRelationships', 'aliases']);
+// NPC_REVERT_GROUPS (keys reverted or kept together) and NPC_REVERT_LIST_FIELDS come from the field
+// registry (src/fields/registry.js).
 const NPC_REVERT_SKIP = new Set(['id', 'portrait', 'updatedAt', 'createdAt', 'manualProfileFields', 'manualProfileLocksExplicit']);
 // Presence bookkeeping alone does not make an NPC "used" by later messages, and neither does manual
 // image/retention metadata (a saved seed or prompt is not a narrative appearance).

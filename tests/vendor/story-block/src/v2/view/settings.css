@@ -1,0 +1,512 @@
+/* The settings window (UI stage, step 3a; view/settings/window.js): a glass window over the page with a header (the
+   title, a search box, Close), a rail of sections and the page of the chosen one. `.story-suite-overlay` (host.css) is
+   the layer around it; the window is the glass, so it must sit where nothing above it has a filter or its own
+   background (the layer has neither). A phone gets the window full-screen and the rail as a row that scrolls sideways
+   above the page; from 760px it is a centred window with the rail down the left side.
+
+   Every rule is `:where(<roots>) .ss-settings…` (see glass.css). The rules for the folds and rows the sections still
+   draw (the old overlay's `story-suite-*` classes, until steps 3b–3g move each section to the form engine) start with
+   `.ss-settings` so they outweigh host.css, which loads after this sheet. */
+
+/* The help lines of the settings window (field, card and feature help, the Diagnostics credit) have their own tone, so they read
+   over a busy background (see theme.js PALETTES.help); opacity stays 1, so a faded class (.ss-packs-hint) does not take it down. */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings :is(.ss-card-help, .ss-field-help, .ss-feature-help) { color: var(--ss-help, var(--ss-muted)); opacity: 1; }
+
+/* ---- the window */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    overflow: clip;
+    padding-top: env(safe-area-inset-top, 0px);
+    background: var(--ss-glass);
+    -webkit-backdrop-filter: var(--ss-blur);
+    backdrop-filter: var(--ss-blur);
+    color: var(--ss-text);
+    font-family: var(--ss-font);
+    font-size: 14px;
+    line-height: 1.4;
+}
+@media (min-width: 760px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings {
+        display: grid;
+        grid-template-columns: 250px minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr) auto;
+        max-width: 1120px;
+        max-height: 780px;
+        padding-top: 0;
+        border: 1px solid var(--ss-border);
+        border-radius: var(--ss-radius-xxl);
+        box-shadow: var(--ss-shadow);
+    }
+}
+
+/* A phone, full screen: the story behind must not read through the glass (it competes with the settings' own text). The tint is
+   layered over itself, which makes the glass about as dense as Solid whatever the Glass strength is (a browser with blur switched off shows the page through it as it is); from 760px the window floats over
+   the page and keeps the reader's strength. */
+@media (max-width: 759.98px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings {
+        background-image: linear-gradient(var(--ss-glass-strong), var(--ss-glass-strong)), linear-gradient(var(--ss-glass-strong), var(--ss-glass-strong)), linear-gradient(var(--ss-glass-strong), var(--ss-glass-strong)), linear-gradient(var(--ss-glass-strong), var(--ss-glass-strong));
+    }
+}
+
+/* Close: the window's top right, on every width (over the title row on a phone, over the page's heading row from 760px). */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-close {
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0px) + var(--ss-space-3));
+    right: var(--ss-space-4);
+    z-index: 2;
+    width: 40px;
+    height: 40px;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius-m);
+    background: var(--ss-tile);
+    color: var(--ss-text);
+    font-family: var(--ss-font);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-close:focus-visible {
+    outline: 2px solid var(--ss-accent);
+    outline-offset: 2px;
+}
+@media (min-width: 760px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-close {
+        top: var(--ss-space-4);
+        right: var(--ss-space-4);
+    }
+}
+
+/* ---- the side: the title, the search and the rail. A phone: the three stacked above the page (the rail a row that
+   scrolls sideways); from 760px a column of its own down the window's left. */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-side {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ss-space-2);
+    min-width: 0;
+    padding: var(--ss-space-3) 0 0;
+    border-bottom: 1px solid var(--ss-border);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-title {
+    margin: 0;
+    padding: 0 calc(var(--ss-space-4) + 48px) 0 var(--ss-space-4);
+    font-family: var(--ss-font);
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 40px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-search {
+    margin: 0 var(--ss-space-4);
+    min-width: 0;
+}
+/* The box has its own clear button (searchField); the browser's second one is hidden. */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-search .ss-search-input::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    appearance: none;
+    display: none;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-rail {
+    min-width: 0;
+}
+/* A phone: the sections in a row that scrolls sideways (the tabs block's own list). */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-rail .ss-tabs-list {
+    padding: var(--ss-space-1) var(--ss-space-4) var(--ss-space-2);
+}
+@media (min-width: 760px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-side {
+        min-height: 0;
+        overflow-y: auto;
+        padding: var(--ss-space-4) var(--ss-space-3);
+        border-bottom: 0;
+        border-right: 1px solid var(--ss-border);
+    }
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-title {
+        padding: 0 10px 10px;
+        line-height: 1.2;
+    }
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-search {
+        margin: 0 0 var(--ss-space-2);
+    }
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-rail .ss-tabs-list {
+        flex-direction: column;
+        gap: 4px;
+        overflow: visible;
+        padding: 0;
+    }
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-rail .ss-tabs-item:not([aria-current="page"]) {
+        border-color: transparent;
+        background: none;
+    }
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-rail .ss-tabs-item {
+        flex: none;
+        width: 100%;
+        justify-content: flex-start;
+        min-height: 44px;
+        padding: 0 var(--ss-space-3);
+        font-size: 15px;
+        font-weight: 700;
+    }
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-rail .ss-tabs-count {
+        margin-left: auto;
+    }
+}
+
+/* ---- the page */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-content {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: var(--ss-space-4) var(--ss-space-4) calc(var(--ss-space-5) + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 760px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-content {
+        padding: 20px 24px 28px;
+    }
+    /* Room for Close beside the status line. */
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-status {
+        padding-right: 52px;
+    }
+    /* The page's heading is a strip that stays at the top while the page scrolls under it, and Close sits in its right end: nothing the page
+       holds is ever under Close. It reaches over the page's own top and side padding, so the cards scroll under all of it. */
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-page-head {
+        position: sticky;
+        top: -20px;
+        z-index: 1;
+        margin: -20px -24px 0;
+        padding: 20px 76px 12px 24px;
+        /* The window already blurs what is behind it and a nested blur does not stack, so the strip is made dense by layering the tint:
+           the page's text passing under it stays unreadable. */
+        background-color: var(--ss-glass-strong);
+        background-image: linear-gradient(var(--ss-glass-strong), var(--ss-glass-strong)), linear-gradient(var(--ss-glass-strong), var(--ss-glass-strong)), linear-gradient(var(--ss-glass-strong), var(--ss-glass-strong));
+    }
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-status {
+    flex: none;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-page {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-page-head {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-page-title {
+    margin: 0;
+    font-family: var(--ss-font);
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1.15;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-page-sub {
+    margin: 0;
+    color: var(--ss-muted);
+    font-size: 14px;
+}
+@media (min-width: 760px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-page-title {
+        font-size: 26px;
+    }
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-pane {
+    min-width: 0;
+    gap: 12px;
+}
+
+/* ---- the form engine's sections inside the window: a tile each, not glass on glass */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .ss-section {
+    border-radius: var(--ss-radius-l);
+    background: var(--ss-tile);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+}
+
+/* ---- what the sections still draw: the old folds and rows, in the look */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .ss-settings-pane > .story-suite-fold,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .ss-settings-pane > .story-suite-subfold {
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius-l);
+    background: var(--ss-tile);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-fold > summary,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-subfold > summary {
+    min-height: 48px;
+    padding: var(--ss-space-2) var(--ss-space-4);
+    border-radius: var(--ss-radius-l);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-fold[open] > summary {
+    border-bottom-color: var(--ss-border);
+    border-radius: var(--ss-radius-l) var(--ss-radius-l) 0 0;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-fold > summary b,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-subfold > summary b {
+    font-size: 15px;
+    font-weight: 800;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-fold > summary small,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-subfold > summary small {
+    color: var(--ss-muted);
+    font-size: 12px;
+    opacity: 1;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-fold > summary:hover,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-subfold > summary:hover {
+    background: var(--ss-accent-soft);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-fold > summary:focus-visible,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-subfold > summary:focus-visible {
+    outline: 2px solid var(--ss-accent);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-fold-body {
+    padding: var(--ss-space-2) var(--ss-space-4) var(--ss-space-4);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-subfold-body {
+    padding-left: var(--ss-space-4);
+    padding-right: var(--ss-space-4);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-fold .story-suite-subfold {
+    border-top-color: var(--ss-border);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-fold-warn > summary small {
+    color: var(--ss-warn-text);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-fold-packs {
+    border-color: var(--ss-accent);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-muted,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-row > span small,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-list-help {
+    color: var(--ss-muted);
+    opacity: 1;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-row {
+    padding: var(--ss-space-3) 0;
+    border-bottom-color: color-mix(in srgb, var(--ss-muted) 28%, transparent);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-row > span b {
+    font-size: 15px;
+    font-weight: 800;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-row > span small {
+    font-size: 13px;
+    line-height: 1.4;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .text_pole,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings select,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings textarea {
+    min-height: 40px;
+    padding: 0 var(--ss-space-3);
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius-s);
+    background-color: var(--ss-field);
+    color: var(--ss-text);
+    font-family: var(--ss-font);
+    font-size: 14px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings textarea {
+    padding: var(--ss-space-2) var(--ss-space-3);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .menu_button {
+    min-height: 40px;
+    padding: 0 var(--ss-space-4);
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius-pill);
+    background: var(--ss-tile);
+    color: var(--ss-text);
+    font-family: var(--ss-font);
+    font-size: 14px;
+    font-weight: 600;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .menu_button:disabled {
+    opacity: 0.45;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .menu_button:focus-visible {
+    outline: 2px solid var(--ss-accent);
+    outline-offset: 2px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-diagnostics-report,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-sent-text {
+    border-color: var(--ss-border);
+    border-radius: var(--ss-radius-s);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-feature-link {
+    color: var(--ss-accent);
+}
+/* A switch in place of the browser's checkbox. */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-row > input[type="checkbox"] {
+    -webkit-appearance: none;
+    appearance: none;
+    position: relative;
+    display: block;
+    flex: none;
+    width: 48px;
+    height: 28px;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+    border: 0;
+    border-radius: var(--ss-radius-pill);
+    outline: 0;
+    background-color: var(--ss-off);
+    box-shadow: none;
+    filter: none;
+    transform: none;
+    cursor: pointer;
+    transition: background-color var(--ss-motion, 0.2s) ease;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-row > input[type="checkbox"]::before {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 22px;
+    height: 22px;
+    margin: 0;
+    border: 0;
+    border-radius: 50%;
+    background: var(--ss-knob);
+    box-shadow: 0 1px 3px color-mix(in srgb, var(--ss-on-ring) 40%, transparent);
+    clip-path: none;
+    transform: none;
+    transform-origin: center;
+    transition: transform var(--ss-motion, 0.2s) ease;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-row > input[type="checkbox"]:checked {
+    background-color: var(--ss-accent);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-row > input[type="checkbox"]:checked::before {
+    transform: translateX(20px);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-row > input[type="checkbox"]:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-row > input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--ss-accent);
+    outline-offset: 2px;
+}
+/* ---- the footer bar: "What's sent each reply" (view/settings/footer.js), slim, at the bottom of every page; pressing it opens the
+   Prompt card. A phone: the label above the meter and the numbers. */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-foot {
+    flex: none;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "icon label go" "meter meter value";
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 4px;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 8px var(--ss-space-4) calc(8px + env(safe-area-inset-bottom, 0px));
+    border: 0;
+    border-top: 1px solid var(--ss-border);
+    border-radius: 0;
+    background: color-mix(in srgb, var(--ss-tile) 70%, transparent);
+    color: var(--ss-text);
+    font-family: var(--ss-font);
+    font-size: 13px;
+    line-height: 1.3;
+    text-align: left;
+    cursor: pointer;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-foot:hover {
+    background: var(--ss-tile);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-foot:focus-visible {
+    outline: 2px solid var(--ss-accent);
+    outline-offset: -2px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-foot-icon {
+    grid-area: icon;
+    color: var(--ss-muted);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-foot-label {
+    grid-area: label;
+    font-weight: 700;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-foot-meter {
+    grid-area: meter;
+    display: block;
+    height: 6px;
+    min-width: 40px;
+    border-radius: var(--ss-radius-pill);
+    background: var(--ss-track);
+    overflow: hidden;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-foot-fill {
+    display: block;
+    width: calc(var(--ss-fill, 0) * 100%);
+    height: 100%;
+    border-radius: var(--ss-radius-pill);
+    background: var(--ss-accent);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-foot-over .ss-settings-foot-fill {
+    background: var(--ss-warn);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-foot-value {
+    grid-area: value;
+    color: var(--ss-muted);
+    white-space: nowrap;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-foot-all {
+    display: none;
+    color: var(--ss-muted);
+    white-space: nowrap;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-foot-go {
+    grid-area: go;
+    color: var(--ss-muted);
+}
+@media (min-width: 760px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-foot {
+        grid-column: 1 / -1;
+        grid-template-columns: auto auto minmax(80px, 200px) auto auto 1fr;
+        grid-template-areas: "icon label meter value all go";
+        padding: 10px var(--ss-space-5);
+    }
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-foot-all {
+        display: inline;
+        grid-area: all;
+    }
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-foot-go {
+        justify-self: end;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-row > input[type="checkbox"],
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings .story-suite-row > input[type="checkbox"]::before {
+        transition: none;
+    }
+}
+
+/* The desktop window (a centred glass window, 760px and up): Glass lays its translucent glass over an opaque floor (--ss-sheet-floor,
+   set for Glass only, as the phone's full-screen window has), so the busy page behind does not reach the text. Solid and Follow
+   SillyTavern leave the token unset: the floor is transparent and the window stays as it was. */
+@media (min-width: 760px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings {
+        background-color: var(--ss-sheet-floor, transparent);
+        background-image: linear-gradient(var(--ss-glass), var(--ss-glass));
+    }
+}

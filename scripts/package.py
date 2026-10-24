@@ -2,6 +2,7 @@
 from pathlib import Path
 import hashlib
 import json
+import re
 import subprocess
 import zipfile
 
@@ -10,13 +11,23 @@ manifest = json.loads((root / 'manifest.json').read_text())
 runtime_config = json.loads((root / 'runtime-modules.json').read_text())
 runtime_files = [str(item['path']) for item in runtime_config.get('modules', [])]
 root_js = sorted(p.name for p in root.glob('*.js'))
-assert sorted(runtime_files) == root_js, 'runtime-modules.json must declare every and only top-level runtime JS module'
+top_level_runtime = [name for name in runtime_files if '/' not in name]
+assert sorted(top_level_runtime) == root_js, 'runtime-modules.json must declare every and only top-level runtime JS module'
 assert runtime_config.get('applicationVersion') == manifest['version'], 'runtime inventory version differs from manifest'
 assert runtime_config.get('entrypoint') == manifest['js'], 'runtime inventory entrypoint differs from manifest'
-assert all('/' not in name and name.endswith('.js') for name in runtime_files), 'runtime inventory contains a non-top-level JS path'
+src_module = re.compile(r'^src/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.js$')
+assert all(name.endswith('.js') and ('/' not in name or (src_module.match(name) and '..' not in name.split('/'))) for name in runtime_files), 'runtime inventory contains a JS path outside the top level and src/'
+assert all((root / name).is_file() for name in runtime_files), 'runtime inventory declares a missing module'
 
-support_files = ['style.css', 'suite.css', 'manifest.json', 'runtime-modules.json', 'LICENSE', 'README.md']
+# src/storysuite-v2.js is the optional Story Suite v2 adapter, imported by index.js at runtime;
+# src/npc-meters.js, src/npc-meters-screen.js and src/npc-meters-presets.js are its npc slice, NPC card and meter presets;
+# src/social-check.js is the social check rules (npc.socialModifier).
+support_files = ['style.css', 'suite.css', 'manifest.json', 'runtime-modules.json', 'LICENSE', 'README.md', 'src/storysuite-v2.js', 'src/npc-meters.js', 'src/npc-meters-screen.js', 'src/npc-meters-presets.js', 'src/social-check.js']
 files = runtime_files + support_files
+src_js = sorted(p.relative_to(root).as_posix() for p in (root / 'src').rglob('*.js'))
+assert all(name in files for name in src_js), 'every src/ module must be packaged'
+# A src/ module may be declared in the inventory and listed as a support file too; it ships once.
+files = list(dict.fromkeys(files))
 out = root / 'dist'
 out.mkdir(exist_ok=True)
 archive = out / f"npc_state_delta-{manifest['version']}.zip"

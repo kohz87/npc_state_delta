@@ -1,5 +1,7 @@
 import { normalizeName } from './core.js';
 import { normalizeSocialGraph } from './social.js';
+import { lockedFieldKeys } from './src/dossier-edit.js';
+import { BRANCH_USER_METADATA_FIELDS } from './src/fields/registry.js';
 
 export const BRANCH_HISTORY_LIMIT = 160;
 
@@ -241,10 +243,7 @@ export function clearUserDismissedGroupsFor(groups, target, { modernByIdOnly = f
 
 export function preserveUserNpcMetadata(restoredNpcs = [], currentNpcs = []) {
     const restored = cloneNpcList(restoredNpcs);
-    const globallyPreserved = [
-        'portraitPromptPositive', 'portraitPromptNegative', 'portraitPromptReplace', 'portraitSeed',
-        'retentionProtected', 'minor',
-    ];
+    const globallyPreserved = BRANCH_USER_METADATA_FIELDS;
     for (const npc of restored) {
         // Retired dossier metadata must not be resurrected by historical checkpoints.
         delete npc.importance;
@@ -257,8 +256,10 @@ export function preserveUserNpcMetadata(restoredNpcs = [], currentNpcs = []) {
         }
         if (current.manualProfileLocksExplicit) {
             const locked = Array.isArray(current.manualProfileFields) ? [...current.manualProfileFields] : [];
-            for (const field of locked) {
-                if (Object.prototype.hasOwnProperty.call(current, field)) npc[field] = structuredClone(current[field]);
+            // A lock keeps every key its field is made of (an appearance lock keeps the forms too).
+            for (const key of new Set(locked.flatMap(lockedFieldKeys))) {
+                if (Object.prototype.hasOwnProperty.call(current, key)) npc[key] = structuredClone(current[key]);
+                else delete npc[key];
             }
             npc.manualProfileFields = locked;
             npc.manualProfileLocksExplicit = true;

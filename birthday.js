@@ -2,7 +2,6 @@
 import {
     calendarFingerprint,
     calendarPromptContext,
-    currentCalendarDate,
     deriveAgeFromBirthDate,
     deriveBirthDateFromAgeParts,
     deterministicCalendarBirthday,
@@ -10,6 +9,7 @@ import {
     getActiveCalendarConfig,
     normalizeCalendarConfig,
     normalizeCalendarDate,
+    storyCurrentDate,
 } from './calendar.js';
 
 const BIRTH_DATE_SOURCES = Object.freeze(['generated', 'established']);
@@ -51,7 +51,7 @@ function exactAge(value) {
 }
 
 function groundedReferenceDate(calendar, referenceDate = null) {
-    return normalizeCalendarDate(referenceDate, calendar) || currentCalendarDate(calendar);
+    return normalizeCalendarDate(referenceDate, calendar) || storyCurrentDate(calendar);
 }
 
 export function normalizeBirthDate(value, config = undefined) {
@@ -282,3 +282,14 @@ export function birthdayPromptRule(config = undefined, referenceDate = null) {
 }
 
 export const BIRTHDAY_PROMPT_RULE = birthdayPromptRule(null);
+
+// (cleanup step 12, I-10) The one-pass rules' short form: the same contract, nothing that changes
+// from reply to reply (the current date is sent with the context instead).
+export function birthdayCaptureRule(config = undefined) {
+    const normalized = normalizeCalendarConfig(activeOrProvided(config), { requireCurrentDate: false });
+    const shape = normalized.calendarValid
+        ? `{"era":"${normalized.config.era || ''}","year":number|null,"month":"month name","day":number}`
+        : '"MM-DD|YYYY-MM-DD"';
+    const names = normalized.calendarValid ? ' Keep stated era/month names.' : '';
+    return `\nBIRTHDAY: grounded evidence only: birthDate:${shape}+birthDateState:"establish|correct"+birthDateReason; never invented or derived from apparentAge/species/lifespan.${names}`;
+}
