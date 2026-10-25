@@ -483,9 +483,9 @@ test('N2: a host that gives no Source for the head cannot take the change yet (U
     assert.equal(seen[0].input.source.ordinal, 1, 'the port gave the Source');
 });
 
-test('N2: opening a chat primes its ids before the first ask, and writes nothing for a chat with nothing to name', async () => {
+test('opening a chat, a reply or a scan hydrates nothing and writes nothing; the first save point or npc.identity question makes the story line', async () => {
     const empty = setup({ state: { npcs: [], socialGraph: { edges: [] }, checkpoints: [], lineage: [], turn: 0 } });
-    assert.deepEqual(await empty.prime(), { ok: true, lineage: null });
+    assert.equal(empty.prime, undefined, 'nothing primes a chat at open');
     assert.equal(empty.live.writes, 0, 'a new chat has no file until it is saved');
     assert.equal(empty.queries['npc.identity'](null, { name: 'Mira' }), null);
     await new Promise(resolve => setTimeout(resolve, 5));
@@ -495,9 +495,27 @@ test('N2: opening a chat primes its ids before the first ask, and writes nothing
     assert.equal(saved.ok, true);
     assert.equal(empty.live.writes, 1);
     assert.match(empty.timeline().lineage, LINEAGE_ID);
-    // A chat with dossiers is primed at once: the first ask after the reload finds the ids.
+
+    // A populated chat that never asks is untouched: no lineage, no ids, no checkpoint, no vault file, however its dossiers change.
     const full = setup();
-    const primed = await full.prime();
-    assert.match(primed.lineage, LINEAGE_ID);
+    const plain = structuredClone(full.live.state);
+    full.participant.attach({ head: async () => ({ ok: false, code: 'RESTORE_PENDING' }), nativeMutation: async () => { throw new Error('published'); } });
+    full.noteChange();
+    full.live.state.npcs[0].trust = 5;
+    full.noteChange();
+    assert.equal((await full.flush()).unchanged, true, 'nothing to publish for a chat that does not use the timeline');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(full.live.writes, 0);
+    assert.equal(full.live.installs, 0);
+    assert.equal(full.vault.docs.size, 0);
+    assert.equal(full.vault.indexes.size, 0);
+    assert.equal(Object.hasOwn(full.live.state, 'timeline'), false);
+    full.live.state.npcs[0].trust = plain.npcs[0].trust;
+    assert.deepEqual(full.live.state, plain);
+
+    // The first question to npc.identity is a use: the ids are made behind it, and the next ask finds them.
+    assert.equal(full.queries['npc.identity'](null, { name: 'Mira' }), null);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.match(full.timeline().lineage, LINEAGE_ID);
     assert.equal(full.queries['npc.identity'](null, { name: 'Mira' }).nativeKey, 'npc_mira');
 });

@@ -17,6 +17,7 @@
 //   readState()          the chat's native state now, synchronously (a copy; window.NPCStateDelta.getState())
 //   installState(state)  replaces the chat's native state absolutely and makes it durable (asynchronous); not a native change
 //   writeTimeline(block) writes the participant's block (`state.timeline`) into the chat's state and makes it durable; not a native change
+//   started()            whether the chat has its story line already (`state.timeline.lineage`), without reading the whole state (optional)
 //   busy()               whether a scan or dossier pass is in flight for the open chat (optional)
 //   idle(ms)             resolves true when none is, false after `ms` (optional)
 //   headSource()         the Source of the reply at the head, when the host's head() does not carry one (optional; see the dev note)
@@ -115,16 +116,15 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     /**
      * Brings the open chat's state up to date: it has a lineage, every dossier has its np_ and a dossier that is gone has its np_ archived;
      * written into the state (durably) when it changed. The chat is looked at again after every await: a chat that changed meanwhile ends it.
+     * Only a chat that uses the timeline gets here: a save point, a restore, a death, a published change of a chat that has its line already, or a
+     * question to `npc.identity`. Opening a chat, a reply, or a scan writes nothing (`started`).
      * → the session { key, lineage, index } or null (no chat, or it changed).
      */
-    async function hydrate({ create = true } = {}) {
+    async function hydrate() {
         const key = keyNow();
         if (!usable(key)) return null;
         const state = port.readState();
         const block = timelineOf(state);
-        // A chat with no dossiers and no line yet has nothing to name: opening it writes nothing (a new chat has no file until it is saved), and
-        // the line is made by the first thing that needs one (a save point, a death, a dossier).
-        if (!create && !block.lineage && !(Array.isArray(state?.npcs) && state.npcs.length)) return null;
         let write = false;
         if (!block.lineage) {
             block.lineage = mintLineage(random);
@@ -175,6 +175,16 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         return { ok: true, doc };
     }
 
+    /**
+     * Whether the open chat uses the timeline: it has its story line (the state carries a lineage, made by the first save point, restore, death
+     * or `npc.identity` question) or this run has made it. A chat that never did is left exactly as Delta alone keeps it: nothing is hydrated,
+     * written or published for it, so a populated chat that never asks for the timeline stays byte for byte what it was.
+     */
+    const started = () => {
+        if (session && session.key === keyNow()) return true;
+        try { if (typeof port.started === 'function') return port.started() === true; } catch { return false; }
+        return Boolean(timelineOf(port.readState()).lineage);
+    };
     const busy = () => (typeof port.busy === 'function' ? port.busy() === true : false);
     /** Whether the native state is, now, the one this checkpoint was handed over (or installed) as: the part of the host's commit probe that reads the state. */
     const stands = (checkpoint, hash) => {
@@ -408,6 +418,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
      */
     async function publish() {
         if (!handle) return fail('UNSUPPORTED', 'The host has not given this participant its handle.');
+        if (!started()) return { ok: true, unchanged: true };
         for (let attempt = 0; attempt < 3; attempt += 1) {
             const settled = await exclusive(async () => ({ ok: true, session: await hydrate(), stateHash: hashJson(port.readState()) }));
             if (!settled.ok || !settled.session) return settled.ok ? { ok: true, unchanged: true } : settled;
@@ -492,13 +503,11 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
                 return resolveIdentity(block.identity, npcs, args);
             },
         },
-        /** Opens the chat's line: the ids exist before the first ask. A chat with nothing to name is left alone (nothing is written). */
-        prime: () => exclusive(async () => { const s = await hydrate({ create: false }); return s ? { ok: true, lineage: s.lineage } : { ok: true, lineage: null }; }),
         /** Hydrates the open chat now, making its line if it has none. */
         hydrate: () => exclusive(async () => { const s = await hydrate(); return s ? { ok: true, npcs: Object.keys(timelineOf(port.readState()).identity.byKey).length, lineage: s.lineage } : fail('FAILED', 'There is no open chat.'); }),
         nativeChange,
         /** Delta's state was written durably by something other than the participant: publish it as a native change (debounced). */
-        noteChange: () => { announced += 1; if (handle) schedulePublish(debounceMs); },
+        noteChange: () => { announced += 1; if (handle && started()) schedulePublish(debounceMs); },
         /** Publishes now what is pending and resolves with the answer (tests; and a chat closing). */
         flush: async () => { if (timer) { cancel(timer); timer = null; } return runPublish(); },
         lastPublish: () => last,

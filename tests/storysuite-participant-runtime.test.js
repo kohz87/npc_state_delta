@@ -203,3 +203,30 @@ test('N1 end to end: the real rename lifecycle keeps the lineage and the ids, an
         assert.deepEqual(adopted.identity.map, before.identity.map, 'the ids are kept');
     });
 });
+
+test('a hosted chat that never uses the timeline keeps its state and its files exactly as Delta alone: no story line, no checkpoint file, no participant index', () => {
+    runHostScenario('parity', async () => {
+        const sdk = { registered: [], registerModule(def) { sdk.registered.push(def); } };
+        mockState.sdk = sdk;
+        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    }, async () => {
+        const api = globalThis.NPCStateDelta;
+        assert.equal(await waitFor(() => mockState.sdk.registered.length === 1), true);
+        const def = mockState.sdk.registered[0];
+        await manualAddNpc('Mira');
+        await api.flush();
+        await manualAddNpc('Orrin');
+        await api.flush();
+        await sleep(450);
+        assert.equal(api.getState().npcs.length, 2);
+        assert.equal(api.getState().timeline, undefined, 'no story line was made for the chat');
+        assert.equal(api.timelineStarted(), false);
+        const written = [...mockState.files.keys()].filter(name => /checkpoint|participant/.test(String(name)));
+        assert.deepEqual(written, [], 'no checkpoint or index file');
+        // The first question to npc.identity is what starts it.
+        assert.equal(def.queries['npc.identity']({}, { name: 'Mira' }), null);
+        await sleep(60);
+        assert.match(api.getState().timeline.lineage, /^lg_[0-9a-z]{8}$/);
+        assert.equal(api.timelineStarted(), true);
+    });
+});

@@ -103,3 +103,73 @@ export async function played(t, options = {}) {
     await r.change(state => { state.npcs[0].trust = 9; });
     return r;
 }
+
+// ---- the adapter (src/storysuite-v2.js) on the real host, over a fake Delta runtime -------------------------------------------------------
+
+/**
+ * adapterRig(t, { state?, vault?, image?, live?, history? }) → { host, adapter, api, live, vault, delta (the participant's view through the host), ... }
+ * The real adapter registers Delta's module (with its participant and npc.identity) on a real host; `api` is the fake runtime it talks to
+ * (`window.NPCStateDelta`): the chat's state, an absolute install, the change announcements, the scan counters and the message gate.
+ */
+export async function adapterRig(t, { state = freshState(), vault = memoryVault(), image = null, live = null, modules = [] } = {}) {
+    const { createStorySuiteV2Adapter } = await import('../../src/storysuite-v2.js');
+    t.mock.method(console, 'warn', () => {});
+    const mine = live ?? { chatKey: 'chat:avatar.png:one', state: structuredClone(state), installs: 0, writes: 0, scans: 0, waiting: 0 };
+    const host = await createHost({ modules: [sealer(), ...modules], ...(image ? { st: { chat: image.chat } } : {}) });
+    if (image) {
+        host.ctx.chatMetadata = clone(image.metadata);
+        await host.turn.onChatChanged();
+    }
+    t.after(() => host.close());
+    const listeners = new Set();
+    const warnings = [];
+    const box = { ready: Promise.resolve(host.sdk), sdk: host.sdk };
+    const api = {
+        gate: null,
+        isEnabled: () => true,
+        getNpc: id => mine.state.npcs.find(item => item.id === id) ?? null,
+        relationshipBaseline: () => ({ trust: 0, affection: 0, desire: 0, tension: 0 }),
+        chatKey: () => mine.chatKey,
+        getState: () => structuredClone(mine.state),
+        timelineStarted: () => Boolean(mine.state.timeline?.lineage),
+        installState: async next => { mine.installs += 1; mine.state = structuredClone(next); },
+        writeTimeline: async block => { mine.writes += 1; mine.state = { ...mine.state, timeline: structuredClone(block) }; },
+        onNativeChange: fn => { listeners.add(fn); return () => listeners.delete(fn); },
+        scanActive: () => mine.scans > 0,
+        scanIdle: async () => true,
+        useMessageGate: gate => { api.gate = gate; },
+        stateReady: () => true,
+        requestHeaders: () => ({}),
+    };
+    const adapter = createStorySuiteV2Adapter({
+        suiteApi: { npcs: () => mine.state.npcs.map(({ id, name, aliases, present, archived }) => ({ id, name, aliases, present, archived })) },
+        delta: () => api, version: 'test', host: () => box, headReply: () => host.store.headIndex(),
+        doc: { documentElement: { dataset: {} }, getElementById: () => null, addEventListener() {}, dispatchEvent() { return true; } },
+        timers: { setTimeout: () => 0, clearTimeout() {}, setInterval: () => ({ unref() {} }), clearInterval() {} },
+        logger: { warn: (...args) => warnings.push(args.join(' ')) }, loadEmptyCast: async () => null,
+        participantVault: vault,
+    });
+    adapter.start();
+    if (await adapter.settled() !== true) throw new Error(`the adapter did not register: ${warnings.join(' / ')}`);
+    t.after(() => adapter.stop());
+    const disk = { image: { chat: clone(host.ctx.chat), metadata: clone(host.ctx.chatMetadata) } };
+    const original = host.ctx.saveChat;
+    host.ctx.saveChat = async (...args) => {
+        const out = await original.apply(host.ctx, args);
+        disk.image = { chat: clone(host.ctx.chat), metadata: clone(host.ctx.chatMetadata) };
+        return out;
+    };
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+    return {
+        host, adapter, api, live: mine, vault, warnings, disk, sleep,
+        /** Delta saves a change to its state and announces it, as index.js does. */
+        announce(edit = () => {}) {
+            edit(mine.state);
+            for (const fn of [...listeners]) fn({ key: mine.chatKey });
+        },
+        listeners,
+        reload(options = {}) {
+            return adapterRig(t, { vault, image: clone(disk.image), live: mine, modules, ...options });
+        },
+    };
+}

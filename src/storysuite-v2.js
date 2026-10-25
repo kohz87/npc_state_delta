@@ -1108,7 +1108,6 @@ export function createStorySuiteV2Adapter({
     // ---- the per-reply step (npc.tick) ----
 
     function onTurn(turn) {
-        if (hosted) { primeTimeline(); void refreshActive(); }
         if (!hosted || !TICK_TURNS.includes(turn?.type) || !enabled()) return;
         let wanted = false;
         try { wanted = part.tickWanted(); } catch { wanted = false; }
@@ -1172,7 +1171,10 @@ export function createStorySuiteV2Adapter({
     // ---- the module definition ----
 
     // The timeline participant (Story Block docs/v2/TIMELINE.md, contract §8): Delta's native state takes part in save points and restores, and
-    // `npc.identity` names a person by an np_ id. It needs Delta's runtime for the open chat's key, its state and an absolute install.
+    // `npc.identity` names a person by an np_ id. It needs Delta's runtime for the open chat's key, its state and an absolute install. Nothing of it
+    // runs for a chat until the chat uses the timeline or asks `npc.identity` (participant.js `started`): registering, opening a chat, a reply or a
+    // scan hydrate nothing, write nothing and publish nothing.
+    //
     // Which of the chat's messages the story stands on (Story Block's `sdk.timeline.history()`): after a restore the replies of the dead timeline
     // are faded, and Delta's scans do not read them (src/transcript.js useMessageGate). Refreshed at a turn, a restore and before a scan.
     let activeFlags = null;
@@ -1183,12 +1185,12 @@ export function createStorySuiteV2Adapter({
         } catch { activeFlags = null; }
     };
     const messageGate = Object.freeze({ refresh: refreshActive, faded: () => Array.isArray(activeFlags) && activeFlags.includes(false), active: index => activeFlags?.[index] !== false });
-    let primedKey = null;
     let offNativeChange = null;
     const timeline = createParticipant({
         port: {
             chatKey: () => String(runtime()?.chatKey?.() ?? ''),
             readState: () => runtime()?.getState?.() ?? { npcs: [] },
+            started: () => runtime()?.timelineStarted?.() === true,
             installState: state => runtime().installState(state),
             writeTimeline: block => runtime().writeTimeline(block),
             busy: () => runtime()?.scanActive?.() === true,
@@ -1198,30 +1200,17 @@ export function createStorySuiteV2Adapter({
         },
         vault: participantVault ?? fileVault({ headers: () => runtime()?.requestHeaders?.() ?? {} }),
     });
-    // At chat open the ids are made before anyone asks (a state with none yet, or dossiers a scan admitted since), and the active messages read.
-    function primeTimeline() {
-        const api = runtime();
-        if (!hosted || api?.stateReady?.() !== true) return;
-        const key = String(api.chatKey?.() ?? '');
-        if (!key || key === 'no-chat' || key === primedKey) return;
-        primedKey = key;
-        void timeline.prime();
-        void refreshActive();
-    }
     function startTimeline() {
         const api = runtime();
         offNativeChange?.();
         offNativeChange = typeof api?.onNativeChange === 'function' ? api.onNativeChange(() => timeline.noteChange()) : null;
         try { api?.useMessageGate?.(messageGate); } catch { /* an older runtime */ }
-        primedKey = null;
-        primeTimeline();
     }
     function stopTimeline() {
         try { offNativeChange?.(); } catch { /* gone */ }
         offNativeChange = null;
         try { runtime()?.useMessageGate?.(null); } catch { /* gone */ }
         activeFlags = null;
-        primedKey = null;
     }
     const definition = Object.freeze({
         id: MODULE_ID,
@@ -1412,7 +1401,6 @@ export function createStorySuiteV2Adapter({
 
     /** Checks that the host is still there; restores the drawer and looks again when it is not. */
     function check() {
-        if (hostRef && host() === hostRef) primeTimeline();
         if (!hostRef || host() === hostRef) return hosted;
         unhost();
         if (started) poll(0);

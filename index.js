@@ -7811,7 +7811,9 @@ window.NPCStateDelta = Object.freeze({
         nativeChangeListeners.add(listener);
         return () => { nativeChangeListeners.delete(listener); };
     },
-    // Whether the open chat's dossier state is loaded (the participant hydrates its ids at chat open), and whether a scan or pass is in flight.
+    // Whether the open chat uses the timeline (its state has a story line), read without cloning the state; whether the open chat's dossier state is
+    // loaded; and whether a scan or pass is in flight.
+    timelineStarted: () => Boolean(getChatState()?.timeline?.lineage),
     stateReady: () => chatHydrationStatus() === 'ready',
     scanActive: () => scanWorkPending(),
     scanIdle: ms => scanIdle(ms),
