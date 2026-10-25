@@ -85,6 +85,8 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     let retries = 0;
     let last = null;
     const handed = new Map();   // checkpoint id -> { hash, stateHash }: what the participant handed the host, for `current`
+    let announced = 0;          // changes announced to the participant (noteChange), in this run
+    const preparedAt = new Map();   // prepared id of an in-place publication -> `announced` when it was prepared (this run only)
     const warn = text => { try { port.warn?.(text); } catch { /* telling is best effort */ } };
     const keyNow = () => String(port.chatKey() ?? '');
     const usable = key => Boolean(key) && key !== 'no-chat';
@@ -174,6 +176,15 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     }
 
     const busy = () => (typeof port.busy === 'function' ? port.busy() === true : false);
+    /** Whether the native state is, now, the one this checkpoint was handed over (or installed) as: the part of the host's commit probe that reads the state. */
+    const stands = (checkpoint, hash) => {
+        const held = handed.get(checkpoint);
+        return Boolean(held) && held.hash === hash && hashJson(port.readState()) === held.stateHash;
+    };
+    const hand = (checkpoint, hash, stateHash) => {
+        handed.set(checkpoint, { hash, stateHash });
+        while (handed.size > 16) handed.delete(handed.keys().next().value);
+    };
     const quiet = async () => (typeof port.idle === 'function' ? (await port.idle(idleMs)) !== false : true);
 
     const participant = {
@@ -198,8 +209,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
                 const built = await made({ cursor, headHash });
                 if (busy() || hashJson(port.readState()) !== at) continue;
                 s.index.base = { checkpoint: built.id, hash: built.hash, stateHash: at };
-                handed.set(built.id, { hash: built.hash, stateHash: at });
-                while (handed.size > 16) handed.delete(handed.keys().next().value);
+                hand(built.id, built.hash, at);
                 await save();
                 return { ok: true, checkpoint: built.id, hash: built.hash, schema: PARTICIPANT_SCHEMA };
             }
@@ -211,11 +221,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
          * checkpoint still the native state? It answers at once (no waiting): the state is the one handed over, and nothing is running, due or
          * queued that would change it. { ok: true, current: boolean }; false makes the host cancel the save and ask again.
          */
-        current: input => {
-            const held = isRecord(input) ? handed.get(input.checkpoint) : null;
-            if (!held || held.hash !== input.hash) return { ok: true, current: false };
-            return { ok: true, current: !busy() && hashJson(port.readState()) === held.stateHash };
-        },
+        current: input => ({ ok: true, current: isRecord(input) && stands(input.checkpoint, input.hash) && !busy() }),
 
         prepare: input => exclusive(async () => {
             const s = await hydrate();
@@ -248,15 +254,31 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
             if (ret.status === 'aborted') return fail('REFUSED', 'That preparation was aborted.');
             const got = await verified(entry.checkpoint, entry.hash);
             if (!got.ok) return got;
-            if (entry.inPlace) {
-                // A change Delta already made and published after the fact: the state is live, nothing is installed over a newer one.
-                idx.base = { checkpoint: entry.checkpoint, hash: entry.hash, stateHash: entry.stateHash ?? idx.base?.stateHash ?? '' };
-            } else {
+            // The journal decides what the story stands on: the selected bytes. A change Delta made and published after the fact is live already
+            // when the state is those bytes; only then (or when a newer change of its own is in flight, below) is nothing installed. Anything else
+            // (a restore, a selected head, a recovery that finds the live state is not what the journal selected) is installed, durably, and the
+            // state is looked at again like the host's commit probe does before the activation is acknowledged.
+            const live = port.readState();
+            let install = !entry.inPlace || hashJson(live) !== hashJson(got.doc.state);
+            if (install && entry.inPlace && announced > (preparedAt.get(input.prepared) ?? Infinity)) {
+                // A newer change of Delta's own, announced after this one was prepared, is live and is published next (on this baseline): it is not
+                // overwritten by the older bytes.
+                install = false;
+            }
+            if (install) {
                 // The saved state, its np_ map and its deaths together; the ids either timeline issued stay reserved (inactive, never issued again).
-                const installed = restoredState(got.doc.state, port.readState());
-                await port.installState(installed);
+                await port.installState(restoredState(got.doc.state, live));
                 try { port.restored?.(); } catch { /* the restore is done; telling is best effort */ }
-                idx.base = { checkpoint: entry.checkpoint, hash: entry.hash, stateHash: hashJson(port.readState()) };
+                // The state now is the selected bytes (the timeline block aside, which keeps both timelines' reserved ids): read back and compared,
+                // then recorded as handed over so the probe `current` answers for it like for any checkpoint. Not acknowledged otherwise.
+                const now = port.readState();
+                hand(entry.checkpoint, entry.hash, hashJson(now));
+                if (hashJson(restoredState(got.doc.state, now)) !== hashJson(now) || !stands(entry.checkpoint, entry.hash)) {
+                    return fail('STALE', 'NPC State Delta could not confirm that the selected native state is installed; it is tried again.');
+                }
+                idx.base = { checkpoint: entry.checkpoint, hash: entry.hash, stateHash: hashJson(now) };
+            } else {
+                idx.base = { checkpoint: entry.checkpoint, hash: entry.hash, stateHash: entry.stateHash ?? idx.base?.stateHash ?? '' };
             }
             idx.selected = entry.checkpoint;
             entry.return = input.return;
@@ -405,6 +427,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
                     const { before, after } = await pairFor(state, head);
                     const prepared = preparedId({ inPlace: true, before: before.checkpoint, after: after.id, lineage: s.lineage, n: Object.keys(s.index.prepared).length });
                     s.index.prepared[prepared] = { checkpoint: after.id, hash: after.hash, return: null, inPlace: true, stateHash: hashJson(state) };
+                    preparedAt.set(prepared, announced);
                     await save();
                     return { before: shaped(before), after: shaped(after), prepared };
                 }),
@@ -475,7 +498,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         hydrate: () => exclusive(async () => { const s = await hydrate(); return s ? { ok: true, npcs: Object.keys(timelineOf(port.readState()).identity.byKey).length, lineage: s.lineage } : fail('FAILED', 'There is no open chat.'); }),
         nativeChange,
         /** Delta's state was written durably by something other than the participant: publish it as a native change (debounced). */
-        noteChange: () => { if (handle) schedulePublish(debounceMs); },
+        noteChange: () => { announced += 1; if (handle) schedulePublish(debounceMs); },
         /** Publishes now what is pending and resolves with the answer (tests; and a chat closing). */
         flush: async () => { if (timer) { cancel(timer); timer = null; } return runPublish(); },
         lastPublish: () => last,

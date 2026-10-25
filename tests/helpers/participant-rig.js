@@ -31,7 +31,11 @@ export async function rig(t, { state = freshState(), vault = memoryVault(), imag
     const port = {
         chatKey: () => mine.chatKey,
         readState: () => structuredClone(mine.state),
-        installState: async next => { mine.installs += 1; mine.state = structuredClone(next); },
+        installState: async next => {
+            if (mine.failInstall > 0) { mine.failInstall -= 1; throw new Error('The restored native state could not be saved yet.'); }
+            mine.installs += 1;
+            mine.state = structuredClone(next);
+        },
         writeTimeline: async block => { mine.state = { ...mine.state, timeline: structuredClone(block) }; },
         warn: text => warnings.push(text),
         ...quiet,
