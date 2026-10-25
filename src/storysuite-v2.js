@@ -492,7 +492,11 @@ export function createStorySuiteV2Adapter({
          */
         'npc.dossier': (state, args) => {
             try {
-                const npc = dossierOf(args?.name);
+                // A native dependency uses the stable np_ identity, including a terminal-death dossier
+                // archived from the ordinary cast. Name-based browsing keeps its existing visibility rule.
+                const byId = args?.id !== undefined;
+                const identity = byId ? timeline.queries['npc.identity'](state, { id: args.id }) : null;
+                const npc = byId ? (identity && runtime()?.getNpc?.(identity.nativeKey)) : dossierOf(args?.name);
                 if (!npc) return null;
                 const names = runtime()?.customFieldNames?.();
                 const out = dossierFields(npc, { customFieldNames: Array.isArray(names) ? names : undefined });

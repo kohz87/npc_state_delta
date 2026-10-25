@@ -53,16 +53,21 @@ export const MODULES = {
         make: (imported, ref) => imported.createModule({
             host: { settings: id => ref.sdk?.settings(id) ?? null, substitute: text => ref.sdk?.substitute(text) },
         }),
-        A: ['~ time June 3, 1200, 08:00 am', '+ quest Lost Letter — Orsa lost a letter | giver: Orsa | goal: Find the letter | reward: 30 gold'],
-        B: ['~ time June 3, 1200, 10:00 am', '+ quest Wolf Cull — wolves at the farm | giver: Orsa | goal: Kill 3 wolves | reward: 40 gold'],
-        C: ['~ time June 3, 1200, 09:00 am', '+ quest Mill Rats — rats in the mill | giver: Orsa | goal: Clear the mill | reward: 20 gold'],
-        action: host => {
-            const quest = host.sdk.query('director.threads', { kind: 'quest' }).find(thread => thread.key === 'Lost Letter');
-            return ['quest.abandon', { id: quest?.id }];
+        A: ['~ time June 3, 1200, 08:00 am', '+ hook Lost Letter — Orsa lost a letter | giver: Orsa | goal: Find the letter'],
+        B: ['~ time June 3, 1200, 10:00 am', '+ hook The Farm — news from the farm | goal: Talk to the farmer'],
+        C: ['~ time June 3, 1200, 09:00 am', '+ hook The Mill — news from the mill | goal: Talk to the miller'],
+        action: async host => {
+            const thread = 'th_matrix01';
+            const offered = await host.sdk.command('threads.offer', {
+                write: 'wr_matrix01', thread, kind: 'hook', key: 'Read the letter',
+                summary: 'Hear what Orsa has to say', fields: { goal: 'Talk to Orsa' }, expectedHash: null,
+            });
+            if (!offered.ok) throw new Error(`threads.offer: ${offered.message}`);
+            return ['threads.accept', { write: 'wr_matrix02', thread, expectedHash: host.sdk.query('threads.hash', { thread }) }];
         },
         facts: host => ({
             minutes: host.head().domains.director?.time?.minutes ?? null,
-            quests: host.sdk.query('director.threads', { kind: 'quest' }).map(thread => `${thread.key}:${thread.status}:${thread.taken ? 'taken' : 'open'}`).sort(),
+            goals: host.sdk.query('director.threads', { kind: 'hook' }).map(thread => `${thread.key}:${thread.status}:${thread.acceptance ? 'accepted' : 'open'}`).sort(),
         }),
     },
     nsd: {
