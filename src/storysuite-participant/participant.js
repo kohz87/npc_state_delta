@@ -56,7 +56,7 @@ function cleanIndex(raw) {
     if (!isRecord(raw)) return index;
     for (const [event, ack] of Object.entries(isRecord(raw.acks) ? raw.acks : {})) if (isRecord(ack) && typeof ack.checkpoint === 'string' && typeof ack.hash === 'string') index.acks[event] = { checkpoint: ack.checkpoint, hash: ack.hash };
     for (const [id, entry] of Object.entries(isRecord(raw.prepared) ? raw.prepared : {})) {
-        if (isRecord(entry) && typeof entry.checkpoint === 'string' && typeof entry.hash === 'string') index.prepared[id] = { checkpoint: entry.checkpoint, hash: entry.hash, return: typeof entry.return === 'string' ? entry.return : null, inPlace: entry.inPlace === true, stateHash: typeof entry.stateHash === 'string' ? entry.stateHash : null };
+        if (isRecord(entry) && typeof entry.checkpoint === 'string' && typeof entry.hash === 'string') index.prepared[id] = { checkpoint: entry.checkpoint, hash: entry.hash, return: typeof entry.return === 'string' ? entry.return : null, inPlace: entry.inPlace === true, stateHash: typeof entry.stateHash === 'string' ? entry.stateHash : null, newer: entry.newer === true };
     }
     for (const [id, entry] of Object.entries(isRecord(raw.returns) ? raw.returns : {})) {
         if (isRecord(entry) && typeof entry.prepared === 'string' && typeof entry.checkpoint === 'string' && ['prepared', 'active', 'aborted'].includes(entry.status)) index.returns[id] = { prepared: entry.prepared, checkpoint: entry.checkpoint, hash: String(entry.hash ?? ''), status: entry.status };
@@ -277,10 +277,13 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
             // state is looked at again like the host's commit probe does before the activation is acknowledged.
             const live = port.readState();
             let install = !entry.inPlace || hashJson(live) !== hashJson(got.doc.state);
-            if (install && entry.inPlace && announced > (preparedAt.get(input.prepared) ?? Infinity)) {
-                // A newer change of Delta's own, announced after this one was prepared, is live and is published next (on this baseline): it is not
-                // overwritten by the older bytes.
+            const newer = entry.newer === true || announced > (preparedAt.get(input.prepared) ?? Infinity);
+            if (install && entry.inPlace && newer) {
+                // A newer change of Delta's own, announced after this one was read (even while its checkpoint was being uploaded, and noted in the
+                // index so a restart knows it too), is live: the older bytes do not overwrite it. It is published next, on this baseline, by the normal
+                // route, which is asked for now (the host cannot take a change while it is finishing this one, so it follows the acknowledgement).
                 install = false;
+                schedulePublish(0);
             }
             if (install) {
                 // The saved state, its np_ map and its deaths together; the ids either timeline issued stay reserved (inactive, never issued again).
@@ -297,6 +300,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
             } else {
                 idx.base = { checkpoint: entry.checkpoint, hash: entry.hash, stateHash: entry.stateHash ?? idx.base?.stateHash ?? '' };
             }
+            preparedAt.delete(input.prepared);
             idx.selected = entry.checkpoint;
             entry.return = input.return;
             idx.returns[input.return] = { ...ret, status: 'active' };
@@ -449,11 +453,13 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
                 prepare: () => preparing(async () => {
                     const s = await hydrate();
                     if (!s) throw new Error('There is no open chat.');
+                    // A change announced from here on (the state is read now; the upload of its checkpoint takes time) is newer than this publication.
+                    const seen = announced;
                     const state = port.readState();
                     const { before, after } = await pairFor(state, head);
                     const prepared = preparedId({ inPlace: true, before: before.checkpoint, after: after.id, lineage: s.lineage, n: Object.keys(s.index.prepared).length });
-                    s.index.prepared[prepared] = { checkpoint: after.id, hash: after.hash, return: null, inPlace: true, stateHash: hashJson(state) };
-                    preparedAt.set(prepared, announced);
+                    s.index.prepared[prepared] = { checkpoint: after.id, hash: after.hash, return: null, inPlace: true, stateHash: hashJson(state), newer: announced > seen };
+                    preparedAt.set(prepared, seen);
                     await save();
                     return { before: shaped(before), after: shaped(after), prepared };
                 }),
@@ -522,7 +528,20 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         hydrate: () => exclusive(async () => { const s = await hydrate(); return s ? { ok: true, npcs: Object.keys(timelineOf(port.readState()).identity.byKey).length, lineage: s.lineage } : fail('FAILED', 'There is no open chat.'); }),
         nativeChange,
         /** Delta's state was written durably by something other than the participant: publish it as a native change (debounced). */
-        noteChange: () => { announced += 1; if (handle && started()) schedulePublish(debounceMs); },
+        noteChange: () => {
+            announced += 1;
+            // A publication being finished (prepared, not yet activated) is older than this change: say so in its index entry, which is saved, so a
+            // restart that finds the publication in the host's journal does not take the newer live state for a lost write.
+            if (session && preparedAt.size) {
+                let marked = false;
+                for (const id of preparedAt.keys()) {
+                    const entry = session.index.prepared[id];
+                    if (entry && !entry.newer) { entry.newer = true; marked = true; }
+                }
+                if (marked) void exclusive(async () => { await save(); return { ok: true }; });
+            }
+            if (handle && started()) schedulePublish(debounceMs);
+        },
         /** Publishes now what is pending and resolves with the answer (tests; and a chat closing). */
         flush: async () => { if (timer) { cancel(timer); timer = null; } return runPublish(); },
         lastPublish: () => last,

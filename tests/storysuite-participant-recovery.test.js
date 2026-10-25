@@ -109,3 +109,65 @@ test('after another reload and a rebuild the selected bytes are the live state a
     assert.deepEqual(next.host.store.problems(), []);
     assert.equal(next.live.installs, again.live.installs, 'nothing is installed again');
 });
+
+/** The change Delta announces while the checkpoint of a publication is being uploaded: trust 8 lands after trust 9 was read. */
+async function announcedDuringUpload(t, { crashAfter = false } = {}) {
+    const r = await rig(t);
+    await r.host.send('Hello.', 'One.');
+    await r.change(state => { state.npcs[0].trust = 5; });
+    await r.host.send('Two.', 'Two reply.');
+    let image = null;
+    if (crashAfter) r.hook.at = async phase => { if (phase === 'native.journaled') { image = clone(r.disk.image); throw crash(); } };
+    const put = r.vault.put.bind(r.vault);
+    let armed = true;
+    r.vault.put = async (id, doc) => {
+        await put(id, doc);
+        if (armed && doc.state.npcs[0].trust === 9) {
+            armed = false;
+            r.live.state.npcs[0].trust = 8;
+            r.delta.noteChange();
+        }
+    };
+    r.live.state.npcs[0].trust = 9;
+    r.delta.noteChange();
+    const out = await r.delta.flush();
+    r.vault.put = put;
+    return { r, out, image };
+}
+
+test('a change announced while the checkpoint is being uploaded is not overwritten by the selected bytes: it ends live and is published', async t => {
+    const { r, out } = await announcedDuringUpload(t);
+    assert.equal(out.ok, true, out.message);
+    assert.equal((await r.delta.flush()).ok, true);
+    assert.equal(r.live.state.npcs[0].trust, 8, 'trust 8 is live');
+    assert.equal(r.live.installs, 0, 'nothing was installed over it');
+    assert.equal(r.host.registry.restore().state, 'idle');
+    assert.deepEqual(r.host.store.problems(), []);
+    assert.deepEqual(r.warnings, []);
+    const standing = await selected(r.host);
+    assert.equal(standing.checkpoint, r.delta.index().base.checkpoint, 'and the story stands on a checkpoint that has it');
+    assert.equal(r.delta.index().base.stateHash, hashJson(r.live.state));
+    const next = await r.reload();
+    next.host.store.rebuild();
+    await next.host.timeline.host.recover();
+    assert.equal(next.live.state.npcs[0].trust, 8);
+    assert.deepEqual(await selected(next.host), standing);
+});
+
+test('and after a restart that finds the publication in the journal, the newer change is still there', async t => {
+    const { r, image } = await announcedDuringUpload(t, { crashAfter: true });
+    assert.notEqual(image, null);
+    assert.equal(r.live.state.npcs[0].trust, 8);
+    r.hook.at = async () => {};
+    const again = await rig(t, { vault: r.vault, image, live: r.live, hydrate: false });
+    assert.equal(again.live.state.npcs[0].trust, 8, 'the selected 9 did not replace the newer 8');
+    assert.equal(again.live.installs, 0);
+    assert.equal(again.host.registry.restore().state, 'idle');
+    assert.deepEqual(again.host.store.problems(), []);
+    assert.equal((await again.delta.flush()).ok, true);
+    assert.equal(again.delta.index().base.stateHash, hashJson(again.live.state), 'and it is published on the baseline');
+    assert.equal((await selected(again.host)).checkpoint, again.delta.index().base.checkpoint);
+    again.host.store.rebuild();
+    await again.host.timeline.host.recover();
+    assert.equal(again.live.state.npcs[0].trust, 8);
+});
