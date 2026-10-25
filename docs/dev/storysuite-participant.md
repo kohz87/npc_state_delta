@@ -48,8 +48,9 @@ barrier) in kohz87/Story_block. This note is Delta's side; the vendored copy in 
   lineage's id, every np_ either timeline issued reserved), durably, then read it back and check it (the bytes are what stands, and the probe above agrees)
   before acknowledging; a failed install or check is a retryable answer and the barrier holds. A change Delta made and published after the fact (below) is
   acknowledged as it is when the live state already is those bytes; when it is not (a recovery after a crash finds an older state file) the selected bytes
-  are installed the same way. The one exception is a newer change of Delta's own, announced (`noteChange`) after the publication was prepared in this run: it
-  is live, it is not overwritten, and it is published next on this baseline. An aborted preparation is refused.
+  are installed the same way. The one exception is a newer change of Delta's own, announced (`noteChange`) after the state of the publication was read (so also
+  while its checkpoint was being uploaded): it is live, it is not overwritten, and it is published next on this baseline. The index entry of the publication
+  carries that fact (`newer`, saved), so a restart that finds the publication in the host's journal knows it too. An aborted preparation is refused.
 - `abort`: before the commit only (a committed return is `REFUSED`); idempotent.
 - `status({ return })`: `prepared | active | aborted`. The host's recovery asks it to learn whether the participant switched already and **skips the
   activation when it says active**, so it says active only while the live state is that checkpoint's bytes; otherwise (a write that never reached the file, bytes
@@ -105,7 +106,10 @@ copy of that rule**: the callbacks above are all it does. What Delta owes the ba
   selection is needed and answers `RESTORE_PENDING` while it is up — every 50 ms until it answers, for at most 20 s; false when it does not.
 - `index.js` asks it (`messageGateSettled`) before a reply's scan, a queued drain, a backfill, a targeted pass (`withScanIntent`), before a branch reconcile
   (`reconcileCurrentBranch`: a delete or a swipe) and before a generation's injection is built (`generationReady`: `MESSAGE_SENT` and `GENERATION_AFTER_COMMANDS`).
-  A scan that waits counts as dossier work (a save point waits for it); one that gives up leaves the next scan or pass to carry on.
+  A scan that waits counts as dossier work (a save point waits for it). **Work is never dropped when the wait runs out:** a reply's scan (its receipt), a queued
+  drain, backfills, a targeted pass, a reconcile and the injection are kept in `deferredWork` (`deferUntilSettled`) and carried out when the barrier is down; a
+  Problem (a warning toast) says the scan is pending if the host has not settled for ten minutes, and the work still waits. A reply's retry runs only if the reply
+  is unchanged (same text, same place in the story: `replyGuard`); work for a chat that is no longer open is the only other work given up.
 - The host's queries of Delta are held by the host while the barrier is up (it answers null for a module that is `restore-pending`).
 
 ## After a restore: active history
