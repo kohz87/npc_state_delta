@@ -1688,21 +1688,83 @@ async function quietly(key, task) {
 // for a reply whose scan is due but not started. A save point taken then would miss what the scan writes a moment later. Counted per chat from the
 // reply arriving (handleAssistantMessageReceived) and from every scan, queued drain, backfill pass and targeted pass until it ends.
 const scanIntents = new Map();
-async function withScanIntent(key, task, skipped = false) {
+async function withScanIntent(key, task, skipped = false, defer = null) {
     scanIntents.set(key, (scanIntents.get(key) || 0) + 1);
+    const check = defer?.guard?.() ?? null;   // what the work stood on when it was asked for, kept for a retry
     try {
         // (timeline) No dossier work starts, and nothing is read for it, until the host's head-selection barrier is down and Delta stands on the
-        // checkpoint of the selected head (a delete, a swipe or a retraction moved the head; the host asks Delta to follow it first).
-        if (!await messageGateSettled()) return headNotSettled(skipped);
+        // checkpoint of the selected head (a delete, a swipe or a retraction moved the head; the host asks Delta to follow it first). Work that
+        // cannot start in time is not dropped: it waits in the queue below and starts when the barrier is down.
+        if (!await messageGateSettled()) return deferUntilSettled(key, defer, check, skipped);
         return await task();
     } finally {
         const left = (scanIntents.get(key) || 1) - 1;
         if (left > 0) scanIntents.set(key, left); else scanIntents.delete(key);
     }
 }
+// (timeline) Work that found the host's barrier still up after the wait is kept here, by chat and kind, and retried when the barrier is down: a
+// reply's scan (its receipt), a queued drain, backfills, a reconcile, a targeted pass, an injection. It counts as dossier work meanwhile (a save point
+// waits for it). If the host does not settle within HEAD_SETTLE_PROBLEM_MS a Problem tells the reader the work is pending; it is still not dropped. It
+// is given up only when its chat is no longer the open one, or the reply it was for is no longer there (the new one has its own event).
+const HEAD_SETTLE_PROBLEM_MS = 10 * 60 * 1000;
+const deferredWork = new Map();
+function deferredWorkPending(key) {
+    for (const entry of deferredWork.values()) if (entry.key === key) return true;
+    return false;
+}
+function deferUntilSettled(key, defer, check, answer) {
+    if (!defer?.label || typeof defer.retry !== 'function') return headNotSettled(answer);
+    const id = `${key}|${defer.label}`;
+    const kept = deferredWork.get(id);
+    if (kept) {
+        // The same kind of work asked for again: one retry, with the newest request (a reconcile merges the options).
+        kept.defer = { ...defer, options: defer.merge && kept.defer.options ? defer.merge(kept.defer.options, defer.options) : defer.options };
+        kept.check = check;
+        return answer;
+    }
+    const entry = { key, defer, check, since: Date.now(), told: false };
+    deferredWork.set(id, entry);
+    void (async () => {
+        try {
+            for (;;) {
+                if (getChatKey() !== key) return;
+                if (await messageGateSettled()) break;
+                if (!entry.told && Date.now() - entry.since >= HEAD_SETTLE_PROBLEM_MS) {
+                    entry.told = true;
+                    const text = `NPC State Delta: Story Block has not finished bringing the story to the selected point for ${Math.round(HEAD_SETTLE_PROBLEM_MS / 60000)} minutes, so ${defer.what || 'a scan'} is still pending. It runs as soon as Story Block is ready.`;
+                    console.warn(`[NPC State Delta] ${text}`);
+                    globalThis.toastr?.warning?.(text);
+                }
+                await new Promise(resolve => setTimeout(resolve, 250));
+            }
+            if (getChatKey() !== key) return;
+            deferredWork.delete(id);
+            if (typeof entry.check === 'function' && !entry.check()) return;   // the reply it was for is gone: its replacement has its own event
+            await entry.defer.retry(entry.defer.options);
+        } catch (error) {
+            console.warn('[NPC State Delta] deferred dossier work failed', error);
+        } finally {
+            if (deferredWork.get(id) === entry) deferredWork.delete(id);
+        }
+    })();
+    return answer;
+}
+/** The state of reply `messageId` as it is now, as a test for a retry: the same text on the same line of the story. null for no reply. */
+function replyGuard(messageId) {
+    if (!Number.isInteger(messageId) || messageId < 0) return null;
+    const chat = getContext().chat || [];
+    const message = chat[messageId];
+    const fingerprint = message ? fingerprintMessage(message) : '';
+    const lineageKey = lineageCheckpointKey(chatLineage(chat), messageId);
+    return () => {
+        const now = getContext().chat || [];
+        const current = now[messageId];
+        return Boolean(current) && fingerprintMessage(current) === fingerprint && lineageCheckpointKey(chatLineage(now), messageId) === lineageKey;
+    };
+}
 /** Whether dossier work is running, due or queued for the chat: an active operation, an intent, a queued automatic scan. */
 function scanWorkPending(key = getChatKey()) {
-    return isScanBusy(key) || (scanIntents.get(key) || 0) > 0 || pendingAutoScans.has(key);
+    return isScanBusy(key) || (scanIntents.get(key) || 0) > 0 || pendingAutoScans.has(key) || deferredWorkPending(key);
 }
 /** Resolves true when no scan or dossier pass is in flight, due or queued for the open chat, false after `ms`. */
 async function scanIdle(ms = 20000) {
@@ -1718,21 +1780,36 @@ async function scanIdle(ms = 20000) {
 
 
 // (timeline participant) The entry points that start dossier work hold a scan intent for their whole run (see scanWorkPending).
-// (timeline) Before a generation's prompt is built from the dossiers and the chat: the host's barrier is down and the gate has been asked.
+// (timeline) Before a generation's prompt is built from the dossiers and the chat: the host's barrier is down and the gate has been asked. If it is
+// not down in time the injection is built when it is (the host holds the generation meanwhile).
 async function generationReady(key) {
-    if (!await messageGateSettled()) return headNotSettled(false);
+    if (!await messageGateSettled()) {
+        deferUntilSettled(key, { label: 'injection', what: 'the dossier injection', retry: async () => { await refreshMessageGate(); if (getChatKey() === key) updateInjection(); } }, null, false);
+        return false;
+    }
     await refreshMessageGate();
     return getChatKey() === key;
 }
 function headNotSettled(answer) {
-    console.info('[NPC State Delta] the host has not settled the selected head (its barrier is still up), so no dossier work was started; the next scan or pass carries on.');
+    console.info('[NPC State Delta] the host has not settled the selected head (its barrier is still up), so no dossier work was started.');
     return answer;
 }
-function scanNow(options) { return withScanIntent(getChatKey(), () => scanNowInner(options)); }
-function drainPendingAutoScan(chatKey) { return withScanIntent(chatKey, () => drainPendingAutoScanInner(chatKey)); }
-function processPendingBackfills(...args) { return withScanIntent(getChatKey(), () => processPendingBackfillsInner(...args), 0); }
-function runTargetedDossierPass(job) { return withScanIntent(job?.chatKey || getChatKey(), () => runTargetedDossierPassInner(job)); }
-function handleAssistantMessageReceived(...args) { return withScanIntent(getChatKey(), () => handleAssistantMessageReceivedInner(...args), undefined); }
+function scanNow(options) {
+    return withScanIntent(getChatKey(), () => scanNowInner(options), false, { label: `scan:${options?.messageId ?? 'latest'}:${options?.manual ? 'manual' : 'auto'}`, what: 'a dossier scan', retry: () => scanNow(options), guard: () => replyGuard(options?.messageId) });
+}
+function drainPendingAutoScan(chatKey) {
+    return withScanIntent(chatKey, () => drainPendingAutoScanInner(chatKey), false, { label: 'drain', what: 'a queued dossier scan', retry: () => drainPendingAutoScan(chatKey) });
+}
+function processPendingBackfills(...args) {
+    return withScanIntent(getChatKey(), () => processPendingBackfillsInner(...args), 0, { label: 'backfills', what: 'a dossier backfill', retry: () => processPendingBackfills(...args) });
+}
+function runTargetedDossierPass(job) {
+    const key = job?.chatKey || getChatKey();
+    return withScanIntent(key, () => runTargetedDossierPassInner(job), false, { label: `pass:${job?.id ?? job?.label ?? 'targeted'}`, what: 'a dossier pass', retry: () => runTargetedDossierPass(job) });
+}
+function handleAssistantMessageReceived(...args) {
+    return withScanIntent(getChatKey(), () => handleAssistantMessageReceivedInner(...args), undefined, { label: `reply:${args[0]}`, what: 'the scan of a new reply', retry: () => handleAssistantMessageReceived(...args), guard: () => replyGuard(args[0]) });
+}
 
 function queueStateFileWrite(key = getChatKey(), delay = STATE_WRITE_DELAY) {
     if (!key || key === 'no-chat' || !isCanonicalChatKey(key) || !chatStateCache.has(key)) return;
@@ -2140,7 +2217,10 @@ async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true
     const key = chatKey || getChatKey();
     if (key === 'no-chat' || getChatKey() !== key) return null;
     // (timeline) A head that moved is followed by the host first (Delta installs the checkpoint of the selected head); this reads Delta's state after.
-    if (!await messageGateSettled()) return headNotSettled(null);
+    if (!await messageGateSettled()) {
+        // Not dropped: it runs, with every request made meanwhile merged, when the barrier is down.
+        return deferUntilSettled(key, { label: 'reconcile', what: 'a rollback after a deleted or swiped message', options: { explicitDivergence, rescan, reason, chatKey, operation }, merge: mergeBranchOptions, retry: options => reconcileCurrentBranch(options) }, null, null);
+    }
     if (getChatKey() !== key) return null;
     const ctx = getContext();
     await ensureChatStateLoaded(key);
