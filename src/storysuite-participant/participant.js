@@ -191,6 +191,11 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         const held = handed.get(checkpoint);
         return Boolean(held) && held.hash === hash && hashJson(port.readState()) === held.stateHash;
     };
+    /** Whether the live state is what installing this checkpoint's document leaves (its state with the timeline block's reserved ids of both timelines). */
+    const standsOnBytes = doc => {
+        const live = port.readState();
+        return hashJson(restoredState(doc.state, live)) === hashJson(live);
+    };
     const hand = (checkpoint, hash, stateHash) => {
         handed.set(checkpoint, { hash, stateHash });
         while (handed.size > 16) handed.delete(handed.keys().next().value);
@@ -260,10 +265,12 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
             if (entry.return !== null && entry.return !== input.return) return fail('CONFLICT', 'That preparation belongs to another return.');
             const ret = idx.returns[input.return] ?? { prepared: input.prepared, checkpoint: entry.checkpoint, hash: entry.hash, status: 'prepared' };
             if (ret.prepared !== input.prepared) return fail('CONFLICT', 'That return was prepared under another id.');
-            if (ret.status === 'active') return { ok: true, checkpoint: ret.checkpoint, hash: ret.hash };
             if (ret.status === 'aborted') return fail('REFUSED', 'That preparation was aborted.');
             const got = await verified(entry.checkpoint, entry.hash);
             if (!got.ok) return got;
+            // A return already active is not skipped: it is acknowledged again only while the live state still is its bytes (a state that never
+            // reached the file after it was activated, found by a recovery, is installed again).
+            if (ret.status === 'active' && standsOnBytes(got.doc)) return { ok: true, checkpoint: ret.checkpoint, hash: ret.hash };
             // The journal decides what the story stands on: the selected bytes. A change Delta made and published after the fact is live already
             // when the state is those bytes; only then (or when a newer change of its own is in flight, below) is nothing installed. Anything else
             // (a restore, a selected head, a recovery that finds the live state is not what the journal selected) is installed, durably, and the
@@ -283,7 +290,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
                 // then recorded as handed over so the probe `current` answers for it like for any checkpoint. Not acknowledged otherwise.
                 const now = port.readState();
                 hand(entry.checkpoint, entry.hash, hashJson(now));
-                if (hashJson(restoredState(got.doc.state, now)) !== hashJson(now) || !stands(entry.checkpoint, entry.hash)) {
+                if (!standsOnBytes(got.doc) || !stands(entry.checkpoint, entry.hash)) {
                     return fail('STALE', 'NPC State Delta could not confirm that the selected native state is installed; it is tried again.');
                 }
                 idx.base = { checkpoint: entry.checkpoint, hash: entry.hash, stateHash: hashJson(now) };
@@ -314,7 +321,15 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         status: input => exclusive(async () => {
             const s = await hydrate();
             const ret = s && isRecord(input) ? s.index.returns[input.return] : null;
-            return ret ? { ok: true, checkpoint: ret.checkpoint, hash: ret.hash, status: ret.status } : fail('NOT_FOUND', 'No such return.');
+            if (!ret) return fail('NOT_FOUND', 'No such return.');
+            // The host's recovery asks this to learn whether the participant switched already, and skips the activation when it says active. It
+            // says so only while the live state is the bytes of that checkpoint; otherwise (a write that never reached the file, bytes that are
+            // gone) it says prepared, and the activation is asked for again, which installs them or refuses.
+            if (ret.status === 'active') {
+                const got = await verified(ret.checkpoint, ret.hash);
+                if (!got.ok || !standsOnBytes(got.doc)) return { ok: true, checkpoint: ret.checkpoint, hash: ret.hash, status: 'prepared' };
+            }
+            return { ok: true, checkpoint: ret.checkpoint, hash: ret.hash, status: ret.status };
         }),
 
         applyEvent: input => exclusive(async () => {

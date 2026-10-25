@@ -1688,9 +1688,14 @@ async function quietly(key, task) {
 // for a reply whose scan is due but not started. A save point taken then would miss what the scan writes a moment later. Counted per chat from the
 // reply arriving (handleAssistantMessageReceived) and from every scan, queued drain, backfill pass and targeted pass until it ends.
 const scanIntents = new Map();
-async function withScanIntent(key, task) {
+async function withScanIntent(key, task, skipped = false) {
     scanIntents.set(key, (scanIntents.get(key) || 0) + 1);
-    try { return await task(); } finally {
+    try {
+        // (timeline) No dossier work starts, and nothing is read for it, until the host's head-selection barrier is down and Delta stands on the
+        // checkpoint of the selected head (a delete, a swipe or a retraction moved the head; the host asks Delta to follow it first).
+        if (!await messageGateSettled()) return headNotSettled(skipped);
+        return await task();
+    } finally {
         const left = (scanIntents.get(key) || 1) - 1;
         if (left > 0) scanIntents.set(key, left); else scanIntents.delete(key);
     }
@@ -1713,11 +1718,21 @@ async function scanIdle(ms = 20000) {
 
 
 // (timeline participant) The entry points that start dossier work hold a scan intent for their whole run (see scanWorkPending).
+// (timeline) Before a generation's prompt is built from the dossiers and the chat: the host's barrier is down and the gate has been asked.
+async function generationReady(key) {
+    if (!await messageGateSettled()) return headNotSettled(false);
+    await refreshMessageGate();
+    return getChatKey() === key;
+}
+function headNotSettled(answer) {
+    console.info('[NPC State Delta] the host has not settled the selected head (its barrier is still up), so no dossier work was started; the next scan or pass carries on.');
+    return answer;
+}
 function scanNow(options) { return withScanIntent(getChatKey(), () => scanNowInner(options)); }
 function drainPendingAutoScan(chatKey) { return withScanIntent(chatKey, () => drainPendingAutoScanInner(chatKey)); }
-function processPendingBackfills(...args) { return withScanIntent(getChatKey(), () => processPendingBackfillsInner(...args)); }
+function processPendingBackfills(...args) { return withScanIntent(getChatKey(), () => processPendingBackfillsInner(...args), 0); }
 function runTargetedDossierPass(job) { return withScanIntent(job?.chatKey || getChatKey(), () => runTargetedDossierPassInner(job)); }
-function handleAssistantMessageReceived(...args) { return withScanIntent(getChatKey(), () => handleAssistantMessageReceivedInner(...args)); }
+function handleAssistantMessageReceived(...args) { return withScanIntent(getChatKey(), () => handleAssistantMessageReceivedInner(...args), undefined); }
 
 function queueStateFileWrite(key = getChatKey(), delay = STATE_WRITE_DELAY) {
     if (!key || key === 'no-chat' || !isCanonicalChatKey(key) || !chatStateCache.has(key)) return;
@@ -2124,6 +2139,9 @@ function staleHostPrefix(key, operation, explicitDivergence) {
 async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true, reason = 'branch', chatKey = null, operation = 'auto' } = {}) {
     const key = chatKey || getChatKey();
     if (key === 'no-chat' || getChatKey() !== key) return null;
+    // (timeline) A head that moved is followed by the host first (Delta installs the checkpoint of the selected head); this reads Delta's state after.
+    if (!await messageGateSettled()) return headNotSettled(null);
+    if (getChatKey() !== key) return null;
     const ctx = getContext();
     await ensureChatStateLoaded(key);
     if (getChatKey() !== key) return null;
@@ -7377,6 +7395,7 @@ function registerEvents() {
             migrateLegacyLineage(sentState, getContext().chat || []);
             // A turn typed on a chat that is behind the adopted dossier must not replace its lineage.
             if (!staleHostActive(key)) sentState.lineage = chatLineage(getContext().chat || []);
+            if (!await generationReady(key)) return;
             updateInjection();
             noteNarrationCaptureVersion(key);
         });
@@ -7411,6 +7430,8 @@ function registerEvents() {
                 generationFreshness = { key, at: Date.now() };
             } catch (error) { console.warn('[NPC State Delta] pre-generation freshness check failed; the injection keeps the last verified dossier.', error); }
             if (getChatKey() !== key) return;
+            // (timeline) The prompt is built from the selected head: the barrier is down and the gate has been asked.
+            if (!await generationReady(key)) return;
             narrationCaptureArmed = captureType ? key : '';
             updateInjection();
             // Armed only when the instruction actually went out (hydration may have withheld it).

@@ -25,7 +25,7 @@ test('a populated chat that never uses the timeline is left alone: registering, 
     // Scans change the dossiers and say so; the participant is told and does nothing for a chat that does not use the timeline.
     r.announce(state => { state.npcs[0].trust = 5; });
     r.announce(state => { state.npcs[0].trust = 6; });
-    await r.sleep(450);
+    await r.sleep(60);
     plain.npcs[0].trust = 6;
     await untouched(r, plain);
     r.host.store.rebuild();
@@ -41,7 +41,7 @@ test('after a reload the untouched chat is still untouched, and the host\'s own 
     const again = await r.reload();
     await again.host.send('Onward.', 'The keep.');
     again.announce(state => { state.npcs[0].trust = 4; });
-    await again.sleep(450);
+    await again.sleep(60);
     plain.npcs[0].trust = 4;
     await untouched(again, plain);
     assert.equal((await again.host.sdk.timeline.head()).ok, true);
@@ -61,7 +61,7 @@ test('the first save point starts the timeline for the chat: the line and the id
     assert.equal(r.vault.docs.size > 0, true);
     const head = (await r.host.sdk.timeline.head()).headHash;
     r.announce(state => { state.npcs[0].trust = 8; });
-    await r.sleep(450);
+    await r.sleep(60);
     assert.notEqual((await r.host.sdk.timeline.head()).headHash, head, 'a change after the first use is published');
     const standing = (await r.host.sdk.timeline.status()).participants[0];
     assert.equal(standing.module, 'npc-state-delta');
@@ -70,7 +70,7 @@ test('the first save point starts the timeline for the chat: the line and the id
     again.host.store.rebuild();
     const before = (await again.host.sdk.timeline.head()).headHash;
     again.announce(state => { state.npcs[0].trust = 9; });
-    await again.sleep(450);
+    await again.sleep(60);
     assert.notEqual((await again.host.sdk.timeline.head()).headHash, before);
     assert.equal(again.live.state.npcs[0].trust, 9);
 });
@@ -88,6 +88,6 @@ test('the first npc.identity question starts it as well: the ids are made behind
     assert.equal(found.nativeKey, 'npc_mira');
     const head = (await r.host.sdk.timeline.head()).headHash;
     r.announce(state => { state.npcs[0].trust = 7; });
-    await r.sleep(450);
+    await r.sleep(60);
     assert.notEqual((await r.host.sdk.timeline.head()).headHash, head);
 });

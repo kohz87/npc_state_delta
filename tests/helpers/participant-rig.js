@@ -111,7 +111,7 @@ export async function played(t, options = {}) {
  * The real adapter registers Delta's module (with its participant and npc.identity) on a real host; `api` is the fake runtime it talks to
  * (`window.NPCStateDelta`): the chat's state, an absolute install, the change announcements, the scan counters and the message gate.
  */
-export async function adapterRig(t, { state = freshState(), vault = memoryVault(), image = null, live = null, modules = [] } = {}) {
+export async function adapterRig(t, { state = freshState(), vault = memoryVault(), image = null, live = null, modules = [], participantOptions = { debounceMs: 1, retryMs: 5 }, settle = {} } = {}) {
     const { createStorySuiteV2Adapter } = await import('../../src/storysuite-v2.js');
     t.mock.method(console, 'warn', () => {});
     const mine = live ?? { chatKey: 'chat:avatar.png:one', state: structuredClone(state), installs: 0, writes: 0, scans: 0, waiting: 0 };
@@ -132,7 +132,11 @@ export async function adapterRig(t, { state = freshState(), vault = memoryVault(
         chatKey: () => mine.chatKey,
         getState: () => structuredClone(mine.state),
         timelineStarted: () => Boolean(mine.state.timeline?.lineage),
-        installState: async next => { mine.installs += 1; mine.state = structuredClone(next); },
+        installState: async next => {
+            if (mine.holdInstall) await mine.holdInstall;
+            mine.installs += 1;
+            mine.state = structuredClone(next);
+        },
         writeTimeline: async block => { mine.writes += 1; mine.state = { ...mine.state, timeline: structuredClone(block) }; },
         onNativeChange: fn => { listeners.add(fn); return () => listeners.delete(fn); },
         scanActive: () => mine.scans > 0,
@@ -147,7 +151,7 @@ export async function adapterRig(t, { state = freshState(), vault = memoryVault(
         doc: { documentElement: { dataset: {} }, getElementById: () => null, addEventListener() {}, dispatchEvent() { return true; } },
         timers: { setTimeout: () => 0, clearTimeout() {}, setInterval: () => ({ unref() {} }), clearInterval() {} },
         logger: { warn: (...args) => warnings.push(args.join(' ')) }, loadEmptyCast: async () => null,
-        participantVault: vault,
+        participantVault: vault, participantOptions, ...settle,
     });
     adapter.start();
     if (await adapter.settled() !== true) throw new Error(`the adapter did not register: ${warnings.join(' / ')}`);
@@ -168,8 +172,19 @@ export async function adapterRig(t, { state = freshState(), vault = memoryVault(
             for (const fn of [...listeners]) fn({ key: mine.chatKey });
         },
         listeners,
+        /** Delta saves a change at the head and the story records it: resolves when the participant's selected checkpoint has moved. */
+        async published(edit) {
+            const was = (await host.sdk.timeline.status()).participants[0]?.hash ?? null;
+            this.announce(edit);
+            for (let i = 0; i < 200; i += 1) {
+                const now = (await host.sdk.timeline.status()).participants[0]?.hash ?? null;
+                if (now !== was && host.registry.restore().state !== 'pending') return now;
+                await sleep(5);
+            }
+            throw new Error('the change was not published');
+        },
         reload(options = {}) {
-            return adapterRig(t, { vault, image: clone(disk.image), live: mine, modules, ...options });
+            return adapterRig(t, { vault, image: clone(disk.image), live: mine, modules, participantOptions, settle, ...options });
         },
     };
 }

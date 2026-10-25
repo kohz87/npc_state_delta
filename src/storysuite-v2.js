@@ -93,6 +93,9 @@ export const HOST_RETRY_MS = 250;
 export const HOST_RETRY_ATTEMPTS = 40;
 export const HOST_ALIVE_MS = 5000;
 export const SECTION_WATCH_MS = 1000;
+// How long a scan, a pass or a generation waits for the host's head-selection barrier, and how often it looks.
+export const HEAD_SETTLE_MS = 20000;
+export const HEAD_SETTLE_POLL_MS = 50;
 
 // What npc.dossier returns: the dossier's own fields, as the dossier shows them (DOSSIER_FIELDS, from
 // the field registry). Book-keeping (evidence, change ledgers, portrait prompts and images,
@@ -292,6 +295,11 @@ export function createStorySuiteV2Adapter({
     page = globalThis,
     // Where the timeline participant keeps its checkpoints (storysuite-participant/vault.js); SillyTavern's user files by default.
     participantVault = null,
+    // The participant's timings (debounceMs, retryMs, idleMs; participant.js), for tests.
+    participantOptions = {},
+    // How long Delta waits for the host's head-selection barrier to come down, and how often it looks (messageGate.settled).
+    settleMs = HEAD_SETTLE_MS,
+    settlePollMs = HEAD_SETTLE_POLL_MS,
 } = {}) {
     let started = false;
     let pollTimer = null;
@@ -1184,7 +1192,24 @@ export function createStorySuiteV2Adapter({
             return history?.ok === true && Array.isArray(history.messages) ? history.messages.map(message => message?.active !== false) : null;
         } catch { return null; }
     };
-    const messageGate = Object.freeze({ refresh: activeMessages });
+    // Story Block's head-selection barrier (docs/v2/TIMELINE.md, HISTORY.md): after a delete, a swipe or a retraction the host raises its barrier and
+    // asks every participant to stand on the checkpoint of the selected head (`prepare`, `activate`: the callbacks of the participant below), and lowers
+    // it only when they do. Nothing here selects a head. `head()` is the host's own look at it (it raises the barrier when a selection is needed and
+    // answers RESTORE_PENDING while it is up), so Delta asks it before it reads or writes the dossiers and waits for it. true once the barrier is
+    // down (or when the host has no such barrier), false if it is still up after `settleMs`.
+    const headSettled = async () => {
+        const head = sdkRef?.timeline?.head;
+        if (typeof head !== 'function') return true;
+        const until = Date.now() + settleMs;
+        for (;;) {
+            let answer = null;
+            try { answer = await sdkRef.timeline.head({}); } catch { return true; }
+            if (answer?.ok !== false || answer.code !== 'RESTORE_PENDING') return true;
+            if (Date.now() >= until) return false;
+            await new Promise(resolve => { const timer = setTimeout(resolve, settlePollMs); timer?.unref?.(); });
+        }
+    };
+    const messageGate = Object.freeze({ refresh: activeMessages, settled: headSettled });
     let offNativeChange = null;
     const timeline = createParticipant({
         port: {
@@ -1198,6 +1223,7 @@ export function createStorySuiteV2Adapter({
             warn: text => warn(text),
         },
         vault: participantVault ?? fileVault({ headers: () => runtime()?.requestHeaders?.() ?? {} }),
+        ...participantOptions,
     });
     function startTimeline() {
         const api = runtime();
