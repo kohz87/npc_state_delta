@@ -7845,7 +7845,7 @@ window.NPCStateDelta = Object.freeze({
     },
     // Whether the open chat uses the timeline (its state has a story line), read without cloning the state; whether the open chat's dossier state is
     // loaded; and whether a scan or pass is in flight.
-    timelineStarted: () => Boolean(getChatState()?.timeline?.lineage),
+    timelineStarted: () => Boolean(chatStateCache.get(getChatKey())?.timeline?.lineage),
     stateReady: () => chatHydrationStatus() === 'ready',
     scanActive: () => scanWorkPending(),
     scanIdle: ms => scanIdle(ms),
