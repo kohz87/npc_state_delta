@@ -1,4 +1,4 @@
-// The participant on the real Story Block host with the timeline (the vendored testkit from track-e/e6a-timeline): the host registers it
+// The participant on the real Story Block host with the timeline (the vendored testkit, Story Block main): the host registers it
 // with the module, a save point carries its checkpoint, a native change is published through the handle, a confirmed death reaches it once,
 // and a restore puts the dossiers, the relationship map and the np_ map back together. The module here is a stand-in carrying the real
 // participant and the `npc.identity` query; wiring them into src/storysuite-v2.js is the lead's (docs/dev/storysuite-participant.md).
@@ -20,7 +20,7 @@ const sealer = () => ({
     batchResults: { resolve: ({ id, state }) => { const bytes = state.domains.death?.batches?.[id]; return bytes === undefined ? null : { id, hash: hashJson(bytes), bytes }; } },
 });
 
-async function started(t, { quiet = {} } = {}) {
+async function started(t, { quiet = {}, withoutSource = false } = {}) {
     const live = { chatKey: 'chat:avatar.png:one', state: { npcs: [npc('npc_mira', 'Mira', { aliases: ['The Weaver'] }), npc('npc_tom', 'Old Tom')], socialGraph: { edges: [{ a: 'npc_mira', b: 'npc_tom', kind: 'friends' }] }, checkpoints: [], lineage: [], turn: 1 }, installs: 0 };
     const ref = { host: null };
     const port = {
@@ -28,13 +28,15 @@ async function started(t, { quiet = {} } = {}) {
         readState: () => structuredClone(live.state),
         installState: async state => { live.installs += 1; live.state = structuredClone(state); },
         writeTimeline: async block => { live.state = { ...live.state, timeline: structuredClone(block) }; },
-        // The host's own head Source (the testkit's seam; production reads head().source once Story Block carries it: docs/dev/storysuite-participant.md).
-        headSource: () => ref.host.store.sourceAt(ref.host.store.headIndex()),
         ...quiet,
     };
     const delta = createParticipant({ port, vault: memoryVault(), debounceMs: 1 });
     await delta.hydrate();
-    const def = { id: MODULE_ID, name: 'NPC State Delta (test)', version: '0.0.1', domains: { marks: { initial: () => ({ n: 0 }) } }, participant: delta.participant, queries: delta.queries };
+    // A host that gives no Source for the head: the handle's head() has none (Story Block before it carried `source`).
+    const participant = withoutSource
+        ? { ...delta.participant, attach: handle => delta.participant.attach({ ...handle, head: async () => { const { source, ...rest } = await handle.head(); void source; return rest; } }) }
+        : delta.participant;
+    const def = { id: MODULE_ID, name: 'NPC State Delta (test)', version: '0.0.1', domains: { marks: { initial: () => ({ n: 0 }) } }, participant, queries: delta.queries };
     const host = await createHost({ modules: [sealer(), def] });
     ref.host = host;
     t.after(() => host.close());
@@ -167,10 +169,12 @@ test('N2: a scan that lands while the reader presses Save is waited for: the sav
     assert.equal(made.ok, true, made.message);
     await host.send('Onward.', reply('Further.'));
     live.state.npcs = live.state.npcs.filter(item => item.id !== 'npc_vale');
+    // (a restore takes a checkpoint of the live state first, so a change Delta saved is recorded by the story before it)
+    delta.noteChange();
+    assert.equal((await delta.flush()).ok, true);
     const restored = await restoreTo(host, made.snapshot);
     assert.equal(restored.ok, true, restored.message);
     assert.deepEqual(live.state.npcs.map(item => item.name), ['Mira', 'Old Tom', 'Vale'], 'the person the story still has is still there');
-    void delta;
 });
 
 test('N2: a save the participant cannot make true is refused as a retryable STALE', async t => {
@@ -210,6 +214,8 @@ test('N1: the chat is renamed (Delta moves its state to a new key): the ids are 
     await delta.hydrate();
     assert.equal(delta.identity().byKey.npc_mira, mira);
     live.state.npcs[0].trust = 9;
+    delta.noteChange();
+    assert.equal((await delta.flush()).ok, true);
     const restored = await restoreTo(host, made.snapshot);
     assert.equal(restored.ok, true, restored.message);
     assert.equal(live.state.npcs[0].trust, 3);
@@ -246,13 +252,16 @@ test('N-B1: a queued scan that begins right after the idle look is caught by the
     assert.equal(made.ok, true, made.message);
     await host.send('Onward.', reply('Further.'));
     live.state.npcs = live.state.npcs.filter(item => item.id !== 'npc_vale');
+    delta.noteChange();
+    assert.equal((await delta.flush()).ok, true);
     const restored = await restoreTo(host, made.snapshot);
     assert.equal(restored.ok, true, restored.message);
     assert.deepEqual(live.state.npcs.map(item => item.name), ['Mira', 'Old Tom', 'Vale'], 'the person the story keeps is still there');
 });
 
 test('N-B1: when the host gives no way to publish a change, a save is not held up for it', async t => {
-    const { host, live, delta } = await started(t, { quiet: { headSource: () => null } });
+    const { host, live, delta } = await started(t, { withoutSource: true });
+    assert.equal((await host.sdk.timeline.head()).source !== undefined, true, 'the host does give a Source: the participant\'s handle does not');
     live.state.npcs.push(npc('npc_vale', 'Vale'));
     delta.noteChange();
     assert.equal((await delta.flush()).code, 'UNSUPPORTED');
