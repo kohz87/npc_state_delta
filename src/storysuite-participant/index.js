@@ -1,6 +1,6 @@
 // NPC State Delta's timeline participant (track B6; Story Block docs/v2/TIMELINE.md): see participant.js. New files only; Delta's own
 // modules, its prompts and its storage are untouched. The registration in src/storysuite-v2.js (`participant`, the `npc.identity` query,
-// the runtime port) is the lead's wiring.
+// the runtime port) is Delta's own wiring (docs/dev/storysuite-participant.md).
 
 export { MODULE_ID, confirmedDeath, createParticipant } from './participant.js';
 export { PARTICIPANT_SCHEMA, buildCheckpoint, checkpointIdOf, checkpointProblem } from './checkpoint.js';

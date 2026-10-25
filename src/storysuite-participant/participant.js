@@ -12,7 +12,7 @@
 // and the query `npc.identity({ id } | { name })`. Every answer is `{ ok: true, ... }` or `{ ok: false, code, message }`; the callbacks run
 // one at a time. Nothing here reads the chat or prompts: Delta's prompt text is not touched.
 //
-// `port` is what the participant needs of Delta's runtime (index.js, the lead's wiring):
+// `port` is what the participant needs of Delta's runtime (index.js and src/storysuite-v2.js):
 //   chatKey()            the open chat's key (a string)
 //   readState()          the chat's native state now, synchronously (a copy; window.NPCStateDelta.getState())
 //   installState(state)  replaces the chat's native state absolutely and makes it durable (asynchronous); not a native change
@@ -20,7 +20,7 @@
 //   started()            whether the chat has its story line already (`state.timeline.lineage`), without reading the whole state (optional)
 //   busy()               whether a scan or dossier pass is in flight for the open chat (optional)
 //   idle(ms)             resolves true when none is, false after `ms` (optional)
-//   headSource()         the Source of the reply at the head, when the host's head() does not carry one (optional; see the dev note)
+//   headSource()         the Source of the reply at the head, for a host whose head() carries no `source` (optional; the host's head().source is used first)
 //   restored()           told after a restore installed a state (optional)
 //   warn(text)           where problems are told (optional)
 // `vault` keeps the bytes (vault.js). The np_ map, the reserved ids and the applied deaths live in the chat's state (timeline.js), the restores

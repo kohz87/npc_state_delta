@@ -5,6 +5,9 @@ history, portraits. When a character dies and the story returns to a save point,
 dossier of the person who died has to learn it. Story Block's timeline asks every module with native state to be a **participant**.
 This folder is Delta's: `src/storysuite-participant/` (new files only; Delta's own modules, storage and **prompts** are untouched).
 
+Story Block's side is `docs/v2/TIMELINE.md` (participants, the commit-time probe, recovery) and `docs/v2/HISTORY.md` (active history, the head-selection
+barrier) in kohz87/Story_block. This note is Delta's side; the vendored copy in `tests/vendor/story-block/` is Story Block `5043028` (E1, E5, E6a, ctx-seams, E6b).
+
 ## What it is
 
 - `participant.js` `createParticipant({ port, vault })` -> `{ participant, queries, hydrate, nativeChange, noteChange, flush, ... }`. `participant` is
@@ -32,16 +35,25 @@ This folder is Delta's: `src/storysuite-participant/` (new files only; Delta's o
   state moves while the checkpoint is made, or Delta has **saved a change the story has not recorded yet** (the live state is not the baseline the timeline stands
   on; the publish is asked for, and the save made again). When the host gives no way to publish (`UNSUPPORTED`) nothing is waited for. Then it hydrates,
   snapshots, stores, answers `{ checkpoint, hash, schema }`.
-- `current({ checkpoint, hash })` -> `{ ok: true, current: boolean }`, **synchronous**: for the host's commit-time probe (Story Block E6a, being written): asked
-  inside the synchronous commit section, after the host holds the checkpoint it will store. `current` is true only when the checkpoint is one this participant
-  handed over, the native state still hashes to what it was when it was handed over, and no dossier work is running, due or queued. False makes the host
-  cancel and ask again. The shape is this participant's reading of that interface and follows it when it lands.
+- `current({ checkpoint, hash, schema })` -> `{ ok: true, current: boolean }`, **synchronous**: Story Block's commit-time probe. The host asks it once, inside
+  the synchronous section that commits a save point, for the checkpoint this participant supplied (a native change that lands after `checkpoint()` answered is
+  not in the head hash, so the probe is the only thing that sees it). `current` is true only when the checkpoint is one this participant handed over (or
+  installed), the native state still hashes to what it was then, and no dossier work is running, due or queued. False (or a throw, or a promise, or any other
+  answer) makes the host discard the save with a retryable `STALE`. The same reading of "the state is the one handed over" (`stands`) is what an activation
+  checks after it installs a checkpoint, minus the "no dossier work" clause (work waiting for the barrier is not a reason to refuse the install).
 - `prepare({ return, checkpoint, hash })`: verifies the bytes (gone: `SNAPSHOT_UNAVAILABLE`; another hash, another lineage or a return already
   prepared for another checkpoint: `CONFLICT`; a newer schema: `SNAPSHOT_UNAVAILABLE`) and shows nothing. The same prepare answers the same.
-- `activate({ return, prepared })`: installs the saved state through the port (`restoredState`: its map and deaths, this lineage's id, every np_ either
-  timeline issued reserved); idempotent; a failed install leaves it prepared, so it can be tried again; an aborted preparation is refused. A change Delta
-  already made and published after the fact (below) is not installed over the live state.
-- `abort`: before the commit only (a committed return is `REFUSED`); idempotent. `status({ return })`: `prepared | active | aborted`.
+- `activate({ return, prepared })`: **the journal decides what the story stands on, so the selected bytes are the live state before this answers.** A restore
+  and a selected head (the host's own `selection` journal entry, below) install the saved state through the port (`restoredState`: its map and deaths, this
+  lineage's id, every np_ either timeline issued reserved), durably, then read it back and check it (the bytes are what stands, and the probe above agrees)
+  before acknowledging; a failed install or check is a retryable answer and the barrier holds. A change Delta made and published after the fact (below) is
+  acknowledged as it is when the live state already is those bytes; when it is not (a recovery after a crash finds an older state file) the selected bytes
+  are installed the same way. The one exception is a newer change of Delta's own, announced (`noteChange`) after the publication was prepared in this run: it
+  is live, it is not overwritten, and it is published next on this baseline. An aborted preparation is refused.
+- `abort`: before the commit only (a committed return is `REFUSED`); idempotent.
+- `status({ return })`: `prepared | active | aborted`. The host's recovery asks it to learn whether the participant switched already and **skips the
+  activation when it says active**, so it says active only while the live state is that checkpoint's bytes; otherwise (a write that never reached the file, bytes
+  gone) it says prepared and the activation is asked for again, which installs them or refuses. A completed restore is not skipped on the index's word.
 - `applyEvent({ event, nativeKey, kind: 'confirmed-death' })`: the dossier becomes Delta's explicit, terminal death (`manualLifeStateRecord` with the
   event as the reason), the event is put in `timeline.applied`, a checkpoint is made, the ack is recorded; the same event again returns the same ack (and
   finishes an install that was lost); another person for the same event is `CONFLICT`; an unknown native key is `NOT_FOUND` (the death is held, never guessed).
@@ -54,6 +66,15 @@ the server first), and for a reply whose scan is due but not started. `index.js`
 is the registry, the intents and a queued automatic scan (`pendingAutoScans`). That is what `scanActive`/`scanIdle` (the port's `busy`/`idle`) answer. The
 participant's own writes are counted per chat too, so one chat's install never hides another chat's change.
 
+## Nothing runs until the chat uses the timeline
+
+Registering with the host, opening a chat, a reply, a scan and a rebuild hydrate nothing, write nothing and publish nothing for a chat that has not used the timeline,
+so a populated chat that never asks stays byte for byte what Delta alone keeps (no `state.timeline`, no checkpoint file, no participant index, nothing in the host's
+chat metadata). A chat **uses** it when something needs the line: a save point (`checkpoint`), a restore or a selected head (`prepare`/`activate`), a confirmed
+death, or the first question to `npc.identity` (the ids are made behind it). The state then carries `state.timeline.lineage`, which is how every later run knows
+(`started`; the runtime answers `timelineStarted()` without cloning the state), and its changes are published from then on. What changed before the first use is in
+the first checkpoint, which is the baseline.
+
 ## Every native change is published (N2)
 
 Delta saves its chat state through three functions (`persist`, `persistCritical`, `persistCriticalDurable`), all ending in `markStateDirty`; a scan, a targeted
@@ -64,25 +85,46 @@ tried again; nothing is published when the state is the one the story already st
 a counter and are not announced. `nativeChange({ source, edit })` is the other direction (edit a copy, let the host activate it) for a change that has not
 been made yet.
 
-**A gap that blocks this in production, and a patch for it.** `nativeMutation` takes the `Source` of the reply at the head (`sid`, `swipeKey`, `evidence`,
-`ordinal`) and a module has no way to get one: `handle.head()` carries a cursor. The participant takes `head.source` when the host gives one, else `port.headSource()`
-(the tests' seam is `store.sourceAt`); with neither it answers `UNSUPPORTED` and the change waits (the next checkpoint still carries it, state is whole in every
-one). `e6a-head-source.patch` (for Story Block, not edited here) adds `source` to `head()`.
+The **baseline** of a change (the checkpoint the story stands on, `before`) is verified (bytes, hash, lineage) before the change is made: when it is gone or is not
+the recorded one the change is refused with a Problem (the participant's `warn`, and the reason reaches the host as a `FAILED` prepare) and is never published on a
+baseline made up from the new state.
 
-## After a restore
+`nativeMutation` takes the `Source` of the reply at the head (`sid`, `swipeKey`, `evidence`, `ordinal`). The host's `head()` carries it (`head().source`, Story Block
+E6a), and the participant takes it from there; `port.headSource()` is only the fallback for a host that predates it, and with neither the publication answers
+`UNSUPPORTED`, the change waits (the next checkpoint still carries it, state is whole in every one) and a save is not held up for it.
 
-Story Block fades the replies of the dead timeline; they stay in SillyTavern's chat array. The adapter keeps `sdk.timeline.history()`'s `active` flags
-(refreshed at a turn, a restore and before a scan) and gives Delta a gate (`useMessageGate`, `src/transcript.js`): the transcript walks read a faded message as a system
-message (skipped, index kept), so a scan does not read the dead timeline. With no gate, or nothing faded, the chat is read as it always was, byte for byte.
+## Head selection: the host's barrier
+
+A delete, a swipe, a retraction (the reply that holds a restore goes) or a Re-read moves the head. Story Block then raises its barrier (every module is
+`restore-pending`, generations are held), works out the checkpoint of the selected head for each participant from the prefix map (exact surviving prefix
+witnesses and replayed state, one rule: `selectionPlan`), writes a `selection` journal entry and calls the participant's `prepare` and `activate` like it does for
+a restore, and lowers the barrier only when the participants stand on those checkpoints and the chat file has it. **Delta does not select anything and keeps no
+copy of that rule**: the callbacks above are all it does. What Delta owes the barrier is to read and write nothing while it is up:
+
+- `messageGate.settled()` (the adapter, `src/storysuite-v2.js`) asks `sdk.timeline.head()` — the host's own look at the head, which raises the barrier when a
+  selection is needed and answers `RESTORE_PENDING` while it is up — every 50 ms until it answers, for at most 20 s; false when it does not.
+- `index.js` asks it (`messageGateSettled`) before a reply's scan, a queued drain, a backfill, a targeted pass (`withScanIntent`), before a branch reconcile
+  (`reconcileCurrentBranch`: a delete or a swipe) and before a generation's injection is built (`generationReady`: `MESSAGE_SENT` and `GENERATION_AFTER_COMMANDS`).
+  A scan that waits counts as dossier work (a save point waits for it); one that gives up leaves the next scan or pass to carry on.
+- The host's queries of Delta are held by the host while the barrier is up (it answers null for a module that is `restore-pending`).
+
+## After a restore: active history
+
+Story Block fades the replies of the dead timeline and **hides them with SillyTavern's own flag** (`is_system`; HISTORY.md): SillyTavern builds no prompt from a hidden
+message, so Delta's prompt text needs no filter and has none. Delta's own readers of the chat skip `is_system` like `cleanMessage` always did, the story day
+included. The gate is the second look, for a message the host could not hide and for the moment before it has: `refreshMessageGate()` (`src/transcript.js`) asks the
+adapter, which answers Story Block's one active-history filter, `sdk.timeline.history()` (one `active` flag per message of the chat at the moment it is asked), and the
+faded messages are remembered **by identity** (a `WeakSet`), so a delete or a swipe after the ask cannot move the mark onto another message. It is asked before any
+prompt is built from the chat: a scan, a targeted pass, Refresh from chat, the dossier import, a backfill, a generation's injection. A faded message reads as a system
+message. With no gate, or nothing faded, the chat is read as it always was, byte for byte.
 
 ## The port, and what is wired
 
 The participant needs of Delta's runtime (the `port`): `chatKey()`, `readState()` (synchronous, a copy), `installState(state)` (absolute, durable),
-`writeTimeline(block)` (the block into the state, durable), and optionally `busy()`, `idle(ms)`, `headSource()`, `restored()`, `warn(text)`. The
-runtime entries (`chatKey`, `requestHeaders`, `installState`, `writeTimeline`, `onNativeChange`, `stateReady`, `scanBusy`, `scanIdle`, `useMessageGate`), the
-announcement in `index.js`, the branch and bundle carry and the registration in `src/storysuite-v2.js` are the "lead-owned:" commits on this branch;
-`tests/storysuite-participant-runtime.test.js` runs them in the real runtime. At chat open the adapter hydrates (`primeTimeline`), so the ids exist before the
-first ask.
+`writeTimeline(block)` (the block into the state, durable), and optionally `started()`, `busy()`, `idle(ms)`, `headSource()`, `restored()`, `warn(text)`. The
+runtime entries (`chatKey`, `requestHeaders`, `installState`, `writeTimeline`, `onNativeChange`, `timelineStarted`, `stateReady`, `scanActive`, `scanIdle`,
+`useMessageGate`), the announcement in `index.js`, the branch and bundle carry and the registration in `src/storysuite-v2.js` are Delta's own wiring;
+`tests/storysuite-participant-runtime.test.js` runs them in the real runtime. The ids exist before the first ask only for a chat that uses the timeline (above).
 
 Not done, written down:
 
@@ -93,8 +135,9 @@ Not done, written down:
 - Publishing happens after Delta saved the change, so the new state is visible in Delta (and its prompt) a moment before the timeline records it; the
   contract's order (before exposing) needs Delta to build the change on a copy and let the host activate it (`nativeChange`), a rewrite of the scan apply
   paths. The prefix map still gets its entry at the head the change was made at, and a save point is exact (it waits for the scan).
-- The testkit is the E6a branch's (`dcb371f`); it is re-vendored to the final E6a head when it lands.
 - A manual scan and the targeted passes read the transcript through the gate; the dossier prompts built before a restore are not rebuilt.
+- The retained bytes are never pruned on either side (the host's archive, Delta's vault): Story Block's HISTORY.md lists reachability pruning and an owner
+  checkpoint-release protocol as its follow-up, and the vault follows it.
 
 ## The prompt rule
 

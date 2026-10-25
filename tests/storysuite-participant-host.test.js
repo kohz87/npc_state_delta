@@ -1,7 +1,7 @@
 // The participant on the real Story Block host with the timeline (the vendored testkit, Story Block main): the host registers it
 // with the module, a save point carries its checkpoint, a native change is published through the handle, a confirmed death reaches it once,
 // and a restore puts the dossiers, the relationship map and the np_ map back together. The module here is a stand-in carrying the real
-// participant and the `npc.identity` query; wiring them into src/storysuite-v2.js is the lead's (docs/dev/storysuite-participant.md).
+// participant and the `npc.identity` query; src/storysuite-v2.js wires them the same way (storysuite-participant-parity and -selection run that).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHost } from './vendor/story-block/testkit/index.js';

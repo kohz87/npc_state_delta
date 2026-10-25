@@ -1,4 +1,4 @@
-// The timeline participant inside the real runtime (lead-owned wiring): the synthetic host (runtime-smoke.mjs) loads Delta beside a fake
+// The timeline participant inside the real runtime: the synthetic host (runtime-smoke.mjs) loads Delta beside a fake
 // Story Block v2 global; the module definition Delta registers carries the participant and `npc.identity`, and the runtime's
 // `installState` puts a native state back absolutely and durably.
 import test from 'node:test';
