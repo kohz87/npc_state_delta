@@ -95,6 +95,114 @@ export function currencyOf(settings) {
     return { name, plural, short, coins, ...(settings?.coinDisplay === 'base' ? { display: 'base' } : {}) };
 }
 
+// ---------- a ready RPG Battle's money (RB_CONTRACT §3, P14) ----------
+//
+// The rules module may supply the chat's currency (`purse.currency`) and the caps a reply's story lines
+// are held to (`rules.moneyPolicy`). Story Block asks both through public queries and only ever uses an
+// answer that passes the checks below; anything else (no module, no answer, a wrong shape, a query that
+// throws) leaves the reader's / pack's / default currency in force. The wallet is one whole number of
+// the smallest unit either way: a different currency changes how an amount is written, never the number.
+
+const OVERRIDE_QUERY = 'purse.currency';
+const POLICY_QUERY = 'rules.moneyPolicy';
+const isRecord = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+// Words that are shown to the reader and read back from change lines: no control or invisible format
+// characters, no markup, no change-line delimiter.
+const PLAIN_WORD = /^[^\p{Cc}\p{Cf}<>|]+$/u;
+const COIN_WORD = /^[^\p{Cc}\p{Cf}<>|:#/\d]+$/u;
+const sizeOf = text => Array.from(text).length;
+
+// A required word (1..max code points) as written, or null.
+function wordOf(value, max, pattern = PLAIN_WORD) {
+    if (typeof value !== 'string') return null;
+    const text = value.replace(/\s+/g, ' ').trim();
+    return text && sizeOf(text) <= max && pattern.test(text) ? text : null;
+}
+
+const hasOnly = (record, keys) => Object.keys(record).every(key => keys.includes(key));
+
+/**
+ * A rules module's currency (contract type Currency) checked and copied: `{ name, plural, short, coins?,
+ * display? }`, or null when it is not one. Name and plural 1..24 and short 1..6 code points; at most 8
+ * coins with different names (ignoring case), worth 1..1,000,000 smallest units, one of them worth 1;
+ * `display` 'mixed' or 'base'. Unknown fields, repeated or markup-bearing names and a coin table without
+ * the smallest unit are all refused, never repaired.
+ */
+export function validCurrency(raw) {
+    if (!isRecord(raw) || !hasOnly(raw, ['name', 'plural', 'short', 'coins', 'display'])) return null;
+    const name = wordOf(raw.name, MAX_NAME);
+    const plural = wordOf(raw.plural, MAX_NAME);
+    const short = wordOf(raw.short, MAX_SHORT);
+    if (!name || !plural || !short) return null;
+    if (raw.display !== undefined && raw.display !== 'mixed' && raw.display !== 'base') return null;
+    if (raw.coins === undefined) return { name, plural, short };
+    if (!Array.isArray(raw.coins) || raw.coins.length > MAX_COINS) return null;
+    const rows = [];
+    for (const row of raw.coins) {
+        if (!isRecord(row) || !hasOnly(row, ['name', 'plural', 'value'])) return null;
+        const coinName = wordOf(row.name, MAX_NAME, COIN_WORD);
+        const coinPlural = wordOf(row.plural, MAX_NAME, COIN_WORD);
+        if (!coinName || !coinPlural || !Number.isSafeInteger(row.value) || row.value < 1 || row.value > MAX_COIN_VALUE) return null;
+        rows.push({ name: coinName, plural: coinPlural, value: row.value });
+    }
+    if (!rows.length) return { name, plural, short };
+    // coinsOf keeps a row only when its names are free (ignoring case): all of them or the table is refused.
+    const coins = coinsOf(rows);
+    if (coins.length !== rows.length || !coins.some(coin => coin.value === 1)) return null;
+    return { name, plural, short, coins, ...(raw.display === 'base' ? { display: 'base' } : {}) };
+}
+
+// One answer at a time: the rules module's query reads its own frozen policy and must not ask for
+// inventory.currency, but if it did, the second ask would be answered with the fallback, not recurse.
+let asking = false;
+
+/**
+ * Which currency is in force and why: `{ currency, source, reason }` with `source` 'rules' (a ready rules
+ * module's, validated) or 'settings' (this module's own: the reader's, else the pack's, else gold), and
+ * `reason` for the fallback: '' (an override is in force), 'none' (no module answers, or it answers
+ * null), 'invalid' (it answered, and the answer is not a currency) or 'busy' (asked from inside its own
+ * answer). `ask(name, args)` is any query function; it may throw.
+ */
+export function currencyResolution(settings, ask) {
+    const own = currencyOf(settings);
+    if (typeof ask !== 'function') return { currency: own, source: 'settings', reason: 'none' };
+    if (asking) return { currency: own, source: 'settings', reason: 'busy' };
+    let raw;
+    asking = true;
+    try {
+        raw = ask(OVERRIDE_QUERY, {});
+    } catch {
+        return { currency: own, source: 'settings', reason: 'none' };
+    } finally {
+        asking = false;
+    }
+    if (raw === null || raw === undefined) return { currency: own, source: 'settings', reason: 'none' };
+    const checked = validCurrency(raw);
+    return checked ? { currency: checked, source: 'rules', reason: '' } : { currency: own, source: 'settings', reason: 'invalid' };
+}
+
+/** The chat's currency (currencyResolution), for display and for reading money lines. */
+export const resolveCurrency = (settings, ask) => currencyResolution(settings, ask).currency;
+
+/**
+ * The caps a ready rules module puts on a reply's story money, `rules.moneyPolicy({ level })` →
+ * `{ storyCreditCap, storyDebitCap }`: `{ credit, debit }` in smallest units, each null when it is not
+ * given (no module, a wrong answer, not a whole number of at least 0). `level` is the main character's.
+ */
+export function moneyCaps(ask, level = 1) {
+    const none = { credit: null, debit: null };
+    if (typeof ask !== 'function') return none;
+    let raw;
+    try {
+        raw = ask(POLICY_QUERY, { level: Math.max(1, Math.min(99, Number.isSafeInteger(level) ? level : 1)) });
+    } catch {
+        return none;
+    }
+    if (!isRecord(raw)) return none;
+    const cap = value => (Number.isSafeInteger(value) && value >= 0 ? value : null);
+    return { credit: cap(raw.storyCreditCap), debit: cap(raw.storyDebitCap) };
+}
+
 const coinList = currency => (Array.isArray(currency?.coins) ? currency.coins : []);
 
 /** The smallest unit's names: the coin worth 1, else the currency's own name. */

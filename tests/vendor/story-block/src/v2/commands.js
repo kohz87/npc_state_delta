@@ -26,12 +26,30 @@
 //   per-reply bookkeeping (a budget tally under the reply's sid) can be read and kept for a click too.
 // * Internal commands (registry.isInternal: capture.*, module.init.*, events.fire) are refused with
 //   REFUSED when the cause is 'ui', whether named at the top or through ctx.call.
+// * Guarded blocks (docs/v2/REPLAY.md, contract §6): `ctx.replayGuard(guard, recorded?)` attaches the owner's
+//   requirements to the command's root transaction (nested commands share it). The bus stamps the
+//   receipt's `data.v2` with the host's Source and the guard, and hands the store a `block` (module,
+//   source, guard, operation, recorded, result) to keep on the block's span; the store adds the block id,
+//   the claims the ops make and the boundary. On replay the owner's `hooks.replayGuard` is asked
+//   (`replayGuardCheck`); a throw or a malformed answer fails closed. `ctx.source` is the Source the block
+//   will carry (null without a reply), `ctx.hash(value)` the contract's Hash.
+// * Proof (docs/v2/EVIDENCE.md, contract §6): `ctx.proof({ kind, payload, parents? })` → `{ id, payloadHash }`, for
+//   the module that owns the kind, inside the root transaction (evidence.js `submitProof` does the checks). The
+//   proof is kept on the block's span (a command that gives proof makes a block even without a guard) and
+//   pinned in `meta.proofs` by the same ops, so a block that does not apply, or a rolled-back root, publishes
+//   nothing. A nested command reads the root's pending proof through `story.evidence` (the query's tools have
+//   `pendingProofs`); a public query sees what is stored and pinned.
 // * A command under a feature the reader turned off (MODULES §F100, registry.commandFeature) is refused
 //   with FEATURE_OFF, at the top or through ctx.call; like UNKNOWN_COMMAND, nothing has run, so a
 //   ctx.call caller may catch it. `ctx.feature(id)` says whether a feature is on.
 
 import { apply, checkOps, clone, counterInside, deepFreeze, diff, escapeKey, frozenCopy, isCounterPath, isDeepFrozen, isJson, valueAt } from './ops.js';
 import { isSeed, rng as makeRng, roll as rollDice, seed as freshSeed } from './rng.js';
+import { blockIdOf, deriveId, epochOf, guardProblem, hashJson, isPlainJson } from './replay.js';
+import { CLOCK_COMMANDS, markerHash } from './timeline/boundary.js';
+import { capture as captureSnapshot } from './timeline/manifest.js';
+import { stateHash } from './timeline/host-block.js';
+import { newRoot, occurrenceOf, operationKey, receiptEvidence, submitProof } from './evidence.js';
 
 export const MAX_DEPTH = 8;
 const CAUSES = ['ui', 'story', 'system'];
@@ -107,6 +125,10 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
 
     // `again` (a Re-read of a line that made a change before, turn.js): its features are not checked.
     function resolve(type, again = false) {
+        // A module held back (dormant, or a restore is pending; registry.refusal) is refused with its reason, at
+        // the top, through ctx.call and on commit; like UNKNOWN_COMMAND nothing has run, so a caller may catch it.
+        const held = typeof type === 'string' && type && typeof registry.refusal === 'function' ? registry.refusal(type) : null;
+        if (held) fail(held.code, held.message);
         const handler = typeof type === 'string' && type ? registry.command(type) : null;
         const moduleId = typeof handler === 'function' ? registry.commandOwner(type) : null;
         if (typeof handler !== 'function' || !moduleId) fail('UNKNOWN_COMMAND', `There is no command called "${type}".`);
@@ -135,6 +157,134 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
             if (typeof fn === 'function') return fn;
         }
         return null;
+    }
+
+    // ---- guards (REPLAY.md) ------------------------------------------------------------------
+
+    // The module's own `hooks.replayGuard`, whatever its features say: replaying a chat must not depend on
+    // what the reader turned off since.
+    function guardHook(moduleId) {
+        for (const def of registry.modules?.() ?? []) if (def?.id === moduleId) return typeof def.hooks?.replayGuard === 'function' ? def.hooks.replayGuard : null;
+        return null;
+    }
+
+    // The context a guard is asked in on replay (REPLAY.md "Guards are pure"): the state before its block and what it recorded,
+    // nothing else. `query` answers only the queries its owner module declares as replay-safe (`replayQueries: [names]`: they
+    // depend on the state and their arguments alone, not on settings, the clock or other messages); anything else, and
+    // `receipts()` (the chat after the block is not part of what it was recorded over), throws, which fails the guard closed.
+    // What a guard needs from outside (a setting, a currency rule) is read when the block is planned and handed to
+    // `ctx.replayGuard(guard, recorded)`, and comes back from the record.
+    // `story.evidence` is the host's own and is always allowed: it reads the state's pins and the proof of the blocks that applied
+    // before the block (the prefix), and nothing else (docs/v2/EVIDENCE.md).
+    function replayQuery(owner, name) {
+        if (name === 'story.evidence') return findQuery(name);
+        for (const def of registry.modules?.() ?? []) {
+            if (def?.id === owner && typeof def.queries?.[name] === 'function' && Array.isArray(def.replayQueries) && def.replayQueries.includes(name)) return def.queries[name];
+        }
+        return null;
+    }
+    function replayTools(owner, state) {
+        const tools = Object.freeze({
+            reply: null,
+            query(name, args) {
+                const fn = replayQuery(owner, name);
+                if (!fn) throw new Error(`"${name}" is not a query a guard may ask on replay: ${owner} lists the ones that depend on the state alone in replayQueries; anything else it needs it records`);
+                return frozenCopy(fn(state, deepFreeze(clone(args)), tools));
+            },
+            receipts() {
+                throw new Error('a guard does not see receipts on replay: only the state before its block and what it recorded');
+            },
+        });
+        return tools;
+    }
+
+    // What the store asks on replay: `hooks.replayGuard({ state, query, hash }, { guard, source, block,
+    // operation, recorded, payload: { saved, current } })` of the guard's owner, on the state before the block. { ok: true } or { ok: false,
+    // reason }; no hook, a throw, a promise or a malformed answer is { ok: false } (fails closed).
+    function replayGuardCheck(state, info) {
+        const owner = info?.guard?.owner;
+        const hook = typeof owner === 'string' ? guardHook(owner) : null;
+        if (!hook) return { ok: false, reason: `${owner} has no replayGuard hook to check it` };
+        // A module that is held back (dormant, or the restore barrier is up) is not asked: its blocks stay off
+        // until it is ready, and are asked again then (the store looks again when the mark changes).
+        if (registry.held?.(owner) === true) return { ok: false, reason: `${owner} is not ready` };
+        let answer;
+        try {
+            const tools = replayTools(owner, state);
+            const view = Object.freeze({ state, query: tools.query, hash: hashJson });
+            answer = hook(view, deepFreeze(clone({ guard: info.guard, source: info.source, block: info.block, operation: info.operation, recorded: info.recorded ?? null, payload: info.payload ?? null })));
+        } catch (error) {
+            // The store records thrown guards even when this is a tentative plan that will not be stored.
+            throw error;
+        }
+        if (answer && typeof answer.then === 'function') {
+            answer.then(null, () => {});
+            return { ok: false, reason: `${owner}'s replayGuard did not answer at once` };
+        }
+        if (isRecord(answer) && answer.ok === true) return { ok: true };
+        if (isRecord(answer) && answer.ok === false && typeof answer.reason === 'string' && answer.reason) return { ok: false, reason: answer.reason };
+        return { ok: false, reason: `${owner}'s replayGuard gave an answer that is neither { ok: true } nor { ok: false, reason }` };
+    }
+
+    // Changes when a module with a guard hook registers, goes, or turns ready or dormant: the store looks again at
+    // its guarded blocks.
+    // A checkpoint over guarded blocks keeps the mark it was made under (store.js chain): a different owner set, or a new
+    // version of an owner (its guard code may answer otherwise), makes it fail and the prefix replays with the guards asked.
+    // (the host's own hook, `hostOwned`, answers from the story alone, whoever is ready: it is no owner whose readiness changes an answer)
+    const guardMark = () => (registry.modules?.() ?? [])
+        .filter(def => typeof def?.hooks?.replayGuard === 'function' && def.hooks.replayGuard.hostOwned !== true && registry.held?.(def.id) !== true).map(def => `${def.id}@${def.version ?? ''}`).join(',');
+    if (typeof store.attachGuard === 'function') store.attachGuard(replayGuardCheck, guardMark);
+
+    // The Source this transaction's block will carry: its reply's canonical pair and ordinal (store.sourceAt).
+    function sourceOf(tx) {
+        if (tx.source === undefined) {
+            let found = null;
+            if (Number.isInteger(tx.reply?.index) && typeof store.sourceAt === 'function') {
+                try { found = store.sourceAt(tx.reply.index, { pending: tx.pending, ordinal: tx.ordinal }); } catch { found = null; }
+            }
+            tx.source = found ? Object.freeze(found) : null;
+        }
+        return tx.source;
+    }
+
+    // What a block is for the ids of its proof: its command and line, and its occurrence among the blocks of its reply that did the same
+    // (given once and kept in the block's span: the caller that plans a block again passes the one it has, else the reply's next unused
+    // one). Two blocks of a reply differ in it.
+    function originOf(tx) {
+        if (tx.origin === null) {
+            try { tx.operation = operationKey(tx.call.type, tx.call.payload); } catch { tx.operation = null; }
+            // (never invented here: the caller that plans a block gives it, else the store's allocator does; with neither the proof is refused)
+            let rank = tx.occurrence;
+            if (rank === null) {
+                try { rank = Number.isInteger(tx.reply?.index) && tx.operation ? store.allocateOccurrence?.(tx.reply.index, tx.operation) : null; } catch { rank = null; }
+            }
+            if (!Number.isInteger(rank) || rank < 0) throw new Error('No occurrence could be given to this proof.');
+            tx.rank = rank;
+            tx.origin = `${tx.operation}:${rank}`;
+        }
+        return tx.origin;
+    }
+
+    // The Cursor this transaction's block starts at (ctx.cursor): who the block is (the reply's canonical pair and the id named by its operation and its
+    // occurrence, which is the one the host stamps: replay.js blockIdOf) and where it sits now (the changes before it on the reply, the rev before it).
+    // A block the reply holds already (a step planned again: its ordinal) is told by the id it has.
+    function cursorOf(tx) {
+        if (tx.cursor === undefined) {
+            let found = null;
+            const source = sourceOf(tx);
+            if (source && Number.isInteger(tx.reply?.index)) {
+                try {
+                    originOf(tx);
+                    const held = Number.isInteger(tx.ordinal) ? store.blockAt?.(tx.reply.index, tx.ordinal) ?? null : null;
+                    const block = tx.reusing ? tx.reusing.id : held ? held.block : tx.operation ? blockIdOf({ sid: source.sid, swipeKey: source.swipeKey, key: tx.operation, rank: tx.rank }) : null;
+                    const op = Number.isInteger(tx.opsBefore) ? tx.opsBefore : held ? held.op : store.opsAt(tx.reply.index).length;
+                    if (block) found = { sid: source.sid, swipeKey: source.swipeKey, block, op, rev: Math.max(0, tx.rev - 1) };
+                } catch { found = null; }
+            }
+            tx.cursor = found ? Object.freeze(found) : null;
+        }
+        if (!tx.cursor) fail('FAILED', 'There is no reply yet to hold a block, so it has no cursor.');
+        return tx.cursor;
     }
 
     // ---- one transaction ----------------------------------------------------------------------
@@ -183,12 +333,14 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
                 return frozenCopy(fn(state, deepFreeze(clone(args)), tools));
             },
             receipts: () => store.receipts?.() ?? [],
+            // The proof this root has given so far (not stored yet), for story.evidence (evidence.js).
+            pendingProofs: () => [...(tx.planned ?? []), ...(tx.proofs?.list ?? [])].map(proof => ({ proof, block: null })),
         });
         return tools;
     }
 
     function invoke(tx, type, target, payload, depth, caller = null) {
-        const ctx = makeCtx(tx, target.moduleId, depth, caller);
+        const ctx = makeCtx(tx, target.moduleId, depth, caller, type);
         const out = target.handler(ctx, deepFreeze(clone(payload)));
         if (out && typeof out.then === 'function') {
             out.then(null, () => {});   // nobody waits on it; keep a late rejection quiet
@@ -197,7 +349,27 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
         return out;
     }
 
-    function makeCtx(tx, moduleId, depth, caller) {
+    function giveProof(tx, moduleId, spec) {
+        const made = submitProof(spec, {
+            who: moduleId, cause: tx.cause, chat: tx.chat, source: sourceOf(tx), origin: originOf(tx), state: () => currentState(tx),
+            stored: () => store.proofs?.() ?? [], taken: () => store.proofs?.({ all: true }) ?? [], planned: tx.planned, root: tx.proofs, fail, replacing: tx.replacing,
+        });
+        if (made.created) {
+            const meta = metaOf(tx);
+            if (!isRecord(meta.proofs)) meta.proofs = {};
+            meta.proofs[made.proof.id] = made.pin;
+        }
+        return Object.freeze({ id: made.proof.id, payloadHash: made.proof.payloadHash });
+    }
+
+    function allocateId(tx, prefix) {
+        if (typeof prefix !== 'string' || !ID_PREFIX.test(prefix)) fail('INVALID', `An id prefix is lowercase letters and digits (like "it"), not "${prefix}".`);
+        let out = '';
+        for (let n = 0; n < 8; n += 1) out += BASE36[Math.floor(tx.idRandom() * 36) % 36];
+        return `${prefix}_${out}`;
+    }
+
+    function makeCtx(tx, moduleId, depth, caller, type) {
         const open = () => {
             if (tx.closed) throw new Error('This command has already finished; its ctx cannot be used any more.');
         };
@@ -210,15 +382,46 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
             module: moduleId,
             caller,
             rev: tx.rev,
+            // The epoch of the timeline this block is made in: the savepoints domain's, else the genesis epoch (a pure function of the state before it).
+            epoch: epochOf(tx.head),
+            // The Cursor (RB contract) the block of this command starts at: { sid, swipeKey, block, op, rev }, the same the host stamps as the block's
+            // first boundary, and the same when the command is run again by a Re-read of an unchanged line. A function: it reads the chat.
+            cursor() {
+                open();
+                return cursorOf(tx);
+            },
             carrier: tx.carrier,
             chat: tx.chat,
             reply: tx.reply,
-            id(prefix) {
+            // The Source a guarded block of this command will carry ({ sid, swipeKey, evidence, ordinal }), or
+            // null when there is no reply to hold it (REPLAY.md). Never a numeric message or swipe index.
+            get source() {
+                return sourceOf(tx);
+            },
+            id: prefix => { open(); return allocateId(tx, prefix); },
+            clockBoundary(input) {
                 open();
-                if (typeof prefix !== 'string' || !ID_PREFIX.test(prefix)) fail('INVALID', `An id prefix is lowercase letters and digits (like "it"), not "${prefix}".`);
-                let out = '';
-                for (let n = 0; n < 8; n += 1) out += BASE36[Math.floor(tx.idRandom() * 36) % 36];
-                return `${prefix}_${out}`;
+                if (moduleId !== 'story-director' || !CLOCK_COMMANDS.includes(type) || tx.cause === 'ui') fail('REFUSED', 'Only a trusted SD clock command may mark a midnight.');
+                if (!isRecord(input) || Object.keys(input).some(key => !['minute', 'source'].includes(key))) fail('INVALID', 'clockBoundary takes { minute, source }.');
+                const source = sourceOf(tx);
+                if (!source || hashJson(input.source ?? null) !== hashJson(source)) fail('REFUSED', 'A clock marker must carry this root source.');
+                const minute = input.minute;
+                const before = tx.head.domains?.director?.time?.minutes;
+                const current = currentState(tx).domains?.director?.time?.minutes;
+                const previous = tx.clockBoundaries.at(-1)?.minute;
+                const next = Math.floor((previous === undefined ? before : previous) / 1440) * 1440 + 1440;
+                if (!Number.isSafeInteger(before) || !Number.isSafeInteger(minute) || minute !== next || current !== minute) fail('INVALID', 'A marker must be the next crossed midnight, with the draft clock at that minute.');
+                // E5 assigns this root's occurrence; no second allocator for ambiguous Re-reads.
+                const root = cursorOf(tx);
+                const entry = captureSnapshot({ registry, state: currentState(tx), settings });
+                const cursor = { ...root, block: deriveId('bl', `clock:${root.block}:${minute}:${hashJson(entry)}`), op: tx.clockBoundaries.length + 1, rev: tx.rev };
+                const marker = { minute, source: clone(source), cursor, entry, baseHash: stateHash(tx.head) };
+                marker.prefixHash = markerHash(marker);
+                const made = giveProof(tx, moduleId, { kind: 'event', payload: { clockBoundary: minute, prefixHash: marker.prefixHash } });
+                marker.proof = made.id;
+                marker.pin = tx.meta.proofs[made.id];
+                tx.clockBoundaries.push(marker);
+                return deepFreeze({ cursor: clone(cursor), prefixHash: marker.prefixHash });
             },
             read(domain) {
                 open();
@@ -283,6 +486,43 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
                 if (owner !== moduleId) fail('NOT_OWNER', `${moduleId} cannot mark changes in ${domain}: only its owner can.`);
                 if (typeof path !== 'string' || !/^\/[^~]/.test(path)) fail('INVALID', `A thing to mark is a path inside the domain, like "/threads/th_x", not "${path}".`);
                 tx.within.add(`/domains/${escapeKey(domain)}${path}`);
+            },
+            // The Hash of the contract (§4): SHA-256 of normalized JSON (sorted keys, array order kept).
+            hash(value) {
+                open();
+                if (!isPlainJson(value)) fail('INVALID', 'Only plain JSON can be hashed.');
+                return hashJson(value);
+            },
+            // Attaches this module's guard to the command's root transaction (REPLAY.md, contract §6): on replay
+            // the block is applied, with its claims, only while the owner's `hooks.replayGuard` says its guard
+            // holds. The host stamps the source, the block id and the authority; the guard's owner must be the
+            // module calling, which must have a replayGuard hook. Nested commands share the root's guard: the
+            // same guard again is fine, another one is a CONFLICT. `recorded` (plain JSON, optional) is the
+            // durable inputs and draws the hook is given back.
+            replayGuard(guard, recorded) {
+                open();
+                const problem = guardProblem(guard);
+                if (problem) fail('INVALID', `That is not a guard: ${problem}.`);
+                if (guard.owner !== moduleId) fail('REFUSED', `${moduleId} cannot attach ${guard.owner}'s guard: a module attaches its own.`);
+                if (!guardHook(moduleId)) fail('REFUSED', `${moduleId} has no replayGuard hook, so a guard of its own could not be checked on replay.`);
+                if (recorded !== undefined && !isPlainJson(recorded)) fail('INVALID', 'A guard\'s recorded inputs must be plain JSON.');
+                if (!sourceOf(tx)) fail('FAILED', 'There is no reply yet to hold a guarded block.');
+                if (tx.guard) {
+                    if (hashJson(tx.guard) !== hashJson(guard) || (recorded !== undefined && hashJson(tx.recorded) !== hashJson(recorded))) {
+                        fail('CONFLICT', 'This command already has a guard; a nested command shares it and cannot attach another.');
+                    }
+                    return;
+                }
+                tx.guard = deepFreeze(clone(guard));
+                tx.recorded = recorded === undefined ? null : deepFreeze(clone(recorded));
+            },
+            // Gives proof (contract §6, docs/v2/EVIDENCE.md): only the module that owns `kind` may, and only as part of
+            // a command's root transaction; the host stamps the id, the Source and the payload hash. An identical
+            // call again returns the same id; the same key with other contents is a CONFLICT. The proof is
+            // published only when the root commits, on this command's block, and only while that block applies.
+            proof(spec) {
+                open();
+                return giveProof(tx, moduleId, spec);
             },
             claim(key) {
                 open();
@@ -383,6 +623,7 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
                 for (const change of changes) {
                     if (change.op === 'remove') {
                         const count = counterInside(change.path, counters);
+                        if (count && tx.absolute.has(`${change.path}${count}`)) continue;   // a reset (ctx.absolute): no `was`
                         const was = count ? valueAt(tx.head, `${change.path}${count}`) : undefined;
                         if (typeof was === 'number') Object.assign(change, { was, count });
                         continue;
@@ -414,7 +655,7 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
     }
 
     // Runs one command against `head` and returns { ok, ops, receipt, state } without storing anything.
-    function transact(head, type, payload, { cause, seed: seedValue, receiptId, capture, carrier = null, chat = null, again = false, standing = null, reply = null }) {
+    function transact(head, type, payload, { cause, seed: seedValue, receiptId, capture, carrier = null, chat = null, again = false, standing = null, reply = null, planned = null, replacing = null, occurrence = null, reusing = null }) {
         let tx = null;
         try {
             if (!CAUSES.includes(cause)) fail('INVALID', `"${cause}" is not a cause (ui, story or system).`);
@@ -435,14 +676,72 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
                 rev: headRev + 1, carrier: carrierOf(carrier), chat: chatOf(chat), again: again === true && cause === 'story',
                 standing: cause === 'story' && isRecord(standing) ? (isDeepFrozen(standing) ? standing : deepFreeze(clone(standing))) : null,
                 drafts: new Map(), meta: null, failure: null, closed: false, absolute: new Set(), within: new Set(),
+                clockBoundaries: [], guard: null, recorded: null, source: undefined, pending: 0, ordinal: undefined, proofs: newRoot(), cursor: undefined, opsBefore: null, reusing,
+                // The proof a Re-read's earlier lines gave (planned, not stored yet), for parents and story.evidence.
+                planned: Array.isArray(planned) ? planned : [],
+                // The proof of the blocks being replaced (a Re-read's lines and steps, a step planned again): a proof of the same kind and key, at the same place among those, keeps the id.
+                replacing: Array.isArray(replacing) ? replacing : [],
+                // What this root is (its command and line) and its rank among blocks of the reply that did the same: its proof ids come from it.
+                origin: null, rank: null, operation: null, occurrence: Number.isInteger(occurrence) && occurrence >= 0 ? occurrence : null,
             };
+            tx.call = { type, payload };
             // `reply` (run, a system step only): the reply a Re-read's step is kept on, which need not be the head.
             const given = cause === 'system' && isRecord(reply) ? replyOf(reply.index, reply.sid) : null;
             tx.reply = tx.carrier ? replyOf(tx.carrier.index, tx.carrier.sid ?? tx.carrier.key) : given ?? headReply(store);
+            // A Re-read plans blocks it has not stored yet: `pending` of them come before this one, or `ordinal`
+            // names the block's own (a block planned again keeps it). Only the Source's ordinal, nothing else.
+            const place = tx.carrier ? carrier : given ? reply : null;
+            if (Number.isInteger(place?.pending) && place.pending > 0) tx.pending = place.pending;
+            if (Number.isInteger(place?.ordinal) && place.ordinal >= 0) tx.ordinal = place.ordinal;
+            // Where the block sits, for ctx.cursor: in a Re-read, the changes of the blocks planned before this one (the store has not stored them yet).
+            if (Number.isInteger(place?.opsBefore) && place.opsBefore >= 0) tx.opsBefore = place.opsBefore;
             const out = invoke(tx, type, target, payload, 0);
             if (tx.failure) throw tx.failure;
-            const { summary, narrate, data, problem, replan } = resultOf(type, out, cause);
+            if (tx.clockBoundaries.length) {
+                const last = tx.clockBoundaries.at(-1).minute;
+                const end = currentState(tx).domains?.director?.time?.minutes;
+                if (!Number.isSafeInteger(end) || end < last || end >= last + 1440) fail('INVALID', 'Every crossed midnight needs its own logical marker.');
+            }
+            const done = resultOf(type, out, cause);
+            const { summary, narrate, problem, replan } = done;
+            let { data } = done;
             tx.closed = true;
+            // A guarded transaction: the receipt's data.v2 carries the host's Source and the guard (the owner's
+            // own fields stay, but never a source or guard of its own making), and the store gets the block.
+            let block = null;
+            // A cursor names a block that is stored: a command that read one makes a guarded block (or one that gives proof) or it fails (no id is handed out that is never used).
+            if (tx.cursor && !tx.guard && !tx.proofs.list.length) fail('FAILED', `${type} read its cursor but made no guarded block (ctx.replayGuard), so there is no block for it to name.`);
+            if (tx.guard || tx.proofs.list.length) {
+                const source = sourceOf(tx);
+                if (!source) fail('FAILED', 'There is no reply yet to hold a guarded block.');
+                if (!isRecord(data.v2 ?? {})) fail('FAILED', `${type} returned data.v2 that is not a record.`);
+                const owned = { ...(data.v2 ?? {}) };
+                delete owned.evidence;
+                // The host alone stamps the source, the guard and the evidence; a block that gives proof but
+                // attaches no guard has none (guard: null) and no epoch of its own (the owner's, if it names one).
+                const proofs = tx.proofs.list;
+                data = { ...data, v2: {
+                    schema: 2, ...owned, ...(tx.guard ? { epoch: owned.epoch ?? tx.guard.epoch } : {}),
+                    rulesHash: tx.guard ? tx.guard.rulesHash : null, source, guard: tx.guard ?? null,
+                } };
+                const operation = payload ?? {};
+                if (!isPlainJson(operation)) fail('INVALID', `${type} is guarded, so its payload must be plain JSON.`);
+                block = {
+                    ...(tx.clockBoundaries.length ? { clockBoundaries: clone(tx.clockBoundaries) } : {}),
+                    module: target.moduleId, source, guard: tx.guard ?? null, operation: { type, payload: clone(operation) }, recorded: tx.recorded,
+                    result: Object.hasOwn(data.v2, 'result') ? clone(data.v2.result) : clone(data),
+                    ...(proofs.length ? { evidence: clone(proofs) } : {}),
+                    // The occurrence the block takes among the reply's blocks of its operation: given once, kept in its span, and what its id (and its proofs') come from.
+                    // A supported old proofless span keeps its bytes, including its absent occurrence. If it starts giving proof,
+                    // originOf uses the plan's shared allocator, just as a new block does.
+                    ...(reusing && occurrenceOf(reusing) === null && !proofs.length ? {} : { occurrence: (originOf(tx), tx.rank) }),
+                    ...(reusing ? { id: reusing.id } : {}),
+                    // A cursor the command read is the one its block is stored at: the host stamps that id and checks the rest.
+                    ...(tx.cursor ? { id: tx.cursor.block, cursor: tx.cursor } : {}),
+                };
+                // The receipt shows the proof too (contract Receipt.data.v2.evidence); the span's is what the host reads.
+                if (proofs.length) data = { ...data, v2: { ...data.v2, evidence: receiptEvidence(proofs) } };
+            }
 
             const { ops, touched, rev } = opsOf(tx);
             const problems = checkOps(ops, head);
@@ -468,8 +767,10 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
                 id: receiptId, type, module: target.moduleId, cause, seed: seedValue, summary, narrate, data, rev,
                 // What to run it again with on a Re-read (resultOf `replan`): its payload.
                 ...(replan && isJson(payload ?? {}) ? { replan: { payload: clone(payload ?? {}) } } : {}),
+                // The host's own mark that this was a guarded block (a module cannot set it; data.v2 is the module's to fill).
+                ...(block ? { guarded: true } : {}),
             });
-            return { ok: true, ops: deepFreeze(ops), receipt, state: next, ...(problem ? { problem } : {}) };
+            return { ok: true, ops: deepFreeze(ops), receipt, state: next, ...(block ? { block: deepFreeze(block) } : {}), ...(problem ? { problem } : {}) };
         } catch (error) {
             const reason = asCommandError(type, tx?.failure ?? error);
             return { ok: false, code: reason.code, message: reason.message };
@@ -497,9 +798,9 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
 
     // ---- storing ------------------------------------------------------------------------------
 
-    function storeResult(ops, receipt) {
+    function storeResult(ops, receipt, block = null) {
         try {
-            store.append({ ops, receipt });
+            store.append({ ops, receipt, ...(block ? { block } : {}) });
         } catch (error) {
             return { ok: false, code: 'FAILED', message: `The change could not be stored: ${error?.message ?? error}` };
         }
@@ -541,7 +842,7 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
         command(type, payload, { cause = 'ui' } = {}) {
             return guarded(() => {
                 const result = transact(store.head(), type, payload, fresh(cause));
-                return result.ok ? storeResult(result.ops, result.receipt) : result;
+                return result.ok ? storeResult(result.ops, result.receipt, result.block) : result;
             });
         },
 
@@ -552,7 +853,7 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
                 const result = transact(head, type, payload, fresh(cause));
                 if (!result.ok) return result;
                 const token = `pv_${++previewCount}`;
-                previews.set(token, { type, ops: result.ops, receipt: result.receipt, seen: fingerprint(head), features: featureMarks() });
+                previews.set(token, { type, ops: result.ops, receipt: result.receipt, block: result.block ?? null, seen: fingerprint(head), features: featureMarks() });
                 while (previews.size > MAX_PREVIEWS) previews.delete(previews.keys().next().value);
                 return { ok: true, receipt: result.receipt, token, ops: result.ops };
             });
@@ -576,7 +877,7 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
                 if (now.rev !== saved.seen.rev || now.index !== saved.seen.index || now.json !== saved.seen.json) {
                     return { ok: false, code: 'STALE', message: 'The story changed since this preview; try the action again.' };
                 }
-                return storeResult(saved.ops, saved.receipt);
+                return storeResult(saved.ops, saved.receipt, saved.block);
             });
         },
 
@@ -589,9 +890,14 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
          * of a line that made a change before, run with its features as on (C3-4). `standing` (story only): a
          * Re-read's reply state as it stood before it, ctx.standing (a2-3). `reply` ({ index, sid }, system only):
          * ctx.reply for a step kept on a reply that is not the head (a Re-read's afterCapture and replan steps).
+         * `carrier` and `reply` may also say `pending` (guarded blocks a Re-read has planned before this one) or
+         * `ordinal` (this block's own, when it is planned again): only ctx.source's ordinal follows them. `planned`
+         * (the Proofs the lines of a Re-read have given so far): parents and story.evidence see them like stored ones.
+         * `replacing` (the proof of the blocks being replaced): a proof of the same kind and key at the same place among those keeps the id of its old one.
+         * A guarded transaction's result has a `block` too (REPLAY.md), which store.append or replaceStory keeps.
          */
-        run(type, payload, { cause = 'story', seed: seedValue, state, capture, carrier = null, chat = null, again = false, standing = null, reply = null } = {}) {
-            return guarded(() => transact(state ?? store.head(), type, payload, { ...fresh(cause, seedValue), capture, carrier, chat, again: again === true && cause === 'story', standing, reply }));
+        run(type, payload, { cause = 'story', seed: seedValue, state, capture, carrier = null, chat = null, again = false, standing = null, reply = null, planned = null, replacing = null, occurrence = null, reusing = null } = {}) {
+            return guarded(() => transact(state ?? store.head(), type, payload, { ...fresh(cause, seedValue), capture, carrier, chat, again: again === true && cause === 'story', standing, reply, planned, replacing, occurrence, reusing }));
         },
     };
 }

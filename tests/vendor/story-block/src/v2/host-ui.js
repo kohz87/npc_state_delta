@@ -180,6 +180,12 @@ export const DIAGNOSTICS_TEXT = Object.freeze({
     sampleTitle: 'Every building block of Story Suite\'s look, in light and dark, for checking a theme and for screenshots',
     sampleFailed: 'The UI sample could not be shown: {why}',
     credits: 'Icons: Phosphor Icons (phosphoricons.com), MIT License.',
+    repairTitle: 'Story record',
+    repairHelp: 'This chat\'s saved story could not be used as it is. Story Block has not touched it and works on an empty story until you decide.',
+    repairYes: 'Yes, do it',
+    repairNo: 'Cancel',
+    repairDone: 'Done.',
+    repairFailed: 'That could not be done: {why}',
 });
 export const FEATURE_TEXT = Object.freeze({
     title: 'Features',
@@ -961,7 +967,7 @@ export function renderSettingsHost(root, { registry, settings, doc = globalThis.
 
     // Versions (compat.js): each module, its version, the Story Block it needs, and what is out of step.
     function versionsFold() {
-        const report = compatReport({ hostVersion: registry.hostVersion?.() ?? '', modules: registry.modules(), refusals: registry.refusals?.() ?? [] });
+        const report = compatReport({ hostVersion: registry.hostVersion?.() ?? '', modules: registry.modules(), refusals: registry.refusals?.() ?? [], lifecycle: id => registry.lifecycle?.(id) ?? null });
         const { details, body } = fold(doc, VERSIONS_FOLD, 'Versions', report.outOfStep ? `${report.outOfStep} out of step` : 'all in step');
         if (report.outOfStep) details.classList.add('story-suite-fold-warn');
         note('panel', VERSIONS_FOLD, { label: 'Versions', help: report.outOfStep ? `${report.outOfStep} out of step` : 'all in step' }, 'Modules', details);

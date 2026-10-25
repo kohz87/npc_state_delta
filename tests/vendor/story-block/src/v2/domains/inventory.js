@@ -10,8 +10,9 @@ import {
     OWNER_RE, isPlainObject, clone, labelOf, parseCount, newId, ownerName, ownerNameIn, capitalize,
 } from './common.js';
 import { aliasKey, cleanName, resolveDef, slugify, trimText } from './names.js';
-import { WALLET_KEY, coinValue, countedMoney, currencyOf, formatAmount, formatWallet, isCurrencyName, parseAmount } from './money.js';
-import { DEF_ID, isId } from '../check.js';
+import { WALLET_KEY, coinValue, countedMoney, currencyResolution, formatAmount, formatWallet, isCurrencyName, moneyCaps, parseAmount, resolveCurrency } from './money.js';
+import { DEF_ID, RECORD_ID, isId } from '../check.js';
+import { hashOf, isHash, sha256Hex } from './digest.js';
 
 export const KINDS = Object.freeze(['goods', 'material', 'consumable', 'equipment', 'quest', 'money']);
 export const RARITIES = Object.freeze(['common', 'uncommon', 'rare', 'epic', 'legendary']);
@@ -220,6 +221,27 @@ export function validateInventory(slice) {
 // ---------- shared pieces of the handlers ----------
 
 const told = ctx => ctx.cause !== 'story';
+
+// The rules module (RB_CONTRACT §3): the one module Story Block lets register item definitions, plan
+// equipment and speak for the chat's money. Its seams are all optional: with no answer, nothing changes.
+export const RULES_MODULE = 'rpg-battle';
+
+// The chat's currency as this command sees it: a ready rules module's validated `purse.currency`, else the
+// reader's / pack's / default one (money.js currencyResolution). The wallet is the same whole number either way.
+const currencyIn = ctx => resolveCurrency(ctx.settings(), (name, args) => ctx.query(name, args));
+
+// A query the rules module may or may not have: `{ found: false }` when nothing answers to that name (no
+// rules module, or one that is not ready), else `{ found: true, value }` or, when its answer throws,
+// `{ found: true, error }`. Being found is how Story Block knows a ready rules module is there.
+function askRules(ctx, name, args = {}) {
+    if (typeof ctx?.query !== 'function') return { found: false };
+    try {
+        return { found: true, value: ctx.query(name, args) };
+    } catch (error) {
+        if (error?.code === 'NOT_FOUND' && String(error.message).includes(`"${name}"`)) return { found: false };
+        return { found: true, error };
+    }
+}
 export const itemText = (name, qty) => (qty === 1 ? name : `${name} ×${qty}`);
 const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 // Taking from several stacks of one item: loose ones before worn ones, the party's first, then by ID.
@@ -373,7 +395,7 @@ function hookScale(env) {
     }
 }
 
-function addDef(inv, def, env, about, keep = {}) {
+function buildDef(def, env, about, keep = {}) {
     const id = def.id;
     const hooks = env.hookEntries?.('item.define') ?? env.hooks('item.define').map(fn => ({ moduleId: null, fn }));
     for (const { moduleId, fn } of hooks) {
@@ -393,28 +415,86 @@ function addDef(inv, def, env, about, keep = {}) {
     if (carry === null) delete def.carry;
     else def.carry = carry;
     if (def.kind === 'equipment') def.stack = false;   // MODULES.md F6
-    inv.defs[id] = clone(def);
-    inv.aliases[aliasKey(def.name)] ??= id;
+    return def;
+}
+
+function addDef(inv, def, env, about, keep = {}) {
+    buildDef(def, env, about, keep);
+    inv.defs[def.id] = clone(def);
+    inv.aliases[aliasKey(def.name)] ??= def.id;
+    return inv.defs[def.id];
+}
+
+// A definition the story, a pack or a module's full def brings in for the first time. Alone, Story Block
+// stores it. While a rules module answers `rules.registerItem` (RB_CONTRACT §3, P01) it goes there first:
+// the module resolves the item's rule and registers the definition itself (inventory.registerDefinition),
+// in this same transaction, so one refusal later in the command (a limit, the carry limit, a failed buy)
+// takes the definition and the rule away together. `template`: the pack item the definition copies, or
+// null. The module's registered definition is the one used, whatever was offered. `route: false`: a
+// scratch inventory (loot on offer), where nothing real may be registered. `store: false`: only use the route;
+// where it is not there, do nothing (null).
+function registerNew(ctx, inv, def, env, about, { keep = {}, template = null, route = true, hooks = true, written = null, store = true } = {}) {
+    if (!route) return hooks ? addDef(inv, def, env, about, keep) : storeDef(inv, def);
+    if (hooks) buildDef(def, env, about, keep);
+    let out;
+    try {
+        out = ctx.call('rules.registerItem', {
+            write: writeId(ctx, def.id), def: clone(def), rule: null, template, area: null, rulesHash: null,
+        });
+    } catch (error) {
+        // The command is not there (no rules module) or its feature is off: nothing has run, so the definition
+        // is stored directly, as without a rules module. Any other refusal is the rules module's and stands.
+        const absent = (error?.code === 'UNKNOWN_COMMAND' || error?.code === 'FEATURE_OFF') && String(error.message).includes('rules.registerItem');
+        if (!absent) throw error;
+        return store ? storeDef(inv, def) : null;
+    }
+    const id = def.id;
+    const answered = out?.data?.def;
+    if ((answered !== undefined && answered !== id) || !Object.hasOwn(inv.defs, id) || !isPlainObject(inv.defs[id])) {
+        ctx.fail('RULES_MISMATCH', `The rules took ${def.name} but did not register its definition under ${id}, so it was not added.`);
+    }
+    // The name the story wrote finds it too, whatever name the rules module registered it under.
+    inv.aliases[aliasKey(inv.defs[id].name)] ??= id;
+    inv.aliases[aliasKey(written ?? def.name)] ??= id;
     return inv.defs[id];
 }
 
+// Whether a ready rules module holds this definition's rules (`rules.item` answers with a rule): its bytes
+// are then frozen (a rename is a new alias, never a change of the def). Alone, or for a def the rules module
+// has no rule for, a definition is Story Block's to rename.
+function frozenByRules(ctx, def) {
+    const asked = askRules(ctx, 'rules.item', { def: def.id });
+    return asked.found && !asked.error && isPlainObject(asked.value);
+}
+
+// A def stored as it is (its hooks, if any, have run).
+function storeDef(inv, def) {
+    inv.defs[def.id] = clone(def);
+    inv.aliases[aliasKey(def.name)] ??= def.id;
+    return inv.defs[def.id];
+}
+
+// The `write` of a registration call: an ID of the call's own, the same for the same receipt and item (no
+// randomness is drawn, so a chat without a rules module makes exactly the IDs it always did).
+const writeId = (ctx, defId) => `wr_${sha256Hex(`${ctx.receiptId ?? 'rc'}|${defId}`).slice(0, 8)}`;
+
 /** The def a name means, created as `story/<slug>` with the §7 defaults when there is none. */
-function defineByName(ctx, inv, written, env, about = {}) {
+function defineByName(ctx, inv, written, env, about = {}, route = true) {
     const name = cleanName(written);
     if (!name || name.length > MAX_NAME) ctx.fail('INVALID', `An item needs a name of 1 to ${MAX_NAME} characters.`);
     const found = resolveDef(inv, name);
     if (found.status === 'ambiguous') ctx.fail('INVALID', ambiguous(inv, name, found.ids));
     if (found.status === 'found') return { def: inv.defs[found.id], created: false };
-    const packed = packDef(ctx, inv, name, env);
+    const packed = packDef(ctx, inv, name, env, route);
     if (packed) return packed;
     const def = defaultDef(freeId(inv, `story/${slugify(name)}`), name);
-    return { def: addDef(inv, def, env, about), created: true };
+    return { def: registerNew(ctx, inv, def, env, about, { route, written: name }), created: true };
 }
 
 // The `item.resolve(name)` hooks (packs, MODULES §E): a pack's def for a name the inventory does
 // not know yet, taken as the pack wrote it (its numbers are the rules; item.define does not run),
 // with the written name kept as an alias. The first hook that answers wins.
-function packDef(ctx, inv, name, env) {
+function packDef(ctx, inv, name, env, route = true) {
     for (const hook of env.hooks('item.resolve')) {
         let found;
         try { found = hook(name); } catch { found = null; }
@@ -426,8 +506,7 @@ function packDef(ctx, inv, name, env) {
             const carry = packCarry(def.id, found.carry);
             if (carry !== null) def.carry = carry;
             if (def.kind === 'equipment') def.stack = false;   // MODULES.md F6
-            inv.defs[def.id] = def;
-            inv.aliases[aliasKey(def.name)] ??= def.id;
+            registerNew(ctx, inv, def, env, {}, { route, hooks: false, template: def.id });
         }
         inv.aliases[aliasKey(name)] ??= def.id;
         return { def: inv.defs[def.id], created: !known };
@@ -441,7 +520,10 @@ function packDef(ctx, inv, name, env) {
  * through the hooks, keeping the caller's own rarity and value.
  */
 function defineGiven(ctx, inv, given, env, about) {
-    if (typeof given.id === 'string' && inv.defs[given.id]) return { def: inv.defs[given.id], created: false };
+    if (typeof given.id === 'string' && inv.defs[given.id]) {
+        refuseConflict(ctx, inv, inv.defs[given.id], given);
+        return { def: inv.defs[given.id], created: false };
+    }
     const name = cleanName(given.name);
     if (!name || name.length > MAX_NAME) ctx.fail('INVALID', `An item needs a name of 1 to ${MAX_NAME} characters.`);
     if (given.id !== undefined && (typeof given.id !== 'string' || !DEF_ID.test(given.id))) {
@@ -454,12 +536,45 @@ function defineGiven(ctx, inv, given, env, about) {
     for (const field of ['rarity', 'value']) if (given[field] !== undefined) keep[field] = given[field];
     // A pack item's carry capacity comes with it (a pack shop's stock bought through a module).
     if (packCarry(id, given.carry) !== null) keep.carry = given.carry;
-    return { def: addDef(inv, def, env, about, keep), created: true };
+    return { def: registerNew(ctx, inv, def, env, about, { keep, written: name }), created: true };
+}
+
+// The fields of a def that are its rules (not its name, which a story may rename).
+const RULE_FIELDS = Object.freeze(['kind', 'rarity', 'value', 'stack', 'slot', 'stats', 'effect', 'tags', 'note', 'carry']);
+
+// A full def handed to inventory.grant for an ID the inventory already has must be that definition: the same
+// rules, field by field for those it states. Where it differs, the rules module's registration route is asked
+// to take the def as stated; it registers through inventory.registerDefinition, which refuses other bytes under
+// a used ID (CONFLICT, RB_CONTRACT §3). Where that route is not there (no rules module, or its command off)
+// "an existing def with that ID wins", as ever.
+function refuseConflict(ctx, inv, stored, given) {
+    const equipment = (given.kind ?? stored.kind) === 'equipment';
+    const differs = RULE_FIELDS.filter(field => {
+        if (given[field] === undefined) return false;
+        const offered = field === 'stack' && equipment ? false : given[field];
+        return hashOf(offered) !== hashOf(stored[field] ?? null);
+    });
+    if (!differs.length) return;
+    const stated = clone(stored);
+    for (const field of RULE_FIELDS) if (given[field] !== undefined) stated[field] = clone(given[field]);
+    if (equipment) stated.stack = false;
+    registerNew(ctx, inv, stated, null, {}, { hooks: false, template: null, written: stored.name, store: false });
+    // The route accepted it (it registered the same bytes it already held): the existing def stands.
+}
+
+// The rules module's money moves in the currency it states (`purse.currency`). When it states one that is
+// not a currency, its own payments and rewards are held (RULES_MISMATCH) until it answers properly; the
+// reader's display and every other caller go on with the fallback currency, the wallet untouched.
+function rulesMoneyOk(ctx) {
+    if (ctx.caller !== RULES_MODULE) return;
+    if (currencyResolution(ctx.settings(), (name, args) => ctx.query(name, args)).reason === 'invalid') {
+        ctx.fail('RULES_MISMATCH', 'The rules module\'s currency is not a valid one, so its money is held; the wallet is unchanged.');
+    }
 }
 
 function receive(ctx, env, { owner, amount, note }) {
     const inv = ctx.draft('inventory');
-    const currency = currencyOf(ctx.settings());
+    const currency = currencyIn(ctx);
     const wallet = (inv.wallets[owner] ??= {});
     const now = (wallet[WALLET_KEY] ?? 0) + amount;
     if (!Number.isSafeInteger(now)) ctx.fail('INVALID', 'That is more money than can be counted.');
@@ -474,7 +589,7 @@ function receive(ctx, env, { owner, amount, note }) {
 
 function pay(ctx, env, { owner, amount, note }) {
     const inv = ctx.draft('inventory');
-    const currency = currencyOf(ctx.settings());
+    const currency = currencyIn(ctx);
     const have = inv.wallets[owner]?.[WALLET_KEY] ?? 0;
     const who = capitalize(ownerNameIn(ctx, owner));
     if (have < amount) ctx.fail('NOT_ENOUGH', `${who} has only ${formatAmount(have, currency)}; ${formatAmount(amount, currency)} is needed.`);
@@ -568,6 +683,166 @@ function readParty(ctx) {
     }
 }
 
+// ---------- equipment through the rules module (RB_CONTRACT §3, P07) ----------
+//
+// While a ready rules module answers `rules.equipPlan`, nothing is worn without its plan: inventory.equip,
+// inventory.equipOn (and so the module's own item.equip, which calls equipOn) all ask for one plan inside
+// the transaction, check it against Story Block's own records, and apply it to the draft as one step. The
+// plan is never taken from the caller (a payload cannot carry one) and never asks the rules module to
+// equip (no item.equip call from here: that command calls equipOn, so it would loop). Without such a
+// module equipment is stored as it always was (the code after each call to equipByRules).
+
+// The eight slot IDs of the contract (§4), the keys of a worn piece under rules.
+export const EQUIP_SLOTS = Object.freeze(['weapon', 'offhand', 'head', 'body', 'legs', 'feet', 'accessory-1', 'accessory-2']);
+const PLAN_KEYS = Object.freeze(['actor', 'stack', 'def', 'slot', 'unequip', 'move', 'rulesHash', 'inputHash']);
+// Payload fields that would claim a plan or a way round one; refused while a rules module is ready.
+const PLAN_CLAIMS = Object.freeze(['plan', 'token', 'bypass', 'trusted', 'force', 'skipRules', 'rules', 'rulesHash', 'inputHash', 'unequip', 'move']);
+const ERROR_CODES = new Set(['INVALID', 'REFUSED', 'NOT_FOUND', 'NOT_ENOUGH', 'CLAIMED', 'STALE', 'FEATURE_OFF', 'LIMITED', 'FAILED', 'NOT_OWNER',
+    'UNSUPPORTED', 'UNKNOWN_COMMAND', 'DEPENDENCY_UNAVAILABLE', 'CLOCK_UNSET', 'RULES_MISMATCH', 'CONFLICT', 'SNAPSHOT_UNAVAILABLE', 'RESTORE_PENDING', 'REPLAY_PREREQUISITE']);
+
+// What of a stack the plan's inputHash covers: where it is and in what.
+const piece = stack => ({ id: stack.id, def: stack.def, qty: stack.qty, owner: stack.owner, equipped: stack.equipped });
+
+/**
+ * The inputHash of an equip plan as Story Block checks it (the contract names what it covers, not its
+ * bytes; docs/v2/INVENTORY-SEAMS.md fixes them): the Hash of
+ * `{ rulesHash, actor: { id, stats, life }, slot: targetSlot | null, stack: piece, affected: [piece…] }`
+ * where `piece` = `{ id, def, qty, owner, equipped }` of a stack record, `stats`/`life` are the actor's
+ * `rules.sheet`, and `affected` are the other stacks the plan unequips or moves, by ID. Pure.
+ */
+export function equipInputHash({ rulesHash, actor, stats, life, targetSlot = null, stack, affected = [] }) {
+    const others = new Map();
+    for (const other of affected) if (other.id !== stack.id) others.set(other.id, other);
+    return hashOf({
+        rulesHash,
+        actor: { id: actor, stats, life },
+        slot: targetSlot ?? null,
+        stack: piece(stack),
+        affected: [...others.values()].sort(byId).map(piece),
+    });
+}
+
+// The plan the rules module gave (`asked`, the one answer to `rules.equipPlan`) for `stack` worn by `actor`,
+// checked against this transaction's records and returned as { slot, unequip: [stack], moves: [{ stack,
+// from, to }] }. Any other outcome is a refusal with nothing changed: the module's own (its code and message), DEPENDENCY_UNAVAILABLE for no answer,
+// RULES_MISMATCH for a plan that is not one or does not fit the records, STALE for one the records have
+// moved on from (a piece changed hands or slot, the actor's stats or life differ from its inputs).
+function planEquip(ctx, inv, stack, def, actor, targetSlot, pc, asked) {
+    const refuse = (code, why) => ctx.fail(code, `${why} Nothing was changed.`);
+    const mismatch = why => refuse('RULES_MISMATCH', `The rules gave a plan for ${def.name} that does not fit (${why}).`);
+    const stale = why => refuse('STALE', `The rules' plan for ${def.name} no longer matches the inventory (${why}).`);
+    if (asked.error) refuse(ERROR_CODES.has(asked.error.code) ? asked.error.code : 'DEPENDENCY_UNAVAILABLE', String(asked.error.message ?? 'The rules could not plan this.'));
+    const answer = asked.value;
+    if (answer === null || answer === undefined) refuse('DEPENDENCY_UNAVAILABLE', 'The rules gave no plan for this.');
+    if (!isPlainObject(answer)) mismatch('not a record');
+    if (answer.ok === false) {
+        refuse(ERROR_CODES.has(answer.code) ? answer.code : 'REFUSED', typeof answer.message === 'string' && answer.message ? answer.message : `${def.name} cannot be worn.`);
+    }
+    const plan = answer.ok === true ? answer.plan : null;
+    if (!isPlainObject(plan) || Object.keys(plan).length !== PLAN_KEYS.length || !PLAN_KEYS.every(key => Object.hasOwn(plan, key))) mismatch('wrong fields');
+    if (plan.actor !== actor || plan.stack !== stack.id || plan.def !== stack.def) mismatch('another piece or wearer');
+    if (!EQUIP_SLOTS.includes(plan.slot) || (targetSlot && plan.slot !== targetSlot)) mismatch('not the slot asked for');
+    if (!isHash(plan.rulesHash) || !isHash(plan.inputHash)) mismatch('no hashes');
+
+    const recordOf = id => (Object.hasOwn(inv.stacks, id) && isPlainObject(inv.stacks[id]) ? inv.stacks[id] : null);
+    // First what the plan is made of, whatever the records say ...
+    if (!Array.isArray(plan.unequip) || plan.unequip.length > EQUIP_SLOTS.length || !Array.isArray(plan.move) || plan.move.length > 2 * EQUIP_SLOTS.length) mismatch('what comes off or moves');
+    plan.unequip.forEach((id, at) => {
+        if (typeof id !== 'string' || !RECORD_ID.test(id) || id === stack.id || plan.unequip.indexOf(id) !== at) mismatch('what comes off');
+    });
+    plan.move.forEach((entry, at) => {
+        if (!isPlainObject(entry) || Object.keys(entry).length !== 3 || !['stack', 'from', 'to'].every(key => typeof entry[key] === 'string')
+            || !OWNER_RE.test(entry.from) || !OWNER_RE.test(entry.to) || entry.from === entry.to || plan.move.findIndex(other => other.stack === entry.stack) !== at) mismatch('what moves');
+        if (entry.stack !== stack.id && !plan.unequip.includes(entry.stack)) mismatch('it moves a piece that is not part of this');
+        if (entry.to !== actor && (entry.stack === stack.id || entry.to !== 'party')) mismatch('it hands a piece to the wrong owner');
+        if (!ownerKnown(ctx, entry.to)) mismatch('it hands a piece to someone who is not in the party');
+    });
+    // ... then whether the records are still what it was made from.
+    const off = plan.unequip.map(id => {
+        const other = recordOf(id);
+        if (!other || other.equipped === null || wearerOf(other, pc) !== actor) stale('a piece it takes off is not worn by them now');
+        return other;
+    });
+    const moves = plan.move.map(entry => {
+        const target = entry.stack === stack.id ? stack : recordOf(entry.stack);
+        if (!target || target.owner !== entry.from) stale('a piece changed hands');
+        return entry;
+    });
+    const ownerAfter = target => moves.find(entry => entry.stack === target.id)?.to ?? target.owner;
+    if (ownerAfter(stack) !== actor) mismatch('it does not put the piece with its wearer');
+    // After the plan nobody wears two pieces in one slot.
+    const after = new Map();
+    for (const other of Object.values(inv.stacks)) {
+        const slot = other.id === stack.id ? plan.slot : off.includes(other) ? null : other.equipped;
+        if (slot === null || slot === undefined) continue;
+        const key = `${wearerOf({ ...other, owner: ownerAfter(other) }, pc)}\u0000${slot}`;
+        if (after.has(key)) mismatch('a slot would hold two pieces');
+        after.set(key, other.id);
+    }
+    // The inputs it was made from: the actor's stats and life (rules.sheet), the slot asked for, the piece and
+    // every piece it touches. Anything that changed since makes the plan someone else's.
+    const sheet = askRules(ctx, 'rules.sheet', { actor });
+    const stats = sheet.found && !sheet.error && isPlainObject(sheet.value) ? sheet.value.stats : null;
+    const life = sheet.found && !sheet.error && isPlainObject(sheet.value) ? sheet.value.life : null;
+    if (!isPlainObject(stats) || typeof life !== 'string') refuse('DEPENDENCY_UNAVAILABLE', 'The rules could not give the wearer\'s stats to check the plan against.');
+    const touched = [...new Set([...off, ...moves.map(entry => recordOf(entry.stack))])].filter(Boolean);
+    if (equipInputHash({ rulesHash: plan.rulesHash, actor, stats, life, targetSlot: targetSlot ?? null, stack, affected: touched }) !== plan.inputHash) {
+        stale('the wearer, their stats or the pieces involved are not what it was made from');
+    }
+    return { slot: plan.slot, unequip: off, moves };
+}
+
+// Puts a validated plan on the draft: pieces move, the displaced come off, the piece goes on. A hand-over
+// into someone's own carry follows the carry limit (as equipOn always did).
+function applyPlan(ctx, inv, stack, actor, plan) {
+    const add = plan.moves.filter(entry => entry.to === actor).map(entry => ({ defId: inv.stacks[entry.stack].def, qty: inv.stacks[entry.stack].qty }));
+    if (add.length) readerCarry(ctx, add, actor, true);
+    for (const entry of plan.moves) inv.stacks[entry.stack].owner = entry.to;
+    for (const other of plan.unequip) other.equipped = null;
+    stack.owner = actor;
+    stack.equipped = plan.slot;
+}
+
+// inventory.equip / inventory.equipOn while a rules module is ready: null when none is (the caller stores
+// equipment as before); else the command's result. `direct`: inventory.equip, whose wearer is the piece's
+// own owner, so a piece in the party's bag needs "Equip on…" with someone named.
+function equipByRules(ctx, inv, stack, def, { actor, payload, direct }) {
+    const written = payload.targetSlot ?? payload.slot;
+    const targetSlot = typeof written === 'string' && written.trim() ? written.trim() : null;
+    const asked = askRules(ctx, 'rules.equipPlan', { stack: stack.id, actor, ...(targetSlot && EQUIP_SLOTS.includes(targetSlot) ? { targetSlot } : {}) });
+    if (!asked.found) return null;
+    const claims = PLAN_CLAIMS.filter(key => Object.hasOwn(payload, key));
+    if (claims.length) ctx.fail('INVALID', `Equipment is planned by the rules, not by the caller; ${claims.join(', ')} cannot be passed in.`);
+    if (def.kind !== 'equipment') ctx.fail('REFUSED', `${def.name} is not equipment; it cannot be worn or wielded.`);
+    if (written !== undefined && written !== null && typeof written !== 'string') ctx.fail('INVALID', 'The slot must be text.');
+    if (payload.targetSlot != null && payload.slot != null && payload.targetSlot !== payload.slot) ctx.fail('INVALID', 'targetSlot and slot name different slots.');
+    if (targetSlot !== null && !EQUIP_SLOTS.includes(targetSlot)) ctx.fail('INVALID', `"${targetSlot}" is not one of the slots: ${EQUIP_SLOTS.join(', ')}.`);
+    if (actor === 'party') ctx.fail('REFUSED', `${def.name} is in the party's bag: choose who puts it on (Equip on…).`);
+    const pc = pcOf((name, args) => ctx.query(name, args), readParty(ctx));
+    const from = stack.owner;
+    const plan = planEquip(ctx, inv, stack, def, actor, targetSlot, pc, asked);
+    // The reply to the plan: the same question again would now say the piece is already there.
+    if (stack.equipped === plan.slot && from === actor && !plan.unequip.length && !plan.moves.length) ctx.fail('REFUSED', `${def.name} is already equipped.`);
+    applyPlan(ctx, inv, stack, actor, plan);
+    const away = plan.unequip.map(other => inv.defs[other.def]?.name ?? other.id);
+    const who = ownerNameIn(ctx, actor);
+    const extra = targetSlot ? { targetSlot } : {};
+    if (direct) {
+        return {
+            summary: `${capitalize(who)} equips ${def.name} (${plan.slot})${away.length ? `, putting away ${joinNames(away)}` : ''}.`,
+            data: { stack: stack.id, def: def.id, slot: plan.slot, replaced: plan.unequip[0]?.id ?? null, ...(plan.unequip.length > 1 ? { replacedAll: plan.unequip.map(other => other.id) } : {}), ...extra },
+            narrate: told(ctx),
+        };
+    }
+    const fromText = from !== actor ? ` from ${ownerNameIn(ctx, from)}` : '';
+    const awayText = away.length ? `; ${joinNames(away)} ${away.length === 1 ? 'goes' : 'go'} back into ${who}'s pack` : '';
+    return {
+        summary: `${capitalize(who)} equips ${def.name}${fromText} (${plan.slot})${awayText}.`,
+        data: { stack: stack.id, def: def.id, actor, from, slot: plan.slot, replaced: plan.unequip.map(other => other.id), replacedNames: away, ...extra },
+        narrate: told(ctx),
+    };
+}
+
 // `inventory.equipOn { stack, actor }`: one step, the piece goes to that member and on (MODULES §F99).
 // What sits in its slot goes back into that member's own carry: for a slot of one piece the piece
 // there (a two-handed weapon also puts away the off-hand; an off-hand is refused while a two-handed
@@ -582,6 +857,8 @@ function equipOn(ctx, payload) {
     const actor = payload.actor;
     if (typeof actor !== 'string' || !OWNER_RE.test(actor) || actor === 'party') ctx.fail('INVALID', 'Say which member of the party should wear it.');
     if (!ownerKnown(ctx, actor)) ctx.fail('REFUSED', `${actor} is not in the party, so nothing can be given to them.`);
+    const ruled = equipByRules(ctx, inv, stack, def, { actor, payload, direct: false });
+    if (ruled) return ruled;
     const query = (name, args) => ctx.query(name, args);
     const who = ownerNameIn(ctx, actor);
     const able = canWear(query, def, actor, slotLimits(query), who);
@@ -808,7 +1085,7 @@ export function captureLoot(ctx, line, env) {
     const before = isPlainObject(inv.loot) && isPlainObject(inv.loot[sid]) ? inv.loot[sid] : null;
     const items = before ? clone(lootItems(before) ?? []) : [];
     const notes = [];
-    const currency = currencyOf(ctx.settings());
+    const currency = currencyIn(ctx);
     // New definitions are worked out on a copy (their value is what the story limits need); the real
     // ones are made only for what the reader takes.
     const scratch = { ...inv, defs: { ...inv.defs }, aliases: { ...inv.aliases } };
@@ -850,7 +1127,7 @@ export function captureLoot(ctx, line, env) {
         let def;
         try {
             let created;
-            ({ def, created } = defineByName(ctx, scratch, name, env, { owner: 'party' }));
+            ({ def, created } = defineByName(ctx, scratch, name, env, { owner: 'party' }, false));
             if (items.some(item => aliasKey(item.name) === aliasKey(def.name) || resolveDef(scratch, item.name).id === def.id)) { notes.push(`${def.name} is offered once.`); continue; }
             held = storyItems(ctx, inv, def, qty, created, false, false);
         } catch (error) {
@@ -900,8 +1177,16 @@ function lootTake(ctx, payload, env) {
         const item = things[at];
         if (item.coin !== undefined) { coin += item.coin; continue; }
         if (owned(inv, item.name)) { skipped.push(item.name); continue; }
-        const { def } = defineByName(ctx, inv, item.name, env, { owner: 'party' });
-        wanted.push({ def, qty: item.qty });
+        const { def, created } = defineByName(ctx, inv, item.name, env, { owner: 'party' });
+        wanted.push({ def, qty: item.qty, created });
+    }
+    // The offer was held to the goods limit with the definition Story Block would make; a ready rules module
+    // may register another (a higher value), so what is made now is held to the same limit again. (Alone
+    // nothing is checked twice: the definition is the one the offer was priced with.)
+    const worth = wanted.filter(entry => entry.created).reduce((sum, entry) => sum + (isCount(entry.def.value, 1) ? entry.def.value : 0) * entry.qty, 0);
+    const limit = STORY_WORTH_TIMES * storyCoinBudget(ctx);
+    if (worth > limit && askRules(ctx, 'rules.item', { def: wanted[0].def.id }).found) {
+        ctx.fail('REFUSED', `What was made of this loot is worth ${formatAmount(worth, currencyIn(ctx))}; one reply's story may give goods worth at most ${formatAmount(limit, currencyIn(ctx))}.`);
     }
     if (!wanted.length && !coin) ctx.fail('REFUSED', `${joinNames(skipped)} ${skipped.length === 1 ? 'is' : 'are'} already carried.`);
     if (wanted.length) readerCarry(ctx, wanted.map(entry => ({ defId: entry.def.id, qty: entry.qty })), 'party');
@@ -909,7 +1194,7 @@ function lootTake(ctx, payload, env) {
     // def (a pack's item named in the `? loot` line): its worth was held to that reply's goods budget.
     const stacks = wanted.flatMap(entry => grantInto(ctx, inv, entry.def, entry.qty, 'party', '', false, true));
     // The money was held to its reply's coin budget when the loot was read: it is paid as held.
-    const currency = currencyOf(ctx.settings());
+    const currency = currencyIn(ctx);
     if (coin) receive(ctx, env, { owner: 'party', amount: coin, note: 'loot' });
     const where = offer.where ? ` (${offer.where})` : '';
     const left = skipped.length ? `; ${joinNames(skipped)} ${skipped.length === 1 ? 'is' : 'are'} already carried` : '';
@@ -919,6 +1204,58 @@ function lootTake(ctx, payload, env) {
         data: { sid, taken: wanted.map(entry => ({ def: entry.def.id, qty: entry.qty })), coin, skipped, stacks },
         narrate: told(ctx),
     };
+}
+
+// ---------- item definitions for a rules module (RB_CONTRACT §3, P01) ----------
+
+const DEF_KEYS = Object.freeze(['id', 'name', 'kind', 'rarity', 'value', 'stack', 'slot', 'stats', 'effect', 'tags', 'note', 'carry']);
+// The most definitions one `inventory.definitions` call may ask for by ID.
+export const DEFINITIONS_MAX_IDS = 1000;
+
+/** Whether a value is plain JSON data (no undefined, no non-finite number, no class instance). */
+function plainData(value, depth = 0) {
+    if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
+    if (typeof value === 'number') return Number.isFinite(value);
+    if (depth > 8) return false;
+    if (Array.isArray(value)) return value.every(item => plainData(item, depth + 1));
+    return isPlainObject(value) && Object.values(value).every(item => plainData(item, depth + 1));
+}
+
+// The def a registration offers, checked as Story Block's own shape (RPG meaning is the rules module's):
+// the closed ItemDef fields, the validator's rules for each, plain data, and a carry capacity only on a
+// pack's def (the story's and a module's items never have one). → error sentences, [] when fine.
+function offeredDefErrors(def) {
+    if (!isPlainObject(def)) return ['The definition is not a record.'];
+    const errors = Object.keys(def).filter(key => !DEF_KEYS.includes(key)).map(key => `The definition has a field "${key}" that an item definition does not.`);
+    if (typeof def.id !== 'string') return [...errors, 'The definition needs an ID.'];
+    errors.push(...defErrors(def.id, def));
+    if (def.carry !== undefined && packCarry(def.id, def.carry) === null) errors.push(`${def.name ?? def.id} has a carry capacity, which only a pack's item may have.`);
+    if (!plainData(def)) errors.push('The definition holds something that is not plain data.');
+    else if (Object.values(def.stats ?? {}).some(value => typeof value !== 'number')) errors.push(`${def.name ?? def.id} has stats that are not numbers.`);
+    return errors;
+}
+
+// `inventory.registerDefinition { write, def, hash }`: the rules module's registration of one item
+// definition, with no stack. `hash` is the contract's Hash of the normalized def, so the two sides agree
+// on the exact bytes. The same ID with the same bytes is a no-op (`created: false`); other bytes under an
+// ID in use are a CONFLICT and nothing changes. Only the rules module's own nested call may register.
+function registerDefinition(ctx, payload) {
+    if (ctx.caller !== RULES_MODULE) ctx.fail('REFUSED', 'Item definitions are registered by the rules module\'s own step, not from a button, a change line or another module.');
+    const extra = Object.keys(payload).filter(key => !['write', 'def', 'hash'].includes(key));
+    if (extra.length) ctx.fail('INVALID', `A definition registration takes write, def and hash, not ${extra.join(', ')}.`);
+    if (typeof payload.write !== 'string' || !RECORD_ID.test(payload.write)) ctx.fail('INVALID', 'A definition registration needs the ID of the write that asks for it.');
+    const errors = offeredDefErrors(payload.def);
+    if (errors.length) ctx.fail('INVALID', errors.join(' '));
+    const def = payload.def;
+    if (!isHash(payload.hash) || payload.hash !== hashOf(def)) ctx.fail('INVALID', `The hash does not match ${def.name}'s definition.`);
+    const inv = ctx.draft('inventory');
+    const known = Object.hasOwn(inv.defs, def.id) ? inv.defs[def.id] : null;
+    if (known) {
+        if (hashOf(known) !== payload.hash) ctx.fail('CONFLICT', `${known.name} (${def.id}) is already defined differently; a definition never changes once it exists.`);
+        return { summary: `${known.name} is already defined.`, data: { def: def.id, hash: payload.hash, created: false }, narrate: false };
+    }
+    inv.defs[def.id] = clone(def);
+    return { summary: `${def.name} defined.`, data: { def: def.id, hash: payload.hash, created: true }, narrate: false };
 }
 
 // ---------- commands ----------
@@ -1041,6 +1378,8 @@ export function createInventoryCommands(env) {
             const stack = stackIn(ctx, inv, payload.stack);
             const def = inv.defs[stack.def];
             if (def.kind !== 'equipment') ctx.fail('REFUSED', `${def.name} is not equipment; it cannot be worn or wielded.`);
+            const ruled = equipByRules(ctx, inv, stack, def, { actor: stack.owner, payload, direct: true });
+            if (ruled) return ruled;
             const slot = payload.slot ?? def.slot;
             if (!nonBlank(slot)) ctx.fail('REFUSED', `${def.name} has no slot to be worn in.`);
             const where = slot.trim();
@@ -1117,6 +1456,7 @@ export function createInventoryCommands(env) {
         // (a shop's trade.buy pays; a reward's quest.finish receives).
         'wallet.pay'(ctx, payload = {}) {
             byModule(ctx, 'Money cannot be paid from a button on its own; it is paid by the story or by another module\'s action.');
+            rulesMoneyOk(ctx);
             return pay(ctx, env, {
                 owner: ownerArg(ctx, payload.owner),
                 amount: count(ctx, payload.amount, undefined, 'amount'),
@@ -1133,6 +1473,7 @@ export function createInventoryCommands(env) {
         // budget. Without the flag, a module's payout is not counted.
         'wallet.receive'(ctx, payload = {}) {
             byModule(ctx, 'Money cannot be handed out from a button; it comes from the story or from another module\'s action.');
+            rulesMoneyOk(ctx);
             if (payload.story !== undefined && typeof payload.story !== 'boolean') ctx.fail('INVALID', 'story must be true or false.');
             const args = {
                 owner: receiverArg(ctx, payload.owner),
@@ -1142,6 +1483,8 @@ export function createInventoryCommands(env) {
             return payload.story === true && ctx.caller ? receiveStory(ctx, env, args, undefined, true) : receive(ctx, env, args);
         },
 
+        // { write, def, hash }: the rules module registers one item definition, no stack (RB_CONTRACT §3).
+        'inventory.registerDefinition': (ctx, payload = {}) => registerDefinition(ctx, payload),
         // { stack, actor }: move a piece to a member and put it on, in one step (MODULES §F99).
         'inventory.equipOn': (ctx, payload = {}) => equipOn(ctx, payload),
         // { stack, amount }: gear condition down / up, for another module's rules only (ctx.caller).
@@ -1223,15 +1566,27 @@ export function scaledDefault(amount, scale = 1) {
     return Math.max(1, Math.round(amount * (scaleIn(scale) ?? 1)));
 }
 
-// `ctx` needs settings() and query(); a query passes its own (createInventoryQueries).
+// The player character's level (`party.pc`), 1 without a party module.
+function pcLevel(ctx) {
+    try {
+        const pc = ctx.query('party.pc');
+        if (Number.isSafeInteger(pc?.level) && pc.level > 0) return pc.level;
+    } catch { /* no party module: level 1 */ }
+    return 1;
+}
+
+// The caps a ready rules module puts on a reply's story money (`rules.moneyPolicy`, money.js moneyCaps).
+const policyCaps = ctx => moneyCaps((name, args) => ctx.query(name, args), pcLevel(ctx));
+
+// `ctx` needs settings() and query(); a query passes its own (createInventoryQueries). The reader's own
+// number wins; then a ready rules module's `storyCreditCap` for this level; then what the installed modules
+// and packs say, and last the level fallback (all of which stand alone, as they always did).
 function storyCoinBudget(ctx) {
     const set = Number(ctx.settings()?.storyCoinPerReply);
     if (Number.isSafeInteger(set) && set > 0) return set;
-    let level = 1;
-    try {
-        const pc = ctx.query('party.pc');
-        if (Number.isSafeInteger(pc?.level) && pc.level > 0) level = pc.level;
-    } catch { /* no party module: level 1 */ }
+    const level = pcLevel(ctx);
+    const credit = moneyCaps((name, args) => ctx.query(name, args), level).credit;
+    if (credit !== null) return credit;
     const topFor = ranks => {
         const rank = Array.isArray(ranks) ? ranks.find(r => Array.isArray(r?.levels) && level >= r.levels[0] && level <= r.levels[1]) : null;
         const top = rank?.reward?.[1];
@@ -1281,6 +1636,8 @@ function tallyOf(ctx, inv, vouched = false) {
     const tally = { id, coin: tallied(stored?.coin), worth: tallied(stored?.worth), made: tallied(stored?.made), items: {}, ...(stored?.notable === true ? { notable: true } : {}) };
     // Of `coin`, what modules' vouched payouts gave (quest rewards), kept only once there is some.
     if (tallied(stored?.vouched)) tally.vouched = tallied(stored.vouched);
+    // Money the reply's lines took (`- coin`), kept only once there is some (a rules module's debit cap).
+    if (tallied(stored?.debit)) tally.debit = tallied(stored.debit);
     for (const [def, n] of Object.entries(isPlainObject(stored?.items) ? stored.items : {})) if (isCount(n, 0)) tally.items[def] = n;
     return tally;
 }
@@ -1338,6 +1695,23 @@ function storyCoin(ctx, inv, amount, currency, vouched = false) {
     };
 }
 
+// A story line's payment (`- coin`), held to the reply's debit cap while a ready rules module gives one
+// (`storyDebitCap`): { amount, problem }. Without a cap nothing is counted and the amount is as written.
+function storyDebit(ctx, inv, amount, currency) {
+    const cap = policyCaps(ctx).debit;
+    const tally = cap === null ? null : tallyOf(ctx, inv);
+    if (!tally) return { amount, problem: null };
+    const left = Math.max(0, cap - (tally.debit ?? 0));
+    if (!left) ctx.fail('REFUSED', `This reply has already taken all the money one reply may take (${formatAmount(cap, currency)}); the rest was not paid.`);
+    const paid = Math.min(amount, left);
+    tally.debit = (tally.debit ?? 0) + paid;
+    keepTally(inv, tally);
+    return {
+        amount: paid,
+        problem: paid < amount ? `${formatAmount(amount, currency)} was written as paid, but one reply may take at most ${formatAmount(cap, currency)}; ${formatAmount(paid, currency)} was paid.` : null,
+    };
+}
+
 // `qty` of a def held to what this reply may still give (of that item, in worth, and, when the def is
 // new, in kinds): { qty, problem, notable }. Refused when nothing may be given. Only a `+ item` line
 // (not `more`, a raised count) may be the reply's notable item.
@@ -1356,7 +1730,7 @@ function storyItems(ctx, inv, def, qty, created = false, more = false, notableOk
     const value = isCount(def.value, 1) ? def.value : 0;
     let notable = false;
     if (value) {
-        const currency = currencyOf(ctx.settings());
+        const currency = currencyIn(ctx);
         const cap = STORY_WORTH_TIMES * storyCoinBudget(ctx);
         const fits = Math.floor(Math.max(0, cap - tally.worth) / value);
         const gift = STORY_NOTABLE_TIMES * cap;
@@ -1474,7 +1848,7 @@ export function captureItem(ctx, line, env) {
     const text = String(line.text ?? '').trim();
     // An "item" named as money (the currency, a coin, "Silver Coins", "3 silver coins") goes to the
     // wallet, as the coin and loot lines read the same words (B-a1-7).
-    const currency = currencyOf(ctx.settings());
+    const currency = currencyIn(ctx);
     if (isCurrencyName(name, currency) || countedMoney(name, currency)) return itemAsCoin(ctx, line, env, currency);
     if (line.op === '+') {
         const qty = lineQty(ctx, line, 1);
@@ -1531,8 +1905,12 @@ export function captureItem(ctx, line, env) {
             const old = def.name;
             inv.aliases[aliasKey(old)] ??= def.id;
             inv.aliases[key] = def.id;
-            def.name = next;
-            changes.push(`${old} is now called ${next}`);
+            // A definition a ready rules module froze keeps its bytes: the new name is only another name for it.
+            if (frozenByRules(ctx, def)) changes.push(`${old} is also called ${next}`);
+            else {
+                def.name = next;
+                changes.push(`${old} is now called ${next}`);
+            }
         }
         // With a wear label the text says how it happened, not a new note.
         const note = labelOf(line, 'note') ?? (worn === null ? text || null : null);
@@ -1589,14 +1967,21 @@ function itemAsCoin(ctx, line, env, currency) {
     const note = who ? `${line.op === '+' ? 'from' : 'to'} ${trimText(who, 80)}` : '';
     return line.op === '+'
         ? receiveStory(ctx, env, { owner: 'party', amount, note }, currency)
-        : pay(ctx, env, { owner: 'party', amount, note });
+        : payStory(ctx, env, { owner: 'party', amount, note }, currency);
 }
 
 // A story line's money, held to the reply's budget (storyCoin); `vouched` for a module's payout
 // that the story alone vouched for (wallet.receive { story: true }).
-function receiveStory(ctx, env, { owner, amount, note }, currency = currencyOf(ctx.settings()), vouched = false) {
+function receiveStory(ctx, env, { owner, amount, note }, currency = currencyIn(ctx), vouched = false) {
     const held = storyCoin(ctx, ctx.draft('inventory'), amount, currency, vouched);
     const out = receive(ctx, env, { owner, amount: held.amount, note });
+    return held.problem ? { ...out, problem: held.problem } : out;
+}
+
+// A story line's payment, held to the reply's debit cap (storyDebit).
+function payStory(ctx, env, { owner, amount, note }, currency = currencyIn(ctx)) {
+    const held = storyDebit(ctx, ctx.draft('inventory'), amount, currency);
+    const out = pay(ctx, env, { owner, amount: held.amount, note });
     return held.problem ? { ...out, problem: held.problem } : out;
 }
 
@@ -1607,13 +1992,13 @@ export function captureCoin(ctx, line, env) {
         ctx.fail('INVALID', `"${line?.op} coin" is not a change the wallet understands; use + coin or - coin.`);
     }
     // With coins, "3 silver" is read in the smallest unit here, before the reply's budget holds it.
-    const parsed = parseAmount(written, currencyOf(ctx.settings()));
+    const parsed = parseAmount(written, currencyIn(ctx));
     if (parsed.error) ctx.fail('INVALID', parsed.error);
     const who = labelOf(line, line.op === '+' ? 'from' : 'to');
     const note = who ? `${line.op === '+' ? 'from' : 'to'} ${trimText(who, 80)}` : '';
     return line.op === '+'
         ? receiveStory(ctx, env, { owner: 'party', amount: parsed.amount, note })
-        : pay(ctx, env, { owner: 'party', amount: parsed.amount, note });
+        : payStory(ctx, env, { owner: 'party', amount: parsed.amount, note });
 }
 
 // ---------- queries (read-only, plain copies) ----------
@@ -1761,6 +2146,18 @@ export function encumbranceTail(found) {
     return [`Encumbered (carrying more than they can): ${who}; ${found.stats.join(' and ')} checks ${found.penalty} until something is put down.`];
 }
 
+/** `inventory.definitions`' answer from an inventory slice (see the query). */
+export function definitionsOf(inventory, args) {
+    if (args !== undefined && args !== null && !isPlainObject(args)) return [];
+    const ids = args?.ids;
+    const defs = isPlainObject(inventory?.defs) ? inventory.defs : {};
+    let list;
+    if (ids === undefined || ids === null) list = Object.keys(defs);
+    else if (!Array.isArray(ids) || ids.length > DEFINITIONS_MAX_IDS || ids.some(id => typeof id !== 'string' || !DEF_ID.test(id))) return [];
+    else list = [...new Set(ids)].filter(id => Object.hasOwn(defs, id));
+    return list.sort().filter(id => isPlainObject(defs[id])).map(id => clone(defs[id]));
+}
+
 /**
  * The inventory queries; `env.settings()` gives the currency for `inventory.currency` and the reader's
  * money scale, `env.economy()` the enabled pack's ({ scale } or null) for `inventory.economy`.
@@ -1773,9 +2170,16 @@ export const createInventoryQueries = env => ({
         return economyOf(env.settings(), pack);
     },
     // { name, plural, short }: the chat's one currency (MODULES.md F1); name singular ("mark").
-    'inventory.currency': () => currencyOf(env.settings()),
+    // A ready rules module's validated currency when it gives one (`purse.currency`), else the reader's,
+    // the pack's or gold: the wallet is the same whole number of the smallest unit either way.
+    'inventory.currency': (state, args, tools) => resolveCurrency(env.settings(), typeof tools?.query === 'function' ? (name, more) => tools.query(name, more) : null),
     // Each row's `carry` (the capacity the thing adds, PACKS.md "Carry capacity") is the carry module's
     // (`items.carry` → bonuses by stack: a pack's `carry` or the reader's own) when one answers, else the def's.
+    // [def copies], ID-sorted: every definition the inventory holds (default) or those of `ids` that it
+    // has; unknown IDs are left out, malformed arguments give []. It reads the definitions as the asking
+    // transaction has them (drafts included), makes nothing and does not depend on a pack being installed:
+    // a pack's item registered by the rules module stays here after the pack is removed.
+    'inventory.definitions': (state, args) => definitionsOf(state?.domains?.inventory, args),
     'inventory.items': (state, args = {}, tools) => listItems(state?.domains?.inventory, args?.owner ?? null, carryBonuses(tools)),
     // { budget, paid, left, vouched }: the story money (`+ coin` lines and modules' `wallet.receive { story:
     // true }`) the current reply may give, has given and has left (RX-E-2); `vouched` is the part of

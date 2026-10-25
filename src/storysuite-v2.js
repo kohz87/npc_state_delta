@@ -39,6 +39,7 @@ import { normalizeLimits, presetCatalog, presetIds } from './npc-meters-presets.
 import { METERS_CARD_ID, metersCardScreen } from './npc-meters-screen.js';
 import { DOSSIER_FIELDS } from './fields/registry.js';
 import { escapeHtml } from './util/html.js';
+import { createParticipant, fileVault } from './storysuite-participant/index.js';
 
 export const MODULE_ID = 'npc-state-delta';
 export const MODULE_NAME = 'NPC State Delta';
@@ -71,7 +72,7 @@ export const WORLD_FEATURE = 'story-director.world';
  */
 export const PAGE_API = 'NPCStateDeltaCast';
 export const PAGE_SLOT_CLASS = 'npc-state-delta-v2-slot';
-export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.socialModifier']);
+export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.socialModifier', 'npc.identity']);
 export const COMMAND_NAMES = Object.freeze(['npc.adjust', 'npc.set', 'npc.refresh', 'npc.milestone', 'npc.tick']);
 // The replies after which Delta takes its per-reply step (npc.tick): a new reply or a new swipe of
 // one, never a Continue, a Re-read or late change lines (the same reply again).
@@ -92,6 +93,9 @@ export const HOST_RETRY_MS = 250;
 export const HOST_RETRY_ATTEMPTS = 40;
 export const HOST_ALIVE_MS = 5000;
 export const SECTION_WATCH_MS = 1000;
+// How long a scan, a pass or a generation waits for the host's head-selection barrier, and how often it looks.
+export const HEAD_SETTLE_MS = 20000;
+export const HEAD_SETTLE_POLL_MS = 50;
 
 // What npc.dossier returns: the dossier's own fields, as the dossier shows them (DOSSIER_FIELDS, from
 // the field registry). Book-keeping (evidence, change ledgers, portrait prompts and images,
@@ -289,6 +293,13 @@ export function createStorySuiteV2Adapter({
         .then(([tabs, ui]) => ({ rowNodes: tabs.dossierRowNodes, project: ui.dossierIndexProjection, filter: ui.filterDossierIndex })),
     // Where the page API (PAGE_API) goes; null for none.
     page = globalThis,
+    // Where the timeline participant keeps its checkpoints (storysuite-participant/vault.js); SillyTavern's user files by default.
+    participantVault = null,
+    // The participant's timings (debounceMs, retryMs, idleMs; participant.js), for tests.
+    participantOptions = {},
+    // How long Delta waits for the host's head-selection barrier to come down, and how often it looks (messageGate.settled).
+    settleMs = HEAD_SETTLE_MS,
+    settlePollMs = HEAD_SETTLE_POLL_MS,
 } = {}) {
     let started = false;
     let pollTimer = null;
@@ -1167,6 +1178,64 @@ export function createStorySuiteV2Adapter({
 
     // ---- the module definition ----
 
+    // The timeline participant (Story Block docs/v2/TIMELINE.md, contract §8): Delta's native state takes part in save points and restores, and
+    // `npc.identity` names a person by an np_ id. It needs Delta's runtime for the open chat's key, its state and an absolute install. Nothing of it
+    // runs for a chat until the chat uses the timeline or asks `npc.identity` (participant.js `started`): registering, opening a chat, a reply or a
+    // scan hydrate nothing, write nothing and publish nothing.
+    //
+    // Which of the chat's messages the story stands on: Story Block's one active-history filter, `sdk.timeline.history()`, one entry per message of the
+    // chat as it stands when asked (`active: false` for a faded one). Delta asks before it builds any prompt from the chat (src/transcript.js), and
+    // after a restore the host hides the faded replies with SillyTavern's own flag as well. Never cached here: a delete or a swipe moves the indexes.
+    const activeMessages = async () => {
+        try {
+            const history = await sdkRef?.timeline?.history?.();
+            return history?.ok === true && Array.isArray(history.messages) ? history.messages.map(message => message?.active !== false) : null;
+        } catch { return null; }
+    };
+    // Story Block's head-selection barrier (docs/v2/TIMELINE.md, HISTORY.md): after a delete, a swipe or a retraction the host raises its barrier and
+    // asks every participant to stand on the checkpoint of the selected head (`prepare`, `activate`: the callbacks of the participant below), and lowers
+    // it only when they do. Nothing here selects a head. `head()` is the host's own look at it (it raises the barrier when a selection is needed and
+    // answers RESTORE_PENDING while it is up), so Delta asks it before it reads or writes the dossiers and waits for it. true once the barrier is
+    // down (or when the host has no such barrier), false if it is still up after `settleMs`.
+    const headSettled = async () => {
+        const head = sdkRef?.timeline?.head;
+        if (typeof head !== 'function') return true;
+        const until = Date.now() + settleMs;
+        for (;;) {
+            let answer = null;
+            try { answer = await sdkRef.timeline.head({}); } catch { return true; }
+            if (answer?.ok !== false || answer.code !== 'RESTORE_PENDING') return true;
+            if (Date.now() >= until) return false;
+            await new Promise(resolve => { const timer = setTimeout(resolve, settlePollMs); timer?.unref?.(); });
+        }
+    };
+    const messageGate = Object.freeze({ refresh: activeMessages, settled: headSettled });
+    let offNativeChange = null;
+    const timeline = createParticipant({
+        port: {
+            chatKey: () => String(runtime()?.chatKey?.() ?? ''),
+            readState: () => runtime()?.getState?.() ?? { npcs: [] },
+            started: () => runtime()?.timelineStarted?.() === true,
+            installState: state => runtime().installState(state),
+            writeTimeline: block => runtime().writeTimeline(block),
+            busy: () => runtime()?.scanActive?.() === true,
+            idle: ms => (typeof runtime()?.scanIdle === 'function' ? runtime().scanIdle(ms) : Promise.resolve(true)),
+            warn: text => warn(text),
+        },
+        vault: participantVault ?? fileVault({ headers: () => runtime()?.requestHeaders?.() ?? {} }),
+        ...participantOptions,
+    });
+    function startTimeline() {
+        const api = runtime();
+        offNativeChange?.();
+        offNativeChange = typeof api?.onNativeChange === 'function' ? api.onNativeChange(() => timeline.noteChange()) : null;
+        try { api?.useMessageGate?.(messageGate); } catch { /* an older runtime */ }
+    }
+    function stopTimeline() {
+        try { offNativeChange?.(); } catch { /* gone */ }
+        offNativeChange = null;
+        try { runtime()?.useMessageGate?.(null); } catch { /* gone */ }
+    }
     const definition = Object.freeze({
         id: MODULE_ID,
         name: MODULE_NAME,
@@ -1182,7 +1251,8 @@ export function createStorySuiteV2Adapter({
             ...part.commands,
             'npc.milestone': Object.freeze({ handler: part.commands['npc.milestone'], feature: FEATURE_STAGES }),
         }),
-        queries,
+        queries: Object.freeze({ ...queries, ...timeline.queries }),
+        participant: timeline.participant,
         capture: {
             kinds: {
                 [NPC_KIND]: { grammar: part.kinds[NPC_KIND].grammar },
@@ -1294,6 +1364,7 @@ export function createStorySuiteV2Adapter({
         listen();
         syncDrawer();
         announceHosted(true);
+        startTimeline();
         aliveTimer = timers.setInterval?.(check, aliveMs) ?? null;
         aliveTimer?.unref?.();
         return true;
@@ -1340,6 +1411,7 @@ export function createStorySuiteV2Adapter({
         aliveTimer = null;
         const was = hosted;
         hosted = false;
+        stopTimeline();
         try { offTurn?.(); } catch { /* the host is gone */ }
         offTurn = null;
         hostRef = null;

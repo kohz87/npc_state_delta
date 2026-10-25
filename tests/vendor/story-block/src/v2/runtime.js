@@ -30,11 +30,12 @@ import { applyStart, createPacksPart } from './packs/index.js';
 import { MODEL_CALL_ERRORS, createCallQueue, createModelCalls, createOwnCalls, profileName, stModelCall } from './model-call.js';
 import { carryRecord } from './persist.js';
 import { createRegistry } from './registry.js';
-import { MAX_CHANGE_LINES, createEvents, createSdk, createSettings, newId } from './sdk.js';
+import { MAX_CHANGE_LINES, announceModules, createEvents, createSdk, createSettings, newId, runQuery } from './sdk.js';
 import { displayLines } from './extras.js';
 import { DEFAULT_HIDDEN } from './view/screens.js';
 import { SCENE_SCREEN_ID } from './screens/scene.js';
 import { createRewind } from './rewind.js';
+import { createTimeline, withRuleOverlay } from './timeline/index.js';
 import { createStore as realStore } from './store.js';
 import { createTurn, substituteNames } from './turn.js';
 
@@ -148,6 +149,8 @@ export function storeSaving({ ctx, live = () => ctx, fetch = null, onSaveError =
             } catch { return false; }
         },
         chat: () => ctx.chat,
+        // The chat's metadata (SillyTavern's, saved with the chat file): the store keeps the source-map archive there.
+        metadata: () => context().chatMetadata ?? null,
         chatId: () => (typeof ctx.getCurrentChatId === 'function' ? ctx.getCurrentChatId() : ctx.chatId),
         place: () => file.where(),
         save: (change, { keepalive = false, signal = null, stamp: wanted = false } = {}) => {
@@ -342,14 +345,17 @@ export function saveOnUnload(store, page, { fits = () => true } = {}) {
  * onBlocked?, onSaveError?, onRegister?(def), branch?(index) (src/v2/rewind.js stBranch), callModel?(prompt, { maxTokens,
  * profile, system, signal }) → text (the assist helpers' and sdk.callModel's model call), modelTimeoutMs? (sdk.callModel's default limit),
  * live?() (SillyTavern's live getContext(); default: globalThis.SillyTavern's, else ctx), fetch?, page? (for
- * beforeunload; default: globalThis.window) }) → { registry, settings, features, store, bus, events, sdk, turn,
- * markReady, initial, packs, setDialog, ownCalls }. `ownCalls` marks Story Suite's own model calls on the chat's connection (model-call.js). `features` is createFeatureStore() (the reader's choices). `ctx` is SillyTavern's context (or the testkit's fake); `packs` a
+ * beforeunload; default: globalThis.window), timelineFaults? ({ at(phase) }, a test seam: called at every phase of a save
+ * point, a restore and a native change) }) → { registry, settings, features, store, bus, events, sdk, turn,
+ * markReady, initial, packs, setDialog, ownCalls, timeline }. `timeline` is the host's side of sdk.timeline
+ * (src/v2/timeline/, docs/v2/TIMELINE.md): `host` (prepare, activate, abort, recover, nativeEvent, registerParticipant, with the
+ * host's authority bound) and `capability`; it is never given to a module. `ownCalls` marks Story Suite's own model calls on the chat's connection (model-call.js). `features` is createFeatureStore() (the reader's choices). `ctx` is SillyTavern's context (or the testkit's fake); `packs` a
  * createPacksPart() result (default: one over ctx.extensionSettings).
  */
 export function createRuntime({
     ctx, packs = null, core = true, modules = [], createStore = realStore, createCommandBus = realBus,
     notify, onBlocked = null, onSaveError = null, onRegister = null, branch = null, callModel = null, modelTimeoutMs = undefined,
-    live = () => globalThis.SillyTavern?.getContext?.() ?? ctx, fetch = null, page = globalThis.window ?? null,
+    live = () => globalThis.SillyTavern?.getContext?.() ?? ctx, fetch = null, page = globalThis.window ?? null, timelineFaults = null,
 } = {}) {
     let features = null;
     let events = null;
@@ -362,9 +368,14 @@ export function createRuntime({
     });
     const packPart = packs ?? packsFor(ctx);
     const base = createSettings({ root: () => ctx.extensionSettings, registry, save: () => ctx.saveSettingsDebounced?.() });
-    const settings = withPackCurrency(base, () => packPart.startState().currency);
+    // The chat's rule settings (a restore sets them, docs/v2/TIMELINE.md) are read in preference to the global ones.
+    const settings = withRuleOverlay(withPackCurrency(base, () => packPart.startState().currency), {
+        registry, state: () => { try { return store.head(); } catch { return null; } },
+    });
     let sdk = null;
     let bus = null;
+    let timeline = null;
+    let chatterReaders = null;   // the timeline's readers of earlier messages for the Inner chatter tail line and its two queries
     let assistCall = async () => { throw new Error('Story Block is not ready.'); };
     let turn = null;
     // What a reply's display lines (Choices, Inner chatter; extras.js) show, read from its text with the
@@ -388,8 +399,9 @@ export function createRuntime({
             // The chatter the reader may send back to the story (its setting): the replies and how to read one.
             // The head reply's index too, for `scene.moved` (the store is made below; asked only later).
             // Whether Story Director's World screen is there (it shows the chatter; else Scene does: `scene.chatter`).
-            extras: { chat: () => ctx.chat, display, headIndex: () => store.headIndex(), worldShown: () => registry.screens().some(screen => screen.id === DEFAULT_HIDDEN[SCENE_SCREEN_ID]) },
+            extras: { promptChat: () => chatterReaders.prompt.messages(ctx.chat), headChat: () => chatterReaders.head.messages(ctx.chat), sceneChat: () => chatterReaders.scene.messages(ctx.chat), display, headIndex: () => store.headIndex(), proofs: () => store.proofs(), worldShown: () => registry.screens().some(screen => screen.id === DEFAULT_HIDDEN[SCENE_SCREEN_ID]) },
             version: VERSION,
+            timeline: () => timeline,
             packs: packPart,
             // Due events are the host's own system cues: straight to the bus (the public sdk only runs
             // the reader's 'ui' actions), with the same 'committed' event the sdk sends.
@@ -444,6 +456,23 @@ export function createRuntime({
     saveOnUnload(store, page, { fits: saving.keepaliveFits });
     bus = createCommandBus({ store, registry, settings });
     events = createEvents();
+    // The timeline (docs/v2/TIMELINE.md): save points, restores, participants. Its archive is in the open chat's metadata.
+    const chatMetadata = () => {
+        try { return (live() ?? ctx)?.chatMetadata ?? null; } catch { return ctx?.chatMetadata ?? null; }
+    };
+    timeline = createTimeline({
+        store, registry, metadata: chatMetadata, chat: () => ctx.chat, settings: id => settings(id), faults: timelineFaults,
+        // a message a restore hid or showed again is drawn again; a message that could not be hidden is a Problem
+        redraw: (index, message) => { try { ctx.updateMessageBlock?.(index, message); } catch { /* drawn from the saved chat later */ } },
+        problem: entry => turn?.report(entry),
+        query: (name, args, state) => runQuery(registry, state, name, args),
+        barrier: (state, reason) => {
+            registry.setRestore(state, reason);
+            announceModules(registry, events);
+        },
+        announce: receipt => events.emit('committed', { receipt }),
+    });
+    chatterReaders = { prompt: timeline.active('prompt.chatter'), head: timeline.active('query.chatter.head'), scene: timeline.active('query.scene.chatter') };
     const rewind = createRewind({ ctx, store, events, ...(branch ? { branch } : {}) });
     let dialogOpener = null;
     let dialogCurrent = null;
@@ -467,14 +496,14 @@ export function createRuntime({
     };
     const made = createSdk({ store, bus, registry, settings, events, chat: () => ctx.chat, onRegister: def => onRegister?.(def), rewind,
         substitute: text => substituteNames(text, ctx), dialog: (screenId, opts) => dialogOpener?.(screenId, opts) ?? null,
-        dialogCurrent: () => dialogCurrent?.() ?? null, reread: index => turn?.reread(index), callModel: modelCalls.callModel });
+        dialogCurrent: () => dialogCurrent?.() ?? null, reread: index => turn?.reread(index), callModel: modelCalls.callModel, timeline });
     sdk = made.sdk;
     const initial = () => initialWithStart(registry);
-    turn = createTurn({ ctx, live, store, bus, registry, settings, events, onBlocked, initial, ownPrompt: eventData => ownCalls.owns(eventData), ...(notify ? { notify } : {}) });
+    turn = createTurn({ ctx, live, store, bus, timeline, registry, settings, events, onBlocked, initial, ownPrompt: eventData => ownCalls.owns(eventData), ...(notify ? { notify } : {}) });
     // The UI (ui-host.js) plugs its dialog mount in here, for sdk.dialog.open (and .current).
     const setDialog = (fn, current = null) => {
         dialogOpener = typeof fn === 'function' ? fn : null;
         dialogCurrent = typeof current === 'function' ? current : null;
     };
-    return { registry, settings, features, store, bus, events, sdk, turn, markReady: made.markReady, initial, packs: packPart, setDialog, display, ownCalls, callQueue };
+    return { registry, settings, features, store, bus, events, sdk, turn, markReady: made.markReady, initial, packs: packPart, setDialog, display, ownCalls, callQueue, timeline };
 }

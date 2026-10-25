@@ -196,7 +196,8 @@ export function createFeatureStore({ root, registry, save = () => {}, legacy = C
             const before = registry.featureOn(id);
             choices()[id] = Boolean(on);
             save();
-            if (before !== Boolean(on)) tell(id);
+            // Told only when it is on or off now as it was not before: a feature of a module held back stays off.
+            if (before !== Boolean(on) && before !== registry.featureOn(id)) tell(id);
             return Boolean(on);
         },
         /** Every declared feature with its state: [{ id, moduleId, moduleName, label, describe, default, prompt, needs, available, why, on }]. */

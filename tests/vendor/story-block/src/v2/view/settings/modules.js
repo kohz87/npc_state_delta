@@ -17,7 +17,7 @@
 // Built with createElement and textContent only: module names, versions and descriptions come from other extensions.
 
 import { FEATURE_TEXT, SUB_FOLD, VERSIONS_FOLD, featuresFoldOf, groupFields } from '../../host-ui.js';
-import { compatReport, renderCompat } from '../../compat.js';
+import { LIFE_TEXT, compatReport, renderCompat } from '../../compat.js';
 import { featureOf } from '../../features.js';
 import { fill } from '../../strings.js';
 import { cutAt } from '../../../text.js';
@@ -113,6 +113,18 @@ export function createModuleCard(env, mod, sdef = null, { placed = null, collaps
     }
     const entry = { id: mod.id, mod, panelTitle: '', card, form: null, panel: null, panelBox: null, link: null, folds: [], groups: [], description: clip(mod.description || KNOWN_DESCRIPTIONS[mod.id], CUT.description) };
     if (entry.description) card.body.appendChild(h(doc, 'p', 'ss-card-help ss-module-description', entry.description));
+    // Where the module stands when it is not running (dormant: what it waits for; a restore pending), read-only.
+    entry.status = h(doc, 'p', 'ss-card-help ss-module-status');
+    card.body.appendChild(entry.status);
+    entry.paintStatus = () => {
+        let life = null;
+        try { life = registry.lifecycle?.(mod.id) ?? null; } catch { life = null; }
+        const quiet = !life || life.status === 'ready';
+        entry.status.hidden = quiet;
+        entry.status.dataset.status = quiet ? 'ready' : life.status;
+        entry.status.textContent = quiet ? '' : `${LIFE_TEXT[life.status] ?? life.status}${life.reason ? `: ${clip(life.reason, CUT.description)}` : ''}`;
+    };
+    entry.paintStatus();
     // The line to this module's features (their switches are on the Features page).
     entry.link = h(doc, 'button', 'ss-button ss-button-quiet ss-module-features');
     entry.link.type = 'button';
@@ -220,6 +232,7 @@ export function createModuleCard(env, mod, sdef = null, { placed = null, collaps
             return hit ? (byName ? Math.max(rows, 1) : rows) + folds.length + (panel ? 1 : 0) : 0;
         },
         refresh() {
+            entry.paintStatus();
             entry.paintLink();
             entry.panel?.();
             entry.form?.refresh();
@@ -281,7 +294,7 @@ export function modulesBody(pane, ctx) {
     versions.el.dataset.fold = VERSIONS_FOLD;
     versions.title.tabIndex = -1;
     function paintVersions() {
-        const report = compatReport({ hostVersion: registry.hostVersion?.() ?? '', modules: registry.modules(), refusals: registry.refusals?.() ?? [] });
+        const report = compatReport({ hostVersion: registry.hostVersion?.() ?? '', modules: registry.modules(), refusals: registry.refusals?.() ?? [], lifecycle: id => registry.lifecycle?.(id) ?? null });
         const hint = report.outOfStep ? fill(MODULES_TEXT.outOfStep, { n: report.outOfStep }) : MODULES_TEXT.inStep;
         // The hint sits in the head: rebuilt with the card's body.
         let note = versions.el.querySelector('.ss-section-hint');
