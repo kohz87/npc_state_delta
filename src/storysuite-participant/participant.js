@@ -102,6 +102,12 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         return run;
     };
 
+    /** `exclusive` for a native change's `prepare`: a failure is thrown, so the host tells the reason (it reads a failure envelope as a malformed answer). */
+    const preparing = fn => exclusive(fn).then(out => {
+        if (out?.ok === false) throw new Error(out.message);
+        return out;
+    });
+
     const save = () => vault.putIndex(session.lineage, session.index);
 
     /**
@@ -319,15 +325,23 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         attach: given => { handle = given; },
     };
 
-    /** Both checkpoints of a change, made durable: `before` is the one the story stands on, `after` the state in `state`. */
+    /**
+     * Both checkpoints of a change, made durable: `before` is the one the story stands on, `after` the state in `state`. The baseline is
+     * the checkpoint the story stands on: when its bytes are gone or are not the ones recorded, the change is refused (a Problem is told)
+     * and never published on a baseline made up from the new state, which would tell the story it stood where it did not.
+     */
     async function pairFor(state, head) {
         const s = await hydrate();
         if (!s) throw new Error('There is no open chat.');
         const base = s.index.base;
-        const kept = base ? await vault.get(base.checkpoint) : null;
-        const before = kept && hashJson(kept) === base.hash ? base : null;
+        const kept = await verified(base.checkpoint, base.hash);
+        if (!kept.ok) {
+            const text = `NPC State Delta cannot record a native change: the checkpoint the story stands on (${base.checkpoint}) is not usable (${kept.message}); the change was not published.`;
+            warn(text);
+            throw new Error(text);
+        }
         const after = await made({ state, cursor: head.cursor, headHash: head.headHash });
-        return { before: before ?? { checkpoint: after.id, hash: after.hash }, after };
+        return { before: base, after };
     }
     const shaped = built => ({ module, checkpoint: built.checkpoint ?? built.id, hash: built.hash, schema: PARTICIPANT_SCHEMA });
 
@@ -345,7 +359,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
             participant: module,
             source,
             expectedHead: head.headHash,
-            prepare: () => exclusive(async () => {
+            prepare: () => preparing(async () => {
                 const s = await hydrate();
                 if (!s) throw new Error('There is no open chat.');
                 const state = plain(port.readState());
@@ -384,7 +398,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
                 participant: module,
                 source,
                 expectedHead: head.headHash,
-                prepare: () => exclusive(async () => {
+                prepare: () => preparing(async () => {
                     const s = await hydrate();
                     if (!s) throw new Error('There is no open chat.');
                     const state = port.readState();
