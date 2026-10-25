@@ -17,6 +17,7 @@
 
 import { deriveId, hashJson, isHash, isPlainJson, isRecordId, sourceProblem } from '../replay.js';
 import { cutAt } from '../../text.js';
+import { createActiveHistory } from './active.js';
 import { createArchive } from './archive.js';
 import { GENESIS_EPOCH, HOST_DOMAIN, epochOf } from './gate.js';
 import { appendHostBlock, stateHash } from './host-block.js';
@@ -28,9 +29,11 @@ export const MANUAL_LIMIT = 10;
 const MINUTES_PER_DAY = 1440;
 const KINDS = Object.freeze(['initial', 'manual', 'day-start']);
 // The phases a journal entry ends in, by kind; any other is work to recover.
-const ENDS = Object.freeze({ make: ['committed', 'discarded', 'aborted'], restore: ['complete', 'aborted', 'retracted'], 'native-mutation': ['done', 'aborted'], 'native-event': ['done', 'aborted'] });
+const ENDS = Object.freeze({ make: ['committed', 'discarded', 'aborted'], restore: ['complete', 'aborted', 'retracted'], 'native-mutation': ['done', 'aborted'], 'native-event': ['done', 'aborted'], selection: ['complete'] });
 const settled = entry => (ENDS[entry.kind] ?? []).includes(entry.phase);
 const NAME_MAX = 80;
+// How many times a head is planned again, one pass after the other, before it is called moving (the barrier stays up then).
+const SELECTION_PASSES = 32;
 
 const textProblem = (value, max) => {
     if (typeof value !== 'string') return 'is not text';
@@ -49,14 +52,16 @@ const ordered = (a, b) => (a.target.rev - b.target.rev) || (a.target.op - b.targ
  * * `barrier(state, reason)`: raises or drops the host-wide restore barrier (registry.setRestore and the announcement);
  * * `announce(receipt)`: told of each block the host stores (the `committed` event);
  * * `query(name, args, state)`: a registered query over `state` (the clock, the atlas, the journal), or throws when there is none;
+ * * `problem(entry)`: told of a Problem the host reader should see (faded messages that could not be hidden); `redraw(index, message)`: told when a
+ *   message's hidden flag changed, so the page can draw it;
  * * `faults`: `{ at(phase) }`, awaited at every phase boundary (tests simulate a crash by throwing `crash()` there).
  */
-export function createTimeline({ store, registry, metadata, chat = () => [], barrier = () => {}, announce = null, query = null, settings = () => ({}), faults = null }) {
+export function createTimeline({ store, registry, metadata, chat = () => [], barrier = () => {}, announce = null, query = null, settings = () => ({}), faults = null, problem = null, redraw = null }) {
     // The chat the running operation began in (operations run one at a time): every write and every clean-up of it is bound to that
     // chat, and when another one is open it touches nothing there (`staleChat`, answered STALE).
     let scope = null;
     const archive = createArchive({ metadata, touch: () => store.touch?.(), bound: () => scope?.holder ?? null });
-    const participants = createParticipants();
+    const participants = createParticipants({ chat: () => archive.holder() });
     const capability = Object.freeze({ timeline: 'story-block' });
     const handles = new Map();
     const broken = new Map();   // module -> why its participant declaration was not registered
@@ -85,9 +90,14 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         settle();
         if (archive.holder() !== holder) return fail('STALE', 'Another chat was opened before this was done; nothing was changed in the chat that is open now.');
         scope = { holder };
-        try { return await fn(); } finally { scope = null; }
+        try {
+            const out = await fn();
+            await reconcile();
+            return out;
+        } finally { scope = null; }
     };
     const exclusive = fn => {
+        settle();
         const holder = archive.holder();
         bump(holder, 1);
         const run = busy.then(() => scoped(fn, holder), () => scoped(fn, holder));
@@ -142,18 +152,23 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         }
     };
     // What belongs to a chat that is not the open one is dropped: announcements owed, and a barrier raised for it (its own journal
-    // keeps what it was doing, and its `recover` raises the barrier again when that chat is opened).
+    // keeps what it was doing, and its `recover` raises the barrier again when that chat is opened). The open chat is asked every
+    // time whether its participants stand on the checkpoints of its selected head, whether or not an operation is running: a head
+    // change met meanwhile raises the barrier at once, and the operation ends by reconciling (`reconcile`).
     function settle() {
         const holder = archive.holder();
         owed = owed.filter(each => each.holder === holder);
         if (barrierOwner !== null && barrierOwner !== holder) {
             barrierOwner = null;
             barrierEarly = false;
-            barrier('idle', '');
+            lowerWhenSettled();   // (held on, without a moment of readiness, when the open chat has something of its own to finish)
         }
-        // A chat whose journal has work unfinished is barred from the moment it is open; its recovery follows when the queue gives it
-        // its turn (a make of another chat may be holding the line meanwhile).
-        if (holder && barrierOwner === null && pendingEntry() !== null) {
+        // The faded messages follow the story as it is now (read whole: with the barrier up the story is not, and the operation that holds it
+        // does this itself before it lowers it).
+        if (holder && registry.restore?.().state !== 'pending') syncHidden();
+        // A chat whose journal has work unfinished, or whose participants are off its selected head, is barred from the moment it is
+        // open; its recovery follows when the queue gives it its turn (a make of another chat may be holding the line meanwhile).
+        if (holder && barrierOwner === null && (pendingEntry() !== null || selectionNeeded())) {
             barrierOwner = holder;
             barrierEarly = true;
             barrier('pending', 'A restore is finishing; every part must agree before the story goes on.');
@@ -170,10 +185,50 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
     const owe = stored => { owed.push({ stored, holder: archive.holder(), id: stored.receipt.id }); return stored; };
     // The host's restore barrier, raised or dropped only for the chat the operation is in, and remembered as that chat's.
     const raise = reason => { here(); barrierOwner = archive.holder(); barrierEarly = false; barrier('pending', reason); };
-    const lower = () => { here(); barrierOwner = null; barrierEarly = false; barrier('idle', ''); };
+    // The one place the barrier comes down and the host is announced ready: nothing is outstanding in the journal (besides the change
+    // being settled) and the participants stand on the checkpoints the selected head names. Judged in the same synchronous step that
+    // lowers it, so no listener is told ready on a story whose native state has not caught up. → whether it came down.
+    function lowerWhenSettled(settling = null) {
+        if (pendingEntry(settling) !== null || selectionNeeded()) return false;
+        barrierOwner = null;
+        barrierEarly = false;
+        barrier('idle', '');
+        return true;
+    }
+    // Brings the participants to the selected head and lowers the barrier, in this order: the head's checkpoints are reconciled to a
+    // fixed point (each pass plans again from the head as it stands; a pass that still reports a change is followed by another), what
+    // was published is made durable, and the look that lowers the barrier is the last thing done, with nothing awaited after it.
+    // Bounded: a head that keeps moving leaves the barrier up for the next recovery. → { ok: true } when it came down, else why not.
+    async function release(settling = null) {
+        for (let pass = 0; pass < SELECTION_PASSES; pass += 1) {
+            here();
+            if (pendingEntry(settling) !== null) return fail('RESTORE_PENDING', 'Another change is outstanding in this chat; the barrier holds until it has settled.');
+            withWholePrefixes(syncHidden);
+            if (selectionNeeded()) {
+                const selected = await selectHead();
+                if (!selected.ok) return selected;
+                continue;
+            }
+            await durable();
+            if (lowerWhenSettled(settling)) return { ok: true };
+        }
+        return fail('FAILED', 'The selected head kept moving; the barrier remains held.');
+    }
+    // An operation that ends with the barrier raised for a selection (a head change it met while it ran) brings the participants to
+    // the selected head before the next one starts. A failure leaves the barrier up: a recovery finishes it. (A save that failed is not
+    // tried again here: the operation told its caller, and the retry or the recovery is the next try.)
+    async function reconcile() {
+        if (barrierOwner === null || barrierOwner !== archive.holder() || pendingEntry() !== null || !selectionNeeded()) return;
+        try { await release(); } catch (error) {
+            if (crashing(error)) throw error;
+            if (isStaleChat(error)) settle();
+        }
+    }
     const isHost = auth => auth === capability || auth?.capability === capability;
-    const pendingEntry = () => archive.entries().find(entry => entry.kind === 'restore' && ['committed', 'participants-pending', 'acked'].includes(entry.phase))
-        ?? archive.entries().find(entry => ['native-mutation', 'native-event'].includes(entry.kind) && entry.phase === 'prepared')
+    // A change that is outstanding: a restore committed and not complete, a native change prepared and not done (`ignore`: the one being settled).
+    const pendingEntry = (ignore = null) => archive.entries().find(entry => entry.id !== ignore && entry.kind === 'restore' && ['committed', 'participants-pending', 'acked'].includes(entry.phase))
+        ?? archive.entries().find(entry => entry.id !== ignore && entry.kind === 'selection' && entry.phase !== 'complete')
+        ?? archive.entries().find(entry => entry.id !== ignore && ['native-mutation', 'native-event'].includes(entry.kind) && entry.phase === 'prepared')
         ?? null;
     const pendingNow = () => {
         settle();
@@ -228,7 +283,9 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         if (pendingNow()) return fail('RESTORE_PENDING', 'A restore is in progress; the head is not settled until every part agrees.');
         const now = headNow();
         if (!now) return fail('NOT_FOUND', 'This chat has no story state yet.');
-        return { ok: true, headHash: now.headHash, cursor: structuredClone(now.cursor), epoch: now.epoch, prefixHash: now.prefixHash };
+        // `source`: the Source of the reply at the head ({ sid, swipeKey, evidence, ordinal }), what nativeMutation asks of a participant that reads the head
+        // through its handle (a module has no other way to name the reply a change of its own stands on).
+        return { ok: true, headHash: now.headHash, cursor: structuredClone(now.cursor), epoch: now.epoch, prefixHash: now.prefixHash, ...(isObject(now.boundary.source) ? { source: structuredClone(now.boundary.source) } : {}) };
     }
 
     // ---- list, status, history ---------------------------------------------------------------------------
@@ -243,38 +300,147 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
     }
 
     async function status() {
+        settle();
         const entries = archive.entries();
-        const damaged = entries.some(entry => !['make', 'restore', 'native-mutation', 'native-event'].includes(entry.kind));
+        const damaged = entries.some(entry => !['make', 'restore', 'native-mutation', 'native-event', 'selection'].includes(entry.kind));
         const pending = pendingEntry();
         const state = damaged ? 'failed' : pending || registry.restore?.().state === 'pending' ? 'pending' : 'idle';
         const out = [];
         for (const module of participants.modules()) {
-            const latest = archive.prefixes(module).at(-1);
-            const selected = latest?.[latest.selected];
+            const selected = archive.selection()[module];
             if (selected) out.push({ module, checkpoint: selected.checkpoint, hash: selected.hash, schema: selected.schema });
         }
         return { ok: true, state, return: pending?.kind === 'restore' ? pending.return : null, participants: out };
     }
 
+    // The one rule for which messages of the chat are on the active line: the faded interval of each return on the line of history,
+    // (target, restore], excludes the whole target reply when the cursor is inside it (op > 0), through the restoring reply,
+    // including intervening reader messages. A cursor at op 0 denotes the boundary at that carrier.
+    // → { messages, sids (the canonical ids of each carrier), faded (the intervals as returned), at (the Set of faded indexes) }.
+    function activeLine({ ids = false } = {}) {
+        const state = store.head();
+        const messages = typeof chat === 'function' ? chat() : [];
+        const returns = Object.values(isObject(state?.domains?.[HOST_DOMAIN]?.returns) ? state.domains[HOST_DOMAIN].returns : {}).filter(isObject);
+        const faded = returns.map(item => item.faded).filter(item => isObject(item?.after) && isObject(item?.through))
+            .map(item => ({ after: structuredClone(item.after), through: structuredClone(item.through) }));
+        const sids = faded.length || ids ? messages.map((message, at) => (message?.is_user ? null : store.sourceAt(at))) : [];
+        const spans = faded.map(item => ({ from: sids.findIndex(source => source?.sid === item.after.sid && source?.swipeKey === item.after.swipeKey), to: sids.findIndex(source => source?.sid === item.through.sid && source?.swipeKey === item.through.swipeKey), inside: item.after.op > 0 }))
+            .filter(span => span.from >= 0 && span.to >= span.from);
+        const at = new Set();
+        for (let index = 0; index < messages.length; index += 1) if (spans.some(span => index >= span.from + (span.inside ? 0 : 1) && index <= span.to)) at.add(index);
+        return { messages, sids, faded, at };
+    }
+    // Story Block's own readers of earlier messages (the chatter queries, the module view, the late lines) ask this
+    // (src/v2/timeline/active.js), by name; the capability counts the names. A generation request is not one of them: faded messages
+    // leave it because they are hidden (below).
+    const activeHistory = createActiveHistory({ faded: () => activeLine().at });
+
+    // ---- hiding the faded messages ------------------------------------------------------------------------------
+    //
+    // SillyTavern leaves a hidden message (`is_system: true`, the ghost the reader sees) out of every prompt it builds: chat and text
+    // completion, regexes, nested and quiet generations. A restore hides the messages it faded that are not hidden already, and
+    // records which ones it hid in its journal entry (`hid`: [{ stamp, index, sid }]); when the restore is gone from the story (a swipe,
+    // a delete, a Re-read) it shows exactly those again. Each message it hid carries the stamp (`story_suite_hid`, on the message, which
+    // swipes and deletions of other messages do not move), so a record is found again whatever happened to the places. A message the
+    // reader hid is never stamped, so it is never shown; one the reader showed again while it was faded is the reader's choice
+    // (`released`): it is not hidden again and nothing is said. `syncHidden` is that rule, run in one synchronous step over the story
+    // read whole; it changes nothing when nothing is faded and nothing was hid, so a chat that never restored is untouched.
+    const STAMP = 'story_suite_hid';
+    const hideFailed = new WeakSet();   // chats (by their holder) where a faded message could not be hidden or shown
+    const restoreEntries = () => archive.entries().filter(entry => entry.kind === 'restore' && entry.phase !== 'aborted');
+    function syncHidden() {
+        if (!archive.exists() || !archive.holder()) return;
+        const entries = restoreEntries();
+        const line = activeLine({ ids: true });
+        const noted = entries.some(entry => entry.hid?.length || entry.released?.length);
+        if (!line.at.size && !noted) { hideFailed.delete(archive.holder()); return; }
+        const { messages, sids } = line;
+        const placeOf = new Map();
+        messages.forEach((message, at) => { if (typeof message?.[STAMP] === 'string') placeOf.set(message[STAMP], at); });
+        const returns = store.head()?.domains?.[HOST_DOMAIN]?.returns;
+        const owner = entries.filter(entry => isObject(returns) && isObject(returns[entry.return])).at(-1) ?? null;
+        let failed = '';
+        let flipped = false;
+        const flip = (at, hidden) => {
+            const message = messages[at];
+            try {
+                message.is_system = hidden;
+                if (message.is_system !== hidden) throw new Error('the message did not take the flag');
+            } catch (error) { failed ||= `message ${at} could not be ${hidden ? 'hidden' : 'shown'} (${error?.message ?? error})`; return false; }
+            flipped = true;
+            try { redraw?.(at, message); } catch { /* not drawn yet: it is drawn from the saved chat */ }
+            return true;
+        };
+        const stamped = (at, stamp) => {
+            try { if (stamp === null) delete messages[at][STAMP]; else messages[at][STAMP] = stamp; } catch (error) { failed ||= `message ${at} could not be marked (${error?.message ?? error})`; return false; }
+            flipped = true;
+            return true;
+        };
+        const notes = new Map();   // entry id -> { hid, released }
+        const noteOf = entry => {
+            if (!notes.has(entry.id)) notes.set(entry.id, { hid: (entry.hid ?? []).map(item => ({ ...item })), released: [...(entry.released ?? [])] });
+            return notes.get(entry.id);
+        };
+        const known = new Set();
+        for (const entry of entries) {
+            for (const item of entry.hid ?? []) {
+                known.add(item.stamp);
+                const at = placeOf.get(item.stamp);
+                const note = noteOf(entry);
+                const drop = () => { note.hid = note.hid.filter(each => each.stamp !== item.stamp); };
+                if (at === undefined) { drop(); continue; }   // the message is gone
+                if (!line.at.has(at)) {
+                    // the restore is gone from the story: what it hid is shown again (unless the reader showed it already)
+                    if (messages[at].is_system === true && !flip(at, false)) continue;
+                    if (stamped(at, null)) drop();
+                } else if (messages[at].is_system !== true) {
+                    // the reader showed it again while it was faded: theirs to choose, and not hidden again
+                    drop();
+                    note.released.push(item.stamp);
+                }
+            }
+            for (const stamp of entry.released ?? []) {
+                known.add(stamp);
+                const at = placeOf.get(stamp);
+                if (at === undefined) { const note = noteOf(entry); note.released = note.released.filter(each => each !== stamp); continue; }
+                if (!line.at.has(at)) { const note = noteOf(entry); if (stamped(at, null)) note.released = note.released.filter(each => each !== stamp); }
+            }
+        }
+        // what is faded and still visible is hidden now, and noted on the newest restore the story holds
+        for (const at of line.at) {
+            const message = messages[at];
+            if (message.is_system === true || known.has(message[STAMP])) continue;
+            if (!owner) { failed ||= 'a return in the story has no restore in the journal to note the hidden messages on'; break; }
+            const stamp = makeId('hd');
+            if (stamped(at, stamp) && flip(at, true)) noteOf(owner).hid.push({ stamp, index: at, sid: sids[at]?.sid ?? null });
+            else if (message[STAMP] === stamp) stamped(at, null);
+        }
+        for (const [id, note] of notes) {
+            const entry = archive.get(id);
+            if (hashJson({ hid: entry.hid ?? [], released: entry.released ?? [] }) !== hashJson(note)) archive.patch(id, { hid: note.hid, released: note.released });
+        }
+        const holder = archive.holder();
+        if (failed) {
+            if (!hideFailed.has(holder)) {
+                hideFailed.add(holder);
+                try { problem?.({ code: 'HIDE_FAILED', message: `Messages a restore faded could not all be hidden or shown again (${failed}), so they may reach a prompt.` }); } catch { /* a listener is not the timeline's business */ }
+            }
+        } else hideFailed.delete(holder);
+        // (the flags are the chat's: it is saved with them, by the operation's own flush or the next save)
+        if (flipped) { store.touch?.(); store.scheduleSave?.(); }
+    }
+
     // A projection of the chat's messages for the readers of the story (prompt, extraction, native scans): the canonical
     // ids of each message and whether it is on the active line. A message with no carrier record of its own (the reader's
-    // own) gets a projection-only msg_ id worked out from where it stands. The faded interval of a return, (target, restore],
-    // is carrier-wide here: the replies after the target's reply through the restoring one, and the reader's messages between.
-    // The exclusion of the reply a target falls inside of, and the head-selection barrier, are the next package's.
+    // own) gets a projection-only msg_ id worked out from where it stands.
     async function history(input = {}) {
         if (!isObject(input) || Object.keys(input).some(key => key !== 'through')) return fail('INVALID', 'history takes { through? }.');
         const through = input.through;
         if (through !== undefined && (!isObject(through) || !isRecordId(through.sid))) return fail('INVALID', 'through is a cursor.');
-        const state = store.head();
-        const messages = typeof chat === 'function' ? chat() : [];
-        const sids = messages.map((message, at) => (message?.is_user ? null : store.sourceAt(at)));
-        const cut = through === undefined ? messages.length - 1 : sids.findIndex(source => source?.sid === through.sid);
-        if (cut < 0) return fail('NOT_FOUND', 'No message of this chat has that cursor.');
-        const returns = Object.values(isObject(state?.domains?.[HOST_DOMAIN]?.returns) ? state.domains[HOST_DOMAIN].returns : {}).filter(isObject);
-        const faded = returns.map(item => item.faded).filter(item => isObject(item?.after) && isObject(item?.through))
-            .map(item => ({ after: structuredClone(item.after), through: structuredClone(item.through) }));
-        const spans = faded.map(item => ({ from: sids.findIndex(source => source?.sid === item.after.sid), to: sids.findIndex(source => source?.sid === item.through.sid) }))
-            .filter(span => span.from >= 0 && span.to >= span.from);
+        const line = activeLine({ ids: true });
+        const { messages, sids, faded } = line;
+        const cut = through === undefined ? messages.length - 1 : sids.findIndex(source => source?.sid === through.sid && source?.swipeKey === through.swipeKey);
+        if (through !== undefined && cut < 0) return fail('NOT_FOUND', 'No message of this chat has that cursor.');
         const out = [];
         for (let at = 0; at <= cut && at < messages.length; at++) {
             const message = messages[at];
@@ -283,7 +449,7 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
                 const id = deriveId('msg', hashJson({ lineage: archive.lineage(), at, name: message?.name ?? '', date: message?.send_date ?? '', mes: message?.mes ?? '' }));
                 return { sid: id, swipeKey: id };
             })();
-            out.push({ sid: ids.sid, swipeKey: ids.swipeKey, text: String(message?.mes ?? ''), active: !spans.some(span => at > span.from && at <= span.to) });
+            out.push({ sid: ids.sid, swipeKey: ids.swipeKey, text: String(message?.mes ?? ''), active: !line.at.has(at) });
         }
         return { ok: true, messages: out, faded };
     }
@@ -310,7 +476,7 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
 
     // One save point: reserve it, ask the participants for their checkpoints, put the bytes in the archive, then, only
     // if the story has not moved, store the descriptor and its receipt together. → { ok: true, snapshot, receipt } | failure.
-    async function makeNow(input, { host, cause }) {
+    async function makeNow(input, { host, cause, marker = null }) {
         const bad = makeInput(input, host);
         if (!bad.ok) return bad;
         if (pendingNow()) return fail('RESTORE_PENDING', 'A restore is in progress; a save point cannot be made until every part agrees.');
@@ -341,15 +507,32 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         const blockId = makeId('bl');
         const name = input.name ?? (input.kind === 'initial' ? 'Start' : input.kind === 'day-start' ? `Day ${input.day}` : 'Save point');
         const journal = makeId('jr');
-        const taken = capture({ registry, state: first.state, settings });
+        const taken = marker ? structuredClone(marker.entry) : capture({ registry, state: first.state, settings });
+        if (marker) {
+            // Earlier markers in this same root precede this logical capture, although their async
+            // descriptors were necessarily published later. Carry only those proved predecessors.
+            for (const point of Object.values(pointsOf(first.state))) {
+                if (!marker.prior.includes(point.target.block)) continue;
+                if (!taken.payload.domains[HOST_DOMAIN]) {
+                    taken.payload.domains[HOST_DOMAIN] = initialSavepoints(first.epoch);
+                    taken.payload.domainVersions[HOST_DOMAIN] = 1;
+                }
+                const domain = taken.payload.domains[HOST_DOMAIN];
+                domain.points[point.id] = structuredClone(point);
+                domain.dayStarts[String(point.day)] = point.id;
+                domain.previousDay = previousDayOf(domain.dayStarts);
+            }
+        }
         archive.add({ id: journal, kind: 'make', phase: 'reserved', session: session(), snapshot: id, savekind: input.kind, expectedHead: first.headHash, block: blockId });
         await point('make.reserved');
 
         // 2. the participants' checkpoints, as of this head.
-        const cursor = { ...structuredClone(first.cursor), block: blockId };
+        const cursor = marker ? structuredClone(marker.cursor) : { ...structuredClone(first.cursor), block: blockId };
         const checkpoints = [];
+        const historical = marker ? selectionPlan(marker.root.cursor) : {};
         for (const module of participants.modules()) {
-            const answer = await callParticipant(module, 'checkpoint', { cursor, headHash: first.headHash });
+            const selected = historical[module];
+            const answer = selected ? { ok: true, ...selected } : await callParticipant(module, 'checkpoint', { cursor, headHash: marker ? marker.prefixHash : first.headHash });
             if (!answer.ok) {
                 archive.patch(journal, { phase: 'aborted', why: answer.message });
                 return fail(answer.code === 'FAILED' ? 'SNAPSHOT_UNAVAILABLE' : answer.code, `The participant ${module} could not save its state: ${answer.message}`);
@@ -371,10 +554,10 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         const day = input.kind === 'day-start' ? input.day : Number.isInteger(minute) ? Math.floor(minute / MINUTES_PER_DAY) : null;
         const journalDay = day === null ? null : ask('journal.day', { day }, first.state);
         const descriptor = {
-            capturedAtRev: first.cursor.rev, label: name, id, kind: input.kind, name, epoch: first.epoch,
+            capturedAtRev: marker ? marker.cursor.rev : first.cursor.rev, label: name, id, kind: input.kind, name, epoch: first.epoch,
             target: cursor, eligibleFrom: structuredClone(cursor), minute: Number.isInteger(minute) ? minute : null, day,
-            scene: sceneOf(first.state), journal: isObject(journalDay) ? journalDay : null,
-            payloadHash, participants: checkpoints, lineage: first.prefixHash, available: true,
+            scene: sceneOf(marker ? { domains: taken.payload.domains } : first.state), journal: isObject(journalDay) ? journalDay : null,
+            payloadHash, participants: checkpoints, lineage: marker ? marker.prefixHash : first.prefixHash, available: true,
         };
         archive.putPayload(payloadHash, { payload: taken.payload, proofs: taken.proofs });
         archive.putSnapshot(id, { descriptor, payloadHash });
@@ -398,6 +581,17 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
             archive.patch(journal, { phase: 'discarded', why: lacking });
             return fail('SNAPSHOT_UNAVAILABLE', `A save point cannot be made: ${lacking}.`);
         }
+        // A participant's native change that landed after its checkpoint was handed over is not in the head hash (it is published when its
+        // change finishes): each participant that has a probe is asked, in this synchronous section, whether its state is still the one it
+        // gave. Retryable: nothing is written or announced.
+        if (marker && hashJson(historical) !== hashJson(selectionPlan(marker.root.cursor))) return fail('STALE', 'The native prefix of the clock marker changed before publication.');
+        for (const item of checkpoints.filter(item => !historical[item.module])) {
+            const probed = participants.probe(item.module, { checkpoint: item.checkpoint, hash: item.hash, schema: item.schema });
+            if (!probed.current) {
+                archive.patch(journal, { phase: 'discarded', why: `${item.module}: ${probed.why}` });
+                return fail('STALE', `The participant ${item.module} changed its state while the save point was made (${probed.why}); nothing was saved. Try again.`);
+            }
+        }
         const domain = isObject(now.state.domains?.[HOST_DOMAIN]) ? now.state.domains[HOST_DOMAIN] : null;
         const ops = [];
         if (!domain) {
@@ -417,12 +611,14 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
             store, head: now, ops, announce, here: stillHere,
             spec: {
                 type: 'savepoint.make', cause, summary: `Save point "${name}" made.`, key: `make:${id}`, blockId,
-                predicate: { kind: 'make', snapshot: id, payloadHash }, payload: { kind: input.kind, ...(input.name !== undefined ? { name: input.name } : {}), ...(input.kind === 'day-start' ? { day: input.day } : {}) },
+                predicate: { kind: 'make', snapshot: id, payloadHash, ...(marker ? { marker: { proof: marker.proof, pin: marker.pin } } : {}) }, payload: { kind: input.kind, ...(input.name !== undefined ? { name: input.name } : {}), ...(input.kind === 'day-start' ? { day: input.day } : {}) },
                 recorded: { payloadHash, participants: checkpoints }, result: { snapshot: id },
             },
         });
         if (!stored.ok) { archive.patch(journal, { phase: 'discarded', why: stored.message }); return stored; }
         owe(stored);
+        archive.remember(checkpoints);
+        if (marker) archive.putMarker(marker.cursor.block, { prefixHash: marker.prefixHash, snapshot: id });
         archive.patch(journal, { phase: 'committed' });
         await point('make.committed');
         // Made only once the chat file has it: a failed save is the caller's failure (the save point stands in memory and the store tries again).
@@ -590,6 +786,14 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
 
         // The story as it is now (the dead timeline) is pinned beside the batch result: what the restore replaces stays retrievable.
         const pre = capture({ registry, state: now.state, settings });
+        for (const module of participants.modules()) {
+            const before = await callParticipant(module, 'checkpoint', { cursor: now.cursor, headHash: now.headHash });
+            if (!before.ok) return before;
+            pre.payload.participants.push({ module, checkpoint: before.checkpoint, hash: before.hash, schema: before.schema });
+        }
+        here();
+        const checked = headNow();
+        if (!checked || checked.headHash !== now.headHash) return fail('STALE', 'The head moved while the pre-restore checkpoints were saved.');
         const preHash = hashJson({ payload: pre.payload, proofs: pre.proofs });
         archive.putPayload(preHash, { payload: pre.payload, proofs: pre.proofs });
         const slots = {};
@@ -597,7 +801,7 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         archive.add({
             id: preparedId, kind: 'restore', phase: 'preparing', session: session(), return: returnId, snapshot: found.id, deathEvents: [...input.deathEvents],
             batchResult: { ...input.batchResult }, expectedHead: now.headHash, newEpoch, block: blockId, cue: record.cue, payloadHash: found.payloadHash,
-            manifest: plan.manifest, manifestHash: plan.manifestHash, participants: slots, pre: preHash,
+            manifest: plan.manifest, manifestHash: plan.manifestHash, participants: slots, pre: preHash, before: pre.payload.participants, boundary: { cursor: now.cursor, prefixHash: now.prefixHash, stateHash: stateHash(now.state) },
         });
         archive.putPin(input.batchResult.id, { id: input.batchResult.id, hash: input.batchResult.hash, bytes: sealed.bytes, resolvedBy: sealed.module, return: returnId, prepared: preparedId, deathEvents: [...input.deathEvents], manifestHash: plan.manifestHash, preRestore: preHash, aborted: false });
         try { await durable(); } catch (error) { await dropPrepared(preparedId, error); }
@@ -664,6 +868,10 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
             if (answer.checkpoint !== slot.checkpoint || answer.hash !== slot.hash) return hold(`the participant ${module} switched to another checkpoint than the save holds`);
             slot = { ...slot, ack: { checkpoint: answer.checkpoint, hash: answer.hash } };
             archive.patch(entry.id, { participants: { ...fresh().participants, [module]: slot }, phase: 'committed' });
+            // The participant stands on the restore's checkpoint from now on, whatever becomes of the restore: what is selected is where
+            // the participants are, so a head that does not hold the restore finds it off its checkpoint and switches it back.
+            archive.remember(fresh().before);
+            archive.select({ ...archive.selection(), [module]: { module, checkpoint: answer.checkpoint, hash: answer.hash, schema: slot.schema } });
             await durable();
             await point(`activate.participant:${module}:acked`);
         }
@@ -673,33 +881,57 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         return complete(entry);
     }
 
-    // Every part agreed: the barrier drops, then the return is marked complete in the story (with the barrier down, so
-    // every module's blocks are asked again and the block sees the story whole). Complete is told only once the chat file has it.
-    async function complete(entry) {
-        lower();
-        const now = headNow();
-        const returns = now?.state?.domains?.[HOST_DOMAIN]?.returns;
-        const found = isObject(returns) ? returns[entry.return] : null;
-        if (found?.status === 'committed') {
-            const stored = appendHostBlock({
-                store, announce, here: stillHere, head: now, ops: [{ op: 'replace', path: `/domains/${HOST_DOMAIN}/returns/${entry.return}/status`, value: 'complete' }],
-                spec: { type: 'savepoint.complete', cause: 'system', summary: 'The return is complete.', key: `complete:${entry.return}`, blockId: makeId('bl'),
-                    predicate: { kind: 'complete', return: entry.return }, payload: { return: entry.return }, recorded: null, result: { return: entry.return, status: 'complete' } },
-            });
-            if (!stored.ok) {
-                // (the story cannot take the word yet: the restore waits, behind the barrier, for recover to try again)
-                archive.patch(entry.id, { phase: 'acked', why: stored.message });
-                raise('A restore is finishing; every part must agree before the story goes on.');
-                return { ok: true, return: entry.return, status: 'participants-pending' };
-            }
-            owe(stored);
-        }
-        publishRestore(entry);
-        archive.patch(entry.id, { phase: 'complete' });
-        await durable();
-        await point('activate.completed');
-        return { ok: true, return: entry.return, status: 'complete' };
+    // Whether the committed restore is in the story that is selected now. The story is read whole (the barrier holds the modules, and
+    // their blocks, back): a swipe, a delete or a Re-read that took the restore away leaves no return of it.
+    function restoreHeld(entry) {
+        return withWholePrefixes(() => isObject(store.head()?.domains?.[HOST_DOMAIN]?.returns?.[entry.return]));
     }
+
+    // Every part agreed. In one synchronous section the story is read whole and the restore is looked for in the head that is selected
+    // now; only if it is there is the return marked complete (a small block of its own) and the restore published for that head. Else
+    // the restore is retracted, nothing is published, and the participants, which stand on its checkpoint, are brought to the checkpoint
+    // of the selected head. The barrier comes down in `release`, after the chat file has it all and the participants are on the selected
+    // head. Complete is told only once the chat file has it.
+    async function complete(entry) {
+        if (pendingEntry(entry.id) !== null) {
+            // Another change is outstanding in this journal (it cannot be through the API): this restore is not complete until it has settled.
+            archive.patch(entry.id, { phase: 'acked', why: 'another change is outstanding in this chat' });
+            return { ok: true, return: entry.return, status: 'participants-pending' };
+        }
+        here();
+        const section = withWholePrefixes(() => {
+            if (!restoreHeld(entry)) return { held: false };
+            const now = headNow();
+            const found = now?.state?.domains?.[HOST_DOMAIN]?.returns?.[entry.return];
+            if (found?.status === 'committed') {
+                const stored = appendHostBlock({
+                    store, announce, here: stillHere, head: now, ops: [{ op: 'replace', path: `/domains/${HOST_DOMAIN}/returns/${entry.return}/status`, value: 'complete' }],
+                    spec: { type: 'savepoint.complete', cause: 'system', summary: 'The return is complete.', key: `complete:${entry.return}`, blockId: makeId('bl'),
+                        predicate: { kind: 'complete', return: entry.return }, payload: { return: entry.return }, recorded: null, result: { return: entry.return, status: 'complete' } },
+                });
+                if (!stored.ok) return { held: true, failed: stored };
+                owe(stored);
+            }
+            publishRestore(entry);
+            return { held: true };
+        });
+        if (section.failed) {
+            // (the story cannot take the word yet: the restore waits, behind the barrier, for recover to try again)
+            archive.patch(entry.id, { phase: 'acked', why: section.failed.message });
+            raise('A restore is finishing; every part must agree before the story goes on.');
+            return { ok: true, return: entry.return, status: 'participants-pending' };
+        }
+        archive.patch(entry.id, section.held ? { phase: 'complete' } : { phase: 'retracted', why: 'the story no longer holds the restore' });
+        const released = await release(entry.id);
+        if (!section.held) return { ok: true, return: entry.return, status: 'retracted' };
+        await point('activate.completed');
+        return { ok: true, return: entry.return, status: released.ok ? 'complete' : 'participants-pending' };
+    }
+
+    // A restore taken back by a swipe, a delete or a Re-read while its participants were switching did not take: say so.
+    const answered = done => (done.ok && done.status === 'retracted'
+        ? fail('STALE', 'The restore was taken back (its reply was swiped or deleted, or an earlier reply changed) while its participants were switching; the story does not hold it, and the participants follow the selected head.')
+        : done);
 
     async function activate(input) {
         if (!isObject(input) || Object.keys(input).some(key => !['prepared', 'expectedHead'].includes(key)) || typeof input.prepared !== 'string' || !isHash(input.expectedHead)) {
@@ -711,13 +943,22 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         // when the chat file has it.
         if (entry.phase === 'complete') {
             await durable();
+            // (a save that failed after the restore was complete left the barrier up: it comes down now that the file has it)
+            if (barrierOwner !== null && barrierOwner === archive.holder()) {
+                const released = await release();
+                if (!released.ok) return { ok: true, return: entry.return, status: 'participants-pending' };
+            }
             return { ok: true, return: entry.return, status: 'complete' };
         }
         if (['committed', 'participants-pending', 'acked'].includes(entry.phase)) {
             raise('A restore is finishing; every part must agree before the story goes on.');
-            return finish(entry);
+            return answered(await finish(entry));
         }
         if (entry.phase !== 'prepared') return fail('REFUSED', 'That restore was aborted.');
+        // One change at a time: a restore does not start while a native event or change (or another restore) is outstanding, whatever order
+        // they were prepared in. It stays prepared; once the other has settled (retry it, or recover) it can be activated.
+        const other = pendingEntry(entry.id);
+        if (other) return fail('RESTORE_PENDING', `Another change (${other.id}) is still outstanding in this chat; the restore was not activated and stays prepared.`);
         here();
         const now = headNow();
         if (input.expectedHead !== entry.expectedHead || !now || now.headHash !== entry.expectedHead) {
@@ -772,11 +1013,13 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         if (!stored2.ok) { await abortEntry(entry, stored2.message); return stored2; }
         owe(stored2);
         archive.patch(entry.id, { phase: 'committed' });
+        // The messages the restore faded are hidden in this same section, and noted on the restore's journal entry; the flush below makes both durable.
+        syncHidden();
         raise('A restore is finishing; every part must agree before the story goes on.');
         // Nothing is switched before the commit is in the chat file: a failed save is the caller's failure, and the barrier stays up.
         await durable();
         await point('activate.committed');
-        return finish(archive.get(entry.id));
+        return answered(await finish(archive.get(entry.id)));
     }
 
     async function abort(input) {
@@ -791,25 +1034,19 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
 
     // ---- recover -----------------------------------------------------------------------------------------------
 
-    // The story as it stands with the modules not held back, read in one synchronous step while commands stay barred: the barrier is
-    // put back before anything else can run and nothing is announced, so no listener sees the host ready (or acts) on a story whose
-    // native state has not caught up. Internal to recovery; nothing outside this file can ask it.
-    function wholeStory() {
-        const was = registry.restore();
-        if (was.state !== 'pending') return store.head();
-        registry.setRestore('idle', '');
-        try {
-            store.lifecycleChanged?.();   // (the guarded blocks are asked again with the modules not held: no 'modules' event, no 'head' event)
-            return store.head();
-        } finally {
-            registry.setRestore(was.state, was.reason);
-            store.lifecycleChanged?.();
-        }
-    }
-
     // Host startup: what was committed is finished, what was only prepared is aborted. No clock, no target is chosen again.
     async function recover() {
-        if (!archive.exists()) return { ok: true, state: 'idle', return: null };
+        if (!archive.exists() && !(store.head()?.meta?.proofs && store.timelineMarkers().length)) return { ok: true, state: 'idle', return: null };
+        // Two unfinished changes at once cannot happen through the API (a second is refused while one is pending): a journal that holds them
+        // was damaged or edited. Finishing one would let go of the barrier with the other still undone, so none is touched, the chat stays
+        // barred and nothing is announced ready: it fails safe until the file is put right.
+        const unfinished = archive.entries().filter(entry => (entry.kind === 'restore' && ['committed', 'participants-pending', 'acked'].includes(entry.phase))
+            || (entry.kind === 'selection' && entry.phase !== 'complete')
+            || (['native-mutation', 'native-event'].includes(entry.kind) && entry.phase === 'prepared'));
+        if (unfinished.length > 1) {
+            if (barrierOwner === null) raise('A restore is finishing; every part must agree before the story goes on.');
+            return fail('FAILED', `The journal holds ${unfinished.length} unfinished changes (${unfinished.map(entry => entry.id).join(', ')}); only one can be, so the chat stays held until the file is put right.`);
+        }
         const early = barrierEarly && barrierOwner === archive.holder();
         let ret = null;
         for (const entry of archive.entries()) {
@@ -828,10 +1065,10 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
                     // A start finds the story whole and asks whether it still holds the restore. Within a run that already has the
                     // barrier up it cannot ask: with the modules held, their guarded blocks are off and the story is not whole.
                     // (the barrier `settle` raised when this chat opened is not one of a run: the story is looked at whole, as it was before)
-                    const state = early ? wholeStory() : store.head();
-                    const there = state?.domains?.[HOST_DOMAIN]?.returns?.[entry.return];
-                    if ((early || registry.restore?.().state !== 'pending') && !isObject(there)) {
-                        // The story no longer holds the restore (its reply was swiped or deleted): its participants are the next package's.
+                    if ((early || registry.restore?.().state !== 'pending') && !restoreHeld(entry)) {
+                        // The story no longer holds the restore (its reply was swiped or deleted): its participants, which may stand on its
+                        // checkpoints (they are recorded as selected as they acknowledge), are brought to the selected head below.
+                        archive.remember(entry.before);
                         archive.patch(entry.id, { phase: 'retracted', why: 'the story no longer holds the restore' });
                         continue;   // (the barrier comes down once, below, when nothing else is left to finish)
                     }
@@ -839,7 +1076,12 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
                     const done = await finish(archive.get(entry.id));
                     if (done.ok === false) return done;
                     ret = entry.return;
-                    if (done.status === 'complete') ret = null;
+                    if (done.status === 'complete' || done.status === 'retracted') ret = null;
+                }
+            } else if (entry.kind === 'selection') {
+                if (entry.phase !== 'complete') {
+                    const done = await finishSelection(entry);
+                    if (!done.ok) return done;
                 }
             } else if (entry.kind === 'native-mutation' || entry.kind === 'native-event') {
                 if (entry.phase === 'prepared') {
@@ -849,11 +1091,105 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
                 }
             }
         }
-        // (a barrier raised as this chat opened, for work that turned out to be nothing to finish, does not stay up)
-        if (barrierOwner === archive.holder() && pendingEntry() === null) lower();
+        // The participants are brought to the selected head, and the barrier (a barrier raised as this chat opened, for work that turned
+        // out to be nothing to finish, does not stay up) comes down: in `release`, the one place that does.
+        if (pendingEntry() === null && (barrierOwner === archive.holder() || selectionNeeded())) {
+            const released = await release();
+            if (!released.ok) return released;
+        }
+        if (pendingEntry() === null) {
+            const markers = await materializeMarkers();
+            if (!markers.ok) return markers;
+        }
         await durable();
         const left = pendingEntry();
         return { ok: true, state: left ? 'pending' : 'idle', return: left?.kind === 'restore' ? left.return : ret };
+    }
+
+    function unmaterializedMarkers() {
+        if (!store.head()?.meta?.proofs) return [];
+        return withWholePrefixes(() => store.timelineMarkers().filter(marker => archive.marker(marker.cursor.block)?.prefixHash !== marker.prefixHash));
+    }
+    async function materializeMarkers() {
+        for (const marker of unmaterializedMarkers()) {
+            if (archive.marker(marker.cursor.block)) return fail('CONFLICT', 'The clock marker changed its captured prefix; its old identity is retired, not rebound.');
+            if (pendingNow()) return fail('RESTORE_PENDING', 'The clock anchors are waiting for native recovery.');
+            const made = await makeNow({ kind: 'day-start', day: marker.minute / MINUTES_PER_DAY }, { host: true, cause: 'system', marker });
+            if (!made.ok) return made;
+        }
+        return { ok: true };
+    }
+
+    // One selection rule for every head change. Prefix identity AND replayed state must match;
+    // no revision, positional fallback or nearest-swipe rebinding is allowed.
+    function selectionPlan(limit = null) {
+        if (!archive.exists()) return {};
+        return withWholePrefixes(() => {
+            const result = { ...archive.baseline() };
+            const through = limit ? store.prefixWitness(limit) : null;
+            if (limit && !through) throw new Error('The marker root no longer has a unique prefix.');
+            for (const module of participants.modules()) {
+                const candidates = [];
+                for (const mapping of archive.prefixes(module)) {
+                    if (!mapping.boundary || !mapping.after) continue;
+                    const witness = store.prefixWitness(mapping.boundary.cursor);
+                    if (witness && (!through || witness.index < through.index || (witness.index === through.index && witness.op <= through.op)) && witness.prefixHash === mapping.boundary.prefixHash && stateHash(witness.state) === mapping.boundary.stateHash) {
+                        candidates.push({ mapping, index: witness.index, op: witness.op });
+                    }
+                }
+                candidates.sort((a, b) => a.index - b.index || a.op - b.op || a.mapping.seq - b.mapping.seq);
+                if (candidates.length) result[module] = candidates.at(-1).mapping.after;
+            }
+            return result;
+        });
+    }
+    function withWholePrefixes(fn) {
+        const was = registry.restore();
+        if (was.state !== 'pending') return fn();
+        registry.setRestore('idle', '');
+        try { store.lifecycleChanged?.(); return fn(); }
+        finally { registry.setRestore(was.state, was.reason); store.lifecycleChanged?.(); }
+    }
+    const selectionNeeded = () => hashJson(selectionPlan()) !== hashJson(archive.selection());
+
+    async function selectHead() {
+        if (!selectionNeeded()) return { ok: true };
+        const desired = selectionPlan();
+        if (availability(Object.values(desired))) { raise('The selected history needs unavailable native participants.'); return fail('SNAPSHOT_UNAVAILABLE', 'The participants needed by this head are unavailable.'); }
+        const entry = archive.add({ id: makeId('hs'), kind: 'selection', phase: 'prepared', desired, slots: {} });
+        raise('The selected history is waiting for its native checkpoints.');
+        await durable();
+        return finishSelection(entry);
+    }
+
+    async function finishSelection(entry) {
+        raise('The selected history is waiting for its native checkpoints.');
+        await durable();
+        for (const [module, target] of Object.entries(entry.desired)) {
+            const registered = participants.get(module);
+            if (!registered || registered.schema !== target.schema) return fail('SNAPSHOT_UNAVAILABLE', `The participant ${module} is unavailable for the selected head.`);
+            let slot = archive.get(entry.id).slots[module];
+            if (!slot) {
+                const prepared = await callParticipant(module, 'prepare', { return: entry.id, checkpoint: target.checkpoint, hash: target.hash });
+                if (!prepared.ok) return prepared;
+                if (prepared.hash !== target.hash) return fail('CONFLICT', 'The participant prepared other selected bytes.');
+                slot = { prepared: prepared.prepared, ack: false };
+                archive.patch(entry.id, { slots: { ...archive.get(entry.id).slots, [module]: slot } });
+                await durable();
+            }
+            if (!slot.ack) {
+                const done = await callParticipant(module, 'activate', { return: entry.id, prepared: slot.prepared });
+                if (!done.ok) return done;
+                if (done.checkpoint !== target.checkpoint || done.hash !== target.hash) return fail('CONFLICT', 'The participant selected other bytes.');
+                archive.patch(entry.id, { slots: { ...archive.get(entry.id).slots, [module]: { ...slot, ack: true } } });
+                await durable();
+            }
+        }
+        // A head may move during any callback: settle this durable selection, then plan again.
+        archive.select(entry.desired);
+        archive.patch(entry.id, { phase: 'complete' });
+        await durable();
+        return { ok: true };
     }
 
     // ---- native mutations and events ---------------------------------------------------------------------
@@ -865,8 +1201,10 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         const seq = archive.bumpNative();
         archive.putPrefix(entry.participant, key, {
             seq, participant: entry.participant, tx: entry.id, source: entry.source ?? null, schema: entry.after.schema,
-            before: entry.before, after: entry.after, selected: 'after',
+            before: entry.before, after: entry.after, selected: 'after', boundary: entry.boundary,
         });
+        archive.remember([entry.before]);
+        archive.select({ ...archive.selection(), [entry.participant]: entry.after });
         archive.patch(entry.id, { phase: 'done' });
     }
 
@@ -875,16 +1213,22 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         const now = headNow();
         if (!now) return;
         const key = prefixKey(now.cursor, now.prefixHash);
+        const beforeKey = prefixKey(entry.boundary.cursor, entry.boundary.prefixHash);
+        archive.remember(entry.before);
+        for (const item of entry.before) archive.putPrefix(item.module, beforeKey, {
+            seq: archive.bumpNative(), participant: item.module, tx: entry.id, schema: item.schema,
+            before: null, after: item, selected: 'after', boundary: entry.boundary,
+        });
         let moved = false;
         for (const [module, slot] of Object.entries(entry.participants ?? {})) {
             if (!slot.ack || archive.prefix(module, key)?.tx === entry.id) continue;
             archive.putPrefix(module, key, {
                 seq: archive.bumpNative(), participant: module, tx: entry.id, source: null, schema: slot.schema, before: null,
-                after: { module, checkpoint: slot.ack.checkpoint, hash: slot.ack.hash, schema: slot.schema }, selected: 'after',
+                after: { module, checkpoint: slot.ack.checkpoint, hash: slot.ack.hash, schema: slot.schema }, selected: 'after', boundary: { cursor: now.cursor, prefixHash: now.prefixHash, stateHash: stateHash(now.state) },
             });
             moved = true;
         }
-        void moved;
+        if (moved) archive.select(Object.fromEntries(Object.entries(entry.participants).map(([module, slot]) => [module, { module, checkpoint: slot.ack.checkpoint, hash: slot.ack.hash, schema: slot.schema }])));
     }
 
     // The activation of a native entry, or its recovery after a crash: whatever the participant's own status says it did.
@@ -915,9 +1259,10 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
             return fail('CONFLICT', `The participant ${module} answered other bytes than the change prepared.`);
         }
         publish(settled);
-        lower();
         // Told done only when the file has it; a failed save is the caller's failure (a retry of the same event answers once it is saved).
-        await durable();
+        // The barrier comes down in `release`, once the participants stand on the selected head: the reply this change stood on may be
+        // gone by now. (A selection that cannot be confirmed yet leaves the barrier up for a recovery; the change itself is done.)
+        await release(settled.id);
         return { ok: true, checkpoint: settled.after.checkpoint, hash: settled.after.hash };
     }
 
@@ -938,8 +1283,10 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         if (input.source.sid !== first.cursor.sid || input.source.swipeKey !== first.cursor.swipeKey) return fail('STALE', 'That source is not the reply at the head.');
         // The participant makes both checkpoints durable on its side and gives back what it made, without showing the new state.
         let made;
-        try { made = await input.prepare(); } catch (error) {
+        try { made = await participants.run(who, () => input.prepare());
+            here(); } catch (error) {
             if (crashing(error)) throw error;
+            if (isStaleChat(error)) throw error;
             return fail('FAILED', `The participant ${who} could not prepare its change: ${error?.message ?? error}`);
         }
         if (!isObject(made) || !participantShape(made.before, who) || !participantShape(made.after, who) || typeof made.prepared !== 'string' || !made.prepared) {
@@ -958,7 +1305,7 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
             return fail('STALE', 'The head moved while the change was prepared; it was cancelled before it was shown.');
         }
         archive.add({ id: tx, kind: 'native-mutation', phase: 'prepared', session: session(), participant: who, source: structuredClone(input.source), expectedHead: first.headHash,
-            before: structuredClone(made.before), after: structuredClone(made.after), preparedId: made.prepared, boundary: { cursor: structuredClone(first.cursor), prefixHash: first.prefixHash } });
+            before: structuredClone(made.before), after: structuredClone(made.after), preparedId: made.prepared, boundary: { cursor: structuredClone(first.cursor), prefixHash: first.prefixHash, stateHash: stateHash(first.state) } });
         raise('A native change is finishing; every part must agree before the story goes on.');
         await durable();
         await point('native.journaled');
@@ -1012,7 +1359,7 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         archive.putEvent(input.event, { participant: input.participant, npc: input.npc, kind: input.kind, nativeKey: identity.nativeKey, tx });
         archive.add({ id: tx, kind: 'native-event', phase: 'prepared', session: session(), participant: input.participant, event: input.event, eventKind: input.kind, nativeKey: identity.nativeKey, npc: input.npc,
             expectedHead: first.headHash, before: { module: input.participant, checkpoint: before.checkpoint, hash: before.hash, schema: before.schema }, after: null,
-            boundary: { cursor: structuredClone(first.cursor), prefixHash: first.prefixHash } });
+            boundary: { cursor: structuredClone(first.cursor), prefixHash: first.prefixHash, stateHash: stateHash(first.state) } });
         raise('A native change is finishing; every part must agree before the story goes on.');
         await durable();
         await point('native.journaled');
@@ -1059,7 +1406,7 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         if (!isObject(predicate)) return { ok: false, reason: 'its guard names no predicate' };
         if (asked.inputHash !== hashJson({ predicate, stateHash: stateHash(state) })) return { ok: false, reason: 'the story before it is not the story it was made on' };
         switch (predicate.kind) {
-            case 'make': return { ok: true };
+            case 'make': return !predicate.marker || state?.meta?.proofs?.[predicate.marker.proof] === predicate.marker.pin ? { ok: true } : { ok: false, reason: 'the clock marker no longer belongs to the active prefix' };
             // (a restore carries what it installs in its own changes: replaying it needs no archive)
             case 'restore': return { ok: true };
             case 'forget':
@@ -1068,6 +1415,20 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
                 return state?.domains?.[HOST_DOMAIN]?.returns?.[predicate.return]?.status === 'committed' ? { ok: true } : { ok: false, reason: 'the return it completes is not committed' };
             default: return { ok: false, reason: `it names a predicate (${predicate.kind}) that this host does not know` };
         }
+    }
+
+    // Synchronous §2 capability projection. Reading it creates no archive or participant checkpoint.
+    // Installed NSD needs its native participant even when its optional UI/social features are off.
+    function contract() {
+        const snapshots = archive.holder() !== null && store.readOnly?.() == null;
+        const declarations = registry.modules().filter(def => def.participant !== undefined || def.id === 'npc-state-delta');
+        const installed = declarations.every(def => participants.has(def.id) && !broken.has(def.id));
+        const oldWitnesses = archive.entries().some(entry => entry.kind === 'restore' && entry.phase !== 'aborted' && !entry.boundary);
+        const participantsReady = installed && participants.ready() && !brokenProblem() && !oldWitnesses && registry.restore?.().state !== 'pending' && !selectionNeeded();
+        // (a restore fades earlier messages: retained-chat restore is offered only while Story Block's own readers of earlier messages filter
+        // them, and not for a chat where a faded message could not be hidden)
+        const retainedChatRestore = snapshots && unmaterializedMarkers().length === 0 && activeHistory.wired() && !hideFailed.has(archive.holder());
+        return { api: 2, snapshots, retainedChatRestore, participantsReady };
     }
 
     // ---- the public adapter of savepoint.make ------------------------------------------------------------
@@ -1142,10 +1503,14 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         settle,
         available: hash => archive.hasPayload(hash),
         /** Whether the journal holds work no operation owns (a crashed make, a restore left half way): the host recovers it. */
-        needsRecovery: () => runningIn(archive.holder()) === 0 && archive.exists() && archive.entries().some(entry => !settled(entry)),
+        needsRecovery: () => runningIn(archive.holder()) === 0 && ((archive.exists() && (archive.entries().some(entry => !settled(entry)) || selectionNeeded())) || unmaterializedMarkers().length > 0
+            || (barrierOwner !== null && barrierOwner === archive.holder())),
         archive,
+        /** The active-history reader one of Story Block's own readers of earlier messages asks for by name (active.js ACTIVE_READERS): → { messages, faded }. */
+        active: name => activeHistory.reader(name),
         pending: pendingNow,
         /** Points of `state` with their bytes checked, in target order (the savepoint.list query). */
         points: state => listNow(state),
+        contract,
     });
 }

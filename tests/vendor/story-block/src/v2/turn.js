@@ -25,7 +25,7 @@ import { assistSections, continuation, cutLine, defangMarker, extractBlock, gram
 import { notWritten } from './assist/extractor.js';
 import { refusedWhy } from './assist/safety.js';
 import { displayLines, readDisplayLine } from './extras.js';
-import { replacedProofs } from './evidence.js';
+import { occurrenceOf, operationKey, replacedProofs, reusePlan } from './evidence.js';
 import { hash, readRecord, swipeLoading } from './persist.js';
 import { CAPTURE_PREFIX, HOST_MODULE } from './registry.js';
 import { STATIC_MARKER, assemble, contextNotice, estimateTokens } from './prompt.js';
@@ -205,11 +205,17 @@ export function restoreMissing(chat, staticText, tailText) {
  * onChatChanged, onChatRenamed, onTimelineChanged, onGenerationEnded, preview, report, problems, clearProblems, blocked, blockers, unblock,
  * session, replyBusy, whenIdle }.
  */
-export function createTurn({ ctx, live = () => ctx, store, bus, registry, settings, events = null, onBlocked = null, notify = defaultNotify, initial = () => registry.initialState(), ownPrompt = () => false }) {
+export function createTurn({ ctx, live = () => ctx, store, bus, registry, settings, events = null, onBlocked = null, notify = defaultNotify, initial = () => registry.initialState(), ownPrompt = () => false, timeline = null }) {
     const types = () => ctx?.extension_prompt_types ?? ctx?.extensionPromptTypes ?? {};
     const roles = () => ctx?.extension_prompt_roles ?? ctx?.extensionPromptRoles ?? {};
     const position = place => (place === 'static' ? types().IN_PROMPT ?? IN_PROMPT : types().IN_CHAT ?? IN_CHAT);
     const hostSettings = () => (typeof settings === 'function' ? settings() : settings ?? {});
+    // Story Block's readers of earlier messages that this turn owns, each asked for by name from the timeline's active-history filter
+    // (timeline/active.js): messages a restore faded are not a module's last reader message nor a source of late lines. (A request is not
+    // filtered here: SillyTavern leaves the hidden messages out of it, and a restore hides what it faded.) A host without a timeline has none.
+    const reader = name => (typeof timeline?.active === 'function' ? timeline.active(name) : null);
+    const lateReader = reader('assist.late');
+    const viewReader = reader('view.lastUser');
     let session = null;
     let deferred = false;   // cues committed before a reply, left for the reply's save (runCues)
     let listeners = [];
@@ -282,7 +288,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         }
     }
 
-    const view = () => makeView({ store, registry, settings, chat: ctx?.chat });
+    const view = () => makeView({ store, registry, settings, chat: ctx?.chat, active: viewReader });
     const hasCarrier = () => (ctx?.chat ?? []).some(isCarrier);
     const lastCarrier = () => (ctx?.chat ?? []).findLastIndex(isCarrier);
 
@@ -334,7 +340,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         const ordinal = info?.span?.source?.ordinal;
         // The proof of the block being planned again may be given again: the step keeps its ids.
         const replacing = Array.isArray(info?.span?.evidence) ? info.span.evidence : [];
-        return bus.run(plan.type, plan.payload ?? {}, { cause: 'system', state, seed: plan.seed, replacing, ...(reply ? { reply: Number.isInteger(ordinal) ? { ...reply, ordinal } : reply } : {}) });
+        return bus.run(plan.type, plan.payload ?? {}, { cause: 'system', state, seed: plan.seed, replacing, reusing: typeof info?.span?.id === 'string' ? info.span : null, ...(Number.isInteger(info?.occurrence) ? { occurrence: info.occurrence } : {}), ...(reply ? { reply: { ...reply, ...(Number.isInteger(ordinal) ? { ordinal } : {}), ...(Number.isInteger(info?.opsBefore) ? { opsBefore: info.opsBefore } : {}) } } : {}) });
     }
 
     // After a delete or swipe (REPLAY.md "Reconciling"): the guarded steps that carry a `replan` are planned again
@@ -700,7 +706,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
     function lateLines(index, own = []) {
         const chat = ctx?.chat ?? [];
         const from = chat.slice(0, Math.max(0, index)).findLastIndex(isCarrier);
-        if (from < 0) return [];
+        if (from < 0 || lateReader?.faded().has(from)) return [];
         const stored = assistSections(String(chat[from]?.mes ?? '')).next;
         if (!stored.length) return [];
         const safe = parseChanges(stored.join('\n')).lines.filter(line => !refusedWhy(line, null, { late: true }));
@@ -770,7 +776,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         // A Re-read has stored nothing yet: the proof its lines and earlier steps planned is what the hooks and steps see.
         const planned = () => (live || !plan ? [] : [...plan.blocks.flatMap(piece => piece.block?.evidence ?? []), ...steps.flatMap(step => step.block?.evidence ?? [])]);
         for (const { moduleId, fn } of registry.hookEntries('afterCapture')) {
-            const seen = live ? view() : makeView({ store, registry, settings, chat: ctx?.chat, state: now, reply, pendingProofs: () => planned().map(proof => ({ proof, block: null })) });
+            const seen = live ? view() : makeView({ store, registry, settings, chat: ctx?.chat, active: viewReader, state: now, reply, pendingProofs: () => planned().map(proof => ({ proof, block: null })) });
             let out;
             try { out = await within(fn(seen, { index, type }), HOOK_TIMEOUT_MS); } catch (error) {
                 problems.push(problem({ module: moduleId, index, code: 'FAILED', message: `afterCapture failed: ${error?.message ?? error}` }));
@@ -783,7 +789,8 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             for (const command of Array.isArray(out?.commands) ? out.commands : []) {
                 const payload = command?.payload ?? {};
                 const seed = seeds?.(command?.type);
-                const result = bus.run(command?.type, payload, { cause: 'system', state: live ? store.head() : now, ...(reply ? { reply: plan ? { ...reply, pending: plan.pending } : reply } : {}), ...(plan ? { planned: planned(), replacing: plan.replacing } : {}), ...(seed === undefined ? {} : { seed }) });
+                const taking = plan ? occurrenceFor(plan, command?.type, payload) : null;
+                const result = bus.run(command?.type, payload, { cause: 'system', state: live ? store.head() : now, ...(reply ? { reply: plan ? { ...reply, ...(taking.span && occurrenceOf(taking.span) === null ? { ordinal: taking.span.source.ordinal } : {}), pending: plan.pending, opsBefore: plan.blocks.reduce((sum, piece) => sum + (Number.isInteger(piece.n) ? piece.n : 0), 0) + steps.reduce((sum, step) => sum + (Array.isArray(step.ops) ? step.ops.length : 0), 0) } : reply } : {}), ...(plan ? { planned: planned(), replacing: plan.replacing, reusing: taking.span, ...(Number.isInteger(taking.value) ? { occurrence: taking.value } : {}) } : {}), ...(seed === undefined ? {} : { seed }) });
                 if (!result?.ok) {
                     problems.push(problem({ module: moduleId, index, code: result?.code ?? 'FAILED', message: `The step "${command?.type}" after the reply's lines was not run: ${result?.message ?? 'unknown error'}` }));
                     continue;
@@ -797,12 +804,23 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
                     events?.emit('committed', { receipt });
                 } else {
                     now = result.state;
-                    if (result.block && plan) plan.pending += 1;
+                    if (result.block && plan) {
+                        plan.pending += 1;
+                        if (taking.key) plan.reuse.commit(taking.key, result.block.occurrence);
+                    }
                 }
                 steps.push({ ops: result.ops, receipt, ...(result.block ? { block: result.block } : {}) });
             }
         }
         return steps;
+    }
+
+    // The occurrence a block of a Re-read that does `type` with `payload` takes (evidence.js reusePlan): the number of a block it replaces, else the next unused.
+    function occurrenceFor(plan, type, payload) {
+        try {
+            const key = operationKey(type, payload);
+            return { key, value: plan.reuse.peek(key), span: plan.reuse.span(key) };
+        } catch { return { key: null, value: undefined }; }
     }
 
     // For a Re-read: each afterCapture step run again gets the seed of the old one of its type, in order.
@@ -872,7 +890,9 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             }
             let result;
             try {
-                const run = opts => bus.run(`${CAPTURE_PREFIX}${entry.kind}`, { ...line, kind: entry.kind, word: line.kind }, { cause: 'story', state, capture: entry, carrier: plan ? { ...carrier, pending: plan.pending } : carrier, chat, standing, ...(plan ? { planned: plan.blocks.flatMap(piece => piece.block?.evidence ?? []), replacing: plan.replacing } : {}), ...(seed === undefined ? {} : { seed }), ...opts });
+                const operation = { type: `${CAPTURE_PREFIX}${entry.kind}`, payload: { ...line, kind: entry.kind, word: line.kind } };
+                const taking = plan ? occurrenceFor(plan, operation.type, operation.payload) : null;
+                const run = opts => bus.run(operation.type, operation.payload, { cause: 'story', state, capture: entry, carrier: plan ? { ...carrier, ...(taking.span && occurrenceOf(taking.span) === null ? { ordinal: taking.span.source.ordinal } : {}), pending: plan.pending, opsBefore: plan.blocks.reduce((sum, piece) => sum + (Number.isInteger(piece.n) ? piece.n : 0), 0) } : carrier, chat, standing, ...(plan ? { planned: plan.blocks.flatMap(piece => piece.block?.evidence ?? []), replacing: plan.replacing, reusing: taking.span, ...(Number.isInteger(taking.value) ? { occurrence: taking.value } : {}) } : {}), ...(seed === undefined ? {} : { seed }), ...opts });
                 result = entry.off ? await run({ capture: { ...entry, off: false }, again: true }) : await run();
                 // Refused by a feature that is off (a command it called, ctx.feature): run as it ran before.
                 if (again && !entry.off && result?.code === 'FEATURE_OFF') result = await run({ again: true });
@@ -883,7 +903,10 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
                     collected.push(...result.ops);
                     if (plan) {
                         plan.blocks.push({ n: result.ops.length, receipt: result.receipt, ...(result.block ? { block: result.block } : {}) });
-                        if (result.block) plan.pending += 1;
+                        if (result.block) {
+                            plan.pending += 1;
+                            if (taking.key) plan.reuse.commit(taking.key, result.block.occurrence);
+                        }
                     }
                 } else if (result?.ok) store.append({ ops: result.ops, receipt: result.receipt, ...(result.block ? { block: result.block } : {}) });
             } catch (error) {
@@ -973,7 +996,8 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         const message = Number.isInteger(index) ? chat[index] : undefined;
         if (!message) return refusal('NOT_FOUND', `There is no message ${index} in this chat.`);
         if (message.is_user) return refusal('REFUSED', 'This is the reader\'s own message; only replies hold story changes.');
-        if (message.is_system) return refusal('REFUSED', 'This is a system message; it holds no story changes.');
+        // (a reply a restore hid keeps its record, and can be read again; a system message of SillyTavern's has none)
+        if (message.is_system && !readRecord(message)) return refusal('REFUSED', 'This is a system message; it holds no story changes.');
         if (session) return refusal('REFUSED', 'A reply is being written; Re-read once it is done.');
         if (!readRecord(message)) return refusal('REFUSED', 'This reply keeps no story record, so there is nothing to read again.');
         const base = store.before?.(index);
@@ -998,24 +1022,42 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         let ops;
         let off = [];
         let steps = [];
-        // `replacing`: the proof of the blocks this Re-read replaces (its story lines and its steps). A proof given again keeps the id of the
-        // old one of the same kind and key at the same place among those, so a line that reads as it did keeps its ids and what was built on them.
-        const plan = { blocks: [], pending: 0, replacing: replacedProofs(readRecord(message)) };
+        // `replacing`: the proof of the blocks this Re-read replaces (its story lines and its steps): ids of them may be held again by the blocks that replace
+        // them. `reuse`: the occurrences those blocks have, given again per operation while the number of blocks of the operation is unchanged.
+        let plan = null;
+        const problemsFrom = problems.length;
+        const reply = store.carrierSid?.(index) ? { index, sid: store.carrierSid(index) } : null;
         try {
             let after;
-            const seeds = storySeeds(readRecord(message));
-            ({ ops, off, state: after } = await captureEach(index, lines, receipts, problems, base, seeds, new Map(), null, plan));
-            for (const mark of [LATE, NOW]) {
-                const group = extra.filter(item => item.mark === mark).map(item => item.line);
-                if (!group.length) continue;
-                const more = await captureEach(index, group, receipts, problems, after, seeds, new Map(), mark, plan);
-                ops = [...ops, ...more.ops];
-                off = [...new Set([...off, ...more.off])];
-                after = more.state;
+            // The Re-read is planned; when an operation has more or fewer blocks than it replaces it is planned again with none of that
+            // operation's old occurrences given back (evidence.js reusePlan), and again while a plan finds another operation changed (the
+            // retired set only grows). Every pass starts from the same inputs but that set: seeds, steps' seeds, plan and outputs are made anew.
+            let retire = new Set();
+            const bound = 32;     // (each pass retires at least one more operation, so a reply ends well before; a plan that does not is not stored)
+            let settled = false;
+            for (let pass = 0; pass <= bound; pass += 1) {
+                receipts.length = 0;
+                problems.length = problemsFrom;
+                steps = [];
+                const seeds = storySeeds(readRecord(message));
+                plan = { blocks: [], pending: 0, replacing: replacedProofs(readRecord(message)), reuse: reusePlan(readRecord(message), retire) };
+                ({ ops, off, state: after } = await captureEach(index, lines, receipts, problems, base, seeds, new Map(), null, plan));
+                for (const mark of [LATE, NOW]) {
+                    const group = extra.filter(item => item.mark === mark).map(item => item.line);
+                    if (!group.length) continue;
+                    const more = await captureEach(index, group, receipts, problems, after, seeds, new Map(), mark, plan);
+                    ops = [...ops, ...more.ops];
+                    off = [...new Set([...off, ...more.off])];
+                    after = more.state;
+                }
+                // The reply's afterCapture steps, run again after its new story lines (none when none was kept).
+                if (receipts.length) steps = await afterCapture(index, { type: 'reread', problems, state: after, reply, seeds: stepSeeds(readRecord(message)), plan });
+                const unsure = plan.reuse.ambiguous([...plan.blocks, ...steps]);
+                if (!unsure.length) { settled = true; break; }
+                retire = new Set([...retire, ...unsure]);
             }
-            // The reply's afterCapture steps, run again after its new story lines (none when none was kept).
-            const reply = store.carrierSid?.(index) ? { index, sid: store.carrierSid(index) } : null;
-            if (receipts.length) steps = await afterCapture(index, { type: 'reread', problems, state: after, reply, seeds: stepSeeds(readRecord(message)), plan });
+            // A plan that still reports a changed operation is never stored.
+            if (!settled) return refusal('CONFLICT', 'The reply could not be read again without taking blocks for ones that went; nothing was changed.');
             // B-b2-timeline-r2: the lines ran while the reader could act (a capture handler may wait). A
             // message deleted, another chat opened, the reply swiped or edited, or a reply begun in that
             // time: what was read is no longer this reply's, so nothing is stored (not even on the
@@ -1040,6 +1082,8 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             if (Array.isArray(message.swipes) && Number.isInteger(message.swipe_id)) message.swipes[message.swipe_id] = hidden;
             redraw(index, message);
         }
+        timeline?.settle();
+        if (timeline?.needsRecovery()) await timeline.recover();
         await trySave('after the Re-read');
         for (const receipt of [...receipts, ...steps.map(step => step.receipt)]) events?.emit('committed', { receipt });
         events?.emit('head', { index: store.headIndex() });
@@ -1118,6 +1162,10 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
                 message.mes = hidden;
                 if (Array.isArray(message.swipes) && Number.isInteger(message.swipe_id)) message.swipes[message.swipe_id] = hidden;
                 edited = true;
+            }
+            if (timeline?.needsRecovery()) {
+                const anchored = await timeline.recover();
+                if (!anchored.ok) problem({ index: id, code: anchored.code, message: anchored.message });
             }
             deferred = false;
             // One write for the reply, its capture and the reader's actions after it (store.saveIdle).
@@ -1233,7 +1281,8 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         session = null;
         markIdle();
         clearPrompts();
-        rebuild();
+        rebuild({ publish: false });
+        timeline?.settle();
         // A1-2: read-backs of a write that timed out before a reload of the page go on.
         try { store.resume?.(); } catch { /* only a guard */ }
         // A cue left for the reply's save (runCues) whose reply will not come here: saved now (into its
@@ -1243,6 +1292,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             if (store.dirty?.()) store.scheduleSave?.();
         }
         await ensureModules({ store, bus, registry, events });
+        events?.emit('head', { index: store.headIndex() });
     }
 
     /**
@@ -1264,9 +1314,11 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
     }
 
     /** Deleted messages, swipes, a greeting picked: the state is rebuilt from what is stored. */
-    function onTimelineChanged() {
+    async function onTimelineChanged() {
         rebuild({ publish: false });
         reconcileNow();
+        timeline?.settle();
+        if (timeline?.needsRecovery()) await timeline.recover();
         events?.emit('head', { index: store.headIndex() });   // one head, after the steps that follow the change are planned again
     }
 
@@ -1283,7 +1335,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         const message = live[Number.isInteger(at) ? at : live.length - 1];
         const deleted = Number.isInteger(detail?.swipeId) ? detail.swipeId : null;
         if (swipeLoading(message, deleted)) return;
-        onTimelineChanged();
+        return onTimelineChanged();
     }
 
     /** GENERATION_STOPPED: the reader stopped the reply being written (its last line may be unfinished). */

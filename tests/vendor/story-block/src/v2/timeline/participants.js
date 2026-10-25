@@ -8,6 +8,19 @@
 import { isHash } from '../replay.js';
 import { CODES, crashing, fail, isObject } from './util.js';
 
+export const PARTICIPANT_TIMEOUT_MS = 10000;
+
+// One bound for every asynchronous participant callback, including native prepare. A timed-out
+// call remains quarantined until it really settles: a late activation must not race a new selection.
+export async function boundedParticipant(callback, timeoutMs = PARTICIPANT_TIMEOUT_MS) {
+    let timer;
+    try {
+        return await Promise.race([Promise.resolve().then(callback), new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`participant callback timed out after ${timeoutMs} ms`)), timeoutMs);
+        })]);
+    } finally { clearTimeout(timer); }
+}
+
 export const CALLBACKS = Object.freeze(['checkpoint', 'prepare', 'activate', 'abort', 'status']);
 const MODULE_ID = /^[a-z0-9][a-z0-9._-]*$/;
 const STATUSES = Object.freeze(['prepared', 'active', 'aborted']);
@@ -23,7 +36,23 @@ const SHAPES = Object.freeze({
     applyEvent: answer => text(answer.event) && text(answer.checkpoint) && isHash(answer.hash) && answer.ack === true,
 });
 
-export function createParticipants() {
+export function createParticipants({ timeoutMs = PARTICIPANT_TIMEOUT_MS, chat = () => null } = {}) {
+    // Callback state belongs to the chat that began it. Late completion clears only that chat's slot.
+    const inflight = new Map();
+    async function run(module, callback) {
+        const holder = chat();
+        let calls = inflight.get(holder);
+        if (!calls) { calls = new Map(); inflight.set(holder, calls); }
+        if (calls.has(module)) throw new Error(`The participant ${module} still has a timed-out callback in flight.`);
+        const pending = Promise.resolve().then(callback);
+        calls.set(module, pending);
+        const clear = () => {
+            if (calls.get(module) === pending) calls.delete(module);
+            if (!calls.size && inflight.get(holder) === calls) inflight.delete(holder);
+        };
+        pending.then(clear, clear);
+        return boundedParticipant(() => pending, timeoutMs);
+    }
     const table = new Map();
     return {
         /** Registers a participant: → { ok: true, module } | INVALID | CONFLICT. */
@@ -34,16 +63,43 @@ export function createParticipants() {
                 if (typeof spec[name] !== 'function') return fail('INVALID', `The participant ${spec.module} has no ${name}() callback.`);
             }
             if (spec.applyEvent !== undefined && typeof spec.applyEvent !== 'function') return fail('INVALID', `The participant ${spec.module} has an applyEvent that is not a function.`);
+            if (spec.current !== undefined && typeof spec.current !== 'function') return fail('INVALID', `The participant ${spec.module} has a current that is not a function.`);
             if (table.has(spec.module)) return fail('CONFLICT', `The participant ${spec.module} is registered already.`);
             const entry = { module: spec.module, schema: spec.schema };
-            for (const name of [...CALLBACKS, 'applyEvent']) if (typeof spec[name] === 'function') entry[name] = spec[name];
+            for (const name of [...CALLBACKS, 'applyEvent', 'current']) if (typeof spec[name] === 'function') entry[name] = spec[name];
             table.set(spec.module, Object.freeze(entry));
             return { ok: true, module: spec.module };
         },
         has: module => table.has(module),
+        ready: () => !inflight.get(chat())?.size,
+        run,
         get: module => table.get(module) ?? null,
         /** The registered participants' modules, sorted. */
         modules: () => [...table.keys()].sort(),
+        /**
+         * The optional synchronous probe `current({ checkpoint, hash, schema })` → `{ ok: true, current: boolean }`: is its native state still the one it handed over? Asked
+         * in the section that commits a save point, where nothing may be awaited. → { current: true } (it says so, or has no probe: today's
+         * behaviour) | { current: false, why } (it says no, or throws, or answers anything but `{ ok: true, current }`, or a promise: it fails closed).
+         */
+        probe(module, input) {
+            const entry = table.get(module);
+            if (typeof entry?.current !== 'function') return { current: true };
+            let answer;
+            try {
+                answer = entry.current(structuredClone(input));
+            } catch (error) {
+                if (crashing(error)) throw error;
+                return { current: false, why: `its probe failed: ${error?.message ?? error}` };
+            }
+            if (answer && typeof answer.then === 'function') {
+                answer.then(null, () => {});
+                return { current: false, why: 'its probe did not answer at once' };
+            }
+            if (isObject(answer) && answer.ok === true && typeof answer.current === 'boolean') {
+                return answer.current ? { current: true } : { current: false, why: 'its native state changed after its checkpoint' };
+            }
+            return { current: false, why: 'its probe answered something other than { ok: true, current: boolean }' };
+        },
         /**
          * Calls the participant's `method` with `input` and checks the answer. → the success (as the participant gave it) or
          * a failure envelope: the participant's own failure (unknown codes become FAILED), or FAILED when it threw,
@@ -56,7 +112,7 @@ export function createParticipants() {
             if (typeof callback !== 'function') return fail('UNSUPPORTED', `The participant ${module} cannot ${method}.`);
             let answer;
             try {
-                answer = await callback(structuredClone(input));
+                answer = await run(module, () => callback(structuredClone(input)));
             } catch (error) {
                 if (crashing(error)) throw error;
                 return fail('FAILED', `The participant ${module} failed at ${method}: ${error?.message ?? error}`);

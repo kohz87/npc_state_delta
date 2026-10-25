@@ -375,6 +375,7 @@ export function createRuntime({
     let sdk = null;
     let bus = null;
     let timeline = null;
+    let chatterReaders = null;   // the timeline's readers of earlier messages for the Inner chatter tail line and its two queries
     let assistCall = async () => { throw new Error('Story Block is not ready.'); };
     let turn = null;
     // What a reply's display lines (Choices, Inner chatter; extras.js) show, read from its text with the
@@ -398,7 +399,7 @@ export function createRuntime({
             // The chatter the reader may send back to the story (its setting): the replies and how to read one.
             // The head reply's index too, for `scene.moved` (the store is made below; asked only later).
             // Whether Story Director's World screen is there (it shows the chatter; else Scene does: `scene.chatter`).
-            extras: { chat: () => ctx.chat, display, headIndex: () => store.headIndex(), proofs: () => store.proofs(), worldShown: () => registry.screens().some(screen => screen.id === DEFAULT_HIDDEN[SCENE_SCREEN_ID]) },
+            extras: { promptChat: () => chatterReaders.prompt.messages(ctx.chat), headChat: () => chatterReaders.head.messages(ctx.chat), sceneChat: () => chatterReaders.scene.messages(ctx.chat), display, headIndex: () => store.headIndex(), proofs: () => store.proofs(), worldShown: () => registry.screens().some(screen => screen.id === DEFAULT_HIDDEN[SCENE_SCREEN_ID]) },
             version: VERSION,
             timeline: () => timeline,
             packs: packPart,
@@ -461,6 +462,9 @@ export function createRuntime({
     };
     timeline = createTimeline({
         store, registry, metadata: chatMetadata, chat: () => ctx.chat, settings: id => settings(id), faults: timelineFaults,
+        // a message a restore hid or showed again is drawn again; a message that could not be hidden is a Problem
+        redraw: (index, message) => { try { ctx.updateMessageBlock?.(index, message); } catch { /* drawn from the saved chat later */ } },
+        problem: entry => turn?.report(entry),
         query: (name, args, state) => runQuery(registry, state, name, args),
         barrier: (state, reason) => {
             registry.setRestore(state, reason);
@@ -468,6 +472,7 @@ export function createRuntime({
         },
         announce: receipt => events.emit('committed', { receipt }),
     });
+    chatterReaders = { prompt: timeline.active('prompt.chatter'), head: timeline.active('query.chatter.head'), scene: timeline.active('query.scene.chatter') };
     const rewind = createRewind({ ctx, store, events, ...(branch ? { branch } : {}) });
     let dialogOpener = null;
     let dialogCurrent = null;
@@ -494,7 +499,7 @@ export function createRuntime({
         dialogCurrent: () => dialogCurrent?.() ?? null, reread: index => turn?.reread(index), callModel: modelCalls.callModel, timeline });
     sdk = made.sdk;
     const initial = () => initialWithStart(registry);
-    turn = createTurn({ ctx, live, store, bus, registry, settings, events, onBlocked, initial, ownPrompt: eventData => ownCalls.owns(eventData), ...(notify ? { notify } : {}) });
+    turn = createTurn({ ctx, live, store, bus, timeline, registry, settings, events, onBlocked, initial, ownPrompt: eventData => ownCalls.owns(eventData), ...(notify ? { notify } : {}) });
     // The UI (ui-host.js) plugs its dialog mount in here, for sdk.dialog.open (and .current).
     const setDialog = (fn, current = null) => {
         dialogOpener = typeof fn === 'function' ? fn : null;

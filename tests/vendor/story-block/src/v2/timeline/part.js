@@ -19,6 +19,7 @@ export function createTimelinePart({ timeline = () => null } = {}) {
             'savepoint.restore': { handler: refuse('A restore is a block only the host stores, after it prepared one; no command can run it.'), internal: true },
         },
         queries: {
+            'savepoint.contract': () => current()?.contract() ?? { api: 2, snapshots: false, retainedChatRestore: false, participantsReady: false },
             'savepoint.list': state => current()?.points(state) ?? Object.values(state?.domains?.savepoints?.points ?? {}),
         },
         hooks: {

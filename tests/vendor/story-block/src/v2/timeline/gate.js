@@ -10,18 +10,14 @@
 //   sdk.preflight reads). A guard that names a hash must meet that hash when the state has one. A state with
 //   no rules marker has nothing to compare it with.
 
+import { GENESIS_EPOCH, epochOf } from '../replay.js';
+
 export const HOST_DOMAIN = 'savepoints';
 export const RULES_DOMAIN = 'rules';
-/** The epoch of a timeline that has never been restored (the savepoints domain starts in it). */
-export const GENESIS_EPOCH = 'ep_00000000';
+// (the genesis epoch and the epoch of a state are replay.js's: ctx.epoch reads the same function)
+export { GENESIS_EPOCH, epochOf };
 
 const isObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
-
-/** The epoch the state is in: the savepoints domain's, else the genesis epoch. */
-export function epochOf(state) {
-    const domain = state?.domains?.[HOST_DOMAIN];
-    return isObject(domain) && typeof domain.epoch === 'string' && domain.epoch ? domain.epoch : GENESIS_EPOCH;
-}
 
 /** The frozen ruleset's hash the state carries (its `rules` slice), else null. */
 export function rulesHashOf(state) {
