@@ -56,14 +56,15 @@ test('N1: a bundle export carries the block with the dossiers it names, and a bu
 });
 
 test('N2: after a restore the scanner reads the messages the story stands on: faded replies are skipped, indexes kept; no gate, or nothing faded, reads the chat as it is', async () => {
-    const { currentExchangeMessages, recentTranscript, refreshMessageGate, useMessageGate, useTranscriptSource } = await import('../src/transcript.js');
+    const { activeChat, currentExchangeMessages, recentTranscript, refreshMessageGate, storyDayAt, useMessageGate, useTranscriptSource } = await import('../src/transcript.js');
     const chat = [user('I go north.'), assistant('The road bends.'), user('I turn back.'), assistant('The dead timeline\'s reply.')];
     useTranscriptSource({ context: () => ({ chat, name1: 'Kazuma', name2: 'Megumin' }), scanDepth: () => 6 });
     const plain = recentTranscript(4, { messageIds: true });
     assert.match(plain, /\[m3\]/);
     let refreshed = 0;
     let flags = [true, true, true, false];
-    useMessageGate({ refresh: async () => { refreshed += 1; }, faded: () => flags.includes(false), active: index => flags[index] !== false });
+    useMessageGate({ refresh: async () => { refreshed += 1; return flags; } });
+    assert.match(recentTranscript(4, { messageIds: true }), /dead timeline/, 'nothing is known before the gate is asked');
     await refreshMessageGate();
     assert.equal(refreshed, 1);
     const gated = recentTranscript(4, { messageIds: true });
@@ -71,12 +72,16 @@ test('N2: after a restore the scanner reads the messages the story stands on: fa
     assert.match(gated, /\[m2\]/);
     assert.deepEqual(currentExchangeMessages(1).map(message => message.mes), ['I go north.', 'The road bends.']);
     assert.equal(currentExchangeMessages(3)?.at(-1)?.mes === 'The dead timeline\'s reply.', false, 'a faded reply is not the current exchange');
+    assert.equal(activeChat(chat)[3].is_system, true);
+    assert.equal(chat[3].is_system, false, 'the chat itself is not changed');
     flags = [true, true, true, true];
+    await refreshMessageGate();
     assert.equal(recentTranscript(4, { messageIds: true }), plain, 'nothing faded: the same bytes');
+    assert.equal(activeChat(chat), chat, 'and the same array');
     useMessageGate(null);
     assert.equal(recentTranscript(4, { messageIds: true }), plain);
+    void storyDayAt;
 });
-
 test('N2: every durable write of the chat\'s state ends in the one function that announces it to the participant', async () => {
     const { readFileSync } = await import('node:fs');
     const index = readFileSync(new URL('../index.js', import.meta.url), 'utf8');

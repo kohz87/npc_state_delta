@@ -34,6 +34,8 @@ import {
     currentExclusions,
     useTranscriptSource,
     refreshMessageGate,
+    messageGateSettled,
+    activeChat,
     useMessageGate,
 } from './src/transcript.js';
 import {
@@ -2874,7 +2876,7 @@ function meguminDossierBlocksInMessage(npc, raw, messageId) {
     return found.sort((a, b) => a.at - b.at);
 }
 
-export function findMeguminDossierSources(npc, chat = getContext().chat || []) {
+export function findMeguminDossierSources(npc, chat = activeChat(getContext().chat || [])) {
     if (!npc) return [];
     const newerUpdates = [];
     let base = null;
@@ -3094,10 +3096,13 @@ async function scanNpcDossier(npcId) {
         return false;
     }
     if (!await prepareCanonicalScanBase(chatKey, 'dossier import')) return false;
+    // (timeline) The import reads only the messages the story stands on: the gate is asked before the chat is read, and a faded one reads as hidden.
+    await refreshMessageGate();
+    if (getChatKey() !== chatKey) return false;
     const state = getChatState(chatKey);
     const existing = state.npcs.find(npc => npc.id === id);
     if (!existing) return false;
-    const sources = findMeguminDossierSources(existing, ctx.chat || []);
+    const sources = findMeguminDossierSources(existing, activeChat(ctx.chat || []));
     if (!sources.length) {
         globalThis.toastr?.info?.(`NPC State Delta: no matching Megumin dossier block found for ${existing.name}; scanning recent story context instead.`);
         return backfillNpcFromHistory({ npcId: existing.id, label: existing.name, requestedAt: Date.now() }, latestMessageId(true));
@@ -3231,6 +3236,9 @@ async function refreshNpcFromChat(npcId, { automatic = false } = {}) {
         try { await flushStateFile(chatKey); } catch { return false; }
     }
     if (!await prepareCanonicalScanBase(chatKey, 'dossier refresh')) return false;
+    // (timeline) The window and the story day are read from the messages the story stands on: the gate is asked first.
+    await refreshMessageGate();
+    if (getChatKey() !== chatKey) return false;
     const settings = getSettings();
     const state = getChatState(chatKey);
     const existing = state.npcs.find(npc => npc.id === id);
@@ -3370,6 +3378,9 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
     if (getChatKey() !== chatKey || !requireReadyChatMutation('backfill a dossier', chatKey, { notify: false })) return false;
     if (isScanBusy(chatKey)) return false;
     if (!await prepareCanonicalScanBase(chatKey, 'dossier backfill')) return false;
+    // (timeline) The window is read from the messages the story stands on: the gate is asked first.
+    await refreshMessageGate();
+    if (getChatKey() !== chatKey) return false;
     const state = getChatState(chatKey);
     const existing = state.npcs.find(npc => npc.id === request.npcId);
     if (!existing) return false;

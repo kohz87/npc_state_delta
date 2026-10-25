@@ -1175,16 +1175,16 @@ export function createStorySuiteV2Adapter({
     // runs for a chat until the chat uses the timeline or asks `npc.identity` (participant.js `started`): registering, opening a chat, a reply or a
     // scan hydrate nothing, write nothing and publish nothing.
     //
-    // Which of the chat's messages the story stands on (Story Block's `sdk.timeline.history()`): after a restore the replies of the dead timeline
-    // are faded, and Delta's scans do not read them (src/transcript.js useMessageGate). Refreshed at a turn, a restore and before a scan.
-    let activeFlags = null;
-    const refreshActive = async () => {
+    // Which of the chat's messages the story stands on: Story Block's one active-history filter, `sdk.timeline.history()`, one entry per message of the
+    // chat as it stands when asked (`active: false` for a faded one). Delta asks before it builds any prompt from the chat (src/transcript.js), and
+    // after a restore the host hides the faded replies with SillyTavern's own flag as well. Never cached here: a delete or a swipe moves the indexes.
+    const activeMessages = async () => {
         try {
             const history = await sdkRef?.timeline?.history?.();
-            activeFlags = history?.ok === true && Array.isArray(history.messages) ? history.messages.map(message => message?.active !== false) : null;
-        } catch { activeFlags = null; }
+            return history?.ok === true && Array.isArray(history.messages) ? history.messages.map(message => message?.active !== false) : null;
+        } catch { return null; }
     };
-    const messageGate = Object.freeze({ refresh: refreshActive, faded: () => Array.isArray(activeFlags) && activeFlags.includes(false), active: index => activeFlags?.[index] !== false });
+    const messageGate = Object.freeze({ refresh: activeMessages });
     let offNativeChange = null;
     const timeline = createParticipant({
         port: {
@@ -1195,7 +1195,6 @@ export function createStorySuiteV2Adapter({
             writeTimeline: block => runtime().writeTimeline(block),
             busy: () => runtime()?.scanActive?.() === true,
             idle: ms => (typeof runtime()?.scanIdle === 'function' ? runtime().scanIdle(ms) : Promise.resolve(true)),
-            restored: () => { void refreshActive(); },
             warn: text => warn(text),
         },
         vault: participantVault ?? fileVault({ headers: () => runtime()?.requestHeaders?.() ?? {} }),
@@ -1210,7 +1209,6 @@ export function createStorySuiteV2Adapter({
         try { offNativeChange?.(); } catch { /* gone */ }
         offNativeChange = null;
         try { runtime()?.useMessageGate?.(null); } catch { /* gone */ }
-        activeFlags = null;
     }
     const definition = Object.freeze({
         id: MODULE_ID,

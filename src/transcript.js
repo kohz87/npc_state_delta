@@ -12,15 +12,39 @@ export function useTranscriptSource({ context, scanDepth }) {
 }
 
 // (timeline participant) Which of the chat's messages the story still stands on. After a restore Story Block fades the replies of the dead
-// timeline; they stay in SillyTavern's chat array, and a scan must not read them. `gate` = { refresh(): Promise, faded(): boolean,
-// active(index): boolean } from the Story Suite adapter, or none (the chat as it is, byte for byte). A faded message reads as a system
-// message: skipped by every walk below, and its index is kept.
+// timeline and hides them with SillyTavern's own flag (`is_system`), which every reader below already skips, so a prompt needs no filtering of
+// its own. The gate is the second look, for a message the host could not hide and for the moment before it has: `gate` = { refresh():
+// Promise<boolean[] | null>, settled(): Promise<boolean> } from the Story Suite adapter, or none (the chat as it is, byte for byte).
+// `refresh` answers Story Block's one active-history filter (`sdk.timeline.history`), one entry per message of the chat as it stood when it
+// was asked; the faded messages are remembered by identity, so a delete or a swipe after it cannot move the mark onto another message. A faded
+// message reads as a system message: skipped by every walk below, and its index is kept.
 let gate = null;
-export function useMessageGate(next) { gate = next && typeof next.active === 'function' ? next : null; }
-export async function refreshMessageGate() { try { await gate?.refresh?.(); } catch { /* the chat as it is */ } }
-function storyChat(chat) {
-    if (!gate || gate.faded?.() !== true) return chat;
-    return chat.map((message, index) => (message && gate.active(index) === false ? { ...message, is_system: true } : message));
+let faded = null;   // WeakSet of the chat's message objects the story no longer stands on, as of the last refresh; null: none known
+export function useMessageGate(next) {
+    gate = next && typeof next.refresh === 'function' ? next : null;
+    if (!gate) faded = null;
+}
+/** Asks the host which messages are faded now. Awaited before any prompt is built from the chat (a scan, a refresh, an import, a backfill). */
+export async function refreshMessageGate() {
+    if (!gate) return;
+    const chat = [...(readContext().chat || [])];
+    let flags = null;
+    try { flags = await gate.refresh(); } catch { flags = null; }
+    const list = Array.isArray(flags) && flags.length === chat.length ? chat.filter((message, at) => flags[at] === false && message && typeof message === 'object') : [];
+    faded = list.length ? new WeakSet(list) : null;
+}
+/**
+ * Whether the host's head-selection barrier is down and Delta stands on the checkpoint of the selected head (Story Block's barrier;
+ * participants.md). Awaited before a scan, a targeted pass, a branch reconcile or a generation reads or writes the dossiers. true without a gate.
+ */
+export async function messageGateSettled() {
+    if (typeof gate?.settled !== 'function') return true;
+    try { return (await gate.settled()) !== false; } catch { return true; }
+}
+/** The chat as the story stands on it: the faded messages read as system messages; the same array when none is faded. */
+export function activeChat(chat = readContext().chat || []) {
+    if (!faded) return chat;
+    return chat.map(message => (message && faded.has(message) ? { ...message, is_system: true } : message));
 }
 
 export function cleanMessage(message) {
@@ -31,7 +55,7 @@ export function cleanMessage(message) {
 }
 
 export function recentTranscript(limit = null, { messageIds = false } = {}) {
-    const chat = storyChat(readContext().chat || []);
+    const chat = activeChat(readContext().chat || []);
     const count = Math.max(2, Math.min(30, Number(limit ?? readScanDepth()) || 6));
     const lines = [];
     // Walk backward and stop as soon as the requested meaningful window is full.
@@ -45,7 +69,7 @@ export function recentTranscript(limit = null, { messageIds = false } = {}) {
 }
 
 export function recentUserDevelopmentContext(limit = null, { messageIds = true } = {}) {
-    const chat = storyChat(readContext().chat || []);
+    const chat = activeChat(readContext().chat || []);
     const count = Math.max(2, Math.min(30, Number(limit ?? readScanDepth()) || 6));
     const selected = [];
     let meaningful = 0;
@@ -62,7 +86,7 @@ export function recentUserDevelopmentContext(limit = null, { messageIds = true }
 
 export function currentExchangeUserDevelopmentContext(messageId = null) {
     const ctx = readContext();
-    const chat = storyChat(ctx.chat || []);
+    const chat = activeChat(ctx.chat || []);
     let assistantId = Number.isInteger(messageId) ? messageId : chat.length - 1;
     while (assistantId >= 0 && (chat[assistantId]?.is_system || chat[assistantId]?.is_user)) assistantId -= 1;
     if (assistantId < 0) return '';
@@ -81,7 +105,7 @@ export function currentExchangeUserDevelopmentContext(messageId = null) {
 // message it answers, oldest first; null when there is no reply.
 export function currentExchangeMessages(messageId = null) {
     const ctx = readContext();
-    const chat = storyChat(ctx.chat || []);
+    const chat = activeChat(ctx.chat || []);
     let assistantId = Number.isInteger(messageId) ? messageId : chat.length - 1;
     while (assistantId >= 0 && (chat[assistantId]?.is_system || chat[assistantId]?.is_user)) assistantId -= 1;
     if (assistantId < 0) return null;
@@ -117,9 +141,11 @@ export function currentExchangeProse(messageId = null) {
 export const STORY_DAY_LOOKBACK = 12;
 
 export function storyDayAt(messageId) {
-    const chat = storyChat(readContext().chat || []);
+    const chat = activeChat(readContext().chat || []);
     const start = Number.isInteger(messageId) ? Math.min(messageId, chat.length - 1) : chat.length - 1;
     for (let i = start; i >= 0 && i > start - STORY_DAY_LOOKBACK; i -= 1) {
+        // A hidden message (a faded reply is one) dates nothing: the prompts do not carry it, the story does not stand on it.
+        if (chat[i]?.is_system) continue;
         const day = storyDayFromText(chat[i]?.mes || '');
         if (day !== null) return day;
     }
