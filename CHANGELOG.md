@@ -6,7 +6,7 @@ Delta keeps its own version scheme: **1.2.21 → 1.3.0**, the next minor. Prompt
 - Rules packs can be pinned at character creation; the bundled **Ersveil** pack supplies a ready-to-play world and rules.
 - **Story Director owns checks**; RPG Battle uses those results for practice and crafting alongside its party and combat rules.
 - **Save points** let you return to a saved story with the suite's records together.
-- **Native-death recovery** returns an NPC's living dossier when the lethal reply is retracted, keeping combat and dossiers in agreement. This requires Story Block #203, NPC State Delta #220 and RPG Battle #150, still unmerged when this release branch started from `main`.
+- **Native-death recovery** returns an NPC's living dossier when the lethal reply is retracted, keeping combat and dossiers in agreement. It needs Story Block 2.0.0, RPG Battle 2.0.0 and NPC State Delta 1.3.0 together.
 
 ### Upgrading from 1.x
 
