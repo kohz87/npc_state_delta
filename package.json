@@ -1,6 +1,6 @@
 {
   "name": "npc_state_delta",
-  "version": "1.2.21",
+  "version": "1.3.0",
   "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
@@ -8,6 +8,7 @@
   "scripts": {
     "test": "node --import ./tests/active-runtime-test-setup.mjs --test tests/*.test.js tests/v2/break/*.test.js && node --import ./tests/active-runtime-test-setup.mjs tests/compatibility-check.js && node --import ./tests/active-runtime-test-setup.mjs tests/runtime-smoke.mjs",
     "test:dot": "node --import ./tests/active-runtime-test-setup.mjs --test --test-reporter=dot tests/*.test.js tests/v2/break/*.test.js && node --import ./tests/active-runtime-test-setup.mjs tests/compatibility-check.js && node --import ./tests/active-runtime-test-setup.mjs tests/runtime-smoke.mjs",
+    "check": "npm run -s validate",
     "validate": "node scripts/validate.mjs",
     "measure:prompts": "node scripts/measure-prompts.mjs",
     "package": "node scripts/package.mjs"

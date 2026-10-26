@@ -1,7 +1,6 @@
-# NPC State Delta v1.2.21 ("Delta")
+# NPC State Delta v1.3.0 ("Delta")
 
-> This is the build that goes with Story Suite v2, second beta (**2.0.0-beta.2**). It is for test play, not
-> for your real campaigns yet.
+> Story Suite 2.0.0. Delta keeps its own application version: **1.3.0**.
 
 ## What it is
 
@@ -17,12 +16,17 @@ with every reply, shows a **Dossiers** tab, feeds its cards to
 
 ## Install
 
-1. SillyTavern **1.18.0 or newer** for Delta alone (Story Suite v2 itself targets 1.19). Delta needs a model
-   connection for its scans: your chat's, or a separate connection profile.
-2. **Extensions → Install extension**, paste `https://github.com/kohz87/npc_state_delta` and install (no branch to
-   pick), reload.
-3. For the suite, install **Story Block first** (`https://github.com/kohz87/Story_block`), then Delta;
-   Story Director and RPG Battle can come before or after.
+Tested with **SillyTavern 1.19**. In **Extensions → Install extension**, install in this order, then reload:
+
+1. [Story Block](https://github.com/kohz87/Story_block)
+2. [Story Director](https://github.com/kohz87/Story_director)
+3. [RPG Battle](https://github.com/kohz87/rpg_battle)
+4. [NPC State Delta](https://github.com/kohz87/npc_state_delta)
+
+To start with the bundled **Ersveil** rules pack, open a fresh chat and follow **Setup → Pin Ersveil Rules → Create**,
+then choose your character's options. Existing chats load and rebuild unchanged; legacy chats stay unpinned.
+
+Report bugs in [this repo's Issues](https://github.com/kohz87/npc_state_delta/issues), with steps to reproduce.
 
 For the old version (Delta for Story Block 1, Story Suite v1), install the `v1` branch of the same repo instead: paste the URL and type `v1` as the branch.
 

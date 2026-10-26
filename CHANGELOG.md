@@ -1,3 +1,25 @@
+## 1.3.0 (Story Suite 2.0.0)
+
+Delta keeps its own version scheme: **1.2.21 → 1.3.0**, the next minor. Prompt text is byte-identical.
+
+- Story Block v2 hosts the suite's inventory, purse and scene, with reply cards and a **Game view** for your party, fights and world.
+- Rules packs can be pinned at character creation; the bundled **Ersveil** pack supplies a ready-to-play world and rules.
+- **Story Director owns checks**; RPG Battle uses those results for practice and crafting alongside its party and combat rules.
+- **Save points** let you return to a saved story with the suite's records together.
+- **Native-death recovery** returns an NPC's living dossier when the lethal reply is retracted, keeping combat and dossiers in agreement. This requires Story Block #203, NPC State Delta #220 and RPG Battle #150, still unmerged when this release branch started from `main`.
+
+### Upgrading from 1.x
+
+Old chats load and rebuild unchanged. Legacy chats stay unpinned; updating does not choose a rules pack for them.
+For a pinned Ersveil adventure, start a fresh chat with **Setup → Pin Ersveil Rules → Create**.
+
+### Known issues
+
+- Fight offers appear in the Game view and Fight tab dot, but are not listed in **Changed this reply**.
+- The creation wizard allows Next without a class and says **Choose a basic class** only at the end.
+- Shop prices and the bestiary can still read the installed pack in pinned chats, so reinstalling a pack can affect them.
+- If an extension stops responding during recovery, the chat can remain on hold until it responds.
+
 ## Unreleased
 
 - Licence: AGPL-3.0 (was GPL-3.0). Releases already published keep the licence they shipped with.
