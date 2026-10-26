@@ -34,7 +34,5 @@ export const CASES = Object.freeze([
     ['delete', 'delete'],
 ]);
 
-/** Cases the host cannot express today, with why (reported as "n/a" in every row). */
-export const NOT_EXPRESSIBLE = Object.freeze({
-    'disabled-SD': 'the host can switch a registered module off (registry.setEnabled, host-internal: no setting or screen yet) but the matrix does not drive it, so "SD present but off" is not run yet',
-});
+/** Cases the host cannot express today, with why. All current columns are executable. */
+export const NOT_EXPRESSIBLE = Object.freeze({});
