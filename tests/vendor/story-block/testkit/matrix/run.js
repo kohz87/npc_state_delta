@@ -19,12 +19,12 @@
 import assert from 'node:assert/strict';
 import { createHost } from '../host.js';
 import { createStore } from '../../src/v2/store.js';
+import { createCommandBus } from '../../src/v2/commands.js';
 import { MODULES, ORDER } from './modules.js';
 import { CASES, NOT_EXPRESSIBLE, ROWS } from './rows.js';
 
 const gap = detail => ({ gap: detail });
 const na = detail => ({ na: detail });
-const todo = detail => ({ todo: detail });
 const oneLine = text => String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 360);
 const label = key => (key === 'sb' ? 'SB' : MODULES[key].label);
 const PEER_QUERIES = { sd: ['director.time', 'director.threads'], nsd: ['npc.present', 'npc.dossier'] };
@@ -129,9 +129,14 @@ function replayed(host, when = '') {
         const errors = typeof fn === 'function' ? fn(state?.domains?.[name], state) : [];
         return Array.isArray(errors) ? errors.map(String) : [];
     });
-    const fresh = createStore({ chat: () => host.ctx.chat, save: () => {}, validate, scratch: name => registry.scratch(name) });
+    const chat = structuredClone(host.ctx.chat);
+    const metadata = structuredClone(host.ctx.chatMetadata ?? {});
+    const fresh = createStore({ chat: () => chat, metadata: () => metadata, save: () => {}, validate, scratch: name => registry.scratch(name) });
+    // As on a real reload, the bus attaches the owners' replay guards before the first store read.
+    createCommandBus({ store: fresh, registry, settings: id => host.sdk.settings(id) });
     fresh.ensureInitial(registry.initialState());
     assert.deepEqual(fresh.head().domains, host.head().domains, `a cold rebuild from the chat's records is not the live state${when}`);
+    assert.deepEqual(fresh.problems(), [], `a cold rebuild reports problems${when}`);
 }
 function changed(before, after, keys, what) {
     for (const key of keysOf({}, keys)) assert.notDeepEqual(after[key], before[key], `${label(key)}: ${what} changed nothing it keeps`);
@@ -273,7 +278,7 @@ async function basics(env, row, rec) {
                 for (const key of keysOf(row, active)) {
                     const watch = MODULES[key].watch ?? MODULES[key].facts;
                     const before = watch(host);
-                    const [type, payload] = MODULES[key].action(host);
+                    const [type, payload] = await MODULES[key].action(host);
                     const result = await host.sdk.command(type, payload);
                     assert.ok(result.ok, `${label(key)} ${type} was refused: ${result.message}`);
                     assert.notDeepEqual(watch(host), before, `${label(key)} ${type} changed nothing it keeps`);
@@ -400,12 +405,23 @@ async function unsetClock(env, row, rec) {
             await host.send('Turn A.', `A reply with no time.\n\n<Changes>\n${quiet.join('\n')}\n</Changes>`);
             noProblems(host);
             assert.equal(host.head().domains.director.time.minutes, null, 'the clock should still be unset');
-            assert.ok(MODULES.sd.facts(host).quests.length, 'SD should still create a quest with the clock unset');
+            assert.ok(MODULES.sd.facts(host).goals.length, 'SD should still create a neutral goal with the clock unset');
+            const [type, payload] = await MODULES.sd.action(host);
+            const accepted = await host.sdk.command(type, payload);
+            assert.ok(accepted.ok, `neutral acceptance with the clock unset: ${accepted.message}`);
+            const goal = host.sdk.query('director.thread', { id: payload.thread });
+            assert.ok(goal.acceptance, 'neutral acceptance should retain its evidence without time');
+            assert.equal(goal.acceptance.minute, null);
+            assert.equal(goal.rpg, undefined, 'a neutral goal needs no RPG extension');
             replayed(host);
             if (!active.includes('rb')) return { note: 'creation and views work; no timed action in this row' };
-            const rest = await host.sdk.command('party.rest', { kind: 'short' });
-            if (rest.ok) return gap('RB ran a timed action (party.rest) with the clock unset; CLOCK_UNSET lands with RB\'s dependency work');
-            assert.equal(rest.code, 'CLOCK_UNSET', `a timed action with the clock unset was refused with ${rest.code}: ${rest.message}`);
+            for (const kind of ['short', 'long']) {
+                const before = structuredClone(host.head());
+                const rest = await host.sdk.command('party.rest', { kind });
+                assert.equal(rest.ok, false, `RB ran a ${kind} rest with the clock unset`);
+                assert.equal(rest.code, 'CLOCK_UNSET', `a timed action with the clock unset was refused with ${rest.code}: ${rest.message}`);
+                assert.deepEqual(host.head(), before, 'a refused rest must change no state');
+            }
             return undefined;
         });
     });
@@ -414,7 +430,53 @@ async function unsetClock(env, row, rec) {
 async function disabledSd(env, row, rec) {
     await rec.step('disabled-sd', async () => {
         if (!row.modules.includes('sd')) return na('there is no SD in this row to disable');
-        return todo(NOT_EXPRESSIBLE['disabled-SD']);
+        const held = row.modules.filter(key => key === 'sd' || key === 'rb');
+        const active = row.modules.filter(key => !held.includes(key));
+        await withHost(env, row.modules, {}, async host => {
+            const domains = host.sdk.modules().filter(entry => held.some(key => MODULES[key].id === entry.id)).flatMap(entry => entry.domains);
+            const saved = () => structuredClone(Object.fromEntries(domains.map(domain => [domain, host.head().domains[domain]])));
+            const disable = async () => {
+                assert.equal(host.registry.setEnabled(MODULES.sd.id, false, 'Matrix: SD disabled.'), true);
+                for (const key of held) {
+                    await dormancy(host, key, 'with SD disabled');
+                    assert.ok(host.registry.contexts().every(entry => entry.moduleId !== MODULES[key].id), `${label(key)} still supplies prompts`);
+                    const def = env.loaded[key].make(host.ref);
+                    for (const hook of Object.keys(def.hooks ?? {})) {
+                        assert.ok(host.registry.hookEntries(hook).every(entry => entry.moduleId !== def.id), `${label(key)} still supplies ${hook}`);
+                    }
+                    for (const kind of Object.keys(def.capture?.kinds ?? {})) assert.equal(host.registry.capture(kind), null, `${label(key)} still captures ${kind}`);
+                }
+                const refused = await host.sdk.command('threads.offer', {
+                    write: 'wr_disabled', thread: 'th_disabled', kind: 'hook', key: 'Disabled goal',
+                    summary: '', fields: {}, expectedHash: null,
+                });
+                assert.equal(refused.code, 'DEPENDENCY_UNAVAILABLE');
+            };
+            // Disable before character creation: a dormant RB must not veto the other modules' replies.
+            await disable();
+            const initial = factsOf(host, active);
+            const before = saved();
+            await play(host, active, 'A');
+            changed(initial, factsOf(host, active), active, 'a reply with SD disabled');
+            assert.deepEqual(saved(), before, 'disabled modules changed their saved slices');
+            noProblems(host);
+            replayed(host, ' (SD disabled before setup)');
+            host.registry.setEnabled(MODULES.sd.id, true);
+            checkRegistered(host, row);
+            await runSetups(host, activeOf(row));
+            await play(host, activeOf(row), 'B');
+            noProblems(host);
+            // Disable a second time with real saved state, then reactivate without resetting it.
+            const established = saved();
+            await disable();
+            await play(host, active, 'C');
+            assert.deepEqual(saved(), established, 'disabling SD must preserve initialized slices');
+            noProblems(host);
+            replayed(host, ' (SD disabled with saved state)');
+            host.registry.setEnabled(MODULES.sd.id, true);
+            checkRegistered(host, row);
+            assert.deepEqual(saved(), established, 'reactivation reset saved state');
+        });
     });
 }
 
@@ -424,11 +486,15 @@ async function lateRegistration(env, row, rec) {
         const late = order.at(-1);
         if (!late) return na('SB alone has no module to register late');
         const early = row.modules.filter(key => key !== late);
-        const activeEarly = early.filter(key => !row.dormant.includes(key));
+        const activeEarly = await withHost(env, row.modules, { withhold: [late] }, host => early.filter(key => {
+            const entry = host.sdk.modules().find(item => item.id === MODULES[key].id);
+            return entry?.status ? entry.status === 'ready' : !row.dormant.includes(key);
+        }));
         const active = activeOf(row);
         const expected = await oracle(env, row, [{ set: 'A', keys: activeEarly }, { set: 'B' }]);
         const gaps = [];
         await withHost(env, row.modules, { withhold: [late] }, async host => {
+            if (late === 'sd' && early.includes('rb')) await dormancy(host, 'rb', 'until SD registers');
             await runSetups(host, activeEarly);
             await play(host, activeEarly, 'A');
             const before = factsOf(host, activeEarly);
@@ -438,7 +504,7 @@ async function lateRegistration(env, row, rec) {
             assert.deepEqual(factsOf(host, activeEarly), before, 'registering a module changed what the others keep');
             noProblems(host);
             if (row.dormant.includes(late)) gaps.push((await dormancy(host, late, 'when registered late'))?.gap);
-            else await runSetups(host, [late]);
+            else await runSetups(host, active.filter(key => !activeEarly.includes(key)));
             await play(host, active, 'B');
             noProblems(host);
             assert.deepEqual(factsOf(host, active), expected, 'a late registration should end where a boot with all of them does');

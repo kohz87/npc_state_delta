@@ -6,7 +6,7 @@ dossier of the person who died has to learn it. Story Block's timeline asks ever
 This folder is Delta's: `src/storysuite-participant/` (new files only; Delta's own modules, storage and **prompts** are untouched).
 
 Story Block's side is `docs/v2/TIMELINE.md` (participants, the commit-time probe, recovery) and `docs/v2/HISTORY.md` (active history, the head-selection
-barrier) in kohz87/Story_block. This note is Delta's side; the vendored copy in `tests/vendor/story-block/` is Story Block `5043028` (E1, E5, E6a, ctx-seams, E6b).
+barrier) in kohz87/Story_block. This note is Delta's side; the vendored copy in `tests/vendor/story-block/` is Story Block `c54104b` (E1, E5, E6a, ctx-seams, E6b and native-dependency checks).
 
 ## What it is
 
@@ -95,6 +95,13 @@ E6a), and the participant takes it from there; `port.headSource()` is only the f
 `UNSUPPORTED`, the change waits (the next checkpoint still carries it, state is whole in every one) and a save is not held up for it.
 
 ## Head selection: the host's barrier
+
+RB registers its delivered-death dependency with the host's synchronous `nativeSelection` hook. Before lowering the
+barrier, the host checks that the selected native dossier agrees with RB's surviving death. `npc.dossier({id: np_})`
+resolves that stable identity through the participant map and can read a terminal-death dossier archived from the cast;
+ordinary name-based browsing keeps its visibility rule. Unknown ids return null without a name fallback or a write.
+This read adds no scan, prompt, mutation or second selection rule. A checkpoint that cannot satisfy the dependency
+keeps the host's visible hold and remedy.
 
 A delete, a swipe, a retraction (the reply that holds a restore goes) or a Re-read moves the head. Story Block then raises its barrier (every module is
 `restore-pending`, generations are held), works out the checkpoint of the selected head for each participant from the prefix map (exact surviving prefix

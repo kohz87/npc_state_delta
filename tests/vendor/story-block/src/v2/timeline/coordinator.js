@@ -168,10 +168,14 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         if (holder && registry.restore?.().state !== 'pending') syncHidden();
         // A chat whose journal has work unfinished, or whose participants are off its selected head, is barred from the moment it is
         // open; its recovery follows when the queue gives it its turn (a make of another chat may be holding the line meanwhile).
-        if (holder && barrierOwner === null && (pendingEntry() !== null || selectionNeeded())) {
-            barrierOwner = holder;
-            barrierEarly = true;
-            barrier('pending', 'A restore is finishing; every part must agree before the story goes on.');
+        if (holder && barrierOwner === null) {
+            const outstanding = pendingEntry() !== null || selectionNeeded();
+            const dependency = outstanding ? null : nativeSelectionProblem();
+            if (outstanding || dependency) {
+                barrierOwner = holder;
+                barrierEarly = true;
+                barrier('pending', dependency ?? 'A restore is finishing; every part must agree before the story goes on.');
+            }
         }
     }
     // A clean-up after a failure that is not itself a durable step: the journal word it writes rides with the next save (a
@@ -189,7 +193,7 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
     // being settled) and the participants stand on the checkpoints the selected head names. Judged in the same synchronous step that
     // lowers it, so no listener is told ready on a story whose native state has not caught up. → whether it came down.
     function lowerWhenSettled(settling = null) {
-        if (pendingEntry(settling) !== null || selectionNeeded()) return false;
+        if (pendingEntry(settling) !== null || selectionNeeded() || nativeSelectionProblem()) return false;
         barrierOwner = null;
         barrierEarly = false;
         barrier('idle', '');
@@ -209,6 +213,8 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
                 if (!selected.ok) return selected;
                 continue;
             }
+            const dependency = nativeSelectionProblem();
+            if (dependency) { raise(dependency); return fail('SNAPSHOT_UNAVAILABLE', dependency); }
             await durable();
             if (lowerWhenSettled(settling)) return { ok: true };
         }
@@ -1152,18 +1158,39 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
     }
     const selectionNeeded = () => hashJson(selectionPlan()) !== hashJson(archive.selection());
 
+    // Owners may declare a native dependency through a synchronous, read-only hook. Check it only after
+    // checkpoint selection, on the whole selected story, while the barrier still holds every public reader.
+    function nativeSelectionProblem() {
+        const events = Object.freeze(archive.entries().filter(entry => entry.kind === 'native-event' && entry.phase === 'done')
+            .map(({ event, npc, participant }) => Object.freeze({ event, npc, participant })));
+        if (!events.length) return null;
+        return withWholePrefixes(() => {
+            const state = store.head();
+            for (const { moduleId, fn } of registry.hookEntries('nativeSelection')) {
+                let answer;
+                try { answer = fn({ state, query: (name, args) => ask(name, args, state) }, { events }); }
+                catch { answer = null; }
+                if (typeof answer?.then === 'function') { Promise.resolve(answer).catch(() => {}); answer = null; }
+                if (answer?.ok === true) continue;
+                return typeof answer?.reason === 'string' && answer.reason ? answer.reason
+                    : `The records needed by ${moduleId} could not follow the selected story. Restore a save point from before the change, or put the changed reply back.`;
+            }
+            return null;
+        });
+    }
+
     async function selectHead() {
         if (!selectionNeeded()) return { ok: true };
         const desired = selectionPlan();
-        if (availability(Object.values(desired))) { raise('The selected history needs unavailable native participants.'); return fail('SNAPSHOT_UNAVAILABLE', 'The participants needed by this head are unavailable.'); }
+        if (availability(Object.values(desired))) { raise('The selected story needs records that are unavailable. Restore a save point from before the change, or put the changed reply back.'); return fail('SNAPSHOT_UNAVAILABLE', 'The participants needed by this head are unavailable.'); }
         const entry = archive.add({ id: makeId('hs'), kind: 'selection', phase: 'prepared', desired, slots: {} });
-        raise('The selected history is waiting for its native checkpoints.');
+        raise('The selected story is waiting for its records. If this continues, restore a save point from before the change, or put the changed reply back.');
         await durable();
         return finishSelection(entry);
     }
 
     async function finishSelection(entry) {
-        raise('The selected history is waiting for its native checkpoints.');
+        raise('The selected story is waiting for its records. If this continues, restore a save point from before the change, or put the changed reply back.');
         await durable();
         for (const [module, target] of Object.entries(entry.desired)) {
             const registered = participants.get(module);
@@ -1424,7 +1451,7 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         const declarations = registry.modules().filter(def => def.participant !== undefined || def.id === 'npc-state-delta');
         const installed = declarations.every(def => participants.has(def.id) && !broken.has(def.id));
         const oldWitnesses = archive.entries().some(entry => entry.kind === 'restore' && entry.phase !== 'aborted' && !entry.boundary);
-        const participantsReady = installed && participants.ready() && !brokenProblem() && !oldWitnesses && registry.restore?.().state !== 'pending' && !selectionNeeded();
+        const participantsReady = installed && participants.ready() && !brokenProblem() && !oldWitnesses && registry.restore?.().state !== 'pending' && !selectionNeeded() && !nativeSelectionProblem();
         // (a restore fades earlier messages: retained-chat restore is offered only while Story Block's own readers of earlier messages filter
         // them, and not for a chat where a faded message could not be hidden)
         const retainedChatRestore = snapshots && unmaterializedMarkers().length === 0 && activeHistory.wired() && !hideFailed.has(archive.holder());
@@ -1502,6 +1529,8 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
         /** A chat was opened: what belongs to the one before it is dropped (the host calls it before it recovers). */
         settle,
         available: hash => archive.hasPayload(hash),
+        /** Internal turn hint: unchanged roots must keep Sources once native checkpoints depend on their prefixes. */
+        hasNativeChanges: () => archive.entries().some(entry => ['native-event', 'native-mutation'].includes(entry.kind)),
         /** Whether the journal holds work no operation owns (a crashed make, a restore left half way): the host recovers it. */
         needsRecovery: () => runningIn(archive.holder()) === 0 && ((archive.exists() && (archive.entries().some(entry => !settled(entry)) || selectionNeeded())) || unmaterializedMarkers().length > 0
             || (barrierOwner !== null && barrierOwner === archive.holder())),
