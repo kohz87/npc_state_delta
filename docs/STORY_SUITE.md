@@ -1,14 +1,15 @@
 # Story Suite: working alone and together
 
-Story Block, Story Director, NPC State Delta and RPG Battle each work on their own. When several
+Story Block, Story Director and NPC State Delta each work on their own. When several
 are installed, they find each other through a small shared registry (`globalThis.StorySuite`,
-created by whichever loads first; `src/suite.js`, identical in all four) and agree on **who is the
+created by whichever loads first; `src/suite.js`, identical in each) and agree on **who is the
 source of truth** for each area, so the model is not told the same thing twice and two
 extensions never contradict each other.
 
 ## Areas and owners
 
-The specialist for an area wins; the next one listed owns it when the first is not installed.
+The specialist for an area wins; the next one listed owns it when the first is not installed. RPG Battle, listed
+first for `stats` and `rolls` and second for `items` by earlier versions, is no longer part of the suite.
 
 | Area | What it covers | Owner, in order |
 |---|---|---|
@@ -16,9 +17,9 @@ The specialist for an area wins; the next one listed owns it when the first is n
 | `npc` | Who an NPC is: identity, personality, voice, relationships, goals | NPC State Delta → Story Director |
 | `calendar` | The calendar and story time | Story Director → NPC State Delta |
 | `timeline` | Off-screen agendas, quests, clocks, arcs | Story Director → Story Block (World State's lists) |
-| `stats` | HP, MP, stats, skills, fights | RPG Battle → Story Block (Character Sheet) → NPC State Delta (custom fields) |
-| `items` | What the player carries | Story Block (Inventory) → RPG Battle |
-| `rolls` | Roll modifiers for checks | RPG Battle (Checks) → Story Block (Dice) |
+| `stats` | HP, MP, stats, skills | Story Block (Character Sheet) → NPC State Delta (custom fields) |
+| `items` | What the player carries | Story Block (Inventory) |
+| `rolls` | Roll modifiers for checks | Story Block (Dice) |
 
 An extension offers an area only while it actually provides it (for example Story Block offers
 `stats` only while its Character Sheet block is on, and `rolls` only while a Dice block is on).
@@ -27,10 +28,8 @@ An extension offers an area only while it actually provides it (for example Stor
 
 | Extension | Defers when another owns… |
 |---|---|
-| Story Block | `stats`: its Character Sheet is marked "RPG Battle owns stats" (the reader decides whether to keep it). `rolls`: the Dice block takes RPG Battle's modifier (since 0.7). |
 | Story Director | `npc`: agenda lines describe only an NPC's plan and timing, never who they are. Shares its calendar (`StoryDirector.calendar()`), story time (`timeAt`) and encounters (`encountersAt`). |
-| NPC State Delta | `scene`: present-NPC cards leave out the live mood and current outfit that World State already gives. `calendar`: uses Story Director's months and era instead of its own. `stats`: warns when its custom fields name game stats (Level, HP, Class…) that RPG Battle keeps. Reads World State inside Story Block's hidden envelope. |
-| RPG Battle | `items` is Story Block's: reads gear, writes loot. Offers its party (`api.members()`). |
+| NPC State Delta | `scene`: present-NPC cards leave out the live mood and current outfit that World State already gives. `calendar`: uses Story Director's months and era instead of its own. `stats`: warns when its custom fields name game stats (Level, HP, Class…) that another extension keeps. Reads World State inside Story Block's hidden envelope. |
 
 ## The reader decides
 
@@ -41,8 +40,8 @@ choice behaves like Automatic.
 ## One place to manage them all
 
 With two or more installed, **Story Suite** (in the extensions menu, and the gear in Story Block's
-sidebar header) opens one overlay for all of them. Story Director and RPG Battle need Story Block,
-so any two of the four include it, and Story Block hosts the overlay:
+sidebar header) opens one overlay for all of them. Story Director needs Story Block, so any two of
+the three include it, and Story Block hosts the overlay:
 
 - **Overview:** each installed extension with its version and, where it has one, its on/off
   switch; and **one Source of truth table**, a row per shared area with one owner: Automatic, or
@@ -148,5 +147,4 @@ extension's *Manage all in Story Suite* link carries `data-story-suite-link`, so
 hides it while that panel is shown inside it.
 
 Announce again whenever what you offer changes (a block switched on or off), and `withdraw(id)`
-when the extension is turned off (or announce `enabled: false`, below). Ids: `story-block`, `story-director`, `npc-state-delta`,
-`rpg-battle`.
+when the extension is turned off (or announce `enabled: false`, below). Ids: `story-block`, `story-director`, `npc-state-delta`.

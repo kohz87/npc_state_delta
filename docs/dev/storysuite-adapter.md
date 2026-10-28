@@ -35,7 +35,8 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
 ## Social checks (`npc.socialModifier`)
 
 - `npc.socialModifier({ name, skill })` → `{ mod, name, skill, reasons: [{ text, value }] } | null`, for a dice
-  module's check (RPG Battle reads it through its check-modifier hook, by `tryQuery`; Delta never calls RPG Battle).
+  module's check (Story Director's `checks.roll` asks it for a check with `vs: Name`, by a guarded query; Delta never
+  calls the dice module).
   Delta owns the rules, all in `src/social-check.js` (header comment): `socialSkill` (skill words → persuade,
   charm, intimidate, deceive, social; anything else null), `SKILL_METERS` (meters and weights per skill),
   `STEPS` (25/50/75% of a meter's reach → 1/2/3), `RANK_BONUS_MAX`, `DISPOSITION_WORDS`, `socialSettings`
@@ -64,7 +65,7 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
   root), each rule keeps Delta's own value as the fallback. No new colour.
 - **The dossier panel** (`dossier-ui.js`, `#npc_state_delta_dossier_root .delta-panel`) carries the `ss-cards` root class; its
   `--delta-*` variables read the tokens with Delta's values as fallbacks. Its scrolling is its own (`.delta-document`).
-- **Social check lines**: Delta draws none. `npc.socialModifier` only answers; the reasons list is drawn by RPG Battle's check table.
+- **Social check lines**: Delta draws none. `npc.socialModifier` only answers; Story Director keeps the reasons as parts of the check it rolled.
 - **Delta's warning** under Custom fields keeps its own rule (`#npc_state_delta_settings .npc-state-delta-suite-warning`); the
   `story-suite-notice` glass in Story Block is scoped to the bar.
 
@@ -87,10 +88,10 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
 - `tests/v2/break/` (`a1-meter-window-after-delete`, `b5b-r2-capture-rule-names`,
   `b6-soak-prompt-and-backfill`, `b7r2-cast-*`).
 - Prompt identity: `tests/stage9-regression.test.js` (runs `scripts/measure-stage9.mjs`), `npm run measure:prompts`.
-- Across repos: the suite tests in Story Block and RPG Battle import `src/storysuite-v2.js` from a sibling checkout.
+- Across repos: Story Block's combination matrix imports `src/storysuite-v2.js` from a sibling checkout.
 
 ## When you change it
 
 - Keep the unhosted path untouched: a test with no host must show NSD exactly as before.
-- Run the adapter tests with Story Director and RPG Battle absent (the default here) and, once, the suite
-  check with all four side by side.
+- Run the adapter tests with Story Director absent (the default here) and, once, Story Block's matrix with Story
+  Block, Story Director and Delta side by side.
