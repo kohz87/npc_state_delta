@@ -1,11 +1,7 @@
 // `story-block/home` (SPEC §13.1, §13.4): the landing page of the full-screen game view. A summary of
-// whatever is installed, read through each module's queries (MODULES §B–C): the party (RPG Battle), a fight
-// under way or foes ahead, the place, time and who is here, the purse and what is worn, and the quests on
-// hand (Story Director). The lead's hero card is not here: the game view's header draws it on every screen
-// (view/game-header.js), so Home does not repeat it. A query whose module is not
-// installed answers null (the mount catches the "no module answers" error), and every panel that needs it
-// is behind a `data-if`, so a missing module's panel is simply not there. Story Block alone shows the
-// place and the purse. The time is written on the story's calendar (the host's fmt.time, view/clock.js).
+// the place, time and people here, the purse and what is worn, and Story Director's quests.
+// A query whose module is absent answers null; its panel stays hidden. Story Block alone shows
+// the place and the purse. The time is written on the story's calendar (view/clock.js).
 //
 // The quests come from Story Director's `quest.board`: its open quests, then its offers, each with the
 // status line the Director words itself (`status.text`: "Ready to turn in", "Not yet: 2/3 wolves",
@@ -13,9 +9,8 @@
 // quest's state on its own. The first open quest's progress bar is drawn when the board says it has a
 // target (`meter`).
 //
-// First, while a module holds the story back (its canGenerate, MODULES §F12: RPG Battle until your
-// character exists), "Before you start" (the host's `story-block.ready-hint` widget): its reason and a
-// button that runs its onBlocked hook (RPG Battle's opens the character wizard). Without such a module
+// First, while a module holds the story back (its canGenerate, MODULES §F12: a module needs a setup step), "Before you start" (the host's `story-block.ready-hint` widget): its reason and a
+// button that runs its onBlocked hook. Without such a module
 // it draws nothing.
 //
 // Last, the save points (MODULES §F93): the host's `story-block.savepoints` widget, which draws nothing
@@ -39,26 +34,6 @@ export const HOME_SCREEN_ID = 'story-block/home';
 const TEMPLATE = `
 <div class="home">
   <ss-widget name="${READY_HINT_WIDGET}" class="ready-slot"></ss-widget>
-
-  <section class="panel party" data-if="len(state.party.order) > 1">
-    <h4 class="ss-section-label"><i class="fa-solid fa-people-group" aria-hidden="true"></i> ${html(S.party)}</h4>
-    <ul>
-      <li class="member" data-each="state.party.order as id" data-if="id != state.party.pc">
-        <ss-widget name="ss.meter" data-props='{"bind":"state.party.actors[id].hp","label":"{{ state.party.actors[id].name }}","tone":"bad"}'></ss-widget>
-      </li>
-    </ul>
-  </section>
-
-  <section class="panel fight" data-if="q.fight.status == 'active' || len(q.offers) > 0">
-    <h4 class="ss-section-label"><i class="fa-solid fa-khanda" aria-hidden="true"></i> ${html(S.fight)}</h4>
-    <p class="on" data-if="q.fight.status == 'active'"><b>${html(S.fightOn)}</b> ${html(S.fightOpen)}</p>
-    <ul data-if="q.fight.status != 'active'">
-      <li class="offer" data-each="q.offers as o">
-        ${html(S.ahead)} <span data-each="o.foes as f, j"><span data-if="j > 0">, </span>{{ f.count }} {{ f.name }}</span>
-        <span class="chip danger" data-if="o.stakes == 'death'">${html(S.toTheDeath)}</span>
-      </li>
-    </ul>
-  </section>
 
   <section class="panel scene">
     <h4 class="ss-section-label"><i class="fa-solid fa-location-dot" aria-hidden="true"></i> ${html(S.where)}</h4>
@@ -112,12 +87,8 @@ const CSS = `${BASE_CSS}
 .more-slot { display: block; }
 .more-slot:empty { display: none; }
 .more-slot .sb-show-more { justify-self: start; }
-.party ul { display: grid; gap: 6px; }
 /* A quest is a small stacked block: title and status pill on one line when they fit, the goal under it; a hairline and 8px either side between quests. */
 .quests ul { display: grid; gap: 0; }
-.fight { border-color: color-mix(in srgb, var(--sb-bad) 55%, var(--sb-border)); }
-.fight .on b { color: var(--sb-bad); }
-.chip.danger { color: var(--sb-bad); }
 .chip.status[data-state="here"], .chip.status[data-state="ready"] { color: var(--sb-good); }
 .chip.status[data-state="offered"] { color: var(--sb-accent); }
 .panel p { margin: 2px 0; }
@@ -167,8 +138,6 @@ export const homeScreen = Object.freeze({
         items: Object.freeze({ query: 'inventory.items' }),
         wallet: Object.freeze({ query: 'inventory.wallet', args: Object.freeze({ owner: 'party' }) }),
         currency: Object.freeze({ query: 'inventory.currency' }),
-        fight: Object.freeze({ query: 'combat.session' }),                            // RPG Battle
-        offers: Object.freeze({ query: 'combat.offers' }),                            // RPG Battle
         board: Object.freeze({ query: 'quest.board' }),                               // Story Director
     }),
     template: TEMPLATE,

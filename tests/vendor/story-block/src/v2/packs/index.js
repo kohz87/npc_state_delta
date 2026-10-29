@@ -10,11 +10,10 @@
 // Interface for the other parts:
 // * query `packs.list` → installed packs for display (`installed.js` list()).
 // * query `packs.content({ kind, pack? })` → records of one kind from enabled packs (places and
-//   routes are the map Story Director's atlas reads; `terms` the level and XP words RPG Battle reads; `ranks` a
-//   ladder of quest ranks for Story Director's `quest.ranks` and RPG Battle's foe strength).
+//   routes are the map Story Director's atlas reads; other content is available to modules).
 // * query `packs.calendar` → the first enabled pack's calendar for the story clock, or null.
 // * query `packs.crafts` → the craft table (default crafts, enabled packs' `crafts` laid over them:
-//   `[{ craft, title, stats, stations, note?, pack }]`) that RPG Battle's crafting reads with recipes.
+//   `[{ craft, title, stats, stations, note?, pack }]`) for modules that use recipes.
 // * query `packs.weather` → the first enabled pack's weather table `{ pack, seasons, tables }`, or null
 //   (MODULES §F122: Story Director's weather by rule).
 // * query `packs.economy` → the first enabled pack's money scale `{ pack, scale, note }`, or null. Modules
@@ -23,12 +22,8 @@
 //   the enabled packs' `markets` records (settlement types and environment tags, the first pack's per
 //   name) and the places with a market: the character lorebook's `market:` lines first
 //   (`from: 'lorebook'`), then the packs' places that name a `market` or `tags` (`from: 'pack'`).
-//   RPG Battle's trade lays them over its built-in factors. The lorebook is read when a chat opens
+//   A module may use these records to set prices. The lorebook is read when a chat opens
 //   (`refreshLore()`) and from the Packs panel, never by a query.
-// * query `packs.rules({ pack? })` → the enabled packs' rules manifests, one entry per pack that has one, in list order
-//   (rulesOf below): `[{ pack, version, id, name, manifest }]`. Rules are never mixed across packs, so the reader
-//   (RPG Battle) takes one entry; the manifest is the checked, normalized `content.rules[0]` (RB_CONTRACT §7).
-//   `packs.content({ kind: 'rules' })` gives the bare manifests, `packs.list` counts them (`counts.rules`).
 // * query `packs.item({ name })` and hook `item.resolve(name)` → the pack item def a story
 //   name means (`pack.<packId>/<slug>`, SPEC §7 shape) or null. Inventory capture calls it
 //   after its own aliases and before it creates a `story/<slug>` def.
@@ -45,8 +40,9 @@ import { marketEntries } from './lorebook.js';
 export { validatePack, slugify, applyStart, mergeStart, resolveItemIn, contentOf, calendarOf, craftsOf, economyOf, weatherOf, createInstalled, renderPacksPanel };
 export { LIMITS, CONTENT_KINDS, DEFAULT_CRAFTS, STATIONS } from './limits.js';
 export { findPackEntries, marketEntries, readMarketLine, PACK_TAG } from './lorebook.js';
-export { readerRanks, rankLine } from './ranks.js';
 export { satisfies } from './version.js';
+export { validateDataModules, validateDataMigration, dataModuleDefaults, dataModuleHash,
+    DM_DESCRIPTORS, DM_LIMITS, DM_DIAGNOSTICS, DATA_MODULES_CAPABILITY } from '../data-modules/check.js';
 
 /**
  * Builds the part over injected access, so tests (and the coordinator, if it prefers the
@@ -96,7 +92,6 @@ export function createPacksPart({ settings, readLorebook = async () => ({ charac
         queries: {
             'packs.list': () => packs.list(),
             'packs.content': (_state, { kind, pack = null } = {}) => contentOf(packs.packs(), kind, { pack }),
-            'packs.rules': (_state, { pack = null } = {}) => rulesOf(packs.packs(), { pack }),
             'packs.item': (_state, { name } = {}) => resolveItem(name),
             // The enabled packs' items as inventory defs by definition ID, ID-sorted (content.js itemDefsIn): what a
             // rules module freezes with inventory.registerDefinition. `ids` narrows to those IDs.
@@ -128,20 +123,6 @@ export function createPacksPart({ settings, readLorebook = async () => ({ charac
 }
 
 const copy = value => JSON.parse(JSON.stringify(value));
-
-/**
- * `packs.rules`' answer from the enabled packs (in list order): `[{ pack, version, id, name, manifest }]`, one per pack
- * with a rules manifest (`id` is `pack.<pack>/rules`). `pack` narrows to one pack id. Fresh copies.
- */
-export function rulesOf(list, { pack = null } = {}) {
-    const out = [];
-    for (const entry of Array.isArray(list) ? list : []) {
-        const manifest = entry.content.rules?.[0];
-        if (!manifest || (pack && entry.id !== pack)) continue;
-        out.push({ pack: entry.id, version: entry.version, id: manifest.id, name: manifest.name, manifest: copy(manifest) });
-    }
-    return out;
-}
 
 /**
  * `packs.markets`' answer from the enabled packs (in list order) and the lorebook's market places

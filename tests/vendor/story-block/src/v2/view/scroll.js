@@ -11,9 +11,24 @@
 // * `followViewport(doc, layer)` (a phone) keeps the window's layer exactly over what is visible: the visual viewport
 //   (it shrinks for the on-screen keyboard and can be panned by the browser).
 //
+// * `zoomOf(node)` is the CSS zoom a node is drawn at (Story Suite's roots are zoomed, size.css): measured distances are drawn
+//   pixels, `scrollTop` is the scroller's own, so a measured distance is divided by it before it moves a scroller.
+//
 // Everything tolerates a document with no layout (the tests' fake DOM): nothing is scrolled then, and nothing throws.
 
 const PHONE = '(max-width: 759.98px)';
+
+/**
+ * The CSS zoom `node` is drawn at, its ancestors' included: the browser's `currentCSSZoom` where it has one, else its drawn width
+ * over its own; 1 when there is nothing to measure (no layout, the tests' fake DOM).
+ */
+export function zoomOf(node) {
+    const own = Number(node?.currentCSSZoom);
+    if (Number.isFinite(own) && own > 0) return own;
+    const width = Number(node?.offsetWidth);
+    const drawn = Number(node?.getBoundingClientRect?.()?.width);
+    return width > 0 && drawn > 0 ? drawn / width : 1;
+}
 
 /** Focuses `node` and never scrolls the page for it. → whether there was a node. */
 export function focusNode(node) {
@@ -59,7 +74,7 @@ export function revealIn(scroller, node, block = 'start') {
     } else delta = rect.top - (outer.top + covered + margin);
     if (!delta) return false;
     const before = box.scrollTop;
-    box.scrollTop = before + delta;
+    box.scrollTop = before + delta / zoomOf(box);
     return box.scrollTop !== before;
 }
 

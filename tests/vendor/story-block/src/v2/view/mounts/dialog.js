@@ -91,6 +91,8 @@ export function createDialogMount(deps) {
 
         const backdrop = make(doc, 'div', 'ss-dialog-backdrop');
         const root = make(doc, 'div', 'ss-dialog');
+        // A screen may ask for a wide window (`width: 'wide'`, wide screens only; a phone's sheet is full width anyway).
+        if (screen?.width === 'wide') root.classList.add('ss-dialog-wide');
         root.setAttribute('role', 'dialog');
         root.setAttribute('aria-modal', 'true');
         root.setAttribute('tabindex', '-1');

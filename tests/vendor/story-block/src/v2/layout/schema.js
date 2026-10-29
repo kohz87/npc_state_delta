@@ -59,7 +59,7 @@ export const isPlainObject = value => value !== null && typeof value === 'object
 export const isBinding = value => isPlainObject(value) && typeof value.query === 'string';
 
 // Names: queries and commands are dotted (`inventory.items`), widgets may be too
-// (`rpg-battle.actor-card`).
+// (`example-module.actor-card`).
 export const QUERY_NAME = /^[A-Za-z][\w-]*(\.[\w-]+)*$/;
 export const COMMAND_NAME = /^[A-Za-z][\w-]*(\.[\w-]+)+$/;
 export const WIDGET_NAME = /^[a-z][a-z0-9-]*(\.[a-z0-9-]+)*$/;

@@ -365,7 +365,8 @@ export function openUiSample({ doc = globalThis.document, widgets = () => ({}), 
             opener.addEventListener('click', () => {
                 const scheme = opener.closest?.('.ss-scheme-dark') ? 'dark' : 'light';
                 const wrap = doc.createElement('div');
-                wrap.className = `ss-scheme-${scheme}`;
+                // ss-sample-dialog: inside the zoom and the phone's 44px rule like the sample itself (view/size.css)
+                wrap.className = `ss-sample-dialog ss-scheme-${scheme}`;
                 wrap.setAttribute('data-ss-screen', UI_SAMPLE_ID);
                 doc.body.appendChild(wrap);
                 let handle = null;

@@ -101,7 +101,7 @@ export function compatReport({ hostVersion = '', modules = [], refusals = [], wa
 const needsText = requires => (requires ? `needs ${requires.replace(/^>=\s*/, '≥')}` : 'needs: not said');
 
 /**
- * The Versions card's body: one line per module, each said once ("RPG Battle 2.0.0-beta.1 · needs ≥2.0.0-beta.1 · In step"); what a
+ * The Versions card's body: one line per module, each said once ("an example module 2.0.0-beta.1 · needs ≥2.0.0-beta.1 · In step"); what a
  * module that is out of step makes of it (its note and the fix) goes under its line, and nothing is repeated for one that fits.
  */
 export function renderCompat(el, report, { doc = el?.ownerDocument ?? globalThis.document } = {}) {

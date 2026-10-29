@@ -15,7 +15,7 @@
 // refused by the bus (commandFeature); a change line of its kinds is told quietly (capture().off).
 // `featureValue(id)` gives the reader's stored choice (true, false or undefined for the default).
 //
-// Lifecycle (docs/v2/LIFECYCLE.md, RB_CONTRACT §2 P22): a module may name the peers it needs
+// Lifecycle (docs/v2/LIFECYCLE.md): a module may name the peers it needs
 // (`requires: { peers: { 'story-director': '^2' } }`). A module whose peer is missing, of another
 // version, turned off or not ready itself, or whose peers need each other, is dormant: it is
 // registered and its names stay reserved, but it has no domain set up, no capture, hooks, context or
@@ -26,6 +26,7 @@
 
 import { compareVersions, formatVersion, parseRange, parseVersion, satisfies } from './packs/version.js';
 import { HOST_DOMAIN } from './timeline/gate.js';
+import { SLUG } from './packs/limits.js';
 import { NEEDS_HINT, affectsStatic, featureOf, featureProblems, featureWarnings } from './features.js';
 
 // Commands the registry makes itself, so the command bus can run them like any other:
@@ -52,11 +53,13 @@ export const STANDARD_PREFIX = 'ss.';
 const SETTINGS_KEYS = ['defaults', 'schema', 'section', 'render', 'folds', 'place', 'rules'];
 export const SETTINGS_PLACES = Object.freeze(['diagnostics']);
 const placeOf = value => (SETTINGS_PLACES.includes(value) ? value : null);
-const KNOWN_KEYS = ['id', 'name', 'version', 'description', 'requires', 'domains', 'commands', 'queries', 'replayQueries', 'capture', 'context', 'hooks', 'settings', 'tabs', 'screens', 'widgets', 'features', 'cards', 'participant', 'batchResults'];
+const KNOWN_KEYS = ['id', 'name', 'version', 'description', 'requires', 'domains', 'commands', 'queries', 'replayQueries', 'capture', 'context', 'hooks', 'settings', 'tabs', 'screens', 'widgets', 'features', 'cards', 'participant', 'batchResults', 'capabilities'];
 const CONTEXT_KEYS = ['static', 'tail', 'budget', 'feature', 'parts'];
 // What `requires` may name: the Story Block it needs, and the peers (modules) it needs registered.
 const REQUIRES_KEYS = ['storyBlock', 'peers'];
-const COMMAND_KEYS = ['handler', 'internal', 'feature'];
+// How many capability names a module may declare (`capabilities`: what a pack's requires.capabilities can name).
+export const MAX_CAPABILITIES = 32;
+const COMMAND_KEYS = ['handler', 'internal', 'feature', 'enabled'];
 export const FIELD_TYPES = Object.freeze(['bool', 'int', 'choice', 'text', 'list', 'profile']);
 
 const MODULE_ID = /^[a-z0-9][a-z0-9._-]*$/;
@@ -66,7 +69,7 @@ const COMMAND = /^[a-z][a-zA-Z0-9_-]*(?:\.[a-zA-Z0-9_-]+)*$/;
 const KIND = /^[a-z][a-z0-9_-]*$/;
 const TAB_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 const FOLD_ID = /^[a-z0-9][a-z0-9_-]*$/;
-// Screen ids are namespaced like `rpg-battle/party` (§13.1); widget names like `rpg-battle.battle-board`.
+// Screen ids are namespaced like `story-director/world` (§13.1); widget names like `story-director.world-card`.
 const SCREEN_ID = /^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/;
 const WIDGET_NAME = /^[a-z0-9][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)+$/;
 
@@ -148,7 +151,7 @@ export function definitionProblems(def) {
         if (!isObject(value)) { problems.push(`${where} is not an object`); return false; }
         return true;
     };
-    if (typeof def.id !== 'string' || !MODULE_ID.test(def.id)) problems.push('its id must be lowercase letters, digits, ".", "_" or "-" (like "rpg-battle")');
+    if (typeof def.id !== 'string' || !MODULE_ID.test(def.id)) problems.push('its id must be lowercase letters, digits, ".", "_" or "-" (like "story-director")');
     for (const key of ['name', 'version', 'description']) if (def[key] !== undefined && typeof def[key] !== 'string') problems.push(`${key} is not text`);
     if (def.requires !== undefined) {
         if (!isObject(def.requires)) problems.push('requires is not an object (like { storyBlock: ">=2.0.0" })');
@@ -164,12 +167,21 @@ export function definitionProblems(def) {
         }
     }
 
+    if (def.capabilities !== undefined) {
+        if (!Array.isArray(def.capabilities)) problems.push('capabilities is not a list of names (like ["custom-data"])');
+        else if (def.capabilities.length > MAX_CAPABILITIES) problems.push(`capabilities lists more than ${MAX_CAPABILITIES} names`);
+        else for (const name of def.capabilities) {
+            if (typeof name !== 'string' || !SLUG.test(name)) problems.push(`capabilities names ${JSON.stringify(name)}, which is not a capability name (lowercase words joined by "-", like "custom-data")`);
+        }
+    }
+
     if (map(def.domains, 'domains')) {
         for (const [name, domain] of Object.entries(def.domains)) {
             if (!DOMAIN.test(name)) { problems.push(`the domain name "${name}" must start with a letter and use letters, digits, "_" or "-"`); continue; }
             if (name === HOST_DOMAIN) { problems.push(`the domain name "${name}" is the host's own (the timeline's save points); a module cannot declare it`); continue; }
             if (!isObject(domain)) { problems.push(`domain "${name}" is not an object`); continue; }
             fn(domain.initial, `domain "${name}" initial`);
+            if (domain.deferred !== undefined && typeof domain.deferred !== 'boolean') problems.push(`domain "${name}" deferred must be true or false`);
             if (domain.validate !== undefined) fn(domain.validate, `domain "${name}" validate`);
             if (domain.counters !== undefined && (!Array.isArray(domain.counters) || domain.counters.some(path => typeof path !== 'string' || !/^[^/~][^~]*$/.test(path)))) {
                 problems.push(`domain "${name}" counters must be a list of paths inside the domain, like "wallets/*/coin"`);
@@ -645,6 +657,9 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         if (!kind) return null;
         const def = defs.get(owners.kind.get(kind));
         const spec = def.capture.kinds[kind];
+        // `enabled: false` (a kind of an API not in use, MODULES / LIFECYCLE "Deferred domains"): acts as if it were not declared, so a
+        // line of it is told as an unknown kind, exactly as in a host that never had the kind.
+        if (spec.enabled === false) return null;
         return { moduleId: def.id, kind, grammar: spec.grammar.trim(), apply: def.capture.apply, feature: featureOf(spec), off: off(spec), display: displayOf(spec) };
     }
 
@@ -691,7 +706,7 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         return (ctx, payload) => {
             const own = Object.keys(def.domains ?? {});
             const lacking = name => typeof ctx.read !== 'function' || ctx.read(name) == null;
-            const named = own.filter(name => (!Array.isArray(payload?.domains) || payload.domains.includes(name)) && lacking(name));
+            const named = own.filter(name => !def.domains[name].deferred && (!Array.isArray(payload?.domains) || payload.domains.includes(name)) && lacking(name));
             const done = [];
             for (const name of named) {
                 const slice = initialSlice(name);
@@ -722,7 +737,7 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         const owner = owners.command.get(name);
         if (owner && held(owner)) return null;
         const entry = commandEntry(name);
-        return entry ? (isObject(entry) ? entry.handler : entry) : null;
+        return entry && entry.enabled !== false ? (isObject(entry) ? entry.handler : entry) : null;
     }
 
     function commandEntry(name) {
@@ -751,6 +766,7 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         const domains = {};
         const names = [...owners.domain.keys()].sort().filter(name => !held(owners.domain.get(name)));
         for (const name of names) {
+            if (defs.get(owners.domain.get(name)).domains[name].deferred) continue;
             const slice = initialSlice(name);
             if (slice) domains[name] = slice;
         }
@@ -803,6 +819,7 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
             const owner = owners.query.get(name);
             if (!owner) return null;
             const fn = defs.get(owner).queries[name];
+            if (fn.enabled === false) return null;
             return off(fn) || held(owner) ? offQuery : fn;
         },
         initialState,
@@ -909,7 +926,7 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
                 moduleId: def.id,
                 name: def.name ?? def.id,
                 domains: Object.keys(def.domains ?? {}),
-                kinds: Object.keys(def.capture?.kinds ?? {}).sort().filter(kind => !off(def.capture.kinds[kind])).map(kind => ({ kind, grammar: def.capture.kinds[kind].grammar.trim() })),
+                kinds: Object.keys(def.capture?.kinds ?? {}).sort().filter(kind => def.capture.kinds[kind].enabled !== false && !off(def.capture.kinds[kind])).map(kind => ({ kind, grammar: def.capture.kinds[kind].grammar.trim() })),
                 static: context.static,
                 tail: context.tail,
                 budget: def.context?.budget ?? null,

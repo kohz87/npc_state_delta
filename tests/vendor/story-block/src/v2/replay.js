@@ -165,6 +165,7 @@ export function guardProblem(guard) {
     if (guard.rulesHash !== null && !isHash(guard.rulesHash)) return 'a guard\'s rulesHash is null or a 64-character hash';
     if (!isHash(guard.inputHash)) return 'a guard\'s inputHash is a 64-character hash';
     if (!Object.hasOwn(guard, 'predicate') || !isPlainJson(guard.predicate)) return 'a guard\'s predicate is plain JSON';
+    if (guard.replyBound !== undefined && typeof guard.replyBound !== 'boolean') return 'a guard\'s replyBound is true or false';
     return '';
 }
 

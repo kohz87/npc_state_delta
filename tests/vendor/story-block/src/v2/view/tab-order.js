@@ -3,7 +3,7 @@
 // navigation (screens), so moving Fight up moves it in both.
 //
 // * Kept in extension_settings.storySuite.tabs as { order: [id…], hidden: [id…] } (the reader's, every
-//   chat). An id is a screen's ('rpg-battle/fight'), or for a module's own tab "<module>/<tab id>"
+//   chat). An id is a screen's ('example-module/fight'), or for a module's own tab "<module>/<tab id>"
 //   ('npc-state-delta/cast', the same id as Cast's screen, so the two are one entry).
 // * No saved order: the default (screens.js screenOrder). A saved order puts the ids it names first, in its
 //   order; anything it does not name (a module installed since) follows at the end, in default order.

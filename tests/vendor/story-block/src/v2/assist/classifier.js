@@ -1,7 +1,7 @@
 // The pre-roll classifier (SPEC §4.5 "Optional classifier", MODULES §F16): when it is on and the
 // reader's new message tries something whose outcome is uncertain, one cheap model call turns the
-// message into a check line, and the check is made and rolled BEFORE the reply, so the reply tells
-// the result instead of stopping at it.
+// message into a check line. The turn previews the roll for the prompt, then commits that seed
+// on the generated reply before its story lines. No change is stored on the previous reply.
 //
 // The model only proposes `? check <skill> — <what> | dc: …` or `none`; code reads the line with
 // Story Block's capture parser and commits one `system` command, `assist.precheck`, whose single
@@ -9,20 +9,20 @@
 //   1. claims `assist:precheck:<key>` (the key is the reader's message: its index and a hash of its
 //      text), so the same message is never checked twice on this line of history; swiping or
 //      deleting the carrier the claim is on takes it back, like any other change;
-//   2. runs `capture.check` with the line, exactly as if the reply had written it (RPG Battle's
-//      `check` kind: it makes the pending check, or, before pending checks exist, resolves it);
-//   3. rolls it with `check.roll { id }` when step 2 left a pending check (its id in the capture's
-//      `data.check`), with the automatic modifiers (MODULES §F16);
-//   4. returns the roll's summary as this receipt's summary (narrate: true), so the next reply is
+//   2. runs `capture.check` with the line, exactly as if the reply had written it: the module that
+//      keeps the `check` kind (Story Director, contract P09) makes the check with its one
+//      `checks.roll`, one die, the policy's modifiers, the outcome from the die and never from the
+//      line. There is no second step and no probe for an older `check.roll` command;
+//   3. returns the roll's summary as this receipt's summary (narrate: true), so the next reply is
 //      told the result under [Happened].
-// Anything that fails rejects the whole transaction: no claim, no check, nothing saved.
+// Anything that fails rejects the whole transaction: no claim, no check, nothing saved. A `check`
+// kind that is not there fails the capture call, so the claim is not kept either.
 
 import { extractBlock, parseChanges } from '../capture.js';
 import { BACKGROUND, SETTING, TIMEOUT_MS, clip, estimateTokens, hashText, normalizeType, withTimeout } from './common.js';
 
 export const PRECHECK = 'assist.precheck';
 export const CHECK_KIND = 'check';
-export const ROLL_COMMAND = 'check.roll';
 export const claimKey = key => `assist:precheck:${key}`;
 
 // The classifier's whole prompt stays within this many tokens (chars/4): the static head below plus
@@ -119,14 +119,6 @@ export function claimed(state, key) {
 
 const KEY = /^\d{1,7}-[0-9a-z]{1,7}$/;
 
-// The pending check a capture made, from its data: `data.check` (or `pending`, `id`) as an id. A
-// capture that already resolved the check (its data has an outcome) left nothing to roll.
-export function pendingCheckId(data) {
-    if (!data || typeof data !== 'object' || data.outcome !== undefined) return null;
-    for (const key of ['check', 'pending', 'id']) if (typeof data[key] === 'string' && data[key]) return data[key];
-    return null;
-}
-
 /**
  * `assist.precheck { key, line }`: the command the classifier's answer is committed through (see
  * the top of this file). Synchronous and pure apart from ctx, like every handler (SPEC §3.2).
@@ -138,28 +130,18 @@ export function precheck(ctx, payload = {}) {
     if (!line) ctx.fail('INVALID', 'A pre-rolled check needs one check line with a skill and a difficulty.');
     if (!ctx.claim(claimKey(key))) ctx.fail('CLAIMED', 'This message has already been turned into a check.');
     const made = ctx.call(`capture.${CHECK_KIND}`, { ...line, index: 0, word: CHECK_KIND }) ?? {};
-    const pending = pendingCheckId(made.data);
-    let rolled = null;
-    if (pending) {
-        try {
-            rolled = ctx.call(ROLL_COMMAND, { id: pending }) ?? {};
-        } catch (error) {
-            // Nothing ran: the check stays pending for the reader (and RPG Battle's own roll).
-            if (error?.code !== 'UNKNOWN_COMMAND') throw error;
-        }
-    }
-    const out = rolled ?? made;
-    const summary = String(out.summary ?? '').trim() || String(made.summary ?? '').trim() || `A ${line.name} check is made.`;
-    const outcome = out.data?.outcome;
+    const result = made.data?.v2?.result ?? made.data ?? {};
+    const outcome = result.outcome;
     return {
-        summary,
+        summary: String(made.summary ?? '').trim() || `A ${line.name} check is made.`,
         narrate: true,
+        replan: true,
         data: {
             key,
             skill: line.name,
             dc: line.labels.dc,
-            check: pending,
-            rolled: Boolean(rolled),
+            check: typeof result.check === 'string' ? result.check : null,
+            rolled: typeof outcome === 'string',
             outcome: typeof outcome === 'string' ? outcome : null,
         },
     };
@@ -174,7 +156,7 @@ export function precheck(ctx, payload = {}) {
 export function createClassifier({ callModel, settings, chat, chatId, hasKind, log, warn, timeoutMs = TIMEOUT_MS, timer }) {
     // Messages already asked about in this session (whatever the answer), by chat and key, so a
     // swipe, a regenerate or a failed call never asks again.
-    const asked = new Set();
+    const asked = new Map();
 
     function note(outcome, entry = {}) {
         const item = log.add({ helper: 'classifier', outcome, ...entry });
@@ -185,32 +167,33 @@ export function createClassifier({ callModel, settings, chat, chatId, hasKind, l
     /**
      * beforeGenerate(view, info?): { lines, commands: [{ type: 'assist.precheck', payload }] } when the
      * reader's new message is an uncertain attempt, else null. `info.type` (when the host passes it) is
-     * the generation type; only a new message (normal, or a regenerate of its reply) is asked about.
+     * the generation type. A swipe or regeneration reuses a successful classification, but rolls anew
+     * when the old reply's claim was retracted.
      */
     async function beforeGenerate(view, info = {}) {
         const values = settings(view);
         if (values?.[SETTING.classifier] !== true) return null;
         const type = normalizeType(info?.type);
-        if (BACKGROUND.includes(type) || !['normal', 'regenerate'].includes(type)) return null;
-        // A swipe or continue has no new message; nor has a reply asked for without one.
+        if (BACKGROUND.includes(type) || !['normal', 'regenerate', 'swipe'].includes(type)) return null;
+        // A swipe reuses the reader message before its reply; a Continue never prepares a roll.
         const messages = chat() ?? [];
-        const index = messages.length - 1;
+        const index = type === 'swipe' ? messages.length - 2 : messages.length - 1;
         const last = messages[index];
         if (!last?.is_user) return null;
         const text = String(last.mes ?? '').trim();
         if (!text) return null;
         const key = `${index}-${hashText(text)}`;
         const memo = `${chatId() ?? ''}|${key}`;
-        if (asked.has(memo)) return null;
         if (claimed(view?.state, key)) {
-            asked.add(memo);
             return null;
         }
         if (!hasKind(CHECK_KIND)) {
-            note('skipped', { key, message: 'no module keeps checks (RPG Battle is not on)' });
+            note('skipped', { key, message: 'no module keeps checks' });
             return null;
         }
-        asked.add(memo);
+        const prepared = line => ({ lines: [ROLLED_LINE], commands: [{ type: PRECHECK, payload: { key, line } }] });
+        if (asked.has(memo)) return asked.get(memo) ? prepared(asked.get(memo)) : null;
+        asked.set(memo, null);
         const prompt = classifierPrompt(text);
         let answer;
         try {
@@ -229,7 +212,8 @@ export function createClassifier({ callModel, settings, chat, chatId, hasKind, l
             return null;
         }
         note('check', { key, line: parsed.line.raw, tokens: estimateTokens(prompt) });
-        return { lines: [ROLLED_LINE], commands: [{ type: PRECHECK, payload: { key, line: parsed.line } }] };
+        asked.set(memo, parsed.line);
+        return prepared(parsed.line);
     }
 
     return { beforeGenerate };

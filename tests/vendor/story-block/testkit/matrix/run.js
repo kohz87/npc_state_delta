@@ -1,6 +1,6 @@
 // The matrix runner (docs/v2/MATRIX.md): for each combination row it boots the real module definitions
 // in createHost, registers them once, plays a scripted reply, runs each module's action and replays
-// the chat cold, then the §2 extra cases (docs/v2/contract/RB_CONTRACT.md): missing query, malformed
+// the chat cold, then the additional cases: missing query, malformed
 // answer, feature off, unset clock, late registration, duplicate name, swipe, re-read and delete.
 //
 // What is compared is never a hand-written number: a module's facts after a swipe, a delete or a
@@ -414,15 +414,7 @@ async function unsetClock(env, row, rec) {
             assert.equal(goal.acceptance.minute, null);
             assert.equal(goal.rpg, undefined, 'a neutral goal needs no RPG extension');
             replayed(host);
-            if (!active.includes('rb')) return { note: 'creation and views work; no timed action in this row' };
-            for (const kind of ['short', 'long']) {
-                const before = structuredClone(host.head());
-                const rest = await host.sdk.command('party.rest', { kind });
-                assert.equal(rest.ok, false, `RB ran a ${kind} rest with the clock unset`);
-                assert.equal(rest.code, 'CLOCK_UNSET', `a timed action with the clock unset was refused with ${rest.code}: ${rest.message}`);
-                assert.deepEqual(host.head(), before, 'a refused rest must change no state');
-            }
-            return undefined;
+            return { note: 'creation and views work with the clock unset' };
         });
     });
 }
@@ -430,7 +422,7 @@ async function unsetClock(env, row, rec) {
 async function disabledSd(env, row, rec) {
     await rec.step('disabled-sd', async () => {
         if (!row.modules.includes('sd')) return na('there is no SD in this row to disable');
-        const held = row.modules.filter(key => key === 'sd' || key === 'rb');
+        const held = row.modules.filter(key => key === 'sd');
         const active = row.modules.filter(key => !held.includes(key));
         await withHost(env, row.modules, {}, async host => {
             const domains = host.sdk.modules().filter(entry => held.some(key => MODULES[key].id === entry.id)).flatMap(entry => entry.domains);
@@ -452,7 +444,7 @@ async function disabledSd(env, row, rec) {
                 });
                 assert.equal(refused.code, 'DEPENDENCY_UNAVAILABLE');
             };
-            // Disable before character creation: a dormant RB must not veto the other modules' replies.
+            // Disable before the other modules play.
             await disable();
             const initial = factsOf(host, active);
             const before = saved();
@@ -494,7 +486,6 @@ async function lateRegistration(env, row, rec) {
         const expected = await oracle(env, row, [{ set: 'A', keys: activeEarly }, { set: 'B' }]);
         const gaps = [];
         await withHost(env, row.modules, { withhold: [late] }, async host => {
-            if (late === 'sd' && early.includes('rb')) await dormancy(host, 'rb', 'until SD registers');
             await runSetups(host, activeEarly);
             await play(host, activeEarly, 'A');
             const before = factsOf(host, activeEarly);

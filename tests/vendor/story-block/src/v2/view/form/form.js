@@ -261,7 +261,7 @@ export function renderSettingsForm(parent, options) {
         }
         if (!entries.length) continue;
         // One group alone needs no heading of its own (and is never folded).
-        const folded = Boolean(fold) && !single;
+        const folded = Boolean(fold) && !single && (!Array.isArray(fold.only) || fold.only.includes(group.name));
         const foldKey = `${fold?.prefix ?? ''}${group.name}`;
         const wasOpen = fold?.state instanceof Map && fold.state.has(foldKey) ? fold.state.get(foldKey) === true : fold?.openFirst !== false && sections.length === 0;
         const section = sectionBlock(doc, { title: single ? '' : group.name, id: newId(`${moduleId ?? 'host'}-group`), collapsible: folded, open: wasOpen });

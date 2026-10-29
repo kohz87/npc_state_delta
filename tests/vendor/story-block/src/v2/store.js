@@ -666,6 +666,9 @@ export function createStore({
 
     function replayGuarded(state, record, ops, span, message = null, receipt = null) {
         blockIntact(record, ops, span, receipt);
+        // Some setup choices must retract even when deletion of the earliest replies carries their
+        // other state forward (carriedTo replays the formerly known prefix). Never carry this choice.
+        if (span.guard?.replyBound === true && message && !list().includes(message)) throw prerequisite('its reply was deleted');
         const clockPrefix = markerPrefixProblem(span, state);
         if (clockPrefix) throw prerequisite(clockPrefix);
         // A proof id belongs to the block that applied with it first: a later block that gives the same id collides and does not apply.
@@ -1033,9 +1036,14 @@ export function createStore({
     // State after the last carrier at or before `upTo`, or null when no checkpoint precedes it. A block
     // of ops that no longer applies (a hand-edited chat, a middle reply deleted) is skipped and reported
     // on its own, so a bad change cannot take the rest of its carrier, or anything later, with it.
-    function replay(arr, upTo) {
+    // `whole`: from the first carrier's own checkpoint, past every later one (carriedTo, below).
+    function replay(arr, upTo, { whole = false } = {}) {
         counts.replays++;
-        const { from } = chain(arr, upTo);
+        let { from } = chain(arr, upTo);
+        if (whole) {
+            const first = carrierIndexes(arr)[0];
+            if (first !== undefined && first <= upTo && readRecord(arr[first])?.checkpoint) from = first;
+        }
         // A damaged record (B-b2-timeline-7) is skipped, and said so.
         const problems = from >= 0 ? unpackProblems(arr, from, readRecord(arr[from]).carried) : [];
         for (let i = Math.max(from, 0); i <= upTo && i < arr.length; i++) {
@@ -1094,6 +1102,10 @@ export function createStore({
         const out = rewrites ? { parts: [], gone: new Map(), changed: false, running, planned: 0, removed: 0 } : null;
         const anyGuardedReceipt = record.receipts.some(each => each?.guarded === true);
         const orphan = anyGuardedReceipt && quarantined(record);
+        // Where each block of this record stands in the record that is written back (a planned-again step that is no longer
+        // done takes its place out of it), so the Problems below name the block as a full replay will number it.
+        const firstProblem = problems.length;
+        const placed = new Map();
         // Quarantine is decided on the record as it is stored, before any rebase, renumbering or filtering below can touch it:
         // it applies nothing and is never rewritten (so nothing renumbered can reattach the receipt that is detached).
         if (orphan) {
@@ -1139,6 +1151,7 @@ export function createStore({
             const keep = () => {
                 if (!rewrites) return;
                 out.parts.push({ ops: blockOps, span });
+                placed.set(block, out.parts.length - 1);
                 for (const [was, now] of remapped) out.gone.set(was, now);
             };
             if (skip?.has(`${index}:${block}`)) {
@@ -1179,6 +1192,10 @@ export function createStore({
             }
         });
         if (!out?.changed) return { state, fields: null, running: out?.running ?? null };
+        for (let at = firstProblem; at < problems.length; at += 1) {
+            const entry = problems[at];
+            if (entry.index === index && placed.has(entry.block)) entry.block = placed.get(entry.block);
+        }
         const receipts = [];
         for (const each of record.receipts) {
             if (!out.gone.has(each)) receipts.push(each);
@@ -1247,7 +1264,7 @@ export function createStore({
         }
         const own = revOfOps(fresh);
         if (Number.isInteger(own)) out.running = out.running === null ? own : Math.max(out.running, own);
-        const newReceipt = { ...structuredClone(planned.receipt), id: receipt.id, ...(receipt.afterCapture === true ? { afterCapture: true } : {}) };
+        const newReceipt = { ...structuredClone(planned.receipt), id: receipt.id, ...(receipt.afterCapture === true ? { afterCapture: true } : {}), ...(receipt.beforeGenerate === true ? { beforeGenerate: true } : {}) };
         let newSpan = { n: fresh.length, story: false };
         if (planned.block) {
             const arr = list();
@@ -1565,10 +1582,12 @@ export function createStore({
 
     // B-b2-timeline-3: the state the first carrier starts from when the carriers before it were deleted:
     // what they ended with, as the store last saw them (their message objects still hold their records).
+    // The deleted replies are replayed whole, from the first one's checkpoint: a later checkpoint among them holds what their
+    // blocks did without asking them, and a block that must not outlive its reply (a reply-bound guard) is asked here again.
     function carriedTo(message) {
         const at = known ? known.indexOf(message) : -1;
         if (at <= 0) return null;
-        const { state } = replay(known, at - 1);
+        const { state } = replay(known, at - 1, { whole: true });
         return state ? structuredClone(state) : null;
     }
 
@@ -2084,8 +2103,8 @@ export function createStore({
             writable();
             const arr = list();
             const message = carrierAt(arr, index);
-            if (!Array.isArray(receipts) || receipts.some(receipt => !isObject(receipt) || receipt.cause !== 'story')) {
-                throw new TypeError('Re-read takes story receipts only.');
+            if (!Array.isArray(receipts) || receipts.some(receipt => !isObject(receipt) || (receipt.cause !== 'story' && !(receipt.cause === 'system' && receipt.beforeGenerate === true)))) {
+                throw new TypeError('Re-read takes story receipts and generated-reply preludes only.');
             }
             if (settled !== null && (!Array.isArray(settled) || settled.some(ran => !isObject(ran?.receipt) || ran.receipt.cause !== 'system'))) {
                 throw new TypeError('Re-read\'s afterCapture steps are system steps, each { ops, receipt }.');
@@ -2137,16 +2156,17 @@ export function createStore({
             // The new story lines: each guarded one a block of its own, the others together as one (as before).
             const replacedIds = new Set(spans.filter(span => span.story && isMetaSpan(span)).map(span => span.id));
             const pieces = Array.isArray(lines) && lines.length && lines.every(piece => Number.isInteger(piece?.n) && piece.n >= 0)
-                && lines.reduce((sum, piece) => sum + piece.n, 0) === fresh.length && lines.some(piece => piece.block) ? lines : null;
+                && lines.reduce((sum, piece) => sum + piece.n, 0) === fresh.length && lines.some(piece => piece.block || piece.receipt?.beforeGenerate === true) ? lines : null;
             if (pieces) {
                 let offset = 0;
                 let upTo = base;         // the state before the piece
                 for (const piece of pieces) {
                     const own = fresh.slice(offset, offset + piece.n);
+                    const story = piece.receipt?.beforeGenerate !== true;
                     if (piece.block) {
                         let span;
                         try {
-                            span = { n: piece.n, story: true, ...stamp(arr, index, record, piece.block, own, piece.receipt, nextParts, offset) };
+                            span = { n: piece.n, story, ...stamp(arr, index, record, piece.block, own, piece.receipt, nextParts, offset) };
                             guardHolds(upTo, span, message);
                         } catch (error) {
                             throw fail(error);
@@ -2154,11 +2174,11 @@ export function createStore({
                         publish(span, index);     // the lines applied to the state before this point
                         storySpans.push(span);
                         nextParts.push({ ops: own, span });
-                    } else if (storySpans.length && !isMetaSpan(storySpans.at(-1))) {
+                    } else if (storySpans.length && storySpans.at(-1).story === story && !isMetaSpan(storySpans.at(-1))) {
                         storySpans.at(-1).n += piece.n;
                         nextParts.at(-1).ops = [...nextParts.at(-1).ops, ...own];
                     } else {
-                        const span = { n: piece.n, story: true };
+                        const span = { n: piece.n, story };
                         storySpans.push(span);
                         nextParts.push({ ops: own, span });
                     }
@@ -2201,6 +2221,12 @@ export function createStore({
             }
             for (const [n, { ops: block, span: was }] of blocks.entries()) {
                 const receipt = paired ? keptReceipts[n] : null;
+                // A reply-bound block goes when its reply is read again, its receipt with it (as a delete or a swipe takes it);
+                // what was built on it is replayed below without it.
+                if (was.guard?.replyBound === true) {
+                    if (!paired) for (const gone of receiptsFor({ receipts: keptReceipts }, block)) keptReceipts.splice(keptReceipts.indexOf(gone), 1);
+                    continue;
+                }
                 let blockOps;
                 let kept = receipt;
                 let again = null;      // the block as planned again, when it was
@@ -2217,7 +2243,7 @@ export function createStore({
                     } else {
                         again = out;
                         blockOps = asOps(out.ops);
-                        kept = { ...structuredClone(out.receipt), id: receipt.id };
+                        kept = { ...structuredClone(out.receipt), id: receipt.id, ...(receipt.beforeGenerate === true ? { beforeGenerate: true } : {}) };
                         const own = [...blockOps].reverse().find(op => op?.path === '/meta/rev' && Number.isInteger(op.value))?.value;
                         if (Number.isInteger(own)) rev = Math.max(rev, own);
                     }

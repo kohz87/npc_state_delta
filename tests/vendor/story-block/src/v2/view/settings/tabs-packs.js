@@ -18,10 +18,13 @@ import { matchesSearch } from '../form/schema.js';
 import { PROMPT_FOLD, createPromptReader, renderPromptCard } from './prompt.js';
 import { renderTabsCard } from './tabs-list.js';
 import { showAndFocus } from '../scroll.js';
+import { renderDataModules } from '../../data-modules/setup.js';
 
 /** Story Block's module id and its Packs fold. */
 const CORE_ID = 'story-block';
 export const PACKS_CARD = Object.freeze({ title: 'Packs', hint: 'import a pack' });
+/** The Data modules card (data-modules/setup.js): there only while the library holds a data module or this chat has one. */
+export const DATA_MODULES_CARD = Object.freeze({ title: 'Data modules', hint: 'enable for this chat' });
 const KEYS = Object.freeze([HOST_FOLD, TABS_FOLD, PACKS_FOLD, PROMPT_FOLD, SENT_FOLD]);
 
 /** The Packs fold Story Block registers (`settings.folds`), with its module's settings access; null when there is none. */
@@ -70,7 +73,27 @@ export function tabsPacksBody(pane, ctx) {
         root.appendChild(packsCard.el);
     }
 
+    // Data modules: the reader's explicit choice of which ones this chat uses. The card is made when there is something to
+    // show (an installed definition or a pin) and stays out of the page otherwise, so a chat that uses none is unchanged.
+    let modulesCard = null;
+    let modules = null;
+    const ensureModules = () => {
+        if (!sdk) return false;
+        let count = 0;
+        try { count = (sdk.query('dataModules.setup') ?? []).length; } catch { count = 0; }
+        if (!count) { modulesCard?.setHidden(true); return false; }
+        if (!modulesCard) {
+            modulesCard = sectionBlock(doc, { title: DATA_MODULES_CARD.title, hint: DATA_MODULES_CARD.hint, id: newId('dm-card') });
+            modulesCard.el.classList.add('ss-dm-card');
+            modules = renderDataModules(modulesCard.body, { sdk });
+            root.insertBefore(modulesCard.el, root.querySelector('.ss-prompt-card'));
+        }
+        modulesCard.setHidden(false);
+        return true;
+    };
+
     const prompt = renderPromptCard(root, { doc, settings, reader, openState: ctx.openState, onChange: changed });
+    ensureModules();
 
     const packNames = () => [...packsCard.body.querySelectorAll('.ss-packs-row')].map(node => node.textContent ?? '').join(' ');
     const importButton = () => packsCard.body.querySelector('.ss-packs-import');
@@ -79,6 +102,11 @@ export function tabsPacksBody(pane, ctx) {
         filter(text) {
             const query = String(text ?? '').trim();
             let count = tabsCard.filter(text) + prompt.filter(text);
+            if (ensureModules()) {
+                const match = !query || matchesSearch('data-modules', { label: DATA_MODULES_CARD.title, help: `${DATA_MODULES_CARD.hint} ${modulesCard.body.textContent ?? ''}` }, 'Data modules', text);
+                modulesCard.setHidden(!match);
+                if (query && match) count += 1;
+            }
             if (packs) {
                 const match = !query || matchesSearch('packs', { label: PACKS_CARD.title, help: `${PACKS_CARD.hint} ${packNames()}` }, 'Packs', text);
                 packsCard.setHidden(!match);
@@ -89,6 +117,7 @@ export function tabsPacksBody(pane, ctx) {
         refresh() {
             tabsCard.refresh();
             panel?.refresh?.();
+            if (ensureModules()) modules.refresh();
             prompt.refresh();
         },
         // The story moved: only the size is read again.
@@ -99,6 +128,7 @@ export function tabsPacksBody(pane, ctx) {
             tabsCard.destroy();
             prompt.destroy();
             packsCard.el.remove();
+            modulesCard?.el.remove();
             root.remove();
         },
         has: key => KEYS.includes(key),

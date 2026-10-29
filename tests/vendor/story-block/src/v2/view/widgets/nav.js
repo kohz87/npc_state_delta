@@ -15,6 +15,7 @@
 import { h, iconNode, runCommand, shell, str } from './dom.js';
 import { defineWidget, resolveProps } from './props.js';
 import { cutAt } from '../../../text.js';
+import { zoomOf } from '../scroll.js';
 
 export const NAV_MAX_ITEMS = 24;
 const LABEL_MAX = 40;
@@ -55,7 +56,8 @@ export function revealItem(list, item, smooth = false) {
     const rect = item?.getBoundingClientRect?.();
     if (!box || !rect || !(box.width > 0) || !(rect.width > 0)) return false;
     if (rect.left >= box.left && rect.right <= box.right) return false;
-    const delta = (rect.left - box.left) - (box.width - rect.width) / 2;
+    // measured in drawn pixels; the list scrolls in its own (a zoomed root, size.css)
+    const delta = ((rect.left - box.left) - (box.width - rect.width) / 2) / zoomOf(list);
     const reduced = list.ownerDocument?.defaultView?.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
     if (typeof list.scrollBy === 'function') list.scrollBy({ left: delta, behavior: smooth && !reduced ? 'smooth' : 'auto' });
     else list.scrollLeft = (list.scrollLeft ?? 0) + delta;

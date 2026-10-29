@@ -121,8 +121,8 @@ export function scrubSettings(value, removed = [], path = '', depth = 0) {
 
 // ---- what is caught while the page runs ----------------------------------------------------------
 
-const PREFIXES = ['[Story Suite', '[Story Block', '[NPC State Delta', '[RPG Battle', '[Story Director'];
-const FOLDERS = ['Story_block', 'story_block', 'npc_state_delta', 'rpg_battle', 'Story_director', 'story_director'];
+const PREFIXES = ['[Story Suite', '[Story Block', '[NPC State Delta', '[Story Director'];
+const FOLDERS = ['Story_block', 'story_block', 'npc_state_delta', 'Story_director', 'story_director'];
 const caught = { errors: [], saves: [], saveFailures: 0, seq: 0 };
 
 const textOf = part => (part instanceof Error ? `${part.name}: ${part.message}` : typeof part === 'string' ? part : (() => {

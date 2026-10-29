@@ -31,11 +31,11 @@ export const FEATURE_TEXT = Object.freeze({
     classifier: Object.freeze({
         label: 'Roll checks before the reply',
         describe: 'One small extra model call per message: when you try something risky, the check is rolled first and the reply tells how it went.',
-        needs: 'Needs a module that keeps checks, like RPG Battle.',
+        needs: 'Needs a module that keeps checks, like Story Director.',
     }),
     extractor: Object.freeze({
         label: 'Safety net: read changes the reply forgot',
-        describe: 'One cheap extra model call per reply: time, place, who came or went, weather, quest progress or a hand-over the story told but its change lines missed are kept anyway, marked "assist". Never adds coin, items or XP.',
+        describe: 'One cheap extra model call per reply: time, place, who came or went, weather, quest progress or a hand-over the story told but its change lines missed are kept anyway, marked "assist". Never adds coin, items, XP or loot.',
     }),
 });
 

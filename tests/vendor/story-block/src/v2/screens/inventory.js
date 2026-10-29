@@ -1,18 +1,4 @@
-// `story-block/inventory` (SPEC §13.1): the party's things from the head state, grouped by kind, with
-// rarity colours, quantities, the wallet in the chat's one currency (MODULES §F1), "Use on…" for a consumable
-// (`item.use { stack, target }`, only the members `items.useOn` says a dose would help now: a module's rule,
-// none without one), a "To pick up" section with the loot still waiting (the same chips and Take selected as
-// the reply's card, so loot works with the cards off), and filters that fill the view's draft (§13.2, §13.6):
-// a name box ("Filter…", `draft.find`), what kind, what rarity, equipped only.
-//
-// Equipment belongs to RPG Battle (its party screen shows who wears what). So the equipment controls are drawn
-// only when RPG Battle answers (`q.gear.detail`, the same probe as its item detail): an "Equip on…" picker
-// (`item.equip { stack, to }` for an unworn piece, MODULES §F99), the plain Equip, Unequip, the condition, and a "Worn by" tag on a worn
-// piece. Without RPG Battle the inventory is the bag and the purse only. Drop is bag management and always there. Its texts are in src/v2/strings.js. Nothing here writes state; the buttons run the core commands
-// with the payloads of MODULES §F5 (`inventory.equip { stack }`, `inventory.unequip { stack }`,
-// `inventory.drop { stack, qty }`). Equip on…, Use on… and Drop open a fold row BELOW the action row (one open per card); Drop
-// asks first there ("Drop …?" and the confirm). The party shares one bag, so there is no Give here (`inventory.transfer` stays
-// a core command).
+// Inventory shows the wallet, items, loot and bag actions.
 
 import { KIND_ORDER, RARITIES } from '../domains/inventory.js';
 import { STRINGS, html } from '../strings.js';
@@ -25,13 +11,6 @@ const S = STRINGS.inventory;
 /** The kinds' group titles (src/v2/strings.js). */
 export const KIND_TITLES = S.kinds;
 
-/** The "Worn by" tag's texts (src/v2/strings.js). */
-const WORN = Object.freeze({ by: S.wornBy, byParty: S.wornByParty });
-
-// RPG Battle is installed when its item detail answers (`q.gear.detail`, screens/view.js itemDetail). Every
-// equipment control is drawn only while this holds.
-const RPG = 'q.gear.detail == true';
-
 const KIND_ICONS = Object.freeze({
     quest: 'fa-scroll', equipment: 'fa-shield-halved', consumable: 'fa-flask',
     material: 'fa-cubes', goods: 'fa-box', money: 'fa-gem',
@@ -39,18 +18,18 @@ const KIND_ICONS = Object.freeze({
 
 // The draft fields start unset, so every test also accepts "never chosen" (null) as "everything".
 // `contains` holds for an empty filter text, so the name box filters only once something is typed.
-// The equipped-only filter only narrows while RPG Battle is there (its checkbox is drawn only then).
+// The equipped-only filter narrows the visible items.
 const anyKind = kind => `(draft.kind == null || draft.kind == '' || draft.kind == '${kind}')`;
 const ITEM_FILTER = "(draft.rarity == null || draft.rarity == '' || draft.rarity == it.rarity)"
-    + ' && (draft.equippedOnly != true || q.gear.detail != true || it.equipped != null)'
+    + ' && (draft.equippedOnly != true || it.equipped != null)'
     + ' && contains(it.name, draft.find)';
 const rarityClasses = name => RARITIES.filter(rarity => rarity !== 'common').map(rarity => `r-${rarity}: ${name}.rarity == '${rarity}'`).join('; ');
 const RARITY_CLASSES = rarityClasses('it');
 
-// The actions that open a fold (Equip on…, Use on…, Drop). Each is a real button in the card's action row with aria-expanded and
+// The actions that open a fold (Use on… and Drop). Each is a real button in the card's action row with aria-expanded and
 // aria-controls (the fold row's id): a press sets the card's `fold[stack]` in the view's draft (`data-draft` on a button picks its
 // value; a press on the open one closes it), and that one value is the one open fold of the card. The fold opens in a row BELOW the
-// action row, so the row does not move. Escape inside the card closes the open fold and the focus goes back to its button
+// name and the actions, so the row does not move. Escape inside the card closes the open fold and the focus goes back to its button
 // (`data-draft-close` on the card); Cancel does the same (`data-draft-cancel`). Arrow keys do nothing here: they are not radios.
 const foldAction = (kind, when, icon, label, title) => `
           <button type="button" class="ss-button act"${when ? ` data-if="${when}"` : ''} title="${title}" data-draft="fold[it.stack]" value="${kind}" aria-expanded="{{ draft.fold[it.stack] == '${kind}' }}" aria-controls="fold-{{ it.stack }}"><i class="fa-solid ${icon}" aria-hidden="true"></i> ${label}</button>`;
@@ -66,34 +45,27 @@ function group(kind) {
     <h4 class="ss-section-label"><i class="fa-solid ${KIND_ICONS[kind]}" aria-hidden="true"></i> ${html(KIND_TITLES[kind])}</h4>
     <ul>
       <li class="item ss-glass" data-each="q.items as it" data-draft-close="fold[it.stack]" data-if="it.kind == '${kind}' && ${ITEM_FILTER}"
-          data-class="${RARITY_CLASSES}; equipped: ${RPG} && it.equipped != null">
+          data-class="${RARITY_CLASSES}; equipped: it.equipped != null">
         <span class="ss-tile-box" aria-hidden="true"><i class="fa-solid ${KIND_ICONS[kind]}"></i><span class="ss-tile-count" data-if="it.qty != 1">{{ it.qty }}</span></span>
         <div class="body">
         <div class="line">
           <span class="name">{{ it.name }}</span>
-          <span class="chip eq worn-by" data-if="${RPG} && it.equipped != null && it.owner != 'party'" title="${html(S.equippedTitle)}"><i class="fa-solid fa-check" aria-hidden="true"></i> ${html(WORN.by, { name: '{{ state.party.actors[it.owner].name }}' })}</span>
-          <span class="chip eq worn-by" data-if="${RPG} && it.equipped != null && it.owner == 'party' && state.party.pc != null" title="${html(S.equippedTitle)}"><i class="fa-solid fa-check" aria-hidden="true"></i> ${html(WORN.by, { name: '{{ state.party.actors[state.party.pc].name }}' })}</span>
-          <span class="chip eq worn-by" data-if="${RPG} && it.equipped != null && it.owner == 'party' && state.party.pc == null" title="${html(S.equippedTitle)}"><i class="fa-solid fa-check" aria-hidden="true"></i> ${html(WORN.byParty)}</span>
+          <span class="chip eq worn-by" data-if="it.equipped != null && it.owner == 'party'" title="${html(S.equippedTitle)}">${html(S.wornByParty)}</span>
           <span class="chip key" data-if="it.key" title="${html(S.keyTitle)}">${html(S.key)}</span>
           <span class="chip carry" data-if="it.carry" title="${html(S.carryTitle)}">+{{ it.carry }} ${html(S.carry)}</span>
           <span class="rarity">{{ it.rarity }}</span>
-          <span class="cond muted" data-if="${RPG} && it.cond != null" title="${html(S.condTitle)}">{{ it.cond }}/100</span>
-          <span class="owner muted" data-if="it.owner != 'party' && (q.gear.detail != true || it.equipped == null)">{{ state.party.actors[it.owner].name }}</span>
+          <span class="cond muted" data-if="it.cond != null" title="${html(S.condTitle)}">{{ it.cond }}/100</span>
+          <span class="owner muted" data-if="it.owner != 'party'">{{ state.party.actors[it.owner].name }}</span>
         </div>
         <p class="note muted" data-if="it.note">{{ it.note }}</p>
-        <div class="detail" data-if="q.gear.detail == true"><ss-widget name="rpg-battle.item-detail" data-props='{"stack":"{{ it.stack }}"}'></ss-widget></div>
         <div class="actions">
-          <button class="ss-button" data-if="${RPG} && it.kind == 'equipment' && it.equipped == null && len(q.gear.members) == 0" data-command="inventory.equip"
+          <button class="ss-button" data-if="it.kind == 'equipment' && it.equipped == null" data-command="inventory.equip"
                   data-payload='{"stack":"{{ it.stack }}"}' title="${html(S.equipTitle, { name: '{{ it.name }}' })}"><i class="fa-solid fa-hand-fist" aria-hidden="true"></i> ${html(S.equip)}</button>
-          ${foldAction('equipOn', `${RPG} && it.kind == 'equipment' && it.equipped == null && len(q.gear.wearers[it.stack]) > 0`, 'fa-hand-fist', html(S.equipOn), html(S.equipOnTitle, { name: '{{ it.name }}' }))}
           ${foldAction('use', "it.kind == 'consumable' && len(q.gear.users[it.stack]) > 0", 'fa-flask', html(S.useOn), html(S.useOnTitle, { name: '{{ it.name }}' }))}
-          <button class="ss-button" data-if="${RPG} && it.equipped != null" data-command="inventory.unequip"
+          <button class="ss-button" data-if="it.equipped != null" data-command="inventory.unequip"
                   data-payload='{"stack":"{{ it.stack }}"}' title="${html(S.unequipTitle, { name: '{{ it.name }}' })}">${html(S.unequip)}</button>
           ${foldAction('drop', '', 'fa-trash-can', html(S.drop), html(S.dropTitle, { name: '{{ it.name }}' }))}
         </div>
-          ${foldPanel('equipOn', 'equip-on', `${RPG} && it.kind == 'equipment' && it.equipped == null && len(q.gear.wearers[it.stack]) > 0`, html(S.equipOn), `
-            <button class="ss-button pick-member" data-each="q.gear.wearers[it.stack] as who" data-command="item.equip"
-                    data-payload='{"stack":"{{ it.stack }}","to":"{{ who.id }}"}' title="${html(S.equipOnWho, { name: '{{ it.name }}' })}">{{ who.name }}</button>`)}
           ${foldPanel('use', 'use-on', "it.kind == 'consumable' && len(q.gear.users[it.stack]) > 0", html(S.useOn), `
             <button class="ss-button" data-each="q.gear.users[it.stack] as who" data-command="item.use"
                     data-payload='{"stack":"{{ it.stack }}","target":"{{ who.id }}"}' title="${html(S.useOnWho, { name: '{{ it.name }}' })}">{{ who.name }}</button>`)}
@@ -123,7 +95,7 @@ const TEMPLATE = `
       <label>${html(S.show)}
         <select data-draft="kind">
           <option value="">${html(S.everything)}</option>
-${KIND_ORDER.map(kind => `          <option value="${kind}"${kind === 'equipment' ? ` data-if="${RPG}"` : ''}>${html(KIND_TITLES[kind])}</option>`).join('\n')}
+${KIND_ORDER.map(kind => `          <option value="${kind}">${html(KIND_TITLES[kind])}</option>`).join('\n')}
         </select>
       </label>
       <label>${html(S.rarity)}
@@ -132,7 +104,7 @@ ${KIND_ORDER.map(kind => `          <option value="${kind}"${kind === 'equipment
 ${RARITIES.map(rarity => `          <option value="${rarity}">${html(S.rarities[rarity])}</option>`).join('\n')}
         </select>
       </label>
-      <label class="check" data-if="${RPG}"><input type="checkbox" data-draft="equippedOnly"> ${html(S.equippedOnly)}</label>
+      <label class="check"><input type="checkbox" data-draft="equippedOnly"> ${html(S.equippedOnly)}</label>
     </div>
   </header>
   <section class="loot" data-if="len(q.loot) > 0">
@@ -172,8 +144,21 @@ const CSS = `${BASE_CSS}
 .groups:not(:has(.item)) + .nomatch { display: block; }
 .item { --rarity: var(--sb-common); padding: 12px; margin: 0 0 4px; border-radius: var(--ss-radius-l, 14px); transition: box-shadow 0.15s ease; }
 /* UI 5b: an item is a glass card: its tile (the kind's icon, the count in the corner) with the rarity ring, the name and the actions beside it */
-.item { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: start; }
-.item > .body { display: grid; gap: 6px; min-width: 0; }
+.item { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: center; }
+.item:has(> .body > .fold) { align-items: start; }
+/* The body: the name line, the note and the item detail in the left column; the actions on the right, at most half the row (more
+   buttons than fit wrap as a group on the right); an open fold below both. The text and the actions are centred on each other: the
+   actions span the text's rows and a 1fr row above and below them, which take the room when the actions are the taller. */
+.item > .body { display: grid; grid-template-columns: minmax(0, 1fr) fit-content(50%); grid-template-rows: 1fr auto auto auto 1fr auto; column-gap: 12px; row-gap: 0; align-items: center; min-width: 0; }
+.item > .body > .line { grid-column: 1; grid-row: 2; }
+.item > .body > .note { grid-column: 1; grid-row: 3; margin-top: 6px; }
+.item > .body > .detail { grid-column: 1; grid-row: 4; margin-top: 6px; }
+/* The text column never reaches under the actions: it may shrink below its longest word, a long name breaks anywhere and the chips
+   (Worn by, the condition, key, carry) wrap to the next line, each cut to the column. */
+.item > .body > :is(.line, .note, .detail) { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.item > .body > .line > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.item > .body > .actions { grid-column: 2; grid-row: 1 / 6; justify-content: flex-end; margin: 0; }
+.item > .body > .fold { grid-column: 1 / -1; grid-row: 6; margin-top: 8px; }
 .item .ss-tile-box { --rarity-ring: var(--rarity); width: 44px; height: 44px; border: 2px solid var(--rarity); border-radius: var(--ss-radius-m, 12px); }
 .item .ss-tile-count { right: -6px; bottom: -6px; }
 .item.r-uncommon { --rarity: var(--sb-uncommon); }
@@ -191,7 +176,7 @@ const CSS = `${BASE_CSS}
 .worn-by > i { color: var(--sb-accent); }
 .owner { font-size: 0.85em; }
 .note { margin: 2px 0 0; font-size: 0.85em; }
-.actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .act { cursor: pointer; }
 .act[aria-expanded="true"] { border-color: var(--sb-accent); }
 .act:focus-visible, .fold-cancel:focus-visible, .fold .ss-button:focus-visible { outline: 2px solid var(--sb-accent); outline-offset: 2px; }

@@ -617,10 +617,13 @@ export function checkOps(ops, before = undefined) {
 }
 
 function checkValue(value, key, path, errors) {
-    if (key === 'qty' && !(Number.isInteger(value) && value >= 0)) {
+    // Data modules' closed checker owns field names/types, including literal authoring IDs
+    // and user fields named id/qty. Keep the JSON/prototype/integer safety checks below.
+    const dataDefined = path === '/domains/dataModules' || path.startsWith('/domains/dataModules/');
+    if (!dataDefined && key === 'qty' && !(Number.isInteger(value) && value >= 0)) {
         errors.push(`${path}: qty must be a whole number, 0 or more (got ${JSON.stringify(value)}).`);
     }
-    if (ID_KEY.test(key)) {
+    if (!dataDefined && ID_KEY.test(key)) {
         const ok = key === 'id' ? isId(value) : value === null || isId(value);
         if (!ok) errors.push(`${path}: ${key} must be an ID like it_k3f9a2qz or story/moonveil-trout (got ${JSON.stringify(value)}).`);
     }
