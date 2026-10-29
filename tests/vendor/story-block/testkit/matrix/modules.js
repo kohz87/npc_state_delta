@@ -8,7 +8,7 @@
 //   * `make(imported, ref)`: a fresh definition; `ref.sdk` is the host's sdk once it is up (set after
 //     createHost), for the modules whose settings come through it;
 //   * `A`, `B`, `C`: three replies' change lines (A first, B second, C the swipe / re-read text);
-//   * `setup(host)`: commands run before the first reply (RPG Battle makes its party);
+//   * `setup(host)`: commands run before the first reply (an example module makes its party);
 //   * `action(host)` → [type, payload]: the reader's action, run after reply A;
 //   * `watch(host)` (optional): what the action is expected to change when `facts` does not show it;
 //   * `facts(host)`: a plain projection of what the module keeps, to compare with a host that
@@ -19,7 +19,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 /** The order modules are registered in (the same as the suite helpers); Story Block's core is always first. */
-export const ORDER = ['rb', 'sd', 'nsd'];
+export const ORDER = ['sd', 'nsd'];
 
 const asObject = value => (value && typeof value === 'object' ? value : {});
 
@@ -90,37 +90,15 @@ export const MODULES = {
         action: () => ['npc.set', { name: 'Odda', meters: { trust: 40 } }],
         facts: host => Object.fromEntries(Object.values(asObject(host.head().domains.npc?.npcs)).map(npc => [npc.name, { ...npc.meters }])),
     },
-    rb: {
-        id: 'rpg-battle',
-        label: 'RB',
-        dir: 'rpg_battle',
-        entry: 'src/v2/module.js',
-        make: (imported, ref) => imported.createModule({ settings: () => ref.sdk?.settings(imported.MODULE_ID) ?? {} }),
-        setup: async host => {
-            const made = await host.sdk.command('party.create', { name: 'Wessel', preset: 'fighter' });
-            if (!made.ok) throw new Error(`party.create: ${made.message}`);
-        },
-        // Conditions, not HP: HP also moves with the story time (SD), which a swipe or a delete leaves behind.
-        A: ['~ wound Wessel — poisoned: a spider bite'],
-        B: ['~ wound Wessel — bleeding: a deep cut'],
-        C: ['~ wound Wessel — burning: a torch fell'],
-        action: () => ['party.rest', { kind: 'short' }],
-        facts: host => {
-            const party = host.head().domains.party;
-            const pc = party?.actors?.[party?.pc];
-            return pc ? { name: pc.name, conditions: (pc.conditions ?? []).map(entry => entry.kind).sort() } : { name: null };
-        },
-        // A rest at full health changes nothing in facts; it is written down as the party's last rest.
-        watch: host => ({ ...MODULES.rb.facts(host), rested: host.head().domains.party?.rested ?? null }),
-    },
+
 };
 
 /** The checkout folder names, for `discoverRoots`. */
-export const FOLDERS = { sb: 'Story_block', rb: 'rpg_battle', sd: 'Story_director', nsd: 'npc_state_delta' };
+export const FOLDERS = { sb: 'Story_block', sd: 'Story_director', nsd: 'npc_state_delta' };
 
 /**
  * The checkouts next to each other in `base`, by their usual folder names (Story Block's folder may
- * also be `sb`): { sb?, rb?, sd?, nsd? } with the ones that exist.
+ * also be `sb`): { sb?, sd?, nsd? } with the ones that exist.
  */
 export function discoverRoots(base) {
     const roots = {};
@@ -134,8 +112,8 @@ export function discoverRoots(base) {
 }
 
 /**
- * Imports each module's definition builder from its checkout. `roots`: { rb?, sd?, nsd? } (paths);
- * `entries`: { rb?, sd?, nsd? } overrides of the entry file inside a checkout (the modules' wiring
+ * Imports each module's definition builder from its checkout. `roots`: { sd?, nsd? } (paths);
+ * `entries`: { sd?, nsd? } overrides of the entry file inside a checkout (the modules' wiring
  * moves between releases). A module that is not given, or whose checkout is not there, is `missing`
  * with a sentence; a checkout that does not import is `broken` (that fails its rows, it is not skipped).
  * → { loaded: { key: { ...MODULES[key], root, imported, make(ref) } }, missing: { key: sentence }, broken: { key: error } }

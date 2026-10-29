@@ -39,7 +39,7 @@ import { createTimeline, withRuleOverlay } from './timeline/index.js';
 import { createStore as realStore } from './store.js';
 import { createTurn, substituteNames } from './turn.js';
 
-export const VERSION = '2.0.0-beta.2';
+export const VERSION = '2.6.1';
 
 /**
  * Settings where Story Block's `currency` (and `currencyShort`, `currencyPlural`, `coins`) fall back to
@@ -402,6 +402,7 @@ export function createRuntime({
             extras: { promptChat: () => chatterReaders.prompt.messages(ctx.chat), headChat: () => chatterReaders.head.messages(ctx.chat), sceneChat: () => chatterReaders.scene.messages(ctx.chat), display, headIndex: () => store.headIndex(), proofs: () => store.proofs(), worldShown: () => registry.screens().some(screen => screen.id === DEFAULT_HIDDEN[SCENE_SCREEN_ID]) },
             version: VERSION,
             timeline: () => timeline,
+            dataModules: { state: () => store.head(), lifecycle: id => registry.lifecycle(id), restore: () => registry.restore() },
             packs: packPart,
             // Due events are the host's own system cues: straight to the bus (the public sdk only runs
             // the reader's 'ui' actions), with the same 'committed' event the sdk sends.

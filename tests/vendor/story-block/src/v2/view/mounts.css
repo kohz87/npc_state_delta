@@ -336,8 +336,8 @@
     white-space: nowrap;
 }
 
-/* The summary line of the header, muted, on the right (Reply.dc.html's "+1 Wolf Pelt · …"). On a phone it takes the
-   next line when the title leaves no room, and runs to two lines at most. */
+/* The summary line of the header, muted, on the right (Reply.dc.html's "+1 Wolf Pelt · …"). On a narrow chat column it
+   takes the next line when the title leaves no room, and runs to two lines at most; on a phone the header is one line (below). */
 .ss-card-summary {
     flex: 1 1 160px;
     min-width: 0;
@@ -349,6 +349,24 @@
     color: var(--ss-muted, inherit);
     font-size: 0.85em;
     text-align: right;
+}
+
+/* A phone: the header stays one line (icon, title, summary, chevron); the summary takes the room left and ends in an ellipsis. */
+@media (max-width: 759.98px) {
+    .ss-card-head {
+        flex-wrap: nowrap;
+    }
+
+    .ss-card-head > :not(.ss-card-summary) {
+        flex: none;
+    }
+
+    .ss-card-summary {
+        flex: 1 1 0;
+        display: block;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
 }
 
 .ss-card-chevron {
@@ -584,6 +602,11 @@
         width: min(640px, 92vw);
         max-height: 85dvh;
         border-radius: var(--ss-sheet-radius, var(--ss-radius));
+    }
+
+    /* A screen that asks for `width: 'wide'` (a wizard with a details column beside its choices). */
+    .ss-dialog.ss-dialog-wide {
+        width: min(960px, 94vw);
     }
 }
 

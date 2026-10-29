@@ -54,9 +54,9 @@ export const TABS_FOLD = 'story-suite::tabs';
 export const PACKS_FOLD = 'story-block/packs';
 // Story Block's Events (the events part's debug panel), a sub-fold of Diagnostics (its `place`).
 export const EVENTS_FOLD = 'story-block/events';
-// A sub-fold's key: its module's id, this, and the part ("rpg-battle::features", "story-director::group:Calendar").
+// A sub-fold's key: its module's id, this, and the part ("example-module::features", "story-director::group:Calendar").
 export const SUB_FOLD = '::';
-// A module's sub-fold in the Features fold ("story-suite-features::rpg-battle"); its fold's line opens it.
+// A module's sub-fold in the Features fold ("story-suite-features::example-module"); its fold's line opens it.
 export const featuresFoldOf = moduleId => `${FEATURES_FOLD}${SUB_FOLD}${moduleId}`;
 export const SETTINGS_TEXT = Object.freeze({
     hostHint: 'prompt and its size',

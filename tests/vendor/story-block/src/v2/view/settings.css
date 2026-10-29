@@ -104,6 +104,12 @@
     font-weight: 800;
     line-height: 40px;
 }
+/* A phone: Close is a 44px target (size.css) in the title row, so the row is as tall and Close never covers the search box under it. */
+@media (max-width: 759.98px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-title {
+        line-height: max(40px, calc(44px / var(--ss-zoomed, 1)));
+    }
+}
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-settings-search {
     margin: 0 var(--ss-space-4);
     min-width: 0;

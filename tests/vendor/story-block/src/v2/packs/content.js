@@ -47,7 +47,7 @@ export function itemDefsIn(packs, ids = null) {
  * Records of one kind from every enabled pack, in pack order then file order.
  * `kind`: a content kind (items, creatures, shops, recipes, events, quests, races, talents,
  * skills, presets, places, routes, terms: `{ id, slug, pack, name?, levelName?, xpName?, tiers? }`, the
- * words a world uses for levels and XP, MODULES §F25; ranks: `{ id, pack, title?, levels?, reward? }`,
+ * words a world uses for levels and XP, MODULES §F25; ranks: `{ id, pack, title?, levels?, reward?, xp? }`,
  * each pack's ladder lowest first, so a reader takes one pack's ranks; crafts: `{ id, slug, pack, title,
  * stats, stations, note? }`, see craftsOf for the merged table; meterPresets: `{ id, slug, pack, title,
  * meters, stages? }`, ready-made NPC meter sets),

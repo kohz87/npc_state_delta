@@ -1,5 +1,5 @@
 // The game view's header (UI stage 5a): the `ss.hero` block at the top of every screen of the game view, read from the
-// head state. The lead is the party's own character (`party.pc`, RPG Battle; with no RPG Battle, the reader's persona
+// head state. The lead is the party's own character (`party.pc`; without a party module, the reader's persona
 // name), its HP, MP and SP pools, the level under the Terms' word and its conditions. The scene is `scene.place`,
 // `scene.weather` and the story time (`director.time`, Story Director; formatted by the host's `fmt.time`). Every
 // read goes through `query(name, args)` and falls back to nothing: a missing module shows no bar, not an error.
@@ -57,7 +57,7 @@ export function personaFileOnPage(doc = globalThis.document) {
 
 /**
  * What the reader's SillyTavern says about the persona and the open character: names and avatar files, '' for none.
- * The persona's file is the first of: the context's `user_avatar` (or SillyTavern's global, as RPG Battle's persona reader reads it),
+ * The persona's file is the first of: the context's `user_avatar` (or SillyTavern's global),
  * the current persona on the page (personaFileOnPage), and the settings' default persona (power user's `default_persona`).
  */
 export function readHeroContext(context = globalThis.SillyTavern?.getContext?.() ?? null, doc = globalThis.document) {

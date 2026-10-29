@@ -89,7 +89,7 @@ export function sharedPrefix(a, b) {
 /**
  * The fake. `options`: { chat?: Message[] (default: one greeting), greeting?, chatId?,
  * mainApi? ('openai' = chat completion, anything else = text completion), mainPrompt? (false:
- * the preset has no Main Prompt), interceptorName?, extensionSettings?, user?, char?, contextSize? (what the
+ * the preset has no Main Prompt), interceptorName?, extensionSettings?, chatMetadata?, user?, char?, contextSize? (what the
  * interceptor is handed: SillyTavern's context size less the reply's length; default 8192) }.
  * Returns the fake (see the returned object's comments); `fake.ctx` is what getContext() gives.
  */
@@ -133,7 +133,7 @@ export function createFakeContext(options = {}) {
         name1: user,
         name2: char,
         mainApi,
-        chatMetadata: {},
+        chatMetadata: clone(options.chatMetadata ?? {}),
         extensionSettings,
         extension_settings: extensionSettings,
         eventSource,

@@ -44,7 +44,9 @@ export function registered(registry) {
  */
 export function capture({ registry, state, settings = () => ({}) }) {
     const domains = structuredClone(state?.domains ?? {});
-    const names = registered(registry);
+    // Opt-in deferred domains leave no snapshot metadata before first use. Other domains keep
+    // their existing absent/default contract, including deferred domains without this flag.
+    const names = registered(registry).filter(item => domainDef(registry, item.name)?.snapshot !== 'when-present' || Object.hasOwn(domains, item.name));
     const known = new Set(names.map(item => item.name));
     const domainVersions = {};
     for (const name of Object.keys(domains).sort()) domainVersions[name] = versionOf(domainDef(registry, name));
@@ -158,6 +160,10 @@ export function planRestore({ registry, state, entry, descriptor, returnRecord, 
             ops.push({ op: 'add', path, value: structuredClone(slice) });
             listing[name] = { version: def ? now : from, source, hash: hashJson(slice) };
         } else if (def || here) {
+            if (def?.deferred === true && def.snapshot === 'when-present') {
+                if (here) { ops.push({ op: 'remove', path }); listing[name] = { version: now, source: 'removed', hash: null }; }
+                continue;
+            }
             if (def) {
                 if (typeof def.absent !== 'function') return fail('SNAPSHOT_UNAVAILABLE', `The domain ${name} came after this save and says nothing of how to restore without it (no absent() on its definition).`);
                 let slice;

@@ -10,14 +10,10 @@ const WEIGHTS = Object.freeze(['regular', 'fill']);
 /** The default `ph-*` icon of the game view's screens and tabs, by full id or by the id's last part. */
 export const TAB_ICONS = Object.freeze({
     'story-block/home': 'ph-house',
-    'rpg-battle/party': 'ph-users-three',
     'story-block/inventory': 'ph-backpack',
     'story-director/quests': 'ph-scroll',
     'story-director/world': 'ph-globe-hemisphere-west',
     'story-director/map': 'ph-map-trifold',
-    'rpg-battle/fight': 'ph-sword',
-    'rpg-battle/crafting': 'ph-hammer',
-    'rpg-battle/trade': 'ph-scales',
     'story-block/scene': 'ph-map-pin',
     'story-director/chronicle': 'ph-book-open',
     'story-director/director': 'ph-film-slate',

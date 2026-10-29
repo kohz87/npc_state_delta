@@ -1270,8 +1270,9 @@
     display: flex;
     align-items: flex-end;
     justify-content: center;
-    width: 100vw;
-    height: 100dvh;
+    /* the whole screen even inside a zoomed root (size.css): vw and dvh are zoomed with it */
+    width: calc(100vw / var(--ss-zoomed, 1));
+    height: calc(100dvh / var(--ss-zoomed, 1));
     box-sizing: border-box;
     background: var(--ss-scrim);
     -webkit-backdrop-filter: blur(3px);

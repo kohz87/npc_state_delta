@@ -245,7 +245,7 @@ export function missingModules(registry, state) {
     const domains = state?.domains ?? {};
     return registry.modules()
         .filter(def => registry.held?.(def.id) !== true)
-        .map(def => ({ def, missing: Object.keys(def.domains ?? {}).filter(name => !Object.hasOwn(domains, name)) }))
+        .map(def => ({ def, missing: Object.keys(def.domains ?? {}).filter(name => !def.domains[name].deferred && !Object.hasOwn(domains, name)) }))
         .filter(entry => entry.missing.length);
 }
 
@@ -314,23 +314,14 @@ export async function ensureModules({ store, bus, registry, events = null }) {
     return results;
 }
 
-// ---- sdk.preflight (RB_CONTRACT §2, §9; docs/v2/LIFECYCLE.md) --------------------------------------
+// ---- sdk.preflight (docs/v2/LIFECYCLE.md) --------------------------------------
 
 /** The classes a module's stored data can be in, as sdk.preflight tells them. */
 export const PREFLIGHT_CLASSES = Object.freeze(['empty', 'current', 'legacy', 'mixed', 'future', 'damaged']);
 // The version of the store records this Story Block reads (record `v`, state `v`).
 const STORE_VERSION = 2;
-// The slice whose root carries a module's rules marker (rulesVersion, rulesHash): RPG Battle's `rules`.
+// A module may keep version markers in a `rules` domain.
 const RULES_DOMAIN = 'rules';
-// What a module not registered yet is known by: the domains it keeps and the peers it needs, for the
-// suite's own modules, so `preflight({ module: 'rpg-battle' })` can look before it registers. Any
-// other module (or a different list) passes `domains` and `peers` itself.
-export const SUITE_MODULES = Object.freeze({
-    'rpg-battle': Object.freeze({
-        domains: Object.freeze(['party', 'effects', 'creation', 'gear', 'combat', 'bestiary', 'trade', 'craft', 'rules', 'progress', 'training', 'death']),
-        peers: Object.freeze(['story-director']),
-    }),
-});
 const MODULE_ID_TEXT = /^[a-z0-9][a-z0-9._-]*$/;
 const DOMAIN_TEXT = /^[a-z][a-zA-Z0-9_-]*$/;
 
@@ -346,7 +337,7 @@ const DOMAIN_TEXT = /^[a-z][a-zA-Z0-9_-]*$/;
  */
 export function preflight({ store, registry, chat = () => [], apiVersion = 2 }, options) {
     if (!isObject(options) || typeof options.module !== 'string' || !MODULE_ID_TEXT.test(options.module)) {
-        throw new TypeError('Story Suite: preflight needs { module } with a module id (like "rpg-battle").');
+        throw new TypeError('Story Suite: preflight needs { module } with a module id (like "story-director").');
     }
     const wanted = options.rulesVersion;
     if (wanted !== undefined && wanted !== null && !(Number.isInteger(wanted) && wanted >= 1)) {
@@ -354,7 +345,6 @@ export function preflight({ store, registry, chat = () => [], apiVersion = 2 }, 
     }
     const id = options.module;
     const def = registry.module?.(id) ?? null;
-    const suite = SUITE_MODULES[id] ?? null;
     // `domains` and `peers`, when given, are lists of valid names; a bad one throws, it is never left out
     // (a list that lost a name would read `empty`).
     const listed = (name, pattern) => {
@@ -365,11 +355,12 @@ export function preflight({ store, registry, chat = () => [], apiVersion = 2 }, 
         }
         return list;
     };
-    const domainNames = listed('domains', DOMAIN_TEXT) ?? (def ? Object.keys(def.domains ?? {}) : suite ? [...suite.domains] : []);
-    const peerIds = listed('peers', MODULE_ID_TEXT) ?? (def ? registry.peers(id).map(peer => peer.module) : suite ? [...suite.peers] : []);
+    const domainNames = listed('domains', DOMAIN_TEXT) ?? (def ? Object.keys(def.domains ?? {}) : []);
+    const peerIds = listed('peers', MODULE_ID_TEXT) ?? (def ? registry.peers(id).map(peer => peer.module) : []);
 
     const result = {
         hostApi: apiVersion,
+        deferredDomains: true,
         hostVersion: registry.hostVersion?.() ?? '',
         storeVersion: null,
         classification: 'empty',
@@ -585,7 +576,7 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
             current: () => (typeof dialogCurrent === 'function' ? dialogCurrent() ?? null : null),
         }),
         /**
-         * The timeline coordinator (RB_CONTRACT §8; docs/v2/TIMELINE.md): `head`, `make` (a manual save), `list`, `status`,
+         * The timeline coordinator (docs/v2/TIMELINE.md): `head`, `make` (a manual save), `list`, `status`,
          * `history`, `forget` for a reader; `prepare`, `activate`, `abort`, `recover`, `nativeEvent`, `registerParticipant`
          * refuse without the host's capability, which no module is given. Every method answers `{ ok: true, … }` or
          * `{ ok: false, code, message }`, as a promise.
@@ -599,8 +590,9 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
         /** Every declared feature: [{ id, moduleId, moduleName, label, describe, default, prompt, on }]. */
         features: () => (registry.features?.() ?? []).map(feature => Object.freeze({ ...feature, on: featureOn(registry, feature.id) })),
         /**
-         * [{ id, name, version, domains, commands, kinds, tabs, features, status, reason }] in id order.
-         * `domains`, `commands` and `kinds` are what the module declares; it is available only while
+         * [{ id, name, version, domains, commands, kinds, tabs, features, capabilities, status, reason }] in id order.
+         * `domains`, `commands` and `kinds` are what the module declares; `capabilities` are the names it declares for
+         * packs' requires.capabilities (a frozen list, empty when it declares none); it is available only while
          * `status` is 'ready' ('dormant': waiting for a peer; 'restore-pending': a restore holds it), and
          * `reason` says why when it is not (null when ready).
          */
@@ -615,6 +607,7 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
                 kinds: Object.keys(def.capture?.kinds ?? {}),
                 tabs: (def.tabs ?? []).map(tab => tab.id),
                 features: (def.features ?? []).map(feature => feature.id),
+                capabilities: Object.freeze([...new Set(def.capabilities ?? [])]),
                 status: life?.status ?? 'ready',
                 reason: life?.reason ?? null,
             });

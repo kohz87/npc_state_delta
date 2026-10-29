@@ -1,5 +1,5 @@
-// Hashes for the inventory seams with the rules module (RB_CONTRACT §4: "Hash means SHA-256 of
-// normalized JSON, sorted keys, array order preserved"). A command handler cannot wait, so this is a
+// Hashes for inventory: SHA-256 of normalized JSON, with sorted keys and array order preserved.
+// A command handler cannot wait, so this is a
 // small synchronous SHA-256 rather than crypto.subtle. Pure; no SillyTavern, no Node built-ins.
 
 const K = Uint32Array.from([

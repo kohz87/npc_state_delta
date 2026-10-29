@@ -2,7 +2,7 @@
 // Features subsection of its module's settings and on one overview of every module's features.
 //
 // A module declares them, `registerModule({ features: [{ id, label, describe, default, prompt? }] })`,
-// ids namespaced by the module (`rpg-battle.wear`), and marks what each one owns with
+// ids namespaced by the module (`example-module.wear`), and marks what each one owns with
 // `feature: '<id>'`: a capture kind, a command (`{ handler, feature }`, or a handler function with a
 // `feature` property), a query or a hook (a function with a `feature` property, so an older host that
 // only takes functions there still takes it), the module's context or one of its `context.parts`, a

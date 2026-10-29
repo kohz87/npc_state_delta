@@ -1,7 +1,6 @@
 // Story Suite v2: proof and evidence (docs/v2/EVIDENCE.md, contract §6 "Proof submission" and "story.evidence").
 //
-// A module that owns a kind of proof (Story Director: visit, acceptance, event; RPG Battle: kill, use, rescue,
-// story) calls `ctx.proof({ kind, payload, parents? })` inside a command. The host checks who is asking, what
+// A module that owns a kind of proof (Story Director: visit, acceptance, event) calls `ctx.proof({ kind, payload, parents? })` inside a command. The host checks who is asking, what
 // the payload is and what the reader really said, stamps the id, the Source and the payload hash, keeps the
 // proof on the span of the block the command makes (`span.evidence`) and pins it in the state
 // (`meta.proofs[id]`, written by the same ops as the block). The pin is what makes a proof ACTIVE: a block
@@ -23,7 +22,6 @@ const utf8 = new TextEncoder();
 /** Who may give each kind of proof (contract §6): the module id that owns it. */
 export const OWNERS = Object.freeze({
     visit: 'story-director', acceptance: 'story-director', event: 'story-director',
-    kill: 'rpg-battle', use: 'rpg-battle', rescue: 'rpg-battle', story: 'rpg-battle',
 });
 export const KINDS = Object.freeze(Object.keys(OWNERS));
 export const STATS = Object.freeze(['STR', 'VIT', 'AGI', 'DEX', 'INT', 'LUK', 'CHA']);

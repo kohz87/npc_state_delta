@@ -235,6 +235,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         }
         let packScreens = [];
         try { packScreens = sdk.query('packs.content', { kind: 'screens' }) ?? []; } catch { packScreens = []; }
+        try { packScreens.push(...(sdk.query('dataModules.presentation', { kind: 'screens' }) ?? [])); } catch { /* older host */ }
         const byPack = new Map();
         for (const screen of packScreens) {
             const { pack, ...def } = screen ?? {};
@@ -788,7 +789,13 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
     const offs = [...replyOffs];
     // Story Suite's console errors, kept for Diagnostics (once per page; the console still prints them).
     offs.push(captureConsole());
-    for (const name of ['head', 'committed']) offs.push(events.on(name, () => { mounts.tab.register(); if (!panel.hidden) tabHost?.refresh(); }));
+    let dataPresentation = '';
+    for (const name of ['head', 'committed']) offs.push(events.on(name, () => {
+        let next = '';
+        try { const pinned = sdk.query('dataModules.presentation', { kind: 'screens' }) ?? []; if (pinned.length) next = JSON.stringify(pinned); } catch { /* older host */ }
+        if (next !== dataPresentation) { dataPresentation = next; syncScreens(); }
+        mounts.tab.register(); if (!panel.hidden) tabHost?.refresh();
+    }));
     // A feature turned on or off: its screens, tabs, widgets and cards come and go; nothing else changes.
     for (const name of ['head', 'committed', 'turn']) offs.push(events.on(name, () => overlay?.refreshSize?.()));
     // A chat change closes the dialogs (their drafts were for the chat they were opened in), the game view's More sheet and the

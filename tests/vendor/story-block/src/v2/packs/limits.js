@@ -15,25 +15,16 @@ export const LIMITS = Object.freeze({
     errors: 20,                      // problems reported for one pack before giving up
 });
 
-// Content kinds a pack may carry (SPEC §9). Each is a list of records.
-// races and talents are choices for the character creation wizard (MODULES §F12); skills are
-// RPG Battle skill templates and presets ready-made characters for that wizard; places and
-// routes are the map Story Director's atlas reads; terms are the words a world uses for levels and XP
-// (MODULES §F25), which RPG Battle reads under the reader's own; ranks are a ladder of quest ranks
-// (Story Director's `quest.ranks`, RPG Battle's foe strength); crafts change which stats a craft rolls
-// with (MODULES §F102); meterPresets are ready-made NPC meter sets for NPC State Delta (MODULES §F81, §F90);
-// markets are the price factors of settlement types and environment tags RPG Battle's trade reads (PACKS.md
-// "Markets"); rules is the one manifest of RPG Battle's rules pack format (schema 2: classes, skills, branches,
-// item rules, trainers; PACKS.md "Rules packs"), read by the rules checker (rules-v2.js) before anything is wrapped.
-export const CONTENT_KINDS = Object.freeze(['items', 'creatures', 'shops', 'recipes', 'events', 'quests', 'races', 'talents', 'skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'rules']);
+// Shared authoring bounds for host records, also used by pack editors.
+export const RECORD_LIMITS = Object.freeze({ slug: 64, note: 500, word: 40, element: 24 });
+
+// Content kinds a pack may carry. Each is a list of records.
+export const CONTENT_KINDS = Object.freeze(['items', 'creatures', 'shops', 'recipes', 'events', 'quests', 'races', 'talents', 'skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'dataModules']);
 // Kinds added after the first pack format: a normalized pack has them only when the file gives
 // them, so what older packs list (counts) stays as it was.
-export const OPTIONAL_KINDS = Object.freeze(['skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'rules']);
-// Capabilities Story Block itself has, beside the module ids and state areas the modules give: a pack that
-// lists one is refused where the host lacks it (validate.js, with the capability list supplied). `rb-rules-v2`:
-// this host knows the rules content kind, so a pack with a rules manifest can be installed (an older host
-// refuses the kind itself, UNKNOWN_KIND).
-export const HOST_CAPABILITIES = Object.freeze(['rb-rules-v2']);
+export const OPTIONAL_KINDS = Object.freeze(['skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'dataModules']);
+// Capabilities provided by the host in addition to installed modules.
+export const HOST_CAPABILITIES = Object.freeze(['data-modules-v1']);
 
 // Top-level fields of pack.json; anything else is refused so a typo is not silently ignored.
 export const PACK_FIELDS = Object.freeze(['id', 'version', 'name', 'author', 'description', 'requires', 'currency', 'economy', 'calendar', 'weather', 'content', 'start', 'layouts', 'screens', 'theme']);
@@ -54,7 +45,7 @@ export const EVENT_FIELDS = Object.freeze(['id', 'when', 'cue', 'once', 'after',
 // The events part's own limits (src/v2/events), so a pack that passes here also runs there.
 export const EVENT_LIMITS = Object.freeze({ when: 500, cue: 500, then: 8 });
 export const CHOICE_FIELDS = Object.freeze(['id', 'name', 'note', 'stats', 'tags']);
-// RPG Battle's skill template (v1 skillFromTemplate): the numbers come from its rules.
+// A skill template: numbers are supplied by the consuming module.
 export const SKILL_FIELDS = Object.freeze(['name', 'slug', 'type', 'stat', 'target', 'element', 'note', 'tags']);
 export const SKILL_TYPES = Object.freeze(['physical', 'magic', 'heal', 'buff', 'debuff']);
 export const SKILL_TARGETS = Object.freeze(['one', 'all', 'self', 'ally', 'allies']);
@@ -68,18 +59,19 @@ export const STAT_NAME = /^[A-Z]{2,12}$/;
 export const PLACE_FIELDS = Object.freeze(['name', 'slug', 'aliases', 'region', 'kind', 'layer', 'x', 'y', 'note', 'hidden', 'secret', 'market', 'tags']);
 export const ROUTE_FIELDS = Object.freeze(['slug', 'from', 'to', 'kind', 'km', 'hours', 'corridor', 'note']);
 // Display terms a pack suggests (MODULES §F25): `{ id?, name?, levelName?, xpName?, tiers? }`, `tiers`
-// being `true` or `{ size?, numerals?, enabled? }`. A term is a label in RPG Battle's blocks
+// being `true` or `{ size?, numerals?, enabled? }`. A term is a label in a module's blocks
 // (`Soul Class: III (Lv 24)`), so it may not hold what separates fields there.
 export const TERMS_FIELDS = Object.freeze(['id', 'name', 'levelName', 'xpName', 'tiers']);
 export const TERMS_TIER_FIELDS = Object.freeze(['size', 'numerals', 'enabled']);
 export const TERMS_NUMERALS = Object.freeze(['roman', 'arabic']);
 export const TERMS_LIMITS = Object.freeze({ records: 4, term: 30, tierSize: 999 });
 export const TERM_SEPARATORS = /[|:#<>\r\n]/;
-// A ladder of ranks, lowest first: `{ id: 'F', title?, levels?: [lo, hi], reward?: [lo, hi] }`, the
-// reward in whole units of the chat's one currency.
-export const RANK_FIELDS = Object.freeze(['id', 'title', 'levels', 'reward']);
+// A ladder of ranks, lowest first: `{ id: 'F', title?, levels?: [lo, hi], reward?: [lo, hi], xp?: [lo, hi] }`, the
+// reward in whole units of the chat's one currency and `xp` the experience a job of the rank may give (whole XP, 0 to
+// RANKS_LIMITS.xp). Without `xp`, an open quest template's XP is held to `reward` as before (2.5.0 added `xp`).
+export const RANK_FIELDS = Object.freeze(['id', 'title', 'levels', 'reward', 'xp']);
 export const RANK_ID = /^[\p{L}\p{N}+-]{1,8}$/u;
-export const RANKS_LIMITS = Object.freeze({ records: 12, title: 30, level: 999 });
+export const RANKS_LIMITS = Object.freeze({ records: 12, title: 30, level: 999, xp: 1000000 });
 // Markets (PACKS.md "Markets"): price factors a pack adds or changes, each record one of
 // `{ type: 'town', buy?, sell?, stock?: [least, most], note? }` (a settlement type) or
 // `{ tag: 'coastal', prices: { fish: 0.8, all: 1.05 }, note? }` (an environment tag: a factor per item
@@ -92,7 +84,7 @@ export const MARKET_WORD = /^[a-z][a-z0-9]*(?:-[a-z0-9]+){0,3}$/;
 
 // Crafting (MODULES §F102). A recipe may say which craft it is, how hard (`dc`), where it is made
 // (`station`), which stats it rolls with (`stat`, overriding the craft's), whether a character knows
-// it from the start (`known`) and who teaches it. RPG Battle's craft part reads them; code sets every
+// it from the start (`known`) and who teaches it. A crafting module may read them; code sets every
 // chance. Fields a recipe had before (fee, minutes, any other plain data) are kept as they were.
 export const RECIPE_CRAFT_FIELDS = Object.freeze(['craft', 'dc', 'station', 'stat', 'known', 'teaches']);
 export const RECIPE_LIMITS = Object.freeze({ dcMin: 5, dcMax: 40, teaches: 120, stats: 3 });
@@ -146,5 +138,5 @@ export const SEMVER = /^(\d{1,6})\.(\d{1,6})\.(\d{1,6})(?:-[0-9A-Za-z.-]{1,40})?
 export const COMMAND = /^[a-z][a-z0-9-]{0,39}(?:\.[a-z][A-Za-z0-9-]{0,39}){1,3}$/;
 // A reference to a def outside the pack: `story/rope`, `pack.fantasy/iron-sword`.
 export const DEF_ID = /^(?:story|pack\.[a-z0-9]+(?:-[a-z0-9]+)*)\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
-// A screen id: a module's (`rpg-battle/party`) to override, or the pack's own.
+// A screen id: a module's (`example-module/party`) to override, or the pack's own.
 export const SCREEN_ID = /^[a-z0-9]+(?:[.-][a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)?$/;

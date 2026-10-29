@@ -1,7 +1,7 @@
 // "Before you start" on the Home screen: the `story-block.ready-hint` host widget. While a module's
-// canGenerate hook holds the story back (MODULES §F12: RPG Battle until your character exists), it draws
+// canGenerate hook holds the story back (MODULES §F12), it draws
 // one panel with each such module's name and reason and, when the module has an onBlocked hook, a button
-// that runs it (RPG Battle's opens the character wizard). The button's words are the module's own
+// that runs it (for example, it may open a setup screen). The button's words are the module's own
 // (`{ ok: false, reason, action }`), else a plain default; `action: false` asks for no button. With no
 // module holding back (Story Block alone, or the character made) it draws nothing.
 //

@@ -7,6 +7,7 @@
 @import url('./glass.css');
 @import url('./settings.css');
 @import url('./fonts.css');
+@import url('./size.css');
 
 :root {
     --story-suite-line: var(--SmartThemeBorderColor, rgba(128, 128, 128, 0.35));
@@ -405,3 +406,14 @@ body.story-suite-open { overflow: hidden; }
         scroll-behavior: auto !important;
     }
 }
+
+/* The Data modules card (data-modules/setup.js). */
+.ss-dm-row { display: grid; gap: 4px; padding: 8px 0; border-top: 1px solid var(--story-suite-line); min-width: 0; overflow-wrap: anywhere; }
+.ss-dm-details { margin: 2px 0; }
+.ss-dm-label { display: block; font-weight: bold; margin-top: 6px; }
+.ss-dm-list { margin: 2px 0 2px 18px; padding: 0; }
+.ss-dm-sub, .ss-dm-empty { opacity: 0.75; }
+.ss-dm-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ss-dm-actor { display: inline-flex; align-items: center; gap: 4px; }
+.ss-dm-preview { display: grid; gap: 4px; padding: 6px 0; }
+.ss-dm-result { margin: 2px 0; }

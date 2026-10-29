@@ -3,7 +3,7 @@
 //
 // * Extra calls: the Connection Manager profile both helpers use (a cheaper model, say) and Story Suite's "one call at a time per
 //   connection" switch (a host setting that used to sit in the Story Suite fold).
-// * Checks: the pre-roll, "Roll checks before the reply" (the strict mode): the check is rolled first, from the reader's message.
+// * Checks: the pre-roll, "Roll checks before the reply": the check is rolled first, from the reader's message.
 // * Safety net: reads the finished reply for change lines it forgot (time, place, who is here, weather, quest progress, wounds, an
 //   item handed over). Its own profile, and the kinds it may write as chips. The value wall is stated plainly: coin, new items,
 //   XP, loot and healing have no chip and are never written, whatever is stored; a line that arrives after the reader has already

@@ -702,7 +702,12 @@ function parseLine(source) {
         if (!trimmed) continue;
         const found = labelled(trimmed);
         // A part with no label is more text, so nothing written is lost.
-        if (found) addLabel(labels, found[0].trim().toLowerCase(), found[1]);
+        if (found) {
+            const label = found[0].trim().toLowerCase();
+            if (kind === 'dm' && Object.hasOwn(labels, label)) return { error: `DM_LABEL: duplicate label ${label}` };
+            addLabel(labels, label, found[1]);
+        }
+        else if (kind === 'dm') return { error: 'DM_LABEL: unused trailing text needs a declared label' };
         else texts.push(trimmed);
     }
     return { op, kind, name, text: texts.filter(Boolean).join('; '), labels };

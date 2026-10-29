@@ -24,8 +24,9 @@ export const MONEY_FOLD = `${MONEY_MODULE}::group:${SETTINGS_TEXT.general}`;
 /** The cards, in order: a title and the fields in each. */
 export const MONEY_CARDS = Object.freeze([
     Object.freeze({ title: 'Coins', keys: Object.freeze(['coins', 'coinDisplay']) }),
-    Object.freeze({ title: 'What the story may pay', keys: Object.freeze(['storyCoinPerReply', 'economyScale']) }),
+    Object.freeze({ title: 'What the story may pay', keys: Object.freeze(['storyCoinPerReply']) }),
     Object.freeze({ title: 'Money words', keys: Object.freeze(['currency', 'currencyPlural', 'currencyShort']) }),
+    Object.freeze({ title: 'Advanced', keys: Object.freeze(['economyScale']) }),
 ]);
 const MORE = 'More';
 
@@ -43,9 +44,9 @@ export function budgetUnit(values) {
     return { one: unit.name, many: unit.plural };
 }
 
-/** The budget as words: "60 pennies", "1 penny", and "Automatic" for 0 (worked out from the installed modules). */
+/** The budget as words: "60 pennies", "1 penny", and the unlimited automatic setting for 0. */
 export function budgetText(n, values) {
-    if (!Number.isFinite(n) || n <= 0) return 'Automatic';
+    if (!Number.isFinite(n) || n <= 0) return 'Automatic: no limit — the story decides';
     const unit = budgetUnit(values);
     return `${num(n)} ${n === 1 ? unit.one : unit.many}`;
 }
@@ -108,6 +109,7 @@ export function moneyBody(pane, ctx) {
     const def = typeof registry?.settingsDefs === 'function' ? registry.settingsDefs().find(item => item.moduleId === MONEY_MODULE) : null;
     const form = renderSettingsForm(pane, {
         moduleId: MONEY_MODULE, schema: moneySchema(def?.schema, () => settings(MONEY_MODULE)), settings, doc: ctx.doc, quiet: true, className: 'ss-money',
+        fold: { prefix: 'money::', only: ['Advanced'], openFirst: false },
     });
     return {
         filter: text => form.filter(text),

@@ -23,6 +23,7 @@
 
 import { assistSections, continuation, cutLine, defangMarker, extractBlock, grammarHeads, hasHidden, hideBlock, markOff, parseChanges, strayLines, stripBlock, withAssist } from './capture.js';
 import { notWritten } from './assist/extractor.js';
+import { PRECHECK } from './assist/classifier.js';
 import { refusedWhy } from './assist/safety.js';
 import { displayLines, readDisplayLine } from './extras.js';
 import { occurrenceOf, operationKey, replacedProofs, reusePlan } from './evidence.js';
@@ -370,6 +371,8 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
     async function runCues(type = 'normal', { dryRun = false } = {}) {
         const cues = {};
         let committed = false;
+        const prechecks = [];
+        const requested = [];
         const commit = !dryRun && type !== 'continue';
         for (const { moduleId, fn } of registry.hookEntries('beforeGenerate')) {
             let out;
@@ -384,12 +387,28 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             const lines = Array.isArray(out) ? out : Array.isArray(out?.lines) ? out.lines : [];
             if (lines.length) cues[moduleId] = lines.filter(line => typeof line === 'string');
             for (const command of commit && Array.isArray(out?.commands) ? out.commands : []) {
+                // Assist's roll is previewed for the prompt, without writing on the previous reply.
+                // Completion runs the same seed on the generated reply; only that transaction is stored.
+                if (command?.type === PRECHECK) {
+                    requested.push({ moduleId, payload: command.payload ?? {} });
+                    continue;
+                }
                 const result = await bus.command(command?.type, command?.payload ?? {}, { cause: 'system' });
                 if (result?.ok) {
                     committed = true;
                     events?.emit('committed', { receipt: result.receipt });
                 } else problem({ module: moduleId, code: result?.code ?? 'FAILED', message: `The cue "${command?.type}" was not committed: ${result?.message ?? 'unknown error'}` });
             }
+        }
+        // Other cues may settle a fight or change a modifier. Preview on the state they leave,
+        // which is also the state the generated reply's prelude will start from.
+        for (const { moduleId, payload } of requested) {
+            const prior = session?.prechecks?.find(step => JSON.stringify(step.payload) === JSON.stringify(payload));
+            const result = bus.run(PRECHECK, payload, { cause: 'system', ...(prior ? { seed: prior.seed } : {}) });
+            if (result?.ok) {
+                prechecks.push({ type: PRECHECK, payload, seed: result.receipt.seed });
+                cues[moduleId] = [...(cues[moduleId] ?? []), `[Happened]\n${result.receipt.summary}`];
+            } else problem({ module: moduleId, code: result?.code ?? 'FAILED', message: `The cue "${PRECHECK}" was not prepared: ${result?.message ?? 'unknown error'}` });
         }
         // Saved with the reply (MESSAGE_RECEIVED), not now: each save writes the whole chat file, and the
         // reply's save comes moments later with these cues in it. A reply that never comes still has them
@@ -398,7 +417,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             store.deferSave?.();
             deferred = true;
         }
-        return cues;
+        return { cues, prechecks };
     }
 
     // What modules send with the reply on their own, under their own prompt keys (SPEC §5: NPC State
@@ -486,7 +505,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
     }
     const blockedBy = () => askCanGenerate();
 
-    // A module's own onBlocked hook (what it does when it held the story back: RPG Battle opens the
+    // A module's own onBlocked hook (what it does when it held the story back: an example module opens the
     // character wizard). → true when it ran without throwing.
     // C3-2: through the off-aware hook list, so a hook whose feature is off is never called (nor offered).
     const onBlockedOf = moduleId => registry.hookEntries('onBlocked').find(entry => entry.moduleId === moduleId)?.fn ?? null;
@@ -564,7 +583,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
                 block(blocked, abort);
                 return;
             }
-            const cues = await runCues(kind);
+            const { cues, prechecks } = await runCues(kind);
             const built = build(cues);
             tellTooSmall(built.fit);
             const chat = ctx.chat;
@@ -572,6 +591,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             const index = kind === 'swipe' || kind === 'continue' ? last : chat.length;
             session = {
                 type: kind,
+                prechecks,
                 index,
                 untold: built.untold.map(receipt => receipt.id),
                 staticText: defuseMacros(built.staticText),
@@ -734,7 +754,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
     // `late` / `assist` (MODULES §F123): the Assist safety net's lines, run after the reply's own as story
     // lines marked as its (late: read from the reply before, after the reader had sent), within the same
     // cap per reply (`used`: lines the reply already read in an earlier call).
-    async function captureLines(index, all, before = null, type = 'normal', { late = [], assist = [], used = 0 } = {}) {
+    async function captureLines(index, all, before = null, type = 'normal', { late = [], assist = [], used = 0, prechecks = [] } = {}) {
         const receipts = [];
         const found = [];
         const lines = capped(index, all, found);
@@ -744,13 +764,16 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         let off = [];
         let steps = [];
         await (store.batch ?? (fn => fn()))(async () => {
+            // The seeded pre-roll precedes this reply's story lines, as it did in the prompt.
+            // Its Source is now this reply's; the previous reply is never changed.
+            const prepared = prechecks.length ? await afterCapture(index, { type, problems: found, prechecks, onlyPrechecks: true }) : [];
             ({ off } = await captureEach(index, lines, receipts, found, null, null, shown));
             for (const mark of [LATE, NOW]) {
                 const group = extra.filter(item => item.mark === mark).map(item => item.line);
                 if (group.length) off = [...new Set([...off, ...(await captureEach(index, group, receipts, found, null, null, shown, mark)).off])];
             }
-            // Only after a capture that kept a story line (never for an empty one, a click or a system step).
-            if (receipts.length) steps = await afterCapture(index, { type, problems: found });
+            // A pre-roll is part of this reply even when its narration has no Changes block.
+            if (receipts.length || prepared.length) steps = [...prepared, ...await afterCapture(index, { type, problems: found })];
         });
         return { receipts, problems: found, off, steps: steps.map(step => step.receipt) };
     }
@@ -767,15 +790,20 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
      * state after its new story lines), `reply` and `seeds` (the old steps' seeds by type, in order): nothing
      * is stored, and the steps come back as [{ ops, receipt, block? }] for store.replaceStory (`block`: what a
      * guarded step hands over, REPLAY.md; `plan` counts the guarded blocks the Re-read has planned so far, so
-     * each gets its own ordinal).
+     * each gets its own ordinal). The same runner stores Assist's seeded pre-roll prelude with
+     * `beforeGenerate: true`; Re-read plans that prelude before the story lines and replaces it too.
      */
-    async function afterCapture(index, { type = 'normal', problems = [], state = null, reply = null, seeds = null, plan = null } = {}) {
+    async function afterCapture(index, { type = 'normal', problems = [], state = null, reply = null, seeds = null, plan = null, prechecks = [], onlyPrechecks = false } = {}) {
         const steps = [];
         const live = state === null;
         let now = live ? store.head() : state;
         // A Re-read has stored nothing yet: the proof its lines and earlier steps planned is what the hooks and steps see.
         const planned = () => (live || !plan ? [] : [...plan.blocks.flatMap(piece => piece.block?.evidence ?? []), ...steps.flatMap(step => step.block?.evidence ?? [])]);
-        for (const { moduleId, fn } of registry.hookEntries('afterCapture')) {
+        const hooks = [
+            ...(prechecks.length ? [{ moduleId: HOST_MODULE, precheck: true, fn: () => ({ commands: prechecks }) }] : []),
+            ...(onlyPrechecks ? [] : registry.hookEntries('afterCapture')),
+        ];
+        for (const { moduleId, fn, precheck = false } of hooks) {
             const seen = live ? view() : makeView({ store, registry, settings, chat: ctx?.chat, active: viewReader, state: now, reply, pendingProofs: () => planned().map(proof => ({ proof, block: null })) });
             let out;
             try { out = await within(fn(seen, { index, type }), HOOK_TIMEOUT_MS); } catch (error) {
@@ -788,7 +816,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             }
             for (const command of Array.isArray(out?.commands) ? out.commands : []) {
                 const payload = command?.payload ?? {};
-                const seed = seeds?.(command?.type);
+                const seed = command.seed ?? seeds?.(command?.type);
                 const taking = plan ? occurrenceFor(plan, command?.type, payload) : null;
                 const result = bus.run(command?.type, payload, { cause: 'system', state: live ? store.head() : now, ...(reply ? { reply: plan ? { ...reply, ...(taking.span && (plan.preserveSources || occurrenceOf(taking.span) === null) ? { ordinal: taking.span.source.ordinal } : {}), pending: plan.pending, opsBefore: plan.blocks.reduce((sum, piece) => sum + (Number.isInteger(piece.n) ? piece.n : 0), 0) + steps.reduce((sum, step) => sum + (Array.isArray(step.ops) ? step.ops.length : 0), 0) } : reply } : {}), ...(plan ? { planned: planned(), replacing: plan.replacing, reusing: taking.span, ...(Number.isInteger(taking.value) ? { occurrence: taking.value } : {}) } : {}), ...(seed === undefined ? {} : { seed }) });
                 if (!result?.ok) {
@@ -797,7 +825,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
                 }
                 let replan = result.receipt.replan;
                 if (!replan) { try { replan = { payload: structuredClone(payload) }; } catch { replan = undefined; } }
-                const receipt = { ...result.receipt, afterCapture: true, ...(replan ? { replan } : {}) };
+                const receipt = { ...result.receipt, afterCapture: true, ...(precheck ? { beforeGenerate: true } : {}), ...(replan ? { replan } : {}) };
                 if (live) {
                     store.append({ ops: result.ops, receipt, ...(result.block ? { block: result.block } : {}) });
                     now = store.head();
@@ -809,7 +837,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
                         if (taking.key) plan.reuse.commit(taking.key, result.block.occurrence);
                     }
                 }
-                steps.push({ ops: result.ops, receipt, ...(result.block ? { block: result.block } : {}) });
+                steps.push({ ops: result.ops, receipt, state: now, ...(result.block ? { block: result.block } : {}) });
             }
         }
         return steps;
@@ -1047,7 +1075,14 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
                 const preserveSources = timeline?.hasNativeChanges?.() === true
                     && record?.spans?.some(span => span.boundaries?.[0]?.payloadHash === store.payloadHashAt(index));
                 plan = { blocks: [], pending: 0, replacing: replacedProofs(record), reuse: reusePlan(record, retire), preserveSources };
-                ({ ops, off, state: after } = await captureEach(index, lines, receipts, problems, base, seeds, new Map(), null, plan));
+                const prechecks = (record?.receipts ?? [])
+                    .filter(receipt => receipt.beforeGenerate === true && receipt.type === PRECHECK)
+                    .map(receipt => ({ type: PRECHECK, payload: receipt.replan?.payload ?? {}, seed: receipt.seed }));
+                const prepared = prechecks.length ? await afterCapture(index, { type: 'reread', problems, state: base, reply, plan, prechecks, onlyPrechecks: true }) : [];
+                plan.blocks.push(...prepared.map(step => ({ n: step.ops.length, receipt: step.receipt, ...(step.block ? { block: step.block } : {}) })));
+                receipts.push(...prepared.map(step => step.receipt));
+                ({ ops, off, state: after } = await captureEach(index, lines, receipts, problems, prepared.at(-1)?.state ?? base, seeds, new Map(), null, plan));
+                ops = [...prepared.flatMap(step => step.ops), ...ops];
                 for (const mark of [LATE, NOW]) {
                     const group = extra.filter(item => item.mark === mark).map(item => item.line);
                     if (!group.length) continue;
@@ -1151,14 +1186,14 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             if (cut) problems.push(problem({ index: id, line: cut, code: 'CUT_OFF', message: `The reply ended in the middle of the change line "${cutAt(cut, 80)}" (nothing after it on its line, and the block was not closed), so it was not used. Continue finishes it; or end the line and close the block by hand, then Re-read.` }));
             // The previous reply's safety-net lines that came after the reader sent (not for a Continue).
             const late = current.type === 'continue' ? [] : lateLines(id, parsed.lines.map(line => line.raw));
-            const result = await captureLines(id, parsed.lines, at ? current.base : null, current.type, { late });
+            const result = await captureLines(id, parsed.lines, at ? current.base : null, current.type, { late, prechecks: current.prechecks });
             problems.push(...result.problems);
 
             // What this reply was told; a Continue keeps what the reply was told before.
             // (B-b2-timeline-9: read through readRecord, and only receipt IDs, whatever the chat holds.)
             const told = current.type === 'continue' ? readRecord(message)?.narrated ?? [] : [];
             const before = told.filter(id => typeof id === 'string');
-            store.setNarrated(id, [...new Set([...before, ...current.untold])]);
+            store.setNarrated(id, [...new Set([...before, ...current.untold, ...result.steps.filter(receipt => receipt.beforeGenerate === true).map(receipt => receipt.id)])]);
 
             // Also with no block: the change lines left in the story are listed in the hidden comment, so a
             // Re-read leaves them too (B-a1-3, B-a1-10).

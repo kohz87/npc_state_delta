@@ -7,7 +7,7 @@
 //   const form = renderFeaturesForm(parent, { features, doc, onChange: ({ id, on }) => {} });
 //   form.filter('weather');   // → how many tiles are shown (name, description, module and id are searched)
 //   form.refresh();           // read the store again: states, counts, a feature that came or went
-//   form.focusGroup('rpg-battle');  form.field('rpg-battle.wear');  form.destroy();
+//   form.focusGroup('example-module');  form.field('example-module.wear');  form.destroy();
 //
 // A tile is the feature's name (a `label` for its switch), its description, a quiet line when it changes the fixed
 // prompt (PROMPT_HINT) and, for a feature whose `needs` no installed module meets, the reason: that switch is off
