@@ -93,7 +93,7 @@ export const FEATURES = Object.freeze([
     Object.freeze({ id: FEATURE_DRIFT, label: 'Meters drift each story day', describe: 'Meters with a drift setting move toward their resting value as story days pass (needs Story Director\'s clock).', default: false }),
     Object.freeze({ id: FEATURE_PRESETS, label: 'Meter presets and rules', describe: 'One-click meter sets (Companion, Rival, Mentor and packs\') and each meter\'s rule line in the story\'s instructions.', default: true, prompt: true }),
     // Read-only (src/social-check.js): no prompt text, no state; a dice module asks npc.socialModifier.
-    Object.freeze({ id: FEATURE_SOCIAL, label: 'Social checks use the dossier', describe: 'A persuade, charm, intimidate or deceive check against an NPC gets a small bonus or penalty from their meters, stage and disposition (for a dice module such as RPG Battle).', default: true }),
+    Object.freeze({ id: FEATURE_SOCIAL, label: 'Social checks use the dossier', describe: 'A persuade, charm, intimidate or deceive check against an NPC gets a small bonus or penalty from their meters, stage and disposition (for Story Director\'s checks or another dice module).', default: true }),
 ]);
 const FEATURE_DEFAULTS = Object.freeze(Object.fromEntries(FEATURES.map(feature => [feature.id, feature.default])));
 

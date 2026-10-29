@@ -1,3 +1,9 @@
+## Unreleased
+
+- Help and documentation no longer describe RPG Battle, which is no longer part of the suite: the README's install steps
+  and the social checks it names, Source of truth's help in Delta's settings and the Social checks feature's description
+  now name Story Block and Story Director's checks. Prompt text is unchanged.
+
 ## 1.3.0 (Story Suite 2.0.0)
 
 Delta keeps its own version scheme: **1.2.21 → 1.3.0**, the next minor. Prompt text is byte-identical.

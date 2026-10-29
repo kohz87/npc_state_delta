@@ -11,8 +11,8 @@ story gives evidence, and sends the NPCs who are present back to the roleplay mo
 In Story Suite v2 it is the people part of the suite. It works on its own, and beside
 [Story Block](https://github.com/kohz87/Story_block) (the host) it also keeps trust, affection, desire and tension
 with every reply, shows a **Dossiers** tab, feeds its cards to
-[Story Director](https://github.com/kohz87/Story_director)'s World screen and gives
-[RPG Battle](https://github.com/kohz87/rpg_battle) its social checks.
+[Story Director](https://github.com/kohz87/Story_director)'s World screen and adds how a person feels about you to
+Story Director's checks against them.
 
 ## Install
 
@@ -20,11 +20,9 @@ Tested with **SillyTavern 1.19**. In **Extensions → Install extension**, insta
 
 1. [Story Block](https://github.com/kohz87/Story_block)
 2. [Story Director](https://github.com/kohz87/Story_director)
-3. [RPG Battle](https://github.com/kohz87/rpg_battle)
-4. [NPC State Delta](https://github.com/kohz87/npc_state_delta)
+3. [NPC State Delta](https://github.com/kohz87/npc_state_delta)
 
-To start with the bundled **Ersveil** rules pack, open a fresh chat and follow **Setup → Pin Ersveil Rules → Create**,
-then choose your character's options. Existing chats load and rebuild unchanged; legacy chats stay unpinned.
+RPG Battle is no longer part of the suite. Existing RPG Battle chats should stay on the versions they were played with.
 
 Report bugs in [this repo's Issues](https://github.com/kohz87/npc_state_delta/issues), with steps to reproduce.
 
@@ -55,8 +53,8 @@ Switches are in Story Suite **Settings → Features**. "No switch" means it is a
 - **Hidden notes** (dossier editor): a note stays out of every prompt until its meter reaches a threshold; while
   locked, a screen shows only "Her past, unlocks at Trust 60".
 - **Social checks** (`npc-state-delta.social`, on): a persuade, charm, intimidate or deceive check against an NPC
-  gets a bonus or penalty from their meters, stage and disposition, for a dice module such as RPG Battle
-  ("Elula trusts you (+2)"). Delta only reads; it sends nothing to the model. Settings **Social checks: strength
+  gets a bonus or penalty from their meters, stage and disposition, for Story Director's checks (`vs: Name`) or
+  another dice module ("Elula trusts you (+2)"). Delta only reads; it sends nothing to the model. Settings **Social checks: strength
   (%)** (default 100) and **Social checks: most a check moves** (default 5).
 - **Questions other modules can ask** (read-only): `npc.present`, `npc.known`, `npc.dossier`, `npc.meters`,
   `npc.cast`, `npc.portrait`, `npc.socialModifier`.
@@ -115,8 +113,7 @@ counts toward the Share of the context. Delta's scanner route and last call are 
 - **Alone:** dossiers, scans, portraits, calendar and birthdays work as in Delta 1.2.
 - **With Story Block 2:** meters kept with each reply, the Dossiers tab, and its settings in the Story Suite overlay.
 - **With Story Director:** its World screen draws Delta's cards; birthdays and ages follow its clock when the two
-  calendars agree.
-- **With RPG Battle:** social checks and companion portraits.
+  calendars agree; a check against a person adds Delta's social bonus or penalty.
 
 ## Known issues in this beta
 
@@ -138,4 +135,4 @@ The suite's full list is in Story Block's
 - History, decisions and the after-beta list: `suite-notes/` in
   [kohz87/inventory-block](https://github.com/kohz87/inventory-block/tree/claude/hopeful-babbage-tipaw8/suite-notes)
 
-Licence: [AGPL-3.0](LICENSE). RPG Battle and Story Director are MIT-licensed, so you can start your own module from either of them.
+Licence: [AGPL-3.0](LICENSE). Story Director is MIT-licensed, so you can start your own module from it.

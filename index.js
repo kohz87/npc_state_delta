@@ -4343,7 +4343,7 @@ function buildSettingsHtml() {
         settingRow('npc_state_delta_branch_rescan', 'Rescan changed branches', '<input id="npc_state_delta_branch_rescan" type="checkbox">', 'Re-evaluate the surviving branch after a swipe, edit or middle-message deletion.'),
     ].join('');
     const suite = `
-        <p class="npc-state-delta-muted">With Story Block, Story Director or RPG Battle installed, each area has one source of truth so the model is not told the same thing twice. Automatic lets the specialist lead (Story Block the scene, Story Director the calendar, RPG Battle game stats; Delta the NPCs). Alone, every choice behaves like Automatic.</p>
+        <p class="npc-state-delta-muted">With Story Block or Story Director installed, each area has one source of truth so the model is not told the same thing twice. Automatic lets the specialist lead (Story Block the scene and game stats, Story Director the calendar; Delta the NPCs). Alone, every choice behaves like Automatic.</p>
         ${SUITE_AREAS.map(area => settingRow(`npc_state_delta_source_${area}`, SUITE_AREA_LABELS[area], `<select id="npc_state_delta_source_${area}" class="text_pole" data-delta-source-area="${area}"><option value="auto">Automatic</option><option value="mine">This extension</option><option value="theirs">The other one</option></select>`, `<span data-delta-source-status="${area}"></span>`)).join('')}`;
     const portrait = `
         <p class="npc-state-delta-muted">Builds positive and negative prompts from the dossier for the native SillyTavern Image Generation handoff. The configured image backend (including ComfyUI) stays host-owned.</p>
