@@ -60,7 +60,7 @@ let current = null;
 const windowOpenState = new Map();
 
 /** Opens the settings window on `doc.body` (closing one already open). `profiles()` is the Connection Manager's list for the profile selects (default: read from SillyTavern). Returns { root, window, refresh, refreshSize, select, section, isOpen, close }. */
-export function openSettingsWindow({ registry, settings, doc = globalThis.document, sdk = null, features = null, promptParts = null, countTokens = null, diagnostics = null, tabs = null, theme = null, profiles = null, fold: target = null, openState = windowOpenState, onClose = null, bodies = SECTION_BODIES }) {
+export function openSettingsWindow({ registry, settings, doc = globalThis.document, sdk = null, features = null, promptParts = null, countTokens = null, diagnostics = null, tabs = null, theme = null, profiles = null, blockTemplates = null, fold: target = null, openState = windowOpenState, onClose = null, bodies = SECTION_BODIES }) {
     if (current?.root?.ownerDocument === doc) current.close();
     doc.querySelector?.(`#${WINDOW_ID}`)?.remove();
 
@@ -137,7 +137,7 @@ export function openSettingsWindow({ registry, settings, doc = globalThis.docume
     // ---- the bodies
     // One reader of the prompt's size for the Prompt card and the footer bar, so both always say the same.
     const reader = createPromptReader({ registry, settings, promptParts, countTokens });
-    const options = { registry, settings, doc, sdk, features, promptParts, countTokens, openState, diagnostics, tabs, theme, profiles, reader };
+    const options = { registry, settings, doc, sdk, features, promptParts, countTokens, openState, diagnostics, tabs, theme, profiles, blockTemplates, reader };
     const legacy = createLegacySettings(options);
     // The footer bar: what is sent each reply against its budget; pressing it opens the Prompt card. Declared before the bodies (their
     // `changed()` refreshes it) and shown after them.

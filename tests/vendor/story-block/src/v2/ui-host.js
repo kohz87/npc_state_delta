@@ -53,15 +53,18 @@ import { createReplyExtras } from './extras-ui.js';
 import { displayLines } from './extras.js';
 import { STRINGS, fill } from './strings.js';
 import { readRecord } from './persist.js';
-import { laterStore, scanReplyCards } from './reply-cards.js';
+import { laterStore, replyEdits, replyRules, scanReplyCards } from './reply-cards.js';
 import { drawReplyCard } from './view/reply-cards-ui.js';
 import { CORE_FEATURE } from './features.js';
+import { createBlockTemplates } from './data-modules/block-templates.js';
+import { BLOCKS_SCREEN_ID, createBlockWidgets } from './screens/blocks.js';
 import { createInspectorSource } from './inspect.js';
 import { createSavePoints } from './rewind.js';
 import { createInspectorWidget, INSPECTOR_WIDGET } from './screens/inspector.js';
 import { createSavePointsWidget, SAVEPOINTS_WIDGET } from './screens/savepoints.js';
 import { createReadyHintWidget, READY_HINT_WIDGET } from './screens/ready-hint.js';
 import { createShowMoreWidget, SHOW_MORE_WIDGET } from './screens/show-more.js';
+import { createInventoryAddWidget, INVENTORY_ADD_WIDGET } from './screens/inventory-add.js';
 import { buildReport, captureConsole, caughtSoFar, reportFileName } from './diagnostics.js';
 import { createThemeBridge } from './view/theme.js';
 import { activeNow } from './view/mounts/common.js';
@@ -158,6 +161,14 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
     });
     // A feature of a module that is not here (a runtime without Story Block's core) counts as on.
     const coreOn = id => (registry.feature?.(id) ? registry.featureOn(id) : true);
+    const blockTemplates = createBlockTemplates({ read: () => {
+        const es = ctx.extensionSettings;
+        if (!es.storySuite || typeof es.storySuite !== 'object') es.storySuite = {};
+        return es.storySuite;
+    }, save: () => ctx.saveSettingsDebounced?.() });
+    const blockWidgets = createBlockWidgets({ templates: blockTemplates,
+        directorOn: () => registry.lifecycle?.('story-director')?.status === 'ready',
+        navigate: () => mounts.screen.open(BLOCKS_SCREEN_ID) });
     // The host's own widgets: the Inspector (over the store's replay) and the save points (over the chat).
     const liveCtx = () => globalThis.SillyTavern?.getContext?.() ?? ctx;
     const savePoints = createSavePoints({ ctx, store, live: liveCtx, ...(runtime.createBranch ? { createBranch: runtime.createBranch } : {}) });
@@ -168,6 +179,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         problems: index => inspectorProblems(index),
     });
     const hostWidgets = {
+        ...blockWidgets.widgets,
         [INSPECTOR_WIDGET]: createInspectorWidget(inspector, { enabled: () => coreOn(CORE_FEATURE.inspector) }),
         [SAVEPOINTS_WIDGET]: createSavePointsWidget({
             points: savePoints,
@@ -177,6 +189,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         // Home's "Before you start" while a module's canGenerate holds the story back (MODULES §F12).
         // A long card's "Show all" / "Show less" (screens/show-more.js).
         [SHOW_MORE_WIDGET]: createShowMoreWidget(),
+        [INVENTORY_ADD_WIDGET]: createInventoryAddWidget(),
         [READY_HINT_WIDGET]: createReadyHintWidget({
             blockers: () => (typeof runtime.turn?.blockers === 'function' ? runtime.turn.blockers() : []),
             unblock: (moduleId, reason) => runtime.turn?.unblock?.(moduleId, reason) ?? false,
@@ -235,6 +248,11 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         }
         let packScreens = [];
         try { packScreens = sdk.query('packs.content', { kind: 'screens' }) ?? []; } catch { packScreens = []; }
+        try {
+            for (const { id, title, icon, pack, ...layout } of sdk.query('packs.content', { kind: 'layouts' }) ?? []) {
+                if (!packScreens.some(screen => screen.pack === pack && screen.id === id)) packScreens.push({ id, title, icon, mounts: ['tab'], layout, pack });
+            }
+        } catch { /* older host */ }
         try { packScreens.push(...(sdk.query('dataModules.presentation', { kind: 'screens' }) ?? [])); } catch { /* older host */ }
         const byPack = new Map();
         for (const screen of packScreens) {
@@ -321,7 +339,12 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
     }
     // A card's scope also gets `refused`: that reply's change lines the code did not apply; the "Changed this
     // reply" card also `moduleLines`: the modules' own lines for that reply (hooks.replyCard, MODULES §F125).
-    const cardLines = (index, state, changes) => replyCardLines(registry.hookEntries?.('replyCard') ?? [], { index, state, changes });
+    const recordAt = index => readRecord(ctx.chat?.[index]);
+    const editsAt = index => replyEdits(recordAt(index), store.problems?.() ?? [], index);
+    const cardLines = (index, state, changes) => [
+        ...replyCardLines(registry.hookEntries?.('replyCard') ?? [], { index, state, changes }),
+        ...replyRules(recordAt(index), store.problems?.() ?? [], index),
+    ];
     const drawScreen = renderer.render;
     // …and `assisted`: the lines the Assist safety net applied on it (its receipts marked `assist`).
     const assistedAt = index => {
@@ -331,7 +354,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         } catch { return []; }
     };
     renderer.render = (el, screen, scope) => drawScreen(el, screen, scope?.mount === 'card'
-        ? { ...scope, refused: notes.refusedAt(scope.index), assisted: assistedAt(scope.index), ...(screen?.id === CHANGES_CARD_SCREEN_ID ? { moduleLines: cardLines(scope.index, scope.state, scope.changes) } : {}) }
+        ? { ...scope, refused: notes.refusedAt(scope.index), assisted: assistedAt(scope.index), ...(screen?.id === CHANGES_CARD_SCREEN_ID ? { moduleLines: cardLines(scope.index, scope.state, scope.changes), edits: editsAt(scope.index), editableHead: scope.index === store.headIndex() } : {}) }
         : scope);
     // The story head a dialog was opened on (mounts/dialog.js): the head's index and record. Which swipe is shown is not part of
     // it: a swipe that keeps the head record is not a move (the chat's id is checked on its own).
@@ -454,11 +477,12 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
             if (screen?.id !== CHANGES_CARD_SCREEN_ID) return null;
             let currency = null;
             try { currency = sdk.query('inventory.currency'); } catch { currency = null; }
-            return changesSummary({ state, before, changes, currency, refused: notes.refusedAt(index).length, assisted: assistedAt(index).length, lines: cardLines(index, state, changes) });
+            return changesSummary({ state, before, changes, currency, refused: notes.refusedAt(index).length, assisted: assistedAt(index).length, lines: cardLines(index, state, changes), edits: editsAt(index).length });
         },
         settings: screenId => {
             const owner = String(screenId ?? '').split('/')[0];
-            return sdk.settings(registry.has(owner) ? owner : 'story-block');
+            const current = sdk.settings(registry.has(owner) ? owner : 'story-block');
+            return owner === 'story-block' ? { ...current, _weatherEnabled: coreOn(CORE_FEATURE.weather) } : current;
         },
         // Cards: the reader's switch per card screen, under Story Block's `story-block.cards` feature.
         enabled: (mount, screenId) => (mount === 'card' ? coreOn(CORE_FEATURE.cards) && screens.cardsOn(screenId) : true),
@@ -637,7 +661,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         const fold = typeof options?.fold === 'string' ? options.fold : null;
         overlay = openSettingsWindow({
             registry, settings, doc, sdk, features: runtime.features ?? null, fold, diagnostics,
-            promptParts, tabs: tabsControl, theme,
+            promptParts, tabs: tabsControl, theme, blockTemplates,
             countTokens: countTokens(),
             onClose: () => { overlay = null; },
         });
@@ -802,6 +826,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
     // Story panel's More sheet.
     const chatTypes = ctx.eventTypes ?? ctx.event_types ?? {};
     const onChatChanged = () => {
+        blockWidgets.reset();
         mounts.dialog?.closeAll();
         mounts.screen?.closeMore?.();
         tabHost?.bar?.closeMore?.({ focus: false });

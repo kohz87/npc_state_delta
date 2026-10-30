@@ -8,7 +8,7 @@
 // chatter thought from the newest reply under their name (`scene.chatter`, MODULES §F115; [] while World is
 // there, null while the chatter is off).
 
-import { STRINGS, html } from '../strings.js';
+import { STRINGS, html, jsonText } from '../strings.js';
 import { BASE_CSS } from './style.js';
 
 const S = STRINGS.scene;
@@ -24,18 +24,22 @@ const TEMPLATE = `
   <header class="place panel" data-class="moved: changed('state.scene.place')">
     <i class="fa-solid fa-location-dot pin" aria-hidden="true"></i>
     <div class="where">
-      <h3 data-if="q.place.name">{{ q.place.name }}</h3>
+      <div class="place-title"><h3 data-if="q.place.name">{{ q.place.name }}</h3>
       <h3 class="muted" data-if="!q.place.name">${html(S.unnamed)}</h3>
+      <ss-widget name="ss.editable" data-props='{"value":"{{ q.place.name }}","displayValue":false,"options":{{ q.places }},"label":"${jsonText(S.editPlace)}","command":"scene.place","valueKey":"name","payload":{"with":{{ q.present }}}}'></ss-widget></div>
       <p class="sub muted">
         <span class="kind" data-if="q.place.kind">{{ q.place.kind }}</span>
         <span class="region" data-if="q.place.region">{{ q.place.region }}</span>
         <span class="time" data-if="state.director.time.minutes != null"><i class="fa-regular fa-clock" aria-hidden="true"></i> {{ fmt.time(state.director.time.minutes) }}</span>
-        <span class="weather" data-if="q.weather.text" title="${html(S.weather)}"><i class="fa-solid fa-cloud-sun" aria-hidden="true"></i> {{ q.weather.text }}</span>
+        <span data-if="settings._weatherEnabled != false">
+          <span class="weather" data-if="q.weather.text" title="${html(S.weather)}"><i class="fa-solid fa-cloud-sun" aria-hidden="true"></i> {{ q.weather.text }}<ss-widget name="ss.editable" data-props='{"value":"{{ q.weather.text }}","displayValue":false,"maxLength":60,"label":"${jsonText(S.editWeather)}","command":"scene.weather","valueKey":"text"}'></ss-widget></span>
+          <span data-if="!q.weather.text"><ss-widget name="ss.editable" data-props='{"value":"{{ q.weather.text }}","displayValue":false,"maxLength":60,"label":"${jsonText(S.editWeather)}","command":"scene.weather","valueKey":"text"}'></ss-widget></span>
+        </span>
       </p>
     </div>
   </header>
   <section class="present panel" data-class="moved: changed('state.scene.present')">
-    <h4 class="ss-section-label"><i class="fa-solid fa-users" aria-hidden="true"></i> ${html(S.here)} <span class="count" data-if="len(q.present) > 0">{{ len(q.present) }}</span></h4>
+    <h4 class="ss-section-label"><i class="fa-solid fa-users" aria-hidden="true"></i> ${html(S.here)} <span class="count" data-if="len(q.present) > 0">{{ len(q.present) }}</span><ss-widget name="ss.editable" data-props='{"value":{{ q.present }},"displayValue":false,"kind":"list","maxLength":80,"label":"${jsonText(S.editPresent)}","command":"scene.present","valueKey":"set"}'></ss-widget></h4>
     <p class="nobody muted" data-if="len(q.present) == 0">${html(S.nobody)}</p>
     <ul class="cast" data-class="faces: q.cast != null">
       <li class="who" data-each="q.present as p">
@@ -51,6 +55,7 @@ const CSS = `${BASE_CSS}
 .scene { display: grid; gap: var(--sb-gap); }
 .place { display: flex; gap: 10px; align-items: center; }
 .pin { font-size: 1.4em; color: var(--sb-accent); }
+.place-title { display: flex; align-items: center; gap: 4px; }
 .where h3 { margin: 0; font-size: 1.15em; }
 .sub { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 2px 0 0; font-size: 0.85em; }
 .kind { text-transform: capitalize; }
@@ -72,6 +77,7 @@ export const sceneScreen = Object.freeze({
     mounts: Object.freeze(['tab', 'screen']),
     data: Object.freeze({
         place: Object.freeze({ query: 'scene.place' }),
+        places: Object.freeze({ query: 'packs.content', args: Object.freeze({ kind: 'places' }) }),
         present: Object.freeze({ query: 'scene.present' }),
         // NPC State Delta's list of known people: only used to tell whether portraits can be asked for.
         cast: Object.freeze({ query: 'npc.known' }),

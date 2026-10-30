@@ -242,6 +242,8 @@ export function schemeTokens(scheme, panel, { opaque = false, strength = DEFAULT
         return [
             ['--ss-glass', 'var(--SmartThemeBlurTintColor, rgba(23, 23, 23, 1))'],
             ['--ss-glass-strong', 'var(--SmartThemeBlurTintColor, rgba(23, 23, 23, 1))'],
+            ['--ss-panel-opaque', (PALETTES[scheme] ?? PALETTES.dark).solid],
+            ['--ss-panel-text', (PALETTES[scheme] ?? PALETTES.dark).text],
             ['--ss-tile', 'color-mix(in srgb, var(--SmartThemeBodyColor, #dcdcd2) 8%, transparent)'],
             ['--ss-border', 'var(--SmartThemeBorderColor, rgba(0, 0, 0, 0.5))'],
             // the current tab's edge (UI 5b): SillyTavern's text colour, since its quote colour can be faint on a light track
@@ -291,6 +293,8 @@ export function schemeTokens(scheme, panel, { opaque = false, strength = DEFAULT
     return [
         ['--ss-glass', solid ? opaqueOf(mixTint(p.solid)) : glassOf(alpha.glass)],
         ['--ss-glass-strong', solid ? opaqueOf(mixTint(p.solid)) : glassOf(alpha.strong)],
+        ['--ss-panel-opaque', p.solid],
+        ['--ss-panel-text', p.text],
         ['--ss-tile', p.tile],
         ['--ss-border', p.border],
         ['--ss-rule', p.rule],

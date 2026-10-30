@@ -24,11 +24,13 @@
 //   data-draft-close="path"        Escape inside, or a press on an inner [data-draft-cancel], clears that draft value
 //   data-submit="type"             a form's submit (or an element's click) sends the draft as one command
 //   <ss-widget name="ss.meter" data-props='{"bind":"q.pc.hp"}'></ss-widget>   a registered widget
+//   <span data-inline-control="ss.editable" data-props='…'></span>   a built-in inline control
 
 import { compileExpr, isLoopName, parseInterpolation, parsePath, splitPairs } from '../bind.js';
 import { PURIFY_CONFIG, attrAllowed, markControlTypes, sanitizeNodes, strictSanitize } from './sanitize.js';
 import { MAX_JSON_DEPTH, compileJson, jsonDepth } from './json.js';
 import { destroyTemplate, renderTemplate } from './render.js';
+import { STRINGS } from '../../strings.js';
 
 export { PURIFY_CONFIG, strictSanitize, renderTemplate, destroyTemplate };
 
@@ -188,15 +190,18 @@ function compileElement(node, warnings) {
         }
     }
 
-    if (tag === 'ss-widget') {
+    const inlineControl = take('data-inline-control');
+    const inlineControls = ['ss.editable', 'story-block.inventory-add'];
+    if (tag === 'ss-widget' || (tag === 'span' && inlineControls.includes(inlineControl))) {
         const props = take('data-props');
-        const name = (attrs.get('name') ?? '').trim();
+        const name = tag === 'ss-widget' ? (attrs.get('name') ?? '').trim() : inlineControl;
         if (!name) warnings.push('An <ss-widget> has no name.');
         out.widget = { name, props: props === undefined ? null : compileJson(props, warnings, `data-props of ${name || 'a widget'}`) };
     } else if (attrs.has('data-props')) {
         take('data-props');
         warnings.push(`data-props belongs on <ss-widget>, not <${tag}>.`);
     }
+    if (inlineControl !== undefined && !(tag === 'span' && inlineControls.includes(inlineControl))) warnings.push(STRINGS.editMessages.inlineControl);
 
     for (const name of BINDING_ATTRS) attrs.delete(name);
     for (const [name, value] of attrs) {
