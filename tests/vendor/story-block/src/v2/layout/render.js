@@ -9,6 +9,7 @@
 import { el, stop } from '../../ui/dom.js';
 import { LIMITS, NODE_TYPES, TONES, isBinding, itemRef, getPath, imageUrlError } from './schema.js';
 import { validateLayout, widgetRegistry } from './validate.js';
+import { editable } from '../view/widgets/editable.js';
 
 // Which page each tabs node shows, per mount element, so a redraw keeps the reader's choice.
 const pageMemory = new WeakMap();
@@ -381,7 +382,7 @@ export function renderLayout(host, layout, { query, command, evaluate, widgets, 
     const doc = host?.ownerDocument ?? globalThis.document;
     takeDown(DRAWN.get(host) ?? []);
     DRAWN.delete(host);
-    const registry = widgetRegistry(widgets);
+    const registry = widgetRegistry({ 'ss.editable': editable, ...widgets });
     const errors = validateLayout(layout, { widgets: registry, meta: false });
     if (errors.length) return showErrors(host, errors);
     const ctx = {

@@ -417,3 +417,30 @@ body.story-suite-open { overflow: hidden; }
 .ss-dm-actor { display: inline-flex; align-items: center; gap: 4px; }
 .ss-dm-preview { display: grid; gap: 4px; padding: 6px 0; }
 .ss-dm-result { margin: 2px 0; }
+.ss-block-page-head, .ss-block-card-head, .ss-block-actions, .ss-block-field-actions, .ss-block-function-actions, .ss-block-editor-actions, .ss-block-chips, .ss-block-icons, .ss-block-template-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: space-between; }
+.ss-block-card, .ss-block-editor, .ss-block-function, .ss-block-chooser { display: grid; gap: 8px; padding: 12px; min-width: 0; }
+.ss-w-blocks-list { display: grid; gap: 12px; min-width: 0; }
+.ss-w-blocks-list.ss-glass { padding: 12px; }
+.ss-block-page-head, .ss-block-card-head { position: relative; }
+.ss-block-menu, .ss-block-chooser { position: absolute; z-index: 2; top: 100%; right: 0; min-width: min(15rem, 100%); max-width: 100%; display: grid; gap: 4px; padding: 8px; }
+.ss-block-menu[hidden] { display: none; }
+.ss-block-value { display: grid; grid-template-columns: minmax(8em, 1fr) 3fr; gap: 8px; align-items: center; overflow-wrap: anywhere; padding: 6px 0; border-bottom: 1px solid var(--story-suite-line); }
+.ss-w-editable-value-list { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.ss-w-editable-value-list[hidden] { display: none; }
+.ss-w-editable-meter { display: inline-flex; align-items: center; gap: 8px; }
+.ss-w-editable-meter[hidden] { display: none; }
+.ss-w-editable-meter-track { display: inline-block; width: 8em; height: .3em; overflow: hidden; border-radius: 1em; background: var(--ss-track); }
+.ss-w-editable-meter-fill { display: block; width: calc(var(--ss-w-ratio, 0) * 100%); height: 100%; background: var(--ss-accent); }
+.ss-block-control, .ss-block-field-editor, .ss-block-effect { display: grid; gap: 5px; min-width: 0; }
+.ss-block-fields-editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.ss-block-fields-editor > h4, .ss-block-fields-editor > button { grid-column: 1 / -1; }
+.ss-block-fields-editor > button { justify-self: start; }
+.ss-block-field-editor { padding: 10px; }
+.ss-block-effect { grid-template-columns: repeat(3, minmax(0, 1fr)) auto; align-items: end; }
+.ss-block-chips, .ss-block-icons, .ss-block-function-actions, .ss-block-editor-actions { justify-content: flex-start; }
+.ss-block-icons .ss-iconbutton[aria-pressed="true"] { border-color: var(--ss-accent); background: var(--ss-accent-soft); }
+.ss-block-control-error { color: var(--ss-bad-text); }
+.ss-block-hint { color: var(--ss-text); opacity: .75; }
+@media (max-width: 759.98px) {
+    .ss-block-fields-editor, .ss-block-effect, .ss-block-value { grid-template-columns: minmax(0, 1fr); }
+}

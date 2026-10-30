@@ -19,6 +19,7 @@ import { PROMPT_FOLD, createPromptReader, renderPromptCard } from './prompt.js';
 import { renderTabsCard } from './tabs-list.js';
 import { showAndFocus } from '../scroll.js';
 import { renderDataModules } from '../../data-modules/setup.js';
+import { STRINGS } from '../../strings.js';
 
 /** Story Block's module id and its Packs fold. */
 const CORE_ID = 'story-block';
@@ -46,7 +47,7 @@ function packsFold(registry, settings, sdk) {
 /** The Tabs & Packs body: `(pane, ctx) → { filter, refresh, refreshSize, destroy, has, open }` (bodies.js). */
 export function tabsPacksBody(pane, ctx) {
     const { doc } = ctx;
-    const { registry, settings, sdk = null, tabs = null, promptParts = null, countTokens = null } = ctx.options;
+    const { registry, settings, sdk = null, tabs = null, promptParts = null, countTokens = null, blockTemplates = null } = ctx.options;
     const reader = ctx.options.reader ?? createPromptReader({ registry, settings, promptParts, countTokens });
     const root = doc.createElement('div');
     root.className = 'ss-tabspacks';
@@ -92,6 +93,22 @@ export function tabsPacksBody(pane, ctx) {
         return true;
     };
 
+    const templatesCard = blockTemplates ? sectionBlock(doc, { title: STRINGS.blocks.templates, id: newId('block-templates') }) : null;
+    function drawTemplates() {
+        if (!templatesCard) return;
+        templatesCard.body.replaceChildren();
+        const list = blockTemplates.list();
+        if (!list.length) { const empty = doc.createElement('p'); empty.textContent = STRINGS.blocks.noTemplates; templatesCard.body.appendChild(empty); }
+        for (const entry of list) {
+            const row = doc.createElement('div'); row.className = 'ss-block-template-row';
+            const name = doc.createElement('span'); name.textContent = entry.name;
+            const remove = doc.createElement('button'); remove.type = 'button'; remove.className = 'ss-button'; remove.textContent = STRINGS.blocks.deleteTemplate;
+            remove.setAttribute('aria-label', `${STRINGS.blocks.deleteTemplate}: ${entry.name}`);
+            remove.addEventListener('click', async () => { await blockTemplates.remove(entry.name); drawTemplates(); });
+            row.append(name, remove); templatesCard.body.appendChild(row);
+        }
+    }
+    if (templatesCard) { drawTemplates(); root.appendChild(templatesCard.el); }
     const prompt = renderPromptCard(root, { doc, settings, reader, openState: ctx.openState, onChange: changed });
     ensureModules();
 
@@ -112,12 +129,18 @@ export function tabsPacksBody(pane, ctx) {
                 packsCard.setHidden(!match);
                 if (query && match) count += 1;
             }
+            if (templatesCard) {
+                const match = !query || matchesSearch('block-templates', { label: STRINGS.blocks.templates, help: templatesCard.body.textContent ?? '' }, 'Blocks', text);
+                templatesCard.setHidden(!match);
+                if (query && match) count += 1;
+            }
             return count;
         },
         refresh() {
             tabsCard.refresh();
             panel?.refresh?.();
             if (ensureModules()) modules.refresh();
+            drawTemplates();
             prompt.refresh();
         },
         // The story moved: only the size is read again.
@@ -127,6 +150,7 @@ export function tabsPacksBody(pane, ctx) {
         destroy() {
             tabsCard.destroy();
             prompt.destroy();
+            modules?.destroy?.();
             packsCard.el.remove();
             modulesCard?.el.remove();
             root.remove();

@@ -7,8 +7,7 @@
 //   with the values as they are, so a hole can take a template binding (`{{ it.qty }}`).
 // * `jsonText(text)`: a text inside a JSON string in a template attribute (`data-props='{"label":"…"}'`).
 //
-// Not here: messages written by the runtime (command refusals, problems) and by other parts (the mounts,
-// the settings overlay); those are their owners' texts.
+// Existing messages written by the runtime and other parts stay with their owners; inline-edit messages are below.
 
 function deepFreeze(value) {
     if (value && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -19,6 +18,92 @@ function deepFreeze(value) {
 }
 
 export const STRINGS = deepFreeze({
+    editable: {
+        edit: 'Edit {label}', value: 'value', save: 'Save', cancel: 'Cancel', add: 'Add',
+        remove: 'Remove {value}', wholeNumber: 'Enter a whole number.', failed: 'Could not save this change.',
+    },
+
+    blocks: {
+        reservedPack: 'The pack id "chat" is reserved for blocks made in this chat.',
+        origin: 'Made in this chat', reader: 'Only the reader can change a block.',
+        chatScope: 'A block must have chat scope.', exists: 'A block with this name is already active.',
+        limit: 'This chat already has the maximum number of blocks and data modules.',
+        blockLimit: 'This chat can have at most 8 blocks.',
+        chatOnly: 'Only a block made in this chat can be changed here.',
+        sameSlug: 'Keep the block identifier when changing its fields.',
+        defined: 'You made {name}.', redefined: 'You changed {name}.', removed: 'You removed {name}.',
+        promptLimit: 'What it is for must be at most 600 characters.',
+        staticLimit: 'The purpose and story lines together must fit 2000 characters.',
+        showOptions: 'Choose whether to show the block as a tab or card, a short tab name and an app icon.',
+        listOnlyText: 'A list must be a text field.', listLimit: 'A list can have at most 12 entries.',
+        labelLimit: 'Use a name of 1 to 60 characters.', choiceLimit: 'A choice needs 2 to 32 different options.',
+        functionLimit: 'A block can have at most 8 functions.', chooseField: 'Choose a field.',
+        kindLimit: 'A block can have at most 16 fields and buttons in total.',
+        kindCount: '{n} of 16 used: each field and each button uses one.',
+        timerNumber: 'A timer can only add to a number field.',
+        chooseFunction: 'Choose a valid function and effect.', fieldType: 'Choose a field type.',
+        blockName: 'Give the block a name.', fieldName: 'Give each field a different name.',
+        templatesFull: 'You can save at most 16 block templates.', templateExists: 'A template with this name already exists.',
+        templateMissing: 'That template is no longer available.', templateLarge: 'This block is too large to save as a template.',
+        exportFailed: 'Could not export this block.',
+        unsupportedEdit: 'This block has details the editor cannot change safely.',
+        title: 'Blocks', custom: 'Custom blocks', empty: 'No custom blocks in this story yet.',
+        newBlock: 'New block', emptyBlock: 'Empty block', chooseTemplate: 'Start from a template',
+        editBlock: 'Edit block', fields: 'Fields', addField: 'Add field', name: 'Block name', fieldNameLabel: 'Field name',
+        fieldTypeLabel: 'Type', text: 'Text', number: 'Number', choice: 'Choice', list: 'List',
+        min: 'Minimum', max: 'Maximum', defaultValue: 'Default', choices: 'Options, separated by commas',
+        up: 'Move up', down: 'Move down', remove: 'Remove', purpose: 'What it is for',
+        staticCount: '{n} of 2000 characters for purpose and story lines', showAs: 'Show as', ownTab: 'Own tab', card: 'Card on Home', both: 'Both',
+        tabName: 'Tab name', icon: 'Tab icon', functions: 'Functions', addButton: 'Add button', addRule: 'Add rule', addTimer: 'Add timer',
+        timerNeeds: 'Timers need Story Director’s clock.', functionName: 'Function name', button: 'Button', rule: 'Rule', timer: 'Timer',
+        every: 'Every N minutes', whenField: 'When field', comparison: 'Comparison', whenValue: 'Value',
+        is: 'is', isNot: 'is not', below: 'below', above: 'above', atMost: 'at most', atLeast: 'at least',
+        effectField: 'Field', effectAction: 'Do', setTo: 'Set to', add: 'Add', effectValue: 'Value', addStep: 'Add step',
+        save: 'Save block', cancel: 'Cancel', savedWithReply: 'Saved with the latest reply.',
+        menu: 'Block actions', editFields: 'Edit fields', saveTemplate: 'Save as template', exportPack: 'Export as pack',
+        removeBlock: 'Remove block', confirmRemove: 'Remove this block from the chat?', confirmReplace: 'Replace the saved template with this name?',
+        templateSaved: 'Template saved.', templateDeleted: 'Template deleted.', templates: 'Block templates', noTemplates: 'No block templates saved.',
+        deleteTemplate: 'Delete template', timerUnavailable: 'Timers need Story Director’s clock.',
+        newFieldName: 'Field {n}', newFunctionName: '{type} {n}',
+        templateCounts: '{name} · {fields} fields, {buttons} buttons, {rules} rules, {timers} timers',
+        icons: { 'ph-bookmark-simple': 'Bookmark', 'ph-scroll': 'Scroll', 'ph-heart': 'Heart', 'ph-lightning': 'Lightning',
+            'ph-star': 'Star', 'ph-sparkle': 'Sparkle', 'ph-sword': 'Sword', 'ph-skull': 'Skull' },
+    },
+
+    editMessages: {
+        onlyReader: 'Only the reader can make this edit.', itemName: 'Give the item a name.',
+        itemNameLength: 'An item needs a name of 1 to 60 characters.',
+        itemAdded: 'You added {item}.', itemCount: '{name} to {qty}', itemNote: "{name}'s note",
+        itemGroupRenamed: '{name} to {qty}; one renamed {renamed}',
+        itemSet: 'You set {detail}.', itemUnstackable: '{name} does not stack; each piece is kept separately.',
+        itemEditDamaged: 'The saved item edit is damaged.', itemEditGone: 'The item for this edit has changed or is gone.',
+        itemPiecesChanged: 'The separate pieces for this edit have changed.', itemDecisionChanged: 'The item or stack chosen for this edit has changed.',
+        itemGroupLimit: 'Keep at most {max} pieces of this item.',
+        itemGroupEquipped: 'Unequip pieces before removing them.',
+        itemCannotMerge: '{name} cannot be combined with this stack.', itemQuantityLarge: 'That quantity is too large.',
+        purseAmount: 'The amount must be a whole number of at least 0.', purseSet: 'You set the purse to {amount}.',
+        moneyEmpty: 'Enter an amount of money.', moneyWhole: 'Enter whole amounts of the coins used here.',
+        moneyUnknown: '"{name}" is not a coin here.', moneyLarge: 'That amount is too large.',
+        presentReader: 'Only the reader can set the whole list.', presentList: 'Give the people present as a list.',
+        presentSummary: 'Present: {names}.', nobody: 'nobody',
+        fieldReader: 'Only the reader can set a field.', restorePending: 'A restore is pending.',
+        pinDamaged: 'Unsupported or damaged pin.', fieldDeclared: 'Choose a declared field.',
+        fieldLocked: 'This field cannot be edited.', mapKeyDeclared: 'Choose a declared map key.',
+        fieldNoKeys: 'This field has no map keys.', fieldShared: 'This field is shared by the chat.',
+        fieldRange: 'The value is outside this field’s allowed range.', fields: 'Fields',
+        fieldSet: 'You set {module}: {field} {from} → {to}.', lockedSuffix: ' (cannot be edited)',
+        editBoolean: 'edit must be true or false.', textEffect: 'Text fields accept literal text or a text label within max.',
+        declaredSchema: 'Expected a declared {schema} schema.', labelSchema: 'int, bool, enum or text label',
+        fieldSchema: 'scalar field or fixed map',
+        editableCommand: 'An editable field may call only dm.set.',
+        editableField: 'An editable field must name this module and one declared field.',
+        editableLocked: 'This field is not editable.', scalarKey: 'A scalar field has no map key.',
+        chatCharacter: 'A chat field has no character.', noInventoryControl: 'A data module cannot use the Inventory add control.',
+        onlyEditableControl: 'A data module may use only the editable inline control.',
+        textComparison: 'Text may only be compared with a literal.', textNonempty: 'be nonempty text',
+        inlineControl: 'An inline control must be a supported built-in on a <span>.',
+    },
+
     // The Story Suite bar above the message box, the story panel, the drawer and the wand menu.
     bar: {
         label: 'Story Suite',
@@ -100,6 +185,8 @@ export const STRINGS = deepFreeze({
     // `story-block/changes-card` and its one-line summary.
     card: {
         title: 'Changed this reply',
+        editHint: 'Your edits ride on this reply: swipe or delete it to undo them; deleting the oldest remaining reply carries them forward.',
+        rule: 'Rule: {name}',
         itemNow: 'now ×{qty}',
         equipped: 'equipped: {slot}',
         wallet: 'Wallet: now {coin} {money}',
@@ -150,6 +237,8 @@ export const STRINGS = deepFreeze({
         many: '{first} and {n} more',
         lootOne: '1 thing to pick up',
         lootMany: '{n} things to pick up',
+        editsOne: '1 edit of yours',
+        editsMany: '{n} edits of yours',
         assistedOne: '1 line from the safety net (assist)',
         assistedMany: '{n} lines from the safety net (assist)',
         refusedOne: '1 line not applied',
@@ -168,6 +257,9 @@ export const STRINGS = deepFreeze({
             common: 'Common', uncommon: 'Uncommon', rare: 'Rare', epic: 'Epic', legendary: 'Legendary',
         },
         walletTitle: 'The party\'s money',
+        addItem: '+ Add item', itemName: 'Item name', itemCount: 'Count', itemNote: 'Note', save: 'Save',
+        countError: 'Enter a whole number of at least 1.', addError: 'Could not add this item.',
+        editName: 'item name', editCount: 'item count', editNote: 'item note', editItem: 'item', editPurse: 'purse',
         filterLabel: 'Filter the inventory',
         find: 'Filter…',
         findTitle: 'Show only things whose name has this text',
@@ -211,6 +303,7 @@ export const STRINGS = deepFreeze({
 
     // `story-block/scene`.
     scene: {
+        editPlace: 'place', editWeather: 'weather', editPresent: 'people present',
         title: 'Scene',
         unnamed: 'Somewhere not yet named',
         here: 'Here',

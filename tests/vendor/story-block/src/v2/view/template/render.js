@@ -789,7 +789,7 @@ class WidgetBlock extends ElementBlock {
         const block = this;
         return {
             ...(view.options.api ?? {}),
-            command: (type, payload) => view.run(type, payload, block),
+            get command() { return typeof view.options.command === 'function' ? (type, payload) => view.run(type, payload, block) : undefined; },
             /** Read a path in the scope the widget sits in. */
             resolve: path => resolvePath(block.scope, path),
             /** The dialog's draft: widgets inside a form (ss.stepper) read and write it here. */
@@ -835,7 +835,7 @@ class WidgetBlock extends ElementBlock {
         }
         if (typeof props.bind === 'string') props.value = evalExpr(props.bind, scope, view.options.evaluate, message => view.warn(message));
         if (!def || typeof def.render !== 'function') return this.fail(`There is no widget called "${name}".`);
-        const key = stable(props);
+        const key = `${stable(props)}:${typeof view.options.command === 'function'}`;
         if (def === this.def && key === this.key) return undefined;
         const first = def !== this.def;
         this.def = def;

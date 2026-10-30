@@ -12,6 +12,9 @@ import {
 import { aliasKey, cleanName, resolveDef, slugify, trimText } from './names.js';
 import { WALLET_KEY, coinValue, countedMoney, formatAmount, formatWallet, isCurrencyName, parseAmount, resolveCurrency } from './money.js';
 import { DEF_ID, isId } from '../check.js';
+import { STRINGS, fill } from '../strings.js';
+
+const E = STRINGS.editMessages;
 
 export const KINDS = Object.freeze(['goods', 'material', 'consumable', 'equipment', 'quest', 'money']);
 export const RARITIES = Object.freeze(['common', 'uncommon', 'rare', 'epic', 'legendary']);
@@ -967,6 +970,104 @@ function byModule(ctx, why) {
     if (!(ctx.caller || ctx.cause === 'story' || ctx.cause === 'system')) ctx.fail('REFUSED', why);
 }
 
+// A reader edit is never a story line or a nested module call.
+function byReader(ctx) {
+    if (ctx.cause !== 'ui' || ctx.caller !== null) ctx.fail('REFUSED', E.onlyReader);
+}
+
+export const INVENTORY_EDIT_GUARD = 'inventory.reader-edit';
+const editStack = stack => ({ id: stack.id, def: stack.def, owner: stack.owner });
+const editPieces = (inventory, target) => Object.values(inventory?.stacks ?? {})
+    .filter(stack => stack.def === target.def && stack.owner === target.owner)
+    .map(stack => ({ id: stack.id, equipped: stack.equipped }));
+
+// Saved ops cannot choose a different stack on replay. Witness the same name lookup and
+// compatibility decision made when the reader added or renamed an item, without including
+// unrelated inventory or a destination count that counter replay can safely rebase.
+const editCompatibility = (inv, stack) => stack ? {
+    id: stack.id, def: stack.def, owner: stack.owner, note: stack.note,
+    equipped: stack.equipped, condition: condOf(stack, inv), key: stack.key === true,
+} : null;
+function addDecision(inv, payload, defId) {
+    const name = cleanName(payload.name), owner = payload.owner ?? 'party';
+    const note = payload.note == null ? '' : trimText(payload.note, MAX_NOTE);
+    const def = inv.defs[defId];
+    const destination = def?.stack ? looseMatch(inv, defId, owner, note) : null;
+    return { resolution: resolveDef(inv, name), def: def ? { id: def.id, stack: def.stack } : null,
+        destination: editCompatibility(inv, destination) };
+}
+function renameDecision(inv, stack, payload) {
+    const name = cleanName(payload.name), original = inv.defs[stack.def], found = resolveDef(inv, name);
+    const note = payload.note === undefined ? stack.note : payload.note == null ? '' : trimText(payload.note, MAX_NOTE);
+    const source = { ...editCompatibility(inv, stack), note };
+    if (found.status === 'found' && found.id !== original.id) {
+        const targetDef = inv.defs[found.id];
+        const target = stacksOf(inv, found.id).find(other => targetDef.stack && source.owner === other.owner
+            && source.equipped === other.equipped && source.note === other.note && source.condition === condOf(other, inv)
+            && source.key === (other.key === true));
+        return { resolution: found, original: { name: original.name, stack: original.stack }, source,
+            sourceQty: stack.qty, sourceStory: stack.story === true, targetStackable: targetDef.stack,
+            destination: editCompatibility(inv, target) };
+    }
+    if (name === original.name) return { resolution: found, original: { name: original.name, stack: original.stack } };
+    const shared = Object.values(inv.stacks).some(other => other.id !== stack.id && other.def === original.id);
+    if (shared || original.id.startsWith('pack.')) {
+        return { resolution: found, original, shared, newDef: freeId(inv, `story/${slugify(name)}`) };
+    }
+    const aliases = Object.keys(inv.aliases).filter(key => inv.aliases[key] === original.id).sort();
+    return { resolution: found, original: { name: original.name, stack: original.stack }, shared, aliases };
+}
+
+// A reader action is a guarded ordinary command. If a later Re-read makes its saved ops
+// invalid, the existing replay machinery can leave just this action off and report it.
+function guardReaderEdit(ctx, action, target = null, pieces = null, decision = null) {
+    if (ctx.cause !== 'ui' || ctx.caller !== null || typeof ctx.replayGuard !== 'function' || !ctx.source) return;
+    const predicate = { kind: INVENTORY_EDIT_GUARD, action, ...(target ? { target } : {}), ...(pieces ? { pieces: ctx.hash(pieces) } : {}),
+        ...(decision ? { decision: { ...decision, witness: ctx.hash(decision.witness) } } : {}) };
+    ctx.replayGuard({ owner: 'story-block', version: 2, epoch: ctx.epoch, rulesHash: null,
+        inputHash: ctx.hash({ predicate, source: ctx.source }), predicate });
+}
+
+export function inventoryEditGuard({ state, hash }, { guard, source, operation }) {
+    const p = guard?.predicate;
+    const bad = { ok: false, reason: E.itemEditDamaged };
+    if (guard?.owner !== 'story-block' || guard.version !== 2 || guard.rulesHash !== null
+        || !isPlainObject(p) || p.kind !== INVENTORY_EDIT_GUARD
+        || !['inventory.add', 'inventory.edit', 'inventory.drop'].includes(p.action)
+        || operation?.type !== p.action || Object.keys(p).some(key => !['kind', 'action', 'target', 'pieces', 'decision'].includes(key))
+        || hash({ predicate: p, source }) !== guard.inputHash) return bad;
+    const inventory = state?.domains?.inventory;
+    if (p.decision !== undefined) {
+        const d = p.decision, payload = operation?.payload;
+        if (!isPlainObject(d) || !inventory || !isPlainObject(payload) || typeof payload.name !== 'string'
+            || typeof d.witness !== 'string' || !/^[a-f0-9]{64}$/.test(d.witness)) return bad;
+        let witness;
+        if (p.action === 'inventory.add' && Object.keys(d).length === 2 && typeof d.def === 'string') {
+            witness = addDecision(inventory, payload, d.def);
+        } else if (p.action === 'inventory.edit' && Object.keys(d).length === 1 && inventory.stacks?.[payload.stack]
+            && inventory.defs?.[inventory.stacks[payload.stack].def]) {
+            witness = renameDecision(inventory, inventory.stacks[payload.stack], payload);
+        } else return bad;
+        if (hash(witness) !== d.witness) return { ok: false, reason: E.itemDecisionChanged };
+    }
+    // Earlier saved guards did not have a decision witness; keep their existing replay behavior.
+    if (p.action === 'inventory.add') return p.target === undefined && p.pieces === undefined ? { ok: true } : bad;
+    if (!isPlainObject(p.target) || Object.keys(p.target).length !== 3
+        || typeof p.target.id !== 'string' || p.target.id !== operation?.payload?.stack
+        || typeof p.target.def !== 'string' || typeof p.target.owner !== 'string') return bad;
+    const stack = inventory?.stacks?.[p.target.id];
+    if (!stack || stack.def !== p.target.def || stack.owner !== p.target.owner || !inventory?.defs?.[stack.def]) {
+        return { ok: false, reason: E.itemEditGone };
+    }
+    if (p.pieces !== undefined && (p.action !== 'inventory.edit' || operation?.payload?.group !== true
+        || !(Array.isArray(p.pieces) || (typeof p.pieces === 'string' && /^[a-f0-9]{64}$/.test(p.pieces))))) return bad;
+    const piecesHash = Array.isArray(p.pieces) ? hash(p.pieces) : p.pieces;
+    if (p.pieces !== undefined && hash(editPieces(inventory, p.target)) !== piecesHash) {
+        return { ok: false, reason: E.itemPiecesChanged };
+    }
+    return { ok: true };
+}
+
 /** The inventory commands; `env` = { hooks: name => fn[], settings: () => this module's settings }. */
 export function createInventoryCommands(env) {
     return {
@@ -995,6 +1096,105 @@ export function createInventoryCommands(env) {
                 data: { def: def.id, qty, owner, stacks, created },
                 narrate: told(ctx),
             };
+        },
+
+        // The reader's own item, resolved just like a story item but without the story's grant command.
+        'inventory.add'(ctx, payload = {}) {
+            byReader(ctx);
+            const prefix = ctx.read('inventory');
+            const inv = ctx.draft('inventory');
+            if (typeof payload.name !== 'string') ctx.fail('INVALID', E.itemName);
+            const name = cleanName(payload.name);
+            if (!name || [...name].length > 60) ctx.fail('INVALID', E.itemNameLength);
+            const qty = count(ctx, payload.qty, 1);
+            const owner = receiverArg(ctx, payload.owner);
+            const note = textArg(ctx, payload.note, MAX_NOTE, 'note');
+            const { def, created } = defineByName(ctx, inv, name, env, { note, owner });
+            guardReaderEdit(ctx, 'inventory.add', null, null, { def: def.id, witness: addDecision(prefix, payload, def.id) });
+            readerCarry(ctx, [{ defId: def.id, qty }], owner);
+            const stacks = grantInto(ctx, inv, def, qty, owner, note);
+            return { summary: fill(E.itemAdded, { item: itemText(def.name, qty) }), data: { edit: true, def: def.id, qty, owner, stacks, created }, narrate: true };
+        },
+
+        'inventory.edit'(ctx, payload = {}) {
+            byReader(ctx);
+            const inv = ctx.draft('inventory');
+            const stack = stackIn(ctx, inv, payload.stack);
+            const original = inv.defs[stack.def];
+            const oldName = original.name;
+            const decision = typeof payload.name === 'string' ? { witness: renameDecision(inv, stack, payload) } : null;
+            let groupQty;
+            // The screen counts separate pieces together without changing the one-piece stack invariant.
+            if (payload.group === true && !original.stack && payload.qty !== undefined) {
+                const qty = count(ctx, payload.qty, undefined);
+                if (qty > MAX_UNSTACKED) ctx.fail('INVALID', fill(E.itemGroupLimit, { max: MAX_UNSTACKED }));
+                const editPiece = payload.name !== undefined || payload.note !== undefined;
+                const pieces = Object.values(inv.stacks).filter(item => item.def === stack.def && item.owner === stack.owner);
+                guardReaderEdit(ctx, 'inventory.edit', editStack(stack), editPieces(inv, stack), decision);
+                // If this edit also changes the selected piece, keep that piece when reducing the group.
+                const loose = pieces.filter(item => item.equipped === null && (!editPiece || item.id !== stack.id)).reverse();
+                const remove = pieces.length - qty;
+                if (remove > loose.length) ctx.fail('REFUSED', E.itemGroupEquipped);
+                if (remove > 0) for (const item of loose.slice(0, remove)) delete inv.stacks[item.id];
+                if (remove < 0) {
+                    readerCarry(ctx, [{ defId: original.id, qty: -remove }], stack.owner);
+                    grantInto(ctx, inv, original, -remove, stack.owner, stack.note);
+                }
+                if (!editPiece) {
+                    const remaining = Object.values(inv.stacks).find(item => item.def === original.id && item.owner === stack.owner);
+                    return { summary: fill(E.itemSet, { detail: fill(E.itemCount, { name: original.name, qty }) }),
+                        data: { edit: true, stack: remaining.id }, narrate: true };
+                }
+                groupQty = qty;
+            }
+            if (groupQty === undefined) guardReaderEdit(ctx, 'inventory.edit', editStack(stack), null, decision);
+            if (payload.qty !== undefined && groupQty === undefined) {
+                const qty = count(ctx, payload.qty, undefined);
+                // A non-stacking item is one stack per piece (the domain's invariant).
+                if (!original.stack && qty !== 1) ctx.fail('REFUSED', fill(E.itemUnstackable, { name: original.name }));
+                if (qty > stack.qty) readerCarry(ctx, [{ defId: original.id, qty: qty - stack.qty }], stack.owner);
+                stack.qty = qty;
+            }
+            if (payload.note !== undefined) stack.note = textArg(ctx, payload.note, MAX_NOTE, 'note');
+            let name = original.name;
+            let resultStack = stack.id;
+            if (payload.name !== undefined) {
+                if (typeof payload.name !== 'string') ctx.fail('INVALID', E.itemName);
+                name = cleanName(payload.name);
+                if (!name || [...name].length > 60) ctx.fail('INVALID', E.itemNameLength);
+                const found = resolveDef(inv, name);
+                if (found.status === 'ambiguous') ctx.fail('INVALID', ambiguous(inv, name, found.ids));
+                if (found.status === 'found' && found.id !== original.id) {
+                    const targetDef = inv.defs[found.id];
+                    const target = stacksOf(inv, found.id).find(other => targetDef.stack && stack.owner === other.owner
+                        && stack.equipped === other.equipped && stack.note === other.note && condOf(stack, inv) === condOf(other, inv)
+                        && (stack.key === true) === (other.key === true));
+                    if (!target) ctx.fail('REFUSED', fill(E.itemCannotMerge, { name }));
+                    if (!Number.isSafeInteger(target.qty + stack.qty)) ctx.fail('INVALID', E.itemQuantityLarge);
+                    stack.def = targetDef.id;
+                    ctx.call('inventory.merge', { stack: stack.id, into: target.id });
+                    resultStack = target.id;
+                    name = targetDef.name;
+                } else if (name !== original.name) {
+                    const shared = Object.values(inv.stacks).some(other => other.id !== stack.id && other.def === original.id);
+                    if (shared || original.id.startsWith('pack.')) {
+                        const id = freeId(inv, `story/${slugify(name)}`);
+                        const copy = { ...clone(original), id, name };
+                        delete copy.carry;
+                        storeDef(inv, copy);
+                        stack.def = id;
+                    } else {
+                        for (const [key, id] of Object.entries(inv.aliases)) if (id === original.id) delete inv.aliases[key];
+                        original.name = name;
+                        inv.aliases[aliasKey(name)] = original.id;
+                    }
+                }
+            }
+            const current = inv.stacks[resultStack];
+            const detail = groupQty !== undefined && name !== oldName
+                ? fill(E.itemGroupRenamed, { name: oldName, qty: groupQty, renamed: name })
+                : payload.qty !== undefined ? fill(E.itemCount, { name, qty: groupQty ?? current.qty }) : payload.note !== undefined ? fill(E.itemNote, { name }) : name;
+            return { summary: fill(E.itemSet, { detail }), data: { edit: true, stack: resultStack }, narrate: true };
         },
 
         'inventory.consume'(ctx, payload = {}) {
@@ -1066,10 +1266,11 @@ export function createInventoryCommands(env) {
             const qty = count(ctx, payload.qty, stack.qty);
             if (qty > stack.qty) ctx.fail('NOT_ENOUGH', shortOf(def.name, stack.qty));
             const owner = stack.owner;
+            guardReaderEdit(ctx, 'inventory.drop', editStack(stack));
             take(inv, stack, qty);
             return {
                 summary: `${capitalize(ownerNameIn(ctx, owner))} drops ${itemText(def.name, qty)}.`,
-                data: { def: def.id, qty, owner, stack: stack.id },
+                data: { def: def.id, qty, owner, stack: stack.id, ...(ctx.cause === 'ui' ? { edit: true } : {}) },
                 narrate: told(ctx),
             };
         },
@@ -1148,6 +1349,18 @@ export function createInventoryCommands(env) {
                 data: { stack: stack.id, into: into.id, qty: into.qty },
                 narrate: false,
             };
+        },
+
+        'wallet.set'(ctx, payload = {}) {
+            byReader(ctx);
+            const owner = receiverArg(ctx, payload.owner);
+            if (!isCount(payload.amount, 0)) ctx.fail('INVALID', E.purseAmount);
+            const inv = ctx.draft('inventory');
+            const wallet = (inv.wallets[owner] ??= {});
+            const from = wallet[WALLET_KEY] ?? 0;
+            wallet[WALLET_KEY] = payload.amount;
+            return { summary: fill(E.purseSet, { amount: formatAmount(payload.amount, currencyIn(ctx)) }),
+                data: { edit: true, from, to: payload.amount }, narrate: true };
         },
 
         // { owner, amount, note? }, amount in whole units of the one currency. Like inventory.grant, not
@@ -1820,6 +2033,15 @@ export const createInventoryQueries = env => ({
     // a pack's item registered by the rules module stays here after the pack is removed.
     'inventory.definitions': (state, args) => definitionsOf(state?.domains?.inventory, args),
     'inventory.items': (state, args = {}, tools) => listItems(state?.domains?.inventory, args?.owner ?? null, carryBonuses(tools)),
+    'inventory.counts': state => {
+        const inventory = state?.domains?.inventory, stacks = Object.values(inventory?.stacks ?? {}), totals = new Map();
+        for (const stack of stacks) {
+            const key = JSON.stringify([stack.def, stack.owner]);
+            totals.set(key, (totals.get(key) ?? 0) + stack.qty);
+        }
+        return Object.fromEntries(stacks.map(stack => [stack.id, inventory.defs?.[stack.def]?.stack === false
+            ? totals.get(JSON.stringify([stack.def, stack.owner])) : stack.qty]));
+    },
     // { budget, paid, left, vouched }: the story money (`+ coin` lines and modules' `wallet.receive { story:
     // true }`) the current reply may give, has given and has left (RX-E-2); `vouched` is the part of
     // `paid` that modules' vouched payouts gave (quest rewards), so a module can tell a reply whose

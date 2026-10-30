@@ -1,5 +1,6 @@
 // Static type and interval analysis; no evaluation, queries, state or code execution.
 import { DM_DESCRIPTORS as D, DM_LIMITS as L, dmObject, dmOwn, dmInt } from './schema.js';
+import { STRINGS } from '../strings.js';
 
 const BAD = Object.freeze({ type: 'invalid' });
 const bool = () => ({ type: 'bool' });
@@ -16,7 +17,7 @@ export function fieldType(schema) {
         return { ...type, enumValues: values };
     }
     if (schema.type === 'bool') return bool();
-    if (schema.type === 'text') return { type: 'text', max: schema.max };
+    if (schema.type === 'text') return { type: 'text', max: schema.max, ...(schema.list === true ? { list: true } : {}) };
     return BAD;
 }
 
@@ -86,7 +87,7 @@ export function pathType(path, env, at, add, visit) {
 /** Infer one expression, charging AST operator/literal visits including dynamic path expressions. */
 export function expressionType(expression, env, at, add) {
     let nodes = 0;
-    const visit = (value, path, depth = 1) => {
+    const visit = (value, path, depth = 1, allowText = false) => {
         nodes += 1;
         if (nodes > L.expressionNodes || depth > L.expressionDepth) {
             add('DM_BUDGET', path, `An expression permits depth ${L.expressionDepth} and ${L.expressionNodes} AST nodes.`);
@@ -104,16 +105,18 @@ export function expressionType(expression, env, at, add) {
             return BAD;
         }
         const [op, a, b, c] = value;
-        const child = (v, i) => visit(v, `${path}[${i}]`, depth + 1);
+        const child = (v, i, allow = false) => visit(v, `${path}[${i}]`, depth + 1, allow);
         if (op === 'get') {
             const result = pathType(a, { ...env, writing: false }, `${path}[1]`, add, (v, p) => visit(v, p, depth + 1));
-            if (result.type === 'text') { add('DM_SCHEMA', path, 'Text fields are display-only and cannot be read by an expression.'); return BAD; }
+            if (result.type === 'text' && !allowText) { add('DM_SCHEMA', path, STRINGS.editMessages.textComparison); return BAD; }
             return result;
         }
         if (op === 'arg' || op === 'bind' || op === 'reward') {
             const source = op === 'arg' ? env.args : op === 'bind' ? env.bindings : env.rewards;
             if (typeof a !== 'string' || !dmOwn(source, a)) { add('DM_SCHEMA', path, `Unknown ${op} reference in this expression context.`); return BAD; }
-            return op === 'reward' ? source[a] : fieldType(source[a]);
+            const result = op === 'reward' ? source[a] : fieldType(source[a]);
+            if (result.type === 'text' && !allowText) { add('DM_SCHEMA', path, STRINGS.editMessages.textComparison); return BAD; }
+            return result;
         }
         if (op === 'check') { add('DM_SCHEMA', path, 'SD checks inside a dm root need data-modules v1.1; this definition needs data-modules v1.1.'); return BAD; }
         if (op === 'timer') {
@@ -127,14 +130,16 @@ export function expressionType(expression, env, at, add) {
             if (result.type === 'text' || result.type === 'map') { add('DM_SCHEMA', path, 'Only scalar non-text public projections may be used in expressions.'); return BAD; }
             return result;
         }
-        const x = child(a, 1);
+        const textComparison = ['eq', 'ne'].includes(op);
+        const x = child(a, 1, textComparison && typeof b === 'string');
         if (op === 'not') {
             if (x.type !== 'bool' && x.type !== 'invalid') add('DM_SCHEMA', path, 'not requires a boolean operand.');
             return bool();
         }
-        const y = child(b, 2);
+        const y = child(b, 2, textComparison && typeof a === 'string');
         if (x.type === 'invalid' || y.type === 'invalid') return BAD;
         if (['eq', 'ne', 'lt', 'le', 'gt', 'ge'].includes(op)) {
+            if (textComparison && ((x.type === 'text' && typeof b === 'string') || (y.type === 'text' && typeof a === 'string'))) return bool();
             if (x.type !== y.type || (['lt', 'le', 'gt', 'ge'].includes(op) && x.type !== 'int')) add('DM_SCHEMA', path, 'Comparison operands must have the same type; ordered comparisons require integers.');
             return bool();
         }

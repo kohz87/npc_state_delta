@@ -98,7 +98,7 @@ export function textField(ctx) {
     if (!multiline) input.type = 'text';
     else input.rows = Math.max(3, Math.min(8, Number(field.rows) || 4));
     const max = Number.isInteger(field.max) && field.max >= 0 ? field.max : null;
-    if (max !== null) input.maxLength = max;
+    if (max !== null && field.codepoints !== true) input.maxLength = max;
     named(input, ctx);
     input.value = String(ctx.value ?? '');
     const root = h(doc, 'div', 'ss-control');
@@ -111,13 +111,16 @@ export function textField(ctx) {
     }
     const count = () => { if (counter) counter.textContent = fill(FORM_TEXT.count, { n: Array.from(input.value).length, max }); };
     count();
-    input.addEventListener('input', count);
+    input.addEventListener('input', () => {
+        if (max !== null && field.codepoints === true) input.value = [...input.value].slice(0, max).join('');
+        count();
+    });
     input.addEventListener('change', () => {
         // A paste past the maximum is cut (the store cuts there too).
         const asked = input.value;
         let value = asked;
-        if (max !== null && value.length > max) {
-            value = cutAt(value, max);
+        if (max !== null && (field.codepoints === true ? [...value].length : value.length) > max) {
+            value = field.codepoints === true ? [...value].slice(0, max).join('') : cutAt(value, max);
             input.value = value;
         }
         count();

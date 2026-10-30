@@ -1,5 +1,6 @@
 // Pure data-modules-v1 checker. The pack validator and Studio share these entry points.
 import { DM_DESCRIPTORS as D, DM_LIMITS as L, DATA_MODULES_CAPABILITY, dmObject, dmOwn, dmSlug, dmInt, dmId } from './schema.js';
+import { HASH_BASIS_V1 } from './hash-basis-v1.js';
 import { fieldType, compatible, expressionType, conditionType, pathType } from './expressions.js';
 import { byteLength, checkPlain } from '../packs/safety.js';
 import { LIMITS as PACK_LIMITS } from '../packs/limits.js';
@@ -8,6 +9,12 @@ import { validateScreen } from '../view/screens.js';
 import { parseHtml } from '../view/template/html.js';
 import { checkScreens } from '../packs/validate.js';
 import { sha256Hex as sha256 } from '../domains/digest.js';
+import { STRINGS, fill } from '../strings.js';
+import { oneLine } from '../../text.js';
+import { fullModuleGrammar } from './grammar.js';
+import { hasIcon } from '../view/icons/index.js';
+
+const E = STRINGS.editMessages;
 
 export { DM_DESCRIPTORS, DM_LIMITS, DM_DIAGNOSTICS, DATA_MODULES_CAPABILITY } from './schema.js';
 export { expressionType, conditionType } from './expressions.js';
@@ -70,8 +77,13 @@ function normalizedKeys(value, path, add) {
 function scalar(schema, path, add, { label = false, map = true } = {}) {
     const schemas = label ? D.labels : D.fields;
     const descriptor = dmOwn(schemas, schema?.type) && schemas[schema.type];
-    if (!descriptor || (!map && schema.type === 'map')) { add(label ? 'DM_LABEL' : 'DM_SCHEMA', path, `Expected a declared ${label ? 'int, bool or enum label' : 'scalar field or fixed map'} schema.`); return; }
+    if (!descriptor || (!map && schema.type === 'map')) { add(label ? 'DM_LABEL' : 'DM_SCHEMA', path, fill(E.declaredSchema, { schema: label ? E.labelSchema : E.fieldSchema })); return; }
     if (!shape(schema, descriptor, path, add, label ? 'DM_LABEL' : 'DM_SCHEMA')) return;
+    if (!label && schema.edit !== undefined && typeof schema.edit !== 'boolean') add('DM_SCHEMA', `${path}.edit`, E.editBoolean);
+    if (!label && schema.label !== undefined) {
+        if (typeof schema.label !== 'string' || !oneLine(schema.label) || [...schema.label].length > 60) add('DM_SCHEMA', `${path}.label`, STRINGS.blocks.labelLimit);
+        else schema.label = oneLine(schema.label);
+    }
     if (schema.type === 'int') {
         if (!dmInt(schema.min) || !dmInt(schema.max) || schema.min > schema.max) add('DM_BOUNDS', path, 'Integer bounds must be ordered safe integers.');
         if (!label && !dmInt(schema.default, schema.min, schema.max)) add('DM_BOUNDS', `${path}.default`, 'The integer default must be inside its inclusive bounds.');
@@ -83,7 +95,9 @@ function scalar(schema, path, add, { label = false, map = true } = {}) {
     }
     if (schema.type === 'text') {
         if (!dmInt(schema.max, 1, L.text)) add('DM_BOUNDS', `${path}.max`, `Text max must be 1 to ${L.text}.`);
-        if (typeof schema.default !== 'string' || !dmInt(schema.max, 1, L.text) || schema.default.length > schema.max) add('DM_BOUNDS', `${path}.default`, 'Text defaults must be literal text within max.');
+        if (!label && schema.list !== undefined && typeof schema.list !== 'boolean') add('DM_SCHEMA', `${path}.list`, STRINGS.blocks.listOnlyText);
+        if (!label && (typeof schema.default !== 'string' || !dmInt(schema.max, 1, L.text) || [...schema.default].length > schema.max
+            || (schema.list === true && schema.default && schema.default.split(';').length > 12))) add('DM_BOUNDS', `${path}.default`, 'Text defaults must be literal text within max.');
     }
     if (schema.type === 'map') {
         distinct(schema.keys, `${path}.keys`, add, { max: L.mapKeys, keys: true });
@@ -138,7 +152,14 @@ function effects(list, env, path, add, { timer = false, reward = false } = {}) {
                 if (effect.bounds !== undefined && !['reject', 'clamp'].includes(effect.bounds)) add('DM_SCHEMA', `${at}.bounds`, 'bounds must be reject or clamp.');
                 if (effect.op === 'add') effect.bounds ??= 'reject';
                 if (target.type === 'text') {
-                    if (effect.op !== 'set' || typeof effect.value !== 'string' || effect.value.length > target.max) add('DM_SCHEMA', `${at}.value`, 'Text fields accept only literal display text within max.');
+                    const argName = Array.isArray(effect.value) && effect.value.length === 2 && effect.value[0] === 'arg' ? effect.value[1]
+                        : dmObject(effect.value) && Object.keys(effect.value).length === 1 ? effect.value.arg : null;
+                    const arg = typeof argName === 'string' ? env.args?.[argName] : null;
+                    const literal = typeof effect.value === 'string' && [...effect.value].length <= target.max
+                        && (target.list !== true || !effect.value || effect.value.split(';').length <= 12);
+                    const textArg = arg?.type === 'text' && arg.max <= target.max;
+                    if (effect.op !== 'set' || !(literal || textArg)) add('DM_SCHEMA', `${at}.value`, E.textEffect);
+                    else if (textArg && dmObject(effect.value)) effect.value = ['arg', argName];
                     return;
                 }
                 let type = expressionType(effect.value, env, `${at}.value`, add);
@@ -216,6 +237,24 @@ function migrations(definition, path, add) {
     if (definition.migrations.length && definition.migrations.at(-1)?.to !== definition.stateVersion) add('DM_SCHEMA', `${path}.migrations`, 'The migration chain must end at this stateVersion.');
 }
 
+// An editable in data-module presentation may address only this pin and an editable declared field.
+function editableProps(definition, props, at, add) {
+    if (!dmObject(props) || props.command !== 'dm.set' || (props.valueKey !== undefined && props.valueKey !== 'value')) {
+        add('DM_SCHEMA', at, E.editableCommand); return;
+    }
+    const payload = props.payload;
+    if (!dmObject(payload) || Object.keys(payload).some(key => !['module', 'field', 'key', 'who'].includes(key))
+        || payload.module !== definition.id || !dmOwn(definition.state, payload.field)) {
+        add('DM_SCHEMA', at, E.editableField); return;
+    }
+    const field = definition.state[payload.field];
+    if (field.edit === false) add('DM_SCHEMA', at, E.editableLocked);
+    if (field.type === 'map') {
+        if (typeof payload.key !== 'string' || (!field.keys.includes(payload.key) && !payload.key.startsWith('$item.'))) add('DM_SCHEMA', at, E.mapKeyDeclared);
+    } else if (payload.key !== undefined) add('DM_SCHEMA', at, E.scalarKey);
+    if (definition.scope === 'chat' && payload.who !== undefined) add('DM_SCHEMA', at, E.chatCharacter);
+}
+
 function presentation(definition, path, add) {
     // Reuse the shipped presentation validators. Ordinary packs keep their current acceptance.
     checkScreens(definition.screens, 'data-module', (code, at, message) => add('DM_SCHEMA', `${path}.${at}`, message));
@@ -257,6 +296,14 @@ function presentation(definition, path, add) {
             // Read the same HTML tree as the renderer, including decoded attributes.
             const visit = nodes => { for (const node of nodes) {
                 const attrs = new Map(node.attrs ?? []);
+                if (node.tag === 'ss-widget' && attrs.get('name') === 'ss.editable') {
+                    editableProps(definition, templatePayload(attrs.get('data-props')), `${where}.data-props`, add);
+                }
+                if (node.tag === 'ss-widget' && attrs.get('name') === 'story-block.inventory-add') add('DM_SCHEMA', where, E.noInventoryControl);
+                if (attrs.has('data-inline-control')) {
+                    if (node.tag !== 'span' || attrs.get('data-inline-control') !== 'ss.editable') add('DM_SCHEMA', where, E.onlyEditableControl);
+                    else editableProps(definition, templatePayload(attrs.get('data-props')), `${where}.data-props`, add);
+                }
                 if (attrs.has('data-submit')) add('DM_SCHEMA', where, 'A data module template button uses data-command="dm.act" with a closed data-payload; a form cannot carry one.');
                 if (attrs.has('data-command')) {
                     if (attrs.get('data-command').trim() !== 'dm.act') add('DM_SCHEMA', where, 'Data module template actions may call only dm.act.');
@@ -355,11 +402,22 @@ export function validateDataModules(value, { packId, capabilities = [], definiti
         if (!dmSlug(given.slug)) add('DM_SCHEMA', `${at}.slug`, 'A module slug must be safe lowercase text of at most 40 characters.');
         if (seen.has(given.slug)) add('DM_SCHEMA', `${at}.slug`, 'Module slugs must be unique within a pack.');
         seen.add(given.slug);
-        if (typeof given.name !== 'string' || !given.name.trim() || given.name.length > PACK_LIMITS.name || /[\r\n\u0000-\u001f\u007f]/.test(given.name)) add('DM_SCHEMA', `${at}.name`, `A module name must be one line of 1 to ${PACK_LIMITS.name} safe characters.`);
+        if (typeof given.name !== 'string' || !given.name.trim() || [...given.name].length > PACK_LIMITS.name || /[\r\n\u0000-\u001f\u007f]/.test(given.name)) add('DM_SCHEMA', `${at}.name`, `A module name must be one line of 1 to ${PACK_LIMITS.name} safe characters.`);
         if (given.schema !== 1) add('DM_SCHEMA', `${at}.schema`, 'Only data module schema 1 is supported.');
         if (!dmInt(given.stateVersion, 1, Number.MAX_SAFE_INTEGER)) add('DM_SCHEMA', `${at}.stateVersion`, 'stateVersion must be a positive safe integer.');
         if (!D.scope.includes(given.scope)) add('DM_SCHEMA', `${at}.scope`, 'scope must be chat or character.');
         const definition = { ...copy(D.defaults), ...copy(given), id: defId(packId, given.slug), pack: packId };
+        if (definition.prompt !== undefined) {
+            if (typeof definition.prompt !== 'string' || [...definition.prompt].length > 600) add('DM_BOUNDS', `${at}.prompt`, STRINGS.blocks.promptLimit);
+            else definition.prompt = oneLine(definition.prompt);
+        }
+        if (definition.show !== undefined) {
+            const show = definition.show;
+            if (!dmObject(show) || Object.keys(show).some(key => !['tab', 'card', 'tabName', 'icon'].includes(key))
+                || typeof show.tab !== 'boolean' || typeof show.card !== 'boolean' || (!show.tab && !show.card)
+                || typeof show.tabName !== 'string' || !show.tabName.trim() || [...show.tabName].length > 24 || !hasIcon(show.icon)) add('DM_SCHEMA', `${at}.show`, STRINGS.blocks.showOptions);
+            else show.tabName = oneLine(show.tabName);
+        }
         if (byteLength(JSON.stringify(definition)) > L.definitionBytes) add('DM_BUDGET', at, `A definition must fit ${L.definitionBytes} UTF-8 JSON bytes.`);
         for (const [key, schema] of named(definition.state, L.fields, `${at}.state`, add)) scalar(schema, `${at}.state.${key}`, add);
         imports(definition, at, add); // forms first, linking before expression analysis below
@@ -405,6 +463,10 @@ export function validateDataModules(value, { packId, capabilities = [], definiti
             if (kind.check !== undefined) add('DM_SCHEMA', `${path}.check`, 'SD checks inside a dm root need data-modules v1.1; this definition needs data-modules v1.1.');
             if (!D.ops.includes(kind.op)) add('DM_SCHEMA', `${path}.op`, `A kind op must be ${D.ops.join(', ')}.`);
             if (kind.ui !== undefined && typeof kind.ui !== 'boolean') add('DM_SCHEMA', `${path}.ui`, 'ui must be a boolean.');
+            if (kind.title !== undefined) {
+                if (typeof kind.title !== 'string' || !oneLine(kind.title) || [...kind.title].length > 60) add('DM_SCHEMA', `${path}.title`, STRINGS.blocks.labelLimit);
+                else kind.title = oneLine(kind.title);
+            }
             if (kind.refusal !== undefined && (typeof kind.refusal !== 'string' || !kind.refusal.trim() || kind.refusal.length > L.text || /[\u0000-\u001f\u007f]/.test(kind.refusal))) add('DM_SCHEMA', `${path}.refusal`, `A refusal is bounded safe text of at most ${L.text} characters.`);
             for (const [key, schema] of named(kind.labels, L.fields, `${path}.labels`, add, { label: true })) {
                 if (['kind', 'who'].includes(key)) add('DM_LABEL', `${path}.labels.${key}`, 'kind and who are host-reserved labels.');
@@ -418,6 +480,10 @@ export function validateDataModules(value, { packId, capabilities = [], definiti
             kind.oncePerReply = claims;
             kind.when ??= true;
             kind.ui ??= false;
+        }
+        if (!errors.length && (definition.prompt !== undefined || definition.show !== undefined || packId === 'chat')) {
+            const lines = fullModuleGrammar(definition, definition.id);
+            if ([...lines].length > L.staticCharacters) add('DM_BUDGET', `${at}.prompt`, STRINGS.blocks.staticLimit);
         }
         const ids = new Set();
         if (sized(definition.rules, L.rules, `${at}.rules`, add, { list: true })) definition.rules.forEach((rule, j) => {
@@ -471,7 +537,7 @@ export function validateDataModules(value, { packId, capabilities = [], definiti
 
 /** Hash checked normalized definitions only; envelope identity is deliberately separate. */
 export function dataModuleHash(definition) {
-    return sha256(JSON.stringify(stable({ definition, interpreter: 1, descriptors: D, limits: L })));
+    return sha256(JSON.stringify(stable({ definition, ...HASH_BASIS_V1 })));
 }
 
 /** Whole normalized pack identity; added only for packs containing dataModules. */

@@ -17,6 +17,7 @@
 // Pure except for the storage that `laterStore` takes; no DOM.
 
 import { oneLine } from '../text.js';
+import { STRINGS, fill } from './strings.js';
 
 export const CARD_TONES = Object.freeze(['accent', 'bad', 'good', 'info']);
 export const CARD_ROWS_MAX = 4;
@@ -151,4 +152,22 @@ export function laterStore(storage) {
             try { area()?.setItem?.(LATER_KEY, JSON.stringify(all)); } catch { /* the choice lasts this page only */ }
         },
     };
+}
+
+/** Applied reader edits on one reply, in receipt order. Skipped replay blocks do not describe changes. */
+export function replyEdits(record, problems = [], index = null) {
+    const skipped = new Set((Array.isArray(problems) ? problems : []).filter(problem => index === null || problem?.index === index)
+        .flatMap(problem => Array.isArray(problem?.receipts) ? problem.receipts : []));
+    return (Array.isArray(record?.receipts) ? record.receipts : [])
+        .filter(receipt => receipt?.data?.edit === true && !skipped.has(receipt.id))
+        .map(receipt => ({ text: oneLine(receipt.summary ?? '', 200) })).filter(row => row.text);
+}
+
+/** Rules reported by a data-module action on this reply. */
+export function replyRules(record, problems = [], index = null) {
+    const skipped = new Set((Array.isArray(problems) ? problems : []).filter(problem => index === null || problem?.index === index)
+        .flatMap(problem => Array.isArray(problem?.receipts) ? problem.receipts : []));
+    return (Array.isArray(record?.receipts) ? record.receipts : []).filter(receipt => !skipped.has(receipt.id))
+        .flatMap(receipt => (Array.isArray(receipt?.data?.v2?.result?.rules) ? receipt.data.v2.result.rules : [])
+            .map(rule => oneLine(rule, 80)).filter(Boolean).map(rule => ({ text: fill(STRINGS.card.rule, { name: rule }), summary: fill(STRINGS.card.rule, { name: rule }), kind: 'line', tone: 'accent', icon: 'fa-bolt', flag: '', note: '', check: null })));
 }

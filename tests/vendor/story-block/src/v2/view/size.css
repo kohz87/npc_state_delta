@@ -94,6 +94,13 @@
         padding-block: max(0px, calc((44px / var(--ss-zoomed, 1) - 5px) / 2));
         background-clip: content-box;
     }
+    /* Authored inline controls (including elements such as mark) need a box before a minimum can size them. */
+    :where([data-ss-screen] :is([role="button"], [data-command]):not(.ss-switch, .ss-w-map-node, [data-ss-hit])) {
+        display: inline-block;
+        box-sizing: border-box;
+        min-width: calc(44px / var(--ss-zoomed, 1)) !important;
+        min-height: calc(44px / var(--ss-zoomed, 1)) !important;
+    }
     /* A link, wherever it sits and whatever its role, and a text element acting as a button or a tab (a module's "more") are boxes of
        their own in the line: an inline block (an inline box takes no minimum size) with real padding round its text and no negative
        margin, so the minimum size above reaches it and nothing overlaps its neighbours; the line grows where one sits. No weight:

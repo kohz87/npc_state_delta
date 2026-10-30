@@ -673,3 +673,15 @@
                       background: var(--ss-bad); border: 2px solid var(--ss-badge, #1e2132); pointer-events: none; }
 .ss-screenbar-tile { position: relative; }
 .ss-screenbar-tile > .ss-screenbar-alert { top: 8px; right: 8px; }
+
+/* The Story panel covers the chat on a phone. Give it an opaque floor and readable body text in every panel style;
+   the side sheet keeps its desktop glass. The repeated class wins over host.css, which loads after this sheet. */
+@media (max-width: 759.98px) {
+    .story-suite-sheet.story-suite-sheet {
+        background: var(--ss-panel-opaque);
+        color: var(--ss-panel-text);
+    }
+    .story-suite-sheet [data-ss-screen] {
+        --ss-text: var(--ss-panel-text);
+    }
+}

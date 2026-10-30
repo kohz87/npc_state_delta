@@ -33,16 +33,16 @@ export const DM_DIAGNOSTICS = freeze({
 
 export const DM_DESCRIPTORS = freeze({
     definition: { required: ['slug', 'name', 'schema', 'stateVersion', 'scope', 'state', 'kinds'],
-        optional: ['imports', 'rules', 'timers', 'rewards', 'exports', 'screens', 'layouts', 'migrations'] },
+        optional: ['imports', 'rules', 'timers', 'rewards', 'exports', 'screens', 'layouts', 'migrations', 'prompt', 'show'] },
     defaults: { imports: {}, rules: [], timers: [], rewards: {}, exports: {}, screens: [], layouts: [], migrations: [] },
     scope: ['chat', 'character'],
     fields: {
-        int: ['type', 'min', 'max', 'default'], bool: ['type', 'default'],
-        enum: ['type', 'values', 'default'], text: ['type', 'max', 'default'],
-        map: ['type', 'keys', 'values'],
+        int: { required: ['type', 'min', 'max', 'default'], optional: ['edit', 'label'] }, bool: { required: ['type', 'default'], optional: ['edit', 'label'] },
+        enum: { required: ['type', 'values', 'default'], optional: ['edit', 'label'] }, text: { required: ['type', 'max', 'default'], optional: ['edit', 'list', 'label'] },
+        map: { required: ['type', 'keys', 'values'], optional: ['edit', 'label'] },
     },
-    labels: { int: ['type', 'min', 'max'], bool: ['type'], enum: ['type', 'values'] },
-    kind: { required: ['op', 'labels', 'effects'], optional: ['when', 'refusal', 'oncePerReply', 'ui', 'check'] },
+    labels: { int: ['type', 'min', 'max'], bool: ['type'], enum: ['type', 'values'], text: ['type', 'max'] },
+    kind: { required: ['op', 'labels', 'effects'], optional: ['when', 'refusal', 'oncePerReply', 'ui', 'check', 'title'] },
     ops: [...OPS],
     effects: {
         set: { required: ['op', 'path', 'value'], optional: [] },

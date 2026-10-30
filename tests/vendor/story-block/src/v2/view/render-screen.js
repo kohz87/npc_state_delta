@@ -88,7 +88,7 @@ export function createScreenRenderer({ queryAt, widgets = () => ({}), headIndex 
     function render(el, screen, scope) {
         const api = scope.api ?? {};
         const query = (name, args) => queryAt(name, args, scope.state);
-        const command = readOnly(scope) ? undefined : typeof api.command === 'function' ? api.command : undefined;
+        const command = readOnly(scope) ? null : typeof api.command === 'function' ? api.command : null;
         const evaluate = layoutEvaluator(scope);
         if (screen.layout) {
             ensureLayoutStyles(el.ownerDocument);

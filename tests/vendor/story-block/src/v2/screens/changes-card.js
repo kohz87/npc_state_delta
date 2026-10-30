@@ -45,7 +45,6 @@ const TEMPLATE = `
     <li class="tile line coin tone-warn" data-if="changed('state.inventory.wallets.party')">
       <span class="ico"><i class="fa-solid fa-coins" aria-hidden="true"></i></span>
       <span class="tx">
-      <i class="fa-solid fa-coins" aria-hidden="true"></i>
       <span class="main" data-if="len(q.currency.coins) == 0">${html(C.wallet, { coin: '<b>{{ state.inventory.wallets.party.coin }}</b>', money: '<span data-if="state.inventory.wallets.party.coin == 1">{{ q.currency.name }}</span><span data-if="state.inventory.wallets.party.coin != 1">{{ q.currency.plural }}</span>' })}</span>
       <span class="main" data-if="len(q.currency.coins) > 0" title="{{ fmt.money(state.inventory.wallets.party.coin) }}">${html(C.wallet, { coin: '<b>{{ fmt.money(state.inventory.wallets.party.coin) }}</b>', money: '' })}</span></span>
     </li>
@@ -64,6 +63,10 @@ const TEMPLATE = `
       <span class="tx"><span class="main" title="{{ x.text }}">{{ x.text }}</span> <span class="sub flag" data-if="x.flag != ''" title="{{ x.flag }}">{{ x.flag }}</span> <span class="sub note" data-if="x.note != ''" title="{{ x.note }}">{{ x.note }}</span></span>
     </li>
   </ul>
+  <ul class="edits" data-if="len(edits) > 0">
+    <li class="edit line" data-each="edits as e"><i class="fa-solid fa-pencil" aria-hidden="true"></i> <span>{{ e.text }}</span></li>
+  </ul>
+  <p class="edit-hint muted" data-if="editableHead == true && len(edits) > 0">${html(C.editHint)}</p>
   <ul class="checks">
     <li class="check" data-each="moduleLines as x" data-if="x.kind == 'check'" data-class="good: x.check.result == 'success'; bad: x.check.result == 'fail'">
       <span class="dice">{{ x.check.d20 }}</span>
@@ -83,7 +86,7 @@ const TEMPLATE = `
     </div>
     <p class="taken muted" data-if="state.meta.claims[o.claim] == true">${html(C.lootTaken)}</p>
   </div>
-  <p class="none muted" data-if="!changed('state.inventory') && !changed('state.scene') && len(moduleLines) == 0">${html(C.nothing)}</p>
+  <p class="none muted" data-if="!changed('state.inventory') && !changed('state.scene') && len(moduleLines) == 0 && len(edits) == 0">${html(C.nothing)}</p>
   <ul class="refused" data-if="len(refused) > 0">
     <li class="line" data-each="refused as r">
       <i class="fa-solid fa-ban" aria-hidden="true"></i>
@@ -120,6 +123,10 @@ const CSS = `${BASE_CSS}
 .tile.tone-warn { --ring: var(--ss-warn); }
 .tile.tone-info { --ring: var(--ss-info); }
 .tile.tone-accent { --ring: var(--ss-accent); }
+.edits { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.edit { display: flex; gap: 8px; align-items: center; padding: 10px; border: 1px solid var(--ss-accent); border-radius: var(--ss-radius-m); overflow-wrap: anywhere; }
+.edit i { color: var(--ss-accent-text); }
+.edit-hint { margin: 0; font-size: 0.85em; }
 /* The checks: a 34px tile with the d20, the line beside it (wraps under the tile's edge, never over it). The ring is the row's border and
    tint; the words are the theme's text colour (the tone colours are under 4.5:1 on the light glass). */
 .checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
@@ -368,7 +375,7 @@ function people(names) {
  * `summary` (else its `text`) after the rest: "+1 Rope · AGI check 14 vs 10: success". Takes the same fields
  * as changesDigest, or a digest as `digest`.
  */
-export function changesSummary({ state = null, before = null, changes = [], currency = null, digest = null, refused = 0, assisted = 0, lines = [] } = {}) {
+export function changesSummary({ state = null, before = null, changes = [], currency = null, digest = null, refused = 0, assisted = 0, lines = [], edits = 0 } = {}) {
     const d = digest ?? changesDigest({ state, before, changes });
     // The currency word for an amount: its name for exactly 1, else its plural (MODULES §F1).
     const name = typeof currency?.name === 'string' && currency.name ? currency.name : T.defaultMoney;
@@ -393,6 +400,8 @@ export function changesSummary({ state = null, before = null, changes = [], curr
         const told = oneLine(line?.summary || line?.text || '', 80);
         if (told) parts.push(told);
     }
+    const editCount = Number.isSafeInteger(edits) && edits > 0 ? edits : 0;
+    if (editCount) parts.push(editCount === 1 ? T.editsOne : fill(T.editsMany, { n: editCount }));
     const helped = Number.isSafeInteger(assisted) && assisted > 0 ? assisted : 0;
     if (helped) parts.push(helped === 1 ? T.assistedOne : fill(T.assistedMany, { n: helped }));
     const count = Number.isSafeInteger(refused) && refused > 0 ? refused : 0;

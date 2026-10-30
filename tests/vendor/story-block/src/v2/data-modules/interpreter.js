@@ -3,6 +3,8 @@
 // a preceding effect in this root has changed the draft.
 import { DM_LIMITS as L, dmInt, dmObject, dmOwn } from './schema.js';
 import { hashJson } from '../replay.js';
+import { oneLine } from '../../text.js';
+import { STRINGS } from '../strings.js';
 
 export const copy = value => structuredClone(value);
 export const bytes = value => new TextEncoder().encode(JSON.stringify(value)).length;
@@ -17,7 +19,8 @@ export function scalarHolds(schema, value) {
     if (schema.type === 'int') return dmInt(value, schema.min, schema.max);
     if (schema.type === 'bool') return typeof value === 'boolean';
     if (schema.type === 'enum') return schema.values.includes(value);
-    if (schema.type === 'text') return typeof value === 'string' && value.length <= schema.max;
+    if (schema.type === 'text') return typeof value === 'string' && [...value].length <= schema.max
+        && (schema.list !== true || !value || value.split(';').length <= 12);
     return schema.type === 'map' && dmObject(value) && Object.keys(value).length === schema.keys.length
         && schema.keys.every(key => dmOwn(value, key) && scalarHolds(schema.values, value[key]));
 }
@@ -27,8 +30,15 @@ export const orList = values => {
     const list = values.map(String);
     return list.length < 2 ? list.join('') : `${list.slice(0, -1).join(', ')} or ${list.at(-1)}`;
 };
+export function cleanList(value, max) {
+    const entries = Array.isArray(value) ? value : typeof value === 'string' ? value.split(';') : null;
+    if (!entries || entries.some(entry => typeof entry !== 'string')) refuse('DM_BOUNDS', '', STRINGS.blocks.listLimit);
+    const cleaned = entries.map(entry => oneLine(entry)).filter(Boolean);
+    if (cleaned.length > 12) refuse('DM_BOUNDS', '', STRINGS.blocks.listLimit);
+    return [...cleaned.join('; ')].slice(0, max).join('');
+}
 const ruleOf = schema => (schema.type === 'enum' ? `be ${orList(schema.values)}`
-    : schema.type === 'int' ? `be a whole number from ${schema.min} to ${schema.max}` : 'be true or false');
+    : schema.type === 'int' ? `be a whole number from ${schema.min} to ${schema.max}` : schema.type === 'text' ? STRINGS.editMessages.textNonempty : 'be true or false');
 
 // Each label of a line is one declared name with one value of its declared type; anything else is refused with a plain sentence
 // ("faction must be guild, watch or compact"), never guessed. `text`: a story line (its values are text); else typed (a reader action).
@@ -47,8 +57,10 @@ export function parseLabels(definition, kind, labels, { text = false } = {}) {
                 if (matches.length === 1) value = matches[0];
             }
         }
+        if (schema.type === 'text' && typeof value === 'string') value = [...oneLine(value)].slice(0, schema.max).join('');
         const valid = schema.type === 'int' ? dmInt(value, schema.min, schema.max)
-            : schema.type === 'bool' ? typeof value === 'boolean' : schema.values.includes(value);
+            : schema.type === 'bool' ? typeof value === 'boolean'
+                : schema.type === 'text' ? typeof value === 'string' && value.length > 0 : schema.values.includes(value);
         if (!valid) refuse('DM_LABEL', key, `${key} must ${ruleOf(schema)}`);
         args[key] = value;
     }
@@ -56,7 +68,7 @@ export function parseLabels(definition, kind, labels, { text = false } = {}) {
 }
 
 export function createEvaluation(definition, instance, { inputs = {}, source, cursor, subject = 'chat', lookup = null } = {}) {
-    const original = copy(instance), reads = new Map(), notes = [], decisions = [], conds = [], written = new Set();
+    const original = copy(instance), reads = new Map(), notes = [], decisions = [], conds = [], fired = [], written = new Set();
     let visits = 0, frame = null;
     const charge = (n = 1) => {
         visits += n;
@@ -147,7 +159,9 @@ export function createEvaluation(definition, instance, { inputs = {}, source, cu
         return schema.type === 'map' ? schema.values : schema;
     }
     function write(path, value) {
-        if (!scalarHolds(field(path), value)) refuse('DM_BOUNDS', path.join('.'), 'Field value is outside its schema.');
+        const schema = field(path);
+        if (schema.list === true) value = cleanList(value, schema.max);
+        if (!scalarHolds(schema, value)) refuse('DM_BOUNDS', path.join('.'), 'Field value is outside its schema.');
         // Saved ops omit no-ops. Witness the ORIGINAL destination even then: later conditions may
         // use this root's internal value, which is valid only while its starting value is unchanged.
         read(['fields', ...path]);
@@ -235,13 +249,13 @@ export function createEvaluation(definition, instance, { inputs = {}, source, cu
         }
     }
     function rules() {
-        for (const rule of definition.rules) { charge(); if (condition(['rule', rule.id], rule.when, {})) effects(rule.then); }
+        for (const rule of definition.rules) { charge(); if (condition(['rule', rule.id], rule.when, {})) { fired.push(rule.id); effects(rule.then); } }
     }
     return { evaluate, condition, effects, timers, rules, charge, read,
         finish() {
             for (const [key, schema] of Object.entries(definition.state)) if (!scalarHolds(schema, instance.fields[key])) refuse('DM_BOUNDS', key, 'Invalid instance field.');
             if (bytes(instance) > L.instanceBytes) refuse('DM_BUDGET', '', 'Instance storage exhausted.');
-            return { reads: [...reads.values()], visits, notes, decisions, conds };
+            return { reads: [...reads.values()], visits, notes, decisions, conds, fired };
         },
     };
 }

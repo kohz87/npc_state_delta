@@ -21,6 +21,7 @@ import { newId, sectionBlock } from '../form/fields.js';
 import { matchesSearch } from '../form/schema.js';
 import { createModuleCard } from './modules.js';
 import { showAndFocus } from '../scroll.js';
+import { saveTextFile } from '../download.js';
 
 const h = (doc, tag, className = '', text = '') => {
     const node = doc.createElement(tag);
@@ -156,17 +157,7 @@ export function diagnosticsBody(pane, ctx) {
             const value = await build();
             const name = typeof diagnostics.fileName === 'function' ? diagnostics.fileName() : 'story-suite-diagnostics.txt';
             try {
-                const win = doc.defaultView ?? globalThis;
-                const blob = new win.Blob([value], { type: 'text/plain;charset=utf-8' });
-                const url = win.URL.createObjectURL(blob);
-                const link = h(doc, 'a');
-                link.href = url;
-                link.download = name;
-                link.hidden = true;
-                doc.body.appendChild(link);
-                link.click();
-                link.remove();
-                setTimeout(() => win.URL.revokeObjectURL(url), 1000);
+                saveTextFile(doc, value, name);
                 status.textContent = fill(T.saved, { name });
             } catch (error) {
                 status.textContent = fill(T.saveFailed, { why: error?.message ?? error });

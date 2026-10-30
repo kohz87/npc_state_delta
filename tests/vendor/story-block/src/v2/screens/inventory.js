@@ -1,7 +1,8 @@
 // Inventory shows the wallet, items, loot and bag actions.
 
 import { KIND_ORDER, RARITIES } from '../domains/inventory.js';
-import { STRINGS, html } from '../strings.js';
+import { STRINGS, html, jsonText } from '../strings.js';
+import { INVENTORY_ADD_WIDGET } from './inventory-add.js';
 import { BASE_CSS, RARITY_THEME } from './style.js';
 
 export const INVENTORY_SCREEN_ID = 'story-block/inventory';
@@ -50,6 +51,7 @@ function group(kind) {
         <div class="body">
         <div class="line">
           <span class="name">{{ it.name }}</span>
+          <span class="item-edit" data-inline-control="ss.editable" data-props='{"value":"{{ it.name }}","itemCount":{{ q.counts[it.stack] }},"itemNote":"{{ it.note }}","displayValue":false,"kind":"item","label":"${jsonText(S.editItem)}","command":"inventory.edit","payload":{"stack":"{{ it.stack }}","group":true}}'></span>
           <span class="chip eq worn-by" data-if="it.equipped != null && it.owner == 'party'" title="${html(S.equippedTitle)}">${html(S.wornByParty)}</span>
           <span class="chip key" data-if="it.key" title="${html(S.keyTitle)}">${html(S.key)}</span>
           <span class="chip carry" data-if="it.carry" title="${html(S.carryTitle)}">+{{ it.carry }} ${html(S.carry)}</span>
@@ -83,11 +85,15 @@ function group(kind) {
 const TEMPLATE = `
 <div class="inv">
   <header class="top">
+    <div class="wallet-and-add">
     <div class="wallet" title="${html(S.walletTitle)}">
       <i class="fa-solid fa-coins" aria-hidden="true"></i>
       <span data-if="len(q.currency.coins) == 0"><b data-if="q.wallet.coin">{{ q.wallet.coin }}</b><b data-if="!q.wallet.coin">0</b>
       <span><span data-if="q.wallet.coin == 1">{{ q.currency.name }}</span><span data-if="q.wallet.coin != 1">{{ q.currency.plural }}</span></span></span>
       <span data-if="len(q.currency.coins) > 0"><b data-if="q.wallet.coin">{{ fmt.money(q.wallet.coin) }}</b><b data-if="!q.wallet.coin">{{ fmt.money(0) }}</b></span>
+    <span data-inline-control="ss.editable" data-props='{"value":{{ q.wallet.coin }},"displayValue":false,"money":true,"currency":{{ q.currency }},"label":"${jsonText(S.editPurse)}","command":"wallet.set","valueKey":"amount"}'></span>
+    </div>
+    <span data-inline-control="${INVENTORY_ADD_WIDGET}"></span>
     </div>
     <div class="filter" role="search" aria-label="${html(S.filterLabel)}" data-if="len(q.items) > 0">
       <input type="search" class="find" data-draft="find" placeholder="${html(S.find)}" title="${html(S.findTitle)}"
@@ -127,10 +133,14 @@ ${RARITIES.map(rarity => `          <option value="${rarity}">${html(S.rarities[
 
 const CSS = `${BASE_CSS}
 .inv { display: grid; gap: var(--sb-gap); }
-.top { display: flex; flex-wrap: wrap; gap: var(--sb-gap); align-items: center; justify-content: space-between; }
-.wallet { display: inline-flex; gap: 6px; align-items: baseline; font-size: 1.05em; }
+.top { display: flex; flex-wrap: wrap; gap: var(--sb-gap); align-items: center; }
+.wallet-and-add { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.wallet { display: inline-flex; gap: 6px; align-items: center; font-size: 1.05em; }
 .wallet i { color: var(--sb-accent); }
-.filter { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 0.85em; }
+.inv-add-form { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.inv-add-form input { width: 10em; max-width: 100%; }
+.inv-add-error { flex-basis: 100%; color: var(--ss-bad-text); }
+.filter { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-left: auto; font-size: 0.85em; }
 .filter label { display: inline-flex; gap: 4px; align-items: center; }
 .filter select, .filter .find { font: inherit; color: var(--sb-fg); background: var(--sb-surface); border: 1px solid var(--sb-border);
                  border-radius: 6px; padding: 1px 4px; margin: 0; box-shadow: none; transition: border-color 0.15s ease; }
@@ -167,6 +177,9 @@ const CSS = `${BASE_CSS}
 .item.r-legendary { --rarity: var(--sb-legendary); }
 .item.equipped { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sb-accent) 45%, transparent); }
 .line { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.line:has(.ss-w-editable-item-form) > :not(.item-edit) { display: none; }
+.line:has(.ss-w-editable-item-form) > .item-edit, .line .ss-w-editable:has(.ss-w-editable-item-form) { width: 100%; }
+.item > .body:has(.ss-w-editable-item-form) > .note { display: none; }
 .name { font-weight: 600; color: var(--rarity); }
 .qty { font-variant-numeric: tabular-nums; }
 .rarity { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--rarity); opacity: 0.85; }
@@ -211,6 +224,7 @@ export const inventoryScreen = Object.freeze({
     mounts: Object.freeze(['tab', 'screen']),
     data: Object.freeze({
         items: Object.freeze({ query: 'inventory.items' }),
+        counts: Object.freeze({ query: 'inventory.counts' }),
         wallet: Object.freeze({ query: 'inventory.wallet', args: Object.freeze({ owner: 'party' }) }),
         currency: Object.freeze({ query: 'inventory.currency' }),
         // Who wears what, who may put each piece on, where Give may hand it (MODULES §F99).

@@ -13,6 +13,9 @@
 // the smallest unit when the reader prefers (Coin display: base).
 
 import { cutAt } from '../../text.js';
+import { STRINGS, fill } from '../strings.js';
+
+const E = STRINGS.editMessages;
 
 export const WALLET_KEY = 'coin';
 export const DEFAULT_CURRENCY = Object.freeze({ name: 'gold', plural: 'gold', short: 'g' });
@@ -227,6 +230,30 @@ export function parseAmount(text, currency = null) {
     if (!value) return { error: `"${tidy(words, 40)}" is not a coin here: write ${coinList(currency).map(coin => coin.name).join(', ')} or a number of ${baseUnit(currency).plural}.` };
     const amount = read.amount * value;
     if (!Number.isSafeInteger(amount)) return { error: 'That amount is too large.' };
+    return { amount };
+}
+
+/** A reader's purse input: one amount or several named coins, summed in the smallest unit. */
+export function parseMixedAmount(text, currency = DEFAULT_CURRENCY) {
+    const input = String(text ?? '').trim();
+    if (!input) return { error: E.moneyEmpty };
+    if (/^0+$/.test(input)) return { amount: 0 };
+    const zero = /^0+\s+(.+)$/.exec(input);
+    if (zero && coinValue(zero[1], currency)) return { amount: 0 };
+    if (!coinList(currency).length) return parseAmount(input, currency);
+    if (/[^\p{L}\s0-9,'-]/u.test(input) || /[-']\s*\d/.test(input)) return { error: E.moneyWhole };
+    const parts = [...input.matchAll(/(?:^|\s)(\d[\d,]*)(?:\s+)([^\d]+?)(?=\s+\d|$)/gu)];
+    if (!parts.length) return parseAmount(input, currency);
+    if (parts.map(part => part[0]).join('').trim() !== input) return { error: E.moneyWhole };
+    let amount = 0;
+    for (const part of parts) {
+        if (!/^(?:\d{1,3}(?:,\d{3})+|\d+)$/.test(part[1])) return { error: E.moneyWhole };
+        const count = Number(part[1].replace(/,/g, ''));
+        const worth = coinValue(part[2], currency);
+        if (!worth) return { error: fill(E.moneyUnknown, { name: tidy(part[2], 40) }) };
+        if (!Number.isSafeInteger(count) || !Number.isSafeInteger(count * worth) || !Number.isSafeInteger(amount + count * worth)) return { error: E.moneyLarge };
+        amount += count * worth;
+    }
     return { amount };
 }
 

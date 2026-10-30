@@ -6,6 +6,7 @@
 import { badge } from './badge.js';
 import { bar, pill, status, tile } from './glass.js';
 import { dialog } from './dialog.js';
+import { editable } from './editable.js';
 import { hero } from './hero.js';
 import { listcard } from './listcard.js';
 import { navbar, tabs } from './nav.js';
@@ -39,9 +40,10 @@ export const standardWidgets = Object.freeze({
     'ss.tabs': tabs,
     'ss.navbar': navbar,
     'ss.dialog': dialog,
+    'ss.editable': editable,
 });
 
-export { badge, bar, dialog, hero, listcard, map, meter, navbar, pill, portrait, radar, skillTree, status, stepper, tabs, tile, tiers, timeline };
+export { badge, bar, dialog, editable, hero, listcard, map, meter, navbar, pill, portrait, radar, skillTree, status, stepper, tabs, tile, tiers, timeline };
 export { defineWidget, propProblems, resolveProps, unfoldValue } from './props.js';
 export { ensureStyles, faClasses, safeImageUrl } from './dom.js';
 export { widgetCss } from './styles.js';

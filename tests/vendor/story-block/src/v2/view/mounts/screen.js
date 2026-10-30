@@ -55,7 +55,8 @@ export function createScreenMount(deps) {
         const row = view.phone?.matches === false;
         const items = listed.map(entry => {
             const now = activeNow(entry.screen, state, deps.query);
-            return { id: entry.id, label: entry.screen.title ?? entry.id, icon: iconFor(entry.id, entry.screen.icon), alert: now.alert, alertText: now.badge ?? '' };
+            return { id: entry.id, label: entry.screen.title ?? entry.id, icon: iconFor(entry.id, entry.screen.icon), alert: now.alert, alertText: now.badge ?? '',
+                moreOnly: entry.id === 'story-block/blocks' || entry.id.startsWith('story-block/block/') };
         });
         // On a phone an active tab with an alert takes the last pinned slot (the one it displaces goes to More); the wide row keeps the order.
         view.bar.update({ items: row ? items : pinAlerts(items), current: view.screenId, row });

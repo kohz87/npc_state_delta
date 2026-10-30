@@ -39,6 +39,17 @@ export const widgetCss = `
 :where(.ss-w button:disabled, .ss-w [aria-disabled="true"]) { cursor: not-allowed; opacity: 0.5; }
 :where(.ss-w :focus-visible) { outline: 2px solid var(--ss-w-accent); outline-offset: 2px; }
 
+/* inline edits */
+:where(.ss-w-editable) { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+:where(.ss-w-editable-form, .ss-w-editable-chips) { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+:where(.ss-w-editable-field input, .ss-w-editable-field select) { width: min(20em, 100%); }
+:where(.ss-w-editable-error) { flex-basis: 100%; color: var(--ss-bad-text); }
+:where(.ss-w-editable-item-form) { width: 100%; }
+:where(.ss-w-editable-item-fields) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(4em, 6em); gap: 8px; width: 100%; }
+:where(.ss-w-editable-item-label) { display: grid; gap: 3px; min-width: 0; font-size: 0.85em; color: var(--ss-w-muted); }
+:where(.ss-w-editable-item-label:last-child) { grid-column: 1 / -1; }
+:where(.ss-w-editable-item-fields input) { width: 100%; min-width: 0; color: var(--ss-w-fg); }
+
 /* meter */
 :where(.ss-w-meter) { display: flex; flex-direction: column; gap: 0.2em; }
 :where(.ss-w-meter-head) { display: flex; align-items: baseline; gap: var(--ss-w-gap); font-size: 0.9em; }

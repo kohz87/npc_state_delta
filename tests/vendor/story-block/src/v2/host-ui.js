@@ -1073,7 +1073,8 @@ export function createTabHost(root, { registry, view, api = null, doc = globalTh
         const tabs = registry.tabs();
         if (!tabs.some(tab => tab.id === current)) current = tabs[0]?.id ?? null;
         // An active tab's alert (a red dot) takes the last pinned slot while it has something to show (screen-bar.js pinAlerts).
-        bar.update({ items: pinAlerts(tabs.map(tab => ({ id: tab.id, label: tab.title, icon: iconFor(tab.id, tab.icon), alert: tab.alert === true, alertText: tab.alertText ?? '' }))), current: current ?? '' });
+        bar.update({ items: pinAlerts(tabs.map(tab => ({ id: tab.id, label: tab.title, icon: iconFor(tab.id, tab.icon), alert: tab.alert === true,
+            alertText: tab.alertText ?? '', moreOnly: tab.id.startsWith('story-block/block/') }))), current: current ?? '' });
         // The pane's widgets go before the pane is drawn again (a redraw of the same tab too): their listeners and observers.
         dispose(pane);
         if (typeof release === 'function') { try { release(); } catch { /* a tab's cleanup failing must not block the redraw */ } }

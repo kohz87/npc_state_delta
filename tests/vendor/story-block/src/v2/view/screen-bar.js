@@ -47,7 +47,8 @@ export function barItems(list) {
         const label = str(raw.label).replace(/\s+/g, ' ').trim().slice(0, LABEL_MAX) || id;
         // `alert`: the tab is active with something to show (a red dot, no number); `alertText` is the badge's words for its name; see pinAlerts.
         const alert = raw.alert === true;
-        out.push({ id, label, icon: typeof raw.icon === 'string' ? raw.icon : '', alert, alertText: alert ? str(raw.alertText).replace(/\s+/g, ' ').trim().slice(0, 40) : '' });
+        out.push({ id, label, icon: typeof raw.icon === 'string' ? raw.icon : '', alert, alertText: alert ? str(raw.alertText).replace(/\s+/g, ' ').trim().slice(0, 40) : '',
+            ...(raw.moreOnly === true ? { moreOnly: true } : {}) });
     }
     return out;
 }
@@ -68,7 +69,9 @@ export function pinAlerts(items, pinned = PINNED) {
 /** The reader's order split into the slots (the first `pinned`) and what More holds (the rest). */
 export function splitItems(items, pinned = PINNED) {
     const list = Array.isArray(items) ? items : [];
-    return { pinned: list.slice(0, pinned), more: list.slice(pinned) };
+    const visible = list.filter(item => !item.moreOnly).slice(0, pinned);
+    const ids = new Set(visible.map(item => item.id));
+    return { pinned: visible, more: list.filter(item => !ids.has(item.id)) };
 }
 
 /** The item under More that is current (More then shows its icon and label), or null. */
