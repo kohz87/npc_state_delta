@@ -300,15 +300,15 @@ function takeAcross(inv, stacks, qty) {
     }
 }
 
-// A key item (`key: true` on its stack): the one notable item a reply's story gives outside its goods
-// budget (storyItems), a stack kept apart from the rest of that item. It is used, worn, given and consumed like any other, but it has no cash value: a module
+// A key item (`key: true` on its stack): a stack kept apart from the rest of that item (an older chat's
+// notable gift from the story, which the story no longer needs). It is used, worn, given and consumed like any other, but it has no cash value: a module
 // that buys things back or counts what they are worth (for trade or crafting) counts it as 0.
 // It never joins another stack, nor another stack it (looseMatch, inventory.merge), and the part of it
 // that is given away or split off stays a key stack.
 // The story's own (`story: true` on its stack, B-a2-2): what a story line (`+ item`) gave, or the reader
 // took from a story's loot (`? loot`, inventory.lootTake, FB-2), whatever its def (a pack's item named in
 // the story too). inventory.grant never sets it: no story line reaches it (modules and pack events call it
-// with what their code chose) and it moves no stack. Its worth was counted in that reply's goods budget, so a
+// with what their code chose) and it moves no stack. A
 // module that buys things back holds what it pays for it to its worth at the sell rate (the module's
 // trade). It stacks with the rest of that item; a stack it joins, or that joins it, is the story's too,
 // and the part of it that is given away or split off stays the story's.
@@ -693,8 +693,7 @@ function storyWear(ctx, inv, def, written, why) {
 
 // `? loot Rusty Key, Lantern Oil x2, Torn Map — on the cellar shelf | qty: 1`: what lies there, offered
 // on the reply's card as chips; the reader takes the ones they want (inventory.lootTake). The offer is
-// held to the reply's story limits when it is read (each thing as a `+ item` line would be, never the
-// notable one), so the chips show what can be taken; things the party already carries (tolerant
+// read as a `+ item` line would be, so the chips show what can be taken; things the party already carries (tolerant
 // names) are left out. One offer per reply, keyed by the reply's record ID (`loot[<sid>]`, scratch like
 // perReply); a second loot line in the reply adds to it. A reply keeps the LOOT_KEEP newest offers.
 export const LOOT_ITEMS = 8;
@@ -739,7 +738,7 @@ function lootItems(offer) {
 }
 
 // "Lantern Oil x2", "Lantern Oil ×2" → { name, qty }: a count of any length is a count, never part of
-// the name (held to the story limits after); without one, `fallback`. Money ("1000 gold", "Gold x500",
+// the name); without one, `fallback`. Money ("1000 gold", "Gold x500",
 // "gold") → { money: amount }.
 function lootPart(text, fallback, currency) {
     const counted = /^(.*?)\s*[x×]\s*(\d+)$/i.exec(text);
@@ -773,14 +772,13 @@ export function captureLoot(ctx, line, env) {
     const items = before ? clone(lootItems(before) ?? []) : [];
     const notes = [];
     const currency = currencyIn(ctx);
-    // New definitions are worked out on a copy (their value is what the story limits need); the real
-    // ones are made only for what the reader takes.
+    // New definitions are worked out on a copy; the real ones are made only for what the reader takes.
     const scratch = { ...inv, defs: { ...inv.defs }, aliases: { ...inv.aliases } };
     for (const part of parts) {
         const { name: written, qty, money } = lootPart(part, fallback, currency);
         const name = cleanName(written);
         if (!name) continue;
-        // Money in a loot line is a coin offer in that loot, held to the reply's coin budget now (as a
+        // Money in a loot line is a coin offer in that loot, counted for the reply now (as a
         // `+ coin` line would be) and paid into the wallet on Take: never an item, never left out unsaid.
         if (money !== undefined) {
             const purse = items.find(item => item.coin !== undefined);
@@ -789,14 +787,7 @@ export function captureLoot(ctx, line, env) {
                 continue;
             }
             if (money < 1) { notes.push(`${name}: an amount of money is more than nothing.`); continue; }
-            let held;
-            try { held = storyCoin(ctx, inv, money, currency); } catch (error) {
-                if (typeof error?.code !== 'string') throw error;
-                notes.push(error.message);
-                continue;
-            }
-            if (held.problem) notes.push(held.problem);
-            if (!held.amount) continue;
+            const held = storyCoin(ctx, inv, money);
             if (purse) {
                 purse.coin += held.amount;
                 purse.name = formatAmount(purse.coin, currency);
@@ -813,10 +804,9 @@ export function captureLoot(ctx, line, env) {
         let held;
         let def;
         try {
-            let created;
-            ({ def, created } = defineByName(ctx, scratch, name, env, { owner: 'party' }, false));
+            ({ def } = defineByName(ctx, scratch, name, env, { owner: 'party' }, false));
             if (items.some(item => aliasKey(item.name) === aliasKey(def.name) || resolveDef(scratch, item.name).id === def.id)) { notes.push(`${def.name} is offered once.`); continue; }
-            held = storyItems(ctx, inv, def, qty, created, false, false, 'offered');
+            held = storyItems(def, qty, false, 'offered');
         } catch (error) {
             if (typeof error?.code !== 'string') throw error;
             notes.push(error.message);
@@ -884,9 +874,9 @@ function lootTake(ctx, payload, env) {
     const predicate = { kind: LOOT_GUARD, sid, claim: offer.claim || `loot:${sid}`, items: wanted.map(entry => ({ name: entry.offered, qty: entry.qty })), coin };
     ctx.replayGuard({ owner: LOOT_OWNER, version: 2, epoch: ctx.epoch, rulesHash: null, inputHash: ctx.hash(predicate), predicate });
     // FB-2: what the story offered is the story's own (`story: true`, as a `+ item` line's), whatever its
-    // def (a pack's item named in the `? loot` line): its worth was held to that reply's goods budget.
+    // def (a pack's item named in the `? loot` line).
     const stacks = wanted.flatMap(entry => grantInto(ctx, inv, entry.def, entry.qty, 'party', '', false, true));
-    // The money was held to its reply's coin budget when the loot was read: it is paid as held.
+    // The money was counted for its reply when the loot was read: it is paid as offered.
     const currency = currencyIn(ctx);
     if (coin) receive(ctx, env, { owner: 'party', amount: coin, note: 'loot' });
     const where = offer.where ? ` (${offer.where})` : '';
@@ -1376,12 +1366,10 @@ export function createInventoryCommands(env) {
         },
 
         // `story: true` (a module's call): money the story alone vouched for (a quest reward the story
-        // wrote). It is held to the same per-reply coin budget as the story's own coin lines, but never
-        // refused: past the budget what is left is paid, which may be nothing; `data.amount` is what was
-        // paid and `problem` (a LIMITED note) says why. During a capture it counts against the reply being
-        // read; outside one (a click after the reply, RX-E-2) against the reply the click is stored on,
-        // the head carrier (ctx.reply), so one reply's `+ coin` lines and the clicks after it share one
-        // budget. Without the flag, a module's payout is not counted.
+        // wrote). It is paid in full (there is no per-reply limit) and counted for the reply: during a
+        // capture the reply being read; outside one (a click after the reply, RX-E-2) the reply the click is
+        // stored on, the head carrier (ctx.reply), so `inventory.storyBudget` can tell a reply's coin lines
+        // from the payouts after it. Without the flag, a module's payout is not counted.
         'wallet.receive'(ctx, payload = {}) {
             byModule(ctx, 'Money cannot be handed out from a button; it comes from the story or from another module\'s action.');
             if (payload.story !== undefined && typeof payload.story !== 'boolean') ctx.fail('INVALID', 'story must be true or false.');
@@ -1390,7 +1378,7 @@ export function createInventoryCommands(env) {
                 amount: count(ctx, payload.amount, undefined, 'amount'),
                 note: textArg(ctx, payload.note, 120, 'note'),
             };
-            return payload.story === true && ctx.caller ? receiveStory(ctx, env, args, undefined, true) : receive(ctx, env, args);
+            return payload.story === true && ctx.caller ? receiveStory(ctx, env, args, true) : receive(ctx, env, args);
         },
 
         // { stack, amount }: gear condition down / up, for another module's rules only (ctx.caller).
@@ -1403,44 +1391,23 @@ export function createInventoryCommands(env) {
 
 // ---------- capture (§4.4): runs as a story command ----------
 
-// What one reply's story lines may make out of nothing (B1-2). Code's own payouts (a module's
-// wallet.receive or inventory.grant through ctx.call) are not counted here, except a payout a module
-// says the story alone vouched for (`wallet.receive { story: true }`, below), during the reply's capture
-// or by a click after it (counted against the reply the click is stored on, ctx.reply; RX-E-2).
-// `inventory.storyBudget` tells a module what is left (createInventoryQueries).
-// * Coin: a positive `storyCoinPerReply` setting caps one reply; 0 lets the story decide. Past a
-//   configured cap a line is paid what is left, and the Problems list says so.
-// * When a cap is set, items: at most STORY_ITEM_QTY of one item per reply, however many lines name it (so a line repeated
-//   is counted together), and goods worth at most STORY_WORTH_TIMES × the coin budget in all (each
-//   def's `value` × the count given), so many kinds of item cannot add up to more than the coin limit.
-//   Past either, a line gives what is left, and the Problems list says so. A `~ item … | qty:` that
-//   raises a count is a gain, counted the same way; lowering one is free.
-// * A notable item: the first `+ item` line of a reply whose one item is worth more than the goods
-//   budget has left (so none of it would fit) gives one of it outside the worth tally, when it is worth
-//   at most STORY_NOTABLE_TIMES × the goods budget (a count over 1 is clamped to 1: the rest is over
-//   the goods budget). "The old man
-//   hands you a potion" is a normal story moment even when that potion is worth more than a reply's
-//   goods. One per reply: a later line over the budget is held as above. An item worth more than the
-//   notable limit on its own is not notable, and is refused as above.
-//   The notable item is given as a key item, a stack of its own (`key: true`, see addStack): usable,
-//   never sold.
-// * New kinds: at most STORY_NEW_DEFS item definitions made by one reply's story lines; past that a
-//   line naming something new is refused.
-// The tally is kept in the inventory slice under the reply's record ID (`perReply[<sid>]` =
-// { coin, worth, made, items, notable, vouched }, ctx.carrier.sid, which stays with the reply when earlier messages are
-// deleted), so it rolls back with the reply and starts again on the next one or another swipe. A reply
-// adds its own entry and drops the others; `perReply` is the domain's `scratch` (ops.js): on replay a
-// drop of an entry already gone (its reply deleted) is passed over, so no reply's gains hang on another's.
+// What one reply's story lines give. The story decides what it pays: there is no per-reply cap on coin,
+// items or goods (only a thing that does not stack, a stack per piece, is held to MAX_UNSTACKED a line).
+// Code's own payouts (a module's wallet.receive or inventory.grant through ctx.call) are not counted
+// here, except a payout a module says the story alone vouched for (`wallet.receive { story: true }`), during
+// the reply's capture or by a click after it (counted against the reply the click is stored on, ctx.reply;
+// RX-E-2). `inventory.storyBudget` tells a module what has been given (createInventoryQueries).
+// What was given is still counted, for modules that tell a reply whose coin lines paid from one whose
+// quest payouts did: the inventory slice keeps `perReply[<sid>]` = { coin, vouched?, debit? }, under the
+// reply's record ID (ctx.carrier.sid, which stays with the reply when earlier messages are deleted), so it
+// rolls back with the reply and starts again on the next one or another swipe. A reply adds its own entry
+// and drops the others; `perReply` is the domain's `scratch` (ops.js): on replay a drop of an entry already
+// gone (its reply deleted) is passed over, so no reply's gains hang on another's. An older chat's entries
+// also hold `worth`, `made`, `items` and `notable`: they are ignored, and a stored reply replays as it was
+// written (its ops hold what it gave).
 // A click's vouched payout (a2-3) adds its own key instead, `storyClicks[<sid>][<receipt id>] = paid`
 // (scratch too, add-only, on the same carrier), and never writes the reply's entry: a swipe or delete of
-// the reply takes it back with the reply, a Continue's lines count on from it, and a Re-read, whose
-// capture runs on the state before the reply, counts it from the reply as it stood (ctx.standing), so
-// the re-read lines and the clicks kept after them share one budget. The reply's money given is its
-// entry's `coin` plus its clicks.
-export const STORY_ITEM_QTY = 20;
-export const STORY_WORTH_TIMES = 2;
-export const STORY_NEW_DEFS = 10;
-export const STORY_NOTABLE_TIMES = 5;
+// the reply takes it back with the reply. The reply's money given is its entry's `coin` plus its clicks.
 
 // The money scale (MODULES §F104): how many of the chat's coins one coin of the built-in defaults is worth.
 // Defaults are gold-scale; a pack whose currency is copper-like says `economy: { scale }`. The scale only
@@ -1470,12 +1437,6 @@ export function scaledDefault(amount, scale = 1) {
     return Math.max(1, Math.round(amount * (scaleIn(scale) ?? 1)));
 }
 
-// Zero means that the story decides; a positive setting is a per-reply limit.
-function storyCoinBudget(ctx) {
-    const set = Number(ctx.settings()?.storyCoinPerReply);
-    return Number.isSafeInteger(set) && set > 0 ? set : Infinity;
-}
-
 const tallied = value => (isCount(value, 0) ? value : 0);
 
 // The reply a tally is kept for: during a story capture its carrier's record ID; for a module's vouched
@@ -1500,12 +1461,11 @@ function tallyOf(ctx, inv, vouched = false) {
     const id = tallyId(ctx, vouched);
     if (!id) return null;
     const stored = storedTally(inv, id);
-    const tally = { id, coin: tallied(stored?.coin), worth: tallied(stored?.worth), made: tallied(stored?.made), items: {}, ...(stored?.notable === true ? { notable: true } : {}) };
+    const tally = { id, coin: tallied(stored?.coin) };
     // Of `coin`, what modules' vouched payouts gave (quest rewards), kept only once there is some.
     if (tallied(stored?.vouched)) tally.vouched = tallied(stored.vouched);
     // Money the reply's lines took (`- coin`), kept only once there is some (a rules module's debit cap).
     if (tallied(stored?.debit)) tally.debit = tallied(stored.debit);
-    for (const [def, n] of Object.entries(isPlainObject(stored?.items) ? stored.items : {})) if (isCount(n, 0)) tally.items[def] = n;
     return tally;
 }
 
@@ -1517,12 +1477,9 @@ function keepTally(inv, { id, ...tally }) {
     if (isPlainObject(inv.storyClicks)) for (const key of Object.keys(inv.storyClicks)) if (key !== id) delete inv.storyClicks[key];
 }
 
-// What the clicks after reply `id` paid of its budget (storyClicks): from `inv`, or in a Re-read's capture
-// (whose state is the one before the reply) from the reply as it stood (`standing`, ctx.standing).
-function clicksOf(inv, id, standing = null) {
-    const own = isPlainObject(inv?.storyClicks) && Object.hasOwn(inv.storyClicks, id) ? inv.storyClicks[id] : null;
-    const stood = standing?.domains?.inventory?.storyClicks;
-    const log = own ?? (isPlainObject(stood) && Object.hasOwn(stood, id) ? stood[id] : null);
+// What the clicks after reply `id` paid (storyClicks).
+function clicksOf(inv, id) {
+    const log = isPlainObject(inv?.storyClicks) && Object.hasOwn(inv.storyClicks, id) ? inv.storyClicks[id] : null;
     return isPlainObject(log) ? Object.values(log).reduce((sum, paid) => sum + tallied(paid), 0) : 0;
 }
 
@@ -1537,96 +1494,30 @@ function keepClick(ctx, inv, id, paid) {
     inv.storyClicks[id][key] = tallied(inv.storyClicks[id][key]) + paid;
 }
 
-// `amount` held to what this reply may still give: { amount, problem }.
-function storyCoin(ctx, inv, amount, currency, vouched = false) {
+// A story line's money, counted for the reply (nothing is held back): { amount }. Counted only for a story
+// line and a module's vouched payout (tallyOf).
+function storyCoin(ctx, inv, amount, vouched = false) {
     const tally = tallyOf(ctx, inv, vouched);
-    if (!tally) return { amount, problem: null };
-    const budget = storyCoinBudget(ctx);
+    if (!tally) return { amount };
     // A click (a module's vouched payout outside a capture) is kept as its own key (keepClick).
-    const click = vouched && ctx.cause !== 'story';
-    const left = Math.max(0, budget - tally.coin - clicksOf(inv, tally.id, ctx.standing ?? null));
-    // A module's vouched payout is never refused (its caller cannot catch a sub-command's failure): it
-    // is paid what is left, which may be nothing, and told so.
-    if (!left && !vouched) ctx.fail('REFUSED', `This reply has already given all the money one reply may give (${formatAmount(budget, currency)}); the rest was not paid.`);
-    const paid = Math.min(amount, left);
-    if (click) {
-        if (paid) keepClick(ctx, inv, tally.id, paid);
+    if (vouched && ctx.cause !== 'story') {
+        keepClick(ctx, inv, tally.id, amount);
     } else {
-        tally.coin += paid;
-        if (vouched && paid) tally.vouched = (tally.vouched ?? 0) + paid;
+        tally.coin = Math.min(Number.MAX_SAFE_INTEGER, tally.coin + amount);
+        if (vouched) tally.vouched = Math.min(Number.MAX_SAFE_INTEGER, (tally.vouched ?? 0) + amount);
         keepTally(inv, tally);
     }
-    return {
-        amount: paid,
-        problem: paid < amount ? `${formatAmount(amount, currency)} was written, but one reply may give at most ${formatAmount(budget, currency)}; ${formatAmount(paid, currency)} was paid.` : null,
-    };
+    return { amount };
 }
 
-// `qty` of a def held to what this reply may still give (of that item, in worth, and, when the def is
-// new, in kinds): { qty, problem, notable }. Refused when nothing may be given. Only a `+ item` line
-// (not `more`, a raised count) may be the reply's notable item.
-function storyItems(ctx, inv, def, qty, created = false, more = false, notableOk = !more, verb = 'given') {
-    const tally = tallyOf(ctx, inv);
-    if (!tally) return { qty, problem: null, notable: false };
-    if (!Number.isFinite(storyCoinBudget(ctx))) {
-        // No limit: the story decides. Only a thing that does not stack is held to what one line can give
-        // (each piece is a stack of its own, grantInto), so a loot offer is always one its Take can give.
-        const given = def.stack ? qty : Math.min(qty, MAX_UNSTACKED);
-        // Keep the reply's accounting for replay and for a later change to the setting, without limiting the gift.
-        if (created) tally.made = Math.min(Number.MAX_SAFE_INTEGER, tally.made + 1);
-        tally.items[def.id] = Math.min(Number.MAX_SAFE_INTEGER, (tally.items[def.id] ?? 0) + given);
-        const value = isCount(def.value, 1) ? def.value : 0;
-        tally.worth = Math.min(Number.MAX_SAFE_INTEGER, tally.worth + value * given);
-        keepTally(inv, tally);
-        return {
-            qty: given,
-            problem: given < qty ? `${itemText(def.name, qty)}${more ? ' more' : ''} was written, but ${def.name} does not stack and at most ${MAX_UNSTACKED} can be given at once; ${given} were ${verb}.` : null,
-            notable: false,
-        };
-    }
-    if (created) {
-        if (tally.made >= STORY_NEW_DEFS) ctx.fail('REFUSED', `This reply has already brought ${STORY_NEW_DEFS} new kinds of item into the story, the most one reply may; ${def.name} was not added.`);
-        tally.made += 1;
-    }
-    const had = tally.items[def.id] ?? 0;
-    const left = Math.max(0, STORY_ITEM_QTY - had);
-    if (!left) ctx.fail('REFUSED', `This reply has already given ${STORY_ITEM_QTY} ${def.name}, the most one reply may give of one item.`);
-    let given = Math.min(qty, left);
-    const limits = given < qty ? [`at most ${STORY_ITEM_QTY} of one item`] : [];
-    const value = isCount(def.value, 1) ? def.value : 0;
-    let notable = false;
-    if (value) {
-        const currency = currencyIn(ctx);
-        const cap = STORY_WORTH_TIMES * storyCoinBudget(ctx);
-        const fits = Math.floor(Math.max(0, cap - tally.worth) / value);
-        const gift = STORY_NOTABLE_TIMES * cap;
-        if (!fits && notableOk && !tally.notable && value <= gift) {
-            // The reply's notable item: not counted in the worth tally, held to its own limit.
-            // One item (approved "one notable item per reply"): what else the line wrote is over the goods
-            // budget (none of it fits), so it is not given, and the Problems list says so.
-            notable = true;
-            tally.notable = true;
-            if (given > 1) {
-                given = 1;
-                limits.push(`only one key item beyond goods worth ${formatAmount(cap, currency)} in all`);
-            }
-        } else {
-            if (!fits) {
-                ctx.fail('REFUSED', `This reply has already given goods worth ${formatAmount(tally.worth, currency)}, and one ${def.name} is worth ${formatAmount(value, currency)}; one reply may give goods worth at most ${formatAmount(cap, currency)}.`);
-            }
-            if (fits < given) {
-                given = fits;
-                limits.push(`goods worth at most ${formatAmount(cap, currency)} in all`);
-            }
-            tally.worth += given * value;
-        }
-    }
-    tally.items[def.id] = had + given;
-    keepTally(inv, tally);
+// `qty` of a def a story line gives: all of it, except a thing that does not stack, which is held to what one
+// line can give (each piece is a stack of its own, grantInto), so a loot offer is always one its Take can
+// give: { qty, problem }. `more`: a raised count (`~ item … | qty:`); `verb`: how the Problems list says it.
+function storyItems(def, qty, more = false, verb = 'given') {
+    const given = def.stack ? qty : Math.min(qty, MAX_UNSTACKED);
     return {
         qty: given,
-        notable,
-        problem: given < qty ? `${itemText(def.name, qty)}${more ? ' more' : ''} was written, but one reply may give ${limits.join(' and ')}; ${given} ${given === 1 ? 'was' : 'were'} ${verb}${notable ? ' as a key item' : ''}.` : null,
+        problem: given < qty ? `${itemText(def.name, qty)}${more ? ' more' : ''} was written, but ${def.name} does not stack and at most ${MAX_UNSTACKED} can be given at once; ${given} were ${verb}.` : null,
     };
 }
 
@@ -1720,17 +1611,14 @@ export function captureItem(ctx, line, env) {
         if (qty < 1) ctx.fail('INVALID', 'A gained item needs a quantity of at least 1.');
         const note = trimText(labelOf(line, 'note') ?? text, MAX_NOTE);
         const { def, created } = defineByName(ctx, inv, name, env, { note, owner: 'party' });
-        const held = storyItems(ctx, inv, def, qty, created);
+        const held = storyItems(def, qty);
         // Asked before the stacks change: `add` is weight on top of what is carried now.
         const heavy = storyCarry(ctx, def, held.qty, 'party');
-        // The notable item is given as a key item, a stack of its own (addStack): usable, never sold.
         // Given by a story line: the story's own whatever its def (B-a2-2), for what it sells for.
-        const stacks = grantInto(ctx, inv, def, held.qty, 'party', note, held.notable, true);
+        const stacks = grantInto(ctx, inv, def, held.qty, 'party', note, false, true);
         return {
-            summary: (held.notable
-                ? `The party gains ${itemText(def.name, held.qty)}, given as a key item (outside this reply's goods budget; it can't be sold).`
-                : `The party gains ${itemText(def.name, held.qty)}.`) + (heavy ? ENCUMBERED_NOTE : ''),
-            data: { def: def.id, qty: held.qty, owner: 'party', stacks, created, from: labelOf(line, 'from') ?? '', ...(held.notable ? { notable: true, key: true } : {}), ...(heavy ? { encumbered: true } : {}) },
+            summary: `The party gains ${itemText(def.name, held.qty)}.${heavy ? ENCUMBERED_NOTE : ''}`,
+            data: { def: def.id, qty: held.qty, owner: 'party', stacks, created, from: labelOf(line, 'from') ?? '', ...(heavy ? { encumbered: true } : {}) },
             narrate: false,
             ...(held.problem ? { problem: held.problem } : {}),
         };
@@ -1791,8 +1679,8 @@ export function captureItem(ctx, line, env) {
                 if (qty > 1 && !def.stack) ctx.fail('REFUSED', `${def.name} does not stack.`);
                 if (qty === 0) delete inv.stacks[stack.id];
                 else if (qty > stack.qty) {
-                    // A raised count is a gain (r2-1): held to the reply's story limits and the carry limit.
-                    const held = storyItems(ctx, inv, def, qty - stack.qty, false, true);
+                    // A raised count is a gain (r2-1): held to the carry limit.
+                    const held = storyItems(def, qty - stack.qty, true);
                     // Asked before the count moves: `add` is weight on top of what is carried now.
                     if (storyCarry(ctx, def, held.qty, stack.owner)) heavy = true;
                     stack.qty += held.qty;
@@ -1827,16 +1715,15 @@ function itemAsCoin(ctx, line, env, currency) {
     const who = labelOf(line, line.op === '+' ? 'from' : 'to');
     const note = who ? `${line.op === '+' ? 'from' : 'to'} ${trimText(who, 80)}` : '';
     return line.op === '+'
-        ? receiveStory(ctx, env, { owner: 'party', amount, note }, currency)
-        : payStory(ctx, env, { owner: 'party', amount, note }, currency);
+        ? receiveStory(ctx, env, { owner: 'party', amount, note })
+        : payStory(ctx, env, { owner: 'party', amount, note });
 }
 
-// A story line's money, held to the reply's budget (storyCoin); `vouched` for a module's payout
+// A story line's money, counted for the reply (storyCoin); `vouched` for a module's payout
 // that the story alone vouched for (wallet.receive { story: true }).
-function receiveStory(ctx, env, { owner, amount, note }, currency = currencyIn(ctx), vouched = false) {
-    const held = storyCoin(ctx, ctx.draft('inventory'), amount, currency, vouched);
-    const out = receive(ctx, env, { owner, amount: held.amount, note });
-    return held.problem ? { ...out, problem: held.problem } : out;
+function receiveStory(ctx, env, { owner, amount, note }, vouched = false) {
+    storyCoin(ctx, ctx.draft('inventory'), amount, vouched);
+    return receive(ctx, env, { owner, amount, note });
 }
 
 // A story payment can spend up to what the wallet holds.
@@ -1850,7 +1737,7 @@ export function captureCoin(ctx, line, env) {
     if (line?.op !== '+' && line?.op !== '-') {
         ctx.fail('INVALID', `"${line?.op} coin" is not a change the wallet understands; use + coin or - coin.`);
     }
-    // With coins, "3 silver" is read in the smallest unit here, before the reply's budget holds it.
+    // With coins, "3 silver" is read in the smallest unit here, before it is counted for the reply.
     const parsed = parseAmount(written, currencyIn(ctx));
     if (parsed.error) ctx.fail('INVALID', parsed.error);
     const who = labelOf(line, line.op === '+' ? 'from' : 'to');
@@ -2043,18 +1930,17 @@ export const createInventoryQueries = env => ({
             ? totals.get(JSON.stringify([stack.def, stack.owner])) : stack.qty]));
     },
     // { budget, paid, left, vouched }: the story money (`+ coin` lines and modules' `wallet.receive { story:
-    // true }`) the current reply may give, has given and has left (RX-E-2); `vouched` is the part of
-    // `paid` that modules' vouched payouts gave (quest rewards), so a module can tell a reply whose
-    // budget its own payouts used from one whose coin lines did. A null budget and left mean no limit.
-    // The current reply is the one
-    // the asking command is stored on (tools.reply: a capture's carrier, else the head carrier); with
-    // none known, nothing is counted as given yet.
+    // true }`) the current reply has given (RX-E-2); `vouched` is the part of `paid` that modules' vouched
+    // payouts gave (quest rewards), so a module can tell a reply whose money its own payouts gave from one
+    // whose coin lines did. There is no per-reply limit (the story decides what it pays), so `budget` and
+    // `left` are always null; they stay in the answer for modules written when a limit could be set. The
+    // current reply is the one the asking command is stored on (tools.reply: a capture's carrier, else the
+    // head carrier); with none known, nothing is counted as given yet.
     'inventory.storyBudget': (state, args, tools) => {
-        const budget = storyCoinBudget({ settings: () => env.settings(), query: (name, more) => tools.query(name, more) });
         const stored = storedTally(state?.domains?.inventory, tools?.reply?.sid);
         const clicks = tools?.reply?.sid ? clicksOf(state?.domains?.inventory, tools.reply.sid) : 0;
-        const paid = Math.min(budget, tallied(stored?.coin) + clicks);
-        return { budget: Number.isFinite(budget) ? budget : null, paid, left: Number.isFinite(budget) ? Math.max(0, budget - paid) : null, vouched: Math.min(paid, tallied(stored?.vouched) + clicks) };
+        const paid = tallied(stored?.coin) + clicks;
+        return { budget: null, paid, left: null, vouched: Math.min(paid, tallied(stored?.vouched) + clicks) };
     },
     'inventory.wallet': (state, args = {}) => ({ ...(state?.domains?.inventory?.wallets?.[args?.owner ?? 'party'] ?? {}) }),
     // { status: 'found' | 'ambiguous' | 'none', defs: [def copies], stacks: [items of the found def] }

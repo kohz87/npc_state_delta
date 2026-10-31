@@ -16,6 +16,7 @@ import { NO_ROLLS_LINE } from './cue.js';
 import { parsePlanAnswer } from './plan.js';
 import { DICE_VERSION, claimKey, prepare } from './resolve.js';
 import { readSheet } from './read.js';
+import { SOUL_LABEL, soulShortOf } from './soul.js';
 
 /** What the reader's instructions are called in the prompt. */
 export const NOTE_LABEL = 'Reader\'s instructions:';
@@ -29,7 +30,7 @@ export const PRECALL_HEAD = [
     'pace: careful | normal | all',
     `act <who> | skill: <skill> | stat: ${STATS.map(stat => stat.toUpperCase()).join('|')}? | target: <foe> | edge: <-3 to +3 and a short reason>?`,
     `act <who> | stat: ${STATS.map(stat => stat.toUpperCase()).join('|')} | target: <foe> | edge: <-3 to +3 and a short reason>?`,
-    'foe <foe> | target: <who> | defend: <stat>',
+    'foe <foe> | target: <who> | defend: <stat> | skill: <skill>?',
     'foe <foe> | hold',
     'check <who> | skill: <skill> | stat: <stat>? | difficulty: easy|normal|hard|very hard',
     'check <who> | stat: <stat> | difficulty: easy|normal|hard|very hard',
@@ -38,6 +39,7 @@ export const PRECALL_HEAD = [
     '- Roll only what is uncertain. Talk, questions, plans and safe actions: answer none.',
     '- In a fight, give every party member who is not Down an act (companions act on their own) and every foe a target or hold.',
     '- Use only the names listed. A skill brings its own stat and what it uses, so write no stat for a skill the character has; for a skill they lack, or with no skill, write the stat.',
+    '- A foe line may name a skill of the defender, only when one plausibly fits defending (a parry, a dodge, a shield, a counter-draw); otherwise write no skill. It brings its own stat.',
     '- pace: careful when the reader moves slowly or carefully, all when they fight it out, else normal.',
     '- An edge is a small bonus or penalty the situation earns (an ambush +2, a trap -2).',
     '- Outside a fight a risky attempt (sneaking, persuading, climbing, lying) is a check with a difficulty.',
@@ -58,7 +60,7 @@ export function sheetText(sheet) {
         };
         const skills = entry.skills.length ? entry.skills.map(skillText).join(', ') : 'none';
         const down = entry.alive === false || (entry.health === 0 && shown('health')) ? ' DOWN' : '';
-        const head = [shown('soul') ? `class ${word(CLASS_NAMES, entry.soul - 1)}` : ''].filter(Boolean).join('');
+        const head = [shown('soul') ? `${soulShortOf(entry.soulLabel ?? SOUL_LABEL, 'class')} ${entry.soul >= 1 && entry.soul <= CLASS_NAMES.length && entry.soulWord ? entry.soulWord : word(CLASS_NAMES, entry.soul - 1)}` : ''].filter(Boolean).join('');
         const bars = [['health', 'Health', STAGES.health], ['mana', 'Mana', STAGES.mana], ['stamina', 'Stamina', STAGES.stamina]]
             .filter(([key]) => shown(key)).map(([key, label, words]) => `${label} ${word(words, entry[key])}`).join(', ');
         return `${entry.who}${head || down ? ` (${head}${down})` : ''}: ${[stats, bars].filter(Boolean).join('; ')}; skills: ${skills}`;
@@ -93,9 +95,9 @@ export const claimed = (state, key) => state?.meta?.claims?.[claimKey(key)] === 
 /**
  * The pre-call. `deps`: { callModel(prompt, { maxTokens, profile, helper }) → text, chat() → SillyTavern's chat array,
  * chatId() → the open chat's id, hold (plan.js createPlanHold), problem(entry) (the turn's Problems list), moduleId,
- * timeoutMs, timer }. Returns { beforeGenerate(view, info) → { commands, lines? } | { lines } | null, afterCapture(view) }.
+ * timeoutMs, timer, skip { peek() → whether the next reply is to go out with no dice, clear() } (start.js: "Send without the RPG for now") }. Returns { beforeGenerate(view, info) → { commands, lines? } | { lines } | null, afterCapture(view) }.
  */
-export function createPrecall({ callModel, chat, chatId, hold, problem = null, moduleId = 'story-block', timeoutMs = TIMEOUT_MS, timer }) {
+export function createPrecall({ callModel, chat, chatId, hold, problem = null, moduleId = 'story-block', timeoutMs = TIMEOUT_MS, timer, skip: noDice = { peek: () => false, clear: () => {} } }) {
     const skip = (sheet, message) => {
         try { problem?.({ module: moduleId, code: 'ROLLS_SKIPPED', quiet: true, message: `Rolls skipped for this reply: ${message} Swipe to try again.` }); } catch { /* the Problems list is optional */ }
         // While a fight is on the narrator is told to keep it undecided; outside one there is nothing to hold back.
@@ -124,6 +126,8 @@ export function createPrecall({ callModel, chat, chatId, hold, problem = null, m
         if (view?.feature?.(LEAN_RPG_FEATURE) !== true) return null;
         if (info?.commit === false) return null;
         if (!['normal', 'regenerate', 'swipe'].includes(normalizeType(info?.type))) return null;
+        // The reader chose to send the first message without the RPG: that reply has no dice (the flag goes when the reply is captured).
+        if (normalizeType(info?.type) === 'normal' && noDice.peek()) return null;
         if (readSettings(view, moduleId)[ROLLS_SETTING] === 'off') return null;
         const sheet = readSheet(view.state);
         if (!sheet.characters.length) return null;
@@ -160,6 +164,7 @@ export function createPrecall({ callModel, chat, chatId, hold, problem = null, m
     // not there writes nothing.
     function afterCapture() {
         hold.clear();
+        noDice.clear();
     }
 
     return { beforeGenerate, afterCapture };

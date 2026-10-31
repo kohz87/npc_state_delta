@@ -66,6 +66,15 @@ export function contentOf(packs, kind, { pack = null } = {}) {
 }
 
 /**
+ * The Rank the first enabled pack (in list order) that declares one gives {{user}}'s look (`content.you.rank`, MODULES §F126), as
+ * `{ pack, label }`, or null: a story with no such pack has no Rank.
+ */
+export function youRankOf(packs) {
+    const pack = packs.find(entry => entry.content?.you?.rank?.label);
+    return pack ? { pack: pack.id, label: pack.content.you.rank.label } : null;
+}
+
+/**
  * The calendar for the story clock: the first enabled pack (in list order) that has one, as
  * `{ pack, era, months: [{ name, days }], start: { year, month, day, hour, minute } | null }`,
  * or null. `start.month` is the month's name. Calendars are not mixed across packs.

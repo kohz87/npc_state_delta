@@ -1,7 +1,8 @@
 // The game view's header (UI stage 5a): the `ss.hero` block at the top of every screen of the game view, read from the
 // head state. The lead is the party's own character (`party.pc`; without a party module, the reader's persona
 // name), its HP, MP and SP pools, the level under the Terms' word and its conditions. The scene is `scene.place`,
-// `scene.weather` and the story time (`director.time`, Story Director; formatted by the host's `fmt.time`). Every
+// `scene.weather` and the story time (`director.time`, Story Director; formatted by the host's `fmt.time`), and, while
+// `story-block.you` is on, the persona's rank, what they wear and how they are (`scene.you`, with the pencil's command). Every
 // read goes through `query(name, args)` and falls back to nothing: a missing module shows no bar, not an error.
 //
 // The portrait is the first safe picture of: the persona's avatar (`/thumbnail?type=persona&file=…`), the character
@@ -148,7 +149,12 @@ export function gameHeroProps({ state = null, query = null, context = {}, format
     const npc = name ? pictureOf(safeQuery(query, 'npc.portrait', { name })) : '';
     const place = safeQuery(query, 'scene.place', {});
     const weather = safeQuery(query, 'scene.weather', {});
+    // `scene.you` answers null while the feature is off (or with no Story Block): no rows then, not empty ones.
+    const you = safeQuery(query, 'scene.you', {});
     const time = safeQuery(query, 'director.time', {});
+    // The trip Story Director keeps (`atlas.trip`, 2.5): its one-line `row`; null with no trip, with the feature off or with an older Story Director.
+    const trip = safeQuery(query, 'atlas.trip', {});
+    const travel = textOf(trip?.row).slice(0, 200);
     const minutes = count(time?.minutes);
     const bars = [];
     for (const [kind, label] of [['hp', 'HP'], ['mp', 'MP'], ['sp', 'SP']]) {
@@ -176,5 +182,7 @@ export function gameHeroProps({ state = null, query = null, context = {}, format
         time: when.slice(0, 40),
         weather: textOf(weather?.text).slice(0, 40),
         statuses,
+        ...(you && typeof you === 'object' ? { you: { ...(textOf(you.rankLabel) ? { rank: textOf(you.rank).slice(0, 120), rankLabel: textOf(you.rankLabel).slice(0, 30) } : {}), wearing: textOf(you.wearing).slice(0, 120), condition: textOf(you.condition).slice(0, 120), command: 'scene.you' } } : {}),
+        ...(travel ? { travel } : {}),
     };
 }

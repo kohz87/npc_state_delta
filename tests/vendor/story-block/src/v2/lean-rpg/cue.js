@@ -50,7 +50,7 @@ export function lineText(line, { compact = false, names = 0, shown = name => nam
         if (line.pc.statHidden && !plain) return `${who} — ${line.skill ? cut(line.skill, names) : 'check'}, ${line.difficulty}: ${word} ${numbers(line)}`;
         return `${who} — ${cut(line.skill ?? line.pc.stat.toUpperCase(), names)} (${line.pc.stat.toUpperCase()}), ${line.difficulty}: ${word} ${numbers(line)}`;
     }
-    if (line.kind === 'foe') return `${shown(line.foe.name)} attacks ${who}: ${word} for ${who} ${numbers(line)}`;
+    if (line.kind === 'foe') return `${shown(line.foe.name)} attacks ${who}${line.skill ? ` (${cut(line.skill, names)})` : ''}: ${word} for ${who} ${numbers(line)}`;
     return `${who} → ${shown(line.foe.name)}${line.skill ? ` (${cut(line.skill, names)})` : ''}: ${word} ${numbers(line)}`;
 }
 

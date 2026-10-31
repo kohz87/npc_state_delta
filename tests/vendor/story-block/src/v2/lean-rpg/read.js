@@ -12,6 +12,7 @@
 // out, with a plain `problems` line.
 import { FOE_SLOTS, SKILL_SLOTS, STAGES, STATS, USES } from './names.js';
 import { dmHidden } from '../data-modules/schema.js';
+import { soulReading } from './soul.js';
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const int = value => (Number.isSafeInteger(value) ? value : null);
@@ -79,14 +80,16 @@ const hiddenOf = definition => new Set(Object.entries(isObject(definition?.state
 const shownFields = (fields, hidden) => (hidden.size ? Object.fromEntries(Object.entries(fields).filter(([key]) => !(hidden.has(key) && TEXT_KEY.test(key)))) : fields);
 
 // `own`: the block's name, which stands in for a hidden Who (as the tail does).
-function character(id, fields, own = '', hidden = new Set()) {
+function character(id, fields, own = '', hidden = new Set(), schema = null) {
     const who = text(fields.who) || text(own);
     if (!who) return null;
     const stats = Object.fromEntries(STATS.map(stat => [stat, int(fields[stat])]));
+    // What the pack calls the Soul Class field and its current value (soul.js), for the planner's lines and the odds.
+    const soul = int(fields.soul) ?? 1, reading = soulReading(schema);
     return {
         module: id, who, key: fold(who),
         health: int(fields.health), mana: int(fields.mana), stamina: int(fields.stamina),
-        stats, soul: int(fields.soul) ?? 1, xp: int(fields.xp), points: int(fields.points),
+        stats, soul, soulLabel: reading.label, soulWord: reading.word(soul), xp: int(fields.xp), points: int(fields.points),
         alive: fields.alive !== false,
         skills: [],
         hidden: [...hidden].filter(key => !TEXT_KEY.test(key)),
@@ -145,7 +148,9 @@ export function readSheet(state) {
         if (!raw || typeof role !== 'string') continue;
         const hidden = hiddenOf(definition), fields = shownFields(raw, hidden);
         if (role === 'character') {
-            const found = character(id, fields, hidden.has('who') ? definition.name : '', hidden);
+            // A companion who left the party (`left`) is kept on the Party tab but is not on the sheet the dice are rolled for.
+            if (fields.left === true) continue;
+            const found = character(id, fields, hidden.has('who') ? definition.name : '', hidden, isObject(definition.state) ? definition.state.soul : null);
             if (!found) sheet.problems.push(`The Character block "${id}" has no name in its Who field, so it is left out.`);
             else if (sheet.characters.some(other => other.key === found.key)) sheet.problems.push(`Two Character blocks are called ${found.who}; only the first is used.`);
             else sheet.characters.push(found);

@@ -10,6 +10,7 @@ import { precallPrompt } from '../precall.js';
 import { COMBAT_PROMPT } from '../templates.js';
 import { RPG_STRINGS, fill } from '../strings.js';
 import { rpgBlocks } from './party-data.js';
+import { SOUL_LABEL, soulShortOf } from '../soul.js';
 
 const S = RPG_STRINGS.settings;
 
@@ -55,7 +56,7 @@ export function oddsView(state, own, rules) {
     const sheet = readSheet(state);
     const subject = oddsSubject(sheet, own, { rankNames: RANK_NAMES, soulNames: CLASS_NAMES, fold });
     if (!subject) return null;
-    const words = { who: subject.who, stat: subject.stat.toUpperCase(), value: subject.statValue, soul: subject.soulName, rank: subject.rankName };
+    const words = { who: subject.who, stat: subject.stat.toUpperCase(), value: subject.statValue, soul: subject.soulName, rank: subject.rankName, label: soulLabelOfSheet(sheet, own), short: soulShortOf(soulLabelOfSheet(sheet, own), 'Class') };
     const chosen = presetOf(rules);
     return {
         label: fill(subject.skill ? S.oddsFor : S.oddsForUntrained, words),
@@ -63,6 +64,17 @@ export function oddsView(state, own, rules) {
         compare: DIFFICULTIES.slice(0, 3).filter(name => name !== chosen).map(name => ({ name, ...pick(subjectOdds(PRESETS[name], subject)) })),
     };
 }
+
+/** What the reader's own character calls the Soul Class (their name's Character block, else the first), else "Soul Class". */
+export function soulLabelFor(state, own) {
+    return soulLabelOfSheet(readSheet(state), own);
+}
+const soulLabelOfSheet = (sheet, own) => {
+    const characters = sheet?.characters ?? [];
+    const mine = own ? characters.find(entry => fold(entry.who) === fold(own)) : null;
+    return (mine ?? characters[0])?.soulLabel ?? SOUL_LABEL;
+};
+
 const pick = ({ success, cost, fail }) => ({ success, cost, fail });
 
 /** The roll planner's prompt as it is built for this chat now: the fixed part, the reader's words, the party and foes, and a stand-in for the next message. */

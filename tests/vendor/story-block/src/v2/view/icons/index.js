@@ -17,7 +17,6 @@ export const TAB_ICONS = Object.freeze({
     'story-block/scene': 'ph-map-pin',
     'story-director/chronicle': 'ph-book-open',
     'story-director/director': 'ph-film-slate',
-    'story-block/blocks': 'ph-package',
     'npc-state-delta/cast': 'ph-identification-card',
     home: 'ph-house',
     party: 'ph-users-three',

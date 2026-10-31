@@ -13,14 +13,18 @@ import { stCallModel, stChat, stChatId } from '../assist/st-adapter.js';
 import { TIMEOUT_MS } from '../assist/common.js';
 import { LEAN_RPG_FEATURE, RESOLVE, ROLLS, ROLLS_SETTING } from './names.js';
 import { createPlanHold } from './plan.js';
+import { JOIN_NO, joinCard, joinOffers, partyOf } from './join.js';
 import { createPrecall } from './precall.js';
 import { leanRpgGuard, resolve, rollsOf } from './resolve.js';
+import { skipOf } from './start.js';
 
 export * from './names.js';
-export { CUSTOM_SETTING, DIFFICULTIES, DIFFICULTY_SETTING, NOTE_MAX, NOTE_SETTING, PRESETS, RULE_KEYS, RULE_RANGES, STANDARD, difficultyOf, normalizeRules, oddsFor, oddsSubject, plannerNoteOf, presetOf, rulesFromSettings, sameRules, subjectOdds } from './rules.js';
+export { CUSTOM_SETTING, DIFFICULTIES, DIFFICULTY_SETTING, NOTE_MAX, NOTE_SETTING, PRESETS, RULE_KEYS, RULE_RANGES, STANDARD, STAT_ABOVE, difficultyOf, normalizeRules, oddsFor, oddsSubject, plannerNoteOf, presetOf, rulesFromSettings, sameRules, statShare, subjectOdds } from './rules.js';
 export { createPlanHold, parsePlanAnswer, planIsEmpty, validatePlan } from './plan.js';
 export { characterOf, fold, matchCharacter, matchFoe, matchName, matchSkill, readSheet } from './read.js';
 export { NO_ROLLS_LINE, OUTCOME_WORD, cueText, fitCue, lineText } from './cue.js';
+export { JOIN_ADD, JOIN_NO, checkJoin, joinCard, joinDefinitions, joinDraft, joinGrammar, joinMode, joinOffers, partyCap, partyOf, readJoin, soulOf } from './join.js';
+export { setStartNotes, skipOf, startNotes } from './start.js';
 export { PRECALL_HEAD, claimed, createPrecall, precallPrompt, sheetText } from './precall.js';
 export { DICE_VERSION, RESULT_VERSION, claimKey, leanRpgGuard, outcomeOf, positionalDice, prepare, resolve, rollPrepared, rollsOf } from './resolve.js';
 
@@ -29,6 +33,9 @@ const HOOK_MARGIN_MS = 2000;
 
 /** The part's setting (Story Block's own bucket): when the pre-call plans the rolls. */
 export const DEFAULT_SETTINGS = Object.freeze({ [ROLLS_SETTING]: ROLLS[0] });
+
+/** The offers a reply's `+ party` lines made under Ask (the card under the reply reads them): `rpg.joins { index? }` → [{ name, about, soul, best }] on the head reply (or the reply `index`). */
+export const JOINS_QUERY = 'rpg.joins';
 
 /** The query B reads a reply's rolls through: `rpg.rolls { index? }` → { receipt, result, summary } | null (the head reply by default). */
 export const ROLLS_QUERY = 'rpg.rolls';
@@ -44,12 +51,25 @@ export const ROLLS_QUERY = 'rpg.rolls';
  * (domains/index.js routes the guards of that predicate to it).
  */
 export function createLeanRpgPart({ callModel = stCallModel, chat = stChat, chatId = stChatId, metadata = () => null, problem = null, moduleId = 'story-block', timeoutMs, timer } = {}) {
-    const precall = createPrecall({ callModel, chat, chatId, hold: createPlanHold({ metadata }), problem, moduleId, timeoutMs, timer });
+    const precall = createPrecall({ callModel, chat, chatId, hold: createPlanHold({ metadata }), problem, moduleId, timeoutMs, timer, skip: skipOf(metadata) });
     return {
         // A prelude: previewed before the reply and stored on it before its story lines (turn.js). Not tied to the
         // feature, so a Re-read of a reply that has rolls keeps them whatever the feature says now.
-        commands: { [RESOLVE]: Object.assign((ctx, payload) => resolve(ctx, payload), { prelude: true, internal: true }) },
-        queries: { [ROLLS_QUERY]: Object.assign((_state, args, tools) => rollsOf(tools?.receipts?.() ?? [], Number.isInteger(args?.index) ? args.index : tools?.reply?.index), { feature: LEAN_RPG_FEATURE }) },
+        commands: {
+            [RESOLVE]: Object.assign((ctx, payload) => resolve(ctx, payload), { prelude: true, internal: true }),
+            // "No" on a companion's card (join.js): the reader's answer, kept in the reply's own receipt like the offer it answers.
+            [JOIN_NO]: Object.assign((ctx, payload) => {
+                if (ctx.cause !== 'ui') ctx.fail('REFUSED', 'Only the reader answers a companion\'s card.');
+                const name = typeof payload?.name === 'string' ? payload.name.replace(/\s+/g, ' ').trim().slice(0, 40) : '';
+                if (!name) ctx.fail('INVALID', 'Which companion?');
+                return { summary: `No to ${name} joining the party.`, narrate: false, data: { join: { op: 'no', name } } };
+            }, { feature: LEAN_RPG_FEATURE }),
+        },
+        // The card under the head reply for a companion who may join (join.js): read from the reply's own receipts, so it goes with the reply.
+        cards: { 'rpg-join': { feature: LEAN_RPG_FEATURE, for: (state, _message, ctx) => joinCard(ctx?.query?.(JOINS_QUERY, Number.isInteger(ctx?.index) ? { index: ctx.index } : {}) ?? [], state) } },
+        queries: {
+            [JOINS_QUERY]: Object.assign((state, args, tools) => joinOffers(tools?.receipts?.() ?? [], Number.isInteger(args?.index) ? args.index : tools?.reply?.index, partyOf(state)), { feature: LEAN_RPG_FEATURE }),
+            [ROLLS_QUERY]: Object.assign((_state, args, tools) => rollsOf(tools?.receipts?.() ?? [], Number.isInteger(args?.index) ? args.index : tools?.reply?.index), { feature: LEAN_RPG_FEATURE }) },
         // The planner's model call has its own limit (timeoutMs, Assist's 20 s by default); the hook is given a little longer, so
         // its own skip path (quiet ROLLS_SKIPPED, the no-rolls cue) runs on a slow answer and the turn's generic limit never cuts in.
         hooks: {

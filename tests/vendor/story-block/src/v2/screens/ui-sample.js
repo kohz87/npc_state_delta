@@ -41,7 +41,7 @@ export const UI_SAMPLE_FORM = Object.freeze({
         notes: Object.freeze({ type: 'text', multiline: true, label: 'Narrator notes', help: 'Anything the narrator should keep in mind.', max: 160 }),
         pace: Object.freeze({ type: 'choice', form: 'chips', label: 'Pace', options: Object.freeze([Object.freeze({ value: 'slow', label: 'Slow' }), Object.freeze({ value: 'steady', label: 'Steady' }), Object.freeze({ value: 'fast', label: 'Fast' })]) }),
         pack: Object.freeze({ type: 'text', label: 'Pack', help: 'Set by the pack in use.', readOnly: true, shows: () => 'Ersveil: Bluewatch' }),
-        budget: Object.freeze({ type: 'int', form: 'slider', min: 0, max: 200, unit: ' pennies', label: 'Money: Story coin per reply', help: 'The most coin one reply\'s story lines can give. Quest rewards count toward it.', group: 'Money' }),
+        budget: Object.freeze({ type: 'int', form: 'slider', min: 0, max: 200, unit: ' pennies', label: 'Money: Starting purse', help: 'The coins the party starts with.', group: 'Money' }),
         prices: Object.freeze({ type: 'choice', label: 'Prices by place', group: 'Money', options: Object.freeze([Object.freeze({ value: 'by-place', label: 'Settlement type × surroundings (±30%)' }), Object.freeze({ value: 'flat', label: 'Flat prices everywhere' })]) }),
         coins: Object.freeze({
             type: 'list', label: 'Coins', group: 'Money', help: 'One coin per row, smallest first. The story\'s "40 silver" is paid as 400 pennies.',

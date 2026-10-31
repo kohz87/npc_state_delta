@@ -502,7 +502,7 @@ export function validateDataModules(value, { packId, capabilities = [], definiti
         if (definition.show !== undefined) {
             const show = definition.show;
             if (!dmObject(show) || Object.keys(show).some(key => !['tab', 'card', 'tabName', 'icon'].includes(key))
-                || typeof show.tab !== 'boolean' || typeof show.card !== 'boolean' || (!show.tab && !show.card)
+                || typeof show.tab !== 'boolean' || typeof show.card !== 'boolean'
                 || typeof show.tabName !== 'string' || !show.tabName.trim() || [...show.tabName].length > 24 || !hasIcon(show.icon)) add('DM_SCHEMA', `${at}.show`, STRINGS.blocks.showOptions);
             else show.tabName = oneLine(show.tabName);
         }

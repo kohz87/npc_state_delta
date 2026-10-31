@@ -1,7 +1,7 @@
 // The numbers a roll is made with, and the odds they give (Settings → RPG, mockup section 6).
 //
 // A roll uses six numbers: the foe's base, what a Soul Class adds (×1, ×2 or ×3), how much of a stat counts (half, or a
-// third), how far short a total may fall and still be "success at a cost", the margin that makes a round decisive, and
+// third, or the stat − 5: "full above 10"), how far short a total may fall and still be "success at a cost", the margin that makes a round decisive, and
 // the most exchanges one reply may hold. Standard is the formula as it always was (names.js FORMULA and LIMITS); Gentle and
 // Harsh move the foe's base and the "at a cost" window; Custom is what the reader typed (each number held to its range).
 //
@@ -13,7 +13,9 @@ import { FORMULA, LIMITS } from './names.js';
 /** The numbers, in the order they are stored and shown. */
 export const RULE_KEYS = Object.freeze(['foeBase', 'classWeight', 'statDivisor', 'costMargin', 'decisiveMargin', 'roundCap']);
 
-/** What each number may be: whole numbers, `min` to `max`. A stat divisor is 2 or 3, a Soul Class weight 1, 2 or 3. */
+/**
+ * What each number may be: whole numbers, `min` to `max`. A stat divisor is 2 or 3 (or STAT_ABOVE, below), a Soul Class weight 1, 2 or 3.
+ */
 export const RULE_RANGES = Object.freeze({
     foeBase: Object.freeze({ min: 0, max: 15 }),
     classWeight: Object.freeze({ min: 1, max: 3 }),
@@ -22,6 +24,16 @@ export const RULE_RANGES = Object.freeze({
     decisiveMargin: Object.freeze({ min: 4, max: 15 }),
     roundCap: Object.freeze({ min: 1, max: 8 }),
 });
+
+/**
+ * The stat divisor that stands for "full above 10": the stat adds its value − 5 (10 → +5, 14 → +9, 20 → +15, 8 → +3). It is a value of
+ * `statDivisor`, so a set of numbers still has the same six keys and one recorded before it existed reads exactly as it did.
+ */
+export const STAT_ABOVE = 0;
+export const STAT_ABOVE_FROM = 5;
+
+/** What a stat of `value` adds under `rules`: half or a third of it (rounded down), or, for STAT_ABOVE, the stat − 5. */
+export const statShare = (value, rules) => (rules.statDivisor === STAT_ABOVE ? value - STAT_ABOVE_FROM : Math.floor(value / rules.statDivisor));
 
 const preset = (foeBase, costMargin) => Object.freeze({
     foeBase, classWeight: 2, statDivisor: 2, costMargin, decisiveMargin: LIMITS.decisiveMargin, roundCap: LIMITS.roundCap,
@@ -52,7 +64,7 @@ const whole = (value, range, fallback) => (Number.isSafeInteger(value) && value 
  */
 export function normalizeRules(value) {
     const given = value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {};
-    return Object.fromEntries(RULE_KEYS.map(key => [key, whole(given[key], RULE_RANGES[key], STANDARD[key])]));
+    return Object.fromEntries(RULE_KEYS.map(key => [key, key === 'statDivisor' && given[key] === STAT_ABOVE ? STAT_ABOVE : whole(given[key], RULE_RANGES[key], STANDARD[key])]));
 }
 
 /** The difficulty the settings say: a known word, else Standard. */
@@ -101,7 +113,7 @@ export function oddsFor(rules, { bonus, foeClass }) {
  * Who the odds are shown for: the reader's own character (by name, else the first Character block), the skill they are best
  * at (highest rank, the first on a tie; none: their best stat untrained), against a foe of their own Soul Class.
  * `sheet` is readSheet's answer, `own` the reader's name, `names` = { rank: [...], soul: [...] } the words for ranks and classes.
- * → null (no character), else { who, label, stat, statValue, soul, rank, rankName, soulName, skill, bonus (under `rules`), foeClass }.
+ * → null (no character), else { who, label, stat, statValue, soul, rank, rankName, soulName (the Character block's own word for it), skill, bonus (under `rules`), foeClass }.
  */
 export function oddsSubject(sheet, own, { rankNames, soulNames, fold }) {
     const characters = sheet?.characters ?? [];
@@ -115,13 +127,13 @@ export function oddsSubject(sheet, own, { rankNames, soulNames, fold }) {
     const rank = best?.rank ?? 0;
     return {
         who: who.who, stat, statValue: who.stats[stat], soul: who.soul, rank, skill: best?.name ?? null, foeClass: who.soul,
-        rankName: best ? rankNames[rank] ?? String(rank) : '', soulName: soulNames[who.soul - 1] ?? String(who.soul),
+        rankName: best ? rankNames[rank] ?? String(rank) : '', soulName: who.soulWord ?? soulNames[who.soul - 1] ?? String(who.soul),
     };
 }
 
 /** The bonus the subject rolls with under `rules` (the stat's share, the Soul Class and the skill rank), and the odds against a foe of their class. */
 export function subjectOdds(rules, subject) {
     const r = normalizeRules(rules);
-    const bonus = Math.floor(subject.statValue / r.statDivisor) + r.classWeight * subject.soul + subject.rank;
+    const bonus = statShare(subject.statValue, r) + r.classWeight * subject.soul + subject.rank;
     return { bonus, ...oddsFor(r, { bonus, foeClass: subject.foeClass }) };
 }

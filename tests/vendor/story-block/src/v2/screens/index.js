@@ -17,14 +17,13 @@ import { sceneScreen, SCENE_SCREEN_ID } from './scene.js';
 import { changesCardScreen, changesDigest, changesSummary, replyCardLines, CHANGES_CARD_SCREEN_ID, REPLY_LINES_MAX } from './changes-card.js';
 import { homeScreen, HOME_SCREEN_ID } from './home.js';
 import { inspectorScreen, INSPECTOR_SCREEN_ID } from './inspector.js';
-import { blocksScreen, BLOCKS_SCREEN_ID } from './blocks.js';
 import { BASE_CSS, RARITY_THEME } from './style.js';
 
 export {
-    inventoryScreen, sceneScreen, changesCardScreen, homeScreen, inspectorScreen, blocksScreen,
-    INVENTORY_SCREEN_ID, SCENE_SCREEN_ID, CHANGES_CARD_SCREEN_ID, HOME_SCREEN_ID, INSPECTOR_SCREEN_ID, BLOCKS_SCREEN_ID,
+    inventoryScreen, sceneScreen, changesCardScreen, homeScreen, inspectorScreen,
+    INVENTORY_SCREEN_ID, SCENE_SCREEN_ID, CHANGES_CARD_SCREEN_ID, HOME_SCREEN_ID, INSPECTOR_SCREEN_ID,
     changesDigest, changesSummary, replyCardLines, REPLY_LINES_MAX, KIND_TITLES, BASE_CSS, RARITY_THEME,
 };
 
 /** The default screens, in the order the game view should offer them (home first). */
-export const screens = Object.freeze([homeScreen, inventoryScreen, sceneScreen, changesCardScreen, inspectorScreen, blocksScreen]);
+export const screens = Object.freeze([homeScreen, inventoryScreen, sceneScreen, changesCardScreen, inspectorScreen]);

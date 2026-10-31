@@ -43,6 +43,10 @@ export const CORE_FEATURE = Object.freeze({
     chatter: 'story-block.chatter',
     // The scene's weather line (`~ weather`, src/v2/domains/scene.js, MODULES §F120).
     weather: 'story-block.weather',
+    // What {{user}} wears and how they are (`~ you`, src/v2/domains/scene.js, MODULES §F126).
+    you: 'story-block.you',
+    // The party's mounts (`+ mount`, src/v2/domains/mounts.js): the pace they travel at.
+    mounts: 'story-block.mounts',
     // The RPG (src/v2/lean-rpg/, SPEC_RPG.md): automatic rolls, the Party tab, the battle log.
     leanRpg: 'story-block.rpg',
 });

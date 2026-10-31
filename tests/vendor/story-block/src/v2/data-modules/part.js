@@ -13,9 +13,15 @@ import { STRINGS, fill } from '../strings.js';
 import { blockTabScreen } from './block-screen.js';
 import { roleTail } from '../lean-rpg/tail.js';
 import { LEAN_RPG_FEATURE } from '../lean-rpg/names.js';
+import { checkJoin, joinDefinitions, joinGrammar, joinMode, partyOf, readJoin, soulNaming } from '../lean-rpg/join.js';
+import { RPG_EXTRAS, extraDefinitions, extraName, extrasPlan } from '../lean-rpg/view/wizard-data.js';
+import { fold } from '../lean-rpg/read.js';
+import { CLASS_NAMES } from '../lean-rpg/names.js';
+import { RPG_STRINGS } from '../lean-rpg/strings.js';
 
 const E = STRINGS.editMessages;
 const B = STRINGS.blocks;
+const J = RPG_STRINGS.join;
 // The most fields one multi-field `dm.set` takes (a sheet's seven stats and its points fit with room to spare).
 const SET_FIELDS = 16;
 
@@ -160,17 +166,29 @@ export function replayInputs(state, { module, subject = 'chat', reads = [], impo
 export function dataModuleGuard(view, info) {
     try {
         const { guard, recorded, source } = info, predicate = guard?.predicate;
-        if (guard?.owner !== 'story-block' || guard.version !== 2 || !['dm.pin', 'dm.attach', 'dm.migrate', 'dm.act', 'dm.set', 'dm.tick', 'dm.settle', 'dm.define', 'dm.redefine', 'dm.remove'].includes(predicate?.kind)
+        if (guard?.owner !== 'story-block' || guard.version !== 2 || !['dm.pin', 'dm.attach', 'dm.migrate', 'dm.act', 'dm.set', 'dm.tick', 'dm.settle', 'dm.define', 'dm.redefine', 'dm.remove', 'dm.join'].includes(predicate?.kind)
             || !dmObject(recorded) || hashJson(recorded.source) !== hashJson(source)) return { ok: false, reason: 'Malformed data module guard.' };
         const domain = view.state.domains?.dataModules;
-        if (predicate.kind === 'dm.pin' || predicate.kind === 'dm.define') {
+        if (predicate.kind === 'dm.pin' || predicate.kind === 'dm.define' || predicate.kind === 'dm.join') {
+            // A joining companion is two blocks made as one action (the Character, then the Skills block kept in `decision.more`, then the
+            // Combat rules and Foes blocks a story's first character brings when it has none).
+            const join = predicate.kind === 'dm.join', more = join ? recorded.decision?.more : [];
+            if (join && (!Array.isArray(more) || more.length < 1 || more.length > 1 + RPG_EXTRAS.length || !more.every(dmObject))) return { ok: false, reason: 'Malformed data module guard.' };
             if (domain?.active?.[predicate.module] || recorded.pin.interpreter !== 1 || recorded.pin.definition.id !== predicate.module
                 || hashOf(recorded.pin.definition) !== predicate.hash) return { ok: false, reason: 'Pin selection or checked definition changed.' };
-            if (activeCount(domain) >= L.pins) return { ok: false, reason: 'Data module limit changed.' };
-            if (predicate.kind === 'dm.define' && (recorded.pin.packId !== 'chat' || recorded.pin.packVersion !== '0' || recorded.pin.packHash !== null
-                || recorded.pin.definition.pack !== 'chat' || predicate.module !== `pack.chat/${recorded.pin.definition.slug}` || recorded.pin.definition.scope !== 'chat'
-                || blockCount(domain) >= L.definitions)) return { ok: false, reason: 'Block selection or chat limit changed.' };
+            if (activeCount(domain) + more.length >= L.pins) return { ok: false, reason: 'Data module limit changed.' };
+            const chatBlock = (pin, module) => pin?.packId === 'chat' && pin.packVersion === '0' && pin.packHash === null && pin.definition?.pack === 'chat'
+                && module === `pack.chat/${pin.definition.slug}` && pin.definition.scope === 'chat';
+            if ((predicate.kind !== 'dm.pin' && (!chatBlock(recorded.pin, predicate.module) || blockCount(domain) + more.length >= L.definitions))) return { ok: false, reason: 'Block selection or chat limit changed.' };
+            // A companion joined a story that had blocks: if every one of them is gone (a Re-read of the reply that made them), the join is skipped
+            // with its own reason instead of failing to find the place it was written in.
+            if (join && recorded.decision?.base === true && !domain) return { ok: false, reason: 'The blocks this story had when the companion joined are gone; Re-read this action.' };
             checkedTarget(recorded.pin.definition, view.state);
+            for (const second of more) {
+                if (domain?.active?.[second.module] || second.module === predicate.module || second.pin?.interpreter !== 1 || second.pin.definition?.id !== second.module
+                    || hashOf(second.pin.definition) !== second.hash || !chatBlock(second.pin, second.module)) return { ok: false, reason: 'Block selection or chat limit changed.' };
+                checkedTarget(second.pin.definition, view.state);
+            }
         } else {
             const active = domain?.active?.[predicate.module];
             if (!active || !activeDefinition(view.state, predicate.module) || hashOf(activeDefinition(view.state, predicate.module)) !== active.hash) return { ok: false, reason: 'The required frozen pin is missing or damaged.' };
@@ -302,9 +320,15 @@ export function blockCards(state) {
 }
 const blockCardSlots = Object.fromEntries(Array.from({ length: CARD_SLOTS }, (_, at) => [`block-card-${at + 1}`, { for: state => blockCards(state)[at]?.card ?? null }]));
 
-export function createDataModulesPart({ packs, state: head = () => null, lifecycle = () => null, restore = () => ({ state: 'idle' }) } = {}) {
+export function createDataModulesPart({ packs, state: head = () => null, lifecycle = () => null, restore = () => ({ state: 'idle' }), settings = () => ({}), persona = () => '' } = {}) {
     // The runtime's late-bound readers may not exist yet while the definition registers: read as "no state" until they do.
     const state = () => { try { return head(); } catch { return null; } };
+    // Whether a name is the reader's own (the persona's): the Party tab shows that character as You.
+    const isReader = name => {
+        let who = '';
+        try { who = String(persona() ?? '').replace(/\s+/g, ' ').trim(); } catch { who = ''; }
+        return Boolean(who) && fold(name) === fold(who);
+    };
     function offers() {
         const where = new Map();
         try { for (const entry of packs?.list?.() ?? []) where.set(entry.id, entry.source === 'lorebook' ? 'a lorebook' : String(entry.origin ?? '')); } catch { /* no list: no origin */ }
@@ -458,6 +482,80 @@ export function createDataModulesPart({ packs, state: head = () => null, lifecyc
         answer.data.edit = true;
         return answer;
     }
+    // ---- companions who join (lean-rpg/join.js): `+ party` makes a Character and an empty Skills block as ONE guarded action ('dm.join'), `- party` sets `left` ----
+    function makeParty(ctx, request, soul, call, { added = false } = {}) {
+        if (restore()?.state === 'pending') refuse('RESTORE_PENDING', '', E.restorePending);
+        const prefix = stateOf(ctx), domain = prefix.domains.dataModules;
+        const made = joinDefinitions(request, { used: Object.keys(domain?.active ?? {}), soul });
+        // The story's first character also brings the Combat rules and Foes blocks it lacks, as far as they fit (nothing is refused for them).
+        const first = partyOf(prefix).length === 0, plan = first ? extrasPlan(prefix) : { add: [], skipped: [] };
+        const extras = extraDefinitions(plan.add, { used: [...Object.keys(domain?.active ?? {}), made.character.slug, made.skills.slug] });
+        const catalog = Object.keys(domain?.active ?? {}).map(id => activeDefinition(prefix, id)).filter(Boolean);
+        const checked = validateDataModules([made.character, made.skills, ...extras], { packId: 'chat', capabilities: ['data-modules-v1', 'story-director'], definitions: catalog });
+        if (!checked.ok) refuse(checked.errors[0].code, checked.errors[0].path, checked.errors[0].message);
+        if (blockCount(domain) + 2 > L.definitions) refuse('DM_BUDGET', '', B.blockLimit);
+        if (activeCount(domain) + 2 > L.pins) refuse('DM_BUDGET', '', B.limit);
+        const generation = Math.max(ctx.rev, 1), draft = draftOf(ctx);
+        const pins = checked.definitions.map(definition => ({ definition, hash: hashOf(definition), pin: { definition, packId: 'chat', packVersion: '0', packHash: null, interpreter: 1 } }));
+        for (const { definition, hash, pin } of pins) {
+            draft.pins[hash] = copy(pin);
+            draft.active[definition.id] = { hash, generation, subjects: ['chat'] };
+            draft.instances[definition.id] = { chat: newInstance(definition, inputsOf(prefix, definition)) };
+        }
+        const [head, ...rest] = pins;
+        const recorded = guard(ctx, prefix, { kind: 'dm.join', module: head.definition.id, hash: head.hash, generation, imports: [],
+            decision: { subjects: ['chat'], inputs: {}, previous: null, base: Boolean(domain && Object.keys(domain.active ?? {}).length),
+                more: rest.map(entry => ({ module: entry.definition.id, hash: entry.hash, generation, pin: entry.pin })) }, pin: head.pin, bound: true });
+        const left = plan.skipped.length ? ` ${fill(J.noExtras, { list: plan.skipped.map(item => extraName(item.role)).join(', ') })}` : '';
+        const answer = finish(ctx, prefix, draft, recorded, { pin: true, result: { module: head.definition.id, skills: rest[0].definition.id },
+            summary: `${fill(J.joined, { name: request.name })}${left}` });
+        answer.data.join = { op: 'added', name: request.name };
+        return answer;
+    }
+    function party(ctx, line, call = {}) {
+        if (ctx.cause !== 'story' || ctx.caller !== null) refuse('REFUSED', '', J.storyOnly);
+        const prefix = stateOf(ctx);
+        const read = readJoin(line, soulNaming(prefix));
+        call.label = 'Party';
+        if (read.error) refuse('DM_LABEL', '', read.error);
+        if (read.op === '-') {
+            const person = partyOf(prefix).find(entry => fold(entry.name) === fold(read.name));
+            if (!person || person.left) refuse('DM_SCHEMA', '', fill(J.nothing, { name: read.name }));
+            // The player's own character (the one named like the persona) never leaves: companions only.
+            if (isReader(person.name)) refuse('REFUSED', '', fill(J.isYou, { name: person.name }));
+            return leave(ctx, person, true, call);
+        }
+        const check = checkJoin(prefix, read);
+        if (!check.ok) refuse('REFUSED', '', check.why);
+        if (check.returning) return leave(ctx, check.returning, false, call);
+        if (joinMode(settings()) === 'ask') {
+            // Ask: nothing is made. The line is kept in this reply's own receipt, and the card under the reply (rpg.joins) is read from it.
+            const offer = { op: 'offer', name: read.name, about: read.about, soul: read.soul, best: read.best };
+            return { summary: fill(J.offerNote, { name: read.name }), narrate: false, data: { join: offer } };
+        }
+        return makeParty(ctx, read, check.soul, call);
+    }
+    // Left (or back): the Character block's `left` field, one guarded `dm.set`. A sheet made before the field existed cannot be marked.
+    function leave(ctx, person, left, call) {
+        const definition = activeDefinition(stateOf(ctx), person.module);
+        if (!person.canLeave || !definition) refuse('DM_SCHEMA', '', fill(J.noLeave, { name: person.name }));
+        const answer = setField(ctx, { module: person.module, field: 'left', value: left }, call, { story: true });
+        answer.summary = fill(left ? J.left : J.returned, { name: person.name });
+        answer.data.join = { op: left ? 'left' : 'back', name: person.name };
+        return answer;
+    }
+    // "Add to party" on the Ask card: the reader's own go-ahead, so it is made like the automatic one, for the head reply.
+    function addParty(ctx, payload, call = {}) {
+        if (ctx.cause !== 'ui' || ctx.caller !== null) refuse('REFUSED', '', J.cardOnly);
+        const soul = payload?.soul === undefined ? 1 : payload.soul;
+        const request = readJoin({ op: '+', name: payload?.name, labels: { about: payload?.about, class: Number.isSafeInteger(soul) ? CLASS_NAMES[soul - 1] ?? 'X' : 'X', best: payload?.best ?? '' } }, soulNaming(stateOf(ctx)));
+        call.label = 'Party';
+        if (request.error) refuse('DM_LABEL', '', request.error);
+        const check = checkJoin(stateOf(ctx), request);
+        if (!check.ok) refuse('REFUSED', '', check.why);
+        if (check.returning) refuse('REFUSED', '', fill(J.taken, { name: request.name }));
+        return makeParty(ctx, request, check.soul, call);
+    }
     // A refusal reaches the reader as one plain sentence naming the module: "Reputation: faction must be guild, watch or compact;
     // nothing applied." (bounded; shown escaped by the card). `call.label` is the module's name once the pin is known.
     const wrap = fn => (ctx, payload = {}) => {
@@ -521,8 +619,9 @@ export function createDataModulesPart({ packs, state: head = () => null, lifecyc
     }
     // `dm.set` writes one field (`field`, `key?`, `value`) or, as ONE action, several non-map fields of one block (`fields`: { name: value }).
     // Either way each value is checked the same, the rules run once after all the sets, and nothing applies unless every one holds.
-    function setField(ctx, payload, call = {}) {
-        if (ctx.cause !== 'ui' || ctx.caller !== null) refuse('REFUSED', '', E.fieldReader);
+    function setField(ctx, payload, call = {}, { story = false } = {}) {
+        // `story`: the party line that marks a companion as left (`- party Name`, below) is the one story line that sets a field.
+        if (story ? ctx.cause !== 'story' || ctx.caller !== null : ctx.cause !== 'ui' || ctx.caller !== null) refuse('REFUSED', '', E.fieldReader);
         if (restore()?.state === 'pending') refuse('RESTORE_PENDING', '', E.restorePending);
         const prefix = stateOf(ctx), module = resolveModule(prefix, payload.module), definition = activeDefinition(prefix, module);
         call.label = definition?.name ?? module;
@@ -575,7 +674,7 @@ export function createDataModulesPart({ packs, state: head = () => null, lifecyc
         const answer = finish(ctx, prefix, draft, recorded, { visits: result.visits, notes: result.notes, summary,
             result: multi ? { fields: Object.fromEntries(entries.map(entry => [entry.name, { from: entry.before, to: entry.value }])), subject, ...rules }
                 : { field: only.name, ...(only.map ? { key: only.key } : {}), subject, from: only.before, to: only.value, ...rules } });
-        answer.data.edit = true;
+        if (!story) answer.data.edit = true;
         return answer;
     }
     // A step the host plans again (REPLAY.md "Re-read and reconciling") answers NO_LONGER_DONE when the story before it
@@ -681,8 +780,12 @@ export function createDataModulesPart({ packs, state: head = () => null, lifecyc
             'dm.redefine': wrap((ctx, payload, call) => changeBlock(ctx, payload, 'redefine', call)),
             'dm.remove': wrap((ctx, payload, call) => changeBlock(ctx, payload, 'remove', call)),
             'dm.attach': wrap(attach), 'dm.set': wrap(setField), 'dm.act': wrap((ctx, payload, call) => act(ctx, payload, null, call)), 'dm.capture': { internal: true, handler: wrap((ctx, line, call) => act(ctx, {}, line, call)) },
-            'dm.tick': { internal: true, handler: wrap(tick) }, 'dm.settle': { internal: true, handler: wrap(settle) } },
-        kinds: { dm: kind },
+            'dm.tick': { internal: true, handler: wrap(tick) }, 'dm.settle': { internal: true, handler: wrap(settle) },
+            // The Ask card's "Add to party" (rpg only: the feature gate leaves it out while the RPG is off).
+            'dm.join': Object.assign(wrap(addParty), { feature: LEAN_RPG_FEATURE }) },
+        // `+ party Name | about: … | class: I | best: int` and `- party Name`: under the RPG feature, out of the grammar while Companions who join is Off, and
+        // until the story has a Character block (a party line means something only once there is a party).
+        kinds: { dm: kind, party: { grammar: joinGrammar(), feature: LEAN_RPG_FEATURE, get enabled() { return joinMode(settings()) !== 'off' && partyOf(state()).length > 0; }, apply: wrap(party) } },
         queries: { 'dataModules.offers': offers, 'dataModules.view': moduleView, 'dataModules.public': publicView,
             'dataModules.replayInputs': replayInputs, 'dataModules.actors': actorsOf,
             'dataModules.setup': prefix => {

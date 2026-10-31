@@ -46,7 +46,7 @@ export const HOME_ID = 'story-block/home';
 // browser goes to the end; a reader's saved order keeps its own place for it, tab-order.js).
 export const DEFAULT_ORDER = Object.freeze({
     party: 10, inventory: 20, quests: 30, world: 40, map: 50, fight: 60, crafting: 70, trade: 80,
-    scene: 100, chronicle: 110, director: 200, blocks: 205, cast: 210,
+    scene: 100, chronicle: 110, director: 200, cast: 210,
 });
 // Screens hidden by default while another screen is registered, the one that shows the same and more
 // (MODULES §F119): Story Block's Scene (place, kind, region, story time, the people with portraits) while
@@ -59,7 +59,7 @@ export const REST_ORDER = 150;
 // (Cast, now Dossiers, once said 35); the reader moves them in Settings → Tabs & Packs → Tabs.
 export const SUITE_NAV = Object.freeze([
     'story-block/inventory', 'story-director/quests', 'story-director/world', 'story-director/map', 'story-block/scene',
-    'story-director/chronicle', 'story-director/director', 'story-block/blocks', 'npc-state-delta/cast',
+    'story-director/chronicle', 'story-director/director', 'npc-state-delta/cast',
 ]);
 
 /**

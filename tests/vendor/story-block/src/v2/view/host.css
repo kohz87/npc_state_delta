@@ -444,3 +444,31 @@ body.story-suite-open { overflow: hidden; }
 @media (max-width: 759.98px) {
     .ss-block-fields-editor, .ss-block-effect, .ss-block-value { grid-template-columns: minmax(0, 1fr); }
 }
+/* Settings → Blocks (screens/blocks.js `page`): the buttons and the count line, then a row for each block: its name and words, Show as, Edit and more. */
+.ss-blocks-page { display: grid; gap: 12px; min-width: 0; }
+.ss-blocks-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+.ss-blocks-actions { position: relative; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ss-blocks-actions .ss-block-chooser { left: 0; right: auto; min-width: min(20rem, 100%); }
+.ss-blocks-actions .ss-block-chooser, .ss-blockrow-more .ss-block-menu { background: var(--ss-panel-opaque, var(--ss-glass-strong)); }
+.ss-blocks-count, .ss-blocks-note, .ss-blocks-empty { margin: 0; font-size: 13px; color: var(--ss-muted, inherit); opacity: .9; overflow-wrap: anywhere; }
+.ss-blocks-empty { padding: 8px 0; font-size: 14px; }
+.ss-blocks-page .ss-block-status:empty { display: none; }
+.ss-blockrows { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.ss-blockrow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px 12px; align-items: center; padding: 10px 12px; min-width: 0; }
+.ss-blockrow[hidden] { display: none; }
+.ss-blockrow-main { display: grid; gap: 2px; min-width: 0; }
+.ss-blockrow-title { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.ss-blockrow-name { overflow-wrap: anywhere; }
+.ss-blockrow-meta { color: var(--ss-muted, inherit); font-size: 12px; overflow-wrap: anywhere; }
+.ss-blockrow-show { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--ss-muted, inherit); }
+.ss-blockrow-show-label { white-space: nowrap; }
+.ss-blockrow-show .ss-select { min-width: 9.5em; max-width: 100%; }
+.ss-blockrow-actions { display: flex; gap: 6px; align-items: center; }
+.ss-blockrow-more { position: relative; }
+.ss-blockrow-more .ss-block-menu { min-width: 11rem; }
+@media (max-width: 759.98px) {
+    .ss-blockrow { grid-template-columns: minmax(0, 1fr) auto; }
+    .ss-blockrow-main { grid-column: 1 / -1; }
+    .ss-blockrow-show { min-width: 0; }
+    .ss-blockrow-show .ss-select { min-width: 0; flex: 1 1 auto; }
+}

@@ -9,6 +9,7 @@ import { meter } from '../../view/widgets/meter.js';
 import { refusalText } from '../../strings.js';
 import { FORMULA, RANK_NAMES, SKILL_SLOTS } from '../names.js';
 import { RPG_STRINGS, fill } from '../strings.js';
+import { statShare } from '../rules.js';
 
 const K = RPG_STRINGS.skills;
 
@@ -32,7 +33,7 @@ export function masteryOf(skill) {
  */
 export function rollOf(skill, character, rules = FORMULA) {
     const entry = character.stats.find(stat => stat.key === skill.stat) ?? null;
-    const half = entry ? Math.floor(entry.value / rules.statDivisor) : 0;
+    const half = entry ? statShare(entry.value, rules) : 0;
     const bonus = rules.classWeight * character.soul;
     return { total: half + skill.rank + bonus, stat: entry?.label ?? null, value: entry?.value ?? 0, half, rank: skill.rank, bonus };
 }
@@ -168,7 +169,7 @@ export function renderSkills(parent, { character, session = null, api = {}, onBa
         row.appendChild(bar);
         handles.push(meter.render(bar, { label: K.mastery, value: mastery.value, max: mastery.max, segments: mastery.max, tone: mastery.tone, text: mastery.text, icon: 'fa-book-open' }, {}));
         const line = h(doc, 'p', 'rpg-skill-roll');
-        const rank = { rank: skill.rankName, n: skill.rank, soul: character.soulName, bonus: roll.bonus };
+        const rank = { rank: skill.rankName, n: skill.rank, soul: character.soulName, label: character.soulLabel, bonus: roll.bonus };
         if (roll.stat) {
             line.appendChild(h(doc, 'b', '', fill(K.rolls, { total: roll.total })));
             line.appendChild(doc.createTextNode(' '));
@@ -185,7 +186,7 @@ export function renderSkills(parent, { character, session = null, api = {}, onBa
         const head = h(doc, 'div', 'rpg-sheet-head');
         head.appendChild(h(doc, 'h3', 'rpg-sheet-name', fill(K.title, { name: character.name })));
         const pills = h(doc, 'div', 'rpg-pills');
-        pills.appendChild(h(doc, 'span', 'ss-pill', fill(RPG_STRINGS.party.soul, { name: character.soulName })));
+        pills.appendChild(h(doc, 'span', 'ss-pill', fill(RPG_STRINGS.party.soul, { label: character.soulLabel, name: character.soulName })));
         pills.appendChild(h(doc, 'span', 'ss-pill rpg-slots', fill(K.slots, { n: character.skills.length, max: SKILL_SLOTS })));
         head.appendChild(pills);
         root.appendChild(head);
