@@ -18,6 +18,7 @@
 // * the reader's "Font": Nunito (the default) or the theme's own font. Nunito ships with the extension
 //   (assets/fonts/nunito, SIL OFL; view/fonts.css), so it is the same offline and while SillyTavern's "Forbid
 //   external media" is on; nothing is fetched. If it cannot load, the system's own UI font.
+// * the reader's "Text size": Normal (nothing added) or 110% / 120%, which set size.css's `--ss-zoom` (TEXT_SIZES).
 //
 // Everything is written into one <style data-ss-theme> in the page's head, every rule under
 // :where(<Story Suite roots>) (the same roots as controls.css), so SillyTavern's own UI is never touched:
@@ -38,6 +39,20 @@ export const FONTS = Object.freeze(['nunito', 'theme']);
 export const SCHEMES = Object.freeze(['dark', 'light']);
 export const DEFAULT_PANEL = 'glass';
 export const DEFAULT_FONT = 'nunito';
+
+/**
+ * The reader's Text size (host setting `textSize`, kept as text): Normal, 110% or 120% of the size Story Suite is drawn at
+ * (view/size.css `--ss-zoom`, 0.8). Normal adds nothing to the sheet, so it is the same bytes as before the setting; the
+ * others set `--ss-zoom` to the size times 0.8, which every Story Suite root already follows (its content grows and
+ * reflows, its frames keep their size, SillyTavern's own text is not touched).
+ */
+export const TEXT_SIZES = Object.freeze({ 100: null, 110: 0.88, 120: 0.96 });
+export const DEFAULT_TEXT_SIZE = '100';
+/** The Text size in a settings record, as one of the keys of TEXT_SIZES ('100' for anything else). */
+export const textSizeOf = settings => {
+    const value = String(settings?.textSize ?? '').trim();
+    return Object.hasOwn(TEXT_SIZES, value) ? value : DEFAULT_TEXT_SIZE;
+};
 
 export const FONT_STACKS = Object.freeze({
     nunito: '\'Nunito\', system-ui, -apple-system, \'Segoe UI\', Roboto, sans-serif',
@@ -349,7 +364,7 @@ const forced = scheme => `${ROOT_SELECTOR}:where(.ss-scheme-${scheme}), ${ROOT_S
  * schemes (classes `ss-scheme-light`, `ss-scheme-dark`), Solid's opaque glass where relative colours work, Solid in place of Glass
  * for a system that asks for less transparency, and no transitions for one that asks for less motion.
  */
-export function themeCss({ scheme = 'dark', panel = DEFAULT_PANEL, font = DEFAULT_FONT, strength = DEFAULT_GLASS } = {}) {
+export function themeCss({ scheme = 'dark', panel = DEFAULT_PANEL, font = DEFAULT_FONT, strength = DEFAULT_GLASS, textSize = DEFAULT_TEXT_SIZE } = {}) {
     const choice = { scheme: SCHEMES.includes(scheme) ? scheme : 'dark', ...themeChoice({ panelStyle: panel, font, glassStrength: strength }) };
     const out = [`/* Story Suite theme (src/v2/view/theme.js): ${choice.panel}, ${choice.panel === 'sillytavern' ? 'as SillyTavern' : choice.scheme}, ${choice.font}${choice.panel === 'glass' ? `, glass ${choice.strength}%` : ''}. */`];
     out.push(block(ROOT_SELECTOR, themeTokens(choice)));
@@ -376,6 +391,9 @@ export function themeCss({ scheme = 'dark', panel = DEFAULT_PANEL, font = DEFAUL
         out.push(`@media (prefers-reduced-transparency: reduce) {\n    @supports (color: rgb(from red r g b)) {\n${solidBlocks('        ', true, SHEET_RESET).join('\n')}\n    }\n}`);
     }
     out.push(`@media (prefers-reduced-motion: reduce) {\n${block(ROOT_SELECTOR, [['--ss-motion', '0s']], '    ')}\n}`);
+    // Text size (not Normal): the size every root is zoomed to. `html:root` outranks size.css's `:root` whatever the order.
+    const zoom = TEXT_SIZES[textSizeOf({ textSize })];
+    if (zoom) out.push(`/* Text size ${textSizeOf({ textSize })}% */\n${block('html:root', [['--ss-zoom', String(zoom)]])}`);
     return `${out.join('\n')}\n`;
 }
 
@@ -383,7 +401,7 @@ export function themeCss({ scheme = 'dark', panel = DEFAULT_PANEL, font = DEFAUL
 
 /**
  * createThemeBridge({ doc, settings, readVar }) → { apply(), current(), destroy() }.
- * `settings()` → the host settings ({ panelStyle, glassStrength, font }); `readVar(name)` → a theme
+ * `settings()` → the host settings ({ panelStyle, glassStrength, font, textSize }); `readVar(name)` → a theme
  * variable's value (default: computed on <html>). apply() writes the theme sheet (only when it changed); a
  * change to <html>'s style (SillyTavern applying a theme) applies again.
  */
@@ -410,7 +428,7 @@ export function createThemeBridge({ doc = globalThis.document, settings = () => 
         const { panel, font, strength } = themeChoice(values);
         const scheme = decideScheme({ body: read('--SmartThemeBodyColor'), tint: read('--SmartThemeBlurTintColor') });
         last = { scheme, panel, font, strength };
-        const text = themeCss(last);
+        const text = themeCss({ ...last, textSize: textSizeOf(values) });
         const node = sheet();
         if (node.textContent !== text) node.textContent = text;
         return last;

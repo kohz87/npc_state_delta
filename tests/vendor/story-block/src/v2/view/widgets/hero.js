@@ -2,18 +2,22 @@
 // the PC, the character card's image, or an NPC's from a query such as Delta's `npc.portrait`; the initial
 // when there is none), the name, a level badge on the portrait (a star and the number), the class · title line, bars for HP, MP and SP and one for experience under the
 // Terms' own word ("Soul growth"), a place / time / weather corner, and a row of status badges. `compact`
-// is the one-row variant for the strip under a reply.
+// is the one-row variant for the strip under a reply. With `you` (the game view's header while `story-block.you` is
+// on), a Rank, a Wearing and a Condition row under the place line, each with a pencil (an `ss.editable` that runs the `command`
+// it names through the widget api); without `you` the card draws no such row. With `travel` (Story Director's trip line) a Travel row follows them.
 //
 // The bars are ss.bar and the badges ss.status (glass.js), so each speaks as it does there. The picture is
 // taken only from a safe URL (https, a base64 raster image or a same-origin path, widgets/dom.js); a
 // `portraitQuery` is asked through the widget api (a read-only query, a name that looks like one), and what it
-// answers is checked the same way. Nothing here runs a command: the card is read-only.
+// answers is checked the same way. The card is read-only; only the pencils of the `you` rows run a command.
 //
 // Built with createElement and textContent only, like every standard widget (dom.js).
 
 import { h, iconNode, initials, safeImageUrl, shell, str } from './dom.js';
 import { defineWidget, resolveProps } from './props.js';
 import { bar, status } from './glass.js';
+import { editable } from './editable.js';
+import { STRINGS } from '../../strings.js';
 import { cutAt } from '../../../text.js';
 import { svgIcon } from '../icons/index.js';
 
@@ -36,6 +40,8 @@ const heroProps = {
     time: { type: 'string', default: '' },
     weather: { type: 'string', default: '' },
     statuses: { type: 'array', default: Object.freeze([]) }, // [{ id, label, icon, left, unit, tone }]
+    you: { type: 'object', default: null },             // { rank?, rankLabel?, wearing, condition, command }: the rows under the place line, each with a pencil
+    travel: { type: 'string', default: '' },            // the trip's line (Story Director's `atlas.trip` row): a Travel row under the `you` rows
     compact: { type: 'boolean', default: false },
 };
 
@@ -141,6 +147,65 @@ function renderHero(el, input, api) {
         badge.append(...(star ? [star] : []), levelNumber, levelSaid);
         const corner = h(doc, 'ul', 'ss-hero-corner');
         const statuses = h(doc, 'div', 'ss-hero-statuses');
+        // The Rank, Wearing and Condition rows (`you`): made when first asked for, so a card without them has no trace of them. Each
+        // pencil is made once and only updated, so a redraw never closes an edit that is open.
+        let youRow = null;
+        let travelRow = null;
+        const youParts = [];
+        const S = STRINGS.scene;
+        function drawYou() {
+            const you = p.you && typeof p.you === 'object' ? p.you : null;
+            if (!you) {
+                if (youRow) youRow.hidden = true;
+                return;
+            }
+            if (!youRow) {
+                youRow = h(doc, 'div', 'ss-hero-you');
+                for (const [part, label, said] of [['rank', S.rank, S.editRank], ['wearing', S.wearing, S.editWearing], ['condition', S.condition, S.editCondition]]) {
+                    const item = h(doc, 'span', 'ss-hero-you-part');
+                    item.setAttribute('data-part', part);
+                    const text = h(doc, 'span', 'ss-hero-you-text');
+                    const pencil = h(doc, 'span', 'ss-hero-you-pencil');
+                    const name = h(doc, 'b', 'ss-hero-you-label', label);
+                    item.append(name, text, pencil);
+                    youRow.appendChild(item);
+                    youParts.push({ part, said, item, name, text, pencil, handle: null });
+                }
+                text.insertBefore(youRow, travelRow ?? statuses);
+            }
+            youRow.hidden = false;
+            for (const entry of youParts) {
+                // The Rank is a part only while the game gives it a word (`rankLabel`, from a pack): the label is that word.
+                const rankLabel = entry.part === 'rank' ? short(you.rankLabel, 30) : '';
+                entry.item.hidden = entry.part === 'rank' && !rankLabel;
+                if (entry.item.hidden) continue;
+                if (rankLabel) entry.name.textContent = rankLabel;
+                const value = typeof you[entry.part] === 'string' ? you[entry.part] : '';
+                entry.text.textContent = value || '\u2014';
+                entry.text.classList.toggle('ss-hero-you-empty', !value);
+                const props = { value, displayValue: false, maxLength: 120, label: rankLabel ? rankLabel.toLowerCase() : entry.said, command: typeof you.command === 'string' ? you.command : '', valueKey: entry.part };
+                if (entry.handle) entry.handle.update(props);
+                else entry.handle = editable.render(entry.pencil, props, api);
+            }
+        }
+        // The Travel row (`travel`): made when first asked for, hidden while there is no trip.
+        let travelText = null;
+        function drawTravel() {
+            const said = short(p.travel, 200);
+            if (!said) {
+                if (travelRow) travelRow.hidden = true;
+                return;
+            }
+            if (!travelRow) {
+                travelRow = h(doc, 'div', 'ss-hero-travel');
+                travelText = h(doc, 'span', 'ss-hero-travel-text');
+                travelRow.append(h(doc, 'b', 'ss-hero-you-label', STRINGS.scene.travel), travelText);
+                text.insertBefore(travelRow, statuses);
+            }
+            travelRow.hidden = false;
+            travelText.textContent = said;
+        }
+        cleanup(() => { for (const entry of youParts) entry.handle?.destroy(); });
         // the text block: the name, the class line, the place and weather, the statuses: one stacked group, which the portrait is
         // centred against (grid areas "portrait text", glass.css)
         const text = h(doc, 'div', 'ss-hero-text');
@@ -212,6 +277,8 @@ function renderHero(el, input, api) {
                 corner.appendChild(item);
             }
             corner.hidden = !corner.children.length;
+            drawYou();
+            drawTravel();
             const bars = heroBars(p.bars);
             const pools = bars.filter(b => b.kind !== 'exp');
             const growth = bars.filter(b => b.kind === 'exp');

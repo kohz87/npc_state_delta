@@ -18,7 +18,7 @@ const checkModule = await import('./check.js').catch(() => null);
 export const EVENTS = Object.freeze(['committed', 'head', 'turn', 'feature', 'modules']);
 // The most change lines one reply's block may hold; the rest are one Problem (turn.js).
 export const MAX_CHANGE_LINES = 150;
-export const HOST_SETTINGS_DEFAULTS = Object.freeze({ tailBudget: 1500, contextShare: 40, maxChangeLines: MAX_CHANGE_LINES, callQueue: true, panelStyle: 'glass', glassStrength: 50, font: 'nunito' });
+export const HOST_SETTINGS_DEFAULTS = Object.freeze({ tailBudget: 1500, contextShare: 40, maxChangeLines: MAX_CHANGE_LINES, callQueue: true, panelStyle: 'glass', glassStrength: 50, font: 'nunito', textSize: '100' });
 export const HOST_SETTINGS_SCHEMA = Object.freeze({
     tailBudget: Object.freeze({
         type: 'int', min: 100, max: 20000, label: 'Notes per reply (tokens)',
@@ -55,6 +55,15 @@ export const HOST_SETTINGS_SCHEMA = Object.freeze({
             Object.freeze({ value: 'theme', label: 'Your theme\'s font' }),
         ]),
         help: 'Nunito comes with Story Block, so it looks the same offline and with "Forbid external media" on. "Your theme\'s font" uses the font SillyTavern\'s theme sets.',
+    }),
+    // The size of Story Suite's own text (view/theme.js textSizeOf, view/size.css): Normal adds nothing.
+    textSize: Object.freeze({
+        type: 'choice', form: 'segmented', label: 'Text size', options: Object.freeze([
+            Object.freeze({ value: '100', label: 'Normal' }),
+            Object.freeze({ value: '110', label: '110%' }),
+            Object.freeze({ value: '120', label: '120%' }),
+        ]),
+        help: 'Makes the text in Story Suite\'s panels bigger: the Game view, cards, dialogs and these settings. Your SillyTavern chat text keeps its own size (SillyTavern\'s User Settings → Font scale).',
     }),
 });
 

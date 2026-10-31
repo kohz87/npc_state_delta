@@ -367,7 +367,8 @@ function scratchOps(state, ops, scratchOf) {
     const out = [];
     for (const op of ops) {
         const root = op && typeof op.path === 'string' ? scratchRoot(op.path, scratchOf) : null;
-        if (!root || !OPS.has(op.op)) {
+        // An op marked `within` a thing (ctx.ifThere, rule d) is not fitted: it is passed over when the thing is not there.
+        if (!root || !OPS.has(op.op) || typeof op.within === 'string') {
             out.push(op);
             continue;
         }

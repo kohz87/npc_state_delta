@@ -3,7 +3,7 @@
 // stats in a row and the skills from that character's Skills block. A character with points to spend shows
 // "N points to spend" and a Spend points button; any other shows Stats. Both open the Spend points sheet (distribute.js)
 // over the cards; Skills opens the character's Skills view (skills.js) the same way. A fallen character (`alive` false) is greyed
-// and says "Fallen". The header's "+ New character" (and "Create your character" when there is none) opens the New character
+// and says "Fallen"; a companion who left the party (`left`, a `- party` line) is greyed too and says "Left". The header's "+ New character" (and "Create your character" when there is none) opens the New character
 // wizard (wizard.js). The tab shows while the feature is on, with or without a Character block.
 // Every node is built with createElement and textContent.
 
@@ -34,7 +34,7 @@ const sameCharacter = (a, b) => a.module === b.module && a.subject === b.subject
  * The Party widget. `deps`: `headState()` (the head state or null), `readerName()` (the reader's persona name),
  * `roleOf(definition)` (default: the definition's `role`), `openWizard()` (opens the New character dialog; without it there is no button).
  * The page draws a screen again from nothing on every change of the story, so what must outlive that, the open sheet and
- * its draft, is kept here, outside the widget (as the Blocks page keeps its editor): `shared.open` is the Spend points sheet's
+ * its draft, is kept here, outside the widget (as Settings → Blocks keeps its editor): `shared.open` is the Spend points sheet's
  * session and `shared.skills` the Skills view's; at most one of them is open.
  */
 export function createPartyWidget({ headState = () => null, readerName = () => '', roleOf, openWizard = null, rules = undefined } = {}) {
@@ -75,7 +75,7 @@ export function createPartyWidget({ headState = () => null, readerName = () => '
             const newCharacter = () => { try { openWizard?.(); } catch { /* the dialog may not open here */ } };
 
             function card(parent, character) {
-                const node = h(doc, 'article', `rpg-card ss-glass${character.alive ? '' : ' rpg-fallen'}`);
+                const node = h(doc, 'article', `rpg-card ss-glass${character.alive && !character.left ? '' : ' rpg-fallen'}${character.left ? ' rpg-left' : ''}`);
                 node.setAttribute('aria-label', character.name);
                 node.setAttribute('data-character', character.name);
                 parent.appendChild(node);
@@ -83,8 +83,9 @@ export function createPartyWidget({ headState = () => null, readerName = () => '
                 who.appendChild(h(doc, 'p', 'rpg-name', character.name));
                 who.appendChild(h(doc, 'span', 'rpg-sub', character.own ? P.own : P.companion));
                 const pills = h(doc, 'div', 'rpg-pills');
-                if (!character.alive) pills.appendChild(h(doc, 'span', 'ss-pill rpg-fallen-pill', P.fallen));
-                pills.appendChild(h(doc, 'span', 'ss-pill', fill(P.soul, { name: character.soulName })));
+                if (character.left) pills.appendChild(h(doc, 'span', 'ss-pill rpg-fallen-pill rpg-left-pill', P.left));
+                else if (!character.alive) pills.appendChild(h(doc, 'span', 'ss-pill rpg-fallen-pill', P.fallen));
+                pills.appendChild(h(doc, 'span', 'ss-pill', fill(P.soul, { label: character.soulLabel, name: character.soulName })));
                 if (character.points > 0) pills.appendChild(h(doc, 'span', 'ss-pill rpg-points', fill(character.points === 1 ? P.pointsOne : P.points, { n: character.points })));
                 top.append(who, pills);
                 node.appendChild(top);

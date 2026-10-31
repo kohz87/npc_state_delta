@@ -13,7 +13,7 @@
 // requires.capabilities is checked for form only).
 // `dataModuleDefinitions`: checked normalized dependency definitions for public cross-pack data imports.
 //
-import { LEAN_RPG_FIELDS, LEAN_RPG_LIMITS, SKILL_SET_FIELDS, SKILL_SET_SKILL_FIELDS, RECORD_LIMITS, CALENDAR_FIELDS, CALENDAR_HOLIDAY_FIELDS, CALENDAR_LIMITS, CALENDAR_START_FIELDS, CHOICE_FIELDS, CONTENT_KINDS, COMMAND, CRAFT_FIELDS, ECONOMY_FIELDS, ECONOMY_LIMITS, CRAFTS_LIMITS, DEFAULT_CRAFTS, METER_FIELDS, METER_LIMITS, METER_PRESET_FIELDS, METER_RESERVED, METER_STAGE_FIELDS, RECIPE_LIMITS, STAT_SUM, DEF_ID, EVENT_FIELDS, EVENT_LIMITS, ITEM_FIELDS, ITEM_KINDS, LIMITS, MOUNTS, PACK_FIELDS, PACK_ID, PLACE_FIELDS, PRESET_FIELDS, RARITIES, ROUTE_FIELDS, SCREEN_FIELDS, SCREEN_ID, SEMVER, SKILL_FIELDS, SKILL_TARGETS, SKILL_TYPES, SLUG, START_FIELDS, STAT_NAME, RANK_FIELDS, RANK_ID, RANKS_LIMITS, TERM_SEPARATORS, ITEM_CARRY, MARKET_FIELDS, MARKET_LIMITS, MARKET_WORD, TERMS_FIELDS, TERMS_LIMITS, TERMS_NUMERALS, TERMS_TIER_FIELDS, WEATHER_FIELDS, WEATHER_LIMITS, WEATHER_SEASON_FIELDS, WEATHER_TABLE_FIELDS } from './limits.js';
+import { YOU_FIELDS, YOU_RANK_FIELDS, YOU_RANK_LABEL_MAX, LEAN_RPG_FIELDS, LEAN_RPG_LIMITS, SKILL_SET_FIELDS, SKILL_SET_SKILL_FIELDS, RECORD_LIMITS, CALENDAR_FIELDS, CALENDAR_HOLIDAY_FIELDS, CALENDAR_LIMITS, CALENDAR_START_FIELDS, CHOICE_FIELDS, CONTENT_KINDS, COMMAND, CRAFT_FIELDS, ECONOMY_FIELDS, ECONOMY_LIMITS, CRAFTS_LIMITS, DEFAULT_CRAFTS, METER_FIELDS, METER_LIMITS, METER_PRESET_FIELDS, METER_RESERVED, METER_STAGE_FIELDS, RECIPE_LIMITS, STAT_SUM, DEF_ID, EVENT_FIELDS, EVENT_LIMITS, ITEM_FIELDS, ITEM_KINDS, LIMITS, MOUNTS, PACK_FIELDS, PACK_ID, PLACE_FIELDS, PRESET_FIELDS, RARITIES, ROUTE_FIELDS, SCREEN_FIELDS, SCREEN_ID, SEMVER, SKILL_FIELDS, SKILL_TARGETS, SKILL_TYPES, SLUG, START_FIELDS, STAT_NAME, RANK_FIELDS, RANK_ID, RANKS_LIMITS, TERM_SEPARATORS, ITEM_CARRY, MARKET_FIELDS, MARKET_LIMITS, MARKET_WORD, TERMS_FIELDS, TERMS_LIMITS, TERMS_NUMERALS, TERMS_TIER_FIELDS, WEATHER_FIELDS, WEATHER_LIMITS, WEATHER_SEASON_FIELDS, WEATHER_TABLE_FIELDS } from './limits.js';
 import { byteLength, checkPlain } from './safety.js';
 import { parseRange, satisfies } from './version.js';
 import { foldKey, oneLine } from '../../text.js';
@@ -25,7 +25,7 @@ import { MAX_COINS, MAX_COIN_VALUE, coinsOf } from '../domains/money.js';
 import { validateDataModules, dataModulesPackHash } from '../data-modules/check.js';
 import { STRINGS } from '../strings.js';
 
-export const HOST_VERSION = '2.8.0';
+export const HOST_VERSION = '2.11.0';
 
 /** A slug for a display name: "Iron Sword (old)" → "iron-sword-old". */
 export function slugify(name) {
@@ -97,7 +97,7 @@ function normalize(raw, { add, hostVersion, capabilities, limits, dataModuleDefi
     const content = {};
     if (raw.content !== undefined && !isObject(raw.content)) add('BAD_CONTENT', 'content', 'content must be an object of lists: { "items": [ … ], "events": [ … ] }.');
     const given = isObject(raw.content) ? raw.content : {};
-    for (const kind of Object.keys(given)) if (!CONTENT_KINDS.includes(kind)) add('UNKNOWN_KIND', `content.${kind}`, `"${kind}" is not a content kind (expected ${CONTENT_KINDS.join(', ')}).`);
+    for (const kind of Object.keys(given)) if (!CONTENT_KINDS.includes(kind) && kind !== 'you') add('UNKNOWN_KIND', `content.${kind}`, `"${kind}" is not a content kind (expected ${[...CONTENT_KINDS, 'you'].join(', ')}).`);
     // Items first: shops, recipes and the start state refer to them.
     const items = records(given.items, 'items', { add, packId, check: (record, path, label) => checkItem(record, path, label, add) });
     content.items = items;
@@ -142,6 +142,11 @@ function normalize(raw, { add, hostVersion, capabilities, limits, dataModuleDefi
         else content.meterPresets = records(given.meterPresets, 'meterPresets', { add, packId, check: (record, path) => checkMeterPreset(record, path, add), slugField: 'id', named: false });
     }
     if (given.rpg !== undefined) content.rpg = checkRpg(given.rpg, packId, add);
+    // Not a list: kept only when given (so older packs' bytes and hashes stay), and only when it checks.
+    if (given.you !== undefined) {
+        const you = checkYou(given.you, add);
+        if (you) content.you = you;
+    }
 
     const start = raw.start === undefined ? null : checkStart(raw.start, add, ref);
     let layouts = [];
@@ -407,6 +412,25 @@ function checkCrafts(list, packId, add) {
         if (!ok) return null;
         return { title: oneLine(record.title), stats: [...record.stats], stations: [...stations], ...(note ? { note } : {}) };
     } });
+}
+
+// Your look (`content.you`, MODULES §F126): `{ "rank": { "label": "Guild rank" } }` makes a Rank part of {{user}}'s look in a story
+// that uses this pack. The label is plain text of 1 to 30 characters that goes into the narrator's instructions, so no markup
+// or macro; unknown keys are refused like any other content.
+function checkYou(value, add) {
+    if (!isObject(value)) { add('BAD_CONTENT', 'content.you', 'content.you must be an object: { "rank": { "label": "Guild rank" } }.'); return null; }
+    let ok = true;
+    for (const key of Object.keys(value)) if (!YOU_FIELDS.includes(key)) { ok = false; add('UNKNOWN_FIELD', `content.you.${key}`, `"${key}" is not a content.you field (expected ${YOU_FIELDS.join(', ')}).`); }
+    const rank = value.rank;
+    if (rank === undefined) return ok ? {} : null;
+    if (!isObject(rank)) { add('BAD_CONTENT', 'content.you.rank', 'content.you.rank must be an object: { "label": "Guild rank" }.'); return null; }
+    for (const key of Object.keys(rank)) if (!YOU_RANK_FIELDS.includes(key)) { ok = false; add('UNKNOWN_FIELD', `content.you.rank.${key}`, `"${key}" is not a content.you.rank field (expected ${YOU_RANK_FIELDS.join(', ')}).`); }
+    const label = typeof rank.label === 'string' ? oneLine(rank.label) : '';
+    if (!label || label.length > YOU_RANK_LABEL_MAX || /[<>{}]/.test(label)) {
+        add('BAD_CONTENT', 'content.you.rank.label', `content.you.rank.label must be plain text of 1 to ${YOU_RANK_LABEL_MAX} characters (no < > { }), such as "Guild rank".`);
+        return null;
+    }
+    return ok ? { rank: { label } } : null;
 }
 
 // The RPG's skill sets (`content.rpg.skillSets`): ready-made skills the New character wizard offers, each with what the

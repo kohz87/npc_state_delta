@@ -1,5 +1,5 @@
-// The `scene` domain (§7): where the story is, who is present and the weather, with its validator,
-// commands, capture kinds `place`, `present` and `weather`, queries and prompt view. Pure.
+// The `scene` domain (§7): where the story is, who is present, the weather and what {{user}} wears and how they
+// are, with its validator, commands, capture kinds `place`, `present`, `weather` and `you`, queries and prompt view. Pure.
 
 import { isPlainObject, labelOf } from './common.js';
 import { cleanName, trimText } from './names.js';
@@ -7,6 +7,7 @@ import { foldKey } from '../../text.js';
 import { lineBody } from '../capture.js';
 import { cutPoints, flatten } from '../extras.js';
 import { CORE_FEATURE } from '../features.js';
+import { validateMounts } from './mounts.js';
 import { STRINGS, fill } from '../strings.js';
 
 const E = STRINGS.editMessages;
@@ -20,6 +21,10 @@ export const WEATHER_TAIL_CHARS = 26;
 /** The mark a module's rule leaves on the weather it set (`scene.weather` command `key`), at most this many code points. */
 export const WEATHER_KEY_CHARS = 80;
 export const WEATHER_FEATURE = CORE_FEATURE.weather;
+/** What {{user}} wears and their condition (`~ you`): each at most this many code points (cut, an ellipsis in the last place). */
+export const YOU_CHARS = 120;
+export const YOU_FEATURE = CORE_FEATURE.you;
+const YOU_PARTS = Object.freeze(['rank', 'wearing', 'condition']);
 
 export function initialScene() {
     return { place: { name: '', kind: '', region: '' }, present: [] };
@@ -60,6 +65,19 @@ export function validateScene(slice) {
             else if (Array.from(weather.text).length > WEATHER_CHARS) errors.push(`The weather is longer than ${WEATHER_CHARS} characters.`);
             if (!Number.isSafeInteger(weather.rev) || weather.rev < 0) errors.push('The weather\'s rev is not a whole number.');
             if (weather.key !== undefined && (typeof weather.key !== 'string' || !weather.key || Array.from(weather.key).length > WEATHER_KEY_CHARS)) errors.push(`The weather's key is not text of at most ${WEATHER_KEY_CHARS} characters.`);
+        }
+    }
+    errors.push(...validateMounts(slice));
+    // {{user}}'s look (`~ you`, MODULES §F126): absent until a reply first writes one; each part may be missing (read as '').
+    if (slice.you !== undefined) {
+        if (!isPlainObject(slice.you)) errors.push('Your look is not a record.');
+        else {
+            for (const part of YOU_PARTS) {
+                const value = slice.you[part];
+                if (value === undefined) continue;
+                if (typeof value !== 'string') errors.push(`Your ${part} is not text.`);
+                else if (Array.from(value).length > YOU_CHARS) errors.push(`Your ${part} is longer than ${YOU_CHARS} characters.`);
+            }
         }
     }
     return errors;
@@ -215,6 +233,52 @@ function setPresent(ctx, value) {
         data: { added: present.filter(name => !before.includes(name)), removed: before.filter(name => !present.includes(name)), present: [...present] }, narrate: true };
 }
 
+/**
+ * `scene.you({ rank?, wearing?, condition? })`: {{user}}'s standing, what they wear and how they are, from the reader (the pencils on Home) or a
+ * module, never the story (it writes `~ you`). A part that is given replaces that part, '' clears it; a part left out stays.
+ */
+function setYou(ctx, payload = {}) {
+    if (ctx.cause === 'story') ctx.fail('REFUSED', 'The story writes your look with a ~ you line.');
+    const parts = {};
+    for (const part of YOU_PARTS) {
+        const value = payload?.[part];
+        if (value === undefined || value === null) continue;
+        if (typeof value !== 'string') ctx.fail('INVALID', `Your ${part} must be text.`);
+        parts[part] = youText(value);
+    }
+    if (!Object.keys(parts).length) ctx.fail('INVALID', 'Say what you wear or how you are.');
+    return changeYou(ctx, parts);
+}
+
+// The Rank's label the first enabled pack that declares one gives ('' when no pack does: this story has no Rank).
+function rankLabelIn(query) {
+    try {
+        const found = query('packs.youRank', {});
+        return typeof found?.label === 'string' ? found.label : '';
+    } catch { return ''; }
+}
+
+// Puts the given parts into the scene: a part that differs replaces that part only (one op each, so a replay after an earlier
+// reply was deleted keeps the other part as the replies still there left it). Nothing differs: nothing is written.
+function changeYou(ctx, parts) {
+    // Rank comes from a pack: a story with none has no Rank, so a line or a call that names it is refused (nothing saved).
+    if (parts.rank !== undefined && !rankLabelIn(ctx.query)) ctx.fail('INVALID', 'This story has no rank, so "rank" was not used (a pack can give your character one).');
+    const scene = ctx.draft('scene');
+    const held = isPlainObject(scene.you) ? scene.you : null;
+    const now = part => (typeof held?.[part] === 'string' ? held[part] : '');
+    const next = held ? { ...held } : { rank: '', wearing: '', condition: '' };
+    const said = [];
+    for (const part of YOU_PARTS) {
+        if (parts[part] === undefined || parts[part] === now(part)) continue;
+        next[part] = parts[part];
+        said.push(parts[part] ? `${part} ${parts[part]}` : `${part} cleared`);
+    }
+    const data = part => parts[part] === undefined ? now(part) : parts[part];
+    if (!said.length) return { summary: 'Your look stays.', data: { rank: now('rank'), wearing: now('wearing'), condition: now('condition'), same: true }, narrate: false };
+    scene.you = next;
+    return { summary: `Your look: ${said.join('; ')}.`, data: { rank: data('rank'), wearing: data('wearing'), condition: data('condition') }, narrate: false };
+}
+
 function markEdit(ctx, result) {
     if (ctx.cause === 'ui') result.data = { ...result.data, edit: true };
     return result;
@@ -227,6 +291,8 @@ export const sceneCommands = {
     'scene.present': (ctx, payload = {}) => markEdit(ctx, payload.set === undefined ? changePresent(ctx, payload) : setPresent(ctx, payload.set)),
     // { text?, key? } (a module's rule; the story writes `~ weather`)
     'scene.weather': Object.assign((ctx, payload = {}) => markEdit(ctx, setWeather(ctx, payload)), { feature: WEATHER_FEATURE }),
+    // { rank?, wearing?, condition? } ('' clears a part; the story writes `~ you`)
+    'scene.you': Object.assign((ctx, payload = {}) => markEdit(ctx, setYou(ctx, payload)), { feature: YOU_FEATURE }),
 };
 
 /** `~ place Name | kind | region | with: who came along` (or `+ place`). */
@@ -277,6 +343,54 @@ export function captureWeather(ctx, line) {
     return { summary: `The weather: ${text}.`, data: { text }, narrate: false };
 }
 
+// A part of {{user}}'s look as stored: plain words on one line (markdown, tags and invisible characters gone), cut by code
+// points; '' (which clears the part) when it holds no word.
+export function youText(raw) {
+    const text = flatten(lineBody(`~ you ${raw ?? ''}`).replace(/<[^>]*>?/g, ' ').replace(/[<>]/g, ' '));
+    return HAS_WORD.test(text) ? cutPoints(text, YOU_CHARS) : '';
+}
+
+// The words a change line may call each part.
+const YOU_LABELS = Object.freeze({ rank: 'rank', standing: 'rank', wearing: 'wearing', wear: 'wearing', wears: 'wearing', worn: 'wearing', outfit: 'wearing', clothes: 'wearing', clothing: 'wearing', condition: 'condition', state: 'condition' });
+
+/**
+ * The parts a `~ you` line gives: `{ rank?, wearing?, condition? }` from "rank: … | wearing: … | condition: …" (any of them is fine; a part
+ * with no words is '', which clears it). A piece after a `|` with no label of its own goes on the part before it; one with a
+ * label that is not a part ("mood: glad") is not used.
+ */
+export function youParts(raw) {
+    const found = {};
+    let last = null;
+    for (const piece of lineBody(String(raw ?? '')).split('|')) {
+        const named = /^\s*(\p{L}+)\s*:\s*([\s\S]*)$/u.exec(piece);
+        const part = named ? YOU_LABELS[named[1].toLowerCase()] : null;
+        if (part) {
+            found[part] = named[2];
+            last = part;
+        } else if (named) last = null;   // a label that is not one of the parts: not used, and not part of the one before
+        else if (last && piece.trim()) found[last] = `${found[last].trimEnd()}, ${piece.trim()}`;
+    }
+    for (const part of Object.keys(found)) found[part] = youText(found[part]);
+    return found;
+}
+
+/**
+ * `~ you rank: F-rank, Adventurer Guild | wearing: oilskin coat, boots | condition: tired and cold` (or `+ you`): {{user}}'s
+ * standing, what they wear and how they are,
+ * descriptive only (no mechanics read it). Either part alone is fine and the other stays; an empty one clears its part. Kept as
+ * `scene.you = { rank, wearing, condition }`, each part written on its own, and `you` is one of the scene's `scratch` fields, so a
+ * later reply's write replays after the reply that first wrote one is deleted (SPEC §2.2).
+ */
+export function captureYou(ctx, line) {
+    if (line?.op !== '~' && line?.op !== '+') {
+        ctx.fail('INVALID', `"${line?.op} you" is not a change the scene understands; use ~ you rank: … | wearing: … | condition: ….`);
+    }
+    const fallback = `~ you ${[`${line?.name ?? ''}${line?.text ? ` - ${line.text}` : ''}`, ...Object.entries(line?.labels ?? {}).map(([label, value]) => `${label}: ${value}`)].join(' | ')}`;
+    const parts = youParts(line?.raw ?? fallback);
+    if (!Object.keys(parts).length) ctx.fail('INVALID', 'The you line names no part of your look (write "~ you rank: F-rank | wearing: a grey coat | condition: tired").');
+    return changeYou(ctx, parts);
+}
+
 export const sceneQueries = {
     'scene.place': state => ({ ...(state?.domains?.scene?.place ?? initialScene().place) }),
     'scene.present': state => [...(state?.domains?.scene?.present ?? [])],
@@ -285,13 +399,23 @@ export const sceneQueries = {
         const text = state?.domains?.scene?.weather?.text;
         return typeof text === 'string' && text ? { text } : null;
     }, { feature: WEATHER_FEATURE }),
+    // What {{user}} wears and their condition, `{ wearing, condition }` ('' for what no reply said; null while `story-block.you` is off).
+    // With a pack that gives a Rank (`packs.youRank`), also `rank` and `rankLabel` (the pack's word for it); without one the stored rank is
+    // kept but not answered.
+    'scene.you': Object.assign((state, _args, tools) => {
+        const you = state?.domains?.scene?.you;
+        const text = part => (typeof you?.[part] === 'string' ? you[part] : '');
+        const label = typeof tools?.query === 'function' ? rankLabelIn(tools.query) : '';
+        return { ...(label ? { rank: text('rank'), rankLabel: label } : {}), wearing: text('wearing'), condition: text('condition') };
+    }, { feature: YOU_FEATURE }),
 };
 
 /**
  * The scene's tail lines: the place and who is present (nothing when both are empty). With `weather`
- * (the feature is on), the weather ends the Place line, cut to WEATHER_TAIL_CHARS code points.
+ * (the feature is on), the weather ends the Place line, cut to WEATHER_TAIL_CHARS code points. With `you` (the feature is
+ * on), one more line says {{user}}'s rank, what they wear and their condition, whichever are set.
  */
-export function sceneTail(state, { weather = false } = {}) {
+export function sceneTail(state, { weather = false, you = false, rankLabel = '' } = {}) {
     const scene = state?.domains?.scene;
     const lines = [];
     const place = scene?.place;
@@ -301,5 +425,11 @@ export function sceneTail(state, { weather = false } = {}) {
         lines.push(`Place: ${place.name}${about.length ? ` (${about.join(', ')})` : ''}${sky}`);
     }
     if (scene?.present?.length) lines.push(`Present: ${scene.present.join(', ')}`);
+    if (you) {
+        const said = [...(rankLabel ? [['rank', rankLabel]] : []), ['wearing', 'wears'], ['condition', 'condition']]
+            .map(([part, word]) => [word, typeof scene?.you?.[part] === 'string' ? scene.you[part] : '']).filter(([, text]) => text);
+        // "{{user}}: Guild rank …; wears …; condition …" (the pack's word for the Rank, only with a pack that gives one), only the parts that are set.
+        if (said.length) lines.push(`{{user}}: ${said.map(([word, text]) => `${word} ${text}`).join('; ')}`);
+    }
     return lines;
 }

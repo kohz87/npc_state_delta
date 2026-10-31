@@ -232,7 +232,10 @@ export function definitionProblems(def) {
             for (const [kind, spec] of Object.entries(kinds)) {
                 if (!KIND.test(kind)) problems.push(`the capture kind "${kind}" must be lowercase letters, digits, "_" or "-"`);
                 if (!isObject(spec)) { problems.push(`capture kind "${kind}" is not an object`); continue; }
-                if (typeof spec.grammar !== 'string' || !spec.grammar.trim()) problems.push(`capture kind "${kind}" has no grammar line`);
+                // `grammar` may be a function answering the line when the static part is built (a line that depends on what is
+                // installed, such as an enabled pack: Story Block's `you`); it must answer one line of text.
+                if (typeof spec.grammar === 'function') { /* read where it is used (grammarOf) */ }
+                else if (typeof spec.grammar !== 'string' || !spec.grammar.trim()) problems.push(`capture kind "${kind}" has no grammar line`);
                 else if (/\n/.test(spec.grammar.trim())) problems.push(`capture kind "${kind}" grammar is more than one line`);
                 if (spec.aliases !== undefined && (!Array.isArray(spec.aliases) || spec.aliases.some(alias => typeof alias !== 'string' || !KIND.test(alias)))) {
                     problems.push(`capture kind "${kind}" aliases must be a list of lowercase words`);
@@ -396,6 +399,16 @@ function neededVersion(range, version) {
  * `requires.storyBlock`; null skips that check (a registry built outside the host).
  * `warn(message)`: where definition warnings and failed initial() calls go (default console.warn).
  */
+/** A capture kind's grammar line: its text, or what its function answers now (one line of text; '' when it answers anything else). */
+function grammarOf(spec) {
+    let line = spec?.grammar;
+    if (typeof line === 'function') {
+        try { line = line(); } catch { line = ''; }
+    }
+    line = typeof line === 'string' ? line.trim() : '';
+    return /\n/.test(line) ? '' : line;
+}
+
 export function createRegistry({ hostVersion = null, warn = message => console.warn(`[Story Suite] ${message}`), featureValue = () => undefined } = {}) {
     const defs = new Map();
     // C3-5: each module's features as they were when it registered (module id → [declaration]): a
@@ -661,7 +674,7 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         // `enabled: false` (a kind of an API not in use, MODULES / LIFECYCLE "Deferred domains"): acts as if it were not declared, so a
         // line of it is told as an unknown kind, exactly as in a host that never had the kind.
         if (spec.enabled === false) return null;
-        return { moduleId: def.id, kind, grammar: spec.grammar.trim(), apply: def.capture.apply, feature: featureOf(spec), off: off(spec), display: displayOf(spec) };
+        return { moduleId: def.id, kind, grammar: grammarOf(spec), apply: def.capture.apply, feature: featureOf(spec), off: off(spec), display: displayOf(spec) };
     }
 
     // The feature a command belongs to (a capture.<kind> command: its kind's), or null.
@@ -937,7 +950,7 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
                 moduleId: def.id,
                 name: def.name ?? def.id,
                 domains: Object.keys(def.domains ?? {}),
-                kinds: Object.keys(def.capture?.kinds ?? {}).sort().filter(kind => def.capture.kinds[kind].enabled !== false && !off(def.capture.kinds[kind])).map(kind => ({ kind, grammar: def.capture.kinds[kind].grammar.trim() })),
+                kinds: Object.keys(def.capture?.kinds ?? {}).sort().filter(kind => def.capture.kinds[kind].enabled !== false && !off(def.capture.kinds[kind])).map(kind => ({ kind, grammar: grammarOf(def.capture.kinds[kind]) })).filter(entry => entry.grammar),
                 static: context.static,
                 tail: context.tail,
                 budget: def.context?.budget ?? null,

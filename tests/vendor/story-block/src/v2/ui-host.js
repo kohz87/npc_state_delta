@@ -58,13 +58,14 @@ import { laterStore, replyEdits, replyRules, scanReplyCards } from './reply-card
 import { drawReplyCard } from './view/reply-cards-ui.js';
 import { CORE_FEATURE } from './features.js';
 import { createBlockTemplates } from './data-modules/block-templates.js';
-import { BLOCKS_SCREEN_ID, createBlockWidgets } from './screens/blocks.js';
+import { createBlockWidgets } from './screens/blocks.js';
 import { ROLES_WITHOUT_TAB } from './lean-rpg/names.js';
 import { createInspectorSource } from './inspect.js';
 import { createSavePoints } from './rewind.js';
 import { createInspectorWidget, INSPECTOR_WIDGET } from './screens/inspector.js';
 import { createSavePointsWidget, SAVEPOINTS_WIDGET } from './screens/savepoints.js';
 import { createReadyHintWidget, READY_HINT_WIDGET } from './screens/ready-hint.js';
+import { RPG_START_WIDGET } from './screens/home.js';
 import { createShowMoreWidget, SHOW_MORE_WIDGET } from './screens/show-more.js';
 import { createInventoryAddWidget, INVENTORY_ADD_WIDGET } from './screens/inventory-add.js';
 import { buildReport, captureConsole, caughtSoFar, reportFileName } from './diagnostics.js';
@@ -172,7 +173,8 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
         directorOn: () => registry.lifecycle?.('story-director')?.status === 'ready',
         // Off unless Story Block's core is there to own the switch (unlike coreOn, which counts a missing feature as on).
         leanRpgOn: () => (registry.feature?.(CORE_FEATURE.leanRpg) ? registry.featureOn(CORE_FEATURE.leanRpg) : false),
-        navigate: () => mounts.screen.open(BLOCKS_SCREEN_ID) });
+        // A block card's "Edit fields": the editor is on Settings → Blocks.
+        navigate: () => { openSettings().select('blocks'); return true; } });
     // The host's own widgets: the Inspector (over the store's replay) and the save points (over the chat).
     const liveCtx = () => globalThis.SillyTavern?.getContext?.() ?? ctx;
     const savePoints = createSavePoints({ ctx, store, live: liveCtx, ...(runtime.createBranch ? { createBranch: runtime.createBranch } : {}) });
@@ -194,6 +196,16 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
         // A long card's "Show all" / "Show less" (screens/show-more.js).
         [SHOW_MORE_WIDGET]: createShowMoreWidget(),
         [INVENTORY_ADD_WIDGET]: createInventoryAddWidget(),
+        // Home's "Your character" card (the RPG's, lean-rpg/view/start.js): this stands in for it while the RPG screens are not loaded.
+        [RPG_START_WIDGET]: Object.freeze({
+            props: {}, primary: null, validate: () => [],
+            render(el, props, api) {
+                const widget = rpg?.start?.widget;
+                if (!widget) { el.hidden = true; return null; }
+                el.hidden = false;
+                return widget.render(el, props, api);
+            },
+        }),
         [READY_HINT_WIDGET]: createReadyHintWidget({
             blockers: () => (typeof runtime.turn?.blockers === 'function' ? runtime.turn.blockers() : []),
             unblock: (moduleId, reason) => runtime.turn?.unblock?.(moduleId, reason) ?? false,
@@ -240,7 +252,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
     const packScreenIds = new Map();
     const rpgOn = () => registry.featureOn?.(CORE_FEATURE.leanRpg) === true;
     // The pinned blocks' screens. While RPG is on, its character, skills and rules blocks get no tab (the Party tab draws them;
-    // they stay on the Blocks page); with the feature off every block with a tab keeps it.
+    // they stay in Settings → Blocks); with the feature off every block with a tab keeps it.
     const blockPresentation = () => sdk.query('dataModules.presentation', { kind: 'screens', ...(rpgOn() ? { noTab: ROLES_WITHOUT_TAB } : {}) });
     function syncScreens() {
         const byModule = new Map();
@@ -456,6 +468,8 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
     // the action's `payload` is the dialog's starting draft), else nothing; that is said once per screen.
     const unopened = new Set();
     function openReplyScreen(id, payload) {
+        // The card that asks to add a companion opens the New character window filled in (lean-rpg/join.js): the wizard keeps its own draft.
+        if (id === 'story-block/new-character' && rpg?.wizard?.open(payload && typeof payload === 'object' ? payload : null)) return;
         const mountsOf = screens.resolve(id)?.screen?.mounts ?? [];
         if (mountsOf.includes('screen') && api.openScreen(id)) return;
         if (mountsOf.includes('dialog')) {
@@ -675,7 +689,8 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
         const fold = typeof options?.fold === 'string' ? options.fold : null;
         overlay = openSettingsWindow({
             registry, settings, doc, sdk, features: runtime.features ?? null, fold, diagnostics,
-            promptParts, tabs: tabsControl, theme, blockTemplates,
+            promptParts, tabs: tabsControl, theme, blockTemplates, blocks: blockWidgets,
+            chatOpen: () => Boolean(liveCtx()?.getCurrentChatId?.() ?? liveCtx()?.chatId),
             ...(rpg ? { extraSections: rpg.settingsSections() } : {}),
             countTokens: countTokens(),
             onClose: () => { overlay = null; },
@@ -833,8 +848,16 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
             rpgLoading = false;
             if (rpgGone || rpg || !rpgOn()) return;
             rpg = view.mountLeanRpg({ doc, ctx, store, events, screens, widgets: hostWidgets, headState: headStateNow, featureOn: rpgOn,
-                readerName: () => String(liveCtx()?.name1 ?? ctx.name1 ?? ''), openDialog: (id, opts) => api.dialog.open(id, opts), closeView: () => mounts.screen.close(), refresh: () => refresh(), command: (type, payload, options) => sdk.command(type, payload, options), values: () => settings('story-block') });
+                readerName: () => String(liveCtx()?.name1 ?? ctx.name1 ?? ''),
+                // The active persona's description: the one property of SillyTavern's settings this reads (never another persona or setting).
+                readerAbout: () => { try { return String((liveCtx()?.powerUserSettings ?? ctx.powerUserSettings)?.persona_description ?? ''); } catch { return ''; } },
+                // What the chat remembers about the first send (lean-rpg/start.js): in its own metadata, written with the chat.
+                meta: () => { try { return (liveCtx() ?? ctx)?.chatMetadata ?? null; } catch { return null; } },
+                save: () => { try { const c = liveCtx() ?? ctx; (c.saveMetadata ?? c.saveMetadataDebounced)?.call(c); } catch { /* the choice lasts this page only */ } },
+                openDialog: (id, opts) => api.dialog.open(id, opts), closeView: () => mounts.screen.close(), refresh: () => refresh(), command: (type, payload, options) => sdk.command(type, payload, options), values: () => settings('story-block') });
             mounts.card?.refreshAll?.({ force: true });
+            // Home draws its "Your character" card from `rpg`, which is only set now: the open screen is drawn again.
+            mounts.screen?.update?.();
             // The settings window was opened before the screens loaded (the reader just switched the feature on): open it again on the same
             // page, now with the RPG page in its rail.
             if (overlay?.isOpen?.()) { const page = overlay.section(); openSettings(); overlay.select(page); }

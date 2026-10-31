@@ -16,6 +16,7 @@
 //   `[{ craft, title, stats, stations, note?, pack }]`) for modules that use recipes.
 // * query `packs.weather` → the first enabled pack's weather table `{ pack, seasons, tables }`, or null
 //   (MODULES §F122: Story Director's weather by rule).
+// * query `packs.youRank` → `{ pack, label }` of the first enabled pack with `content.you.rank`, or null (MODULES §F126).
 // * query `packs.economy` → the first enabled pack's money scale `{ pack, scale, note }`, or null. Modules
 //   read the settled scale through Story Block's `inventory.economy` instead (MODULES §F104).
 // * query `packs.markets` → what sets a place's prices (PACKS.md "Markets"): `{ types, tags, places }`,
@@ -31,13 +32,13 @@
 //   `applyStart(state, start, { id })` writes it into an initial State.
 
 import { createInstalled } from './installed.js';
-import { calendarOf, contentOf, craftsOf, economyOf, itemDefsIn, mergeStart, resolveItemIn, applyStart, weatherOf } from './content.js';
+import { calendarOf, contentOf, craftsOf, economyOf, itemDefsIn, mergeStart, resolveItemIn, applyStart, weatherOf, youRankOf } from './content.js';
 import { renderPacksPanel } from './panel.js';
 import { HOST_VERSION, validatePack, slugify } from './validate.js';
 import { readCharacterLorebook, stCapabilities, stHostVersion, stSettings } from './st-adapter.js';
 import { marketEntries } from './lorebook.js';
 
-export { validatePack, slugify, applyStart, mergeStart, resolveItemIn, contentOf, calendarOf, craftsOf, economyOf, weatherOf, createInstalled, renderPacksPanel };
+export { validatePack, slugify, applyStart, mergeStart, resolveItemIn, contentOf, calendarOf, craftsOf, economyOf, weatherOf, youRankOf, createInstalled, renderPacksPanel };
 export { LIMITS, CONTENT_KINDS, DEFAULT_CRAFTS, STATIONS } from './limits.js';
 export { findPackEntries, marketEntries, readMarketLine, PACK_TAG } from './lorebook.js';
 export { satisfies } from './version.js';
@@ -99,6 +100,8 @@ export function createPacksPart({ settings, readLorebook = async () => ({ charac
             'packs.start': () => startState(),
             'packs.calendar': () => calendarOf(packs.packs()),
             'packs.weather': () => weatherOf(packs.packs()),
+            // The Rank the first enabled pack that declares one gives {{user}}'s look, `{ pack, label }`, or null (no Rank in this story).
+            'packs.youRank': () => youRankOf(packs.packs()),
             'packs.crafts': () => craftsOf(packs.packs()),
             'packs.economy': () => economy(),
             'packs.markets': () => markets(),

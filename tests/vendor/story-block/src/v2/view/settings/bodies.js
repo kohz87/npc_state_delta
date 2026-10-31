@@ -12,7 +12,7 @@
 // changed that other pages draw: it redraws them), options (what the window was opened with: registry, settings, sdk,
 // features, theme, …) }.
 //
-// Look, Features (3b), Money (3c, money.js), Assist (3d, assist.js), Tabs & Packs (3e, tabs-packs.js) and Modules (3f, modules.js) are the
+// Look, Features (3b), Money (3c, money.js), Assist (3d, assist.js), Tabs & Packs (3e, tabs-packs.js), Blocks (blocks.js) and Modules (3f, modules.js) are the
 // form engine's (below). The last section, Diagnostics, is still today's settings (host-ui.js `renderSettingsHost`), drawn into the section
 // it belongs to (sections.js `routeOf`) by one shared host. Step 3g replaces that entry:
 //
@@ -26,6 +26,7 @@ import { HOST_SETTINGS_SCHEMA } from '../../sdk.js';
 import { renderFeaturesForm } from '../form/features.js';
 import { renderSettingsForm } from '../form/form.js';
 import { assistBody } from './assist.js';
+import { blocksBody } from './blocks.js';
 import { diagnosticsBody } from './diagnostics-page.js';
 import { modulesBody } from './modules.js';
 import { moneyBody } from './money.js';
@@ -109,6 +110,7 @@ export const SECTION_BODIES = Object.freeze({
     money: moneyBody,
     assist: assistBody,
     tabs: tabsPacksBody,
+    blocks: blocksBody,
     modules: modulesBody,
     diagnostics: diagnosticsBody,
 });

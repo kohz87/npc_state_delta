@@ -14,7 +14,8 @@
 // it draws nothing.
 //
 // Last, the save points (MODULES §F93): the host's `story-block.savepoints` widget, which draws nothing
-// while that feature is off. Packs are not on Home: Settings → Tabs & Packs has the import.
+// while that feature is off, and the Mounts card (`mounts.list`, `mounts.pace`: src/v2/domains/mounts.js), which
+// shows only while the party has a mount. Packs are not on Home: Settings → Tabs & Packs has the import.
 
 import { STRINGS, html, jsonText } from '../strings.js';
 import { BASE_CSS } from './style.js';
@@ -24,8 +25,11 @@ import { SHOW_MORE_WIDGET } from './show-more.js';
 const SAVEPOINTS_WIDGET = 'story-block.savepoints';
 // "Before you start" while a module holds the story back (screens/ready-hint.js), also a host widget.
 const READY_HINT_WIDGET = 'story-block.ready-hint';
+// The RPG's "Your character" card while the story has no character (lean-rpg/view/start.js): a host widget that draws nothing unless the RPG is on.
+export const RPG_START_WIDGET = 'story-block.rpg-start';
 
 const S = STRINGS.home;
+const M = STRINGS.mounts;
 
 export const HOME_SCREEN_ID = 'story-block/home';
 
@@ -33,6 +37,7 @@ export const HOME_SCREEN_ID = 'story-block/home';
 
 const TEMPLATE = `
 <div class="home">
+  <ss-widget name="${RPG_START_WIDGET}" class="rpg-start-slot"></ss-widget>
   <ss-widget name="${READY_HINT_WIDGET}" class="ready-slot"></ss-widget>
 
   <section class="panel scene">
@@ -76,6 +81,27 @@ const TEMPLATE = `
   </section>
 
   <ss-widget name="${SAVEPOINTS_WIDGET}" class="saves-slot"></ss-widget>
+
+  <section class="panel mounts" data-if="len(q.mounts) > 0">
+    <h4 class="ss-section-label"><i class="fa-solid fa-horse" aria-hidden="true"></i> ${html(M.title)}</h4>
+    <ul class="mount-list">
+      <li class="mount" data-each="q.mounts as m">
+        <span class="mount-ico" aria-hidden="true">
+          <i class="fa-solid fa-cart-flatbed" data-if="contains(m.kind, 'cart') || contains(m.kind, 'wagon')"></i>
+          <i class="fa-solid fa-horse" data-if="contains(m.kind, 'horse') || contains(m.kind, 'pony')"></i>
+          <i class="fa-solid fa-horse-head" data-if="!contains(m.kind, 'cart') && !contains(m.kind, 'wagon') && !contains(m.kind, 'horse') && !contains(m.kind, 'pony')"></i>
+        </span>
+        <div class="mount-text">
+          <div class="mount-name"><b>{{ m.name }}</b><span data-if="m.count > 1"> ×{{ m.count }}</span><ss-widget name="ss.editable" data-props='{"value":"{{ m.name }}","displayValue":false,"kind":"fields","label":"${jsonText(M.edit)}","command":"mounts.edit","payload":{"mount":"{{ m.name }}"},"fields":[{"key":"name","label":"${jsonText(M.editName)}","value":"{{ m.name }}","maxLength":40},{"key":"kind","label":"${jsonText(M.editKind)}","value":"{{ m.kind }}","maxLength":20},{"key":"count","label":"${jsonText(M.editCount)}","type":"number","value":"{{ m.count }}","min":1,"max":8},{"key":"pace","label":"${jsonText(M.editPace)}","type":"number","value":"{{ m.pace }}","min":1,"max":200},{"key":"condition","label":"${jsonText(M.editCondition)}","value":"{{ m.condition }}","maxLength":60},{"key":"where","label":"${jsonText(M.editWhere)}","value":"{{ m.where }}","maxLength":80}]}'></ss-widget></div>
+          <div class="mount-sub muted"><span data-if="m.kind">{{ m.kind }}</span><span data-if="m.kind != '' && m.condition != ''"> · </span><span data-if="m.condition">{{ m.condition }}</span><span data-if="m.kind != '' && m.condition == '' && m.where != ''"> · </span><span data-if="m.condition != '' && m.where != ''"> · </span><span data-if="m.where">{{ m.where }}</span></div>
+        </div>
+        <span class="chip mount-pace">{{ m.pace }} ${html(M.perDay)}</span>
+      </li>
+    </ul>
+    <p class="mount-note muted" data-if="q.pace.short == 0">${html(M.noteBefore)}{{ q.pace.pace }}${html(M.noteAfter)}</p>
+    <p class="mount-note muted" data-if="q.pace.short > 0">${html(M.noteShortBefore)}{{ q.pace.pace }}${html(M.noteShortAfter)}</p>
+  </section>
+
   <ss-widget name="story-block.block-cards" class="blocks-slot"></ss-widget>
 </div>`;
 
@@ -106,8 +132,20 @@ const CSS = `${BASE_CSS}
 .worn { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .progress { margin-top: 4px; }
 .saves-slot:empty { display: none; }
+/* The Mounts card: one row per mount (an icon, the name with its pencil and what it is, a pace pill), then what the party travels at. */
+.mount-list { display: grid; gap: 8px; margin-top: 4px; }
+.mount { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; min-width: 0; }
+.mount-ico { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; border: 1.5px solid var(--sb-border); }
+.mount-text { min-width: 0; overflow-wrap: anywhere; }
+.mount-sub { font-size: 0.85em; }
+/* While a row's pencil form is open, the form takes the row's text column. */
+.mount:has(.ss-w-editable-form) .mount-sub, .mount:has(.ss-w-editable-form) .mount-name > b, .mount:has(.ss-w-editable-form) .mount-name > span { display: none; }
+.mount-name:has(.ss-w-editable-form) .ss-w-editable { width: 100%; }
+.mount-pace { white-space: nowrap; font-weight: 700; background: color-mix(in srgb, var(--sb-accent) 28%, transparent); }
+.mount-note { font-size: 0.85em; margin: 8px 0 0; }
 .blocks-slot:empty { display: none; }
-.ready-slot { grid-column: 1 / -1; }
+.ready-slot, .rpg-start-slot { grid-column: 1 / -1; }
+.rpg-start-slot:empty, .rpg-start-slot[hidden] { display: none; }
 .ready-slot:empty { display: none; }
 .ready-hint { display: grid; gap: 6px; border-color: color-mix(in srgb, var(--sb-accent) 55%, var(--sb-border)); }
 .ready-hint > h4 { margin: 0; }
@@ -145,6 +183,8 @@ export const homeScreen = Object.freeze({
         wallet: Object.freeze({ query: 'inventory.wallet', args: Object.freeze({ owner: 'party' }) }),
         currency: Object.freeze({ query: 'inventory.currency' }),
         board: Object.freeze({ query: 'quest.board' }),                               // Story Director
+        mounts: Object.freeze({ query: 'mounts.list' }),
+        pace: Object.freeze({ query: 'mounts.pace' }),
     }),
     template: TEMPLATE,
     css: CSS,

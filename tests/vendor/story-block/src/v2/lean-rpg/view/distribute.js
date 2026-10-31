@@ -50,7 +50,7 @@ export function renderDistribute(parent, { character, session = null, api = {}, 
     const pointsLeft = () => run.pool - spentOf(character.stats, run.start, run.draft);
     const pillText = left => fill(left === 1 ? S.pointsLeftOne : S.pointsLeft, { n: left });
     const axes = () => character.stats.map(stat => ({ label: stat.label, value: run.draft[stat.key], max: stat.max, before: run.start[stat.key] }));
-    const words = () => (run.busy ? S.saving : run.message || (character.points > 0 ? S.hint : S.noPoints));
+    const words = () => (run.busy ? S.saving : run.message || (character.points > 0 ? fill(S.hint, { label: character.soulLabel }) : S.noPoints));
 
     // The pill, the steppers' budgets, the radar and the buttons follow the draft; nothing is redrawn from scratch.
     function refresh() {
@@ -71,7 +71,7 @@ export function renderDistribute(parent, { character, session = null, api = {}, 
         const head = h(doc, 'div', 'rpg-sheet-head');
         head.appendChild(h(doc, 'h3', 'rpg-sheet-name', character.name));
         const pills = h(doc, 'div', 'rpg-pills');
-        pills.appendChild(h(doc, 'span', 'ss-pill', fill(RPG_STRINGS.party.soul, { name: character.soulName })));
+        pills.appendChild(h(doc, 'span', 'ss-pill', fill(RPG_STRINGS.party.soul, { label: character.soulLabel, name: character.soulName })));
         pills.appendChild(h(doc, 'span', 'ss-pill', fill(S.xpPill, { xp: character.xp })));
         pill = h(doc, 'span', 'ss-pill rpg-points-left');
         pill.setAttribute('role', 'status');

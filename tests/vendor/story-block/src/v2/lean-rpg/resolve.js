@@ -17,7 +17,8 @@
 // lacks, rolls the plan's stat at rank 0. The
 // outcome is the party member's: a natural 20 succeeds, a natural 1 fails, a total that reaches the other side
 // succeeds, one within FORMULA.costMargin short is "success at a cost", anything else fails. A foe's attack is
-// the same roll seen from the defender, who rolls with the `defend` stat and no skill. Rounds = the smallest of the
+// the same roll seen from the defender, who rolls with the `defend` stat, or with a skill the plan names (`skill`, which a skill the defender
+// has resolves like an act's: its own stat and rank, an Empty resource rolls without it; one they lack is rolled untrained). Rounds = the smallest of the
 // pace (careful 1, normal 5, all 8), LIMITS.roundCap, the first decisive round (a natural 1 or 20 on any die, or a
 // margin of LIMITS.decisiveMargin either way) and what fits the cue budget (LIMITS.cueTokens); at least one.
 //
@@ -45,10 +46,11 @@
 //     difficulty, dc                                                          (checks only) }
 // Every number is final: total = die + statBonus + classBonus + rank + edge for the party and die + base + classBonus
 // for a foe. 'act': the party member attacks (the outcome is theirs); 'foe': the foe attacks, `stat` is the defend
-// stat and `pc` the defender (outcome 'fail' means the defender failed). `summary.exchanges` = rounds.length is the
+// stat (or the defending skill's), `skill` the defending skill (null: none; a roll made before there were any has none) and `pc` the
+// defender (outcome 'fail' means the defender failed). `summary.exchanges` = rounds.length is the
 // number B shows as "Rolled for you: N exchanges". The told count is not recorded: the narrator is not asked to count.
 import { FORMULA, LIMITS, PACE, RESOLVE, STAGES } from './names.js';
-import { normalizeRules, STANDARD } from './rules.js';
+import { normalizeRules, STANDARD, statShare } from './rules.js';
 import { fitCue } from './cue.js';
 import { matchCharacter, matchFoe, matchSkill, readSheet, strongestStat } from './read.js';
 import { validatePlan } from './plan.js';
@@ -76,7 +78,7 @@ export function outcomeOf(die, total, against, rules = STANDARD) {
 function side(character, stat, rank, edge, rules, hidden = false) {
     const value = character.stats[stat];
     return {
-        who: character.who, stat, statBonus: Math.floor(value / rules.statDivisor),
+        who: character.who, stat, statBonus: statShare(value, rules),
         classValue: character.soul, classBonus: rules.classWeight * character.soul, rank, edge,
         ...(hidden || (character.hidden ?? []).includes(stat) ? { statHidden: true } : {}),
     };
@@ -155,9 +157,13 @@ export function prepare(plan, sheet, rules = STANDARD) {
         const label = `${foe?.name ?? `Foe ${entry.slot}`} attacks ${entry.target}`;
         if (!foe) { refuse(`foe${entry.slot}`, `${label}: not rolled (that foe slot is empty).`); continue; }
         const defender = ready(entry.target);
-        const stat = defender.refusal ? defender : statOf(defender.character, entry.defend);
-        if (stat.refusal) { refuse(entry.target, `${label}: not rolled (${stat.refusal}).`); continue; }
-        out.foes.push({ at, kind: 'foe', skill: null, pc: side(defender.character, entry.defend, 0, 0, rules), foe });
+        if (defender.refusal) { refuse(entry.target, `${label}: not rolled (${defender.refusal}).`); continue; }
+        // A skill the defender has counts like an act's: its own stat wins over `defend`, its rank adds, an Empty resource rolls without it.
+        const skill = skillFor(defender.character, entry.skill, { stat: entry.defend });
+        const stat = statOf(defender.character, skill.stat, skill.statHidden);
+        if (stat.refusal) { refuse(entry.target, `${label}: not rolled (${stat.refusal}).`, `${label}: not rolled (${stat.plain ?? stat.refusal}).`); continue; }
+        if (skill.refused) refuse(entry.target, skill.refused, skill.refusedPlain);
+        out.foes.push({ at, kind: 'foe', skill: skill.skill, pc: side(defender.character, skill.stat, skill.rank, 0, rules, skill.statHidden), foe });
     }
     for (const [at, check] of (plan.checks ?? []).entries()) {
         const actor = ready(check.who);

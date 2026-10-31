@@ -23,13 +23,18 @@ export const CONTENT_KINDS = Object.freeze(['items', 'creatures', 'shops', 'reci
 // Kinds added after the first pack format: a normalized pack has them only when the file gives
 // them, so what older packs list (counts) stays as it was.
 export const OPTIONAL_KINDS = Object.freeze(['skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'dataModules', 'rpg']);
+// `content.you` (Your look, MODULES §F126): an object, not a list. A pack opts in to a Rank for {{user}} with
+// `content.you.rank: { "label": "Guild rank" }` (the label is what Home and the Status card call it, 1 to 30 characters).
+export const YOU_FIELDS = Object.freeze(['rank']);
+export const YOU_RANK_FIELDS = Object.freeze(['label']);
+export const YOU_RANK_LABEL_MAX = 30;
 // Capabilities provided by the host in addition to installed modules.
 export const HOST_CAPABILITIES = Object.freeze(['data-modules-v1']);
 
 // Top-level fields of pack.json; anything else is refused so a typo is not silently ignored.
 export const PACK_FIELDS = Object.freeze(['id', 'version', 'name', 'author', 'description', 'requires', 'currency', 'economy', 'calendar', 'weather', 'content', 'start', 'layouts', 'screens', 'theme']);
 // A pack's money scale (MODULES §F104): `{ scale?: 0.001–1000 (default 1), note? }`. `scale` multiplies the
-// built-in money defaults (Story Block's coin budget by level, a module's default loot and prices) when
+// built-in money defaults (a module's default loot and prices) when
 // this pack's currency is in use; numbers the pack writes itself (ranks, item values, prices) stay as written.
 export const ECONOMY_FIELDS = Object.freeze(['scale', 'note']);
 export const ECONOMY_LIMITS = Object.freeze({ min: 0.001, max: 1000, note: 500 });

@@ -18,6 +18,8 @@
 import { RESOLVE } from '../index.js';
 import { CLASS_NAMES, RANK_NAMES } from '../names.js';
 import { readRecord } from '../../persist.js';
+import { fold } from '../read.js';
+import { soulReading, soulShortOf } from '../soul.js';
 import { RPG_STRINGS, fill } from '../strings.js';
 import { BARS, readFoes, readParty } from './party-data.js';
 
@@ -48,25 +50,30 @@ export function rollText(roll) {
     return body ? `${body}${sum}` : '';
 }
 
+// "Class II", or what the Character block calls it ("Level 3"): `soul` is its soulReading (null: the template's words).
+const classText = (value, soul) => `${soul ? soulShortOf(soul.label, 'Class') : 'Class'} ${soul ? soul.word(value) : CLASS_NAMES[value - 1] ?? value}`;
+
 // The party side of a Line: the die, the stat, the class, the skill's rank and the edge.
-const pcRoll = (pc, skill) => ({ d20: pc.die, total: pc.total, parts: [
-    { label: words(pc.stat, 12).toUpperCase(), value: pc.statBonus }, { label: `Class ${CLASS_NAMES[pc.classValue - 1] ?? pc.classValue}`, value: pc.classBonus },
+const pcRoll = (pc, skill, soul) => ({ d20: pc.die, total: pc.total, parts: [
+    { label: words(pc.stat, 12).toUpperCase(), value: pc.statBonus }, { label: classText(pc.classValue, soul), value: pc.classBonus },
     { label: skill ? RANK_NAMES[pc.rank] ?? `Rank ${pc.rank}` : '', value: pc.rank }, { label: 'Edge', value: pc.edge }] });
-const foeRoll = foe => ({ d20: foe.die, total: foe.total, parts: [{ label: '', value: foe.base }, { label: `Class ${CLASS_NAMES[foe.classValue - 1] ?? foe.classValue}`, value: foe.classBonus }] });
+const foeRoll = (foe, soul) => ({ d20: foe.die, total: foe.total, parts: [{ label: '', value: foe.base }, { label: classText(foe.classValue, soul), value: foe.classBonus }] });
 
 // One Line as the panel draws it: who acts, on whom, the acting side's total against the other's, and the roll behind it. A party
 // act or check reads the party's total first; a foe's attack reads from the attacker's side, so the foe's total and roll come first.
-function lineOf(raw) {
+function lineOf(raw, soulOf = () => null) {
     if (!isRecord(raw) || !isRecord(raw.pc) || !Number.isFinite(raw.pc.total)) return null;
     const outcome = outcomeOf(raw.outcome);
     const foeSide = isRecord(raw.foe) && Number.isFinite(raw.foe.total) ? raw.foe : null;
     const skill = words(raw.skill, 40), why = words(raw.why, 120);
-    const mine = pcRoll(raw.pc, skill && raw.kind !== 'foe');
+    // A foe's class is told in the words of the party member it is rolled against, so one line reads in one set of words.
+    const soul = soulOf(words(raw.pc.who, 40));
+    const mine = pcRoll(raw.pc, skill, soul);
     const against = raw.kind === 'check' ? (Number.isFinite(raw.dc) ? raw.dc : null) : foeSide?.total ?? null;
-    const theirs = foeSide ? rollText(foeRoll(foeSide)) : against !== null ? `DC ${against}` : '';
+    const theirs = foeSide ? rollText(foeRoll(foeSide, soul)) : against !== null ? `DC ${against}` : '';
     const detail = (raw.kind === 'foe' ? [theirs, rollText(mine)] : [rollText(mine), theirs]).filter(Boolean).join(' vs ');
     const base = { outcome, total: raw.pc.total, vs: against, skill, breakdown: why ? `${detail} · ${why}` : detail, arrows: [] };
-    if (raw.kind === 'foe') return { ...base, total: foeSide?.total ?? null, vs: raw.pc.total, who: words(foeSide?.name, 40), target: words(raw.pc.who, 40), skill: '', stat: words(raw.pc.stat, 12).toUpperCase(), foe: true };
+    if (raw.kind === 'foe') return { ...base, total: foeSide?.total ?? null, vs: raw.pc.total, who: words(foeSide?.name, 40), target: words(raw.pc.who, 40), skill: '', defence: skill, stat: words(raw.pc.stat, 12).toUpperCase(), foe: true };
     if (raw.kind === 'check') return { ...base, who: words(raw.pc.who, 40), target: '', stat: words(raw.pc.stat, 12).toUpperCase(), foe: false, what: skill || words(raw.pc.stat, 12).toUpperCase() };
     return { ...base, who: words(raw.pc.who, 40), target: words(foeSide?.name, 40), stat: words(raw.pc.stat, 12).toUpperCase(), foe: false };
 }
@@ -75,13 +82,13 @@ function lineOf(raw) {
  * A's result record as the panel draws it: `{ rounds: [{ n, lines }], checks, order, ended, refused }` or null when the
  * record holds nothing to show. A Line that is not whole is left out, never thrown on.
  */
-export function readResolve(result) {
+export function readResolve(result, { soulOf = () => null } = {}) {
     if (!isRecord(result)) return null;
     const rounds = list(result.rounds).map((round, at) => ({
         n: Number.isSafeInteger(round?.n) ? round.n : at + 1,
-        lines: list(round?.lines).map(lineOf).filter(line => line?.who),
+        lines: list(round?.lines).map(line => lineOf(line, soulOf)).filter(line => line?.who),
     })).filter(round => round.lines.length);
-    const checks = list(result.checks).map(lineOf).filter(line => line?.who);
+    const checks = list(result.checks).map(line => lineOf(line, soulOf)).filter(line => line?.who);
     const refused = list(result.refused).filter(isRecord).map(item => ({ who: words(item.who, 40), why: words(item.text, 160) })).filter(item => item.why);
     if (!rounds.length && !checks.length) return null;
     // The order they act in: the names of the first round, each once.
@@ -90,11 +97,11 @@ export function readResolve(result) {
 }
 
 /** The recorded rolls of a reply's record: the result of its `rpg.resolve` receipt that the replay kept, or null. */
-export function resolveOf(record, problems = []) {
+export function resolveOf(record, problems = [], options = {}) {
     const skipped = new Set(list(problems).flatMap(problem => list(problem?.receipts)));
     for (const receipt of list(record?.receipts)) {
         if (receipt?.type !== RESOLVE || skipped.has(receipt.id)) continue;
-        const read = readResolve(receipt.data?.v2?.result);
+        const read = readResolve(receipt.data?.v2?.result, options);
         if (read) return read;
     }
     return null;
@@ -178,6 +185,12 @@ function lineNode(doc, line, { check = false } = {}) {
         text.append(`${line.who} ${line.skill ? B.uses : B.attacks} `);
         if (line.skill) text.appendChild(el(doc, 'span', 'rpg-skill', line.skill));
         if (line.target) text.append(`${line.skill ? ` ${B.on} ` : ''}${line.target}`);
+        // The skill a defender used ("Sluice Rat A attacks Astra (Iaijutsu) — Blocked"); a roll made before there were any has none.
+        if (line.defence) {
+            text.append(' (');
+            text.appendChild(el(doc, 'span', 'rpg-skill', line.defence));
+            text.append(')');
+        }
         if (outcome) {
             text.append(' — ');
             text.appendChild(el(doc, 'span', `rpg-out rpg-out-${line.outcome}`, outcome));
@@ -400,7 +413,13 @@ export function createBattleLog({ ctx, doc = globalThis.document, store, events 
         if (!featureOn() || !message || message.is_user || message.is_system) return null;
         const record = readRecord(message);
         if (!record) return null;
-        const resolve = resolveOf(record, problems().filter(problem => problem?.index === index));
+        // What each party member calls the Soul Class comes from the reply's own state, read once and only when a line is drawn.
+        let souls = null;
+        const soulOf = who => {
+            souls ??= new Map((stateAt(index) ? readParty(stateAt(index), { roleOf }) : []).map(character => [fold(character.name), soulReading(character.definition.state?.soul)]));
+            return souls.get(fold(who)) ?? null;
+        };
+        const resolve = resolveOf(record, problems().filter(problem => problem?.index === index), { soulOf });
         const state = resolve ? stateAt(index) : null;
         if (!state) return null;
         return { key: `${chatKey()}|${record.sid ?? index}`, model: panelModel({ resolve, state, before: beforeOf(index), roleOf }) };

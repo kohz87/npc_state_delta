@@ -26,6 +26,7 @@ const props = {
     cost: { type: 'number', default: 1 },                       // points per step up
     label: { type: 'string', default: '' },
     budgetLabel: { type: 'string', default: 'Points left' },
+    showBudget: { type: 'boolean', default: true },             // false: the budget still limits the stepper, but the line under it is left out
     tone: { type: 'string', default: 'neutral' },
     disabled: { type: 'boolean', default: false },
 };
@@ -100,8 +101,8 @@ function render(el, input, api) {
             inc.disabled = p.disabled || value + limits.step > limits.hi + EPSILON;
             field.disabled = p.disabled;
             root.classList.toggle('ss-w-spent', remaining !== null && remaining < limits.cost);
-            budgetNote.hidden = remaining === null;
-            budgetNote.textContent = remaining === null ? '' : `${p.budgetLabel || 'Points left'}: ${fmt(remaining)}`;
+            budgetNote.hidden = remaining === null || !p.showBudget;
+            budgetNote.textContent = remaining === null || !p.showBudget ? '' : `${p.budgetLabel || 'Points left'}: ${fmt(remaining)}`;
         }
 
         function set(raw) {

@@ -2,7 +2,7 @@
 // the `ss-switch`, `ss-input`, `ss-select`, `ss-slider`, `ss-chips`, `ss-lines`, `ss-search` classes).
 //
 //   switch (bool), text, number (int), slider (int with form: 'slider'), select (choice), chips (choice with
-//   form: 'chips', or several at once with `multiple`), profile (a Connection Manager profile), lines (a list of
+//   form: 'chips', or several at once with `multiple`), segmented (choice with form: 'segmented': one joined row of buttons), profile (a Connection Manager profile), lines (a list of
 //   records: rows with Add and Remove, or one line per item), plus the search box and a grouped section.
 //
 // Every renderer is `(ctx) → handle` with
@@ -410,6 +410,18 @@ export function chipsField(ctx) {
     return handle;
 }
 
+// ---- segmented: one choice as a joined row of buttons ----------------------------------------------
+
+/**
+ * A choice with `form: 'segmented'`: the one-of chips (a radio group with arrow keys) drawn as one joined row, for a few short
+ * options (Text size: Normal, 110%, 120%). Same value, events and keys as `chipsField`; only the class differs (`ss-segmented`).
+ */
+export function segmentedField(ctx) {
+    const handle = chipsField({ ...ctx, field: { ...ctx.field, multiple: false } });
+    handle.el.classList.add('ss-segmented');
+    return handle;
+}
+
 // ---- lines: an editable list of records ------------------------------------------------------------
 
 const subLabel = (key, sub) => String(sub.label ?? String(key).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase()));
@@ -696,7 +708,7 @@ export function chipsetField(ctx) {
 
 /** The renderers by kind. */
 export const RENDERERS = Object.freeze({
-    switch: switchField, text: textField, number: numberField, slider: sliderField, select: selectField, chips: chipsField, chipset: chipsetField, profile: profileField, lines: linesField,
+    switch: switchField, text: textField, number: numberField, slider: sliderField, select: selectField, chips: chipsField, chipset: chipsetField, segmented: segmentedField, profile: profileField, lines: linesField,
 });
 
 export { FIELD_KINDS };

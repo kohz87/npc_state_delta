@@ -113,7 +113,7 @@ export function renderBlockEditor(root, { draft, used = [], directorOn = true, o
         const show = node('section', 'ss-block-show', '', form);
         node('h4', 'ss-section-label', S.showAs, show);
         const group = node('div', 'ss-block-chips', '', show);
-        for (const [label, tab, card] of [[S.ownTab, true, false], [S.card, false, true], [S.both, true, true]]) {
+        for (const [label, tab, card] of [[S.ownTab, true, false], [S.card, false, true], [S.both, true, true], [S.hidden, false, false]]) {
             const selected = draft.show.tab === tab && draft.show.card === card;
             const item = button(group, label, () => { collect(); draft.show.tab = tab; draft.show.card = card; draw(); }, `ss-button ss-chip${selected ? ' ss-chip-on' : ''}`);
             item.setAttribute('aria-pressed', String(draft.show.tab === tab && draft.show.card === card));

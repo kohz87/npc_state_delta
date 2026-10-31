@@ -1,5 +1,5 @@
 // The RPG's lines in "Changed this reply" (mockup 12-auto-lines): "Rolled for you: 3 exchanges" from the reply's recorded
-// rolls, and the automatic rises, "Wessel: Soul Class II → III" and "Iron Breath: Adept → Expert", worked out from the
+// rolls, and the automatic rises, "Wessel: Soul Class II → III" (the field's own label and names when a pack renamed it) and "Iron Breath: Adept → Expert", worked out from the
 // state before the reply and the reply's own (the class and rank rules raise them; the display names come from the
 // fields' `names`). They come in the shape `replyCardLines` gives (ui-host.js adds them to the card's `moduleLines`).
 // Pure: no DOM.
@@ -58,6 +58,25 @@ export function rulesOfReply(record, problems = []) {
 }
 
 /**
+ * Companions who joined or left on this reply (a `+ party` or `- party` line, or the reader's Add to party), from the reply's own receipts
+ * (`data.join`, join.js): a swipe or a delete takes the receipt and so the line away, and a block the replay skipped is not told.
+ */
+export function partyLines(record, problems = []) {
+    const skipped = new Set(list(problems).flatMap(problem => list(problem?.receipts)));
+    const out = [];
+    for (const receipt of list(record?.receipts)) {
+        const join = receipt?.data?.join;
+        if (!isRecord(join) || skipped.has(receipt.id)) continue;
+        const who = words(join.name);
+        if (!who) continue;
+        if (join.op === 'added') out.push(line({ icon: 'fa-user-plus', tone: 'good', text: fill(C.joined, { who }), summary: fill(C.joinedSummary, { who }), note: C.joinedNote }));
+        else if (join.op === 'back') out.push(line({ icon: 'fa-user-plus', tone: 'good', text: fill(C.returned, { who }), summary: fill(C.joinedSummary, { who }) }));
+        else if (join.op === 'left') out.push(line({ icon: 'fa-user-minus', tone: 'info', text: fill(C.left, { who }), summary: fill(C.leftSummary, { who }), note: C.leftNote }));
+    }
+    return out;
+}
+
+/**
  * The RPG's lines for one reply. `state` is the reply's state, `before` the one before it (null for the first reply: no
  * rises are told then), `record` the reply's record, `problems` the replay problems of that reply. `rules`: the numbers in force
  * now, used only for a reply that has no roll of its own (its roll's recorded numbers win).
@@ -71,15 +90,19 @@ export function rpgReplyLines({ state, before = null, record = null, problems = 
         out.push(line({ icon: 'fa-dice-d20', tone: 'info', text: fill(rolled.exchanges === 1 ? C.rolledOne : C.rolled, { n: rolled.exchanges }),
             summary: fill(rolled.exchanges === 1 ? C.rolledSummaryOne : C.rolledSummary, { n: rolled.exchanges }), note }));
     }
+    out.push(...partyLines(record, problems));
     if (!before) return out;
     const then = new Map(readParty(before, { roleOf }).map(character => [`${character.module}|${character.subject}`, character]));
     for (const character of readParty(state, { roleOf })) {
         const old = then.get(`${character.module}|${character.subject}`);
         if (!old || !(character.soul > old.soul)) continue;
         const bonus = (rules?.classWeight ?? FORMULA.classWeight) * (character.soul - old.soul);
-        out.push(line({ icon: 'fa-arrow-up', tone: 'good', text: fill(C.classUp, { who: character.name, from: old.soulName, to: character.soulName }),
-            summary: fill(C.classSummary, { to: character.soulName }),
-            note: character.xp === 0 ? fill(C.classNote, { xp: character.xp, bonus }) : fill(C.classNoteShort, { bonus }) }));
+        // A character made from 2.9.1 on gets 3 points to spend with each rise (the template's class-up rule): said when the points went up.
+        const gained = character.points - old.points;
+        const base = character.xp === 0 ? fill(C.classNote, { xp: character.xp, bonus }) : fill(C.classNoteShort, { bonus });
+        out.push(line({ icon: 'fa-arrow-up', tone: 'good', text: fill(C.classUp, { who: character.name, label: character.soulLabel, from: old.soulName, to: character.soulName }),
+            summary: fill(gained > 0 ? C.classSummaryPoints : C.classSummary, { label: character.soulLabel, to: character.soulName, n: gained }),
+            note: gained > 0 ? `${base} · ${fill(C.classPoints, { n: gained })}` : base }));
     }
     const skillsThen = new Map(rpgBlocks(before, { roleOf }).filter(block => block.role === 'skills').map(block => [`${block.module}|${block.subject}`, block]));
     const skillBlocks = rpgBlocks(state, { roleOf }).filter(block => block.role === 'skills');

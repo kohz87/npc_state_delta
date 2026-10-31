@@ -2,7 +2,8 @@
 //
 //   { pace: 'careful' | 'normal' | 'all',
 //     acts:   [{ who, skill?, uses?, stat?, target, edge?, why? }],  a party member's action against a foe
-//     foes:   [{ slot, target, defend } | { slot, hold: true }],     what a foe slot does (a number 1–4)
+//     foes:   [{ slot, target, defend, skill? } | { slot, hold: true }],  what a foe slot does (a number 1–4); `skill`: the
+//                                                                         defender's skill that counts when they defend
 //     checks: [{ who, skill?, uses?, stat?, difficulty }] }         a roll outside a fight
 //
 // A skill the character has brings its own stat and resource (the Skills block's `statN` and `usesN`): an act or check
@@ -64,8 +65,8 @@ export function validatePlan(plan) {
             if (foe.hold !== true) errors.push(`${where} hold must be true.`);
             return;
         }
-        known(foe, ['slot', 'target', 'defend'], where);
-        text(foe, 'target', where);
+        known(foe, ['slot', 'target', 'defend', 'skill'], where);
+        text(foe, 'target', where); text(foe, 'skill', where, false);
         stat(foe, 'defend', where);
     });
     (Array.isArray(plan.checks) ? plan.checks : []).forEach((check, n) => {
@@ -181,7 +182,11 @@ export function parsePlanAnswer(answer, sheet) {
             const target = matchCharacter(sheet, labels.target);
             const defend = statOf(labels.defend) ?? 'agi';
             if (!target) { dropped += 1; continue; }
-            plan.foes.push({ slot: foe.slot, target: target.who, defend });
+            // A skill of the defender's counts when they defend (it brings its own stat, as an act's does); `defend` stays as the stat for
+            // none, or for a skill they lack. An answer from before this had no skill: its plans never carry the key.
+            const named = oneLine(labels.skill);
+            const phrase = named && !/^(none|no|-|—)$/i.test(named) ? named : '';
+            plan.foes.push({ slot: foe.slot, target: target.who, defend, ...(phrase ? { skill: matchSkill(target, phrase)?.name ?? phrase } : {}) });
         } else if (head === 'check') {
             const who = matchCharacter(sheet, name);
             const skill = skillOf(who, labels);

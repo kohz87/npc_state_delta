@@ -26,6 +26,8 @@ const props = {
     currency: { type: 'object', default: Object.freeze({}) },
     itemCount: { type: 'number', default: 1 },
     itemNote: { type: 'string', default: '' },
+    // kind 'fields': one input per entry, `{ key, label, type: 'text' | 'number', value, min?, max?, maxLength? }`; only the changed ones go in the payload.
+    fields: { type: 'array', default: Object.freeze([]) },
 };
 const cut = (value, max) => [...oneLine(value)].slice(0, Math.max(0, Math.floor(max))).join('');
 
@@ -53,6 +55,7 @@ function render(el, input, api) {
         let field = null;
         let itemCount = null;
         let itemNote = null;
+        let inputs = [];
         let entries = [];
         let editing = false;
         let busy = false;
@@ -136,8 +139,34 @@ function render(el, input, api) {
                 field.focus?.();
                 return;
             }
-            fieldSlot.classList.remove('ss-w-editable-item-fields');
+            fieldSlot.classList.remove('ss-w-editable-item-fields', 'ss-w-editable-record-fields');
             form.classList.remove('ss-w-editable-item-form');
+            if (p.kind === 'fields') {
+                inputs = p.fields.filter(spec => spec && typeof spec === 'object' && /^[A-Za-z][A-Za-z0-9_]*$/.test(String(spec.key))).map(spec => {
+                    const input = h(doc, 'input', 'ss-input');
+                    const number = spec.type === 'number';
+                    input.setAttribute('aria-label', String(spec.label ?? spec.key));
+                    input.setAttribute('type', number ? 'number' : 'text');
+                    if (number) {
+                        input.setAttribute('step', '1');
+                        if (Number.isFinite(Number(spec.min))) input.setAttribute('min', String(spec.min));
+                        if (Number.isFinite(Number(spec.max))) input.setAttribute('max', String(spec.max));
+                    }
+                    input.value = String(spec.value ?? '');
+                    const node = h(doc, 'label', 'ss-w-editable-item-label');
+                    node.append(h(doc, 'span', '', String(spec.label ?? spec.key)), input);
+                    return { spec, input, node, number };
+                });
+                field = inputs[0]?.input ?? null;
+                fieldSlot.classList.add('ss-w-editable-record-fields');
+                fieldSlot.replaceChildren(...inputs.map(entry => entry.node));
+                chips.hidden = true;
+                add.hidden = true;
+                form.classList.add('ss-w-editable-item-form');
+                draw();
+                field?.focus?.();
+                return;
+            }
             const choice = p.kind === 'choice';
             field = h(doc, choice ? 'select' : 'input', choice ? 'ss-select' : 'ss-input');
             field.setAttribute('aria-label', p.label || E.value);
@@ -200,6 +229,21 @@ function render(el, input, api) {
                 if (qty !== p.itemCount) payload.qty = qty;
                 if (note !== p.itemNote) payload.note = note;
                 if (!('name' in payload) && !('qty' in payload) && !('note' in payload)) { close(); return; }
+            } else if (p.kind === 'fields') {
+                payload = { ...p.payload };
+                for (const { spec, input, number } of inputs) {
+                    const raw = String(input.value).trim();
+                    let next;
+                    if (number) {
+                        if (!/^-?\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) { error.textContent = E.wholeNumber; return; }
+                        next = Number(raw);
+                        if (Number.isFinite(Number(spec.min))) next = Math.max(Number(spec.min), next);
+                        if (Number.isFinite(Number(spec.max))) next = Math.min(Number(spec.max), next);
+                    } else next = cut(raw, Number.isFinite(Number(spec.maxLength)) ? Number(spec.maxLength) : p.maxLength);
+                    const was = number ? Number(spec.value) : cut(spec.value, 1e6);
+                    if (next !== was) payload[spec.key] = next;
+                }
+                if (!inputs.some(({ spec }) => Object.hasOwn(payload, spec.key))) { close(); return; }
             } else if (p.kind === 'number') {
                 const raw = String(field.value).trim();
                 if (!/^-?\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) { error.textContent = E.wholeNumber; return; }

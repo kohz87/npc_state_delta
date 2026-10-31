@@ -10,7 +10,7 @@ export const RESOLVE = 'rpg.resolve';
 /** `role` on a block definition: what the RPG reads it as. A Character, Skills or Foes block names its `who`. */
 export const ROLES = Object.freeze(['character', 'skills', 'foes', 'rules']);
 
-/** The roles whose blocks get no tab of their own while the feature is on (the Party tab draws them, the Fight tab the Foes block; they stay in Blocks). */
+/** The roles whose blocks get no tab of their own while the feature is on (the Party tab draws them, the Fight tab the Foes block; they stay in Settings → Blocks). */
 export const ROLES_WITHOUT_TAB = Object.freeze(['character', 'skills', 'foes', 'rules']);
 
 /** The seven stats, 1–20 each (a pack may rename them through its Character template's field labels). */
@@ -74,3 +74,12 @@ export const CREATION = Object.freeze({
     start: 10, budget: 6, min: 8, max: 15, skills: SKILL_SLOTS, adept: 1,
     name: 40, about: 240, skillName: 40, skillAbout: 120,
 });
+
+/**
+ * Companions who join (mockup section 8): the setting `rpgJoin` says what the story's `+ party Name | …` line does. 'ask' (the default)
+ * puts a card under the reply and makes nothing until the reader says so; 'auto' makes the companion at once; 'off' leaves the line out
+ * of the narrator's grammar. A party holds at most PARTY_MAX characters (the ones who left count: their sheets are kept).
+ */
+export const JOIN_SETTING = 'rpgJoin';
+export const JOINS = Object.freeze(['ask', 'auto', 'off']);
+export const PARTY_MAX = 8;

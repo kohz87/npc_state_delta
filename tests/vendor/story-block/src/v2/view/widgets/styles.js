@@ -46,9 +46,10 @@ export const widgetCss = `
 :where(.ss-w-editable-error) { flex-basis: 100%; color: var(--ss-bad-text); }
 :where(.ss-w-editable-item-form) { width: 100%; }
 :where(.ss-w-editable-item-fields) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(4em, 6em); gap: 8px; width: 100%; }
+:where(.ss-w-editable-record-fields) { display: grid; grid-template-columns: repeat(auto-fit, minmax(8em, 1fr)); gap: 8px; width: 100%; }
 :where(.ss-w-editable-item-label) { display: grid; gap: 3px; min-width: 0; font-size: 0.85em; color: var(--ss-w-muted); }
 :where(.ss-w-editable-item-label:last-child) { grid-column: 1 / -1; }
-:where(.ss-w-editable-item-fields input) { width: 100%; min-width: 0; color: var(--ss-w-fg); }
+:where(.ss-w-editable-item-fields input, .ss-w-editable-record-fields input) { width: 100%; min-width: 0; color: var(--ss-w-fg); }
 
 /* meter */
 :where(.ss-w-meter) { display: flex; flex-direction: column; gap: 0.2em; }
