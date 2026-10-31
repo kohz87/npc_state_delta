@@ -19,10 +19,10 @@ export const LIMITS = Object.freeze({
 export const RECORD_LIMITS = Object.freeze({ slug: 64, note: 500, word: 40, element: 24 });
 
 // Content kinds a pack may carry. Each is a list of records.
-export const CONTENT_KINDS = Object.freeze(['items', 'creatures', 'shops', 'recipes', 'events', 'quests', 'races', 'talents', 'skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'dataModules']);
+export const CONTENT_KINDS = Object.freeze(['items', 'creatures', 'shops', 'recipes', 'events', 'quests', 'races', 'talents', 'skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'dataModules', 'rpg']);
 // Kinds added after the first pack format: a normalized pack has them only when the file gives
 // them, so what older packs list (counts) stays as it was.
-export const OPTIONAL_KINDS = Object.freeze(['skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'dataModules']);
+export const OPTIONAL_KINDS = Object.freeze(['skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'dataModules', 'rpg']);
 // Capabilities provided by the host in addition to installed modules.
 export const HOST_CAPABILITIES = Object.freeze(['data-modules-v1']);
 
@@ -111,6 +111,14 @@ export const METER_PRESET_FIELDS = Object.freeze(['id', 'title', 'meters', 'stag
 export const METER_FIELDS = Object.freeze(['id', 'name', 'min', 'max', 'start', 'describe', 'bands', 'drift']);
 export const METER_STAGE_FIELDS = Object.freeze(['id', 'name', 'needs', 'milestone']);
 export const METER_LIMITS = Object.freeze({ presets: 4, meters: 6, min: -1000, max: 1000, id: 40, name: 40, title: 40, describe: 200, bands: 8, word: 24, stages: 8, needs: 4, milestone: 200 });
+// Skill sets for the RPG's New character wizard, `content.rpg.skillSets` (normalized to a list of sets):
+// `[{ name, slug?, about?, skills: [{ name, about, stat, uses? }] }]`. The limits follow the Skills block's fields; `stats` and `uses`
+// are the words the block's `statN` and `usesN` take (src/v2/lean-rpg/names.js STATS and USES, kept apart so packs need nothing of it).
+export const LEAN_RPG_FIELDS = Object.freeze(['skillSets']);
+export const SKILL_SET_FIELDS = Object.freeze(['name', 'slug', 'about', 'skills']);
+export const SKILL_SET_SKILL_FIELDS = Object.freeze(['name', 'about', 'stat', 'uses']);
+export const LEAN_RPG_LIMITS = Object.freeze({ sets: 12, skills: 5, name: 40, about: 160, skillName: 40, skillAbout: 120,
+    stats: Object.freeze(['str', 'vit', 'agi', 'dex', 'int', 'luk', 'cha']), uses: Object.freeze(['stamina', 'mana']) });
 // Words NPC State Delta keeps for itself (a stage line, a reason): never a meter id.
 export const METER_RESERVED = Object.freeze(['stage', 'stages', 'disposition', 'name', 'meter', 'meters', 'reason', 'why', 'because', 'note', 'cause']);
 // A calendar for the story clock: { era, months: [{ name, days }], start: { year, month, day, hour, minute },

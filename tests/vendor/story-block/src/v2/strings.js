@@ -32,7 +32,7 @@ export const STRINGS = deepFreeze({
         chatOnly: 'Only a block made in this chat can be changed here.',
         sameSlug: 'Keep the block identifier when changing its fields.',
         defined: 'You made {name}.', redefined: 'You changed {name}.', removed: 'You removed {name}.',
-        promptLimit: 'What it is for must be at most 600 characters.',
+        promptLimit: 'What it is for must be at most 1200 characters.',
         staticLimit: 'The purpose and story lines together must fit 2000 characters.',
         showOptions: 'Choose whether to show the block as a tab or card, a short tab name and an app icon.',
         listOnlyText: 'A list must be a text field.', listLimit: 'A list can have at most 12 entries.',
@@ -47,6 +47,28 @@ export const STRINGS = deepFreeze({
         templateMissing: 'That template is no longer available.', templateLarge: 'This block is too large to save as a template.',
         exportFailed: 'Could not export this block.',
         unsupportedEdit: 'This block has details the editor cannot change safely.',
+        madeFromTemplate: 'Made from a template: edit its fields here, its rules in the pack file.',
+        replyFull: 'This reply has used all the block actions it can take, and the last place is kept for settling it; this line was not applied.',
+        stagesLimit: 'A bar field (health, mana, stamina, a foe\'s health) has at most {max} stages, counted up from 0.',
+        roleInvalid: 'A block role is character, skills, foes or rules.',
+        roleChat: 'A block with a role belongs to the chat: give it scope chat, one block for each person.',
+        hiddenFlag: 'Hiding a field from the story is prompt: false on a field of its own.',
+        hiddenKind: 'A field hidden from the story can only be changed by a button.',
+        hiddenLine: 'The story cannot change this.',
+        namesLimit: 'Give 1 to 32 values a name.',
+        namesKey: 'Names go on a number field, for whole values inside its range.',
+        namesText: 'A name is 1 to 40 characters and not a number.',
+        namesSame: 'Two values have the same name.',
+        namesInvalid: 'Write one name per line as "value = name", for values inside the range.',
+        cardsChat: 'Cards belong to blocks made for the chat.',
+        functionType: 'This function is listed under the wrong type.',
+        cardTitle: 'A card title is 1 to 60 characters.', cardText: 'A card text is at most 240 characters.',
+        cardButton: 'A card button must be a button of this block that asks for nothing.',
+        replyEndPlain: 'An end-of-reply function changes only the fields of its own block.',
+        names: 'Names', namesHelp: 'One per line: value = name',
+        leanRpg: 'RPG', templateAdded: 'Added {name}.',
+        card: 'Card', replyEnd: 'End of each reply', cardTone: 'Look', cardTitleLabel: 'Title', cardTextLabel: 'Text', cardButtonLabel: 'Button',
+        noButton: 'None', always: 'Always', addCondition: 'Add a condition', hiddenField: 'The story cannot change this field.', tones: { info: 'Information', warn: 'Warning', end: 'The end' },
         title: 'Blocks', custom: 'Custom blocks', empty: 'No custom blocks in this story yet.',
         newBlock: 'New block', emptyBlock: 'Empty block', chooseTemplate: 'Start from a template',
         editBlock: 'Edit block', fields: 'Fields', addField: 'Add field', name: 'Block name', fieldNameLabel: 'Field name',
@@ -55,7 +77,7 @@ export const STRINGS = deepFreeze({
         up: 'Move up', down: 'Move down', remove: 'Remove', purpose: 'What it is for',
         staticCount: '{n} of 2000 characters for purpose and story lines', showAs: 'Show as', ownTab: 'Own tab', card: 'Card on Home', both: 'Both',
         tabName: 'Tab name', icon: 'Tab icon', functions: 'Functions', addButton: 'Add button', addRule: 'Add rule', addTimer: 'Add timer',
-        timerNeeds: 'Timers need Story Director’s clock.', functionName: 'Function name', button: 'Button', rule: 'Rule', timer: 'Timer',
+        timerNeeds: 'Timers need Story Director’s clock.', functionName: 'Name', button: 'Button', rule: 'Rule', timer: 'Timer',
         every: 'Every N minutes', whenField: 'When field', comparison: 'Comparison', whenValue: 'Value',
         is: 'is', isNot: 'is not', below: 'below', above: 'above', atMost: 'at most', atLeast: 'at least',
         effectField: 'Field', effectAction: 'Do', setTo: 'Set to', add: 'Add', effectValue: 'Value', addStep: 'Add step',
@@ -92,6 +114,10 @@ export const STRINGS = deepFreeze({
         fieldNoKeys: 'This field has no map keys.', fieldShared: 'This field is shared by the chat.',
         fieldRange: 'The value is outside this field’s allowed range.', fields: 'Fields',
         fieldSet: 'You set {module}: {field} {from} → {to}.', lockedSuffix: ' (cannot be edited)',
+        fieldsSet: 'You set {module}: {changes}.', fieldsAlone: 'Give either one field or a set of fields, not both.',
+        fieldsCount: 'Give between 1 and 16 fields to set.', fieldsNoMaps: 'Set a field with map keys on its own.',
+        replyFull: 'This reply already holds as many changes as one reply can. Send your next message, then try again.',
+        pinsFull: 'This chat has kept as many block versions as it can. Try again after your next message.',
         editBoolean: 'edit must be true or false.', textEffect: 'Text fields accept literal text or a text label within max.',
         declaredSchema: 'Expected a declared {schema} schema.', labelSchema: 'int, bool, enum or text label',
         fieldSchema: 'scalar field or fixed map',
@@ -154,6 +180,8 @@ export const STRINGS = deepFreeze({
         inspectorDescribe: 'A read-only Inspector screen: any reply\'s story state as a tree you can search, what changed since the reply before, its receipts and its problems.',
         savepoints: 'Save points',
         savepointsDescribe: 'A Save point button on Home keeps the moment as a named branch of the chat, listed with Return here.',
+        leanRpg: 'RPG',
+        leanRpgDescribe: 'Party cards with stage bars, automatic dice for fights and checks, and a battle log in the reply. Uses the RPG block templates.',
         choices: 'Choices',
         choicesDescribe: 'The story offers 2 to 4 short next moves as buttons under the latest reply. A click only puts the words in your message box; you still send, edit or ignore them.',
         chatter: 'Inner chatter',
@@ -403,6 +431,12 @@ const HOLE = /\{(\w+)\}/g;
 /** `text` with each `{name}` replaced by `values[name]` (a hole without a value stays as written). */
 export function fill(text, values = {}) {
     return String(text ?? '').replace(HOLE, (hole, name) => (Object.hasOwn(values, name) && values[name] !== undefined && values[name] !== null ? String(values[name]) : hole));
+}
+
+/** What a reader sees when a command was refused: a full reply budget or a chat that holds as many block versions as it can, in plain words (`pinsFull` words the second), else the refusal's own sentence (or `fallback`). */
+export function refusalText(result, fallback = '', { pinsFull = STRINGS.editMessages.pinsFull } = {}) {
+    if (result?.code === 'DM_BUDGET') return /Retained pin budget exhausted/.test(String(result.message ?? '')) ? pinsFull : STRINGS.editMessages.replyFull;
+    return result?.message || fallback;
 }
 
 const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' };

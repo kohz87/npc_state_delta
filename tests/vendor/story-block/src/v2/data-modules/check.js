@@ -1,5 +1,6 @@
 // Pure data-modules-v1 checker. The pack validator and Studio share these entry points.
-import { DM_DESCRIPTORS as D, DM_LIMITS as L, DATA_MODULES_CAPABILITY, dmObject, dmOwn, dmSlug, dmInt, dmId } from './schema.js';
+import { DM_DESCRIPTORS as D, DM_LIMITS as L, DATA_MODULES_CAPABILITY, dmObject, dmOwn, dmSlug, dmInt, dmId, dmKindWritesHidden } from './schema.js';
+import { ROLES } from '../lean-rpg/index.js';
 import { HASH_BASIS_V1 } from './hash-basis-v1.js';
 import { fieldType, compatible, expressionType, conditionType, pathType } from './expressions.js';
 import { byteLength, checkPlain } from '../packs/safety.js';
@@ -84,9 +85,14 @@ function scalar(schema, path, add, { label = false, map = true } = {}) {
         if (typeof schema.label !== 'string' || !oneLine(schema.label) || [...schema.label].length > 60) add('DM_SCHEMA', `${path}.label`, STRINGS.blocks.labelLimit);
         else schema.label = oneLine(schema.label);
     }
+    // `prompt: false` hides a field from the story's tail and grammar; `names` gives a number's values display names. Neither belongs on a
+    // label, or on the value type of a map.
+    if (!label && schema.prompt !== undefined && (typeof schema.prompt !== 'boolean' || !map)) add('DM_SCHEMA', `${path}.prompt`, STRINGS.blocks.hiddenFlag);
+    if (!label && schema.names !== undefined && !map) add('DM_SCHEMA', `${path}.names`, STRINGS.blocks.namesKey);
     if (schema.type === 'int') {
         if (!dmInt(schema.min) || !dmInt(schema.max) || schema.min > schema.max) add('DM_BOUNDS', path, 'Integer bounds must be ordered safe integers.');
         if (!label && !dmInt(schema.default, schema.min, schema.max)) add('DM_BOUNDS', `${path}.default`, 'The integer default must be inside its inclusive bounds.');
+        if (!label && schema.names !== undefined && map) names(schema, path, add);
     }
     if (schema.type === 'bool' && !label && typeof schema.default !== 'boolean') add('DM_SCHEMA', `${path}.default`, 'A bool default must be a boolean.');
     if (schema.type === 'enum') {
@@ -102,6 +108,23 @@ function scalar(schema, path, add, { label = false, map = true } = {}) {
     if (schema.type === 'map') {
         distinct(schema.keys, `${path}.keys`, add, { max: L.mapKeys, keys: true });
         scalar(schema.values, `${path}.values`, add, { map: false });
+    }
+}
+
+const foldedName = text => String(text).normalize('NFKC').toLowerCase();
+// Display names for an int field: { "<value>": "<name>" }, whole values inside min..max, short distinct names that are not numbers.
+function names(schema, path, add) {
+    const given = schema.names;
+    if (!dmObject(given) || !Object.keys(given).length || Object.keys(given).length > L.names) { add('DM_BOUNDS', `${path}.names`, STRINGS.blocks.namesLimit); return; }
+    const seen = new Set();
+    for (const [key, name] of Object.entries(given)) {
+        const at = `${path}.names.${key}`;
+        if (!/^-?\d+$/.test(key) || String(Number(key)) !== key || !dmInt(Number(key), schema.min, schema.max)) add('DM_BOUNDS', at, STRINGS.blocks.namesKey);
+        const text = typeof name === 'string' ? oneLine(name) : '';
+        if (!text || [...text].length > L.nameText || /^-?\d+$/.test(text)) { add('DM_SCHEMA', at, STRINGS.blocks.namesText); continue; }
+        given[key] = text;
+        if (seen.has(foldedName(text))) add('DM_SCHEMA', at, STRINGS.blocks.namesSame);
+        seen.add(foldedName(text));
     }
 }
 
@@ -134,7 +157,7 @@ function rewardTypes(reward, path, add) {
     return out;
 }
 
-function effects(list, env, path, add, { timer = false, reward = false } = {}) {
+function effects(list, env, path, add, { timer = false, reward = false, plain = false } = {}) {
     if (!sized(list, L.effects, path, add, { list: true })) return;
     list.forEach((effect, i) => {
         const at = `${path}[${i}]`;
@@ -143,6 +166,7 @@ function effects(list, env, path, add, { timer = false, reward = false } = {}) {
         if (!descriptor || !shape(effect, descriptor, at, add)) { if (!descriptor) add('DM_SCHEMA', at, 'Unknown effect; arbitrary commands and patches are not allowed.'); return; }
         if (timer && effect.op !== 'add') add('DM_SCHEMA', at, 'Timer effects must be additive field changes, optionally clamped; no checks, rewards or offers.');
         if (reward && ['reward', 'offer', 'award'].includes(effect.op)) add('DM_SCHEMA', at, 'Reward templates cannot dispatch rewards, offers or awards recursively.');
+        if (plain && ['reward', 'offer', 'award'].includes(effect.op)) add('DM_SCHEMA', at, STRINGS.blocks.replyEndPlain);
         if (['set', 'add', 'clamp'].includes(effect.op)) {
             const target = pathType(effect.path, { ...env, writing: true }, `${at}.path`, add, (v, p) => expressionType(v, env, p, add));
             if (effect.op === 'clamp') {
@@ -382,6 +406,68 @@ function viewPath(definition, path, at, add) {
     if (!field || parts.length > (field.type === 'map' ? 2 : 1) || (parts.length === 2 && !array(field.keys).includes(parts[1]))) add('DM_SCHEMA', at, 'Unknown module view field or fixed map key.');
 }
 
+// The RPG draws a role block's health, mana, stamina and foe-health fields as stage bars, one cell and one choice for each stage, so
+// those fields stay small: at most ten stages counted up from empty (0), whatever else the block holds.
+const STAGE_FIELD = /^(health|mana|stamina|hurt[1-4])$/;
+function stageFields(definition, at, add) {
+    for (const [key, schema] of entries(definition.state)) {
+        if (!STAGE_FIELD.test(key) || !dmObject(schema) || schema.type !== 'int' || !dmInt(schema.min) || !dmInt(schema.max)) continue;
+        if (schema.max - schema.min >= L.stages || schema.max > L.stages) add('DM_BOUNDS', `${at}.state.${key}`, fill(STRINGS.blocks.stagesLimit, { max: L.stages }));
+    }
+}
+
+// The cards a block draws under the head reply, the rules it settles once at the end of each reply, and the hidden fields only
+// a Button may write. All three are declarations: a card is derived from the state, never stored.
+function blockFunctions(definition, env, at, add) {
+    if (definition.cards !== undefined) {
+        if (definition.scope !== 'chat') add('DM_SCHEMA', `${at}.cards`, STRINGS.blocks.cardsChat);
+        if (sized(definition.cards, L.cards, `${at}.cards`, add, { list: true })) {
+            const ids = new Set();
+            definition.cards.forEach((card, i) => {
+                const path = `${at}.cards[${i}]`;
+                if (!shape(card, D.card, path, add)) return;
+                if (card.type !== undefined && card.type !== 'card') add('DM_SCHEMA', `${path}.type`, STRINGS.blocks.functionType);
+                if (card.id !== undefined) {
+                    if (!dmSlug(card.id) || ids.has(card.id)) add('DM_SCHEMA', `${path}.id`, 'Card IDs must be unique safe slugs.');
+                    ids.add(card.id);
+                }
+                // A card is asked about the head state alone: no import, no label.
+                conditionType(card.when, { ...env, inputs: {} }, `${path}.when`, add);
+                if (!D.cardTones.includes(card.tone)) add('DM_SCHEMA', `${path}.tone`, `A card tone is ${D.cardTones.join(', ')}.`);
+                const title = typeof card.title === 'string' ? oneLine(card.title) : '';
+                if (!title || [...title].length > L.cardTitle) add('DM_BOUNDS', `${path}.title`, STRINGS.blocks.cardTitle);
+                else card.title = title;
+                const text = typeof card.text === 'string' ? oneLine(card.text) : null;
+                if (text === null || [...text].length > L.cardText) add('DM_BOUNDS', `${path}.text`, STRINGS.blocks.cardText);
+                else card.text = text;
+                if (card.button !== undefined) {
+                    const kind = typeof card.button === 'string' && dmOwn(definition.kinds, card.button) ? definition.kinds[card.button] : null;
+                    if (!kind || kind.ui !== true || Object.keys(kind.labels ?? {}).length) add('DM_SCHEMA', `${path}.button`, STRINGS.blocks.cardButton);
+                }
+            });
+        }
+    }
+    if (definition.replyEnd !== undefined && sized(definition.replyEnd, L.replyEnd, `${at}.replyEnd`, add, { list: true })) {
+        const ids = new Set();
+        definition.replyEnd.forEach((entry, i) => {
+            const path = `${at}.replyEnd[${i}]`;
+            if (!shape(entry, D.replyEnd, path, add)) return;
+            if (entry.type !== undefined && entry.type !== 'reply-end') add('DM_SCHEMA', `${path}.type`, STRINGS.blocks.functionType);
+            if (entry.id !== undefined) {
+                if (!dmSlug(entry.id) || ids.has(entry.id)) add('DM_SCHEMA', `${path}.id`, 'Reply-end IDs must be unique safe slugs.');
+                ids.add(entry.id);
+            }
+            conditionType(entry.when, env, `${path}.when`, add);
+            if (Array.isArray(entry.effects) && !entry.effects.length) add('DM_SCHEMA', `${path}.effects`, 'A reply-end function needs at least one effect.');
+            effects(entry.effects, env, `${path}.effects`, add, { plain: true });
+        });
+    }
+    // The narrator cannot set a hidden field: only a Button (the reader's) may write one directly.
+    for (const [name, kind] of entries(definition.kinds)) {
+        if (dmObject(kind) && kind.ui !== true && dmKindWritesHidden(definition, kind)) add('DM_SCHEMA', `${at}.kinds.${name}`, STRINGS.blocks.hiddenKind);
+    }
+}
+
 /** Checked definitions plus an optional catalog for imports from other packs. No state is read. */
 export function validateDataModules(value, { packId, capabilities = [], definitions = [] } = {}) {
     const errors = [];
@@ -408,9 +494,11 @@ export function validateDataModules(value, { packId, capabilities = [], definiti
         if (!D.scope.includes(given.scope)) add('DM_SCHEMA', `${at}.scope`, 'scope must be chat or character.');
         const definition = { ...copy(D.defaults), ...copy(given), id: defId(packId, given.slug), pack: packId };
         if (definition.prompt !== undefined) {
-            if (typeof definition.prompt !== 'string' || [...definition.prompt].length > 600) add('DM_BOUNDS', `${at}.prompt`, STRINGS.blocks.promptLimit);
+            if (typeof definition.prompt !== 'string' || [...definition.prompt].length > L.prompt) add('DM_BOUNDS', `${at}.prompt`, STRINGS.blocks.promptLimit);
             else definition.prompt = oneLine(definition.prompt);
         }
+        if (definition.role !== undefined && !ROLES.includes(definition.role)) add('DM_SCHEMA', `${at}.role`, STRINGS.blocks.roleInvalid);
+        else if (definition.role !== undefined && definition.scope === 'character') add('DM_SCHEMA', `${at}.role`, STRINGS.blocks.roleChat);
         if (definition.show !== undefined) {
             const show = definition.show;
             if (!dmObject(show) || Object.keys(show).some(key => !['tab', 'card', 'tabName', 'icon'].includes(key))
@@ -420,6 +508,7 @@ export function validateDataModules(value, { packId, capabilities = [], definiti
         }
         if (byteLength(JSON.stringify(definition)) > L.definitionBytes) add('DM_BUDGET', at, `A definition must fit ${L.definitionBytes} UTF-8 JSON bytes.`);
         for (const [key, schema] of named(definition.state, L.fields, `${at}.state`, add)) scalar(schema, `${at}.state.${key}`, add);
+        if (definition.role !== undefined) stageFields(definition, at, add);
         imports(definition, at, add); // forms first, linking before expression analysis below
         migrations(definition, at, add);
         normalized.push(definition);
@@ -481,6 +570,7 @@ export function validateDataModules(value, { packId, capabilities = [], definiti
             kind.when ??= true;
             kind.ui ??= false;
         }
+        blockFunctions(definition, env, at, add);
         if (!errors.length && (definition.prompt !== undefined || definition.show !== undefined || packId === 'chat')) {
             const lines = fullModuleGrammar(definition, definition.id);
             if ([...lines].length > L.staticCharacters) add('DM_BUDGET', `${at}.prompt`, STRINGS.blocks.staticLimit);

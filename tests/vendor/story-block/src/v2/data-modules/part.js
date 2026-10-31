@@ -1,6 +1,6 @@
 // Trusted host glue for checked data, merged into story-block. Library discovery is read-only;
 // every game-state write is a bus transaction, using detached pins and prefix witnesses.
-import { DM_LIMITS as L, dmOwn, dmObject } from './schema.js';
+import { DM_LIMITS as L, dmOwn, dmObject, dmHidden, dmKindWritesHidden, dmNameOf } from './schema.js';
 import { validateDataModules, validateDataMigration, dataModuleDefaults, dataModuleHash, dataModulesPackHash } from './check.js';
 import { copy, bytes, refuse, DataModuleError, createEvaluation, parseLabels, atPath, scalarHolds, cleanList, orList, conditionHolds } from './interpreter.js';
 import { activeDefinition, actorsOf, inputsOf, instanceOf, publicView, projectImport, resolveActor } from './adapters.js';
@@ -11,9 +11,13 @@ import { cutAt, oneLine } from '../../text.js';
 import { editableLayout } from './editable-layout.js';
 import { STRINGS, fill } from '../strings.js';
 import { blockTabScreen } from './block-screen.js';
+import { roleTail } from '../lean-rpg/tail.js';
+import { LEAN_RPG_FEATURE } from '../lean-rpg/names.js';
 
 const E = STRINGS.editMessages;
 const B = STRINGS.blocks;
+// The most fields one multi-field `dm.set` takes (a sheet's seven stats and its points fit with room to spare).
+const SET_FIELDS = 16;
 
 const initial = () => ({ pins: {}, active: {}, instances: {}, perReply: {} });
 // A frozen value (a branch of the state) never changes, so what is worked out from it is kept with it. No game state is cached:
@@ -90,7 +94,8 @@ export function moduleView(state, { module } = {}) {
     return { characters: subjectsOf(state, module).map(id => ({ id, name: actors[id]?.name ?? id, ...copy(instanceOf(state, module, id)?.fields ?? {}) })) };
 }
 
-export function pinnedPresentation(state, kind = 'screens') {
+// `noTab`: block roles whose block gets no tab of its own (the RPG's Party tab draws them while its feature is on).
+export function pinnedPresentation(state, kind = 'screens', noTab = []) {
     return Object.keys(state?.domains?.dataModules?.active ?? {}).flatMap(id => {
         const definition = activeDefinition(state, id);
         const screens = (definition?.[kind] ?? []).map(entry => {
@@ -102,7 +107,7 @@ export function pinnedPresentation(state, kind = 'screens') {
             if (!screens.some(screen => screen.id === layoutId)) screens.push({ id: layoutId, title, ...(icon ? { icon } : {}), mounts: ['tab'], layout: editableLayout(copy(layout), definition), pack: `dm:${id}` });
         }
         if (kind === 'screens') {
-            const block = blockTabScreen(definition);
+            const block = noTab.includes(definition?.role) ? null : blockTabScreen(definition);
             if (block) screens.push(block);
         }
         return screens;
@@ -155,7 +160,7 @@ export function replayInputs(state, { module, subject = 'chat', reads = [], impo
 export function dataModuleGuard(view, info) {
     try {
         const { guard, recorded, source } = info, predicate = guard?.predicate;
-        if (guard?.owner !== 'story-block' || guard.version !== 2 || !['dm.pin', 'dm.attach', 'dm.migrate', 'dm.act', 'dm.set', 'dm.tick', 'dm.define', 'dm.redefine', 'dm.remove'].includes(predicate?.kind)
+        if (guard?.owner !== 'story-block' || guard.version !== 2 || !['dm.pin', 'dm.attach', 'dm.migrate', 'dm.act', 'dm.set', 'dm.tick', 'dm.settle', 'dm.define', 'dm.redefine', 'dm.remove'].includes(predicate?.kind)
             || !dmObject(recorded) || hashJson(recorded.source) !== hashJson(source)) return { ok: false, reason: 'Malformed data module guard.' };
         const domain = view.state.domains?.dataModules;
         if (predicate.kind === 'dm.pin' || predicate.kind === 'dm.define') {
@@ -200,22 +205,102 @@ export function dataModuleGuard(view, info) {
 }
 
 const valueText = value => (typeof value === 'string' ? JSON.stringify(oneLine(value)) : String(value));
-const fieldsText = fields => Object.entries(fields).map(([key, value]) => (value !== null && typeof value === 'object'
-    ? `${key}: ${Object.entries(value).map(([name, item]) => `${name} ${valueText(item)}`).join(', ')}` : `${key} ${valueText(value)}`)).join('; ');
+// A number whose field has display names is shown (to a person and to the story) by its name; stored, it stays the number.
+const shownText = (schema, value) => dmNameOf(schema, value) ?? valueText(value);
+// A hidden field (`prompt: false`) is left out: the story is never told it.
+const fieldText = (definition, key, value) => (value !== null && typeof value === 'object'
+    ? `${key}: ${Object.entries(value).map(([name, item]) => `${name} ${valueText(item)}`).join(', ')}` : `${key} ${shownText(definition.state[key], value)}`);
+const fieldsText = (definition, fields) => Object.entries(fields).filter(([key]) => !dmHidden(definition.state[key])).map(([key, value]) => fieldText(definition, key, value)).join('; ');
+// The named fields a root changed, for its summary: "Soul Class II → III". Empty for a block with no display names.
+const namedChanges = (definition, before, after) => Object.entries(definition.state).filter(([key, schema]) => schema.names && before[key] !== after[key])
+    .map(([key, schema]) => `${schema.label ?? key} ${shownText(schema, before[key])} → ${shownText(schema, after[key])}`);
 
-/** One module's state in plain words for the prompt's tail, at most 100 tokens: "Survival — Wessel: hunger 12; fatigue 6." */
-export function summaryOf(state, module) {
+// What a module may take of the prompt's tail: 100 tokens, 300 for a block with a `role` (the RPG's sheets carry text the story reads).
+// `rpg` is whether the RPG feature is on: a block with a role is the RPG's to write only then; with it off the block is told like any other.
+const tailRoom = (definition, rpg = true) => (rpg && definition?.role ? L.roleTailTokens : L.tailTokens);
+
+/**
+ * One module's state in plain words for the prompt's tail, at most 100 tokens (300 for a block with a role, written compact): "Survival — Wessel: hunger 12; fatigue 6."
+ * `rpg` (default on) is the RPG feature: with it off a block with a role gets the ordinary line, which leaves out its hidden fields as well.
+ */
+export function summaryOf(state, module, { rpg = true } = {}) {
     const definition = activeDefinition(state, module);
     if (!definition) return `${module} — unavailable (damaged or unknown pin).`;
     const view = moduleView(state, { module });
     let waiting = '';
     try { const inputs = inputsOf(state, definition); if (definition.timers.some(timer => inputs[timer.clock]?.minutes == null)) waiting = ' Waiting for story time.'; } catch { waiting = ' Waiting.'; }
-    const body = definition.scope === 'chat' ? fieldsText(view.chat)
-        : view.characters.map(({ id, name, ...fields }) => `${name}: ${fieldsText(fields)}`).join(' | ') || 'no one attached';
+    // A block with a role is written compact (lean-rpg/tail.js): defaults and empty slots left out, one line per skill; nothing to say, no line.
+    if (rpg && definition.role) {
+        const people = definition.scope === 'chat' ? [{ name: definition.name, fields: view.chat }] : view.characters.map(({ id, name, ...fields }) => ({ name, fields }));
+        const line = roleTail(definition, people, { hidden: key => dmHidden(definition.state[key]), text: (key, value) => fieldText(definition, key, value),
+            named: (key, value) => shownText(definition.state[key], value) });
+        return line && cutAt(`${line}${waiting}`, tailRoom(definition, rpg) * 4);
+    }
+    const body = definition.scope === 'chat' ? fieldsText(definition, view.chat)
+        : view.characters.map(({ id, name, ...fields }) => `${name}: ${fieldsText(definition, fields)}`).join(' | ') || 'no one attached';
     // The host estimates tokens from UTF-16 length; cut on a character boundary within that budget.
-    return cutAt(`${definition.name} — ${body}.${waiting}`, L.tailTokens * 4);
+    return cutAt(`${definition.name} — ${body}.${waiting}`, tailRoom(definition, rpg) * 4);
 }
-const tailLines = state => Object.keys(state?.domains?.dataModules?.active ?? {}).map(module => summaryOf(state, module));
+// A timer whose clock has moved past its cursor.
+const timerDue = (timer, inputs, instance) => {
+    const minute = inputs[timer.clock]?.minutes, last = instance?.timers?.[timer.id]?.lastMinute;
+    return minute !== null && minute !== undefined && (last === null || last === undefined || minute > last);
+};
+// A reply's lines are settled by the reply-end functions on these generations only (not a Continue's, nor the extractor's late lines).
+const SETTLED_TYPES = Object.freeze(['normal', 'swipe', 'regenerate', 'reread']);
+// Every node an evaluation could visit in this piece of a definition (each list, each leaf): the most its visits can come to.
+const nodesOf = value => Array.isArray(value) ? 1 + value.reduce((sum, item) => sum + nodesOf(item), 0)
+    : value && typeof value === 'object' ? Object.values(value).reduce((sum, item) => sum + nodesOf(item), 0) : 1;
+// What the settle steps of a reply can cost: one root for each subject of each pinned block that has reply-end functions, and for the
+// visits, what that block's own reply-end functions, rules and reward templates can come to (counted, not a flat share), at most one
+// root's worth for a subject.
+export function settleReserve(state) {
+    const total = { roots: 0, visits: 0 };
+    for (const module of Object.keys(state?.domains?.dataModules?.active ?? {})) {
+        const definition = activeDefinition(state, module);
+        if (!definition?.replyEnd?.length) continue;
+        const subjects = subjectsOf(state, module).length;
+        total.roots += subjects;
+        total.visits += subjects * Math.min(L.rootVisits, 1 + nodesOf(definition.replyEnd) + nodesOf(definition.rules ?? []) + nodesOf(definition.rewards ?? {}));
+    }
+    return total;
+}
+const tailLines = (state, rpg) => Object.keys(state?.domains?.dataModules?.active ?? {}).map(module => summaryOf(state, module, { rpg }));
+
+// --- Cards under the head reply -------------------------------------------------------------------------------------------------
+// A block's `cards` are derived from the head reply's state each time the cards are asked for, never stored. They reach the reply-cards
+// socket (src/v2/reply-cards.js) through a few fixed slots, because that socket takes one named card per entry: slot n answers with the
+// nth card of the active blocks, in pin order and, within a block, in the order written. A card with a button runs that Button of the
+// same block as a reader command on the latest reply.
+export const CARD_SLOTS = 8;
+const CARD_LOOK = Object.freeze({ info: { tone: 'info', icon: 'ph-info' }, warn: { tone: 'accent', icon: 'ph-warning' }, end: { tone: 'bad', icon: 'ph-skull' } });
+const cardLists = new WeakMap();
+
+const CARD_RANK = Object.freeze({ end: 1, warn: 2, info: 3 });
+
+/**
+ * The cards the head state shows: [{ module, card }] with card in reply-cards.js's shape. A card whose condition cannot be asked is left out.
+ * They are ordered the end cards of a role `character` block first (the death notice), then any other end card, then warn, then info (pin
+ * order, then written order, within each) before the slots are filled, so a death notice always has a slot, however many other cards show.
+ */
+export function blockCards(state) {
+    const active = state?.domains?.dataModules?.active;
+    if (!active || !Object.keys(active).length) return [];
+    return kept(cardLists, state, () => Object.keys(active).flatMap(module => {
+        const definition = activeDefinition(state, module), instance = instanceOf(state, module);
+        if (!definition?.cards?.length || !instance) return [];
+        return definition.cards.flatMap((entry, at) => {
+            try {
+                if (!createEvaluation(definition, instance).condition(['card', at], entry.when, {})) return [];
+            } catch { return []; }
+            const look = CARD_LOOK[entry.tone] ?? CARD_LOOK.info, kind = entry.button ? definition.kinds[entry.button] : null;
+            return [{ module, rank: entry.tone === 'end' && definition.role === 'character' ? 0 : CARD_RANK[entry.tone] ?? CARD_RANK.info, card: { ...look, title: entry.title, text: entry.text,
+                actions: kind ? [{ id: entry.button, label: oneLine(kind.title ?? entry.button.replace(/^button-/, '')), primary: true,
+                    command: 'dm.act', payload: { module, kind: entry.button } }] : [] } }];
+        });
+    }).sort((a, b) => a.rank - b.rank).map(({ module, card }) => ({ module, card })));
+}
+const blockCardSlots = Object.fromEntries(Array.from({ length: CARD_SLOTS }, (_, at) => [`block-card-${at + 1}`, { for: state => blockCards(state)[at]?.card ?? null }]));
 
 export function createDataModulesPart({ packs, state: head = () => null, lifecycle = () => null, restore = () => ({ state: 'idle' }) } = {}) {
     // The runtime's late-bound readers may not exist yet while the definition registers: read as "no state" until they do.
@@ -263,6 +348,12 @@ export function createDataModulesPart({ packs, state: head = () => null, lifecyc
         actions[ctx.cursor().block] = { visits, click: ctx.cause === 'ui' && !pin };
         const next = { roots: Object.keys(actions).length, visits: Object.values(actions).reduce((n, action) => n + action.visits, 0), actions };
         if (next.roots > L.replyRoots || next.visits > L.replyVisits) refuse('DM_BUDGET', '', 'Data module reply budget exhausted.');
+        // The story's lines leave room for the steps that settle the reply (what each block with reply-end functions can really cost): without it a full
+        // reply would take its last action and the settling that decides a death would be refused.
+        if (ctx.cause === 'story') {
+            const kept = settleReserve(prefix);
+            if (next.roots > L.replyRoots - kept.roots || next.visits > L.replyVisits - kept.visits) refuse('DM_BUDGET', '', B.replyFull);
+        }
         // Scratch from earlier replies is pruned only by a successful data root.
         draft.perReply = { [key]: next };
         // (The bus counts the patch's ops and the span's bytes for every data root; this is the data's own share, and the pins.)
@@ -332,7 +423,9 @@ export function createDataModulesPart({ packs, state: head = () => null, lifecyc
         const definition = checked.definitions[0];
         if (definition.scope !== 'chat') refuse('DM_SCHEMA', 'scope', B.chatScope);
         if (action === 'redefine' && definition.id !== module) refuse('DM_SCHEMA', 'slug', B.sameSlug);
-        const slots = Object.keys(definition.state).length + Object.values(definition.kinds).filter(kind => kind.ui).length;
+        // Each field and each button is a slot the form uses. A block with a role is a template written by hand, whose stats and latches are
+        // fields no kind sets: only its kinds count.
+        const slots = definition.role ? Object.keys(definition.kinds).length : Object.keys(definition.state).length + Object.values(definition.kinds).filter(kind => kind.ui).length;
         if (slots > L.kinds) refuse('DM_BUDGET', 'fields', B.kindLimit);
         dependency(definition, prefix);
         const inputs = inputsOf(prefix, definition), hash = dataModuleHash(definition);
@@ -354,6 +447,9 @@ export function createDataModulesPart({ packs, state: head = () => null, lifecyc
         draft.pins[hash] = copy(pin);
         draft.active[module] = { hash, generation, subjects: ['chat'] };
         draft.instances[module] = { chat: instance };
+        // The definition this one replaces is not kept (every block that used it carries its own recorded pin, and a swipe or delete of this
+        // reply brings the old pin back with the state before it): the pins would otherwise fill up, one for each edit, until 16 refused all blocks.
+        if (old && old.hash !== hash && !Object.values(draft.active).some(entry => entry.hash === old.hash)) delete draft.pins[old.hash];
         const recorded = guard(ctx, prefix, { kind: `dm.${action}`, module, hash, generation,
             reads: previous ? [['fields'], ['timers'], ['offers'], ['settled']] : [], imports: Object.keys(definition.imports),
             decision: { subjects: ['chat'], inputs, previous: old?.hash ?? null }, pin, bound: true });
@@ -400,6 +496,7 @@ export function createDataModulesPart({ packs, state: head = () => null, lifecyc
         const kind = dmOwn(definition.kinds, labels.kind) && definition.kinds[labels.kind];
         if (!kind) refuse('DM_LABEL', 'kind', `kind must be ${orList(Object.keys(definition.kinds))}`);
         if (line ? line.op !== kind.op : ctx.cause !== 'ui' || !kind.ui) refuse('REFUSED', '', line ? `${labels.kind} is written with ${kind.op}, not ${line.op}` : `${labels.kind} is a story line; a screen may only use kinds that allow it`);
+        if (line && dmKindWritesHidden(definition, kind)) refuse('REFUSED', '', B.hiddenLine);
         const args = parseLabels(definition, kind, labels, { text: Boolean(line) });
         const subject = definition.scope === 'chat' ? 'chat' : resolveActor(prefix, labels.who, subjectsOf(prefix, module));
         const active = prefix.domains.dataModules.active[module], draft = draftOf(ctx);
@@ -407,19 +504,23 @@ export function createDataModulesPart({ packs, state: head = () => null, lifecyc
         const claim = `dm:${pairKey(ctx.source)}:${module}:${labels.kind}:${subject}:${hashJson(kind.oncePerReply.map(key => args[key]))}`;
         if (!ctx.claim(claim)) refuse('CLAIMED', '', `${labels.kind} was already applied for this in this reply`);
         const evaluation = createEvaluation(definition, instance, { inputs, source: ctx.source, cursor: ctx.cursor(), subject });
+        const fieldsBefore = copy(instance.fields);
         evaluation.timers();
         if (!evaluation.condition(['kind', labels.kind], kind.when, { arg: args })) refuse('DM_CONDITION', '', kind.refusal ?? 'Kind condition is not met.');
         evaluation.effects(kind.effects, { arg: args }); evaluation.rules();
         const result = evaluation.finish();
+        const changes = namedChanges(definition, fieldsBefore, instance.fields);
         const recorded = guard(ctx, prefix, { kind: 'dm.act', module, hash: active.hash, generation: active.generation, subject,
             reads: result.reads.map(read => read.path), imports: prefixImports(definition),
             actor: subject !== 'chat', decision: { args, inputs, decisions: result.decisions.map(({ source: _source, cursor: _cursor, ...rest }) => rest), conds: result.conds } });
         // The concrete outcome kept beside the inputs (and past the receipts' display data): which line, for whom, what was frozen, what was limited.
         const outcome = { kind: labels.kind, subject, decisions: result.decisions.map(({ source: _source, cursor: _cursor, ...rest }) => rest), notes: result.notes, ...(result.fired.length ? { rules: result.fired } : {}) };
-        const answer = finish(ctx, prefix, draft, recorded, { visits: result.visits, notes: result.notes, result: outcome, summary: `${definition.name}: ${kind.title ?? labels.kind}.` });
+        const answer = finish(ctx, prefix, draft, recorded, { visits: result.visits, notes: result.notes, result: outcome, summary: `${definition.name}: ${kind.title ?? labels.kind}${changes.length ? ` (${changes.join(', ')})` : ''}.` });
         if (ctx.cause === 'ui') answer.data.edit = true;
         return answer;
     }
+    // `dm.set` writes one field (`field`, `key?`, `value`) or, as ONE action, several non-map fields of one block (`fields`: { name: value }).
+    // Either way each value is checked the same, the rules run once after all the sets, and nothing applies unless every one holds.
     function setField(ctx, payload, call = {}) {
         if (ctx.cause !== 'ui' || ctx.caller !== null) refuse('REFUSED', '', E.fieldReader);
         if (restore()?.state === 'pending') refuse('RESTORE_PENDING', '', E.restorePending);
@@ -427,34 +528,53 @@ export function createDataModulesPart({ packs, state: head = () => null, lifecyc
         call.label = definition?.name ?? module;
         if (!definition) refuse('DM_SCHEMA', '', E.pinDamaged);
         dependency(definition, prefix);
-        const schema = dmOwn(definition.state, payload.field) ? definition.state[payload.field] : null;
-        if (!schema) refuse('DM_SCHEMA', 'field', E.fieldDeclared);
-        if (schema.edit === false) refuse('REFUSED', 'field', E.fieldLocked);
-        const map = schema.type === 'map';
-        if (map && !schema.keys.includes(payload.key)) refuse('DM_SCHEMA', 'key', E.mapKeyDeclared);
-        if (!map && payload.key !== undefined) refuse('DM_SCHEMA', 'key', E.fieldNoKeys);
+        const multi = payload.fields !== undefined;
+        if (multi && ['field', 'key', 'value'].some(name => payload[name] !== undefined)) refuse('DM_SCHEMA', 'fields', E.fieldsAlone);
+        if (multi && (!dmObject(payload.fields) || Object.keys(payload.fields).length < 1 || Object.keys(payload.fields).length > SET_FIELDS)) refuse('DM_SCHEMA', 'fields', E.fieldsCount);
+        // One entry per field to set: its name, map key (the single form only) and value.
+        const entries = multi ? Object.entries(payload.fields).map(([name, value]) => ({ name, key: undefined, value })) : [{ name: payload.field, key: payload.key, value: payload.value }];
+        for (const entry of entries) {
+            const schema = dmOwn(definition.state, entry.name) ? definition.state[entry.name] : null;
+            if (!schema) refuse('DM_SCHEMA', multi ? entry.name : 'field', E.fieldDeclared);
+            if (schema.edit === false) refuse('REFUSED', multi ? entry.name : 'field', E.fieldLocked);
+            entry.map = schema.type === 'map';
+            if (entry.map && multi) refuse('DM_SCHEMA', entry.name, E.fieldsNoMaps);
+            if (entry.map && !schema.keys.includes(entry.key)) refuse('DM_SCHEMA', 'key', E.mapKeyDeclared);
+            if (!entry.map && entry.key !== undefined) refuse('DM_SCHEMA', 'key', E.fieldNoKeys);
+            entry.schema = schema;
+        }
         if (definition.scope === 'chat' && payload.who !== undefined) refuse('DM_LABEL', 'who', E.fieldShared);
         const subject = definition.scope === 'chat' ? 'chat' : resolveActor(prefix, payload.who, subjectsOf(prefix, module));
         const active = prefix.domains.dataModules.active[module], draft = draftOf(ctx);
         const instance = atPath(draft, instancePath(module, subject));
-        const field = map ? schema.values : schema, path = map ? [payload.field, payload.key] : [payload.field];
-        let value = payload.value;
-        if (field.list === true) value = cleanList(value, field.max);
-        else if (field.type === 'text' && typeof value === 'string') value = [...oneLine(value)].slice(0, field.max).join('');
-        if (!scalarHolds(field, value)) refuse('DM_BOUNDS', 'value', E.fieldRange);
-        const before = atPath(instance.fields, path);
+        for (const entry of entries) {
+            const { schema } = entry;
+            entry.field = entry.map ? schema.values : schema;
+            entry.path = entry.map ? [entry.name, entry.key] : [entry.name];
+            let { value } = entry;
+            if (entry.field.list === true) value = cleanList(value, entry.field.max);
+            else if (entry.field.type === 'text' && typeof value === 'string') value = [...oneLine(value)].slice(0, entry.field.max).join('');
+            if (!scalarHolds(entry.field, value)) refuse('DM_BOUNDS', multi ? entry.name : 'value', E.fieldRange);
+            entry.value = value;
+            entry.before = atPath(instance.fields, entry.path);
+        }
         const inputs = inputsOf(prefix, definition);
         const evaluation = createEvaluation(definition, instance, { inputs, source: ctx.source, cursor: ctx.cursor(), subject });
-        evaluation.effects([{ op: 'set', path, value }]);
+        evaluation.effects(entries.map(entry => ({ op: 'set', path: entry.path, value: entry.value })));
         evaluation.rules();
         const result = evaluation.finish();
         const recorded = guard(ctx, prefix, { kind: 'dm.set', module, hash: active.hash, generation: active.generation, subject,
             reads: result.reads.map(read => read.path), imports: prefixImports(definition), actor: subject !== 'chat',
             decision: { inputs, conds: result.conds } });
-        const label = map ? `${schema.label ?? payload.field} (${payload.key})` : schema.label ?? payload.field;
-        const summary = fill(E.fieldSet, { module: definition.name, field: label, from: valueText(before), to: valueText(value) });
-        const answer = finish(ctx, prefix, draft, recorded, { visits: result.visits, notes: result.notes,
-            result: { field: payload.field, ...(map ? { key: payload.key } : {}), subject, from: before, to: value, ...(result.fired.length ? { rules: result.fired } : {}) }, summary });
+        const labelOf = entry => (entry.map ? `${entry.schema.label ?? entry.name} (${entry.key})` : entry.schema.label ?? entry.name);
+        const change = entry => `${labelOf(entry)} ${shownText(entry.field, entry.before)} → ${shownText(entry.field, entry.value)}`;
+        const [only] = entries;
+        const summary = multi ? fill(E.fieldsSet, { module: definition.name, changes: entries.map(change).join(', ') })
+            : fill(E.fieldSet, { module: definition.name, field: labelOf(only), from: shownText(only.field, only.before), to: shownText(only.field, only.value) });
+        const rules = result.fired.length ? { rules: result.fired } : {};
+        const answer = finish(ctx, prefix, draft, recorded, { visits: result.visits, notes: result.notes, summary,
+            result: multi ? { fields: Object.fromEntries(entries.map(entry => [entry.name, { from: entry.before, to: entry.value }])), subject, ...rules }
+                : { field: only.name, ...(only.map ? { key: only.key } : {}), subject, from: only.before, to: only.value, ...rules } });
         answer.data.edit = true;
         return answer;
     }
@@ -483,6 +603,49 @@ export function createDataModulesPart({ packs, state: head = () => null, lifecyc
             actor: subject !== 'chat', decision: { inputs, conds: result.conds } });
         return finish(ctx, prefix, draft, recorded, { visits: result.visits, notes: result.notes, replan: true, result: { subject, notes: result.notes, ...(result.fired.length ? { rules: result.fired } : {}) }, summary: `${definition.name}: story time settled.` });
     }
+    // The block's reply-end functions, settled once at the end of every reply that has accepted lines, as a system step (a timer's twin:
+    // planned again by a swipe, a delete or an edit before it). It is recorded even when it changes nothing, so that a change before this
+    // reply (a Re-read of an earlier one) has a step here to plan again; NO_LONGER_DONE only when the pin or the subject is gone.
+    function settle(ctx, payload, call = {}) {
+        if (ctx.cause !== 'system' || ctx.caller !== null) refuse('REFUSED', '', 'Reply-end functions run only as host system steps.');
+        const prefix = stateOf(ctx), module = payload.module, subject = payload.subject;
+        if (!prefix.domains.dataModules?.active?.[module] || !subjectsOf(prefix, module).includes(subject)) refuse('NO_LONGER_DONE', 'who', 'This module or subject is no longer pinned and attached.');
+        const definition = activeDefinition(prefix, module);
+        call.label = definition?.name ?? module;
+        if (!definition) refuse('DM_SCHEMA', module, 'Unsupported or damaged pin; inspect it in Setup.');
+        if (!definition.replyEnd?.length) refuse('NO_LONGER_DONE', '', 'This block has nothing to settle at the end of a reply.');
+        dependency(definition, prefix);
+        if (subject !== 'chat') resolveActor(prefix, subject, subjectsOf(prefix, module));
+        const active = prefix.domains.dataModules.active[module], draft = draftOf(ctx), instance = atPath(draft, instancePath(module, subject));
+        const inputs = inputsOf(prefix, definition);
+        const evaluation = createEvaluation(definition, instance, { inputs, source: ctx.source, cursor: ctx.cursor(), subject });
+        evaluation.charge(); evaluation.replyEnd();
+        evaluation.rules();
+        const result = evaluation.finish();
+        const recorded = guard(ctx, prefix, { kind: 'dm.settle', module, hash: active.hash, generation: active.generation, subject,
+            reads: result.reads.map(read => read.path), imports: prefixImports(definition),
+            actor: subject !== 'chat', decision: { inputs, conds: result.conds } });
+        return finish(ctx, prefix, draft, recorded, { visits: result.visits, notes: result.notes, replan: true, result: { subject, notes: result.notes, ...(result.fired.length ? { rules: result.fired } : {}) }, summary: `${definition.name}: settled at the end of the reply.` });
+    }
+    // The settle steps due once a reply's lines are in: one per block (and subject) that has reply-end functions, whether or not they would
+    // change anything now (see `settle`). Not for a Continue or the extractor's late lines, which add to a reply already settled: a reply
+    // is settled once, so a latch cannot fire twice in it.
+    function settleDue(view, info) {
+        const prefix = view?.state, commands = [];
+        if (!prefix?.domains?.dataModules?.active || !SETTLED_TYPES.includes(info?.type ?? 'normal')) return commands;
+        if (restore()?.state === 'pending') return commands;
+        for (const module of Object.keys(prefix.domains.dataModules.active)) {
+            const definition = activeDefinition(prefix, module);
+            if (!definition?.replyEnd?.length) continue;
+            try { dependency(definition, prefix); } catch { continue; }
+            for (const subject of subjectsOf(prefix, module)) {
+                if (subject !== 'chat') { try { resolveActor(prefix, subject, subjectsOf(prefix, module)); } catch { continue; } }
+                const instance = instanceOf(prefix, module, subject);
+                if (instance) commands.push({ type: 'dm.settle', payload: { module, subject } });
+            }
+        }
+        return commands;
+    }
     // The timers whose clock has moved past their cursor, as `dm.tick` steps (one per module and subject). Silent while a
     // peer is away or a restore is pending (Setup shows the reason; an explicit action is refused with it), and for a
     // subject whose actor is gone. Nothing due: nothing returned, nothing consumed.
@@ -499,12 +662,14 @@ export function createDataModulesPart({ packs, state: head = () => null, lifecyc
             for (const subject of subjectsOf(prefix, module)) {
                 if (subject !== 'chat') { try { resolveActor(prefix, subject, subjectsOf(prefix, module)); } catch { continue; } }
                 const instance = instanceOf(prefix, module, subject);
-                if (definition.timers.some(timer => {
-                    const minute = inputs[timer.clock]?.minutes, last = instance?.timers?.[timer.id]?.lastMinute;
-                    return minute !== null && minute !== undefined && (last === null || last === undefined || minute > last);
-                })) commands.push({ type: 'dm.tick', payload: { module, subject } });
+                if (definition.timers.some(timer => timerDue(timer, inputs, instance))) commands.push({ type: 'dm.tick', payload: { module, subject } });
             }
         }
+        return commands.length ? { commands } : undefined;
+    }
+    // Timers first, then the reply-end functions of the blocks that would change (they see the state the ticks leave).
+    function afterCapture(view, info) {
+        const commands = [...(due(view)?.commands ?? []), ...settleDue(view, info)];
         return commands.length ? { commands } : undefined;
     }
     const kind = { get enabled() { return Boolean(Object.keys(state()?.domains?.dataModules?.active ?? {}).length); },
@@ -516,7 +681,7 @@ export function createDataModulesPart({ packs, state: head = () => null, lifecyc
             'dm.redefine': wrap((ctx, payload, call) => changeBlock(ctx, payload, 'redefine', call)),
             'dm.remove': wrap((ctx, payload, call) => changeBlock(ctx, payload, 'remove', call)),
             'dm.attach': wrap(attach), 'dm.set': wrap(setField), 'dm.act': wrap((ctx, payload, call) => act(ctx, payload, null, call)), 'dm.capture': { internal: true, handler: wrap((ctx, line, call) => act(ctx, {}, line, call)) },
-            'dm.tick': { internal: true, handler: wrap(tick) } },
+            'dm.tick': { internal: true, handler: wrap(tick) }, 'dm.settle': { internal: true, handler: wrap(settle) } },
         kinds: { dm: kind },
         queries: { 'dataModules.offers': offers, 'dataModules.view': moduleView, 'dataModules.public': publicView,
             'dataModules.replayInputs': replayInputs, 'dataModules.actors': actorsOf,
@@ -543,13 +708,14 @@ export function createDataModulesPart({ packs, state: head = () => null, lifecyc
                         actors: Object.values(actorsOf(prefix)), baseline: inputs, budgets: L };
                 });
             },
-            'dataModules.presentation': (prefix, { kind: name = 'screens' } = {}) => pinnedPresentation(prefix, name) },
-        hooks: { afterCapture: due, beforeGenerate: (view, info) => info?.commit === false ? undefined : due(view) },
+            'dataModules.presentation': (prefix, { kind: name = 'screens', noTab = [] } = {}) => pinnedPresentation(prefix, name, Array.isArray(noTab) ? noTab : []) },
+        hooks: { afterCapture: afterCapture, beforeGenerate: (view, info) => info?.commit === false ? undefined : due(view) },
+        cards: blockCardSlots,
         context: {
             static: () => grammarFor(state()),
-            tail: view => ({ lines: tailLines(view.state), optional: [] }),
-            // Tail room for the lines above: 100 tokens for each pinned module, on top of the core's own; none without a pin.
-            extra: () => Math.min(Object.keys(state()?.domains?.dataModules?.active ?? {}).length, L.pins) * L.tailTokens,
+            tail: view => ({ lines: tailLines(view.state, typeof view.feature === 'function' ? view.feature(LEAN_RPG_FEATURE) === true : true), optional: [] }),
+            // Tail room for the lines above: 100 tokens for each pinned module (300 for one with a role), on top of the core's own; none without a pin.
+            extra: () => Object.keys(state()?.domains?.dataModules?.active ?? {}).slice(0, L.pins).reduce((sum, id) => sum + tailRoom(activeDefinition(state(), id)), 0),
         },
     };
 }

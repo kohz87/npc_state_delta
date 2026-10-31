@@ -27,6 +27,20 @@ import { screens as defaultScreens } from '../screens/index.js';
 import { createPacksPart, packs as liveInstalled, part as livePart, resolveItem as liveResolve, startState as liveStart } from '../packs/index.js';
 import { createTimelinePart } from '../timeline/part.js';
 import { createDataModulesPart, dataModuleGuard } from '../data-modules/part.js';
+import { RESOLVE as RPG_RESOLVE, createLeanRpgPart } from '../lean-rpg/index.js';
+import { hookTimeout } from '../turn.js';
+
+const TIMED_OUT = Symbol('timed out');
+// `value`, or TIMED_OUT when it is a promise that has not settled within `ms`.
+async function withinLimit(value, ms) {
+    if (!value || typeof value.then !== 'function') return value;
+    let timer;
+    try {
+        return await Promise.race([value, new Promise(resolve => { timer = setTimeout(resolve, ms, TIMED_OUT); })]);
+    } finally {
+        clearTimeout(timer);
+    }
+}
 
 // The packs part bound to SillyTavern (src/v2/packs/index.js), in createPacksPart()'s shape.
 const livePacks = Object.freeze({ part: livePart, packs: liveInstalled, resolveItem: liveResolve, startState: liveStart });
@@ -72,6 +86,7 @@ export const CORE_FEATURES = Object.freeze([
     Object.freeze({ id: CORE_FEATURE.chatter, label: STRINGS.features.chatter, describe: STRINGS.features.chatterDescribe, default: false }),
     // The weather (MODULES §F120): on; its grammar line is in the static part while it is on.
     Object.freeze({ id: CORE_FEATURE.weather, label: STRINGS.features.weather, describe: STRINGS.features.weatherDescribe, default: true }),
+    Object.freeze({ id: CORE_FEATURE.leanRpg, label: STRINGS.features.leanRpg, describe: STRINGS.features.leanRpgDescribe, default: false }),
 ]);
 
 // The chat's one currency (MODULES.md F1): its name (singular) and plural, renamable by the reader,
@@ -191,7 +206,7 @@ export function createCorePart({ hooks = () => [], settings = () => ({}), hookEn
  * in lowercase: the Events).
  */
 export function mergeParts(parts) {
-    const out = { domains: {}, commands: {}, queries: {}, kinds: {}, hooks: {}, tabs: [], statics: [], tails: [], budget: 0, sections: [], folds: [], defaults: {}, schema: {} };
+    const out = { domains: {}, commands: {}, queries: {}, kinds: {}, cards: {}, hooks: {}, tabs: [], statics: [], tails: [], budget: 0, sections: [], folds: [], defaults: {}, schema: {} };
     const put = (table, name, value, what) => {
         if (Object.hasOwn(out[table], name)) throw new Error(`Story Block: two parts both define the ${what} "${name}".`);
         out[table][name] = value;
@@ -202,6 +217,7 @@ export function mergeParts(parts) {
         for (const [name, value] of Object.entries(part.commands ?? {})) put('commands', name, value, 'command');
         for (const [name, value] of Object.entries(part.queries ?? {})) put('queries', name, value, 'query');
         for (const [name, value] of Object.entries(part.kinds ?? {})) put('kinds', name, value, 'change-line kind');
+        for (const [name, value] of Object.entries(part.cards ?? {})) put('cards', name, value, 'card under replies');
         for (const [name, fn] of Object.entries(part.hooks ?? {})) if (typeof fn === 'function') (hookLists[name] ??= []).push(fn);
         if (typeof part.context?.static === 'function') out.statics.push(part.context.static);
         if (typeof part.context?.tail === 'function') out.tails.push(part.context.tail);
@@ -224,19 +240,31 @@ export function mergeParts(parts) {
     }
     for (const [name, fns] of Object.entries(hookLists)) {
         out.hooks[name] = fns.length === 1 ? fns[0] : name === 'beforeGenerate'
-            ? async (...args) => {
+            ? Object.assign(async (...args) => {
                 const lines = [];
                 const commands = [];
+                const problems = [];
+                // Each part has its own time limit (turn.js hookTimeout): a part that fails or is too slow is reported, and the
+                // answers of the parts that did answer are kept.
                 for (const fn of fns) {
-                    const answer = await fn(...args);
+                    const limit = hookTimeout(fn);
+                    let answer;
+                    try { answer = await withinLimit(fn(...args), limit); } catch (error) {
+                        problems.push({ code: 'FAILED', message: `beforeGenerate failed: ${error?.message ?? error}` });
+                        continue;
+                    }
+                    if (answer === TIMED_OUT) {
+                        problems.push({ code: 'TIMEOUT', message: `beforeGenerate did not answer within ${limit / 1000} s; the reply went on without its notes.` });
+                        continue;
+                    }
                     if (Array.isArray(answer)) lines.push(...answer);
                     else {
                         lines.push(...(Array.isArray(answer?.lines) ? answer.lines : []));
                         commands.push(...(Array.isArray(answer?.commands) ? answer.commands : []));
                     }
                 }
-                return { lines, commands };
-            }
+                return { lines, commands, ...(problems.length ? { problems } : {}) };
+            }, { timeoutMs: fns.reduce((sum, fn) => sum + hookTimeout(fn), 500) })
             : (...args) => {
                 for (const fn of fns) {
                     const answer = fn(...args);
@@ -290,20 +318,23 @@ export function headMoved(tools, headIndex) {
  * what the events part commits and asks through (default: the public sdk, looked up lazily);
  * `assist`: the assist part (pre-roll classifier, after-reply extractor; both off by default).
  */
-export function createCoreModule({ hooks = () => [], settings = () => ({}), version = '2.0.0-alpha.1', packs = livePacks, command, query, assist = null, hookEntries = null, problem = null, extras = null, timeline = () => null, dataModules = {} } = {}) {
+export function createCoreModule({ hooks = () => [], settings = () => ({}), version = '2.0.0-alpha.1', packs = livePacks, command, query, assist = null, hookEntries = null, problem = null, extras = null, timeline = () => null, dataModules = {}, leanRpg = {} } = {}) {
     const core = createCorePart({ hooks, settings, hookEntries, problem, query, economy: () => (typeof packs.economy === 'function' ? packs.economy() : null) });
     const events = createEventsPart({
         ...(command ? { command } : {}),
         ...(query ? { query } : {}),
     });
     const dataPart = createDataModulesPart({ packs: packs.packs, ...dataModules });
-    const merged = mergeParts([core, packs.part, events, assist ?? createAssistPart({ settings: () => settings() }), createTimelinePart({ timeline }), dataPart]);
+    // The RPG's pre-call and rolls (`leanRpg`: the runtime's queued model call, the chat and its metadata; src/v2/lean-rpg/).
+    const rpg = createLeanRpgPart({ ...leanRpg, problem });
+    const merged = mergeParts([core, packs.part, events, assist ?? createAssistPart({ settings: () => settings() }), createTimelinePart({ timeline }), dataPart, rpg]);
     const timelineGuard = merged.hooks.replayGuard;
-    // One host-owned hook for the host's guarded blocks, by predicate: data modules (`dm.*`), a loot offer or take
-    // (`loot.offer`, `loot.take`, inventory.js), else the timeline's.
+    // One host-owned hook for the host's guarded blocks, by predicate: data modules (`dm.*`), the RPG's rolls
+    // (`rpg.resolve`), a loot offer or take (`loot.offer`, `loot.take`, inventory.js), else the timeline's.
     merged.hooks.replayGuard = Object.assign((view, info) => {
         const kind = String(info?.guard?.predicate?.kind ?? '');
         if (kind.startsWith('dm.')) return dataModuleGuard(view, info);
+        if (kind === RPG_RESOLVE) return rpg.guard(view, info);
         if (kind === INVENTORY_EDIT_GUARD) return inventoryEditGuard(view, info);
         return LOOT_KINDS.includes(kind) ? lootTakeGuard(view, info) : timelineGuard(view, info);
     }, { hostOwned: true });
@@ -315,6 +346,8 @@ export function createCoreModule({ hooks = () => [], settings = () => ({}), vers
         domains: merged.domains,
         commands: merged.commands,
         replayQueries: ['dataModules.replayInputs'],
+        // The cards under the head reply that blocks declare (data-modules/part.js blockCards).
+        cards: merged.cards,
         // The newest reply's Inner chatter, [{ name, text }] (MODULES §F115; null while the feature is off), the
         // same under each present person for the Scene screen while Story Director's World is not there, and
         // whether the head reply moved the scene to another place (Story Director's World → Here, §F119).

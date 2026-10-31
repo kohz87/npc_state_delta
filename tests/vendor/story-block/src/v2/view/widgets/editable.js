@@ -1,7 +1,7 @@
 // An inline reader edit. The value is displayed as text; saving sends one ordinary UI command.
 import { oneLine } from '../../../text.js';
 import { formatAmount, parseMixedAmount } from '../../domains/money.js';
-import { STRINGS, fill } from '../../strings.js';
+import { STRINGS, fill, refusalText } from '../../strings.js';
 import { h, iconNode, shell } from './dom.js';
 import { defineWidget, resolveProps } from './props.js';
 import { meterRatio } from './meter.js';
@@ -231,7 +231,7 @@ function render(el, input, api) {
             save.disabled = false;
             if (!alive) return;
             if (result?.ok) close();
-            else error.textContent = result?.message || E.failed;
+            else error.textContent = refusalText(result, E.failed);
         }
         listen(chips, 'click', event => {
             const index = Number(event.target?.getAttribute?.('data-index'));

@@ -32,6 +32,9 @@ import { CAPTURE_PREFIX, HOST_MODULE } from './registry.js';
 import { STATIC_MARKER, assemble, contextNotice, estimateTokens } from './prompt.js';
 import { MAX_CHANGE_LINES, ensureModules, makeView } from './sdk.js';
 import { cutAt } from '../text.js';
+import { CORE_FEATURE } from './features.js';
+import { RESOLVE as RPG_RESOLVE } from './lean-rpg/names.js';
+import { NO_ROLLS_LINE } from './lean-rpg/cue.js';
 
 export const STATIC_KEY = 'story_suite_static';
 export const TAIL_KEY = 'story_suite_tail_1';
@@ -53,6 +56,8 @@ const ROLE_SYSTEM = 0;
 const MAX_PROBLEMS = 200;
 // How long a canGenerate or beforeGenerate hook may take before the reply goes on without it.
 export const HOOK_TIMEOUT_MS = 2500;
+// A hook may declare its own, longer limit (`fn.timeoutMs`): the RPG's planner makes a model call of up to 20 s.
+export const hookTimeout = fn => (Number.isFinite(fn?.timeoutMs) && fn.timeoutMs > HOOK_TIMEOUT_MS ? fn.timeoutMs : HOOK_TIMEOUT_MS);
 // A reply that never ends (no MESSAGE_RECEIVED, GENERATION_ENDED or STOPPED) stops counting as in progress
 // after this long, so Story Suite's own model calls on the chat's connection are not held up for good.
 export const REPLY_BUSY_MAX_MS = 5 * 60_000;
@@ -76,6 +81,15 @@ export const MAX_NAME = 80;
 // Stripped history texts kept between prompts (each is read again for every later prompt).
 const STRIP_CACHE = 500;
 const HAS_BLOCK = /<changes/i;
+// The RPG's battle-log marker: a line `[battle]` of its own in a reply (src/v2/lean-rpg/view/battle-log.js draws the panel there).
+// It is for the reader's eyes only, so it leaves the prompt history like the change blocks do: the narrator never sees its own old
+// markers. The line goes with one blank line after it, so no gap is left.
+const BATTLE_MARKER = /^[ \t]*\[battle\][ \t]*(?:\r?\n|$)(?:[ \t]*\r?\n)?/gim;
+const HAS_BATTLE = /\[battle\]/i;
+/** `text` without its `[battle]` marker lines. */
+export function stripBattleMarker(text) {
+    return typeof text === 'string' && HAS_BATTLE.test(text) ? text.replace(BATTLE_MARKER, '') : text;
+}
 
 const defaultNotify = reason => globalThis.toastr?.warning?.(reason, 'Story Suite');
 
@@ -362,6 +376,9 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         }
     }
 
+    // The commands run as preludes: Assist's pre-roll, and any command a module marks `prelude` (registry.isPrelude).
+    const isPrelude = type => type === PRECHECK || registry.isPrelude?.(type) === true;
+
     // beforeGenerate (§4.1 step 3): each hook may return lines for the tail, or commands to
     // commit now as `system` receipts: string[] | { lines?: string[], commands?: [{ type, payload }] }.
     // A Continue (the same reply goes on) commits nothing (B3-9): hooks are told `{ type, dryRun,
@@ -374,23 +391,29 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         const prechecks = [];
         const requested = [];
         const commit = !dryRun && type !== 'continue';
+        // `again`: an earlier attempt at this reply was never captured (a retried interceptor), so a hook may reuse its work.
+        const again = session !== null;
         for (const { moduleId, fn } of registry.hookEntries('beforeGenerate')) {
             let out;
-            try { out = await within(fn(view(), { type, dryRun, commit }), HOOK_TIMEOUT_MS); } catch (error) {
+            const limit = hookTimeout(fn);
+            try { out = await within(fn(view(), { type, dryRun, commit, again }), limit); } catch (error) {
                 problem({ module: moduleId, code: 'FAILED', message: `beforeGenerate failed: ${error?.message ?? error}` });
                 continue;
             }
             if (out === TIMED_OUT) {
-                problem({ module: moduleId, code: 'TIMEOUT', message: `beforeGenerate did not answer within ${HOOK_TIMEOUT_MS / 1000} s; the reply went on without its notes.` });
+                problem({ module: moduleId, code: 'TIMEOUT', message: `beforeGenerate did not answer within ${limit / 1000} s; the reply went on without its notes.` });
                 continue;
             }
+            // A merged hook (domains/index.js mergeParts) keeps the answers of the parts that did answer and reports the others.
+            for (const entry of Array.isArray(out?.problems) ? out.problems : []) problem({ module: moduleId, code: entry.code, message: entry.message });
             const lines = Array.isArray(out) ? out : Array.isArray(out?.lines) ? out.lines : [];
-            if (lines.length) cues[moduleId] = lines.filter(line => typeof line === 'string');
+            // The RPG's rolls and its "no rolls" line outrank ordinary tail notes when the tail is trimmed (prompt.js).
+            if (lines.length) cues[moduleId] = lines.filter(line => typeof line === 'string').map(line => (line === NO_ROLLS_LINE ? { text: line, keep: true } : line));
             for (const command of commit && Array.isArray(out?.commands) ? out.commands : []) {
-                // Assist's roll is previewed for the prompt, without writing on the previous reply.
-                // Completion runs the same seed on the generated reply; only that transaction is stored.
-                if (command?.type === PRECHECK) {
-                    requested.push({ moduleId, payload: command.payload ?? {} });
+                // A prelude (Assist's roll, the RPG's rolls) is previewed for the prompt, without writing on the
+                // previous reply. Completion runs the same seed on the generated reply; only that transaction is stored.
+                if (isPrelude(command?.type)) {
+                    requested.push({ moduleId, type: command.type, payload: command.payload ?? {} });
                     continue;
                 }
                 const result = await bus.command(command?.type, command?.payload ?? {}, { cause: 'system' });
@@ -402,13 +425,14 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         }
         // Other cues may settle a fight or change a modifier. Preview on the state they leave,
         // which is also the state the generated reply's prelude will start from.
-        for (const { moduleId, payload } of requested) {
-            const prior = session?.prechecks?.find(step => JSON.stringify(step.payload) === JSON.stringify(payload));
-            const result = bus.run(PRECHECK, payload, { cause: 'system', ...(prior ? { seed: prior.seed } : {}) });
+        for (const { moduleId, type: preludeType, payload } of requested) {
+            const prior = session?.prechecks?.find(step => step.type === preludeType && JSON.stringify(step.payload) === JSON.stringify(payload));
+            const result = bus.run(preludeType, payload, { cause: 'system', ...(prior ? { seed: prior.seed } : {}) });
             if (result?.ok) {
-                prechecks.push({ type: PRECHECK, payload, seed: result.receipt.seed });
-                cues[moduleId] = [...(cues[moduleId] ?? []), `[Happened]\n${result.receipt.summary}`];
-            } else problem({ module: moduleId, code: result?.code ?? 'FAILED', message: `The cue "${PRECHECK}" was not prepared: ${result?.message ?? 'unknown error'}` });
+                prechecks.push({ type: preludeType, payload, seed: result.receipt.seed });
+                const told = `[Happened]\n${result.receipt.summary}`;
+                cues[moduleId] = [...(cues[moduleId] ?? []), preludeType === RPG_RESOLVE ? { text: told, keep: true } : told];
+            } else problem({ module: moduleId, code: result?.code ?? 'FAILED', message: `The cue "${preludeType}" was not prepared: ${result?.message ?? 'unknown error'}` });
         }
         // Saved with the reply (MESSAGE_RECEIVED), not now: each save writes the whole chat file, and the
         // reply's save comes moments later with these cues in it. A reply that never comes still has them
@@ -627,10 +651,13 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         }
         return out;
     }
+    // Only while the RPG is on: with it off a reply's text goes into the prompt as it always did.
+    const battleOn = () => registry.featureOn?.(CORE_FEATURE.leanRpg) === true;
     function stripHistory(chat) {
+        const strip = battleOn() ? text => stripBattleMarker(strippedText(text)) : strippedText;
         for (const message of chat) {
             if (message?.role !== 'assistant') continue;
-            const content = mapContent(message.content, strippedText);
+            const content = mapContent(message.content, strip);
             if (content !== message.content) message.content = content;
         }
     }
@@ -659,6 +686,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         // Only the hidden form: the static text's own example block must stay.
         const hidden = new RegExp(`\\s*<!--\\s*STORY_SUITE_V2\\b[\\s\\S]*?-->`, 'g');
         eventData.prompt = eventData.prompt.replace(hidden, '');
+        if (battleOn()) eventData.prompt = stripBattleMarker(eventData.prompt);
         if (backgroundPrompt() || !session || session.prompted) return;
         session.prompted = true;
         const missing = [session.staticText, session.tailText].filter(text => text && !eventData.prompt.includes(firstLine(text)));
@@ -1076,8 +1104,8 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
                     && record?.spans?.some(span => span.boundaries?.[0]?.payloadHash === store.payloadHashAt(index));
                 plan = { blocks: [], pending: 0, replacing: replacedProofs(record), reuse: reusePlan(record, retire), preserveSources };
                 const prechecks = (record?.receipts ?? [])
-                    .filter(receipt => receipt.beforeGenerate === true && receipt.type === PRECHECK)
-                    .map(receipt => ({ type: PRECHECK, payload: receipt.replan?.payload ?? {}, seed: receipt.seed }));
+                    .filter(receipt => receipt.beforeGenerate === true && isPrelude(receipt.type))
+                    .map(receipt => ({ type: receipt.type, payload: receipt.replan?.payload ?? {}, seed: receipt.seed }));
                 const prepared = prechecks.length ? await afterCapture(index, { type: 'reread', problems, state: base, reply, plan, prechecks, onlyPrechecks: true }) : [];
                 plan.blocks.push(...prepared.map(step => ({ n: step.ops.length, receipt: step.receipt, ...(step.block ? { block: step.block } : {}) })));
                 receipts.push(...prepared.map(step => step.receipt));
@@ -1188,6 +1216,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             const late = current.type === 'continue' ? [] : lateLines(id, parsed.lines.map(line => line.raw));
             const result = await captureLines(id, parsed.lines, at ? current.base : null, current.type, { late, prechecks: current.prechecks });
             problems.push(...result.problems);
+            receivedHooks(id, current.type);
 
             // What this reply was told; a Continue keeps what the reply was told before.
             // (B-b2-timeline-9: read through readRecord, and only receipt IDs, whatever the chat holds.)
@@ -1245,6 +1274,16 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         if (!runs.length) return;
         const all = Promise.allSettled(runs).then(() => { if (assistPending === all) assistPending = null; });
         assistPending = all;
+    }
+
+    // afterReceive: every reply that arrives, with or without change lines, once its lines have been read and before it is
+    // saved (the RPG lets go of the plan it held for the reply). Nothing is asked of it; a failure is a Problem.
+    function receivedHooks(index, type) {
+        for (const { moduleId, fn } of registry.hookEntries('afterReceive')) {
+            try { fn(view(), { index, type }); } catch (error) {
+                problem({ module: moduleId, index, code: 'FAILED', message: `afterReceive failed: ${error?.message ?? error}` });
+            }
+        }
     }
 
     /** Change lines found after the reply (afterReply): captured on it and kept in its hidden block. */

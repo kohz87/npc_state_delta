@@ -1,7 +1,7 @@
 // Interpreter 1. No host calls, randomness or mutable caches: the caller supplies a checked,
 // frozen definition and a disposable instance. Reads refer to the original prefix, even when
 // a preceding effect in this root has changed the draft.
-import { DM_LIMITS as L, dmInt, dmObject, dmOwn } from './schema.js';
+import { DM_LIMITS as L, dmInt, dmLabelNames, dmObject, dmOwn, dmValueOfName } from './schema.js';
 import { hashJson } from '../replay.js';
 import { oneLine } from '../../text.js';
 import { STRINGS } from '../strings.js';
@@ -37,8 +37,10 @@ export function cleanList(value, max) {
     if (cleaned.length > 12) refuse('DM_BOUNDS', '', STRINGS.blocks.listLimit);
     return [...cleaned.join('; ')].slice(0, max).join('');
 }
-const ruleOf = schema => (schema.type === 'enum' ? `be ${orList(schema.values)}`
-    : schema.type === 'int' ? `be a whole number from ${schema.min} to ${schema.max}` : schema.type === 'text' ? STRINGS.editMessages.textNonempty : 'be true or false');
+// (a number with display names also takes any of them: "be a whole number from 0 to 5 or Down, Hurt or Unhurt")
+const ruleOf = (schema, names = null) => (schema.type === 'enum' ? `be ${orList(schema.values)}`
+    : schema.type === 'int' ? `be a whole number from ${schema.min} to ${schema.max}${names ? ` or ${orList(Object.values(names).slice(0, 8))}${Object.keys(names).length > 8 ? ' …' : ''}` : ''}`
+        : schema.type === 'text' ? STRINGS.editMessages.textNonempty : 'be true or false');
 
 // Each label of a line is one declared name with one value of its declared type; anything else is refused with a plain sentence
 // ("faction must be guild, watch or compact"), never guessed. `text`: a story line (its values are text); else typed (a reader action).
@@ -49,7 +51,10 @@ export function parseLabels(definition, kind, labels, { text = false } = {}) {
     for (const [key, schema] of Object.entries(kind.labels)) {
         if (!dmOwn(labels, key)) refuse('DM_LABEL', key, `${key} is missing`);
         let value = labels[key];
+        // A number the story may write as one of its display names; the stored value is always the number.
+        const names = text && schema.type === 'int' ? dmLabelNames(definition, kind, key) : null;
         if (text) {
+            if (schema.type === 'int' && names && typeof value === 'string' && !/^-?\d+$/.test(value)) value = dmValueOfName(names, value) ?? value;
             if (schema.type === 'int' && /^-?\d+$/.test(value)) value = Number(value);
             if (schema.type === 'bool' && ['true', 'false'].includes(value)) value = value === 'true';
             if (schema.type === 'enum') {
@@ -61,7 +66,7 @@ export function parseLabels(definition, kind, labels, { text = false } = {}) {
         const valid = schema.type === 'int' ? dmInt(value, schema.min, schema.max)
             : schema.type === 'bool' ? typeof value === 'boolean'
                 : schema.type === 'text' ? typeof value === 'string' && value.length > 0 : schema.values.includes(value);
-        if (!valid) refuse('DM_LABEL', key, `${key} must ${ruleOf(schema)}`);
+        if (!valid) refuse('DM_LABEL', key, `${key} must ${ruleOf(schema, names)}`);
         args[key] = value;
     }
     return args;
@@ -251,7 +256,11 @@ export function createEvaluation(definition, instance, { inputs = {}, source, cu
     function rules() {
         for (const rule of definition.rules) { charge(); if (condition(['rule', rule.id], rule.when, {})) { fired.push(rule.id); effects(rule.then); } }
     }
-    return { evaluate, condition, effects, timers, rules, charge, read,
+    // The reply-end functions, in the order they are written: each asks its condition about the fields as the one before left them.
+    function replyEnd() {
+        (definition.replyEnd ?? []).forEach((entry, at) => { charge(); if (condition(['reply-end', at], entry.when, {})) effects(entry.effects); });
+    }
+    return { evaluate, condition, effects, timers, rules, replyEnd, charge, read,
         finish() {
             for (const [key, schema] of Object.entries(definition.state)) if (!scalarHolds(schema, instance.fields[key])) refuse('DM_BOUNDS', key, 'Invalid instance field.');
             if (bytes(instance) > L.instanceBytes) refuse('DM_BUDGET', '', 'Instance storage exhausted.');
@@ -268,7 +277,7 @@ export function createEvaluation(definition, instance, { inputs = {}, source, cu
 export function conditionHolds(definition, record, prefixFields, inputs = {}) {
     const [kind, name] = Array.isArray(record?.ref) ? record.ref : [];
     const expression = kind === 'kind' ? definition.kinds?.[name]?.when : kind === 'rule' ? definition.rules?.find(rule => rule.id === name)?.when
-        : kind === 'reward' ? definition.rewards?.[name]?.when : undefined;
+        : kind === 'reward' ? definition.rewards?.[name]?.when : kind === 'reply-end' ? definition.replyEnd?.[name]?.when : undefined;
     if (expression === undefined || !dmObject(record.internal) || typeof record.outcome !== 'boolean') refuse('DM_SCHEMA', '', 'A recorded condition is damaged.');
     const evaluation = createEvaluation(definition, { fields: prefixFields, timers: {}, offers: {}, settled: {} }, {
         inputs, lookup: (path, key) => (Object.hasOwn(record.internal, key) ? record.internal[key] : atPath(prefixFields, path)),

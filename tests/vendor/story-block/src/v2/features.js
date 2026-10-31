@@ -43,6 +43,8 @@ export const CORE_FEATURE = Object.freeze({
     chatter: 'story-block.chatter',
     // The scene's weather line (`~ weather`, src/v2/domains/scene.js, MODULES §F120).
     weather: 'story-block.weather',
+    // The RPG (src/v2/lean-rpg/, SPEC_RPG.md): automatic rolls, the Party tab, the battle log.
+    leanRpg: 'story-block.rpg',
 });
 
 // Where Story Block kept these switches before they were features: a reader who set one keeps that

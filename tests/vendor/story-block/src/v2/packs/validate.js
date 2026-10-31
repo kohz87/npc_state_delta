@@ -13,7 +13,7 @@
 // requires.capabilities is checked for form only).
 // `dataModuleDefinitions`: checked normalized dependency definitions for public cross-pack data imports.
 //
-import { RECORD_LIMITS, CALENDAR_FIELDS, CALENDAR_HOLIDAY_FIELDS, CALENDAR_LIMITS, CALENDAR_START_FIELDS, CHOICE_FIELDS, CONTENT_KINDS, COMMAND, CRAFT_FIELDS, ECONOMY_FIELDS, ECONOMY_LIMITS, CRAFTS_LIMITS, DEFAULT_CRAFTS, METER_FIELDS, METER_LIMITS, METER_PRESET_FIELDS, METER_RESERVED, METER_STAGE_FIELDS, RECIPE_LIMITS, STAT_SUM, DEF_ID, EVENT_FIELDS, EVENT_LIMITS, ITEM_FIELDS, ITEM_KINDS, LIMITS, MOUNTS, PACK_FIELDS, PACK_ID, PLACE_FIELDS, PRESET_FIELDS, RARITIES, ROUTE_FIELDS, SCREEN_FIELDS, SCREEN_ID, SEMVER, SKILL_FIELDS, SKILL_TARGETS, SKILL_TYPES, SLUG, START_FIELDS, STAT_NAME, RANK_FIELDS, RANK_ID, RANKS_LIMITS, TERM_SEPARATORS, ITEM_CARRY, MARKET_FIELDS, MARKET_LIMITS, MARKET_WORD, TERMS_FIELDS, TERMS_LIMITS, TERMS_NUMERALS, TERMS_TIER_FIELDS, WEATHER_FIELDS, WEATHER_LIMITS, WEATHER_SEASON_FIELDS, WEATHER_TABLE_FIELDS } from './limits.js';
+import { LEAN_RPG_FIELDS, LEAN_RPG_LIMITS, SKILL_SET_FIELDS, SKILL_SET_SKILL_FIELDS, RECORD_LIMITS, CALENDAR_FIELDS, CALENDAR_HOLIDAY_FIELDS, CALENDAR_LIMITS, CALENDAR_START_FIELDS, CHOICE_FIELDS, CONTENT_KINDS, COMMAND, CRAFT_FIELDS, ECONOMY_FIELDS, ECONOMY_LIMITS, CRAFTS_LIMITS, DEFAULT_CRAFTS, METER_FIELDS, METER_LIMITS, METER_PRESET_FIELDS, METER_RESERVED, METER_STAGE_FIELDS, RECIPE_LIMITS, STAT_SUM, DEF_ID, EVENT_FIELDS, EVENT_LIMITS, ITEM_FIELDS, ITEM_KINDS, LIMITS, MOUNTS, PACK_FIELDS, PACK_ID, PLACE_FIELDS, PRESET_FIELDS, RARITIES, ROUTE_FIELDS, SCREEN_FIELDS, SCREEN_ID, SEMVER, SKILL_FIELDS, SKILL_TARGETS, SKILL_TYPES, SLUG, START_FIELDS, STAT_NAME, RANK_FIELDS, RANK_ID, RANKS_LIMITS, TERM_SEPARATORS, ITEM_CARRY, MARKET_FIELDS, MARKET_LIMITS, MARKET_WORD, TERMS_FIELDS, TERMS_LIMITS, TERMS_NUMERALS, TERMS_TIER_FIELDS, WEATHER_FIELDS, WEATHER_LIMITS, WEATHER_SEASON_FIELDS, WEATHER_TABLE_FIELDS } from './limits.js';
 import { byteLength, checkPlain } from './safety.js';
 import { parseRange, satisfies } from './version.js';
 import { foldKey, oneLine } from '../../text.js';
@@ -25,7 +25,7 @@ import { MAX_COINS, MAX_COIN_VALUE, coinsOf } from '../domains/money.js';
 import { validateDataModules, dataModulesPackHash } from '../data-modules/check.js';
 import { STRINGS } from '../strings.js';
 
-export const HOST_VERSION = '2.7.0';
+export const HOST_VERSION = '2.8.0';
 
 /** A slug for a display name: "Iron Sword (old)" → "iron-sword-old". */
 export function slugify(name) {
@@ -141,6 +141,7 @@ function normalize(raw, { add, hostVersion, capabilities, limits, dataModuleDefi
         if (Array.isArray(given.meterPresets) && given.meterPresets.length > METER_LIMITS.presets) add('BAD_CONTENT', 'content.meterPresets', `content.meterPresets holds at most ${METER_LIMITS.presets} presets.`);
         else content.meterPresets = records(given.meterPresets, 'meterPresets', { add, packId, check: (record, path) => checkMeterPreset(record, path, add), slugField: 'id', named: false });
     }
+    if (given.rpg !== undefined) content.rpg = checkRpg(given.rpg, packId, add);
 
     const start = raw.start === undefined ? null : checkStart(raw.start, add, ref);
     let layouts = [];
@@ -406,6 +407,47 @@ function checkCrafts(list, packId, add) {
         if (!ok) return null;
         return { title: oneLine(record.title), stats: [...record.stats], stations: [...stations], ...(note ? { note } : {}) };
     } });
+}
+
+// The RPG's skill sets (`content.rpg.skillSets`): ready-made skills the New character wizard offers, each with what the
+// skill does, the stat it rolls with and what it uses (stamina unless it says mana). A set is 1 to 5 skills; a pack has up to 12 sets.
+// Normalized to the list of sets, each `{ id, slug, pack, name, about, skills: [{ name, about, stat, uses }] }`.
+function checkRpg(value, packId, add) {
+    if (!isObject(value)) { add('BAD_CONTENT', 'content.rpg', 'content.rpg must be an object: { "skillSets": [ … ] }.'); return []; }
+    for (const key of Object.keys(value)) if (!LEAN_RPG_FIELDS.includes(key)) add('UNKNOWN_FIELD', `content.rpg.${key}`, `"${key}" is not a content.rpg field (expected ${LEAN_RPG_FIELDS.join(', ')}).`);
+    if (Array.isArray(value.skillSets) && value.skillSets.length > LEAN_RPG_LIMITS.sets) {
+        add('BAD_CONTENT', 'content.rpg.skillSets', `content.rpg.skillSets holds at most ${LEAN_RPG_LIMITS.sets} sets.`);
+        return [];
+    }
+    return records(value.skillSets, 'rpg.skillSets', { add, packId, check: (record, path, label) => checkSkillSet(record, path, label, add) });
+}
+
+function checkSkillSet(record, path, label, add) {
+    const L = LEAN_RPG_LIMITS;
+    let ok = true;
+    const say = (field, message, code = 'BAD_RECORD') => { ok = false; add(code, `${path}.${field}`, `${label}: ${message}`); };
+    for (const key of Object.keys(record)) if (!SKILL_SET_FIELDS.includes(key)) say(key, `"${key}" is not a skill set field (expected ${SKILL_SET_FIELDS.join(', ')}).`, 'UNKNOWN_FIELD');
+    if (oneLine(record.name).length > L.name) say('name', `name must be text of at most ${L.name} characters.`);
+    const about = record.about === undefined ? '' : record.about;
+    if (typeof about !== 'string' || oneLine(about).length > L.about) say('about', `about must be text of at most ${L.about} characters.`);
+    const skills = [];
+    if (!Array.isArray(record.skills) || !record.skills.length || record.skills.length > L.skills) say('skills', `skills must be a list of 1 to ${L.skills} skills: [{ "name": "Spark", "about": "A small burst of magic.", "stat": "int", "uses": "mana" }].`);
+    else record.skills.forEach((skill, index) => {
+        const at = `skills[${index}]`;
+        if (!isObject(skill)) return say(at, `${at} must be an object.`);
+        for (const key of Object.keys(skill)) if (!SKILL_SET_SKILL_FIELDS.includes(key)) say(`${at}.${key}`, `"${key}" is not a skill field (expected ${SKILL_SET_SKILL_FIELDS.join(', ')}).`, 'UNKNOWN_FIELD');
+        const name = typeof skill.name === 'string' ? oneLine(skill.name) : '';
+        if (!name || name.length > L.skillName) say(`${at}.name`, `${at}.name must be text of 1 to ${L.skillName} characters.`);
+        else if (skills.some(other => foldKey(other.name) === foldKey(name))) say(`${at}.name`, `${at}.name repeats "${name}"; a set names each skill once.`, 'DUPLICATE');
+        const what = typeof skill.about === 'string' ? oneLine(skill.about) : '';
+        if (!what || what.length > L.skillAbout) say(`${at}.about`, `${at}.about must be text of 1 to ${L.skillAbout} characters (what the skill does; the story reads it).`);
+        const stat = typeof skill.stat === 'string' ? skill.stat.trim().toLowerCase() : '';
+        if (!L.stats.includes(stat)) say(`${at}.stat`, `${at}.stat must be one of ${L.stats.join(', ')}.`);
+        const uses = skill.uses === undefined ? L.uses[0] : typeof skill.uses === 'string' ? skill.uses.trim().toLowerCase() : '';
+        if (!L.uses.includes(uses)) say(`${at}.uses`, `${at}.uses must be ${L.uses.join(' or ')}.`);
+        if (name && what && L.stats.includes(stat) && L.uses.includes(uses)) skills.push({ name, about: what, stat, uses });
+    });
+    return ok ? { name: oneLine(record.name), about: oneLine(about), skills } : null;
 }
 
 // One ready-made set of NPC meters for NPC State Delta (MODULES §F81, §F90). Each meter is a whole-number

@@ -59,7 +59,7 @@ const CONTEXT_KEYS = ['static', 'tail', 'budget', 'feature', 'parts'];
 const REQUIRES_KEYS = ['storyBlock', 'peers'];
 // How many capability names a module may declare (`capabilities`: what a pack's requires.capabilities can name).
 export const MAX_CAPABILITIES = 32;
-const COMMAND_KEYS = ['handler', 'internal', 'feature', 'enabled'];
+const COMMAND_KEYS = ['handler', 'internal', 'prelude', 'feature', 'enabled'];
 export const FIELD_TYPES = Object.freeze(['bool', 'int', 'choice', 'text', 'list', 'profile']);
 
 const MODULE_ID = /^[a-z0-9][a-z0-9._-]*$/;
@@ -204,6 +204,7 @@ export function definitionProblems(def) {
             if (isObject(handler)) {
                 fn(handler.handler, `command "${type}" handler`);
                 if (handler.internal !== undefined && typeof handler.internal !== 'boolean') problems.push(`command "${type}" internal is not true or false`);
+                if (handler.prelude !== undefined && typeof handler.prelude !== 'boolean') problems.push(`command "${type}" prelude is not true or false`);
             } else fn(handler, `command "${type}"`);
         }
     }
@@ -753,6 +754,14 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         return Boolean(entry) && entry.internal === true;
     }
 
+    // Preludes: system commands a module's beforeGenerate asks for, previewed for the prompt and stored on the
+    // generated reply before its story lines (turn.js runCues; Assist's pre-roll is the first). A command is marked
+    // `{ handler, prelude: true }`, or is a handler function that carries `prelude === true` itself.
+    function isPrelude(type) {
+        const entry = commandEntry(String(type ?? ''));
+        return Boolean(entry) && entry.prelude === true;
+    }
+
     function commandOwner(type) {
         const name = String(type ?? '');
         if (name.startsWith(CAPTURE_PREFIX)) return captureEntry(name.slice(CAPTURE_PREFIX.length))?.moduleId ?? null;
@@ -791,6 +800,8 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         command,
         /** True for a command only the host runs (capture.*, module.init.*, commands marked internal). */
         isInternal,
+        /** True for a prelude command (marked `prelude`): previewed before the reply and stored on it before its story lines. */
+        isPrelude,
         /** { moduleId, kind, grammar, apply, feature, off, display } (display: a display kind's options, else null) for a capture kind or alias, or null. */
         capture: word => {
             const entry = captureEntry(word);
