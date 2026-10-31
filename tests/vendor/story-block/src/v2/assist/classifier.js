@@ -19,6 +19,8 @@
 // kind that is not there fails the capture call, so the claim is not kept either.
 
 import { extractBlock, parseChanges } from '../capture.js';
+import { LEAN_RPG_FEATURE } from '../lean-rpg/names.js';
+import { readSheet } from '../lean-rpg/read.js';
 import { BACKGROUND, SETTING, TIMEOUT_MS, clip, estimateTokens, hashText, normalizeType, withTimeout } from './common.js';
 
 export const PRECHECK = 'assist.precheck';
@@ -173,6 +175,8 @@ export function createClassifier({ callModel, settings, chat, chatId, hasKind, l
     async function beforeGenerate(view, info = {}) {
         const values = settings(view);
         if (values?.[SETTING.classifier] !== true) return null;
+        // The RPG plans the rolls itself (src/v2/lean-rpg/precall.js): with it on and a Character block in the chat, this pre-roll steps aside.
+        if (view?.feature?.(LEAN_RPG_FEATURE) === true && readSheet(view.state).characters.length) return null;
         const type = normalizeType(info?.type);
         if (BACKGROUND.includes(type) || !['normal', 'regenerate', 'swipe'].includes(type)) return null;
         // A swipe reuses the reader message before its reply; a Continue never prepares a roll.

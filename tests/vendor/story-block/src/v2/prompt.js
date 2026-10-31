@@ -106,8 +106,18 @@ function fit(section, budget) {
     let dropped = 0;
     const cost = () => estimateTokens([...section.lines, ...section.optional].join('\n'));
     while (cost() > budget && section.optional.length) { section.optional.pop(); dropped += 1; }
-    while (cost() > budget && section.lines.length) { section.lines.pop(); dropped += 1; }
+    while (cost() > budget && dropLast(section, section.lines)) dropped += 1;
     return dropped;
+}
+
+// Drops the last line of `list` that is not pinned (a pinned cue outranks ordinary notes and is never dropped); false when none is left.
+function dropLast(section, list) {
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+        if (section.pinned.has(list[i])) continue;
+        list.splice(i, 1);
+        return true;
+    }
+    return false;
 }
 
 // The [Happened] lines that fit `budget` tokens (at least the first MIN_HAPPENED), the rest told as
@@ -190,10 +200,13 @@ export function assemble({ registry, view, untold = [], settings = {}, cues = {}
 
     const sections = [];
     for (const context of tailOrder(registry.contexts())) {
-        const extra = linesOf(cues?.[context.moduleId]);
+        // A cue may be `{ text, keep: true }`: kept whole, whatever the budget says (the rolls the narrator must tell).
+        const given = Array.isArray(cues?.[context.moduleId]) ? cues[context.moduleId] : [];
+        const extra = linesOf(given.map(cue => (typeof cue?.text === 'string' ? cue.text : cue)));
+        const pinned = new Set(linesOf(given.filter(cue => cue?.keep === true).map(cue => cue.text).map(fill)));
         let tail = null;
         if (typeof context.tail === 'function') tail = attempt(() => context.tail(view), null, problems, `${context.name}: this reply`);
-        const section = { context, lines: linesOf([...extra, ...linesOf(tail?.lines)].map(fill)), optional: linesOf(linesOf(tail?.optional).map(fill)), dropped: 0 };
+        const section = { context, lines: linesOf([...extra, ...linesOf(tail?.lines)].map(fill)), optional: linesOf(linesOf(tail?.optional).map(fill)), pinned, dropped: 0 };
         if (!section.lines.length && !section.optional.length) continue;
         if (context.budget) section.dropped += fit(section, context.budget);
         sections.push(section);
@@ -205,7 +218,10 @@ export function assemble({ registry, view, untold = [], settings = {}, cues = {}
     for (const pass of ['optional', 'lines']) {
         for (let i = sections.length - 1; i >= 0 && estimateTokens(tailText()) > total; i -= 1) {
             const list = sections[i][pass];
-            while (list.length && estimateTokens(tailText()) > total) { list.pop(); sections[i].dropped += 1; }
+            while (list.length && estimateTokens(tailText()) > total) {
+                if (pass === 'optional') list.pop(); else if (!dropLast(sections[i], list)) break;
+                sections[i].dropped += 1;
+            }
         }
     }
 

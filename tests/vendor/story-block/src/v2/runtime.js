@@ -39,7 +39,7 @@ import { createTimeline, withRuleOverlay } from './timeline/index.js';
 import { createStore as realStore } from './store.js';
 import { createTurn, substituteNames } from './turn.js';
 
-export const VERSION = '2.7.0';
+export const VERSION = '2.8.0';
 
 /**
  * Settings where Story Block's `currency` (and `currencyShort`, `currencyPlural`, `coins`) fall back to
@@ -403,6 +403,8 @@ export function createRuntime({
             version: VERSION,
             timeline: () => timeline,
             dataModules: { state: () => store.head(), lifecycle: id => registry.lifecycle(id), restore: () => registry.restore() },
+            // The RPG's pre-call asks through the same queued call as Assist's helpers (assistCall, set below).
+            leanRpg: { callModel: (prompt, options = {}) => assistCall(prompt, options), chat: () => ctx.chat, chatId: () => ctx.getCurrentChatId?.() ?? ctx.chatId ?? '', metadata: () => { try { return (live() ?? ctx)?.chatMetadata ?? null; } catch { return ctx?.chatMetadata ?? null; } } },
             packs: packPart,
             // Due events are the host's own system cues: straight to the bus (the public sdk only runs
             // the reader's 'ui' actions), with the same 'committed' event the sdk sends.
@@ -490,7 +492,7 @@ export function createRuntime({
     // The assist helpers' call (assist/index.js: (prompt, { maxTokens, profile, helper }) → text, throwing
     // with a code on failure; an empty answer is '' as before).
     assistCall = async (prompt, { maxTokens, profile = '', helper = 'pre-roll' } = {}) => {
-        const result = await modelCalls.callModel({ prompt, maxTokens, profile, module: `${CORE_MODULE_ID} (${helper === 'extractor' ? 'safety net' : 'pre-roll'})`, timeoutMs: ASSIST_TIMEOUT_MS }, { idle: false });
+        const result = await modelCalls.callModel({ prompt, maxTokens, profile, module: `${CORE_MODULE_ID} (${helper === 'extractor' ? 'safety net' : helper === 'rolls' ? 'rolls' : 'pre-roll'})`, timeoutMs: ASSIST_TIMEOUT_MS }, { idle: false });
         if (result.ok) return result.text;
         if (result.error === MODEL_CALL_ERRORS.EMPTY) return '';
         throw Object.assign(new Error(result.message), { code: result.error });

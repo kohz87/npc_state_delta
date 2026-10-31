@@ -2,7 +2,7 @@
 import { textField, numberField, selectField } from '../view/form/fields.js';
 import { h, iconNode } from '../view/widgets/dom.js';
 import { hasIcon } from '../view/icons/index.js';
-import { blockKindCount, buildBlock } from '../data-modules/block-builder.js';
+import { blockKindCount, buildBlock, namesText } from '../data-modules/block-builder.js';
 import { fullModuleGrammar } from '../data-modules/grammar.js';
 import { DM_LIMITS } from '../data-modules/schema.js';
 import { slugify } from '../packs/validate.js';
@@ -16,7 +16,7 @@ const ICONS = ['ph-bookmark-simple', 'ph-scroll', 'ph-heart', 'ph-lightning', 'p
 
 export function renderBlockEditor(root, { draft, used = [], directorOn = true, onSave, onCancel }) {
     const doc = root.ownerDocument ?? globalThis.document;
-    let controls = [], spots = new Map(), busy = false, alive = true, updateCount = () => {};
+    let controls = [], spots = new Map(), busy = false, alive = true, updateCount = () => {}, renamed = new Map();
     const node = (tag, cls = '', text = '', parent = null) => { const out = h(doc, tag, cls, text); parent?.appendChild(out); return out; };
     const button = (parent, label, action, cls = 'ss-button') => {
         const out = node('button', cls, label, parent); out.setAttribute('type', 'button'); out.addEventListener('click', action); return out;
@@ -78,6 +78,7 @@ export function renderBlockEditor(root, { draft, used = [], directorOn = true, o
             const kind = /\.kinds\.(?:set|change)-([a-z0-9-]+)/.exec(location);
             const buttonKind = /\.kinds\.button-([a-z0-9-]+)/.exec(location);
             const rule = /\.rules\[(\d+)\]/.exec(location), timer = /\.timers\[(\d+)\]/.exec(location);
+            const card = /\.cards\[(\d+)\]/.exec(location), replyEnd = /\.replyEnd\[(\d+)\]/.exec(location);
             const functionIndex = (type, index) => {
                 const selected = draft.functions.filter(fn => fn.type === type)[Number(index)];
                 return draft.functions.indexOf(selected);
@@ -87,8 +88,9 @@ export function renderBlockEditor(root, { draft, used = [], directorOn = true, o
                     : buttonKind ? `function:${draft.functions.findIndex((fn, index) => fn.type === 'button'
                         && slugify(fn.name || `button-${index + 1}`).slice(0, 32).replace(/-+$/, '') === buttonKind[1])}`
                         : rule ? `function:${functionIndex('rule', rule[1])}` : timer ? `function:${functionIndex('timer', timer[1])}`
+                        : card ? `function:${functionIndex('card', card[1])}` : replyEnd ? `function:${functionIndex('reply-end', replyEnd[1])}`
                         : /\.show/.test(location) ? 'show' : /prompt/.test(location) ? 'prompt' : location === 'name' ? 'name' : 'form';
-            const part = /\.(min|max|default|values|type|every|when|effects)(?:\.|\[|$)/.exec(location)?.[1];
+            const part = /\.(min|max|default|values|names|type|every|when|button|tone|title|text|effects)(?:\.|\[|$)/.exec(location)?.[1];
             const effect = /\.(?:effects|then)(?:\.(\d+)|\[(\d+)\])(?:\.(field|op|value))?/.exec(location);
             const effectSpot = effect ? spots.get(`${path}:effect:${effect[1] ?? effect[2]}:${effect[3] ?? 'value'}`) : null;
             (effectSpot ?? spots.get(`${path}:${part}`) ?? spots.get(path) ?? spots.get('form')).textContent = error.message;
@@ -103,7 +105,7 @@ export function renderBlockEditor(root, { draft, used = [], directorOn = true, o
     function draw() {
         updateCount = () => {};
         for (const entry of controls) entry.handle.destroy();
-        controls = []; spots = new Map();
+        controls = []; spots = new Map(); renamed = new Map();
         root.replaceChildren();
         const form = node('section', 'ss-block-editor ss-glass', '', root);
         node('h3', 'ss-section-label', S.editBlock, form);
@@ -143,6 +145,9 @@ export function renderBlockEditor(root, { draft, used = [], directorOn = true, o
                 control(row, S.min, field.min ?? 0, { type: 'int', min: -DM_LIMITS.integer, max: DM_LIMITS.integer }, value => { field.min = value; }, `field:${index}:min`);
                 control(row, S.max, field.max ?? 10, { type: 'int', min: -DM_LIMITS.integer, max: DM_LIMITS.integer }, value => { field.max = value; }, `field:${index}:max`);
                 control(row, S.defaultValue, field.default ?? 0, { type: 'int', min: -DM_LIMITS.integer, max: DM_LIMITS.integer }, value => { field.default = value; }, `field:${index}:default`);
+                // Optional display names ("1 = I"): shown instead of the number; the number is what is kept.
+                control(row, S.names, typeof field.names === 'string' ? field.names : namesText(field.names), { type: 'text', multiline: true, max: 1500 }, value => { field.names = value; }, `field:${index}:names`);
+                node('small', 'ss-block-hint', S.namesHelp, row);
             } else if (field.type === 'choice') {
                 control(row, S.choices, Array.isArray(field.values) ? field.values.join(', ') : field.values ?? '', { type: 'text', max: 500 }, value => { field.values = String(value).split(',').map(part => part.trim()); }, `field:${index}:values`);
                 control(row, S.defaultValue, field.default ?? '', { type: 'text', max: 240 }, value => { field.default = value; }, `field:${index}:default`);
@@ -150,6 +155,7 @@ export function renderBlockEditor(root, { draft, used = [], directorOn = true, o
                 if (field.type === 'text') control(row, S.max, field.max ?? 120, { type: 'int', min: 1, max: 240 }, value => { field.max = value; }, `field:${index}:max`);
                 control(row, S.defaultValue, field.default ?? '', { type: 'text', max: 240 }, value => { field.default = value; }, `field:${index}:default`);
             }
+            if (field.prompt === false) node('small', 'ss-block-hint', S.hiddenField, row);
             const actions = node('div', 'ss-block-field-actions', '', row);
             const up = button(actions, S.up, () => { collect(); [draft.fields[index - 1], draft.fields[index]] = [draft.fields[index], draft.fields[index - 1]]; draw(); }); up.disabled = index === 0;
             const down = button(actions, S.down, () => { collect(); [draft.fields[index + 1], draft.fields[index]] = [draft.fields[index], draft.fields[index + 1]]; draw(); }); down.disabled = index === draft.fields.length - 1;
@@ -159,7 +165,7 @@ export function renderBlockEditor(root, { draft, used = [], directorOn = true, o
             let n = draft.fields.length + 1; while (draft.fields.some(field => field.key === `field-${n}`)) n++;
             draft.fields.push({ key: `field-${n}`, name: fill(S.newFieldName, { n }), type: 'text', max: 120, default: '' }); draw(); });
         const purpose = node('section', 'ss-block-purpose', '', form);
-        const prompt = control(purpose, S.purpose, draft.prompt, { type: 'text', multiline: true, max: 600 }, value => { draft.prompt = value; }, 'prompt');
+        const prompt = control(purpose, S.purpose, draft.prompt, { type: 'text', multiline: true, max: DM_LIMITS.prompt }, value => { draft.prompt = value; }, 'prompt');
         const total = node('small', 'ss-block-static-count', '', purpose);
         updateCount = () => {
             collect();
@@ -181,16 +187,40 @@ export function renderBlockEditor(root, { draft, used = [], directorOn = true, o
             add.disabled = draft.functions.length >= 8 || (type === 'timer' && !directorOn);
         }
         if (!directorOn) node('p', 'ss-block-hint', S.timerNeeds, functions);
+        const whenControls = (row, fn, index) => {
+            control(row, S.whenField, fn.when.field, { type: 'choice', options: fieldOptions() }, value => { fn.when.field = value; }, null);
+            control(row, S.comparison, fn.when.op, { type: 'choice', options: COMPARISONS }, value => { fn.when.op = value; }, null);
+            control(row, S.whenValue, fn.when.value, { type: 'text', max: 240 }, value => { fn.when.value = value; }, `function:${index}:when`);
+        };
+        const KINDS = { button: S.button, rule: S.rule, timer: S.timer, card: S.card, 'reply-end': S.replyEnd };
         for (const [index, fn] of draft.functions.entries()) {
             const row = node('div', 'ss-block-function ss-glass', '', functions);
-            node('span', 'ss-pill', fn.type === 'button' ? S.button : fn.type === 'rule' ? S.rule : S.timer, row);
-            control(row, S.functionName, fn.name, { type: 'text', max: 60 }, value => { fn.name = value; }, `function:${index}`);
-            if (fn.type === 'rule') {
-                control(row, S.whenField, fn.when.field, { type: 'choice', options: fieldOptions() }, value => { fn.when.field = value; }, null);
-                control(row, S.comparison, fn.when.op, { type: 'choice', options: COMPARISONS }, value => { fn.when.op = value; }, null);
-                control(row, S.whenValue, fn.when.value, { type: 'text', max: 240 }, value => { fn.when.value = value; }, `function:${index}:when`);
-            } else if (fn.type === 'timer') control(row, S.every, fn.every, { type: 'int', min: 1, max: 525600 }, value => { fn.every = value; }, `function:${index}:every`);
-            paintEffects(row, fn, index);
+            node('span', 'ss-pill', KINDS[fn.type] ?? S.timer, row);
+            // (a card names the button it runs, so a button's new name goes to the cards that run it: now, and for a card form read after it)
+            const named = control(row, S.functionName, fn.name, { type: 'text', max: 60 }, value => {
+                if (fn.type === 'button' && fn.name !== value) {
+                    renamed.set(fn.name, value);
+                    for (const other of draft.functions) if (other.type === 'card' && other.button === fn.name) other.button = value;
+                }
+                fn.name = value;
+            }, `function:${index}`);
+            if (fn.type === 'button') named.input.addEventListener('change', refresh);
+            if (fn.type === 'rule') whenControls(row, fn, index);
+            else if (fn.type === 'timer') control(row, S.every, fn.every, { type: 'int', min: 1, max: 525600 }, value => { fn.every = value; }, `function:${index}:every`);
+            else if (fn.type === 'card') {
+                whenControls(row, fn, index);
+                control(row, S.cardTone, fn.tone ?? 'info', { type: 'choice', options: ['info', 'warn', 'end'].map(value => ({ value, label: S.tones[value] })) }, value => { fn.tone = value; }, `function:${index}:tone`);
+                control(row, S.cardTitleLabel, fn.title ?? '', { type: 'text', max: 60 }, value => { fn.title = value; }, `function:${index}:title`);
+                control(row, S.cardTextLabel, fn.text ?? '', { type: 'text', max: 240 }, value => { fn.text = value; }, `function:${index}:text`);
+                const buttons = draft.functions.filter(other => other.type === 'button').map(other => ({ value: other.name, label: other.name }));
+                control(row, S.cardButtonLabel, fn.button ?? '', { type: 'choice', options: [{ value: '', label: S.noButton }, ...buttons] }, value => { const button = renamed.get(value) ?? value; if (button) fn.button = button; else delete fn.button; }, `function:${index}:button`);
+            } else if (fn.type === 'reply-end') {
+                if (fn.when) {
+                    whenControls(row, fn, index);
+                    button(row, S.always, () => { collect(); delete fn.when; draw(); });
+                } else button(row, S.addCondition, () => { collect(); fn.when = { field: draft.fields[0]?.key ?? '', op: 'eq', value: '' }; draw(); });
+            }
+            if (fn.type !== 'card') paintEffects(row, fn, index);
             button(row, S.remove, () => { collect(); draft.functions.splice(index, 1); draw(); });
         }
         const footer = node('div', 'ss-block-editor-actions', '', form);

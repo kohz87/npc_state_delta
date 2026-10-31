@@ -12,7 +12,9 @@
 // `fold` opens the window on the section that holds that fold, the fold open and its summary focused (Home's "Import a
 // pack" asks for PACKS_FOLD); a module's group of features (`story-suite-features::<id>`, or the old `<id>::features`) is
 // on the Features page, its heading focused. `bodies` replaces the section → body map (tests, and a section moved to the form
-// engine). The window is a modal dialog: `<body>` carries `story-suite-open`, Tab stays inside it, a click or the
+// engine). `extraSections` adds sections of a module that is on only sometimes (the RPG's page): each is a section record plus
+// `after` (the id it follows in the rail), `body` (as a body above) and `visible()` (false: it is left out of the rail, the search
+// and the pages until it says true again, which `refresh()` re-reads). The window is a modal dialog: `<body>` carries `story-suite-open`, Tab stays inside it, a click or the
 // focus going to the page behind brings the focus back, Escape closes it (while the search box holds text, Escape
 // empties it first), and the focus goes back to where it was. Search: typing filters every section at once, a page
 // with no match is left out, the rail shows how many each page has, and the count is said in a polite live region
@@ -30,7 +32,7 @@ import { followViewport, holdPage, revealIn } from '../scroll.js';
 import { stackOf } from '../modal-stack.js';
 import { tabs as tabsBlock } from '../widgets/nav.js';
 import { SECTION_BODIES, createLegacySettings } from './bodies.js';
-import { DEFAULT_SECTION, SECTION_IDS, SETTINGS_SECTIONS, WINDOW_TEXT } from './sections.js';
+import { DEFAULT_SECTION, SETTINGS_SECTIONS, WINDOW_TEXT } from './sections.js';
 
 export const WINDOW_ID = 'story_suite_v2_overlay';
 const TITLE_ID = `${WINDOW_ID}_title`;
@@ -60,7 +62,7 @@ let current = null;
 const windowOpenState = new Map();
 
 /** Opens the settings window on `doc.body` (closing one already open). `profiles()` is the Connection Manager's list for the profile selects (default: read from SillyTavern). Returns { root, window, refresh, refreshSize, select, section, isOpen, close }. */
-export function openSettingsWindow({ registry, settings, doc = globalThis.document, sdk = null, features = null, promptParts = null, countTokens = null, diagnostics = null, tabs = null, theme = null, profiles = null, blockTemplates = null, fold: target = null, openState = windowOpenState, onClose = null, bodies = SECTION_BODIES }) {
+export function openSettingsWindow({ registry, settings, doc = globalThis.document, sdk = null, features = null, promptParts = null, countTokens = null, diagnostics = null, tabs = null, theme = null, profiles = null, blockTemplates = null, fold: target = null, openState = windowOpenState, onClose = null, bodies = SECTION_BODIES, extraSections = [] }) {
     if (current?.root?.ownerDocument === doc) current.close();
     doc.querySelector?.(`#${WINDOW_ID}`)?.remove();
 
@@ -110,8 +112,13 @@ export function openSettingsWindow({ registry, settings, doc = globalThis.docume
     win.addEventListener('scroll', pinWindow);
 
     // ---- the pages: a heading, then the body's pane
+    // The sections in rail order: the fixed ones, with each extra section after the one it names.
+    const sections = [...SETTINGS_SECTIONS];
+    for (const extra of extraSections) sections.splice(Math.max(0, sections.findIndex(item => item.id === extra.after) + 1) || sections.length, 0, extra);
+    const sectionIds = sections.map(section => section.id);
+    const shown = section => typeof section.visible !== 'function' || section.visible() !== false;
     const pages = new Map();
-    for (const section of SETTINGS_SECTIONS) {
+    for (const section of sections) {
         const page = h(doc, 'section', 'ss-settings-page');
         page.dataset.ssSection = section.id;
         page.hidden = true;
@@ -130,7 +137,7 @@ export function openSettingsWindow({ registry, settings, doc = globalThis.docume
     let chosen = DEFAULT_SECTION;
     let searchText = '';
     let railBlock = null;
-    const railItems = () => SETTINGS_SECTIONS.map(section => ({ id: section.id, label: section.label, icon: section.icon, count: searchText.trim() && pages.get(section.id).count ? String(pages.get(section.id).count) : '' }));
+    const railItems = () => sections.filter(shown).map(section => ({ id: section.id, label: section.label, icon: section.icon, count: searchText.trim() && pages.get(section.id).count ? String(pages.get(section.id).count) : '' }));
     const railProps = () => ({ items: railItems(), current: chosen, label: WINDOW_TEXT.railLabel, onSelect: 'settings.section' });
     railBlock = tabsBlock.render(rail, railProps(), { command: (type, payload) => { if (type === 'settings.section') select(payload?.tabs); } });
 
@@ -142,9 +149,9 @@ export function openSettingsWindow({ registry, settings, doc = globalThis.docume
     // The footer bar: what is sent each reply against its budget; pressing it opens the Prompt card. Declared before the bodies (their
     // `changed()` refreshes it) and shown after them.
     let footer = null;
-    for (const id of SECTION_IDS) {
+    for (const id of sectionIds) {
         const entry = pages.get(id);
-        const make = bodies[id];
+        const make = bodies[id] ?? sections.find(section => section.id === id)?.body;
         if (typeof make !== 'function') continue;
         // `changed()`: a setting this page drew changed and other pages draw what depends on it, so they are drawn again.
         const changed = () => {
@@ -161,13 +168,14 @@ export function openSettingsWindow({ registry, settings, doc = globalThis.docume
     // ---- showing a page
     function paint() {
         const searching = searchText.trim() !== '';
-        for (const entry of pages.values()) entry.page.hidden = searching ? !entry.count : entry.section.id !== chosen;
+        if (!shown(pages.get(chosen).section)) chosen = DEFAULT_SECTION;
+        for (const entry of pages.values()) entry.page.hidden = !shown(entry.section) || (searching ? !entry.count : entry.section.id !== chosen);
         railBlock.update(railProps());
         // A page that is shown tells its body (Diagnostics builds its report the first time).
         for (const entry of pages.values()) if (!entry.page.hidden) entry.body?.show?.();
     }
     function select(id) {
-        chosen = SECTION_IDS.includes(id) ? id : DEFAULT_SECTION;
+        chosen = sectionIds.includes(id) && shown(pages.get(id).section) ? id : DEFAULT_SECTION;
         if (searchText !== '') searchBox.clear();   // choosing a section ends the search (its onInput repaints)
         else paint();
         content.scrollTop = 0;
@@ -181,7 +189,7 @@ export function openSettingsWindow({ registry, settings, doc = globalThis.docume
         let total = 0;
         for (const entry of pages.values()) {
             const found = entry.body?.filter?.(searchText);
-            entry.count = Number.isFinite(found) ? found : 0;
+            entry.count = Number.isFinite(found) && shown(entry.section) ? found : 0;
             total += query ? entry.count : 0;
         }
         status.hidden = !query;
@@ -210,6 +218,8 @@ export function openSettingsWindow({ registry, settings, doc = globalThis.docume
             legacy.refresh();
             for (const entry of pages.values()) entry.body?.refresh?.();
             footer.refresh();
+            // A section that came or went (the RPG's page, with its feature): the rail and the page shown follow.
+            paint();
         },
         // The story moved (a new head, a commit, a turn): the prompt's size is read again, nothing else.
         refreshSize() {

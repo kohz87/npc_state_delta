@@ -7,7 +7,7 @@
 import { button, el, plural } from '../../ui/dom.js';
 import { LIMITS } from './limits.js';
 
-const COUNT_WORDS = { items: 'item', creatures: 'creature', shops: 'shop', recipes: 'recipe', events: 'event', quests: 'quest', races: 'race', talents: 'talent', skills: 'skill', presets: 'ready-made character', places: 'place', routes: 'route', terms: 'term set', ranks: 'rank', crafts: 'craft', meterPresets: 'meter preset', markets: 'market', rules: 'rules set' };
+const COUNT_WORDS = { items: 'item', creatures: 'creature', shops: 'shop', recipes: 'recipe', events: 'event', quests: 'quest', races: 'race', talents: 'talent', skills: 'skill', presets: 'ready-made character', places: 'place', routes: 'route', terms: 'term set', ranks: 'rank', crafts: 'craft', meterPresets: 'meter preset', markets: 'market', rpg: 'skill set', rules: 'rules set' };
 
 /** One line of what a pack holds: "3 items, 1 shop, start state". */
 export function countsLine(counts, hasStart) {

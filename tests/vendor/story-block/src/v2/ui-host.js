@@ -48,6 +48,7 @@ import { gameHeroProps, readHeroContext } from './view/game-header.js';
 import { HOME_ID, createScreens } from './view/screens.js';
 import { createTabOrderStore, isDefaultChoice, isHiddenNav, moveNav, navKey, orderNav, setNavHidden, visibleNav } from './view/tab-order.js';
 import { CHANGES_CARD_SCREEN_ID, HOME_SCREEN_ID, changesSummary, replyCardLines } from './screens/index.js';
+import { mergeRpgLines } from './screens/changes-card.js';
 import { createReplyNotes } from './reply-notes.js';
 import { createReplyExtras } from './extras-ui.js';
 import { displayLines } from './extras.js';
@@ -58,6 +59,7 @@ import { drawReplyCard } from './view/reply-cards-ui.js';
 import { CORE_FEATURE } from './features.js';
 import { createBlockTemplates } from './data-modules/block-templates.js';
 import { BLOCKS_SCREEN_ID, createBlockWidgets } from './screens/blocks.js';
+import { ROLES_WITHOUT_TAB } from './lean-rpg/names.js';
 import { createInspectorSource } from './inspect.js';
 import { createSavePoints } from './rewind.js';
 import { createInspectorWidget, INSPECTOR_WIDGET } from './screens/inspector.js';
@@ -136,13 +138,13 @@ function readerStore(ctx) {
 }
 
 /**
- * mountUi({ runtime, ctx, doc?, version? }) → { refresh(), blocked(reason, moduleId), clearBlocked(),
+ * mountUi({ runtime, ctx, doc?, version?, loadLeanRpg? }) → { refresh(), blocked(reason, moduleId), clearBlocked(),
  * openPanel(), closePanel(), openSettings(), toggleGameView(), setHud(on), hudOn(), screens, mounts,
  * renderer, notes, extras, savePoints, inspector, tabs (Settings → Tabs: rows(), move(id, delta),
  * setHidden(id, hidden), reset(), isDefault()), syncScreens(), destroy() }.
  * Re-read uses `sdk.reread(index)` (or `runtime.turn.reread(index)`) when the runtime has one.
  */
-export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' }) {
+export function mountUi({ runtime, ctx, doc = globalThis.document, version = '', loadLeanRpg = () => import('./lean-rpg/view/index.js') }) {
     const { registry, store, sdk, settings, events } = runtime;
     // A screen asking a query no module answers (an optional module that is not installed, like NSD's
     // npc.portrait) gets null, not a problem line.
@@ -168,6 +170,8 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
     }, save: () => ctx.saveSettingsDebounced?.() });
     const blockWidgets = createBlockWidgets({ templates: blockTemplates,
         directorOn: () => registry.lifecycle?.('story-director')?.status === 'ready',
+        // Off unless Story Block's core is there to own the switch (unlike coreOn, which counts a missing feature as on).
+        leanRpgOn: () => (registry.feature?.(CORE_FEATURE.leanRpg) ? registry.featureOn(CORE_FEATURE.leanRpg) : false),
         navigate: () => mounts.screen.open(BLOCKS_SCREEN_ID) });
     // The host's own widgets: the Inspector (over the store's replay) and the save points (over the chat).
     const liveCtx = () => globalThis.SillyTavern?.getContext?.() ?? ctx;
@@ -234,6 +238,10 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
     // The screen ids each pack gave at the last sync, by pack: a pack that is disabled, removed or no longer has a screen takes
     // those screens and their stylesheets away, and a replaced pack's new stylesheets replace the old ones.
     const packScreenIds = new Map();
+    const rpgOn = () => registry.featureOn?.(CORE_FEATURE.leanRpg) === true;
+    // The pinned blocks' screens. While RPG is on, its character, skills and rules blocks get no tab (the Party tab draws them;
+    // they stay on the Blocks page); with the feature off every block with a tab keeps it.
+    const blockPresentation = () => sdk.query('dataModules.presentation', { kind: 'screens', ...(rpgOn() ? { noTab: ROLES_WITHOUT_TAB } : {}) });
     function syncScreens() {
         const byModule = new Map();
         // Every module with screens, even one whose screens are all off just now (its list is then empty).
@@ -253,7 +261,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
                 if (!packScreens.some(screen => screen.pack === pack && screen.id === id)) packScreens.push({ id, title, icon, mounts: ['tab'], layout, pack });
             }
         } catch { /* older host */ }
-        try { packScreens.push(...(sdk.query('dataModules.presentation', { kind: 'screens' }) ?? [])); } catch { /* older host */ }
+        try { packScreens.push(...(blockPresentation() ?? [])); } catch { /* older host */ }
         const byPack = new Map();
         for (const screen of packScreens) {
             const { pack, ...def } = screen ?? {};
@@ -341,10 +349,16 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
     // reply" card also `moduleLines`: the modules' own lines for that reply (hooks.replyCard, MODULES §F125).
     const recordAt = index => readRecord(ctx.chat?.[index]);
     const editsAt = index => replyEdits(recordAt(index), store.problems?.() ?? [], index);
-    const cardLines = (index, state, changes) => [
-        ...replyCardLines(registry.hookEntries?.('replyCard') ?? [], { index, state, changes }),
-        ...replyRules(recordAt(index), store.problems?.() ?? [], index),
-    ];
+    // The RPG's screens (src/v2/lean-rpg/view/): loaded by import() only while its feature is on, taken away when it goes off.
+    let rpg = null, rpgLoading = false, rpgGone = false;
+    const cardLines = (index, state, changes, before = null) => {
+        const lines = [
+            ...replyCardLines(registry.hookEntries?.('replyCard') ?? [], { index, state, changes }),
+            ...replyRules(recordAt(index), store.problems?.() ?? [], index),
+        ];
+        // The RPG's own lines (rolls, class and rank rises), only while its screens are mounted.
+        return rpg ? mergeRpgLines(lines, rpg.cardLines({ state, before, record: recordAt(index), problems: (store.problems?.() ?? []).filter(item => item?.index === index) })) : lines;
+    };
     const drawScreen = renderer.render;
     // …and `assisted`: the lines the Assist safety net applied on it (its receipts marked `assist`).
     const assistedAt = index => {
@@ -354,7 +368,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         } catch { return []; }
     };
     renderer.render = (el, screen, scope) => drawScreen(el, screen, scope?.mount === 'card'
-        ? { ...scope, refused: notes.refusedAt(scope.index), assisted: assistedAt(scope.index), ...(screen?.id === CHANGES_CARD_SCREEN_ID ? { moduleLines: cardLines(scope.index, scope.state, scope.changes), edits: editsAt(scope.index), editableHead: scope.index === store.headIndex() } : {}) }
+        ? { ...scope, refused: notes.refusedAt(scope.index), assisted: assistedAt(scope.index), ...(screen?.id === CHANGES_CARD_SCREEN_ID ? { moduleLines: cardLines(scope.index, scope.state, scope.changes, scope.before), edits: editsAt(scope.index), editableHead: scope.index === store.headIndex() } : {}) }
         : scope);
     // The story head a dialog was opened on (mounts/dialog.js): the head's index and record. Which swipe is shown is not part of
     // it: a swipe that keeps the head record is not a move (the chat's id is checked on its own).
@@ -477,7 +491,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
             if (screen?.id !== CHANGES_CARD_SCREEN_ID) return null;
             let currency = null;
             try { currency = sdk.query('inventory.currency'); } catch { currency = null; }
-            return changesSummary({ state, before, changes, currency, refused: notes.refusedAt(index).length, assisted: assistedAt(index).length, lines: cardLines(index, state, changes), edits: editsAt(index).length });
+            return changesSummary({ state, before, changes, currency, refused: notes.refusedAt(index).length, assisted: assistedAt(index).length, lines: cardLines(index, state, changes, before), edits: editsAt(index).length });
         },
         settings: screenId => {
             const owner = String(screenId ?? '').split('/')[0];
@@ -662,6 +676,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         overlay = openSettingsWindow({
             registry, settings, doc, sdk, features: runtime.features ?? null, fold, diagnostics,
             promptParts, tabs: tabsControl, theme, blockTemplates,
+            ...(rpg ? { extraSections: rpg.settingsSections() } : {}),
             countTokens: countTokens(),
             onClose: () => { overlay = null; },
         });
@@ -810,13 +825,28 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         refresh();
         return Boolean(on);
     }
+    function syncLeanRpg() {
+        if (!rpgOn()) { rpg?.destroy(); rpg = null; return; }
+        if (rpg || rpgLoading) return;
+        rpgLoading = true;
+        Promise.resolve().then(() => loadLeanRpg()).then(view => {
+            rpgLoading = false;
+            if (rpgGone || rpg || !rpgOn()) return;
+            rpg = view.mountLeanRpg({ doc, ctx, store, events, screens, widgets: hostWidgets, headState: headStateNow, featureOn: rpgOn,
+                readerName: () => String(liveCtx()?.name1 ?? ctx.name1 ?? ''), openDialog: (id, opts) => api.dialog.open(id, opts), closeView: () => mounts.screen.close(), refresh: () => refresh(), command: (type, payload, options) => sdk.command(type, payload, options), values: () => settings('story-block') });
+            mounts.card?.refreshAll?.({ force: true });
+            // The settings window was opened before the screens loaded (the reader just switched the feature on): open it again on the same
+            // page, now with the RPG page in its rail.
+            if (overlay?.isOpen?.()) { const page = overlay.section(); openSettings(); overlay.select(page); }
+        }).catch(error => { rpgLoading = false; console.warn('[Story Suite] the RPG screens could not load', error?.message ?? error); });
+    }
     const offs = [...replyOffs];
     // Story Suite's console errors, kept for Diagnostics (once per page; the console still prints them).
     offs.push(captureConsole());
     let dataPresentation = '';
     for (const name of ['head', 'committed']) offs.push(events.on(name, () => {
         let next = '';
-        try { const pinned = sdk.query('dataModules.presentation', { kind: 'screens' }) ?? []; if (pinned.length) next = JSON.stringify(pinned); } catch { /* older host */ }
+        try { const pinned = blockPresentation() ?? []; if (pinned.length) next = JSON.stringify(pinned); } catch { /* older host */ }
         if (next !== dataPresentation) { dataPresentation = next; syncScreens(); }
         mounts.tab.register(); if (!panel.hidden) tabHost?.refresh();
     }));
@@ -843,6 +873,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         mounts.card?.refreshAll?.({ force: true });
     }) ?? (() => {}));
     offs.push(events.on('feature', () => {
+        syncLeanRpg();
         // The overlay draws the switch and the fields of that feature again, and the prompt size.
         overlay?.refresh?.();
         syncScreens();
@@ -867,6 +898,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
     }));
 
     syncScreens();
+    syncLeanRpg();
     refresh();
     mounts.card?.attachAll?.();
 
@@ -891,6 +923,9 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '' 
         inspector,
         theme,
         destroy() {
+            rpgGone = true;
+            rpg?.destroy();
+            rpg = null;
             overlay?.close?.();
             mounts.dialog?.closeAll?.();
             tabHost?.destroy?.();

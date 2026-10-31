@@ -12,7 +12,8 @@ const problem = (path, message) => ({ ok: false, errors: [{ code: 'DM_SCHEMA', p
 const keyFor = (name, max = 40) => slugify(name).slice(0, max).replace(/-+$/, '');
 const number = value => typeof value === 'number' ? value
     : typeof value === 'string' && value.trim() ? Number(value) : NaN;
-export const blockKindCount = draft => (Array.isArray(draft?.fields) ? draft.fields.length : 0)
+// (a field hidden from the story has no line the story can write, so it uses no kind)
+export const blockKindCount = draft => (Array.isArray(draft?.fields) ? draft.fields.filter(field => field?.prompt !== false).length : 0)
     + (Array.isArray(draft?.functions) ? draft.functions.filter(fn => fn?.type === 'button').length : 0);
 
 export function uniqueBlockSlug(name, used = []) {
@@ -25,6 +26,38 @@ export function uniqueBlockSlug(name, used = []) {
     }
     return '';
 }
+
+// Display names written as lines ("1 = I") or given as an object; null when they cannot be read, {} when there are none.
+export function parseNames(value) {
+    if (value === undefined || value === null || value === '') return {};
+    const out = {};
+    const add = (key, name) => {
+        const at = String(key).trim(), text = oneLine(name);
+        if (!/^-?\d+$/.test(at) || !text || Object.hasOwn(out, String(Number(at)))) return false;
+        out[String(Number(at))] = text;
+        return true;
+    };
+    if (typeof value === 'string') {
+        for (const line of value.split('\n')) {
+            if (!line.trim()) continue;
+            const match = /^\s*(-?\d+)\s*[=:]\s*(.+?)\s*$/.exec(line);
+            if (!match || !add(match[1], match[2])) return null;
+        }
+        return out;
+    }
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+    for (const [key, name] of Object.entries(value)) if (!add(key, name)) return null;
+    return out;
+}
+/** The names as the editor's lines, one "value = name" each. */
+export const namesText = names => Object.entries(names ?? {}).sort(([a], [b]) => Number(a) - Number(b)).map(([value, name]) => `${value} = ${name}`).join('\n');
+
+// A rule's, card's or reply-end function's condition: one field compared with a value.
+const conditionOf = (condition, state) => {
+    const schema = state[condition?.field];
+    if (!schema || !['eq', 'ne', 'lt', 'gt', 'le', 'ge'].includes(condition?.op)) return null;
+    return [condition.op, ['get', [condition.field]], schema.type === 'int' ? number(condition.value) : condition.value];
+};
 
 const effectOf = (effect, state) => {
     const schema = state[effect?.field];
@@ -58,22 +91,39 @@ export function buildBlock(draft, { used = [], definitions = [] } = {}) {
             let value;
             try { value = cleanList(field.default ?? '', 240); } catch { return problem(`${path}.default`, B.listLimit); }
             schema = { type: 'text', max: 240, default: value, list: true, label };
-        } else if (field.type === 'number') schema = { type: 'int', min: number(field.min), max: number(field.max), default: number(field.default), label };
-        else if (field.type === 'choice') {
+        } else if (field.type === 'number') {
+            schema = { type: 'int', min: number(field.min), max: number(field.max), default: number(field.default), label };
+            const names = parseNames(field.names);
+            if (!names) return problem(`${path}.names`, B.namesInvalid);
+            if (Object.keys(names).length) schema.names = names;
+        } else if (field.type === 'choice') {
             const values = Array.isArray(field.values) ? field.values.map(value => oneLine(value)) : String(field.values ?? '').split(',').map(value => oneLine(value));
             if (values.length < 2 || values.length > L.enumValues || values.some(value => !value) || new Set(values).size !== values.length) return problem(`${path}.values`, B.choiceLimit);
             schema = { type: 'enum', values, default: field.default || values[0], label };
         } else return problem(`${path}.type`, B.fieldType);
+        if (field.prompt === false) schema.prompt = false;
         state[key] = schema;
+        // A field hidden from the story gets no line the story can write; the reader and the rules still change it.
+        if (schema.prompt === false) continue;
         const labelSchema = schema.type === 'int' ? { type: 'int', min: schema.min, max: schema.max }
             : schema.type === 'enum' ? { type: 'enum', values: schema.values } : { type: 'text', max: schema.max };
         kinds[`set-${key}`] = { op: '~', labels: { to: labelSchema }, effects: [{ op: 'set', path: [key], value: ['arg', 'to'] }] };
     }
     const functions = Array.isArray(draft.functions) ? draft.functions : [];
     if (functions.length > 8) return problem('functions', B.functionLimit);
-    const rules = [], timers = [];
+    const rules = [], timers = [], cards = [], cardAt = [], replyEnd = [];
     for (const [index, fn] of functions.entries()) {
-        const path = `functions.${index}`, effects = (Array.isArray(fn.effects) ? fn.effects : []).map(effect => effectOf(effect, state));
+        const path = `functions.${index}`;
+        if (fn?.type === 'card') {
+            const key = keyFor(fn.name || `card-${index + 1}`, 32), when = conditionOf(fn.when, state);
+            if (!key) return problem(`${path}.name`, B.chooseFunction);
+            if (!when) return problem(`${path}.when`, B.chooseField);
+            cardAt.push(index);
+            cards.push({ id: key, when, tone: fn.tone ?? 'info', title: oneLine(fn.title), text: oneLine(fn.text),
+                ...(fn.button ? { button: `button-${keyFor(fn.button, 32)}` } : {}) });
+            continue;
+        }
+        const effects = (Array.isArray(fn.effects) ? fn.effects : []).map(effect => effectOf(effect, state));
         if (!effects.length) return problem(`${path}.effects`, B.chooseFunction);
         for (const [effectIndex, effect] of effects.entries()) {
             const input = fn.effects[effectIndex];
@@ -90,17 +140,23 @@ export function buildBlock(draft, { used = [], definitions = [] } = {}) {
             if (Object.hasOwn(kinds, kind)) return problem(`${path}.name`, B.fieldName);
             kinds[kind] = { op: '!', ui: true, title: oneLine(fn.name || key), labels: {}, effects };
         } else if (fn.type === 'rule') {
-            const condition = fn.when, schema = state[condition?.field];
-            if (!schema || !['eq', 'ne', 'lt', 'gt', 'le', 'ge'].includes(condition?.op)) return problem(`${path}.when`, B.chooseField);
-            const value = schema.type === 'int' ? number(condition.value) : condition.value;
-            rules.push({ id: key, when: [condition.op, ['get', [condition.field]], value], then: effects });
+            const when = conditionOf(fn.when, state);
+            if (!when) return problem(`${path}.when`, B.chooseField);
+            rules.push({ id: key, when, then: effects });
+        } else if (fn.type === 'reply-end') {
+            // (no condition: at the end of every reply)
+            const when = fn.when ? conditionOf(fn.when, state) : true;
+            if (!when) return problem(`${path}.when`, B.chooseField);
+            replyEnd.push({ id: key, when, effects });
         } else if (fn.type === 'timer') timers.push({ id: key, clock: 'clock', every: number(fn.every),
             effects: effects.map(effect => ({ ...effect, value: ['mul', ['timer', 'periods'], effect.value] })) });
         else return problem(`${path}.type`, B.chooseFunction);
     }
+    for (const [index, card] of cards.entries()) if (card.button && !Object.hasOwn(kinds, card.button)) return problem(`functions.${cardAt[index]}.button`, B.cardButton);
     const show = draft.show ?? { tab: true, card: false, tabName: '', icon: 'ph-bookmark-simple' };
     const output = { slug, name, schema: 1, stateVersion: 1, scope: 'chat', state, kinds,
         prompt: String(draft.prompt ?? ''), show: { ...show, tabName: oneLine(show.tabName) || [...name].slice(0, 24).join('') },
+        ...(draft.role ? { role: draft.role } : {}), ...(cards.length ? { cards } : {}), ...(replyEnd.length ? { replyEnd } : {}),
         rules, timers, ...(timers.length ? { imports: { clock: { query: 'director.time', mode: 'prefix', projection: ['minutes'] } } } : {}) };
     const checked = validateDataModules([output], { packId: 'chat', capabilities: ['data-modules-v1', 'story-director'], definitions });
     return checked.ok ? { ok: true, definition: output, checked: checked.definitions[0] } : { ...checked, definition: output };
@@ -111,7 +167,8 @@ export function blockDraft(definition) {
     const fields = Object.entries(definition?.state ?? {}).map(([key, schema]) => ({ key, name: schema.label ?? key,
         type: schema.type === 'int' ? 'number' : schema.type === 'enum' ? 'choice' : schema.list ? 'list' : 'text',
         ...(schema.type === 'int' ? { min: schema.min, max: schema.max } : {}),
-        ...(schema.type === 'text' ? { max: schema.max } : {}), ...(schema.type === 'enum' ? { values: [...schema.values] } : {}), default: schema.default }));
+        ...(schema.type === 'text' ? { max: schema.max } : {}), ...(schema.type === 'enum' ? { values: [...schema.values] } : {}), default: schema.default,
+        ...(schema.names ? { names: { ...schema.names } } : {}), ...(schema.prompt === false ? { prompt: false } : {}) }));
     const effects = list => (list ?? []).map(effect => {
         const value = effect.value;
         const timerSet = effect.op === 'add' && Array.isArray(value) && value[0] === 'sub' && Array.isArray(value[2])
@@ -119,12 +176,17 @@ export function blockDraft(definition) {
         return { field: effect.path?.[0], op: timerSet ? 'set' : effect.op, value: timerSet ? value[1]
             : Array.isArray(value) && value[0] === 'mul' && Array.isArray(value[1]) && value[1][0] === 'timer' ? value[2] : value };
     });
+    const condition = when => ({ op: when?.[0], field: when?.[1]?.[1]?.[0], value: when?.[2] });
     const functions = [
         ...Object.entries(definition?.kinds ?? {}).filter(([, kind]) => kind.ui).map(([key, kind]) => ({ type: 'button', name: kind.title ?? key.replace(/^button-/, ''), effects: effects(kind.effects) })),
-        ...(definition?.rules ?? []).map(rule => ({ type: 'rule', name: rule.id, when: { op: rule.when?.[0], field: rule.when?.[1]?.[1]?.[0], value: rule.when?.[2] }, effects: effects(rule.then) })),
+        ...(definition?.rules ?? []).map(rule => ({ type: 'rule', name: rule.id, when: condition(rule.when), effects: effects(rule.then) })),
         ...(definition?.timers ?? []).map(timer => ({ type: 'timer', name: timer.id, every: timer.every, effects: effects(timer.effects) })),
+        ...(definition?.replyEnd ?? []).map((entry, at) => ({ type: 'reply-end', name: entry.id ?? `reply-end-${at + 1}`,
+            ...(entry.when === true ? {} : { when: condition(entry.when) }), effects: effects(entry.effects) })),
+        ...(definition?.cards ?? []).map((card, at) => ({ type: 'card', name: card.id ?? `card-${at + 1}`, when: condition(card.when), tone: card.tone,
+            title: card.title, text: card.text, ...(card.button ? { button: definition.kinds?.[card.button]?.title ?? card.button.replace(/^button-/, '') } : {}) })),
     ];
-    return { slug: definition?.slug, name: definition?.name ?? '', fields, functions, prompt: definition?.prompt ?? '',
+    return { slug: definition?.slug, name: definition?.name ?? '', ...(definition?.role ? { role: definition.role } : {}), fields, functions, prompt: definition?.prompt ?? '',
         show: definition?.show ?? { tab: true, card: false, tabName: definition?.name ?? '', icon: 'ph-bookmark-simple' } };
 }
 
