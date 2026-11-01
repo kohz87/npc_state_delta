@@ -5,6 +5,7 @@ export * from './calendar.js';
 import * as continuity from './continuity-core.js';
 import * as mechanics from './core-mechanics.js';
 import { isTerminalNpcDeath } from './terminal-lifecycle.js';
+import { lockAwayNpcs } from './src/key-people.js';
 import { resolveNpcAppearance } from './appearance.js';
 import { removeNpcFromSocialGraph, purgeNpcStructuredReferences } from './social.js';
 import {
@@ -1731,7 +1732,18 @@ export function applyNpcStateCommand(state, command, options = {}) {
     return result;
 }
 
+// A scan's merge. `awayNpcIds` (the dossiers of key people who are away, from Story Director): their stable
+// profile fields and custom fields are held as if locked for this merge only (src/key-people.js); nothing of
+// the hold is stored, and without it the merge is exactly as before.
 export function mergeScanResult(state, scanResult, rawOptions = {}) {
+    const hold = lockAwayNpcs(state, rawOptions.awayNpcIds);
+    if (!hold) return mergeScanResultHeld(state, scanResult, rawOptions);
+    const result = mergeScanResultHeld(hold.state, scanResult, rawOptions);
+    result.state.npcs = hold.restore(result.state.npcs);
+    return result;
+}
+
+function mergeScanResultHeld(state, scanResult, rawOptions = {}) {
     // Story day of the scanned message (its dated World State), unless the caller already resolved
     // it (carrying the last dated message forward). Undated chats leave it null and use turns.
     const supplied = rawOptions.storyDay;
@@ -1876,4 +1888,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.4.0';
+export const NPC_STATE_VERSION = '1.5.0';

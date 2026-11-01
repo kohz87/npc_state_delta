@@ -322,6 +322,8 @@
 .npc-state-delta-present-card-text { display: grid; align-content: center; min-width: 0; gap: 2px; line-height: 1.25; pointer-events: none; }
 .npc-state-delta-present-card-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .npc-state-delta-present-card-name { display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 14px; font-weight: 800; color: var(--ss-text, #f4f1e9); }
+.npc-state-delta-key-tag { flex: 0 0 auto; padding: 0 7px; border: 1px solid rgba(245, 200, 75, .5); border-radius: 999px; background: rgba(245, 200, 75, .18); color: #f5c84b; font-size: 11px; font-weight: 600; line-height: 1.5; white-space: nowrap; }
+.npc-state-delta-key-star { color: #f5c84b; font-size: .85em; }
 .npc-state-delta-present-card-stage:empty { display: none; }
 .npc-state-delta-present-card-stage { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; font-weight: 600; color: var(--ss-accent, var(--npc-gold, #d8bc78)); }
 .npc-state-delta-present-card-bars { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px 10px; margin-top: 3px; min-width: 0; }

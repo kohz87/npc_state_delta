@@ -119,6 +119,7 @@ import {
     normalizeCustomFields,
     setExternalCalendarSource,
     setStoryClockSource,
+    storyMinuteText,
     currentPresentationText,
 } from './core.js';
 import { applyNpcBirthdayUpdate, normalizeBirthDate } from './birthday.js';
@@ -220,6 +221,7 @@ import {
     worldStatePeople,
 } from './present-scene.js';
 import { escapeHtml } from './src/util/html.js';
+import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, returnNote } from './src/key-people.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
 // The chat text helpers (src/transcript.js) read the host's chat and the Scan context setting.
@@ -912,6 +914,53 @@ function hostedMeterView(npcs) {
     if (!adapter) return npcs;
     try { return adapter.sliceView(npcs) || npcs; } catch { return npcs; }
 }
+// (v2, key people) Story Director's key people (`director.keyPeople`, read only), or null: no host, no Story Director,
+// or one without the query. Null means Delta alone: no badge, no section, no hold, nothing sent. src/key-people.js.
+function keyPeopleList() {
+    const adapter = storySuiteV2Meters();
+    if (!adapter) return null;
+    try {
+        const answer = adapter.keyPeopleAnswer?.();
+        if (!Array.isArray(answer)) return null;
+        const calendar = adapter.directorCalendar?.() ?? null;
+        return normalizeKeyPeople(answer, minutes => storyMinuteText(minutes, calendar));
+    } catch {
+        return null;
+    }
+}
+// Whether this dossier (or snapshot of one) is a current key person.
+function isKeyNpc(npc, list = keyPeopleList()) {
+    return Boolean(list?.length) && isKey(findKeyEntry(list, npc));
+}
+// (key people) A swipe or a regenerate replaces the latest reply, and SillyTavern's chat still holds that reply while the new
+// one is being written; the story it continues from is the reply before it. `replacingReply` is set when such a generation
+// starts (with that reply's message) and cleared when the reply arrives, the generation stops, the next message is sent or
+// the chat changes.
+let replacingReply = null;
+// The index of the reply the story stands on for the next generation: the latest reply, or the one before it while the
+// latest is being replaced.
+function keyHeadIndex() {
+    const latest = latestReplyIndex();
+    const chat = getContext().chat || [];
+    if (!replacingReply || replacingReply.key !== getChatKey() || latest < 0 || chat[latest] !== replacingReply.message) return latest;
+    for (let at = latest - 1; at >= 0; at -= 1) if (chat[at] && !chat[at].is_system && !chat[at].is_user) return at;
+    return -1;
+}
+// What the narrator is told once about key people who just came back: { dossier id: "WHILE AWAY, NOW BACK …" }.
+// It stands while the latest reply is the one the return was noticed at, so a swipe of the next reply repeats it and
+// the next reply that stays drops it.
+function keyReturnNotes(state) {
+    const list = keyPeopleList();
+    if (!list?.length) return null;
+    const head = keyHeadIndex();
+    const memory = storySuiteV2Meters()?.keyAwayMemory?.() ?? {};
+    const notes = {};
+    for (const npc of state?.npcs || []) {
+        const view = npc?.id ? keyView(list, memory, npc, head) : null;
+        if (view?.recent?.justReturned) notes[npc.id] = returnNote(view.recent.away);
+    }
+    return Object.keys(notes).length ? notes : null;
+}
 // (v2) While hosted, Story Block's scene says who is here unless the reader keeps the scene in Delta
 // ("scene: mine"): the dossier injection, the Cast tab and the module's queries all follow its
 // `scene.present`, so the prompt never carries two different casts. Delta's stored presence is not
@@ -947,6 +996,26 @@ function scanScenePresent(messageId) {
     } catch {
         return null;
     }
+}
+// The merge option that holds away key people's stable fields (as if locked) for one scan: { awayNpcIds } or nothing.
+// The dossier view's key-person data by dossier id ({ name, here, away, recent }), or null with no key people.
+function dossierKeyViews(state) {
+    const list = keyPeopleList();
+    if (!list?.length) return null;
+    const head = keyHeadIndex();
+    const memory = storySuiteV2Meters()?.keyAwayMemory?.() ?? {};
+    const views = {};
+    for (const npc of state?.npcs || []) {
+        const view = npc?.id ? keyView(list, memory, npc, head) : null;
+        if (view) views[npc.id] = view;
+    }
+    return Object.keys(views).length ? views : null;
+}
+function keyAwayScanOptions(state) {
+    const list = keyPeopleList();
+    if (!list?.length) return {};
+    const ids = awayNpcIds(list, state?.npcs);
+    return ids.size ? { awayNpcIds: [...ids] } : {};
 }
 // The chat state a scan works from: with the slice's relationship numbers while hosted (a copy;
 // the stored state is never changed here), the state itself otherwise.
@@ -2724,7 +2793,8 @@ function liveInjectionText(state, settings, { namedNpcIds = namedByPlayerNpcIds(
     // v1's World State carries the live mood and outfit the cards then leave out; v2's scene keeps
     // only the place and who is present, so under a v2 host the cards keep them.
     const sceneDeferred = defersArea('scene', settings.sourceOfTruth) && !storyBlockIsV2();
-    return buildInjection(scenePresenceView(hostedMeterView(state.npcs)), transcript, state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: settings.customFieldNames, sceneDeferred });
+    const awayNotes = keyReturnNotes(state);
+    return buildInjection(scenePresenceView(hostedMeterView(state.npcs)), transcript, state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: settings.customFieldNames, sceneDeferred, ...(awayNotes ? { awayNotes } : {}) });
 }
 
 function updateInjection() {
@@ -4104,6 +4174,9 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
             preserveWorldActive: compactWorldStateTurn,
             developmentContext: transcript,
             userDevelopmentContext,
+            // Key people who are away keep their stable profile and custom fields through the automatic scan (src/key-people.js);
+            // the reader's own "Scan now" is deliberate and writes them.
+            ...(manual ? {} : keyAwayScanOptions(mergeBaseState)),
         });
         const newlyAdmittedIds = [...new Set([...(merged.report?.created || []), ...(merged.report?.promoted || [])])];
         let newNpcRelationshipPass = { decisions: new Map(), used: false, targetCount: 0, responseChars: 0, retried: false };
@@ -4778,7 +4851,7 @@ function inlineCardHtml(npc, messageId, scene = null) {
       <button type="button" class="npc-state-delta-present-card" data-npc-id="${escapeHtml(npc.id)}" data-message-id="${messageId}" aria-label="Open ${escapeHtml(displayName)} dossier">
         <span class="npc-state-delta-present-card-portrait">${portrait}</span>
         <span class="npc-state-delta-present-card-text">
-          <span class="npc-state-delta-present-card-head"><b class="npc-state-delta-present-card-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</b><span class="npc-state-delta-present-card-stage"></span></span>
+          <span class="npc-state-delta-present-card-head"><b class="npc-state-delta-present-card-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</b>${isKeyNpc(npc) ? '<span class="npc-state-delta-key-tag" title="Key person (Story Director)">★ Key</span>' : ''}<span class="npc-state-delta-present-card-stage"></span></span>
           <small class="npc-state-delta-present-card-role" title="${escapeHtml(identityLine)}">${escapeHtml(identityLine)}</small>${now}
         </span>
       </button>`;
@@ -7492,6 +7565,7 @@ function registerEvents() {
 
     if (events.MESSAGE_SENT) {
         source.on(events.MESSAGE_SENT, async (messageId) => {
+            replacingReply = null;
             const key = getChatKey();
             if (key === 'no-chat') return;
             // SillyTavern waits for this listener before generating. The freshness read must stay: a
@@ -7540,6 +7614,11 @@ function registerEvents() {
                 return;
             }
             narrationCaptureArmed = '';
+            {
+                const chat = getContext().chat || [];
+                const last = chat[chat.length - 1];
+                replacingReply = (type === 'swipe' || type === 'regenerate') && last && !last.is_user && !last.is_system ? { key, message: last } : null;
+            }
             // Every roleplay generation revalidates the canonical dossier (a 304 when unchanged)
             // before its prompt is built: regenerate/swipe/continue, an empty Send, impersonate and
             // group member turns have no MESSAGE_SENT, and an ordinary send reuses this read there.
@@ -7559,13 +7638,13 @@ function registerEvents() {
             noteNarrationCaptureVersion(key);
         });
     }
-    if (events.GENERATION_STOPPED) source.on(events.GENERATION_STOPPED, () => { sentCaptureRules = ''; disarmNarrationCapture(); });
+    if (events.GENERATION_STOPPED) source.on(events.GENERATION_STOPPED, () => { sentCaptureRules = ''; replacingReply = null; disarmNarrationCapture(); });
     if (events.CHAT_COMPLETION_PROMPT_READY) source.on(events.CHAT_COMPLETION_PROMPT_READY, eventData => keepCaptureRules(eventData));
 
     if (events.MESSAGE_RECEIVED) {
         // The capture block leaves the reply before any other listener (TTS, full cast, other
         // extensions) or lineage key reads it.
-        const stripCapture = messageId => { sentCaptureRules = ''; return receiveNarrationBlock(messageId); };
+        const stripCapture = messageId => { sentCaptureRules = ''; replacingReply = null; return receiveNarrationBlock(messageId); };
         if (typeof source.makeFirst === 'function') source.makeFirst(events.MESSAGE_RECEIVED, stripCapture);
         else source.on(events.MESSAGE_RECEIVED, stripCapture);
         source.on(events.MESSAGE_RECEIVED, async (messageId) => {
@@ -7638,6 +7717,7 @@ function registerEvents() {
 
     if (events.CHAT_CHANGED) {
         source.on(events.CHAT_CHANGED, async () => {
+            replacingReply = null;
             narrationCaptureArmed = '';
             sentCaptureRules = '';
             for (const cachedKey of chatStateCache.keys()) cancelScanOperation(cachedKey, 'chat changed');
@@ -7992,7 +8072,8 @@ window.NPCStateDelta = Object.freeze({
                 .map(portrait => [portrait.form, { dataUrl: portrait.dataUrl, appearanceFingerprint: portrait.appearanceFingerprint || '' }]));
         }
         const meterViews = storySuiteV2Meters()?.dossierMeters?.(state.npcs) ?? {};
-        return { turn: state.turn, reply: latestReplyIndex(), npcs: structuredClone(hostedMeterView(state.npcs)), portraitAssets: {}, formPortraits, customFieldNames: [...getSettings().customFieldNames], meterViews };
+        const keyViews = dossierKeyViews(state);
+        return { turn: state.turn, reply: latestReplyIndex(), npcs: structuredClone(hostedMeterView(state.npcs)), portraitAssets: {}, formPortraits, customFieldNames: [...getSettings().customFieldNames], meterViews, ...(keyViews ? { keyViews } : {}) };
     },
     persistenceStatus: () => {
         const key = getChatKey();

@@ -41,7 +41,9 @@
 // Pure: no DOM, no SillyTavern, no clock, no randomness. What Delta knows (dossier names, base
 // values, note rules and texts, per-NPC setup, presets, who is present) comes in through the hooks
 // given to createNpcPart.
+import { storyMinuteText } from '../calendar.js';
 import { BUILT_IN_PRESETS, normalizeLimits, normalizePreset, presetIds } from './npc-meters-presets.js';
+import { RECENT_REPLIES, isAway, isKey, labelKey, labelsOf, memoryKey, normalizeKeyPeople } from './key-people.js';
 import {
     DEFAULT_SOCIAL_CAP, DEFAULT_SOCIAL_SCALE, FEATURE_SOCIAL, MAX_SOCIAL_CAP, MAX_SOCIAL_SCALE, SOCIAL_QUERY, socialModifier, socialSettings, socialSkill,
 } from './social-check.js';
@@ -150,6 +152,9 @@ export function npcKey(name) {
     if (!key) return null;
     return FORBIDDEN_KEYS.has(key) ? `${key}-npc` : key;
 }
+
+/** Story Director's key people (read only): who is a key person, and where the away ones are (src/key-people.js). */
+export const KEY_PEOPLE_QUERY = 'director.keyPeople';
 
 /** The key of a milestone or a rung: its words, lowercase, joined by "-" ('' when none). */
 export function wordKey(value) {
@@ -495,6 +500,64 @@ export function initialNpcSlice() {
     return { npcs: {}, problems: [] };
 }
 
+// ---- key people: the memory of the last absence (Story Director's director.keyPeople, read only) ----
+//
+// The query says only who is away NOW; after a return it is null again. So the slice keeps `keyAway`: { [memoryKey]: { name, aliases,
+// away: { doing, since, back, steps }, returnedAt: reply | null, presentReplies } } for a key person who has been away, until they
+// have been present for RECENT_REPLIES replies. npc.tick writes it (observeKeyAway), so it is part of the replies' state: it follows
+// swipes and deletes, and a reload never loses it. Absent while nobody has been away.
+
+/**
+ * Notes the answer (`people`, normalized) into the memory at reply `head`: { memory, changed }.
+ * - a key person away now: their record as it stands (the newest steps), not yet returned;
+ * - one who was away and is not any more: returned at `head`; each later reply they are `here` counts toward
+ *   RECENT_REPLIES, after which the record is dropped (a person who is not here waits);
+ * - anyone no longer a key person is dropped. No usable head or no answer: nothing is touched.
+ */
+export function observeKeyAway(memory, people, head) {
+    const before = isObject(memory) ? memory : {};
+    if (!Number.isInteger(head) || head < 0 || !Array.isArray(people)) return { memory: before, changed: false };
+    const next = {};
+    for (const entry of people) {
+        if (!isKey(entry)) continue;
+        const key = memoryKey(entry.name);
+        if (!key) continue;
+        const had = isObject(before[key]) && before[key].away ? before[key] : null;
+        const record = { name: entry.name, aliases: [...entry.aliases], away: JSON.parse(JSON.stringify(entry.away ?? had?.away ?? null)) };
+        if (entry.away) {
+            next[key] = { ...record, returnedAt: null, presentReplies: 0 };
+            continue;
+        }
+        if (!had) continue;
+        const fresh = !isInt(had.returnedAt);
+        const present = fresh ? 0 : (isInt(had.presentReplies) ? had.presentReplies : 0) + (entry.here ? 1 : 0);
+        if (present >= RECENT_REPLIES) continue;
+        next[key] = { ...record, returnedAt: fresh ? head : had.returnedAt, presentReplies: present };
+    }
+    const changed = JSON.stringify(next) !== JSON.stringify(before);
+    return { memory: changed ? next : before, changed };
+}
+
+const KEY_AWAY_MAX = 40;
+function validateKeyAway(memory) {
+    if (!isObject(memory)) return ['The key people memory is not a record.'];
+    const errors = [];
+    const entries = Object.entries(memory);
+    if (entries.length > KEY_AWAY_MAX) errors.push(`The key people memory keeps at most ${KEY_AWAY_MAX} people.`);
+    const text = (value, max) => typeof value === 'string' && value.length <= max;
+    for (const [key, record] of entries) {
+        const where = `The key people entry "${key}"`;
+        if (!key || key.length > 60) { errors.push(`${where} has an unusable key.`); continue; }
+        if (!isObject(record) || !text(record.name, 80) || !record.name || !Array.isArray(record.aliases) || record.aliases.length > 8 || !record.aliases.every(item => text(item, 80))) { errors.push(`${where} has no usable name.`); continue; }
+        const away = record.away;
+        if (!isObject(away) || !text(away.doing, 200) || !text(away.since, 40) || !text(away.back, 40) || !Array.isArray(away.steps) || away.steps.length > 12
+            || !away.steps.every(step => isObject(step) && text(step.date, 40) && text(step.text, 200))) errors.push(`${where} has an unusable absence.`);
+        if (record.returnedAt !== null && !(isInt(record.returnedAt) && record.returnedAt >= 0)) errors.push(`${where} has an unusable return.`);
+        if (!isInt(record.presentReplies) || record.presentReplies < 0 || record.presentReplies >= RECENT_REPLIES) errors.push(`${where} has an unusable count of replies.`);
+    }
+    return errors;
+}
+
 /** Problems with the slice (§2.5): [] when fine. Any problem rejects the command that made it. */
 export function validateNpcSlice(slice) {
     const errors = [];
@@ -554,7 +617,8 @@ export function validateNpcSlice(slice) {
         if (slice.problems.length > MAX_PROBLEMS) errors.push(`The NPC meters keep at most ${MAX_PROBLEMS} problems.`);
         if (slice.problems.some(item => !isObject(item) || !isInt(item.rev) || typeof item.text !== 'string')) errors.push('An NPC meters problem is not { rev, text }.');
     }
-    for (const field of Object.keys(slice)) if (!['npcs', 'problems'].includes(field)) errors.push(`The NPC meters have an unknown field "${field}".`);
+    if (slice.keyAway !== undefined) errors.push(...validateKeyAway(slice.keyAway));
+    for (const field of Object.keys(slice)) if (!['npcs', 'problems', 'keyAway'].includes(field)) errors.push(`The NPC meters have an unknown field "${field}".`);
     return errors;
 }
 
@@ -1027,8 +1091,20 @@ export function createNpcPart(hooks = {}) {
                 try { minutes = ctx.time(); } catch { minutes = null; }
             }
             const day = isInt(minutes) ? Math.floor(minutes / DAY_MINUTES) : null;
+            // Key people (Story Director's `director.keyPeople`, read only): while one is away their meters stay as
+            // the reader set them, so no drift and no count toward losing a stage. Without that query: nobody.
+            let people = null;
+            try {
+                let calendar = null;
+                try { calendar = ctx.query('director.calendar', {}); } catch { calendar = null; }
+                people = normalizeKeyPeople(ctx.query(KEY_PEOPLE_QUERY, {}), minutes => storyMinuteText(minutes, calendar));
+            } catch { people = null; }
+            const awayKeys = new Set();
+            for (const entry of people ?? []) if (isAway(entry)) for (const label of labelsOf(entry)) awayKeys.add(label);
             const before = ctx.read(NPC_DOMAIN);
-            if (!isObject(before?.npcs) || !Object.keys(before.npcs).length) ctx.fail('REFUSED', 'Nothing to update.');
+            // The memory of the last absence (above): noted at this reply.
+            const observed = people ? observeKeyAway(before?.keyAway, people, ctx.reply?.index) : null;
+            if ((!isObject(before?.npcs) || !Object.keys(before.npcs).length) && !observed?.changed) ctx.fail('REFUSED', 'Nothing to update.');
             const slice = ctx.draft(NPC_DOMAIN);
             const texts = [];
             const data = [];
@@ -1041,12 +1117,13 @@ export function createNpcPart(hooks = {}) {
                 if (!Array.isArray(record.unlocked)) record.unlocked = [];
                 const was = JSON.stringify(record);
                 const drift = [];
+                const away = awayKeys.size > 0 && [record.name, ...(resolve(record.name)?.aliases ?? [])].some(label => awayKeys.has(labelKey(label)));
                 if (day !== null) {
                     const days = isInt(record.day) ? day - record.day : 0;
                     if (record.day !== day) record.day = day;
                     const setup = setupFor(record.name);
                     const limits = limitsFor(settings, setup);
-                    for (const def of days > 0 ? drifting : []) {
+                    for (const def of days > 0 && !away ? drifting : []) {
                         const value = meterValue(record, def);
                         const { perDay, to } = def.drift;
                         const step = Math.min(Math.abs(to - value), perDay * days);
@@ -1060,13 +1137,19 @@ export function createNpcPart(hooks = {}) {
                         drift.push({ meter: def.id, before: value, after: next });
                     }
                 }
-                const settled = settleRecord(record, [record.name], settings, defs, featureOn(FEATURE_STAGES, ctx));
+                const settled = settleRecord(record, [record.name], settings, defs, featureOn(FEATURE_STAGES, ctx) && !away);
                 if (JSON.stringify(record) === was) continue;
                 changed = true;
                 if (drift.length) texts.push(`${record.name}: ${drift.map(item => `${defs.find(def => def.id === item.meter)?.label.toLocaleLowerCase() ?? item.meter} ${item.before} → ${item.after}`).join(', ')} (story days passed)`);
                 texts.push(...settled.stages.map(move => move.text), ...settled.ranks.map(move => move.text), ...settled.unlocked.map(item => item.text));
                 if (settled.stages.length || settled.ranks.length) narrate = true;
                 data.push({ key, drift, stages: settled.stages.map(({ meter, from, to }) => ({ meter, from, to })), ranks: settled.ranks.map(({ from, to }) => ({ from, to })), unlocked: settled.unlocked.map(item => item.id), ...(isInt(record.low) ? { low: record.low } : {}) });
+            }
+            if (observed?.changed) {
+                if (Object.keys(observed.memory).length) slice.keyAway = observed.memory;
+                else delete slice.keyAway;
+                if (!changed) texts.push('Key people: noted');
+                changed = true;
             }
             if (!changed) ctx.fail('REFUSED', 'Nothing to update.');
             return { summary: sentence(texts.length ? texts : ['NPC meters: the reply was counted']), narrate, data: { day, npcs: data } };
@@ -1223,6 +1306,11 @@ export function createNpcPart(hooks = {}) {
                     };
                 })
                 .sort((a, b) => Number(b.present) - Number(a.present) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+        },
+        /** npc.keyAway → the memory of key people's last absences (see observeKeyAway), {} when none. Read by Delta's dossier, cards and injection. */
+        'npc.keyAway'(state) {
+            const memory = state?.domains?.[NPC_DOMAIN]?.keyAway;
+            return isObject(memory) ? JSON.parse(JSON.stringify(memory)) : {};
         },
         /** npc.next({ name }) → the NPC's ladder from here ({ rank, next, risk, text }), or null. */
         'npc.next'(state, args = {}) {

@@ -51,6 +51,46 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
   host's prompt log identical with the feature off and on (asked every reply). No prompt text: C10 holds.
 - Everything outside (runtime api, host global, document, timers) is injectable: no SillyTavern import here.
 
+## Key people (Story Director's `director.keyPeople`, read only)
+
+Story Director owns who is a key person (a pin, removed when archived or dead) and where one is while away. Delta only
+reads the query and never writes to Story Director; `src/key-people.js` holds every rule (pure, with its header
+comment). Without Story Director, or with one that lacks the query, `adapter.keyPeople()` is null and nothing below
+exists: Delta alone has no key people, and its saved state and prompts are byte-identical.
+
+- **Query:** `director.keyPeople` → `[{ name, aliases?, here, away: { doing, since, back, steps: [{ date, text }] } | null,
+  removed?: { reason, on } }]`. `since`, `back` and a step's `date` are story minutes (null when unknown): index.js writes them
+  as "Goldwane 18" on Story Director's `director.calendar` (`calendar.js` `storyMinuteText`, Gregorian without one); words
+  are kept as given. `normalizeKeyPeople` cleans it (text and sizes bounded, at most 50 people); a `removed` entry is no
+  longer a key person (no badge, no section, no hold).
+- **Dossier** (`dossier-ui.js` `keyProjection`, `keyAwayHtml`): "★ Key person" badge in the hero and the document head, and a
+  "While away" section (dates, the steps) while the person is away and, after the return, until they have been present for
+  `RECENT_REPLIES` (3) replies. The library list (`delta-cast-card`) and Story Block's dossier rows (`row.key`) carry a ★.
+  Data comes from `getDossierState().keyViews` (by dossier id).
+- **Present cards** (`index.js` `inlineCardHtml`): a "★ Key" tag beside the name; World → People here and Delta's own cards
+  share this markup.
+- **The memory of the last absence:** the query says only who is away now, so the npc slice keeps `keyAway` (`observeKeyAway` in
+  `src/npc-meters.js`: by `memoryKey`, `{ name, aliases, away, returnedAt, presentReplies }`) for a key person who has been away,
+  until they have been present for `RECENT_REPLIES` replies. `npc.tick` writes it (asking `director.keyPeople` and
+  `director.calendar` through `ctx.query`, dates written as text), so it is part of each reply's state: it follows swipes and
+  deletes exactly and a reload never loses it. Read through the query `npc.keyAway` (`adapter.keyAwayMemory()`). The slice has no
+  `keyAway` until someone has been away, and the step also runs for key people (`onTurn`) so a return is noticed even with no
+  ladder or drift set up. Delta's own sidecar holds none of it.
+- **Return summary:** at the reply the return was noticed (`head === returnedAt`) the narrator gets `returnNote` (at most 360
+  characters: where, the newest steps) appended to that NPC's block in `buildInjection` (option `awayNotes`), counted in the
+  injection budget like the block. The next reply that stays drops it. A swipe or regenerate of the first reply after the return
+  repeats it: SillyTavern's chat still holds the reply being replaced, so while such a generation runs `keyHeadIndex()` (index.js) stands
+  on the reply before it (`replacingReply`, set at `GENERATION_AFTER_COMMANDS`, cleared when the reply arrives, the generation stops,
+  the next message is sent or the chat changes).
+- **Meters** do not change by themselves while away: the same step asks `director.keyPeople` through `ctx.query` (so a replay
+  gives the same answer) and skips drift and the count toward losing a stage for those people. Story lines still move them.
+- **Scans** (`core.js` `mergeScanResult`, option `awayNpcIds`, set by `index.js` `keyAwayScanOptions` for the automatic scan
+  only): the away key person's `AWAY_LOCKED_FIELDS` (personality, speech, appearance, mannerisms, behavior profile,
+  background, custom fields) are held as if locked for that merge, then their own lock list is put back; nothing of the hold is
+  stored, and the scan prompt is unchanged (C10). A reader's own Refresh or backfill is not held.
+- Tests: `tests/key-people.test.js` (the answer, the memory, the note, the hold, the dossier and rows, the meters on Story
+  Block's host with a stand-in director, Delta's real runtime beside a fake host).
+
 ## Screens on the glass look (UI 4c)
 
 - **Present cards** (`index.js` `inlineCardHtml`, `style.css` `.npc-state-delta-present-card*`): one compact row per person, one

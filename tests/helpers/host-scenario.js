@@ -37,7 +37,8 @@ try {
 }
 `;
     try {
-        execFileSync(process.execPath, ['--import', fileURLToPath(new URL('./active-runtime-test-setup.mjs', TESTS)), '--input-type=module'], {
+        // The scenario's output comes back, for a scenario that prints a `RESULT <json>` line.
+        return execFileSync(process.execPath, ['--import', fileURLToPath(new URL('./active-runtime-test-setup.mjs', TESTS)), '--input-type=module'], {
             input: script, encoding: 'utf8', timeout: 120000, maxBuffer: 16 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'],
         });
     } catch (error) {
