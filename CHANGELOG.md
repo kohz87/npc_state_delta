@@ -1,3 +1,26 @@
+## 1.6.0
+
+Needs Story Block 2.12.0 or later to join the suite (alone it works as before). The pack cast needs Story Block 2.15.0
+and Story Director 2.8.0.
+
+- **The cast's dossiers.** When you meet someone from a pack's cast, their dossier appears on that same reply, already
+  written from the pack: portrait, look, voice, personality, background, starting relationship and stages, and the
+  pack's own fields. A badge ("Ersveil cast") and a short block show where you first met and their own path. The pack's
+  words stay exactly as written until play changes them. A "★ Pin as Key people" button appears when Story Director
+  offers it.
+- **Secrets for everyone.** A dossier has its own **Secrets** section, right after Background. An opened secret shows
+  its title and text; a hidden one shows only a blank bar and when it opens ("Opens at Trust 60", "Opens with the
+  story") — never its title or words. Secrets open at a relationship value or when the story shows an event, and the
+  scan watches for those events while the person is present.
+- **The narrator keeps them.** Hidden secrets are told to the narrator while the person is present, as things to never
+  reveal but let shape how they act; opened ones may come out. Within the budget, those nearest to opening go first.
+- **New people get layers.** The scan that writes a new person's first dossier also writes 2 to 5 layered secrets
+  (setting "Hidden notes for new people", on). Once written, a secret is never rewritten.
+- **The editor.** Your own notes stay visible and editable. Notes from a pack or a scan show only as "Hidden note n ·
+  opens at …" while hidden; you can still open or shut any note by hand.
+- **"What's sent each reply"** shows a hidden note as "1 hidden note", never its text.
+- The dossier panel and its row of section buttons are solid on a phone.
+
 ## 1.5.0
 
 Needs Story Block 2.12.0 or later to join the suite (alone it works as before). Key people need Story Director 2.7.0.

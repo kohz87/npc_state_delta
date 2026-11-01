@@ -341,7 +341,7 @@ export function chipsField(ctx) {
     let locked = false;
     let off = false;
     const chips = options.map(option => {
-        const chip = button(doc, 'ss-chip');
+        const chip = button(doc, 'ss-chip ss-tap-pill');
         chip.setAttribute('data-value', option.value);
         chip.textContent = option.label;
         if (!many) chip.setAttribute('role', 'radio');

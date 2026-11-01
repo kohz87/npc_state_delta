@@ -222,6 +222,7 @@ import {
 } from './present-scene.js';
 import { escapeHtml } from './src/util/html.js';
 import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, returnNote } from './src/key-people.js';
+import { applyCastEntry, castView, dossierFor, findCastPerson, metWithEntry, normalizeCast } from './src/cast-dossier.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
 // The chat text helpers (src/transcript.js) read the host's chat and the Scan context setting.
@@ -339,6 +340,8 @@ let captureRulesWithheld = false;
 // has drawn them (CHARACTER_MESSAGE_RENDERED): at MESSAGE_RECEIVED the reply is not fully drawn.
 const captureRerenderPending = new Set();
 let narrationCaptureArmed = '';
+// (v2 hidden notes) The story events the armed reply's instruction asked about, kept until its block arrives.
+let narrationCaptureWatch = [];
 let narrationCaptureVersion = null;
 const stateWriteTimers = new Map();
 const stateWritePromises = new Map();
@@ -611,6 +614,8 @@ const DEFAULTS = Object.freeze({
     behaviorCriteria: DEFAULT_BEHAVIOR_CRITERIA,
     autoArchiveDeaths: true,
     autoReactivateArchived: true,
+    // (v2 hidden notes) A scan that builds a new dossier also writes 2 to 5 layered hidden notes. Hosted only.
+    layeredSecrets: true,
     dataFiles: {},
     sidecarTombstones: {},
     recoveryFiles: {},
@@ -685,6 +690,7 @@ function getSettings() {
     const legacyDefaultDepth = settings.injectDepthTailUpgraded !== true && Number(settings.injectDepth) === 1;
     assign('injectDepth', legacyDefaultDepth ? 0 : injectDepthOf(settings));
     assign('injectDepthTailUpgraded', true);
+    assign('layeredSecrets', settings.layeredSecrets !== false);
     assign('fullScanEveryTurn', settings.fullScanEveryTurn === true);
     assign('narrationCapture', settings.narrationCapture === true);
     assign('narrationCaptureCompact', settings.narrationCaptureCompact === true);
@@ -961,6 +967,136 @@ function keyReturnNotes(state) {
     }
     return Object.keys(notes).length ? notes : null;
 }
+// (v2, the living cast) Delta reads Story Director's `director.cast` and Story Block's `packs.portrait` (never writes to them). At
+// the first meeting it makes the person's dossier at once from the pack entry: no scan, no model call. The step (npc.tick,
+// src/npc-meters.js observeCast) records the meeting in the saved slice at that reply; this makes the dossier and commits a
+// branch checkpoint at the reply, so a swipe or a delete takes it back with the reply (as a manual add does). Nothing here
+// without a host or without a Story Director that answers `director.cast`. Rules: src/cast-dossier.js.
+let castSyncRunning = false;
+// A pack portrait as the dossier's portrait record ({ dataUrl, … }) from its safe image URL, or null. Pack portraits are small
+// (64 KB at most), so no re-compression: a data: URL is kept as it is, anything else is fetched once.
+async function castPortraitRecord(url, fileName) {
+    try {
+        let dataUrl = String(url || '');
+        if (!/^data:/i.test(dataUrl)) {
+            const controller = typeof AbortController === 'function' ? new AbortController() : null;
+            const timer = controller ? setTimeout(() => controller.abort(), 8000) : null;
+            try {
+                const response = await fetch(dataUrl, controller ? { signal: controller.signal } : undefined);
+                if (!response?.ok) return null;
+                const blob = await response.blob();
+                if (!/^image\/(?:png|jpeg|webp)$/i.test(String(blob?.type || '')) || blob.size > 256 * 1024) return null;
+                dataUrl = await new Promise(resolve => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(String(reader.result || ''));
+                    reader.onerror = () => resolve('');
+                    reader.readAsDataURL(blob);
+                });
+            } finally {
+                if (timer) clearTimeout(timer);
+            }
+        }
+        if (!/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(dataUrl) || dataUrl.length > 400_000) return null;
+        return { dataUrl, mime: dataUrl.slice(5, dataUrl.indexOf(';')), sourceName: String(fileName || '').slice(0, 120), updatedAt: Date.now() };
+    } catch {
+        return null;
+    }
+}
+// Whether the reader removed this person's dossier before (their name is in the dismissed groups).
+function castPersonDismissed(state, person) {
+    const labels = new Set([person.name, person.entry?.name, ...(person.aliases || [])].map(normalizeName).filter(Boolean));
+    return (state?.userDismissedGroups || []).some(group => (group?.labels || []).some(label => labels.has(label)));
+}
+// The people the step has recorded as made (the slice's `cast`), met now with their entry, with no dossier standing for them
+// and not removed by the reader.
+function castList() {
+    const adapter = storySuiteV2Meters();
+    if (!adapter) return null;
+    try {
+        const answer = adapter.castAnswer?.();
+        if (!Array.isArray(answer)) return null;
+        const calendar = adapter.directorCalendar?.() ?? null;
+        return normalizeCast(answer, minutes => storyMinuteText(minutes, calendar));
+    } catch {
+        return null;
+    }
+}
+function castDue(state, adapter) {
+    const people = castList();
+    if (!Array.isArray(people) || !people.length) return [];
+    const made = adapter.castMade?.() ?? {};
+    return metWithEntry(people).filter(person => Object.hasOwn(made, person.key)
+        && !dossierFor(state.npcs, person) && !castPersonDismissed(state, person));
+}
+async function castSync() {
+    const adapter = storySuiteV2Meters();
+    if (!adapter || castSyncRunning || getSettings().enabled === false) return false;
+    const key = getChatKey();
+    if (!key || key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return false;
+    if (!castDue(getChatState(key), adapter).length) return false;
+    castSyncRunning = true;
+    try {
+        const mark = chatHeadMark();
+        const names = adapter.packNames?.() ?? {};
+        const portraits = new Map();
+        for (const person of castDue(getChatState(key), adapter)) {
+            const url = person.entry.portrait ? adapter.packPortraitUrl?.(person.pack, person.entry.portrait) : null;
+            if (url) portraits.set(person.key, await castPortraitRecord(url, person.entry.portrait));
+        }
+        // The same checks as any other change to the dossiers, after the waits: the chat and its head are still the ones asked about.
+        if (!await ensureFreshMutationBoundary('make dossiers from the cast', key, { notify: false })) return false;
+        if (getChatKey() !== key || !chatHeadUnchanged(mark)) return false;
+        const settings = getSettings();
+        const messageId = latestMessageId(true);
+        let working = getChatState(key);
+        const made = [];
+        for (const person of castDue(working, adapter)) {
+            const added = applyNpcStateCommand(working, { action: 'add', name: person.entry.name || person.name }, {
+                maxNpcs: settings.maxNpcs, excludeNames: currentExclusions(), turn: working.turn, relationshipBaseline: settings.relationshipBaseline,
+            });
+            if (added.report.status !== 'added') continue;
+            const base = added.state.npcs.find(npc => npc.id === added.report.npcId);
+            const portrait = portraits.get(person.key) ?? null;
+            const filled = base ? applyCastEntry(base, person, { packName: names[person.pack] ?? '', portrait }) : null;
+            if (!filled) continue;
+            const record = normalizeNpcRecord(filled);
+            if (record.portrait?.dataUrl) {
+                const fingerprint = appearanceFingerprint(record);
+                if (fingerprint) record.portrait = { ...record.portrait, appearanceFingerprint: fingerprint };
+                added.state.portraitAssets = { ...(added.state.portraitAssets || {}), [record.id]: structuredClone(record.portrait) };
+            }
+            added.state.npcs = added.state.npcs.map(npc => (npc.id === record.id ? record : npc));
+            working = added.state;
+            made.push(record);
+        }
+        if (!made.length) return false;
+        if (messageId >= 0) commitBranchCheckpoint(working, messageId, 'cast-dossier');
+        setChatState(key, working);
+        persistCritical(key);
+        renderDossier(); updateInjection();
+        return true;
+    } finally {
+        castSyncRunning = false;
+    }
+}
+// The dossier view's cast data by dossier id ({ badge, packName, firstMet, goal, routine, lastHeard, where, doing }) for the
+// dossiers made from the cast; null with none. Story Director's answer adds the live path and "last heard" when it is there.
+function dossierCastViews(state) {
+    const made = (state?.npcs || []).filter(npc => npc?.id && npc.castFrom?.key);
+    if (!made.length) return null;
+    const people = castList();
+    // The pin button: Story Director offers it (hosted) and the person is not a key person yet.
+    let offered = false;
+    try { offered = storySuiteV2Meters()?.keyPinOffered?.() === true; } catch { offered = false; }
+    const keyList = offered ? keyPeopleList() : null;
+    const views = {};
+    for (const npc of made) {
+        const view = castView(npc, findCastPerson(people, npc.castFrom.key), { pin: offered && !isKeyNpc(npc, keyList ?? []) });
+        if (view) views[npc.id] = view;
+    }
+    return Object.keys(views).length ? views : null;
+}
+
 // (v2) While hosted, Story Block's scene says who is here unless the reader keeps the scene in Delta
 // ("scene: mine"): the dossier injection, the Cast tab and the module's queries all follow its
 // `scene.present`, so the prompt never carries two different casts. Delta's stored presence is not
@@ -1065,6 +1201,87 @@ function forwardRelationshipChangesToHost(before, after, messageId, head = null)
             await adapter.adjust(change);
         }
     })();
+}
+
+// (v2 hidden notes) The story events of present people's locked notes this scan should look for ([] when none): only for
+// a scan of the head reply (an opened note is recorded on the head), and only for the people in the scene now.
+function hostedEventWatch(state, messageId) {
+    const adapter = storySuiteV2Meters();
+    if (!adapter || (Number.isInteger(messageId) && messageId !== latestMessageId(true))) return [];
+    try { return adapter.eventWatch?.(scenePresenceView(state?.npcs || [])) || []; } catch { return []; }
+}
+
+// (v2 hidden notes) What a scanner or one-pass prompt is asked about hidden notes while hosted: the layered notes for a new
+// dossier (setting) and the story events of present people's locked notes; {} when neither (the prompt is then as before).
+function hostedNotePromptOptions(state, settings, messageId = null) {
+    if (!storySuiteV2Meters()) return {};
+    const eventWatch = hostedEventWatch(state, Number.isInteger(messageId) ? messageId : undefined);
+    return {
+        ...(settings.layeredSecrets !== false ? { layeredSecrets: true } : {}),
+        ...(eventWatch.length ? { eventWatch } : {}),
+    };
+}
+
+// (v2 hidden notes) What a targeted pass (backfill, Refresh) is asked about hidden notes: { layered, watch } or null when
+// nothing is asked (not hosted, or no setting and no event note to look for). `layered`: this dossier is new (a backfill
+// queued at admission) and has no notes yet. `watch`: this one person's locked event notes, when they are present.
+function hostedTargetNotes(npc, { newDossier = false, messageId = null } = {}) {
+    const adapter = storySuiteV2Meters();
+    if (!adapter || !npc) return null;
+    const layered = newDossier && getSettings().layeredSecrets !== false && !(Array.isArray(npc.secrets) && npc.secrets.length);
+    const watch = hostedEventWatch({ npcs: [npc] }, messageId);
+    return layered || watch.length ? { layered, watch } : null;
+}
+const targetNoteOptions = notes => ({
+    ...(notes?.layered ? { layeredSecrets: true } : {}),
+    ...(notes?.watch?.length ? { eventWatch: notes.watch } : {}),
+});
+
+// A committed scan's `secretEvents` (the keys of the watched story events the current exchange showed) open those notes
+// as npc.open (cause ui, recorded on the head reply, so a swipe takes them back). Nothing is sent when the chat moved
+// on during the scan (as forwardRelationshipChangesToHost).
+function forwardSecretEventsToHost(watched, answered, head = null) {
+    const adapter = storySuiteV2Meters();
+    if (!adapter || !Array.isArray(watched) || !watched.length || !Array.isArray(answered) || !answered.length) return;
+    if (!chatHeadUnchanged(head)) {
+        console.info('[NPC State Delta] the chat moved on during the scan; its story events were not sent to Story Suite.');
+        return;
+    }
+    const keys = new Set(answered.map(item => String(item ?? '')));
+    const byName = new Map();
+    for (const item of watched) {
+        if (!keys.has(item.key)) continue;
+        byName.set(item.name, [...(byName.get(item.name) || []), item.note]);
+    }
+    if (!byName.size) return;
+    void (async () => {
+        for (const [name, ids] of byName) {
+            if (!chatHeadUnchanged(head)) return;
+            await adapter.openByEvent({ name, ids });
+        }
+    })();
+}
+
+// (v2 hidden notes) The layered notes a scan wrote for the dossiers it just built (`ids`), read from the rows the model
+// returned: 2 to 5 per person, cleaned, set once and never rewritten by a later scan. A dossier that already has notes
+// (the pack's, the reader's) keeps them. Returns how many dossiers got notes.
+function attachGeneratedSecrets(state, ids, ...sources) {
+    const adapter = storySuiteV2Meters();
+    if (!adapter || !Array.isArray(state?.npcs)) return 0;
+    const rows = sources.flatMap(source => (Array.isArray(source?.npcs) ? source.npcs : []));
+    let count = 0;
+    for (const id of ids || []) {
+        const npc = state.npcs.find(item => item?.id === id && !item.archived);
+        if (!npc || (Array.isArray(npc.secrets) && npc.secrets.length)) continue;
+        const row = rows.find(item => Array.isArray(item?.secrets) && item.secrets.length
+            && (String(item.id || '') === npc.id || npcMatchesLabel(npc, String(item.name || ''))));
+        let made = [];
+        try { made = row ? adapter.generatedSecrets(row.secrets) : []; } catch { made = []; }
+        if (!made.length) continue;
+        npc.secrets = made;
+        count += 1;
+    }
+    return count;
 }
 
 // A v2-hosted automatic boundary may skip the deterministic-path probe: this session already found
@@ -2823,8 +3040,11 @@ function updateInjection() {
     const namedNpcIds = namedByPlayerNpcIds(state);
     const prompt = settings.inject ? liveInjectionText(state, settings, { namedNpcIds, transcript }) : '';
     // (1.2.17) The capture's context leaves out what this dossier already gives word for word.
+    // (v2 hidden notes) The one-pass block is asked for layered notes (with the rules, byte-identical each reply) and for
+    // the story events of present people's locked notes (with the context); the list is kept for the reply that carries it.
+    const noteOptions = armed || rulesSent ? hostedNotePromptOptions(state, settings) : {};
     const builtParts = armed || rulesSent
-        ? buildNarrationCaptureParts(scannerPromptOptions(state, settings, transcript, { dossierAbove: prompt }))
+        ? buildNarrationCaptureParts(scannerPromptOptions(state, settings, transcript, { dossierAbove: prompt, ...noteOptions }))
         : { rules: '', context: '' };
     const captureParts = { rules: armed || rulesSent ? builtParts.rules : '', context: armed ? builtParts.context : '' };
     const capture = captureParts.context;
@@ -2840,6 +3060,7 @@ function updateInjection() {
         captureChars: captureParts.rules.length + capture.length,
         captureRules: captureParts.rules,
         captureContext: capture,
+        captureEventWatch: armed ? (noteOptions.eventWatch || []) : [],
     };
     ctx.setExtensionPrompt?.(PROMPT_KEY, prompt, extension_prompt_types.IN_CHAT, depth, false, extension_prompt_roles.SYSTEM);
     // Replaced on every build and emptied when not armed, so a spent reminder is never sent again;
@@ -3182,6 +3403,8 @@ async function runTargetedDossierPassInner(job) {
             job.onStale();
             return false;
         }
+        // (v2 hidden notes) Story events the pass was told to look for: sent whatever else the answer holds.
+        if (job.notes?.watch?.length) forwardSecretEventsToHost(job.notes.watch, parsed?.secretEvents, operation.chatHead);
         const latest = getChatState(chatKey);
         const liveBefore = latest.npcs.find(npc => npc.id === id) || null;
         const scoped = job.scope(parsed, { latest, liveBefore });
@@ -3219,6 +3442,8 @@ async function runTargetedDossierPassInner(job) {
         merged.state.npcs = (merged.state.npcs || []).map(npc => (npc.id === id ? npc : (latestById.get(npc.id) || npc)));
         const result = merged.state.npcs.find(npc => npc.id === id);
         if (!result) return false;
+        // (v2 hidden notes) A backfill of a dossier that is new: the layered notes the model wrote for it.
+        if (job.notes?.layered) attachGeneratedSecrets(merged.state, [id], parsed);
         job.afterMerge?.(result, { liveBefore, scoped, merged });
         if (liveBefore) Object.assign(result, protectTerminalNpc(liveBefore, result));
         if (!await scanCanonicalBaseCurrent(chatKey, operation, `${job.staleLabel} final commit`)) {
@@ -3428,6 +3653,8 @@ async function refreshNpcFromChat(npcId, { automatic = false } = {}) {
         return false;
     }
     const before = structuredClone(existing);
+    // (v2 hidden notes) A Refresh looks for this person's story events (never writes layers: the dossier is not new).
+    const notes = hostedTargetNotes(existing);
     const prompt = buildProfileRefreshPrompt({
         transcript,
         targetNpc: existing,
@@ -3437,9 +3664,10 @@ async function refreshNpcFromChat(npcId, { automatic = false } = {}) {
         turn: Number.isInteger(state.turn) ? state.turn : null,
         storyDay: storyDayAt(latestMessageId(true)),
         customFieldNames: settings.customFieldNames,
+        ...targetNoteOptions(notes),
     });
     return runTargetedDossierPass({
-        chatKey, ctx, id, prompt,
+        chatKey, ctx, id, prompt, notes,
         label: `chat refresh for ${existing.name}`,
         systemPrompt: "You are NPC State Delta's targeted dossier reconciliation scanner. Re-read the supplied recent-story window for exactly one existing NPC. Return only the requested JSON object.",
         indicator: 'refresh',
@@ -3568,6 +3796,7 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
     } else if (!backfillNeedsRequest(existing, state.npcs)) {
         return true;
     }
+    const notes = hostedTargetNotes(existing, { newDossier: request.reason === 'new-admission', messageId });
     const prompt = buildBackfillPrompt({
         transcript,
         targetName: request.label,
@@ -3576,9 +3805,10 @@ async function backfillNpcFromHistory(request, messageId = null, { automatic = f
         charName: ctx.name2 || 'Character',
         memoryCriteria: settings.memoryCriteria,
         customFieldNames: settings.customFieldNames,
+        ...targetNoteOptions(notes),
     });
     return runTargetedDossierPass({
-        chatKey, ctx, prompt, messageId,
+        chatKey, ctx, prompt, messageId, notes,
         id: request.npcId,
         label: `backfill for ${request.label}`,
         systemPrompt: "You are NPC State Delta's isolated dossier backfill scanner. Use only the supplied scanner payload. Return only the requested JSON object.",
@@ -3908,7 +4138,7 @@ function rerenderNarrationMessage(messageId, message) {
     try { getContext().updateMessageBlock?.(messageId, message); }
     catch (error) { console.warn('[NPC State Delta] could not re-render a reply after removing its capture block.', error); }
 }
-function captureNarrationBlock(chatKey, messageId, message, armed) {
+function captureNarrationBlock(chatKey, messageId, message, armed, watch = []) {
     const extracted = extractNarrationCapture(message.mes, { lenient: armed });
     stripNarrationSwipes(message, armed);
     if (extracted.status === 'none') {
@@ -3925,7 +4155,7 @@ function captureNarrationBlock(chatKey, messageId, message, armed) {
         narrationCaptureStats[extracted.status === 'found' ? 'invalid' : 'unterminated'] += 1;
         return;
     }
-    narrationCaptures.set(narrationCaptureKey(chatKey, messageId), { parsed, raw: extracted.raw });
+    narrationCaptures.set(narrationCaptureKey(chatKey, messageId), { parsed, raw: extracted.raw, watch });
     // Only its size is kept, for the tokens() output estimate; never the block itself.
     lastCaptureBlockChars = String(extracted.raw ?? '').length;
     while (narrationCaptures.size > NARRATION_CAPTURE_LIMIT) narrationCaptures.delete(narrationCaptures.keys().next().value);
@@ -3934,11 +4164,12 @@ function receiveNarrationBlock(messageId) {
     const chatKey = getChatKey();
     const armedHere = Boolean(narrationCaptureArmed) && narrationCaptureArmed === chatKey;
     const current = armedHere && Number(stateVersions.get(chatKey) || 0) === narrationCaptureVersion;
+    const watched = armedHere ? narrationCaptureWatch : [];
     disarmNarrationCapture();
     const message = Number.isInteger(messageId) ? getContext().chat?.[messageId] : null;
     if (!getSettings().enabled || chatKey === 'no-chat' || !message || message.is_user || message.is_system) return;
     if (armedHere) narrationCaptureStats[current ? 'requested' : 'outdated'] += 1;
-    captureNarrationBlock(chatKey, messageId, message, current);
+    captureNarrationBlock(chatKey, messageId, message, current, watched);
 }
 // Swiping to a stored sibling must not bring back a block another reply path left in it.
 function stripSwipedNarrationBlock(messageId) {
@@ -3955,6 +4186,7 @@ function stripSwipedNarrationBlock(messageId) {
 // another extension must never carry the instruction.
 function disarmNarrationCapture() {
     narrationCaptureArmed = '';
+    narrationCaptureWatch = [];
     if (lastInjection.captureChars) updateInjection();
 }
 function takeNarrationCapture(chatKey, messageId) {
@@ -4039,7 +4271,16 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
         ? takeNarrationCapture(scanChatKey, messageId)
         : null;
     const scanLabel = capture ? 'narration-capture' : (manual ? 'manual' : (fullWindowScan ? 'automatic-full' : 'automatic'));
-    const prompt = capture ? '' : buildScannerPrompt(scannerPromptOptions(state, settings, transcript, { currentTranscript, fullScanMode: fullWindowScan, sceneNames: scanScenePresent(messageId) }));
+    // (v2 hidden notes) Hosted: a new dossier's layered notes are asked for (setting) and the story events of present people's
+    // locked notes are looked for in the current exchange. A scan sends both in its prompt; a one-pass block was asked
+    // when its reply was generated, so its events are the ones that went out then (`capture.watch`). Neither is in a
+    // prompt otherwise.
+    const hostedNotes = hostedMeters();
+    const noteOptions = hostedNotes && !capture ? hostedNotePromptOptions(state, settings, messageId) : {};
+    const eventWatch = capture ? (Array.isArray(capture.watch) ? capture.watch : []) : (noteOptions.eventWatch || []);
+    const prompt = capture ? '' : buildScannerPrompt(scannerPromptOptions(state, settings, transcript, {
+        currentTranscript, fullScanMode: fullWindowScan, sceneNames: scanScenePresent(messageId), ...noteOptions,
+    }));
 
     let relationshipEdgeCount = 0;
     let relationshipEdgeFallbacks = 0;
@@ -4309,6 +4550,8 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
                 });
             }
         }
+        // (v2 hidden notes) The layered notes for the dossiers this scan built.
+        if (hostedNotes && settings.layeredSecrets !== false) attachGeneratedSecrets(nextState, newlyAdmittedIds, parsedForMerge, resolvedParsed, parsed);
         const inlineIds = scanInlineNpcIds(resolvedParsed, merged);
         if (targetMessageId >= 0) {
             clearInlineCardsAtMessage(nextState, targetMessageId);
@@ -4321,6 +4564,7 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
         if (targetMessageId >= 0) commitBranchCheckpoint(nextState, targetMessageId, 'scan');
         setChatState(chatKey, nextState);
         forwardRelationshipChangesToHost(state.npcs, nextState.npcs, targetMessageId, operation.chatHead);
+        if (eventWatch.length) forwardSecretEventsToHost(eventWatch, resolvedParsed?.secretEvents ?? parsed?.secretEvents, operation.chatHead);
         persist();
         renderDossier();
         updateInjection();
@@ -4410,6 +4654,7 @@ function buildSettingsHtml() {
         ${settingRow('npc_state_delta_max', 'Maximum active NPCs', numberControl('npc_state_delta_max', 1, 100), 'Archived dossiers do not use an active slot.')}
         ${settingRow('npc_state_delta_archive_deaths', 'Archive confirmed deaths', '<input id="npc_state_delta_archive_deaths" type="checkbox">', 'Explicit current-timeline deaths archive instead of deleting. Ambiguous death language is ignored.')}
         ${settingRow('npc_state_delta_reactivate_archived', 'Reactivate on clear return', '<input id="npc_state_delta_reactivate_archived" type="checkbox">', 'Manual archives return when the NPC clearly reappears. Death archives need an explicit living return.')}
+        <div class="npc-state-delta-v2-hosted-only">${settingRow('npc_state_delta_layered_secrets', 'Hidden notes for new people', '<input id="npc_state_delta_layered_secrets" type="checkbox">', 'When a scan builds a new dossier it also writes 2 to 5 layered hidden notes (light to deep; each opens at a rising meter value or on a story event), fitted to the background and fixed once written. The story is told them while the person is present, never to reveal; you see only that a note is hidden until it opens. Off: new people get none (existing notes stay).')}</div>
         <h4 class="delta-settings-subhead story-suite-subhead">Stale cleanup</h4>
         ${settingRow('npc_state_delta_auto_prune_stale', 'Auto-manage stale NPCs', '<input id="npc_state_delta_auto_prune_stale" type="checkbox">', 'Long-absent NPCs auto-archive, then stale auto-archives are deleted later. Manual, death and protected records are kept; deleted names can be rediscovered.')}
         ${settingRow('npc_state_delta_stale_archive_after', 'Auto-archive after', numberControl('npc_state_delta_stale_archive_after', 10, 999, 'replies'), 'Default 30. Replies since the NPC was last present or active off-screen.')}
@@ -4674,6 +4919,7 @@ function syncSettingsControls() {
     syncSuiteControls();
     $('#npc_state_delta_archive_deaths').prop('checked', s.autoArchiveDeaths !== false);
     $('#npc_state_delta_reactivate_archived').prop('checked', s.autoReactivateArchived !== false);
+    $('#npc_state_delta_layered_secrets').prop('checked', s.layeredSecrets !== false);
     $('#npc_state_delta_branch_rescan').prop('checked', s.branchRescan !== false);
     $('#npc_state_delta_mid_delete_rewind').prop('checked', s.midDeleteRewind === true);
     $('#npc_state_delta_present_cast_display').val(effectivePresentCastChoice());
@@ -6184,6 +6430,8 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
     if (hostedMeters && (meterEdits || v2Edits)) {
         if (meterEdits) await hostedMeters.setMeters({ name: current.name, meters: meterEdits });
         if (v2Edits) await hostedMeters.applyEditor(savedName, v2Edits);
+        // The notes opened or shut by hand change the dossier's Secrets section: draw it from the slice as it now stands.
+        renderDossier();
         updateInjection();
     }
     if (close) closeNpcEditor();
@@ -6878,7 +7126,7 @@ function nextReplyTexts() {
     const transcript = recentTranscript(4);
     const injection = settings.inject ? liveInjectionText(state, settings, { transcript }) : '';
     const capture = narrationCaptureEnabled(settings)
-        ? buildNarrationCapturePrompt(scannerPromptOptions(state, settings, transcript, { dossierAbove: injection }))
+        ? buildNarrationCapturePrompt(scannerPromptOptions(state, settings, transcript, { dossierAbove: injection, ...hostedNotePromptOptions(state, settings) }))
         : '';
     return { injection, capture };
 }
@@ -7088,6 +7336,7 @@ function bindUi() {
     bindCustomFieldSettings();
     bindSourceOfTruthSettings();
     bindSettingsCheckbox('#npc_state_delta_reactivate_archived', 'autoReactivateArchived');
+    bindSettingsCheckbox('#npc_state_delta_layered_secrets', 'layeredSecrets');
     bindSettingsCheckbox('#npc_state_delta_branch_rescan', 'branchRescan');
     bindSettingsCheckbox('#npc_state_delta_mid_delete_rewind', 'midDeleteRewind');
     $(document).on('change.npcStateDelta', '#npc_state_delta_portrait_theme_preset', function () {
@@ -7636,6 +7885,7 @@ function registerEvents() {
             if (lastInjection.captureRules) holdCaptureRules();
             else sentCaptureRules = '';
             noteNarrationCaptureVersion(key);
+            narrationCaptureWatch = narrationCaptureArmed ? structuredClone(lastInjection.captureEventWatch || []) : [];
         });
     }
     if (events.GENERATION_STOPPED) source.on(events.GENERATION_STOPPED, () => { sentCaptureRules = ''; replacingReply = null; disarmNarrationCapture(); });
@@ -7801,7 +8051,7 @@ async function init() {
     clearLegacyPromptKeys();
     connectStorySuite();
     // Story Suite v2 (Story Block 2): optional; without a v2 host the adapter does nothing.
-    import('./src/storysuite-v2.js').then(v2 => { storySuiteV2 = v2.startStorySuiteV2({ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION, headReply: latestReplyIndex, calendarOwn: () => normalizeSourceOfTruth(getSettings().sourceOfTruth).calendar === 'mine' }); }).catch(error => console.debug('[NPC State Delta] Story Suite v2 adapter is not available', error));
+    import('./src/storysuite-v2.js').then(v2 => { storySuiteV2 = v2.startStorySuiteV2({ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION, headReply: latestReplyIndex, castSync, calendarOwn: () => normalizeSourceOfTruth(getSettings().sourceOfTruth).calendar === 'mine' }); }).catch(error => console.debug('[NPC State Delta] Story Suite v2 adapter is not available', error));
     // (v2) Hosted with Story Director, the story's date follows its clock (calendar.js hostedStoryDate)
     // unless the reader keeps the calendar here (Source of truth: calendar "mine"). No host: none.
     setStoryClockSource(hostedStoryClock);
@@ -8064,6 +8314,13 @@ window.NPCStateDelta = Object.freeze({
     },
     /** The configured custom field names (the dossier shows these; a stored value under another name stays in the editor only). */
     customFieldNames: () => [...getSettings().customFieldNames],
+    /** (the living cast) The reader pins this dossier's person as a key person (Story Director's `keypeople.pin`) → { ok, message }. */
+    pinKeyPerson: async npcId => {
+        const adapter = storySuiteV2Meters();
+        const npc = getChatState().npcs.find(item => item.id === String(npcId || ''));
+        if (!adapter || !npc) return { ok: false, message: 'Story Director does not offer Key people here.' };
+        return adapter.pinKeyPerson({ name: npc.name, aliases: npc.aliases });
+    },
     getDossierState: () => {
         const state = getChatState();
         const formPortraits = {};
@@ -8073,7 +8330,8 @@ window.NPCStateDelta = Object.freeze({
         }
         const meterViews = storySuiteV2Meters()?.dossierMeters?.(state.npcs) ?? {};
         const keyViews = dossierKeyViews(state);
-        return { turn: state.turn, reply: latestReplyIndex(), npcs: structuredClone(hostedMeterView(state.npcs)), portraitAssets: {}, formPortraits, customFieldNames: [...getSettings().customFieldNames], meterViews, ...(keyViews ? { keyViews } : {}) };
+        const castViews = dossierCastViews(state);
+        return { turn: state.turn, reply: latestReplyIndex(), npcs: structuredClone(hostedMeterView(state.npcs)), portraitAssets: {}, formPortraits, customFieldNames: [...getSettings().customFieldNames], meterViews, ...(keyViews ? { keyViews } : {}), ...(castViews ? { castViews } : {}) };
     },
     persistenceStatus: () => {
         const key = getChatKey();

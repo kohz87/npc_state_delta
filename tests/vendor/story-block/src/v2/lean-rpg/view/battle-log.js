@@ -8,6 +8,16 @@
 // Nothing the panel shows is stored in the chat text: it is read from the record and the state each time, so a swipe,
 // a delete, a Re-read and a reload agree. Every node is built with createElement and textContent.
 //
+// The Standard formula's record (lean-rpg/standard.js) adds, all optional (a record without them draws exactly as before):
+//   result.order       [{ id, name, total, die, bonus, agi, party, fresh }] the turn order rolled at the start of the fight, highest first
+//   result.quickStart  [{ who, against }] a character 10 or more ahead of a foe: one opening action against it before the first round
+//   result.opening     [Line] those opening actions
+//   round.idle         [{ n, id, who, kind, why }] a foe group or character who does not act: why 'beaten' (before its turn), 'down' or 'no-target'
+//   Line               { kind, type: physical|magic|defence|social|check, skill, pc: { who, die, type, stat, second, mainValue, secondValue, statBonus, style,
+//                        classValue, classBonus, rank, luck, edge, total }, foe, outcome, decisive?, damage?: { name, blocks (+ hurt, − healed), from, to, size },
+//                        area?, support? (kind 'check', `target` the one helped), opening? }; the breakdown on tap is built from these
+//                        ("Physical: d20 17 + (AGI 10 + DEX 6/2)/2 = 6 + Expert 2 + Class II 4 = 29 · vs Weir-drake d20 9 + 3 + Class IV 12 = 24")
+//   Line.breakdown     (or the roll's breakdown as one plain string, which then wins)
 // A's result record (`data.v2.result` of the `rpg.resolve` receipt; see the header of lean-rpg/resolve.js), as `readResolve` reads it:
 //   { v: 1, key, pace, stop, checks: [Line], rounds: [{ n, decisive, lines: [Line] }], refused: [{ who, text }], summary: { exchanges, acts, refused } }
 //   Line = { kind: 'act' | 'foe' | 'check', outcome: 'success' | 'cost' | 'fail', skill: string | null, why?,
@@ -26,6 +36,8 @@ import { BARS, readFoes, readParty } from './party-data.js';
 const B = RPG_STRINGS.battle;
 // The result word of a foe's attack, by the recorded outcome (the party's): the colour stays the outcome's (fail red, cost amber, success green).
 const FOE_WORDS = Object.freeze({ fail: B.foeHit, cost: B.foeGrazed, success: B.foeBlocked });
+// A Standard line that was decisive: a party success is "Decisive"; a foe's decisive hit (the party's fail) or decisive block (its success) say so.
+const DECISIVE_WORDS = Object.freeze({ success: B.decisive, 'foe-fail': B.foeDecisiveHit, 'foe-success': B.foeDecisiveBlock });
 export const BATTLE_ROOT = 'rpg-battle';
 export const BATTLE_ID = 'rpg/battle-log';
 /** The narrator's marker: a line of its own. (turn.js strips the same line from the prompt history.) */
@@ -33,6 +45,8 @@ export const MARKER_LINE = /^[ \t]*\[battle\][ \t]*$/i;
 const FOLD_KEY = 'story-block.rpg.battle.folded';
 const RECENT_MESSAGES = 30;
 
+// Why a character or group does not act in a round (Standard's `idle`): the words the log says (strings.js blocks.idle).
+const IDLE = RPG_STRINGS.blocks.idle;
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const list = value => (Array.isArray(value) ? value : []);
 const words = (value, max = 80) => (typeof value === 'string' || typeof value === 'number' ? String(value).replace(/\s+/g, ' ').trim().slice(0, max) : '');
@@ -59,41 +73,79 @@ const pcRoll = (pc, skill, soul) => ({ d20: pc.die, total: pc.total, parts: [
     { label: skill ? RANK_NAMES[pc.rank] ?? `Rank ${pc.rank}` : '', value: pc.rank }, { label: 'Edge', value: pc.edge }] });
 const foeRoll = (foe, soul) => ({ d20: foe.die, total: foe.total, parts: [{ label: '', value: foe.base }, { label: classText(foe.classValue, soul), value: foe.classBonus }] });
 
+// ---- the Standard formula's lines ----
+
+const TYPE_WORDS = Object.freeze({ physical: 'Physical', magic: 'Magic', defence: 'Defence', social: 'Social', check: 'Check' });
+const signed = value => `${value < 0 ? '−' : '+'} ${Math.abs(value)}`;
+
+// "Physical: d20 17 + (AGI 10 + DEX 6/2)/2 = 6 + Expert 2 + Class II 4 + edge 1 = 29": the party side of a Standard line.
+function pcStandard(raw, skill, soul) {
+    const pc = raw.pc, stat = words(pc.stat, 12).toUpperCase(), second = words(pc.second, 12).toUpperCase();
+    const head = `${TYPE_WORDS[raw.type] ?? 'Roll'}${words(pc.style, 12) ? `, ${words(pc.style, 12)}` : ''}`;
+    const terms = [`${Number.isFinite(pc.die) ? `d20 ${pc.die} + ` : ''}(${stat} ${pc.mainValue} + ${second} ${pc.secondValue}/2)/2 = ${pc.statBonus}`];
+    if (skill) terms.push(`+ ${RANK_NAMES[pc.rank] ?? `Rank ${pc.rank}`} ${pc.rank}`);
+    if (pc.classBonus) terms.push(`+ ${classText(pc.classValue, soul)} ${pc.classBonus}`);
+    if (Number.isFinite(pc.edge) && pc.edge !== 0) terms.push(`${signed(pc.edge).replace(' ', ' edge ')}${pc.window && pc.edge !== pc.situation ? ` (luck window ${pc.window.min}..${pc.window.max})` : ''}`);
+    return `${head}: ${terms.join(' ')} = ${pc.total}`;
+}
+
+// What the told roll did to a bar: "Weir-drake loses 1 block (5 of 6)", "Wessel heals 2 blocks (6 of 6)".
+function damageText(damage) {
+    if (!isRecord(damage) || !Number.isFinite(damage.blocks) || damage.blocks === 0 || !Number.isFinite(damage.to) || !Number.isFinite(damage.size)) return '';
+    const n = Math.abs(damage.blocks);
+    return fill(damage.blocks > 0 ? B.loses : B.heals, { who: words(damage.name, 40), n, blocks: n === 1 ? B.blockOne : B.blockMany, to: damage.to, size: damage.size });
+}
+
+function breakdownStandard(raw, skill, soul, foeSide, against) {
+    const theirs = foeSide ? `${words(foeSide.name, 40)} ${rollText(foeRoll(foeSide, soul))}`.trim() : Number.isFinite(against) ? `DC ${against}` : '';
+    return [`${pcStandard(raw, skill, soul)}${theirs ? ` · vs ${theirs}` : ''}`, damageText(raw.damage), raw.decisive === true ? B.decisive : ''].filter(Boolean).join(' · ');
+}
+
 // One Line as the panel draws it: who acts, on whom, the acting side's total against the other's, and the roll behind it. A party
 // act or check reads the party's total first; a foe's attack reads from the attacker's side, so the foe's total and roll come first.
 function lineOf(raw, soulOf = () => null) {
     if (!isRecord(raw) || !isRecord(raw.pc) || !Number.isFinite(raw.pc.total)) return null;
     const outcome = outcomeOf(raw.outcome);
     const foeSide = isRecord(raw.foe) && Number.isFinite(raw.foe.total) ? raw.foe : null;
-    const skill = words(raw.skill, 40), why = words(raw.why, 120);
+    const skill = words(raw.skill, 40), why = words(raw.why, 120), told = words(raw.breakdown, 400);
     // A foe's class is told in the words of the party member it is rolled against, so one line reads in one set of words.
     const soul = soulOf(words(raw.pc.who, 40));
     const mine = pcRoll(raw.pc, skill, soul);
     const against = raw.kind === 'check' ? (Number.isFinite(raw.dc) ? raw.dc : null) : foeSide?.total ?? null;
     const theirs = foeSide ? rollText(foeRoll(foeSide, soul)) : against !== null ? `DC ${against}` : '';
     const detail = (raw.kind === 'foe' ? [theirs, rollText(mine)] : [rollText(mine), theirs]).filter(Boolean).join(' vs ');
-    const base = { outcome, total: raw.pc.total, vs: against, skill, breakdown: why ? `${detail} · ${why}` : detail, arrows: [] };
+    // A Standard line (typed, with both stats of the pair recorded) tells its roll as the formula makes it; a Classic one is as it was.
+    const standard = typeof raw.type === 'string' && Number.isFinite(raw.pc.mainValue) && Number.isFinite(raw.pc.secondValue);
+    const breakdown = told || (standard ? breakdownStandard(raw, skill, soul, foeSide, against) : why ? `${detail} · ${why}` : detail);
+    const base = { outcome, total: raw.pc.total, vs: against, skill, breakdown, arrows: [], ...(raw.decisive === true ? { decisive: true } : {}), ...(raw.area === true ? { area: true } : {}) };
+    // A support action (a heal or a buff, a `check` line that names the one helped) reads like an act on that character.
+    if (raw.kind === 'check' && raw.support === true && words(raw.target, 40)) return { ...base, who: words(raw.pc.who, 40), target: words(raw.target, 40), stat: words(raw.pc.stat, 12).toUpperCase(), foe: false, support: true, heals: isRecord(raw.damage) && raw.damage.blocks < 0 };
     if (raw.kind === 'foe') return { ...base, total: foeSide?.total ?? null, vs: raw.pc.total, who: words(foeSide?.name, 40), target: words(raw.pc.who, 40), skill: '', defence: skill, stat: words(raw.pc.stat, 12).toUpperCase(), foe: true };
     if (raw.kind === 'check') return { ...base, who: words(raw.pc.who, 40), target: '', stat: words(raw.pc.stat, 12).toUpperCase(), foe: false, what: skill || words(raw.pc.stat, 12).toUpperCase() };
     return { ...base, who: words(raw.pc.who, 40), target: words(foeSide?.name, 40), stat: words(raw.pc.stat, 12).toUpperCase(), foe: false };
 }
 
 /**
- * A's result record as the panel draws it: `{ rounds: [{ n, lines }], checks, order, ended, refused }` or null when the
+ * A's result record as the panel draws it: `{ rounds: [{ n, lines, skipped?: [{ who, why }] }], checks, order, orderEntries?, quickStart?, opening?, ended, refused }` or null when the
  * record holds nothing to show. A Line that is not whole is left out, never thrown on.
  */
 export function readResolve(result, { soulOf = () => null } = {}) {
     if (!isRecord(result)) return null;
-    const rounds = list(result.rounds).map((round, at) => ({
-        n: Number.isSafeInteger(round?.n) ? round.n : at + 1,
-        lines: list(round?.lines).map(line => lineOf(line, soulOf)).filter(line => line?.who),
-    })).filter(round => round.lines.length);
+    const rounds = list(result.rounds).map((round, at) => {
+        // Who does not act this round: Standard's `idle` entries (with why), or plain names (read as beaten before their turn).
+        const skipped = list(round?.idle ?? round?.skipped).map(item => ({ who: words(isRecord(item) ? item.who ?? item.name : item, 40), why: IDLE[item?.why] ? item.why : 'beaten' })).filter(item => item.who);
+        return { n: Number.isSafeInteger(round?.n) ? round.n : at + 1, lines: list(round?.lines).map(line => lineOf(line, soulOf)).filter(line => line?.who), ...(skipped.length ? { skipped } : {}) };
+    }).filter(round => round.lines.length || round.skipped?.length);
+    const opening = list(result.opening).map(line => lineOf(line, soulOf)).filter(line => line?.who);
     const checks = list(result.checks).map(line => lineOf(line, soulOf)).filter(line => line?.who);
     const refused = list(result.refused).filter(isRecord).map(item => ({ who: words(item.who, 40), why: words(item.text, 160) })).filter(item => item.why);
     if (!rounds.length && !checks.length) return null;
     // The order they act in: the names of the first round, each once.
-    const order = [...new Set(rounds[0]?.lines.map(line => line.who) ?? [])];
-    return { rounds, checks, refused, order, ended: '' };
+    // The Standard formula records the order itself, with the totals rolled (result.order); else it is the names of the first round.
+    const entries = list(result.order).filter(isRecord).map(item => ({ name: words(item.name, 40), total: Number.isFinite(item.total) ? item.total : null, party: item.party === true })).filter(item => item.name);
+    const order = entries.length ? entries.map(item => item.name) : [...new Set(rounds[0]?.lines.map(line => line.who) ?? [])];
+    const quickStart = list(result.quickStart).filter(isRecord).map(item => ({ who: words(item.who, 40), against: words(item.against, 40) })).filter(item => item.who && item.against);
+    return { rounds, checks, refused, order, ...(entries.length ? { orderEntries: entries } : {}), ...(quickStart.length ? { quickStart } : {}), ...(opening.length ? { opening } : {}), ended: '' };
 }
 
 /** The recorded rolls of a reply's record: the result of its `rpg.resolve` receipt that the replay kept, or null. */
@@ -128,7 +180,7 @@ function consequences(state, before, roleOf) {
 // told action explains is left to the Status block.
 const same = (a, b) => a.normalize('NFKC').toLowerCase() === b.normalize('NFKC').toLowerCase();
 function attach(model, changes) {
-    const lines = model.rounds.flatMap(round => round.lines);
+    const lines = [...(model.opening ?? []), ...model.rounds.flatMap(round => round.lines)];
     for (const change of changes) {
         const aimed = line => (change.kind === 'health' ? (line.target && same(line.target, change.name)) || (line.foe && same(line.who, change.name)) : same(line.who, change.name));
         lines.findLast(aimed)?.arrows.push(change.text);
@@ -140,9 +192,10 @@ function attach(model, changes) {
  * `state` and `before` are the reply's state and the one before it (null for none).
  */
 export function panelModel({ resolve, state, before = null, roleOf }) {
-    const model = { ...resolve, rounds: resolve.rounds.map(round => ({ ...round, lines: round.lines.map(line => ({ ...line, arrows: [] })) })) };
+    const model = { ...resolve, rounds: resolve.rounds.map(round => ({ ...round, lines: round.lines.map(line => ({ ...line, arrows: [] })) })),
+        ...(resolve.opening ? { opening: resolve.opening.map(line => ({ ...line, arrows: [] })) } : {}) };
     attach(model, consequences(state, before, roleOf));
-    const names = new Set(model.rounds.flatMap(round => round.lines.flatMap(line => [line.who, line.target])));
+    const names = new Set([...(model.opening ?? []), ...model.rounds.flatMap(round => round.lines)].flatMap(line => [line.who, line.target]));
     const party = readParty(state, { roleOf });
     const involved = party.filter(character => names.has(character.name));
     model.status = (involved.length ? involved : party).map(character => ({ name: character.name,
@@ -179,12 +232,18 @@ function lineNode(doc, line, { check = false } = {}) {
     const mark = el(doc, 'span', 'rpg-act-mark', line.breakdown ? '▸' : '');
     mark.setAttribute('aria-hidden', 'true');
     const text = el(doc, 'span', 'rpg-act-text');
-    const outcome = line.outcome ? (line.foe ? FOE_WORDS[line.outcome] : B[line.outcome]) : '';
+    const outcome = line.outcome ? (line.decisive ? DECISIVE_WORDS[line.foe ? `foe-${line.outcome}` : line.outcome] ?? (line.foe ? FOE_WORDS[line.outcome] : B[line.outcome]) : line.foe ? FOE_WORDS[line.outcome] : B[line.outcome]) : '';
     if (check) text.append(fill(B.check, { who: line.who, what: line.what, total: line.total ?? '?', against: line.vs ?? '?', outcome }));
     else {
-        text.append(`${line.who} ${line.skill ? B.uses : B.attacks} `);
-        if (line.skill) text.appendChild(el(doc, 'span', 'rpg-skill', line.skill));
-        if (line.target) text.append(`${line.skill ? ` ${B.on} ` : ''}${line.target}`);
+        // A heal or a help names the one helped ("Ren heals Wessel (Mend)"), never "attacks".
+        if (line.support) {
+            text.append(`${line.who} ${line.heals ? B.verbHeals : B.verbHelps} ${line.target}`);
+            if (line.skill) { text.append(' ('); text.appendChild(el(doc, 'span', 'rpg-skill', line.skill)); text.append(')'); }
+        } else {
+            text.append(`${line.who} ${line.skill ? B.uses : B.attacks} `);
+            if (line.skill) text.appendChild(el(doc, 'span', 'rpg-skill', line.skill));
+            if (line.target) text.append(`${line.skill ? ` ${B.on} ` : ''}${line.target}${line.area ? ` (${B.area})` : ''}`);
+        }
         // The skill a defender used ("Sluice Rat A attacks Astra (Iaijutsu) — Blocked"); a roll made before there were any has none.
         if (line.defence) {
             text.append(' (');
@@ -247,12 +306,20 @@ export function buildPanel(doc, model, { folded = false, onFold = () => {}, vari
         onFold(on);
     });
 
-    if (model.order.length) body.appendChild(el(doc, 'p', 'rpg-bl-order', `${B.turnOrder} ${model.order.join(' > ')}`));
+    if (model.order.length) body.appendChild(el(doc, 'p', 'rpg-bl-order', `${B.turnOrder} ${(model.orderEntries ?? model.order.map(name => ({ name, total: null }))).map(item => (item.total === null ? item.name : `${item.name} ${item.total}`)).join(' > ')}`));
+    for (const item of model.quickStart ?? []) body.appendChild(el(doc, 'p', 'rpg-bl-note rpg-bl-quick', fill(RPG_STRINGS.blocks.quickStartLine, item)));
     for (const check of model.checks) body.appendChild(lineNode(doc, check, { check: true }));
+    if (model.opening?.length) {
+        const box = el(doc, 'div', 'rpg-bl-round rpg-bl-opening');
+        box.appendChild(el(doc, 'p', 'rpg-bl-round-title', B.opening));
+        for (const line of model.opening) box.appendChild(lineNode(doc, line));
+        body.appendChild(box);
+    }
     for (const round of model.rounds) {
         const box = el(doc, 'div', 'rpg-bl-round');
         box.appendChild(el(doc, 'p', 'rpg-bl-round-title', fill(B.round, { n: round.n })));
         for (const line of round.lines) box.appendChild(lineNode(doc, line));
+        for (const item of round.skipped ?? []) box.appendChild(el(doc, 'p', 'rpg-bl-note rpg-bl-skip', fill(IDLE[item.why], { who: item.who })));
         body.appendChild(box);
     }
     for (const item of model.refused) body.appendChild(el(doc, 'p', 'rpg-bl-note', fill(B.refused, { why: item.why })));

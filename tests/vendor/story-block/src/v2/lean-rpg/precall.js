@@ -10,13 +10,16 @@
 // connection profile and time limit; the answer is a plan, never a number.
 import { SETTING, TIMEOUT_MS, clip, estimateTokens, hashText, normalizeType, withTimeout } from '../assist/common.js';
 import { stripBlock } from '../capture.js';
-import { CLASS_NAMES, LEAN_RPG_FEATURE, RANK_NAMES, RESOLVE, ROLLS_SETTING, STAGES, STATS } from './names.js';
-import { plannerNoteOf, rulesFromSettings } from './rules.js';
+import { CLASS_NAMES, LEAN_RPG_FEATURE, RANK_NAMES, RESOLVE, ROLLS_SETTING, STAGES, STATS, stageWord } from './names.js';
+import { isStandard, packRulesOf, plannerNoteOf, rulesFromSettings } from './rules.js';
 import { NO_ROLLS_LINE } from './cue.js';
 import { parsePlanAnswer } from './plan.js';
 import { DICE_VERSION, claimKey, prepare } from './resolve.js';
 import { readSheet } from './read.js';
 import { SOUL_LABEL, soulShortOf } from './soul.js';
+
+// (The query the roll record is read through: index.js ROLLS_QUERY, named here too so this file need not import its parent.)
+const ROLLS_QUERY = 'rpg.rolls';
 
 /** What the reader's instructions are called in the prompt. */
 export const NOTE_LABEL = 'Reader\'s instructions:';
@@ -45,11 +48,37 @@ export const PRECALL_HEAD = [
     '- Outside a fight a risky attempt (sneaking, persuading, climbing, lying) is a check with a difficulty.',
 ].join('\n');
 
+// The same for the Standard formula (formula.js): the roll type decides the stat, so a line asks for a type, not a stat; the planner is told only
+// what it must write. Classic keeps PRECALL_HEAD above, word for word.
+export const PRECALL_HEAD_STANDARD = [
+    'You plan the dice for one message in an interactive story. Answer with these fixed lines only, no other words:',
+    'pace: careful | normal | all',
+    'act <who> | skill: <skill>? | type: physical|magic|social|check | target: <foe, or an ally> | edge: <-3 to +3 and a short reason>? | area? | support: easy|normal|hard?',
+    'foe <foe> | target: <who> | skill: <skill>? | magic?',
+    'foe <foe> | hold',
+    `check <who> | skill: <skill>? | type: social|check | fit: ${STATS.map(stat => stat.toUpperCase()).join('|')}? | difficulty: easy|normal|hard|very hard`,
+    'none',
+    'Rules:',
+    '- Roll only what is uncertain. Talk, questions, plans and safe actions: answer none.',
+    '- In a fight, give every party member who is not Down an act (companions act on their own) and every foe a target or hold.',
+    '- Use only the names listed. A skill brings its own stat and what it uses: write no stat.',
+    '- type: physical (blades, force), magic (spells, a skill that uses Mana), social (talk, bluff), check (the rest). area: hits every foe. support: heals or helps an ally. magic on a foe line: a spell.',
+    '- fit: the stat a check leans on (STR climb, AGI sneak, DEX locks, INT lore, VIT endure).',
+    '- A foe line may name a defender\'s skill only when it plausibly fits defending (a parry, a dodge, a shield); otherwise no skill.',
+    '- pace: careful when the reader moves slowly or carefully, all when they fight it out, else normal.',
+    '- An edge is a small bonus or penalty the situation earns (an ambush +2, a trap -2).',
+    '- Outside a fight a risky attempt (sneaking, persuading, climbing, lying) is a check with a difficulty.',
+].join('\n');
+
 const word = (list, at) => (Number.isInteger(at) && at >= 0 && at < list.length ? list[at] : '?');
 
 /** The party and foes in a few short lines for the pre-call. */
 // A value the pack hides (`hidden` on an entry, review 160) still counts for the dice but is left out of these lines.
-export function sheetText(sheet) {
+export function sheetText(sheet, { standard = false } = {}) {
+    // The Standard formula's bars are blocks: the narrator-facing word is the block count spread over the bar's size (names.js stageWord).
+    // (A bar is read as the block itself holds it: a block of the Standard formula says its size and the value is blocks left; a Classic block's
+    // value is the stage itself, whichever formula the chat plays, so the word is never worked out from a size the block does not have.)
+    const barWord = (key, words, entry) => (entry.size ? stageWord(words, entry[key], entry.size[key]) : word(words, entry[key]));
     const party = sheet.characters.map(entry => {
         const shown = key => !(entry.hidden ?? []).includes(key);
         const stats = STATS.filter(shown).map(stat => `${stat.toUpperCase()} ${entry.stats[stat] ?? '?'}`).join(' ');
@@ -62,12 +91,12 @@ export function sheetText(sheet) {
         const down = entry.alive === false || (entry.health === 0 && shown('health')) ? ' DOWN' : '';
         const head = [shown('soul') ? `${soulShortOf(entry.soulLabel ?? SOUL_LABEL, 'class')} ${entry.soul >= 1 && entry.soul <= CLASS_NAMES.length && entry.soulWord ? entry.soulWord : word(CLASS_NAMES, entry.soul - 1)}` : ''].filter(Boolean).join('');
         const bars = [['health', 'Health', STAGES.health], ['mana', 'Mana', STAGES.mana], ['stamina', 'Stamina', STAGES.stamina]]
-            .filter(([key]) => shown(key)).map(([key, label, words]) => `${label} ${word(words, entry[key])}`).join(', ');
+            .filter(([key]) => shown(key)).map(([key, label, words]) => `${label} ${barWord(key, words, entry)}`).join(', ');
         return `${entry.who}${head || down ? ` (${head}${down})` : ''}: ${[stats, bars].filter(Boolean).join('; ')}; skills: ${skills}`;
     });
     const foes = sheet.foes.filter(foe => foe.filled).map(foe => {
         const shown = part => !(foe.hidden ?? []).includes(part);
-        const about = [shown('class') ? `class ${word(CLASS_NAMES, foe.class - 1)}` : '', shown('hurt') ? word(STAGES.health, foe.hurt) : ''].filter(Boolean).join(', ');
+        const about = [shown('class') ? `class ${word(CLASS_NAMES, foe.class - 1)}` : '', shown('hurt') ? (foe.size ? stageWord(STAGES.health, foe.hurt, foe.size) : word(STAGES.health, foe.hurt)) : ''].filter(Boolean).join(', ');
         return `${foe.slot}. ${foe.name}${foe.count > 1 && shown('count') ? ` x${foe.count}` : ''}${about ? ` (${about})` : ''}`;
     });
     return `Party:\n${party.join('\n')}\nFoes: ${foes.length ? `\n${foes.join('\n')}` : 'none'}`;
@@ -77,9 +106,27 @@ export function sheetText(sheet) {
  * The pre-call's prompt: the static head, the reader's own instructions when they wrote any (`note`, Settings → RPG; after the
  * fixed part, which they cannot change), the sheet, the end of the last reply, then the reader's message.
  */
-export function precallPrompt({ sheet, message, excerpt = '', note = '' }) {
+export function precallPrompt({ sheet, message, excerpt = '', note = '', standard = false }) {
     const tail = String(excerpt ?? '').trim(), extra = String(note ?? '').trim();
-    return `${PRECALL_HEAD}${extra ? `\n\n${NOTE_LABEL} ${extra}` : ''}\n\n${sheetText(sheet)}\n${tail ? `\nThe last reply ended:\n"""\n${tail.slice(-EXCERPT_LIMIT)}\n"""\n` : ''}\nThe reader's message:\n"""\n${clip(message, MESSAGE_LIMIT)}\n"""`;
+    return `${standard ? PRECALL_HEAD_STANDARD : PRECALL_HEAD}${extra ? `\n\n${NOTE_LABEL} ${extra}` : ''}\n\n${sheetText(sheet, { standard })}\n${tail ? `\nThe last reply ended:\n"""\n${tail.slice(-EXCERPT_LIMIT)}\n"""\n` : ''}\nThe reader's message:\n"""\n${clip(message, MESSAGE_LIMIT)}\n"""`;
+}
+
+// How far back a fight's turn order is looked for, in messages.
+const ORDER_LOOKBACK = 12;
+
+/**
+ * The turn order of the fight this reply goes on with: the order recorded by the nearest earlier reply that has rolls (a roll with no order,
+ * checks only, is passed over), as the short list resolve.js takes; null when there is none. `index`: the reader's message this reply answers.
+ */
+export function carriedOrder(view, index) {
+    for (let at = index - 1; at >= 0 && at >= index - ORDER_LOOKBACK; at -= 1) {
+        let found = null;
+        try { found = view.query?.(ROLLS_QUERY, { index: at }) ?? null; } catch { found = null; }
+        const order = found?.result?.order;
+        if (Array.isArray(order) && order.length) return order.map(({ id, name, total, die, bonus, agi, party, left }) => ({ id, name, total, ...(Number.isSafeInteger(die) ? { die } : {}), ...(Number.isSafeInteger(bonus) ? { bonus } : {}), agi, party, ...(Number.isSafeInteger(left) && left >= 0 ? { left } : {}) }));
+        if (found) return null;
+    }
+    return null;
 }
 
 const readSettings = (view, moduleId) => {
@@ -104,20 +151,21 @@ export function createPrecall({ callModel, chat, chatId, hold, problem = null, m
         return sheet.foes.some(foe => foe.filled) ? { lines: [NO_ROLLS_LINE] } : null;
     };
 
-    async function plan(view, sheet, message, excerpt) {
+    async function plan(view, sheet, message, excerpt, rules) {
         const values = readSettings(view, moduleId);
-        const prompt = precallPrompt({ sheet, message, excerpt, note: plannerNoteOf(values) });
+        const standard = isStandard(rules);
+        const prompt = precallPrompt({ sheet, message, excerpt, note: plannerNoteOf(values), standard });
         let answer;
         try {
             answer = await withTimeout(() => callModel(prompt, { maxTokens: ANSWER_TOKENS, profile: String(values[SETTING.profile] ?? ''), helper: 'rolls' }), timeoutMs, timer);
         } catch (error) {
             return { failed: error?.code === 'TIMEOUT' ? 'the planning call timed out.' : `the planning call failed (${String(error?.message ?? error).slice(0, 120)}).` };
         }
-        const parsed = parsePlanAnswer(answer, sheet);
+        const parsed = parsePlanAnswer(answer, sheet, { formula: standard ? 'standard' : 'classic' });
         if (parsed.error) return { failed: `the answer could not be read (${parsed.error}).` };
         if (parsed.none) return { plan: null, tokens: estimateTokens(prompt) };
         // A plan that names nothing this sheet can roll is the same as no plan.
-        const ready = prepare(parsed.plan, sheet);
+        const ready = prepare(parsed.plan, sheet, rules);
         if (!ready.acts.length && !ready.foes.length && !ready.checks.length) return { plan: null, tokens: estimateTokens(prompt) };
         return { plan: parsed.plan, tokens: estimateTokens(prompt) };
     }
@@ -142,6 +190,12 @@ export function createPrecall({ callModel, chat, chatId, hold, problem = null, m
         const key = `${index}-${hashText(text)}`;
         if (claimed(view.state, key)) return null;
         const where = String(chatId() ?? '');
+        // The numbers the dice are rolled with are fixed here, from the settings of this moment, and travel in the payload: the roll
+        // (and every Re-read of it) uses these, whatever the settings say later (rules.js).
+        // (A pack may say which formula its story plays on and its numbers; the reader's own settings win over it.)
+        let pack = null;
+        try { pack = packRulesOf(view.query?.('packs.content', { kind: 'rpg' })); } catch { pack = null; }
+        const rules = rulesFromSettings(readSettings(view, moduleId), pack);
         // A retried interceptor (the same generation, never captured) keeps its plan; any new generation plans anew.
         const held = info?.again === true ? hold.peek(where, key) : null;
         let planned;
@@ -150,13 +204,14 @@ export function createPrecall({ callModel, chat, chatId, hold, problem = null, m
             hold.clear();
             const before = messages[index - 1];
             const excerpt = before && !before.is_user ? stripBlock(String(before.mes ?? '')) : '';
-            planned = await plan(view, sheet, text, excerpt);
+            planned = await plan(view, sheet, text, excerpt, rules);
             if (planned.failed) return skip(sheet, planned.failed);
             hold.put(where, key, planned.plan);
         }
-        // The numbers the dice are rolled with are fixed here, from the settings of this moment, and travel in the payload: the roll
-        // (and every Re-read of it) uses these, whatever the settings say later (rules.js).
-        return planned.plan ? { commands: [{ type: RESOLVE, payload: { key, plan: planned.plan, rules: rulesFromSettings(readSettings(view, moduleId)), dice: DICE_VERSION } }] } : null;
+        // A Standard fight keeps its turn order across replies: the nearest earlier reply's order goes on in the payload (resolve.js), so a swipe of
+        // this reply rolls this reply's dice again and keeps the order the fight began with.
+        const order = isStandard(rules) && planned.plan ? carriedOrder(view, index) : null;
+        return planned.plan ? { commands: [{ type: RESOLVE, payload: { key, plan: planned.plan, rules, dice: DICE_VERSION, ...(order ? { order } : {}) } }] } : null;
     }
 
     // The reply is captured: its plan has been used, so the hold is let go (best effort; a new generation clears it anyway). Whether

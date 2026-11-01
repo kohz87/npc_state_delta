@@ -4,10 +4,13 @@
 //   * values go by their names where the field has them ("Hurt", "II", "Adept"), never the stored number;
 //   * a Skills block is one line per skill, empty slots left out ("Short blade (Novice, agi, stamina): what it does");
 //   * a Foes block lists only the groups in the fight, one clause each; with none, and for a Rules block with no fields, there is no line;
+//   * a Standard block's bars (a field with `blocks`, blocks.js) go by the same words, spread over the bar's size: still words, never block counts, and
+//     a full bar is left out like a full Classic one;
 //   * the field keys are not written for a skill or a foe (`skill3`, `about3`), and practice is not either: the story adds it by a line and the
 //     rules raise the rank, so only the rank (by its name) is something it tells.
 // Pure: no DOM, no state. `summaryOf` (data-modules/part.js) calls it for a block with a role and cuts the result to the block's room.
 
+import { barOf, characterBars, sizeOf, spreadWord, wordsOf } from './blocks.js';
 import { STATS } from './names.js';
 import { oneLine } from '../../text.js';
 
@@ -18,9 +21,14 @@ const word = value => (typeof value === 'string' ? oneLine(value) : '');
 function sheetBody(definition, fields, { hidden, text }) {
     const parts = [];
     let stats = null;
+    const bars = characterBars(definition, fields);
     for (const [key, schema] of Object.entries(definition.state)) {
         if (key === 'who' || hidden(key) || !(key in fields)) continue;
         const value = fields[key];
+        if (bars?.[key]) {
+            if (bars[key].value < bars[key].size) parts.push(`${key} ${bars[key].word}`);
+            continue;
+        }
         if (STATS.includes(key) && typeof value === 'number') {
             if (!stats) { stats = []; parts.push(stats); }
             const label = typeof schema.label === 'string' && schema.label && [...schema.label].length <= 4 ? schema.label : key.toUpperCase();
@@ -53,7 +61,9 @@ function foesBody(definition, fields, { hidden, named }) {
         const count = hidden(`count${slot}`) ? null : fields[`count${slot}`], hurt = fields[`hurt${slot}`];
         const bits = [];
         if (!hidden(`class${slot}`)) bits.push(`Class ${named(`class${slot}`, fields[`class${slot}`])}`);
-        if (!hidden(`hurt${slot}`) && hurt !== definition.state[`hurt${slot}`]?.default) bits.push(named(`hurt${slot}`, hurt));
+        const schema = definition.state[`hurt${slot}`], size = barOf(schema) ? sizeOf(schema, fields, `hurt${slot}`) : null;
+        if (size) { if (!hidden(`hurt${slot}`) && Number.isSafeInteger(hurt) && hurt < size) bits.push(spreadWord(wordsOf('foe'), Math.max(0, hurt), size)); }
+        else if (!hidden(`hurt${slot}`) && hurt !== schema?.default) bits.push(named(`hurt${slot}`, hurt));
         out.push(`${name}${Number.isSafeInteger(count) && count > 1 ? ` ×${count}` : ''}${bits.length ? ` (${bits.join(', ')})` : ''}`);
     }
     return out;

@@ -23,8 +23,8 @@
 //   refreshChanged  the fields a targeted Refresh reports as changed
 //   snapshot      [position, how]: the inline-card snapshot (index.js snapshotNpc)
 //   v2            DOSSIER_FIELDS: what the v2 npc.dossier query returns
-//   prompt        'never' when the field must never reach a model-facing text; 'unlocked' when only
-//                 its unlocked items may (the v2 hidden notes)
+//   prompt        'never' when the field must never reach a model-facing text; 'tail' when it reaches one only through
+//                 the v2 module's tail (the hidden notes: opened ones as known, locked ones as hidden)
 
 const APPEARANCE_PARTS = Object.freeze(['appearance', 'overallAppearance', 'unclassifiedAppearance', 'appearanceForms', 'currentForm', 'currentFormUnknown', 'appearanceModelVersion']);
 
@@ -102,12 +102,16 @@ export const FIELDS = Object.freeze({
     lastSeenTurn: { kind: 'meta', terminalFrozen: 11 },
     lastWorldActiveTurn: { kind: 'meta', terminalFrozen: 12 },
     manualProfileFields: { kind: 'meta', snapshot: [36, 'list'] },
-    // (v2 meters) The hidden notes: [{ id, meter, at, text }]. A note reaches a model-facing text
-    // only once its meter has unlocked it, and only through the v2 slice (src/npc-meters.js).
-    secrets: { kind: 'secret', prompt: 'unlocked' },
+    // (v2 meters) The hidden notes: [{ id, meter?, at?, when?, title?, text }]. No scanner, Refresh, import or
+    // injection prompt of Delta's carries them; they reach the story only through the v2 module's tail, while the
+    // NPC is present: an opened one as known to the player, a locked one worded "hidden: never state or reveal".
+    secrets: { kind: 'secret', prompt: 'tail' },
     // (v2 meters) The reader's meter setup for this NPC: { track (a preset or ladder track), limits:
     // { meter: { ceiling?, floor? } } }. Read by the v2 slice's handlers only; never model-facing.
     meterSetup: { kind: 'meta', prompt: 'never' },
+    // (the living cast) Where a dossier made from the pack's cast came from: { key, pack, id, packName?, packVersion?, met: { on, where },
+    // goal, routine, stages? } (src/cast-dossier.js). The person's own stage ladder (`stages`) is read by the v2 slice's handlers only.
+    castFrom: { kind: 'meta', prompt: 'never' },
 });
 
 // (cleanup step 13) How each key a targeted prompt asks the model to return is written in its return

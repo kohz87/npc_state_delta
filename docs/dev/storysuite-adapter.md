@@ -12,9 +12,9 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
   While hosted it checks every `HOST_ALIVE_MS` (5 s) that the host is still there, and restores the drawer copy
   when it is not. The v1 handshake (`suite-handshake.js`) offers nothing to a v2 host (`storyBlockIsV2`).
 - Registers module `npc-state-delta`: queries `QUERY_NAMES` (`npc.present`, `npc.dossier`, `npc.known`,
-  `npc.portrait`, `npc.meters`, `npc.cast`, `npc.next`, `npc.socialModifier`), commands `COMMAND_NAMES` (`npc.adjust`, `npc.set`,
-  `npc.refresh`, `npc.milestone`, `npc.tick`), the Cast / Dossiers tab and screen (`CAST_SCREEN_ID`,
-  widget `CAST_WIDGET`), its settings section, and hooks `diagnostics` and `ownPrompt`.
+  `npc.portrait`, `npc.meters`, `npc.cast`, `npc.next`, `npc.keyAway`, `npc.castMade`, `npc.socialModifier`), commands `COMMAND_NAMES` (`npc.adjust`, `npc.set`,
+  `npc.refresh`, `npc.milestone`, `npc.open`, `npc.tick`), the Cast / Dossiers tab and screen (`CAST_SCREEN_ID`,
+  widget `CAST_WIDGET`), its settings section, and hooks `diagnostics`, `ownPrompt` and `redactSent`.
 - **`npc` domain** (only numbers, stage and milestone names, ids of unlocked notes; prose stays in NSD's
   sidecar): meters trust, affection, desire, tension in `BUILT_IN_RANGE` (−100..100) plus up to
   `MAX_CUSTOM_METERS` (6) custom ones, at most `MAX_NPCS` (80). While hosted this slice is the truth for meter
@@ -23,8 +23,19 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
 - **Code sets numbers:** every value clamped to its range; one meter's change within one reply held to the
   change cap (`DEFAULT_CHANGE_CAP` 15; `turn.from` keeps the reply's starting values, keyed by the reply `sid`);
   per-NPC floors and ceilings; stages and ladder rungs moved by code when thresholds are crossed; the story
-  cannot set a stage. Hidden notes unlock by rule and their text reaches the story only through the tail,
-  only while the NPC is present and unlocked.
+  cannot set a stage. Hidden notes (the pack's, the reader's, or the 2 to 5 layers a scan writes for a new dossier;
+  pack and reader up to 8, generated up to 5) open by a meter rule, by a story event (`when`, ≤ 120 characters: the scan
+  lists present people's locked event notes and answers `secretEvents`, sent as `npc.open` with `by: 'story'`, recorded on
+  the reply) or by the reader's hand (`npc.open`; a note shut by hand is kept in the slice's `held`). Their text reaches the
+  story only through the tail and only while the NPC is present: an opened note as "known to the player now; may come out",
+  a locked one as "hidden: never state or reveal; let it shape how they act" (optional tail lines, nearest to opening first,
+  so the host's budget drops the deepest first). The hook `redactSent(text)` turns each locked line into "Name: 1 hidden note"
+  for a view that shows what is sent; a host that does not call it shows the raw text.
+  Layers and event watching run in every path that builds a dossier or scans a present person: the ordinary scan (the default:
+  one-pass capture and "Scan every reply" full-window are off by default, and Lean scans every third reply), the one-pass block (the
+  layered rule rides with the capture's rules, byte-identical each reply; the list of events is in its context part, and the list
+  that went out with a reply is kept for the block that comes back with it), the targeted backfill of a new dossier (layers) and the
+  targeted Refresh (one person's events). Off, or with nobody to watch, every prompt is as it was.
 - Change lines: `~ npc <Name> | trust: +5 ...` and `+ milestone <Name> — <words>`; refused parts become
   problems (last 20). `npc.tick` runs once per new reply or swipe (`TICK_TURNS`), never for a Continue or Re-read.
 - Who is present: `director.world.here` when Story Director answers, else Story Block's `scene.present`.
@@ -90,6 +101,52 @@ exists: Delta alone has no key people, and its saved state and prompts are byte-
   stored, and the scan prompt is unchanged (C10). A reader's own Refresh or backfill is not held.
 - Tests: `tests/key-people.test.js` (the answer, the memory, the note, the hold, the dossier and rows, the meters on Story
   Block's host with a stand-in director, Delta's real runtime beside a fake host).
+
+## The living cast (Story Director's `director.cast`, read only)
+
+A pack lists a hand-written cast; Story Director owns who has been met and where everyone is. Delta only reads `director.cast`
+(and Story Block's `packs.portrait`, `packs.list`) and never writes to either. At the first meeting Delta makes the person's dossier
+at once from the pack entry: no scan, no model call. `src/cast-dossier.js` holds every rule (pure, with its header comment).
+Without Story Director, or one without the query, `adapter.castPeople()` is null and nothing below exists.
+
+- **Query:** `director.cast` → `[{ key ("pack:id"), pack, id, name, aliases, met: { on, where } | null, where?, doing?, lastHeard?
+  (words or { text, on }), alive, entry? }]`. `entry` (the pack entry) comes only for met people; `normalizeCast` drops one that came
+  with an unmet person. Dates are story minutes, written on `director.calendar` like key people's (words are kept as given).
+- **The record in the saved slice:** `npc.tick` asks `director.cast` through `ctx.query` and `observeCast` (src/npc-meters.js) adds
+  each met person with an entry that the slice does not have yet to `cast` = `{ [castKey]: { name, rungs? } }` at that reply, so it
+  follows swipes, deletes and reloads with the replies. The step also gives the person's slice entry the pack's first meter values
+  (by meter id or label; a meter this chat does not have is a problem line, not an error). Read through the query `npc.castMade`.
+  The step runs when someone is met and not yet recorded, or when a recorded person has stages of their own (`castWanted`).
+- **The dossier** (index.js `castSync`, run by the adapter after the step lands, `castSync` option): for each person recorded as
+  made, met now with their entry, with no dossier standing for them (by cast key, name or alias) and not removed by the reader
+  (`userDismissedGroups`), the roster add command makes the dossier, `applyCastEntry` fills it (about → role, look → appearance,
+  voice → speech, personality, history → background, start.place → home base, start.goal → goal, the place met → location, fields
+  → custom fields, the four built-in meters → relationship, `meters.preset` → meter track, secrets → `secrets` (see
+  `castSecrets`, the one place that shapes the notes: `{ id, title?, text, meter + at | when }`), the portrait) and a branch
+  checkpoint is committed at the reply (`cast-dossier`), exactly as a manual add does, so a swipe or delete takes the dossier back with
+  the reply. The pack never overwrites a standing dossier. `castFrom` on the record holds where it came from (key, pack, name,
+  version, when and where met, the starting goal and routine, the person's own `stages`). Later scans treat the dossier as any
+  other: they add and change as they do for anyone, every change marked as today.
+- **The pack's words** (`castFrom.first`: appearance, speech, personality, background as written) are kept exactly by `normalizeNpcRecord` for as long as the stored field still is them (it would otherwise compact them, dropping clauses); once a scan or the reader changes a field it is compacted as for any dossier. `tests/fixtures/ersveil-cast.json` holds the twelve Ersveil entries the tests build from.
+- **The person's own stages** (`castFrom.stages`: the pack's `{ id, name, needs: [{ meter, at }], milestone }`, the milestone kept as the rung's `cue`, the line the story is told when it is reached, never a milestone it needs) run as a ladder before any track, only while
+  the stage ladders feature is on (`rungsFor` in npc-meters.js, `settings.stagesOn`); the editor's meter setup never holds them.
+- **Portrait:** `packs.portrait({ pack, file })` → a safe image URL; a `data:` URL is kept, anything else is fetched once (8 s limit,
+  png/jpeg/webp, 256 KB at most, no re-compression) before the dossier is made, so the dossier has it from the start; it joins the
+  chat's portraits (`portraitAssets`) and its appearance fingerprint like an uploaded one.
+- **The view:** the dossier shows a badge ("Ersveil cast", `delta-cast-badge`) beside the name and a "From the Ersveil cast · first met
+  Gw 12 at the docks" block (`castFromHtml`): their own path (the goal, the routine) and, from `director.cast`, when they were last heard of
+  (`lastHeard`), else where and what they are doing now. Data comes from `getDossierState().castViews` (by dossier id), built from
+  the dossier's `castFrom` and Story Director's live answer; without Story Director the pack's starting words stand.
+- **"★ Pin as Key people"** (on the From-the-cast block, `castFromHtml`): the reader's own action. `api.pinKeyPerson(dossierId)` →
+  `adapter.pinKeyPerson` sends Story Director's existing command `keypeople.pin { name, aliases?, nsd: true }` through `sdk.command` (cause
+  ui) and nothing else: Delta never writes Story Director's state. The button is drawn only while Story Director offers the command
+  (`keyPinOffered`: a ready module lists `keypeople.pin` and its feature `story-director.key-people` is not off) and the person is not
+  already a key person (`director.keyPeople`); the view flag is `castViews[id].pin`.
+- **The panel and the section bar are opaque** (a follow-up from the mockup): `.delta-panel` and the sticky `.delta-section-nav` paint
+  an opaque floor (`--delta-floor`: Story Block's `--ss-sheet-floor`, else the tint with its alpha dropped) under the tint.
+- Tests: `tests/cast-dossier.test.js` (the answer, the entry, the dossier, the view, the slice record on Story Block's host with a stand-in
+  director, Delta's real runtime beside a fake host: made at the first meeting, swipe undoes and re-makes, a standing dossier left alone,
+  removal final, Delta alone makes none, the opaque panel).
 
 ## Screens on the glass look (UI 4c)
 

@@ -10,11 +10,22 @@
 // that names one carries no `stat` or `uses` of its own, and any it does carry are not read. `stat` is for an act with no
 // skill (or one the character lacks, rolled untrained) and is then required.
 //
+// A plan made for the Standard formula (`formula: 'standard'` at its root) also carries what the roll type needs (formula.js ROLL_TYPES):
+//     acts:   + type ('physical' | 'magic' | 'social' | 'check'), fit (a check's fitting stat), area: true (hits every foe), support: true
+//             with a difficulty (a heal or a buff: `target` is then an ally); `stat` is no longer asked for
+//     foes:   + againstMagic: true (the attack is a spell, so the defender wards); `defend` is no longer asked for
+//     checks: + type ('social' | 'check'), fit; `stat` is no longer asked for
+// A Classic plan has none of these keys and is read exactly as before.
+//
 // `validatePlan` is the one place its shape is checked (the pieces never trust a plan without it); `parsePlanAnswer`
 // reads the pre-call's fixed answer lines into a plan against the sheet, dropping what it cannot place. A plan is
 // held for the next generation only, in chat metadata (not game state), and the hold is cleared when it is used.
 import { FOE_SLOTS, FORMULA, LIMITS, PACE, STATS, USES } from './names.js';
 import { matchCharacter, matchFoe, matchSkill } from './read.js';
+import { ROLL_TYPES } from './formula.js';
+
+/** The roll types a plan may name for an action (a defence is never planned: a foe's attack makes it). */
+const PLAN_TYPES = Object.freeze(ROLL_TYPES.filter(type => type !== 'defence'));
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const TEXT = 60;
@@ -28,6 +39,8 @@ const oneLine = (value, max = TEXT) => String(value ?? '').replace(/\s+/g, ' ').
 export function validatePlan(plan) {
     const errors = [];
     if (!isObject(plan)) return { ok: false, errors: ['A plan must be an object.'] };
+    if (plan.formula !== undefined && plan.formula !== 'standard') errors.push('formula must be standard when a plan has one.');
+    const std = plan.formula === 'standard';
     if (!Object.hasOwn(PACE, plan.pace)) errors.push('pace must be careful, normal or all.');
     const lists = [['acts', LIMITS.acts], ['foes', LIMITS.foes], ['checks', LIMITS.checks]];
     for (const [key, max] of lists) {
@@ -50,9 +63,17 @@ export function validatePlan(plan) {
     (Array.isArray(plan.acts) ? plan.acts : []).forEach((act, n) => {
         const where = `act ${n + 1}`;
         if (!isObject(act)) { errors.push(`${where} must be an object.`); return; }
-        known(act, ['who', 'skill', 'uses', 'stat', 'target', 'edge', 'why'], where);
+        known(act, ['who', 'skill', 'uses', 'stat', 'target', 'edge', 'why', ...(std ? ['type', 'fit', 'area', 'support', 'difficulty'] : [])], where);
         text(act, 'who', where); text(act, 'skill', where, false); text(act, 'target', where); text(act, 'why', where, false);
-        stat(act, 'stat', where, act.skill === undefined);
+        stat(act, 'stat', where, !std && act.skill === undefined);
+        if (std) {
+            if (act.type !== undefined && !PLAN_TYPES.includes(act.type)) errors.push(`${where} type must be one of ${PLAN_TYPES.join(', ')}.`);
+            stat(act, 'fit', where, false);
+            for (const flag of ['area', 'support']) if (act[flag] !== undefined && act[flag] !== true) errors.push(`${where} ${flag} must be true.`);
+            if (act.support === true && !DIFFICULTIES.includes(act.difficulty)) errors.push(`${where} needs difficulty to be one of ${DIFFICULTIES.join(', ')}.`);
+            if (act.support !== true && act.difficulty !== undefined) errors.push(`${where} has "difficulty", which only a support action uses.`);
+            if (act.support === true && act.area === true) errors.push(`${where} cannot be both support and area.`);
+        }
         if (act.uses !== undefined && !USES.includes(act.uses)) errors.push(`${where} uses must be mana or stamina.`);
         if (act.edge !== undefined && !(Number.isInteger(act.edge) && Math.abs(act.edge) <= FORMULA.edgeMax)) errors.push(`${where} edge must be a whole number from -${FORMULA.edgeMax} to ${FORMULA.edgeMax}.`);
     });
@@ -65,16 +86,21 @@ export function validatePlan(plan) {
             if (foe.hold !== true) errors.push(`${where} hold must be true.`);
             return;
         }
-        known(foe, ['slot', 'target', 'defend', 'skill'], where);
+        known(foe, ['slot', 'target', 'defend', 'skill', ...(std ? ['againstMagic'] : [])], where);
         text(foe, 'target', where); text(foe, 'skill', where, false);
-        stat(foe, 'defend', where);
+        stat(foe, 'defend', where, !std);
+        if (std && foe.againstMagic !== undefined && foe.againstMagic !== true) errors.push(`${where} againstMagic must be true.`);
     });
     (Array.isArray(plan.checks) ? plan.checks : []).forEach((check, n) => {
         const where = `check ${n + 1}`;
         if (!isObject(check)) { errors.push(`${where} must be an object.`); return; }
-        known(check, ['who', 'skill', 'uses', 'stat', 'difficulty'], where);
+        known(check, ['who', 'skill', 'uses', 'stat', 'difficulty', ...(std ? ['type', 'fit'] : [])], where);
         text(check, 'who', where); text(check, 'skill', where, false);
-        stat(check, 'stat', where, check.skill === undefined);
+        stat(check, 'stat', where, !std && check.skill === undefined);
+        if (std) {
+            if (check.type !== undefined && !['social', 'check'].includes(check.type)) errors.push(`${where} type must be social or check.`);
+            stat(check, 'fit', where, false);
+        }
         if (!DIFFICULTIES.includes(check.difficulty)) errors.push(`${where} needs difficulty to be one of ${DIFFICULTIES.join(', ')}.`);
         if (check.uses !== undefined && !USES.includes(check.uses)) errors.push(`${where} uses must be mana or stamina.`);
     });
@@ -99,7 +125,11 @@ function lineOf(raw) {
     const labels = {};
     for (const part of rest) {
         const at = part.indexOf(':');
-        if (at < 0) { if (/^\s*hold\s*$/i.test(part)) labels.hold = true; continue; }
+        if (at < 0) {
+            const flag = /^\s*(hold|area|magic|support)\s*$/i.exec(part);
+            if (flag) labels[flag[1].toLowerCase()] = true;
+            continue;
+        }
         labels[part.slice(0, at).trim().toLowerCase()] = part.slice(at + 1).trim();
     }
     if (head === 'foe' && /\bhold\s*$/i.test(word[2])) return { head, name: word[2].replace(/\s*[,—-]?\s*\bhold\s*$/i, '').trim(), labels: { ...labels, hold: true } };
@@ -126,6 +156,11 @@ const difficultyOf = value => {
     return word === 'veryhard' || word === 'very-hard' ? 'very hard' : null;
 };
 
+const typeOf = value => {
+    const word = String(value ?? '').trim().toLowerCase().replace(/[^a-z]/g, '');
+    return PLAN_TYPES.find(type => word.startsWith(type)) ?? null;
+};
+
 const usesOf = value => {
     const word = String(value ?? '').trim().toLowerCase();
     return USES.find(use => word.startsWith(use)) ?? null;
@@ -150,10 +185,11 @@ function skillOf(character, labels) {
  * A line that names someone or a foe the sheet does not have, a stat that is not one of the seven, or a difficulty
  * that is not a word is dropped by itself; the rest stands. `dropped` counts them.
  */
-export function parsePlanAnswer(answer, sheet) {
+export function parsePlanAnswer(answer, sheet, { formula = 'classic' } = {}) {
     const text = String(answer ?? '').trim();
     if (!text) return { error: 'the answer was empty' };
-    const plan = { pace: 'normal', acts: [], foes: [], checks: [] };
+    const std = formula === 'standard';
+    const plan = { ...(std ? { formula: 'standard' } : {}), pace: 'normal', acts: [], foes: [], checks: [] };
     let read = 0;
     let dropped = 0;
     let none = false;
@@ -172,6 +208,19 @@ export function parsePlanAnswer(answer, sheet) {
             const who = matchCharacter(sheet, name);
             const skill = skillOf(who, labels);
             const stat = skill.stat;
+            if (std) {
+                // Standard: the type decides the stat, so a line needs only a character and a target (a foe, or an ally for support).
+                const support = labels.support !== undefined && !/^(no|none|false|-|—)$/i.test(String(labels.support));
+                const mate = support ? matchCharacter(sheet, labels.target) : null;
+                const target = support ? mate : matchFoe(sheet, labels.target);
+                const difficulty = support ? difficultyOf(labels.support === true ? 'normal' : labels.support) ?? 'normal' : null;
+                if (!who || !target || plan.acts.length >= LIMITS.acts) { dropped += 1; continue; }
+                const type = typeOf(labels.type);
+                const fit = type === 'check' ? statOf(labels.fit ?? labels.stat) : null;
+                plan.acts.push({ who: who.who, ...skill.entry, ...(type ? { type } : {}), ...(fit ? { fit } : {}), ...(!support && labels.area ? { area: true } : {}),
+                    ...(support ? { support: true, difficulty } : {}), target: support ? mate.who : target.name, ...edgeOf(labels.edge) });
+                continue;
+            }
             const target = matchFoe(sheet, labels.target);
             if (!who || !(stat || skill.named) || !target || plan.acts.length >= LIMITS.acts) { dropped += 1; continue; }
             plan.acts.push({ who: who.who, ...skill.entry, target: target.name, ...edgeOf(labels.edge) });
@@ -186,11 +235,18 @@ export function parsePlanAnswer(answer, sheet) {
             // none, or for a skill they lack. An answer from before this had no skill: its plans never carry the key.
             const named = oneLine(labels.skill);
             const phrase = named && !/^(none|no|-|—)$/i.test(named) ? named : '';
-            plan.foes.push({ slot: foe.slot, target: target.who, defend, ...(phrase ? { skill: matchSkill(target, phrase)?.name ?? phrase } : {}) });
+            plan.foes.push({ slot: foe.slot, target: target.who, ...(std ? { ...(labels.magic ? { againstMagic: true } : {}) } : { defend }), ...(phrase ? { skill: matchSkill(target, phrase)?.name ?? phrase } : {}) });
         } else if (head === 'check') {
             const who = matchCharacter(sheet, name);
             const skill = skillOf(who, labels);
             const difficulty = difficultyOf(labels.difficulty ?? labels.dc);
+            if (std) {
+                if (!who || !difficulty || plan.checks.length >= LIMITS.checks) { dropped += 1; continue; }
+                const type = ['social', 'check'].includes(typeOf(labels.type)) ? typeOf(labels.type) : null;
+                const fit = statOf(labels.fit ?? labels.stat);
+                plan.checks.push({ who: who.who, ...skill.entry, ...(type ? { type } : {}), ...(fit && !skill.entry.stat ? { fit } : {}), difficulty });
+                continue;
+            }
             if (!who || !(skill.stat || skill.named) || !difficulty || plan.checks.length >= LIMITS.checks) { dropped += 1; continue; }
             plan.checks.push({ who: who.who, ...skill.entry, difficulty });
         }

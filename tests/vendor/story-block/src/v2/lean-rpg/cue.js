@@ -1,7 +1,7 @@
 // The [Rolls] cue (SPEC_RPG_v1 §4.5.3 step 5): what the narrator is told under [Happened], and what a refused action
 // says. Short lines, one per roll; the numbers are always "the party member's total vs the foe's (or the difficulty)".
 // Model-facing text, kept to the cue budget (names.js LIMITS.cueTokens).
-import { BATTLE_MARKER, LIMITS } from './names.js';
+import { BATTLE_MARKER, LIMITS, STAGES, stageWord } from './names.js';
 
 export const OUTCOME_WORD = Object.freeze({ success: 'SUCCESS', cost: 'SUCCESS AT A COST', fail: 'FAIL' });
 
@@ -44,6 +44,8 @@ export function shortNames(names, max = NAME_CUT) {
 export function lineText(line, { compact = false, names = 0, shown = name => name, plain = false } = {}) {
     const word = OUTCOME_WORD[line.outcome];
     const who = shown(line.pc.who);
+    if (line.type && line.kind !== 'check') return standardLine(line, { names, shown, word, who });
+    if (line.type && line.support) return `${who} → ${shown(line.target)}${line.skill ? ` (${cut(line.skill, names)}, support)` : ' (support)'}: ${word} ${numbers(line)}${line.damage ? `, heals${line.decisive ? ' well' : ''}` : ''}`;
     if (line.kind === 'check') {
         if (compact) return `${who} — ${line.difficulty} check: ${word} ${numbers(line)}`;
         // a stat the pack hides is not named (review 163)
@@ -53,6 +55,40 @@ export function lineText(line, { compact = false, names = 0, shown = name => nam
     if (line.kind === 'foe') return `${shown(line.foe.name)} attacks ${who}${line.skill ? ` (${cut(line.skill, names)})` : ''}: ${word} for ${who} ${numbers(line)}`;
     return `${who} → ${shown(line.foe.name)}${line.skill ? ` (${cut(line.skill, names)})` : ''}: ${word} ${numbers(line)}`;
 }
+
+// The Standard formula's act and foe attack: Classic's wording, then what the roll did to the bars in words (the narrator reads no block counts).
+function standardLine(line, { names, shown, word, who }) {
+    const hit = line.damage
+        ? (line.kind === 'foe' ? `, hits ${who}${line.decisive ? ' hard' : ''}` : `, a ${line.decisive ? 'decisive ' : ''}hit`)
+        : (line.decisive ? ', decisive' : '');
+    // (a skill whose Stamina or Mana ran out in the fight is rolled without it)
+    const bare = line.without ? ` (${cut(line.without, names)} unavailable: resource spent)` : '';
+    if (line.kind === 'foe') return `${shown(line.foe.name)} attacks ${who}${line.skill ? ` (${cut(line.skill, names)})` : ''}${bare}: ${word} for ${who} ${numbers(line)}${hit}`;
+    const kind = line.area ? ' (area)' : '';
+    return `${who} → ${shown(line.foe.name)}${line.skill ? ` (${cut(line.skill, names)})` : ''}${bare}${kind}: ${word} ${numbers(line)}${hit}`;
+}
+
+const IDLE_WHY = Object.freeze({ down: 'Down', beaten: 'beaten', 'no-target': 'no target left' });
+
+/** The bars the told lines moved, from `start` (id → bar): [{ id, kind, name, module, field, from, to, size }] (one per bar, its first `from` to its last `to`). */
+export function hurtsOf(start, lines) {
+    const moved = new Map();
+    for (const line of lines) {
+        // (a hit or a heal moves Health; a skill's cost moves Stamina or Mana)
+        for (const damage of [line.damage, line.cost]) {
+            if (!damage) continue;
+            const before = start.get(damage.id), seen = moved.get(damage.id);
+            moved.set(damage.id, { id: damage.id, kind: damage.kind, name: damage.name, module: before.module, field: before.field, from: seen?.from ?? damage.from, to: damage.to, size: damage.size });
+        }
+    }
+    return [...moved.values()].filter(item => item.from !== item.to);
+}
+
+// "Wessel Hurt; Sluice Rats Wounded": where the bars the told lines moved stand now, as words.
+const barsLine = (start, lines) => hurtsOf(start, lines).map(item => {
+    const own = item.field === 'stamina' || item.field === 'mana';
+    return `${item.name} ${own ? `${item.field === 'mana' ? 'Mana' : 'Stamina'} ` : ''}${stageWord(own ? STAGES[item.field] : STAGES.health, item.to, item.size)}`;
+}).join('; ');
 
 const STOP_POINTS = 'Stop earlier at the first stop point (a foe falls, flees or yields; anyone on your side is Down or Badly wounded; new foes arrive).';
 
@@ -65,10 +101,12 @@ const shortRefusal = text => cut(String(text).replace(/\s*\([^)]*\)/g, '').repla
  * is how much it is shortened to fit the budget: 0 as written; 1 checks without their skill and refusals without their
  * reasons; 2 the refusals as one count; 3 names cut as well.
  */
-export function cueText({ checks, rounds, refused, plainRefused, decisive }, shape = 0, { plain = false } = {}) {
+export function cueText(parts, shape = 0, { plain = false } = {}) {
+    const { checks, rounds, refused, plainRefused, decisive } = parts;
     const fight = rounds.length > 0;
+    const std = parts.standard ?? null;
     const head = fight
-        ? `[Rolls] Code rolled these. Tell them in this order and as given, and never invent a roll; write ${BATTLE_MARKER} on its own line where the fight is told.`
+        ? `[Rolls] Code rolled these${std ? ' and has already moved the bars they hit, heal or spend (Health, and the Stamina or Mana a skill uses; the last line says where those stand): never set those yourself' : ''}. Tell them in this order and as given, and never invent a roll; write ${BATTLE_MARKER} on its own line where the fight is told.`
         : '[Rolls] Code rolled these. Tell them as given, and never invent a roll.';
     // Shape 3 cuts every name, and each stays different from the others, so the narrator can tell who earned which result.
     const options = { compact: shape >= 1, names: shape >= 3 ? NAME_CUT : 0, plain };
@@ -79,12 +117,25 @@ export function cueText({ checks, rounds, refused, plainRefused, decisive }, sha
     }
     const lines = [head];
     for (const line of checks) lines.push(lineText(line, options));
-    for (const round of rounds) for (const line of round.lines) lines.push(`Round ${round.n}: ${lineText(line, options)}`);
+    if (std && fight) {
+        // (names only; a quick start and its opening action come before round 1)
+        if (shape < 2 && std.order.length) lines.push(`Turn order: ${std.order.map(entry => options.shown ? options.shown(entry.name) : entry.name).join(', ')}.`);
+        for (const item of std.quick) lines.push(`${item.who} is quick enough to act first against ${item.against} (an opening action).`);
+        for (const line of std.opening) lines.push(`Opening: ${lineText(line, options)}`);
+    }
+    for (const round of rounds) {
+        for (const line of round.lines) lines.push(`Round ${round.n}: ${lineText(line, options)}`);
+        for (const item of round.idle ?? []) lines.push(`Round ${round.n}: ${item.who} does not act: ${IDLE_WHY[item.why] ?? item.why}.`);
+    }
     // measuring (`plain`), each refusal as if nothing were hidden (`plainRefused`, the same count; review 166)
     const notes = plain && plainRefused?.length === refused.length ? plainRefused : refused;
     if (shape >= 2 && notes.length) lines.push(`${notes.length} more ${notes.length === 1 ? 'action was' : 'actions were'} not rolled as planned.`);
     else for (const text of notes) lines.push(shape >= 1 ? shortRefusal(text) : text);
-    if (fight) lines.push(`Round ${rounds.at(-1).n} is ${decisive ? 'decisive' : 'the last rolled'}: stop there at the latest. ${STOP_POINTS}`);
+    if (std && fight) {
+        const standing = barsLine(std.start, [...std.opening, ...rounds.flatMap(round => round.lines)]);
+        if (standing) lines.push(`Bars now: ${standing}.`);
+    }
+    if (fight) lines.push(`Round ${rounds.at(-1).n} is ${decisive ? (rounds.at(-1).decisive || !std ? 'decisive' : 'the end of the fight') : 'the last rolled'}: stop there at the latest. ${STOP_POINTS}`);
     return lines.join('\n');
 }
 

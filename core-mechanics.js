@@ -3907,16 +3907,23 @@ export function normalizeNpcRecord(raw = {}) {
     const ageFields = normalizeStoredAgeFields(raw);
     npc.age = ageFields.age;
     npc.apparentAge = ageFields.apparentAge;
-    npc.personality = locked.has('personality')
+    // (the living cast) A dossier made from the pack's cast keeps the pack's words exactly as written (`castFrom.first`) for as long as
+    // the stored field still is those words; once a scan or the reader changes the field it is compacted like any other.
+    const packFirst = raw.castFrom && typeof raw.castFrom.first === 'object' && raw.castFrom.first ? raw.castFrom.first : {};
+    const packWords = (field, max) => {
+        const text = typeof packFirst[field] === 'string' ? cleanText(packFirst[field], max) : '';
+        return text && cleanText(raw[field], max) === text;
+    };
+    npc.personality = locked.has('personality') || packWords('personality', 900)
         ? cleanText(raw.personality, 900)
         : compactDurableText(raw.personality, DURABLE_PROFILE_LIMITS.personality, 6);
-    npc.speech = locked.has('speech')
+    npc.speech = locked.has('speech') || packWords('speech', 600)
         ? cleanText(raw.speech, 600)
         : compactDurableText(raw.speech, DURABLE_PROFILE_LIMITS.speech, 5);
-    npc.appearance = locked.has('appearance')
+    npc.appearance = locked.has('appearance') || packWords('appearance', 1800)
         ? cleanText(raw.appearance, 1800)
         : normalizeAppearanceCanon(raw.appearance);
-    npc.background = locked.has('background')
+    npc.background = locked.has('background') || packWords('background', 1200)
         ? cleanText(raw.background, 1200)
         : compactDurableText(raw.background, DURABLE_PROFILE_LIMITS.background, 8);
     npc.relationshipSummary = compactDurableText(raw.relationshipSummary, DURABLE_PROFILE_LIMITS.relationshipSummary, 6);
@@ -6892,6 +6899,54 @@ function compactCaptureRules() {
 11. JSON only: {"npcs":[...],"profileUpdates":[...],"keyRelationshipEdges":[...]}. Example: {"id":"npc_myla","evidence":{"speech":["formal"]},"speechState":"refine","speech":"Soft, formal."}.`;
 }
 
+const LAYERED_SECRETS_RULE = 'HIDDEN NOTES: for each NEW dossier-worthy NPC only (never an existing one), also return "secrets" in its npcs[] row: 2 to 5 layered hidden notes, light to deep, as many as the person is deep (a passing shopkeeper 2, someone central 4-5). Ground them in the established background; never contradict it or invent a rival backstory. Each {"title":"<=60 chars","text":"<=300 chars, one fact the player does not know yet","meter":"trust|affection|desire|tension","at":whole number 1..100, higher for deeper layers} or, for a layer that opens on a story event instead, {"title","text","when":"short event <=120 chars"}. Written once; never repeat or rewrite them later.';
+// A targeted pass (backfill) is about one NEW dossier: the same notes, asked for that person.
+const LAYERED_SECRETS_RULE_TARGET = LAYERED_SECRETS_RULE.replace('for each NEW dossier-worthy NPC only (never an existing one), also return "secrets" in its npcs[] row', 'this dossier is NEW: also return "secrets" in the npcs[] row of the target');
+const watchItems = eventWatch => (Array.isArray(eventWatch) ? eventWatch : []).filter(item => item && item.key && item.event);
+// `window`: the story given is a window of recent replies (a targeted pass), not only the current exchange.
+function eventWatchRule(eventWatch, { window = false } = {}) {
+    const watch = watchItems(eventWatch);
+    if (!watch.length) return '';
+    const where = window ? 'the supplied story shows happened' : 'the CURRENT exchange clearly shows happened (never from earlier history, never a guess)';
+    return `STORY EVENTS to look for (present NPCs' hidden notes): ${watch.map(item => `${item.key} = ${item.name}: ${item.event}`).join(' | ')}. Return top-level "secretEvents":["<key>",...] with ONLY the keys whose event ${window ? where + ' (clearly, never a guess)' : where}; [] or omit when none.`;
+}
+
+/**
+ * The scanner prompt's rules about hidden notes ('' when neither is asked), numbered from `start` after the last rule.
+ * `layeredSecrets`: also write 2 to 5 layered notes for each NEW dossier-worthy NPC. `eventWatch`: [{ key, name, event }], the
+ * story events of present NPCs' locked notes; the scan answers `secretEvents` with the keys of those the CURRENT exchange
+ * clearly shows. `events: false` leaves the watch out (a one-pass capture carries it in its context part, where the list that
+ * changes from reply to reply belongs: hiddenNoteEventParagraph).
+ */
+export function hiddenNotePromptRules({ layeredSecrets = false, eventWatch = null, start = 16, events = true } = {}) {
+    const lines = [];
+    if (layeredSecrets) lines.push(LAYERED_SECRETS_RULE);
+    if (events) {
+        const rule = eventWatchRule(eventWatch);
+        if (rule) lines.push(rule);
+    }
+    return lines.length ? lines.map((line, index) => `\n${start + index}. ${line}`).join('') : '';
+}
+
+/** The story events to look for, as a paragraph of its own ('' with none): the dynamic part of a one-pass capture. */
+export function hiddenNoteEventParagraph(eventWatch) {
+    const rule = eventWatchRule(eventWatch);
+    return rule ? `\n\n${rule}` : '';
+}
+
+/**
+ * A targeted prompt (backfill, Refresh) with the hidden notes it was asked for, as paragraphs at its end. `layeredSecrets`
+ * (a backfill of a NEW dossier only) and `eventWatch` (this one person's locked event notes) are the only options; given
+ * neither, the prompt is returned as it is.
+ */
+export function appendHiddenNotePrompt(prompt, { layeredSecrets = false, eventWatch = null } = {}) {
+    const parts = [];
+    if (layeredSecrets) parts.push(LAYERED_SECRETS_RULE_TARGET);
+    const rule = eventWatchRule(eventWatch, { window: true });
+    if (rule) parts.push(rule);
+    return parts.length ? `${prompt}\n\n${parts.join('\n\n')}` : prompt;
+}
+
 export function buildScannerPrompt({
     transcript,
     existingNpcs = [],
@@ -6912,6 +6967,8 @@ export function buildScannerPrompt({
     dossierAbove = '',
     compactCapture = false,
     sceneNames = null,
+    layeredSecrets = false,
+    eventWatch = null,
 }) {
     const baseline = normalizeRelationshipBaseline(relationshipBaseline);
     const caps = normalizeRelationshipCaps(relationshipCaps);
@@ -7076,10 +7133,16 @@ export function buildScannerPrompt({
     // part, names the people.
     const captureNames = narrationCapture ? `\nNot NPCs: the player is ${userName}; the character you play is ${charName}.` : '';
     const sceneLine = scene ? `\nIn the scene now (the story's scene list): ${scene.names.join(', ')}.` : '';
+    // Hidden notes (Story Suite hosted only; absent by default, so the prompt is byte-identical without them): layered
+    // secrets for a NEW dossier-worthy NPC, and the story events to look for in the CURRENT exchange. A one-pass capture
+    // keeps its rules the same from reply to reply: the layered rule goes with them, the list of events (which changes)
+    // goes in the context part.
+    const hiddenNoteRules = hiddenNotePromptRules({ layeredSecrets, eventWatch, events: !narrationCapture });
+    const hiddenNoteContext = narrationCapture ? hiddenNoteEventParagraph(eventWatch) : '';
     if (rulesBlock) {
         return `${NARRATION_CAPTURE_HEADER}
 Admission: ${admissionPolicy}
-${rulesBlock}
+${rulesBlock}${hiddenNotePromptRules({ layeredSecrets, start: 12, events: false })}
 
 Relationship rubric: ${relationshipRubric || '(none)'}
 Impact rubric: ${impactRubric || '(none)'}
@@ -7093,7 +7156,7 @@ Relevant live context (dynamic fields only):
 ${JSON.stringify(liveSent)}
 
 Stable profile context (strongly relevant existing only):
-${JSON.stringify(profileSent)}${dossierNote}
+${JSON.stringify(profileSent)}${dossierNote}${hiddenNoteContext}
 
 ${storyContext}`;
     }
@@ -7115,7 +7178,7 @@ Rules:
 12. RELATIONSHIP -100..+100 DELTA-ONLY; currentRelationship read-only. Return relationshipDelta+relationshipEvidence (all 4 keys). NEW only; continuation/aftermath=>0. Raw max 1/2/5/10; axis max 1/2/3/4. EVERY non-zero axis needs grounded CURRENT-exchange evidence. Desire needs explicit attraction/intimacy narration; rescue/gratitude/affection/trust/proximity=>0. Trust!=obedience; Affection!=devotion; Tension!=jealousy.
 13. lifeState unknown|alive|deceased; deceased+explicit=terminal death; alive output cannot revive.
 14. Memories: max3 NEW in npcs[] (existing too), ADDED to cap5 stored; no duplicate/paraphrased memories. If crowded use memoryRetention=top5 consequential/durable; recency=tiebreak only. homeBase=durable home/workplace/HQ/haunt, never current scene location; keep-by-default; change needs homeBaseState:"update"+homeBaseReason. Caps: ${PROMPT_CAPS}. COMPACT; never invent.
-15. JSON only: {"npcs":[...],"profileUpdates":[...],"keyRelationshipEdges":[...]}. profileUpdates example: {"id":"npc_myla","evidence":{"appearance":["bronze hair"],"speech":["formal"]},"appearanceState":"refine","appearance":"Bronze hair; wool smock.","speechState":"refine","speech":"Soft, formal."}. Existing relationship delta example: {"id":"npc_myla","relationshipDelta":{"trust":-2,"affection":0,"desire":0,"tension":2},"relationshipEvidence":{"trust":"lie","affection":"","desire":"","tension":"conflict"}}.
+15. JSON only: {"npcs":[...],"profileUpdates":[...],"keyRelationshipEdges":[...]}. profileUpdates example: {"id":"npc_myla","evidence":{"appearance":["bronze hair"],"speech":["formal"]},"appearanceState":"refine","appearance":"Bronze hair; wool smock.","speechState":"refine","speech":"Soft, formal."}. Existing relationship delta example: {"id":"npc_myla","relationshipDelta":{"trust":-2,"affection":0,"desire":0,"tension":2},"relationshipEvidence":{"trust":"lie","affection":"","desire":"","tension":"conflict"}}.${hiddenNoteRules}
 
 Relationship rubric: ${relationshipRubric || '(none)'}
 Impact rubric: ${impactRubric || '(none)'}
@@ -7129,7 +7192,7 @@ Relevant live context (dynamic fields only):
 ${JSON.stringify(liveSent)}
 
 Stable profile context (strongly relevant existing only):
-${JSON.stringify(profileSent)}${dossierNote}
+${JSON.stringify(profileSent)}${dossierNote}${hiddenNoteContext}
 
 ${storyContext}`;
 }

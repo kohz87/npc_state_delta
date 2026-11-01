@@ -27,15 +27,17 @@ const fullyNamed = scalar => {
 };
 
 // (`loadRpgTemplates` reads the list the first time the chooser needs it; a test hands in its own)
-export function createBlockWidgets({ templates, directorOn = () => true, leanRpgOn = () => false, navigate = () => {},
-    loadRpgTemplates = () => import('../lean-rpg/templates.js').then(loaded => loaded.LEAN_RPG_TEMPLATES) } = {}) {
+// (`rpgFormula()` is the stat formula the chat plays on, 'standard' or 'classic': a Standard chat is offered the Standard templates. A loader may
+// hand back one list, or `{ classic, standard }`.)
+export function createBlockWidgets({ templates, directorOn = () => true, leanRpgOn = () => false, navigate = () => {}, rpgFormula = () => 'standard',
+    loadRpgTemplates = () => import('../lean-rpg/templates.js').then(loaded => ({ classic: loaded.LEAN_RPG_TEMPLATES, standard: loaded.STANDARD_TEMPLATES })) } = {}) {
     const shared = { mode: 'list', draft: null, module: null, note: '' };
     // The RPG templates are read (a dynamic import) only when the feature is on and the chooser is open.
     let rpgTemplates = null, rpgLoading = false;
     const loadRpg = () => {
         if (rpgTemplates || rpgLoading) return;
         rpgLoading = true;
-        Promise.resolve().then(loadRpgTemplates).then(list => { rpgTemplates = Array.isArray(list) ? list : []; tell(); }, () => { rpgTemplates = []; });
+        Promise.resolve().then(loadRpgTemplates).then(list => { rpgTemplates = list ?? []; tell(); }, () => { rpgTemplates = []; });
     };
     const listeners = new Set();
     const tell = () => { for (const listener of [...listeners]) listener(); };
@@ -299,7 +301,11 @@ export function createBlockWidgets({ templates, directorOn = () => true, leanRpg
                 shared.module = null; shared.mode = 'editor'; tell();
             });
             let rpg = [];
-            if (leanRpgOn()) { loadRpg(); rpg = rpgTemplates ?? []; }
+            if (leanRpgOn()) {
+                loadRpg();
+                const loaded = rpgTemplates ?? [];
+                rpg = Array.isArray(loaded) ? loaded : (loaded[rpgFormula() === 'classic' ? 'classic' : 'standard'] ?? loaded.classic ?? []);
+            }
             if (rpg.length) {
                 chooser.appendChild(h(doc, 'h4', 'ss-block-chooser-heading', S.leanRpg));
                 for (const entry of rpg) button(doc, chooser, counts(entry), () => addFromTemplate(api, rows, entry, status));

@@ -217,6 +217,15 @@
 .rpg-set-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .rpg-chip { padding: 6px 12px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--ss-text) 20%, transparent); background: transparent; color: inherit; font: inherit; font-size: 13px; cursor: pointer; min-height: 32px; }
 .rpg-chip[aria-pressed="true"] { background: color-mix(in srgb, var(--ss-accent) 25%, transparent); border-color: var(--ss-accent); font-weight: 700; }
+.rpg-formula-scroll { overflow-x: auto; }
+.rpg-formula-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.rpg-formula-table th { text-align: left; font-weight: 700; white-space: nowrap; padding: 5px 12px 5px 0; vertical-align: top; }
+.rpg-formula-table td { padding: 5px 0; color: var(--ss-muted); }
+.rpg-formula-table tr + tr > * { border-top: 1px solid color-mix(in srgb, var(--ss-text) 10%, transparent); }
+.rpg-formula-nums { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.rpg-formula-num { display: grid; gap: 2px; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--ss-text) 6%, transparent); font-size: 12px; color: var(--ss-muted); min-width: 0; }
+.rpg-formula-num b { font-size: 16px; color: var(--ss-text); }
+.rpg-wiz-growth, .rpg-sheet-growth { margin: 6px 0 0; font-size: 12.5px; color: var(--ss-muted); }
 .rpg-set-nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 14px; }
 .rpg-set-num { display: grid; gap: 4px; font-size: 13px; align-content: start; min-width: 0; }
 .rpg-set-num small { color: var(--ss-muted); font-size: 11.5px; }
@@ -238,6 +247,7 @@
 .rpg-set-fold > summary { cursor: pointer; font-size: 13px; }
 .rpg-set-pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.45 ui-monospace, Menlo, monospace; padding: 10px; border-radius: 8px; background: color-mix(in srgb, black 25%, transparent); max-height: 220px; overflow: auto; margin: 8px 0; }
 @media (max-width: 600px) { .rpg-set-nums { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 600px) { .rpg-formula-nums { grid-template-columns: 1fr 1fr; } }
 
 /* ---- A new chat with no character (mockup sections 7 and 7b): Home's card, and the dialog that holds the first Send ---- */
 .ss-w-rpg-start-host { display: contents; }
@@ -252,3 +262,45 @@
 @media (max-width: 600px) { .rpg-hold-actions { justify-content: stretch; } .rpg-hold-actions .ss-button { flex: 1 1 100%; } }
 .rpg-left-pill { font-style: italic; }
 .rpg-wiz-persona[hidden] { display: none; }
+
+/* ---- Export / Import a character ---- */
+/* The RPG's dialogs sit over the Game view (its Party cards are right behind them): opaque, whatever the panel style. Under Glass the glass tint is laid
+   over an opaque floor of the same colour (--ss-sheet-floor); the other styles are the surface laid over itself. No blur: nothing is behind to blur. */
+.ss-dialog:has(.ss-w-rpg-wizard, .ss-w-rpg-export, .ss-w-rpg-hold) {
+    background-color: var(--ss-sheet-floor, var(--ss-surface));
+    background-image: linear-gradient(var(--ss-sheet-bg, var(--ss-surface)), var(--ss-sheet-bg, var(--ss-surface)));
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+.rpg-export-open, .rpg-exp-save { display: inline-flex; align-items: center; gap: 6px; }
+.ss-w-rpg-export { display: grid; gap: 12px; min-width: 0; }
+.rpg-exp-body { display: grid; gap: 12px; min-width: 0; }
+.rpg-exp-note { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--ss-muted); }
+.rpg-exp-opt { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 4px 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--ss-text) 18%, transparent); background: var(--ss-tile); }
+.rpg-exp-opt input { margin: 2px 0 0; width: 16px; height: 16px; accent-color: var(--ss-accent); }
+.rpg-exp-opt b { font-size: 14px; }
+.rpg-exp-lines { grid-column: 2; display: grid; gap: 2px; font-size: 12.5px; line-height: 1.45; color: var(--ss-muted); overflow-wrap: anywhere; }
+.rpg-exp-lines:empty { display: none; }
+.rpg-exp-help { opacity: 0.85; }
+.rpg-exp-actions { justify-content: flex-end; }
+.rpg-exp-actions .rpg-wiz-status { margin-right: auto; }
+.rpg-exp-file { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; padding: 2px 6px; border-radius: 6px; background: color-mix(in srgb, var(--ss-text) 12%, transparent); }
+.rpg-import { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border-radius: 12px; border: 1px dashed color-mix(in srgb, var(--ss-accent) 60%, transparent); font-size: 13px; }
+.rpg-import-text { flex: 1 1 200px; color: var(--ss-muted); }
+.rpg-import-done { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 12px; border-radius: 12px; font-size: 13px; line-height: 1.5;
+    background: color-mix(in srgb, var(--ss-good) 12%, transparent); border: 1px solid color-mix(in srgb, var(--ss-good) 45%, transparent); }
+.rpg-import-done .rpg-import-text { flex: 1 1 260px; color: inherit; }
+.rpg-wiz-replace { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 12px; border-radius: 12px; font-size: 13px; background: color-mix(in srgb, var(--ss-warn) 16%, transparent); border: 1px solid color-mix(in srgb, var(--ss-warn) 45%, transparent); }
+.rpg-wiz-replace-text { flex: 1 1 220px; }
+.rpg-import-error { margin: 0; padding: 8px 12px; border-radius: 8px; font-size: 13px; background: color-mix(in srgb, var(--ss-bad) 18%, transparent); }
+.rpg-wiz-also-import { color: inherit; padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.5; background: color-mix(in srgb, var(--ss-accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--ss-accent) 45%, transparent); }
+@media (max-width: 600px) { .rpg-exp-file { display: none; } .rpg-exp-actions .ss-button { flex: 1 1 auto; } }
+
+/* The Standard formula: the "next block" line under the skills and the Fight tab's turn order. */
+.rpg-growth { margin: 6px 0 0; font-size: 12px; line-height: 1.5; color: var(--ss-muted); }
+.rpg-order { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
+.rpg-order-pill b { margin-left: 4px; }
+.rpg-order-note { flex-basis: 100%; font-size: 12px; color: var(--ss-muted); line-height: 1.5; }
+@media (min-width: 700px) { .rpg-order-note { flex-basis: auto; } }
+.rpg-quick-start { margin: 0; font-size: 12.5px; color: var(--ss-muted); }
+.rpg-bl-skip { font-style: italic; opacity: 0.75; }

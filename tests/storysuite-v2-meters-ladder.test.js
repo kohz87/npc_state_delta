@@ -10,7 +10,7 @@ import {
 } from '../src/npc-meters.js';
 import { BUILT_IN_PRESETS, presetCatalog } from '../src/npc-meters-presets.js';
 import { metersCardScreen } from '../src/npc-meters-screen.js';
-import { v2MetersHtml, v2MetersProjection } from '../dossier-ui.js';
+import { v2MetersHtml, v2MetersProjection, v2SecretsHtml } from '../dossier-ui.js';
 import { fakeRoot } from './helpers/fake-dom.js';
 import { fakeDocument } from './helpers/fake-dom.js';
 
@@ -322,26 +322,27 @@ test('presets: the built-in three are plain; packs add theirs; the settings bloc
 
 // ---- 4. locked-note teasers ----
 
-test('teasers: a locked note shows its title and rule on the card and in the Cast tab, never its text', async () => {
+test('teasers: a locked note shows only that it is hidden and its rule (no title, no text, no icon); opened, its title and text', async () => {
     const s = await suite({ settings: { ladder: LADDER } });
     await s.say(['~ npc Mira | trust: +5']);
     const leaks = () => [
         JSON.stringify(s.host.sdk.query('npc.cast')), JSON.stringify(s.host.head()), s.def.context.static(),
-        JSON.stringify(s.def.context.tail(s.view())), JSON.stringify(s.adapter.dossierMeters(Object.values(s.delta.records))),
-    ].some(text => text.includes('lost heir'));
+        JSON.stringify(s.adapter.dossierMeters(Object.values(s.delta.records))),
+    ].some(text => text.includes('lost heir') || text.includes('Her past'));
     const mira = () => s.host.sdk.query('npc.cast').find(entry => entry.key === 'mira');
-    assert.deepEqual(mira().locked, [{ title: 'Her past', meter: 'trust', at: 30, text: '🔒 Her past — unlocks at Trust 30' }]);
+    assert.deepEqual(mira().locked, [{ id: secretId('trust', 30, SECRET), meter: 'trust', at: 30, event: false, opens: 'Opens at Trust 30', text: 'Hidden note · opens at Trust 30' }]);
     assert.equal(leaks(), false);
     const el = fakeRoot();
     s.def.tabs[0].render(el);
-    assert.match(el.innerHTML, /🔒 Her past — unlocks at Trust 30/);
-    assert.doesNotMatch(el.innerHTML, /lost heir/);
+    assert.match(el.innerHTML, /Hidden note · opens at Trust 30/);
+    assert.doesNotMatch(el.innerHTML, /lost heir|Her past|🔒|🔓/);
     await s.say(['~ npc Mira | trust: +15']);
     assert.deepEqual(mira().locked, []);
-    assert.deepEqual(mira().opened, [{ id: secretId('trust', 30, SECRET), title: 'Her past' }]);
+    assert.deepEqual(mira().opened, [{ id: secretId('trust', 30, SECRET), title: 'Her past', text: 'Opened · Trust 30' }]);
     s.def.tabs[0].render(el);
-    assert.match(el.innerHTML, /🔓 <b>Her past<\/b>: She was the lost heir of House Venn\./, 'once unlocked, the Cast tab shows it');
-    assert.ok(s.def.context.tail(s.view()).lines.includes(`Mira, now known: ${SECRET}`));
+    assert.match(el.innerHTML, /<b>Her past<\/b>: She was the lost heir of House Venn\./, 'once unlocked, the Cast tab shows it');
+    assert.doesNotMatch(el.innerHTML, /🔒|🔓/);
+    assert.ok(s.def.context.tail(s.view()).lines.includes(`Mira, known to the player now; may come out: ${SECRET}`));
 });
 
 test('teasers: editor lines carry an optional [title]; the id does not depend on it', () => {
@@ -369,8 +370,13 @@ test('the dossier view shows custom meters, the ladder line, milestones and teas
     assert.match(html, /&lt;Awe&gt;/);
     assert.doesNotMatch(html, /<Awe>/);
     assert.match(html, /Next: Confidant — trust 22\/60, affection 0\/40/);
-    assert.match(html, /🔒 Her past — unlocks at Trust 30/);
+    assert.doesNotMatch(html, /Her past|Hidden note|🔒/, 'the notes are in their own Secrets section, not among the meters');
+    const secrets = v2SecretsHtml(projection);
+    assert.match(secrets, /Secrets <small class="delta-secrets-count">· 0 opened · 1 still hidden<\/small>/);
+    assert.match(secrets, /delta-secret-bar[^>]*><\/span><span class="delta-secret-when">Opens at Trust 30<\/span>/);
+    assert.doesNotMatch(secrets, /Her past|lost heir|🔒/, 'a hidden note is a bar and its rule');
     assert.equal(v2MetersHtml(v2MetersProjection(null)), '');
+    assert.equal(v2SecretsHtml(v2MetersProjection(null)), '');
     s.adapter.stop();
     assert.deepEqual(s.adapter.dossierMeters(Object.values(s.delta.records)), {});
 });

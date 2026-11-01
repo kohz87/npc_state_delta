@@ -1878,14 +1878,14 @@ export function buildNarrationCaptureParts(options = {}) {
     return { rules: full.slice(0, at).trimEnd(), context: `${NARRATION_CAPTURE_TAIL_LEAD}\n${full.slice(at)}` };
 }
 export function buildBackfillPrompt(options = {}) {
-    return appendCustomFieldRule(appendBirthdayRule(continuity.buildBackfillPrompt(calendarPromptOptions(options)), options), options);
+    return mechanics.appendHiddenNotePrompt(appendCustomFieldRule(appendBirthdayRule(continuity.buildBackfillPrompt(calendarPromptOptions(options)), options), options), options);
 }
 export function buildDossierImportPrompt(options = {}) {
     return appendCustomFieldRule(appendBirthdayRule(continuity.buildDossierImportPrompt(calendarPromptOptions(options)), options), { ...options, customFieldSource: 'the dossier text' });
 }
 export function buildProfileRefreshPrompt(options = {}) {
-    return appendCustomFieldRule(insertRefreshBirthdayRule(continuity.buildProfileRefreshPrompt(calendarPromptOptions(options)), options), options);
+    return mechanics.appendHiddenNotePrompt(appendCustomFieldRule(insertRefreshBirthdayRule(continuity.buildProfileRefreshPrompt(calendarPromptOptions(options)), options), options), options);
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.5.0';
+export const NPC_STATE_VERSION = '1.6.0';

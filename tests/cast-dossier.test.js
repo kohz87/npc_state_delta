@@ -1,0 +1,770 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { createHost } from './vendor/story-block/testkit/index.js';
+import { buildInjection, createNpcRecord } from '../core.js';
+import { normalizeNpcRecord } from '../core-mechanics.js';
+import { castFromHtml, castProjection, projectDossierState } from '../dossier-ui.js';
+import { FEATURE_STAGES, normalizeSecrets, observeCast, validateNpcSlice } from '../src/npc-meters.js';
+import {
+    applyCastEntry, castBadge, castSecrets, castView, dossierFor, findCastPerson, metWithEntry, normalizeCast, normalizeEntry, shortPackName,
+} from '../src/cast-dossier.js';
+import { MODULE_ID, createStorySuiteV2Adapter } from '../src/storysuite-v2.js';
+import { runHostScenario } from './helpers/host-scenario.js';
+
+// The living cast (the user's decision, 1 Nov): Story Director owns who has been met (`director.cast`, read only); at the first
+// meeting Delta makes the dossier at once from the pack entry: profile, portrait, starting numbers, stages, fields and hidden
+// notes, with the "Ersveil cast" badge and the "From the Ersveil cast" block. The meeting is recorded in the saved `npc` slice
+// at that reply (replay-safe); a swipe takes the dossier back with the reply. Without a Story Director nothing changes.
+
+const DAY = 1440;
+const FENNA_ENTRY = {
+    id: 'fenna', name: 'Fenna', aliases: ['the ferrywoman'],
+    about: 'Runs the night ferry at Bluewatch docks.',
+    look: 'Tall and weathered, rope-scarred hands, a grey oilskin coat.',
+    voice: 'Dry and unhurried; says "aye" for yes.',
+    personality: 'Stubborn, watchful, quietly kind.',
+    history: 'Lost her husband to the weir in 598; has run the night ferry alone since.',
+    portrait: 'fenna.webp',
+    start: { place: 'Bluewatch docks', goal: 'Find out who opened the weir', routine: 'evenings at the ferry' },
+    drawnTo: ['whoever fought at the weir'],
+    meters: { preset: 'companion', trust: 10, loyalty: 30, nonsense: 5 },
+    stages: [{ name: 'Wary', needs: 'trust 5' }, { name: 'Ally', needs: 'trust 40, loyalty 50' }],
+    fields: { Allegiance: 'Ferry guild' },
+    secrets: [
+        { title: "Her husband's debt", text: 'He owed the smugglers; she still pays it off.', meter: 'trust', at: 60 },
+        { title: 'The weir', text: 'She saw who opened the gates.', when: 'the party learns of the toll-gang' },
+    ],
+};
+const person = (extra = {}) => ({
+    key: 'ersveil:fenna', pack: 'ersveil', id: 'fenna', name: 'Fenna', aliases: ['the ferrywoman'],
+    met: { on: 11 * DAY, where: 'Bluewatch docks' }, where: 'upriver', doing: 'on the ferry to Ashford',
+    lastHeard: { text: 'took the ferry upriver to Ashford', on: 14 * DAY }, alive: true, entry: structuredClone(FENNA_ENTRY), ...extra,
+});
+const unmet = () => person({ met: null, entry: undefined, lastHeard: undefined });
+const calendar = { era: 'CY', months: [{ name: 'Goldwane', days: 30 }], leapYears: false };
+const dateText = minutes => `Gw ${Math.floor(minutes / DAY) + 1}`;
+
+// ---- Story Director's answer, cleaned ----
+
+test('the answer is cleaned; an unmet person never carries an entry, a met one does; dates are written on the calendar', () => {
+    const list = normalizeCast([person(), { ...unmet(), key: 'ersveil:sera', id: 'sera', name: 'Sera', entry: structuredClone(FENNA_ENTRY) }, { name: 'no key' }, 'junk', null], dateText);
+    assert.deepEqual(list.map(item => item.key), ['ersveil:fenna', 'ersveil:sera'], 'unusable rows and duplicates are left out');
+    const [fenna, sera] = list;
+    assert.equal(fenna.met.on, 'Gw 12');
+    assert.equal(fenna.met.where, 'Bluewatch docks');
+    assert.deepEqual(fenna.lastHeard, { text: 'took the ferry upriver to Ashford', on: 'Gw 15' });
+    assert.equal(fenna.entry.start.goal, 'Find out who opened the weir');
+    assert.equal(sera.entry, null, 'an entry that came with an unmet person is dropped');
+    assert.equal(sera.lastHeard, null);
+    assert.deepEqual(metWithEntry(list).map(item => item.key), ['ersveil:fenna']);
+    assert.equal(findCastPerson(list, 'ersveil:sera').name, 'Sera');
+    assert.deepEqual(normalizeCast('nope'), [], 'no array, no cast');
+    assert.equal(normalizeCast([person()])[0].met.on, '', 'without a calendar a story minute has no text');
+    assert.equal(normalizeCast([person({ met: { on: 'Gw 3', where: 'x' } })])[0].met.on, 'Gw 3', 'words are kept as given');
+});
+
+test('the entry is bounded plain text: lists and texts cut, the pack\'s hidden notes keep a meter rule or a story event', () => {
+    const long = 'word '.repeat(700);
+    const entry = normalizeEntry({ ...FENNA_ENTRY, look: long, aliases: Array.from({ length: 20 }, (_, i) => `alias ${i}`), fields: Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`F${i}`, `v${i}`])) });
+    assert.ok(entry.look.length <= 1800 && entry.aliases.length === 8 && Object.keys(entry.fields).length === 12);
+    assert.equal(normalizeEntry({ about: 'no name' }), null);
+    assert.deepEqual(entry.stages.map(stage => stage.name), ['Wary', 'Ally']);
+    assert.deepEqual(normalizeEntry({ ...FENNA_ENTRY, stages: [{ meter: 'trust', at: 30, name: 'Friend' }] }).stages, [{ name: 'Friend', needs: [{ meter: 'trust', at: 30 }] }], 'a threshold row reads as a need');
+    const secrets = castSecrets(FENNA_ENTRY.secrets.concat([{ title: 'no rule', text: 'dropped' }, { title: 'no text', meter: 'trust', at: 5 }]));
+    assert.equal(secrets.length, 2);
+    assert.deepEqual(secrets[0], { title: "Her husband's debt", text: 'He owed the smugglers; she still pays it off.', meter: 'trust', at: 60, from: 'pack' }, 'a pack\'s note says it came from the pack (the dossier editor keeps it hidden while locked)');
+    assert.deepEqual([secrets[1].title, secrets[1].when, secrets[1].meter], ['The weir', 'the party learns of the toll-gang', undefined]);
+    assert.deepEqual(normalizeSecrets(secrets).map(note => [note.id.startsWith('sec_'), note.when ?? null]), [[true, null], [true, 'the party learns of the toll-gang']], 'the hidden-notes code reads them (ids, story-event rule)');
+    assert.equal(castSecrets(Array.from({ length: 12 }, (_, i) => ({ text: `n${i}`, meter: 'trust', at: i }))).length, 8, 'at most eight');
+});
+
+// ---- the dossier ----
+
+test('the dossier is made from the entry: profile, numbers, fields, notes, portrait, the way back to the pack', () => {
+    const [p] = normalizeCast([person()], dateText);
+    const portrait = { dataUrl: 'data:image/webp;base64,AAAA', mime: 'image/webp', sourceName: 'fenna.webp', updatedAt: 1 };
+    const made = normalizeNpcRecord(applyCastEntry(createNpcRecord('Fenna', []), p, { packName: 'Ersveil', portrait }));
+    assert.equal(made.role, 'Runs the night ferry at Bluewatch docks.');
+    assert.equal(made.appearance, FENNA_ENTRY.look);
+    assert.equal(made.speech, FENNA_ENTRY.voice);
+    assert.equal(made.personality, FENNA_ENTRY.personality);
+    assert.equal(made.background, FENNA_ENTRY.history);
+    assert.equal(made.homeBase, 'Bluewatch docks');
+    assert.equal(made.goal, 'Find out who opened the weir');
+    assert.equal(made.location, 'Bluewatch docks', 'where they were met');
+    assert.deepEqual(made.aliases, ['the ferrywoman']);
+    assert.deepEqual(made.customFields, { Allegiance: 'Ferry guild' });
+    assert.equal(made.relationship.trust, 10, 'the built-in numbers start where the pack put them');
+    assert.deepEqual(made.meterSetup, { track: 'companion', limits: {} });
+    assert.equal(made.secrets.length, 2, 'the hidden notes are handed over');
+    assert.equal(made.portrait.dataUrl, portrait.dataUrl);
+    assert.deepEqual(made.castFrom, {
+        key: 'ersveil:fenna', pack: 'ersveil', id: 'fenna', packName: 'Ersveil', met: { on: 'Gw 12', where: 'Bluewatch docks' },
+        goal: 'Find out who opened the weir', routine: 'evenings at the ferry', stages: FENNA_ENTRY.stages.map(({ name, needs }) => ({ name, needs })),
+        first: { appearance: FENNA_ENTRY.look, speech: FENNA_ENTRY.voice, personality: FENNA_ENTRY.personality, background: FENNA_ENTRY.history },
+    });
+    // The narrator hears the pack's words like any dossier's.
+    const injection = buildInjection([{ ...made, present: true }], 'Fenna is here.', 1);
+    assert.match(injection, /oilskin coat/);
+    assert.match(injection, /says "aye"/);
+    assert.equal(applyCastEntry(createNpcRecord('Fenna', []), { ...p, entry: null }), null, 'without an entry (an unmet person) there is nothing to make');
+});
+
+test('the badge says the pack\'s short name: a bracketed note or a subtitle is left off', () => {
+    assert.equal(shortPackName('Ersveil (open world)'), 'Ersveil');
+    assert.equal(shortPackName('Moonveil — the long night'), 'Moonveil');
+    assert.equal(shortPackName('Lean: a small RPG'), 'Lean');
+    assert.equal(shortPackName('  Ersveil '), 'Ersveil');
+    assert.equal(shortPackName(''), '');
+    const [p] = normalizeCast([person()], dateText);
+    assert.equal(applyCastEntry(createNpcRecord('Fenna', []), p, { packName: 'Ersveil (open world)' }).castFrom.packName, 'Ersveil');
+    assert.equal(castBadge(applyCastEntry(createNpcRecord('Fenna', []), p, { packName: '(x)' }).castFrom), 'Cast', 'nothing left of the name: just Cast');
+});
+
+test('the pack\'s words stay exactly as written until the field is changed; then it is compacted like any other', () => {
+    const [p] = normalizeCast([person({ entry: { ...FENNA_ENTRY, voice: 'Dry and slow. Never raises her voice; goes quieter when angry. Calls everyone love or sailor. Asks about food first. Hums when worried. Says aye.' } })], dateText);
+    const made = normalizeNpcRecord(applyCastEntry(createNpcRecord('Fenna', []), p, { packName: 'Ersveil' }));
+    assert.equal(made.speech, p.entry.voice, 'the whole voice, nothing dropped');
+    assert.equal(normalizeNpcRecord(structuredClone(made)).speech, p.entry.voice, 'and again on the next load');
+    const changed = normalizeNpcRecord({ ...made, speech: `${p.entry.voice} Whistles at the weir.` });
+    assert.notEqual(changed.speech, `${p.entry.voice} Whistles at the weir.`, 'a changed field is compacted as for anyone');
+});
+
+test('a dossier already standing for the person is found by the cast key, name or alias, and is never replaced', () => {
+    const [p] = normalizeCast([person()], dateText);
+    const mine = normalizeNpcRecord({ ...createNpcRecord('Fenna', []), id: 'npc_fenna', castFrom: { key: 'ersveil:fenna' } });
+    const byName = createNpcRecord('The Ferrywoman', []);
+    assert.equal(dossierFor([createNpcRecord('Mira', []), mine], p), mine);
+    assert.equal(dossierFor([createNpcRecord('Mira', []), createNpcRecord('FENNA', [])], p)?.name, 'FENNA', 'a dossier a scan made, by name');
+    assert.equal(dossierFor([byName], p), byName, 'by an alias');
+    assert.equal(dossierFor([createNpcRecord('Mira', [])], p), null);
+});
+
+test('what the dossier shows: the badge, first met, their own path, last heard (words escaped); Story Director gone, the pack\'s words stand', () => {
+    const [p] = normalizeCast([person()], dateText);
+    const made = normalizeNpcRecord(applyCastEntry(createNpcRecord('Fenna', []), p, { packName: 'Ersveil' }));
+    assert.equal(castBadge(made.castFrom), 'Ersveil cast');
+    assert.equal(castBadge({}), 'Cast');
+    const view = castProjection(castView(made, p));
+    assert.deepEqual([view.badge, view.firstMet, view.goal, view.routine], ['Ersveil cast', 'Gw 12 at Bluewatch docks', 'Find out who opened the weir', 'evenings at the ferry']);
+    const html = castFromHtml(view);
+    assert.match(html, /From the Ersveil cast · first met Gw 12 at Bluewatch docks/);
+    assert.match(html, /<b>Their own path:<\/b> Find out who opened the weir/);
+    assert.match(html, /<b>Last heard:<\/b> took the ferry upriver to Ashford \(Gw 15\)/);
+    assert.match(castFromHtml(castProjection({ ...view, goal: '<img src=x onerror=1>', lastHeard: { text: '<b>x</b>', on: '' } })), /&lt;img src=x onerror=1&gt;[\s\S]*&lt;b&gt;x&lt;\/b&gt;/);
+    const alone = castProjection(castView(made, null));
+    assert.equal(alone.lastHeard, null);
+    assert.equal(alone.goal, 'Find out who opened the weir', 'the starting words the pack gave');
+    assert.doesNotMatch(castFromHtml(alone), /Last heard/);
+    assert.match(castFromHtml(castProjection({ ...view, lastHeard: null, doing: 'Walks the road. ', where: 'Hollin\'s Reach' })), /<b>Now:<\/b> Walks the road · at Hollin&#039;s Reach|<b>Now:<\/b> Walks the road · at Hollin's Reach/, 'no lastHeard: what they do now and where, no stray full stop');
+    assert.equal(castView(createNpcRecord('Mira', []), p), null, 'any other dossier shows none of it');
+    assert.equal(castFromHtml(null), '');
+    // The projection carries it to the view by dossier id.
+    const state = projectDossierState({ npcs: [{ ...made, id: 'npc_fenna' }, { ...createNpcRecord('Mira', []), id: 'npc_mira' }], castViews: { npc_fenna: castView(made, p) } });
+    assert.equal(state.npcs.find(npc => npc.id === 'npc_fenna').cast.badge, 'Ersveil cast');
+    assert.equal(state.npcs.find(npc => npc.id === 'npc_mira').cast, undefined);
+});
+
+// ---- "Pin as Key people" on the From-the-cast block ----
+
+test('the Pin button is drawn only when the view says it is offered: it carries the dossier id; none otherwise', () => {
+    const [p] = normalizeCast([person()], dateText);
+    const made = normalizeNpcRecord(applyCastEntry(createNpcRecord('Fenna', []), p, { packName: 'Ersveil' }));
+    assert.equal(castView(made, p).pin, false, 'not offered by default');
+    assert.equal(castView(made, p, { pin: true }).pin, true);
+    const on = castFromHtml(castProjection(castView(made, p, { pin: true })), 'npc_fenna');
+    assert.match(on, /<button type="button" class="delta-btn delta-cast-pin" data-delta-cast-pin="npc_fenna">★ Pin as Key people<\/button>/);
+    assert.match(on, /the narrator hears about them/);
+    assert.doesNotMatch(castFromHtml(castProjection(castView(made, p))), /delta-cast-pin/, 'not offered, or already pinned: no button');
+});
+
+// Story Director's pin as a stand-in: its own command writes its own state; Delta only asks.
+const keyDirector = ({ withPin = true, feature = true } = {}) => ({
+    id: 'story-director', name: 'Story Director (stand-in)', version: '0.0.0-test',
+    domains: { keys: { initial: () => ({ pins: [], causes: [] }) } },
+    commands: withPin ? {
+        'keypeople.pin': (ctx, payload) => {
+            const slice = ctx.draft('keys');
+            slice.pins.push(JSON.stringify(payload));
+            slice.causes.push(String(ctx.cause));
+            return { summary: `${payload.name} is now a key person.` };
+        },
+    } : {},
+    queries: { 'director.keyPeople': state => (state?.domains?.keys?.pins ?? []).map(text => ({ name: JSON.parse(text).name, aliases: JSON.parse(text).aliases ?? [], here: true, away: null })) },
+    ...(feature ? { features: [{ id: 'story-director.key-people', label: 'Key people', describe: 'x', default: true }] } : {}),
+});
+
+test('the adapter offers the pin only while Story Director registers keypeople.pin (feature on); pinning asks its command as the reader, with the name, aliases and nsd', async () => {
+    const s = await suite({ modules: [director(), keyDirector()] });
+    assert.equal(s.adapter.keyPinOffered(), true);
+    const out = await s.adapter.pinKeyPerson({ name: 'Fenna', aliases: ['the ferrywoman'] });
+    assert.deepEqual([out.ok, out.message], [true, 'Fenna is now a key person.']);
+    const slice = s.host.head().domains.keys;
+    assert.deepEqual(JSON.parse(slice.pins[0]), { name: 'Fenna', aliases: ['the ferrywoman'], nsd: true });
+    assert.deepEqual(slice.causes, ['ui'], 'as the reader\'s action');
+    assert.deepEqual(s.adapter.keyPeople().map(entry => entry.name), ['Fenna'], 'and Delta reads the result back from director.keyPeople');
+
+    const none = await suite({ modules: [director()] });
+    assert.equal(none.adapter.keyPinOffered(), false, 'no Story Director that offers it: no button');
+    assert.equal((await none.adapter.pinKeyPerson({ name: 'Fenna' })).ok, false);
+    const noCommand = await suite({ modules: [director(), keyDirector({ withPin: false })] });
+    assert.equal(noCommand.adapter.keyPinOffered(), false, 'an older Story Director without the command');
+    const off = await suite({ modules: [director(), keyDirector()], features: { 'story-director.key-people': false } });
+    assert.equal(off.adapter.keyPinOffered(), false, 'Key people switched off');
+    assert.equal((await off.adapter.pinKeyPerson({ name: 'Fenna' })).ok, false);
+    assert.deepEqual(off.host.head().domains.keys.pins, [], 'and nothing is asked of it');
+});
+
+// ---- the Ersveil writing: twelve real entries ----
+
+const ERSVEIL = JSON.parse(fs.readFileSync(fileURLToPath(new URL('./fixtures/ersveil-cast.json', import.meta.url)), 'utf8'));
+
+test('the twelve Ersveil entries all make a dossier: profile whole, fields, three to five notes, stages in the pack\'s shape with their cue', () => {
+    assert.equal(ERSVEIL.length, 12);
+    for (const raw of ERSVEIL) {
+        const [p] = normalizeCast([{ key: `ersveil:${raw.id}`, pack: 'ersveil', id: raw.id, name: raw.name, aliases: raw.aliases, met: { on: 0, where: raw.start.place }, alive: true, entry: raw }], dateText);
+        assert.ok(p?.entry, raw.id);
+        const made = normalizeNpcRecord(applyCastEntry(createNpcRecord(raw.name, []), p, { packName: 'Ersveil (open world)' }));
+        for (const field of ['look', 'voice', 'personality', 'history']) assert.ok(raw[field].length < 600 && p.entry[field] === raw[field], `${raw.id} ${field} kept whole`);
+        assert.equal(made.appearance, raw.look, raw.id);
+        assert.equal(made.speech, raw.voice, raw.id);
+        assert.equal(made.personality, raw.personality, raw.id);
+        assert.equal(made.background, raw.history, raw.id);
+        assert.deepEqual(made.customFields, raw.fields, `${raw.id}: Soul Class and the other fields`);
+        assert.ok(made.secrets.length >= 3 && made.secrets.length <= 5, `${raw.id}: ${made.secrets.length} notes`);
+        assert.equal(made.secrets.filter(note => note.when && !note.meter).length, raw.secrets.filter(note => note.when).length, 'the story-event notes keep their words');
+        assert.equal(made.secrets.map(note => note.text).join('|'), raw.secrets.map(note => note.text).join('|'), 'the texts whole, in order');
+        assert.deepEqual(made.meterSetup, { track: raw.meters.preset, limits: {} });
+        assert.deepEqual(made.castFrom.stages.map(stage => stage.name), raw.stages.map(stage => stage.name));
+        assert.deepEqual(made.castFrom.stages.map(stage => stage.cue), raw.stages.map(stage => stage.milestone), 'the pack\'s milestone line is the stage\'s cue');
+        assert.ok(made.castFrom.stages.every(stage => stage.milestone === undefined), 'and is never a milestone the stage needs');
+        for (const meter of ['trust', 'affection', 'tension']) assert.equal(made.relationship[meter], raw.meters[meter], `${raw.id} ${meter}`);
+    }
+});
+
+test('a person\'s pack stages are reached by the numbers alone, in order, with the preset\'s meters from the first meeting', async () => {
+    const tansy = ERSVEIL.find(entry => entry.id === 'tansy-millrace');
+    const records = { npc_tansy: { id: 'npc_tansy', name: 'Tansy Millrace', aliases: [], present: true, archived: false, castFrom: { key: 'ersveil:tansy-millrace', stages: normalizeEntry(tansy).stages } } };
+    const host = await createHost({ settings: { modules: { [MODULE_ID]: { presets: ['companion'] } }, features: { [FEATURE_STAGES]: true } }, modules: [director()] });
+    const box = { ready: Promise.resolve(host.sdk), sdk: host.sdk };
+    const api = {
+        isEnabled: () => true, getNpc: id => (records[id] ? structuredClone(records[id]) : null),
+        relationshipBaseline: () => ({ trust: 0, affection: 0, desire: 0, tension: 0 }), presentCastHtml: () => '', castEmptyReason: () => ({ text: '' }), fillPresentCast: () => {},
+    };
+    const adapter = createStorySuiteV2Adapter({
+        suiteApi: { npcs: () => Object.values(records).map(({ id, name, aliases, present, archived }) => ({ id, name, aliases, present, archived })) },
+        delta: () => api, version: 'test', host: () => box, headReply: () => host.store.headIndex(),
+        doc: { documentElement: { dataset: {} }, getElementById: () => null, addEventListener() {}, dispatchEvent() { return true; } },
+        timers: { setTimeout: () => 0, clearTimeout() {}, setInterval: () => ({ unref() {} }), clearInterval() {} },
+        logger: { warn() {} }, loadEmptyCast: async () => null,
+    });
+    adapter.start();
+    await adapter.settled();
+    const rank = () => host.sdk.query('npc.meters', { name: 'Tansy Millrace' })?.rank;
+    await host.send('Hi', 'Tansy binds a wound.\n\n<Changes>\n~ npc Tansy Millrace | trust: +15\n</Changes>');
+    await adapter.ticked();
+    assert.equal(rank(), undefined, 'trust 15 is short of the first stage (20)');
+    await host.send('Hi', 'She stitches you.\n\n<Changes>\n~ npc Tansy Millrace | trust: +10\n</Changes>');
+    await adapter.ticked();
+    assert.equal(rank(), 'Known patient', 'reached on the numbers: no story milestone is needed for it');
+    assert.match(host.sdk.query('npc.next', { name: 'Tansy Millrace' }).text, /Night-shift friend/);
+});
+
+// ---- the saved slice: the meeting is recorded at the reply ----
+
+test('observeCast records each met person with an entry once; nobody is taken out; no answer changes nothing', () => {
+    const [p] = normalizeCast([person()], dateText);
+    const first = observeCast(undefined, [p, ...normalizeCast([unmet()])]);
+    assert.deepEqual(first.fresh.map(item => item.key), ['ersveil:fenna']);
+    assert.deepEqual(first.cast, { 'ersveil:fenna': { name: 'Fenna', rungs: 2 } });
+    assert.deepEqual(validateNpcSlice({ npcs: {}, problems: [], cast: first.cast }), []);
+    const again = observeCast(first.cast, [p]);
+    assert.deepEqual(again.fresh, []);
+    assert.equal(again.cast, first.cast, 'the same record');
+    assert.equal(observeCast(first.cast, []).cast, first.cast, 'a person Story Director no longer lists stays recorded');
+    assert.equal(observeCast(first.cast, null).cast, first.cast);
+    assert.ok(validateNpcSlice({ npcs: {}, problems: [], cast: { 'bad key!': { name: 'x' } } }).length, 'an unusable key is refused');
+    assert.ok(validateNpcSlice({ npcs: {}, problems: [], cast: { 'a:b': { name: 'x', extra: 1 } } }).length, 'and an unknown field');
+});
+
+// ---- on Story Block's whole host: a stand-in for Story Director ----
+
+// Story Director's `director.cast` as a stand-in: the capture line "~ meet Fenna" records the meeting on the reply (as its own step
+// does), a command sets who exists; the query answers with the entry for met people only.
+// (The rows are kept as JSON text in its state: the host's rules reserve the field name `id`.)
+const director = () => ({
+    id: 'zz-director', name: 'Director (stand-in)', version: '0.0.0-test',
+    domains: { director: { initial: () => ({ time: { minutes: 0 }, cast: [] }) } },
+    commands: {
+        'zz.cast': (ctx, { list }) => { ctx.draft('director').cast = list.map(row => JSON.stringify(row)); return { summary: 'cast' }; },
+    },
+    capture: {
+        kinds: { meet: { grammar: '~ meet Name' } },
+        apply: (ctx, line) => {
+            const slice = ctx.draft('director');
+            const at = slice.cast.findIndex(text => JSON.parse(text).name.toLowerCase() === String(line.name).toLowerCase());
+            if (at < 0) ctx.fail('NOT_FOUND', 'Nobody by that name.');
+            const found = JSON.parse(slice.cast[at]);
+            found.met = { on: 11 * DAY, where: 'Bluewatch docks' };
+            slice.cast[at] = JSON.stringify(found);
+            return { summary: `met ${found.name}` };
+        },
+    },
+    queries: {
+        'director.time': state => ({ minutes: state?.domains?.director?.time?.minutes ?? null }),
+        'director.calendar': () => calendar,
+        'director.cast': state => (state?.domains?.director?.cast ?? []).map(text => JSON.parse(text)).map(item => (item.met ? item : { ...item, entry: undefined })),
+    },
+});
+const castRow = (extra = {}) => ({ key: 'ersveil:fenna', pack: 'ersveil', id: 'fenna', name: 'Fenna', aliases: [], met: null, alive: true, entry: structuredClone(FENNA_ENTRY), ...extra });
+
+async function suite({ settings = {}, features = null, modules = [director()], castSync } = {}) {
+    const records = {};
+    const host = await createHost({ settings: { modules: { [MODULE_ID]: structuredClone(settings) }, ...(features ? { features: { ...features } } : {}) }, modules });
+    const box = { ready: Promise.resolve(host.sdk), sdk: host.sdk };
+    const api = {
+        isEnabled: () => true,
+        getNpc: id => (records[id] ? structuredClone(records[id]) : null),
+        relationshipBaseline: () => ({ trust: 0, affection: 0, desire: 0, tension: 0 }),
+        presentCastHtml: () => '', castEmptyReason: () => ({ text: '' }), fillPresentCast: () => {},
+    };
+    const synced = [];
+    const adapter = createStorySuiteV2Adapter({
+        suiteApi: { npcs: () => Object.values(records).map(({ id, name, aliases, present, archived }) => ({ id, name, aliases, present, archived })) },
+        delta: () => api, version: 'test', host: () => box, headReply: () => host.store.headIndex(),
+        castSync: castSync ?? (async () => { synced.push(host.store.headIndex()); }),
+        doc: { documentElement: { dataset: {} }, getElementById: () => null, addEventListener() {}, dispatchEvent() { return true; } },
+        timers: { setTimeout: () => 0, clearTimeout() {}, setInterval: () => ({ unref() {} }), clearInterval() {} },
+        logger: { warn() {} }, loadEmptyCast: async () => null,
+    });
+    adapter.start();
+    assert.equal(await adapter.settled(), true);
+    const say = async (lines = []) => {
+        await host.send('And then?', `The story goes on.${lines.length ? `\n\n<Changes>\n${lines.join('\n')}\n</Changes>` : ''}`);
+        await adapter.ticked();
+    };
+    const swipe = async lines => { await host.swipe(`Another way.${lines?.length ? `\n\n<Changes>\n${lines.join('\n')}\n</Changes>` : ''}`); await adapter.ticked(); };
+    const world = async list => { await host.sdk.command('zz.cast', { list }); };
+    const made = () => host.sdk.query('npc.castMade', {});
+    const meters = name => host.sdk.query('npc.meters', { name });
+    return { host, adapter, say, swipe, world, made, meters, synced };
+}
+
+test('Story Director\'s cast is read through the adapter: cleaned, entry for the met only; with none to ask (or no such query) it answers null', async () => {
+    const s = await suite();
+    assert.deepEqual(s.adapter.castPeople(), [], 'an empty world');
+    await s.world([castRow(), castRow({ key: 'ersveil:sera', id: 'sera', name: 'Sera' })]);
+    assert.deepEqual(s.adapter.castPeople().map(item => [item.key, item.met, item.entry]), [['ersveil:fenna', null, null], ['ersveil:sera', null, null]]);
+    const plain = await suite({ modules: [] });
+    assert.equal(plain.adapter.castPeople(), null, 'Story Block alone: no cast anywhere');
+    assert.deepEqual(plain.adapter.castMade(), {});
+    const old = await suite({ modules: [{ id: 'zz-old', name: 'Older director', domains: {}, commands: {}, queries: { 'director.time': () => ({ minutes: 0 }) } }] });
+    assert.equal(old.adapter.castPeople(), null, 'an older Story Director without the query');
+});
+
+test('the meeting is recorded in the slice at the reply it is first seen: the first numbers, the problem line, the stage; unmet people leave no trace', async () => {
+    const settings = { customMeters: [{ name: 'Loyalty', min: 0, max: 100, start: 20 }], ladder: [] };
+    const s = await suite({ settings, features: { [FEATURE_STAGES]: true } });
+    await s.world([castRow(), castRow({ key: 'ersveil:sera', id: 'sera', name: 'Sera' })]);
+    await s.say();
+    assert.deepEqual(s.made(), {}, 'nobody met: nothing recorded, nobody synced');
+    assert.deepEqual(s.synced, []);
+    assert.equal(s.meters('Fenna'), null);
+
+    await s.say(['~ meet Fenna']);
+    assert.deepEqual(s.made(), { 'ersveil:fenna': { name: 'Fenna', rungs: 2 } });
+    assert.equal(s.made()['ersveil:sera'], undefined, 'the other is still hidden');
+    const fenna = s.meters('Fenna');
+    assert.equal(fenna.meters.trust, 10);
+    assert.equal(fenna.meters.loyalty, 30, 'a meter this chat has takes the pack\'s first value');
+    assert.equal(s.meters('Sera'), null);
+    const slice = s.host.head().domains.npc;
+    assert.deepEqual(validateNpcSlice(slice), []);
+    assert.ok(slice.problems.some(problem => /nonsense/.test(problem.text)), 'a meter this chat does not have is a problem line, not an error');
+    assert.deepEqual(s.synced.length, 1, 'and the dossier is made (once)');
+
+    // Later replies change nothing about it.
+    await s.say();
+    assert.deepEqual(Object.keys(s.made()), ['ersveil:fenna']);
+    assert.equal(s.meters('Fenna').meters.loyalty, 30);
+});
+
+test('a swipe of the meeting\'s reply takes the record with it, a re-meeting on the new swipe records it again, a reload keeps it; the first numbers are never overwritten', async () => {
+    const s = await suite({ settings: { customMeters: [{ name: 'Loyalty', min: 0, max: 100, start: 20 }] } });
+    await s.world([castRow()]);
+    await s.say(['~ meet Fenna']);
+    assert.deepEqual(Object.keys(s.made()), ['ersveil:fenna']);
+    await s.say(['~ npc Fenna | trust: +5']);
+    assert.equal(s.meters('Fenna').meters.trust, 15);
+
+    // Swipe the later reply: the meeting stays (it belongs to the earlier reply), the story's +5 is gone.
+    await s.swipe();
+    assert.deepEqual(Object.keys(s.made()), ['ersveil:fenna']);
+    assert.equal(s.meters('Fenna').meters.trust, 10);
+
+    // Swipe the meeting's own reply: it never happened on this swipe.
+    await s.say();
+    const head = s.host.store.headIndex();
+    assert.ok(head >= 2);
+    await s.host.turn.onChatChanged();
+    assert.deepEqual(Object.keys(s.made()), ['ersveil:fenna'], 'a reload keeps it (the host rebuilds its state from the chat)');
+
+    const t = await suite({ settings: { customMeters: [{ name: 'Loyalty', min: 0, max: 100, start: 20 }] } });
+    await t.world([castRow()]);
+    await t.say(['~ meet Fenna']);
+    assert.deepEqual(Object.keys(t.made()), ['ersveil:fenna']);
+    await t.swipe();
+    assert.deepEqual(t.made(), {}, 'the swipe did not carry the meeting line: unrecorded');
+    assert.equal(t.meters('Fenna'), null, 'and the entry that came with it');
+    await t.swipe(['~ meet Fenna']);
+    assert.deepEqual(Object.keys(t.made()), ['ersveil:fenna'], 'met again on the new swipe: recorded again');
+    assert.equal(t.meters('Fenna').meters.trust, 10);
+});
+
+test('the person\'s own stages work like a ladder: reached by the numbers, only while stage ladders are on', async () => {
+    const own = [{ name: 'Wary', needs: 'trust 5' }, { name: 'Ally', needs: 'trust 40' }];
+    const records = { npc_fenna: { id: 'npc_fenna', name: 'Fenna', aliases: [], present: true, archived: false, castFrom: { key: 'ersveil:fenna', stages: own } } };
+    const host = await createHost({ settings: { modules: { [MODULE_ID]: {} }, features: { [FEATURE_STAGES]: true } }, modules: [director()] });
+    const box = { ready: Promise.resolve(host.sdk), sdk: host.sdk };
+    const api = {
+        isEnabled: () => true, getNpc: id => (records[id] ? structuredClone(records[id]) : null),
+        relationshipBaseline: () => ({ trust: 0, affection: 0, desire: 0, tension: 0 }), presentCastHtml: () => '', castEmptyReason: () => ({ text: '' }), fillPresentCast: () => {},
+    };
+    const adapter = createStorySuiteV2Adapter({
+        suiteApi: { npcs: () => Object.values(records).map(({ id, name, aliases, present, archived }) => ({ id, name, aliases, present, archived })) },
+        delta: () => api, version: 'test', host: () => box, headReply: () => host.store.headIndex(),
+        doc: { documentElement: { dataset: {} }, getElementById: () => null, addEventListener() {}, dispatchEvent() { return true; } },
+        timers: { setTimeout: () => 0, clearTimeout() {}, setInterval: () => ({ unref() {} }), clearInterval() {} },
+        logger: { warn() {} }, loadEmptyCast: async () => null,
+    });
+    adapter.start();
+    await adapter.settled();
+    await host.send('Hi', 'Fenna smiles.\n\n<Changes>\n~ npc Fenna | trust: +10\n</Changes>');
+    await adapter.ticked();
+    assert.equal(host.sdk.query('npc.meters', { name: 'Fenna' }).rank, 'Wary');
+    assert.match(host.sdk.query('npc.next', { name: 'Fenna' }).text, /Ally/);
+    await host.send('Hi', 'Fenna nods.\n\n<Changes>\n~ npc Fenna | trust: +15\n</Changes>');
+    await host.send('Hi', 'Fenna nods.\n\n<Changes>\n~ npc Fenna | trust: +15\n</Changes>');
+    assert.equal(host.sdk.query('npc.meters', { name: 'Fenna' }).rank, 'Ally');
+});
+
+test('with no Story Director the per-reply step and the slice are exactly as before', async () => {
+    const s = await suite({ modules: [] });
+    await s.say(['~ npc Ren | trust: +5']);
+    assert.equal(s.host.head().domains.npc.cast, undefined);
+    assert.deepEqual(s.synced, []);
+    assert.equal(s.meters('Ren').meters.trust, 5);
+});
+
+// ---- Delta's real runtime beside a fake host whose Story Director answers director.cast ----
+
+const scenarioOutput = output => JSON.parse(String(output).split('\n').find(line => line.startsWith('RESULT ')).slice(7));
+
+test('runtime: the dossier is made at the first meeting from the pack entry, with portrait and badge; swipe undoes it; delete is final; a standing dossier is left alone', () => {
+    const entry = FENNA_ENTRY;
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    const scenario = async () => {
+        const api = globalThis.NPCStateDelta;
+        assert.ok(await waitFor(() => mockState.sdk.registered.length === 1));
+        const sdk = mockState.sdk;
+        const say = async text => {
+            mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'And then?' });
+            const userId = mockState.context.chat.length - 1;
+            await Promise.all((mockState.listeners.get('message_sent') || []).map(fn => fn(userId)));
+            mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: text, swipe_id: 0, swipes: [text] });
+            const id = mockState.context.chat.length - 1;
+            await Promise.all((mockState.listeners.get('message_received') || []).map(fn => fn(id)));
+            await Promise.all((mockState.listeners.get('character_message_rendered') || []).map(fn => fn(id)));
+            await sleep(150);
+            return id;
+        };
+        const turn = async () => { await sdk.turn({ type: 'normal' }); await sleep(250); };
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [] });
+        const out = {};
+        const fenna = () => api.getState().npcs.find(npc => npc.name === 'Fenna');
+
+        // Nobody met: Story Director lists her unmet (no entry).
+        sdk.people = [{ key: 'ersveil:fenna', pack: 'ersveil', id: 'fenna', name: 'Fenna', aliases: [], met: null, alive: true }];
+        await say('The docks are quiet at dusk.');
+        await turn();
+        out.unmet = { npcs: api.getState().npcs.length, ticks: sdk.ticks };
+
+        // The first meeting: the step records it, then the dossier is made at once.
+        sdk.people = [{ key: 'ersveil:fenna', pack: 'ersveil', id: 'fenna', name: 'Fenna', aliases: [], met: { on: 11 * 1440, where: 'Bluewatch docks' }, where: 'Bluewatch docks', doing: 'running the ferry', lastHeard: { text: 'took the ferry upriver to Ashford', on: 14 * 1440 }, alive: true, entry: __ENTRY__ }];
+        sdk.present = ['Fenna'];
+        const metAt = await say('Fenna looks up from her rope as you reach the ferry.');
+        await turn();
+        await sleep(300);
+        const made = fenna();
+        out.made = made ? {
+            role: made.role, appearance: made.appearance, speech: made.speech, personality: made.personality, background: made.background,
+            homeBase: made.homeBase, goal: made.goal, location: made.location, aliases: made.aliases, customFields: made.customFields,
+            trust: made.relationship.trust, meterSetup: made.meterSetup, secrets: made.secrets.length, portrait: made.portrait?.dataUrl ?? null,
+            fingerprint: Boolean(made.portrait?.appearanceFingerprint), castFrom: made.castFrom, assets: Boolean(api.getState().portraitAssets?.[made.id]),
+        } : null;
+        out.count = api.getState().npcs.length;
+        out.view = api.getDossierState().castViews?.[made?.id] ?? null;
+        out.injection = api.injectionPreview().text;
+        await turn();
+        await sleep(200);
+        out.again = api.getState().npcs.length;
+
+        // A swipe of the reply she was made at (the head reply) takes the dossier back with it; Story Director's meeting is undone too.
+        const chat = mockState.context.chat;
+        const people = sdk.people;
+        const swipeHead = async (text, list, present) => {
+            chat[metAt] = { is_user: false, is_system: false, name: 'Megumin', swipe_id: (chat[metAt].swipe_id || 0) + 1, mes: text, swipes: [...(chat[metAt].swipes || []), text] };
+            sdk.people = list; sdk.present = present;
+            if (!list.some(person => person.met)) sdk.made = {};
+            mockState.swipeState = 'swiping';
+            eventSource.emit('message_swiped', metAt);
+            await sleep(200);
+            eventSource.emit('message_received', metAt);
+            await sleep(300);
+            mockState.swipeState = 'none';
+            await sleep(300);
+            await turn();
+        };
+        await swipeHead('The ferry is empty tonight.', [{ key: 'ersveil:fenna', pack: 'ersveil', id: 'fenna', name: 'Fenna', aliases: [], met: null, alive: true }], []);
+        out.afterSwipe = api.getState().npcs.filter(npc => npc.name === 'Fenna').length;
+        // Met again on the new swipe: the dossier is made again.
+        await swipeHead('Fenna is back at the ferry, coiling rope.', people, ['Fenna']);
+        out.remade = api.getState().npcs.filter(npc => npc.name === 'Fenna').length;
+
+        // A later scan adds to the dossier as for anyone: a keep row leaves what the pack gave.
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [{ name: 'Fenna', present: true, role: 'ferrywoman', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipReason: '' }] });
+        await say('Fenna hands you a rope. "Hold this," she says.');
+        await sleep(300);
+        out.afterScan = { personality: fenna().personality, speech: fenna().speech, castFrom: Boolean(fenna().castFrom) };
+        console.log('RESULT ' + JSON.stringify(out));
+    };
+    const prelude = async () => {
+        const sdk = {
+            registered: [], people: [], made: {}, ticks: 0, handlers: {}, present: [],
+            registerModule(def) { sdk.registered.push(def); },
+            on(name, fn) { sdk.handlers[name] = fn; return () => {}; },
+            turn: async turn => { await sdk.handlers.turn?.(turn); },
+            command: async type => {
+                if (type === 'npc.tick') {
+                    sdk.ticks += 1;
+                    for (const person of sdk.people) if (person.met && person.entry) sdk.made[person.key] = { name: person.name };
+                }
+                return { ok: true, receipt: { summary: '' } };
+            },
+            query: (name, args) => (name === 'director.cast' ? structuredClone(sdk.people)
+                : name === 'npc.castMade' ? structuredClone(sdk.made)
+                : name === 'packs.list' ? [{ id: 'ersveil', name: 'Ersveil', version: '1.0.0' }]
+                : name === 'packs.portrait' ? (args?.pack === 'ersveil' && args?.file === 'fenna.webp' ? 'PORTRAIT' : null)
+                : name === 'director.calendar' ? { era: 'CY', months: [{ name: 'Goldwane', days: 30 }], leapYears: false }
+                : name === 'scene.present' ? structuredClone(sdk.present) : null),
+            settings: () => ({}),
+        };
+        mockState.sdk = sdk;
+        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    };
+    // The scenario runs in a child process: the entry and the portrait are written into its source.
+    const source = scenario.toString().replace('__ENTRY__', JSON.stringify(entry));
+    const preludeSource = prelude.toString().replace("'PORTRAIT'", JSON.stringify(png));
+    const hosted = scenarioOutput(runHostScenario('cast-dossier-hosted', { toString: () => preludeSource }, { toString: () => source }));
+    assert.equal(hosted.unmet.npcs, 0, 'nobody met: no dossier');
+    assert.equal(hosted.count, 1, 'one dossier at the first meeting, without a scan');
+    assert.equal(hosted.made.role, 'Runs the night ferry at Bluewatch docks.');
+    assert.equal(hosted.made.appearance, FENNA_ENTRY.look);
+    assert.equal(hosted.made.speech, FENNA_ENTRY.voice);
+    assert.equal(hosted.made.personality, FENNA_ENTRY.personality);
+    assert.equal(hosted.made.background, FENNA_ENTRY.history);
+    assert.equal(hosted.made.goal, 'Find out who opened the weir');
+    assert.equal(hosted.made.location, 'Bluewatch docks');
+    assert.equal(hosted.made.trust, 10);
+    assert.equal(hosted.made.secrets, 2);
+    assert.deepEqual(hosted.made.customFields, { Allegiance: 'Ferry guild' });
+    assert.equal(hosted.made.portrait, png, 'the pack\'s portrait is the dossier\'s portrait');
+    assert.equal(hosted.made.fingerprint, true);
+    assert.equal(hosted.made.assets, true, 'and is kept with the chat\'s portraits');
+    assert.equal(hosted.made.castFrom.packName, 'Ersveil');
+    assert.equal(hosted.made.castFrom.met.on, 'Goldwane 12', 'the meeting date is written on Story Director\'s calendar');
+    assert.equal(hosted.view.badge, 'Ersveil cast');
+    assert.equal(hosted.view.lastHeard.text, 'took the ferry upriver to Ashford');
+    assert.match(hosted.injection, /oilskin coat/, 'the narrator hears the look at once');
+    assert.equal(hosted.again, 1, 'a later step does not make it twice');
+    assert.equal(hosted.afterScan.personality, FENNA_ENTRY.personality, 'a later scan leaves what the pack gave unless the story says otherwise');
+    assert.equal(hosted.afterScan.speech, FENNA_ENTRY.voice);
+    assert.equal(hosted.afterScan.castFrom, true);
+    assert.equal(hosted.afterSwipe, 0, 'a swipe of the reply she was made at takes her back');
+    assert.equal(hosted.remade, 1, 'and she is made again when the new swipe meets her');
+});
+
+test('runtime: removing the cast dossier is final; a dossier a scan made earlier is not replaced; Delta alone makes none', () => {
+    const scenario = async () => {
+        const api = globalThis.NPCStateDelta;
+        assert.ok(await waitFor(() => mockState.sdk.registered.length === 1));
+        const sdk = mockState.sdk;
+        const say = async text => {
+            mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'And then?' });
+            const userId = mockState.context.chat.length - 1;
+            await Promise.all((mockState.listeners.get('message_sent') || []).map(fn => fn(userId)));
+            mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: text, swipe_id: 0, swipes: [text] });
+            const id = mockState.context.chat.length - 1;
+            await Promise.all((mockState.listeners.get('message_received') || []).map(fn => fn(id)));
+            await Promise.all((mockState.listeners.get('character_message_rendered') || []).map(fn => fn(id)));
+            await sleep(150);
+            return id;
+        };
+        const turn = async () => { await sdk.turn({ type: 'normal' }); await sleep(300); };
+        const row = (name, extra = {}) => ({ name, present: true, role: 'adventurer', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named', directInteraction: true, relationshipImpact: 'none', relationshipReason: '', ...extra });
+        const out = {};
+        // Yunyun already has a dossier (a scan made it); Fenna is the cast person.
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [row('Yunyun', { personality: 'Shy and loud at once.', role: 'sorceress' })] });
+        await say('Yunyun waves from the gate.');
+        await sleep(300);
+        const meet = (name, key) => ({ key, pack: 'ersveil', id: key.split(':')[1], name, aliases: [], met: { on: 0, where: 'the gate' }, alive: true, entry: { id: key.split(':')[1], name, about: 'From the pack.', look: 'Pack look.', personality: 'Pack personality.', start: { place: 'gate', goal: 'pack goal' } } });
+        sdk.people = [meet('Yunyun', 'ersveil:yunyun'), meet('Fenna', 'ersveil:fenna')];
+        await say('Both are at the gate.');
+        await turn();
+        await sleep(300);
+        const names = () => api.getState().npcs.map(npc => npc.name).sort();
+        out.first = { names: names(), yunyun: api.getState().npcs.find(npc => npc.name === 'Yunyun').personality, yunyunCast: Boolean(api.getState().npcs.find(npc => npc.name === 'Yunyun').castFrom), fennaCast: Boolean(api.getState().npcs.find(npc => npc.name === 'Fenna')?.castFrom) };
+        out.views = Object.keys(api.getDossierState().castViews ?? {});
+
+        // The reader removes Fenna: she is not made again at the next step.
+        const fennaId = api.getState().npcs.find(npc => npc.name === 'Fenna').id;
+        await api.deleteNpc(fennaId);
+        await sleep(200);
+        await turn();
+        await sleep(300);
+        out.afterDelete = names();
+        console.log('RESULT ' + JSON.stringify(out));
+    };
+    const prelude = async () => {
+        const sdk = {
+            registered: [], people: [], made: {}, handlers: {},
+            registerModule(def) { sdk.registered.push(def); },
+            on(name, fn) { sdk.handlers[name] = fn; return () => {}; },
+            turn: async turn => { await sdk.handlers.turn?.(turn); },
+            command: async type => {
+                if (type === 'npc.tick') for (const person of sdk.people) if (person.met && person.entry) sdk.made[person.key] = { name: person.name };
+                return { ok: true, receipt: { summary: '' } };
+            },
+            query: name => (name === 'director.cast' ? structuredClone(sdk.people) : name === 'npc.castMade' ? structuredClone(sdk.made)
+                : name === 'packs.list' ? [{ id: 'ersveil', name: 'Ersveil' }] : name === 'scene.present' ? [] : null),
+            settings: () => ({}),
+        };
+        mockState.sdk = sdk;
+        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    };
+    const hosted = scenarioOutput(runHostScenario('cast-dossier-standing', prelude, scenario));
+    assert.deepEqual(hosted.first.names, ['Fenna', 'Yunyun'], 'one new dossier: the standing one is not made again');
+    assert.equal(hosted.first.yunyun, 'Shy and loud at once.', 'a dossier that was already there keeps its words (the pack never overwrites a dossier)');
+    assert.equal(hosted.first.yunyunCast, false);
+    assert.equal(hosted.first.fennaCast, true);
+    assert.equal(hosted.views.length, 1);
+    assert.deepEqual(hosted.afterDelete, ['Yunyun'], 'removed by the reader: not made again');
+
+    const alone = scenarioOutput(runHostScenario('cast-dossier-none', async () => {
+        const sdk = { registered: [], handlers: {}, registerModule(def) { sdk.registered.push(def); }, on(name, fn) { sdk.handlers[name] = fn; return () => {}; }, command: async () => ({ ok: true }), query: name => (name === 'scene.present' ? [] : null), settings: () => ({}) };
+        mockState.sdk = sdk;
+        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    }, async () => {
+        const api = globalThis.NPCStateDelta;
+        assert.ok(await waitFor(() => mockState.sdk.registered.length === 1));
+        mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'Nobody here.', swipe_id: 0, swipes: ['Nobody here.'] });
+        const id = mockState.context.chat.length - 1;
+        await Promise.all((mockState.listeners.get('message_received') || []).map(fn => fn(id)));
+        await mockState.sdk.handlers.turn?.({ type: 'normal' });
+        await sleep(300);
+        console.log('RESULT ' + JSON.stringify({ npcs: api.getState().npcs.length, views: api.getDossierState().castViews ?? null }));
+    }));
+    assert.equal(alone.npcs, 0);
+    assert.equal(alone.views, null);
+});
+
+test('runtime: the dossier view offers the Pin button while Story Director offers it and the person is not pinned; pinning calls its command and the button goes', () => {
+    const scenario = async () => {
+        const api = globalThis.NPCStateDelta;
+        assert.ok(await waitFor(() => mockState.sdk.registered.length === 1));
+        const sdk = mockState.sdk;
+        const say = async text => {
+            mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'And then?' });
+            const userId = mockState.context.chat.length - 1;
+            await Promise.all((mockState.listeners.get('message_sent') || []).map(fn => fn(userId)));
+            mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: text, swipe_id: 0, swipes: [text] });
+            const id = mockState.context.chat.length - 1;
+            await Promise.all((mockState.listeners.get('message_received') || []).map(fn => fn(id)));
+            await Promise.all((mockState.listeners.get('character_message_rendered') || []).map(fn => fn(id)));
+            await sleep(150);
+        };
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [] });
+        sdk.people = [{ key: 'ersveil:fenna', pack: 'ersveil', id: 'fenna', name: 'Fenna', aliases: [], met: { on: 0, where: 'the docks' }, alive: true, entry: { id: 'fenna', name: 'Fenna', aliases: ['the ferrywoman'], about: 'Ferry.', look: 'Tall.', start: { place: 'docks', goal: 'g' } } }];
+        await say('Fenna looks up.');
+        await sdk.turn({ type: 'normal' });
+        await sleep(300);
+        const id = api.getState().npcs.find(npc => npc.name === 'Fenna').id;
+        const pin = () => api.getDossierState().castViews[id].pin;
+        const out = {};
+        out.offered = pin();
+        out.result = await api.pinKeyPerson(id);
+        out.asked = sdk.asked;
+        // Pinned: Story Director now lists her; the button is gone.
+        sdk.keys = [{ name: 'Fenna', aliases: [], here: true, away: null }];
+        out.pinned = pin();
+        sdk.keys = [];
+        sdk.modulesList = [{ id: 'story-director', status: 'ready', commands: [] }];
+        out.noCommand = pin();
+        sdk.modulesList = [];
+        out.noDirector = pin();
+        console.log('RESULT ' + JSON.stringify(out));
+    };
+    const prelude = async () => {
+        const sdk = {
+            registered: [], people: [], made: {}, handlers: {}, keys: [], asked: [],
+            modulesList: [{ id: 'story-director', status: 'ready', commands: ['keypeople.pin', 'keypeople.unpin'] }],
+            registerModule(def) { sdk.registered.push(def); },
+            on(name, fn) { sdk.handlers[name] = fn; return () => {}; },
+            modules: () => structuredClone(sdk.modulesList),
+            turn: async turn => { await sdk.handlers.turn?.(turn); },
+            command: async (type, payload) => {
+                if (type === 'npc.tick') for (const person of sdk.people) if (person.met && person.entry) sdk.made[person.key] = { name: person.name };
+                if (type === 'keypeople.pin') { sdk.asked.push({ type, payload }); return { ok: true, receipt: { summary: payload.name + ' is now a key person.' } }; }
+                return { ok: true, receipt: { summary: '' } };
+            },
+            query: name => (name === 'director.cast' ? structuredClone(sdk.people) : name === 'npc.castMade' ? structuredClone(sdk.made)
+                : name === 'director.keyPeople' ? structuredClone(sdk.keys) : name === 'packs.list' ? [{ id: 'ersveil', name: 'Ersveil' }] : name === 'scene.present' ? [] : null),
+            settings: () => ({}),
+        };
+        mockState.sdk = sdk;
+        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    };
+    const out = scenarioOutput(runHostScenario('cast-pin', prelude, scenario));
+    assert.equal(out.offered, true, 'offered: Story Director has the command and she is not pinned');
+    assert.deepEqual(out.result, { ok: true, message: 'Fenna is now a key person.' });
+    assert.deepEqual(out.asked, [{ type: 'keypeople.pin', payload: { name: 'Fenna', aliases: ['the ferrywoman'], nsd: true } }]);
+    assert.equal(out.pinned, false, 'already pinned (director.keyPeople lists her): no button');
+    assert.equal(out.noCommand, false, 'Story Director without the command: no button');
+    assert.equal(out.noDirector, false, 'no Story Director: no button');
+});
+
+// ---- the opaque panel and section bar (a follow-up from the mockup) ----
+
+test('the dossier panel and its sticky section bar are opaque: a floor under the tint, the tint over it', () => {
+    const ui = fs.readFileSync(fileURLToPath(new URL('../dossier-ui.js', import.meta.url)), 'utf8');
+    assert.match(ui, /\.delta-panel \{[^}]*background-color:var\(--delta-floor\); background-image:linear-gradient\(var\(--delta-bg\),var\(--delta-bg\)\);/s);
+    assert.match(ui, /\.delta-section-nav \{[^}]*background-color:var\(--delta-floor\); background-image:linear-gradient\(var\(--delta-bg\),var\(--delta-bg\)\);/s);
+    // The bar reaches up over the panel's 22px top padding, so nothing scrolls into view above it (the chips stay where they were).
+    assert.match(ui, /\.delta-section-nav \{ position:sticky; top:-22px;[^}]*margin:-26px 0 12px; padding:30px 0 8px;/);
+    assert.match(ui, /@media \(max-width: 650px\)[\s\S]*\.delta-section-nav \{ top:0; margin-top:-4px; padding-top:8px; \}/, 'on a phone the scrolling parent has no padding: as before');
+    assert.doesNotMatch(ui, /\.delta-panel \{[^}]*background:var\(--delta-bg\)/s, 'the translucent tint alone is gone');
+    assert.match(ui, /--delta-floor: var\(--ss-sheet-floor, #18191d\)/, 'a fixed floor where the host gives none');
+    assert.match(ui, /@supports \(color: rgb\(from red r g b\)\)[\s\S]*--delta-floor: var\(--ss-sheet-floor, rgb\(from var\(--delta-bg\) r g b \/ 1\)\)/, 'the tint with its alpha dropped where relative colours exist');
+});
+
+test('index.js wiring: the cast reader, the checkpoint, the dismissal check, the views (source)', () => {
+    const index = fs.readFileSync(fileURLToPath(new URL('../index.js', import.meta.url)), 'utf8');
+    assert.match(index, /commitBranchCheckpoint\(working, messageId, 'cast-dossier'\)/, 'a swipe takes the dossier back with its reply');
+    assert.match(index, /castPersonDismissed\(state, person\)/, 'a dossier the reader removed is not made again');
+    assert.match(index, /v2\.startStorySuiteV2\(\{[^}]*castSync/, 'the adapter calls the sync after the step');
+    assert.match(index, /const castViews = dossierCastViews\(state\);/);
+    const adapter = fs.readFileSync(fileURLToPath(new URL('../src/storysuite-v2.js', import.meta.url)), 'utf8');
+    assert.doesNotMatch(adapter, /sdkRef\.command\(['"]director\./, 'Delta never writes to Story Director');
+});

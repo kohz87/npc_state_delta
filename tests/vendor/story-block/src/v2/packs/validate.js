@@ -16,7 +16,7 @@
 // it stays the one invalid event the events part makes of it (as before 2.11.3) and the rest of the pack keeps working. Install, import
 // and the authoring-kit checker leave it true.
 //
-import { YOU_FIELDS, YOU_RANK_FIELDS, YOU_RANK_LABEL_MAX, LEAN_RPG_FIELDS, LEAN_RPG_LIMITS, SKILL_SET_FIELDS, SKILL_SET_SKILL_FIELDS, RECORD_LIMITS, CALENDAR_FIELDS, CALENDAR_HOLIDAY_FIELDS, CALENDAR_LIMITS, CALENDAR_START_FIELDS, CHOICE_FIELDS, CONTENT_KINDS, COMMAND, CRAFT_FIELDS, ECONOMY_FIELDS, ECONOMY_LIMITS, CRAFTS_LIMITS, DEFAULT_CRAFTS, METER_FIELDS, METER_LIMITS, METER_PRESET_FIELDS, METER_RESERVED, METER_STAGE_FIELDS, RECIPE_LIMITS, STAT_SUM, DEF_ID, EVENT_FIELDS, EVENT_LIMITS, ITEM_FIELDS, ITEM_KINDS, LIMITS, MOUNTS, PACK_FIELDS, PACK_ID, PLACE_FIELDS, PRESET_FIELDS, RARITIES, ROUTE_FIELDS, SCREEN_FIELDS, SCREEN_ID, SEMVER, SKILL_FIELDS, SKILL_TARGETS, SKILL_TYPES, SLUG, START_FIELDS, STAT_NAME, RANK_FIELDS, RANK_ID, RANKS_LIMITS, TERM_SEPARATORS, ITEM_CARRY, MARKET_FIELDS, MARKET_LIMITS, MARKET_WORD, TERMS_FIELDS, TERMS_LIMITS, TERMS_NUMERALS, TERMS_TIER_FIELDS, WEATHER_FIELDS, WEATHER_LIMITS, WEATHER_SEASON_FIELDS, WEATHER_TABLE_FIELDS } from './limits.js';
+import { YOU_FIELDS, YOU_RANK_FIELDS, YOU_RANK_LABEL_MAX, LEAN_RPG_FIELDS, LEAN_RPG_LIMITS, RPG_FORMULAS, RPG_NUMBER_KEYS, SKILL_SET_FIELDS, SKILL_SET_SKILL_FIELDS, RECORD_LIMITS, CALENDAR_FIELDS, CALENDAR_HOLIDAY_FIELDS, CALENDAR_LIMITS, CALENDAR_START_FIELDS, CHOICE_FIELDS, CONTENT_KINDS, COMMAND, CRAFT_FIELDS, ECONOMY_FIELDS, ECONOMY_LIMITS, CRAFTS_LIMITS, DEFAULT_CRAFTS, METER_FIELDS, METER_LIMITS, METER_PRESET_FIELDS, METER_RESERVED, METER_STAGE_FIELDS, RECIPE_LIMITS, STAT_SUM, DEF_ID, EVENT_FIELDS, EVENT_LIMITS, ITEM_FIELDS, ITEM_KINDS, LIMITS, MOUNTS, PACK_FIELDS, PACK_ID, PLACE_FIELDS, PRESET_FIELDS, RARITIES, ROUTE_FIELDS, SCREEN_FIELDS, SCREEN_ID, SEMVER, SKILL_FIELDS, SKILL_TARGETS, SKILL_TYPES, SLUG, START_FIELDS, STAT_NAME, RANK_FIELDS, RANK_ID, RANKS_LIMITS, TERM_SEPARATORS, ITEM_CARRY, MARKET_FIELDS, MARKET_LIMITS, MARKET_WORD, TERMS_FIELDS, TERMS_LIMITS, TERMS_NUMERALS, TERMS_TIER_FIELDS, WEATHER_FIELDS, WEATHER_LIMITS, WEATHER_SEASON_FIELDS, WEATHER_TABLE_FIELDS } from './limits.js';
 import { byteLength, checkPlain } from './safety.js';
 import { parseRange, satisfies } from './version.js';
 import { foldKey, oneLine } from '../../text.js';
@@ -28,8 +28,9 @@ import { MAX_COINS, MAX_COIN_VALUE, coinsOf } from '../domains/money.js';
 import { validateDataModules, dataModulesPackHash } from '../data-modules/check.js';
 import { STRINGS } from '../strings.js';
 import { compile } from '../events/condition.js';
+import { checkCast } from './cast.js';
 
-export const HOST_VERSION = '2.12.0';
+export const HOST_VERSION = '2.15.0';
 
 /** A slug for a display name: "Iron Sword (old)" → "iron-sword-old". */
 export function slugify(name) {
@@ -146,6 +147,8 @@ function normalize(raw, { add, hostVersion, capabilities, limits, dataModuleDefi
         else content.meterPresets = records(given.meterPresets, 'meterPresets', { add, packId, check: (record, path) => checkMeterPreset(record, path, add), slugField: 'id', named: false });
     }
     if (given.rpg !== undefined) content.rpg = checkRpg(given.rpg, packId, add);
+    // The cast (cast.js): kept only when given, so older packs normalize as they always did.
+    if (given.cast !== undefined) content.cast = checkCast(given.cast, packId, add);
     // Not a list: kept only when given (so older packs' bytes and hashes stay), and only when it checks.
     if (given.you !== undefined) {
         const you = checkYou(given.you, add);
@@ -447,7 +450,21 @@ function checkRpg(value, packId, add) {
         add('BAD_CONTENT', 'content.rpg.skillSets', `content.rpg.skillSets holds at most ${LEAN_RPG_LIMITS.sets} sets.`);
         return [];
     }
-    return records(value.skillSets, 'rpg.skillSets', { add, packId, check: (record, path, label) => checkSkillSet(record, path, label, add) });
+    const sets = records(value.skillSets, 'rpg.skillSets', { add, packId, check: (record, path, label) => checkSkillSet(record, path, label, add) });
+    // The stat formula and its numbers (optional): one more record of the list, after the skill sets.
+    const formula = value.formula, numbers = value.numbers;
+    if (formula === undefined && numbers === undefined) return sets;
+    let ok = true;
+    if (formula !== undefined && !RPG_FORMULAS.includes(formula)) { ok = false; add('BAD_CONTENT', 'content.rpg.formula', `content.rpg.formula must be one of ${RPG_FORMULAS.join(', ')}.`); }
+    const given = {};
+    if (numbers !== undefined) {
+        if (!isObject(numbers)) { ok = false; add('BAD_CONTENT', 'content.rpg.numbers', 'content.rpg.numbers must be an object of whole numbers, like { "foeBase": 5 }.'); } else {
+            for (const [key, number] of Object.entries(numbers)) {
+                if (!RPG_NUMBER_KEYS.includes(key)) { ok = false; add('UNKNOWN_FIELD', `content.rpg.numbers.${key}`, `"${key}" is not an RPG number (expected ${RPG_NUMBER_KEYS.join(', ')}).`); } else if (!Number.isSafeInteger(number)) { ok = false; add('BAD_CONTENT', `content.rpg.numbers.${key}`, `content.rpg.numbers.${key} must be a whole number.`); } else given[key] = number;
+            }
+        }
+    }
+    return ok ? [...sets, { id: `${packId}/formula`, slug: 'formula', pack: packId, ...(formula !== undefined ? { formula } : {}), ...(Object.keys(given).length ? { numbers: given } : {}) }] : sets;
 }
 
 function checkSkillSet(record, path, label, add) {

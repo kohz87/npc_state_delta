@@ -121,6 +121,7 @@ export const SETTINGS_TEXT = Object.freeze({
         dropped: '{n} lines left out to fit the budget.',
         droppedOne: '1 line left out to fit the budget.',
         nothing: 'Nothing (no module adds text here now).',
+        hidden: '(hidden)',
         copy: 'Copy',
         copyTitle: 'Copy all of the text below',
         copied: 'Copied.',
@@ -669,23 +670,49 @@ const ownParts = own => (Array.isArray(own) ? own.filter(part => part && typeof 
 
 /**
  * The texts the next reply would get, as "Show what's sent" lists them: { static: [part], tail: [part],
- * own: [part] } (each part { module, label, text, dropped }, empty texts left out unless lines were
+ * own: [part] } (each part { module, label, text, dropped, counted }, empty texts left out unless lines were
  * dropped), and `copy`, all of it as one text: each section's heading, then its parts as sent (the
  * static ones joined by a blank line, the tail's by a line break, as prompt.js joins them).
+ *
+ * `redact(moduleId, text)` (optional) is what the reader may see of a part: the list, the drawing and `copy` use the
+ * text it gives, never the raw one (`counted` keeps the raw text for token counts only; it is never drawn). The prompt
+ * itself is not touched. See `redactSentOf`.
  */
-export function sentText(parts, own = [], { names = id => id } = {}) {
+export function sentText(parts, own = [], { names = id => id, redact = null } = {}) {
     const list = Array.isArray(parts) ? parts.filter(part => part && typeof part.text === 'string') : [];
     const T = SETTINGS_TEXT.sent;
+    const shown = part => (typeof redact === 'function' && part.text ? redact(String(part.module ?? ''), part.text) : part.text);
     const stat = list.filter(part => part.place === 'static' && part.text);
     const tail = list.filter(part => part.place !== 'static' && (part.text || part.dropped));
-    const titled = part => ({ module: String(part.module ?? ''), title: String(part.label ?? names(part.module)), text: part.text, dropped: Number(part.dropped) || 0 });
+    const titled = part => ({ module: String(part.module ?? ''), title: String(part.label ?? names(part.module)), text: shown(part), counted: part.text, dropped: Number(part.dropped) || 0 });
     const mine = ownParts(own).map(part => ({ ...titled(part), title: fill(T.part, { name: names(part.module), label: String(part.label ?? '') }) }));
+    const statShown = stat.map(titled);
+    const tailShown = tail.map(titled);
     const sections = [
-        [T.static, stat.map(part => part.text).join('\n\n')],
-        [T.tail, tail.map(part => part.text).filter(Boolean).join('\n')],
+        [T.static, statShown.map(part => part.text).join('\n\n')],
+        [T.tail, tailShown.map(part => part.text).filter(Boolean).join('\n')],
         ...mine.map(part => [part.title, part.text]),
     ].filter(([, text]) => text);
-    return { static: stat.map(titled), tail: tail.map(titled), own: mine, copy: sections.map(([head, text]) => `[${head}]\n${text}`).join('\n\n') };
+    return { static: statShown, tail: tailShown, own: mine, copy: sections.map(([head, text]) => `[${head}]\n${text}`).join('\n\n') };
+}
+
+/**
+ * The `redact(moduleId, text)` for sentText over a registry: a module with `hooks.redactSent(text)` says what the reader
+ * sees of its text (NPC State Delta turns each locked note into "Mira: 1 hidden note"). Only the view and its copy use it. A hook that
+ * throws, or answers anything but a string, shows the fixed "(hidden)" line, never the raw text. A module with no such hook is shown as sent.
+ */
+export function redactSentOf(registry) {
+    return (moduleId, text) => {
+        let hook;
+        try { hook = registry?.module?.(moduleId)?.hooks?.redactSent; } catch { hook = null; }
+        if (typeof hook !== 'function') return text;
+        try {
+            const shown = hook(text);
+            return typeof shown === 'string' ? shown : SETTINGS_TEXT.sent.hidden;
+        } catch {
+            return SETTINGS_TEXT.sent.hidden;
+        }
+    };
 }
 
 // One feature's row: its switch, label, description and (when it changes the static prompt) the hint.

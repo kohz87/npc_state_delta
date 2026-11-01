@@ -4,7 +4,7 @@
 // "N points to spend" and a Spend points button; any other shows Stats. Both open the Spend points sheet (distribute.js)
 // over the cards; Skills opens the character's Skills view (skills.js) the same way. A fallen character (`alive` false) is greyed
 // and says "Fallen"; a companion who left the party (`left`, a `- party` line) is greyed too and says "Left". The header's "+ New character" (and "Create your character" when there is none) opens the New character
-// wizard (wizard.js). The tab shows while the feature is on, with or without a Character block.
+// wizard (wizard.js). Each card also has Export (export.js: a file of the character to import in another chat, with or without what they carry). The tab shows while the feature is on, with or without a Character block.
 // Every node is built with createElement and textContent.
 
 import { shell, h } from '../../view/widgets/dom.js';
@@ -12,7 +12,7 @@ import { meter } from '../../view/widgets/meter.js';
 import { RPG_STRINGS, fill } from '../strings.js';
 import { drawStageBars } from './bars.js';
 import { newSession, renderDistribute } from './distribute.js';
-import { readParty } from './party-data.js';
+import { growthText, readParty } from './party-data.js';
 import { newSkillsSession, renderSkills } from './skills.js';
 
 const P = RPG_STRINGS.party;
@@ -32,12 +32,13 @@ const sameCharacter = (a, b) => a.module === b.module && a.subject === b.subject
 
 /**
  * The Party widget. `deps`: `headState()` (the head state or null), `readerName()` (the reader's persona name),
- * `roleOf(definition)` (default: the definition's `role`), `openWizard()` (opens the New character dialog; without it there is no button).
+ * `roleOf(definition)` (default: the definition's `role`), `openWizard()` (opens the New character dialog; without it there is no button),
+ * `exportCharacter(character)` (opens the Export dialog for a card's character; without it there is no Export button).
  * The page draws a screen again from nothing on every change of the story, so what must outlive that, the open sheet and
  * its draft, is kept here, outside the widget (as Settings → Blocks keeps its editor): `shared.open` is the Spend points sheet's
  * session and `shared.skills` the Skills view's; at most one of them is open.
  */
-export function createPartyWidget({ headState = () => null, readerName = () => '', roleOf, openWizard = null, rules = undefined } = {}) {
+export function createPartyWidget({ headState = () => null, readerName = () => '', roleOf, openWizard = null, exportCharacter = null, rules = undefined } = {}) {
     const shared = { open: null, skills: null };
     const live = new Set();
     const tell = () => { for (const redraw of [...live]) redraw(); };
@@ -102,10 +103,19 @@ export function createPartyWidget({ headState = () => null, readerName = () => '
                 }
                 node.appendChild(stats);
                 if (character.skillsBlock) node.appendChild(h(doc, 'div', 'rpg-skills', character.skills.length ? character.skills.map(skill => `${skill.name} (${skill.rankName})`).join(' · ') : P.noSkills));
+                // The Standard formula's bars grow with VIT, AGI and INT: how many blocks each has and the stat that earns the next one, and Luck's next step.
+                if (character.growth) node.appendChild(h(doc, 'p', 'rpg-growth', growthText(character.growth)));
                 const actions = h(doc, 'div', 'rpg-card-actions');
                 const spend = character.points > 0;
                 button(actions, spend ? P.spend : P.stats, `ss-button${spend ? ' ss-button-primary' : ''} rpg-open`, () => openSheet(character));
                 if (character.skillsBlock) button(actions, P.skills, 'ss-button rpg-skills-open', () => openSkills(character));
+                if (exportCharacter) {
+                    const out = button(actions, '', 'ss-button rpg-export-open', () => { try { exportCharacter(character); } catch { /* the dialog may not open here */ } });
+                    const icon = h(doc, 'i', 'fa-solid fa-file-export');
+                    icon.setAttribute('aria-hidden', 'true');
+                    out.append(icon, h(doc, 'span', '', P.export));
+                    out.setAttribute('aria-label', fill(P.exportLabel, { name: character.name }));
+                }
                 node.appendChild(actions);
             }
 
@@ -118,7 +128,7 @@ export function createPartyWidget({ headState = () => null, readerName = () => '
                 const looking = shared.skills ? party.find(character => sameCharacter(character, shared.skills) && character.skillsBlock) : null;
                 if (shared.skills && !looking) shared.skills = null;
                 main.hidden = Boolean(open || looking);
-                if (open) sheet = renderDistribute(host, { character: open, session: shared.open, api, doc, onClose: closeSheet, onDone: ended });
+                if (open) sheet = renderDistribute(host, { character: open, session: shared.open, api, doc, onClose: closeSheet, onDone: ended, ...(rules ? { rules } : {}) });
                 else if (looking) sheet = renderSkills(host, { character: looking, session: shared.skills, api, doc, onBack: closeSkills, onSaved: tell, ...(rules ? { rules } : {}) });
                 const head = h(doc, 'div', 'rpg-head');
                 head.appendChild(h(doc, 'h3', '', P.title));

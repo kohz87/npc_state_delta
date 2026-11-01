@@ -174,6 +174,8 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
         directorOn: () => registry.lifecycle?.('story-director')?.status === 'ready',
         // Off unless Story Block's core is there to own the switch (unlike coreOn, which counts a missing feature as on).
         leanRpgOn: () => (registry.feature?.(CORE_FEATURE.leanRpg) ? registry.featureOn(CORE_FEATURE.leanRpg) : false),
+        // The stat formula Story Block's settings say (Classic only when the reader chose it): which RPG templates the chooser offers.
+        rpgFormula: () => { try { return runtime.settings?.('story-block')?.rpgFormula === 'classic' ? 'classic' : 'standard'; } catch { return 'standard'; } },
         // A block card's "Edit fields": the editor is on Settings → Blocks.
         navigate: () => { openSettings().select('blocks'); return true; } });
     // The host's own widgets: the Inspector (over the store's replay) and the save points (over the chat).
@@ -889,7 +891,8 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
                 // What the chat remembers about the first send (lean-rpg/start.js): in its own metadata, written with the chat.
                 meta: () => { try { return (liveCtx() ?? ctx)?.chatMetadata ?? null; } catch { return null; } },
                 save: () => { try { const c = liveCtx() ?? ctx; (c.saveMetadata ?? c.saveMetadataDebounced)?.call(c); } catch { /* the choice lasts this page only */ } },
-                openDialog: (id, opts) => api.dialog.open(id, opts), closeView: () => mounts.screen.close(), refresh: () => refresh(), command: (type, payload, options) => sdk.command(type, payload, options), values: () => settings('story-block') });
+                openDialog: (id, opts) => api.dialog.open(id, opts), closeView: () => mounts.screen.close(), refresh: () => refresh(), command: (type, payload, options) => sdk.command(type, payload, options), values: () => settings('story-block'),
+                query: (name, args) => { try { return sdk.query(name, args); } catch { return null; } } });
             mounts.card?.refreshAll?.({ force: true });
             // Home draws its "Your character" card from `rpg`, which is only set now: the open screen is drawn again.
             mounts.screen?.update?.();

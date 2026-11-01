@@ -50,7 +50,9 @@ export function itemDefsIn(packs, ids = null) {
  * words a world uses for levels and XP, MODULES §F25; ranks: `{ id, pack, title?, levels?, reward?, xp? }`,
  * each pack's ladder lowest first, so a reader takes one pack's ranks; crafts: `{ id, slug, pack, title,
  * stats, stations, note? }`, see craftsOf for the merged table; meterPresets: `{ id, slug, pack, title,
- * meters, stages? }`, ready-made NPC meter sets),
+ * meters, stages? }`, ready-made NPC meter sets; cast: `{ id, pack, packVersion, name, aliases, about, look, voice?, personality?, history?,
+ * portrait?, start: { place, goal, routine? }, drawnTo?, meters?, stages?, fields?, secrets?, canDieUnmet? }`, the hand-written people of cast.js, `id` their own
+ * slug in the pack),
  * `currency` (one `{ pack, name, short }` per pack that suggests one), `layouts`,
  * `screens` (each with its `pack`), or `theme` (one `{ pack, tokens }` per pack that has a
  * theme). Unknown kinds give [].
@@ -59,6 +61,8 @@ export function itemDefsIn(packs, ids = null) {
 export function contentOf(packs, kind, { pack = null } = {}) {
     if (kind === 'currency') return copy(packs.filter(entry => entry.currency && (!pack || entry.id === pack)).map(entry => ({ pack: entry.id, ...entry.currency })));
     const chosen = pack ? packs.filter(entry => entry.id === pack) : packs;
+    // The cast: each person with the version of the pack that gave them (a newer version changes who is new and who changed).
+    if (kind === 'cast') return copy(chosen.flatMap(entry => (entry.content.cast ?? []).map(person => ({ ...person, packVersion: entry.version }))));
     if (CONTENT_KINDS.includes(kind)) return copy(chosen.flatMap(entry => entry.content[kind] ?? []));
     if (kind === 'layouts' || kind === 'screens') return copy(chosen.flatMap(entry => entry[kind]));
     if (kind === 'theme') return copy(chosen.filter(entry => Object.keys(entry.theme).length).map(entry => ({ pack: entry.id, tokens: entry.theme })));

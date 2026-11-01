@@ -31,14 +31,16 @@
 // Pure apart from the DOM it is given: no SillyTavern import, and every outside thing (Delta's
 // runtime api, the host global, the document, timers) is injectable for tests.
 import { resolveDossierTarget } from '../suite-handshake.js';
+import { storyMinuteText } from '../calendar.js';
 import {
-    FEATURE_PRESETS, FEATURE_SCAN_EVERY_REPLY, FEATURE_SOCIAL, FEATURE_STAGES, KEY_PEOPLE_QUERY, MILESTONE_KIND, NPC_KIND, SOCIAL_QUERY, createNpcPart, limitsFromLines, limitsToLines, meterValue,
-    normalizeSecrets, secretsFromLines, secretsToLines, wordKey,
+    CAST_QUERY, FEATURE_PRESETS, FEATURE_SCAN_EVERY_REPLY, FEATURE_SOCIAL, FEATURE_STAGES, KEY_PEOPLE_QUERY, MILESTONE_KIND, NPC_KIND, SOCIAL_QUERY, createNpcPart, limitsFromLines, limitsToLines, meterValue,
+    MAX_SECRETS, normalizeGeneratedSecrets, normalizeSecrets, secretsFromLines, secretsToLines, wordKey,
 } from './npc-meters.js';
 import { normalizeLimits, presetCatalog, presetIds } from './npc-meters-presets.js';
 import { METERS_CARD_ID, metersCardScreen } from './npc-meters-screen.js';
 import { DOSSIER_FIELDS } from './fields/registry.js';
 import { findKeyEntry, isKey, normalizeKeyPeople } from './key-people.js';
+import { metWithEntry, normalizeCast } from './cast-dossier.js';
 import { escapeHtml } from './util/html.js';
 import { createParticipant, fileVault } from './storysuite-participant/index.js';
 
@@ -73,8 +75,13 @@ export const WORLD_FEATURE = 'story-director.world';
  */
 export const PAGE_API = 'NPCStateDeltaCast';
 export const PAGE_SLOT_CLASS = 'npc-state-delta-v2-slot';
-export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.keyAway', 'npc.socialModifier', 'npc.identity']);
-export const COMMAND_NAMES = Object.freeze(['npc.adjust', 'npc.set', 'npc.refresh', 'npc.milestone', 'npc.tick']);
+// Story Block's query for a pack portrait's image URL (read only): packs.portrait({ pack, file }) → a safe URL or null.
+const PORTRAIT_QUERY = 'packs.portrait';
+// Story Director's reader-only pin for key people (its feature switch is `story-director.key-people`).
+const KEY_PIN_COMMAND = 'keypeople.pin';
+const KEY_PEOPLE_FEATURE = 'story-director.key-people';
+export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.keyAway', 'npc.castMade', 'npc.socialModifier', 'npc.identity']);
+export const COMMAND_NAMES = Object.freeze(['npc.adjust', 'npc.set', 'npc.refresh', 'npc.milestone', 'npc.open', 'npc.tick']);
 // The replies after which Delta takes its per-reply step (npc.tick): a new reply or a new swipe of
 // one, never a Continue, a Re-read or late change lines (the same reply again).
 export const TICK_TURNS = Object.freeze(['normal', 'swipe', 'regenerate']);
@@ -94,6 +101,11 @@ export const HOST_RETRY_MS = 250;
 export const HOST_RETRY_ATTEMPTS = 40;
 export const HOST_ALIVE_MS = 5000;
 export const SECTION_WATCH_MS = 1000;
+// The scan's short list of story events to watch for: this many people, this many events each.
+const EVENT_WATCH_NPCS = 6;
+const EVENT_WATCH_EACH = 3;
+// The widths (percent) the Secrets section draws its blank bars at, in turn.
+const BAR_WIDTHS = Object.freeze([62, 48, 56, 70]);
 // How long a scan, a pass or a generation waits for the host's head-selection barrier, and how often it looks.
 export const HEAD_SETTLE_MS = 20000;
 export const HEAD_SETTLE_POLL_MS = 50;
@@ -217,6 +229,7 @@ const fallbackEmptyCast = reason => `<div class="npc-state-delta-story-empty-sta
  *   version    Delta's version, for the module definition.
  *   host       () => the Story Block global.
  *   headReply  () => the index of the latest reply (the reader's own meter values start its window).
+ *   castSync   async () => makes the dossiers of the cast people the step has just recorded (index.js castSync).
  *   doc, timers, loadEmptyCast (() => Promise<emptyCastHtml>), logger.
  */
 // DOM helpers for the Cast markup (text is set with textContent; nothing is parsed as markup).
@@ -279,6 +292,7 @@ export function createStorySuiteV2Adapter({
     version = '',
     host = () => globalThis.StoryBlock,
     headReply = () => null,
+    castSync = null,
     doc = globalThis.document,
     timers = globalThis,
     loadEmptyCast = () => import('../story-block-tabs.js').then(module => module.emptyCastHtml),
@@ -393,6 +407,9 @@ export function createStorySuiteV2Adapter({
         const setup = npc?.meterSetup && typeof npc.meterSetup === 'object' ? npc.meterSetup : {};
         return { track: typeof setup.track === 'string' ? setup.track : '', limits: normalizeLimits(setup.limits) };
     };
+    // The same for the stage logic: a person made from the cast also brings their own stages (castFrom.stages), which the
+    // editor's setup never holds (so saving the editor cannot lose them).
+    const stageSetupOf = npc => ({ ...setupOf(npc), ladder: Array.isArray(npc?.castFrom?.stages) ? npc.castFrom.stages : [] });
 
     const part = createNpcPart({
         resolve: name => {
@@ -404,13 +421,13 @@ export function createStorySuiteV2Adapter({
         // handlers and screens; the texts go to the tail and to an unlocked note's screen line alone.
         secretRules: (name, labels = []) => {
             const npc = dossierOf(name) ?? labels.map(dossierOf).find(Boolean);
-            return normalizeSecrets(npc?.secrets).map(({ id, meter, at, title }) => ({ id, meter, at, ...(title ? { title } : {}) }));
+            return normalizeSecrets(npc?.secrets).map(({ id, meter, at, when, title }) => ({ id, ...(meter ? { meter, at } : {}), ...(when ? { when } : {}), ...(title ? { title } : {}) }));
         },
         secretTexts: (name, ids = []) => {
             const npc = dossierOf(name);
             return normalizeSecrets(npc?.secrets).filter(secret => ids.includes(secret.id)).map(({ id, text }) => ({ id, text }));
         },
-        setup: (name, labels = []) => setupOf(dossierOf(name) ?? labels.map(dossierOf).find(Boolean)),
+        setup: (name, labels = []) => stageSetupOf(dossierOf(name) ?? labels.map(dossierOf).find(Boolean)),
         presets: catalog,
         feature: hostFeature,
         present: () => names(presentList()),
@@ -538,6 +555,8 @@ export function createStorySuiteV2Adapter({
         'npc.next': (state, args) => part.queries['npc.next'](state, args ?? {}),
         /** npc.keyAway() → the memory of key people's last absences (the slice's `keyAway`: { [name key]: { name, aliases, away, returnedAt, presentReplies } }), {} when none. */
         'npc.keyAway': (state, args) => part.queries['npc.keyAway'](state, args ?? {}),
+        /** npc.castMade() → the people Delta made a dossier for from the cast (the slice's `cast`: { [castKey]: { name, rungs? } }), {} when none. */
+        'npc.castMade': (state, args) => part.queries['npc.castMade'](state, args ?? {}),
         /**
          * npc.socialModifier({ name, skill }) → { mod, name, skill, reasons: [{ text, value }] } | null:
          * what an NPC's meters, stage and disposition do to a social check against them (src/social-check.js).
@@ -730,6 +749,71 @@ export function createStorySuiteV2Adapter({
             return {};
         }
     }
+    // The living cast (Story Director's `director.cast`, read only): the cleaned answer with its dates written on Story Director's
+    // calendar, or null (not hosted, no Story Director, or one without the query). Null means "no cast anywhere".
+    function castAnswer() {
+        if (!hosted || typeof sdkRef?.query !== 'function') return null;
+        try {
+            const answer = sdkRef.query(CAST_QUERY, {});
+            return Array.isArray(answer) ? answer : null;
+        } catch {
+            return null;
+        }
+    }
+    function castPeople() {
+        const answer = castAnswer();
+        if (!answer) return null;
+        const calendar = directorCalendar();
+        return normalizeCast(answer, minutes => storyMinuteText(minutes, calendar));
+    }
+    // The slice's record of the cast dossiers made (npc.castMade), {} when there is none or no host.
+    function castMade() {
+        if (!hosted || typeof sdkRef?.query !== 'function') return {};
+        try {
+            const made = sdkRef.query('npc.castMade', {});
+            return made && typeof made === 'object' && !Array.isArray(made) ? made : {};
+        } catch {
+            return {};
+        }
+    }
+    // Packs' names by id (`packs.list`), for the badge; {} when the host cannot say.
+    function packNames() {
+        if (!hosted || typeof sdkRef?.query !== 'function') return {};
+        try {
+            const list = sdkRef.query('packs.list', {});
+            return Object.fromEntries((Array.isArray(list) ? list : []).filter(pack => pack && typeof pack.id === 'string')
+                .map(pack => [pack.id, String(pack.name ?? pack.title ?? '').trim()]).filter(([, name]) => name));
+        } catch {
+            return {};
+        }
+    }
+    // A pack portrait's image URL (`packs.portrait`) as a safe URL (safeImageUrl), or null.
+    function packPortraitUrl(pack, file) {
+        if (!hosted || typeof sdkRef?.query !== 'function' || !pack || !file) return null;
+        try { return safeImageUrl(sdkRef.query(PORTRAIT_QUERY, { pack, file })); } catch { return null; }
+    }
+    // Whether Story Director offers the reader's pin (`keypeople.pin`, registered by a ready module, its feature not switched off).
+    // Delta only ever asks; Story Director's own command writes its own state.
+    function keyPinOffered() {
+        if (!hosted || typeof sdkRef?.modules !== 'function') return false;
+        try {
+            const offered = (sdkRef.modules() ?? []).some(module => module?.status === 'ready' && Array.isArray(module.commands) && module.commands.includes(KEY_PIN_COMMAND));
+            return offered && hostFeature(KEY_PEOPLE_FEATURE) !== false;
+        } catch {
+            return false;
+        }
+    }
+    // The reader pins a dossier's person as a key person: `keypeople.pin { name, aliases?, nsd: true }` as the reader's action (cause ui).
+    // → { ok, message } (Story Director's own answer, or why not).
+    async function pinKeyPerson({ name, aliases } = {}) {
+        const who = String(name ?? '').trim();
+        if (!who) return { ok: false, message: 'Nobody to pin.' };
+        if (!keyPinOffered()) return { ok: false, message: 'Story Director does not offer Key people here.' };
+        const list = (Array.isArray(aliases) ? aliases : []).map(alias => String(alias ?? '').trim()).filter(Boolean).slice(0, 8);
+        const out = await send(KEY_PIN_COMMAND, { name: who, ...(list.length ? { aliases: list } : {}), nsd: true });
+        if (out?.ok) notifyChange();
+        return { ok: out?.ok === true, message: String(out?.receipt?.summary ?? out?.message ?? (out ? '' : 'Story Director did not answer.')) };
+    }
     // Story Director's calendar (`director.calendar`: { era, months, leapYears }), or null when it has none to give; Story Director's
     // key people carry their dates as story minutes, which index.js writes on it (calendar.js storyMinuteText).
     function directorCalendar() {
@@ -892,7 +976,7 @@ export function createStorySuiteV2Adapter({
         for (const note of entry.opened ?? []) {
             const text = texts.find(secret => secret.id === note.id)?.text ?? '';
             const p = elementOf(doc, 'p', 'npc-state-delta-v2-note npc-state-delta-v2-note-open');
-            p.append(doc.createTextNode('🔓 '), elementOf(doc, 'b', '', note.title ?? ''));
+            p.append(elementOf(doc, 'b', '', note.title ?? ''));
             if (text) p.append(doc.createTextNode(`: ${text}`));
             nodes.push(p);
         }
@@ -1197,8 +1281,24 @@ export function createStorySuiteV2Adapter({
         try { wanted = part.tickWanted(); } catch { wanted = false; }
         // Key people (Story Director's): the step also keeps the memory of their last absence up to date.
         if (!wanted) wanted = (keyPeopleAnswer()?.length ?? 0) > 0 || Object.keys(keyAwayMemory()).length > 0;
+        // The living cast: someone met whose dossier is not yet made, or a made one with a stage ladder of their own.
+        if (!wanted) wanted = castWanted();
         if (!wanted) return;
-        lastTick = send('npc.tick', {}, { own: true });
+        lastTick = send('npc.tick', {}, { own: true }).then(async out => {
+            await madeCastSync();
+            return out;
+        });
+    }
+    function castWanted() {
+        const made = castMade();
+        if (Object.values(made).some(record => record?.rungs > 0)) return true;
+        const people = castPeople();
+        return Array.isArray(people) && metWithEntry(people).some(person => !Object.hasOwn(made, person.key));
+    }
+    // After the step: Delta makes the dossiers of the people it has just recorded (index.js castSync), never twice at once.
+    async function madeCastSync() {
+        if (typeof castSync !== 'function') return;
+        try { await castSync(); } catch (error) { warn('Story Suite v2 cast dossiers were not made', error); }
     }
 
     // ---- Diagnostics (Story Block's Settings → Diagnostics) ----
@@ -1363,8 +1463,10 @@ export function createStorySuiteV2Adapter({
         },
         // Story Block's Settings → Diagnostics (its optional hooks.diagnostics; an older host ignores it):
         // the scanner's route, profile, call counts and last outcome (index.js scannerReport),
-        // and what Delta sends under its own prompt keys (`ownPrompt`, Story Block's prompt size).
-        hooks: Object.freeze({ diagnostics: () => diagnosticsLines(), ownPrompt: () => ownPrompt() }),
+        // and what Delta sends under its own prompt keys (`ownPrompt`, Story Block's prompt size). `redactSent` is for
+        // "Show what's sent": the text of this module's tail with each locked note's line as "Name: 1 hidden note"
+        // (a host that does not call it shows the raw text; SillyTavern's own prompt view always does).
+        hooks: Object.freeze({ diagnostics: () => diagnosticsLines(), ownPrompt: () => ownPrompt(), redactSent: text => part.redact(text) }),
         screens: [metersCardScreen, castScreen],
         widgets: { [CAST_WIDGET]: castWidget },
         tabs: [{
@@ -1573,8 +1675,12 @@ export function createStorySuiteV2Adapter({
         limits: 'npc_state_delta_edit_meter_limits',
         milestones: 'npc_state_delta_edit_milestones',
         meter: id => `npc_state_delta_edit_meter_${id}`,
+        secretState: id => `npc_state_delta_edit_secret_state_${id}`,
     });
     const milestoneLines = entry => Object.values(entry?.milestones ?? {}).join('\n');
+
+    // Whether the dossier editor may show a note's title, text and event: it is the reader's (no `from`: a pack or a scan wrote the others), or it is opened (the player knows it).
+    const editorShows = (note, opened) => !note.from || opened.has(note.id);
 
     /**
      * The editor's v2 controls for one dossier, as markup ('' without a host): the hidden notes (with
@@ -1588,7 +1694,28 @@ export function createStorySuiteV2Adapter({
         const setup = setupOf(npc);
         const box = (id, label, help, value, rows = 3) => `
       <label class="npc-state-delta-editor-wide">${label} <small>${help}</small><textarea id="${id}" class="text_pole" rows="${rows}">${escapeHtml(value)}</textarea></label>`;
-        let html = box(EDITOR.secrets, 'Hidden notes', 'Never sent to the story, nor shown, while locked. One per line: meter, threshold, colon, an optional [title] shown while it is locked, then the note (e.g. "trust 60: [Her past] She is the duke\'s daughter."). Opens when the meter reaches the threshold (at or below it for a negative one); then given to the story while this NPC is present.', secretsToLines(npc.secrets));
+        // A locked note the reader did not write (a pack's or a scan's: its `from`) is not shown: no title, no text, no
+        // event words, only that it is hidden and when it opens, with its open/shut control. The text box holds the reader's
+        // own notes and the notes that are opened. Saving keeps every hidden note exactly as it is (readEditor).
+        const opened = new Set(entry?.unlocked ?? []);
+        const notes = normalizeSecrets(npc.secrets);
+        const shown = notes.filter(note => editorShows(note, opened));
+        const rules = new Map(part.notes({ name: npc.name, unlocked: [...opened], meters: entry?.meters }).locked.map(note => [note.id, note.opens]));
+        let html = box(EDITOR.secrets, 'Hidden notes', 'One per line: "meter threshold: [title] note" (e.g. "trust 60: [Her past] She is the duke\'s daughter."), "when the duke falls => [title] note" for a note that opens on a story event (up to 120 characters; Delta\'s scan watches for it while this NPC is present), or "trust 60 or when the duke falls => note" for whichever comes first. A meter rule opens at or above its threshold (at or below it for a negative one). The story is told every note while this NPC is present (locked ones as hidden, never to be revealed). This box holds the notes you wrote and the notes that are opened; any other note stays hidden from you until it opens, and is kept as it is when you save.', secretsToLines(shown));
+        if (notes.length) {
+            let hiddenCount = 0;
+            const rows = notes.map(note => {
+                const open = opened.has(note.id);
+                const control = label => `<select id="${EDITOR.secretState(note.id)}" class="text_pole" data-delta-secret="${escapeHtml(note.id)}" aria-label="${escapeHtml(label)}"><option value="hidden"${open ? '' : ' selected'}>Hidden</option><option value="open"${open ? ' selected' : ''}>Opened</option></select>`;
+                if (editorShows(note, opened)) return `<label>${escapeHtml(note.title || note.text.slice(0, 40))}${control(note.title || 'Note')}</label>`;
+                hiddenCount += 1;
+                const name = `Hidden note ${hiddenCount}`;
+                const opens = rules.get(note.id) ?? 'Opens with the story';
+                return `<div class="npc-state-delta-v2-editor-hidden"><span>${escapeHtml(`${name} · ${opens[0].toLocaleLowerCase()}${opens.slice(1)}`)}</span>${control(name)}</div>`;
+            });
+            html += `
+      <div class="npc-state-delta-editor-wide npc-state-delta-v2-editor-notes"><p class="npc-state-delta-muted">Open or shut a note by hand. A shut note stays shut until you open it.</p>${rows.join('')}</div>`;
+        }
         const tracks = [...new Set(Object.keys(settings.ladder).filter(Boolean))];
         const presetName = id => catalog().find(preset => preset.id === id)?.name ?? id;
         if (part.featureOn(FEATURE_STAGES) && (tracks.length || setup.track)) {
@@ -1608,7 +1735,7 @@ export function createStorySuiteV2Adapter({
 
     /**
      * What the editor's v2 controls hold for dossier `current` (read(id) → a control's value, or
-     * undefined when the control is not there): { secrets?, meterSetup?, milestones?: { add, remove },
+     * undefined when the control is not there): { secrets?, noteStates?: { open, close }, meterSetup?, milestones?: { add, remove },
      * meters?: { id: n } (changed custom values), problems: [sentences] }. Only what the reader changed.
      */
     function readEditor(read, current) {
@@ -1619,9 +1746,40 @@ export function createStorySuiteV2Adapter({
         };
         const secrets = value(EDITOR.secrets);
         if (secrets !== undefined) {
-            const parsed = secretsFromLines(secrets, current?.secrets);
-            out.secrets = parsed.secrets;
-            if (parsed.problems.length) out.problems.push(`these hidden notes were not kept (write "meter number: note"): ${parsed.problems.join(' / ')}`);
+            // The box held only the notes the reader may see (editorHtml); every other note is kept exactly as it was.
+            const entry = entryFor(sliceEntries(), current);
+            const was = new Set(entry?.unlocked ?? []);
+            const before = normalizeSecrets(current?.secrets);
+            const kept = new Set(before.filter(note => !editorShows(note, was)).map(note => note.id));
+            const parsed = secretsFromLines(secrets, before.filter(note => editorShows(note, was)));
+            const written = new Map(parsed.secrets.map(note => [note.id, note]));
+            const known = new Set(before.map(note => note.id));
+            // The notes as stored (not as cleaned), by id, so a note that stays is exactly the one that was.
+            const stored = new Map();
+            for (const raw of Array.isArray(current?.secrets) ? current.secrets : []) {
+                const id = normalizeSecrets([raw])[0]?.id;
+                if (id && !stored.has(id)) stored.set(id, raw);
+            }
+            const list = [];
+            for (const note of before) {
+                if (kept.has(note.id) || written.has(note.id)) list.push(stored.get(note.id) ?? note);
+            }
+            // New or changed lines are the reader's own notes (no `from`); a line left as it was is the note it was.
+            const fresh = parsed.secrets.filter(note => !known.has(note.id));
+            const room = Math.max(0, MAX_SECRETS - list.length);
+            list.push(...fresh.slice(0, room));
+            out.secrets = list;
+            const problems = [...parsed.problems, ...fresh.slice(room).map(note => (note.title ? `[${note.title}] ` : '') + note.text)];
+            if (problems.length) out.problems.push(`these hidden notes were not kept (write "meter number: note" or "when the event => note"; up to ${MAX_SECRETS} in all): ${problems.join(' / ')}`);
+            // A note whose state select the reader moved (open or shut by hand), among the notes now kept.
+            const open = [];
+            const close = [];
+            for (const note of list) {
+                const state = value(EDITOR.secretState(note.id));
+                if (state === 'open' && !was.has(note.id)) open.push(note.id);
+                if (state === 'hidden' && was.has(note.id)) close.push(note.id);
+            }
+            if (open.length || close.length) out.noteStates = { open, close };
         }
         const track = value(EDITOR.track);
         const limitsText = value(EDITOR.limits);
@@ -1653,10 +1811,32 @@ export function createStorySuiteV2Adapter({
         return out;
     }
 
+    // A dossier's Secrets section, in the order the notes were written (light to deep): [{ state: 'open', title, text,
+    // pill } | { state: 'hidden', opens, width }]. An opened note shows title, what opened it and its text; a hidden one
+    // only that it is hidden and when it opens (never its title, text or event wording). [] without notes.
+    function secretsViewOf(npc, entry) {
+        const rules = normalizeSecrets(npc?.secrets);
+        if (!rules.length) return [];
+        const notes = part.notes({ name: npc.name, unlocked: entry?.unlocked ?? [], meters: entry?.meters });
+        const opened = new Map(notes.opened.map(note => [note.id, note]));
+        const locked = new Map(notes.locked.map(note => [note.id, note]));
+        const out = [];
+        let hiddenCount = 0;
+        for (const rule of rules) {
+            if (opened.has(rule.id)) out.push({ state: 'open', title: rule.title || 'A hidden note', text: rule.text, pill: opened.get(rule.id).text });
+            else if (locked.has(rule.id)) {
+                // The bar's length only varies the look: a fixed set of widths in turn, never anything from the note itself.
+                out.push({ state: 'hidden', opens: locked.get(rule.id).opens, width: BAR_WIDTHS[hiddenCount % BAR_WIDTHS.length] });
+                hiddenCount += 1;
+            }
+        }
+        return out;
+    }
+
     /**
      * Each dossier's v2 meters for Delta's dossier view, by dossier id ({} without a host): { bars:
      * [{ id, label, value, min, max, text, tone, builtIn, ceiling?, delta? }], rank, next, milestones:
-     * [names], locked: [teaser lines], opened: [titles] }. Locked notes are titles and rules only.
+     * [names], secrets: [see secretsViewOf] }. A hidden note is its rule only, never its title or text.
      */
     function dossierMeters(npcs) {
         if (!hosted || !Array.isArray(npcs) || typeof sdkRef?.query !== 'function') return {};
@@ -1667,7 +1847,7 @@ export function createStorySuiteV2Adapter({
         } catch {
             return {};
         }
-        if (!Array.isArray(cast) || !cast.length) return {};
+        cast = Array.isArray(cast) ? cast : [];
         const byKey = Object.fromEntries(cast.map(entry => [entry.key, entry]));
         const entries = sliceEntries() ?? [];
         const builtIn = new Set(part.defs().filter(def => def.builtIn).map(def => def.id));
@@ -1676,16 +1856,40 @@ export function createStorySuiteV2Adapter({
             if (!npc?.id) continue;
             const who = part.identify(byKey, npc.name);
             const entry = who && Object.hasOwn(byKey, who.key) ? byKey[who.key] : null;
-            if (!entry) continue;
-            const slice = entries.find(item => item.key === entry.key);
+            const slice = entry ? entries.find(item => item.key === entry.key) : null;
+            // Someone with notes but no meters yet still has a Secrets section (every note hidden).
+            const secrets = secretsViewOf(npc, slice);
+            if (!entry && !secrets.length) continue;
             out[npc.id] = {
-                bars: entry.bars.map(bar => ({ ...bar, builtIn: builtIn.has(bar.id) })),
-                rank: entry.rank ?? '',
-                next: entry.next ?? '',
+                bars: (entry?.bars ?? []).map(bar => ({ ...bar, builtIn: builtIn.has(bar.id) })),
+                rank: entry?.rank ?? '',
+                next: entry?.next ?? '',
                 milestones: Object.values(slice?.milestones ?? {}),
-                locked: (entry.locked ?? []).map(note => note.text),
-                opened: (entry.opened ?? []).map(note => note.title),
+                secrets,
             };
+        }
+        return out;
+    }
+
+    /**
+     * The story events to watch for in this scan: for each present dossier (of `npcs`, Delta's records), its notes that open
+     * on an event and are still locked and not shut by hand. Short on purpose (6 people, 3 events each):
+     * [{ key: 's1', id: dossier id, name, note: noteId, event }]. [] without a host or without such notes.
+     */
+    function eventWatch(npcs) {
+        if (!hosted || !Array.isArray(npcs)) return [];
+        const entries = sliceEntries() ?? [];
+        const out = [];
+        let people = 0;
+        for (const npc of npcs) {
+            if (people >= EVENT_WATCH_NPCS) break;
+            if (!npc?.id || !npc.present || npc.archived) continue;
+            const slice = entryFor(entries, npc);
+            const done = new Set([...(slice?.unlocked ?? []), ...(slice?.held ?? [])]);
+            const events = normalizeSecrets(npc.secrets).filter(note => note.when && !done.has(note.id)).slice(0, EVENT_WATCH_EACH);
+            if (!events.length) continue;
+            people += 1;
+            for (const note of events) out.push({ key: `s${out.length + 1}`, id: npc.id, name: npc.name, note: note.id, event: note.when });
         }
         return out;
     }
@@ -1715,6 +1919,20 @@ export function createStorySuiteV2Adapter({
         keyPeople,
         /** While hosted: Story Director's calendar (`director.calendar`), or null. */
         directorCalendar,
+        /** While hosted: whether Story Director offers `keypeople.pin` (the "Pin as Key people" button shows only then). */
+        keyPinOffered,
+        /** While hosted: the reader pins a person as a key person (`keypeople.pin`, cause ui) → { ok, message }. */
+        pinKeyPerson,
+        /** While hosted: Story Director's cast (`director.cast`) as it answers, or null when it cannot. */
+        castAnswer,
+        /** The same, cleaned (src/cast-dossier.js normalizeCast), dates written on Story Director's calendar. */
+        castPeople,
+        /** While hosted: the people a cast dossier was made for (npc.castMade), {} without one. */
+        castMade,
+        /** While hosted: packs' names by id. */
+        packNames,
+        /** While hosted: a pack portrait's safe image URL, or null. */
+        packPortraitUrl,
         /** While hosted: the "Scan after every reply" switch (index.js asks before each automatic scan). */
         scanEveryReply: () => part.featureOn(FEATURE_SCAN_EVERY_REPLY) !== false,
         /**
@@ -1764,10 +1982,17 @@ export function createStorySuiteV2Adapter({
             if (!hosted) return null;
             if (edits.meters && Object.keys(edits.meters).length) await send('npc.set', { name, meters: edits.meters });
             if (edits.milestones) await send('npc.milestone', { name, add: edits.milestones.add ?? [], remove: edits.milestones.remove ?? [] });
+            if (edits.noteStates) await send('npc.open', { name, open: edits.noteStates.open ?? [], close: edits.noteStates.close ?? [] });
             return send('npc.refresh', { name });
         },
         /** While hosted: the dossier view's v2 meters by dossier id ({} otherwise). */
         dossierMeters,
+        /** The story events of present people's locked notes the scan should look for (see eventWatch); [] when none. */
+        eventWatch,
+        /** While hosted: a story event the scan saw opens these notes of one NPC → `npc.open` (Delta's own send). */
+        openByEvent: ({ name, ids } = {}) => send('npc.open', { name, open: ids, by: 'story' }, { own: true }),
+        /** The notes a scan wrote for someone new, cleaned to 2 to 5 layers (src/npc-meters.js normalizeGeneratedSecrets). */
+        generatedSecrets: list => normalizeGeneratedSecrets(list),
         /** While hosted: Delta's per-reply step now (the host's 'turn' event sends it on its own). */
         tick: () => send('npc.tick', {}, { own: true }),
         /** Resolves once the latest per-reply step has settled. */

@@ -44,11 +44,11 @@ export const DM_DESCRIPTORS = freeze({
     defaults: { imports: {}, rules: [], timers: [], rewards: {}, exports: {}, screens: [], layouts: [], migrations: [] },
     scope: ['chat', 'character'],
     fields: {
-        int: { required: ['type', 'min', 'max', 'default'], optional: ['edit', 'label', 'names', 'prompt'] }, bool: { required: ['type', 'default'], optional: ['edit', 'label', 'prompt'] },
+        int: { required: ['type', 'min', 'max', 'default'], optional: ['edit', 'label', 'names', 'prompt', 'blocks'] }, bool: { required: ['type', 'default'], optional: ['edit', 'label', 'prompt'] },
         enum: { required: ['type', 'values', 'default'], optional: ['edit', 'label', 'prompt'] }, text: { required: ['type', 'max', 'default'], optional: ['edit', 'list', 'label', 'prompt'] },
         map: { required: ['type', 'keys', 'values'], optional: ['edit', 'label', 'prompt'] },
     },
-    labels: { int: ['type', 'min', 'max'], bool: ['type'], enum: ['type', 'values'], text: ['type', 'max'] },
+    labels: { int: { required: ['type', 'min', 'max'], optional: ['names'] }, bool: ['type'], enum: ['type', 'values'], text: ['type', 'max'] },
     kind: { required: ['op', 'labels', 'effects'], optional: ['when', 'refusal', 'oncePerReply', 'ui', 'check', 'title'] },
     ops: [...OPS],
     effects: {
@@ -144,11 +144,16 @@ export function dmKindWritesHidden(definition, kind) {
     return computed || [...fields].some(name => dmHidden(state[name]));
 }
 
+/** What an int field's `blocks` may say: a character's bar (its stored value counts the blocks left) or a foe group's health. */
+export const DM_BLOCK_BARS = Object.freeze(['health', 'stamina', 'mana', 'foe']);
+
 /**
- * The names a kind's int label shows: those of the int field a `set` effect copies it into (`value: ['arg', label]`), so a
- * label needs no second copy of them. Null when the field has none.
+ * The names a kind's int label shows: its own `names` (a label whose effect works the number out, as the Standard bars' stage words do),
+ * else those of the int field a `set` effect copies it into (`value: ['arg', label]`), so a label needs no second copy of them. Null when
+ * there are none.
  */
 export function dmLabelNames(definition, kind, label) {
+    if (kind?.labels?.[label]?.type === 'int' && dmObject(kind.labels[label].names)) return kind.labels[label].names;
     for (const effect of Array.isArray(kind?.effects) ? kind.effects : []) {
         if (effect?.op !== 'set' || !Array.isArray(effect.value) || effect.value[0] !== 'arg' || effect.value[1] !== label) continue;
         const field = Array.isArray(effect.path) && typeof effect.path[0] === 'string' && dmOwn(definition?.state, effect.path[0]) ? definition.state[effect.path[0]] : null;

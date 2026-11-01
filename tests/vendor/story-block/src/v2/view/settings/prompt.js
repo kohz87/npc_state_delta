@@ -11,7 +11,7 @@
 // `createPromptReader` is the one reader of all this: the card and the window's footer bar both use it, so they always say the same.
 // Every node is built with textContent; module names and texts are never markup.
 
-import { SETTINGS_TEXT, SENT_FOLD, promptSize, sentText } from '../../host-ui.js';
+import { SETTINGS_TEXT, SENT_FOLD, promptSize, redactSentOf, sentText } from '../../host-ui.js';
 import { HOST_SETTINGS_SCHEMA } from '../../sdk.js';
 import { DEFAULT_TAIL_BUDGET, contextNotice, estimateTokens } from '../../prompt.js';
 import { fill } from '../../strings.js';
@@ -63,6 +63,8 @@ const num = n => Number(n).toLocaleString('en-US');
  */
 export function createPromptReader({ registry, settings, promptParts = null, countTokens = null }) {
     const names = id => (id === 'story-suite' ? 'Story Suite' : registry?.module?.(id)?.name ?? id);
+    // What the reader may see of a module's text (a module's `hooks.redactSent`); the prompt itself is never changed.
+    const redact = redactSentOf(registry);
     const tailBudget = () => {
         const value = settings()?.tailBudget;
         return Number.isInteger(value) && value > 0 ? value : DEFAULT_TAIL_BUDGET;
@@ -82,7 +84,7 @@ export function createPromptReader({ registry, settings, promptParts = null, cou
         if (!Array.isArray(parts)) return null;
         // A small context cuts the notes' budget (prompt.js contextFit).
         const budget = Number.isInteger(fit?.budget) ? fit.budget : tailBudget();
-        return { parts, fit, own, budget, names, exact: false, tokensOf: estimateTokens, size: promptSize(parts, { names, budget, own }) };
+        return { parts, fit, own, budget, names, redact, exact: false, tokensOf: estimateTokens, size: promptSize(parts, { names, budget, own }) };
     }
     async function readExact(base) {
         if (typeof countTokens !== 'function' || !base) return null;
@@ -125,7 +127,7 @@ function sentFold(doc, state, openState) {
     details.open = openState?.get(SENT_FOLD) === true;
     const draw = () => {
         if (!details.open || body.children.length) return;
-        drawSent(doc, body, sentText(state.read.parts, state.read.own, { names: state.read.names }), state.read.tokensOf, state.read.exact);
+        drawSent(doc, body, sentText(state.read.parts, state.read.own, { names: state.read.names, redact: state.read.redact }), state.read.tokensOf, state.read.exact);
     };
     details.addEventListener('toggle', () => {
         openState?.set(SENT_FOLD, details.open === true);
@@ -167,7 +169,7 @@ function drawSent(doc, body, text, tokensOf, exact) {
         for (const part of list) {
             const item = el(doc, 'div', 'story-suite-sent-part');
             item.dataset.module = part.module;
-            const n = part.text ? tokensOf(part.text) : 0;
+            const n = part.counted ? tokensOf(part.counted) : 0;
             const head = el(doc, 'p', 'story-suite-sent-head');
             head.append(el(doc, 'b', '', part.title), doc.createTextNode(' · '), el(doc, 'small', '', fill(exact ? T.tokens : T.about, { n: num(n) })));
             item.appendChild(head);

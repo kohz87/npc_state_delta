@@ -13,7 +13,9 @@ import { oneLine } from '../../text.js';
 import { CLASS_NAMES, CREATION, JOINS, JOIN_SETTING, PARTY_MAX, STATS } from './names.js';
 import { fold } from './read.js';
 import { RPG_STRINGS, fill } from './strings.js';
-import { buildDefinitions, hasRoom, newDraft, newSoul, readDraft } from './view/wizard-data.js';
+import { buildDefinitions, creationOf, hasRoom, newDraft, newSoul, readDraft } from './view/wizard-data.js';
+import { companionStats } from './formula.js';
+import { isStandard } from './rules.js';
 import { soulReading } from './soul.js';
 
 const J = RPG_STRINGS.join;
@@ -118,8 +120,15 @@ export function checkJoin(state, request) {
     return { ok: true, soul: Math.min(request.soul, partyCap(party)) };
 }
 
-/** The wizard's draft for a joining companion (the card's Edit first opens it): name, about, class, the best stat raised to 14. */
-export function joinDraft({ name = '', about = '', soul = 1, best = '' } = {}) {
+/** The wizard's draft for a joining companion (the card's Edit first opens it): name, about, class, the best stat raised to 14 (under the Standard formula `rules`: formula.js companionStats). */
+export function joinDraft({ name = '', about = '', soul = 1, best = '' } = {}, rules = null) {
+    if (isStandard(rules)) {
+        // Standard: every stat 5 and the best 9, then the points of each Soul Class above I (formula.js companionStats); the draft's budget is
+        // exactly what they cost, so "Edit first" can move points around but is not handed more.
+        const stats = companionStats(best, soul, rules), creation = creationOf(rules);
+        const spent = STATS.reduce((sum, stat) => sum + stats[stat] - creation.start, 0);
+        return readDraft({ name, about, soul, stats, kind: 'companion', skills: [], set: '', creation: { ...creation, budget: spent, max: creation.statMax } });
+    }
     const draft = newDraft({ hasYou: true });
     const stats = { ...draft.stats };
     if (STATS.includes(best)) stats[best] = 14;
@@ -130,8 +139,8 @@ export function joinDraft({ name = '', about = '', soul = 1, best = '' } = {}) {
  * The two definitions a joining companion is made of (`used`: the ids of the story's blocks, so the slugs are free). The Character
  * starts with no unspent points: the named stat is raised and the rest left as it was, as the line said.
  */
-export const joinDefinitions = (request, { used = [], soul = request.soul } = {}) =>
-    buildDefinitions(joinDraft({ ...request, soul }), { used, points: 0 });
+export const joinDefinitions = (request, { used = [], soul = request.soul, rules = null } = {}) =>
+    buildDefinitions(joinDraft({ ...request, soul }, rules), { used, points: 0 });
 
 /**
  * The offers on a reply: the `+ party` lines that asked (Ask), read from the reply's receipts (`entries`: store.receipts() as a

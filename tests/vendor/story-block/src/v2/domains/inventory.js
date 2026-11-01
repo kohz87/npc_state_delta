@@ -422,8 +422,11 @@ function storeDef(inv, def) {
     return inv.defs[def.id];
 }
 
-/** The def a name means, created as `story/<slug>` with the §7 defaults when there is none. */
-function defineByName(ctx, inv, written, env, about = {}, route = true) {
+/**
+ * The def a name means, created as `story/<slug>` with the §7 defaults when there is none. `keep` (a reader's add may give a kind and a
+ * rarity) are fields a def made here keeps whatever the `item.define` hooks say; a def that already exists, or a pack's, is not changed by it.
+ */
+function defineByName(ctx, inv, written, env, about = {}, route = true, keep = {}) {
     const name = cleanName(written);
     if (!name || name.length > MAX_NAME) ctx.fail('INVALID', `An item needs a name of 1 to ${MAX_NAME} characters.`);
     const found = resolveDef(inv, name);
@@ -432,7 +435,7 @@ function defineByName(ctx, inv, written, env, about = {}, route = true) {
     const packed = packDef(ctx, inv, name, env, route);
     if (packed) return packed;
     const def = defaultDef(freeId(inv, `story/${slugify(name)}`), name);
-    return { def: registerNew(ctx, inv, def, env, about, { route, written: name }), created: true };
+    return { def: registerNew(ctx, inv, def, env, about, { route, written: name, keep }), created: true };
 }
 
 // The `item.resolve(name)` hooks (packs, MODULES §E): a pack's def for a name the inventory does
@@ -1099,7 +1102,17 @@ export function createInventoryCommands(env) {
             const qty = count(ctx, payload.qty, 1);
             const owner = receiverArg(ctx, payload.owner);
             const note = textArg(ctx, payload.note, MAX_NOTE, 'note');
-            const { def, created } = defineByName(ctx, inv, name, env, { note, owner });
+            // A saved character's things come with the kind and rarity the file kept; they apply only when the item is new to this chat.
+            const keep = {};
+            if (payload.kind !== undefined && payload.kind !== null) {
+                if (!KINDS.includes(payload.kind)) ctx.fail('INVALID', fill(E.itemKind, { kinds: KINDS.join(', ') }));
+                keep.kind = payload.kind;
+            }
+            if (payload.rarity !== undefined && payload.rarity !== null) {
+                if (!RARITIES.includes(payload.rarity)) ctx.fail('INVALID', fill(E.itemRarity, { rarities: RARITIES.join(', ') }));
+                keep.rarity = payload.rarity;
+            }
+            const { def, created } = defineByName(ctx, inv, name, env, { note, owner }, true, keep);
             guardReaderEdit(ctx, 'inventory.add', null, null, { def: def.id, witness: addDecision(prefix, payload, def.id) });
             readerCarry(ctx, [{ defId: def.id, qty }], owner);
             const stacks = grantInto(ctx, inv, def, qty, owner, note);

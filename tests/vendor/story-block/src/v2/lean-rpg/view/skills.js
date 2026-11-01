@@ -9,7 +9,8 @@ import { meter } from '../../view/widgets/meter.js';
 import { refusalText } from '../../strings.js';
 import { FORMULA, RANK_NAMES, SKILL_SLOTS } from '../names.js';
 import { RPG_STRINGS, fill } from '../strings.js';
-import { statShare } from '../rules.js';
+import { isStandard, statShare } from '../rules.js';
+import { statPart } from '../formula.js';
 
 const K = RPG_STRINGS.skills;
 
@@ -28,13 +29,20 @@ export function masteryOf(skill) {
 }
 
 /**
- * The roll a skill makes from the live sheet: d20 + floor(stat / 2) + rank + 2 × Soul Class. → { total, stat, value, half, rank, bonus } with
+ * The roll a skill makes from the live sheet: d20 + floor(stat / 2) + rank + 2 × Soul Class (Standard: the pair of the stat and half of DEX, halved, in place of floor(stat / 2)). → { total, stat, value, half, rank, bonus } with
  * `stat` the stat's label (null for a skill that names none: the story then picks the stat, so only the rank and class are known).
  */
 export function rollOf(skill, character, rules = FORMULA) {
     const entry = character.stats.find(stat => stat.key === skill.stat) ?? null;
-    const half = entry ? statShare(entry.value, rules) : 0;
     const bonus = rules.classWeight * character.soul;
+    if (isStandard(rules) && entry) {
+        // The Standard formula: the skill's stat in the main slot with half of DEX (a Mana skill is magic, a Stamina skill physical), halved once.
+        const stats = Object.fromEntries(character.stats.map(stat => [stat.key, stat.value]));
+        const part = statPart(skill.uses === 'mana' ? 'magic' : 'physical', stats, { skillStat: skill.stat });
+        const second = character.stats.find(stat => stat.key === part.second);
+        return { total: part.value + skill.rank + bonus, stat: entry.label, value: entry.value, half: part.value, rank: skill.rank, bonus, second: second?.label ?? part.second.toUpperCase(), secondValue: second?.value ?? 0 };
+    }
+    const half = entry ? statShare(entry.value, rules) : 0;
     return { total: half + skill.rank + bonus, stat: entry?.label ?? null, value: entry?.value ?? 0, half, rank: skill.rank, bonus };
 }
 
@@ -173,7 +181,7 @@ export function renderSkills(parent, { character, session = null, api = {}, onBa
         if (roll.stat) {
             line.appendChild(h(doc, 'b', '', fill(K.rolls, { total: roll.total })));
             line.appendChild(doc.createTextNode(' '));
-            line.appendChild(h(doc, 'span', '', fill(K.rollsParts, { ...rank, stat: roll.stat, value: roll.value, half: roll.half })));
+            line.appendChild(h(doc, 'span', '', fill(roll.second ? K.rollsPartsStandard : K.rollsParts, { ...rank, stat: roll.stat, value: roll.value, half: roll.half, second: roll.second, secondValue: roll.secondValue })));
         } else line.appendChild(h(doc, 'span', '', fill(K.rollsNoStat, rank)));
         row.appendChild(line);
         list.appendChild(row);

@@ -1,5 +1,5 @@
 // Pure data-modules-v1 checker. The pack validator and Studio share these entry points.
-import { DM_DESCRIPTORS as D, DM_LIMITS as L, DATA_MODULES_CAPABILITY, dmObject, dmOwn, dmSlug, dmInt, dmId, dmKindWritesHidden } from './schema.js';
+import { DM_DESCRIPTORS as D, DM_LIMITS as L, DM_BLOCK_BARS, DATA_MODULES_CAPABILITY, dmObject, dmOwn, dmSlug, dmInt, dmId, dmKindWritesHidden } from './schema.js';
 import { ROLES } from '../lean-rpg/index.js';
 import { HASH_BASIS_V1 } from './hash-basis-v1.js';
 import { fieldType, compatible, expressionType, conditionType, pathType } from './expressions.js';
@@ -85,14 +85,16 @@ function scalar(schema, path, add, { label = false, map = true } = {}) {
         if (typeof schema.label !== 'string' || !oneLine(schema.label) || [...schema.label].length > 60) add('DM_SCHEMA', `${path}.label`, STRINGS.blocks.labelLimit);
         else schema.label = oneLine(schema.label);
     }
-    // `prompt: false` hides a field from the story's tail and grammar; `names` gives a number's values display names. Neither belongs on a
-    // label, or on the value type of a map.
+    // `prompt: false` hides a field from the story's tail and grammar; `names` gives a number's values display names (a kind's int label may
+    // carry its own, for a value its effect works out). Neither belongs on the value type of a map; `prompt` is not for a label.
+    // `blocks` marks an int field as one of the Standard formula's bars: its value counts the blocks left, the bar's size comes from the stats.
     if (!label && schema.prompt !== undefined && (typeof schema.prompt !== 'boolean' || !map)) add('DM_SCHEMA', `${path}.prompt`, STRINGS.blocks.hiddenFlag);
-    if (!label && schema.names !== undefined && !map) add('DM_SCHEMA', `${path}.names`, STRINGS.blocks.namesKey);
+    if (schema.names !== undefined && !map) add('DM_SCHEMA', `${path}.names`, STRINGS.blocks.namesKey);
+    if (schema.blocks !== undefined && (label || !map || schema.type !== 'int' || !DM_BLOCK_BARS.includes(schema.blocks))) add('DM_SCHEMA', `${path}.blocks`, STRINGS.blocks.blocksKey);
     if (schema.type === 'int') {
         if (!dmInt(schema.min) || !dmInt(schema.max) || schema.min > schema.max) add('DM_BOUNDS', path, 'Integer bounds must be ordered safe integers.');
         if (!label && !dmInt(schema.default, schema.min, schema.max)) add('DM_BOUNDS', `${path}.default`, 'The integer default must be inside its inclusive bounds.');
-        if (!label && schema.names !== undefined && map) names(schema, path, add);
+        if (schema.names !== undefined && map) names(schema, path, add);
     }
     if (schema.type === 'bool' && !label && typeof schema.default !== 'boolean') add('DM_SCHEMA', `${path}.default`, 'A bool default must be a boolean.');
     if (schema.type === 'enum') {

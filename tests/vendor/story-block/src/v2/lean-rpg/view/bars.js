@@ -1,13 +1,14 @@
 // The three stage bars (Health, Mana, Stamina) drawn the same on a Party card and on the Spend points sheet: an
 // `ss.meter` with one cell per stage, the stage word on the right and a tone by stage (good near full, warn in the
 // middle, bad near empty). A tap on a bar opens the existing inline edit (`ss.editable`, a choice of the stage words)
-// for that field, saved through `dm.set` like any other pencil.
+// for that field, saved through `dm.set` like any other pencil. A Standard character's bars have as many cells as the bar has blocks, and
+// read "Hurt · 4 of 6" (party-data.js `blockBar`).
 
 import { h } from '../../view/widgets/dom.js';
 import { editable } from '../../view/widgets/editable.js';
 import { meter } from '../../view/widgets/meter.js';
 import { RPG_STRINGS, fill } from '../strings.js';
-import { BARS, stageWord } from './party-data.js';
+import { BARS, barOptions } from './party-data.js';
 
 const ICONS = Object.freeze({ health: 'fa-heart', mana: 'fa-droplet', stamina: 'fa-person-running' });
 
@@ -30,9 +31,9 @@ export function drawStageBars(doc, parent, character, { api, handles }) {
         row.setAttribute('data-bar', key);
         row.append(slot, edit);
         box.appendChild(row);
-        handles.push(meter.render(slot, { label, value: bar.value, max: bar.max, tone: bar.tone, text: bar.word, segments: bar.max, icon: ICONS[key] }, {}));
+        handles.push(meter.render(slot, { label, value: bar.value, max: bar.max, tone: bar.tone, text: bar.text ?? bar.word, segments: bar.max, icon: ICONS[key] }, {}));
         if (typeof api?.command !== 'function' || schema?.edit === false) continue;
-        const options = Array.from({ length: bar.max + 1 }, (_, value) => ({ value, label: stageWord(key, schema, value) }));
+        const options = barOptions(key, schema, bar);
         handles.push(editable.render(edit, { value: bar.value, kind: 'choice', options, label, displayValue: false, command: 'dm.set', payload: fieldPayload(character, key) }, { command: api.command }));
         const pencil = edit.querySelector('.ss-w-editable-pencil');
         pencil?.setAttribute('data-bar-edit', key);

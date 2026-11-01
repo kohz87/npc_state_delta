@@ -37,8 +37,9 @@ export function extrasOf(pack) {
  * `settings`: `{ read() → the storySuite settings object (created by the caller), save() }`.
  * `capabilities()`: the capability names this Story Block has, or null when unknown.
  * `hostVersion`: Story Block's version, or a function giving it (read at each install).
+ * `portraits`: the pack portraits' store (portraits.js), or null: it takes the images picked with a pack and forgets them with it.
  */
-export function createInstalled({ settings, hostVersion = HOST_VERSION, capabilities = () => null, limits = LIMITS } = {}) {
+export function createInstalled({ settings, hostVersion = HOST_VERSION, capabilities = () => null, limits = LIMITS, portraits = null } = {}) {
     if (!settings || typeof settings.read !== 'function') throw new Error('createInstalled needs settings.read().');
     const host = () => (typeof hostVersion === 'function' ? hostVersion() : hostVersion) || HOST_VERSION;
     // The capability names this Story Block has: the modules' (still null when unknown) and its own (limits.js HOST_CAPABILITIES).
@@ -66,6 +67,14 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
         for (const fn of listeners) fn();
     };
     const sizeOf = entry => byteLength(JSON.stringify(entry.pack ?? null));
+    // The pack's portraits after an install: `{ portraits: report }` when it names some or images came with it, else nothing.
+    const portraitsOf = async (pack, files) => {
+        const picked = Array.isArray(files) ? files : [];
+        const names = (pack.content.cast ?? []).some(person => person.portrait);
+        if (!portraits) return picked.length ? { portraits: { stored: [], refused: picked.map(item => ({ file: String(item?.name ?? ''), message: `${item?.name} could not be saved: pack portraits are not available here.` })), missing: [], dropped: 0 } } : {};
+        const report = await portraits.apply(pack, picked);
+        return names || picked.length || report.dropped ? { portraits: report } : {};
+    };
 
     return {
         /** The installed packs for the settings list, in order. */
@@ -103,16 +112,19 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
         /**
          * Validates and installs a pack (text or parsed). A pack with an installed id replaces
          * it in place, keeping its place and its on/off switch. Nothing is saved on rejection.
-         * → `{ ok: true, id, name, action: 'installed' | 'updated' | 'unchanged' }` | `{ ok: false, errors }`
+         * `files`: the images picked with it, `[{ name, size, read() }]` (portraits.js). They are taken or refused one by one after the
+         * pack is in, so a refused image never stops the pack.
+         * → `{ ok: true, id, name, action: 'installed' | 'updated' | 'unchanged', portraits }` | `{ ok: false, errors }`, `portraits` being
+         * portraits.js apply's report (`{ stored, refused, missing, dropped }`) whenever the pack names portraits or images were picked.
          */
-        async install(input, { source = 'file', origin = '' } = {}) {
+        async install(input, { source = 'file', origin = '', files = [] } = {}) {
             const result = validatePack(input, { hostVersion: host(), capabilities: have(), limits });
             if (!result.ok) return result;
             const { pack, raw } = result;
             const list = root().packs;
             const index = list.findIndex(entry => entry?.id === pack.id);
             const entry = { id: pack.id, version: pack.version, enabled: index >= 0 ? list[index].enabled !== false : true, source: SOURCES.includes(source) ? source : 'file', origin: String(origin ?? ''), pack: raw };
-            if (index >= 0 && JSON.stringify(list[index].pack) === JSON.stringify(raw)) return { ok: true, id: pack.id, name: pack.name, action: 'unchanged' };
+            if (index >= 0 && JSON.stringify(list[index].pack) === JSON.stringify(raw)) return { ok: true, id: pack.id, name: pack.name, action: 'unchanged', ...(await portraitsOf(pack, files)) };
             if (index < 0 && list.length >= limits.installed) return { ok: false, errors: [{ code: 'TOO_MANY', path: '', message: `There are already ${limits.installed} packs installed; remove one first.` }] };
             const others = list.reduce((sum, other, at) => sum + (at === index ? 0 : sizeOf(other)), 0);
             if (others + sizeOf(entry) > limits.installedBytes) return { ok: false, errors: [{ code: 'TOO_LARGE', path: '', message: `Installed packs may take ${Math.round(limits.installedBytes / 1024 / 1024)} MB together; remove one first.` }] };
@@ -120,7 +132,7 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
             if (index >= 0) list[index] = entry;
             else list.push(entry);
             await changed();
-            return { ok: true, id: pack.id, name: pack.name, action: index >= 0 ? 'updated' : 'installed' };
+            return { ok: true, id: pack.id, name: pack.name, action: index >= 0 ? 'updated' : 'installed', ...(await portraitsOf(pack, files)) };
         },
 
         /**
@@ -154,6 +166,7 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
             const index = list.findIndex(entry => entry?.id === id);
             if (index < 0) return false;
             list.splice(index, 1);
+            await portraits?.forget(id);
             await changed();
             return true;
         },

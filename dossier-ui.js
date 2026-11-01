@@ -312,6 +312,35 @@ export function keyAwayHtml(key) {
     </section>`;
 }
 
+// (the living cast) What the dossier shows for a person Delta made from the pack's cast: { badge, packName, firstMet, goal, routine,
+// lastHeard: { text, on } | null, where, doing }; null for any other dossier. Text only: the view draws it escaped.
+export function castProjection(view) {
+    if (!view || typeof view !== 'object') return null;
+    const heard = view.lastHeard && typeof view.lastHeard === 'object' && plain(view.lastHeard.text)
+        ? { text: plain(view.lastHeard.text), on: plain(view.lastHeard.on) } : null;
+    return {
+        badge: plain(view.badge, 'Cast'), packName: plain(view.packName), firstMet: plain(view.firstMet),
+        goal: plain(view.goal), routine: plain(view.routine), lastHeard: heard, where: plain(view.where), doing: plain(view.doing), pin: view.pin === true,
+    };
+}
+
+/** The "From the Ersveil cast" block: where the person came from, their own path and when they were last heard of. */
+export function castFromHtml(cast, npcId = '') {
+    if (!cast) return '';
+    const heard = cast.lastHeard ? `<b>Last heard:</b> ${escapeHtml(cast.lastHeard.text)}${cast.lastHeard.on ? ` (${escapeHtml(cast.lastHeard.on)})` : ''}` : '';
+    const now = !cast.lastHeard && (cast.doing || cast.where)
+        ? `<b>Now:</b> ${escapeHtml([cast.doing.replace(/[.\s]+$/, ''), cast.where ? `at ${cast.where}` : ''].filter(Boolean).join(' · '))}` : '';
+    const path = cast.goal ? `<b>Their own path:</b> ${escapeHtml(cast.goal)}${cast.routine ? ` <span class="delta-muted">(${escapeHtml(cast.routine)})</span>` : ''}` : '';
+    const lines = [path, heard || now].filter(Boolean).map(line => `<div>${line}</div>`).join('');
+    return `<section class="delta-cast-from" data-delta-section="cast" aria-label="From the cast">
+        <h5>From the ${cast.packName ? `${escapeHtml(cast.packName)} ` : ''}cast${cast.firstMet ? ` · first met ${escapeHtml(cast.firstMet)}` : ''}</h5>
+        <div>Made at the first meeting from the pack's prepared dossier, no scan needed. Later scans add to it and change it as they do for anyone.</div>
+        ${lines}
+        ${cast.pin ? `<button type="button" class="delta-btn delta-cast-pin" data-delta-cast-pin="${escapeHtml(npcId)}">★ Pin as Key people</button>
+        <div class="delta-muted delta-cast-pin-note">Pinned, they get the full Key people track (away, back date, return) and the narrator hears about them.</div>` : ''}
+    </section>`;
+}
+
 export function projectDossierState(state = {}, status = {}) {
     const portraitAssets = state?.portraitAssets && typeof state.portraitAssets === 'object' ? state.portraitAssets : {};
     const records = Array.isArray(state?.npcs) ? state.npcs : [];
@@ -319,11 +348,13 @@ export function projectDossierState(state = {}, status = {}) {
     const customFieldNames = Array.isArray(state?.customFieldNames) ? state.customFieldNames : undefined;
     const meterViews = state?.meterViews && typeof state.meterViews === 'object' ? state.meterViews : {};
     const keyViews = state?.keyViews && typeof state.keyViews === 'object' ? state.keyViews : {};
+    const castViews = state?.castViews && typeof state.castViews === 'object' ? state.castViews : {};
     const details = records.map(npc => {
         const detail = dossierDetailProjection(npc, portraitAssets, formPortraits[npc?.id] || {}, { customFieldNames });
         const meters = v2MetersProjection(Object.hasOwn(meterViews, String(npc?.id ?? '')) ? meterViews[npc.id] : null);
         const key = keyProjection(Object.hasOwn(keyViews, String(npc?.id ?? '')) ? keyViews[npc.id] : null);
-        return { ...detail, ...(meters ? { v2Meters: meters } : {}), ...(key ? { key } : {}) };
+        const cast = castProjection(Object.hasOwn(castViews, String(npc?.id ?? '')) ? castViews[npc.id] : null);
+        return { ...detail, ...(meters ? { v2Meters: meters } : {}), ...(key ? { key } : {}), ...(cast ? { cast } : {}) };
     }).filter(npc => npc.id);
     return {
         chatKey: plain(status?.chatKey, 'no-chat'),
@@ -475,7 +506,7 @@ export function relationshipStepHtml(axis, label, change, latestReply) {
 
 // (v2 meters, hosted) An NPC's Story Suite meters beyond the four axes: custom meters, the stage on
 // the ladder and what the next one needs, milestones, and the hidden notes still locked (their
-// titles and rules only; a locked note's text never reaches the dossier view). Null without a host.
+// "Secrets" section: a hidden note is only its rule, never its title, text or event wording). Null without a host.
 export function v2MetersProjection(view) {
     if (!view || typeof view !== 'object') return null;
     const bars = (Array.isArray(view.bars) ? view.bars : []).filter(bar => bar && !bar.builtIn && plain(bar.id)).slice(0, 12).map(bar => {
@@ -490,9 +521,37 @@ export function v2MetersProjection(view) {
         rank: plain(view.rank),
         next: plain(view.next),
         milestones: stringList(view.milestones, 16),
-        locked: stringList(view.locked, 8),
-        opened: stringList(view.opened, 8),
+        secrets: secretsProjection(view.secrets),
     };
+}
+
+// The notes of a dossier for its Secrets section, in the order written: an opened one { state: 'open', title, text,
+// pill }, a hidden one { state: 'hidden', opens, width } (a bar and the rule; nothing of its title or text).
+function secretsProjection(list) {
+    return (Array.isArray(list) ? list : []).slice(0, 8).map(note => {
+        if (note?.state === 'open') return { state: 'open', title: plain(note.title, 'A hidden note'), text: plain(note.text), pill: plain(note.pill, 'Opened') };
+        if (note?.state === 'hidden') return { state: 'hidden', opens: plain(note.opens, 'Opens with the story'), width: Math.max(30, Math.min(80, Math.round(Number(note.width) || 55))) };
+        return null;
+    }).filter(Boolean);
+}
+
+/**
+ * The Secrets section ('' when the dossier has no notes): "Secrets · n opened · m still hidden"; an opened note is
+ * its title, an "Opened · Trust 20" pill and its text; a hidden one a blank striped bar and "Opens at Trust 60" or
+ * "Opens with the story" (never the title, the text or the event's wording).
+ */
+export function v2SecretsHtml(view) {
+    const notes = view?.secrets ?? [];
+    if (!notes.length) return '';
+    const open = notes.filter(note => note.state === 'open').length;
+    const rows = notes.map(note => (note.state === 'open'
+        ? `<div class="delta-secret delta-secret-open"><div class="delta-secret-head"><b>${escapeHtml(note.title)}</b><span class="delta-secret-pill">${escapeHtml(note.pill)}</span></div>${note.text ? `<p>${escapeHtml(note.text)}</p>` : ''}</div>`
+        : `<div class="delta-secret delta-secret-hidden"><span class="delta-secret-bar" style="width:${note.width}%" aria-hidden="true"></span><span class="delta-secret-when">${escapeHtml(note.opens)}</span></div>`)).join('');
+    return `<section class="delta-section delta-secrets" data-delta-section="secrets">
+                <h3>Secrets <small class="delta-secrets-count">· ${open} opened · ${notes.length - open} still hidden</small></h3>
+                ${rows}
+                <p class="delta-muted delta-secrets-note">The narrator knows them all and keeps them; each appears here when it opens.</p>
+            </section>`;
 }
 
 export function v2MetersHtml(view) {
@@ -506,8 +565,6 @@ export function v2MetersHtml(view) {
         view.rank ? `<p class="delta-v2-rank"><b>${escapeHtml(view.rank)}</b></p>` : '',
         view.next ? `<p class="delta-muted delta-v2-next">${escapeHtml(view.next)}</p>` : '',
         view.milestones.length ? `<p class="delta-v2-milestones"><span class="delta-kicker">MILESTONES</span> ${view.milestones.map(escapeHtml).join(' · ')}</p>` : '',
-        ...view.opened.map(title => `<p class="delta-v2-note">🔓 ${escapeHtml(title)}</p>`),
-        ...view.locked.map(text => `<p class="delta-muted delta-v2-note">${escapeHtml(text)}</p>`),
     ].filter(Boolean).join('');
     return `${bars ? `<div class="delta-rel-grid delta-v2-meters">${bars}</div>` : ''}${lines}`;
 }
@@ -558,8 +615,10 @@ const DOSSIER_SECTIONS = Object.freeze([
     ['dynamic', 'Dynamic'], ['bonds', 'Bonds & memories'], ['history', 'History'],
 ]);
 
-function sectionNavHtml() {
-    return `<nav class="delta-section-nav" aria-label="Dossier sections">${DOSSIER_SECTIONS.map(([key, label]) => `<button type="button" class="delta-section-jump" data-delta-jump="${key}">${escapeHtml(label)}</button>`).join('')}</nav>`;
+function sectionNavHtml(secrets = false) {
+    // "Secrets" sits right after History, and only for a dossier that has notes.
+    const sections = secrets ? [...DOSSIER_SECTIONS, ['secrets', 'Secrets']] : DOSSIER_SECTIONS;
+    return `<nav class="delta-section-nav" aria-label="Dossier sections">${sections.map(([key, label]) => `<button type="button" class="delta-section-jump" data-delta-jump="${key}">${escapeHtml(label)}</button>`).join('')}</nav>`;
 }
 
 function countsFor(rows) {
@@ -695,6 +754,8 @@ class DeltaDossierUi {
                 }
                 return;
             }
+            const pin = event.target.closest('.delta-cast-pin');
+            if (pin) { void this.pinKeyPerson(pin); return; }
             const edit = event.target.closest('.delta-edit');
             if (edit) this.openEditor(edit.dataset.npcId || this.selectedNpcId);
         });
@@ -974,7 +1035,7 @@ class DeltaDossierUi {
         const signature = selectedVisible && selected
             ? JSON.stringify({ ...selected, portrait: undefined, updatedAt: undefined, reply: this.projection.reply }) : `empty:${this.filter}:${this.query}`;
         const heroSignature = selectedVisible && selected
-            ? JSON.stringify([selected.id, selected.name, subtitle, selected.bucket, selected.statusLabel, selected.portrait, selected.portraitAppearanceChanged, selected.appearanceModel.currentForm, Boolean(selected.key)]) : signature;
+            ? JSON.stringify([selected.id, selected.name, subtitle, selected.bucket, selected.statusLabel, selected.portrait, selected.portraitAppearanceChanged, selected.appearanceModel.currentForm, Boolean(selected.key), selected.cast?.badge ?? '']) : signature;
         const documentChanged = force || signature !== this.lastDetailSignature;
         const heroChanged = force || heroSignature !== this.lastHeroSignature;
         if (!documentChanged && !heroChanged) return;
@@ -995,7 +1056,7 @@ class DeltaDossierUi {
                 ${selected.portrait ? `<button type="button" class="delta-portrait-expand" data-npc-id="${escapeHtml(selected.id)}" aria-label="View ${escapeHtml(selected.name)} portrait full size" title="View full size">⤢</button>` : ''}
                 <div class="delta-hero-caption">
                     <span class="delta-status delta-status-${escapeHtml(selected.bucket)}">${escapeHtml(selected.statusLabel)}</span>
-                    <h2>${escapeHtml(selected.name)}${selected.key ? ' <span class="delta-key-badge">★ Key person</span>' : ''}</h2>
+                    <h2>${escapeHtml(selected.name)}${selected.key ? ' <span class="delta-key-badge">★ Key person</span>' : ''}${selected.cast ? ` <span class="delta-cast-badge">${escapeHtml(selected.cast.badge)}</span>` : ''}</h2>
                     <p>${escapeHtml(subtitle)}</p>
                 </div>
             </div>
@@ -1003,11 +1064,12 @@ class DeltaDossierUi {
 
         if (documentChanged) reconcileDocumentSections(documentPane, `
             <div class="delta-document-head">
-                <div><span class="delta-kicker">CURRENT DOSSIER</span><h2>${escapeHtml(selected.name)}${selected.key ? ' <span class="delta-key-badge">★ Key person</span>' : ''}</h2><p class="delta-muted">${escapeHtml(subtitle)}</p>${changeSummaryHtml(selected, this.projection)}</div>
+                <div><span class="delta-kicker">CURRENT DOSSIER</span><h2>${escapeHtml(selected.name)}${selected.key ? ' <span class="delta-key-badge">★ Key person</span>' : ''}${selected.cast ? ` <span class="delta-cast-badge">${escapeHtml(selected.cast.badge)}</span>` : ''}</h2><p class="delta-muted">${escapeHtml(subtitle)}</p>${changeSummaryHtml(selected, this.projection)}</div>
                 <button type="button" class="delta-btn delta-edit" data-npc-id="${escapeHtml(selected.id)}">Edit</button>
             </div>
             ${selected.key ? keyAwayHtml(selected.key) : ''}
-            ${sectionNavHtml()}
+            ${selected.cast ? castFromHtml(selected.cast, selected.id) : ''}
+            ${sectionNavHtml(Boolean(selected.v2Meters?.secrets?.length))}
             <section class="delta-section delta-player-card" data-delta-section="player">
                 <h3>Player relationship${changedMark(selected, 'relationship')}</h3>
                 <div class="delta-rel-grid">
@@ -1055,9 +1117,22 @@ class DeltaDossierUi {
             </section>
             <section class="delta-section" data-delta-section="history">
                 <h3>Background / History${changedMark(selected, 'background')}</h3>${proseHtml(selected.background, 'No background established yet.')}
-            </section>`, documentPane.dataset.npcId !== selected.id);
+            </section>
+            ${v2SecretsHtml(selected.v2Meters)}`, documentPane.dataset.npcId !== selected.id);
         documentPane.dataset.npcId = selected.id;
         documentPane.scrollTop = documentScroll;
+    }
+
+    // (the living cast) "Pin as Key people": Story Director's own command, asked through Delta's api; the button is drawn only while it is offered.
+    async pinKeyPerson(button) {
+        const id = button?.dataset?.deltaCastPin || this.selectedNpcId;
+        if (!id || typeof this.api?.pinKeyPerson !== 'function') return;
+        button.disabled = true;
+        let out = null;
+        try { out = await this.api.pinKeyPerson(id); } catch (error) { out = { ok: false, message: String(error?.message || error) }; }
+        if (out?.ok) globalThis.toastr?.success?.(`NPC State Delta: ${out.message || 'Pinned as a key person.'}`);
+        else { button.disabled = false; globalThis.toastr?.warning?.(`NPC State Delta: ${out?.message || 'Could not pin.'}`); }
+        this.scheduleRefresh();
     }
 
     async openEditor(npcId) {
@@ -1148,6 +1223,8 @@ const STYLES = `
   /* UI 4c: the panel takes Story Block's glass tokens inside its .ss-cards root (the panel carries that class); outside
      Story Block, or in Solid and Follow SillyTavern where a token is unset, each keeps Delta's own value (the fallback). */
   --delta-bg: var(--ss-sheet-bg, var(--SmartThemeBlurTintColor, #18191d));
+  /* the same tint with its alpha dropped: the opaque floor under the panel and the section bar (the chat must not read through them) */
+  --delta-floor: var(--ss-sheet-floor, #18191d);
   --delta-text: var(--ss-text, var(--SmartThemeBodyColor, #f0eee9));
   --delta-muted: var(--ss-text, color-mix(in srgb, var(--delta-text) 66%, transparent));
   --delta-surface: var(--ss-glass, rgba(255,255,255,.055));
@@ -1183,7 +1260,7 @@ const STYLES = `
   position: fixed; z-index: 2147483500; left:50%; top:50%; transform:translate(-50%,-50%);
   width:min(1320px,97vw); height:min(940px,96dvh); overflow:hidden;
   display:flex; flex-direction:column; border:1px solid var(--delta-line); border-radius:var(--ss-radius-xl, 15px);
-  color:var(--delta-text); background:var(--delta-bg); backdrop-filter:var(--ss-blur, none); -webkit-backdrop-filter:var(--ss-blur, none);
+  color:var(--delta-text); background-color:var(--delta-floor); background-image:linear-gradient(var(--delta-bg),var(--delta-bg)); backdrop-filter:var(--ss-blur, none); -webkit-backdrop-filter:var(--ss-blur, none);
   box-shadow:0 0 0 100vmax rgba(0,0,0,.72),0 20px 70px rgba(0,0,0,.55);
 }
 #${ROOT_ID} .delta-topbar { flex:0 0 auto; min-height:56px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px 8px 16px; border-bottom:1px solid var(--delta-line); background:color-mix(in srgb,var(--delta-bg) 94%,black 6%); }
@@ -1224,6 +1301,8 @@ const STYLES = `
 #${ROOT_ID} .delta-panel.ss-cards {
   /* UI 4c: the aliases are read where the tokens exist: inside the panel's ss-cards root (the root above is outside it). */
   --delta-bg: var(--ss-sheet-bg, var(--SmartThemeBlurTintColor, #18191d));
+  /* the same tint with its alpha dropped: the opaque floor under the panel and the section bar (the chat must not read through them) */
+  --delta-floor: var(--ss-sheet-floor, #18191d);
   --delta-text: var(--ss-text, var(--SmartThemeBodyColor, #f0eee9));
   --delta-muted: var(--ss-text, color-mix(in srgb, var(--delta-text) 66%, transparent));
   --delta-surface: var(--ss-glass, rgba(255,255,255,.055));
@@ -1264,7 +1343,20 @@ const STYLES = `
 #${ROOT_ID} .delta-status-active { color:#caefd9; background:rgba(47,112,77,.26); border-color:rgba(113,190,145,.25); }
 #${ROOT_ID} .delta-status-archived { color:#ead7aa; background:rgba(119,90,42,.25); border-color:rgba(205,170,109,.25); }
 #${ROOT_ID} .delta-key-badge { display:inline-block; margin-left:8px; padding:1px 9px; border:1px solid rgba(245,200,75,.5); border-radius:999px; background:rgba(245,200,75,.18); color:#f5c84b; font-size:.72rem; font-weight:600; line-height:1.4; vertical-align:middle; white-space:nowrap; }
+#${ROOT_ID} .delta-cast-badge { display:inline-block; margin-left:8px; font-family:var(--ss-font, system-ui, sans-serif); padding:1px 9px; border:1px solid rgba(160,130,255,.5); border-radius:999px; background:rgba(160,130,255,.18); color:#c9b8ff; font-size:.72rem; font-weight:600; line-height:1.4; vertical-align:middle; white-space:nowrap; }
+#${ROOT_ID} .delta-cast-from { display:grid; gap:6px; margin:10px 0; padding:12px 14px; border:1px solid rgba(160,130,255,.35); border-radius:12px; background:rgba(160,130,255,.08); font-size:.86rem; line-height:1.5; }
+#${ROOT_ID} .delta-cast-pin { justify-self:start; border-color:rgba(160,130,255,.6); }
+#${ROOT_ID} .delta-cast-pin-note { font-size:.78rem; }
+#${ROOT_ID} .delta-cast-from h5 { margin:0; font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; opacity:.8; }
 #${ROOT_ID} .delta-key-star { color:#f5c84b; font-size:.85em; }
+#${ROOT_ID} .delta-secrets h3 .delta-secrets-count { margin-left:6px; color:var(--delta-muted); font-size:.74rem; font-weight:400; letter-spacing:0; text-transform:none; }
+#${ROOT_ID} .delta-secret { display:grid; gap:4px; padding:10px 0; border-top:1px solid rgba(218,193,148,.12); }
+#${ROOT_ID} .delta-secret p { margin:0; font-size:.86rem; line-height:1.5; }
+#${ROOT_ID} .delta-secret-head { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+#${ROOT_ID} .delta-secret-pill { display:inline-flex; padding:1px 9px; border:1px solid rgba(216,188,120,.45); border-radius:999px; background:rgba(216,188,120,.12); color:var(--delta-accent-soft); font-size:.72rem; }
+#${ROOT_ID} .delta-secret-bar { display:block; height:12px; border-radius:6px; background:repeating-linear-gradient(90deg,rgba(255,255,255,.14) 0 10px,rgba(255,255,255,.08) 10px 14px); }
+#${ROOT_ID} .delta-secret-when { color:var(--delta-muted); font-size:.76rem; }
+#${ROOT_ID} .delta-secrets-note { margin:6px 0 0; font-size:.76rem; }
 #${ROOT_ID} .delta-away { margin:10px 0; padding:12px 14px; border:1px solid rgba(120,170,255,.35); border-radius:12px; background:rgba(120,170,255,.08); font-size:.82rem; line-height:1.5; }
 #${ROOT_ID} .delta-away h5 { margin:0 0 6px; font-size:.7rem; letter-spacing:.08em; text-transform:uppercase; opacity:.85; }
 #${ROOT_ID} .delta-away p { margin:0 0 6px; }
@@ -1297,7 +1389,7 @@ const STYLES = `
 #${ROOT_ID} .delta-empty p, #${ROOT_ID} .delta-document-empty p { margin:0; max-width:54ch; }
 #${ROOT_ID} .delta-empty-mark { display:grid; place-items:center; width:64px; height:64px; border:1px solid var(--delta-line-strong); border-radius:18px; color:var(--delta-accent); font:700 2rem/1 Georgia,serif; background:rgba(216,188,120,.07); }
 #${ROOT_ID} .delta-error-copy { color:var(--delta-danger); }
-#${ROOT_ID} .delta-section-nav { position:sticky; top:0; z-index:3; display:flex; gap:6px; overflow-x:auto; margin:-4px 0 12px; padding:8px 0; background:var(--delta-bg); scrollbar-width:none; }
+#${ROOT_ID} .delta-section-nav { position:sticky; top:-22px; z-index:3; display:flex; gap:6px; overflow-x:auto; margin:-26px 0 12px; padding:30px 0 8px; background-color:var(--delta-floor); background-image:linear-gradient(var(--delta-bg),var(--delta-bg)); scrollbar-width:none; }
 #${ROOT_ID} .delta-section-nav::-webkit-scrollbar { display:none; }
 #${ROOT_ID} .delta-section-jump { appearance:none; flex:0 0 auto; min-height:30px; padding:4px 10px; border:1px solid rgba(218,193,148,.18); border-radius:999px; color:var(--delta-muted); background:rgba(255,255,255,.03); font-size:.74rem; cursor:pointer; }
 #${ROOT_ID} .delta-section-jump:hover { color:var(--delta-accent-soft); border-color:var(--delta-line-strong); background:rgba(216,188,120,.09); }
@@ -1334,6 +1426,9 @@ const STYLES = `
 #${ROOT_ID} .delta-lightbox img { min-height:0; max-width:100%; max-height:100%; object-fit:contain; border-radius:8px; box-shadow:0 18px 60px rgba(0,0,0,.6); cursor:default; }
 #${ROOT_ID} .delta-lightbox-close { position:absolute; left:50%; bottom:16px; transform:translateX(-50%); }
 #${SETTINGS_ID}.npc-state-delta-stage1-settings-target { outline:2px solid #d8bc78; outline-offset:4px; }
+@supports (color: rgb(from red r g b)) {
+  #${ROOT_ID} .delta-panel { --delta-floor: var(--ss-sheet-floor, rgb(from var(--delta-bg) r g b / 1)); }
+}
 @media (max-width: 900px) {
   #${ROOT_ID} .delta-panel { width:calc(100vw / var(--ss-zoomed, 1)); height:calc(100dvh / var(--ss-zoomed, 1)); border-radius:0; border-left:0; border-right:0; }
   #${ROOT_ID} .delta-library { grid-template-rows:minmax(0,1fr) 172px; }
@@ -1348,6 +1443,7 @@ const STYLES = `
   #${ROOT_ID} .delta-spread { display:block; overflow:auto; }
   #${ROOT_ID} .delta-hero { min-height:max(330px,min(62dvh,540px)); border-right:0; border-bottom:1px solid rgba(218,193,148,.16); }
   #${ROOT_ID} .delta-document { overflow:visible; }
+  #${ROOT_ID} .delta-section-nav { top:0; margin-top:-4px; padding-top:8px; }
   #${ROOT_ID} .delta-current-grid, #${ROOT_ID} .delta-prose-grid, #${ROOT_ID} .delta-two-column, #${ROOT_ID} .delta-rel-grid { grid-template-columns:1fr; }
   #${ROOT_ID} .delta-prose-grid .delta-wide { grid-column:auto; }
   #${ROOT_ID} .delta-cast-card { flex-basis:190px; }

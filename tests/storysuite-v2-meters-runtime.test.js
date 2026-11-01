@@ -397,3 +397,119 @@ test('the dossier editor (hosted): limits to the dossier, milestones and custom 
     assert.equal(alone.meterSetup, null);
     assert.deepEqual(alone.sent, []);
 });
+
+
+// ---- hidden notes for everyone (secrets): the scan writes the layers, and watches the story events ----
+
+const NOTES_PRELUDE = async () => {
+    const sdk = {
+        registered: [], sent: [], entries: [],
+        registerModule(def) { sdk.registered.push(def); },
+        command: async (type, payload, options) => { sdk.sent.push({ type, payload, options: options ?? null }); return { ok: true, receipt: { summary: '' } }; },
+        query: name => (name === 'npc.meters' ? structuredClone(sdk.entries) : null),
+        settings: () => ({}),
+    };
+    mockState.sdk = sdk;
+    globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+};
+
+test('hosted: the scan that builds a dossier also writes 2 to 5 layered notes, once; a later scan never rewrites them; off writes none', () => {
+    const output = runHostScenario('secrets-generated', NOTES_PRELUDE, async () => {
+        const api = globalThis.NPCStateDelta;
+        assert.ok(await waitFor(() => mockState.sdk.registered.length === 1));
+        const row = (name, extra = {}) => ({ name, present: true, role: 'adventurer', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named companion', directInteraction: true, relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 }, ...extra });
+        const layer = (i, extra = {}) => ({ title: `Layer ${i}`, text: `Secret number ${i} about Yunyun.`, meter: 'trust', at: 10 * i, ...extra });
+        const prompts = [];
+        mockState.quietResponder = async options => {
+            { const text = String(options?.prompt ?? ''); if (text.startsWith('Private NPC dossier scanner.')) prompts.push(text); }
+            return JSON.stringify({ npcs: [row('Yunyun', { secrets: [1, 2, 3, 4, 5, 6, 7].map(i => layer(i)) })] });
+        };
+        await turn('Yunyun waves from the gate.');
+        await sleep(300);
+        const made = api.getState().npcs.find(npc => npc.name === 'Yunyun')?.secrets ?? [];
+        // A later scan, an existing person: new notes from the model are ignored.
+        const id = api.getState().npcs.find(npc => npc.name === 'Yunyun').id;
+        mockState.quietResponder = async options => {
+            { const text = String(options?.prompt ?? ''); if (text.startsWith('Private NPC dossier scanner.')) prompts.push(text); }
+            return JSON.stringify({ npcs: [{ ...row('Yunyun'), id, secrets: [{ title: 'Rewrite', text: 'A different secret.', meter: 'trust', at: 5 }] }] });
+        };
+        await turn('Yunyun nods at the gate.');
+        await sleep(300);
+        const after = api.getState().npcs.find(npc => npc.name === 'Yunyun')?.secrets ?? [];
+        // Switched off: a new person gets none.
+        mockState.extensionSettings.npc_state_delta.layeredSecrets = false;
+        mockState.quietResponder = async options => {
+            { const text = String(options?.prompt ?? ''); if (text.startsWith('Private NPC dossier scanner.')) prompts.push(text); }
+            return JSON.stringify({ npcs: [row('Aqua', { secrets: [layer(1)] })] });
+        };
+        await turn('Aqua appears.');
+        await sleep(300);
+        const megumin = api.getState().npcs.find(npc => npc.name === 'Aqua');
+        console.log('RESULT ' + JSON.stringify({
+            made: made.map(note => ({ at: note.at, meter: note.meter, id: /^sec_[0-9a-z]{8}$/.test(note.id) })),
+            same: JSON.stringify(after) === JSON.stringify(made),
+            megumin: megumin ? (megumin.secrets ?? []).length : null,
+            asked: prompts.map(text => text.includes('HIDDEN NOTES: for each NEW dossier-worthy NPC only')),
+        }));
+    });
+    const result = scenarioOutput(output);
+    assert.deepEqual(result.made.map(note => note.at), [10, 20, 30, 40, 50], 'five at most, light to deep');
+    assert.ok(result.made.every(note => note.meter === 'trust' && note.id));
+    assert.equal(result.same, true, 'a later scan never rewrites a note');
+    assert.equal(result.megumin, 0, 'off: nothing written');
+    assert.deepEqual(result.asked, [true, true, false], 'the scan asks for layers only while the setting is on');
+});
+
+test('hosted: the scan watches present people\'s event notes, and a story event it sees goes to the host as npc.open', () => {
+    const output = runHostScenario('secrets-events', NOTES_PRELUDE, async () => {
+        const api = globalThis.NPCStateDelta;
+        assert.ok(await waitFor(() => mockState.sdk.registered.length === 1));
+        const row = (name, extra = {}) => ({ name, present: true, role: 'adventurer', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named companion', directInteraction: true, relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 }, ...extra });
+        const event = 'The duke is exposed as a traitor';
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [row('Yunyun', { secrets: [{ title: 'The duke', text: 'She knew about the duke.', when: event }, { title: 'Light', text: 'She likes tea.', meter: 'trust', at: 20 }] })] });
+        await turn('Yunyun waves from the gate.');
+        await sleep(300);
+        const dossier = api.getState().npcs.find(npc => npc.name === 'Yunyun');
+        const noteId = dossier.secrets.find(note => note.when).id;
+        const id = dossier.id;
+        // The next scan lists the event (present person, locked event note) and the model says it happened.
+        const prompts = [];
+        mockState.quietResponder = async options => {
+            { const text = String(options?.prompt ?? ''); if (text.startsWith('Private NPC dossier scanner.')) prompts.push(text); }
+            return JSON.stringify({ npcs: [{ ...row('Yunyun'), id }], secretEvents: ['s1', 's9'] });
+        };
+        const sentBefore = mockState.sdk.sent.length;
+        await turn('The duke is dragged out in chains.');
+        await sleep(400);
+        const opened = mockState.sdk.sent.slice(sentBefore).filter(item => item.type === 'npc.open');
+        // Once the host says it is open (its slice), it is not watched or asked again.
+        mockState.sdk.entries = [{ key: 'yunyun', name: 'Yunyun', meters: { trust: 0, affection: 0, desire: 0, tension: 0 }, stages: {}, unlocked: [noteId] }];
+        await turn('The gate is quiet.');
+        await sleep(300);
+        console.log('RESULT ' + JSON.stringify({
+            noteId,
+            watched: /\n17\. STORY EVENTS to look for[^\n]*s1 = Yunyun: The duke is exposed as a traitor\./.test(prompts[0] ?? ''),
+            leaksText: prompts.some(text => text.includes('She knew about the duke')),
+            opened: opened.map(item => ({ payload: item.payload, options: item.options })),
+            watchedAgain: /STORY EVENTS to look for/.test(prompts[1] ?? ''),
+        }));
+    });
+    const result = scenarioOutput(output);
+    assert.equal(result.watched, true, 'the scan lists the event with a key');
+    assert.equal(result.leaksText, false, 'the note\'s text never goes to the scanner');
+    assert.equal(result.opened.length, 1, 'one npc.open, for the key the exchange showed (an unknown key is ignored)');
+    assert.deepEqual(result.opened[0].payload, { name: 'Yunyun', open: [result.noteId], by: 'story' });
+    assert.equal(result.opened[0].options, null, 'sent as Delta\'s own action');
+    assert.equal(result.watchedAgain, false, 'an opened note is not watched again');
+});
+
+test('index.js: after the editor applies its notes to the slice the dossier is drawn again, and the scan carries the hosted notes\' options only while hosted', () => {
+    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    assert.match(index, /await hostedMeters\.applyEditor\(savedName, v2Edits\);\n[^\n]*\n        renderDossier\(\);\n        updateInjection\(\);/);
+    assert.match(index, /const hostedNotes = hostedMeters\(\);\n    const noteOptions = hostedNotes && !capture \? hostedNotePromptOptions\(state, settings, messageId\) : \{\};/);
+    assert.match(index, /const eventWatch = capture \? \(Array\.isArray\(capture\.watch\) \? capture\.watch : \[\]\) : \(noteOptions\.eventWatch \|\| \[\]\);/);
+    assert.match(index, /if \(hostedNotes && settings\.layeredSecrets !== false\) attachGeneratedSecrets\(nextState, newlyAdmittedIds, parsedForMerge, resolvedParsed, parsed\);/);
+    assert.match(index, /function attachGeneratedSecrets\(state, ids, \.\.\.sources\) \{\n    const adapter = storySuiteV2Meters\(\);\n    if \(!adapter/);
+    assert.match(index, /function forwardSecretEventsToHost\(watched, answered, head = null\) \{\n    const adapter = storySuiteV2Meters\(\);\n    if \(!adapter/);
+    assert.match(index, /layeredSecrets: true,/, 'on by default');
+});

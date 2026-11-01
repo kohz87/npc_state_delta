@@ -3,11 +3,15 @@
 // battle log and the "Changed this reply" lines draw from. Pure: no DOM. Field keys are the ones COMMON.md fixes
 // (`who`, `health`, `mana`, `stamina`, the seven stats, `points`, `soul`, `xp`, `alive`; `skillN` / `rankN` /
 // `practiceN`; `foeN` / `countN` / `classN` / `hurtN`). Stored values are numbers; the words come from the field's
-// `names` when it has them, else from the defaults below.
+// `names` when it has them, else from the defaults below. A bar field with `blocks` (the Standard formula, ../blocks.js) stores the blocks left;
+// its size comes from the stats (the foe's class) and its stage word is spread over that size; every other bar reads as it always did.
 
 import { STATS, STAGES } from '../index.js';
+import { STANDARD_NUMBERS } from '../formula.js';
+import { barOf, characterBars, growthOf, sizeOf, spreadWord, statsOfFields, wordsOf } from '../blocks.js';
 import { activeDefinition, actorsOf, instanceOf } from '../../data-modules/adapters.js';
 import { soulLabelOf } from '../soul.js';
+import { RPG_STRINGS, fill } from '../strings.js';
 
 export const SKILL_SLOTS = 5;
 export const FOE_SLOTS = 4;
@@ -35,6 +39,33 @@ export const rankName = (schema, value) => nameOf(schema, value, RANKS[value] ??
 export function stageWord(key, schema, value) {
     const words = STAGES[key] ?? [];
     return nameOf(schema, value, words[value] ?? String(value));
+}
+
+/** The bar's own reading when its field is a Standard block bar: `{ value, max, word, text, tone, blocks: true }` (`text`: "Hurt · 4 of 6"), else null. */
+export function blockBar(key, schema, fields, fieldKey = key) {
+    const bar = barOf(schema);
+    if (!bar) return null;
+    const size = sizeOf(schema, fields, fieldKey), value = Math.min(size, Math.max(0, whole(fields?.[fieldKey], size)));
+    const word = spreadWord(wordsOf(bar), value, size);
+    return { value, max: size, word, text: fill(RPG_STRINGS.blocks.of, { word, n: value, max: size }), tone: stageTone(value, size), blocks: true };
+}
+
+/**
+ * The line under a Standard character's skills (mockup step 1): "Health 6 blocks (VIT 10, next at 15) · Stamina 5 (AGI 10, next at 15) · Mana 4 (INT 5, next at 10) ·
+ * Edge 0..+3 (next at LUK 11)". `growth` is `growthOf` (blocks.js); a stat at its maximum has no next block, and the edge window steps at LUK 5, 7, 11, 13, 15, 17 and 19.
+ */
+export function growthText(growth) {
+    const B = RPG_STRINGS.blocks;
+    const bar = (word, group) => fill(group.next === null ? B[`${word}Top`] : B[word], { n: group.blocks, stat: group.value, next: group.next ?? '' });
+    const sign = n => (n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n)}` : '0');
+    return [bar('growthHealth', growth.health), bar('growthStamina', growth.stamina), bar('growthMana', growth.mana),
+        fill(growth.luck.next === null ? B.luckTop : B.luck, { min: sign(growth.luck.min), max: sign(growth.luck.max), next: growth.luck.next ?? '' })].join(' · ');
+}
+
+/** The choices of a bar's edit (the pencil): every count from empty to full, "Hurt · 4 of 6" for a block bar, the stage word for a stage bar. */
+export function barOptions(key, schema, bar, fields, fieldKey = key) {
+    if (bar?.blocks) return Array.from({ length: bar.max + 1 }, (_, value) => ({ value, label: fill(RPG_STRINGS.blocks.of, { word: spreadWord(wordsOf(barOf(schema)), value, bar.max), n: value, max: bar.max }) }));
+    return Array.from({ length: bar.max + 1 }, (_, value) => ({ value, label: stageWord(key, schema, value) }));
 }
 
 /** The most stages a bar is drawn with (the checker holds a role block to it; a block that got past it is drawn clamped). */
@@ -90,16 +121,17 @@ export function skillsOf(block) {
     return out;
 }
 
-/** The foes a Foes block holds: `[{ slot, name, count, class, hurt, word }]`, empty slots left out (a slot is filled with a name and a count above 0, as the roll planner reads it). */
+/** The foes a Foes block holds: `[{ slot, name, count, class, hurt, word, max?, text?, blocks? }]` (a Standard group has its size `max`, the `text` "Hurt · 4 of 6"), empty slots left out (a slot is filled with a name and a count above 0, as the roll planner reads it). */
 export function foesOf(block) {
     const out = [];
     for (let slot = 1; slot <= FOE_SLOTS; slot += 1) {
         const name = textOf(block.fields[`foe${slot}`]);
         const count = whole(block.fields[`count${slot}`], 0);
         if (!name || count <= 0) continue;
-        const hurt = whole(block.fields[`hurt${slot}`], stageMax('health', block.definition.state?.[`hurt${slot}`]));
+        const schema = block.definition.state?.[`hurt${slot}`], blocks = blockBar('health', schema, block.fields, `hurt${slot}`);
+        const hurt = blocks ? blocks.value : whole(block.fields[`hurt${slot}`], stageMax('health', schema));
         out.push({ slot, name, count, class: whole(block.fields[`class${slot}`], 1), hurt,
-            word: stageWord('health', block.definition.state?.[`hurt${slot}`] ?? block.definition.state?.health, hurt) });
+            word: blocks ? blocks.word : stageWord('health', schema ?? block.definition.state?.health, hurt), ...(blocks ? { max: blocks.max, text: blocks.text, blocks: true } : {}) });
     }
     return out;
 }
@@ -107,7 +139,8 @@ export function foesOf(block) {
 /**
  * The party: one record per Character block (per attached character for a character-scope block), the reader's own
  * character first (`own` is their name), then block order. Each: `{ module, subject, name, own, alive, left (a companion who left the party), points, soul,
- * soulName, soulLabel (what the Character block calls the field, "Soul Class" by default), xp, bars: { health, mana, stamina: { value, max, word, tone } }, stats: [{ key, label, value, min, max }],
+ * soulName, soulLabel (what the Character block calls the field, "Soul Class" by default), xp, bars: { health, mana, stamina: { value, max, word, tone, text?, blocks? } } (a
+ * Standard block's bars: `max` is its size from the stats, `text` "Hurt · 4 of 6"), growth (the Standard "next block / next luck" numbers, blocks.js `growthOf`, or null), stats: [{ key, label, value, min, max }],
  * skills, skillsBlock, definition, fields }`.
  */
 export function readParty(state, { own = '', roleOf } = {}) {
@@ -118,7 +151,9 @@ export function readParty(state, { own = '', roleOf } = {}) {
         const { fields, definition } = block;
         const name = textOf(fields.who) || actors[block.subject]?.name || definition.name;
         const bars = Object.fromEntries(BARS.map(key => {
-            const schema = definition.state?.[key], max = stageMax(key, schema), value = Math.min(max, Math.max(0, whole(fields[key], max)));
+            const schema = definition.state?.[key], blocks = blockBar(key, schema, fields);
+            if (blocks) return [key, blocks];
+            const max = stageMax(key, schema), value = Math.min(max, Math.max(0, whole(fields[key], max)));
             return [key, { value, max, word: stageWord(key, schema, value), tone: stageTone(value, max) }];
         }));
         const stats = STATS.map(key => {
@@ -131,7 +166,8 @@ export function readParty(state, { own = '', roleOf } = {}) {
             ?? (skillBlocks.length === 1 && !textOf(skillBlocks[0].fields.who) ? skillBlocks[0] : null);
         return { module: block.module, subject: block.subject, name, own: false, alive: fields.alive !== false, left: fields.left === true, points: Math.max(0, whole(fields.points)),
             soul, soulName: soulName(definition.state?.soul, soul), soulLabel: soulLabelOf(definition.state?.soul), xp: Math.min(100, Math.max(0, whole(fields.xp))), bars, stats,
-            skills: mine ? skillsOf(mine) : [], skillsBlock: mine ? { module: mine.module, definition: mine.definition } : null, definition, fields, order: block.order };
+            skills: mine ? skillsOf(mine) : [], skillsBlock: mine ? { module: mine.module, definition: mine.definition } : null, definition, fields, order: block.order,
+            growth: characterBars(definition, fields) ? growthOf(statsOfFields(fields), { statMax: whole(definition.state?.vit?.max, STANDARD_NUMBERS.statMax) }) : null };
     });
     const mineAt = own ? characters.findIndex(character => fold(character.name) === fold(own)) : -1;
     if (mineAt >= 0) characters[mineAt].own = true;
