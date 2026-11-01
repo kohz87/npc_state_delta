@@ -50,7 +50,8 @@ export function renderPacksPanel(root, { packs, readLorebook, notify = () => {},
         const parts = [];
         if (report.stored.length) parts.push(`${plural(report.stored.length, 'portrait')} saved`);
         if (report.dropped) parts.push(`${plural(report.dropped, 'portrait')} no longer in the pack removed`);
-        if (report.missing.length) parts.push(`no picture yet for ${report.missing.join(', ')} (pick it with the pack file)`);
+        // Only a count: the missing file names are the unmet people's names, which the reader must not see.
+        if (report.missing.length) parts.push(report.missing.length === 1 ? '1 portrait not picked; that person shows without a picture until you add it' : `${report.missing.length} portraits not picked; the people show without a picture until you add them`);
         return parts.join('; ');
     };
 
