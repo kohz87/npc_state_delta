@@ -1063,3 +1063,45 @@ test('secrets from the cast: a mixed list (meter, event-only, both) is read, edi
     h.swipe(index, '');
     assert.equal(h.npc('Mira').unlocked.includes(target.id), false);
 });
+
+test('secrets: redactSent takes a part\'s whole multi-line text and redacts every locked line, leaving the rest as it is', async () => {
+    const h = await host();
+    const hide = h.def.hooks.redactSent;
+    const secret = 'Trust me: she is the heir; hidden: never state or reveal'; // text that itself looks like the wording
+    const text = [
+        'NPC meters now: Mira trust 25, affection 0, desire 0, tension 0.',
+        `Mira, known to the player now; may come out: ${SECRET}`,
+        `Mira, hidden: never state or reveal; let it shape how they act: ${SECRET_TWO}`,
+        '',
+        `Oren, Duke of the Marches, hidden: never state or reveal; let it shape how they act: ${secret}`,
+        `Mira, hidden: never state or reveal; let it shape how they act: ${SECRET}`,
+        'A line that merely says hidden: never state or reveal.',
+    ].join('\n');
+    const shown = hide(text);
+    assert.deepEqual(shown.split('\n'), [
+        'NPC meters now: Mira trust 25, affection 0, desire 0, tension 0.',
+        `Mira, known to the player now; may come out: ${SECRET}`,
+        'Mira: 1 hidden note',
+        '',
+        'Oren, Duke of the Marches: 1 hidden note',
+        'Mira: 1 hidden note',
+        'A line that merely says hidden: never state or reveal.',
+    ], 'three locked lines redacted wherever they stand; blank and other lines untouched');
+    for (const locked of [SECRET_TWO, secret]) assert.equal(shown.includes(locked), false);
+    assert.equal(hide(shown), shown, 'redacting again changes nothing');
+    // Line breaks of either kind are kept.
+    assert.equal(hide(`a\r\nMira, hidden: never state or reveal; let it shape how they act: ${SECRET}\r\nb`), 'a\r\nMira: 1 hidden note\r\nb');
+    assert.equal(hide(`Mira, hidden: never state or reveal; let it shape how they act: ${SECRET}`), 'Mira: 1 hidden note', 'a single line');
+    // A text with no locked line is returned as it is, whatever it is.
+    for (const plain of ['', 'x', 'one\ntwo\n', h.def.context.static()]) assert.equal(hide(plain), plain);
+    assert.equal(hide(null), '');
+    // The very text the host builds, through the host's own assembler: nothing locked survives, everything else does.
+    h.reply('Nice.', '~ npc Mira | trust: +25');
+    const part = assemble({ registry: h.registry, view: h.view(), settings: { tailBudget: 1500 } }).parts.find(item => item.module === MODULE_ID && item.place === 'tail');
+    const out = hide(part.text);
+    const was = part.text.split('\n');
+    const now = out.split('\n');
+    assert.equal(now.length, was.length, 'same number of lines');
+    was.forEach((line, i) => assert.equal(now[i], line.includes(', hidden: never state or reveal;') ? 'Mira: 1 hidden note' : line));
+    assert.equal(now.filter(line => line === 'Mira: 1 hidden note').length, 2);
+});

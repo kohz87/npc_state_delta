@@ -1509,6 +1509,7 @@ export function createNpcPart(hooks = {}) {
     // The tail's words for a note: an opened one is the player's to know; a locked one shapes how the NPC acts.
     const KNOWN = 'known to the player now; may come out';
     const HIDDEN = 'hidden: never state or reveal; let it shape how they act';
+    const HIDDEN_LINE = new RegExp(`^(.+?), ${HIDDEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: .*$`, 'gm');
 
     /**
      * Present NPCs' meters when they moved lately (band words where a meter has them), and their notes: an
@@ -1569,10 +1570,8 @@ export function createNpcPart(hooks = {}) {
      * module's `hooks.redactSent`, for the view that draws and copies the sent text; SillyTavern's own prompt view still shows all.)
      */
     function redact(text) {
-        return String(text ?? '').split('\n').map(line => {
-            const at = line.indexOf(`, ${HIDDEN}: `);
-            return at > 0 ? `${line.slice(0, at)}: 1 hidden note` : line;
-        }).join('\n');
+        // Every locked line of the whole text, wherever it stands; each other line (and every line break) is left as it is.
+        return String(text ?? '').replace(HIDDEN_LINE, '$1: 1 hidden note');
     }
 
     return {
