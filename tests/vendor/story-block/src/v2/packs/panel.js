@@ -5,9 +5,10 @@
 // The panel only renders and calls `packs` (installed.js); it holds no rules of its own.
 
 import { button, el, plural } from '../../ui/dom.js';
-import { LIMITS } from './limits.js';
+import { LIMITS, ZIP_LIMITS } from './limits.js';
+import { isZipFile, readPackZip } from './bundle.js';
 
-const COUNT_WORDS = { items: 'item', creatures: 'creature', shops: 'shop', recipes: 'recipe', events: 'event', quests: 'quest', races: 'race', talents: 'talent', skills: 'skill', presets: 'ready-made character', places: 'place', routes: 'route', terms: 'term set', ranks: 'rank', crafts: 'craft', meterPresets: 'meter preset', markets: 'market', rpg: 'skill set', rules: 'rules set' };
+const COUNT_WORDS = { items: 'item', creatures: 'creature', shops: 'shop', recipes: 'recipe', events: 'event', quests: 'quest', races: 'race', talents: 'talent', skills: 'skill', presets: 'ready-made character', places: 'place', routes: 'route', terms: 'term set', ranks: 'rank', crafts: 'craft', meterPresets: 'meter preset', markets: 'market', rpg: 'skill set', rules: 'rules set', cast: 'cast member' };
 
 /** One line of what a pack holds: "3 items, 1 shop, start state". */
 export function countsLine(counts, hasStart) {
@@ -42,8 +43,27 @@ export function renderPacksPanel(root, { packs, readLorebook, notify = () => {},
         render();
     };
 
-    async function importFile(file) {
-        if (!file) return;
+    // The picked files: one pack.json (any .json) and the images beside it. The images are taken or refused one by one after the pack.
+    const isJson = file => /\.json$/i.test(file.name) || file.type === 'application/json';
+    const portraitLine = report => {
+        if (!report) return '';
+        const parts = [];
+        if (report.stored.length) parts.push(`${plural(report.stored.length, 'portrait')} saved`);
+        if (report.dropped) parts.push(`${plural(report.dropped, 'portrait')} no longer in the pack removed`);
+        if (report.missing.length) parts.push(`no picture yet for ${report.missing.join(', ')} (pick it with the pack file)`);
+        return parts.join('; ');
+    };
+
+    async function importFiles(picked) {
+        const list = Array.from(picked ?? []).filter(Boolean);
+        if (!list.length) return;
+        const zips = list.filter(isZipFile);
+        if (zips.length) return importZip(zips[0], list.length > 1);
+        const jsons = list.filter(isJson);
+        if (jsons.length !== 1) {
+            return say('Nothing was imported.', [jsons.length ? 'Pick one pack file at a time, with its images.' : 'Pick the pack\'s .json file together with its images.']);
+        }
+        const file = jsons[0];
         if (file.size > LIMITS.packBytes) return say(`${file.name} was not imported.`, [`The pack is larger than ${Math.round(LIMITS.packBytes / 1024)} KB.`]);
         let text;
         try {
@@ -51,10 +71,36 @@ export function renderPacksPanel(root, { packs, readLorebook, notify = () => {},
         } catch {
             return say(`${file.name} could not be read.`);
         }
-        const result = await packs.install(text, { source: 'file', origin: file.name });
-        if (!result.ok) return say(`${file.name} was not imported.`, errorLines(result.errors));
-        say(result.action === 'unchanged' ? `${result.name} is already installed.` : `${result.action === 'updated' ? 'Updated' : 'Installed'} ${result.name}.`);
+        const images = list.filter(other => other !== file).map(other => ({ name: other.name, size: other.size, read: async () => new Uint8Array(await other.arrayBuffer()) }));
+        await finish(file.name, text, images);
     }
+
+    // What an install said, in words: the pack, then its portraits (saved, dropped, not picked) and each image not used.
+    async function finish(name, text, images) {
+        const result = await packs.install(text, { source: 'file', origin: name, files: images });
+        if (!result.ok) return say(`${name} was not imported.`, errorLines(result.errors));
+        const first = result.action === 'unchanged' ? `${result.name} is already installed.` : `${result.action === 'updated' ? 'Updated' : 'Installed'} ${result.name}.`;
+        const portraits = result.portraits;
+        const refused = portraits?.refused ?? [];
+        say([first, portraitLine(portraits) ? `${portraitLine(portraits)}.` : '', refused.length ? `${plural(refused.length, 'image')} not used.` : ''].filter(Boolean).join(' '), refused.map(item => item.message));
+    }
+
+    // A pack as one zip (bundle.js): pack.json and its portraits/ folder, picked alone.
+    async function importZip(file, withOthers) {
+        if (withOthers) return say('Nothing was imported.', ['Pick the .zip alone, or pick pack.json with its images; not both.']);
+        if (file.size > ZIP_LIMITS.archive) return say(`${file.name} was not imported.`, [`The zip is larger than ${Math.round(ZIP_LIMITS.archive / 1024 / 1024)} MB.`]);
+        let bytes;
+        try {
+            bytes = new Uint8Array(await file.arrayBuffer());
+        } catch {
+            return say(`${file.name} could not be read.`);
+        }
+        const bundle = await readPackZip(bytes);
+        if (!bundle.ok) return say(`${file.name} was not imported.`, [bundle.message]);
+        await finish(file.name, bundle.text, bundle.files);
+    }
+
+    const importFile = file => (file ? importFiles([file]) : undefined);
 
     async function importLorebook() {
         const read = await readLorebook();
@@ -153,10 +199,11 @@ export function renderPacksPanel(root, { packs, readLorebook, notify = () => {},
     function render() {
         const file = make('input', 'ss-packs-file');
         file.type = 'file';
-        file.accept = '.json,application/json';
+        file.accept = '.json,application/json,.zip,application/zip,.webp,.png,.jpg,.jpeg,image/webp,image/png,image/jpeg';
+        file.multiple = true;
         file.style.display = 'none';
-        file.addEventListener('change', () => importFile(file.files?.[0]));
-        const pick = button('ss-button ss-button-primary ss-packs-import', { text: 'Import pack file', title: 'Install a pack.json file', icon: 'fa-file-import' });
+        file.addEventListener('change', () => importFiles(file.files));
+        const pick = button('ss-button ss-button-primary ss-packs-import', { text: 'Import pack file', title: 'Install a pack.json file; pick its portrait images with it, or a .zip made by Story Studio', icon: 'fa-file-import' });
         pick.addEventListener('click', () => file.click());
         const lore = button('ss-button ss-packs-lorebook', { text: 'Read from character lorebook', title: 'Install packs from the open character\'s lorebook entries tagged [storysuite:pack]', icon: 'fa-book' });
         lore.addEventListener('click', () => importLorebook());
@@ -174,7 +221,7 @@ export function renderPacksPanel(root, { packs, readLorebook, notify = () => {},
         for (const line of status.errors) errors.append(make('li', '', line));
 
         root.replaceChildren(
-            make('p', 'ss-packs-hint ss-card-help', 'Packs add items, creatures, shops, recipes, events and a start state. They are data only: nothing in a pack runs as code.'),
+            make('p', 'ss-packs-hint ss-card-help', 'Packs add items, creatures, shops, recipes, events, a cast and a start state. They are data only: nothing in a pack runs as code. A pack with a cast may come with portrait images: pick pack.json and the images together, or the .zip of the pack.'),
             actions,
             message,
             errors,
@@ -188,5 +235,5 @@ export function renderPacksPanel(root, { packs, readLorebook, notify = () => {},
     }
 
     render();
-    return { refresh: render, importFile, importLorebook };
+    return { refresh: render, importFile, importFiles, importLorebook };
 }

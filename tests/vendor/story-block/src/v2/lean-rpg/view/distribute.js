@@ -10,6 +10,9 @@ import { stepper } from '../../view/widgets/stepper.js';
 import { RPG_STRINGS, fill } from '../strings.js';
 import { refusalText } from '../../strings.js';
 import { drawStageBars, fieldsPayload } from './bars.js';
+import { growthOf } from '../blocks.js';
+import { growthText } from './party-data.js';
+import { isStandard } from '../rules.js';
 
 const S = RPG_STRINGS.sheet;
 
@@ -30,12 +33,12 @@ const staleFor = (session, character) => !session.busy && (character.points !== 
 
 /**
  * Draws the sheet for `character` (a readParty record) into `parent`.
- * Options: `api` ({ command }), `session` (newSession's record, kept by the caller so the sheet survives a redraw of the
+ * Options: `rules()` (the numbers in force: under the Standard formula the sheet adds the line of what the next points of VIT, AGI, INT and LUK buy, following the steppers), `api` ({ command }), `session` (newSession's record, kept by the caller so the sheet survives a redraw of the
  * page), `onClose({ saved: false })` (Cancel), `onDone({ ok })` (a save ended: the sheet is closed on success), `doc`.
  * → { el, session, draft(), save(), reset(), destroy() }. A save in flight goes on when the sheet is destroyed (the page
  * redrew itself after the first write); `onDone` still tells how it ended.
  */
-export function renderDistribute(parent, { character, session = null, api = {}, onClose = () => {}, onDone = () => {}, doc = parent.ownerDocument ?? globalThis.document } = {}) {
+export function renderDistribute(parent, { character, session = null, api = {}, onClose = () => {}, onDone = () => {}, rules = null, doc = parent.ownerDocument ?? globalThis.document } = {}) {
     const root = h(doc, 'section', 'rpg-sheet ss-glass');
     root.setAttribute('role', 'dialog');
     root.setAttribute('aria-modal', 'false');
@@ -43,7 +46,8 @@ export function renderDistribute(parent, { character, session = null, api = {}, 
     const run = session ?? newSession(character);
     if (staleFor(run, character)) Object.assign(run, newSession(character), { message: run.message });
     let alive = true;
-    let handles = [], steppers = [], radarHandle = null, pill = null, saveButton = null, resetButton = null, note = null;
+    let handles = [], steppers = [], radarHandle = null, pill = null, saveButton = null, resetButton = null, note = null, growth = null;
+    const standard = () => { try { const now = typeof rules === 'function' ? rules() : rules; return isStandard(now) ? now : null; } catch { return null; } };
 
     const clear = () => { for (const handle of handles) handle.destroy?.(); handles = []; steppers = []; radarHandle = null; root.replaceChildren(); };
     const changedStats = () => character.stats.filter(stat => run.draft[stat.key] !== run.start[stat.key]);
@@ -62,6 +66,7 @@ export function renderDistribute(parent, { character, session = null, api = {}, 
         if (saveButton) saveButton.disabled = run.busy || !changed;
         if (resetButton) resetButton.disabled = run.busy || !changed;
         if (note) note.textContent = words();
+        if (growth) growth.textContent = growthText(growthOf(run.draft, { statMax: standard()?.statMax }));
     }
 
     function draw() {
@@ -95,6 +100,9 @@ export function renderDistribute(parent, { character, session = null, api = {}, 
         handles.push(radarHandle);
         body.append(grid, chart);
         root.appendChild(body);
+        // Standard: Health, Stamina and Mana grow with VIT, AGI and INT and luck with LUK; the line says what the next point buys.
+        growth = standard() ? h(doc, 'p', 'rpg-sheet-growth') : null;
+        if (growth) { growth.setAttribute('data-rpg', 'growth'); root.appendChild(growth); }
         const actions = h(doc, 'div', 'rpg-actions');
         const button = (text, cls, fn) => {
             const node = h(doc, 'button', cls, text);

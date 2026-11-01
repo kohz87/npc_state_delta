@@ -24,9 +24,15 @@
    checkbox or a radio is pressed through its 44 x 44 label, or, with no label, gets a 44px tap area in a margin of its own; a
    slider's box is 44px tall around its thin track; a link (or a text element acting as a button) is a 44 x 44 box in the line; a search box leaves the
    room of its 44px clear button free of text. No tap area reaches over a neighbour's. A map marker draws its own tap area (`.ss-w-map-node`, or any control marked `data-ss-hit`,
-   e.g. Story Director's places). */
+   e.g. Story Director's places).
+
+   Compact pills: a segmented choice or a small pill action may opt in with the class `ss-tap-pill`. It is drawn about 30px tall
+   on the screen (30px / zoom before it) with an invisible 44px-tall tap area (::after) in place of the 44 x 44 minimum above. The tap
+   area reaches 7px above and below the pill, so the room is made: a margin of 7px on the row of pills and 14px between rows when they
+   wrap, which never lets two tap areas meet. A joined (segmented) row stops clipping, so the area outside the 30px shows; its end pills
+   keep the row's rounded corners themselves. Width is the pill's own (the tap area is as wide as the pill). */
 @media (max-width: 759.98px), (pointer: coarse) {
-    :is(.ss-cards, .story-suite-extras, .story-suite-reply-note, .story-suite-bar, .ss-hud, .story-suite-sheet, .ss-gameview, .story-suite-overlay, .ss-dialog, .ss-sample, .ss-sample-dialog) :is(button, [role="button"], [role="tab"], a[href], summary):not(.ss-switch, .ss-w-map-node, [data-ss-hit]) {
+    :is(.ss-cards, .story-suite-extras, .story-suite-reply-note, .story-suite-bar, .ss-hud, .story-suite-sheet, .ss-gameview, .story-suite-overlay, .ss-dialog, .ss-sample, .ss-sample-dialog) :is(button, [role="button"], [role="tab"], a[href], summary):not(.ss-switch, .ss-w-map-node, .ss-tap-pill, [data-ss-hit]) {
         min-width: calc(44px / var(--ss-zoomed, 1)) !important;
         min-height: calc(44px / var(--ss-zoomed, 1)) !important;
     }
@@ -95,7 +101,7 @@
         background-clip: content-box;
     }
     /* Authored inline controls (including elements such as mark) need a box before a minimum can size them. */
-    :where([data-ss-screen] :is([role="button"], [data-command]):not(.ss-switch, .ss-w-map-node, [data-ss-hit])) {
+    :where([data-ss-screen] :is([role="button"], [data-command]):not(.ss-switch, .ss-w-map-node, .ss-tap-pill, [data-ss-hit])) {
         display: inline-block;
         box-sizing: border-box;
         min-width: calc(44px / var(--ss-zoomed, 1)) !important;
@@ -105,7 +111,7 @@
        their own in the line: an inline block (an inline box takes no minimum size) with real padding round its text and no negative
        margin, so the minimum size above reaches it and nothing overlaps its neighbours; the line grows where one sits. No weight:
        a control a screen draws as flex, grid or block keeps that display and its own padding. */
-    :where(:is(.ss-cards, .story-suite-extras, .story-suite-reply-note, .story-suite-bar, .ss-hud, .story-suite-sheet, .ss-gameview, .story-suite-overlay, .ss-dialog, .ss-sample, .ss-sample-dialog) :is(a[href], :is(span, i, b, em, strong, small, abbr, code, kbd, label, img)[role="button"], :is(span, i, b, em, strong, small, abbr, code, kbd, label, img)[role="tab"]):not([data-ss-hit])) {
+    :where(:is(.ss-cards, .story-suite-extras, .story-suite-reply-note, .story-suite-bar, .ss-hud, .story-suite-sheet, .ss-gameview, .story-suite-overlay, .ss-dialog, .ss-sample, .ss-sample-dialog) :is(a[href], :is(span, i, b, em, strong, small, abbr, code, kbd, label, img)[role="button"], :is(span, i, b, em, strong, small, abbr, code, kbd, label, img)[role="tab"]):not(.ss-tap-pill, [data-ss-hit])) {
         display: inline-block;
         box-sizing: border-box;
         max-width: 100%;
@@ -116,5 +122,36 @@
     }
     :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-search .ss-search-input {
         padding-right: calc(44px / var(--ss-zoomed, 1) + 8px);
+    }
+    /* Compact pills: see the note above. */
+    :is(.ss-cards, .story-suite-extras, .story-suite-reply-note, .story-suite-bar, .ss-hud, .story-suite-sheet, .ss-gameview, .story-suite-overlay, .ss-dialog, .ss-sample, .ss-sample-dialog) .ss-tap-pill {
+        position: relative;
+        box-sizing: border-box;
+        min-width: 0;
+        min-height: calc(30px / var(--ss-zoomed, 1));
+    }
+    :is(.ss-cards, .story-suite-extras, .story-suite-reply-note, .story-suite-bar, .ss-hud, .story-suite-sheet, .ss-gameview, .story-suite-overlay, .ss-dialog, .ss-sample, .ss-sample-dialog) .ss-tap-pill::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 50%;
+        height: calc(44px / var(--ss-zoomed, 1));
+        transform: translateY(-50%);
+    }
+    :is(.ss-cards, .story-suite-extras, .story-suite-reply-note, .story-suite-bar, .ss-hud, .story-suite-sheet, .ss-gameview, .story-suite-overlay, .ss-dialog, .ss-sample, .ss-sample-dialog) .ss-chips:has(> .ss-tap-pill) {
+        row-gap: calc(14px / var(--ss-zoomed, 1));
+        margin-block: calc(7px / var(--ss-zoomed, 1));
+    }
+    :is(.ss-cards, .story-suite-extras, .story-suite-reply-note, .story-suite-bar, .ss-hud, .story-suite-sheet, .ss-gameview, .story-suite-overlay, .ss-dialog, .ss-sample, .ss-sample-dialog) .ss-chips.ss-segmented:has(> .ss-tap-pill) {
+        overflow: visible;
+    }
+    :is(.ss-cards, .story-suite-extras, .story-suite-reply-note, .story-suite-bar, .ss-hud, .story-suite-sheet, .ss-gameview, .story-suite-overlay, .ss-dialog, .ss-sample, .ss-sample-dialog) .ss-segmented > .ss-tap-pill:first-child {
+        border-start-start-radius: calc(var(--ss-radius-s) - 1px);
+        border-end-start-radius: calc(var(--ss-radius-s) - 1px);
+    }
+    :is(.ss-cards, .story-suite-extras, .story-suite-reply-note, .story-suite-bar, .ss-hud, .story-suite-sheet, .ss-gameview, .story-suite-overlay, .ss-dialog, .ss-sample, .ss-sample-dialog) .ss-segmented > .ss-tap-pill:last-child {
+        border-start-end-radius: calc(var(--ss-radius-s) - 1px);
+        border-end-end-radius: calc(var(--ss-radius-s) - 1px);
     }
 }

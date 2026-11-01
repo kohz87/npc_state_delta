@@ -57,6 +57,7 @@ export const STRINGS = deepFreeze({
         hiddenLine: 'The story cannot change this.',
         namesLimit: 'Give 1 to 32 values a name.',
         namesKey: 'Names go on a number field, for whole values inside its range.',
+        blocksKey: 'Blocks go on a number field of a block with a role and say which bar it is: health, stamina, mana or foe.',
         namesText: 'A name is 1 to 40 characters and not a number.',
         namesSame: 'Two values have the same name.',
         namesInvalid: 'Write one name per line as "value = name", for values inside the range.',
@@ -119,6 +120,7 @@ export const STRINGS = deepFreeze({
     editMessages: {
         onlyReader: 'Only the reader can make this edit.', itemName: 'Give the item a name.',
         itemNameLength: 'An item needs a name of 1 to 60 characters.',
+        itemKind: 'The kind of an item is one of {kinds}.', itemRarity: 'The rarity of an item is one of {rarities}.',
         itemAdded: 'You added {item}.', itemCount: '{name} to {qty}', itemNote: "{name}'s note",
         itemGroupRenamed: '{name} to {qty}; one renamed {renamed}',
         itemSet: 'You set {detail}.', itemUnstackable: '{name} does not stack; each piece is kept separately.',

@@ -389,6 +389,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         const cues = {};
         let committed = false;
         const prechecks = [];
+        let previewState = null;
         const requested = [];
         const commit = !dryRun && type !== 'continue';
         // `again`: an earlier attempt at this reply was never captured (a retried interceptor), so a hook may reuse its work.
@@ -429,6 +430,8 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             const prior = session?.prechecks?.find(step => step.type === preludeType && JSON.stringify(step.payload) === JSON.stringify(payload));
             const result = bus.run(preludeType, payload, { cause: 'system', ...(prior ? { seed: prior.seed } : {}) });
             if (result?.ok) {
+                // The RPG's rolls move bars (hits, heals, skill costs): the tail's block lines are read from the state they leave, so they say what the cue says.
+                if (preludeType === RPG_RESOLVE && result.state) previewState = result.state;
                 prechecks.push({ type: preludeType, payload, seed: result.receipt.seed });
                 const told = `[Happened]\n${result.receipt.summary}`;
                 cues[moduleId] = [...(cues[moduleId] ?? []), preludeType === RPG_RESOLVE ? { text: told, keep: true } : told];
@@ -441,7 +444,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             store.deferSave?.();
             deferred = true;
         }
-        return { cues, prechecks };
+        return { cues, prechecks, previewState };
     }
 
     // What modules send with the reply on their own, under their own prompt keys (SPEC §5: NPC State
@@ -472,9 +475,10 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         return out;
     }
 
-    function build(cues = {}) {
+    function build(cues = {}, state = null) {
         const untold = store.untold();
-        const current = view();
+        // (`state`: the state the reply's prelude rolls leave, when it has one; the tail's lines are made from it)
+        const current = state ? makeView({ store, registry, settings, chat: ctx?.chat, active: viewReader, state }) : view();
         const own = sentByModules(current);
         const ownTokens = own.reduce((sum, part) => sum + part.tokens, 0);
         const result = assemble({ registry, view: current, untold, settings: hostSettings(), cues, substitute: text => substituteNames(text, ctx), context: contextNow(), ownTokens });
@@ -607,8 +611,8 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
                 block(blocked, abort);
                 return;
             }
-            const { cues, prechecks } = await runCues(kind);
-            const built = build(cues);
+            const { cues, prechecks, previewState } = await runCues(kind);
+            const built = build(cues, previewState);
             tellTooSmall(built.fit);
             const chat = ctx.chat;
             const last = chat.length - 1;

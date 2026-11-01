@@ -31,6 +31,9 @@
 // the prefix holds; when an earlier reply is deleted or swiped and they changed, the roll is planned again with the same
 // dice on the new numbers. Claim `rpg:resolve:<key>` (the reader's message) keeps it to one roll per message.
 //
+// The Standard formula (rules.formula 'standard') rolls in standard.js, which documents its own additions to this record: typed lines, the
+// turn order, the opening action, the bars and the blocks the told rolls took or gave (`hurts`, written to the bars below).
+//
 // ---- The record for the battle log (agent B) ----------------------------------------------------------------------
 // The receipt (type 'rpg.resolve', on the reply's record: message.extra.storySuite.receipts, or the query `rpg.rolls`)
 // has `summary` = the cue text and `data.v2.result` =
@@ -50,7 +53,8 @@
 // defender (outcome 'fail' means the defender failed). `summary.exchanges` = rounds.length is the
 // number B shows as "Rolled for you: N exchanges". The told count is not recorded: the narrator is not asked to count.
 import { FORMULA, LIMITS, PACE, RESOLVE, STAGES } from './names.js';
-import { normalizeRules, STANDARD, statShare } from './rules.js';
+import { isStandard, normalizeRules, STANDARD, statShare } from './rules.js';
+import { prepareStandard, rollStandard } from './standard.js';
 import { fitCue } from './cue.js';
 import { matchCharacter, matchFoe, matchSkill, readSheet, strongestStat } from './read.js';
 import { validatePlan } from './plan.js';
@@ -120,7 +124,8 @@ function skillFor(character, phrase, planned) {
  * roll depends on, which the replay guard asks again). `rules` are the numbers in force (rules.js; default: Standard).
  * → { acts, foes, checks, refused: [{ who, text }], witness }
  */
-export function prepare(plan, sheet, rules = STANDARD) {
+export function prepare(plan, sheet, rules = STANDARD, options = {}) {
+    if (isStandard(rules)) return prepareStandard(plan, sheet, rules, options);
     // `plainRefused`: each refusal as if nothing were hidden, to measure the cue only (never saved, never told; review 166).
     const out = { acts: [], foes: [], checks: [], refused: [], plainRefused: [] };
     const refuse = (who, text, plain = text) => { out.refused.push({ who, text }); out.plainRefused.push(plain); };
@@ -199,7 +204,8 @@ const rolled = (entry, pcDie, foeDie, rules) => {
  * receipt's seed; each action's stream is seeded from it and the action's place, so the streams never depend on one another.
  */
 export function positionalDice(base) {
-    const KIND = { act: 1, foe: 2, check: 3 };
+    // (`init` and `open`: the Standard formula's turn order and opening action; Classic never draws them.)
+    const KIND = { act: 1, foe: 2, check: 3, init: 4, open: 5 };
     return Object.assign((kind, at) => {
         const random = seededRandom((base ^ Math.imul(KIND[kind] * 64 + at + 1, 0x9E3779B1)) >>> 0);
         return () => 1 + Math.floor(random() * FORMULA.die);
@@ -213,7 +219,8 @@ export function positionalDice(base) {
  * are dropped). `rules` are the numbers in force (default: Standard); the most rounds is `rules.roundCap`. `earlier`: the cue is fitted as it
  * was for a roll of the earlier scheme (cue.js fitCue), so that its rounds and stop never change.
  */
-export function rollPrepared(plan, prepared, source, rules = STANDARD, { earlier = false } = {}) {
+export function rollPrepared(plan, prepared, source, rules = STANDARD, { earlier = false, carried = null } = {}) {
+    if (isStandard(rules)) return rollStandard(plan, prepared, source, rules, { carried });
     const own = new Map();
     const diceOf = entry => {
         if (source.positional !== true) return source;
@@ -253,6 +260,34 @@ function summaryOf(checks, rounds, refused) {
     return { exchanges: rounds.length, acts, refused: refused.length };
 }
 
+// The turn order a Standard roll is given (resolve.js carries it forward in the payload): a short list of { id, name, total, die?, bonus?, agi,
+// party }, or null when there is none or it is damaged (the fight then starts here).
+const ORDER_ID = /^(?:c:.{1,80}|f:\d{1,3})$/u;
+export function orderOf(value) {
+    if (!Array.isArray(value) || !value.length || value.length > 24) return null;
+    const ok = value.every(entry => isObject(entry) && ORDER_ID.test(entry.id) && typeof entry.name === 'string' && entry.name.length <= 80
+        && Number.isSafeInteger(entry.total) && Number.isSafeInteger(entry.agi) && typeof entry.party === 'boolean'
+        && (entry.die === undefined || entry.die === null || Number.isSafeInteger(entry.die)) && (entry.bonus === undefined || entry.bonus === null || Number.isSafeInteger(entry.bonus))
+        && (entry.left === undefined || (Number.isSafeInteger(entry.left) && entry.left >= 0)));
+    return ok && new Set(value.map(entry => entry.id)).size === value.length ? value : null;
+}
+
+// The most a block's own field holds (the pinned definition's `max`): a Classic block under the Standard formula holds at most 5 Health stages.
+export const fieldMax = domain => (module, field) => {
+    const max = domain?.pins?.[domain?.active?.[module]?.hash]?.definition?.state?.[field]?.max;
+    return Number.isSafeInteger(max) ? max : Infinity;
+};
+
+// The blocks the told rolls took or gave, written to the bars: the same fields the narrator's change lines and the reader's pencils set.
+function writeBars(ctx, hurts) {
+    if (!hurts.length) return;
+    const instances = ctx.draft('dataModules')?.instances;
+    for (const hurt of hurts) {
+        const fields = instances?.[hurt.module]?.chat?.fields;
+        if (fields && Object.hasOwn(fields, hurt.field)) fields[hurt.field] = hurt.to;
+    }
+}
+
 const guardOf = (ctx, predicate, witness) => ({ owner: ctx.module, version: 2, epoch: ctx.epoch, rulesHash: null, predicate, inputHash: ctx.hash({ source: ctx.source, predicate, witness }) });
 
 /**
@@ -266,23 +301,28 @@ export function resolve(ctx, payload = {}) {
     const checked = validatePlan(payload?.plan);
     if (!checked.ok) ctx.fail('INVALID', `That is not a plan: ${checked.errors[0]}`);
     const plan = payload.plan;
+    const order = orderOf(payload.order);
     // The numbers this roll is made with are the ones the payload carries (chosen when it was planned, from the settings of that
     // moment); a Re-read, a rebuild and a reload run the same payload, so they roll with them again. The settings are never read here.
     const rules = normalizeRules(payload.rules);
-    const sheet = readSheet({ domains: { dataModules: ctx.read('dataModules') } });
-    const prepared = prepare(plan, sheet, rules);
+    const domain = ctx.read('dataModules');
+    const sheet = readSheet({ domains: { dataModules: domain } });
+    const prepared = prepare(plan, sheet, rules, { maxOf: fieldMax(domain) });
     if (!prepared.acts.length && !prepared.foes.length && !prepared.checks.length) ctx.fail('NO_LONGER_DONE', 'Nothing is left to roll on this sheet.');
     if (!ctx.claim(claimKey(key))) ctx.fail('CLAIMED', 'This message has already been rolled for.');
     // A roll that asks for the dice version draws one number from the seed, and each action's dice come from that and its place in
     // the plan; one made before has no version and draws its dice in one sequence, as it did.
-    const source = payload.dice === DICE_VERSION ? positionalDice(Math.floor(ctx.rng() * 4294967296) >>> 0) : () => ctx.roll(`d${FORMULA.die}`).total;
-    const dice = rollPrepared(plan, prepared, source, rules, { earlier: payload.dice !== DICE_VERSION });
-    const predicate = { kind: RESOLVE, key, plan: ctx.hash(plan), rules: ctx.hash(rules) };
-    ctx.replayGuard(guardOf(ctx, predicate, prepared.witness), { key, plan, rules });
+    const std = isStandard(rules);
+    const source = payload.dice === DICE_VERSION || std ? positionalDice(Math.floor(ctx.rng() * 4294967296) >>> 0) : () => ctx.roll(`d${FORMULA.die}`).total;
+    const dice = rollPrepared(plan, prepared, source, rules, { earlier: payload.dice !== DICE_VERSION && !std, carried: order });
+    const predicate = { kind: RESOLVE, key, plan: ctx.hash(plan), rules: ctx.hash(rules), ...(order ? { order: ctx.hash(order) } : {}) };
+    ctx.replayGuard(guardOf(ctx, predicate, prepared.witness), { key, plan, rules, ...(order ? { order } : {}) });
     const result = {
         v: RESULT_VERSION, key, pace: plan.pace, rules, stop: dice.stop, checks: dice.checks, rounds: dice.rounds,
         refused: prepared.refused, summary: dice.summary,
+        ...(std ? { order: dice.order, quickStart: dice.quickStart, opening: dice.opening, idle: dice.idle, hurts: dice.hurts } : {}),
     };
+    if (std) writeBars(ctx, dice.hurts);
     return { summary: dice.text, narrate: true, replan: true, data: { v2: { key: claimKey(key), result } } };
 }
 
@@ -301,7 +341,11 @@ export function leanRpgGuard({ state, hash }, { guard, source, recorded }) {
         const rules = normalizeRules(recorded.rules);
         const kept = recorded.rules !== undefined || predicate.rules !== undefined;
         if (kept && (hash(recorded.rules ?? null) !== hash(rules) || hash(rules) !== predicate.rules)) return bad('The roll\'s numbers were damaged.');
-        const witness = prepare(recorded.plan, readSheet(state), rules).witness;
+        // The turn order a Standard roll was given (carried from the fight's earlier reply) is hashed with it; Classic has none.
+        if (predicate.order !== undefined || recorded.order !== undefined) {
+            if (orderOf(recorded.order) === null || hash(recorded.order) !== predicate.order) return bad('The roll\'s turn order was damaged.');
+        }
+        const witness = prepare(recorded.plan, readSheet(state), rules, { maxOf: fieldMax(state.domains?.dataModules) }).witness;
         if (hash({ source, predicate, witness }) !== guard.inputHash) return bad('The sheet before this roll changed; Re-read this reply.');
         return { ok: true };
     } catch { return bad('Damaged roll record.'); }

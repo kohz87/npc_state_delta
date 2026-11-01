@@ -1,3 +1,5 @@
+import { spreadWord } from './blocks.js';
+
 // The RPG's shared names (re-exported by index.js, which is where the other pieces import them from).
 // They live in a file of their own so the pieces that index.js imports can use them without an import cycle.
 
@@ -22,6 +24,13 @@ export const STAGES = Object.freeze({
     mana: Object.freeze(['Empty', 'Drained', 'Low', 'Steady', 'Fresh']),
     stamina: Object.freeze(['Empty', 'Spent', 'Tired', 'Winded', 'Fresh']),
 });
+
+/**
+ * The stage word of a bar that holds `value` blocks of `size` (the Standard formula): the first word for none, the last for a full bar, every other
+ * count the nearest word in between (blocks.js spreadWord, which the Party tab and the tail use too, so the planner's sheet, the cue and the story
+ * all say the same word). `words` is one of STAGES.
+ */
+export const stageWord = (words, value, size) => spreadWord(words, Number.isFinite(value) ? Math.trunc(value) : 0, size);
 
 /** The formula (SPEC_RPG §0): PC d20 + stat/2 + 2×class + skill rank vs foe d20 + 5 + 2×class. */
 export const FORMULA = Object.freeze({ die: 20, statDivisor: 2, classWeight: 2, foeBase: 5, edgeMax: 3, costMargin: 2 });

@@ -12,6 +12,7 @@
 // out, with a plain `problems` line.
 import { FOE_SLOTS, SKILL_SLOTS, STAGES, STATS, USES } from './names.js';
 import { dmHidden } from '../data-modules/schema.js';
+import { barOf, characterBars, sizeOf } from './blocks.js';
 import { soulReading } from './soul.js';
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -79,16 +80,21 @@ const TEXT_KEY = /^(who|about\d*|skill\d+|foe\d+)$/;
 const hiddenOf = definition => new Set(Object.entries(isObject(definition?.state) ? definition.state : {}).filter(([key, schema]) => key !== 'alive' && dmHidden(schema)).map(([key]) => key));
 const shownFields = (fields, hidden) => (hidden.size ? Object.fromEntries(Object.entries(fields).filter(([key]) => !(hidden.has(key) && TEXT_KEY.test(key)))) : fields);
 
-// `own`: the block's name, which stands in for a hidden Who (as the tail does).
-function character(id, fields, own = '', hidden = new Set(), schema = null) {
+// `own`: the block's name, which stands in for a hidden Who (as the tail does). `definition`: the block's own, which says whether its bars are
+// the Standard formula's blocks (blocks.js): then the record also has `size` (how many blocks each bar has now), and health, mana and stamina
+// are the blocks left. A Classic block's record is exactly what it was.
+function character(id, fields, own = '', hidden = new Set(), definition = null) {
+    const schema = isObject(definition?.state) ? definition.state.soul : null;
     const who = text(fields.who) || text(own);
     if (!who) return null;
     const stats = Object.fromEntries(STATS.map(stat => [stat, int(fields[stat])]));
     // What the pack calls the Soul Class field and its current value (soul.js), for the planner's lines and the odds.
     const soul = int(fields.soul) ?? 1, reading = soulReading(schema);
+    const bars = characterBars(definition, fields);
     return {
         module: id, who, key: fold(who),
         health: int(fields.health), mana: int(fields.mana), stamina: int(fields.stamina),
+        ...(bars ? { size: { health: bars.health.size, stamina: bars.stamina.size, mana: bars.mana.size } } : {}),
         stats, soul, soulLabel: reading.label, soulWord: reading.word(soul), xp: int(fields.xp), points: int(fields.points),
         alive: fields.alive !== false,
         skills: [],
@@ -115,12 +121,14 @@ function skillsOf(fields, hidden = new Set()) {
 // A block's four slots. `offset`: where its numbering starts (the first Foes block is 1…4, the next 5…8, and so on), so every
 // slot of every Foes block has a number of its own in the plan.
 // A hidden foe name is the slot's ("Foe 2"); a hidden count, class or health still counts for the rules and is listed in `hidden`.
-function foesOf(id, fields, offset = 0, hidden = new Set()) {
+function foesOf(id, fields, offset = 0, hidden = new Set(), state = null) {
     const out = [];
     for (let n = 1; n <= FOE_SLOTS; n += 1) {
+        // A Standard group's Health is blocks left, out of foeHealthBlocks(class): `size` says how many (a Classic slot has none).
+        const size = barOf(state?.[`hurt${n}`]) ? sizeOf(state[`hurt${n}`], fields, `hurt${n}`) : null;
         const name = hidden.has(`foe${n}`) ? (text(fields[`foe${n}`]) ? `Foe ${offset + n}` : '') : text(fields[`foe${n}`]);
         const count = int(fields[`count${n}`]) ?? 0;
-        out.push({ slot: offset + n, module: id, name, count, class: int(fields[`class${n}`]) ?? 1, hurt: int(fields[`hurt${n}`]) ?? 0, filled: Boolean(name) && count > 0,
+        out.push({ slot: offset + n, module: id, name, count, class: int(fields[`class${n}`]) ?? 1, hurt: int(fields[`hurt${n}`]) ?? 0, ...(size ? { size } : {}), filled: Boolean(name) && count > 0,
             hidden: ['count', 'class', 'hurt'].filter(part => hidden.has(`${part}${n}`)) });
     }
     return out;
@@ -128,10 +136,12 @@ function foesOf(id, fields, offset = 0, hidden = new Set()) {
 
 /**
  * The chat's RPG blocks: `{ characters, foes, problems }`.
- *   characters: [{ module, who, key, health, mana, stamina, stats: { str…cha }, soul, xp, points, down, alive,
+ *   characters: [{ module, who, key, health, mana, stamina, size?, stats: { str…cha }, soul, xp, points, down, alive,
  *                  skills: [{ slot, name, about, rank, practice, stat, uses }] }]   (a Skills block joins the character its `who` names;
  *                  stat is one of STATS and uses 'stamina' | 'mana', or null for a block that has neither)
- *   foes: the four slots of every Foes block in block order, [{ slot, module, name, count, class, hurt, filled }] ([] without one); `slot`
+ *                  `size`: { health, stamina, mana } only for a Standard Character block, where those three are the blocks left)
+ *   foes: the four slots of every Foes block in block order, [{ slot, module, name, count, class, hurt, size?, filled }] ([] without one); `size`: the
+ *         blocks a Standard group's Health has (`hurt` is the blocks left); `slot`
  *         counts on across blocks (1–4, then 5–8, …), `filled` = a name and a count above 0
  *   problems: plain sentences for blocks left out (no `who`, two characters of one name)
  */
@@ -150,7 +160,7 @@ export function readSheet(state) {
         if (role === 'character') {
             // A companion who left the party (`left`) is kept on the Party tab but is not on the sheet the dice are rolled for.
             if (fields.left === true) continue;
-            const found = character(id, fields, hidden.has('who') ? definition.name : '', hidden, isObject(definition.state) ? definition.state.soul : null);
+            const found = character(id, fields, hidden.has('who') ? definition.name : '', hidden, definition);
             if (!found) sheet.problems.push(`The Character block "${id}" has no name in its Who field, so it is left out.`);
             else if (sheet.characters.some(other => other.key === found.key)) sheet.problems.push(`Two Character blocks are called ${found.who}; only the first is used.`);
             else sheet.characters.push(found);
@@ -159,7 +169,7 @@ export function readSheet(state) {
             if (who) skills.push({ who, list: skillsOf(fields, hidden) });
             else sheet.problems.push(`The Skills block "${id}" has no name in its Who field, so it is left out.`);
         } else if (role === 'foes') {
-            sheet.foes.push(...foesOf(id, raw, sheet.foes.length, hidden));
+            sheet.foes.push(...foesOf(id, raw, sheet.foes.length, hidden, isObject(definition.state) ? definition.state : null));
         }
     }
     for (const block of skills) {

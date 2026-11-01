@@ -11,6 +11,9 @@
 // * query `packs.list` → installed packs for display (`installed.js` list()).
 // * query `packs.content({ kind, pack? })` → records of one kind from enabled packs (places and
 //   routes are the map Story Director's atlas reads; other content is available to modules).
+// * query `packs.portrait({ pack, file })` → the safe image URL of a cast portrait the pack names (`/user/files/…`), or null: the pack
+//   is not installed, does not name that file, no picture was imported with it, or the file is gone (portraits.js).
+//   `packs.content({ kind: 'cast' })` gives each person with `pack` and `packVersion` (cast.js).
 // * query `packs.calendar` → the first enabled pack's calendar for the story clock, or null.
 // * query `packs.crafts` → the craft table (default crafts, enabled packs' `crafts` laid over them:
 //   `[{ craft, title, stats, stations, note?, pack }]`) for modules that use recipes.
@@ -32,10 +35,11 @@
 //   `applyStart(state, start, { id })` writes it into an initial State.
 
 import { createInstalled } from './installed.js';
+import { createPortraits } from './portraits.js';
 import { calendarOf, contentOf, craftsOf, economyOf, itemDefsIn, mergeStart, resolveItemIn, applyStart, weatherOf, youRankOf } from './content.js';
 import { renderPacksPanel } from './panel.js';
 import { HOST_VERSION, validatePack, slugify } from './validate.js';
-import { readCharacterLorebook, stCapabilities, stHostVersion, stSettings } from './st-adapter.js';
+import { readCharacterLorebook, stCapabilities, stHostVersion, stPortraitFiles, stSettings } from './st-adapter.js';
 import { marketEntries } from './lorebook.js';
 
 export { validatePack, slugify, applyStart, mergeStart, resolveItemIn, contentOf, calendarOf, craftsOf, economyOf, weatherOf, youRankOf, createInstalled, renderPacksPanel };
@@ -53,8 +57,9 @@ export { validateDataModules, validateDataMigration, dataModuleDefaults, dataMod
  * `→ { character, entries, problem }`; `capabilities()`: names or null; `hostVersion`: a version or a function giving it.
  * Returns `{ part, packs, resolveItem, startState, economy }`.
  */
-export function createPacksPart({ settings, readLorebook = async () => ({ character: '', entries: [], problem: 'No lorebook reader.' }), capabilities = () => null, hostVersion = HOST_VERSION } = {}) {
-    const packs = createInstalled({ settings, capabilities, hostVersion });
+export function createPacksPart({ settings, readLorebook = async () => ({ character: '', entries: [], problem: 'No lorebook reader.' }), capabilities = () => null, hostVersion = HOST_VERSION, portraitFiles = null } = {}) {
+    const portraits = createPortraits({ settings, files: portraitFiles });
+    const packs = createInstalled({ settings, capabilities, hostVersion, portraits });
 
     /** The pack item def a story name means, or null (see content.js resolveItemIn). */
     const resolveItem = name => resolveItemIn(packs.packs(), name);
@@ -105,6 +110,8 @@ export function createPacksPart({ settings, readLorebook = async () => ({ charac
             'packs.crafts': () => craftsOf(packs.packs()),
             'packs.economy': () => economy(),
             'packs.markets': () => markets(),
+            // The URL of a cast portrait (see above): a file name the installed pack names and has a stored picture for, else null.
+            'packs.portrait': (_state, { pack, file } = {}) => portraits.url(pack, file),
         },
         kinds: {},
         context: { static: () => '', tail: () => ({ lines: [], optional: [] }), budget: 0 },
@@ -122,7 +129,7 @@ export function createPacksPart({ settings, readLorebook = async () => ({ charac
         },
         tabs: [],
     };
-    return { part, packs, resolveItem, startState, economy, refreshLore, markets };
+    return { part, packs, portraits, resolveItem, startState, economy, refreshLore, markets };
 }
 
 const copy = value => JSON.parse(JSON.stringify(value));
@@ -162,10 +169,12 @@ const live = createPacksPart({
     readLorebook: readCharacterLorebook,
     capabilities: stCapabilities,
     hostVersion: () => stHostVersion() ?? HOST_VERSION,
+    portraitFiles: stPortraitFiles(),
 });
 
 export const part = live.part;
 export const packs = live.packs;
+export const portraits = live.portraits;
 export const resolveItem = live.resolveItem;
 export const startState = live.startState;
 export const economy = live.economy;

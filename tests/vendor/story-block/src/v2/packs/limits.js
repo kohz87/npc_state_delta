@@ -19,10 +19,10 @@ export const LIMITS = Object.freeze({
 export const RECORD_LIMITS = Object.freeze({ slug: 64, note: 500, word: 40, element: 24 });
 
 // Content kinds a pack may carry. Each is a list of records.
-export const CONTENT_KINDS = Object.freeze(['items', 'creatures', 'shops', 'recipes', 'events', 'quests', 'races', 'talents', 'skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'dataModules', 'rpg']);
+export const CONTENT_KINDS = Object.freeze(['items', 'creatures', 'shops', 'recipes', 'events', 'quests', 'races', 'talents', 'skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'dataModules', 'rpg', 'cast']);
 // Kinds added after the first pack format: a normalized pack has them only when the file gives
 // them, so what older packs list (counts) stays as it was.
-export const OPTIONAL_KINDS = Object.freeze(['skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'dataModules', 'rpg']);
+export const OPTIONAL_KINDS = Object.freeze(['skills', 'presets', 'places', 'routes', 'terms', 'ranks', 'crafts', 'meterPresets', 'markets', 'dataModules', 'rpg', 'cast']);
 // `content.you` (Your look, MODULES §F126): an object, not a list. A pack opts in to a Rank for {{user}} with
 // `content.you.rank: { "label": "Guild rank" }` (the label is what Home and the Status card call it, 1 to 30 characters).
 export const YOU_FIELDS = Object.freeze(['rank']);
@@ -119,11 +119,37 @@ export const METER_LIMITS = Object.freeze({ presets: 4, meters: 6, min: -1000, m
 // Skill sets for the RPG's New character wizard, `content.rpg.skillSets` (normalized to a list of sets):
 // `[{ name, slug?, about?, skills: [{ name, about, stat, uses? }] }]`. The limits follow the Skills block's fields; `stats` and `uses`
 // are the words the block's `statN` and `usesN` take (src/v2/lean-rpg/names.js STATS and USES, kept apart so packs need nothing of it).
-export const LEAN_RPG_FIELDS = Object.freeze(['skillSets']);
+export const LEAN_RPG_FIELDS = Object.freeze(['skillSets', 'formula', 'numbers']);
+// A pack may also say which stat formula its story plays on and the numbers of it (`content.rpg.formula`: 'standard' | 'classic'; `content.rpg.numbers`:
+// whole numbers by name, the names of src/v2/lean-rpg/rules.js STANDARD_RULE_KEYS and RULE_KEYS, kept apart so packs need nothing of it). They are
+// kept as one more record of the list, `{ id, slug: 'formula', pack, formula?, numbers? }`, which the skill-set readers pass over.
+export const RPG_FORMULAS = Object.freeze(['standard', 'classic']);
+export const RPG_NUMBER_KEYS = Object.freeze(['foeBase', 'foeClassWeight', 'classWeight', 'statDivisor', 'costMargin', 'decisiveMargin', 'roundCap', 'quickStartMargin',
+    'startStat', 'createPoints', 'createMin', 'createMax', 'pointsPerSoul', 'statMax']);
 export const SKILL_SET_FIELDS = Object.freeze(['name', 'slug', 'about', 'skills']);
 export const SKILL_SET_SKILL_FIELDS = Object.freeze(['name', 'about', 'stat', 'uses']);
 export const LEAN_RPG_LIMITS = Object.freeze({ sets: 12, skills: 5, name: 40, about: 160, skillName: 40, skillAbout: 120,
     stats: Object.freeze(['str', 'vit', 'agi', 'dex', 'int', 'luk', 'cha']), uses: Object.freeze(['stamina', 'mana']) });
+// The cast (`content.cast`): a hand-written list of people who live off-screen until the party meets them (Story Director)
+// and get a prepared dossier at the first meeting (NPC State Delta). One entry:
+// `{ id, name, aliases?, about, look, voice?, personality?, history?, portrait?, start: { place, goal, routine? }, drawnTo?,
+// meters?: { preset?, <meter>: n }, stages?, fields?, secrets?, canDieUnmet? }`. All text is plain: no < > { } (and no | in
+// the short lines a change line may carry), line breaks become spaces. `stages` take the shape of a meter preset's stages.
+export const CAST_FIELDS = Object.freeze(['id', 'name', 'aliases', 'about', 'look', 'voice', 'personality', 'history', 'portrait', 'start', 'drawnTo', 'meters', 'stages', 'fields', 'secrets', 'canDieUnmet']);
+export const CAST_START_FIELDS = Object.freeze(['place', 'goal', 'routine']);
+export const CAST_SECRET_FIELDS = Object.freeze(['title', 'text', 'meter', 'at', 'when']);
+export const CAST_LIMITS = Object.freeze({ entries: 64, name: 80, aliases: 8, about: 300, look: 600, voice: 300, personality: 600, history: 1200,
+    place: 80, goal: 200, routine: 200, drawnTo: 6, phrase: 80, fields: 6, fieldName: 40, fieldValue: 60, secrets: 8, secretTitle: 60, secretText: 300, secretWhen: 120, meters: 10 });
+// The meters NPC State Delta has before any preset (a secret or a stage may name them without the entry listing them): its four
+// own and the ones its built-in presets (companion, rival, mentor) add.
+export const CAST_BUILT_IN_METERS = Object.freeze(['trust', 'affection', 'desire', 'tension', 'loyalty', 'respect', 'rivalry', 'approval']);
+// Portraits: image files beside pack.json, named by an entry's `portrait`, imported with the pack (portraits.js).
+export const PORTRAIT_LIMITS = Object.freeze({ bytes: 64 * 1024, perPack: 32, name: 64 });
+// A pack zip (Story Studio's export: pack.json and a portraits/ folder, zip.js and bundle.js): the archive itself, everything in it
+// unpacked, and the entries (folders count) it may hold.
+export const ZIP_LIMITS = Object.freeze({ archive: 5 * 1024 * 1024, unpacked: 4 * 1024 * 1024, entries: 40 });
+export const PORTRAIT_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,58}\.(?:webp|png|jpe?g)$/i;
+
 // Words NPC State Delta keeps for itself (a stage line, a reason): never a meter id.
 export const METER_RESERVED = Object.freeze(['stage', 'stages', 'disposition', 'name', 'meter', 'meters', 'reason', 'why', 'because', 'note', 'cause']);
 // A calendar for the story clock: { era, months: [{ name, days }], start: { year, month, day, hour, minute },

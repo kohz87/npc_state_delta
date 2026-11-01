@@ -13,6 +13,11 @@
 //           again: nothing is left half made. When the chat has no Combat rules block and/or no Foes block, Create also defines the missing
 //           ones from the stock templates (one more define each, after the character, so one swipe takes everything back); if they do not
 //           fit (the block limit, the reply's actions) or one is refused, the character stays and the dialog says which block was not added.
+//   Import  the Who step starts with "Start from a saved character … Import file…" (charfile.js): a good file fills the stats, the unspent points,
+//           the Soul Class and the skills with their ranks (the Stats and Skills steps show them and keep the usual rules; the ranks stay the
+//           file's), and never the name, You or a companion, or who they are. Undo import puts back what was there. Create then also adds, as more
+//           changes of the same reply, the things the file had (`inventory.add`, one for each, to the character's owner) and its money
+//           (`wallet.set`, the purse plus the file's); whatever cannot be added is named in the window and the character is still made.
 // The draft lives here, in the wizard's session (the dialog's own draft is not used); each step is a widget of this file drawing from
 // it, so Back and Next keep what was typed. Every node is built with createElement and textContent.
 
@@ -21,13 +26,17 @@ import { h, shell } from '../../view/widgets/dom.js';
 import { radar } from '../../view/widgets/radar.js';
 import { stepper } from '../../view/widgets/stepper.js';
 import { refusalText } from '../../strings.js';
+import { DEFAULT_CURRENCY } from '../../domains/money.js';
+import { FILE_LIMITS, moneyText, parseCharacterFile, skillLine, thingsWord } from '../charfile.js';
 import { CREATION, RANK_NAMES, SKILL_SLOTS, STATS, USES } from '../names.js';
 import { fold } from '../read.js';
 import { RPG_STRINGS, fill } from '../strings.js';
 import { readParty } from './party-data.js';
 import { joinDraft } from '../join.js';
-import { WIZARD_STEPS, actionsFree, blockNames, buildDefinitions, extraDefinitions, extraName, extrasPlan, hasRoom, mayStartAdept, newDraft, newSoul, pointsLeft, problemsOf, readDraft, setLine, skillSetsOf,
-    START_RANKS, statsLine, withSet, withSkill, withSkillPatch, withoutSkill } from './wizard-data.js';
+import { growthOf } from '../blocks.js';
+import { growthText } from './party-data.js';
+import { WIZARD_STEPS, actionsFree, blockNames, buildDefinitions, draftCreation, extraDefinitions, extraName, extrasPlan, hasRoom, mayStartAdept, newDraft, newSoul, pointsLeft, problemsOf, rankOf, readDraft, setLine, skillSetsOf,
+    START_RANKS, startStats, statBounds, statsLine, withImport, withoutImport, withSet, withSkill, withSkillPatch, withoutSkill } from './wizard-data.js';
 
 const W = RPG_STRINGS.wizard;
 // What the characters the wizard makes call their Soul Class (the Character template's own label and names).
@@ -65,17 +74,19 @@ const safe = (fn, fallback) => { try { return fn() ?? fallback; } catch { return
  * `open()` opens the dialog on a fresh draft; the session is dropped when the dialog closes. `prefill` is { name, about, soul, best }: a companion
  * the story brought in (join.js joinDraft); `onEnd(created)` is told once when the dialog closes, `created` true when Create made the character.
  */
-export function createWizard({ headState = () => null, readerName = () => '', readerAbout = () => '', roleOf, openDialog = null, replyKey = () => '' } = {}) {
+export function createWizard({ headState = () => null, readerName = () => '', readerAbout = () => '', roleOf, openDialog = null, replyKey = () => '', rules = () => null, packNote = () => '' } = {}) {
     let session = null;
     const world = () => worldOf(headState(), String(readerName() ?? '').replace(/\s+/g, ' ').trim(), roleOf, safe(replyKey, ''));
     // The persona's description as Who they are starts: one line, the first 240 characters (whole characters), '' when there is none.
     const personaAbout = () => [...String(safe(readerAbout, '') ?? '').replace(/\s+/g, ' ').trim()].slice(0, CREATION.about).join('');
     const fresh = (prefill = null) => {
         const now = world(), about = personaAbout();
-        const draft = prefill ? joinDraft(prefill) : { ...newDraft({ persona: now.persona, hasYou: now.hasYou }) };
+        // (`rules`: the numbers in force now; a Standard chat starts every stat low and has more to spend, joins use formula.js companionStats.)
+        const numbers = safe(rules, null);
+        const draft = prefill ? joinDraft(prefill, numbers) : { ...newDraft({ persona: now.persona, hasYou: now.hasYou, rules: numbers }) };
         // Only a You starts with the persona's description, and only into an empty box: a companion starts empty.
         if (!prefill && draft.kind === 'you' && about) draft.about = about;
-        return { draft, handle: null, busy: false, message: '', created: false, finished: '', about: prefill ? '' : about, onEnd: null };
+        return { draft, handle: null, busy: false, message: '', created: false, finished: '', about: prefill ? '' : about, onEnd: null, imported: null, importError: '', pendingSet: null };
     };
     const current = () => { session ??= fresh(); return session; };
 
@@ -165,7 +176,7 @@ export function createWizard({ headState = () => null, readerName = () => '', re
                     summary.appendChild(node);
                 };
                 part(W.statsHead, statsLine(now));
-                part(W.skillsHead, now.skills.filter(skill => skill.name).map(skill => skill.name).join(', ') || W.noSkills);
+                part(W.skillsHead, now.skills.filter(skill => skill.name).map(skill => (Number.isSafeInteger(skill.rank) ? skillLine({ name: skill.name, rank: skill.rank }) : skill.name)).join(', ') || W.noSkills);
                 const left = pointsLeft(now), count = now.skills.length;
                 const pill = h(doc, 'span', 'ss-pill rpg-wiz-push', step === 'who' || step === 'stats' ? fill(W.pointsLeft, { n: left })
                     : fill(count === 1 ? W.skillCountOne : W.skillCount, { n: count, max: SKILL_SLOTS }));
@@ -175,8 +186,80 @@ export function createWizard({ headState = () => null, readerName = () => '', re
 
             const clear = () => { for (const handle of handles) handle.destroy?.(); handles = []; steppers = []; radarHandle = null; body.replaceChildren(); };
 
+            // ---- Import (the Who step's first row) ----
+            const currency = () => safe(() => api?.query?.('inventory.currency'), null) ?? DEFAULT_CURRENCY;
+            const importedAdds = () => {
+                const file = current().imported?.file;
+                return { things: file?.items?.length ?? 0, money: file?.money > 0 ? file.money : 0 };
+            };
+            // "3 things to the party's bag", or "3 things carried by Ren" only when a party actor of that name will hold them.
+            const thingsPhrase = (n, draftNow) => (ownerFor(draftNow) === 'party' ? fill(W.reviewThingsBag, { things: thingsWord(n) }) : fill(W.reviewThings, { things: thingsWord(n), name: draftNow.name }));
+            async function importFile(file) {
+                const run = current();
+                if (!file) return;
+                let read;
+                if (file.size > FILE_LIMITS.bytes) read = { ok: false, message: RPG_STRINGS.file.tooBig };
+                else {
+                    let text = null;
+                    try { text = await file.text(); } catch { text = null; }
+                    read = text === null ? { ok: false, message: fill(RPG_STRINGS.file.unreadable, { name: String(file.name ?? '') }) } : parseCharacterFile(text);
+                }
+                // The window may have closed, or another run begun, while the file was read.
+                if (!alive || session !== run) return;
+                if (!read.ok) { run.importError = read.message; redraw(); return; }
+                const made = withImport(run.draft, read.file);
+                run.draft = made.draft;
+                run.imported = { file: read.file, fileName: String(file.name ?? ''), before: made.before };
+                run.importError = '';
+                redraw();
+            }
+            function undoImport() {
+                const run = current();
+                if (!run.imported) return;
+                run.draft = withoutImport(run.draft, run.imported.before);
+                run.imported = null;
+                run.importError = '';
+                redraw();
+            }
+            function drawImport() {
+                const run = current();
+                if (run.imported) {
+                    const { file, fileName } = run.imported;
+                    const box = h(doc, 'div', 'rpg-import-done');
+                    box.setAttribute('role', 'status');
+                    box.setAttribute('data-wiz', 'import-done');
+                    const points = file.points === 0 ? W.importNoPoints : fill(file.points === 1 ? W.importPointsOne : W.importPoints, { n: file.points });
+                    const skills = file.skills.length === 0 ? W.importNoSkills : fill(file.skills.length === 1 ? W.importSkillsOne : W.importSkills, { n: file.skills.length });
+                    const adds = importedAdds();
+                    const list = [adds.things ? thingsPhrase(adds.things, snap()) : '', adds.money ? fill(W.importMoney, { amount: moneyText(adds.money, currency()) }) : ''].filter(Boolean).join(' and ');
+                    box.appendChild(h(doc, 'span', 'rpg-import-text', [fill(W.importDone, { file: fileName, points, label: soulWords.label, soul: soulWords.word(file.soul), skills }),
+                        list ? fill(W.importAdds, { list }) : '', W.importName].filter(Boolean).join(' ')));
+                    button(box, W.importUndo, 'ss-button rpg-import-undo', undoImport);
+                    body.appendChild(box);
+                    return;
+                }
+                const row = h(doc, 'div', 'rpg-import');
+                row.setAttribute('data-wiz', 'import');
+                row.appendChild(h(doc, 'span', 'rpg-import-text', W.importText));
+                const input = h(doc, 'input', 'rpg-import-file');
+                input.setAttribute('type', 'file');
+                input.setAttribute('accept', '.json,application/json');
+                input.setAttribute('aria-label', W.importLabel);
+                input.hidden = true;
+                input.addEventListener('change', () => { const picked = input.files?.[0]; importFile(picked); });
+                button(row, W.importButton, 'ss-button rpg-import-pick', () => input.click());
+                row.append(input);
+                body.appendChild(row);
+                if (run.importError) {
+                    const problem = h(doc, 'p', 'rpg-import-error', run.importError);
+                    problem.setAttribute('role', 'alert');
+                    body.appendChild(problem);
+                }
+            }
+
             // ---- Who ----
             function drawWho() {
+                drawImport();
                 const now = world(), form = h(doc, 'div', 'rpg-wiz-form');
                 body.appendChild(form);
                 const name = field(form, W.name, input(draft().name, CREATION.name), h(doc, 'span', 'rpg-wiz-note', draft().kind === 'you' ? W.nameHint : W.nameHintOther));
@@ -221,15 +304,20 @@ export function createWizard({ headState = () => null, readerName = () => '', re
                 showPersona();
                 about.addEventListener('input', () => { put({ ...draft(), about: about.value }); count.textContent = fill(W.aboutCount, { n: [...about.value].length, max: CREATION.about }); showPersona(); });
                 form.appendChild(fromPersona);
-                form.appendChild(h(doc, 'p', 'rpg-wiz-note', draft().soul > 1 ? fill(W.whoNoteSoul, { label: soulWords.label, name: soulWords.word(snap().soul) }) : fill(W.whoNote, { label: soulWords.label, first: soulWords.word(1) })));
+                form.appendChild(h(doc, 'p', 'rpg-wiz-note', current().imported ? fill(W.whoNoteImported, { label: soulWords.label, name: soulWords.word(snap().soul ?? 1) })
+                    : draft().soul > 1 ? fill(W.whoNoteSoul, { label: soulWords.label, name: soulWords.word(snap().soul) }) : fill(W.whoNote, { label: soulWords.label, first: soulWords.word(1) })));
             }
 
             // ---- Stats ----
-            const axes = now => STATS.map(stat => ({ label: stat.toUpperCase(), value: now.stats[stat], max: 20, before: CREATION.start }));
+            const axes = now => STATS.map(stat => ({ label: stat.toUpperCase(), value: now.stats[stat], max: 20, before: now.from ? now.from.stats[stat] : draftCreation(now).start }));
+            // The Standard formula's one line of what the next points buy; Classic's bars do not grow with stats.
+            const growth = now => (draftCreation(now).standard ? growthText(growthOf(now.stats, { statMax: draftCreation(now).statMax })) : '');
+            let growthNode = null;
             function refreshStats() {
                 const now = snap(), left = pointsLeft(now);
-                STATS.forEach((stat, at) => steppers[at]?.update({ name: stat, value: now.stats[stat], min: CREATION.min, max: CREATION.max, budget: left, label: stat.toUpperCase(), budgetLabel: RPG_STRINGS.sheet.budgetLabel, showBudget: false }));
+                STATS.forEach((stat, at) => steppers[at]?.update({ name: stat, value: now.stats[stat], min: statBounds(now, stat)[0], max: statBounds(now, stat)[1], budget: left, label: stat.toUpperCase(), budgetLabel: RPG_STRINGS.sheet.budgetLabel, showBudget: false }));
                 radarHandle?.update({ axes: axes(now), max: 20, label: fill(W.radar, { name: now.name || W.title }), tone: 'accent' });
+                if (growthNode) growthNode.textContent = growth(now);
                 drawSummary();
             }
             function drawStats() {
@@ -244,7 +332,7 @@ export function createWizard({ headState = () => null, readerName = () => '', re
                     const slot = h(doc, 'div', 'rpg-stat-step');
                     slot.setAttribute('data-stat', stat);
                     grid.appendChild(slot);
-                    const handle = stepper.render(slot, { name: stat, value: now.stats[stat], min: CREATION.min, max: CREATION.max, budget: left, label: stat.toUpperCase(), showBudget: false },
+                    const handle = stepper.render(slot, { name: stat, value: now.stats[stat], min: statBounds(now, stat)[0], max: statBounds(now, stat)[1], budget: left, label: stat.toUpperCase(), showBudget: false },
                         { onDraft: (name, value) => { if (STATS.includes(name) && Number.isSafeInteger(value)) put({ ...draft(), stats: { ...snap().stats, [name]: value } }); refreshStats(); } });
                     handles.push(handle);
                     steppers.push(handle);
@@ -255,9 +343,16 @@ export function createWizard({ headState = () => null, readerName = () => '', re
                 sheet.appendChild(chart);
                 card.appendChild(sheet);
                 const actions = h(doc, 'div', 'rpg-actions rpg-wiz-stats-actions');
-                button(actions, W.statsReset, 'ss-button rpg-wiz-reset', () => { put({ ...draft(), stats: Object.fromEntries(STATS.map(stat => [stat, CREATION.start])) }); redraw(); });
-                actions.appendChild(h(doc, 'p', 'rpg-sheet-note', fill(W.statsNote, { ...CREATION, label: soulWords.label })));
+                button(actions, W.statsReset, 'ss-button rpg-wiz-reset', () => { put({ ...draft(), stats: startStats(snap()) }); redraw(); });
+                const creation = draftCreation(now), standard = creation.standard === true;
+                const words = { ...creation, label: soulWords.label };
+                actions.appendChild(h(doc, 'p', 'rpg-sheet-note', now.from ? fill(standard ? W.statsNoteImportStandard : W.statsNoteImport, { ...words, n: now.from.points }) : fill(standard ? W.statsNoteStandard : W.statsNote, words)));
+                const fromPack = standard ? safe(packNote, '') : '';
+                if (fromPack) actions.appendChild(h(doc, 'p', 'rpg-sheet-note rpg-wiz-pack', fill(RPG_STRINGS.settings.fromPack, { name: fromPack })));
                 card.appendChild(actions);
+                // Standard: Health, Stamina and Mana grow with VIT, AGI and INT, and luck with LUK; the line follows the steppers.
+                growthNode = standard ? h(doc, 'p', 'rpg-wiz-growth', growth(now)) : null;
+                if (growthNode) { growthNode.setAttribute('data-wiz', 'growth'); card.appendChild(growthNode); }
                 body.appendChild(card);
             }
 
@@ -267,13 +362,28 @@ export function createWizard({ headState = () => null, readerName = () => '', re
                     packSets: safe(() => api?.query?.('packs.content', { kind: 'rpg' }), []),
                     packNames: Object.fromEntries(safe(() => api?.query?.('packs.list'), []).map(pack => [pack.id, pack.name])),
                 });
+                const pending = current().pendingSet;
+                if (pending && !draft().skills.some(skill => Number.isSafeInteger(skill.rank))) current().pendingSet = null;
+                if (current().pendingSet) {
+                    const ask = h(doc, 'div', 'rpg-wiz-replace');
+                    ask.setAttribute('role', 'alert');
+                    ask.setAttribute('data-wiz', 'replace');
+                    ask.appendChild(h(doc, 'span', 'rpg-wiz-replace-text', W.replaceAsk));
+                    button(ask, W.replaceYes, 'ss-button ss-button-primary rpg-wiz-replace-yes', () => { const set = current().pendingSet; current().pendingSet = null; put(withSet(draft(), set)); drawSummary(); redraw(); });
+                    button(ask, W.replaceKeep, 'ss-button rpg-wiz-replace-keep', () => { current().pendingSet = null; redraw(); });
+                    body.appendChild(ask);
+                }
                 body.appendChild(h(doc, 'p', 'rpg-wiz-p', fill(W.skillsIntro, { max: SKILL_SLOTS })));
                 body.appendChild(h(doc, 'h3', 'rpg-wiz-h', W.templates));
                 const grid = h(doc, 'div', 'rpg-wiz-grid');
                 body.appendChild(grid);
                 for (const set of sets) {
                     const used = draft().set === set.id;
-                    const card = button(grid, '', 'rpg-wiz-card', () => { put(withSet(draft(), set)); drawSummary(); redraw(); });
+                    const card = button(grid, '', 'rpg-wiz-card', () => {
+                        // A template would replace skills that came from a file with their ranks: ask first.
+                        if (draft().skills.some(skill => Number.isSafeInteger(skill.rank))) { current().pendingSet = set; redraw(); return; }
+                        put(withSet(draft(), set)); drawSummary(); redraw();
+                    });
                     card.setAttribute('aria-pressed', String(used));
                     card.setAttribute('data-set', set.id);
                     const top = h(doc, 'span', 'rpg-wiz-card-top');
@@ -285,6 +395,7 @@ export function createWizard({ headState = () => null, readerName = () => '', re
                     card.appendChild(h(doc, 'span', 'rpg-wiz-card-src', set.source));
                 }
                 body.appendChild(h(doc, 'h3', 'rpg-wiz-h', W.yourSkills));
+                if (draft().skills.some(skill => Number.isSafeInteger(skill.rank))) body.appendChild(h(doc, 'p', 'rpg-wiz-note', W.importRanks));
                 const rows = h(doc, 'div', 'rpg-wiz-rows');
                 body.appendChild(rows);
                 const head = h(doc, 'div', 'rpg-wiz-row rpg-wiz-headrow');
@@ -300,12 +411,16 @@ export function createWizard({ headState = () => null, readerName = () => '', re
                     const about = input(skill.about, CREATION.skillAbout, fill(W.skillAbout, { name: label }));
                     about.className = 'rpg-wiz-input rpg-wiz-d';
                     about.setAttribute('data-field', 'about');
-                    const stat = select(STATS.map(key => ({ value: key, label: key.toUpperCase() })), skill.stat, fill(W.skillStat, { name: label }));
+                    const stat = select([...(skill.stat ? [] : [{ value: '', label: '—' }]), ...STATS.map(key => ({ value: key, label: key.toUpperCase() }))], skill.stat ?? '', fill(W.skillStat, { name: label }));
                     stat.setAttribute('data-field', 'stat');
                     const uses = select(USES.map(key => ({ value: key, label: W[key] })), skill.uses, fill(W.skillUses, { name: label }));
                     uses.setAttribute('data-field', 'uses');
-                    const start = select(START_RANKS.map(rank => ({ value: rank, label: RANK_NAMES[rank], disabled: rank === 1 && !mayStartAdept(draft(), at) })), skill.start, fill(W.skillStart, { name: label }));
+                    // A rank the file gave is shown and cannot be changed; a new skill starts at Novice or (for one) Adept.
+                    const ranked = Number.isSafeInteger(skill.rank);
+                    const start = ranked ? select(RANK_NAMES.map((name, rank) => ({ value: rank, label: name, disabled: true })), skill.rank, fill(W.skillStart, { name: label }))
+                        : select(START_RANKS.map(rank => ({ value: rank, label: RANK_NAMES[rank], disabled: rank === 1 && !mayStartAdept(draft(), at) })), skill.start, fill(W.skillStart, { name: label }));
                     start.setAttribute('data-field', 'start');
+                    if (ranked) start.disabled = true;
                     const patch = value => { put(withSkillPatch(draft(), at, value)); drawSummary(); };
                     name.addEventListener('input', () => patch({ name: name.value }));
                     about.addEventListener('input', () => patch({ about: about.value }));
@@ -322,7 +437,7 @@ export function createWizard({ headState = () => null, readerName = () => '', re
                 const add = h(doc, 'div', 'rpg-wiz-add');
                 const addButton = button(add, W.add, 'ss-button rpg-wiz-add-button', () => { put(withSkill(draft())); drawSummary(); redraw(); });
                 addButton.disabled = left <= 0;
-                add.appendChild(h(doc, 'p', 'rpg-wiz-note', `${left <= 0 ? W.slotsFull : left === 1 ? W.slotLeft : fill(W.slotsLeft, { n: left })} ${W.skillsNote}`));
+                add.appendChild(h(doc, 'p', 'rpg-wiz-note', `${left <= 0 ? W.slotsFull : left === 1 ? W.slotLeft : fill(W.slotsLeft, { n: left })} ${draftCreation(now).standard ? W.skillsNoteStandard : W.skillsNote}`));
                 body.appendChild(add);
             }
 
@@ -342,10 +457,11 @@ export function createWizard({ headState = () => null, readerName = () => '', re
                 list.appendChild(about);
                 list.appendChild(h(doc, 'p', 'rpg-wiz-p', `${W.statsHead}: ${statsLine(now)}`));
                 const skills = h(doc, 'ul', 'rpg-wiz-review-skills');
-                for (const skill of now.skills) skills.appendChild(h(doc, 'li', '', `${skill.name || '—'} · ${skill.stat.toUpperCase()} · ${W[skill.uses]} · ${W.startsAt} ${RANK_NAMES[skill.start]}`));
+                for (const skill of now.skills) skills.appendChild(h(doc, 'li', '', `${skill.name || '—'} · ${skill.stat ? skill.stat.toUpperCase() : '—'} · ${W[skill.uses]} · ${W.startsAt} ${RANK_NAMES[rankOf(skill)]}`));
                 if (!now.skills.length) skills.appendChild(h(doc, 'li', '', W.noSkills));
                 list.appendChild(skills);
-                list.appendChild(h(doc, 'p', 'rpg-wiz-note', now.soul > 1 ? fill(W.reviewStartSoul, { label: soulWords.label, name: soulWords.word(now.soul) }) : fill(W.reviewStart, { label: soulWords.label, first: soulWords.word(1) })));
+                list.appendChild(h(doc, 'p', 'rpg-wiz-note', current().imported ? fill(W.reviewStartImported, { label: soulWords.label, name: soulWords.word(now.soul ?? 1) })
+                    : now.soul > 1 ? fill(W.reviewStartSoul, { label: soulWords.label, name: soulWords.word(now.soul) }) : fill(W.reviewStart, { label: soulWords.label, first: soulWords.word(1) })));
                 const left = Math.max(0, pointsLeft(now));
                 if (left > 0) list.appendChild(h(doc, 'p', 'rpg-wiz-note', fill(left === 1 ? W.reviewLeftOne : W.reviewLeft, { n: left })));
                 list.appendChild(h(doc, 'p', 'rpg-wiz-note', fill(W.reviewBlocks, { character: names.character, skills: names.skills })));
@@ -354,6 +470,13 @@ export function createWizard({ headState = () => null, readerName = () => '', re
                     const also = h(doc, 'p', 'rpg-wiz-note', fill(W.reviewAlso, { list: add.map(extraName).join(', ') }));
                     also.setAttribute('data-review', 'also');
                     list.appendChild(also);
+                }
+                const adds = importedAdds();
+                if (adds.things || adds.money) {
+                    const parts = [adds.things ? thingsPhrase(adds.things, now) : '', adds.money ? fill(W.reviewMoney, { amount: moneyText(adds.money, currency()) }) : ''];
+                    const more = h(doc, 'p', 'rpg-wiz-note rpg-wiz-also-import', fill(W.reviewAlsoImport, { list: parts.filter(Boolean).join(' · ') }));
+                    more.setAttribute('data-review', 'import-also');
+                    list.appendChild(more);
                 }
                 if (skipped.length && where.room) {
                     const not = h(doc, 'p', 'rpg-wiz-note', fill(W.reviewNotAdded, { list: skipped.map(item => extraName(item.role)).join(', '), why: whyNot(skipped) }));
@@ -384,6 +507,31 @@ export function createWizard({ headState = () => null, readerName = () => '', re
                 const actions = h(doc, 'div', 'rpg-actions');
                 button(actions, W.finish, 'ss-button ss-button-primary rpg-wiz-done', () => { current().handle?.close?.(); });
                 body.append(box, actions);
+            }
+
+            // Who holds the things an imported character carries: the party's actor of that name when a party module lists one, else the party's bag
+            // (a You always carries in the bag).
+            function ownerFor(draftNow) {
+                if (draftNow.kind === 'you') return 'party';
+                const actors = safe(() => api?.query?.('party.actors'), []);
+                const found = (Array.isArray(actors) ? actors : []).find(actor => typeof actor?.id === 'string' && fold(actor.name) === fold(draftNow.name));
+                return found?.id ?? 'party';
+            }
+            // Adds what an imported file had besides the character: one `inventory.add` for each thing (the carry limit and the rest of the inventory's
+            // rules apply), then the purse raised by the file's money. → the things that could not be added, in plain words ([] when all were).
+            async function addImported(file, draftNow, call) {
+                const owner = ownerFor(draftNow), failed = [];
+                for (const item of file.items ?? []) {
+                    const added = await call('inventory.add', { name: item.name, qty: item.qty, owner, ...(item.note ? { note: item.note } : {}),
+                        ...(item.kind ? { kind: item.kind } : {}), ...(item.rarity ? { rarity: item.rarity } : {}) });
+                    if (!added.ok) failed.push(fill(W.notAdded, { what: `${item.name}${item.qty === 1 ? '' : ` ×${item.qty}`}`, why: refusalText(added, W.generic) }));
+                }
+                if (file.money > 0) {
+                    const purse = safe(() => api?.query?.('inventory.wallet', { owner: 'party' }), null)?.coin;
+                    const set = await call('wallet.set', { owner: 'party', amount: (Number.isSafeInteger(purse) ? purse : 0) + file.money });
+                    if (!set.ok) failed.push(fill(W.moneyNotAdded, { why: refusalText(set, W.generic) }));
+                }
+                return failed;
             }
 
             // Create: two defines, the Character first; if the second fails the first is taken back, so nothing is left half made.
@@ -418,16 +566,22 @@ export function createWizard({ headState = () => null, readerName = () => '', re
                 if (!failure) {
                     unadded = where.extras.skipped.map(item => ({ role: item.role, why: whyNot([item]) }));
                     const used = [...where.used, `pack.chat/${definitions.character.slug}`, `pack.chat/${definitions.skills.slug}`];
-                    for (const definition of extraDefinitions(where.extras.add, { used })) {
+                    for (const definition of extraDefinitions(where.extras.add, { used, formula: draftCreation(now).standard ? 'standard' : 'classic' })) {
                         const made = await call('dm.define', { definition });
                         if (!made.ok) unadded.push({ role: definition.role, why: refusalText(made, W.generic) });
                     }
                 }
+                // The things and the money an imported file had (best effort too: the character is made whatever happens here), as more changes of
+                // the same reply, so one swipe takes them back with the blocks.
+                let notThings = [];
+                if (!failure && run.imported) notThings = await addImported(run.imported.file, now, call);
                 run.busy = false;
                 run.message = failure;
-                if (!failure && unadded.length) {
+                if (!failure && (unadded.length || notThings.length)) {
                     run.created = true;
-                    run.finished = fill(W.madeButNot, { name: now.name, list: unadded.map(item => extraName(item.role)).join(', '), why: [...new Set(unadded.map(item => item.why))].join(' '), hint: W.extraHint });
+                    const blocks = unadded.length ? fill(W.madeButNot, { name: now.name, list: unadded.map(item => extraName(item.role)).join(', '), why: [...new Set(unadded.map(item => item.why))].join(' '), hint: W.extraHint }) : '';
+                    const things = notThings.length ? fill(blocks ? W.thingsNotAdded : W.madeButNotThings, { name: now.name, list: notThings.join('; ') }) : '';
+                    run.finished = [blocks, things].filter(Boolean).join(' ');
                     if (alive) redraw();
                     return { ok: true };
                 }

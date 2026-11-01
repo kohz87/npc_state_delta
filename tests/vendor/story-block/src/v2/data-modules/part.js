@@ -13,9 +13,11 @@ import { STRINGS, fill } from '../strings.js';
 import { blockTabScreen } from './block-screen.js';
 import { roleTail } from '../lean-rpg/tail.js';
 import { LEAN_RPG_FEATURE } from '../lean-rpg/names.js';
+import { barOf, sizeOf as barSizeOf, spreadWord, wordsOf } from '../lean-rpg/blocks.js';
 import { checkJoin, joinDefinitions, joinGrammar, joinMode, partyOf, readJoin, soulNaming } from '../lean-rpg/join.js';
 import { RPG_EXTRAS, extraDefinitions, extraName, extrasPlan } from '../lean-rpg/view/wizard-data.js';
 import { fold } from '../lean-rpg/read.js';
+import { isStandard, packRulesOf, rulesFromSettings } from '../lean-rpg/rules.js';
 import { CLASS_NAMES } from '../lean-rpg/names.js';
 import { RPG_STRINGS } from '../lean-rpg/strings.js';
 
@@ -224,14 +226,20 @@ export function dataModuleGuard(view, info) {
 
 const valueText = value => (typeof value === 'string' ? JSON.stringify(oneLine(value)) : String(value));
 // A number whose field has display names is shown (to a person and to the story) by its name; stored, it stays the number.
-const shownText = (schema, value) => dmNameOf(schema, value) ?? valueText(value);
+// The Standard formula's bars (a field with `blocks`) have no fixed names: their stage word depends on the bar's size, which `at` ({ fields, key }, the
+// block's fields as they were then) gives; without it the number shows, as for any number.
+const barText = (schema, value, at) => {
+    const size = barSizeOf(schema, at.fields, at.key);
+    return Number.isSafeInteger(value) ? spreadWord(wordsOf(barOf(schema)), Math.min(size, Math.max(0, value)), size) : valueText(value);
+};
+const shownText = (schema, value, at = null) => dmNameOf(schema, value) ?? (at && barOf(schema) ? barText(schema, value, at) : valueText(value));
 // A hidden field (`prompt: false`) is left out: the story is never told it.
 const fieldText = (definition, key, value) => (value !== null && typeof value === 'object'
     ? `${key}: ${Object.entries(value).map(([name, item]) => `${name} ${valueText(item)}`).join(', ')}` : `${key} ${shownText(definition.state[key], value)}`);
 const fieldsText = (definition, fields) => Object.entries(fields).filter(([key]) => !dmHidden(definition.state[key])).map(([key, value]) => fieldText(definition, key, value)).join('; ');
 // The named fields a root changed, for its summary: "Soul Class II → III". Empty for a block with no display names.
-const namedChanges = (definition, before, after) => Object.entries(definition.state).filter(([key, schema]) => schema.names && before[key] !== after[key])
-    .map(([key, schema]) => `${schema.label ?? key} ${shownText(schema, before[key])} → ${shownText(schema, after[key])}`);
+const namedChanges = (definition, before, after) => Object.entries(definition.state).filter(([key, schema]) => (schema.names || barOf(schema)) && before[key] !== after[key])
+    .map(([key, schema]) => `${schema.label ?? key} ${shownText(schema, before[key], { fields: before, key })} → ${shownText(schema, after[key], { fields: after, key })}`);
 
 // What a module may take of the prompt's tail: 100 tokens, 300 for a block with a `role` (the RPG's sheets carry text the story reads).
 // `rpg` is whether the RPG feature is on: a block with a role is the RPG's to write only then; with it off the block is told like any other.
@@ -486,10 +494,14 @@ export function createDataModulesPart({ packs, state: head = () => null, lifecyc
     function makeParty(ctx, request, soul, call, { added = false } = {}) {
         if (restore()?.state === 'pending') refuse('RESTORE_PENDING', '', E.restorePending);
         const prefix = stateOf(ctx), domain = prefix.domains.dataModules;
-        const made = joinDefinitions(request, { used: Object.keys(domain?.active ?? {}), soul });
+        // (the formula and numbers in force: the reader's settings, else what the story's pack asks for, as the roll planner reads them)
+        let pack = null;
+        try { pack = packRulesOf((packs?.packs?.() ?? []).flatMap(entry => entry?.content?.rpg ?? [])); } catch { pack = null; }
+        const rules = rulesFromSettings(settings(), pack);
+        const made = joinDefinitions(request, { used: Object.keys(domain?.active ?? {}), soul, rules });
         // The story's first character also brings the Combat rules and Foes blocks it lacks, as far as they fit (nothing is refused for them).
         const first = partyOf(prefix).length === 0, plan = first ? extrasPlan(prefix) : { add: [], skipped: [] };
-        const extras = extraDefinitions(plan.add, { used: [...Object.keys(domain?.active ?? {}), made.character.slug, made.skills.slug] });
+        const extras = extraDefinitions(plan.add, { used: [...Object.keys(domain?.active ?? {}), made.character.slug, made.skills.slug], formula: isStandard(rules) ? 'standard' : 'classic' });
         const catalog = Object.keys(domain?.active ?? {}).map(id => activeDefinition(prefix, id)).filter(Boolean);
         const checked = validateDataModules([made.character, made.skills, ...extras], { packId: 'chat', capabilities: ['data-modules-v1', 'story-director'], definitions: catalog });
         if (!checked.ok) refuse(checked.errors[0].code, checked.errors[0].path, checked.errors[0].message);
@@ -659,6 +671,7 @@ export function createDataModulesPart({ packs, state: head = () => null, lifecyc
         }
         const inputs = inputsOf(prefix, definition);
         const evaluation = createEvaluation(definition, instance, { inputs, source: ctx.source, cursor: ctx.cursor(), subject });
+        const fieldsBefore = copy(instance.fields);
         evaluation.effects(entries.map(entry => ({ op: 'set', path: entry.path, value: entry.value })));
         evaluation.rules();
         const result = evaluation.finish();
@@ -666,10 +679,11 @@ export function createDataModulesPart({ packs, state: head = () => null, lifecyc
             reads: result.reads.map(read => read.path), imports: prefixImports(definition), actor: subject !== 'chat',
             decision: { inputs, conds: result.conds } });
         const labelOf = entry => (entry.map ? `${entry.schema.label ?? entry.name} (${entry.key})` : entry.schema.label ?? entry.name);
-        const change = entry => `${labelOf(entry)} ${shownText(entry.field, entry.before)} → ${shownText(entry.field, entry.value)}`;
+        const was = entry => (entry.map ? null : { fields: fieldsBefore, key: entry.name }), now = entry => (entry.map ? null : { fields: instance.fields, key: entry.name });
+        const change = entry => `${labelOf(entry)} ${shownText(entry.field, entry.before, was(entry))} → ${shownText(entry.field, entry.value, now(entry))}`;
         const [only] = entries;
         const summary = multi ? fill(E.fieldsSet, { module: definition.name, changes: entries.map(change).join(', ') })
-            : fill(E.fieldSet, { module: definition.name, field: labelOf(only), from: shownText(only.field, only.before), to: shownText(only.field, only.value) });
+            : fill(E.fieldSet, { module: definition.name, field: labelOf(only), from: shownText(only.field, only.before, was(only)), to: shownText(only.field, only.value, now(only)) });
         const rules = result.fired.length ? { rules: result.fired } : {};
         const answer = finish(ctx, prefix, draft, recorded, { visits: result.visits, notes: result.notes, summary,
             result: multi ? { fields: Object.fromEntries(entries.map(entry => [entry.name, { from: entry.before, to: entry.value }])), subject, ...rules }
