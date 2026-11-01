@@ -718,7 +718,17 @@ export function createStorySuiteV2Adapter({
             return null;
         }
     }
-    // The same, cleaned (src/key-people.js normalizeKeyPeople).
+    // Story Director's calendar (`director.calendar`: { era, months, leapYears }), or null when it has none to give; Story Director's
+    // key people carry their dates as story minutes, which index.js writes on it (calendar.js storyMinuteText).
+    function directorCalendar() {
+        try {
+            const config = hosted && typeof sdkRef?.query === 'function' ? sdkRef.query('director.calendar', {}) : null;
+            return config && typeof config === 'object' && Array.isArray(config.months) ? config : null;
+        } catch {
+            return null;
+        }
+    }
+    // The key people, cleaned (src/key-people.js normalizeKeyPeople); the dates are left to the caller (they are not needed for names).
     function keyPeople() {
         const answer = keyPeopleAnswer();
         return answer ? normalizeKeyPeople(answer) : null;
@@ -1685,8 +1695,10 @@ export function createStorySuiteV2Adapter({
         sliceView,
         /** While hosted: Story Director's key people (`director.keyPeople`) as it answers, or null when it cannot. */
         keyPeopleAnswer,
-        /** The same, cleaned (normalizeKeyPeople). */
+        /** The same, cleaned (normalizeKeyPeople), without dates written. */
         keyPeople,
+        /** While hosted: Story Director's calendar (`director.calendar`), or null. */
+        directorCalendar,
         /** While hosted: the "Scan after every reply" switch (index.js asks before each automatic scan). */
         scanEveryReply: () => part.featureOn(FEATURE_SCAN_EVERY_REPLY) !== false,
         /**

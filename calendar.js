@@ -232,6 +232,22 @@ function storyClockParts(minutes, calendar) {
     return Number.isSafeInteger(year) && Math.abs(year) <= 999999 ? { year, monthIndex: month, day: rest + 1 } : null;
 }
 
+const GREGORIAN_MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+/**
+ * A story minute as the dossier writes a date: "Goldwane 18" (month and day, no year, no clock) on `calendar`
+ * (`{ months: [{ name, days }], leapYears }`, Story Director's `director.calendar`), Gregorian when it is not given
+ * ('' for anything that is not a story minute). Story Director's key people carry their dates as minutes.
+ */
+export function storyMinuteText(minutes, calendar = null) {
+    const shared = calendar && Array.isArray(calendar.months) && calendar.months.length
+        ? calendar
+        : { months: GREGORIAN_MONTH_NAMES.map((name, at) => ({ name, days: GREGORIAN_DAYS[at] })), leapYears: true };
+    const parts = storyClockParts(minutes, shared);
+    const name = parts ? String(shared.months[parts.monthIndex]?.name ?? '').trim() : '';
+    return name ? `${name} ${parts.day}` : '';
+}
+
 /**
  * The date Story Director's clock (`{ minutes, calendar }`) is on Delta's calendar `config`, or null when
  * Delta cannot write it there. Delta keeps its own calendar (its prompts' birthday shape and era are

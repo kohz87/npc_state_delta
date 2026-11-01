@@ -59,8 +59,10 @@ comment). Without Story Director, or with one that lacks the query, `adapter.key
 exists: Delta alone has no key people, and its saved state and prompts are byte-identical.
 
 - **Query:** `director.keyPeople` → `[{ name, aliases?, here, away: { doing, since, back, steps: [{ date, text }] } | null,
-  removed?: { reason, on } }]`. `normalizeKeyPeople` cleans it (text and sizes bounded, at most 50 people); a `removed`
-  entry is no longer a key person (no badge, no section, no hold).
+  removed?: { reason, on } }]`. `since`, `back` and a step's `date` are story minutes (null when unknown): index.js writes them
+  as "Goldwane 18" on Story Director's `director.calendar` (`calendar.js` `storyMinuteText`, Gregorian without one); words
+  are kept as given. `normalizeKeyPeople` cleans it (text and sizes bounded, at most 50 people); a `removed` entry is no
+  longer a key person (no badge, no section, no hold).
 - **Dossier** (`dossier-ui.js` `keyProjection`, `keyAwayHtml`): "★ Key person" badge in the hero and the document head, and a
   "While away" section (dates, the steps) while the person is away and, after the return, until they have been present for
   `RECENT_REPLIES` (3) replies. The library list (`delta-cast-card`) and Story Block's dossier rows (`row.key`) carry a ★.

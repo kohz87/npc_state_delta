@@ -6,6 +6,7 @@ import { createHost } from './vendor/story-block/testkit/index.js';
 import { buildInjection, createNpcRecord, mergeScanResult } from '../core.js';
 import { keyAwayHtml, keyProjection, projectDossierState } from '../dossier-ui.js';
 import { dossierRowNodes } from '../story-block-tabs.js';
+import { storyMinuteText } from '../calendar.js';
 import { FEATURE_DRIFT, FEATURE_STAGES, KEY_PEOPLE_QUERY } from '../src/npc-meters.js';
 import { MODULE_ID, createStorySuiteV2Adapter } from '../src/storysuite-v2.js';
 import {
@@ -39,7 +40,7 @@ test('the answer is cleaned: names, aliases, dates and steps are text of a bound
     ]);
     assert.deepEqual(list.map(entry => entry.name), ['Ren', 'Odda', 'Mara'], 'a repeated name and junk rows are dropped');
     assert.deepEqual(list[0].aliases, ['The Scout', '5']);
-    assert.deepEqual(list[0].away, { doing: 'scouting', since: 'Gw 12', back: '12', steps: [{ date: 'Gw 14', text: 'reached Wolfmere' }] });
+    assert.deepEqual(list[0].away, { doing: 'scouting', since: 'Gw 12', back: '', steps: [{ date: 'Gw 14', text: 'reached Wolfmere' }] });
     assert.equal(list[1].away, null);
     assert.equal(list[2].away, null, 'a removed person is not away');
     assert.deepEqual(list[2].removed, { reason: 'died', on: 'Gw 18' });
@@ -51,6 +52,28 @@ test('the answer is cleaned: names, aliases, dates and steps are text of a bound
     assert.equal(long.away.steps.length, 12);
     assert.equal(long.away.steps.at(-1).text, 'step 29', 'the newest steps are kept');
     assert.equal(normalizeKeyPeople(Array.from({ length: 80 }, (_, i) => ({ name: `P${i}` }))).length, 50);
+});
+
+test('Story Director sends story minutes: they are written as dates on its calendar; no calendar means no text, words are kept', () => {
+    const DAY = 1440;
+    const calendar = { era: 'CY', months: [{ name: 'Goldwane', days: 30 }, { name: 'Bluewatch', days: 30 }], leapYears: false };
+    const text = minutes => storyMinuteText(minutes, calendar);
+    assert.equal(text(11 * DAY), 'Goldwane 12');
+    assert.equal(text(30 * DAY + 3 * DAY + 600), 'Bluewatch 4', 'the clock time is dropped; the month rolls over');
+    assert.equal(text(null), '');
+    assert.equal(text(1.5), '');
+    assert.equal(storyMinuteText(0), 'January 1', 'no calendar: Gregorian, as Story Director falls back');
+    assert.equal(storyMinuteText(60 * DAY, { months: [] }), 'March 1', 'year 0 is a leap year');
+    assert.equal(storyMinuteText(5, { months: [{ name: '', days: 30 }] }), '');
+
+    const away = { doing: 'scouting', since: 11 * DAY, back: 17 * DAY, steps: [{ date: 13 * DAY, text: 'reached Wolfmere' }, { date: null, text: 'a step with no date' }] };
+    const [ren] = normalizeKeyPeople([{ name: 'Ren', here: false, away }], text);
+    assert.deepEqual(ren.away, { doing: 'scouting', since: 'Goldwane 12', back: 'Goldwane 18', steps: [{ date: 'Goldwane 14', text: 'reached Wolfmere' }, { date: '', text: 'a step with no date' }] });
+    assert.equal(returnNote(ren.away), 'WHILE AWAY, NOW BACK (Goldwane 12 – Goldwane 18): scouting; Goldwane 14: reached Wolfmere; a step with no date');
+    const [bare] = normalizeKeyPeople([{ name: 'Ren', away }]);
+    assert.deepEqual([bare.away.since, bare.away.back, bare.away.steps[0].date], ['', '', ''], 'no way to write a minute: no text, never a bare number');
+    assert.equal(normalizeKeyPeople([{ name: 'Mara', removed: { reason: 'died', on: 18 * DAY } }], text)[0].removed.on, 'Goldwane 19');
+    assert.equal(normalizeKeyPeople([{ name: 'Ren', away: { doing: 'x', since: 'Gw 12', back: null } }])[0].away.since, 'Gw 12', 'a date already in words is kept');
 });
 
 test('a dossier is matched to a key person by name or alias, either side, any case', () => {
@@ -398,7 +421,8 @@ test('runtime: the Key tag on the card, the badge data, the summary once at the 
         await turn('Yunyun waves from the gate.');
         await sleep(200);
         const yunyun = () => api.getState().npcs.find(npc => npc.name === 'Yunyun');
-        const away = { doing: 'scouting the north road', since: 'Gw 12', back: 'Gw 18', steps: [{ date: 'Gw 14', text: 'reached Wolfmere Outpost' }] };
+        // Story Director's dates are story minutes (Goldwane 12 is day 11 of a 30-day month).
+        const away = { doing: 'scouting the north road', since: 11 * 1440, back: 17 * 1440, steps: [{ date: 13 * 1440, text: 'reached Wolfmere Outpost' }] };
         const out = {};
 
         out.cardPlain = api.presentCastHtml();
@@ -447,7 +471,9 @@ test('runtime: the Key tag on the card, the badge data, the summary once at the 
             registered: [], keys: [],
             registerModule(def) { sdk.registered.push(def); },
             command: async () => ({ ok: true, receipt: { summary: '' } }),
-            query: name => (name === 'director.keyPeople' ? structuredClone(sdk.keys) : (name === 'scene.present' ? ['Yunyun'] : null)),
+            query: name => (name === 'director.keyPeople' ? structuredClone(sdk.keys)
+                : (name === 'director.calendar' ? { era: 'CY', months: [{ name: 'Goldwane', days: 30 }, { name: 'Bluewatch', days: 30 }], leapYears: false }
+                    : (name === 'scene.present' ? ['Yunyun'] : null))),
             settings: () => ({}),
         };
         mockState.sdk = sdk;
@@ -459,11 +485,12 @@ test('runtime: the Key tag on the card, the badge data, the summary once at the 
     assert.match(hosted.cardKey, /<span class="npc-state-delta-key-tag" title="Key person \(Story Director\)">★ Key<\/span>/);
     assert.equal(hosted.viewsKey.npc_yunyun === undefined ? Object.values(hosted.viewsKey)[0].name : hosted.viewsKey.npc_yunyun.name, 'Yunyun');
     assert.equal(Object.values(hosted.viewsAway)[0].away.doing, 'scouting the north road');
+    assert.deepEqual([Object.values(hosted.viewsAway)[0].away.since, Object.values(hosted.viewsAway)[0].away.back], ['Goldwane 12', 'Goldwane 18'], 'the dates are written on the calendar, not shown as minutes');
     assert.match(hosted.backgroundHere, /docks of Axel/, 'the same scan writes her background when she is here');
     assert.equal(hosted.backgroundAway, hosted.backgroundHere, 'and does not while she is away');
     assert.match(hosted.backgroundBack, /mountains of Vale/, 'scans resume when she is present again');
     assert.doesNotMatch(hosted.injectionAway, /WHILE AWAY/, 'nothing about the absence is sent while she is away');
-    assert.match(hosted.injectionBack, /Yunyun: IDENTITY[^\n]*; WHILE AWAY, NOW BACK \(Gw 12 – Gw 18\): scouting the north road; Gw 14: reached Wolfmere Outpost/);
+    assert.match(hosted.injectionBack, /Yunyun: IDENTITY[^\n]*; WHILE AWAY, NOW BACK \(Goldwane 12 – Goldwane 18\): scouting the north road; Goldwane 14: reached Wolfmere Outpost/);
     assert.equal(hosted.injectionBack.split('WHILE AWAY').length - 1, 1, 'once');
     assert.equal(hosted.injectionNext, hosted.injectionBack, 'the generation that follows is told too (a swipe of it repeats it)');
     assert.equal(Object.values(hosted.viewsBack)[0].recent.away.doing, 'scouting the north road', 'the dossier still shows the absence');

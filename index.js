@@ -119,6 +119,7 @@ import {
     normalizeCustomFields,
     setExternalCalendarSource,
     setStoryClockSource,
+    storyMinuteText,
     currentPresentationText,
 } from './core.js';
 import { applyNpcBirthdayUpdate, normalizeBirthDate } from './birthday.js';
@@ -920,7 +921,9 @@ function keyPeopleList() {
     if (!adapter) return null;
     try {
         const answer = adapter.keyPeopleAnswer?.();
-        return Array.isArray(answer) ? normalizeKeyPeople(answer) : null;
+        if (!Array.isArray(answer)) return null;
+        const calendar = adapter.directorCalendar?.() ?? null;
+        return normalizeKeyPeople(answer, minutes => storyMinuteText(minutes, calendar));
     } catch {
         return null;
     }

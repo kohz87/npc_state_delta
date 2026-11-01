@@ -6,7 +6,8 @@
 //
 // The query: `director.keyPeople` → [{ name, aliases?, here: bool, away: { doing, since, back, steps: [{ date,
 // text }] } | null, removed?: { reason, on } }]. A `removed` entry is no longer a key person (archived, dead or
-// unpinned): it gets no badge, no section and no hold.
+// unpinned): it gets no badge, no section and no hold. `since`, `back` and a step's `date` are story minutes (null when not
+// known); the adapter's `storyMinuteText` writes them as "Goldwane 18" on Story Director's calendar.
 //
 // The answer says only who is away NOW. After the return it is null again, so Delta keeps a small memory of the
 // last absence (`state.keyAway`, by dossier id) to show "While away" until the person has been present for a few
@@ -36,22 +37,34 @@ export function labelKey(value) {
     return String(value ?? '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
 
-function normalizeAway(raw) {
+// A date as text: Story Director sends story minutes (null when not known), which `dateText` writes on the chat's
+// calendar ('' without one); a date already given as words is kept.
+const dateOf = (value, dateText) => {
+    if (Number.isSafeInteger(value)) {
+        let text = '';
+        try { text = typeof dateText === 'function' ? clip(dateText(value), DATE_MAX) : ''; } catch { text = ''; }
+        return text;
+    }
+    return typeof value === 'string' ? clip(value, DATE_MAX) : '';
+};
+
+function normalizeAway(raw, dateText) {
     if (!isObject(raw)) return null;
     const steps = (Array.isArray(raw.steps) ? raw.steps : [])
         .filter(isObject)
-        .map(step => ({ date: clip(step.date, DATE_MAX), text: clip(step.text, TEXT_MAX) }))
+        .map(step => ({ date: dateOf(step.date, dateText), text: clip(step.text, TEXT_MAX) }))
         .filter(step => step.text)
         .slice(-STEPS_MAX);
-    return { doing: clip(raw.doing, TEXT_MAX), since: clip(raw.since, DATE_MAX), back: clip(raw.back, DATE_MAX), steps };
+    return { doing: clip(raw.doing, TEXT_MAX), since: dateOf(raw.since, dateText), back: dateOf(raw.back, dateText), steps };
 }
 
 /**
  * Story Director's answer as a clean list: [{ name, aliases, here, away: { doing, since, back, steps } | null,
- * removed: { reason, on } | null }], texts cut and cleaned, at most 50 people. A removed person never has an
- * away record here. Anything that is not an array gives [] (use `keyPeopleOrNull` to tell "no answer").
+ * removed: { reason, on } | null }], texts cut and cleaned, at most 50 people. Its dates are story minutes: `dateText`
+ * (minutes → "Goldwane 18") writes them; without it a minute has no text. A removed person never has an away record
+ * here. Anything that is not an array gives [] (the adapter tells "no answer" apart: null).
  */
-export function normalizeKeyPeople(answer) {
+export function normalizeKeyPeople(answer, dateText = null) {
     if (!Array.isArray(answer)) return [];
     const out = [];
     const seen = new Set();
@@ -61,12 +74,12 @@ export function normalizeKeyPeople(answer) {
         const key = labelKey(name);
         if (!key || seen.has(key)) continue;
         seen.add(key);
-        const removed = isObject(raw.removed) ? { reason: clip(raw.removed.reason, NAME_MAX), on: clip(raw.removed.on, DATE_MAX) } : null;
+        const removed = isObject(raw.removed) ? { reason: clip(raw.removed.reason, NAME_MAX), on: dateOf(raw.removed.on, dateText) } : null;
         out.push(Object.freeze({
             name,
             aliases: (Array.isArray(raw.aliases) ? raw.aliases : []).map(alias => clip(alias, NAME_MAX)).filter(Boolean).slice(0, ALIASES_MAX),
             here: raw.here === true,
-            away: removed ? null : normalizeAway(raw.away),
+            away: removed ? null : normalizeAway(raw.away, dateText),
             removed,
         }));
     }
