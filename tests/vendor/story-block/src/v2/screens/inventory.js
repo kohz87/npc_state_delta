@@ -221,6 +221,7 @@ export const inventoryScreen = Object.freeze({
     id: INVENTORY_SCREEN_ID,
     title: S.title,
     icon: 'fa-box-open',
+    bar: true,
     mounts: Object.freeze(['tab', 'screen']),
     data: Object.freeze({
         items: Object.freeze({ query: 'inventory.items' }),

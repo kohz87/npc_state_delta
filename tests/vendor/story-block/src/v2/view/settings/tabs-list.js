@@ -4,6 +4,8 @@
 // reset(), isDefault(); ui-host.js keeps the choice in extension_settings.storySuite.tabs), so the Story panel's tab strip and the
 // game view's navigation follow at once.
 //
+// * Each row also says where the tab sits: "In the bar" or "Under More" (the game view's and the Story panel's bar; `setInBar(id, inBar)`).
+//   Home is always in the bar (its choice is locked).
 // * Home is always first and always shown. Hiding is refused with a message when it would leave no tab shown (Home counts, so the
 //   refusal can only be another tab's; Home's own switch is locked: drawn on and disabled, with "Always shown" beside it).
 // * A change redraws this list only; the focus stays on the same control of the same row, or its neighbour when that one is now
@@ -13,7 +15,7 @@
 
 import { TABS_FOLD, TABS_TEXT } from '../../host-ui.js';
 import { fill } from '../../strings.js';
-import { newId, sectionBlock, switchField } from '../form/fields.js';
+import { newId, sectionBlock, selectField, switchField } from '../form/fields.js';
 import { revealIn, showAndFocus } from '../scroll.js';
 import { iconNode } from '../widgets/dom.js';
 import { iconFor } from '../icons/index.js';
@@ -136,12 +138,26 @@ export function renderTabsCard(parent, { doc, tabs, onChange = null }) {
             toggle.el.title = row.fixed ? T.homeTitle : fill(T.shownTitle, { name: row.title });
             if (lockId) toggle.el.setAttribute('aria-describedby', lockId);
             toggle.el.classList.add('ss-tabrow-shown');
+            // Where it sits: in the bar or under More. Home's is locked on "In the bar".
+            const place = selectField({
+                doc, field: { type: 'choice', options: [{ value: 'bar', label: T.inBar }, { value: 'more', label: T.underMore }] }, value: row.inBar === false ? 'more' : 'bar',
+                ariaLabel: fill(T.placeTitle, { name: row.title }), disabled: false, readOnly: row.fixed,
+                onChange: value => {
+                    tabs.setInBar?.(row.id, value === 'bar');
+                    say(value === 'bar' ? T.movedToBar : T.movedToMore, row.title);
+                    onChange?.();
+                    draw();
+                    rowNode(row.id)?.querySelector('.ss-tabrow-place')?.focus?.({ preventScroll: true });
+                },
+            });
+            place.el.classList.add('ss-tabrow-place');
+            place.el.title = row.fixed ? T.homeTitle : fill(T.placeTitle, { name: row.title });
             // A tab shown only while active has no switch: its note says when it shows (the screen's own, or the default).
             if (row.activeNote) {
                 const note = h(doc, 'small', 'ss-tabrow-note', row.activeNote);
-                item.append(glyph, name, up, down, note);
+                item.append(glyph, name, up, down, place.el, note);
             } else {
-                item.append(glyph, name, up, down, toggle.el);
+                item.append(glyph, name, up, down, place.el, toggle.el);
             }
             list.appendChild(item);
         });

@@ -222,7 +222,7 @@ function setup({ hostValue, delta = fakeDelta(), loadEmptyCast, calendarOwn } = 
     const adapter = createStorySuiteV2Adapter({
         suiteApi: delta.suiteApi,
         delta: () => delta.api,
-        version: '1.3.0',
+        version: '1.4.0',
         host: () => box.host,
         doc,
         timers,
@@ -279,7 +279,7 @@ test('registers module npc-state-delta once, with the npc domain, its queries an
     assert.equal(sdk.registered.length, 1);
     assert.equal(def.id, MODULE_ID);
     assert.equal(def.name, 'NPC State Delta');
-    assert.equal(def.version, '1.3.0');
+    assert.equal(def.version, '1.4.0');
     assert.deepEqual(Object.keys(def.domains), ['npc'], 'one small domain: the NPC meters (F81, F90)');
     assert.deepEqual(Object.keys(def.queries).sort(), ['npc.cast', 'npc.dossier', 'npc.identity', 'npc.known', 'npc.meters', 'npc.next', 'npc.portrait', 'npc.present', 'npc.socialModifier']);
     assert.deepEqual([...QUERY_NAMES].sort(), Object.keys(def.queries).sort());

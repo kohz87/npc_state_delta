@@ -1,10 +1,13 @@
 // ss.hero (view/glass.css): the hero card, a character's one-glance sheet. A portrait (the persona avatar for
 // the PC, the character card's image, or an NPC's from a query such as Delta's `npc.portrait`; the initial
 // when there is none), the name, a level badge on the portrait (a star and the number), the class · title line, bars for HP, MP and SP and one for experience under the
-// Terms' own word ("Soul growth"), a place / time / weather corner, and a row of status badges. `compact`
+// Terms' own word ("Soul growth"), a time / place / weather corner, and a row of status badges. `compact`
 // is the one-row variant for the strip under a reply. With `you` (the game view's header while `story-block.you` is
 // on), a Rank, a Wearing and a Condition row under the place line, each with a pencil (an `ss.editable` that runs the `command`
 // it names through the widget api); without `you` the card draws no such row. With `travel` (Story Director's trip line) a Travel row follows them.
+// With `where` (the game view's header) the corner is the scene's one place: the place and the weather get a pencil each, and a "Here: names" item
+// (the people present) follows the weather with its own; the pencils run `scene.place`, `scene.weather` and `scene.present` through the widget api,
+// as Home's Where card once did. Without `where` the corner is read-only and has no Here item.
 //
 // The bars are ss.bar and the badges ss.status (glass.js), so each speaks as it does there. The picture is
 // taken only from a safe URL (https, a base64 raster image or a same-origin path, widgets/dom.js); a
@@ -40,12 +43,18 @@ const heroProps = {
     time: { type: 'string', default: '' },
     weather: { type: 'string', default: '' },
     statuses: { type: 'array', default: Object.freeze([]) }, // [{ id, label, icon, left, unit, tone }]
+    where: { type: 'object', default: null },          // { present: [names], places: [place names or { name }], weatherOn: bool (the feature is on), place, weatherText (the whole words the pencils start from) }: the corner's pencils and its Here item
     you: { type: 'object', default: null },             // { rank?, rankLabel?, wearing, condition, command }: the rows under the place line, each with a pencil
     travel: { type: 'string', default: '' },            // the trip's line (Story Director's `atlas.trip` row): a Travel row under the `you` rows
     compact: { type: 'boolean', default: false },
 };
 
 const short = (value, max) => cutAt(str(value).replace(/\s+/g, ' ').trim(), max);
+
+// The corner's items in the order drawn: [kind, icon].
+const CORNER = Object.freeze([['time', 'fa-clock'], ['place', 'fa-location-dot'], ['weather', 'fa-cloud-sun'], ['here', 'fa-user-group']]);
+const HERE_MAX = 120;
+const namesOf = list => (Array.isArray(list) ? list : []).map(item => short(typeof item === 'string' ? item : item?.name, 80)).filter(Boolean).slice(0, 12);
 
 /** The line under the name: `line`, else "Class · Title" from the parts that are given (the level is the portrait's badge). */
 export function heroLine(p) {
@@ -147,6 +156,31 @@ function renderHero(el, input, api) {
         badge.append(...(star ? [star] : []), levelNumber, levelSaid);
         const corner = h(doc, 'ul', 'ss-hero-corner');
         const statuses = h(doc, 'div', 'ss-hero-statuses');
+        // The corner's items, made when first asked for and kept: a redraw only changes their words, so a pencil's open edit stays open.
+        const cornerItems = new Map();
+        let cornerShown = '';
+        function cornerItem(kind, icon) {
+            let entry = cornerItems.get(kind);
+            if (entry) return entry;
+            const item = h(doc, 'li', 'ss-hero-corner-item');
+            item.setAttribute('data-kind', kind);
+            const glyph = iconNode(doc, icon, 'ss-hero-corner-icon');
+            if (glyph) item.appendChild(glyph);
+            const words = h(doc, 'span', 'ss-hero-corner-text');
+            item.appendChild(words);
+            entry = { item, words, pencil: null, handle: null };
+            cornerItems.set(kind, entry);
+            return entry;
+        }
+        // The pencil of a corner item (place, weather, here): made once, then only updated.
+        function cornerPencil(entry, props) {
+            if (!entry.pencil) {
+                entry.pencil = h(doc, 'span', 'ss-hero-corner-pencil');
+                entry.item.appendChild(entry.pencil);
+            }
+            if (entry.handle) entry.handle.update(props);
+            else entry.handle = editable.render(entry.pencil, props, api);
+        }
         // The Rank, Wearing and Condition rows (`you`): made when first asked for, so a card without them has no trace of them. Each
         // pencil is made once and only updated, so a redraw never closes an edit that is open.
         let youRow = null;
@@ -205,7 +239,10 @@ function renderHero(el, input, api) {
             travelRow.hidden = false;
             travelText.textContent = said;
         }
-        cleanup(() => { for (const entry of youParts) entry.handle?.destroy(); });
+        cleanup(() => {
+            for (const entry of youParts) entry.handle?.destroy();
+            for (const entry of cornerItems.values()) entry.handle?.destroy();
+        });
         // the text block: the name, the class line, the place and weather, the statuses: one stacked group, which the portrait is
         // centred against (grid areas "portrait text", glass.css)
         const text = h(doc, 'div', 'ss-hero-text');
@@ -240,6 +277,47 @@ function renderHero(el, input, api) {
             if (src) broken.add(src);
             showPicture();
         });
+        // The corner: time, place, weather and (with `where`) Here. With `where` the place, the weather and Here carry a pencil, and an empty one still
+        // shows (with a dash or the place's own empty word), so there is always a pencil to set it; the weather is left out when its feature is off.
+        function drawCorner() {
+            const where = p.where && typeof p.where === 'object' ? p.where : null;
+            const present = namesOf(where?.present);
+            const S = STRINGS.scene;
+            const shown = [];
+            for (const [kind, icon] of CORNER) {
+                let said = '';
+                if (kind === 'time') said = short(p.time, 40);
+                else if (kind === 'place') said = short(p.place, 40);
+                else if (kind === 'weather') said = where && where.weatherOn === false ? '' : short(p.weather, 40);
+                else if (where) said = present.join(', ');
+                const editing = where !== null && kind !== 'time' && !(kind === 'weather' && where.weatherOn === false);
+                const empty = !said;
+                if (empty && !editing) continue;
+                const entry = cornerItem(kind, icon);
+                const text = kind === 'here' ? `${STRINGS.home.here} ${said ? short(said, HERE_MAX) : '\u2014'}` : said || (kind === 'place' ? S.unnamed : '\u2014');
+                entry.words.textContent = text;
+                entry.item.classList.toggle('ss-hero-corner-empty', empty);
+                if (editing) {
+                    const common = { displayValue: false, label: kind === 'place' ? S.editPlace : kind === 'weather' ? S.editWeather : S.editPresent };
+                    if (kind === 'place') cornerPencil(entry, { ...common, value: short(where.place, 80) || said, options: Array.isArray(where.places) ? where.places : [], maxLength: 80, command: 'scene.place', valueKey: 'name', payload: { with: present } });
+                    else if (kind === 'weather') cornerPencil(entry, { ...common, value: short(where.weatherText, 60) || said, maxLength: 60, command: 'scene.weather', valueKey: 'text' });
+                    else cornerPencil(entry, { ...common, value: present, kind: 'list', maxLength: 80, command: 'scene.present', valueKey: 'set' });
+                } else if (entry.pencil) {
+                    entry.handle?.destroy();
+                    entry.handle = null;
+                    entry.pencil.remove();
+                    entry.pencil = null;
+                }
+                shown.push(kind);
+            }
+            // The items are put in order only when the set that shows changes: re-inserting one would close a pencil's open edit.
+            const key = shown.join(',');
+            if (key !== cornerShown) {
+                corner.replaceChildren(...shown.map(kind => cornerItems.get(kind).item));
+                cornerShown = key;
+            }
+            corner.hidden = !shown.length;
+        }
         function clear() {
             for (const handle of handles) handle.destroy();
             handles = [];
@@ -265,18 +343,7 @@ function renderHero(el, input, api) {
             levelNumber.textContent = level.number;
             levelSaid.textContent = level.label;
             badge.hidden = !level.number;
-            corner.replaceChildren();
-            for (const [kind, icon, text] of [['time', 'fa-clock', p.time], ['place', 'fa-location-dot', p.place], ['weather', 'fa-cloud-sun', p.weather]]) {
-                const said = short(text, 40);
-                if (!said) continue;
-                const item = h(doc, 'li', 'ss-hero-corner-item');
-                item.setAttribute('data-kind', kind);
-                const glyph = iconNode(doc, icon, 'ss-hero-corner-icon');
-                if (glyph) item.appendChild(glyph);
-                item.appendChild(h(doc, 'span', 'ss-hero-corner-text', said));
-                corner.appendChild(item);
-            }
-            corner.hidden = !corner.children.length;
+            drawCorner();
             drawYou();
             drawTravel();
             const bars = heroBars(p.bars);

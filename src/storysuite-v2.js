@@ -1282,10 +1282,9 @@ export function createStorySuiteV2Adapter({
         id: MODULE_ID,
         name: MODULE_NAME,
         version: String(version),
-        // Story Block 2.0.0-beta.2 or later, the beta host this was built and tested with. A beta.1 or
-        // alpha.2 host refuses the hosted module and Delta keeps working on its own; a host before
-        // 2.0.0-alpha.2 compares without the pre-release tag and takes it.
-        requires: Object.freeze({ storyBlock: '>=2.0.0-beta.2' }),
+        // Story Block 2.12.0 or later: its feature `presets` key, the folds and the one "This reply" card this
+        // release is built for. An older Story Block 2 refuses the hosted module and Delta keeps working on its own.
+        requires: Object.freeze({ storyBlock: '>=2.12.0' }),
         // The optional mechanics (MODULES §F100); a host without the Features API warns and ignores.
         features: part.features,
         domains: part.domains,

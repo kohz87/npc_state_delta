@@ -3,9 +3,13 @@
 // reply's** state (`stateAt(index)`, never the head) and the paths its ops changed, so a template's
 // `changed(path)` can show "only what changed".
 //
-// * Cards are off until the reader turns them on, per screen (`screens.setCards`). Each card starts
-//   collapsed: a header with the screen's title and a one-line summary slot. Its body is drawn the first
-//   time it is opened.
+// * Under a reply there is ONE card, "This reply", that holds every card screen the reader has on (Story Block's
+//   "Changed this reply", any other module's). Cards are off until the reader turns them on,
+//   per screen (`screens.setCards`); an off screen is simply not a section, and with one on the card is still "This reply".
+//   The card starts collapsed: a header with the title and one line, each section's summary joined with " · " (the screens
+//   in `deps.first` lead, the rest keep their order; the full line is the summary's title). Open, each section is its body
+//   under a small heading (the screen's own title). The bodies are
+//   drawn the first time the card is opened, all together.
 // * Only messages on screen are drawn when IntersectionObserver exists; without it every carrier is.
 // * Long chats (docs/v2/PERFORMANCE.md): SillyTavern keeps every message drawn in a session on the page, so
 //   a pass over all of them on every change grew with the session. A change to the story (`committed`)
@@ -22,7 +26,10 @@
 //   hasCard         (index) → whether that carrier gets cards (default: every carrier does)
 //   messageElement  (index) → SillyTavern's `.mes[mesid=index]` element (default: a document query)
 //   swipeAt         (index) → the message's swipe_id (default 0)
-//   summary         (screen, { index, state, changes, before }) → the header's one-line text (optional)
+//   summary         (screen, { index, state, changes, before }) → the host's part of the header's line for a card that has no summary of its own
+//                   (optional; Story Block's changes card). A card screen's own `summary` (a template read in the card's scope, like
+//                   its body) wins; a card with neither adds nothing to the line.
+//   first           ids of the card screens that lead the sections, in order (optional; Story Block's changes card)
 //   opsAt           (index) → the carrier's own ops (optional; cards get them as `replyOps`)
 //   IntersectionObserver  the class to use (default globalThis.IntersectionObserver; null turns it off)
 //   eventSource, eventTypes   SillyTavern's, to follow swipes, edits, deletes and renders (optional)
@@ -31,10 +38,14 @@
 //   recent          how many of the last carriers a `head` pass goes over besides those on screen (default RECENT)
 //
 // → { mount(el, screenId, { index }) → handle, attachAll({ recent }), refresh(index, { force }), refreshAll({ force }),
-//     toggle(index, screenId, open?), onSwipe(index), onEdit(index), onDelete(), onChatChanged(),
+//     toggle(index, open?), onSwipe(index), onEdit(index), onDelete(), onChatChanged(),
 //     cacheSize(), destroy() }
 
+import { STRINGS } from '../../strings.js';
+import { THIS_REPLY_ID, mergeSummaries, orderSections, sectionHeading } from '../../reply-cards.js';
 import { button, dispose, documentOf, drawScreen, icon, make, screensFor } from './common.js';
+
+const THIS_REPLY_ICON = 'fa-list-check';
 
 const META = /^\/meta(\/|$)/;
 
@@ -89,8 +100,8 @@ export function createCardMount(deps) {
     const Observer = deps.IntersectionObserver === undefined ? globalThis.IntersectionObserver : deps.IntersectionObserver;
 
     const cache = new Map();            // key → { node, index }, oldest first
-    const cards = new WeakMap();        // card node → { index, screenId, open(), drawn }
-    const expanded = new Set();         // `${index}|${screenId}`
+    const cards = new WeakMap();        // card node → { index, head, body, sections: [{ id, body }], drawn, handles }
+    const expanded = new Set();         // indexes whose card is open
     const visible = new Set();          // indexes on screen (used only with an observer)
     let observed = new WeakSet();
     let observer = null;
@@ -137,29 +148,70 @@ export function createCardMount(deps) {
         node.classList.toggle('ss-card-open', open);
         info.head.setAttribute('aria-expanded', open ? 'true' : 'false');
         info.body.hidden = !open;
+        // The first time the card opens every section is filled; one that cannot be drawn leaves the others alone.
         if (open && !info.drawn) {
             info.drawn = true;
-            info.handle = mount(info.body, info.screenId, { index: info.index });
+            info.handles = info.sections.map(section => {
+                try { return mount(section.body, section.id, { index: info.index }); } catch { return null; }
+            });
         }
     }
 
-    function buildCard(entry, index) {
+    // A card screen's own part of the closed line: its `summary` template, read in the card's scope like its body (the same data, at that
+    // reply's state), as plain text. null when the screen has none; '' when it cannot be read (it adds nothing, and stops no other).
+    function ownSummary(entry, { index, state, changes, before }) {
+        const template = entry.screen?.summary;
+        if (typeof template !== 'string' || !template.trim()) return null;
+        const span = make(doc, 'span', '');
+        try {
+            const drawn = drawScreen(span, entry.id, 'card', {
+                deps, state, changes, index, extra: { before, replyOps: opsAt(index) ?? [], summary: true },
+                screen: { id: entry.id, title: entry.screen.title, mounts: entry.screen.mounts, template },
+            });
+            return drawn.ok ? String(span.textContent ?? '').replace(/\s+/g, ' ').trim() : '';
+        } catch {
+            return '';
+        } finally {
+            dispose(span);
+        }
+    }
+
+    // The one card: the sections (every card screen on, `entries`) in order, the header's line from each one's own summary.
+    function buildCard(entries, index) {
         const state = deps.stateAt(index);
         const changes = changesAt(index) ?? [];
+        // The state before the reply is read only for a host or a card that words a summary.
+        const before = typeof deps.summary === 'function' || entries.some(entry => typeof entry.screen?.summary === 'string') ? beforeOf(index) : null;
         const node = make(doc, 'div', 'ss-card');
-        node.setAttribute('data-ss-card', entry.id);
+        node.setAttribute('data-ss-card', THIS_REPLY_ID);
         const head = button(doc, 'ss-card-head');
         head.setAttribute('aria-expanded', 'false');
-        const summary = make(doc, 'span', 'ss-card-summary', deps.summary?.(entry.screen, { index, state, changes, before: beforeOf(index) }) ?? changeSummary(changes));
+        const parts = entries.map(entry => {
+            const own = ownSummary(entry, { index, state, changes, before });
+            if (own !== null) return own;
+            try { return deps.summary?.(entry.screen, { index, state, changes, before }) ?? ''; } catch { return ''; }
+        });
+        const line = mergeSummaries(parts) || changeSummary(changes);
+        const summary = make(doc, 'span', 'ss-card-summary', line);
         summary.setAttribute('data-slot', 'summary');
+        if (line) summary.setAttribute('title', line);
         const chevron = icon(doc, 'fa-chevron-down');
         chevron.classList.add('ss-card-chevron');
-        head.append(icon(doc, entry.screen.icon), make(doc, 'span', 'ss-card-title', entry.screen.title ?? entry.id), summary, chevron);
+        head.append(icon(doc, THIS_REPLY_ICON), make(doc, 'span', 'ss-card-title', STRINGS.thisReply.title), summary, chevron);
         const body = make(doc, 'div', 'ss-card-body');
         body.hidden = true;
+        const sections = entries.map(entry => {
+            const section = make(doc, 'section', 'ss-card-sec');
+            section.setAttribute('data-ss-section', entry.id);
+            const heading = make(doc, 'h4', 'ss-card-sec-title', sectionHeading(entry));
+            const sectionBody = make(doc, 'div', 'ss-card-sec-body');
+            section.append(heading, sectionBody);
+            body.appendChild(section);
+            return { id: entry.id, body: sectionBody };
+        });
         node.append(head, body);
-        cards.set(node, { index, screenId: entry.id, head, body, drawn: false, handle: null });
-        head.addEventListener('click', () => toggle(index, entry.id));
+        cards.set(node, { index, head, body, sections, drawn: false, handles: [] });
+        head.addEventListener('click', () => toggle(index));
         return node;
     }
 
@@ -187,7 +239,7 @@ export function createCardMount(deps) {
         if (!message) return;
         let box = boxOf(message);
         const isCarrier = carriers ? carriers.has(index) : deps.carriers().includes(index);
-        const entries = isCarrier && hasCard(index) ? on ?? screensFor(deps, 'card') : [];
+        const entries = isCarrier && hasCard(index) ? orderSections(on ?? screensFor(deps, 'card'), deps.first) : [];
         if (!entries.length && !repliesOn()) {
             box?.remove();
             return;
@@ -210,14 +262,16 @@ export function createCardMount(deps) {
         const rev = Number.isInteger(state?.meta?.rev) ? state.meta.rev : 0;
         const swipe = swipeAt(index) ?? 0;
         const version = deps.screens.version?.() ?? 0;
-        const nodes = entries.map(entry => {
-            const key = `${entry.id}|${index}|${swipe}|${rev}|${version}`;
+        // One card for the whole set: the sections on are part of its key, so turning a screen on or off draws it again.
+        const nodes = [];
+        if (entries.length) {
+            const key = `${THIS_REPLY_ID}|${entries.map(entry => entry.id).join(',')}|${index}|${swipe}|${rev}|${version}`;
             const hit = cache.get(key);
-            const node = hit ? hit.node : buildCard(entry, index);
+            const node = hit ? hit.node : buildCard(entries, index);
             remember(key, node, index);
-            setOpen(node, expanded.has(`${index}|${entry.id}`));
-            return node;
-        });
+            setOpen(node, expanded.has(index));
+            nodes.push(node);
+        }
         if (!box) {
             box = make(doc, 'div', 'ss-cards');
             (message.querySelector('.mes_block') ?? message).appendChild(box);
@@ -304,14 +358,13 @@ export function createCardMount(deps) {
         if (drawn) for (const [index, element] of drawn) refresh(index, { element });
     }
 
-    /** Opens or closes one card (the header button does this). */
-    function toggle(index, screenId, open = null) {
-        const key = `${index}|${screenId}`;
-        const next = open === null ? !expanded.has(key) : !!open;
-        if (next) expanded.add(key);
-        else expanded.delete(key);
+    /** Opens or closes the reply's one card (the header button does this). */
+    function toggle(index, open = null) {
+        const next = open === null ? !expanded.has(index) : !!open;
+        if (next) expanded.add(index);
+        else expanded.delete(index);
         const box = messageElement(index) && boxOf(messageElement(index));
-        const node = Array.from(box?.children ?? []).find(child => child.getAttribute('data-ss-card') === screenId);
+        const node = Array.from(box?.children ?? []).find(child => child.getAttribute('data-ss-card') === THIS_REPLY_ID);
         if (node) setOpen(node, next);
         return next;
     }

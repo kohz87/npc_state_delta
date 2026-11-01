@@ -540,11 +540,36 @@
     font-size: 11px;
 }
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-corner-text {
+    /* the scene's words wrap (a long place or a list of people), never cut: the corner is the one place they show */
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
 }
+/* the pencil of a corner item (the place, the weather, the people here): quiet, its touch area reaching into the row's gap; the rows of a
+   wrapped corner are 26px apart (compact), so one pencil's area never covers the middle of another's */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-corner-pencil {
+    display: inline-flex;
+    flex: none;
+    align-self: center;
+    margin: -9px 0;
+}
+@media (max-width: 600px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-corner-pencil {
+        margin: -15px 0;
+    }
+}
+/* while a pencil's form is open the item wraps: the words keep their line and the form takes the one under them, across */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-corner-item:has(.ss-w-editable-form) {
+    flex-wrap: wrap;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-corner-pencil:has(.ss-w-editable-form) {
+    flex: 1 1 100%;
+    margin: 0;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-corner-empty .ss-hero-corner-text {
+    color: var(--ss-muted);
+    opacity: 0.8;
+}
+
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-vitals {
     grid-area: vitals;
     display: flex;
@@ -698,18 +723,17 @@
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-compact .ss-hero-exp {
     display: none;
 }
-/* the scene on a phone: one line under the name, the items side by side, each one ellipsised */
+/* the scene on a phone: the items side by side, wrapping onto more lines when they do not fit (the words are never cut) */
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-compact .ss-hero-corner {
     display: flex;
     flex-direction: row;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 2px 10px;
+    gap: 6px 10px;
     min-width: 0;
     max-width: 100%;
     margin: 0;
     padding: 0;
-    overflow: hidden;
     font-size: 12px;
 }
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-compact .ss-hero-corner-item {
@@ -717,14 +741,12 @@
     align-items: center;
     gap: 4px;
     min-width: 0;
+    max-width: 100%;
     flex: 0 1 auto;
-    overflow: hidden;
 }
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-compact .ss-hero-corner-text {
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
 }
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-compact .ss-hero-pools {
     grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
@@ -2058,6 +2080,138 @@
     margin-top: 2px;
 }
 
+/* ---- "How much to track" on the Features page (view/form/presets.js): three tiles over the module groups ---- */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ss-space-2);
+    min-width: 0;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset[hidden],
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-fine[hidden] {
+    display: none;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--ss-space-3);
+    flex-wrap: wrap;
+    padding: 0 var(--ss-space-1);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-state {
+    color: var(--ss-accent);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-state:empty {
+    display: none;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-tiles {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--ss-space-3);
+    min-width: 0;
+}
+/* One column on a phone, as the Features tiles are. */
+@media (max-width: 600px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-tiles {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    min-width: 0;
+    margin: 0;
+    padding: var(--ss-space-3) 14px;
+    border: 1px solid var(--ss-border);
+    border-radius: var(--ss-radius-l);
+    background: var(--ss-tile);
+    color: var(--ss-text);
+    font-family: var(--ss-font);
+    text-align: left;
+    box-sizing: border-box;
+    cursor: pointer;
+    transition: background-color var(--ss-motion, 0.2s) ease, border-color var(--ss-motion, 0.2s) ease;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-tile:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-tile:focus-visible {
+    outline: 2px solid var(--ss-accent);
+    outline-offset: 2px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-on {
+    border-color: var(--ss-accent);
+    background: linear-gradient(var(--ss-accent-soft), var(--ss-accent-soft)), var(--ss-tile);
+    box-shadow: inset 0 0 0 1px var(--ss-accent);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ss-space-2);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-name {
+    font-size: 15px;
+    font-weight: 800;
+    line-height: 1.3;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-dot {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    box-sizing: border-box;
+    border: 2px solid color-mix(in srgb, var(--ss-muted) 70%, var(--ss-border));
+    border-radius: 50%;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-on .ss-preset-dot {
+    border: 5px solid var(--ss-accent);
+    background: var(--ss-text);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-about {
+    color: var(--ss-muted);
+    font-size: 13px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-size {
+    margin-top: auto;
+    font-size: 12px;
+    line-height: 1.4;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-size[hidden] {
+    display: none;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-num {
+    font-weight: 800;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-unit {
+    color: var(--ss-muted);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-note,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-said {
+    margin: 0;
+    padding: 0 var(--ss-space-1);
+    color: var(--ss-muted);
+    font-size: 12px;
+    line-height: 1.4;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-said:empty {
+    display: none;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-preset-fine {
+    margin: var(--ss-space-1) 0 calc(-1 * var(--ss-space-2));
+    padding: 0 var(--ss-space-1);
+    font-size: 12px;
+}
+
 /* ---- a select never clips its text: it ends in an ellipsis ---- */
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-select {
     overflow: hidden;
@@ -2321,6 +2475,14 @@
 }
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-tabrow .ss-switch {
     flex: none;
+}
+/* where the tab sits (in the bar, under More): a compact choice before the switch */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-tabrow-place {
+    flex: none;
+    width: 7.6em;
+    min-width: 0;
+    max-width: 7.6em;
+    font-size: 13px;
 }
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-tabrows-empty {
     padding: 8px 0;

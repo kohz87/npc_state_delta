@@ -171,3 +171,29 @@ export function replyRules(record, problems = [], index = null) {
         .flatMap(receipt => (Array.isArray(receipt?.data?.v2?.result?.rules) ? receipt.data.v2.result.rules : [])
             .map(rule => oneLine(rule, 80)).filter(Boolean).map(rule => ({ text: fill(STRINGS.card.rule, { name: rule }), summary: fill(STRINGS.card.rule, { name: rule }), kind: 'line', tone: 'accent', icon: 'fa-bolt', flag: '', note: '', check: null })));
 }
+
+// ---- The one card under a reply ("This reply") ----------------------------------------------------------------------------
+// Every module's card screen (mount `card`: "Changed this reply" and every other module's) is a
+// section of one card. Closed, the card is one line: each section's own summary, joined with " · ". Pure; no DOM.
+
+/** The key the one card carries (`data-ss-card`, and its open state per reply). */
+export const THIS_REPLY_ID = 'this-reply';
+/** Between one section's summary and the next on the closed line. */
+export const SUMMARY_JOIN = ' · ';
+
+/** The sections in order: the ids in `first` lead (in that order), the rest keep the order they came in. */
+export function orderSections(entries, first = []) {
+    const list = Array.isArray(entries) ? entries : [];
+    const lead = (Array.isArray(first) ? first : []).flatMap(id => list.filter(entry => entry?.id === id));
+    return [...lead, ...list.filter(entry => !lead.includes(entry))];
+}
+
+/** A section's small heading: the card's own title (its id when it has none). */
+export function sectionHeading(entry) {
+    return oneLine(entry?.screen?.title ?? '', 60) || String(entry?.id ?? '');
+}
+
+/** The closed line: the sections' summaries (empty ones left out) joined with " · ". */
+export function mergeSummaries(parts) {
+    return (Array.isArray(parts) ? parts : []).map(part => String(part ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean).join(SUMMARY_JOIN);
+}

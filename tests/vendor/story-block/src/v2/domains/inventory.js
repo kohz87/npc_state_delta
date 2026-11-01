@@ -34,11 +34,11 @@ export function initialInventory() {
 export const FEATURE = Object.freeze({ loot: 'story-block.loot', encumbrance: 'story-block.encumbrance' });
 export const INVENTORY_FEATURES = Object.freeze([
     Object.freeze({
-        id: FEATURE.loot, label: 'Pick what you take', default: true,
+        id: FEATURE.loot, label: 'Pick what you take', default: true, presets: Object.freeze({ lean: false }),
         describe: 'The story can lay out loot (? loot A, B, C — where); the reply\'s card shows it as chips and you take the ones you want.',
     }),
     Object.freeze({
-        id: FEATURE.encumbrance, label: 'Encumbered', default: true,
+        id: FEATURE.encumbrance, label: 'Encumbered', default: true, presets: false,
         describe: 'What the story gives past the carry limit is kept, and the party is encumbered (a check penalty) until something is put down. Your own buys and takes are still refused.',
     }),
 ]);

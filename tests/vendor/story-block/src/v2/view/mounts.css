@@ -264,10 +264,19 @@
         border: 1px solid var(--ss-border);
         border-radius: 24px;
         box-shadow: var(--ss-shadow);
-        background-color: var(--ss-sheet-bg, var(--ss-surface));
-        background-image: var(--ss-sheet-layers, none);
+        /* Opaque in every panel style: the chat behind must not read through the window. Under Glass the glass tint is laid over an
+           opaque floor of the same colour (--ss-sheet-floor); the other styles are their surface at full alpha. */
+        background-color: var(--ss-sheet-floor, var(--ss-surface));
+        background-image: linear-gradient(var(--ss-sheet-bg, transparent), var(--ss-sheet-bg, transparent));
         -webkit-backdrop-filter: var(--ss-sheet-blur, none);
         backdrop-filter: var(--ss-sheet-blur, none);
+    }
+}
+@supports (color: rgb(from red r g b)) {
+    @media (min-width: 760px) {
+        .ss-gameview-main {
+            background-color: var(--ss-sheet-floor, rgb(from var(--ss-surface) r g b / 1));
+        }
     }
 }
 @media (min-width: 1024px) {
@@ -278,6 +287,25 @@
 }
 @media (min-width: 760px) {
     body.ss-gameview-open { overflow: hidden; }
+}
+
+/* The wide bar: the screens that are in the bar are a centred row of even slots, then More; its sheet opens over the window's foot, as
+   a centred panel (on a phone it floats above the pill). */
+@media (min-width: 760px) {
+    .ss-gameview-nav.ss-screenbar-row {
+        justify-content: center;
+        gap: 6px;
+    }
+    .ss-gameview-nav.ss-screenbar-row .ss-screenbar-item {
+        flex: 0 1 112px;
+    }
+    .ss-gameview-main > .ss-screenbar-sheet {
+        left: 50%;
+        right: auto;
+        bottom: 24px;
+        width: min(640px, calc(100% - 48px));
+        transform: translateX(-50%);
+    }
 }
 
 /* ---- Inline cards under replies ---- */
@@ -336,16 +364,15 @@
     white-space: nowrap;
 }
 
-/* The summary line of the header, muted, on the right (Reply.dc.html's "+1 Wolf Pelt · …"). On a narrow chat column it
-   takes the next line when the title leaves no room, and runs to two lines at most; on a phone the header is one line (below). */
+/* The summary line of the header, muted, on the right: every section's part joined with " · " ("+1 Wolf Pelt · 1:30 pm, …").
+   It is one line and ends in an ellipsis (its title holds the whole text); the header is one line on a phone too (below). */
 .ss-card-summary {
     flex: 1 1 160px;
     min-width: 0;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
+    display: block;
+    white-space: nowrap;
+    text-overflow: ellipsis;
     overflow: hidden;
-    overflow-wrap: anywhere;
     color: var(--ss-muted, inherit);
     font-size: 0.85em;
     text-align: right;
@@ -381,6 +408,22 @@
     padding: 12px 14px 14px;
     border-top: 1px solid var(--ss-border);
     overflow-x: auto;
+}
+
+/* The open card: each module's card is a section under a small heading, with a hairline between sections. */
+.ss-card-sec + .ss-card-sec {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--ss-border);
+}
+
+.ss-card-sec-title {
+    margin: 0 0 8px;
+    color: var(--ss-muted, inherit);
+    font-size: 0.72em;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
 }
 
 /* ---- HUD strip above the message box ---- */

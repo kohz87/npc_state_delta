@@ -892,6 +892,21 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         };
     }
 
+    // The reply's lines in the order they run: as written, except a line of a kind with `after` (registry captureEntry) goes behind the
+    // reply's last line of the kinds it names, so it reads what those lines set up. The others keep their order, and so do the moved ones.
+    function linesInOrder(lines) {
+        const kinds = lines.map(line => registry.capture(line.kind));
+        if (!kinds.some(entry => entry?.after)) return lines;
+        const key = (line, at) => {
+            const after = kinds[at]?.after;
+            const last = after ? kinds.reduce((found, entry, other) => (other > at && after.includes(entry?.kind) ? other : found), -1) : -1;
+            return last < 0 ? [at, 0] : [last, at + 1];
+        };
+        return lines.map((line, at) => ({ line, order: key(line, at) }))
+            .sort((a, b) => a.order[0] - b.order[0] || a.order[1] - b.order[1])
+            .map(item => item.line);
+    }
+
     // Runs `lines` as story captures on carrier `index`, each on the state the one before left. Stored on
     // the head as they go (append), or, with `base` (a Re-read), run on that state and returned as
     // { ops } for store.replaceStory, nothing stored.
@@ -900,6 +915,7 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
     async function captureEach(index, lines, receipts, found, base = null, seeds = null, shown = new Map(), assist = null, plan = null) {
         const collected = [];
         const firstProblem = found.length;
+        lines = linesInOrder(lines);
         // Display kinds (written words) whose lines were read while their feature was off (capture.js markOff).
         const off = new Set();
         let state = base ?? store.head();

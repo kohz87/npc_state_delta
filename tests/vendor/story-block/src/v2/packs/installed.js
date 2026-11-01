@@ -46,6 +46,7 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
         const names = capabilities();
         return Array.isArray(names) ? [...new Set([...names, ...HOST_CAPABILITIES])] : null;
     };
+    // (a stored pack is not held to the strict `when` check of install: an installed pack with one unreadable condition keeps working, that event alone invalid)
     const checked = new WeakMap();  // stored pack object → validatePack result
     const listeners = new Set();
 
@@ -57,7 +58,7 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
     const entries = () => root().packs.filter(entry => entry && typeof entry === 'object');
     const check = entry => {
         if (!entry.pack || typeof entry.pack !== 'object') return { ok: false, errors: [{ code: 'NOT_OBJECT', path: '', message: 'The stored pack is missing.' }] };
-        if (!checked.has(entry.pack)) checked.set(entry.pack, validatePack(entry.pack, { hostVersion: host(), limits }));
+        if (!checked.has(entry.pack)) checked.set(entry.pack, validatePack(entry.pack, { hostVersion: host(), limits, readableConditions: false }));
         return checked.get(entry.pack);
     };
     const changed = async () => {

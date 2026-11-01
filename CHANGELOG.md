@@ -1,5 +1,16 @@
-## Unreleased
+## 1.4.0
 
+Needs Story Block 2.12.0 or later to join the suite (alone it works as before).
+
+- **Settings, tidier.** In NPC State Delta's settings the everyday groups stay as they were (Scanning, Roster &
+  continuity, Portrait generation, Data & maintenance). The meter presets (Companion, Rival, Mentor) are in their own
+  closed **Meter presets** fold. Source of truth, Calendar & birthdays, Scanner rules, What's sent and Advanced are in
+  one closed **Expert** fold, last, with a line on which calendar is in use. Every setting is unchanged.
+- **Scan after every reply** (new switch, on by default). Off, the automatic scan runs every 3 replies (or "Scan every"
+  if that is larger); manual scans are unchanged. Story Block's **Lean** preset turns it off, with stage ladders and
+  meter presets.
+- **Dossier on a phone** is full width again (Story Suite's text size had shrunk it to about 310 px): tabs scroll and
+  the whole dossier is reachable.
 - Help and documentation no longer describe RPG Battle, which is no longer part of the suite: the README's install steps
   and the social checks it names, Source of truth's help in Delta's settings and the Social checks feature's description
   now name Story Block and Story Director's checks. Prompt text is unchanged.
