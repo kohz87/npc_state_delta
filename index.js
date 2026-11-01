@@ -611,6 +611,8 @@ const DEFAULTS = Object.freeze({
     behaviorCriteria: DEFAULT_BEHAVIOR_CRITERIA,
     autoArchiveDeaths: true,
     autoReactivateArchived: true,
+    // (v2 hidden notes) A scan that builds a new dossier also writes 2 to 5 layered hidden notes. Hosted only.
+    layeredSecrets: true,
     dataFiles: {},
     sidecarTombstones: {},
     recoveryFiles: {},
@@ -685,6 +687,7 @@ function getSettings() {
     const legacyDefaultDepth = settings.injectDepthTailUpgraded !== true && Number(settings.injectDepth) === 1;
     assign('injectDepth', legacyDefaultDepth ? 0 : injectDepthOf(settings));
     assign('injectDepthTailUpgraded', true);
+    assign('layeredSecrets', settings.layeredSecrets !== false);
     assign('fullScanEveryTurn', settings.fullScanEveryTurn === true);
     assign('narrationCapture', settings.narrationCapture === true);
     assign('narrationCaptureCompact', settings.narrationCaptureCompact === true);
@@ -1051,6 +1054,61 @@ function forwardRelationshipChangesToHost(before, after, messageId, head = null)
             await adapter.adjust(change);
         }
     })();
+}
+
+// (v2 hidden notes) The story events of present people's locked notes this scan should look for ([] when none): only for
+// a scan of the head reply (an opened note is recorded on the head), and only for the people in the scene now.
+function hostedEventWatch(state, messageId) {
+    const adapter = storySuiteV2Meters();
+    if (!adapter || (Number.isInteger(messageId) && messageId !== latestMessageId(true))) return [];
+    try { return adapter.eventWatch?.(scenePresenceView(state?.npcs || [])) || []; } catch { return []; }
+}
+
+// A committed scan's `secretEvents` (the keys of the watched story events the current exchange showed) open those notes
+// as npc.open (cause ui, recorded on the head reply, so a swipe takes them back). Nothing is sent when the chat moved
+// on during the scan (as forwardRelationshipChangesToHost).
+function forwardSecretEventsToHost(watched, answered, head = null) {
+    const adapter = storySuiteV2Meters();
+    if (!adapter || !Array.isArray(watched) || !watched.length || !Array.isArray(answered) || !answered.length) return;
+    if (!chatHeadUnchanged(head)) {
+        console.info('[NPC State Delta] the chat moved on during the scan; its story events were not sent to Story Suite.');
+        return;
+    }
+    const keys = new Set(answered.map(item => String(item ?? '')));
+    const byName = new Map();
+    for (const item of watched) {
+        if (!keys.has(item.key)) continue;
+        byName.set(item.name, [...(byName.get(item.name) || []), item.note]);
+    }
+    if (!byName.size) return;
+    void (async () => {
+        for (const [name, ids] of byName) {
+            if (!chatHeadUnchanged(head)) return;
+            await adapter.openByEvent({ name, ids });
+        }
+    })();
+}
+
+// (v2 hidden notes) The layered notes a scan wrote for the dossiers it just built (`ids`), read from the rows the model
+// returned: 2 to 5 per person, cleaned, set once and never rewritten by a later scan. A dossier that already has notes
+// (the pack's, the reader's) keeps them. Returns how many dossiers got notes.
+function attachGeneratedSecrets(state, ids, ...sources) {
+    const adapter = storySuiteV2Meters();
+    if (!adapter || !Array.isArray(state?.npcs)) return 0;
+    const rows = sources.flatMap(source => (Array.isArray(source?.npcs) ? source.npcs : []));
+    let count = 0;
+    for (const id of ids || []) {
+        const npc = state.npcs.find(item => item?.id === id && !item.archived);
+        if (!npc || (Array.isArray(npc.secrets) && npc.secrets.length)) continue;
+        const row = rows.find(item => Array.isArray(item?.secrets) && item.secrets.length
+            && (String(item.id || '') === npc.id || npcMatchesLabel(npc, String(item.name || ''))));
+        let made = [];
+        try { made = row ? adapter.generatedSecrets(row.secrets) : []; } catch { made = []; }
+        if (!made.length) continue;
+        npc.secrets = made;
+        count += 1;
+    }
+    return count;
 }
 
 // A v2-hosted automatic boundary may skip the deterministic-path probe: this session already found
@@ -4025,7 +4083,15 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
         ? takeNarrationCapture(scanChatKey, messageId)
         : null;
     const scanLabel = capture ? 'narration-capture' : (manual ? 'manual' : (fullWindowScan ? 'automatic-full' : 'automatic'));
-    const prompt = capture ? '' : buildScannerPrompt(scannerPromptOptions(state, settings, transcript, { currentTranscript, fullScanMode: fullWindowScan, sceneNames: scanScenePresent(messageId) }));
+    // (v2 hidden notes) Hosted: a new dossier's layered notes are asked for (setting), and the story events of present people's
+    // locked notes are looked for in the current exchange. Neither is in the prompt otherwise.
+    const hostedNotes = hostedMeters() && !capture;
+    const eventWatch = hostedNotes ? hostedEventWatch(state, messageId) : [];
+    const prompt = capture ? '' : buildScannerPrompt(scannerPromptOptions(state, settings, transcript, {
+        currentTranscript, fullScanMode: fullWindowScan, sceneNames: scanScenePresent(messageId),
+        ...(hostedNotes && settings.layeredSecrets !== false ? { layeredSecrets: true } : {}),
+        ...(eventWatch.length ? { eventWatch } : {}),
+    }));
 
     let relationshipEdgeCount = 0;
     let relationshipEdgeFallbacks = 0;
@@ -4294,6 +4360,8 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
                 });
             }
         }
+        // (v2 hidden notes) The layered notes for the dossiers this scan built.
+        if (hostedNotes && settings.layeredSecrets !== false) attachGeneratedSecrets(nextState, newlyAdmittedIds, parsedForMerge, resolvedParsed, parsed);
         const inlineIds = scanInlineNpcIds(resolvedParsed, merged);
         if (targetMessageId >= 0) {
             clearInlineCardsAtMessage(nextState, targetMessageId);
@@ -4306,6 +4374,7 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
         if (targetMessageId >= 0) commitBranchCheckpoint(nextState, targetMessageId, 'scan');
         setChatState(chatKey, nextState);
         forwardRelationshipChangesToHost(state.npcs, nextState.npcs, targetMessageId, operation.chatHead);
+        if (eventWatch.length) forwardSecretEventsToHost(eventWatch, resolvedParsed?.secretEvents ?? parsed?.secretEvents, operation.chatHead);
         persist();
         renderDossier();
         updateInjection();
@@ -4395,6 +4464,7 @@ function buildSettingsHtml() {
         ${settingRow('npc_state_delta_max', 'Maximum active NPCs', numberControl('npc_state_delta_max', 1, 100), 'Archived dossiers do not use an active slot.')}
         ${settingRow('npc_state_delta_archive_deaths', 'Archive confirmed deaths', '<input id="npc_state_delta_archive_deaths" type="checkbox">', 'Explicit current-timeline deaths archive instead of deleting. Ambiguous death language is ignored.')}
         ${settingRow('npc_state_delta_reactivate_archived', 'Reactivate on clear return', '<input id="npc_state_delta_reactivate_archived" type="checkbox">', 'Manual archives return when the NPC clearly reappears. Death archives need an explicit living return.')}
+        <div class="npc-state-delta-v2-hosted-only">${settingRow('npc_state_delta_layered_secrets', 'Hidden notes for new people', '<input id="npc_state_delta_layered_secrets" type="checkbox">', 'When a scan builds a new dossier it also writes 2 to 5 layered hidden notes (light to deep; each opens at a rising meter value or on a story event), fitted to the background and fixed once written. The story is told them while the person is present, never to reveal; you see only that a note is hidden until it opens. Off: new people get none (existing notes stay).')}</div>
         <h4 class="delta-settings-subhead story-suite-subhead">Stale cleanup</h4>
         ${settingRow('npc_state_delta_auto_prune_stale', 'Auto-manage stale NPCs', '<input id="npc_state_delta_auto_prune_stale" type="checkbox">', 'Long-absent NPCs auto-archive, then stale auto-archives are deleted later. Manual, death and protected records are kept; deleted names can be rediscovered.')}
         ${settingRow('npc_state_delta_stale_archive_after', 'Auto-archive after', numberControl('npc_state_delta_stale_archive_after', 10, 999, 'replies'), 'Default 30. Replies since the NPC was last present or active off-screen.')}
@@ -4659,6 +4729,7 @@ function syncSettingsControls() {
     syncSuiteControls();
     $('#npc_state_delta_archive_deaths').prop('checked', s.autoArchiveDeaths !== false);
     $('#npc_state_delta_reactivate_archived').prop('checked', s.autoReactivateArchived !== false);
+    $('#npc_state_delta_layered_secrets').prop('checked', s.layeredSecrets !== false);
     $('#npc_state_delta_branch_rescan').prop('checked', s.branchRescan !== false);
     $('#npc_state_delta_mid_delete_rewind').prop('checked', s.midDeleteRewind === true);
     $('#npc_state_delta_present_cast_display').val(effectivePresentCastChoice());
@@ -6169,6 +6240,8 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
     if (hostedMeters && (meterEdits || v2Edits)) {
         if (meterEdits) await hostedMeters.setMeters({ name: current.name, meters: meterEdits });
         if (v2Edits) await hostedMeters.applyEditor(savedName, v2Edits);
+        // The notes opened or shut by hand change the dossier's Secrets section: draw it from the slice as it now stands.
+        renderDossier();
         updateInjection();
     }
     if (close) closeNpcEditor();
@@ -7073,6 +7146,7 @@ function bindUi() {
     bindCustomFieldSettings();
     bindSourceOfTruthSettings();
     bindSettingsCheckbox('#npc_state_delta_reactivate_archived', 'autoReactivateArchived');
+    bindSettingsCheckbox('#npc_state_delta_layered_secrets', 'layeredSecrets');
     bindSettingsCheckbox('#npc_state_delta_branch_rescan', 'branchRescan');
     bindSettingsCheckbox('#npc_state_delta_mid_delete_rewind', 'midDeleteRewind');
     $(document).on('change.npcStateDelta', '#npc_state_delta_portrait_theme_preset', function () {

@@ -13,8 +13,8 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
   when it is not. The v1 handshake (`suite-handshake.js`) offers nothing to a v2 host (`storyBlockIsV2`).
 - Registers module `npc-state-delta`: queries `QUERY_NAMES` (`npc.present`, `npc.dossier`, `npc.known`,
   `npc.portrait`, `npc.meters`, `npc.cast`, `npc.next`, `npc.socialModifier`), commands `COMMAND_NAMES` (`npc.adjust`, `npc.set`,
-  `npc.refresh`, `npc.milestone`, `npc.tick`), the Cast / Dossiers tab and screen (`CAST_SCREEN_ID`,
-  widget `CAST_WIDGET`), its settings section, and hooks `diagnostics` and `ownPrompt`.
+  `npc.refresh`, `npc.milestone`, `npc.open`, `npc.tick`), the Cast / Dossiers tab and screen (`CAST_SCREEN_ID`,
+  widget `CAST_WIDGET`), its settings section, and hooks `diagnostics`, `ownPrompt` and `redactSent`.
 - **`npc` domain** (only numbers, stage and milestone names, ids of unlocked notes; prose stays in NSD's
   sidecar): meters trust, affection, desire, tension in `BUILT_IN_RANGE` (−100..100) plus up to
   `MAX_CUSTOM_METERS` (6) custom ones, at most `MAX_NPCS` (80). While hosted this slice is the truth for meter
@@ -23,8 +23,14 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
 - **Code sets numbers:** every value clamped to its range; one meter's change within one reply held to the
   change cap (`DEFAULT_CHANGE_CAP` 15; `turn.from` keeps the reply's starting values, keyed by the reply `sid`);
   per-NPC floors and ceilings; stages and ladder rungs moved by code when thresholds are crossed; the story
-  cannot set a stage. Hidden notes unlock by rule and their text reaches the story only through the tail,
-  only while the NPC is present and unlocked.
+  cannot set a stage. Hidden notes (the pack's, the reader's, or the 2 to 5 layers a scan writes for a new dossier;
+  pack and reader up to 8, generated up to 5) open by a meter rule, by a story event (`when`, ≤ 120 characters: the scan
+  lists present people's locked event notes and answers `secretEvents`, sent as `npc.open` with `by: 'story'`, recorded on
+  the reply) or by the reader's hand (`npc.open`; a note shut by hand is kept in the slice's `held`). Their text reaches the
+  story only through the tail and only while the NPC is present: an opened note as "known to the player now; may come out",
+  a locked one as "hidden: never state or reveal; let it shape how they act" (optional tail lines, nearest to opening first,
+  so the host's budget drops the deepest first). The hook `redactSent(text)` turns each locked line into "Name: 1 hidden note"
+  for a view that shows what is sent; a host that does not call it shows the raw text.
 - Change lines: `~ npc <Name> | trust: +5 ...` and `+ milestone <Name> — <words>`; refused parts become
   problems (last 20). `npc.tick` runs once per new reply or swipe (`TICK_TURNS`), never for a Continue or Re-read.
 - Who is present: `director.world.here` when Story Director answers, else Story Block's `scene.present`.

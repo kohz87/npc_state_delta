@@ -141,8 +141,8 @@ test('the modules use the derived lists, not copies of their own', () => {
     }
 });
 
-test('the hidden notes (secrets) never reach a model-facing text', () => {
-    assert.equal(registry.FIELDS.secrets.prompt, 'unlocked');
+test('the hidden notes (secrets) never reach any of Delta\'s own model-facing texts', () => {
+    assert.equal(registry.FIELDS.secrets.prompt, 'tail', 'only the v2 module\'s tail carries them (opened as known, locked as hidden), none of Delta\'s own prompts');
     assert.equal(registry.DOSSIER_FIELDS.includes('secrets'), false, 'npc.dossier never returns them');
     const secret = 'She is the lost heir of House Venn';
     const npc = core.normalizeNpcRecord({

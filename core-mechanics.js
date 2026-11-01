@@ -6892,6 +6892,23 @@ function compactCaptureRules() {
 11. JSON only: {"npcs":[...],"profileUpdates":[...],"keyRelationshipEdges":[...]}. Example: {"id":"npc_myla","evidence":{"speech":["formal"]},"speechState":"refine","speech":"Soft, formal."}.`;
 }
 
+/**
+ * The scanner prompt's rules about hidden notes ('' when neither is asked). `layeredSecrets`: also write 2 to 5 layered
+ * notes for each NEW dossier-worthy NPC. `eventWatch`: [{ key, name, event }], the story events of present NPCs'
+ * locked notes; the scan answers `secretEvents` with the keys of those the CURRENT exchange clearly shows.
+ */
+export function hiddenNotePromptRules({ layeredSecrets = false, eventWatch = null } = {}) {
+    const lines = [];
+    if (layeredSecrets) {
+        lines.push('HIDDEN NOTES: for each NEW dossier-worthy NPC only (never an existing one), also return "secrets" in its npcs[] row: 2 to 5 layered hidden notes, light to deep, as many as the person is deep (a passing shopkeeper 2, someone central 4-5). Ground them in the established background; never contradict it or invent a rival backstory. Each {"title":"<=60 chars","text":"<=300 chars, one fact the player does not know yet","meter":"trust|affection|desire|tension","at":whole number 1..100, higher for deeper layers} or, for a layer that opens on a story event instead, {"title","text","when":"short event <=120 chars"}. Written once; never repeat or rewrite them later.');
+    }
+    const watch = (Array.isArray(eventWatch) ? eventWatch : []).filter(item => item && item.key && item.event);
+    if (watch.length) {
+        lines.push(`STORY EVENTS to look for (present NPCs' hidden notes): ${watch.map(item => `${item.key} = ${item.name}: ${item.event}`).join(' | ')}. Return top-level "secretEvents":["<key>",...] with ONLY the keys whose event the CURRENT exchange clearly shows happened (never from earlier history, never a guess); [] or omit when none.`);
+    }
+    return lines.length ? lines.map((line, index) => `\n${16 + index}. ${line}`).join('') : '';
+}
+
 export function buildScannerPrompt({
     transcript,
     existingNpcs = [],
@@ -6912,6 +6929,8 @@ export function buildScannerPrompt({
     dossierAbove = '',
     compactCapture = false,
     sceneNames = null,
+    layeredSecrets = false,
+    eventWatch = null,
 }) {
     const baseline = normalizeRelationshipBaseline(relationshipBaseline);
     const caps = normalizeRelationshipCaps(relationshipCaps);
@@ -7098,6 +7117,9 @@ ${JSON.stringify(profileSent)}${dossierNote}
 ${storyContext}`;
     }
 
+    // Hidden notes (Story Suite hosted only; absent by default, so the prompt is byte-identical without them): layered
+    // secrets for a NEW dossier-worthy NPC, and the story events to look for in the CURRENT exchange.
+    const hiddenNoteRules = hiddenNotePromptRules({ layeredSecrets, eventWatch });
     return `${narrationCapture ? NARRATION_CAPTURE_HEADER : 'Private NPC dossier scanner.'}
 Admission: ${admissionPolicy}${fullScanRule}
 Rules:
@@ -7115,7 +7137,7 @@ Rules:
 12. RELATIONSHIP -100..+100 DELTA-ONLY; currentRelationship read-only. Return relationshipDelta+relationshipEvidence (all 4 keys). NEW only; continuation/aftermath=>0. Raw max 1/2/5/10; axis max 1/2/3/4. EVERY non-zero axis needs grounded CURRENT-exchange evidence. Desire needs explicit attraction/intimacy narration; rescue/gratitude/affection/trust/proximity=>0. Trust!=obedience; Affection!=devotion; Tension!=jealousy.
 13. lifeState unknown|alive|deceased; deceased+explicit=terminal death; alive output cannot revive.
 14. Memories: max3 NEW in npcs[] (existing too), ADDED to cap5 stored; no duplicate/paraphrased memories. If crowded use memoryRetention=top5 consequential/durable; recency=tiebreak only. homeBase=durable home/workplace/HQ/haunt, never current scene location; keep-by-default; change needs homeBaseState:"update"+homeBaseReason. Caps: ${PROMPT_CAPS}. COMPACT; never invent.
-15. JSON only: {"npcs":[...],"profileUpdates":[...],"keyRelationshipEdges":[...]}. profileUpdates example: {"id":"npc_myla","evidence":{"appearance":["bronze hair"],"speech":["formal"]},"appearanceState":"refine","appearance":"Bronze hair; wool smock.","speechState":"refine","speech":"Soft, formal."}. Existing relationship delta example: {"id":"npc_myla","relationshipDelta":{"trust":-2,"affection":0,"desire":0,"tension":2},"relationshipEvidence":{"trust":"lie","affection":"","desire":"","tension":"conflict"}}.
+15. JSON only: {"npcs":[...],"profileUpdates":[...],"keyRelationshipEdges":[...]}. profileUpdates example: {"id":"npc_myla","evidence":{"appearance":["bronze hair"],"speech":["formal"]},"appearanceState":"refine","appearance":"Bronze hair; wool smock.","speechState":"refine","speech":"Soft, formal."}. Existing relationship delta example: {"id":"npc_myla","relationshipDelta":{"trust":-2,"affection":0,"desire":0,"tension":2},"relationshipEvidence":{"trust":"lie","affection":"","desire":"","tension":"conflict"}}.${hiddenNoteRules}
 
 Relationship rubric: ${relationshipRubric || '(none)'}
 Impact rubric: ${impactRubric || '(none)'}
