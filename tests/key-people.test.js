@@ -276,13 +276,14 @@ test('the dossier shows the badge and "While away" (live and after the return); 
 test('index.js wiring: the card tag, the badge data, the one-time note, the scan hold and the memory (source)', () => {
     const index = fs.readFileSync(fileURLToPath(new URL('../index.js', import.meta.url)), 'utf8');
     assert.match(index, /\$\{isKeyNpc\(npc\) \? '<span class="npc-state-delta-key-tag" title="Key person \(Story Director\)">★ Key<\/span>' : ''\}/);
-    assert.match(index, /\.\.\.keyAwayScanOptions\(mergeBaseState\)/);
+    assert.match(index, /keyAwayScanOptions\(mergeBaseState\)/);
     assert.match(index, /\.\.\.\(awayNotes \? \{ awayNotes \} : \{\}\)/);
     assert.match(index, /const keyViews = dossierKeyViews\(state\);/);
     assert.match(index, /storySuiteV2Meters\(\)\?\.keyAwayMemory\?\.\(\)/, 'the memory of the last absence is read from the saved slice');
     assert.doesNotMatch(index, /state\.keyAway/, 'and Delta\'s own sidecar holds none');
     const targeted = index.slice(index.indexOf('const scoped = job.scope'), index.indexOf('const result = merged.state.npcs.find'));
     assert.doesNotMatch(targeted, /awayNpcIds|keyAwayScanOptions/, 'a reader\'s own Refresh or backfill is not held');
+    assert.match(index, /\.\.\.\(manual \? \{\} : keyAwayScanOptions\(mergeBaseState\)\)/, 'nor is the reader\'s own Scan now');
 });
 
 // ---- on Story Block's whole host: a stand-in for Story Director ----
@@ -497,6 +498,10 @@ test('runtime: the Key tag on the card, the badge data, the summary once at the 
         await sleep(300);
         out.backgroundAway = yunyun().background ?? '';
         out.injectionAway = api.injectionPreview().text;
+        // The reader's own "Scan now" is deliberate: the same answer is written this time (only the automatic scan holds them).
+        await api.scan();
+        await sleep(300);
+        out.backgroundManual = yunyun().background ?? '';
 
         // Back: the reply that brings her back; the next generation is told once, and not the one after.
         mockState.quietResponder = async () => JSON.stringify({ npcs: [row('Yunyun')] });
@@ -516,8 +521,8 @@ test('runtime: the Key tag on the card, the badge data, the summary once at the 
         out.injectionLater = api.injectionPreview().text;
         out.viewsLater = api.getDossierState().keyViews;
         // Present again: scans resume.
-        mockState.quietResponder = rewrite('Born in the mountains of Vale.');
-        await turn('Yunyun says again that she was born in the mountains of Vale, not on the docks.');
+        mockState.quietResponder = rewrite('Raised in the lighthouse at Axel.');
+        await turn('Yunyun says she was raised in the lighthouse at Axel after all.');
         await sleep(300);
         out.backgroundBack = yunyun().background ?? '';
         console.log('RESULT ' + JSON.stringify(out));
@@ -545,7 +550,8 @@ test('runtime: the Key tag on the card, the badge data, the summary once at the 
     assert.deepEqual([Object.values(hosted.viewsAway)[0].away.since, Object.values(hosted.viewsAway)[0].away.back], ['Goldwane 12', 'Goldwane 18'], 'the dates are written on the calendar, not shown as minutes');
     assert.match(hosted.backgroundHere, /docks of Axel/, 'the same scan writes her background when she is here');
     assert.equal(hosted.backgroundAway, hosted.backgroundHere, 'and does not while she is away');
-    assert.match(hosted.backgroundBack, /mountains of Vale/, 'scans resume when she is present again');
+    assert.match(hosted.backgroundManual, /mountains of Vale/, 'but the reader\'s own Scan now writes it');
+    assert.match(hosted.backgroundBack, /lighthouse at Axel/, 'scans resume when she is present again');
     assert.doesNotMatch(hosted.injectionAway, /WHILE AWAY/, 'nothing about the absence is sent while she is away');
     assert.match(hosted.injectionBack, /Yunyun: IDENTITY[^\n]*; WHILE AWAY, NOW BACK \(Goldwane 12 – Goldwane 18\): scouting the north road; Goldwane 14: reached Wolfmere Outpost/);
     assert.equal(hosted.injectionBack.split('WHILE AWAY').length - 1, 1, 'once');
@@ -573,4 +579,79 @@ test('runtime: the Key tag on the card, the badge data, the summary once at the 
     assert.doesNotMatch(alone.card, /key-tag/);
     assert.equal(alone.views, null);
     assert.equal(alone.keyAway, null, 'nothing is added to the saved state');
+});
+
+test('runtime: a swipe or regenerate of the first reply after a return is told the summary again (the chat still holds the swiped reply); the next new reply is not', () => {
+    const prelude = async () => {
+        mockState.context.eventTypes.GENERATION_AFTER_COMMANDS = 'generation_after_commands';
+        const sdk = {
+            registered: [], keys: [{ name: 'Yunyun', here: true, away: null }], memory: {},
+            registerModule(def) { sdk.registered.push(def); },
+            command: async () => ({ ok: true, receipt: { summary: '' } }),
+            query: name => (name === 'director.keyPeople' ? structuredClone(sdk.keys) : name === 'npc.keyAway' ? structuredClone(sdk.memory) : (name === 'scene.present' ? ['Yunyun'] : null)),
+            settings: () => ({}),
+        };
+        mockState.sdk = sdk;
+        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    };
+    const scenario = async () => {
+        const api = globalThis.NPCStateDelta;
+        assert.ok(await waitFor(() => mockState.sdk.registered.length === 1));
+        const emit = async (name, ...args) => { for (const listener of mockState.listeners.get(name) || []) await listener(...args); };
+        const chat = mockState.context.chat;
+        const userSays = async () => { chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'And then?' }); await emit('message_sent', chat.length - 1); };
+        const replyArrives = async (text, id) => { await emit('message_received', id); await emit('character_message_rendered', id); await sleep(200); };
+        const note = () => api.injectionPreview().text.split('WHILE AWAY').length - 1;
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [{ name: 'Yunyun', present: true, role: 'adventurer', identityKind: 'proper_name', dossierSignal: 'high', dossierReason: 'named companion', directInteraction: true, relationshipImpact: 'none', relationshipDelta: { trust: 0, affection: 0, desire: 0, tension: 0 } }] });
+        const reply = async text => {
+            await userSays();
+            await emit('generation_after_commands', 'normal', {}, false);
+            chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: text, swipe_id: 0, swipes: [text] });
+            const id = chat.length - 1;
+            await replyArrives(text, id);
+            return id;
+        };
+        await reply('Yunyun waves from the gate.');
+        // Reply A brings her back: the host's step wrote the memory at A (the index of the reply it ran for).
+        const A = chat.length + 1;
+        mockState.sdk.memory = { yunyun: { name: 'Yunyun', aliases: [], returnedAt: A, presentReplies: 0, away: { doing: 'scouting', since: 'Goldwane 12', back: 'Goldwane 18', steps: [] } } };
+        assert.equal(await reply('Yunyun walks back through the gate.'), A);
+        const out = { afterA: note() };
+
+        // The next generation (reply B) is told.
+        await userSays();
+        await emit('generation_after_commands', 'normal', {}, false);
+        out.promptB = note();
+        chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: 'Yunyun sits by the fire.', swipe_id: 0, swipes: ['Yunyun sits by the fire.'] });
+        const B = chat.length - 1;
+        await replyArrives('', B);
+        out.afterB = note();
+
+        // A swipe of B: the chat still holds B while the new one is written, and it is told again.
+        await emit('generation_after_commands', 'swipe', {}, false);
+        out.promptSwipe = note();
+        chat[B].swipes.push('Yunyun stirs the fire.'); chat[B].swipe_id = 1; chat[B].mes = 'Yunyun stirs the fire.';
+        await replyArrives('', B);
+        out.afterSwipe = note();
+        // A regenerate that ST has already removed B for: the latest reply is A again, and it is told.
+        const removed = chat.pop();
+        await emit('generation_after_commands', 'regenerate', {}, false);
+        out.promptRegenerate = note();
+        removed.mes = 'Yunyun pokes the fire.'; removed.swipes = [removed.mes]; removed.swipe_id = 0;
+        chat.push(removed);
+        await replyArrives('', B);
+        out.afterRegenerate = note();
+        // The next new reply (C) is not told.
+        await userSays();
+        await emit('generation_after_commands', 'normal', {}, false);
+        out.promptC = note();
+        console.log('RESULT ' + JSON.stringify(out));
+    };
+    const out = scenarioOutput(runHostScenario('key-people-swipe', prelude, scenario));
+    assert.deepEqual(out, { afterA: 1, promptB: 1, afterB: 0, promptSwipe: 1, afterSwipe: 0, promptRegenerate: 1, afterRegenerate: 0, promptC: 0 });
+    assert.equal(out.promptB, 1, 'the first generation after the return is told');
+    assert.equal(out.promptSwipe, 1, 'a swipe of that reply is told again');
+    assert.equal(out.promptRegenerate, 1, 'and so is a regenerate of it');
+    assert.equal(out.afterB + out.afterSwipe + out.afterRegenerate, 0, 'once a reply is written the note is not carried on');
+    assert.equal(out.promptC, 0, 'the next new reply is not told');
 });
