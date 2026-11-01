@@ -73,7 +73,7 @@ export const WORLD_FEATURE = 'story-director.world';
  */
 export const PAGE_API = 'NPCStateDeltaCast';
 export const PAGE_SLOT_CLASS = 'npc-state-delta-v2-slot';
-export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.socialModifier', 'npc.identity']);
+export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.keyAway', 'npc.socialModifier', 'npc.identity']);
 export const COMMAND_NAMES = Object.freeze(['npc.adjust', 'npc.set', 'npc.refresh', 'npc.milestone', 'npc.tick']);
 // The replies after which Delta takes its per-reply step (npc.tick): a new reply or a new swipe of
 // one, never a Continue, a Re-read or late change lines (the same reply again).
@@ -536,6 +536,8 @@ export function createStorySuiteV2Adapter({
         'npc.cast': (state, args) => castFor(state, args),
         /** npc.next({ name }) → the NPC's ladder from here: { rank, next, risk, text } ("what's missing"), or null. */
         'npc.next': (state, args) => part.queries['npc.next'](state, args ?? {}),
+        /** npc.keyAway() → the memory of key people's last absences (the slice's `keyAway`: { [name key]: { name, aliases, away, returnedAt, presentReplies } }), {} when none. */
+        'npc.keyAway': (state, args) => part.queries['npc.keyAway'](state, args ?? {}),
         /**
          * npc.socialModifier({ name, skill }) → { mod, name, skill, reasons: [{ text, value }] } | null:
          * what an NPC's meters, stage and disposition do to a social check against them (src/social-check.js).
@@ -716,6 +718,16 @@ export function createStorySuiteV2Adapter({
             return Array.isArray(answer) ? answer : null;
         } catch {
             return null;
+        }
+    }
+    // The memory of key people's last absences (npc.keyAway; the slice's `keyAway`), {} when there is none or no host.
+    function keyAwayMemory() {
+        if (!hosted || typeof sdkRef?.query !== 'function') return {};
+        try {
+            const memory = sdkRef.query('npc.keyAway', {});
+            return memory && typeof memory === 'object' && !Array.isArray(memory) ? memory : {};
+        } catch {
+            return {};
         }
     }
     // Story Director's calendar (`director.calendar`: { era, months, leapYears }), or null when it has none to give; Story Director's
@@ -1183,6 +1195,8 @@ export function createStorySuiteV2Adapter({
         if (!hosted || !TICK_TURNS.includes(turn?.type) || !enabled()) return;
         let wanted = false;
         try { wanted = part.tickWanted(); } catch { wanted = false; }
+        // Key people (Story Director's): the step also keeps the memory of their last absence up to date.
+        if (!wanted) wanted = (keyPeopleAnswer()?.length ?? 0) > 0 || Object.keys(keyAwayMemory()).length > 0;
         if (!wanted) return;
         lastTick = send('npc.tick', {}, { own: true });
     }
@@ -1695,6 +1709,8 @@ export function createStorySuiteV2Adapter({
         sliceView,
         /** While hosted: Story Director's key people (`director.keyPeople`) as it answers, or null when it cannot. */
         keyPeopleAnswer,
+        /** While hosted: the memory of key people's last absences (npc.keyAway), {} without one. */
+        keyAwayMemory,
         /** The same, cleaned (normalizeKeyPeople), without dates written. */
         keyPeople,
         /** While hosted: Story Director's calendar (`director.calendar`), or null. */

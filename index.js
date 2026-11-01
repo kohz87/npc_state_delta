@@ -221,7 +221,7 @@ import {
     worldStatePeople,
 } from './present-scene.js';
 import { escapeHtml } from './src/util/html.js';
-import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, observeKeyAway, returnNote } from './src/key-people.js';
+import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, returnNote } from './src/key-people.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
 // The chat text helpers (src/transcript.js) read the host's chat and the Scan context setting.
@@ -932,19 +932,6 @@ function keyPeopleList() {
 function isKeyNpc(npc, list = keyPeopleList()) {
     return Boolean(list?.length) && isKey(findKeyEntry(list, npc));
 }
-// Notes who is away or back into `state.keyAway` (the last absence of each key person, by dossier id) at the latest
-// reply. In place and not saved here: it rides along with the next save of the dossiers (every scan commit and edit),
-// so noticing a return never writes the sidecar in the middle of a scan. With no key people nothing is stored.
-function observeKeyPeople() {
-    const list = keyPeopleList();
-    const key = getChatKey();
-    if (!list || key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return;
-    const state = getChatState(key);
-    const { memory, changed } = observeKeyAway(state.keyAway, list, state.npcs, latestReplyIndex());
-    if (!changed) return;
-    if (Object.keys(memory).length) state.keyAway = memory;
-    else delete state.keyAway;
-}
 // What the narrator is told once about key people who just came back: { dossier id: "WHILE AWAY, NOW BACK …" }.
 // It stands while the latest reply is the one the return was noticed at, so a swipe of the next reply repeats it and
 // the next reply that stays drops it.
@@ -952,9 +939,10 @@ function keyReturnNotes(state) {
     const list = keyPeopleList();
     if (!list?.length) return null;
     const head = latestReplyIndex();
+    const memory = storySuiteV2Meters()?.keyAwayMemory?.() ?? {};
     const notes = {};
     for (const npc of state?.npcs || []) {
-        const view = npc?.id ? keyView(list, state.keyAway, npc, head) : null;
+        const view = npc?.id ? keyView(list, memory, npc, head) : null;
         if (view?.recent?.justReturned) notes[npc.id] = returnNote(view.recent.away);
     }
     return Object.keys(notes).length ? notes : null;
@@ -1001,9 +989,10 @@ function dossierKeyViews(state) {
     const list = keyPeopleList();
     if (!list?.length) return null;
     const head = latestReplyIndex();
+    const memory = storySuiteV2Meters()?.keyAwayMemory?.() ?? {};
     const views = {};
     for (const npc of state?.npcs || []) {
-        const view = npc?.id ? keyView(list, state.keyAway, npc, head) : null;
+        const view = npc?.id ? keyView(list, memory, npc, head) : null;
         if (view) views[npc.id] = view;
     }
     return Object.keys(views).length ? views : null;
@@ -2811,7 +2800,6 @@ function updateInjection() {
     }
     if (injectionKey === 'no-chat') return clear('No chat is open.');
     if (!settings.enabled) return clear('NPC State Delta is disabled.');
-    observeKeyPeople();
     const state = getChatState();
     // The recent story and who the player's message names: worked out once for both parts.
     const transcript = recentTranscript(4);
@@ -8062,7 +8050,6 @@ window.NPCStateDelta = Object.freeze({
                 .map(portrait => [portrait.form, { dataUrl: portrait.dataUrl, appearanceFingerprint: portrait.appearanceFingerprint || '' }]));
         }
         const meterViews = storySuiteV2Meters()?.dossierMeters?.(state.npcs) ?? {};
-        observeKeyPeople();
         const keyViews = dossierKeyViews(state);
         return { turn: state.turn, reply: latestReplyIndex(), npcs: structuredClone(hostedMeterView(state.npcs)), portraitAssets: {}, formPortraits, customFieldNames: [...getSettings().customFieldNames], meterViews, ...(keyViews ? { keyViews } : {}) };
     },

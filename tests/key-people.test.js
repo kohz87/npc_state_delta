@@ -7,11 +7,11 @@ import { buildInjection, createNpcRecord, mergeScanResult } from '../core.js';
 import { keyAwayHtml, keyProjection, projectDossierState } from '../dossier-ui.js';
 import { dossierRowNodes } from '../story-block-tabs.js';
 import { storyMinuteText } from '../calendar.js';
-import { FEATURE_DRIFT, FEATURE_STAGES, KEY_PEOPLE_QUERY } from '../src/npc-meters.js';
+import { FEATURE_DRIFT, FEATURE_STAGES, KEY_PEOPLE_QUERY, observeKeyAway, validateNpcSlice } from '../src/npc-meters.js';
 import { MODULE_ID, createStorySuiteV2Adapter } from '../src/storysuite-v2.js';
 import {
     AWAY_LOCKED_FIELDS, RECENT_REPLIES, awayNpcIds, awayRange, findKeyEntry, isAway, isKey, keyView,
-    lockAwayNpcs, normalizeKeyPeople, observeKeyAway, returnNote,
+    lockAwayNpcs, memoryKey, normalizeKeyPeople, returnNote,
 } from '../src/key-people.js';
 import { fakeDocument } from './helpers/fake-dom.js';
 import { runHostScenario } from './helpers/host-scenario.js';
@@ -90,34 +90,37 @@ test('a dossier is matched to a key person by name or alias, either side, any ca
 
 // ---- the memory of the last absence ----
 
-test('away, back, present for a few replies: the absence is kept, then dropped; a swipe back undoes the return', () => {
+test('away, back, present for a few replies: the absence is kept, then dropped (the step\'s memory, one reply at a time)', () => {
     const ren = npc('Ren');
     const awayList = normalizeKeyPeople([key('Ren', { here: false, away: REN_AWAY })]);
     const backList = normalizeKeyPeople([key('Ren', { here: true })]);
     let memory = {};
-    const note = (list, head) => { const out = observeKeyAway(memory, list, [ren], head); memory = out.memory; return out; };
+    const note = (list, head) => { const out = observeKeyAway(memory, list, head); memory = out.memory; return out; };
+    assert.equal(memoryKey('Ren'), 'ren');
+    assert.equal(memoryKey('Jean-Luc  Picard'), 'jean-luc-picard');
 
     assert.equal(note(backList, 3).changed, false, 'a key person never seen away leaves nothing');
     assert.deepEqual(memory, {});
     assert.equal(note(awayList, 4).changed, true);
-    assert.equal(memory.npc_ren.returnedAt, null);
+    assert.equal(memory.ren.returnedAt, null);
+    assert.deepEqual(validateNpcSlice({ npcs: {}, problems: [], keyAway: memory }), [], 'what the step writes is a valid slice');
     assert.equal(keyView(awayList, memory, ren, 4).away.doing, 'scouting the north road');
     assert.equal(keyView(awayList, memory, ren, 4).recent, null);
+    assert.equal(note(awayList, 5).changed, false, 'still away, the same record: nothing to write');
 
     note(backList, 6);
-    assert.equal(memory.npc_ren.returnedAt, 6, 'noticed back at reply 6');
+    assert.equal(memory.ren.returnedAt, 6, 'noticed back at reply 6');
     let view = keyView(backList, memory, ren, 6);
     assert.equal(view.away, null);
     assert.equal(view.recent.justReturned, true);
     assert.equal(view.recent.away.steps.length, 2);
-    assert.equal(note(backList, 6).changed, false, 'the same reply again changes nothing');
 
     note(backList, 7);
     view = keyView(backList, memory, ren, 7);
     assert.equal(view.recent.justReturned, false, 'one reply later it is no longer the return');
-    assert.equal(memory.npc_ren.presentReplies, 1);
+    assert.equal(memory.ren.presentReplies, 1);
     note(backList, 8);
-    assert.equal(memory.npc_ren.presentReplies, 2);
+    assert.equal(memory.ren.presentReplies, 2);
     note(backList, 9);
     assert.equal(RECENT_REPLIES, 3);
     assert.deepEqual(memory, {}, 'present for three replies: the absence is dropped');
@@ -126,27 +129,22 @@ test('away, back, present for a few replies: the absence is kept, then dropped; 
     // Not present after the return: it waits (the section stays) until they are.
     memory = {};
     note(awayList, 4);
-    note(backList.map(entry => ({ ...entry, here: false })), 5);
-    note(backList.map(entry => ({ ...entry, here: false })), 6);
-    note(backList.map(entry => ({ ...entry, here: false })), 7);
-    assert.equal(memory.npc_ren.presentReplies, 0);
+    for (const head of [5, 6, 7]) note(backList.map(entry => ({ ...entry, here: false })), head);
+    assert.equal(memory.ren.presentReplies, 0);
     assert.ok(keyView(backList, memory, ren, 7).recent);
 
-    // A swipe of the return reply that no longer returns them: the answer decides again.
-    memory = {};
-    note(awayList, 4);
-    note(backList, 6);
-    note(awayList, 6);
-    assert.equal(memory.npc_ren.returnedAt, null);
-    assert.equal(keyView(awayList, memory, ren, 6).recent, null);
-    // The head moved back before the return and the answer is "back": noticed again there.
-    note(backList, 6);
-    note(backList, 5);
-    assert.equal(memory.npc_ren.returnedAt, 5);
-    // Unpinned (not in the answer any more) or no answer at all.
-    assert.deepEqual(observeKeyAway(memory, [], [ren], 8).memory, {});
-    assert.equal(observeKeyAway(memory, null, [ren], 8).changed, false, 'no answer: nothing is touched');
-    assert.equal(observeKeyAway(memory, backList, [ren], null).changed, false, 'no head: nothing is touched');
+    // Away again before they were present for long: a new absence replaces the old.
+    note(awayList.map(entry => ({ ...entry, away: { ...entry.away, doing: 'on a second errand' } })), 8);
+    assert.equal(memory.ren.away.doing, 'on a second errand');
+    assert.equal(memory.ren.returnedAt, null);
+    // Unpinned (not a key person any more), removed, no answer, no head.
+    assert.deepEqual(observeKeyAway(memory, [], 9).memory, {});
+    assert.deepEqual(observeKeyAway(memory, normalizeKeyPeople([{ name: 'Ren', removed: { reason: 'died', on: null } }]), 9).memory, {});
+    assert.equal(observeKeyAway(memory, null, 9).changed, false, 'no answer: nothing is touched');
+    assert.equal(observeKeyAway(memory, backList, null).changed, false, 'no head: nothing is touched');
+    // The slice refuses a memory that is not shaped as the step writes it.
+    assert.ok(validateNpcSlice({ npcs: {}, problems: [], keyAway: { ren: { name: 'Ren' } } }).length);
+    assert.ok(validateNpcSlice({ npcs: {}, problems: [], keyAway: [] }).length);
 });
 
 test('the summary for the narrator is one short line: where, the newest steps, within its limit', () => {
@@ -281,8 +279,8 @@ test('index.js wiring: the card tag, the badge data, the one-time note, the scan
     assert.match(index, /\.\.\.keyAwayScanOptions\(mergeBaseState\)/);
     assert.match(index, /\.\.\.\(awayNotes \? \{ awayNotes \} : \{\}\)/);
     assert.match(index, /const keyViews = dossierKeyViews\(state\);/);
-    const observe = index.slice(index.indexOf('function observeKeyPeople'), index.indexOf('// What the narrator is told once'));
-    assert.doesNotMatch(observe, /persist|setChatState/, 'noticing a return never writes the sidecar by itself');
+    assert.match(index, /storySuiteV2Meters\(\)\?\.keyAwayMemory\?\.\(\)/, 'the memory of the last absence is read from the saved slice');
+    assert.doesNotMatch(index, /state\.keyAway/, 'and Delta\'s own sidecar holds none');
     const targeted = index.slice(index.indexOf('const scoped = job.scope'), index.indexOf('const result = merged.state.npcs.find'));
     assert.doesNotMatch(targeted, /awayNpcIds|keyAwayScanOptions/, 'a reader\'s own Refresh or backfill is not held');
 });
@@ -333,9 +331,10 @@ async function suite({ settings = {}, features = null, modules = [director()] } 
         await host.send('And then?', `The story goes on.${lines.length ? `\n\n<Changes>\n${lines.join('\n')}\n</Changes>` : ''}`);
         await adapter.ticked();
     };
+    const swipe = async () => { await host.swipe('Another way.'); await adapter.ticked(); };
     const keys = async (list, minutes) => { await host.sdk.command('zz.keys', { list, ...(minutes === undefined ? {} : { minutes }) }); };
     const meters = name => host.sdk.query('npc.meters', { name });
-    return { host, adapter, say, keys, meters };
+    return { host, adapter, say, swipe, keys, meters };
 }
 
 test('the adapter reads the key people from Story Director; with none to ask (or no such query) it answers null', async () => {
@@ -380,6 +379,58 @@ test('while a key person is away their meters do not drift and their stage is no
     await s.keys(undefined, 21 * 1440);
     await s.say();
     assert.equal(s.meters('Ren').meters.mood, 11, 'once back, the drift resumes with the next story day');
+});
+
+test('the memory of the last absence is in the saved slice: the step writes it, a swipe does not count twice, a reload keeps it and its one-time note', async () => {
+    const DAY = 1440;
+    const away = { doing: 'scouting the north road', since: 11 * DAY, back: 17 * DAY, steps: [{ date: 13 * DAY, text: 'reached Wolfmere Outpost' }] };
+    const s = await suite();
+    const memory = () => s.host.sdk.query('npc.keyAway', {});
+    const head = () => s.host.store.headIndex();
+    const viewOf = () => keyView(s.adapter.keyPeople(), s.adapter.keyAwayMemory(), { name: 'Ren' }, head());
+    assert.deepEqual(memory(), {}, 'nothing until someone has been away');
+
+    await s.keys([key('Ren', { here: false, away })]);
+    await s.say();
+    assert.deepEqual(Object.keys(memory()), ['ren']);
+    assert.deepEqual(memory().ren.away, { doing: 'scouting the north road', since: 'January 12', back: 'January 18', steps: [{ date: 'January 14', text: 'reached Wolfmere Outpost' }] }, 'dates written on the calendar when the step ran');
+    assert.equal(memory().ren.returnedAt, null);
+    assert.deepEqual(validateNpcSlice(s.host.head().domains.npc), []);
+
+    // The reply that brings him back.
+    await s.keys([key('Ren', { here: true })]);
+    await s.say();
+    const returnedAt = head();
+    assert.equal(memory().ren.returnedAt, returnedAt);
+    assert.equal(memory().ren.presentReplies, 0);
+    assert.equal(viewOf().recent.justReturned, true);
+
+    // A swipe of that reply runs the step again from the reply before it: the same memory, never counted twice.
+    await s.swipe();
+    assert.equal(head(), returnedAt);
+    assert.equal(memory().ren.returnedAt, returnedAt);
+    assert.equal(memory().ren.presentReplies, 0);
+
+    // A reload between the return and the next reply (the host rebuilds its state from the chat): the view and the note are still there.
+    await s.host.turn.onChatChanged();
+    assert.equal(head(), returnedAt);
+    assert.equal(memory().ren.returnedAt, returnedAt, 'the memory came back with the replies');
+    const after = viewOf();
+    assert.equal(after.away, null);
+    assert.equal(after.recent.justReturned, true, 'the narrator is still told at the next generation');
+    assert.equal(returnNote(after.recent.away), 'WHILE AWAY, NOW BACK (January 12 – January 18): scouting the north road; January 14: reached Wolfmere Outpost');
+    assert.equal(keyAwayHtml(keyProjection(after)).includes('January 14'), true, 'and the dossier still shows the steps');
+
+    // The next reply: no longer the return; present replies count once each, and a swipe does not add one.
+    await s.say();
+    assert.equal(viewOf().recent.justReturned, false);
+    assert.equal(memory().ren.presentReplies, 1);
+    await s.swipe();
+    assert.equal(memory().ren.presentReplies, 1);
+    await s.say();
+    await s.say();
+    assert.deepEqual(memory(), {}, 'present for three replies: dropped');
+    assert.equal(viewOf().recent, null);
 });
 
 test('with no Story Director the per-reply step is exactly as before (nobody is held)', async () => {
@@ -449,7 +500,12 @@ test('runtime: the Key tag on the card, the badge data, the summary once at the 
 
         // Back: the reply that brings her back; the next generation is told once, and not the one after.
         mockState.quietResponder = async () => JSON.stringify({ npcs: [row('Yunyun')] });
-        await turn('Yunyun walks back through the gate, dusty and tired.', () => { mockState.sdk.keys = [{ name: 'Yunyun', here: true, away: null }]; });
+        // (What the host's per-reply step writes into the slice at the reply that brings her back.)
+        await turn('Yunyun walks back through the gate, dusty and tired.', () => {
+            mockState.sdk.keys = [{ name: 'Yunyun', here: true, away: null }];
+            mockState.sdk.memory = { yunyun: { name: 'Yunyun', aliases: [], returnedAt: mockState.context.chat.length, presentReplies: 0,
+                away: { doing: 'scouting the north road', since: 'Goldwane 12', back: 'Goldwane 18', steps: [{ date: 'Goldwane 14', text: 'reached Wolfmere Outpost' }] } } };
+        });
         await sleep(300);
         out.injectionBack = api.injectionPreview().text;
         out.viewsBack = api.getDossierState().keyViews;
@@ -468,10 +524,11 @@ test('runtime: the Key tag on the card, the badge data, the summary once at the 
     };
     const prelude = async () => {
         const sdk = {
-            registered: [], keys: [],
+            registered: [], keys: [], memory: {},
             registerModule(def) { sdk.registered.push(def); },
             command: async () => ({ ok: true, receipt: { summary: '' } }),
             query: name => (name === 'director.keyPeople' ? structuredClone(sdk.keys)
+                : name === 'npc.keyAway' ? structuredClone(sdk.memory)
                 : (name === 'director.calendar' ? { era: 'CY', months: [{ name: 'Goldwane', days: 30 }, { name: 'Bluewatch', days: 30 }], leapYears: false }
                     : (name === 'scene.present' ? ['Yunyun'] : null))),
             settings: () => ({}),

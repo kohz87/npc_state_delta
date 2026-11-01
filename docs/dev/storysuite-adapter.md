@@ -69,14 +69,17 @@ exists: Delta alone has no key people, and its saved state and prompts are byte-
   Data comes from `getDossierState().keyViews` (by dossier id).
 - **Present cards** (`index.js` `inlineCardHtml`): a "★ Key" tag beside the name; World → People here and Delta's own cards
   share this markup.
-- **The memory of the last absence:** the query says only who is away now, so `state.keyAway` (`observeKeyAway`: by dossier
-  id, `{ away, returnedAt, presentReplies, lastHead }`) keeps the last absence after the return. It is noted in place (never
-  `setChatState` or a save of its own, so it cannot make a scan stale) and travels with the next save; with no key people the
-  key is absent. A swipe or delete that moves the head before the return makes the answer decide again.
+- **The memory of the last absence:** the query says only who is away now, so the npc slice keeps `keyAway` (`observeKeyAway` in
+  `src/npc-meters.js`: by `memoryKey`, `{ name, aliases, away, returnedAt, presentReplies }`) for a key person who has been away,
+  until they have been present for `RECENT_REPLIES` replies. `npc.tick` writes it (asking `director.keyPeople` and
+  `director.calendar` through `ctx.query`, dates written as text), so it is part of each reply's state: it follows swipes and
+  deletes exactly and a reload never loses it. Read through the query `npc.keyAway` (`adapter.keyAwayMemory()`). The slice has no
+  `keyAway` until someone has been away, and the step also runs for key people (`onTurn`) so a return is noticed even with no
+  ladder or drift set up. Delta's own sidecar holds none of it.
 - **Return summary:** at the reply the return was noticed (`head === returnedAt`) the narrator gets `returnNote` (at most 360
   characters: where, the newest steps) appended to that NPC's block in `buildInjection` (option `awayNotes`), counted in the
   injection budget like the block. The next reply that stays drops it; a swipe of the generation repeats it.
-- **Meters** do not change by themselves while away: `npc.tick` asks `director.keyPeople` through `ctx.query` (so a replay
+- **Meters** do not change by themselves while away: the same step asks `director.keyPeople` through `ctx.query` (so a replay
   gives the same answer) and skips drift and the count toward losing a stage for those people. Story lines still move them.
 - **Scans** (`core.js` `mergeScanResult`, option `awayNpcIds`, set by `index.js` `keyAwayScanOptions` for the automatic scan
   only): the away key person's `AWAY_LOCKED_FIELDS` (personality, speech, appearance, mannerisms, behavior profile,

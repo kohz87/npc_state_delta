@@ -10,9 +10,10 @@
 // known); the adapter's `storyMinuteText` writes them as "Goldwane 18" on Story Director's calendar.
 //
 // The answer says only who is away NOW. After the return it is null again, so Delta keeps a small memory of the
-// last absence (`state.keyAway`, by dossier id) to show "While away" until the person has been present for a few
-// replies, and to give the narrator the summary once (see observeKeyAway). Everything here is pure and takes its
-// inputs; index.js, the adapter and core.js call it.
+// last absence in the saved npc slice (`keyAway`, by `memoryKey`; written by npc.tick, src/npc-meters.js observeKeyAway, so it
+// follows swipes, deletes and reloads with the replies) to show "While away" until the person has been present for a few
+// replies, and to give the narrator the summary once. Everything here is pure and takes its inputs; index.js, the
+// adapter and core.js call it.
 
 /** Replies a returned key person must be present for before the dossier drops "While away". */
 export const RECENT_REPLIES = 3;
@@ -27,7 +28,6 @@ const PEOPLE_MAX = 50;
 const STEPS_MAX = 12;
 const TEXT_MAX = 200;
 const DATE_MAX = 40;
-const MEMORY_MAX = 40;
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const clip = (value, max) => String(value ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max).trim();
@@ -144,41 +144,9 @@ export function returnNote(away, max = RETURN_NOTE_CHARS) {
 
 // ---- the memory of the last absence ----
 
-/**
- * Notes the answer into the memory (`state.keyAway`: { [dossier id]: { away, returnedAt, presentReplies,
- * lastHead } }) at reply `head`, and gives back { memory, changed }:
- * - a key person away now: their record is kept as it stands (the newest steps), not yet returned;
- * - one who was away and is not any more: returned at `head`, and each later reply they are `here` counts toward
- *   `RECENT_REPLIES`, after which the record is dropped;
- * - a swipe or delete that takes `head` back before the return clears the return (the answer decides again);
- * - anyone no longer a key person, or no longer a dossier, is dropped.
- * It never reads anything but its arguments.
- */
-export function observeKeyAway(memory, list, npcs, head) {
-    const before = isObject(memory) ? memory : {};
-    if (!Number.isInteger(head) || head < 0 || !Array.isArray(list)) return { memory: before, changed: false };
-    const next = {};
-    for (const npc of Array.isArray(npcs) ? npcs : []) {
-        const id = npc?.id ? String(npc.id) : '';
-        const entry = id ? findKeyEntry(list, npc) : null;
-        if (!id || !isKey(entry)) continue;
-        const had = isObject(before[id]) && before[id].away ? before[id] : null;
-        if (entry.away) {
-            next[id] = { away: entry.away, returnedAt: null, presentReplies: 0, lastHead: head };
-            continue;
-        }
-        if (!had) continue;
-        let returnedAt = Number.isInteger(had.returnedAt) && had.returnedAt <= head ? had.returnedAt : head;
-        let present = Number.isInteger(had.presentReplies) && had.presentReplies > 0 ? had.presentReplies : 0;
-        if (returnedAt === head && had.returnedAt !== head) present = 0;
-        else if (entry.here && Number.isInteger(had.lastHead) && head > had.lastHead) present += 1;
-        present = Math.min(present, Math.max(0, head - returnedAt), RECENT_REPLIES);
-        if (present >= RECENT_REPLIES) continue;
-        next[id] = { away: had.away, returnedAt, presentReplies: present, lastHead: head };
-    }
-    const kept = Object.fromEntries(Object.entries(next).slice(0, MEMORY_MAX));
-    const changed = JSON.stringify(kept) !== JSON.stringify(before);
-    return { memory: changed ? kept : before, changed };
+/** The key of a key person in the slice's `keyAway` (their name as comparison words joined by "-"). */
+export function memoryKey(name) {
+    return labelKey(name).replace(/ /g, '-').slice(0, 60);
 }
 
 /**
@@ -191,8 +159,8 @@ export function keyView(list, memory, npc, head) {
     const entry = findKeyEntry(list, npc);
     if (!isKey(entry)) return null;
     const view = { name: entry.name, here: entry.here, away: entry.away ?? null, recent: null };
-    const kept = isObject(memory) && npc?.id ? memory[String(npc.id)] : null;
-    if (!entry.away && kept?.away && Number.isInteger(kept.returnedAt) && Number.isInteger(head) && head >= kept.returnedAt
+    const kept = isObject(memory) ? memory[memoryKey(entry.name)] : null;
+    if (!entry.away && isObject(kept) && kept.away && Number.isInteger(kept.returnedAt) && Number.isInteger(head) && head >= kept.returnedAt
         && (kept.presentReplies ?? 0) < RECENT_REPLIES) {
         view.recent = { away: kept.away, justReturned: head === kept.returnedAt };
     }
