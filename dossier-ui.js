@@ -329,7 +329,7 @@ export function castFromHtml(cast, npcId = '') {
     if (!cast) return '';
     const heard = cast.lastHeard ? `<b>Last heard:</b> ${escapeHtml(cast.lastHeard.text)}${cast.lastHeard.on ? ` (${escapeHtml(cast.lastHeard.on)})` : ''}` : '';
     const now = !cast.lastHeard && (cast.doing || cast.where)
-        ? `<b>Now:</b> ${escapeHtml([cast.doing, cast.where ? `at ${cast.where}` : ''].filter(Boolean).join(' '))}` : '';
+        ? `<b>Now:</b> ${escapeHtml([cast.doing.replace(/[.\s]+$/, ''), cast.where ? `at ${cast.where}` : ''].filter(Boolean).join(' · '))}` : '';
     const path = cast.goal ? `<b>Their own path:</b> ${escapeHtml(cast.goal)}${cast.routine ? ` <span class="delta-muted">(${escapeHtml(cast.routine)})</span>` : ''}` : '';
     const lines = [path, heard || now].filter(Boolean).map(line => `<div>${line}</div>`).join('');
     return `<section class="delta-cast-from" data-delta-section="cast" aria-label="From the cast">

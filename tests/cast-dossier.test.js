@@ -158,6 +158,7 @@ test('what the dossier shows: the badge, first met, their own path, last heard (
     assert.equal(alone.lastHeard, null);
     assert.equal(alone.goal, 'Find out who opened the weir', 'the starting words the pack gave');
     assert.doesNotMatch(castFromHtml(alone), /Last heard/);
+    assert.match(castFromHtml(castProjection({ ...view, lastHeard: null, doing: 'Walks the road. ', where: 'Hollin\'s Reach' })), /<b>Now:<\/b> Walks the road · at Hollin&#039;s Reach|<b>Now:<\/b> Walks the road · at Hollin's Reach/, 'no lastHeard: what they do now and where, no stray full stop');
     assert.equal(castView(createNpcRecord('Mira', []), p), null, 'any other dossier shows none of it');
     assert.equal(castFromHtml(null), '');
     // The projection carries it to the view by dossier id.
