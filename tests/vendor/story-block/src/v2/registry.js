@@ -27,7 +27,7 @@
 import { compareVersions, formatVersion, parseRange, parseVersion, satisfies } from './packs/version.js';
 import { HOST_DOMAIN } from './timeline/gate.js';
 import { SLUG } from './packs/limits.js';
-import { NEEDS_HINT, affectsStatic, featureOf, featureProblems, featureWarnings } from './features.js';
+import { NEEDS_HINT, affectsStatic, featureOf, featureProblems, featureWarnings, presetsOf } from './features.js';
 
 // Commands the registry makes itself, so the command bus can run them like any other:
 // `capture.<kind>` runs the owner's capture.apply on a change line (turn.js), and
@@ -315,6 +315,7 @@ export function definitionProblems(def) {
             if (typeof tab.id !== 'string' || !TAB_ID.test(tab.id)) problems.push(`tab ${index + 1} has no usable id`);
             if (typeof tab.title !== 'string' || !tab.title.trim()) problems.push(`tab "${tab.id ?? index + 1}" has no title`);
             if (tab.icon !== undefined && typeof tab.icon !== 'string') problems.push(`tab "${tab.id}" icon is not text`);
+            if (tab.bar !== undefined && typeof tab.bar !== 'boolean') problems.push(`tab "${tab.id}" bar is not true or false`);
             fn(tab.render, `tab "${tab.id ?? index + 1}" render`);
         });
     }
@@ -492,6 +493,8 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
             describe: typeof feature.describe === 'string' ? feature.describe.trim() : '',
             default: feature.default !== false,
             prompt: affectsStatic(def, feature.id),
+            // Only a feature that says it carries `presets` (features.js): one that does not follows its default in every preset.
+            ...(feature.presets === undefined ? {} : { presets: presetsOf(feature) }),
             needs: needsOf(feature),
         }))));
         refusals.delete(id);
@@ -518,6 +521,7 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
             describe: feature.describe,
             default: feature.default,
             prompt: feature.prompt,
+            ...(feature.presets === undefined ? {} : { presets: feature.presets }),
             needs,
             available,
             why: available ? '' : heldOwner ? lifecycle(owner).reason : needs.why,
@@ -537,14 +541,25 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
     const availableFor = needs => needs.kinds.every(kind => canonical.has(kind.toLowerCase()) && !held(owners.kind.get(canonical.get(kind.toLowerCase()))))
         && needs.commands.every(type => there(owners.command, type))
         && needs.queries.every(name => there(owners.query, name));
+    // What a read would say with other switches (`withFeatures`): feature id → true | false, set only while that call runs.
+    let asIf = null;
     // On: the reader's choice when there is one, else the feature's default; an id no module declares, or
     // a feature whose `needs` no module meets, is off.
     function featureOn(id) {
         const decl = featureDecl(id);
         if (!decl || !decl.available) return false;
+        if (asIf?.has(decl.id)) return asIf.get(decl.id) === true;
         let value;
         try { value = featureValue(decl.id); } catch { value = undefined; }
         return typeof value === 'boolean' ? value : decl.default;
+    }
+    // Runs `read` (synchronously) as if the features in `switches` (a Map or an object, id → true | false) had those states and the
+    // rest were as they are: what a preset would send, counted without switching anything. Nothing is stored or told, and the
+    // reader's choices are back the moment `read` returns (or throws). An unavailable feature stays off, as it does in a real read.
+    function withFeatures(switches, read) {
+        const before = asIf;
+        asIf = switches instanceof Map ? switches : new Map(Object.entries(isObject(switches) ? switches : {}));
+        try { return read(); } finally { asIf = before; }
     }
     // Is this item (a kind spec, a command, a hook, a tab…) under a feature that is off?
     const off = item => {
@@ -674,7 +689,10 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         // `enabled: false` (a kind of an API not in use, MODULES / LIFECYCLE "Deferred domains"): acts as if it were not declared, so a
         // line of it is told as an unknown kind, exactly as in a host that never had the kind.
         if (spec.enabled === false) return null;
-        return { moduleId: def.id, kind, grammar: grammarOf(spec), apply: def.capture.apply, feature: featureOf(spec), off: off(spec), display: displayOf(spec) };
+        // `after: ['place', 'mount']` (a kind that reads what other kinds' lines of the same reply set up, such as Story Director's trip): its
+        // lines run after the reply's lines of those kinds, whatever order the narrator wrote them in. Words that are no kind are left out.
+        const after = Array.isArray(spec.after) ? [...new Set(spec.after.map(word => canonical.get(String(word ?? '').toLowerCase())).filter(Boolean))] : [];
+        return { moduleId: def.id, kind, grammar: grammarOf(spec), apply: def.capture.apply, feature: featureOf(spec), off: off(spec), display: displayOf(spec), ...(after.length ? { after } : {}) };
     }
 
     // The feature a command belongs to (a capture.<kind> command: its kind's), or null.
@@ -913,8 +931,8 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         /** The names of the widgets whose feature is off. */
         widgetsOff: () => sorted().flatMap(def => Object.keys(def.widgets ?? {}).sort().filter(name => off(def.widgets[name]))),
         /**
-         * Every declared feature: [{ id, moduleId, moduleName, label, describe, default, prompt, needs,
-         * available, why }], module-id order. `available` is false while what it `needs` is not registered
+         * Every declared feature: [{ id, moduleId, moduleName, label, describe, default, prompt, presets, needs,
+         * available, why }], module-id order (`presets`: false, or { lean?, full? }: features.js). `available` is false while what it `needs` is not registered
          * (it is then off, whatever the reader chose); `why` says so for the overlay.
          */
         features: () => sorted().flatMap(def => (declared.get(def.id) ?? []).map(feature => featureDecl(feature.id))),
@@ -922,6 +940,7 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         feature: featureDecl,
         /** Whether feature `id` is on (the reader's choice, else its default); false for an id no module declares. */
         featureOn,
+        withFeatures,
         /** The feature command `type` belongs to, or null; the bus refuses it with FEATURE_OFF while that is off. */
         commandFeature,
         /**

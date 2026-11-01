@@ -6,15 +6,19 @@
 //
 // The reader's order and hidden screens (Settings → Tabs & Packs → Tabs, view/tab-order.js) come in through
 // `deps.screens.list` (the order) and `deps.inNav` (hidden ones leave the navigation, but a screen opened by
-// name, a fight starting, still opens). A screen opened by name that is not on the bar (an `active` screen that is off now) stays open,
+// name, a fight starting, still opens). `deps.inBar` says which screens sit in the bar; the others are under More (on a wide
+// screen too: the row then ends with More). A screen opened by name that is not on the bar (an `active` screen that is off now) stays open,
 // titled from its definition, until the reader goes to another screen; only then is it dropped from view.
 //
 // The header (UI stage 5a): above the screen, the character and the scene as the `ss.hero` block, from `heroOf(state)`
-// (view/game-header.js); null draws no header. It is drawn on open, on a screen change and on every redraw.
+// (view/game-header.js); null draws no header. It is drawn on open, on a screen change and on every redraw, before the screen, which
+// is told whether the header is up (`settings._heroShown`): Home leaves its Where card out then, as the header has the place, time,
+// weather and people.
 //
 // deps (see common.js) plus:
 //   container   () → element the view is added to (optional, default document.body)
 //   inNav       (screenId) → bool: listed in the navigation (optional, default every screen)
+//   inBar       (screenId) → bool: in the bar, not under More (optional, default every screen)
 //   heroOf      (state) → the props of the header's ss.hero, or null (optional: no header)
 //
 // → { mount(el, screenId, opts) → handle, open(screenId?) → bool, close(), isOpen(), current(), update(), destroy() }
@@ -32,7 +36,7 @@ const PHONE_QUERY = '(max-width: 759.98px)';
 export function createScreenMount(deps) {
     if (typeof deps?.render !== 'function') throw new TypeError('The screen mount needs a render(el, screen, scope) function.');
     const doc = documentOf(deps);
-    let view = null;          // { root, bar, title, body, handle, screenId, byName, layer, heroSlot, hero, phone }
+    let view = null;          // { root, bar, title, body, handle, screenId, byName, layer, heroSlot, hero, heroShown, phone }
 
     function mount(el, screenId, opts = {}) {
         return mountHead(deps, 'screen', el, screenId, opts);
@@ -56,11 +60,20 @@ export function createScreenMount(deps) {
         const items = listed.map(entry => {
             const now = activeNow(entry.screen, state, deps.query);
             return { id: entry.id, label: entry.screen.title ?? entry.id, icon: iconFor(entry.id, entry.screen.icon), alert: now.alert, alertText: now.badge ?? '',
-                moreOnly: entry.id.startsWith('story-block/block/') };
+                moreOnly: typeof deps.inBar === 'function' && !deps.inBar(entry.id) };
         });
         // On a phone an active tab with an alert takes the last pinned slot (the one it displaces goes to More); the wide row keeps the order.
         view.bar.update({ items: row ? items : pinAlerts(items), current: view.screenId, row });
         return entries;
+    }
+
+    // The screen's own settings as the game view gives them: the module's, and `_heroShown` while the header is up.
+    function bodySettings() {
+        const base = deps.settings;
+        return screenId => {
+            const own = typeof base === 'function' ? base(screenId) : base;
+            return { ...(own && typeof own === 'object' ? own : {}), _heroShown: view?.heroShown === true };
+        };
     }
 
     // The header: the widget is made once and updated; no state (no chat) or no `heroOf` takes the header away.
@@ -71,6 +84,7 @@ export function createScreenMount(deps) {
             try { props = deps.heroOf(headState(deps)) ?? null; } catch { props = null; }
         }
         view.heroSlot.hidden = !props;
+        view.heroShown = Boolean(props);
         view.root.classList.toggle('ss-gameview-has-hero', Boolean(props));
         if (!props) {
             view.hero?.destroy?.();
@@ -98,8 +112,8 @@ export function createScreenMount(deps) {
         view.byName = byName && !entry ? screenId : null;
         view.title.textContent = entry?.screen.title ?? deps.screens.resolve(screenId)?.screen?.title ?? screenId;
         view.handle?.unmount();
-        view.handle = mount(view.body, screenId);
         drawHero();
+        view.handle = mount(view.body, screenId, { settings: bodySettings() });
         return true;
     }
 
@@ -153,7 +167,7 @@ export function createScreenMount(deps) {
         // A layer of the shared stack (modal-stack.js): Escape closes the view when no layer above it (the More sheet, a dialog) is open,
         // Tab stays in it, and closing it hands the focus back to what opened it.
         const layer = stackOf(doc).push({ name: 'game view', root, onEscape: () => { close(); return true; } });
-        view = { root, bar: screenBar, title, body, handle: null, screenId: target, layer, off: onHead(deps, update), heroSlot, hero: null, phone, onWidth };
+        view = { root, bar: screenBar, title, body, handle: null, screenId: target, layer, off: onHead(deps, update), heroSlot, hero: null, heroShown: false, phone, onWidth };
         show(target, { byName: named === target });
         // by pointer: the window takes the focus (no ring); by key: the close button (its ring is the keyboard's), one task later:
         // the key that opened the view is still being handled, and its own activation (Enter, Space) would click whatever has the
@@ -187,8 +201,8 @@ export function createScreenMount(deps) {
             return;
         }
         drawBar();
-        view.handle?.update();
         drawHero();
+        view.handle?.update();
     }
 
     return {

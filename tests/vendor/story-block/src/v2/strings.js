@@ -87,8 +87,12 @@ export const STRINGS = deepFreeze({
             rpgShown: { character: 'Shown by the RPG in the Party tab', skills: 'Shown by the RPG in the Party tab', foes: 'Shown by the RPG in the Fight tab',
                 rules: 'Used by the RPG; its text is in Settings → RPG' },
             rpgOption: { character: 'Party tab (RPG)', skills: 'Party tab (RPG)', foes: 'Fight tab (RPG)', rules: 'RPG settings' },
+            // With the RPG off there is no Party or Fight tab: the block is only data, used by the RPG when it is on.
+            rpgIdle: { character: 'Used by the RPG when it is on', skills: 'Used by the RPG when it is on', foes: 'Used by the RPG when it is on',
+                rules: 'Used by the RPG when it is on; its text is in Settings → RPG' },
+            rpgIdleOption: { character: 'The RPG, when it is on', skills: 'The RPG, when it is on', foes: 'The RPG, when it is on', rules: 'RPG settings' },
             shownAs: '{name} is now shown as: {how}.', removed: 'Removed {name}.',
-            note: 'Blocks belong to this story. A block shown as its own tab gets a tab in the Game view, with the name and icon you give it (Edit → Show as). RPG blocks are shown by the RPG\'s own tabs. Block templates you save are in Tabs & Packs, for any story.',
+            note: 'Blocks belong to this story. A block shown as its own tab gets a tab in the Game view, with the name and icon you give it (Edit → Show as). RPG blocks are shown by the RPG\'s own tabs while it is on. Block templates you save are in Tabs & Packs, for any story.',
         },
         newBlock: 'New block',
         editBlock: 'Edit block', fields: 'Fields', addField: 'Add field', name: 'Block name', fieldNameLabel: 'Field name',
@@ -107,7 +111,7 @@ export const STRINGS = deepFreeze({
         templateSaved: 'Template saved.', templateDeleted: 'Template deleted.', templates: 'Block templates', noTemplates: 'No block templates saved.',
         deleteTemplate: 'Delete template', timerUnavailable: 'Timers need Story Director’s clock.',
         newFieldName: 'Field {n}', newFunctionName: '{type} {n}',
-        templateCounts: '{name} · {fields} fields, {buttons} buttons, {rules} rules, {timers} timers',
+        templateCounts: '{name} · {fields}, {buttons}, {rules}, {timers}',
         icons: { 'ph-bookmark-simple': 'Bookmark', 'ph-scroll': 'Scroll', 'ph-heart': 'Heart', 'ph-lightning': 'Lightning',
             'ph-star': 'Star', 'ph-sparkle': 'Sparkle', 'ph-sword': 'Sword', 'ph-skull': 'Skull' },
     },
@@ -170,7 +174,7 @@ export const STRINGS = deepFreeze({
         alertWord: 'alert',
         alertSlot: '{title}, {alert}',
         moreAlert: '{more}, {title}: {alert}',
-        moreHint: 'Pin your {count} in Settings → Tabs',
+        moreHint: 'Choose your bar in Settings → Tabs',
         moreEmpty: 'Every screen is in the bar.',
     },
     panel: {
@@ -294,6 +298,10 @@ export const STRINGS = deepFreeze({
         fail: 'fail',
         storyDice: 'story said {story} / dice said {dice}',
     },
+    // The one card under a reply (view/mounts/card.js): every module's card is a section of it.
+    thisReply: {
+        title: 'This reply',
+    },
     replyCards: {
         later: 'Later',
         open: 'Open',
@@ -317,8 +325,6 @@ export const STRINGS = deepFreeze({
         many: '{first} and {n} more',
         lootOne: '1 thing to pick up',
         lootMany: '{n} things to pick up',
-        editsOne: '1 edit of yours',
-        editsMany: '{n} edits of yours',
         assistedOne: '1 line from the safety net (assist)',
         assistedMany: '{n} lines from the safety net (assist)',
         refusedOne: '1 line not applied',

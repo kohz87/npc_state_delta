@@ -230,17 +230,17 @@ export function createBlockWidgets({ templates, directorOn = () => true, leanRpg
             say(result?.ok ? fill(P.shownAs, { name: definition.name, how: P.show[value] }) : refusalText(result, STRINGS.editable.failed));
         }
 
-        function rowNode(list, row, rpgOn) {
-            const definition = row.pinnedDefinition, managed = rpgOn && ROLES_WITHOUT_TAB.includes(definition.role);
+        function rowNode(list, row) {
+            const definition = row.pinnedDefinition, managed = ROLES_WITHOUT_TAB.includes(definition.role), rpgOn = leanRpgOn();
             const item = h(doc, 'li', 'ss-blockrow ss-glass'); item.setAttribute('data-block-row', row.module);
             const main = h(doc, 'div', 'ss-blockrow-main'); item.appendChild(main);
             const title = h(doc, 'div', 'ss-blockrow-title'); main.appendChild(title);
             title.appendChild(h(doc, 'b', 'ss-blockrow-name', definition.name));
             if (definition.role) title.appendChild(h(doc, 'span', 'ss-pill ss-blockrow-role', `${P.rpg} · ${P.roles[definition.role] ?? definition.role}`));
-            main.appendChild(h(doc, 'small', 'ss-blockrow-meta', metaOf(definition, managed)));
+            main.appendChild(h(doc, 'small', 'ss-blockrow-meta', metaOf(definition, managed, rpgOn)));
             const show = h(doc, 'label', 'ss-blockrow-show'); item.appendChild(show);
             show.appendChild(h(doc, 'span', 'ss-blockrow-show-label', P.showAs));
-            const options = managed ? [{ value: 'rpg', label: P.rpgOption[definition.role] }]
+            const options = managed ? [{ value: 'rpg', label: (rpgOn ? P.rpgOption : P.rpgIdleOption)[definition.role] }]
                 : ['tab', 'card', 'both', 'hidden'].map(value => ({ value, label: P.show[value] }));
             const select = selectField({ doc, field: { type: 'choice', options }, value: managed ? 'rpg' : showValue(definition.show),
                 ariaLabel: fill(P.showAsFor, { name: definition.name }), disabled: managed, onChange: value => setShow(row, value) });
@@ -287,9 +287,10 @@ export function createBlockWidgets({ templates, directorOn = () => true, leanRpg
         function chooserNode(parent, rows) {
             const chooser = h(doc, 'div', 'ss-block-chooser ss-glass-strong'); parent.appendChild(chooser);
             const status = h(doc, 'p', 'ss-block-status'); status.setAttribute('role', 'status');
-            const counts = entry => fill(S.templateCounts, { name: entry.name, fields: Object.keys(entry.definition.state ?? {}).length,
-                buttons: Object.values(entry.definition.kinds ?? {}).filter(kind => kind.ui).length,
-                rules: entry.definition.rules?.length ?? 0, timers: entry.definition.timers?.length ?? 0 });
+            // (one word per count: "1 field, 1 button", never "1 buttons")
+            const counts = entry => fill(S.templateCounts, { name: entry.name, fields: plural(Object.keys(entry.definition.state ?? {}).length, P.fields),
+                buttons: plural(Object.values(entry.definition.kinds ?? {}).filter(kind => kind.ui).length, P.buttons),
+                rules: plural(entry.definition.rules?.length ?? 0, P.rules), timers: plural(entry.definition.timers?.length ?? 0, P.timers) });
             const saved = templates?.list?.() ?? [];
             for (const entry of saved) button(doc, chooser, counts(entry), () => {
                 const draft = editableBlockDraft(entry.definition);
@@ -314,7 +315,7 @@ export function createBlockWidgets({ templates, directorOn = () => true, leanRpg
             const inChooser = Boolean(doc.activeElement?.closest?.('.ss-block-chooser')) && root.contains(doc.activeElement);
             clear();
             if (!chatOpen()) { root.appendChild(h(doc, 'p', 'ss-blocks-empty', P.noChat)); return; }
-            const rpgOn = leanRpgOn(), rows = rowsOf(api).filter(row => row.packId === 'chat');
+            const rows = rowsOf(api).filter(row => row.packId === 'chat');
             if (shared.mode === 'editor' && shared.draft) {
                 editor = renderBlockEditor(root, { draft: shared.draft, used: rows.map(row => row.module), directorOn: directorOn(),
                     onCancel: () => { shared.mode = 'list'; shared.draft = null; shared.module = null; tell(); },
@@ -347,14 +348,14 @@ export function createBlockWidgets({ templates, directorOn = () => true, leanRpg
                 // (the RPG templates arrive after the chooser opens and the page is drawn again: the focus stays in the chooser)
                 if (inChooser) root.querySelector('.ss-block-chooser button')?.focus?.();
             }
-            const listed = rows.filter(row => !(rpgOn && ROLES_WITHOUT_TAB.includes(row.pinnedDefinition.role)));
+            const listed = rows.filter(row => !ROLES_WITHOUT_TAB.includes(row.pinnedDefinition.role));
             const tabs = listed.filter(row => row.pinnedDefinition.show?.tab).length, cards = listed.filter(row => row.pinnedDefinition.show?.card).length;
             const where = [tabs ? plural(tabs, P.tab) : '', cards ? plural(cards, P.card) : ''].filter(Boolean).join(', ') || P.nothingShown;
             if (rows.length) head.appendChild(h(doc, 'p', 'ss-blocks-count', fill(P.count, { blocks: plural(rows.length, P.block), where })));
             if (shared.note) { message = shared.note; shared.note = ''; }
             const status = h(doc, 'p', 'ss-block-status', message); status.setAttribute('role', 'status'); root.appendChild(status);
             if (!rows.length) root.appendChild(h(doc, 'p', 'ss-blocks-empty', P.none));
-            else { const list = h(doc, 'ul', 'ss-blockrows'); root.appendChild(list); for (const row of rows) rowNode(list, row, rpgOn); }
+            else { const list = h(doc, 'ul', 'ss-blockrows'); root.appendChild(list); for (const row of rows) rowNode(list, row); }
             root.appendChild(h(doc, 'p', 'ss-block-hint ss-blocks-note', P.note));
             applyFilter();
         }
@@ -386,8 +387,8 @@ export function createBlockWidgets({ templates, directorOn = () => true, leanRpg
     }
 
     // The words under a block's name: how many fields, buttons and rules it has, and where it shows.
-    function metaOf(definition, managed) {
-        if (managed) return P.rpgShown[definition.role];
+    function metaOf(definition, managed, rpgOn = true) {
+        if (managed) return (rpgOn ? P.rpgShown : P.rpgIdle)[definition.role];
         const buttons = Object.values(definition.kinds ?? {}).filter(kind => kind.ui).length, rules = definition.rules?.length ?? 0, timers = definition.timers?.length ?? 0;
         const show = definition.show, shown = [];
         if (show?.tab) shown.push(fill(P.whereTab, { name: show.tabName, icon: String(S.icons[show.icon] ?? '').toLowerCase() || show.icon }));

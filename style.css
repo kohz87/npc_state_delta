@@ -601,6 +601,13 @@ body.npc-state-delta-portrait-generator-open { overflow: hidden !important; }
 #npc_state_delta_settings .delta-settings-group > summary b { font-size: .95rem; }
 #npc_state_delta_settings .delta-settings-group > summary small { opacity: .55; font-weight: 400; }
 #npc_state_delta_settings .delta-settings-group-body { display: grid; gap: 0; padding: 4px 12px 12px; min-width: 0; }
+#npc_state_delta_settings .delta-settings-group[hidden] { display: none; }
+/* The Expert fold holds the rarely needed groups, each still a fold of its own. */
+#npc_state_delta_settings .delta-settings-group-body > .delta-expert-note { margin: 6px 0 8px; }
+#npc_state_delta_settings .delta-settings-group-body > .delta-settings-group + .delta-settings-group { margin-top: 8px; }
+/* The meter presets block sits in the "Meter presets" fold: the fold's title says what its own heading said. */
+#npc_state_delta_settings .delta-settings-slot .npc-state-delta-v2-presets-head { display: none; }
+#npc_state_delta_settings .delta-settings-slot .npc-state-delta-v2-presets { margin-bottom: 0; }
 #npc_state_delta_settings .delta-settings-subhead { margin: 14px 0 2px; font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; color: var(--npc-gold); opacity: .85; }
 #npc_state_delta_settings .delta-settings-subhead:first-child { margin-top: 6px; }
 #npc_state_delta_settings .npc-state-delta-suite-warning { display: block; margin: 2px 0 6px; padding: 6px 8px; border-left: 3px solid var(--npc-gold); font-weight: 600; }

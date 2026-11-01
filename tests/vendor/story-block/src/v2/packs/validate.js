@@ -12,6 +12,9 @@
 // `capabilities` (the capability names this Story Block has, or null when unknown: then
 // requires.capabilities is checked for form only).
 // `dataModuleDefinitions`: checked normalized dependency definitions for public cross-pack data imports.
+// `readableConditions`: false for a pack already stored (installed.js): an event whose `when` cannot be read is then not an error, so
+// it stays the one invalid event the events part makes of it (as before 2.11.3) and the rest of the pack keeps working. Install, import
+// and the authoring-kit checker leave it true.
 //
 import { YOU_FIELDS, YOU_RANK_FIELDS, YOU_RANK_LABEL_MAX, LEAN_RPG_FIELDS, LEAN_RPG_LIMITS, SKILL_SET_FIELDS, SKILL_SET_SKILL_FIELDS, RECORD_LIMITS, CALENDAR_FIELDS, CALENDAR_HOLIDAY_FIELDS, CALENDAR_LIMITS, CALENDAR_START_FIELDS, CHOICE_FIELDS, CONTENT_KINDS, COMMAND, CRAFT_FIELDS, ECONOMY_FIELDS, ECONOMY_LIMITS, CRAFTS_LIMITS, DEFAULT_CRAFTS, METER_FIELDS, METER_LIMITS, METER_PRESET_FIELDS, METER_RESERVED, METER_STAGE_FIELDS, RECIPE_LIMITS, STAT_SUM, DEF_ID, EVENT_FIELDS, EVENT_LIMITS, ITEM_FIELDS, ITEM_KINDS, LIMITS, MOUNTS, PACK_FIELDS, PACK_ID, PLACE_FIELDS, PRESET_FIELDS, RARITIES, ROUTE_FIELDS, SCREEN_FIELDS, SCREEN_ID, SEMVER, SKILL_FIELDS, SKILL_TARGETS, SKILL_TYPES, SLUG, START_FIELDS, STAT_NAME, RANK_FIELDS, RANK_ID, RANKS_LIMITS, TERM_SEPARATORS, ITEM_CARRY, MARKET_FIELDS, MARKET_LIMITS, MARKET_WORD, TERMS_FIELDS, TERMS_LIMITS, TERMS_NUMERALS, TERMS_TIER_FIELDS, WEATHER_FIELDS, WEATHER_LIMITS, WEATHER_SEASON_FIELDS, WEATHER_TABLE_FIELDS } from './limits.js';
 import { byteLength, checkPlain } from './safety.js';
@@ -24,8 +27,9 @@ import { MAX_AT_DEPTH, cssDepth, sheetEscape } from '../view/css.js';
 import { MAX_COINS, MAX_COIN_VALUE, coinsOf } from '../domains/money.js';
 import { validateDataModules, dataModulesPackHash } from '../data-modules/check.js';
 import { STRINGS } from '../strings.js';
+import { compile } from '../events/condition.js';
 
-export const HOST_VERSION = '2.11.0';
+export const HOST_VERSION = '2.12.0';
 
 /** A slug for a display name: "Iron Sword (old)" → "iron-sword-old". */
 export function slugify(name) {
@@ -40,7 +44,7 @@ const fullId = (packId, slug) => `pack.${packId}/${slug}`;
 /**
  * Checks and normalizes one pack. Nothing here touches settings or state.
  */
-export function validatePack(input, { hostVersion = HOST_VERSION, capabilities = null, limits = LIMITS, dataModuleDefinitions = [] } = {}) {
+export function validatePack(input, { hostVersion = HOST_VERSION, capabilities = null, limits = LIMITS, dataModuleDefinitions = [], readableConditions = true } = {}) {
     let value = input;
     if (typeof input === 'string') {
         if (byteLength(input) > limits.packBytes) return fail('TOO_LARGE', '', `The pack is larger than ${Math.round(limits.packBytes / 1024)} KB.`);
@@ -61,7 +65,7 @@ export function validatePack(input, { hostVersion = HOST_VERSION, capabilities =
 
     const errors = [];
     const add = (code, path, message) => { if (errors.length < limits.errors) errors.push({ code, path, message }); };
-    const pack = normalize(raw, { add, hostVersion, capabilities, limits, dataModuleDefinitions });
+    const pack = normalize(raw, { add, hostVersion, capabilities, limits, dataModuleDefinitions, readableConditions });
     if (errors.length) return { ok: false, errors };
     const result = { ok: true, pack, raw };
     if (pack.content.dataModules !== undefined) {
@@ -75,7 +79,7 @@ function fail(code, path, message) {
     return { ok: false, errors: [{ code, path, message }] };
 }
 
-function normalize(raw, { add, hostVersion, capabilities, limits, dataModuleDefinitions }) {
+function normalize(raw, { add, hostVersion, capabilities, limits, dataModuleDefinitions, readableConditions }) {
     for (const key of Object.keys(raw)) if (!PACK_FIELDS.includes(key)) add('UNKNOWN_FIELD', key, `"${key}" is not a pack field (expected ${PACK_FIELDS.join(', ')}).`);
 
     const id = raw.id;
@@ -108,7 +112,7 @@ function normalize(raw, { add, hostVersion, capabilities, limits, dataModuleDefi
     const crafts = given.crafts === undefined ? null : checkCrafts(given.crafts, packId, add);
     const craftIds = new Set([...DEFAULT_CRAFTS.map(craft => craft.craft), ...(crafts ?? []).map(craft => craft.slug)]);
     content.recipes = records(given.recipes, 'recipes', { add, packId, check: (record, path) => checkRecipe(record, path, add, ref, craftIds) });
-    content.events = records(given.events, 'events', { add, packId, check: (record, path) => checkEvent(record, path, add), slugField: 'id' });
+    content.events = records(given.events, 'events', { add, packId, check: (record, path) => checkEvent(record, path, add, readableConditions), slugField: 'id' });
     content.quests = records(given.quests, 'quests', { add, packId, check: openRecord });
     content.races = records(given.races, 'races', { add, packId, check: (record, path, label) => checkChoice(record, path, label, add), slugField: 'id', named: true });
     content.talents = records(given.talents, 'talents', { add, packId, check: (record, path, label) => checkChoice(record, path, label, add), slugField: 'id', named: true });
@@ -577,12 +581,17 @@ function checkMeterPreset(record, path, add) {
 // a change line the story never wrote, a module's state reset, an event firing another. Not for packs.
 const HOST_COMMAND = /^(?:capture\.|module\.)|^events\.fire$/;
 
-function checkEvent(record, path, add) {
+function checkEvent(record, path, add, readableConditions = true) {
     const label = `Event "${record.id}"`;
     let ok = true;
     const say = (field, message, code = 'BAD_RECORD') => { ok = false; add(code, `${path}.${field}`, `${label}: ${message}`); };
     for (const key of Object.keys(record)) if (!EVENT_FIELDS.includes(key)) say(key, `"${key}" is not an event field (expected ${EVENT_FIELDS.join(', ')}).`, 'UNKNOWN_FIELD');
     if (typeof record.when !== 'string' || !record.when.trim() || record.when.length > EVENT_LIMITS.when) say('when', `when must be a condition of 1 to ${EVENT_LIMITS.when} characters.`);
+    else if (readableConditions) {
+        // The parser the events use while the story plays: a condition it cannot read would only fail at play time.
+        const parsed = compile(record.when);
+        if (!parsed.ok) say('when', `the condition can't be read: ${parsed.error.message}${/never closed/.test(parsed.error.message) ? ' A name with an apostrophe in it needs double quotes around it.' : ''}`);
+    }
     if (typeof record.cue !== 'string' || !record.cue.trim() || record.cue.trim().length > EVENT_LIMITS.cue) say('cue', `cue must be text of 1 to ${EVENT_LIMITS.cue} characters.`);
     if (record.once !== undefined && typeof record.once !== 'boolean') say('once', 'once must be true or false.');
     if (record.after !== undefined && (typeof record.after !== 'string' || !SLUG.test(record.after))) say('after', 'after must be the id of another event in this pack.');

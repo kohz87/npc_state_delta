@@ -1,10 +1,12 @@
 // `story-block/home` (SPEC §13.1, §13.4): the landing page of the full-screen game view. A summary of
-// the place, time and people here, the purse and what is worn, and Story Director's quests.
+// the purse and what is worn, and the open quests. The place, the time, the weather and the people here are the game view's
+// header (view/game-header.js), so the Where card is drawn only where there is no header above Home (`settings._heroShown`, which
+// the game view sets while its header is up: no chat yet, or a host with no header).
 // A query whose module is absent answers null; its panel stays hidden. Story Block alone shows
 // the place and the purse. The time is written on the story's calendar (view/clock.js).
 //
-// The quests come from Story Director's `quest.board`: its open quests, then its offers, each with the
-// status line the Director words itself (`status.text`: "Ready to turn in", "Not yet: 2/3 wolves",
+// The quests come from the `quest.board` query (a module that keeps quests answers it): its open quests, then its offers, each with the
+// status line that module words itself (`status.text`: "Ready to turn in", "Not yet: 2/3 wolves",
 // "Offered — say you take it", from `quest.details` where it has one), so Home never works out a
 // quest's state on its own. The first open quest's progress bar is drawn when the board says it has a
 // target (`meter`).
@@ -13,9 +15,10 @@
 // button that runs its onBlocked hook. Without such a module
 // it draws nothing.
 //
-// Last, the save points (MODULES §F93): the host's `story-block.savepoints` widget, which draws nothing
-// while that feature is off, and the Mounts card (`mounts.list`, `mounts.pace`: src/v2/domains/mounts.js), which
-// shows only while the party has a mount. Packs are not on Home: Settings → Tabs & Packs has the import.
+// The Mounts card (`mounts.list`, `mounts.pace`: src/v2/domains/mounts.js) shows only while the party has a mount. Last, the save points
+// (MODULES §F93): the host's `story-block.savepoints` widget, which draws nothing while that feature is off, as one slim row across the
+// foot of the page. The cards size to their content and sit three to a row on a wide screen, one to a row on a phone. Packs are not on
+// Home: Settings → Tabs & Packs has the import.
 
 import { STRINGS, html, jsonText } from '../strings.js';
 import { BASE_CSS } from './style.js';
@@ -40,7 +43,7 @@ const TEMPLATE = `
   <ss-widget name="${RPG_START_WIDGET}" class="rpg-start-slot"></ss-widget>
   <ss-widget name="${READY_HINT_WIDGET}" class="ready-slot"></ss-widget>
 
-  <section class="panel scene">
+  <section class="panel scene" data-if="settings._heroShown != true">
     <h4 class="ss-section-label"><i class="fa-solid fa-location-dot" aria-hidden="true"></i> ${html(S.where)}</h4>
     <p class="place"><b data-if="q.place.name">{{ q.place.name }}</b><span class="muted" data-if="!q.place.name">${html(S.unnamed)}</span><span class="muted" data-if="q.place.region"> · {{ q.place.region }}</span><ss-widget name="ss.editable" data-props='{"value":"{{ q.place.name }}","displayValue":false,"options":{{ q.places }},"label":"${jsonText(STRINGS.scene.editPlace)}","command":"scene.place","valueKey":"name","payload":{"with":{{ q.present }}}}'></ss-widget></p>
     <p class="time muted" data-if="state.director.time.minutes != null"><i class="fa-regular fa-clock" aria-hidden="true"></i> {{ fmt.time(state.director.time.minutes) }}</p>
@@ -80,8 +83,6 @@ const TEMPLATE = `
     <ss-widget name="${SHOW_MORE_WIDGET}" class="more-slot" data-props='{"target":".sb-cap","key":"story-block/home:quests","more":"${jsonText(STRINGS.showMore.more)}","less":"${jsonText(STRINGS.showMore.less)}"}'></ss-widget>
   </section>
 
-  <ss-widget name="${SAVEPOINTS_WIDGET}" class="saves-slot"></ss-widget>
-
   <section class="panel mounts" data-if="len(q.mounts) > 0">
     <h4 class="ss-section-label"><i class="fa-solid fa-horse" aria-hidden="true"></i> ${html(M.title)}</h4>
     <ul class="mount-list">
@@ -103,12 +104,15 @@ const TEMPLATE = `
   </section>
 
   <ss-widget name="story-block.block-cards" class="blocks-slot"></ss-widget>
+
+  <ss-widget name="${SAVEPOINTS_WIDGET}" class="saves-slot"></ss-widget>
 </div>`;
 
 const CSS = `${BASE_CSS}
-.home { display: grid; gap: var(--sb-gap); grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: stretch; }
-/* One height per row: every card takes the row's height (the tallest), its content top-aligned. A card's long list is capped
-   (.sb-cap, two normal cards tall, no scrollbar) with its own toggle below it, so one long card does not stretch the row. */
+.home { display: grid; gap: var(--sb-gap); grid-template-columns: minmax(0, 1fr); align-items: start; }
+/* A wide screen: three cards to a row, each as tall as its own content (no empty stretched bodies). A phone: one column. A card's long
+   list is capped (.sb-cap, two normal cards tall, no scrollbar) with its own toggle below it. */
+@media (min-width: 760px) { .home { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .panel { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .home > ss-widget { display: flex; flex-direction: column; min-width: 0; }
 .home > ss-widget > .panel { flex: 1 1 auto; }
@@ -132,6 +136,8 @@ const CSS = `${BASE_CSS}
 .worn { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .progress { margin-top: 4px; }
 .saves-slot:empty { display: none; }
+.saves-slot, .blocks-slot { grid-column: 1 / -1; }
+.blocks-slot .ss-w-blocks-list { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); align-items: start; }
 /* The Mounts card: one row per mount (an icon, the name with its pencil and what it is, a pace pill), then what the party travels at. */
 .mount-list { display: grid; gap: 8px; margin-top: 4px; }
 .mount { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; min-width: 0; }
@@ -153,14 +159,16 @@ const CSS = `${BASE_CSS}
 .sb-ready-item { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; justify-content: space-between; }
 .sb-ready-reason { flex: 1 1 14em; min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .sb-ready-go { border-color: var(--sb-accent); font-weight: 600; }
-.saves { display: grid; gap: 6px; align-content: start; }
-.saves > h4 { margin: 0; }
-.saves > .ss-button { justify-self: start; }
+/* The save points are one slim row across the page: the label, the Save point button and the words (or the list under them). */
+.saves { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding-top: 10px; padding-bottom: 10px; }
+.saves > h4, .saves > p { margin: 0; }
+.saves > h4 { flex: 0 0 auto; }
+.saves > .sb-save-form, .saves > .sb-save-list, .saves > .sb-save-status { flex: 1 1 100%; }
 .sb-save-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .sb-save-name { flex: 1 1 10em; min-width: 0; }
 .sb-save-list { display: grid; gap: 4px; }
 .sb-save-list.sb-cap[data-capped="true"] { max-height: 15em; overflow: hidden; }
-.saves > .sb-show-more { justify-self: start; }
+.saves > .sb-show-more { flex: 0 0 auto; }
 .sb-save-point { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; justify-content: space-between; }
 .sb-save-info { display: grid; min-width: 0; }
 .sb-save-label { overflow-wrap: anywhere; }
@@ -173,6 +181,7 @@ export const homeScreen = Object.freeze({
     id: HOME_SCREEN_ID,
     title: S.title,
     icon: 'fa-house',
+    bar: true,
     mounts: Object.freeze(['screen']),
     data: Object.freeze({
         place: Object.freeze({ query: 'scene.place' }),
@@ -182,7 +191,7 @@ export const homeScreen = Object.freeze({
         items: Object.freeze({ query: 'inventory.items' }),
         wallet: Object.freeze({ query: 'inventory.wallet', args: Object.freeze({ owner: 'party' }) }),
         currency: Object.freeze({ query: 'inventory.currency' }),
-        board: Object.freeze({ query: 'quest.board' }),                               // Story Director
+        board: Object.freeze({ query: 'quest.board' }),                               // a module that keeps quests
         mounts: Object.freeze({ query: 'mounts.list' }),
         pace: Object.freeze({ query: 'mounts.pace' }),
     }),

@@ -213,7 +213,7 @@ function fakeDelta() {
     return delta;
 }
 
-function setup({ hostValue, delta = fakeDelta(), loadEmptyCast } = {}) {
+function setup({ hostValue, delta = fakeDelta(), loadEmptyCast, calendarOwn } = {}) {
     const doc = fakeDocument();
     const dom = drawerWithPanel(doc);
     const timers = fakeTimers();
@@ -222,12 +222,13 @@ function setup({ hostValue, delta = fakeDelta(), loadEmptyCast } = {}) {
     const adapter = createStorySuiteV2Adapter({
         suiteApi: delta.suiteApi,
         delta: () => delta.api,
-        version: '1.3.0',
+        version: '1.4.0',
         host: () => box.host,
         doc,
         timers,
         logger: { warn: (...args) => warnings.push(args) },
         ...(loadEmptyCast ? { loadEmptyCast } : {}),
+        ...(calendarOwn ? { calendarOwn } : {}),
     });
     return { doc, dom, timers, warnings, box, adapter, delta };
 }
@@ -278,14 +279,14 @@ test('registers module npc-state-delta once, with the npc domain, its queries an
     assert.equal(sdk.registered.length, 1);
     assert.equal(def.id, MODULE_ID);
     assert.equal(def.name, 'NPC State Delta');
-    assert.equal(def.version, '1.3.0');
+    assert.equal(def.version, '1.4.0');
     assert.deepEqual(Object.keys(def.domains), ['npc'], 'one small domain: the NPC meters (F81, F90)');
     assert.deepEqual(Object.keys(def.queries).sort(), ['npc.cast', 'npc.dossier', 'npc.identity', 'npc.known', 'npc.meters', 'npc.next', 'npc.portrait', 'npc.present', 'npc.socialModifier']);
     assert.deepEqual([...QUERY_NAMES].sort(), Object.keys(def.queries).sort());
     assert.deepEqual(Object.keys(def.commands).sort(), ['npc.adjust', 'npc.milestone', 'npc.refresh', 'npc.set', 'npc.tick']);
     assert.deepEqual(Object.keys(def.capture.kinds), ['npc', 'milestone']);
     assert.equal(def.capture.kinds.milestone.feature, 'npc-state-delta.stages', 'the milestone kind belongs to the stages feature');
-    assert.deepEqual(def.features.map(feature => [feature.id, feature.default]), [['npc-state-delta.stages', true], ['npc-state-delta.drift', false], ['npc-state-delta.presets', true], ['npc-state-delta.social', true]]);
+    assert.deepEqual(def.features.map(feature => [feature.id, feature.default]), [['npc-state-delta.stages', true], ['npc-state-delta.drift', false], ['npc-state-delta.presets', true], ['npc-state-delta.social', true], ['npc-state-delta.scan-every-reply', true]]);
     assert.equal(typeof def.context.static, 'function', 'one static line for the npc kind; Delta keeps its own prompt keys besides');
     assert.equal(typeof def.settings.section, 'function');
     assert.deepEqual(Object.keys(def.settings.schema), ['changeCap', 'customMeters', 'stages', 'ladder', 'conflictAt', 'demoteAfter', 'socialScale', 'socialCap']);
@@ -788,4 +789,67 @@ test('index.js starts the adapter once at startup through an optional import', (
     assert.equal(calls.length, 1);
     assert.match(index, /startStorySuiteV2\(\{ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION, headReply: latestReplyIndex, calendarOwn: \(\) => normalizeSourceOfTruth\(getSettings\(\)\.sourceOfTruth\)\.calendar === 'mine' \}\)/);
     assert.equal(/from '\.\/src\/storysuite-v2\.js'/.test(index), false, 'no static import: a copy without src/ still loads');
+});
+
+// ---- UI cleanup (1 Nov): the meter presets fold, the scan switch, the Expert note ----
+
+test('the meter presets block goes into Delta\'s "Meter presets" fold, which shows only while it holds the block', async () => {
+    const { def, dom, doc } = await hosted();
+    const slot = doc.createElement('div');
+    const group = doc.createElement('details');
+    group.hidden = true;
+    slot.closest = selector => (selector === '[data-delta-settings-group]' ? group : null);
+    slot.replaceChildren = (...nodes) => { slot.held = nodes; };
+    dom.panel.querySelector = selector => (selector === '[data-delta-settings-slot="meter-presets"]' ? slot : null);
+    dom.panel.before = () => {};
+    dom.panel.ownerDocument = doc;
+    const el = doc.body.appendChild(doc.createElement('section'));
+    const cleanup = def.settings.section(el, { values: () => ({}), set() {} });
+    assert.equal(slot.held.length, 1, 'the presets block is in the fold');
+    assert.equal(slot.held[0]._cls, 'npc-state-delta-v2-presets');
+    assert.equal(group.hidden, false, 'the fold shows');
+    assert.equal(el.children.length, 1, 'only the panel is in the section: no block above it');
+    assert.equal(el.children[0], dom.panel);
+    cleanup();
+    assert.deepEqual(slot.held, [], 'the block leaves the fold when the panel goes home');
+    assert.equal(group.hidden, true, 'the fold hides again');
+});
+
+test('the block names itself with a head the fold hides, and the drawer panel keeps the old top block when it has no fold', async () => {
+    const { def, dom, doc } = await hosted();
+    dom.panel.querySelector = () => null;
+    dom.panel.before = () => {};
+    const el = doc.body.appendChild(doc.createElement('section'));
+    def.settings.section(el, { values: () => ({}), set() {} });
+    assert.equal(el.children[0]._cls, 'npc-state-delta-v2-presets', 'a panel without the slot gets the block above it');
+    assert.equal(el.children[0].children[0]._cls, 'npc-state-delta-v2-presets-head');
+    assert.equal(el.children[0].children[0].textContent, 'Meter presets');
+});
+
+test('scanEveryReply follows the feature switch (on by default); calendarLink says where the calendar stands', async () => {
+    const switches = {};
+    const sdk = fakeSdk();
+    let calendar;
+    sdk.feature = id => switches[id];
+    sdk.query = name => {
+        if (name === 'director.calendar') {
+            if (calendar === 'throw') throw new Error('unknown query');
+            return calendar;
+        }
+        return undefined;
+    };
+    let own = false;
+    const { adapter } = await hosted({ sdk, calendarOwn: () => own });
+    assert.equal(adapter.scanEveryReply(), true, 'no answer from the host: the default (on)');
+    switches['npc-state-delta.scan-every-reply'] = false;
+    assert.equal(adapter.scanEveryReply(), false);
+    switches['npc-state-delta.scan-every-reply'] = true;
+    assert.equal(adapter.scanEveryReply(), true);
+
+    calendar = 'throw';
+    assert.equal(adapter.calendarLink(), 'none', 'no Story Director: its query is unknown');
+    calendar = { months: [{ name: 'Redleaf', days: 30 }] };
+    assert.equal(adapter.calendarLink(), 'story-director');
+    own = true;
+    assert.equal(adapter.calendarLink(), 'own', 'the reader keeps the calendar in Delta');
 });

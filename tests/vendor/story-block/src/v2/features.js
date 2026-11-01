@@ -17,7 +17,12 @@
 
 export const FEATURE_OFF = 'FEATURE_OFF';
 // The fields a feature entry has; any other is a newer module's, warned and ignored.
-export const FEATURE_KEYS = Object.freeze(['id', 'label', 'describe', 'default', 'prompt', 'needs']);
+export const FEATURE_KEYS = Object.freeze(['id', 'label', 'describe', 'default', 'prompt', 'needs', 'presets']);
+// "How much to track" (Settings → Features): a feature entry may carry `presets: { lean?: boolean, full?: boolean }`.
+// Standard is the feature's own `default`; a preset key it leaves out is its `default` too; `presets: false` keeps the
+// feature out of presets (a preset never changes it). A module with no `presets` follows `default` in all three.
+export const PRESET_NAMES = Object.freeze(['lean', 'standard', 'full']);
+export const PRESET_KEYS = Object.freeze(['lean', 'full']);
 // `needs`: what another module must register for the feature to work at all.
 export const NEEDS_KEYS = Object.freeze(['kinds', 'commands', 'queries', 'why']);
 export const WHY_MAX = 120;
@@ -118,6 +123,11 @@ export function featureProblems(def) {
             else if (typeof feature.describe === 'string' && feature.describe.length > DESCRIBE_MAX) problems.push(`${name} describe is longer than ${DESCRIBE_MAX} characters`);
             if (feature.default !== undefined && typeof feature.default !== 'boolean') problems.push(`${name} default is not true or false`);
             if (feature.prompt !== undefined && typeof feature.prompt !== 'boolean') problems.push(`${name} prompt is not true or false`);
+            if (feature.presets !== undefined && feature.presets !== false) {
+                const presets = feature.presets;
+                if (!isObject(presets)) problems.push(`${name} presets is not false or an object (like { lean: false, full: true })`);
+                else for (const key of PRESET_KEYS) if (presets[key] !== undefined && typeof presets[key] !== 'boolean') problems.push(`${name} presets.${key} is not true or false`);
+            }
             if (feature.needs !== undefined) {
                 const needs = feature.needs;
                 const names = list => Array.isArray(list) && list.every(item => typeof item === 'string' && item.trim());
@@ -144,7 +154,19 @@ export function featureWarnings(def) {
             .map(key => `"${key}" on feature "${feature.id}" is not a feature field this Story Block knows; it is ignored`),
         ...(isObject(feature.needs) ? Object.keys(feature.needs) : []).filter(key => !NEEDS_KEYS.includes(key))
             .map(key => `"needs.${key}" on feature "${feature.id}" is not a needs field this Story Block knows; it is ignored`),
+        ...(isObject(feature.presets) ? Object.keys(feature.presets) : []).filter(key => !PRESET_KEYS.includes(key))
+            .map(key => `"presets.${key}" on feature "${feature.id}" is not a preset this Story Block knows; it is ignored`),
     ]);
+}
+
+/**
+ * A feature's `presets` as the registry keeps it: false (outside presets) or { lean?, full? } with only the booleans.
+ * Anything else (a newer module's shape) is read as no keys: the feature follows its default.
+ */
+export function presetsOf(feature) {
+    if (feature?.presets === false) return false;
+    const given = isObject(feature?.presets) ? feature.presets : {};
+    return Object.freeze(Object.fromEntries(PRESET_KEYS.filter(key => typeof given[key] === 'boolean').map(key => [key, given[key]])));
 }
 
 /**
@@ -159,6 +181,63 @@ export function affectsStatic(def, id) {
     // C3-1: a feature that owns the whole context turns all of it off, its parts' static text too.
     if (featureOf(def?.context) === id && (typeof def.context.static === 'function' || parts.some(part => typeof part?.static === 'function'))) return true;
     return parts.some(part => featureOf(part) === id && typeof part?.static === 'function');
+}
+
+// ---- "How much to track": the presets, derived from the switches, never stored -------------------------
+
+/** Is this feature (a `list()` row or a declaration) part of the presets? Only `presets: false` leaves it out. */
+export const inPresets = feature => feature?.presets !== false;
+
+/**
+ * What preset `name` says for a feature: true or false, or null for a feature outside presets. Standard is the feature's
+ * `default`; lean and full are the feature's own key, else its `default`.
+ */
+export function presetValue(feature, name) {
+    if (!inPresets(feature)) return null;
+    const fallback = feature?.default !== false;
+    if (name === 'standard') return fallback;
+    const own = isObject(feature?.presets) ? feature.presets[name] : undefined;
+    return typeof own === 'boolean' ? own : fallback;
+}
+
+// The features a preset speaks for: in presets and available. An unavailable feature (a module it needs is missing, or its
+// module is held back) cannot be switched, so a preset neither sets nor compares it.
+const members = list => (Array.isArray(list) ? list : []).filter(feature => isObject(feature) && inPresets(feature) && feature.available !== false);
+
+/** What preset `name` sets: a Map of feature id → true | false for every feature it speaks for. */
+export function presetSwitches(list, name) {
+    return new Map(members(list).map(feature => [feature.id, presetValue(feature, name)]));
+}
+
+/**
+ * The preset the switches match now: 'lean', 'standard' or 'full' when every feature a preset speaks for is in the state it
+ * says (Standard first when more than one matches), else null (Custom). Derived on every read; nothing is stored. `list`: the
+ * feature store's `list()`.
+ */
+export function selectedPreset(list) {
+    const own = members(list);
+    if (!own.length) return null;
+    return PRESET_NAMES.find(name => own.every(feature => (feature.on === true) === presetValue(feature, name))) ?? null;
+}
+
+/**
+ * Picks preset `name`: every feature it speaks for that is not in the state it says is set through `store.set` (the
+ * ordinary setter: each change is told as any switch is, and stored choices of other features are left alone). A feature
+ * already in the state it says is not written. → { name, changed: [id], prompt: boolean } (`prompt`: some changed feature
+ * changes the fixed prompt, so the reader is told once about the one slower reply), or null for a name that is not a preset.
+ */
+export function applyPreset(store, name) {
+    if (!PRESET_NAMES.includes(name) || typeof store?.list !== 'function' || typeof store?.set !== 'function') return null;
+    const changed = [];
+    let prompt = false;
+    for (const feature of members(store.list())) {
+        const want = presetValue(feature, name);
+        if ((feature.on === true) === want) continue;
+        if (store.set(feature.id, want) === undefined) continue;
+        changed.push(feature.id);
+        if (feature.prompt === true) prompt = true;
+    }
+    return { name, changed, prompt };
 }
 
 /**
@@ -193,20 +272,42 @@ export function createFeatureStore({ root, registry, save = () => {}, legacy = C
         try { onChange?.({ id, on, prompt: registry.feature(id)?.prompt === true }); } catch (error) { console.warn('[Story Suite] a feature listener failed', error); }
         return on;
     }
-    return {
+    const api = {
         stored,
         on: id => registry.featureOn(id),
-        /** Stores the reader's choice; undefined (nothing stored) for an id no module declares. */
+        /**
+         * Stores the reader's choice; undefined (nothing stored) for an id no module declares. A choice that is the feature's own
+         * default is not kept (the stored choice is cleared), so a later change of the default still reaches the reader; the exception
+         * is a feature an older setting still speaks for (`legacy`), which keeps the explicit value.
+         */
         set(id, on) {
-            if (!registry.feature(id)) return undefined;
+            const decl = registry.feature(id);
+            if (!decl) return undefined;
             const before = registry.featureOn(id);
-            choices()[id] = Boolean(on);
+            const old = typeof legacy?.[id] === 'function' ? legacy[id](suite()) : undefined;
+            if (Boolean(on) === (decl.default !== false) && typeof old !== 'boolean') delete choices()[id];
+            else choices()[id] = Boolean(on);
             save();
             // Told only when it is on or off now as it was not before: a feature of a module held back stays off.
             if (before !== Boolean(on) && before !== registry.featureOn(id)) tell(id);
             return Boolean(on);
         },
-        /** Every declared feature with its state: [{ id, moduleId, moduleName, label, describe, default, prompt, needs, available, why, on }]. */
+        /** Picks a preset ("How much to track"): see applyPreset. */
+        applyPreset: name => applyPreset(api, name),
+        /** Every declared feature with its state: [{ id, moduleId, moduleName, label, describe, default, prompt, presets, needs, available, why, on }]. */
         list: () => registry.features().map(feature => ({ ...feature, on: registry.featureOn(feature.id) })),
     };
+    return api;
+}
+
+/**
+ * The feature store as the Settings window sees it: `list()` leaves out the features `hidden(feature)` says to hide. Nothing is
+ * changed: a hidden feature keeps its stored choice and its effect, and `on`, `set` and `stored` are the store's own.
+ */
+export function withHiddenFeatures(store, hidden) {
+    if (!store || typeof store.list !== 'function' || typeof hidden !== 'function') return store ?? null;
+    return Object.freeze({
+        ...store,
+        list: () => store.list().filter(feature => { try { return !hidden(feature); } catch { return false; } }),
+    });
 }

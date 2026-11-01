@@ -130,6 +130,8 @@ function setPlace(ctx, { name, kind, region, with: along }) {
     if (!placeName) ctx.fail('INVALID', 'A place needs a name.');
     const moved = placeName.toLowerCase() !== scene.place.name.toLowerCase();
     const came = companions(ctx, along);
+    // Whoever comes along is added once: replayed after a reply that took them out was deleted, the add is passed over.
+    ctx.unique('scene', '/present');
     scene.place = {
         name: placeName,
         kind: field(ctx, kind, 'kind') ?? (moved ? field(ctx, packPlaceKind(ctx, placeName), 'kind') ?? '' : scene.place.kind),
@@ -157,6 +159,8 @@ function changePresent(ctx, { add, remove }) {
     const added = [];
     const removed = [];
     const missing = [];
+    // Who arrives is there once: replayed after a reply that took them out was deleted, the add is passed over.
+    ctx.unique('scene', '/present');
     for (const raw of nameList(remove)) {
         const name = typeof raw === 'string' ? cleanName(raw) : '';
         if (!name) ctx.fail('INVALID', 'Say who leaves.');
@@ -228,6 +232,8 @@ function setPresent(ctx, value) {
     const scene = ctx.draft('scene');
     const before = scene.present;
     const present = companions(ctx, value);
+    // The names the reader adds are there once: replayed after a reply that took one out was deleted, that add is passed over.
+    ctx.unique('scene', '/present');
     scene.present = present;
     return { summary: fill(E.presentSummary, { names: present.join(', ') || E.nobody }),
         data: { added: present.filter(name => !before.includes(name)), removed: before.filter(name => !present.includes(name)), present: [...present] }, narrate: true };
@@ -260,9 +266,16 @@ function rankLabelIn(query) {
 
 // Puts the given parts into the scene: a part that differs replaces that part only (one op each, so a replay after an earlier
 // reply was deleted keeps the other part as the replies still there left it). Nothing differs: nothing is written.
-function changeYou(ctx, parts) {
-    // Rank comes from a pack: a story with none has no Rank, so a line or a call that names it is refused (nothing saved).
-    if (parts.rank !== undefined && !rankLabelIn(ctx.query)) ctx.fail('INVALID', 'This story has no rank, so "rank" was not used (a pack can give your character one).');
+function changeYou(ctx, parts, { dropRank = false } = {}) {
+    // Rank comes from a pack: a story with none has no Rank, so a call that names it is refused (nothing saved). A story's line keeps
+    // its other parts (`dropRank`): only the rank is left out, with one plain Problem.
+    let problem = '';
+    if (parts.rank !== undefined && !rankLabelIn(ctx.query)) {
+        problem = 'This story has no rank, so "rank" was not used (a pack can give your character one).';
+        if (!dropRank || Object.keys(parts).length < 2) ctx.fail('INVALID', problem);
+        parts = { ...parts };
+        delete parts.rank;
+    }
     const scene = ctx.draft('scene');
     const held = isPlainObject(scene.you) ? scene.you : null;
     const now = part => (typeof held?.[part] === 'string' ? held[part] : '');
@@ -274,9 +287,10 @@ function changeYou(ctx, parts) {
         said.push(parts[part] ? `${part} ${parts[part]}` : `${part} cleared`);
     }
     const data = part => parts[part] === undefined ? now(part) : parts[part];
-    if (!said.length) return { summary: 'Your look stays.', data: { rank: now('rank'), wearing: now('wearing'), condition: now('condition'), same: true }, narrate: false };
+    const told = problem ? { problem } : {};
+    if (!said.length) return { summary: 'Your look stays.', data: { rank: now('rank'), wearing: now('wearing'), condition: now('condition'), same: true }, narrate: false, ...told };
     scene.you = next;
-    return { summary: `Your look: ${said.join('; ')}.`, data: { rank: data('rank'), wearing: data('wearing'), condition: data('condition') }, narrate: false };
+    return { summary: `Your look: ${said.join('; ')}.`, data: { rank: data('rank'), wearing: data('wearing'), condition: data('condition') }, narrate: false, ...told };
 }
 
 function markEdit(ctx, result) {
@@ -388,7 +402,7 @@ export function captureYou(ctx, line) {
     const fallback = `~ you ${[`${line?.name ?? ''}${line?.text ? ` - ${line.text}` : ''}`, ...Object.entries(line?.labels ?? {}).map(([label, value]) => `${label}: ${value}`)].join(' | ')}`;
     const parts = youParts(line?.raw ?? fallback);
     if (!Object.keys(parts).length) ctx.fail('INVALID', 'The you line names no part of your look (write "~ you rank: F-rank | wearing: a grey coat | condition: tired").');
-    return changeYou(ctx, parts);
+    return changeYou(ctx, parts, { dropRank: true });
 }
 
 export const sceneQueries = {

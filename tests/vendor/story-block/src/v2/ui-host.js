@@ -46,7 +46,8 @@ import { TEMPLATES, applyScreenCss, createScreenRenderer } from './view/render-s
 import { formatStoryTime, storyCalendar } from './view/clock.js';
 import { gameHeroProps, readHeroContext } from './view/game-header.js';
 import { HOME_ID, createScreens } from './view/screens.js';
-import { createTabOrderStore, isDefaultChoice, isHiddenNav, moveNav, navKey, orderNav, setNavHidden, visibleNav } from './view/tab-order.js';
+import { slotsForWidth } from './view/screen-bar.js';
+import { createTabOrderStore, isDefaultChoice, isHiddenNav, isInBar, moveNav, navKey, orderNav, setNavHidden, setNavInBar, visibleNav } from './view/tab-order.js';
 import { CHANGES_CARD_SCREEN_ID, HOME_SCREEN_ID, changesSummary, replyCardLines } from './screens/index.js';
 import { mergeRpgLines } from './screens/changes-card.js';
 import { createReplyNotes } from './reply-notes.js';
@@ -56,7 +57,7 @@ import { STRINGS, fill } from './strings.js';
 import { readRecord } from './persist.js';
 import { laterStore, replyEdits, replyRules, scanReplyCards } from './reply-cards.js';
 import { drawReplyCard } from './view/reply-cards-ui.js';
-import { CORE_FEATURE } from './features.js';
+import { CORE_FEATURE, withHiddenFeatures } from './features.js';
 import { createBlockTemplates } from './data-modules/block-templates.js';
 import { createBlockWidgets } from './screens/blocks.js';
 import { ROLES_WITHOUT_TAB } from './lean-rpg/names.js';
@@ -245,15 +246,17 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
     const extraTabs = [];
     // Whether a screen is there now (a screen hidden by default while another is: Scene while World is).
     const navPresent = id => Boolean(screens.resolve(id));
+    // Whether a screen or a module's tab says `bar: true` on its own registration (in the bar until the reader moves it).
+    const barDeclared = id => screens.declaredBar(id) || registry.tabs().some(tab => navKey(tab) === id && tab.bar === true);
 
     // ---- screens from the modules and the packs ----------------------------------------------
     // The screen ids each pack gave at the last sync, by pack: a pack that is disabled, removed or no longer has a screen takes
     // those screens and their stylesheets away, and a replaced pack's new stylesheets replace the old ones.
     const packScreenIds = new Map();
     const rpgOn = () => registry.featureOn?.(CORE_FEATURE.leanRpg) === true;
-    // The pinned blocks' screens. While RPG is on, its character, skills and rules blocks get no tab (the Party tab draws them;
-    // they stay in Settings → Blocks); with the feature off every block with a tab keeps it.
-    const blockPresentation = () => sdk.query('dataModules.presentation', { kind: 'screens', ...(rpgOn() ? { noTab: ROLES_WITHOUT_TAB } : {}) });
+    // The pinned blocks' screens. A block with an RPG role (character, skills, foes, rules) never gets a tab of its own: with the feature on
+    // the Party and Fight tabs draw them, with it off they are only data (they stay in Settings → Blocks, and come back to use when it is on).
+    const blockPresentation = () => sdk.query('dataModules.presentation', { kind: 'screens', noTab: ROLES_WITHOUT_TAB });
     function syncScreens() {
         const byModule = new Map();
         // Every module with screens, even one whose screens are all off just now (its list is then empty).
@@ -501,11 +504,13 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
         query: queryAt,
         changesAt: index => store.changesAt(index),
         opsAt: index => store.opsAt(index),
+        // The card under a reply is one card; its closed line is each card's own summary, Changes first (this hook is the changes card's).
+        first: [CHANGES_CARD_SCREEN_ID],
         summary(screen, { index, state, before, changes }) {
             if (screen?.id !== CHANGES_CARD_SCREEN_ID) return null;
             let currency = null;
             try { currency = sdk.query('inventory.currency'); } catch { currency = null; }
-            return changesSummary({ state, before, changes, currency, refused: notes.refusedAt(index).length, assisted: assistedAt(index).length, lines: cardLines(index, state, changes, before), edits: editsAt(index).length });
+            return changesSummary({ state, before, changes, currency, refused: notes.refusedAt(index).length, assisted: assistedAt(index).length, lines: cardLines(index, state, changes, before) });
         },
         settings: screenId => {
             const owner = String(screenId ?? '').split('/')[0];
@@ -522,6 +527,9 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
             query: (name, args) => queryAt(name, args, state),
             context: readHeroContext(),
             formatTime: minutes => formatStoryTime(minutes, storyCalendar((name, args) => (registry.query(name) ? sdk.query(name, args) : null))),
+            weatherOn: coreOn(CORE_FEATURE.weather),
+            // The RPG keeps its character in a block, not behind `party.pc`: its stage bars are the header's (lean-rpg/view/hero-data.js).
+            rpgLead: rpg?.heroLead?.(state) ?? null,
         }),
         on: (name, fn) => events.on(name, fn),
         carriers,
@@ -531,6 +539,8 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
         eventTypes: ctx.eventTypes ?? ctx.event_types,
         // The game view's navigation leaves out the screens the reader hid (they still open by name).
         inNav: screenId => !isHiddenNav(tabOrder.choice(), screenId, navPresent),
+        // Which screens sit in the bar, as against under More (the reader's choice, else the default bar).
+        inBar: screenId => isInBar(tabOrder.choice(), screenId, barDeclared(screenId)),
         addTab(tab) {
             extraTabs.push(tab);
             return () => {
@@ -571,10 +581,20 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
         for (const mount of ['screen', 'tab']) for (const entry of screens.list(mount)) add(entry.id, entry.screen, mount);
         for (const tab of registry.tabs()) add(navKey(tab), tab, 'tab');
         const choice = tabOrder.choice();
+        // Two tabs with the same name (two blocks, a pack's tab and a module's) are told apart: the later ones are numbered, "Notes (2)".
+        const seen = new Map();
+        const named = title => {
+            const plain = title.replace(/\s+/g, ' ').trim();
+            const count = (seen.get(plain.toLowerCase()) ?? 0) + 1;
+            seen.set(plain.toLowerCase(), count);
+            return count > 1 ? `${plain} (${count})` : title;
+        };
         return orderNav([...rows.values()], choice).map(row => ({
             ...row,
+            title: named(row.title),
             fixed: row.id === HOME_ID,
             hidden: isHiddenNav(choice, row.id, navPresent),
+            inBar: isInBar(choice, row.id, barDeclared(row.id)),
         }));
     }
     // After a change: the tab strip and the game view's navigation follow at once.
@@ -591,6 +611,10 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
         },
         setHidden(id, hidden) {
             tabOrder.set(setNavHidden(tabOrder.choice(), id, hidden));
+            refreshNav();
+        },
+        setInBar(id, inBar) {
+            tabOrder.set(setNavInBar(tabOrder.choice(), id, inBar, barDeclared(id)));
             refreshNav();
         },
         reset() {
@@ -615,10 +639,13 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
     panel.append(panelHead, panelBody);
     doc.body.appendChild(panel);
 
+    // The strip's slots before More: four on a phone's bottom sheet; on the side sheet (from 760px, the game view's line) as many as its width holds.
+    const panelSlots = () => slotsForWidth(Number(panel.clientWidth), { wide: doc.defaultView?.matchMedia?.('(min-width: 760px)')?.matches === true });
     function openPanel() {
         panel.hidden = false;
         doc.body.classList.add('story-suite-sheet-open');
-        if (!tabHost) tabHost = createTabHost(panelBody, { registry: tabSource, view: () => sdk.view(), api: sdk, doc, barHost: panel });
+        if (!tabHost) tabHost = createTabHost(panelBody, { registry: tabSource, view: () => sdk.view(), api: sdk, doc, barHost: panel, slots: panelSlots,
+            inBar: tab => isInBar(tabOrder.choice(), navKey(tab), barDeclared(navKey(tab))) });
         else tabHost.refresh();
     }
     function closePanel() {
@@ -688,7 +715,9 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
     function openSettings(options = null) {
         const fold = typeof options?.fold === 'string' ? options.fold : null;
         overlay = openSettingsWindow({
-            registry, settings, doc, sdk, features: runtime.features ?? null, fold, diagnostics,
+            // The status strip's switch is there only while some screen asks for the strip (a pack's, a module's `hud` mount); its stored
+            // choice stays, and the strip works as before.
+            registry, settings, doc, sdk, features: withHiddenFeatures(runtime.features ?? null, feature => feature.id === CORE_FEATURE.hud && !hudAsked()), fold, diagnostics,
             promptParts, tabs: tabsControl, theme, blockTemplates, blocks: blockWidgets,
             chatOpen: () => Boolean(liveCtx()?.getCurrentChatId?.() ?? liveCtx()?.chatId),
             ...(rpg ? { extraSections: rpg.settingsSections() } : {}),
@@ -749,6 +778,9 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
     // ---- the Extensions drawer and the wand menu -------------------------------------------
     const drawerStatus = el(doc, 'p', 'story-suite-muted');
     let hudCheck = null;
+    let hudRowNode = null;
+    // The strip's switch is shown only while some screen asks for the strip (a `hud` mount); the stored choice stays either way.
+    const hudAsked = () => screens.list('hud').length > 0;
     function drawer() {
         const host = doc.querySelector('#extensions_settings2') ?? doc.querySelector('#extensions_settings');
         if (!host || doc.querySelector(`#${IDS.drawer}`)) return;
@@ -767,6 +799,8 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
         // The status strip's switch (on by default, MODULES §F54).
         const hudRow = el(doc, 'label', 'checkbox_label story-suite-hud-toggle');
         hudRow.title = S.drawer.hudTitle;
+        hudRowNode = hudRow;
+        hudRow.hidden = !hudAsked();
         hudCheck = el(doc, 'input');
         hudCheck.type = 'checkbox';
         hudCheck.setAttribute('type', 'checkbox');
@@ -819,6 +853,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
         if (hudOn(ctx.extensionSettings)) mounts.hud.show();
         else mounts.hud.hide();
         if (hudCheck) hudCheck.checked = hudOn(ctx.extensionSettings);
+        if (hudRowNode) hudRowNode.hidden = !hudAsked();
         mounts.screen.update();
         notes.refreshAll();
         extras.refreshAll();

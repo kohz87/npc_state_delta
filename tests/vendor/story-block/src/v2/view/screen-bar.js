@@ -1,8 +1,11 @@
-// The screen bar (UI stage 7): the navigation between screens, one component for two places: the phone game view and the
+// The screen bar (UI stage 7): the navigation between screens, one component for two places: the game view and the
 // Story panel (desktop and tablet too). On a phone it is a floating glass pill at the foot of the window with five slots:
-// the first four screens in the reader's order (Settings → Tabs), then More. More opens a glass sheet over the bar with the
-// remaining screens in a four-column grid; a tap on the scrim, Escape or a tile closes it, and the focus goes back to More.
-// The wide game view draws every screen in one row instead (`row: true`, no More).
+// the first four screens that are in the bar (an item says `moreOnly` when it is not; Settings → Tabs & Packs), in the reader's
+// order, then More. More opens a glass sheet over the bar with the remaining screens in a four-column grid; a tap on the scrim,
+// Escape or a tile closes it, and the focus goes back to More. The wide game view draws every screen that is in the bar in one
+// row instead (`row: true`), with More at the end while some screen is under it. `pinned` (in the options, or on an update) is the
+// number of slots before More when the bar is not a row: four on a phone's pill; the Story panel gives more when it is wide enough
+// (host-ui.js panelSlots) and the columns follow (an inline grid-template-columns).
 //
 // The current item: the icon and label in the accent colour and a 4px dot under it, no pill or background. While a screen
 // under More is current, More shows that screen's icon and label (More's accessible name says so) and is current itself.
@@ -12,8 +15,9 @@
 //   className: the host's own class for the bar (its placement: mounts.css, host.css), e.g. `ss-gameview-nav`.
 //   onSelect(id): a slot or a tile was chosen (the caller shows that screen, then calls update).
 //   decorate(node, item): optional; called for each slot and each tile on every draw (the Story panel adds its own names).
-//   → { el, update({ items, current, row }), isMoreOpen(), openMore(), closeMore(), destroy() }
-// items: [{ id, label, icon }] in the reader's order; current: the id on screen; row: every item in one row, no More.
+//   → { el, update({ items, current, row, pinned? }), isMoreOpen(), openMore(), closeMore(), destroy() }
+// items: [{ id, label, icon, moreOnly? }] in the reader's order; current: the id on screen; row: every item that is in the bar in one
+// row, More after them (hidden while nothing is under it).
 //
 // Icons: the item's icon is a `ph-*` id from the Phosphor set (view/icons: iconFor gives it, the screen's own icon or the
 // default for the id); the current one draws the solid weight (`ph-x:fill`), the others the line weight. A Font Awesome class
@@ -55,18 +59,35 @@ export function barItems(list) {
 
 /**
  * An active tab with an alert takes the last pinned slot while it has something to show, and the item that held that slot goes to
- * More (the rest keep their order). The first alert only. Items without one are returned as they are.
+ * More (the rest keep their order). The first alert only. Items without one are returned as they are. Only the items that are in
+ * the bar take part: one that is under More (`moreOnly`) keeps its own place in the list.
  */
 export function pinAlerts(items, pinned = PINNED) {
     const list = Array.isArray(items) ? items : [];
-    const at = list.findIndex(item => item.alert === true);
+    const slots = list.map((item, at) => (item.moreOnly ? -1 : at)).filter(at => at >= 0);
+    const at = slots.findIndex(place => list[place].alert === true);
     if (at < 0 || at < pinned - 1) return list;
-    const alert = list[at];
-    const rest = list.filter((_, i) => i !== at);
-    return [...rest.slice(0, pinned - 1), alert, ...rest.slice(pinned - 1)];
+    const order = slots.map(place => list[place]);
+    const [alert] = order.splice(at, 1);
+    order.splice(pinned - 1, 0, alert);
+    const out = list.slice();
+    slots.forEach((place, i) => { out[place] = order[i]; });
+    return out;
 }
 
-/** The reader's order split into the slots (the first `pinned`) and what More holds (the rest). */
+// The Story panel's side sheet (from 760px) is 300 to 420px wide; its bar has 12px of room each side, 6px of padding and a 1px border,
+// and a slot needs about SLOT_WIDTH px for its icon and a short label. A phone's pill, or a panel too narrow, keeps PINNED.
+export const SLOT_WIDTH = 60;
+export const SLOT_MAX = 6;
+const BAR_CHROME = 12 * 2 + 6 * 2 + 2;
+
+/** How many slots before More the Story panel's bar has room for: PINNED unless the panel is a side sheet (`wide`) with room for more. */
+export function slotsForWidth(width, { wide = false } = {}) {
+    if (!wide || !Number.isFinite(width) || width <= 0) return PINNED;
+    return Math.min(SLOT_MAX, Math.max(PINNED, Math.floor((width - BAR_CHROME) / SLOT_WIDTH) - 1));
+}
+
+/** The reader's order split into the slots (the first `pinned` that are in the bar) and what More holds (the rest). */
 export function splitItems(items, pinned = PINNED) {
     const list = Array.isArray(items) ? items : [];
     const visible = list.filter(item => !item.moreOnly).slice(0, pinned);
@@ -114,7 +135,10 @@ function dotNode(doc) {
 export function createScreenBar(doc, host, options = {}) {
     const onSelect = typeof options.onSelect === 'function' ? options.onSelect : () => {};
     const decorate = typeof options.decorate === 'function' ? options.decorate : () => {};
-    const pinnedCount = Number.isInteger(options.pinned) && options.pinned > 0 ? options.pinned : PINNED;
+    const slotCount = value => (Number.isInteger(value) && value > 0 ? value : null);
+    let pinnedCount = slotCount(options.pinned) ?? PINNED;
+    // The hint in the sheet: where the reader chooses what stays in the bar.
+    const moreHint = S.moreHint;
     const id = `ss-screenbar-${(serial += 1)}`;
 
     const nav = h(doc, 'nav', ['ss-screenbar', str(options.className).trim()].filter(Boolean).join(' '));
@@ -138,7 +162,7 @@ export function createScreenBar(doc, host, options = {}) {
     sheet.setAttribute('tabindex', '-1');
     const head = h(doc, 'div', 'ss-screenbar-sheet-head');
     head.append(h(doc, 'span', 'ss-screenbar-sheet-title', S.more), h(doc, 'span', 'ss-screenbar-sheet-rule'));
-    const hint = h(doc, 'span', 'ss-screenbar-sheet-hint', fill(S.moreHint, { count: pinnedCount }));
+    const hint = h(doc, 'span', 'ss-screenbar-sheet-hint', moreHint);
     head.appendChild(hint);
     const grid = h(doc, 'div', 'ss-screenbar-grid');
     const empty = h(doc, 'p', 'ss-screenbar-empty', S.moreEmpty);
@@ -217,23 +241,24 @@ export function createScreenBar(doc, host, options = {}) {
     }
 
     // After a redraw: the focus goes where it was, or to its nearest equivalent: a slot that moved under More gives More; in the
-    // row (where More is hidden and takes no focus) More's held screen, else the current slot, else the first one takes it; a tile
+    // row while More is not drawn (nothing is under it) More's held screen, else the current slot, else the first one takes it; a tile
     // that is gone gives the first tile.
     function restoreFocus(before) {
         if (!before) return;
         // the first slot as drawn (the map holds them in the order they were made, which is not the bar's)
         const firstSlot = [...nav.children].find(node => node !== more && node.getAttribute?.('data-id')) ?? null;
         const firstTile = [...tiles.values()][0] ?? null;
+        const moreDrawn = !more.hidden;
         let target = null;
-        // Where a slot that is gone sends the focus: More on the phone's bar; in the row, which hides More, the current slot or the first.
-        const fallback = row ? (slots.get(current) ?? firstSlot) : more;
+        // Where a slot that is gone sends the focus: More while it is drawn; else the current slot or the first.
+        const fallback = moreDrawn ? more : (slots.get(current) ?? firstSlot);
         if (before.more) {
-            const held = row ? moreHolds(items, current, pinnedCount) : null;
-            target = row ? (slots.get(held?.id ?? current) ?? firstSlot) : more;
+            const held = moreDrawn ? null : moreHolds(items, current, pinnedCount);
+            target = moreDrawn ? more : (slots.get(held?.id ?? current) ?? firstSlot);
         } else if (before.slot) {
             target = slots.get(before.slot) ?? fallback;
         } else if (before.tile) {
-            target = row ? (slots.get(before.tile) ?? fallback) : (open ? (tiles.get(before.tile) ?? firstTile ?? sheet) : more);
+            target = moreDrawn ? (open ? (tiles.get(before.tile) ?? firstTile ?? sheet) : more) : (slots.get(before.tile) ?? fallback);
         } else if (before.sheet) {
             target = open ? sheet : more;
         }
@@ -244,10 +269,20 @@ export function createScreenBar(doc, host, options = {}) {
 
     function draw() {
         const focusBefore = focusedKey();
-        const { pinned, more: rest } = row ? { pinned: items, more: [] } : splitItems(items, pinnedCount);
+        // The row has no room limit: every item that is in the bar is a slot, and More holds the others (it is drawn only then).
+        const { pinned, more: rest } = splitItems(items, row ? Infinity : pinnedCount);
+        // More columns than the pill's five only when more than four slots are drawn (the Story panel on a wide window): one for each slot and More.
+        const wideGrid = !row && pinned.length > PINNED;
+        if (wideGrid) {
+            nav.style?.setProperty?.('grid-template-columns', `repeat(${pinned.length + 1}, minmax(0, 1fr))`);
+            more.style?.setProperty?.('grid-column', String(pinned.length + 1));   // glass.css keeps More in the pill's fifth column
+        } else {
+            nav.style?.removeProperty?.('grid-template-columns');
+            more.style?.removeProperty?.('grid-column');
+        }
         nav.classList.toggle('ss-screenbar-row', row);
-        more.hidden = row;
-        if (row && open) closeMore({ focus: false });
+        more.hidden = row && !rest.length;
+        if (more.hidden && open) closeMore({ focus: false });
 
         // The slots, in order, before More.
         const keep = new Set(pinned.map(item => item.id));
@@ -263,7 +298,7 @@ export function createScreenBar(doc, host, options = {}) {
         }
 
         // More: its own icon and label, unless a screen under it is current.
-        const held = row ? null : moreHolds(items, current, pinnedCount);
+        const held = more.hidden ? null : moreHolds(items, current, row ? Infinity : pinnedCount);
         // An alerting tab under More (the second one: only the first is pinned) gives More the dot.
         const hidden = rest.find(item => item.alert);
         more.replaceChildren(
@@ -308,7 +343,7 @@ export function createScreenBar(doc, host, options = {}) {
     }
 
     function openMore() {
-        if (open || row) return false;
+        if (open || more.hidden) return false;
         open = true;
         more.setAttribute('aria-expanded', 'true');
         scrim.hidden = false;
@@ -345,6 +380,7 @@ export function createScreenBar(doc, host, options = {}) {
             items = barItems(next.items);
             current = typeof next.current === 'string' && next.current ? next.current : null;
             row = next.row === true;
+            pinnedCount = slotCount(next.pinned) ?? slotCount(options.pinned) ?? PINNED;
             draw();
         },
         isMoreOpen: () => open,

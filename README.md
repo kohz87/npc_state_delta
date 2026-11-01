@@ -1,6 +1,6 @@
-# NPC State Delta v1.3.0 ("Delta")
+# NPC State Delta v1.4.0 ("Delta")
 
-> Story Suite 2.0.0. Delta keeps its own application version: **1.3.0**.
+> Story Suite 2.0.0. Delta keeps its own application version: **1.4.0**.
 
 ## What it is
 
@@ -28,7 +28,7 @@ Report bugs in [this repo's Issues](https://github.com/kohz87/npc_state_delta/is
 
 For the old version (Delta for Story Block 1, Story Suite v1), install the `v1` branch of the same repo instead: paste the URL and type `v1` as the branch.
 
-Needs (`requires`): nothing to run on its own. To join the suite it needs Story Block **2.0.0-beta.2 or later**;
+Needs (`requires`): nothing to run on its own. To join the suite it needs Story Block **2.12.0 or later**;
 with an older Story Block 2 Delta keeps working alone, without meters, the Dossiers tab or its Story Suite
 section, and logs a console warning. Before updating an existing install, export a backup from
 **Data & maintenance → Backup / Export**.

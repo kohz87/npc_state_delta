@@ -28,6 +28,8 @@ export const MOUNTS = Object.freeze(['tab', 'screen', 'card', 'hud', 'dialog']);
 export const SOURCES = Object.freeze(['reader', 'card', 'pack', 'module']);
 export const CSS_LIMIT = 64 * 1024;
 
+/** The longest summary template a card screen may give. */
+export const SUMMARY_MAX = 500;
 const SCREEN_ID = /^[A-Za-z0-9][\w.-]*(?:\/[A-Za-z0-9][\w.-]*)*$/;
 const ALIAS = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const REF = /^\$([A-Za-z_][A-Za-z0-9_]*)((?:\.[\w-]+)*)$/;
@@ -50,9 +52,22 @@ export const DEFAULT_ORDER = Object.freeze({
 });
 // Screens hidden by default while another screen is registered, the one that shows the same and more
 // (MODULES §F119): Story Block's Scene (place, kind, region, story time, the people with portraits) while
-// Story Director's World is there, whose Now → Here has all of it. The reader shows it again in Settings →
+// that screen is there, whose own page has all of it. The reader shows it again in Settings →
 // Tabs & Packs → Tabs; their saved choice wins (view/tab-order.js). Home's scene panel is not a screen here.
 export const DEFAULT_HIDDEN = Object.freeze({ 'story-block/scene': 'story-director/world' });
+// The screens in the bar by default (the game view's navigation and the Story panel's tabs). A screen or a tab says so itself:
+// `bar: true` on its registration puts it in the bar until the reader moves it under More (Settings → Tabs & Packs → Tabs,
+// view/tab-order.js). Story Block's own Home and Inventory carry it. A Party or a Fight is in the bar by the last part of its id,
+// as DEFAULT_ORDER places them (with the RPG on; Fight is a tab only while a fight is on). Every other screen is under More
+// until the reader moves it into the bar.
+const BAR_NAMES = Object.freeze(['party', 'fight']);
+
+/**
+ * Is `id` in the bar by default (before the reader's choice, tab-order.js isInBar)? `declared` is the screen's or tab's own
+ * `bar: true` (the caller reads it from the registration); a Party and a Fight are in the bar without it.
+ */
+export const inDefaultBar = (id, declared = false) => declared === true
+    || BAR_NAMES.includes(String(id ?? '').split('/').pop().toLowerCase());
 // A screen with no `order` and no default place: after the suite's own, before the Director.
 export const REST_ORDER = 150;
 // The suite's own screens and tabs: always in DEFAULT_ORDER, whatever `order` an older module still gives
@@ -92,14 +107,18 @@ export function validateScreen(def, { id = null } = {}) {
     const errors = [];
     const name = label(def);
     if (typeof def.id !== 'string' || !SCREEN_ID.test(def.id)) {
-        errors.push('The screen needs an id made of letters, digits, ".", "_", "-" and "/" (for example "story-director/world").');
+        errors.push('The screen needs an id made of letters, digits, ".", "_", "-" and "/" (for example "example-module/world").');
     } else if (id !== null && def.id !== id) {
         errors.push(`${name} was given for screen "${id}".`);
     }
     if (def.title !== undefined && typeof def.title !== 'string') errors.push(`${name}: the title must be text.`);
     if (def.defaultOn !== undefined && typeof def.defaultOn !== 'boolean') errors.push(`${name}: defaultOn must be true or false.`);
+    // In the bar by default (the game view's navigation, the Story panel's tabs), until the reader moves it under More.
+    if (def.bar !== undefined && typeof def.bar !== 'boolean') errors.push(`${name}: bar must be true or false.`);
     // A tab or screen that is shown only while it is active: active(state, ctx) → { on, badge? }, and the note Settings shows for it.
     if (def.active !== undefined && typeof def.active !== 'function') errors.push(`${name}: active must be a function (state, ctx) → { on, badge? }.`);
+    // A card screen's own part of the closed line under a reply: a template read in the card's scope, like its body.
+    if (def.summary !== undefined && (typeof def.summary !== 'string' || def.summary.length > SUMMARY_MAX)) errors.push(`${name}: summary must be a template of text, at most ${SUMMARY_MAX} characters.`);
     if (def.activeNote !== undefined && typeof def.activeNote !== 'string') errors.push(`${name}: activeNote must be text.`);
     if (def.icon !== undefined && typeof def.icon !== 'string') errors.push(`${name}: the icon must be text.`);
     if (def.width !== undefined && def.width !== 'wide') errors.push(`${name}: width must be "wide" (a dialog's wider window) or left out.`);
@@ -398,6 +417,17 @@ export function createScreens({ reader = () => ({}), saveReader = () => {} } = {
         version: () => version,
 
         choice: id => choices()[id] ?? null,
+        /**
+         * Does the screen say `bar: true` (in the bar by default)? The strongest usable definition that says either way decides, so a
+         * pack's or the reader's restyle that leaves the key out keeps what the module declared.
+         */
+        declaredBar(id) {
+            for (const candidate of candidates(id).list) {
+                if (typeof candidate.def?.bar !== 'boolean' || validateScreen(candidate.def, { id }).length) continue;
+                return candidate.def.bar;
+            }
+            return false;
+        },
         /** The reader's own definition, or a pin { use: 'module' | 'card' | 'pack' | 'pack:<id>' }. */
         choose(id, choice) { writeReader(next => { next.screens[id] = choice; }); },
         /** Back to the module default, whatever the card or packs say. */

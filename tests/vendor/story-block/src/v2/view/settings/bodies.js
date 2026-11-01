@@ -24,6 +24,7 @@
 import { FEATURES_FOLD, SUB_FOLD, renderSettingsHost } from '../../host-ui.js';
 import { HOST_SETTINGS_SCHEMA } from '../../sdk.js';
 import { renderFeaturesForm } from '../form/features.js';
+import { staticTextWith } from '../../prompt.js';
 import { renderSettingsForm } from '../form/form.js';
 import { assistBody } from './assist.js';
 import { blocksBody } from './blocks.js';
@@ -88,7 +89,11 @@ const moduleOf = key => (typeof key === 'string' && key.startsWith(`${FEATURES_F
  */
 function featuresBody(pane, ctx) {
     // Each module's group is a fold, closed until the reader (or a fold id, or a search) opens it; its state is the window's own.
-    const form = renderFeaturesForm(pane, { features: ctx.options.features, doc: ctx.doc, fold: { state: ctx.openState }, onChange: () => ctx.changed?.() });
+    // "How much to track" counts the fixed prompt under each preset from the registry, as it would be built, without switching anything.
+    const form = renderFeaturesForm(pane, {
+        features: ctx.options.features, doc: ctx.doc, fold: { state: ctx.openState }, onChange: () => ctx.changed?.(),
+        staticText: switches => staticTextWith(ctx.options.registry, switches), countTokens: ctx.options.countTokens,
+    });
     return {
         filter: text => form.filter(text),
         refresh: () => form.refresh(),

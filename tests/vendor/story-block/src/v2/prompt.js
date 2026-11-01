@@ -100,6 +100,21 @@ export function staticParts(registry, problems = []) {
     return parts;
 }
 
+/**
+ * The static text as it would be with other feature switches (`switches`: a Map or object, feature id → true | false; the
+ * rest as they are), built by the registry's own `withFeatures` so nothing is switched, stored or told: what the Features
+ * page counts for each preset. The same text `assemble` sends (names not filled in). null when the registry cannot say
+ * (no `withFeatures`) or a part fails: the caller leaves the number out.
+ */
+export function staticTextWith(registry, switches) {
+    if (typeof registry?.withFeatures !== 'function') return null;
+    try {
+        return registry.withFeatures(switches, () => staticParts(registry).map(part => part.text).join('\n\n'));
+    } catch {
+        return null;
+    }
+}
+
 // Drops lines from `section` until its text fits `budget` tokens: optional ones from the end,
 // then required ones from the end. Returns how many it dropped.
 function fit(section, budget) {

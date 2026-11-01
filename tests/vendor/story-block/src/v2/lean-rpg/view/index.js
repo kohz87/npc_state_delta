@@ -14,6 +14,7 @@ import { rpgReplyLines } from './changes-lines.js';
 import { PARTY_WIDGET, createPartyScreen, createPartyWidget } from './party.js';
 import { rulesFromSettings } from '../rules.js';
 import { rpgSection } from './settings.js';
+import { heroLead } from './hero-data.js';
 import { HOLD_WIDGET, createStart } from './start.js';
 import { WIZARD_WIDGET, createWizard } from './wizard.js';
 import { readRecord } from '../../persist.js';
@@ -23,6 +24,7 @@ export { WIZARD_SCREEN_ID, WIZARD_WIDGET } from './wizard.js';
 export { HOLD_SCREEN_ID, HOLD_WIDGET, START_WIDGET } from './start.js';
 export { FIGHT_SCREEN_ID, FIGHT_WIDGET } from './fight.js';
 export { rpgReplyLines } from './changes-lines.js';
+export { heroLead } from './hero-data.js';
 export const PACK = 'rpg';
 const STYLE_ATTR = 'data-ss-rpg';
 
@@ -43,7 +45,8 @@ function addStyle(doc) {
 
 /**
  * mountLeanRpg({ doc, ctx, store, events, screens, widgets, headState, readerName, readerAbout, roleOf, featureOn, openDialog, closeView, refresh, command, values, meta, save })
- * → { cardLines({ index, state, before, record, problems }), settingsSections(), battleLog, wizard, start, destroy() }.
+ * → { cardLines({ index, state, before, record, problems }), settingsSections(), heroLead(state), battleLog, wizard, start, destroy() }.
+ * `heroLead(state)` is the reader's own character as the game view's header draws it ({ name, bars }, hero-data.js), or null.
  * `screens` is the screen registry (`setPack`, `removePack`); `widgets` the host's own widget table (the Party and wizard widgets are
  * added to it); `headState()` the head state; `featureOn()` whether the feature is on now; `openDialog(screenId, { draft, onClose })` the
  * host's dialog mount (the New character wizard opens through it; without it the Party tab has no button for it); `readerAbout()` the active
@@ -78,6 +81,7 @@ export function mountLeanRpg({ doc, ctx, store, events = null, screens, widgets,
         start,
         cardLines: info => { try { return rpgReplyLines({ ...info, roleOf, rules: rules() }); } catch { return []; } },
         settingsSections: () => [rpgSection({ featureOn, headState, readerName, roleOf, command })],
+        heroLead: state => { try { return heroLead(state, { own: readerName(), roleOf }); } catch { return null; } },
         destroy() {
             battleLog.destroy();
             start.detach();

@@ -488,6 +488,16 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
                 if (typeof path !== 'string' || !/^\/[^~]/.test(path)) fail('INVALID', `A thing to mark is a path inside the domain, like "/threads/th_x", not "${path}".`);
                 tx.within.add(`/domains/${escapeKey(domain)}${path}`);
             },
+            // This command's appends to the list at `path` (`add <path>/-`) are a set's: whoever is added is there
+            // once. Marked `unique`, they are passed over on replay when the list holds that item already
+            // (the reply that dropped it was deleted), instead of listing it twice (SPEC §2.2 rule e).
+            unique(domain, path) {
+                open();
+                const owner = registry.domainOwner(domain);
+                if (owner !== moduleId) fail('NOT_OWNER', `${moduleId} cannot mark changes in ${domain}: only its owner can.`);
+                if (typeof path !== 'string' || !/^\/[^~]/.test(path)) fail('INVALID', `A list to mark is a path inside the domain, like "/present", not "${path}".`);
+                tx.unique.add(`/domains/${escapeKey(domain)}${path}`);
+            },
             // The Hash of the contract (§4): SHA-256 of normalized JSON (sorted keys, array order kept).
             hash(value) {
                 open();
@@ -645,6 +655,8 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
             for (const change of changes) {
                 for (const at of tx.within) if (change.path === at || change.path.startsWith(`${at}/`)) { change.within = at; break; }
             }
+            // Appends to a list marked with ctx.unique carry it (`unique`, rule e).
+            for (const change of changes) if (change.op === 'add' && change.path.endsWith('/-') && tx.unique.has(change.path.slice(0, -2))) change.unique = true;
             if (changes.length) touched.push(name);
             ops.push(...changes);
         }
@@ -676,7 +688,7 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
                 head, cause, receiptId, random: makeRng(seedValue), idRandom: makeRng((seedValue ^ ID_STREAM) >>> 0),
                 rev: headRev + 1, carrier: carrierOf(carrier), chat: chatOf(chat), again: again === true && cause === 'story',
                 standing: cause === 'story' && isRecord(standing) ? (isDeepFrozen(standing) ? standing : deepFreeze(clone(standing))) : null,
-                drafts: new Map(), meta: null, failure: null, closed: false, absolute: new Set(), within: new Set(),
+                drafts: new Map(), meta: null, failure: null, closed: false, absolute: new Set(), within: new Set(), unique: new Set(),
                 clockBoundaries: [], guard: null, recorded: null, source: undefined, pending: 0, ordinal: undefined, proofs: newRoot(), cursor: undefined, opsBefore: null, reusing,
                 // The proof a Re-read's earlier lines gave (planned, not stored yet), for parents and story.evidence.
                 planned: Array.isArray(planned) ? planned : [],

@@ -17,6 +17,13 @@
 // used for a module's features, and its heading takes the focus (`focusGroup`). Built with createElement and
 // textContent only: module and feature names come from modules, never from markup.
 //
+// At the top, "How much to track" (presets.js): three tiles, Lean / Standard / Full, then a small "Fine-tune" label over the groups. The
+// tile that is selected is derived from the switches on every paint (features.js `selectedPreset`) and never stored; none selected shows
+// "Custom". Picking one sets every feature a preset speaks for through the store's `set` (features.js `applyPreset`), and tells once
+// when that changed the fixed prompt (PROMPT_HINT). Each tile says what the narrator's fixed prompt would weigh under it: the
+// `staticText(switches)` option answers the static text for a Map of feature id → on (prompt.js `staticTextWith`), counted at four
+// characters a token, then with SillyTavern's tokenizer (`countTokens`) when there is one; without `staticText` the number is left out.
+//
 // With the `fold` option ({ state: Map }) each group is a fold (a `details` with a chevron, the module's name and "6 of 11 on" in its
 // summary), closed until opened: its open state is kept in `fold.state` under the group's `data-fold` key (the same map the window
 // keeps for its other folds, so a redraw or another page does not lose it), a search opens the groups that have a match and gives the
@@ -24,8 +31,10 @@
 
 import { FORM_TEXT, SETTINGS_TEXT, fill, matchesSearch } from './schema.js';
 import { newId, sectionBlock, switchField } from './fields.js';
-import { PROMPT_HINT } from '../../features.js';
+import { PRESET_NAMES, PROMPT_HINT, applyPreset, inPresets, presetSwitches, selectedPreset } from '../../features.js';
+import { estimateTokens } from '../../prompt.js';
 import { featuresFoldOf } from '../../host-ui.js';
+import { renderPresetPicker } from './presets.js';
 import { focusNode, showAndFocus } from '../scroll.js';
 
 const h = (doc, tag, className = '', text) => {
@@ -53,11 +62,12 @@ export const countText = own => fill(SETTINGS_TEXT.featuresOn, { on: own.filter(
 /**
  * Draws the features into `parent`. Options: `features` (the feature store: `list()` → [{ id, moduleId, moduleName, label,
  * describe, prompt, available, why, on }], `set(id, on)`; none: an empty form), `doc`, `onChange({ id, on })` (after a
- * switch was stored), `disabled`, `fold` ({ state: Map }: each group a fold). → { el, filter(text), refresh(), field(id), group(moduleId), focusGroup(moduleId),
+ * switch was stored), `disabled`, `fold` ({ state: Map }: each group a fold), `staticText(switches)` and `countTokens(text)` (the
+ * presets' token numbers, above). → { el, filter(text), refresh(), field(id), group(moduleId), focusGroup(moduleId),
  * setDisabled(on), keys(), destroy() }.
  */
 export function renderFeaturesForm(parent, options) {
-    const { features = null, doc = parent?.ownerDocument ?? globalThis.document, onChange = null } = options ?? {};
+    const { features = null, doc = parent?.ownerDocument ?? globalThis.document, onChange = null, staticText = null, countTokens = null } = options ?? {};
     let disabled = Boolean(options?.disabled);
     const root = h(doc, 'div', 'ss-form ss-features');
     root.setAttribute('data-form', 'features');
@@ -69,6 +79,12 @@ export function renderFeaturesForm(parent, options) {
     let filterText = '';
     const fold = options?.fold && typeof options.fold === 'object' ? options.fold : null;
     const foldState = fold?.state instanceof Map ? fold.state : new Map();
+    let gone = false;
+    let said = '';                   // the one-slower-reply note after a pick that changed the fixed prompt
+    let hasPresets = false;          // some feature takes part in presets
+    const exact = new Map();         // static text → tokens as SillyTavern's tokenizer counts it
+    const asked = new Set();
+    const picker = renderPresetPicker(doc, { onPick: pick, disabled });
 
     const listNow = () => {
         try { return typeof features?.list === 'function' ? features.list() : []; } catch { return []; }
@@ -107,6 +123,7 @@ export function renderFeaturesForm(parent, options) {
 
     // The reader flipped a switch: stored; what the store says is shown (a feature it did not know goes back).
     function commit(id, on) {
+        said = '';
         let stored;
         try { stored = features?.set?.(id, on); } catch { stored = undefined; }
         paint();
@@ -116,7 +133,7 @@ export function renderFeaturesForm(parent, options) {
     // Everything drawn from the store's list: rebuilt when the set of features (or what they need) changed, else only the states.
     function build(list) {
         const focusId = tiles.size ? [...tiles.values()].find(entry => entry.handle.input === doc.activeElement)?.feature.id ?? null : null;
-        root.replaceChildren(empty);
+        root.replaceChildren(picker.el, picker.fine, empty);
         tiles = new Map();
         groups = new Map();
         for (const group of featureGroups(list)) {
@@ -173,7 +190,46 @@ export function renderFeaturesForm(parent, options) {
                 if (group.hint) group.hint.textContent = countText(group.own);
             }
         }
+        paintPresets(list);
         return paintVisibility();
+    }
+
+    // The tiles' numbers: the static text under each preset, estimated at once and counted by the tokenizer when it answers.
+    function presetTokens(list) {
+        const out = {};
+        for (const name of PRESET_NAMES) {
+            let text = null;
+            try { text = typeof staticText === 'function' ? staticText(presetSwitches(list, name)) : null; } catch { text = null; }
+            if (typeof text !== 'string') { out[name] = null; continue; }
+            out[name] = exact.get(text) ?? estimateTokens(text);
+            if (typeof countTokens !== 'function' || exact.has(text) || asked.has(text)) continue;
+            if (asked.size > 24) asked.clear();
+            asked.add(text);
+            Promise.resolve().then(() => countTokens(text)).then(n => {
+                if (gone || !Number.isFinite(n) || n < 0) return;
+                if (exact.size > 24) exact.clear();
+                exact.set(text, Math.round(n));
+                paintPresets(listNow());
+            }, () => {});
+        }
+        return out;
+    }
+
+    function paintPresets(list) {
+        hasPresets = list.some(feature => inPresets(feature) && feature.available !== false);
+        picker.paint({ selected: selectedPreset(list), tokens: presetTokens(list), said });
+        picker.setHidden(!hasPresets || filterText.trim() !== '');
+    }
+
+    // The reader picked a tile: every feature it speaks for is set through the store; the fixed prompt changing is said once.
+    function pick(name) {
+        const done = applyPreset(features, name);
+        said = done?.prompt ? PROMPT_HINT : '';
+        paint();
+        if (!done) return;
+        for (const id of done.changed) {
+            try { onChange?.({ id, on: listNow().find(feature => feature.id === id)?.on === true }); } catch { /* the switch is stored either way */ }
+        }
     }
 
     // The search: a tile shows when its name, description, module's name or id has every word; a module with none is left out.
@@ -196,6 +252,7 @@ export function renderFeaturesForm(parent, options) {
             }
         }
         const searching = filterText.trim() !== '';
+        picker.setHidden(!hasPresets || searching);
         const message = searching && shown === 0 ? fill(FORM_TEXT.none, { text: filterText.trim() }) : !searching && groups.size === 0 ? FORM_TEXT.noRows : '';
         empty.hidden = !message;
         empty.textContent = message;
@@ -228,10 +285,12 @@ export function renderFeaturesForm(parent, options) {
         },
         setDisabled(on) {
             disabled = Boolean(on);
+            picker.setDisabled(disabled);
             for (const entry of tiles.values()) entry.handle.setDisabled(disabled || entry.feature.available === false);
         },
         keys: () => [...tiles.keys()],
         destroy() {
+            gone = true;
             for (const entry of tiles.values()) entry.handle.destroy();
             root.remove();
         },
