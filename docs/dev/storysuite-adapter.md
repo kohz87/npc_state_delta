@@ -78,7 +78,10 @@ exists: Delta alone has no key people, and its saved state and prompts are byte-
   ladder or drift set up. Delta's own sidecar holds none of it.
 - **Return summary:** at the reply the return was noticed (`head === returnedAt`) the narrator gets `returnNote` (at most 360
   characters: where, the newest steps) appended to that NPC's block in `buildInjection` (option `awayNotes`), counted in the
-  injection budget like the block. The next reply that stays drops it; a swipe of the generation repeats it.
+  injection budget like the block. The next reply that stays drops it. A swipe or regenerate of the first reply after the return
+  repeats it: SillyTavern's chat still holds the reply being replaced, so while such a generation runs `keyHeadIndex()` (index.js) stands
+  on the reply before it (`replacingReply`, set at `GENERATION_AFTER_COMMANDS`, cleared when the reply arrives, the generation stops,
+  the next message is sent or the chat changes).
 - **Meters** do not change by themselves while away: the same step asks `director.keyPeople` through `ctx.query` (so a replay
   gives the same answer) and skips drift and the count toward losing a stage for those people. Story lines still move them.
 - **Scans** (`core.js` `mergeScanResult`, option `awayNpcIds`, set by `index.js` `keyAwayScanOptions` for the automatic scan

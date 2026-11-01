@@ -932,13 +932,27 @@ function keyPeopleList() {
 function isKeyNpc(npc, list = keyPeopleList()) {
     return Boolean(list?.length) && isKey(findKeyEntry(list, npc));
 }
+// (key people) A swipe or a regenerate replaces the latest reply, and SillyTavern's chat still holds that reply while the new
+// one is being written; the story it continues from is the reply before it. `replacingReply` is set when such a generation
+// starts (with that reply's message) and cleared when the reply arrives, the generation stops, the next message is sent or
+// the chat changes.
+let replacingReply = null;
+// The index of the reply the story stands on for the next generation: the latest reply, or the one before it while the
+// latest is being replaced.
+function keyHeadIndex() {
+    const latest = latestReplyIndex();
+    const chat = getContext().chat || [];
+    if (!replacingReply || replacingReply.key !== getChatKey() || latest < 0 || chat[latest] !== replacingReply.message) return latest;
+    for (let at = latest - 1; at >= 0; at -= 1) if (chat[at] && !chat[at].is_system && !chat[at].is_user) return at;
+    return -1;
+}
 // What the narrator is told once about key people who just came back: { dossier id: "WHILE AWAY, NOW BACK …" }.
 // It stands while the latest reply is the one the return was noticed at, so a swipe of the next reply repeats it and
 // the next reply that stays drops it.
 function keyReturnNotes(state) {
     const list = keyPeopleList();
     if (!list?.length) return null;
-    const head = latestReplyIndex();
+    const head = keyHeadIndex();
     const memory = storySuiteV2Meters()?.keyAwayMemory?.() ?? {};
     const notes = {};
     for (const npc of state?.npcs || []) {
@@ -988,7 +1002,7 @@ function scanScenePresent(messageId) {
 function dossierKeyViews(state) {
     const list = keyPeopleList();
     if (!list?.length) return null;
-    const head = latestReplyIndex();
+    const head = keyHeadIndex();
     const memory = storySuiteV2Meters()?.keyAwayMemory?.() ?? {};
     const views = {};
     for (const npc of state?.npcs || []) {
@@ -4160,8 +4174,9 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
             preserveWorldActive: compactWorldStateTurn,
             developmentContext: transcript,
             userDevelopmentContext,
-            // Key people who are away keep their stable profile and custom fields through this scan (src/key-people.js).
-            ...keyAwayScanOptions(mergeBaseState),
+            // Key people who are away keep their stable profile and custom fields through the automatic scan (src/key-people.js);
+            // the reader's own "Scan now" is deliberate and writes them.
+            ...(manual ? {} : keyAwayScanOptions(mergeBaseState)),
         });
         const newlyAdmittedIds = [...new Set([...(merged.report?.created || []), ...(merged.report?.promoted || [])])];
         let newNpcRelationshipPass = { decisions: new Map(), used: false, targetCount: 0, responseChars: 0, retried: false };
@@ -7550,6 +7565,7 @@ function registerEvents() {
 
     if (events.MESSAGE_SENT) {
         source.on(events.MESSAGE_SENT, async (messageId) => {
+            replacingReply = null;
             const key = getChatKey();
             if (key === 'no-chat') return;
             // SillyTavern waits for this listener before generating. The freshness read must stay: a
@@ -7598,6 +7614,11 @@ function registerEvents() {
                 return;
             }
             narrationCaptureArmed = '';
+            {
+                const chat = getContext().chat || [];
+                const last = chat[chat.length - 1];
+                replacingReply = (type === 'swipe' || type === 'regenerate') && last && !last.is_user && !last.is_system ? { key, message: last } : null;
+            }
             // Every roleplay generation revalidates the canonical dossier (a 304 when unchanged)
             // before its prompt is built: regenerate/swipe/continue, an empty Send, impersonate and
             // group member turns have no MESSAGE_SENT, and an ordinary send reuses this read there.
@@ -7617,13 +7638,13 @@ function registerEvents() {
             noteNarrationCaptureVersion(key);
         });
     }
-    if (events.GENERATION_STOPPED) source.on(events.GENERATION_STOPPED, () => { sentCaptureRules = ''; disarmNarrationCapture(); });
+    if (events.GENERATION_STOPPED) source.on(events.GENERATION_STOPPED, () => { sentCaptureRules = ''; replacingReply = null; disarmNarrationCapture(); });
     if (events.CHAT_COMPLETION_PROMPT_READY) source.on(events.CHAT_COMPLETION_PROMPT_READY, eventData => keepCaptureRules(eventData));
 
     if (events.MESSAGE_RECEIVED) {
         // The capture block leaves the reply before any other listener (TTS, full cast, other
         // extensions) or lineage key reads it.
-        const stripCapture = messageId => { sentCaptureRules = ''; return receiveNarrationBlock(messageId); };
+        const stripCapture = messageId => { sentCaptureRules = ''; replacingReply = null; return receiveNarrationBlock(messageId); };
         if (typeof source.makeFirst === 'function') source.makeFirst(events.MESSAGE_RECEIVED, stripCapture);
         else source.on(events.MESSAGE_RECEIVED, stripCapture);
         source.on(events.MESSAGE_RECEIVED, async (messageId) => {
@@ -7696,6 +7717,7 @@ function registerEvents() {
 
     if (events.CHAT_CHANGED) {
         source.on(events.CHAT_CHANGED, async () => {
+            replacingReply = null;
             narrationCaptureArmed = '';
             sentCaptureRules = '';
             for (const cachedKey of chatStateCache.keys()) cancelScanOperation(cachedKey, 'chat changed');
