@@ -74,7 +74,7 @@ test('the entry is bounded plain text: lists and texts cut, the pack\'s hidden n
     assert.deepEqual(normalizeEntry({ ...FENNA_ENTRY, stages: [{ meter: 'trust', at: 30, name: 'Friend' }] }).stages, [{ name: 'Friend', needs: [{ meter: 'trust', at: 30 }] }], 'a threshold row reads as a need');
     const secrets = castSecrets(FENNA_ENTRY.secrets.concat([{ title: 'no rule', text: 'dropped' }, { title: 'no text', meter: 'trust', at: 5 }]));
     assert.equal(secrets.length, 2);
-    assert.deepEqual(secrets[0], { title: "Her husband's debt", text: 'He owed the smugglers; she still pays it off.', meter: 'trust', at: 60 });
+    assert.deepEqual(secrets[0], { title: "Her husband's debt", text: 'He owed the smugglers; she still pays it off.', meter: 'trust', at: 60, from: 'pack' }, 'a pack\'s note says it came from the pack (the dossier editor keeps it hidden while locked)');
     assert.deepEqual([secrets[1].title, secrets[1].when, secrets[1].meter], ['The weir', 'the party learns of the toll-gang', undefined]);
     assert.deepEqual(normalizeSecrets(secrets).map(note => [note.id.startsWith('sec_'), note.when ?? null]), [[true, null], [true, 'the party learns of the toll-gang']], 'the hidden-notes code reads them (ids, story-event rule)');
     assert.equal(castSecrets(Array.from({ length: 12 }, (_, i) => ({ text: `n${i}`, meter: 'trust', at: i }))).length, 8, 'at most eight');

@@ -97,6 +97,8 @@ export const RECENT_MESSAGES = 4;
 export const SECRET_TEXT_MAX = 300;
 export const SECRET_TITLE_MAX = 60;
 export const SECRET_WHEN_MAX = 120;
+// Where a note that is not the reader's came from (its `from`).
+export const NOTE_SOURCES = Object.freeze(['pack', 'scan']);
 export const MILESTONE_MAX = 60;
 export const DESCRIBE_MAX = 100;
 export const TAIL_SECRETS_PER_NPC = 3;
@@ -417,8 +419,9 @@ export function parseMeterValue(raw) {
  * Hidden notes from a dossier record, cleaned: [{ id, meter?, at?, when?, text, title? }] (at most
  * eight). A note needs text and a rule: a meter id with a whole-number `at`, a story event (`when`,
  * up to 120 characters), or both (it opens by whichever comes first). The id comes from the rule and
- * the text only, so giving a note a title never locks it again. `own: true` marks a note the reader wrote in the dossier
- * editor (it alone may be shown there while locked); a pack's, a scan's and any older note is not.
+ * the text only, so giving a note a title never locks it again. `from` says a note is not the reader's: 'pack' (the cast's) or 'scan'
+ * (written for a new dossier); a note with no `from` is the reader's own (every note before packs and scans wrote any), and the
+ * dossier editor shows it even while locked. A note's `from` is never read from a model's answer or a pack's file.
  */
 export function normalizeSecrets(list, max = MAX_SECRETS) {
     const out = [];
@@ -434,7 +437,7 @@ export function normalizeSecrets(list, max = MAX_SECRETS) {
         const id = typeof entry.id === 'string' && /^[a-z][a-z0-9]*_[0-9a-z]{8}$/.test(entry.id) ? entry.id : secretId(byMeter ? meter : '', byMeter ? at : 0, text, when);
         if (out.some(other => other.id === id)) continue;
         const title = clean(entry.title, SECRET_TITLE_MAX);
-        out.push({ id, ...(byMeter ? { meter, at } : {}), ...(when ? { when } : {}), text, ...(title ? { title } : {}), ...(entry.own === true ? { own: true } : {}) });
+        out.push({ id, ...(byMeter ? { meter, at } : {}), ...(when ? { when } : {}), text, ...(title ? { title } : {}), ...(NOTE_SOURCES.includes(entry.from) ? { from: entry.from } : {}) });
     }
     return out;
 }
@@ -461,7 +464,7 @@ export function normalizeGeneratedSecrets(list) {
         const meter = slug(entry.meter);
         const at = intOr(entry.at, null);
         const ok = meters.has(meter) && at !== null && at >= -100 && at <= 100 && at !== 0;
-        return { ...entry, id: undefined, own: undefined, meter: ok ? meter : '', at: ok ? at : null };
+        return { ...entry, id: undefined, from: 'scan', meter: ok ? meter : '', at: ok ? at : null };
     });
     return normalizeSecrets(usable, MAX_GENERATED_SECRETS);
 }
@@ -484,7 +487,7 @@ export function secretsToLines(list) {
  * not read are returned in `problems`.
  */
 export function secretsFromLines(text, previous = []) {
-    const kept = new Map(normalizeSecrets(previous).map(secret => [`${secret.meter ?? ''}|${secret.at ?? ''}|${secret.when ?? ''}|${secret.text}`, secret.id]));
+    const kept = new Map(normalizeSecrets(previous).map(secret => [`${secret.meter ?? ''}|${secret.at ?? ''}|${secret.when ?? ''}|${secret.text}`, secret]));
     const secrets = [];
     const problems = [];
     for (const line of String(text ?? '').split(/\r?\n/)) {
@@ -511,10 +514,12 @@ export function secretsFromLines(text, previous = []) {
         const body = clean(titled ? titled[2] : rest, SECRET_TEXT_MAX);
         if ((event ? !when : !meter) || !body) { problems.push(trimmed); continue; }
         const byMeter = Boolean(meter) && at !== null;
-        const id = kept.get(`${byMeter ? meter : ''}|${byMeter ? at : ''}|${when}|${body}`) ?? secretId(byMeter ? meter : '', byMeter ? at : 0, body, when);
+        // A line left as it was is the note it was: its id and what it came from (`from`) go with it.
+        const same = kept.get(`${byMeter ? meter : ''}|${byMeter ? at : ''}|${when}|${body}`);
+        const id = same?.id ?? secretId(byMeter ? meter : '', byMeter ? at : 0, body, when);
         if (secrets.some(secret => secret.id === id)) continue;
         if (secrets.length >= MAX_SECRETS) { problems.push(trimmed); continue; }
-        secrets.push({ id, ...(byMeter ? { meter, at } : {}), ...(when ? { when } : {}), text: body, ...(title ? { title } : {}) });
+        secrets.push({ id, ...(byMeter ? { meter, at } : {}), ...(when ? { when } : {}), text: body, ...(title ? { title } : {}), ...(same?.from ? { from: same.from } : {}) });
     }
     return { secrets, problems };
 }

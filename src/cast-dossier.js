@@ -124,7 +124,7 @@ export function castSecrets(raw) {
         const when = clip(item.when, 120);
         const byMeter = Boolean(meter) && at !== null;
         if (!byMeter && !when) continue;
-        out.push({ ...(title ? { title } : {}), text, ...(byMeter ? { meter, at } : {}), ...(when ? { when } : {}) });
+        out.push({ ...(title ? { title } : {}), text, ...(byMeter ? { meter, at } : {}), ...(when ? { when } : {}), from: 'pack' });
     }
     return out;
 }

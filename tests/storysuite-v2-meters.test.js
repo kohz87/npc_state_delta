@@ -959,7 +959,7 @@ test('secrets: the dossier\'s Secrets section follows Background / History, with
 
 const ERSVEIL = JSON.parse(fs.readFileSync(new URL('./fixtures/ersveil-cast.json', import.meta.url), 'utf8'));
 const allNotes = ERSVEIL.flatMap(entry => entry.secrets);
-// What the cast dossier hands over: { id, title?, text, meter + at | when }, the id from the rule, the event and the text (FNV-1a, `sec_`).
+// What the cast dossier hands over: { id, title?, text, meter + at | when, from: 'pack' }, the id from the rule, the event and the text (FNV-1a, `sec_`).
 const handedOver = raw => raw.map(note => {
     const meter = note.meter ?? '';
     let hash = 0x811c9dc5;
@@ -967,7 +967,7 @@ const handedOver = raw => raw.map(note => {
         hash ^= char.codePointAt(0);
         hash = Math.imul(hash, 0x01000193) >>> 0;
     }
-    return { id: `sec_${hash.toString(36).padStart(8, '0').slice(-8)}`, ...note };
+    return { id: `sec_${hash.toString(36).padStart(8, '0').slice(-8)}`, ...note, from: 'pack' };
 });
 
 test('secrets from the cast: a when-only note survives a read, with its event words and its hand-over id', () => {
@@ -1010,7 +1010,8 @@ test('secrets from the cast: every real entry\'s notes round-trip through the do
         assert.deepEqual(back.secrets, notes, `${entry.id}: same notes, same ids, same event words`);
         // Saved with no change from the editor (no `previous` to keep ids from), the notes keep their rules and words.
         const fresh = secretsFromLines(lines).secrets;
-        assert.deepEqual(fresh.map(({ id, ...rest }) => rest), notes.map(({ id, ...rest }) => rest));
+        // (typed again from the box, a note has no earlier note to say what it came from: it is the reader's)
+        assert.deepEqual(fresh.map(({ id, ...rest }) => rest), notes.map(({ id, from, ...rest }) => rest));
         assert.equal(new Set(fresh.map(note => note.id)).size, fresh.length);
     }
     const eventLine = secretsToLines(normalizeSecrets(handedOver(allNotes.filter(note => note.when && !note.meter).slice(0, 1))));
@@ -1135,32 +1136,45 @@ test('editor: every locked note of the 12 real entries is only "Hidden note n ·
     }
 });
 
-test('editor: generated and older notes are hidden too; the reader\'s own notes and opened notes are shown, and an opened one stays shown', async () => {
+test('editor: pack and scan notes stay hidden while locked; an older note with no marker is the reader\'s, shown and editable', async () => {
     const delta = fakeDelta();
     const generated = normalizeGeneratedSecrets([
-        { title: 'Generated layer', text: 'A generated secret text.', meter: 'trust', at: 50, own: true },
-        { title: 'Generated event', text: 'A generated event text.', when: 'something happens in the story' },
+        { title: 'Generated layer', text: 'A generated secret text.', meter: 'trust', at: 50, from: 'reader' },
+        { title: 'Generated event', text: 'A generated event text.', when: 'something happens in the story', from: '' },
     ]);
-    assert.equal(generated.some(note => note.own), false, 'a model cannot mark a note as the reader\'s');
-    const own = { ...normalizeSecrets([{ title: 'Mine', text: 'I wrote this one.', meter: 'trust', at: 70 }])[0], own: true };
-    const opened = normalizeSecrets([{ title: 'Known', text: 'Already open to the player.', meter: 'trust', at: 5 }])[0];
-    delta.records.npc_mira.secrets = [...generated, own, opened];
+    assert.deepEqual(generated.map(note => note.from), ['scan', 'scan'], 'a model cannot choose what a note says it came from');
+    const packed = normalizeSecrets([{ title: 'Packed', text: 'A pack\'s secret text.', meter: 'trust', at: 60, from: 'pack' }]);
+    assert.equal(packed[0].from, 'pack');
+    assert.equal(normalizeSecrets([{ text: 'x', meter: 'trust', at: 1, from: 'reader' }, { text: 'y', meter: 'trust', at: 2, from: { a: 1 } }]).some(note => 'from' in note), false, 'only "pack" and "scan" are kept');
+    const old = normalizeSecrets([{ title: 'Mine', text: 'I wrote this one in an older version.', meter: 'trust', at: 70 }])[0];
+    assert.equal('from' in old, false);
+    const opened = normalizeSecrets([{ title: 'Known', text: 'Already open to the player.', meter: 'trust', at: 5, from: 'pack' }])[0];
+    delta.records.npc_mira.secrets = [...generated, ...packed, old, opened];
     const h = await host({ delta });
-    h.reply('Nice.', '~ npc Mira | trust: +5');
+    h.reply('Nice.', '~ npc Mira | tension: +1');
     assert.deepEqual(h.npc('Mira').unlocked, [opened.id]);
     const html = h.adapter.editorHtml(delta.records.npc_mira);
-    for (const secret of ['Generated layer', 'A generated secret text.', 'Generated event', 'A generated event text.', 'something happens in the story']) assert.equal(shownIn(html, secret), false, secret);
-    for (const secret of ['I wrote this one.', 'Already open to the player.']) assert.equal(shownIn(html, secret), true, `${secret} is shown`);
+    for (const secret of ['Generated layer', 'A generated secret text.', 'Generated event', 'A generated event text.', 'something happens in the story', 'Packed', 'A pack\'s secret text.']) assert.equal(shownIn(html, secret), false, secret);
+    for (const secret of ['I wrote this one in an older version.', 'Already open to the player.']) assert.equal(shownIn(html, secret), true, `${secret} is shown`);
     assert.match(html, /<span>Hidden note 1 · opens at Trust 50<\/span>/);
     assert.match(html, /<span>Hidden note 2 · opens with the story<\/span>/);
-    assert.equal((html.match(/Hidden note \d/g) || []).length, 4, 'two rows, each named twice (row and control)');
+    assert.match(html, /<span>Hidden note 3 · opens at Trust 60<\/span>/);
+    assert.equal((html.match(/Hidden note \d/g) || []).length, 6, 'three rows, each named twice (row and control)');
+    // The older note is editable: its line is in the box; changing it saves the change, and the hidden ones are untouched.
+    const values = new Map([['npc_state_delta_edit_secrets', secretsToLines([old, opened]).replace('older version', 'newer version')]]);
+    const saved = h.adapter.readEditor(key => values.get(key), delta.records.npc_mira);
+    const mine = saved.secrets.find(note => note.text.includes('newer version'));
+    assert.ok(mine, 'the edited line is saved');
+    assert.equal('from' in mine, false, 'still the reader\'s');
+    assert.equal(saved.secrets.some(note => note.text.includes('older version')), false);
+    for (const note of [...generated, ...packed]) assert.deepEqual(saved.secrets.find(item => item.id === note.id), note, 'hidden notes exactly as they were');
 });
 
 test('editor: saving keeps every hidden note exactly as it was (ids and raw words), adds the reader\'s own, and applies a Hidden/Opened choice', async () => {
     const delta = fakeDelta();
     const longWhen = 'after a night when the party and Tansy work through casualties together and the river rises again ok';
     const packed = handedOver([...ERSVEIL[0].secrets, { title: 'Long', text: 'T'.repeat(200), when: `${longWhen} ${'x'.repeat(70)}` }]);
-    const opened = normalizeSecrets([{ title: 'Known', text: 'Already open to the player.', meter: 'trust', at: 5 }])[0];
+    const opened = normalizeSecrets([{ title: 'Known', text: 'Already open to the player.', meter: 'trust', at: 5, from: 'pack' }])[0];
     delta.records.npc_mira.secrets = [packed[0], opened, ...packed.slice(1)];
     const h = await host({ delta });
     h.reply('Nice.', '~ npc Mira | tension: +1');
@@ -1176,7 +1190,7 @@ test('editor: saving keeps every hidden note exactly as it was (ids and raw word
     for (const note of packed) assert.deepEqual(edits.secrets.find(item => item.id === note.id), note, `${note.title}: exactly as it was, whatever its length`);
     assert.deepEqual(edits.secrets.find(item => item.id === opened.id), opened, 'an opened note left alone is the note it was (not the reader\'s)');
     const mine = edits.secrets.at(-1);
-    assert.deepEqual([mine.when, mine.title, mine.own], ['the barge is found', 'Mine', true]);
+    assert.deepEqual([mine.when, mine.title, 'from' in mine], ['the barge is found', 'Mine', false], 'a line written here is the reader\'s: no marker');
     assert.equal(edits.secrets.length, packed.length + 2);
     // The reader deletes the opened line: it goes; the hidden ones stay.
     values.set('npc_state_delta_edit_secrets', '');

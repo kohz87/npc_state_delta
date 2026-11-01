@@ -1679,8 +1679,8 @@ export function createStorySuiteV2Adapter({
     });
     const milestoneLines = entry => Object.values(entry?.milestones ?? {}).join('\n');
 
-    // Whether the dossier editor may show a note's title, text and event: the reader wrote it here, or it is opened (the player knows it).
-    const editorShows = (note, opened) => note.own === true || opened.has(note.id);
+    // Whether the dossier editor may show a note's title, text and event: it is the reader's (no `from`: a pack or a scan wrote the others), or it is opened (the player knows it).
+    const editorShows = (note, opened) => !note.from || opened.has(note.id);
 
     /**
      * The editor's v2 controls for one dossier, as markup ('' without a host): the hidden notes (with
@@ -1694,7 +1694,7 @@ export function createStorySuiteV2Adapter({
         const setup = setupOf(npc);
         const box = (id, label, help, value, rows = 3) => `
       <label class="npc-state-delta-editor-wide">${label} <small>${help}</small><textarea id="${id}" class="text_pole" rows="${rows}">${escapeHtml(value)}</textarea></label>`;
-        // A locked note the reader did not write here (a pack's, a scan's, an older one) is not shown: no title, no text, no
+        // A locked note the reader did not write (a pack's or a scan's: its `from`) is not shown: no title, no text, no
         // event words, only that it is hidden and when it opens, with its open/shut control. The text box holds the reader's
         // own notes and the notes that are opened. Saving keeps every hidden note exactly as it is (readEditor).
         const opened = new Set(entry?.unlocked ?? []);
@@ -1764,8 +1764,8 @@ export function createStorySuiteV2Adapter({
             for (const note of before) {
                 if (kept.has(note.id) || written.has(note.id)) list.push(stored.get(note.id) ?? note);
             }
-            // New or changed lines are the reader's own notes; a line left as it was is the note it was.
-            const fresh = parsed.secrets.filter(note => !known.has(note.id)).map(note => ({ ...note, own: true }));
+            // New or changed lines are the reader's own notes (no `from`); a line left as it was is the note it was.
+            const fresh = parsed.secrets.filter(note => !known.has(note.id));
             const room = Math.max(0, MAX_SECRETS - list.length);
             list.push(...fresh.slice(0, room));
             out.secrets = list;
