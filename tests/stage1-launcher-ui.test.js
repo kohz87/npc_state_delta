@@ -73,7 +73,8 @@ test('mobile and tablet launcher stays parked at the safe-area-aware side midpoi
 
 test('mobile and tablet dossier is top-anchored to the full dynamic viewport with an always reachable close control', () => {
     assert.match(source, /#\$\{ROOT_ID\} \.delta-panel\s*\{[\s\S]*left:\s*0\s*!important;[\s\S]*top:\s*0\s*!important;[\s\S]*transform:\s*none\s*!important;/);
-    assert.match(source, /height:\s*100vh\s*!important;[\s\S]*height:\s*100dvh\s*!important;/);
+    // The full screen's height, divided by Story Suite's zoom (--ss-zoomed; unset outside it) so the zoomed panel still fills the screen.
+    assert.match(source, /height:\s*calc\(100vh \/ var\(--ss-zoomed, 1\)\)\s*!important;[\s\S]*height:\s*calc\(100dvh \/ var\(--ss-zoomed, 1\)\)\s*!important;/);
     assert.match(source, /#\$\{ROOT_ID\} \.delta-topbar\s*\{[\s\S]*position:\s*sticky;[\s\S]*top:\s*0;[\s\S]*safe-area-inset-top/);
     assert.match(source, /#\$\{ROOT_ID\} \.delta-close\s*\{[\s\S]*min-width:\s*44px;[\s\S]*min-height:\s*44px;/);
 });

@@ -14,6 +14,7 @@ import { normalizeRelationshipMapSettings } from './relationship-map-core.js';
 import {
     AUTOMATIC_BACKFILL_QUEUE_VERSION,
     AUTOMATIC_MISSED_PARTICIPANT_REPAIR_LIMIT,
+    autoScanDue as autoScanDueAfterReply,
     automaticBackfillStillRelevant,
     backfillNeedsRequest,
     normalizeAutomaticBackfillRequest,
@@ -889,6 +890,14 @@ function storyBlockV2Hosted() {
 let storySuiteV2 = null;
 function storySuiteV2Meters() {
     return storyBlockV2Hosted() && storySuiteV2?.hosted?.() ? storySuiteV2 : null;
+}
+// (v2) Story Suite's "Scan after every reply" switch (feature npc-state-delta.scan-every-reply, on by default).
+// Off, the automatic scan waits for three replies (or "Scan every" when larger). True without a host, or when
+// the host cannot answer: Delta alone scans as it always did. Manual scans never ask.
+function scanAfterEveryReply() {
+    const adapter = storySuiteV2Meters();
+    if (!adapter) return true;
+    try { return adapter.scanEveryReply?.() !== false; } catch { return true; }
 }
 // (v2) Story Director's clock while hosted ({ minutes, calendar }), for calendar.js; null otherwise (and
 // while the reader keeps the calendar here: the adapter's calendarOwn).
@@ -4285,8 +4294,8 @@ function numberControl(id, min, max, unit = '', { step = '', prefix = '' } = {})
     return `<span class="delta-setting-number story-suite-number">${prefix}<input id="${id}" type="number" min="${min}" max="${max}"${step ? ` step="${step}"` : ''} class="text_pole npc-state-delta-number">${unit ? `<small>${unit}</small>` : ''}</span>`;
 }
 
-function settingsGroup(key, title, hint, body) {
-    return `<details class="delta-settings-group story-suite-fold" data-delta-settings-group="${key}"><summary><b>${title}</b>${hint ? `<small>${hint}</small>` : ''}</summary><div class="delta-settings-group-body story-suite-fold-body">${body}</div></details>`;
+function settingsGroup(key, title, hint, body, { hidden = false } = {}) {
+    return `<details class="delta-settings-group story-suite-fold" data-delta-settings-group="${key}"${hidden ? ' hidden' : ''}><summary><b>${title}</b>${hint ? `<small>${hint}</small>` : ''}</summary><div class="delta-settings-group-body story-suite-fold-body">${body}</div></details>`;
 }
 
 const SUITE_AREA_LABELS = Object.freeze({
@@ -4428,6 +4437,14 @@ function buildSettingsHtml() {
           <span><b>Clear chat dossier</b><small>Removes every NPC record for this chat only.</small></span>
           <div id="npc_state_delta_clear_chat" class="menu_button redWarningBG"><i class="fa-solid fa-trash"></i> Clear</div>
         </div>`;
+    // One closed fold for what a reader rarely needs; each part keeps its own fold inside, so its key, its slot and its
+    // open state stay as they were. The first line says whether the calendar here matters (syncExpertNote).
+    const expert = `<p class="npc-state-delta-muted delta-expert-note" data-delta-expert-note></p>
+        ${settingsGroup('suite', 'Source of truth', 'Sharing with other story extensions', suite)}
+        ${settingsGroup('calendar', 'Calendar & birthdays', 'Fantasy months and optional campaign clock', settingsSlot('calendar'))}
+        ${settingsGroup('rules', 'Scanner rules', 'Advanced relationship, memory and behavior rubrics', rules)}
+        ${settingsGroup('sent', "What's sent", 'The text your next reply gets, and its size', `<div class="delta-whats-sent" data-delta-whats-sent><small class="delta-whats-sent-empty">Open this to see it.</small></div><div class="npc-state-delta-actions"><div id="npc_state_delta_sent_refresh" class="menu_button"><i class="fa-solid fa-rotate"></i> Refresh</div></div>`)}
+        ${settingsGroup('advanced', 'Advanced', 'Scan context, output and injection limits, branch handling', advanced)}`;
     return `
     <div id="${UI_ID}" class="extension_container npc-state-delta-extension">
       <div class="inline-drawer">
@@ -4454,13 +4471,10 @@ function buildSettingsHtml() {
           <div class="delta-settings-experience story-suite-folds">
             ${settingsGroup('scanning', 'Scanning', 'Connection, cadence and admission', scanning)}
             ${settingsGroup('roster', 'Roster & continuity', 'Injection, lifecycle and stale cleanup', roster)}
-            ${settingsGroup('calendar', 'Calendar & birthdays', 'Fantasy months and optional campaign clock', settingsSlot('calendar'))}
-            ${settingsGroup('suite', 'Source of truth', 'Sharing with other story extensions', suite)}
+            ${settingsGroup('presets', 'Meter presets', 'One-click meter sets (Companion, Rival, Mentor)', settingsSlot('meter-presets'), { hidden: true })}
             ${settingsGroup('portrait', 'Portrait generation', 'Image Generation prompts and style', portrait)}
-            ${settingsGroup('rules', 'Scanner rules', 'Advanced relationship, memory and behavior rubrics', rules)}
-            ${settingsGroup('advanced', 'Advanced', 'Scan context, output and injection limits, branch handling', advanced)}
-            ${settingsGroup('sent', "What's sent", 'The text your next reply gets, and its size', `<div class="delta-whats-sent" data-delta-whats-sent><small class="delta-whats-sent-empty">Open this to see it.</small></div><div class="npc-state-delta-actions"><div id="npc_state_delta_sent_refresh" class="menu_button"><i class="fa-solid fa-rotate"></i> Refresh</div></div>`)}
             ${settingsGroup('maintenance', 'Data & maintenance', 'Backup, diagnostics and this chat', maintenance)}
+            ${settingsGroup('expert', 'Expert', "Source of truth, calendar, scanner rules, what's sent, advanced", expert)}
           </div>
         </div>
       </div>
@@ -4528,6 +4542,7 @@ function bindSettingsGroupMemory(root) {
     root?.addEventListener?.('toggle', event => {
         if (!event.target?.matches?.('[data-delta-settings-group]')) return;
         if (event.target.open) compactSettingHints(event.target);
+        if (event.target.open && event.target.matches('[data-delta-settings-group="expert"]')) syncExpertNote(event.target);
         const next = groups.filter(group => group.open).map(group => group.dataset.deltaSettingsGroup);
         try { globalThis.localStorage?.setItem?.(SETTINGS_OPEN_GROUPS_KEY, JSON.stringify(next)); } catch { /* optional */ }
     }, true);
@@ -4546,7 +4561,24 @@ function syncScannerProfileControl() {
     $('#npc_state_delta_scanner_profile_none').prop('hidden', usable);
 }
 
+// The Expert fold's first line: whether the calendar in Delta's settings matters. It says the Story Director sentence only
+// while that is true (Story Director's calendar answers and the reader has not kept the calendar here).
+const EXPERT_NOTES = Object.freeze({
+    'story-director': 'Rarely needed. With Story Director installed its calendar is used, so the calendar here only matters on its own.',
+    own: "Rarely needed. You keep the calendar here (Source of truth), so Story Director's calendar is not used.",
+    none: 'Rarely needed. No Story Director calendar is linked, so the calendar here is the one in use.',
+});
+function syncExpertNote(root = globalThis.document) {
+    const note = root?.querySelector?.('[data-delta-expert-note]');
+    if (!note) return;
+    let link = 'none';
+    try { link = storySuiteV2?.calendarLink?.() ?? 'none'; } catch { link = 'none'; }
+    const text = EXPERT_NOTES[link] ?? EXPERT_NOTES.none;
+    if (note.textContent !== text) note.textContent = text;
+}
+
 function syncSettingsControls() {
+    syncExpertNote();
     const s = getSettings();
     $('#npc_state_delta_enabled').prop('checked', !!s.enabled);
     $('#npc_state_delta_auto').prop('checked', !!s.autoScan);
@@ -7362,7 +7394,13 @@ async function handleAssistantMessageReceivedInner(messageId, { bypassSwipeGuard
     // A skipped, busy, failed, or timed-out scan must not make every NPC disappear.
     state.assistantSinceScan = Number(state.assistantSinceScan || 0) + 1;
     const shouldForceBranchScan = forceBranchRescan && settings.branchRescan !== false;
-    const autoScanDue = settings.autoScan && (settings.fullScanEveryTurn || state.assistantSinceScan >= settings.scanEvery);
+    const autoScanDue = autoScanDueAfterReply({
+        autoScan: settings.autoScan,
+        full: settings.fullScanEveryTurn,
+        sinceScan: state.assistantSinceScan,
+        scanEvery: settings.scanEvery,
+        everyReply: scanAfterEveryReply(),
+    });
     // A complete capture block is a scan already paid for, so it merges whatever Scan every says.
     const captureDue = narrationCaptureEnabled(settings) && narrationCaptures.has(narrationCaptureKey(eventChatKey, messageId));
     const scanExpected = shouldForceBranchScan || autoScanDue || captureDue;

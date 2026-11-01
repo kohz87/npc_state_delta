@@ -254,10 +254,12 @@ html[data-npc-state-delta-story-block-v2="1"]:not([data-npc-state-delta-launcher
     right: auto !important;
     bottom: auto !important;
     transform: none !important;
-    width: 100vw !important;
+    /* The whole screen even inside Story Suite's zoomed root (its size.css zooms the panel's ss-cards class):
+       vw and dvh are zoomed with it, so the length is divided back. Without Story Suite --ss-zoomed is unset (1). */
+    width: calc(100vw / var(--ss-zoomed, 1)) !important;
     max-width: none !important;
-    height: 100vh !important;
-    height: 100dvh !important;
+    height: calc(100vh / var(--ss-zoomed, 1)) !important;
+    height: calc(100dvh / var(--ss-zoomed, 1)) !important;
     max-height: none !important;
     border-radius: 0 !important;
     border-left: 0 !important;

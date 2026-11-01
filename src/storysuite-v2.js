@@ -32,7 +32,7 @@
 // runtime api, the host global, the document, timers) is injectable for tests.
 import { resolveDossierTarget } from '../suite-handshake.js';
 import {
-    FEATURE_PRESETS, FEATURE_SOCIAL, FEATURE_STAGES, MILESTONE_KIND, NPC_KIND, SOCIAL_QUERY, createNpcPart, limitsFromLines, limitsToLines, meterValue,
+    FEATURE_PRESETS, FEATURE_SCAN_EVERY_REPLY, FEATURE_SOCIAL, FEATURE_STAGES, MILESTONE_KIND, NPC_KIND, SOCIAL_QUERY, createNpcPart, limitsFromLines, limitsToLines, meterValue,
     normalizeSecrets, secretsFromLines, secretsToLines, wordKey,
 } from './npc-meters.js';
 import { normalizeLimits, presetCatalog, presetIds } from './npc-meters-presets.js';
@@ -592,6 +592,7 @@ export function createStorySuiteV2Adapter({
         mounted = null;
         drawer?.classList?.remove?.('story-suite-drawer');
         if (node.dataset) delete node.dataset.storySuiteMoved;
+        clearLead(node);
         const ours = el.contains?.(node);
         if (ours && placeholder.parentNode) placeholder.parentNode.insertBefore(node, placeholder);
         else if (ours && parent?.isConnected) parent.appendChild(node);
@@ -610,7 +611,26 @@ export function createStorySuiteV2Adapter({
         watchTimer?.unref?.();
     }
 
-    // `lead`: the meter presets block, shown above Delta's own panel.
+    // The meter presets block sits in Delta's own "Meter presets" fold (index.js buildSettingsHtml), which stays hidden
+    // until the block is in it. A panel without that slot gets the block above it, as before.
+    const PRESETS_SLOT = '[data-delta-settings-slot="meter-presets"]';
+    const presetsSlot = node => {
+        try { return node?.querySelector?.(PRESETS_SLOT) ?? null; } catch { return null; }
+    };
+    function placeLead(slot, lead) {
+        slot.replaceChildren(lead);
+        const group = slot.closest?.('[data-delta-settings-group]');
+        if (group) group.hidden = false;
+    }
+    function clearLead(node) {
+        const slot = presetsSlot(node);
+        if (!slot) return;
+        slot.replaceChildren();
+        const group = slot.closest?.('[data-delta-settings-group]');
+        if (group) group.hidden = true;
+    }
+
+    // `lead`: the meter presets block, shown in Delta's "Meter presets" fold (above the panel when it has none).
     function mountSection(el, lead = null) {
         if (!el) return () => {};
         if (mounted && mounted.el !== el) unmountSection();
@@ -642,9 +662,12 @@ export function createStorySuiteV2Adapter({
         }
         showPanel(node);
         const top = sectionLead && sectionLead.ownerDocument === node.ownerDocument ? sectionLead : null;
-        if (typeof el.replaceChildren === 'function') el.replaceChildren(...(top ? [top] : []), node);
+        const slot = top ? presetsSlot(node) : null;
+        if (slot) placeLead(slot, top);
+        const above = top && !slot ? top : null;
+        if (typeof el.replaceChildren === 'function') el.replaceChildren(...(above ? [above] : []), node);
         else {
-            if (top) el.appendChild(top);
+            if (above) el.appendChild(above);
             el.appendChild(node);
         }
         watchSection();
@@ -1072,6 +1095,8 @@ export function createStorySuiteV2Adapter({
         const draw = () => {
             root.replaceChildren();
             const head = doc.createElement('b');
+            // Hidden by style.css inside Delta's own "Meter presets" fold, whose title says it.
+            head.className = 'npc-state-delta-v2-presets-head';
             head.textContent = 'Meter presets';
             root.appendChild(head);
             if (!part.featureOn(FEATURE_PRESETS)) {
@@ -1178,6 +1203,19 @@ export function createStorySuiteV2Adapter({
         if (!calendar || typeof calendar !== 'object' || !Array.isArray(calendar.months)) return null;
         const months = calendar.months.map(month => ({ name: String(month?.name ?? ''), days: Number(month?.days) }));
         return { minutes: time.minutes, calendar: { era: String(calendar.era ?? ''), months, leapYears: calendar.leapYears === true } };
+    }
+
+    // Whether Delta's calendar settings matter: Story Director's calendar answers (`director.calendar`) and the reader has
+    // not kept the calendar in Delta, or neither. Read only; the settings panel's Expert note follows it.
+    function calendarLink() {
+        if (!hosted || typeof sdkRef?.query !== 'function') return 'none';
+        try { if (calendarOwn?.() === true) return 'own'; } catch { return 'none'; }
+        try {
+            const calendar = sdkRef.query('director.calendar', {});
+            return calendar && typeof calendar === 'object' && Array.isArray(calendar.months) ? 'story-director' : 'none';
+        } catch {
+            return 'none';
+        }
     }
 
     // ---- the module definition ----
@@ -1621,6 +1659,13 @@ export function createStorySuiteV2Adapter({
             return entries ? entryFor(entries, npc) : null;
         },
         sliceView,
+        /** While hosted: the "Scan after every reply" switch (index.js asks before each automatic scan). */
+        scanEveryReply: () => part.featureOn(FEATURE_SCAN_EVERY_REPLY) !== false,
+        /**
+         * Where the calendar in Delta's settings stands: 'story-director' (Story Director's calendar is the one in
+         * use), 'own' (the reader keeps the calendar in Delta) or 'none' (no host, or no Story Director calendar).
+         */
+        calendarLink,
         /** While hosted: Story Director's clock, { minutes, calendar: { era, months, leapYears } }, or null. */
         storyClock,
         /** What Delta sends with the next reply under its own keys: [{ label, text }] (the `ownPrompt` hook). */

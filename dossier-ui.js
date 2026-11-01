@@ -1287,7 +1287,7 @@ const STYLES = `
 #${ROOT_ID} .delta-lightbox-close { position:absolute; left:50%; bottom:16px; transform:translateX(-50%); }
 #${SETTINGS_ID}.npc-state-delta-stage1-settings-target { outline:2px solid #d8bc78; outline-offset:4px; }
 @media (max-width: 900px) {
-  #${ROOT_ID} .delta-panel { width:100vw; height:100dvh; border-radius:0; border-left:0; border-right:0; }
+  #${ROOT_ID} .delta-panel { width:calc(100vw / var(--ss-zoomed, 1)); height:calc(100dvh / var(--ss-zoomed, 1)); border-radius:0; border-left:0; border-right:0; }
   #${ROOT_ID} .delta-library { grid-template-rows:minmax(0,1fr) 172px; }
   #${ROOT_ID} .delta-spread { grid-template-columns:minmax(250px,38%) minmax(0,1fr); }
   #${ROOT_ID} .delta-cast-tools { align-items:stretch; flex-direction:column; }

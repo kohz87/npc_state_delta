@@ -3,6 +3,20 @@
 export const AUTOMATIC_BACKFILL_QUEUE_VERSION = 1;
 export const AUTOMATIC_MISSED_PARTICIPANT_REPAIR_LIMIT = 1;
 export const AUTOMATIC_BACKFILL_REASONS = Object.freeze(['missed-participant', 'new-admission']);
+// With Story Suite's "Scan after every reply" switched off the automatic scan runs this often at the most.
+export const AUTO_SCAN_EVERY_WITHOUT_EVERY_REPLY = 3;
+
+/**
+ * Whether the automatic scan is due after this reply. `sinceScan` counts the replies since the last scan, `scanEvery` is
+ * the reader's "Scan every" setting, `full` is "Full scan every turn". `everyReply` is the "Scan after every reply"
+ * switch (true when no Story Suite is present): off, a scan waits for three replies, or for "Scan every" when that is
+ * larger, and "Full scan every turn" then makes that scan a full one instead of making every reply scan.
+ */
+export function autoScanDue({ autoScan, full, sinceScan, scanEvery, everyReply = true } = {}) {
+    if (!autoScan) return false;
+    if (everyReply !== false) return Boolean(full) || sinceScan >= scanEvery;
+    return sinceScan >= Math.max(AUTO_SCAN_EVERY_WITHOUT_EVERY_REPLY, Number(scanEvery) || 1);
+}
 
 function text(value) {
     return typeof value === 'string' ? value.trim() : '';
