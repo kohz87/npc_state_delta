@@ -6337,7 +6337,7 @@ function referenceBlock(npcs = [], text = '', castIds = new Set(), customFieldNa
     return [mentioned.length && MENTIONED_HEADER, ...mentioned, deceased.length && DECEASED_HEADER, ...deceased].filter(Boolean).join('\n');
 }
 
-export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria = DEFAULT_BEHAVIOR_CRITERIA, budgetTokens = DEFAULT_INJECTION_BUDGET_TOKENS, socialGraph = null, { includeAppearance = false, namedNpcIds = [], customFieldNames = [], sceneDeferred = false } = {}) {
+export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria = DEFAULT_BEHAVIOR_CRITERIA, budgetTokens = DEFAULT_INJECTION_BUDGET_TOKENS, socialGraph = null, { includeAppearance = false, namedNpcIds = [], customFieldNames = [], sceneDeferred = false, awayNotes = null } = {}) {
     const named = new Set(Array.isArray(namedNpcIds) ? namedNpcIds : []);
     const calledIn = npc => !npc?.present && named.has(npc?.id);
     const present = (npcs || []).filter(npc => (Boolean(npc?.present) || calledIn(npc)) && !npc?.archived);
@@ -6369,8 +6369,14 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
     let identityCap = Math.round(Math.min(2200, 620 * capScale));
     let agencyCap = Math.round(Math.min(900, 300 * capScale));
     let stateCap = Math.round(Math.min(400, 180 * capScale));
+    // A key person who just came back (Story Director's key people) brings a short "while away" summary, once, with
+    // their block; it counts in the budget like the block. Without notes the text is exactly as before.
+    const awayNote = npc => {
+        const note = awayNotes && typeof awayNotes === 'object' ? cleanText(awayNotes[npc.id], 400) : '';
+        return note ? `; ${note}` : '';
+    };
     const renderEssentials = () => relevant.map(npc => {
-        const block = injectionEssentialBlock(npc, behaviorCap, identityCap, agencyCap, stateCap, customFieldNames, sceneDeferred);
+        const block = injectionEssentialBlock(npc, behaviorCap, identityCap, agencyCap, stateCap, customFieldNames, sceneDeferred) + awayNote(npc);
         return calledIn(npc) ? block.replace(`- ${npc.name}: `, `- ${npc.name} (named by player): `) : block;
     });
     while (relevant.length > 1 && (header.length + 1 + renderEssentials().join('\n').length) > budgetChars) {

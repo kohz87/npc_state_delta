@@ -49,6 +49,12 @@ function barNode(doc, bar) {
     item.append(head, track);
     return item;
 }
+function keyStarNode(doc) {
+    const star = make(doc, 'span', 'npc-state-delta-key-star', ' ★');
+    star.setAttribute('title', 'Key person');
+    star.setAttribute('aria-label', 'Key person');
+    return star;
+}
 function rowNode(doc, row) {
     const item = make(doc, 'li', 'ss-listcard-row');
     const button = make(doc, 'button', 'ss-listcard-item npc-state-delta-story-row');
@@ -66,7 +72,10 @@ function rowNode(doc, row) {
         thumb.append(make(doc, 'span', '', Array.from(String(row.name ?? '').trim())[0]?.toUpperCase() || '?'));
     }
     const text = make(doc, 'span', 'npc-state-delta-story-text ss-listcard-main');
-    text.append(make(doc, 'b', 'ss-listcard-title', row.name), make(doc, 'small', 'ss-listcard-sub', [row.role, row.statusLabel].filter(Boolean).join(' · ')));
+    const title = make(doc, 'b', 'ss-listcard-title', row.name);
+    // A key person (Story Director's key people) is marked with a ★ after the name.
+    if (row.key === true) title.append(keyStarNode(doc));
+    text.append(title, make(doc, 'small', 'ss-listcard-sub', [row.role, row.statusLabel].filter(Boolean).join(' · ')));
     const bars = (Array.isArray(row.bars) ? row.bars : []).filter(bar => bar && typeof bar === 'object').slice(0, DOSSIER_BAR_MAX);
     if (bars.length) {
         const wrap = make(doc, 'span', 'npc-state-delta-story-bars');

@@ -220,6 +220,7 @@ import {
     worldStatePeople,
 } from './present-scene.js';
 import { escapeHtml } from './src/util/html.js';
+import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, observeKeyAway, returnNote } from './src/key-people.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
 // The chat text helpers (src/transcript.js) read the host's chat and the Scan context setting.
@@ -912,6 +913,49 @@ function hostedMeterView(npcs) {
     if (!adapter) return npcs;
     try { return adapter.sliceView(npcs) || npcs; } catch { return npcs; }
 }
+// (v2, key people) Story Director's key people (`director.keyPeople`, read only), or null: no host, no Story Director,
+// or one without the query. Null means Delta alone: no badge, no section, no hold, nothing sent. src/key-people.js.
+function keyPeopleList() {
+    const adapter = storySuiteV2Meters();
+    if (!adapter) return null;
+    try {
+        const answer = adapter.keyPeopleAnswer?.();
+        return Array.isArray(answer) ? normalizeKeyPeople(answer) : null;
+    } catch {
+        return null;
+    }
+}
+// Whether this dossier (or snapshot of one) is a current key person.
+function isKeyNpc(npc, list = keyPeopleList()) {
+    return Boolean(list?.length) && isKey(findKeyEntry(list, npc));
+}
+// Notes who is away or back into `state.keyAway` (the last absence of each key person, by dossier id) at the latest
+// reply. In place and not saved here: it rides along with the next save of the dossiers (every scan commit and edit),
+// so noticing a return never writes the sidecar in the middle of a scan. With no key people nothing is stored.
+function observeKeyPeople() {
+    const list = keyPeopleList();
+    const key = getChatKey();
+    if (!list || key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return;
+    const state = getChatState(key);
+    const { memory, changed } = observeKeyAway(state.keyAway, list, state.npcs, latestReplyIndex());
+    if (!changed) return;
+    if (Object.keys(memory).length) state.keyAway = memory;
+    else delete state.keyAway;
+}
+// What the narrator is told once about key people who just came back: { dossier id: "WHILE AWAY, NOW BACK …" }.
+// It stands while the latest reply is the one the return was noticed at, so a swipe of the next reply repeats it and
+// the next reply that stays drops it.
+function keyReturnNotes(state) {
+    const list = keyPeopleList();
+    if (!list?.length) return null;
+    const head = latestReplyIndex();
+    const notes = {};
+    for (const npc of state?.npcs || []) {
+        const view = npc?.id ? keyView(list, state.keyAway, npc, head) : null;
+        if (view?.recent?.justReturned) notes[npc.id] = returnNote(view.recent.away);
+    }
+    return Object.keys(notes).length ? notes : null;
+}
 // (v2) While hosted, Story Block's scene says who is here unless the reader keeps the scene in Delta
 // ("scene: mine"): the dossier injection, the Cast tab and the module's queries all follow its
 // `scene.present`, so the prompt never carries two different casts. Delta's stored presence is not
@@ -947,6 +991,25 @@ function scanScenePresent(messageId) {
     } catch {
         return null;
     }
+}
+// The merge option that holds away key people's stable fields (as if locked) for one scan: { awayNpcIds } or nothing.
+// The dossier view's key-person data by dossier id ({ name, here, away, recent }), or null with no key people.
+function dossierKeyViews(state) {
+    const list = keyPeopleList();
+    if (!list?.length) return null;
+    const head = latestReplyIndex();
+    const views = {};
+    for (const npc of state?.npcs || []) {
+        const view = npc?.id ? keyView(list, state.keyAway, npc, head) : null;
+        if (view) views[npc.id] = view;
+    }
+    return Object.keys(views).length ? views : null;
+}
+function keyAwayScanOptions(state) {
+    const list = keyPeopleList();
+    if (!list?.length) return {};
+    const ids = awayNpcIds(list, state?.npcs);
+    return ids.size ? { awayNpcIds: [...ids] } : {};
 }
 // The chat state a scan works from: with the slice's relationship numbers while hosted (a copy;
 // the stored state is never changed here), the state itself otherwise.
@@ -2724,7 +2787,8 @@ function liveInjectionText(state, settings, { namedNpcIds = namedByPlayerNpcIds(
     // v1's World State carries the live mood and outfit the cards then leave out; v2's scene keeps
     // only the place and who is present, so under a v2 host the cards keep them.
     const sceneDeferred = defersArea('scene', settings.sourceOfTruth) && !storyBlockIsV2();
-    return buildInjection(scenePresenceView(hostedMeterView(state.npcs)), transcript, state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: settings.customFieldNames, sceneDeferred });
+    const awayNotes = keyReturnNotes(state);
+    return buildInjection(scenePresenceView(hostedMeterView(state.npcs)), transcript, state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: settings.customFieldNames, sceneDeferred, ...(awayNotes ? { awayNotes } : {}) });
 }
 
 function updateInjection() {
@@ -2744,6 +2808,7 @@ function updateInjection() {
     }
     if (injectionKey === 'no-chat') return clear('No chat is open.');
     if (!settings.enabled) return clear('NPC State Delta is disabled.');
+    observeKeyPeople();
     const state = getChatState();
     // The recent story and who the player's message names: worked out once for both parts.
     const transcript = recentTranscript(4);
@@ -4104,6 +4169,8 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
             preserveWorldActive: compactWorldStateTurn,
             developmentContext: transcript,
             userDevelopmentContext,
+            // Key people who are away keep their stable profile and custom fields through this scan (src/key-people.js).
+            ...keyAwayScanOptions(mergeBaseState),
         });
         const newlyAdmittedIds = [...new Set([...(merged.report?.created || []), ...(merged.report?.promoted || [])])];
         let newNpcRelationshipPass = { decisions: new Map(), used: false, targetCount: 0, responseChars: 0, retried: false };
@@ -4778,7 +4845,7 @@ function inlineCardHtml(npc, messageId, scene = null) {
       <button type="button" class="npc-state-delta-present-card" data-npc-id="${escapeHtml(npc.id)}" data-message-id="${messageId}" aria-label="Open ${escapeHtml(displayName)} dossier">
         <span class="npc-state-delta-present-card-portrait">${portrait}</span>
         <span class="npc-state-delta-present-card-text">
-          <span class="npc-state-delta-present-card-head"><b class="npc-state-delta-present-card-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</b><span class="npc-state-delta-present-card-stage"></span></span>
+          <span class="npc-state-delta-present-card-head"><b class="npc-state-delta-present-card-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</b>${isKeyNpc(npc) ? '<span class="npc-state-delta-key-tag" title="Key person (Story Director)">★ Key</span>' : ''}<span class="npc-state-delta-present-card-stage"></span></span>
           <small class="npc-state-delta-present-card-role" title="${escapeHtml(identityLine)}">${escapeHtml(identityLine)}</small>${now}
         </span>
       </button>`;
@@ -7992,7 +8059,9 @@ window.NPCStateDelta = Object.freeze({
                 .map(portrait => [portrait.form, { dataUrl: portrait.dataUrl, appearanceFingerprint: portrait.appearanceFingerprint || '' }]));
         }
         const meterViews = storySuiteV2Meters()?.dossierMeters?.(state.npcs) ?? {};
-        return { turn: state.turn, reply: latestReplyIndex(), npcs: structuredClone(hostedMeterView(state.npcs)), portraitAssets: {}, formPortraits, customFieldNames: [...getSettings().customFieldNames], meterViews };
+        observeKeyPeople();
+        const keyViews = dossierKeyViews(state);
+        return { turn: state.turn, reply: latestReplyIndex(), npcs: structuredClone(hostedMeterView(state.npcs)), portraitAssets: {}, formPortraits, customFieldNames: [...getSettings().customFieldNames], meterViews, ...(keyViews ? { keyViews } : {}) };
     },
     persistenceStatus: () => {
         const key = getChatKey();

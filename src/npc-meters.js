@@ -42,6 +42,7 @@
 // values, note rules and texts, per-NPC setup, presets, who is present) comes in through the hooks
 // given to createNpcPart.
 import { BUILT_IN_PRESETS, normalizeLimits, normalizePreset, presetIds } from './npc-meters-presets.js';
+import { isAway, labelKey, labelsOf, normalizeKeyPeople } from './key-people.js';
 import {
     DEFAULT_SOCIAL_CAP, DEFAULT_SOCIAL_SCALE, FEATURE_SOCIAL, MAX_SOCIAL_CAP, MAX_SOCIAL_SCALE, SOCIAL_QUERY, socialModifier, socialSettings, socialSkill,
 } from './social-check.js';
@@ -150,6 +151,9 @@ export function npcKey(name) {
     if (!key) return null;
     return FORBIDDEN_KEYS.has(key) ? `${key}-npc` : key;
 }
+
+/** Story Director's key people (read only): who is a key person, and where the away ones are (src/key-people.js). */
+export const KEY_PEOPLE_QUERY = 'director.keyPeople';
 
 /** The key of a milestone or a rung: its words, lowercase, joined by "-" ('' when none). */
 export function wordKey(value) {
@@ -1027,6 +1031,12 @@ export function createNpcPart(hooks = {}) {
                 try { minutes = ctx.time(); } catch { minutes = null; }
             }
             const day = isInt(minutes) ? Math.floor(minutes / DAY_MINUTES) : null;
+            // Key people (Story Director's `director.keyPeople`, read only): while one is away their meters stay as
+            // the reader set them, so no drift and no count toward losing a stage. Without that query: nobody.
+            const awayKeys = new Set();
+            try {
+                for (const entry of normalizeKeyPeople(ctx.query(KEY_PEOPLE_QUERY, {}))) if (isAway(entry)) for (const label of labelsOf(entry)) awayKeys.add(label);
+            } catch { awayKeys.clear(); }
             const before = ctx.read(NPC_DOMAIN);
             if (!isObject(before?.npcs) || !Object.keys(before.npcs).length) ctx.fail('REFUSED', 'Nothing to update.');
             const slice = ctx.draft(NPC_DOMAIN);
@@ -1041,12 +1051,13 @@ export function createNpcPart(hooks = {}) {
                 if (!Array.isArray(record.unlocked)) record.unlocked = [];
                 const was = JSON.stringify(record);
                 const drift = [];
+                const away = awayKeys.size > 0 && [record.name, ...(resolve(record.name)?.aliases ?? [])].some(label => awayKeys.has(labelKey(label)));
                 if (day !== null) {
                     const days = isInt(record.day) ? day - record.day : 0;
                     if (record.day !== day) record.day = day;
                     const setup = setupFor(record.name);
                     const limits = limitsFor(settings, setup);
-                    for (const def of days > 0 ? drifting : []) {
+                    for (const def of days > 0 && !away ? drifting : []) {
                         const value = meterValue(record, def);
                         const { perDay, to } = def.drift;
                         const step = Math.min(Math.abs(to - value), perDay * days);
@@ -1060,7 +1071,7 @@ export function createNpcPart(hooks = {}) {
                         drift.push({ meter: def.id, before: value, after: next });
                     }
                 }
-                const settled = settleRecord(record, [record.name], settings, defs, featureOn(FEATURE_STAGES, ctx));
+                const settled = settleRecord(record, [record.name], settings, defs, featureOn(FEATURE_STAGES, ctx) && !away);
                 if (JSON.stringify(record) === was) continue;
                 changed = true;
                 if (drift.length) texts.push(`${record.name}: ${drift.map(item => `${defs.find(def => def.id === item.meter)?.label.toLocaleLowerCase() ?? item.meter} ${item.before} → ${item.after}`).join(', ')} (story days passed)`);

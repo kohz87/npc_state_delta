@@ -32,12 +32,13 @@
 // runtime api, the host global, the document, timers) is injectable for tests.
 import { resolveDossierTarget } from '../suite-handshake.js';
 import {
-    FEATURE_PRESETS, FEATURE_SCAN_EVERY_REPLY, FEATURE_SOCIAL, FEATURE_STAGES, MILESTONE_KIND, NPC_KIND, SOCIAL_QUERY, createNpcPart, limitsFromLines, limitsToLines, meterValue,
+    FEATURE_PRESETS, FEATURE_SCAN_EVERY_REPLY, FEATURE_SOCIAL, FEATURE_STAGES, KEY_PEOPLE_QUERY, MILESTONE_KIND, NPC_KIND, SOCIAL_QUERY, createNpcPart, limitsFromLines, limitsToLines, meterValue,
     normalizeSecrets, secretsFromLines, secretsToLines, wordKey,
 } from './npc-meters.js';
 import { normalizeLimits, presetCatalog, presetIds } from './npc-meters-presets.js';
 import { METERS_CARD_ID, metersCardScreen } from './npc-meters-screen.js';
 import { DOSSIER_FIELDS } from './fields/registry.js';
+import { findKeyEntry, isKey, normalizeKeyPeople } from './key-people.js';
 import { escapeHtml } from './util/html.js';
 import { createParticipant, fileVault } from './storysuite-participant/index.js';
 
@@ -706,6 +707,23 @@ export function createStorySuiteV2Adapter({
         try { return (sdkRef?.modules?.() ?? []).some(module => module?.id === 'story-director'); } catch { return false; }
     }
 
+    // Story Director's key people (`director.keyPeople`, read only) as it answers, or null: not hosted, no Story Director,
+    // or one without the query. Null means "no key people anywhere", never an error.
+    function keyPeopleAnswer() {
+        if (!hosted || typeof sdkRef?.query !== 'function') return null;
+        try {
+            const answer = sdkRef.query(KEY_PEOPLE_QUERY, {});
+            return Array.isArray(answer) ? answer : null;
+        } catch {
+            return null;
+        }
+    }
+    // The same, cleaned (src/key-people.js normalizeKeyPeople).
+    function keyPeople() {
+        const answer = keyPeopleAnswer();
+        return answer ? normalizeKeyPeople(answer) : null;
+    }
+
     // Every dossier as a row of v1's list (dossier-ui.js dossierIndexProjection), kept until Delta's state
     // changes (dossierRevision); before that list has loaded, plain rows from the dossiers' names.
     function dossierRows() {
@@ -768,7 +786,14 @@ export function createStorySuiteV2Adapter({
     }
     // Each row's stage and meters (npc.cast: the ranks and bars the present cards' meters show; the row draws at most DOSSIER_BAR_MAX).
     // Read when the list is drawn and never cached with the rows: a reply moves them without changing any dossier.
+    // A ★ on the rows of key people (their `key` flag), read when the list is drawn like the meters.
+    function withKeyMarks(rows) {
+        const list = keyPeople();
+        if (!list?.length) return rows;
+        return rows.map(row => (isKey(findKeyEntry(list, row)) ? { ...row, key: true } : row));
+    }
     function withMeters(rows) {
+        rows = withKeyMarks(rows);
         if (!hosted || !rows.length || typeof sdkRef?.query !== 'function') return rows;
         let cast;
         try {
@@ -879,7 +904,7 @@ export function createStorySuiteV2Adapter({
             else listPart = dossierListNode(el, owner);
         }
         const pane = `<div class="${PANE_CLASS}">${body}${listText}</div>`;
-        const rowsKey = list ? JSON.stringify([el.__npcStateDeltaV2Find ?? '', dossierRows().map(row => [row.id, row.name, row.statusLabel, row.role]), meters?.cast ?? null]) : '';
+        const rowsKey = list ? JSON.stringify([el.__npcStateDeltaV2Find ?? '', withKeyMarks(dossierRows()).map(row => [row.id, row.name, row.statusLabel, row.role, row.key === true]), meters?.cast ?? null]) : '';
         const key = `${pane}\u0001${meters ? JSON.stringify(meters.cast) : ''}\u0001${rowsKey}`;
         // A full redraw replaces the search box: the reader typing in it keeps the focus and the caret.
         const typing = list && owner?.activeElement?.classList?.contains?.('npc-state-delta-story-search') && el.contains?.(owner.activeElement);
@@ -1658,6 +1683,10 @@ export function createStorySuiteV2Adapter({
             return entries ? entryFor(entries, npc) : null;
         },
         sliceView,
+        /** While hosted: Story Director's key people (`director.keyPeople`) as it answers, or null when it cannot. */
+        keyPeopleAnswer,
+        /** The same, cleaned (normalizeKeyPeople). */
+        keyPeople,
         /** While hosted: the "Scan after every reply" switch (index.js asks before each automatic scan). */
         scanEveryReply: () => part.featureOn(FEATURE_SCAN_EVERY_REPLY) !== false,
         /**
