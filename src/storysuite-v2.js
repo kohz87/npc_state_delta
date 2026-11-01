@@ -31,14 +31,16 @@
 // Pure apart from the DOM it is given: no SillyTavern import, and every outside thing (Delta's
 // runtime api, the host global, the document, timers) is injectable for tests.
 import { resolveDossierTarget } from '../suite-handshake.js';
+import { storyMinuteText } from '../calendar.js';
 import {
-    FEATURE_PRESETS, FEATURE_SCAN_EVERY_REPLY, FEATURE_SOCIAL, FEATURE_STAGES, KEY_PEOPLE_QUERY, MILESTONE_KIND, NPC_KIND, SOCIAL_QUERY, createNpcPart, limitsFromLines, limitsToLines, meterValue,
+    CAST_QUERY, FEATURE_PRESETS, FEATURE_SCAN_EVERY_REPLY, FEATURE_SOCIAL, FEATURE_STAGES, KEY_PEOPLE_QUERY, MILESTONE_KIND, NPC_KIND, SOCIAL_QUERY, createNpcPart, limitsFromLines, limitsToLines, meterValue,
     normalizeSecrets, secretsFromLines, secretsToLines, wordKey,
 } from './npc-meters.js';
 import { normalizeLimits, presetCatalog, presetIds } from './npc-meters-presets.js';
 import { METERS_CARD_ID, metersCardScreen } from './npc-meters-screen.js';
 import { DOSSIER_FIELDS } from './fields/registry.js';
 import { findKeyEntry, isKey, normalizeKeyPeople } from './key-people.js';
+import { metWithEntry, normalizeCast } from './cast-dossier.js';
 import { escapeHtml } from './util/html.js';
 import { createParticipant, fileVault } from './storysuite-participant/index.js';
 
@@ -73,7 +75,9 @@ export const WORLD_FEATURE = 'story-director.world';
  */
 export const PAGE_API = 'NPCStateDeltaCast';
 export const PAGE_SLOT_CLASS = 'npc-state-delta-v2-slot';
-export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.keyAway', 'npc.socialModifier', 'npc.identity']);
+// Story Block's query for a pack portrait's image URL (read only): packs.portrait({ pack, file }) → a safe URL or null.
+const PORTRAIT_QUERY = 'packs.portrait';
+export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.keyAway', 'npc.castMade', 'npc.socialModifier', 'npc.identity']);
 export const COMMAND_NAMES = Object.freeze(['npc.adjust', 'npc.set', 'npc.refresh', 'npc.milestone', 'npc.tick']);
 // The replies after which Delta takes its per-reply step (npc.tick): a new reply or a new swipe of
 // one, never a Continue, a Re-read or late change lines (the same reply again).
@@ -217,6 +221,7 @@ const fallbackEmptyCast = reason => `<div class="npc-state-delta-story-empty-sta
  *   version    Delta's version, for the module definition.
  *   host       () => the Story Block global.
  *   headReply  () => the index of the latest reply (the reader's own meter values start its window).
+ *   castSync   async () => makes the dossiers of the cast people the step has just recorded (index.js castSync).
  *   doc, timers, loadEmptyCast (() => Promise<emptyCastHtml>), logger.
  */
 // DOM helpers for the Cast markup (text is set with textContent; nothing is parsed as markup).
@@ -279,6 +284,7 @@ export function createStorySuiteV2Adapter({
     version = '',
     host = () => globalThis.StoryBlock,
     headReply = () => null,
+    castSync = null,
     doc = globalThis.document,
     timers = globalThis,
     loadEmptyCast = () => import('../story-block-tabs.js').then(module => module.emptyCastHtml),
@@ -393,6 +399,9 @@ export function createStorySuiteV2Adapter({
         const setup = npc?.meterSetup && typeof npc.meterSetup === 'object' ? npc.meterSetup : {};
         return { track: typeof setup.track === 'string' ? setup.track : '', limits: normalizeLimits(setup.limits) };
     };
+    // The same for the stage logic: a person made from the cast also brings their own stages (castFrom.stages), which the
+    // editor's setup never holds (so saving the editor cannot lose them).
+    const stageSetupOf = npc => ({ ...setupOf(npc), ladder: Array.isArray(npc?.castFrom?.stages) ? npc.castFrom.stages : [] });
 
     const part = createNpcPart({
         resolve: name => {
@@ -410,7 +419,7 @@ export function createStorySuiteV2Adapter({
             const npc = dossierOf(name);
             return normalizeSecrets(npc?.secrets).filter(secret => ids.includes(secret.id)).map(({ id, text }) => ({ id, text }));
         },
-        setup: (name, labels = []) => setupOf(dossierOf(name) ?? labels.map(dossierOf).find(Boolean)),
+        setup: (name, labels = []) => stageSetupOf(dossierOf(name) ?? labels.map(dossierOf).find(Boolean)),
         presets: catalog,
         feature: hostFeature,
         present: () => names(presentList()),
@@ -538,6 +547,8 @@ export function createStorySuiteV2Adapter({
         'npc.next': (state, args) => part.queries['npc.next'](state, args ?? {}),
         /** npc.keyAway() → the memory of key people's last absences (the slice's `keyAway`: { [name key]: { name, aliases, away, returnedAt, presentReplies } }), {} when none. */
         'npc.keyAway': (state, args) => part.queries['npc.keyAway'](state, args ?? {}),
+        /** npc.castMade() → the people Delta made a dossier for from the cast (the slice's `cast`: { [castKey]: { name, rungs? } }), {} when none. */
+        'npc.castMade': (state, args) => part.queries['npc.castMade'](state, args ?? {}),
         /**
          * npc.socialModifier({ name, skill }) → { mod, name, skill, reasons: [{ text, value }] } | null:
          * what an NPC's meters, stage and disposition do to a social check against them (src/social-check.js).
@@ -729,6 +740,49 @@ export function createStorySuiteV2Adapter({
         } catch {
             return {};
         }
+    }
+    // The living cast (Story Director's `director.cast`, read only): the cleaned answer with its dates written on Story Director's
+    // calendar, or null (not hosted, no Story Director, or one without the query). Null means "no cast anywhere".
+    function castAnswer() {
+        if (!hosted || typeof sdkRef?.query !== 'function') return null;
+        try {
+            const answer = sdkRef.query(CAST_QUERY, {});
+            return Array.isArray(answer) ? answer : null;
+        } catch {
+            return null;
+        }
+    }
+    function castPeople() {
+        const answer = castAnswer();
+        if (!answer) return null;
+        const calendar = directorCalendar();
+        return normalizeCast(answer, minutes => storyMinuteText(minutes, calendar));
+    }
+    // The slice's record of the cast dossiers made (npc.castMade), {} when there is none or no host.
+    function castMade() {
+        if (!hosted || typeof sdkRef?.query !== 'function') return {};
+        try {
+            const made = sdkRef.query('npc.castMade', {});
+            return made && typeof made === 'object' && !Array.isArray(made) ? made : {};
+        } catch {
+            return {};
+        }
+    }
+    // Packs' names by id (`packs.list`), for the badge; {} when the host cannot say.
+    function packNames() {
+        if (!hosted || typeof sdkRef?.query !== 'function') return {};
+        try {
+            const list = sdkRef.query('packs.list', {});
+            return Object.fromEntries((Array.isArray(list) ? list : []).filter(pack => pack && typeof pack.id === 'string')
+                .map(pack => [pack.id, String(pack.name ?? pack.title ?? '').trim()]).filter(([, name]) => name));
+        } catch {
+            return {};
+        }
+    }
+    // A pack portrait's image URL (`packs.portrait`) as a safe URL (safeImageUrl), or null.
+    function packPortraitUrl(pack, file) {
+        if (!hosted || typeof sdkRef?.query !== 'function' || !pack || !file) return null;
+        try { return safeImageUrl(sdkRef.query(PORTRAIT_QUERY, { pack, file })); } catch { return null; }
     }
     // Story Director's calendar (`director.calendar`: { era, months, leapYears }), or null when it has none to give; Story Director's
     // key people carry their dates as story minutes, which index.js writes on it (calendar.js storyMinuteText).
@@ -1197,8 +1251,24 @@ export function createStorySuiteV2Adapter({
         try { wanted = part.tickWanted(); } catch { wanted = false; }
         // Key people (Story Director's): the step also keeps the memory of their last absence up to date.
         if (!wanted) wanted = (keyPeopleAnswer()?.length ?? 0) > 0 || Object.keys(keyAwayMemory()).length > 0;
+        // The living cast: someone met whose dossier is not yet made, or a made one with a stage ladder of their own.
+        if (!wanted) wanted = castWanted();
         if (!wanted) return;
-        lastTick = send('npc.tick', {}, { own: true });
+        lastTick = send('npc.tick', {}, { own: true }).then(async out => {
+            await madeCastSync();
+            return out;
+        });
+    }
+    function castWanted() {
+        const made = castMade();
+        if (Object.values(made).some(record => record?.rungs > 0)) return true;
+        const people = castPeople();
+        return Array.isArray(people) && metWithEntry(people).some(person => !Object.hasOwn(made, person.key));
+    }
+    // After the step: Delta makes the dossiers of the people it has just recorded (index.js castSync), never twice at once.
+    async function madeCastSync() {
+        if (typeof castSync !== 'function') return;
+        try { await castSync(); } catch (error) { warn('Story Suite v2 cast dossiers were not made', error); }
     }
 
     // ---- Diagnostics (Story Block's Settings → Diagnostics) ----
@@ -1715,6 +1785,16 @@ export function createStorySuiteV2Adapter({
         keyPeople,
         /** While hosted: Story Director's calendar (`director.calendar`), or null. */
         directorCalendar,
+        /** While hosted: Story Director's cast (`director.cast`) as it answers, or null when it cannot. */
+        castAnswer,
+        /** The same, cleaned (src/cast-dossier.js normalizeCast), dates written on Story Director's calendar. */
+        castPeople,
+        /** While hosted: the people a cast dossier was made for (npc.castMade), {} without one. */
+        castMade,
+        /** While hosted: packs' names by id. */
+        packNames,
+        /** While hosted: a pack portrait's safe image URL, or null. */
+        packPortraitUrl,
         /** While hosted: the "Scan after every reply" switch (index.js asks before each automatic scan). */
         scanEveryReply: () => part.featureOn(FEATURE_SCAN_EVERY_REPLY) !== false,
         /**

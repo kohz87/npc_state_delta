@@ -108,6 +108,9 @@ export const FIELDS = Object.freeze({
     // (v2 meters) The reader's meter setup for this NPC: { track (a preset or ladder track), limits:
     // { meter: { ceiling?, floor? } } }. Read by the v2 slice's handlers only; never model-facing.
     meterSetup: { kind: 'meta', prompt: 'never' },
+    // (the living cast) Where a dossier made from the pack's cast came from: { key, pack, id, packName?, packVersion?, met: { on, where },
+    // goal, routine, stages? } (src/cast-dossier.js). The person's own stage ladder (`stages`) is read by the v2 slice's handlers only.
+    castFrom: { kind: 'meta', prompt: 'never' },
 });
 
 // (cleanup step 13) How each key a targeted prompt asks the model to return is written in its return

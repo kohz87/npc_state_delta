@@ -3907,16 +3907,23 @@ export function normalizeNpcRecord(raw = {}) {
     const ageFields = normalizeStoredAgeFields(raw);
     npc.age = ageFields.age;
     npc.apparentAge = ageFields.apparentAge;
-    npc.personality = locked.has('personality')
+    // (the living cast) A dossier made from the pack's cast keeps the pack's words exactly as written (`castFrom.first`) for as long as
+    // the stored field still is those words; once a scan or the reader changes the field it is compacted like any other.
+    const packFirst = raw.castFrom && typeof raw.castFrom.first === 'object' && raw.castFrom.first ? raw.castFrom.first : {};
+    const packWords = (field, max) => {
+        const text = typeof packFirst[field] === 'string' ? cleanText(packFirst[field], max) : '';
+        return text && cleanText(raw[field], max) === text;
+    };
+    npc.personality = locked.has('personality') || packWords('personality', 900)
         ? cleanText(raw.personality, 900)
         : compactDurableText(raw.personality, DURABLE_PROFILE_LIMITS.personality, 6);
-    npc.speech = locked.has('speech')
+    npc.speech = locked.has('speech') || packWords('speech', 600)
         ? cleanText(raw.speech, 600)
         : compactDurableText(raw.speech, DURABLE_PROFILE_LIMITS.speech, 5);
-    npc.appearance = locked.has('appearance')
+    npc.appearance = locked.has('appearance') || packWords('appearance', 1800)
         ? cleanText(raw.appearance, 1800)
         : normalizeAppearanceCanon(raw.appearance);
-    npc.background = locked.has('background')
+    npc.background = locked.has('background') || packWords('background', 1200)
         ? cleanText(raw.background, 1200)
         : compactDurableText(raw.background, DURABLE_PROFILE_LIMITS.background, 8);
     npc.relationshipSummary = compactDurableText(raw.relationshipSummary, DURABLE_PROFILE_LIMITS.relationshipSummary, 6);

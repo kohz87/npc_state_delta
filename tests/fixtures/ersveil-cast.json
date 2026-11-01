@@ -1,0 +1,1291 @@
+[
+  {
+    "id": "tansy-millrace",
+    "name": "Tansy Millrace",
+    "aliases": [
+      "Tansy",
+      "Millrace",
+      "the night-ferry woman"
+    ],
+    "about": "A halfling ferry-pilot and hospice-trained healer who keeps Bluewatch's river-gate crews patched and charges what people can pay.",
+    "look": "Small and broad, 44, with brown hair going grey under a salt-stained oilcloth hood, a notched right ear, a weathered round face and quick brown eyes. Her hands are scarred from hot pitch and bandage knots. She carries a pilot's pole and a satchel of willow-bark, lint and catgut on the same strap, and sits whenever there is a bench.",
+    "voice": "Dry, unhurried river-speech with long vowels ('Gooood. Sit.'). Asks about food and sleep before the wound. Never raises her voice; goes quieter when angry. Calls everyone 'love' or 'sailor' until she has their name.",
+    "personality": "Patient, practical and stubborn. Forgives other people's debts and never her own. Cannot walk past a wound. Hides grief behind chores. Distrusts heroics and clean hands, and respects anyone who stays for the night shift.",
+    "history": "Born into a Confederacy barge-family, she trained one season at Auvoth's Ashbell Hospice as a Hospice Healer and left when the wards began pricing care by a patient's contract letter. For eleven years she has run Bluewatch's night ferry and the Watchhouse's infirmary corner, which the Watch pretends is not an infirmary. Her husband drowned at the river-gate in CY 603.",
+    "portrait": "tansy-millrace.webp",
+    "start": {
+      "place": "Bluewatch Village",
+      "goal": "Keep the river-gate crews patched and fed through the season.",
+      "routine": "Dawn to noon at the inspection quay; afternoons in the Watchhouse infirmary corner; after dusk at the Stray Oar, then the night ferry on the Branch."
+    },
+    "drawnTo": [
+      "a wounded party off the Bluewatch road",
+      "the signal horn sounding"
+    ],
+    "meters": {
+      "preset": "companion",
+      "trust": 10,
+      "affection": 5,
+      "tension": 0,
+      "loyalty": 20
+    },
+    "stages": [
+      {
+        "id": "known-patient",
+        "name": "Known patient",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 20
+          }
+        ],
+        "milestone": "She has stitched you once and now calls you by name."
+      },
+      {
+        "id": "night-shift",
+        "name": "Night-shift friend",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 45
+          },
+          {
+            "meter": "affection",
+            "at": 25
+          }
+        ],
+        "milestone": "She gives you a key to the infirmary corner."
+      },
+      {
+        "id": "river-family",
+        "name": "River family",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 70
+          },
+          {
+            "meter": "loyalty",
+            "at": 55
+          }
+        ],
+        "milestone": "She offers to leave the Branch and travel with you."
+      }
+    ],
+    "fields": {
+      "Soul Class": "II",
+      "Rank": "Unregistered",
+      "Calling": "Hospice Healer",
+      "People": "Halfling"
+    },
+    "secrets": [
+      {
+        "title": "The eleven names",
+        "text": "She keeps no ledger of what the Watch owes her. She keeps one of eleven people she could not save, and says their names on the night ferry so the river hears them.",
+        "meter": "trust",
+        "at": 15
+      },
+      {
+        "title": "The seized barge",
+        "text": "The Grey Ledger took her family's barge for her late husband's gambling debts. The price climbs each Yearsend. She saves silver in a jar under the infirmary cot and tells the Watch it is for bandages.",
+        "meter": "trust",
+        "at": 35
+      },
+      {
+        "title": "The cellar guest",
+        "text": "All through the winter of CY 610 a frostbitten Startrace man lay in her root cellar. She nursed him in secret and sent him to Old Lantern Post. His name is Siebert Maas, and he has not written.",
+        "when": "after a night when the party and Tansy work through casualties together"
+      },
+      {
+        "title": "What he raved",
+        "text": "In his fever he raved of ice that sang back and a light that did not move. She wrote the words down and shows them to no one. She fears she is the only person who knows the north is wrong.",
+        "meter": "trust",
+        "at": 60
+      }
+    ],
+    "canDieUnmet": false
+  },
+  {
+    "id": "ugra-salt-hand",
+    "name": "Ugra Salt-Hand",
+    "aliases": [
+      "Sealer Ugra",
+      "Ugra",
+      "the yard-keeper"
+    ],
+    "about": "Bluewatch's orc lay sealer: she completes the frontier's dead in the salt-and-ash yard because no priest will live this far north.",
+    "look": "Tall and wide even for an orc, 41, grey in the tusks and in her black braids, with a burn scar like a hand across her left jaw. Forearms salt-cracked to the elbow, a soot-stained leather apron, and a belt hung with iron nails and a ring of keys. She smells of brine, lamp smoke and iron.",
+    "voice": "Slow and low, in short sentences. Pauses before a name. Says 'the dead' with care and 'the living' with a dry joke. Never swears in the yard.",
+    "personality": "Solemn at work and wry off it. Fair to the point of stubbornness: charges the rich double and the poor nothing, and keeps both prices secret. Reads every corpse for how it died and says so only if asked. Hates debt, hates waste, hates being thanked.",
+    "history": "Born in a Western Barrens camp. She walked north as a young woman and was hired by the Watch after the yard's last sealer froze to death in a hard Turning. In ten years she has completed some four hundred dead: Frostbound raiders and Border villagers in the same pit, when the Watch lets her.",
+    "portrait": "ugra-salt-hand.webp",
+    "start": {
+      "place": "Bluewatch Village",
+      "goal": "Complete every body that comes to the yard before it rises, and keep the pyre fuelled through winter.",
+      "routine": "At the salt-and-ash yard from first light; at the river-gate at dusk to take in the day's dead; she locks the yard at dark and sleeps in it."
+    },
+    "drawnTo": [
+      "a body that was not completed in time",
+      "Veil salts turning up in Bluewatch"
+    ],
+    "meters": {
+      "preset": "mentor",
+      "trust": 0,
+      "affection": 0,
+      "tension": 5,
+      "approval": 10
+    },
+    "stages": [
+      {
+        "id": "yard-gate",
+        "name": "Allowed in the yard",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 15
+          }
+        ],
+        "milestone": "She lets you past the yard gate."
+      },
+      {
+        "id": "hands-in-salt",
+        "name": "Hands in the salt",
+        "needs": [
+          {
+            "meter": "approval",
+            "at": 40
+          },
+          {
+            "meter": "trust",
+            "at": 30
+          }
+        ],
+        "milestone": "She hands you a shovel and shows you the salt-and-iron measure."
+      },
+      {
+        "id": "keeper-of-a-name",
+        "name": "Keeper of a name",
+        "needs": [
+          {
+            "meter": "approval",
+            "at": 70
+          },
+          {
+            "meter": "trust",
+            "at": 55
+          }
+        ],
+        "milestone": "She tells you where someone lies and trusts you to say it."
+      }
+    ],
+    "fields": {
+      "Soul Class": "II",
+      "Rank": "Lay sealer (Bluewatch yard)",
+      "Calling": "Lay Sealer",
+      "People": "Orc"
+    },
+    "secrets": [
+      {
+        "title": "No prayers",
+        "text": "She never speaks a rite over the dead. She was taught completion as a craft, not a faith, and says so to no one, because the Watch likes believing a priest's work is being done.",
+        "meter": "trust",
+        "at": 15
+      },
+      {
+        "title": "Six winters of red",
+        "text": "She was a pyre-tender for the Cinder Host. She left after a records room was burned with its guards inside and the Host would not let her complete them. They rose. She still knows the Barrens roads and the Host's signs.",
+        "meter": "trust",
+        "at": 30
+      },
+      {
+        "title": "Her mother's nail-set",
+        "text": "Her mother's nail-set is stamped in Veil-script, as Barrens pyre-tenders' tools are. She can read the oldest verses of the Church liturgy. She knows what the Church erased and what the Veil kept, and tells no one.",
+        "when": "a Church cleric watches her complete a body or shows her old liturgy"
+      },
+      {
+        "title": "The book of the dead",
+        "text": "She keeps a book of every body she has completed: name if known, place in the pit, date. Kin who come asking are given the names. Ashen Veil agents have offered coin for the book twice. She burned the offers.",
+        "meter": "approval",
+        "at": 60
+      }
+    ],
+    "canDieUnmet": false
+  },
+  {
+    "id": "ruvai-ghostpass",
+    "name": "Ruvai Ghostpass",
+    "aliases": [
+      "Ruvai",
+      "Ghostpass",
+      "the Brazier's tracker"
+    ],
+    "about": "The Ninth Brazier's lynx-eared tracker: brilliant, vain and hungry for the S-rank contract his party's A letter promises.",
+    "look": "Lean and tall, 33, lynx-eared with black ear-tufts (one notched), a banded tail he keeps tucked in his belt, and amber-hazel eyes. He wears the Ninth Brazier's badge, a brazier on black, on a grey hunter's cloak, carries a long bow unstrung on his back, and keeps a cord of tally-knots at his belt. His grin arrives before the rest of him.",
+    "voice": "Quick, clipped and amused. Clan-tongue vowels slide into his speech when he is angry or moved. Calls rivals 'little lamp', the Guild's old insult for an F-rank. Boasts, then undercuts it with a joke when someone is hurt.",
+    "personality": "Competitive, charming and honest in the field, vain in town. Measures people by what they do on a bad road. Cannot bear to be second in front of his clan's name. Quietly generous to young scouts and rude to anyone who tips badly.",
+    "history": "Raised in a Chieftainate clan and trained at the Longstride Hunt Lodge, he was hired by the Guild at Auvoth. Six years ago he joined the Ninth Brazier as its tracker, and has pulled the party out of three wildzone wipes by reading ground. His clan gave him the deed-name Ghostpass after he led a wounded company through Windcutter Pass in a blizzard; two lived.",
+    "portrait": "ruvai-ghostpass.webp",
+    "start": {
+      "place": "Bluewatch Village / Guild Office",
+      "goal": "Win the Guild's deepest wildzone survey contract this season, so the Ninth Brazier's name outlives the job board.",
+      "routine": "At the job board at dawn when the party is in town; out along the wildzone edge on survey otherwise; evenings at the Stray Oar."
+    },
+    "drawnTo": [
+      "a new F-letter taking a job above their letter",
+      "flood contracts being posted"
+    ],
+    "meters": {
+      "preset": "rival",
+      "trust": -10,
+      "affection": 0,
+      "tension": 25,
+      "respect": 10,
+      "rivalry": 55
+    },
+    "stages": [
+      {
+        "id": "little-lamp",
+        "name": "Little lamp",
+        "needs": [
+          {
+            "meter": "rivalry",
+            "at": 30
+          }
+        ],
+        "milestone": "He has stopped ignoring you."
+      },
+      {
+        "id": "worth-a-wager",
+        "name": "Worth a wager",
+        "needs": [
+          {
+            "meter": "respect",
+            "at": 40
+          }
+        ],
+        "milestone": "He bets his own silver on you in front of the party."
+      },
+      {
+        "id": "brazier-mate",
+        "name": "Brazier-mate",
+        "needs": [
+          {
+            "meter": "respect",
+            "at": 65
+          },
+          {
+            "meter": "trust",
+            "at": 35
+          }
+        ],
+        "milestone": "He offers you a seat by the Ninth Brazier's fire."
+      }
+    ],
+    "fields": {
+      "Soul Class": "IV",
+      "Rank": "B (party holds A)",
+      "Calling": "Longstride Hunter",
+      "People": "Beastfolk (lynx)"
+    },
+    "secrets": [
+      {
+        "title": "An F badge",
+        "text": "He calls rivals 'little lamp' because his own first Guild badge was an F. He still carries it on a thong over his heart, worn blank, and has never told the party.",
+        "meter": "respect",
+        "at": 25
+      },
+      {
+        "title": "The fifth member",
+        "text": "The Ninth Brazier earned its A on a contract that killed its fifth member, a young healer. Ruvai tracked the rest out alive. The Guild buried her name to keep the letter, and he is the only one who still says it.",
+        "meter": "respect",
+        "at": 45
+      },
+      {
+        "title": "The tally-cord",
+        "text": "His tally-cord does not count kills. Each knot is a herd track, and every track leads away from one point far in the north. He told Kaidu, who believed him, and no one else. He thinks the flood is a flight.",
+        "when": "the early flood begins and the party fights beside him"
+      },
+      {
+        "title": "The mortgaged banner",
+        "text": "The party's gear and its banner are mortgaged to the Grey Ledger. The Reckoner's agents will call at Yearsend. Ruvai has told his leader the money will come from a contract he has not yet won.",
+        "meter": "respect",
+        "at": 70
+      }
+    ],
+    "canDieUnmet": false
+  },
+  {
+    "id": "siebert-maas",
+    "name": "Siebert Maas",
+    "aliases": [
+      "Siebert",
+      "Maas",
+      "the lamp clerk"
+    ],
+    "about": "A scholarship mage from Startrace, hiding as a lamp-clerk at the edge of settled land, who cannot stop listening to the north.",
+    "look": "Thin and stooped, 27, with dark hair already streaked white at the temples, ink-stained cuffs under a grey lamp-clerk's smock, and two frost-dead fingertips on his left hand wrapped in wax-cloth. His eyes flick north whenever he is outdoors. A small silver tuning-fork hangs from his belt.",
+    "voice": "Quiet and exact. Pauses mid-sentence as if listening. Slips into lecture-hall phrasing ('Strictly speaking...') and laughs a moment too late. Whispers numbers when nervous.",
+    "personality": "Brilliant, anxious and scrupulously honest in small things, evasive in the large one. Afraid of the north and drawn to it. Kind to children and animals. Cannot refuse a question he can answer. Heavy with guilt.",
+    "history": "Born to a Shornmarch hill-farm family, he won a Startrace scholarship on a Guild recommendation and became assistant to Master Albrecht Somner. He left the Tower without notice in the winter of CY 610 and has lived at Old Lantern Post since, selling lamp oil and copying trail-blessings for travellers.",
+    "portrait": "siebert-maas.webp",
+    "start": {
+      "place": "Old Lantern Post",
+      "goal": "Stay out of sight, keep his hands busy, and decide whether he can ever go back to Startrace.",
+      "routine": "In the lamp-oil store by day; copying trail-blessings at the shrine by evening; at dusk on the north road, watching the sky."
+    },
+    "drawnTo": [
+      "someone asking about Master Somner",
+      "the northern sky changing colour"
+    ],
+    "meters": {
+      "preset": "companion",
+      "trust": 0,
+      "affection": 0,
+      "tension": 10,
+      "loyalty": 15
+    },
+    "stages": [
+      {
+        "id": "stranger-who-stays",
+        "name": "Stranger who stays",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 20
+          }
+        ],
+        "milestone": "He lets you see his hands."
+      },
+      {
+        "id": "trusted-reader",
+        "name": "Trusted reader",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 45
+          },
+          {
+            "meter": "loyalty",
+            "at": 35
+          }
+        ],
+        "milestone": "He shows you a page he should not have."
+      },
+      {
+        "id": "witness-at-your-side",
+        "name": "Witness at your side",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 70
+          },
+          {
+            "meter": "loyalty",
+            "at": 55
+          }
+        ],
+        "milestone": "He agrees to say what he saw to whoever must hear it."
+      }
+    ],
+    "fields": {
+      "Soul Class": "III",
+      "Rank": "Struck-off Journeyman",
+      "Calling": "Journeyman Spellwright",
+      "People": "Human"
+    },
+    "secrets": [
+      {
+        "title": "Not a clerk",
+        "text": "He writes the trail-blessings in flawless Startrace copperplate and corrects the shrine's Old Imperial grammar under his breath. A lamp-clerk would not. He tells people he was a copyist's apprentice.",
+        "meter": "trust",
+        "at": 15
+      },
+      {
+        "title": "The fork",
+        "text": "The silver fork is a Listener's calibrating fork. He hears attribute frequencies, and since the north the hum has begun: a faint endless tone he hears whenever the sky is clear.",
+        "meter": "trust",
+        "at": 30
+      },
+      {
+        "title": "Left alive",
+        "text": "He did not escape. Master Somner sent him south alone with the notes, still alive at the camp and still talking to the ice, and told him that someone must carry it. Siebert left him there.",
+        "meter": "trust",
+        "at": 50
+      },
+      {
+        "title": "The missing pages",
+        "text": "Commander Ragna holds Somner's journal. Siebert holds the pages sewn into his coat: the leyline survey and what the ice sang. He is the only living witness to what the Startrace expedition tapped.",
+        "when": "the Third Abyssal Tide is named before the Compact Council"
+      },
+      {
+        "title": "A price on his silence",
+        "text": "Archmaster Quill knows the survey failed and has set a quiet price on Siebert's silence: a Startrace chair, or a Hand of Oblivion contract. He has been offered the chair twice, by letter, without a signature.",
+        "meter": "trust",
+        "at": 75
+      }
+    ],
+    "canDieUnmet": false
+  },
+  {
+    "id": "jorunn-floe-walker",
+    "name": "Jorunn Floe-Walker",
+    "aliases": [
+      "Jorunn",
+      "Floe-Walker",
+      "the northern spear"
+    ],
+    "about": "A Frostbound warrior living as a hired spear in Hollin's Reach: proud, hard-eyed and tired of being called a barbarian.",
+    "look": "Tall and rangy, 31, wind-burned, with a white-blond braid wound with sinew and floe-lines tattooed down both forearms. A rime-blue froststeel long-knife hangs at her hip, forged in her own Forge-Camp, and a fox-fur collar frames a hard, clever face. An old oar-scar crosses her right palm. She eats with her knife.",
+    "voice": "Flat and low, few words, with a saga cadence when she speaks of oaths ('I have said it, so it is'). Dry jokes, hard consonants. She never says 'barbarian', and goes still when anyone else does.",
+    "personality": "Disciplined, proud and slow to trust, absolute once she does. Treats an oath as a debt and a debt as a limb. Hates pity. Quietly kind to hungry children and animals. Rivalry is her way of paying respect.",
+    "history": "Raised in a Frostbound war-camp on the taiga. She earned the deed-name Floe-Walker crossing the breaking ice of a frozen lake with a sled of orphans. A Forge-Camp graduate, she forged her own froststeel blade at nineteen. For three winters she has worked as a hired spear, wolf-hunter and drover on the Shornmarch frontier.",
+    "portrait": "jorunn-floe-walker.webp",
+    "start": {
+      "place": "Hollin's Reach",
+      "goal": "Earn winter stores and a roof without being taken for a raider.",
+      "routine": "Mornings at the wool-barter stalls; days hired out hunting wolves or hauling hay; evenings on the north palisade, looking at the sky."
+    },
+    "drawnTo": [
+      "word of a Border village burning",
+      "Frostbound on the road south"
+    ],
+    "meters": {
+      "preset": "rival",
+      "trust": -15,
+      "affection": 0,
+      "tension": 25,
+      "respect": 10,
+      "rivalry": 40
+    },
+    "stages": [
+      {
+        "id": "measured",
+        "name": "Measured",
+        "needs": [
+          {
+            "meter": "respect",
+            "at": 30
+          }
+        ],
+        "milestone": "She shares her fire without being asked."
+      },
+      {
+        "id": "hearth-guest",
+        "name": "Hearth-guest",
+        "needs": [
+          {
+            "meter": "respect",
+            "at": 55
+          },
+          {
+            "meter": "trust",
+            "at": 25
+          }
+        ],
+        "milestone": "She calls you by name, not 'southerner'."
+      },
+      {
+        "id": "oath-friend",
+        "name": "Oath-friend",
+        "needs": [
+          {
+            "meter": "respect",
+            "at": 75
+          },
+          {
+            "meter": "trust",
+            "at": 50
+          }
+        ],
+        "milestone": "She swears an oath on her own blade."
+      }
+    ],
+    "fields": {
+      "Soul Class": "III",
+      "Rank": "Forge-Camp graduate",
+      "Calling": "Forge-Camp Blade",
+      "People": "Human (Frostbound)"
+    },
+    "secrets": [
+      {
+        "title": "Five she counts",
+        "text": "She walked seven orphans off the breaking ice but the sled carried twelve. She counts the five aloud at every new moon, and turns hard when anyone calls the story a legend.",
+        "meter": "respect",
+        "at": 20
+      },
+      {
+        "title": "The Moot's scout",
+        "text": "She is no exile. The Winter Moot made her an oath-holder and sent her south three winters ago to learn which villages would shelter the Frostbound if the winters never ease. She has told no one.",
+        "meter": "respect",
+        "at": 40
+      },
+      {
+        "title": "Her father's other hearth",
+        "text": "Ketil Ice-Oar is her half-brother, by their father's second hearth. She sends him word through tithe-traders and hopes his raids wake the south in time. She fears they will close the doors she is trying to open.",
+        "when": "Ketil Ice-Oar's raiders strike the Border, or his name is spoken in her hearing"
+      },
+      {
+        "title": "The rivet",
+        "text": "She carries the Moot's token, a froststeel rivet that makes any Frostbound band listen. She has sworn never to show it until the north has truly fallen. She is watching the sky for a colour no one can name.",
+        "meter": "respect",
+        "at": 65
+      }
+    ],
+    "canDieUnmet": false
+  },
+  {
+    "id": "marga-slatehammer",
+    "name": "Marga Slatehammer",
+    "aliases": [
+      "Marga",
+      "Slatehammer",
+      "the lamp carver"
+    ],
+    "about": "A dwarf runecarver who refuses to carve collars and mends the Sealwardens' ward-lamps instead.",
+    "look": "Short and square, 36, with copper-brown braids bound by four iron rings and a leather apron of a hundred pockets. Soot to the elbows, a left thumbnail blackened by rune-ink, and chisel nicks across both hands. A jeweller's lens hangs on a cord at her neck, and she squints without it.",
+    "voice": "Gruff and exact. Mutters measurements. Swears by 'stone and cut'. Rounds nothing off. Her highest praise is 'That will hold.'",
+    "personality": "Meticulous, stubborn and sentimental about tools. Merciless about shoddy work, generous to apprentices. Curious about anything made with hands. Her moral line is collar-work: never. Loyal to the Sealwardens who buy her lamps; uneasy around Hold elders.",
+    "history": "A carver's daughter from Oathvault, apprenticed to Elder Bodvar Runecutter. At thirty-one she refused a collar contract from a Highmark customer, the elders argued it out, and she took leave 'to learn what collars cost'. She set up a stall in Auvoth's Boneglass Yard, where the Sealwardens' ward-lamps always need mending.",
+    "portrait": "marga-slatehammer.webp",
+    "start": {
+      "place": "Auvoth / Boneglass Yard",
+      "goal": "Make the Sealwardens' ward-lamps last a full shift longer, and earn her way home without carving a collar.",
+      "routine": "At her stall from dawn; at the Terrace gates at shift change, delivering lamps; evenings in a Sealcrown cheap-hall."
+    },
+    "drawnTo": [
+      "a ward-lamp failing on the Terrace",
+      "collar-work offered in Auvoth",
+      "an Ironanvil elder's summons"
+    ],
+    "meters": {
+      "preset": "companion",
+      "trust": 5,
+      "affection": 0,
+      "tension": 10,
+      "loyalty": 20
+    },
+    "stages": [
+      {
+        "id": "customer",
+        "name": "Customer",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 20
+          }
+        ],
+        "milestone": "She lets you pick the lamp-oil."
+      },
+      {
+        "id": "bench-mate",
+        "name": "Bench-mate",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 45
+          },
+          {
+            "meter": "loyalty",
+            "at": 35
+          }
+        ],
+        "milestone": "She hands you a rune-chisel to hold."
+      },
+      {
+        "id": "stonebound",
+        "name": "Stonebound",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 70
+          },
+          {
+            "meter": "loyalty",
+            "at": 60
+          }
+        ],
+        "milestone": "She carves your name on a lamp-base, the dwarf way."
+      }
+    ],
+    "fields": {
+      "Soul Class": "III",
+      "Rank": "Oathvault Runecarver",
+      "Calling": "Runecarver",
+      "People": "Dwarf"
+    },
+    "secrets": [
+      {
+        "title": "Why she left",
+        "text": "She is not simply on leave. The Oathvault elders told her to go and see what collars cost as a rebuke: refuse the work, and the Hold will not carve her name on the ancestor stones when she dies.",
+        "meter": "trust",
+        "at": 15
+      },
+      {
+        "title": "One page of the old script",
+        "text": "As a test for favoured pupils, Bodvar taught her a single page of the old script and called it a warding charm. She can read three lines. She has begun to suspect it never was a charm.",
+        "meter": "trust",
+        "at": 30
+      },
+      {
+        "title": "The flickering marks",
+        "text": "Her mended lamps flare with marks she did not carve. She has kept a rubbing of every flicker for two years. Two patterns match no Ironanvil work, and they are slowly changing.",
+        "when": "a breach alarm sounds under the Seventh Seal Terrace"
+      },
+      {
+        "title": "Bodvar's letter",
+        "text": "Bodvar gave her a sealed letter to open only if a crown ever threatens the Archive. She has carried it unopened for four years, sewn into her apron, and no longer sleeps well.",
+        "meter": "trust",
+        "at": 60
+      }
+    ],
+    "canDieUnmet": false
+  },
+  {
+    "id": "nib",
+    "name": "Nib",
+    "aliases": [
+      "Mouse",
+      "Nib-and-Ink",
+      "the Pale Market courier"
+    ],
+    "about": "A goblin courier and fence in Auvoth's Pale Market who insists he is only a middleman and knows everything that moves in the city.",
+    "look": "Small and wiry, 24, with pewter-green skin, large mobile ears hung with eleven tiny bell-rings he muffles with wax, and quick black eyes. One fang is missing; his grin makes up for it. He wears a courier's coat of patched grey with about forty hidden pockets and a satchel that is always empty when searched.",
+    "voice": "Fast, wheedling and comic. Switches register to suit the listener and calls everyone 'friend' when selling, by name only when he means it. Answers questions about himself with questions.",
+    "personality": "Charming, cautious and loyal under a mask of venality. Notices everything and forgets nothing. Terrified of being owned. Gives away more than he sells. Will not steal from the destitute; will lie to anyone else.",
+    "history": "Born in a Shackles goblin warren, sold into debt at nine, and bought out by a fence who trained him as a courier. He came to Auvoth because Guild law honours no outside debt claim. Registered with the Guild at E, which he calls his shield, he carries messages, appraises salvage and fixes small problems in the Pale Market's back lanes.",
+    "portrait": "nib.webp",
+    "start": {
+      "place": "Auvoth / Pale Market",
+      "goal": "Stay useful to everyone and owned by no one.",
+      "routine": "In the Pale Market's back lanes from the second bell of day until midnight; at the Guild's monthly salvage auction on auction day."
+    },
+    "drawnTo": [
+      "a buyer asking for something sealed",
+      "the Grey Ledger buying up debts"
+    ],
+    "meters": {
+      "preset": "companion",
+      "trust": 0,
+      "affection": 0,
+      "tension": 10,
+      "loyalty": 10
+    },
+    "stages": [
+      {
+        "id": "customer",
+        "name": "Customer",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 20
+          }
+        ],
+        "milestone": "He gives you his real price."
+      },
+      {
+        "id": "back-lane-friend",
+        "name": "Back-lane friend",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 45
+          },
+          {
+            "meter": "loyalty",
+            "at": 30
+          }
+        ],
+        "milestone": "He leaves a back door unlocked for you."
+      },
+      {
+        "id": "partner",
+        "name": "Partner",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 70
+          },
+          {
+            "meter": "loyalty",
+            "at": 55
+          }
+        ],
+        "milestone": "He tells you where he sleeps."
+      }
+    ],
+    "fields": {
+      "Soul Class": "II",
+      "Rank": "E",
+      "Calling": "Infiltrator",
+      "People": "Goblin"
+    },
+    "secrets": [
+      {
+        "title": "Nine names",
+        "text": "He has gone by nine names in nine years. Nib is the first he chose himself, after the quill he stole on his first night free. He keeps the nib in his boot and the other eight names in a locked tin.",
+        "meter": "trust",
+        "at": 15
+      },
+      {
+        "title": "Still owned",
+        "text": "Free in Auvoth, but the Grey Ledger still holds 140 gold of his paper. Outside the Compact he can be seized and collared. If the Reckoner's agents learn he means to leave, they will be waiting.",
+        "meter": "trust",
+        "at": 30
+      },
+      {
+        "title": "The Sparrow's runner",
+        "text": "He carries messages for the Sparrow of the Nightingale, unpaid, to work off the fence who bought him out. He does not know the Sparrow's real name and does not want to.",
+        "meter": "trust",
+        "at": 50
+      },
+      {
+        "title": "Keys for the Chain",
+        "text": "Over three years he has passed a dozen collar-keys to the Broken Chain, never seeing the same face twice. When the slave pens open he will go, debt or no debt, and he will ask the party to come.",
+        "when": "the Broken Chain rises at Eastvale"
+      },
+      {
+        "title": "The ribbon",
+        "text": "He delivered the black ribbon of the Key-Widow to its newest bearer, in the dark, in Auvoth. He swore on his dead sister never to say who. He thinks the Widow is a title, and a living one.",
+        "meter": "trust",
+        "at": 75
+      }
+    ],
+    "canDieUnmet": false
+  },
+  {
+    "id": "odalric-millers-son",
+    "name": "Odalric Miller's son",
+    "aliases": [
+      "Odalric",
+      "Squire Odalric",
+      "the Old Stone's boy"
+    ],
+    "about": "A young Warden of the Last Wall, poor, earnest and devoted, whom Sir Volkmar is quietly teaching to hold a shield line.",
+    "look": "Tall and still filling out, 23, with cropped sandy hair, a freckled, easily flushing face and serious grey eyes. He wears the Wardens' faded grey surcoat, patched at the elbows, with the stone-and-tower badge, and carries a dented kite shield too heavy for him. His boots have been resoled three times.",
+    "voice": "Courteous to a fault, 'sir' and 'ma'am' for everyone, in formal old-Imperial phrasing. Stammers when he lies. Quotes the Order's motto when frightened: 'Until the last stone.'",
+    "personality": "Idealistic, brave and painfully honest, a quick learner and a poor liar. Humble, stubborn, and tries too hard. Devoted to the Order and to the Dawn-King's blood, and sometimes unsure why. Quick to blush, slow to quit.",
+    "history": "A miller's son from the lands of Cedran Keep, taken in by Sir Volkmar as a squire at eighteen. He has trained five years at Thornwall Redoubt under Volkmar and Dame Ermengild and has never yet stood in a true line of battle.",
+    "portrait": "odalric-millers-son.webp",
+    "start": {
+      "place": "Thornwall Redoubt",
+      "goal": "Earn his knight's spurs before the Order is needed, and learn why the old Wardens go quiet when the Emperor's health is mentioned.",
+      "routine": "Drills in the yard from dawn; evenings on the north wall; sent down to the market town for oats on market days."
+    },
+    "drawnTo": [
+      "Princess Wendhild's succession",
+      "a call for swords at a bridge"
+    ],
+    "meters": {
+      "preset": "companion",
+      "trust": 10,
+      "affection": 5,
+      "tension": 0,
+      "loyalty": 25
+    },
+    "stages": [
+      {
+        "id": "courteous-stranger",
+        "name": "Courteous stranger",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 20
+          }
+        ],
+        "milestone": "He asks your name and uses it carefully."
+      },
+      {
+        "id": "shield-comrade",
+        "name": "Shield-comrade",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 45
+          },
+          {
+            "meter": "loyalty",
+            "at": 40
+          }
+        ],
+        "milestone": "He asks you to practise with him at dawn."
+      },
+      {
+        "id": "sworn-to-the-line",
+        "name": "Sworn to the line",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 70
+          },
+          {
+            "meter": "loyalty",
+            "at": 65
+          }
+        ],
+        "milestone": "He swears to you on the Order's stone."
+      }
+    ],
+    "fields": {
+      "Soul Class": "II",
+      "Rank": "Warden Squire",
+      "Calling": "Man-at-Arms (Wardens)",
+      "People": "Human"
+    },
+    "secrets": [
+      {
+        "title": "Volkmar's shield",
+        "text": "The kite shield is Sir Volkmar's own from his squire days. The Order calls it a loan. Volkmar gave it to him in the night, told him never to give ground with it, and never to say whose it was.",
+        "meter": "trust",
+        "at": 15
+      },
+      {
+        "title": "Bought out",
+        "text": "When the mill failed he spent two years a bondsman before Volkmar bought out the debt. He never learned the price. Each Yearsend he sends coin to the mill's new owner, a little at a time, to pay it back.",
+        "meter": "trust",
+        "at": 35
+      },
+      {
+        "title": "The errand",
+        "text": "Dame Ermengild swore him to a private errand: if Wendhild's army breaks, he carries word and a spare horse to the Redoubt. A map of the north roads is sewn into his surcoat. He does not know why they trust him.",
+        "when": "the Highmark succession turns into open war"
+      },
+      {
+        "title": "The empty granary",
+        "text": "The Redoubt is poorer than the Order admits. Lord-Commander Ottwald sold Cedran Keep's last tapestries to feed the garrison. Odalric keeps the books and knows the Wardens can feed their men only until the next Frostfall without a patron.",
+        "meter": "trust",
+        "at": 65
+      }
+    ],
+    "canDieUnmet": false
+  },
+  {
+    "id": "cassian-orrel",
+    "name": "Cassian Orrel",
+    "aliases": [
+      "Cassian",
+      "Brother Cassian",
+      "Brother Patience-in-Ash"
+    ],
+    "about": "A gentle ferry-chaplain at a pilgrim ford, a Flame Cleric who hears more than he should.",
+    "look": "Spare and stooped, 52, with ash-grey hair tied back with cord, sunken kind eyes and a knitted cap pulled low over his ears. He wears a ferryman's wet wool cloak over a plain grey cleric's habit with the vow-stitching cut from the hem. His hands are always cold, and he winces at bells.",
+    "voice": "Soft and unhurried, a pastor's cadences that break into fragments when the hum rises. Apologises to silences. Quotes liturgy and then catches himself. Never raises his voice at anyone, living or dead.",
+    "personality": "Gentle, observant and deeply guilty. Fearful of old masters and of his own ears. Unfailingly kind to the dying. Refuses to lie to the dead and will lie to the living for those he protects. His humour comes late and dry.",
+    "history": "Born in a Church-lands parish, trained as a Flame Cleric and then as a Listener, he served the Inquest on the northern hunts for twenty years. For three years he has worked the pilgrim ferry at Saint Orven's Ford, holding evensong in the ford chapel and sitting with the dying.",
+    "portrait": "cassian-orrel.webp",
+    "start": {
+      "place": "Saint Orven's Ford",
+      "goal": "Carry pilgrims safely over the Marrow and sit with the dying.",
+      "routine": "Dawn to dusk on the ford ferry; evensong in the ford chapel; keeps away from the ford on Silver Mark patrol days."
+    },
+    "drawnTo": [
+      "the dead rising along the northern road",
+      "an uncompleted body"
+    ],
+    "meters": {
+      "preset": "companion",
+      "trust": 5,
+      "affection": 5,
+      "tension": 15,
+      "loyalty": 15
+    },
+    "stages": [
+      {
+        "id": "kind-stranger",
+        "name": "Kind stranger",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 20
+          }
+        ],
+        "milestone": "He asks your name and uses it."
+      },
+      {
+        "id": "confessor",
+        "name": "Confessor",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 45
+          },
+          {
+            "meter": "loyalty",
+            "at": 35
+          }
+        ],
+        "milestone": "He tells you why he wears a cap indoors."
+      },
+      {
+        "id": "companion-in-ash",
+        "name": "Companion in ash",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 70
+          },
+          {
+            "meter": "loyalty",
+            "at": 60
+          }
+        ],
+        "milestone": "He puts the vow-stitching back on his habit, for you."
+      }
+    ],
+    "fields": {
+      "Soul Class": "III",
+      "Rank": "Flame Cleric (Listener)",
+      "Calling": "Priest",
+      "People": "Human"
+    },
+    "secrets": [
+      {
+        "title": "The cap",
+        "text": "He wears the knitted cap against the hum, a faint endless tone he has heard for ten years. Bells hurt. The ferry bell he rings by hand, with a strip of cloth tied round the clapper.",
+        "meter": "trust",
+        "at": 15
+      },
+      {
+        "title": "Struck from the roll",
+        "text": "He deserted the Inquest three years ago and cut the vow-stitching from his habit. Mother Inquisitor Severa has his name on her list. He sleeps by the water in case he has to leave in the night.",
+        "meter": "trust",
+        "at": 30
+      },
+      {
+        "title": "The knight who owes him",
+        "text": "Dame Gundisse is the knight sent to find him, and she once owed him her conscience. He will not run if she is the one who comes. He is not sure whether that is faith or tiredness.",
+        "when": "Dame Gundisse or a Silver Mark patrol asks after a deserter"
+      },
+      {
+        "title": "The captive",
+        "text": "In the Silent Cloisters he was set to examine a woman who spoke no tongue of Ersveil and whose frequency belonged nowhere. He helped her escape through the herb gardens. He does not know if she lived.",
+        "meter": "trust",
+        "at": 55
+      },
+      {
+        "title": "The older words",
+        "text": "In the Cloisters' copying rooms he saw that the Church's oldest liturgy is written in Veil-script. He has copied three lines. If completion is craft and not revelation, the Church's monopoly is a lie.",
+        "meter": "trust",
+        "at": 75
+      }
+    ],
+    "canDieUnmet": false
+  },
+  {
+    "id": "gundisse-of-brightspur",
+    "name": "Gundisse of Brightspur",
+    "aliases": [
+      "Dame Gundisse",
+      "Gundisse",
+      "the Silver Mark sergeant"
+    ],
+    "about": "A severe, courteous Silver Mark knight who guards the burial roads and hunts the people who raise the dead.",
+    "look": "Broad-shouldered, 38, with close-cropped dark hair, grey eyes and a tired, stern face crossed by a white scar on the chin. Her plate is worn smooth at the shoulders. She wears a silvered open helm with a pilgrim's cord and keeps a salt-and-iron hammer on her saddle for burial work.",
+    "voice": "Formal, clipped Church-Highmark speech. Asks the same question three ways. Says 'Understood' before a hard decision. Her rare humour is so dry that people miss it.",
+    "personality": "Dutiful, fair and relentless. Keeps to the rule until the rule fails, then breaks it quietly. Courteous to everyone and unmoved by rank. Sleepless. Respects honest craft wherever it comes from.",
+    "history": "Born in Brightspur's burying-guild, she joined the Silver Mark at seventeen and rose to sergeant-knight. For ten years she has escorted pilgrims, guarded burial roads and hunted grave-robbers, and she trains the order's new recruits in salt-and-iron burial.",
+    "portrait": "gundisse-of-brightspur.webp",
+    "start": {
+      "place": "Stirrup Crossing",
+      "goal": "Keep the burial road safe, and finish the task Mother Inquisitor Severa has given her.",
+      "routine": "Drills at the escort station in the morning; rides the burial road at dusk; every ninth day reports at Pilgrim's Shield."
+    },
+    "drawnTo": [
+      "Veil salts sold in a frontier town",
+      "a deserter's trail",
+      "the dead rising in numbers"
+    ],
+    "meters": {
+      "preset": "rival",
+      "trust": 0,
+      "affection": 0,
+      "tension": 30,
+      "respect": 20,
+      "rivalry": 25
+    },
+    "stages": [
+      {
+        "id": "watched",
+        "name": "Watched",
+        "needs": [
+          {
+            "meter": "respect",
+            "at": 30
+          }
+        ],
+        "milestone": "She stops asking the same question three ways."
+      },
+      {
+        "id": "reluctant-ally",
+        "name": "Reluctant ally",
+        "needs": [
+          {
+            "meter": "respect",
+            "at": 55
+          },
+          {
+            "meter": "trust",
+            "at": 30
+          }
+        ],
+        "milestone": "She lends you her second salt-bag."
+      },
+      {
+        "id": "shield-sister",
+        "name": "Shield-sister",
+        "needs": [
+          {
+            "meter": "respect",
+            "at": 75
+          },
+          {
+            "meter": "trust",
+            "at": 55
+          }
+        ],
+        "milestone": "She gives you her name without the title."
+      }
+    ],
+    "fields": {
+      "Soul Class": "III",
+      "Rank": "Sergeant-knight, Silver Mark",
+      "Calling": "Soldier (Silver Mark)",
+      "People": "Human"
+    },
+    "secrets": [
+      {
+        "title": "The hammer",
+        "text": "The salt-and-iron hammer was her father's. He died in a fuel-short winter, when the parish pyre was late and the family could not pay for honoured rites, and rose before dawn. She completed him herself at sixteen.",
+        "meter": "respect",
+        "at": 25
+      },
+      {
+        "title": "A debt of conscience",
+        "text": "Brother Cassian, then an Inquest Listener, talked her out of burning a child the Inquest thought absorbed too well. Hunting him is the hardest duty she has been given, and she is slow-walking it.",
+        "meter": "respect",
+        "at": 45
+      },
+      {
+        "title": "Six salt-tests",
+        "text": "She has quietly salt-tested six bodies completed by lay sealers. All six held as firmly as a priest's work. She has told no one, because her own order's standing rests on the opposite.",
+        "when": "the party shows her a body completed by a lay sealer whose work holds"
+      },
+      {
+        "title": "Severa's second page",
+        "text": "Severa's orders say to take the deserter alive to the Inquest, not to the Order. Gundisse suspects alive means the Silent Cloisters. She has not opened the second page of her orders.",
+        "meter": "respect",
+        "at": 70
+      }
+    ],
+    "canDieUnmet": false
+  },
+  {
+    "id": "hearth-under-snow",
+    "name": "Hearth-Under-Snow",
+    "aliases": [
+      "Hearth",
+      "Under-Snow"
+    ],
+    "about": "A spiritfolk man formed from a banked fire under first snow, gentle and tired, who lives in Highmark's tenements and cannot abide a lit lantern.",
+    "look": "A slight man of thirty by his looks, shaped from mana, with pale ash-grey skin that glows faintly at the seams like embers under ash, drifting soot-dark hair and amber eyes. His edges blur when he is afraid, and meltwater drips from his sleeves. He wears a plain grey coat, gloves and a thick scarf, and his breath steams even in summer.",
+    "voice": "Soft, low and slightly echoing, as if from a banked room. Warm metaphors ('banked', 'kindled'). Asks permission before he touches anything. Goes silent near a bound spirit, then speaks in a rush.",
+    "personality": "Gentle, steady and secretly furious. Patient until a lamp is lit near him. Loves ordinary things: soup, mending, small talk, the cat on the stairs. Avoids violence unless a spirit is being bound in front of him. Fears being unmade, and fears being useful more.",
+    "history": "Formed in the Domain of Oren some two hundred years ago, from the stillness of a banked fire under the first snow of the year. He came to Highmark long ago, where spirit binding is legal and cheap, and has lived in the Civic Ward tenements ever since, doing odd jobs for his keep.",
+    "portrait": "hearth-under-snow.webp",
+    "start": {
+      "place": "Highmark Capital / Civic Ward",
+      "goal": "Find where his sister-in-form is held, and free every bound spirit he meets on the way.",
+      "routine": "Sleeps by day in a Civic Ward cellar; walks the Noble Heights and Knight Quarter lamp-streets at night; visits the armourers' alleys on holy days."
+    },
+    "drawnTo": [
+      "a lantern or blade that hums wrongly",
+      "arms contracts at the Knight Quarter"
+    ],
+    "meters": {
+      "preset": "companion",
+      "trust": 0,
+      "affection": 0,
+      "tension": 15,
+      "loyalty": 15
+    },
+    "stages": [
+      {
+        "id": "cellar-acquaintance",
+        "name": "Cellar acquaintance",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 20
+          }
+        ],
+        "milestone": "He lets you into the cellar."
+      },
+      {
+        "id": "kindled",
+        "name": "Kindled",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 45
+          },
+          {
+            "meter": "loyalty",
+            "at": 35
+          }
+        ],
+        "milestone": "He lets his edges show in front of you."
+      },
+      {
+        "id": "hearth-friend",
+        "name": "Hearth-friend",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 70
+          },
+          {
+            "meter": "loyalty",
+            "at": 60
+          }
+        ],
+        "milestone": "He offers to travel with you, lamp or no lamp."
+      }
+    ],
+    "fields": {
+      "Soul Class": "IV",
+      "Rank": "None",
+      "Calling": "Unbinder (pactcraft)",
+      "People": "Spiritfolk (Oren)"
+    },
+    "secrets": [
+      {
+        "title": "No pulse",
+        "text": "There is no heartbeat in him. The warmth he gives off is his mana, spent a little every day and never fully restored. On cold nights he is dimmer and slower, and he hides it behind gloves and cheerful talk.",
+        "meter": "trust",
+        "at": 15
+      },
+      {
+        "title": "The Lamp-Breaker",
+        "text": "The Capital prefect's heralds call him the Lamp-Breaker: eleven bound lanterns broken in four years, a reward of eighty gold, no description. He is the one suspect nobody has looked for in the tenements.",
+        "meter": "trust",
+        "at": 35
+      },
+      {
+        "title": "The cost of a name",
+        "text": "He frees a spirit by speaking the name it was formed from, and he knows hundreds. Each unbinding costs him a little of himself. He is perhaps a dozen workings from losing his shape.",
+        "when": "a bound spirit is present: a lantern or blade that hums wrongly"
+      },
+      {
+        "title": "Cinder-Beneath-Frost",
+        "text": "His sister-in-form was bound into a hand-lantern for a noble in Prince Corvin's war party. If the Prince's army is ever broken, the baggage will be looted, and he will have one night to find it.",
+        "meter": "trust",
+        "at": 60
+      }
+    ],
+    "canDieUnmet": false
+  },
+  {
+    "id": "ilvane",
+    "name": "Ilvane",
+    "aliases": [
+      "Ilvane the pilot",
+      "the Sea Folk pilot"
+    ],
+    "about": "An Atlantean fleet-pilot who left the dome to guide the Covenant's convoys, and has begun to hear the sea go wrong.",
+    "look": "Tall, about forty by her looks, with sea-pale skin faintly iridescent at the shoulders, long silver-black hair in a sailor's rope-braid and silver-grey eyes with a second lid that flickers in bright light. A thin clear sheath of membrane rests at her collar when she is dry. She carries a waterskin, brass pilot's dividers and a fish-bone chart-case, and moves carefully on dry decks.",
+    "voice": "Soft, exact and tidal: she pauses where a wave would come. Uses depths and distances for metaphors. Calls land-folk 'the Sheathless' with affection. Careful with surface idioms, and gets some wrong on purpose.",
+    "personality": "Calm, wry and watchful. Hates exaggeration and keeps her promises. Secretly lonely, and curious about loud music, hot food and the short, bright lives of humans. Distrusts temples. Happiest when useful.",
+    "history": "Born in Atlantis's Pearlquiet ward and trained as an Abyssal Gate pilot. For fourteen years she has worked the Tidebound Covenant's convoys out of Abysswatch as a pilot on contract, one of the few Sea Folk who live among the Sheathless. She keeps a tide-pool room above the Fleet Basin and never says why she left the dome.",
+    "portrait": "ilvane.webp",
+    "start": {
+      "place": "Abysswatch / Fleet Basin",
+      "goal": "Keep the convoys running through the autumn gales.",
+      "routine": "On the Fleet Basin docks by day, piloting convoys out; evenings at a tide-pool inn on Admiralty Rock; before dawn alone at the breakwater, taking soundings."
+    },
+    "drawnTo": [
+      "a request for northern charts",
+      "refugee ships crowding the Basin"
+    ],
+    "meters": {
+      "preset": "companion",
+      "trust": 0,
+      "affection": 0,
+      "tension": 5,
+      "loyalty": 15
+    },
+    "stages": [
+      {
+        "id": "courteous-pilot",
+        "name": "Courteous pilot",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 20
+          }
+        ],
+        "milestone": "She tells you the real depth of the channel."
+      },
+      {
+        "id": "tide-friend",
+        "name": "Tide-friend",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 45
+          },
+          {
+            "meter": "loyalty",
+            "at": 35
+          }
+        ],
+        "milestone": "She takes you down to the tide-pool room."
+      },
+      {
+        "id": "sworn-to-the-current",
+        "name": "Sworn to the current",
+        "needs": [
+          {
+            "meter": "trust",
+            "at": 70
+          },
+          {
+            "meter": "loyalty",
+            "at": 60
+          }
+        ],
+        "milestone": "She speaks your name in the pressure-tongue, which no surface-dweller has heard."
+      }
+    ],
+    "fields": {
+      "Soul Class": "III",
+      "Rank": "Fleet-pilot (contract)",
+      "Calling": "Abyssal Gate pilot",
+      "People": "Sea Folk"
+    },
+    "secrets": [
+      {
+        "title": "The flask",
+        "text": "She wets her breathing sheath every hour from a flask and keeps another in each boot. Dryness is her private terror. She teases the Sheathless for their dry mouths and hides how often she checks her own.",
+        "meter": "trust",
+        "at": 15
+      },
+      {
+        "title": "The sailor",
+        "text": "She was exiled from Atlantis for loving a Stormmere sailor, which the dome forbids. He died to the Black Trawl eleven years ago. She keeps his marlinspike in her chart-case and has never spoken his name aloud.",
+        "meter": "trust",
+        "at": 30
+      },
+      {
+        "title": "The Witch's letters",
+        "text": "The Sea God Witch Marenthe writes to her once a year. Six years ago she asked, without saying why, for charts of the northern sea-ice. Ilvane has drawn them in secret ever since and does not know why.",
+        "when": "the Tide is named, or a sealed letter bears the Sea God Witch's mark"
+      },
+      {
+        "title": "The Archon's offer",
+        "text": "Tide-Archon Ondaris offered to end her exile if she reports on the Covenant's fleet. She refused. He knows about the charts and may use them. She sleeps with her back to the wall.",
+        "meter": "trust",
+        "at": 60
+      }
+    ],
+    "canDieUnmet": false
+  }
+]

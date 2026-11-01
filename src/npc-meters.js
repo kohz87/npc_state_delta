@@ -38,12 +38,18 @@
 //   this state and is given to the story only through the tail, only while the NPC is present and
 //   unlocked. While locked, screens show the title and the rule ("🔒 Her past — unlocks at Trust 60").
 //
+// * The living cast (src/cast-dossier.js): `cast` = { [castKey ("pack:id")]: { name, rungs? } } records the people whose
+//   dossier Delta made from the pack at the first meeting (Story Director's `director.cast`, read only). npc.tick writes it
+//   at the reply the meeting is first seen (observeCast), so it follows swipes and deletes with the replies; the first meter
+//   values the pack gave are the entry's first values. Read through the query `npc.castMade`.
+//
 // Pure: no DOM, no SillyTavern, no clock, no randomness. What Delta knows (dossier names, base
 // values, note rules and texts, per-NPC setup, presets, who is present) comes in through the hooks
 // given to createNpcPart.
 import { storyMinuteText } from '../calendar.js';
 import { BUILT_IN_PRESETS, normalizeLimits, normalizePreset, presetIds } from './npc-meters-presets.js';
 import { RECENT_REPLIES, isAway, isKey, labelKey, labelsOf, memoryKey, normalizeKeyPeople } from './key-people.js';
+import { CAST_KEY, metWithEntry, normalizeCast } from './cast-dossier.js';
 import {
     DEFAULT_SOCIAL_CAP, DEFAULT_SOCIAL_SCALE, FEATURE_SOCIAL, MAX_SOCIAL_CAP, MAX_SOCIAL_SCALE, SOCIAL_QUERY, socialModifier, socialSettings, socialSkill,
 } from './social-check.js';
@@ -349,7 +355,7 @@ export function normalizeMeterSettings(raw = {}, { presets = BUILT_IN_PRESETS, s
         }
     }
     for (const preset of used) if (Object.keys(preset.limits).length) limits[preset.id] = preset.limits;
-    return { changeCap, custom, stages, ladder, limits, conflictAt, demoteAfter, presets: used.map(preset => preset.id) };
+    return { changeCap, custom, stages, ladder, limits, conflictAt, demoteAfter, presets: used.map(preset => preset.id), stagesOn };
 }
 
 /**
@@ -538,6 +544,45 @@ export function observeKeyAway(memory, people, head) {
     return { memory: changed ? next : before, changed };
 }
 
+// ---- the living cast: who Delta has made a dossier for (Story Director's director.cast, read only) ----
+
+/** Story Director's query for the pack's cast (read only). */
+export const CAST_QUERY = 'director.cast';
+export const CAST_MADE_MAX = 64;
+/**
+ * Notes the met people of Story Director's answer (`people`, normalizeCast) into the record of made dossiers: { cast, fresh }.
+ * `fresh` are the met people with an entry that the record did not have yet (at most up to CAST_MADE_MAX in all); `cast` is the
+ * record with them added. Nobody is ever taken out: a swipe or delete rewinds the slice itself. No answer: nothing changes.
+ */
+export function observeCast(memory, people) {
+    const before = isObject(memory) ? memory : {};
+    if (!Array.isArray(people)) return { cast: before, fresh: [] };
+    const cast = { ...before };
+    const fresh = [];
+    for (const person of metWithEntry(people)) {
+        if (Object.hasOwn(cast, person.key) || Object.keys(cast).length >= CAST_MADE_MAX) continue;
+        const rungs = Math.min(MAX_RUNGS, person.entry.stages.length);
+        cast[person.key] = { name: person.name, ...(rungs ? { rungs } : {}) };
+        fresh.push(person);
+    }
+    return { cast: fresh.length ? cast : before, fresh };
+}
+
+function validateCast(cast) {
+    if (!isObject(cast)) return ['The made cast dossiers are not a record.'];
+    const errors = [];
+    const entries = Object.entries(cast);
+    if (entries.length > CAST_MADE_MAX) errors.push(`The cast record keeps at most ${CAST_MADE_MAX} people.`);
+    for (const [key, record] of entries) {
+        const where = `The cast entry "${key}"`;
+        if (!CAST_KEY.test(key) || FORBIDDEN_KEYS.has(key)) { errors.push(`${where} has an unusable key.`); continue; }
+        if (!isObject(record) || typeof record.name !== 'string' || !record.name.trim() || record.name.length > NAME_MAX) { errors.push(`${where} has no usable name.`); continue; }
+        if (record.rungs !== undefined && (!isInt(record.rungs) || record.rungs < 1 || record.rungs > MAX_RUNGS)) errors.push(`${where} has an unusable count of stages.`);
+        for (const field of Object.keys(record)) if (!['name', 'rungs'].includes(field)) errors.push(`${where} has an unknown field "${field}".`);
+    }
+    return errors;
+}
+
 const KEY_AWAY_MAX = 40;
 function validateKeyAway(memory) {
     if (!isObject(memory)) return ['The key people memory is not a record.'];
@@ -618,7 +663,8 @@ export function validateNpcSlice(slice) {
         if (slice.problems.some(item => !isObject(item) || !isInt(item.rev) || typeof item.text !== 'string')) errors.push('An NPC meters problem is not { rev, text }.');
     }
     if (slice.keyAway !== undefined) errors.push(...validateKeyAway(slice.keyAway));
-    for (const field of Object.keys(slice)) if (!['npcs', 'problems', 'keyAway'].includes(field)) errors.push(`The NPC meters have an unknown field "${field}".`);
+    if (slice.cast !== undefined) errors.push(...validateCast(slice.cast));
+    for (const field of Object.keys(slice)) if (!['npcs', 'problems', 'keyAway', 'cast'].includes(field)) errors.push(`The NPC meters have an unknown field "${field}".`);
     return errors;
 }
 
@@ -869,9 +915,22 @@ export function createNpcPart(hooks = {}) {
     // The NPC's meter setup from the dossier (track, limits) and what it means with these settings.
     const setupFor = (name, labels = []) => {
         const value = call(hooks.setup, null, name, labels);
-        return { track: clean(value?.track, TRACK_MAX), limits: normalizeLimits(value?.limits) };
+        return { track: clean(value?.track, TRACK_MAX), limits: normalizeLimits(value?.limits), rungs: ownRungs(value?.ladder) };
     };
-    const rungsFor = (settings, setup) => (setup.track && Object.hasOwn(settings.ladder, setup.track) ? settings.ladder[setup.track] : settings.ladder[''] ?? []);
+    // A person's own stage ladder (the cast's `stages`, kept on the dossier): rows as the settings' ladder rows, in order. It stands
+    // before any track and only while the stage ladders feature is on (settings.stagesOn).
+    const ownRungs = rows => {
+        const out = [];
+        for (const row of Array.isArray(rows) ? rows : []) {
+            const step = rung(row);
+            if (step && out.length < MAX_RUNGS && !out.some(other => other.key === step.key)) out.push(step);
+        }
+        return out;
+    };
+    const rungsFor = (settings, setup) => {
+        if (setup.rungs?.length && settings.stagesOn) return setup.rungs;
+        return setup.track && Object.hasOwn(settings.ladder, setup.track) ? settings.ladder[setup.track] : settings.ladder[''] ?? [];
+    };
     const limitsFor = (settings, setup) => {
         const merged = { ...(setup.track && Object.hasOwn(settings.limits, setup.track) ? settings.limits[setup.track] : {}) };
         for (const [meter, limit] of Object.entries(setup.limits)) merged[meter] = limit;
@@ -1104,8 +1163,30 @@ export function createNpcPart(hooks = {}) {
             const before = ctx.read(NPC_DOMAIN);
             // The memory of the last absence (above): noted at this reply.
             const observed = people ? observeKeyAway(before?.keyAway, people, ctx.reply?.index) : null;
-            if ((!isObject(before?.npcs) || !Object.keys(before.npcs).length) && !observed?.changed) ctx.fail('REFUSED', 'Nothing to update.');
+            // The living cast (Story Director's `director.cast`, read only): the people met for the first time at this reply.
+            let castPeople = null;
+            try { castPeople = normalizeCast(ctx.query(CAST_QUERY, {})); } catch { castPeople = null; }
+            const castSeen = observeCast(before?.cast, castPeople);
+            if ((!isObject(before?.npcs) || !Object.keys(before.npcs).length) && !observed?.changed && !castSeen.fresh.length) ctx.fail('REFUSED', 'Nothing to update.');
             const slice = ctx.draft(NPC_DOMAIN);
+            const castNames = [];
+            for (const person of castSeen.fresh) {
+                castNames.push(person.name);
+                const who = identify(slice.npcs, person.name);
+                if (!who || Object.hasOwn(slice.npcs, who.key)) continue;
+                // The pack's first meter values (by id or label); a meter this chat does not have is a problem line, not an error.
+                const byId = new Map(defs.flatMap(def => [[def.id, def], [slug(def.label), def]]));
+                const seed = {};
+                const unknown = [];
+                for (const [name, value] of Object.entries(person.entry.meters.values)) {
+                    const def = byId.get(slug(name));
+                    if (def) seed[def.id] = value;
+                    else unknown.push(`${person.name}: "${clean(name, 40)}" is not a meter here (meters: ${defs.map(item => item.id).join(', ')}).`);
+                }
+                try { ensure(ctx, slice.npcs, who, defs, seed); } catch { continue; }
+                note(slice, ctx.rev, unknown);
+            }
+            if (castSeen.fresh.length) slice.cast = castSeen.cast;
             const texts = [];
             const data = [];
             let narrate = false;
@@ -1151,8 +1232,12 @@ export function createNpcPart(hooks = {}) {
                 if (!changed) texts.push('Key people: noted');
                 changed = true;
             }
+            if (castNames.length) {
+                if (!changed) texts.push(`Cast dossier: ${castNames.join(', ')}`);
+                changed = true;
+            }
             if (!changed) ctx.fail('REFUSED', 'Nothing to update.');
-            return { summary: sentence(texts.length ? texts : ['NPC meters: the reply was counted']), narrate, data: { day, npcs: data } };
+            return { summary: sentence(texts.length ? texts : ['NPC meters: the reply was counted']), narrate, data: { day, npcs: data, ...(castNames.length ? { cast: castSeen.fresh.map(person => person.key) } : {}) } };
         },
     };
 
@@ -1311,6 +1396,11 @@ export function createNpcPart(hooks = {}) {
         'npc.keyAway'(state) {
             const memory = state?.domains?.[NPC_DOMAIN]?.keyAway;
             return isObject(memory) ? JSON.parse(JSON.stringify(memory)) : {};
+        },
+        /** npc.castMade → the people Delta made a dossier for from the cast, { [castKey]: { name, rungs? } }, {} when none. */
+        'npc.castMade'(state) {
+            const cast = state?.domains?.[NPC_DOMAIN]?.cast;
+            return isObject(cast) ? JSON.parse(JSON.stringify(cast)) : {};
         },
         /** npc.next({ name }) → the NPC's ladder from here ({ rank, next, risk, text }), or null. */
         'npc.next'(state, args = {}) {

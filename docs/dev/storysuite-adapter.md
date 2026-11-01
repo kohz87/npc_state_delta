@@ -12,7 +12,7 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
   While hosted it checks every `HOST_ALIVE_MS` (5 s) that the host is still there, and restores the drawer copy
   when it is not. The v1 handshake (`suite-handshake.js`) offers nothing to a v2 host (`storyBlockIsV2`).
 - Registers module `npc-state-delta`: queries `QUERY_NAMES` (`npc.present`, `npc.dossier`, `npc.known`,
-  `npc.portrait`, `npc.meters`, `npc.cast`, `npc.next`, `npc.socialModifier`), commands `COMMAND_NAMES` (`npc.adjust`, `npc.set`,
+  `npc.portrait`, `npc.meters`, `npc.cast`, `npc.next`, `npc.keyAway`, `npc.castMade`, `npc.socialModifier`), commands `COMMAND_NAMES` (`npc.adjust`, `npc.set`,
   `npc.refresh`, `npc.milestone`, `npc.tick`), the Cast / Dossiers tab and screen (`CAST_SCREEN_ID`,
   widget `CAST_WIDGET`), its settings section, and hooks `diagnostics` and `ownPrompt`.
 - **`npc` domain** (only numbers, stage and milestone names, ids of unlocked notes; prose stays in NSD's
@@ -87,6 +87,47 @@ exists: Delta alone has no key people, and its saved state and prompts are byte-
   stored, and the scan prompt is unchanged (C10). A reader's own Refresh or backfill is not held.
 - Tests: `tests/key-people.test.js` (the answer, the memory, the note, the hold, the dossier and rows, the meters on Story
   Block's host with a stand-in director, Delta's real runtime beside a fake host).
+
+## The living cast (Story Director's `director.cast`, read only)
+
+A pack lists a hand-written cast; Story Director owns who has been met and where everyone is. Delta only reads `director.cast`
+(and Story Block's `packs.portrait`, `packs.list`) and never writes to either. At the first meeting Delta makes the person's dossier
+at once from the pack entry: no scan, no model call. `src/cast-dossier.js` holds every rule (pure, with its header comment).
+Without Story Director, or one without the query, `adapter.castPeople()` is null and nothing below exists.
+
+- **Query:** `director.cast` → `[{ key ("pack:id"), pack, id, name, aliases, met: { on, where } | null, where?, doing?, lastHeard?
+  (words or { text, on }), alive, entry? }]`. `entry` (the pack entry) comes only for met people; `normalizeCast` drops one that came
+  with an unmet person. Dates are story minutes, written on `director.calendar` like key people's (words are kept as given).
+- **The record in the saved slice:** `npc.tick` asks `director.cast` through `ctx.query` and `observeCast` (src/npc-meters.js) adds
+  each met person with an entry that the slice does not have yet to `cast` = `{ [castKey]: { name, rungs? } }` at that reply, so it
+  follows swipes, deletes and reloads with the replies. The step also gives the person's slice entry the pack's first meter values
+  (by meter id or label; a meter this chat does not have is a problem line, not an error). Read through the query `npc.castMade`.
+  The step runs when someone is met and not yet recorded, or when a recorded person has stages of their own (`castWanted`).
+- **The dossier** (index.js `castSync`, run by the adapter after the step lands, `castSync` option): for each person recorded as
+  made, met now with their entry, with no dossier standing for them (by cast key, name or alias) and not removed by the reader
+  (`userDismissedGroups`), the roster add command makes the dossier, `applyCastEntry` fills it (about → role, look → appearance,
+  voice → speech, personality, history → background, start.place → home base, start.goal → goal, the place met → location, fields
+  → custom fields, the four built-in meters → relationship, `meters.preset` → meter track, secrets → `secrets` (see
+  `castSecrets`, the one place that shapes the notes: `{ id, title?, text, meter + at | when }`), the portrait) and a branch
+  checkpoint is committed at the reply (`cast-dossier`), exactly as a manual add does, so a swipe or delete takes the dossier back with
+  the reply. The pack never overwrites a standing dossier. `castFrom` on the record holds where it came from (key, pack, name,
+  version, when and where met, the starting goal and routine, the person's own `stages`). Later scans treat the dossier as any
+  other: they add and change as they do for anyone, every change marked as today.
+- **The pack's words** (`castFrom.first`: appearance, speech, personality, background as written) are kept exactly by `normalizeNpcRecord` for as long as the stored field still is them (it would otherwise compact them, dropping clauses); once a scan or the reader changes a field it is compacted as for any dossier. `tests/fixtures/ersveil-cast.json` holds the twelve Ersveil entries the tests build from.
+- **The person's own stages** (`castFrom.stages`: the pack's `{ id, name, needs: [{ meter, at }], milestone }`, the milestone kept as the rung's `cue`, the line the story is told when it is reached, never a milestone it needs) run as a ladder before any track, only while
+  the stage ladders feature is on (`rungsFor` in npc-meters.js, `settings.stagesOn`); the editor's meter setup never holds them.
+- **Portrait:** `packs.portrait({ pack, file })` → a safe image URL; a `data:` URL is kept, anything else is fetched once (8 s limit,
+  png/jpeg/webp, 256 KB at most, no re-compression) before the dossier is made, so the dossier has it from the start; it joins the
+  chat's portraits (`portraitAssets`) and its appearance fingerprint like an uploaded one.
+- **The view:** the dossier shows a badge ("Ersveil cast", `delta-cast-badge`) beside the name and a "From the Ersveil cast · first met
+  Gw 12 at the docks" block (`castFromHtml`): their own path (the goal, the routine) and, from `director.cast`, when they were last heard of
+  (`lastHeard`), else where and what they are doing now. Data comes from `getDossierState().castViews` (by dossier id), built from
+  the dossier's `castFrom` and Story Director's live answer; without Story Director the pack's starting words stand.
+- **The panel and the section bar are opaque** (a follow-up from the mockup): `.delta-panel` and the sticky `.delta-section-nav` paint
+  an opaque floor (`--delta-floor`: Story Block's `--ss-sheet-floor`, else the tint with its alpha dropped) under the tint.
+- Tests: `tests/cast-dossier.test.js` (the answer, the entry, the dossier, the view, the slice record on Story Block's host with a stand-in
+  director, Delta's real runtime beside a fake host: made at the first meeting, swipe undoes and re-makes, a standing dossier left alone,
+  removal final, Delta alone makes none, the opaque panel).
 
 ## Screens on the glass look (UI 4c)
 
