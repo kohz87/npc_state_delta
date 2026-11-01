@@ -1,3 +1,16 @@
+## 1.5.0
+
+Needs Story Block 2.12.0 or later to join the suite (alone it works as before). Key people need Story Director 2.7.0.
+
+- **Key people.** A person Story Director has pinned as a key person wears a "★ Key person" badge on the dossier and a
+  "★ Key" tag on the cards and in the dossier library. While they are away the dossier shows a **While away** timeline
+  (where they went and each step), and for a few replies after they come back.
+- **Coming back.** On the reply after a return the narrator is told, once and within the budget, what they did while
+  away; a swipe of that reply tells it again.
+- **Held while away.** While someone is away their meters do not drift and their stage does not slip, and the automatic
+  scan leaves their personality, speech, look, background and your own fields as they were. Your own Refresh and Scan
+  now still write.
+
 ## 1.4.0
 
 Needs Story Block 2.12.0 or later to join the suite (alone it works as before).
