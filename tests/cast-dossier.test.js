@@ -82,6 +82,17 @@ test('the entry is bounded plain text: lists and texts cut, the pack\'s hidden n
 
 // ---- the dossier ----
 
+test('a pack secret with both rules (trust 90 or a story event) goes through the answer, castSecrets and the made dossier with both', () => {
+    const either = { title: 'Either way', text: 'She forged the seal.', meter: 'trust', at: 90, when: 'the party asks about the seal' };
+    const entry = { ...FENNA_ENTRY, secrets: [either] };
+    const [p] = normalizeCast([person({ entry })], dateText);
+    assert.deepEqual(p.entry.secrets, [{ ...either, from: 'pack' }], 'the answer keeps the note whole, marked as the pack\'s');
+    assert.deepEqual(castSecrets(entry.secrets), [{ ...either, from: 'pack' }]);
+    const made = normalizeNpcRecord(applyCastEntry(createNpcRecord('Fenna', []), p, { packName: 'Ersveil' }));
+    assert.deepEqual(made.secrets.map(note => [note.meter, note.at, note.when, note.from]), [['trust', 90, 'the party asks about the seal', 'pack']]);
+    assert.deepEqual(normalizeSecrets(made.secrets).map(note => [note.meter, note.at, note.when]), [['trust', 90, 'the party asks about the seal']]);
+});
+
 test('the dossier is made from the entry: profile, numbers, fields, notes, portrait, the way back to the pack', () => {
     const [p] = normalizeCast([person()], dateText);
     const portrait = { dataUrl: 'data:image/webp;base64,AAAA', mime: 'image/webp', sourceName: 'fenna.webp', updatedAt: 1 };

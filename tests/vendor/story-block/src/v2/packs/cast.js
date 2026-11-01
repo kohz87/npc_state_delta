@@ -182,10 +182,10 @@ export function checkCast(list, packId, add) {
             }
         }
 
-        // Secrets: hidden notes, opened by a meter reaching `at` or by a story event (`when`), one rule each. The story never rewrites them.
+        // Secrets: hidden notes, opened by a meter reaching `at`, by a story event (`when`), or by either (whichever comes first). The story never rewrites them.
         let secrets;
         if (record.secrets !== undefined) {
-            if (!Array.isArray(record.secrets) || record.secrets.length > CAST_LIMITS.secrets) say('secrets', `secrets must be a list of at most ${CAST_LIMITS.secrets} { "title", "text", "meter" and "at", or "when" }.`);
+            if (!Array.isArray(record.secrets) || record.secrets.length > CAST_LIMITS.secrets) say('secrets', `secrets must be a list of at most ${CAST_LIMITS.secrets} { "title", "text", and "meter" with "at", "when", or both }.`);
             else {
                 const kept = [];
                 record.secrets.forEach((secret, n) => {
@@ -198,18 +198,20 @@ export function checkCast(list, packId, add) {
                     if (!body || [...body].length > CAST_LIMITS.secretText || PLAIN.test(body)) say(`${at}.text`, `${at}.text must be plain text of 1 to ${CAST_LIMITS.secretText} characters.`);
                     const byMeter = secret.meter !== undefined || secret.at !== undefined;
                     const byEvent = secret.when !== undefined;
-                    let rule = null;
-                    if (byMeter === byEvent) say(at, `${at} opens by a meter ("meter" and "at") or by a story event ("when"), one of the two.`);
-                    else if (byMeter) {
-                        if (typeof secret.meter !== 'string' || !SLUG.test(secret.meter) || !knowsMeter(secret.meter)) say(`${at}.meter`, `${at}.meter must be one of this person's meters (trust, affection, desire, tension, a meter listed in meters, or a preset's).`, 'UNKNOWN_REF');
-                        else if (!whole(secret.at)) say(`${at}.at`, `${at}.at must be a whole number from ${METER_LIMITS.min} to ${METER_LIMITS.max} (0 or more: at or above it; below 0: at or below it).`);
+                    let rule = {};
+                    let ruleOk = true;
+                    if (!byMeter && !byEvent) { say(at, `${at} needs a rule: a meter ("meter" and "at"), a story event ("when"), or both (it opens at whichever comes first).`); ruleOk = false; }
+                    if (byMeter) {
+                        if (typeof secret.meter !== 'string' || !SLUG.test(secret.meter) || !knowsMeter(secret.meter)) { say(`${at}.meter`, `${at}.meter must be one of this person's meters (trust, affection, desire, tension, a meter listed in meters, or a preset's).`, 'UNKNOWN_REF'); ruleOk = false; }
+                        else if (!whole(secret.at)) { say(`${at}.at`, `${at}.at must be a whole number from ${METER_LIMITS.min} to ${METER_LIMITS.max} (0 or more: at or above it; below 0: at or below it).`); ruleOk = false; }
                         else rule = { meter: secret.meter, at: secret.at };
-                    } else {
-                        const when = typeof secret.when === 'string' ? oneLine(secret.when) : '';
-                        if (!when || [...when].length > CAST_LIMITS.secretWhen || PLAIN.test(when)) say(`${at}.when`, `${at}.when must be plain text of 1 to ${CAST_LIMITS.secretWhen} characters (the story event that opens it).`);
-                        else rule = { when };
                     }
-                    if (title && body && rule) kept.push({ title, text: body, ...rule });
+                    if (byEvent) {
+                        const when = typeof secret.when === 'string' ? oneLine(secret.when) : '';
+                        if (!when || [...when].length > CAST_LIMITS.secretWhen || PLAIN.test(when)) { say(`${at}.when`, `${at}.when must be plain text of 1 to ${CAST_LIMITS.secretWhen} characters (the story event that opens it).`); ruleOk = false; }
+                        else rule = { ...rule, when };
+                    }
+                    if (title && body && ruleOk) kept.push({ title, text: body, ...rule });
                 });
                 secrets = kept;
             }

@@ -1,3 +1,9 @@
+## 1.6.1
+
+- A secret that opens **at a relationship value or on a story event, whichever comes first** reads "Opens at Trust 90
+  or with the story" while hidden (never the event's words), opens on either, and keeps both in the editor
+  ("trust 90 or when … =>"). Story Block 2.15.1 lets a pack's cast carry such secrets.
+
 ## 1.6.0
 
 Needs Story Block 2.12.0 or later to join the suite (alone it works as before). The pack cast needs Story Block 2.15.0
