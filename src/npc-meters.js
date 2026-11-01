@@ -1434,7 +1434,7 @@ export function createNpcPart(hooks = {}) {
                 opened.push({ id: rule.id, title, rule: how, text: `Opened · ${how}` });
                 continue;
             }
-            const opens = meter && event ? `Opens at ${meter}, or with the story` : meter ? `Opens at ${meter}` : 'Opens with the story';
+            const opens = meter && event ? `Opens at ${meter} or with the story` : meter ? `Opens at ${meter}` : 'Opens with the story';
             locked.push({ id: rule.id, ...(meter ? { meter: rule.meter, at: rule.at } : {}), event, opens, text: `Hidden note · ${opens[0].toLocaleLowerCase()}${opens.slice(1)}` });
         }
         return { locked, opened };

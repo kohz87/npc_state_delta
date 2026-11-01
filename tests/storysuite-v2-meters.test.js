@@ -18,6 +18,9 @@ import { METERS_CARD_ID, metersCardScreen } from '../src/npc-meters-screen.js';
 import { buildInjection, buildNarrationCapturePrompt, buildProfileRefreshPrompt, buildScannerPrompt, normalizeNpcRecord } from '../core.js';
 import { fakeRoot } from './helpers/fake-dom.js';
 import { fakeDocument } from './helpers/fake-dom.js';
+import { validatePack } from './vendor/story-block/src/v2/packs/validate.js';
+import { contentOf } from './vendor/story-block/src/v2/packs/content.js';
+import { castSecrets } from '../src/cast-dossier.js';
 
 // NPC meters in v2's per-reply state (F81, F90), against Story Block's real registry, store, command
 // bus and change-line parser (tests/vendor/story-block, see its VERSION). The adapter registers
@@ -1228,4 +1231,81 @@ test('secrets view: blank bars take their lengths from a fixed set in turn, neve
     const long = await widths('Quite different words, much longer. ');
     assert.deepEqual(short, long, 'the same whatever the text');
     assert.deepEqual(short, [62, 48, 56, 70, 62]);
+});
+
+// ---- a pack secret with both rules ("meter OR story event, whichever comes first") ----
+
+// A real pack, validated by the vendored Story Block (which allows both rules on one secret), its cast read the way Delta reads
+// `packs.content`, and the note shaped by castSecrets / normalizeSecrets.
+function eitherNotes() {
+    const checked = validatePack(JSON.stringify({
+        id: 'either-pack', name: 'Either', version: '1.0.0', requires: { storyBlock: '>=2.15.0' },
+        content: { cast: [{
+            id: 'mira', name: 'Mira', about: 'A smith.', look: 'Broad, soot-streaked.', start: { place: 'The forge', goal: 'Keep the fire lit.' },
+            secrets: [{ title: 'Either way', text: 'She forged the duke\'s seal.', meter: 'trust', at: 90, when: 'the party asks her about the seal' }],
+        }] },
+    }));
+    assert.equal(checked.ok, true, JSON.stringify(checked.errors));
+    const [entry] = contentOf([checked.pack], 'cast');
+    return normalizeSecrets(castSecrets(entry.secrets));
+}
+
+test('secrets from a pack: a note with both rules arrives with both, keeps them, and is shaped like any other pack note', () => {
+    const [note] = eitherNotes();
+    assert.deepEqual([note.meter, note.at, note.when, note.title, note.from], ['trust', 90, 'the party asks her about the seal', 'Either way', 'pack']);
+    assert.match(note.id, /^sec_/);
+    assert.equal(note.id, secretId('trust', 90, "She forged the duke's seal."), 'a meter note keeps the id it always had; the event does not change it');
+    // The editor line round-trips with the id and the pack mark.
+    const line = secretsToLines([note]);
+    assert.equal(line, "trust 90 or when the party asks her about the seal => [Either way] She forged the duke's seal.");
+    assert.deepEqual(secretsFromLines(line, [note]).secrets, [note]);
+    assert.deepEqual(secretsFromLines(line).problems, []);
+    // Left out of one rule it is still a note (the other rule alone); with neither it is dropped.
+    assert.deepEqual(castSecrets([{ text: 'x', meter: 'trust', at: 5, when: '' }]).map(item => [item.meter, item.when ?? null]), [['trust', null]]);
+    assert.deepEqual(castSecrets([{ text: 'x', meter: '', at: 5, when: 'an event' }]).map(item => [item.meter ?? null, item.when]), [[null, 'an event']]);
+    assert.deepEqual(castSecrets([{ text: 'x', meter: 'trust' }]), []);
+});
+
+test('secrets from a pack: a both-rules note shows one wording while hidden, opens on the meter OR the story event, and is sent locked like any note', async () => {
+    const WORDING = 'Opens at Trust 90 or with the story';
+    const make = async () => {
+        const delta = fakeDelta();
+        delta.records.npc_mira.secrets = eitherNotes();
+        const h = await host({ delta });
+        h.reply('Nice.', '~ npc Mira | trust: +5');
+        return { h, note: delta.records.npc_mira.secrets[0] };
+    };
+
+    // Hidden: one wording on the card, the event's words not shown; the story is told it as a locked note; the scan watches the event.
+    const { h, note } = await make();
+    const hidden = h.runQuery('npc.cast').find(entry => entry.key === 'mira');
+    assert.deepEqual(hidden.locked.map(item => [item.id, item.meter, item.at, item.event, item.opens]), [[note.id, 'trust', 90, true, WORDING]]);
+    assert.equal(hidden.locked[0].text, 'Hidden note · opens at Trust 90 or with the story');
+    assert.equal(JSON.stringify(hidden).includes('the party asks her about the seal'), false, 'the event wording never reaches the card');
+    const tail = h.def.context.tail(h.view());
+    const sent = [...tail.lines, ...tail.optional].filter(line => line.includes(note.text));
+    assert.equal(sent.length, 1, 'sent once while she is here');
+    assert.match(sent[0], /hidden: never state or reveal/, 'as a locked note, not as something she may say');
+    assert.equal(h.adapter.eventWatch(Object.values(h.delta.records)).length, 1, 'the scan watches for the event');
+    assert.deepEqual(h.npc('Mira').unlocked, []);
+
+    // The meter crossing opens it (trust 15 to 90 in capped steps); the card says what opened it.
+    for (let i = 0; i < 4; i += 1) h.reply('Nice.', '~ npc Mira | trust: +15');
+    assert.deepEqual(h.npc('Mira').unlocked, [], 'still hidden below 90');
+    h.reply('Nice.', '~ npc Mira | trust: +15');
+    assert.ok(h.npc('Mira').meters.trust >= 90);
+    assert.deepEqual(h.npc('Mira').unlocked, [note.id], 'the meter opens it');
+    const byMeter = h.runQuery('npc.cast').find(entry => entry.key === 'mira');
+    assert.deepEqual([byMeter.locked.length, byMeter.opened.map(item => item.text)], [0, ['Opened · Trust 90']]);
+    assert.equal(h.adapter.eventWatch(Object.values(h.delta.records)).length, 0, 'once open the scan stops watching');
+
+    // The story event opens it with the meter far below 90; a swipe takes it back.
+    const other = await make();
+    const { index } = other.h.reply('It happens.', '');
+    assert.ok(other.h.npc('Mira').meters.trust < 90);
+    assert.equal((await other.h.adapter.openByEvent({ name: 'Mira', ids: [other.note.id] })).ok, true);
+    assert.deepEqual(other.h.npc('Mira').unlocked, [other.note.id], 'the event opens it');
+    assert.deepEqual(other.h.runQuery('npc.cast').find(entry => entry.key === 'mira').opened.map(item => item.text), ['Opened · with the story']);
+    other.h.swipe(index, '');
+    assert.deepEqual(other.h.npc('Mira').unlocked, []);
 });
