@@ -5,7 +5,7 @@
 //
 //   npc = {
 //     npcs: { [key]: { name, meters: { trust, affection, desire, tension, ...custom }, stages: { meter: name },
-//                      unlocked: [noteId], disposition?, turn?: { reply, from: { meter: value } },
+//                      unlocked: [noteId], held?: [noteId], disposition?, turn?: { reply, from: { meter: value } },
 //                      milestones?: { [milestoneKey]: name }, rank?: rungKey, low?: n, day?: n } },
 //     problems: [{ rev, text }],          // the last change lines code could not use in full (last 20)
 //   }
@@ -36,7 +36,15 @@
 //   optional title. When the meter reaches `at` (same rule as a threshold), code adds the note's id to
 //   `unlocked` (it stays unlocked on that line of history) and says so; the text itself never enters
 //   this state and is given to the story only through the tail, only while the NPC is present and
-//   unlocked. While locked, screens show the title and the rule ("🔒 Her past — unlocks at Trust 60").
+//   unlocked. While locked, screens show only that a note is hidden and its rule ("Opens at Trust 60",
+//   "Opens with the story"), never its title, text or event wording.
+// * A note opens by a meter rule { meter, at }, by a story event (`when`, up to 120 characters; the scan
+//   of a reply that shows it sends `npc.open`, recorded on that reply), or by the reader's hand (also
+//   `npc.open`; a note the reader shut is kept in `held` so a meter does not open it again).
+// * Every note of a present NPC reaches the story through the tail: an opened one as known to the
+//   player, a locked one worded "hidden: never state or reveal" (the nearest to opening first when the
+//   budget cannot hold them all). `redact` (below) is the screen view of the same text, with locked
+//   notes shown as "1 hidden note".
 //
 // * The living cast (src/cast-dossier.js): `cast` = { [castKey ("pack:id")]: { name, rungs? } } records the people whose
 //   dossier Delta made from the pack at the first meeting (Story Director's `director.cast`, read only). npc.tick writes it
@@ -70,6 +78,8 @@ export const MAX_NPCS = 80;
 export const MAX_METERS_PER_NPC = 24;
 export const MAX_STAGES_PER_METER = 8;
 export const MAX_SECRETS = 8;
+// Notes the scan writes for someone new (2 to 5 layers); the pack's and the reader's keep MAX_SECRETS.
+export const MAX_GENERATED_SECRETS = 5;
 export const MAX_UNLOCKED = 32;
 export const MAX_PROBLEMS = 20;
 export const MAX_MILESTONES = 16;
@@ -86,6 +96,7 @@ export const DAY_MINUTES = 1440;
 export const RECENT_MESSAGES = 4;
 export const SECRET_TEXT_MAX = 300;
 export const SECRET_TITLE_MAX = 60;
+export const SECRET_WHEN_MAX = 120;
 export const MILESTONE_MAX = 60;
 export const DESCRIBE_MAX = 100;
 export const TAIL_SECRETS_PER_NPC = 3;
@@ -126,7 +137,7 @@ const REASON_LABELS = new Set(['reason', 'why', 'because', 'note', 'cause']);
 const RESERVED_IDS = new Set(['stage', 'stages', 'disposition', 'name', 'meter', 'meters', 'milestone', 'milestones', ...REASON_LABELS]);
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const WORDS = /^[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*$/u;
-const RECORD_FIELDS = Object.freeze(['name', 'meters', 'stages', 'unlocked', 'disposition', 'turn', 'milestones', 'rank', 'low', 'day']);
+const RECORD_FIELDS = Object.freeze(['name', 'meters', 'stages', 'unlocked', 'disposition', 'turn', 'milestones', 'rank', 'low', 'day', 'held']);
 
 const isObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
 const isInt = value => Number.isInteger(value);
@@ -403,67 +414,106 @@ export function parseMeterValue(raw) {
 }
 
 /**
- * Hidden notes from a dossier record, cleaned: [{ id, meter, at, text, title? }] (at most eight; an
- * entry without a meter id, a whole-number `at` or text is left out). The id comes from the rule and
+ * Hidden notes from a dossier record, cleaned: [{ id, meter?, at?, when?, text, title? }] (at most
+ * eight). A note needs text and a rule: a meter id with a whole-number `at`, a story event (`when`,
+ * up to 120 characters), or both (it opens by whichever comes first). The id comes from the rule and
  * the text only, so giving a note a title never locks it again.
  */
-export function normalizeSecrets(list) {
+export function normalizeSecrets(list, max = MAX_SECRETS) {
     const out = [];
     for (const entry of Array.isArray(list) ? list : []) {
-        if (out.length >= MAX_SECRETS) break;
+        if (out.length >= max) break;
         if (!isObject(entry)) continue;
         const meter = slug(entry.meter);
         const at = intOr(entry.at, null);
         const text = clean(entry.text, SECRET_TEXT_MAX);
-        if (!meter || at === null || !text) continue;
-        const id = typeof entry.id === 'string' && /^[a-z][a-z0-9]*_[0-9a-z]{8}$/.test(entry.id) ? entry.id : secretId(meter, at, text);
+        const when = clean(entry.when, SECRET_WHEN_MAX);
+        const byMeter = Boolean(meter) && at !== null;
+        if (!text || (!byMeter && !when)) continue;
+        const id = typeof entry.id === 'string' && /^[a-z][a-z0-9]*_[0-9a-z]{8}$/.test(entry.id) ? entry.id : secretId(byMeter ? meter : '', byMeter ? at : 0, text, when);
         if (out.some(other => other.id === id)) continue;
         const title = clean(entry.title, SECRET_TITLE_MAX);
-        out.push({ id, meter, at, text, ...(title ? { title } : {}) });
+        out.push({ id, ...(byMeter ? { meter, at } : {}), ...(when ? { when } : {}), text, ...(title ? { title } : {}) });
     }
     return out;
 }
 
-/** A stable id for a note from its rule and text (FNV-1a): `sec_` and 8 base-36 characters. */
-export function secretId(meter, at, text) {
+/** A stable id for a note from its rule and text (FNV-1a): `sec_` and 8 base-36 characters. A meter note's id does not depend on `when`. */
+export function secretId(meter, at, text, when = '') {
     let hash = 0x811c9dc5;
-    for (const char of `${meter}|${at}|${text}`) {
+    for (const char of `${meter}|${at}|${text}${meter ? '' : `|${when}`}`) {
         hash ^= char.codePointAt(0);
         hash = Math.imul(hash, 0x01000193) >>> 0;
     }
     return `sec_${hash.toString(36).padStart(8, '0').slice(-8)}`;
 }
 
-/** The notes as editor lines: `trust 40: [Her past] She is the duke's daughter.` */
+/**
+ * The notes a scan wrote for someone new (the model's `secrets`), cleaned: [{ id, meter?, at?, when?,
+ * title?, text }], 2 to 5 of them in the order given (light to deep), at most MAX_GENERATED_SECRETS.
+ * A meter rule uses one of the four built-in meters and a whole number from -100 to 100; anything else
+ * must carry a story event. Fewer than one usable note gives [].
+ */
+export function normalizeGeneratedSecrets(list) {
+    const meters = new Set(BUILT_IN_METERS.map(def => def.id));
+    const usable = (Array.isArray(list) ? list : []).filter(isObject).map(entry => {
+        const meter = slug(entry.meter);
+        const at = intOr(entry.at, null);
+        const ok = meters.has(meter) && at !== null && at >= -100 && at <= 100 && at !== 0;
+        return { ...entry, id: undefined, meter: ok ? meter : '', at: ok ? at : null };
+    });
+    return normalizeSecrets(usable, MAX_GENERATED_SECRETS);
+}
+
+/** The notes as editor lines: `trust 40: [Her past] She is the duke's daughter.`; an event note: `when the duke falls => text`. */
 export function secretsToLines(list) {
-    return normalizeSecrets(list).map(secret => `${secret.meter} ${secret.at}: ${secret.title ? `[${secret.title}] ` : ''}${secret.text}`).join('\n');
+    return normalizeSecrets(list).map(secret => {
+        const body = `${secret.title ? `[${secret.title}] ` : ''}${secret.text}`;
+        if (secret.meter === undefined) return `when ${secret.when} => ${body}`;
+        return secret.when ? `${secret.meter} ${secret.at} or when ${secret.when} => ${body}` : `${secret.meter} ${secret.at}: ${body}`;
+    }).join('\n');
 }
 
 /**
  * Editor lines back to notes: one per line, `meter at: text` (`trust 40: …`, `trust >= 40: …`,
  * `tension -30: …`), with an optional title in brackets before the text (`trust 60: [Her past] …`;
- * the title is what screens show while the note is locked). A note whose rule and text are
- * unchanged keeps its id. Lines that do not read are returned in `problems`.
+ * a title is only for the reader: screens never show it while the note is hidden). A note that opens
+ * on a story event is `when the duke falls => text`, and `trust 60 or when the duke falls => text`
+ * opens by whichever comes first. A note whose rule and text are unchanged keeps its id. Lines that do
+ * not read are returned in `problems`.
  */
 export function secretsFromLines(text, previous = []) {
-    const kept = new Map(normalizeSecrets(previous).map(secret => [`${secret.meter}|${secret.at}|${secret.text}`, secret.id]));
+    const kept = new Map(normalizeSecrets(previous).map(secret => [`${secret.meter ?? ''}|${secret.at ?? ''}|${secret.when ?? ''}|${secret.text}`, secret.id]));
     const secrets = [];
     const problems = [];
     for (const line of String(text ?? '').split(/\r?\n/)) {
         const trimmed = line.trim();
         if (!trimmed) continue;
-        const match = /^([\p{L}][\p{L}\p{N} _-]*?)\s*(?:>=|≥|<=|≤|at)?\s*([+\-−]?\d{1,4})\s*:\s*(.+)$/u.exec(trimmed);
-        if (!match) { problems.push(trimmed); continue; }
-        const meter = slug(match[1]);
-        const at = Number(match[2].replace('−', '-'));
-        const titled = /^\[([^\]]{1,80})\]\s*(.+)$/u.exec(match[3].trim());
+        let meter = '';
+        let at = null;
+        let when = '';
+        let rest = '';
+        const event = /^(?:([\p{L}][\p{L}\p{N} _-]*?)\s*(?:>=|≥|<=|≤|at)?\s*([+\-−]?\d{1,4})\s+or\s+)?when\s+(.{1,200}?)\s*=>\s*(.+)$/u.exec(trimmed);
+        const plain = event ? null : /^([\p{L}][\p{L}\p{N} _-]*?)\s*(?:>=|≥|<=|≤|at)?\s*([+\-−]?\d{1,4})\s*:\s*(.+)$/u.exec(trimmed);
+        if (event) {
+            meter = event[1] ? slug(event[1]) : '';
+            at = event[2] ? Number(event[2].replace('−', '-')) : null;
+            when = clean(event[3], SECRET_WHEN_MAX);
+            rest = event[4];
+        } else if (plain) {
+            meter = slug(plain[1]);
+            at = Number(plain[2].replace('−', '-'));
+            rest = plain[3];
+        } else { problems.push(trimmed); continue; }
+        const titled = /^\[([^\]]{1,80})\]\s*(.+)$/u.exec(rest.trim());
         const title = titled ? clean(titled[1], SECRET_TITLE_MAX) : '';
-        const body = clean(titled ? titled[2] : match[3], SECRET_TEXT_MAX);
-        if (!meter || !body) { problems.push(trimmed); continue; }
-        const id = kept.get(`${meter}|${at}|${body}`) ?? secretId(meter, at, body);
+        const body = clean(titled ? titled[2] : rest, SECRET_TEXT_MAX);
+        if ((event ? !when : !meter) || !body) { problems.push(trimmed); continue; }
+        const byMeter = Boolean(meter) && at !== null;
+        const id = kept.get(`${byMeter ? meter : ''}|${byMeter ? at : ''}|${when}|${body}`) ?? secretId(byMeter ? meter : '', byMeter ? at : 0, body, when);
         if (secrets.some(secret => secret.id === id)) continue;
         if (secrets.length >= MAX_SECRETS) { problems.push(trimmed); continue; }
-        secrets.push({ id, meter, at, text: body, ...(title ? { title } : {}) });
+        secrets.push({ id, ...(byMeter ? { meter, at } : {}), ...(when ? { when } : {}), text: body, ...(title ? { title } : {}) });
     }
     return { secrets, problems };
 }
@@ -635,6 +685,10 @@ export function validateNpcSlice(slice) {
             if (record.unlocked.some(id => typeof id !== 'string' || !id || id.length > 40)) errors.push(`${where} has an unusable unlocked note id.`);
             if (new Set(record.unlocked).size !== record.unlocked.length) errors.push(`${where} lists an unlocked note twice.`);
         }
+        if (record.held !== undefined) {
+            if (!Array.isArray(record.held) || record.held.length > MAX_UNLOCKED || record.held.some(id => typeof id !== 'string' || !id || id.length > 40)
+                || new Set(record.held).size !== record.held.length) errors.push(`${where} has an unusable list of shut notes.`);
+        }
         if (record.disposition !== undefined && (typeof record.disposition !== 'string' || record.disposition.length > DISPOSITION_MAX)) errors.push(`${where} has an unusable disposition.`);
         if (record.turn !== undefined) {
             const turn = record.turn;
@@ -798,8 +852,11 @@ function settle(record, { defs, stages, rules, name, rungs = [], conflictAt = DE
     }
     const opened = [];
     const byId = new Map(defs.map(def => [def.id, def]));
+    const shut = Array.isArray(record.held) ? record.held : [];
     for (const rule of Array.isArray(rules) ? rules : []) {
         if (!rule || typeof rule.id !== 'string' || record.unlocked.includes(rule.id) || record.unlocked.length >= MAX_UNLOCKED) continue;
+        // A note the reader shut stays shut; one that opens only on a story event waits for the scan.
+        if (shut.includes(rule.id)) continue;
         const def = byId.get(rule.meter);
         if (!def || !isInt(rule.at)) continue;
         const value = meterValue(record, def);
@@ -850,8 +907,8 @@ function result({ name, key, moved, settled, problems, created, disposition, mil
  * "nothing known"):
  *   resolve(name)     → Delta's dossier for that name or alias: { name, aliases, relationship } | null
  *   baseline()        → Delta's base relationship values (new NPCs start there)
- *   secretRules(name) → that dossier's notes as [{ id, meter, at, title? }] (never their text)
- *   secretTexts(name, ids) → [{ id, text }] for those unlocked notes (the tail and screens only)
+ *   secretRules(name) → that dossier's notes as [{ id, meter?, at?, when?, title? }] (never their text)
+ *   secretTexts(name, ids) → [{ id, text }] for those notes (the tail and screens only)
  *   setup(name, labels) → that dossier's meter setup { track, limits } (the editor's)
  *   presets()         → the preset catalog (presetCatalog: built-ins and packs')
  *   feature(id)       → true / false for a feature the host knows; anything else: its default
@@ -993,8 +1050,36 @@ export function createNpcPart(hooks = {}) {
         });
     };
 
+    // Opens and shuts notes of one record. `notes`: { open: [id], close: [id], story: bool }. A story event may
+    // only open a note that has an event (`when`); the reader's hand may open or shut any of its notes. A shut
+    // note is kept in `held`, so a meter does not open it again; opening it takes it out of `held`.
+    function openCloseNotes(record, rules, notes) {
+        const known = new Map(rules.filter(rule => rule && typeof rule.id === 'string').map(rule => [rule.id, rule]));
+        const ids = list => [...new Set(Array.isArray(list) ? list.filter(id => typeof id === 'string' && known.has(id)) : [])];
+        const held = new Set(Array.isArray(record.held) ? record.held : []);
+        const before = JSON.stringify([record.unlocked, [...held]]);
+        const opened = [];
+        if (!notes.story) {
+            for (const id of ids(notes.close)) {
+                const at = record.unlocked.indexOf(id);
+                if (at >= 0) record.unlocked.splice(at, 1);
+                if (held.size < MAX_UNLOCKED) held.add(id);
+            }
+        }
+        for (const id of ids(notes.open)) {
+            if (record.unlocked.includes(id) || record.unlocked.length >= MAX_UNLOCKED) continue;
+            if (notes.story && (!known.get(id).when || held.has(id))) continue;
+            record.unlocked.push(id);
+            held.delete(id);
+            opened.push({ id, text: `${record.name}: a hidden note opened (${notes.story ? 'the story' : 'by hand'})` });
+        }
+        if (held.size) record.held = [...held];
+        else delete record.held;
+        return { opened, changed: JSON.stringify([record.unlocked, [...held]]) !== before };
+    }
+
     // `milestone`: { add: [{ key, name }], remove: [key] } (the reader's or a story line's).
-    function run(ctx, { label, changes, problems, limit, reply, at = null, seed, disposition, allowEmpty = false, milestone = null }) {
+    function run(ctx, { label, changes, problems, limit, reply, at = null, seed, disposition, allowEmpty = false, milestone = null, notes = null }) {
         const settings = normalized(ctx.settings(), ctx);
         const defs = defsFrom(settings);
         if (!changes.length && disposition === undefined && !allowEmpty) {
@@ -1033,7 +1118,13 @@ export function createNpcPart(hooks = {}) {
             for (const item of added) record.milestones[item.key] = item.name;
             marked = added.length === 1 ? added[0] : null;
         }
+        // Notes opened or shut by hand or by a story event, before the meters are looked at again.
+        const handled = notes ? openCloseNotes(record, rulesFor(record.name, who.labels), notes) : null;
         const settled = settleRecord(record, who.labels, settings, defs);
+        if (handled?.opened.length) settled.unlocked.unshift(...handled.opened);
+        if (notes && !handled.changed && !settled.stages.length && !settled.ranks.length && !settled.unlocked.length) {
+            ctx.fail('REFUSED', 'Nothing to update.');
+        }
         note(slice, ctx.rev, problems);
         return result({ name: record.name, key: who.key, moved, settled, problems, created, disposition, milestone: marked });
     }
@@ -1121,6 +1212,23 @@ export function createNpcPart(hooks = {}) {
             const out = run(ctx, { label: payload.name, changes: [], problems: [], limit: false, reply: null, allowEmpty: true });
             if (!out.data.stages.length && !out.data.unlocked.length && !out.data.ranks?.length) ctx.fail('REFUSED', 'Nothing to update.');
             return out;
+        },
+        /**
+         * npc.open { name, open?: [noteId], close?: [noteId], by?: 'story' }: opens or shuts hidden notes. From
+         * Delta's scan (`by: 'story'`, its own send only): notes whose story event the reply showed. From the
+         * reader's editor (no `by`): any of the dossier's notes, opened or shut by hand (a shut one stays shut
+         * until it is opened by hand). Recorded on the reply like any change, so a swipe takes it back.
+         */
+        'npc.open'(ctx, payload = {}) {
+            const story = payload?.by === 'story';
+            if (story && !ownOrModule(ctx, 'npc.open', payload)) {
+                ctx.fail('REFUSED', 'A story event opens a note only through NPC State Delta\'s own scan.');
+            }
+            const open = Array.isArray(payload?.open) ? payload.open : [];
+            const close = Array.isArray(payload?.close) ? payload.close : [];
+            if (!open.length && !close.length) ctx.fail('INVALID', 'It names no note to open or shut.');
+            // Someone with notes but no meters yet gets an entry here, from their dossier's numbers.
+            return run(ctx, { label: payload?.name, changes: [], problems: [], limit: false, reply: null, allowEmpty: true, notes: { open, close, story } });
         },
         /**
          * npc.milestone { name, add?: [words], remove?: [words or keys] }: the reader's own milestones
@@ -1250,6 +1358,7 @@ export function createNpcPart(hooks = {}) {
         meters: Object.fromEntries(defs.map(def => [def.id, meterValue(record, def)])),
         stages: { ...(record.stages ?? {}) },
         unlocked: [...(record.unlocked ?? [])],
+        ...(Array.isArray(record.held) && record.held.length ? { held: [...record.held] } : {}),
         ...(record.disposition ? { disposition: record.disposition } : {}),
         // The window's reply by its index (as before record IDs): `at` beside a record ID.
         ...(isInt(record.turn?.at) ? { reply: record.turn.at } : isInt(record.turn?.reply) ? { reply: record.turn.reply } : {}),
@@ -1298,18 +1407,29 @@ export function createNpcPart(hooks = {}) {
         return { rank: current?.name ?? null, next, risk, text: parts.join('; ') };
     }
 
-    // The notes of a dossier for screens: locked ones by title and rule only, never their text.
+    // The notes of a dossier for screens. A locked one shows only its rule ("Opens at Trust 60", "Opens with the
+    // story"), never its title, text or event wording; an opened one its title and what opened it ("Opened · Trust 20").
     function notesView(record, defs) {
         const byId = new Map(defs.map(def => [def.id, def]));
         const unlocked = new Set(Array.isArray(record.unlocked) ? record.unlocked : []);
         const locked = [];
         const opened = [];
         for (const rule of rulesFor(record.name, [record.name])) {
-            if (!rule || typeof rule.id !== 'string' || !isInt(rule.at)) continue;
+            if (!rule || typeof rule.id !== 'string') continue;
+            const meter = isInt(rule.at) && typeof rule.meter === 'string' && rule.meter ? `${byId.get(rule.meter)?.label ?? rule.meter} ${rule.at}` : '';
+            const event = typeof rule.when === 'string' && rule.when.trim() !== '';
+            if (!meter && !event) continue;
             const title = clean(rule.title, SECRET_TITLE_MAX) || 'A hidden note';
-            if (unlocked.has(rule.id)) { opened.push({ id: rule.id, title }); continue; }
-            const label = byId.get(rule.meter)?.label ?? rule.meter;
-            locked.push({ id: rule.id, title, meter: rule.meter, at: rule.at, text: `🔒 ${title} — unlocks at ${label} ${rule.at}` });
+            if (unlocked.has(rule.id)) {
+                // What opened it: its meter (when the meter is past the rule), else the story's event, else the reader's hand.
+                const def = byId.get(rule.meter);
+                const reached = Boolean(meter) && Boolean(def) && isObject(record.meters) && thresholdReached(meterValue(record, def), rule.at);
+                const how = reached ? meter : event ? 'with the story' : 'by you';
+                opened.push({ id: rule.id, title, rule: how, text: `Opened · ${how}` });
+                continue;
+            }
+            const opens = meter && event ? `Opens at ${meter}, or with the story` : meter ? `Opens at ${meter}` : 'Opens with the story';
+            locked.push({ id: rule.id, ...(meter ? { meter: rule.meter, at: rule.at } : {}), event, opens, text: `Hidden note · ${opens[0].toLocaleLowerCase()}${opens.slice(1)}` });
         }
         return { locked, opened };
     }
@@ -1367,8 +1487,9 @@ export function createNpcPart(hooks = {}) {
          * npc.cast() → [{ key, name, present, bars, still, rank?, next?, locked, opened }], present
          * first. `bars`: [{ id, label, value, min, max, stage, text, tone, ceiling?, floor?, ticks?,
          * delta? }] (ss.meter's props; `delta` is the change of the entry's latest reply window),
-         * `still`: the same without `delta`. `locked`: the hidden notes still locked, as teasers
-         * ({ title, meter, at, text: "🔒 Her past — unlocks at Trust 60" }); `opened`: [{ id, title }].
+         * `still`: the same without `delta`. `locked`: the hidden notes still locked, as teasers with no
+         * title ({ id, meter?, at?, event, opens: "Opens at Trust 60", text: "Hidden note · opens at Trust 60" });
+         * `opened`: [{ id, title, text: "Opened · Trust 20" }].
          */
         'npc.cast'(state, args = {}, tools = null) {
             const { npcs } = sliceOf(state);
@@ -1386,8 +1507,8 @@ export function createNpcPart(hooks = {}) {
                         key, name: record.name, present: here.has(key), bars: list, still: list.map(({ delta, ...bar }) => bar),
                         ...(ladder?.rank ? { rank: ladder.rank } : {}),
                         ...(ladder?.text ? { next: ladder.text } : {}),
-                        locked: notes.locked.map(({ title, meter, at, text }) => ({ title, meter, at, text })),
-                        opened: notes.opened.map(({ id, title }) => ({ id, title })),
+                        locked: notes.locked.map(({ id, meter, at, event, opens, text }) => ({ id, ...(meter ? { meter, at } : {}), event, opens, text })),
+                        opened: notes.opened.map(({ id, title, text }) => ({ id, title, text })),
                     };
                 })
                 .sort((a, b) => Number(b.present) - Number(a.present) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -1464,16 +1585,39 @@ export function createNpcPart(hooks = {}) {
         return rules.length ? `${base} Meter rules: ${rules.join('; ')}.` : base;
     }
 
-    /** Present NPCs' meters when they moved lately (band words where a meter has them), and their unlocked notes. */
+    // How far a locked note is from opening (smaller is nearer): its meter's gap, else a story event's fixed middle.
+    const EVENT_DISTANCE = 100;
+    function openingDistance(rule, record, byId) {
+        const def = typeof rule.meter === 'string' ? byId.get(rule.meter) : null;
+        if (def && isInt(rule.at)) {
+            const value = meterValue(record, def);
+            return Math.max(0, rule.at < 0 ? value - rule.at : rule.at - value);
+        }
+        return EVENT_DISTANCE;
+    }
+
+    // The tail's words for a note: an opened one is the player's to know; a locked one shapes how the NPC acts.
+    const KNOWN = 'known to the player now; may come out';
+    const HIDDEN = 'hidden: never state or reveal; let it shape how they act';
+    const HIDDEN_LINE = new RegExp(`^(.+?), ${HIDDEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: .*$`, 'gm');
+
+    /**
+     * Present NPCs' meters when they moved lately (band words where a meter has them), and their notes: an
+     * opened one as known to the player (a line), a locked one as hidden (optional lines, nearest to opening
+     * first, so the host's budget drops the farthest first).
+     */
     function tail(view) {
         const state = view?.state;
         const { npcs } = sliceOf(state);
         const settings = storedSettings();
         const defs = defsFrom(settings);
+        const byId = new Map(defs.map(def => [def.id, def]));
         const length = Number.isInteger(view?.chat?.length) ? view.chat.length : 0;
         const here = presentKeys(npcs);
         const moved = [];
         const notes = [];
+        const hidden = [];
+        let order = 0;
         for (const key of Object.keys(npcs).sort()) {
             if (!here.has(key)) continue;
             const record = npcs[key];
@@ -1488,17 +1632,36 @@ export function createNpcPart(hooks = {}) {
                 const rank = record.rank !== undefined ? rungsFor(settings, setupFor(record.name)).find(step => step.key === record.rank)?.name : null;
                 moved.push(`${record.name}${rank ? ` (${rank})` : ''} ${parts.join(', ')}`);
             }
-            if (record.unlocked?.length) {
-                const texts = call(hooks.secretTexts, [], record.name, [...record.unlocked]);
-                for (const item of (Array.isArray(texts) ? texts : []).slice(0, TAIL_SECRETS_PER_NPC)) {
-                    const text = clean(item?.text, SECRET_TEXT_MAX);
-                    if (text && record.unlocked.includes(item?.id)) notes.push(`${record.name}, now known: ${text}`);
+            const rules = rulesFor(record.name, [record.name]).filter(rule => rule && typeof rule.id === 'string');
+            if (!rules.length) continue;
+            const opened = new Set(Array.isArray(record.unlocked) ? record.unlocked : []);
+            const given = call(hooks.secretTexts, [], record.name, rules.map(rule => rule.id));
+            const textOf = new Map((Array.isArray(given) ? given : []).map(item => [item?.id, clean(item?.text, SECRET_TEXT_MAX)]));
+            let known = 0;
+            for (const rule of rules) {
+                const text = textOf.get(rule.id);
+                if (!text) continue;
+                if (opened.has(rule.id)) {
+                    if (known < TAIL_SECRETS_PER_NPC) { notes.push(`${record.name}, ${KNOWN}: ${text}`); known += 1; }
+                } else {
+                    hidden.push({ distance: openingDistance(rule, record, byId), order: order += 1, line: `${record.name}, ${HIDDEN}: ${text}` });
                 }
             }
         }
         const lines = [];
         if (moved.length) lines.push(`NPC meters now: ${moved.join('; ')}.`);
-        return { lines: [...lines, ...notes], optional: [] };
+        hidden.sort((a, b) => a.distance - b.distance || a.order - b.order);
+        return { lines: [...lines, ...notes], optional: hidden.map(item => item.line) };
+    }
+
+    /**
+     * The same text as a reader sees it in "What's sent each reply": a locked note's line becomes
+     * "Mira: 1 hidden note", never its text. Everything else is as sent. (Offered to Story Block as the
+     * module's `hooks.redactSent`, for the view that draws and copies the sent text; SillyTavern's own prompt view still shows all.)
+     */
+    function redact(text) {
+        // Every locked line of the whole text, wherever it stands; each other line (and every line break) is left as it is.
+        return String(text ?? '').replace(HIDDEN_LINE, '$1: 1 hidden note');
     }
 
     return {
@@ -1510,6 +1673,7 @@ export function createNpcPart(hooks = {}) {
             [MILESTONE_KIND]: { grammar: '+ milestone Name — the turning point that just happened between you (once)', apply: captureLine, feature: FEATURE_STAGES },
         },
         context: { static: staticText, tail, budget: CONTEXT_BUDGET },
+        redact,
         settings: { defaults: { ...SETTINGS_DEFAULTS }, schema: SETTINGS_SCHEMA },
         features: FEATURES,
         featureOn: id => featureOn(id),

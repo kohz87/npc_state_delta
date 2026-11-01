@@ -504,7 +504,7 @@ export function relationshipStepHtml(axis, label, change, latestReply) {
 
 // (v2 meters, hosted) An NPC's Story Suite meters beyond the four axes: custom meters, the stage on
 // the ladder and what the next one needs, milestones, and the hidden notes still locked (their
-// titles and rules only; a locked note's text never reaches the dossier view). Null without a host.
+// "Secrets" section: a hidden note is only its rule, never its title, text or event wording). Null without a host.
 export function v2MetersProjection(view) {
     if (!view || typeof view !== 'object') return null;
     const bars = (Array.isArray(view.bars) ? view.bars : []).filter(bar => bar && !bar.builtIn && plain(bar.id)).slice(0, 12).map(bar => {
@@ -519,9 +519,37 @@ export function v2MetersProjection(view) {
         rank: plain(view.rank),
         next: plain(view.next),
         milestones: stringList(view.milestones, 16),
-        locked: stringList(view.locked, 8),
-        opened: stringList(view.opened, 8),
+        secrets: secretsProjection(view.secrets),
     };
+}
+
+// The notes of a dossier for its Secrets section, in the order written: an opened one { state: 'open', title, text,
+// pill }, a hidden one { state: 'hidden', opens, width } (a bar and the rule; nothing of its title or text).
+function secretsProjection(list) {
+    return (Array.isArray(list) ? list : []).slice(0, 8).map(note => {
+        if (note?.state === 'open') return { state: 'open', title: plain(note.title, 'A hidden note'), text: plain(note.text), pill: plain(note.pill, 'Opened') };
+        if (note?.state === 'hidden') return { state: 'hidden', opens: plain(note.opens, 'Opens with the story'), width: Math.max(30, Math.min(80, Math.round(Number(note.width) || 55))) };
+        return null;
+    }).filter(Boolean);
+}
+
+/**
+ * The Secrets section ('' when the dossier has no notes): "Secrets · n opened · m still hidden"; an opened note is
+ * its title, an "Opened · Trust 20" pill and its text; a hidden one a blank striped bar and "Opens at Trust 60" or
+ * "Opens with the story" (never the title, the text or the event's wording).
+ */
+export function v2SecretsHtml(view) {
+    const notes = view?.secrets ?? [];
+    if (!notes.length) return '';
+    const open = notes.filter(note => note.state === 'open').length;
+    const rows = notes.map(note => (note.state === 'open'
+        ? `<div class="delta-secret delta-secret-open"><div class="delta-secret-head"><b>${escapeHtml(note.title)}</b><span class="delta-secret-pill">${escapeHtml(note.pill)}</span></div>${note.text ? `<p>${escapeHtml(note.text)}</p>` : ''}</div>`
+        : `<div class="delta-secret delta-secret-hidden"><span class="delta-secret-bar" style="width:${note.width}%" aria-hidden="true"></span><span class="delta-secret-when">${escapeHtml(note.opens)}</span></div>`)).join('');
+    return `<section class="delta-section delta-secrets" data-delta-section="secrets">
+                <h3>Secrets <small class="delta-secrets-count">· ${open} opened · ${notes.length - open} still hidden</small></h3>
+                ${rows}
+                <p class="delta-muted delta-secrets-note">The narrator knows them all and keeps them; each appears here when it opens.</p>
+            </section>`;
 }
 
 export function v2MetersHtml(view) {
@@ -535,8 +563,6 @@ export function v2MetersHtml(view) {
         view.rank ? `<p class="delta-v2-rank"><b>${escapeHtml(view.rank)}</b></p>` : '',
         view.next ? `<p class="delta-muted delta-v2-next">${escapeHtml(view.next)}</p>` : '',
         view.milestones.length ? `<p class="delta-v2-milestones"><span class="delta-kicker">MILESTONES</span> ${view.milestones.map(escapeHtml).join(' · ')}</p>` : '',
-        ...view.opened.map(title => `<p class="delta-v2-note">🔓 ${escapeHtml(title)}</p>`),
-        ...view.locked.map(text => `<p class="delta-muted delta-v2-note">${escapeHtml(text)}</p>`),
     ].filter(Boolean).join('');
     return `${bars ? `<div class="delta-rel-grid delta-v2-meters">${bars}</div>` : ''}${lines}`;
 }
@@ -587,8 +613,10 @@ const DOSSIER_SECTIONS = Object.freeze([
     ['dynamic', 'Dynamic'], ['bonds', 'Bonds & memories'], ['history', 'History'],
 ]);
 
-function sectionNavHtml() {
-    return `<nav class="delta-section-nav" aria-label="Dossier sections">${DOSSIER_SECTIONS.map(([key, label]) => `<button type="button" class="delta-section-jump" data-delta-jump="${key}">${escapeHtml(label)}</button>`).join('')}</nav>`;
+function sectionNavHtml(secrets = false) {
+    // "Secrets" sits right after History, and only for a dossier that has notes.
+    const sections = secrets ? [...DOSSIER_SECTIONS, ['secrets', 'Secrets']] : DOSSIER_SECTIONS;
+    return `<nav class="delta-section-nav" aria-label="Dossier sections">${sections.map(([key, label]) => `<button type="button" class="delta-section-jump" data-delta-jump="${key}">${escapeHtml(label)}</button>`).join('')}</nav>`;
 }
 
 function countsFor(rows) {
@@ -1037,7 +1065,7 @@ class DeltaDossierUi {
             </div>
             ${selected.key ? keyAwayHtml(selected.key) : ''}
             ${selected.cast ? castFromHtml(selected.cast) : ''}
-            ${sectionNavHtml()}
+            ${sectionNavHtml(Boolean(selected.v2Meters?.secrets?.length))}
             <section class="delta-section delta-player-card" data-delta-section="player">
                 <h3>Player relationship${changedMark(selected, 'relationship')}</h3>
                 <div class="delta-rel-grid">
@@ -1085,7 +1113,8 @@ class DeltaDossierUi {
             </section>
             <section class="delta-section" data-delta-section="history">
                 <h3>Background / History${changedMark(selected, 'background')}</h3>${proseHtml(selected.background, 'No background established yet.')}
-            </section>`, documentPane.dataset.npcId !== selected.id);
+            </section>
+            ${v2SecretsHtml(selected.v2Meters)}`, documentPane.dataset.npcId !== selected.id);
         documentPane.dataset.npcId = selected.id;
         documentPane.scrollTop = documentScroll;
     }
@@ -1302,6 +1331,14 @@ const STYLES = `
 #${ROOT_ID} .delta-cast-from { display:grid; gap:6px; margin:10px 0; padding:12px 14px; border:1px solid rgba(160,130,255,.35); border-radius:12px; background:rgba(160,130,255,.08); font-size:.86rem; line-height:1.5; }
 #${ROOT_ID} .delta-cast-from h5 { margin:0; font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; opacity:.8; }
 #${ROOT_ID} .delta-key-star { color:#f5c84b; font-size:.85em; }
+#${ROOT_ID} .delta-secrets h3 .delta-secrets-count { margin-left:6px; color:var(--delta-muted); font-size:.74rem; font-weight:400; letter-spacing:0; text-transform:none; }
+#${ROOT_ID} .delta-secret { display:grid; gap:4px; padding:10px 0; border-top:1px solid rgba(218,193,148,.12); }
+#${ROOT_ID} .delta-secret p { margin:0; font-size:.86rem; line-height:1.5; }
+#${ROOT_ID} .delta-secret-head { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+#${ROOT_ID} .delta-secret-pill { display:inline-flex; padding:1px 9px; border:1px solid rgba(216,188,120,.45); border-radius:999px; background:rgba(216,188,120,.12); color:var(--delta-accent-soft); font-size:.72rem; }
+#${ROOT_ID} .delta-secret-bar { display:block; height:12px; border-radius:6px; background:repeating-linear-gradient(90deg,rgba(255,255,255,.14) 0 10px,rgba(255,255,255,.08) 10px 14px); }
+#${ROOT_ID} .delta-secret-when { color:var(--delta-muted); font-size:.76rem; }
+#${ROOT_ID} .delta-secrets-note { margin:6px 0 0; font-size:.76rem; }
 #${ROOT_ID} .delta-away { margin:10px 0; padding:12px 14px; border:1px solid rgba(120,170,255,.35); border-radius:12px; background:rgba(120,170,255,.08); font-size:.82rem; line-height:1.5; }
 #${ROOT_ID} .delta-away h5 { margin:0 0 6px; font-size:.7rem; letter-spacing:.08em; text-transform:uppercase; opacity:.85; }
 #${ROOT_ID} .delta-away p { margin:0 0 6px; }

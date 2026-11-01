@@ -50,8 +50,12 @@ Switches are in Story Suite **Settings → Features**. "No switch" means it is a
   milestone; code moves the stage and tells the next reply.
 - **Meter presets and rules** (`npc-state-delta.presets`, on): one-click Companion, Rival and Mentor sets, plus
   any a pack brings. **Meters drift each story day** (`npc-state-delta.drift`, **off**; needs Story Director's clock).
-- **Hidden notes** (dossier editor): a note stays out of every prompt until its meter reaches a threshold; while
-  locked, a screen shows only "Her past, unlocks at Trust 60".
+- **Hidden notes** (Secrets): a note opens when its meter reaches a threshold, when the story shows an event you gave
+  it (`when the duke falls => the note`), or when you open it by hand in the dossier editor. The story is told every note
+  of someone who is present, a locked one as "hidden: never state or reveal; let it shape how they act", an opened one as
+  known to the player. While locked, a screen shows only a blank bar and "Opens at Trust 60" or "Opens with the story";
+  the dossier's **Secrets** section follows Background / History. When a scan builds a new dossier it also writes 2 to 5
+  layered notes (setting **Hidden notes for new people**, on). A pack's and your notes: up to 8 each.
 - **Social checks** (`npc-state-delta.social`, on): a persuade, charm, intimidate or deceive check against an NPC
   gets a bonus or penalty from their meters, stage and disposition, for Story Director's checks (`vs: Name`) or
   another dice module ("Elula trusts you (+2)"). Delta only reads; it sends nothing to the model. Settings **Social checks: strength
