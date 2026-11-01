@@ -31,6 +31,11 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
   a locked one as "hidden: never state or reveal; let it shape how they act" (optional tail lines, nearest to opening first,
   so the host's budget drops the deepest first). The hook `redactSent(text)` turns each locked line into "Name: 1 hidden note"
   for a view that shows what is sent; a host that does not call it shows the raw text.
+  Layers and event watching run in every path that builds a dossier or scans a present person: the ordinary scan (the default:
+  one-pass capture and "Scan every reply" full-window are off by default, and Lean scans every third reply), the one-pass block (the
+  layered rule rides with the capture's rules, byte-identical each reply; the list of events is in its context part, and the list
+  that went out with a reply is kept for the block that comes back with it), the targeted backfill of a new dossier (layers) and the
+  targeted Refresh (one person's events). Off, or with nobody to watch, every prompt is as it was.
 - Change lines: `~ npc <Name> | trust: +5 ...` and `+ milestone <Name> — <words>`; refused parts become
   problems (last 20). `npc.tick` runs once per new reply or swipe (`TICK_TURNS`), never for a Continue or Re-read.
 - Who is present: `director.world.here` when Story Director answers, else Story Block's `scene.present`.
