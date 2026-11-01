@@ -137,6 +137,11 @@ Without Story Director, or one without the query, `adapter.castPeople()` is null
   Gw 12 at the docks" block (`castFromHtml`): their own path (the goal, the routine) and, from `director.cast`, when they were last heard of
   (`lastHeard`), else where and what they are doing now. Data comes from `getDossierState().castViews` (by dossier id), built from
   the dossier's `castFrom` and Story Director's live answer; without Story Director the pack's starting words stand.
+- **"★ Pin as Key people"** (on the From-the-cast block, `castFromHtml`): the reader's own action. `api.pinKeyPerson(dossierId)` →
+  `adapter.pinKeyPerson` sends Story Director's existing command `keypeople.pin { name, aliases?, nsd: true }` through `sdk.command` (cause
+  ui) and nothing else: Delta never writes Story Director's state. The button is drawn only while Story Director offers the command
+  (`keyPinOffered`: a ready module lists `keypeople.pin` and its feature `story-director.key-people` is not off) and the person is not
+  already a key person (`director.keyPeople`); the view flag is `castViews[id].pin`.
 - **The panel and the section bar are opaque** (a follow-up from the mockup): `.delta-panel` and the sticky `.delta-section-nav` paint
   an opaque floor (`--delta-floor`: Story Block's `--ss-sheet-floor`, else the tint with its alpha dropped) under the tint.
 - Tests: `tests/cast-dossier.test.js` (the answer, the entry, the dossier, the view, the slice record on Story Block's host with a stand-in

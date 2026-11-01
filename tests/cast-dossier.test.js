@@ -166,6 +166,56 @@ test('what the dossier shows: the badge, first met, their own path, last heard (
     assert.equal(state.npcs.find(npc => npc.id === 'npc_mira').cast, undefined);
 });
 
+// ---- "Pin as Key people" on the From-the-cast block ----
+
+test('the Pin button is drawn only when the view says it is offered: it carries the dossier id; none otherwise', () => {
+    const [p] = normalizeCast([person()], dateText);
+    const made = normalizeNpcRecord(applyCastEntry(createNpcRecord('Fenna', []), p, { packName: 'Ersveil' }));
+    assert.equal(castView(made, p).pin, false, 'not offered by default');
+    assert.equal(castView(made, p, { pin: true }).pin, true);
+    const on = castFromHtml(castProjection(castView(made, p, { pin: true })), 'npc_fenna');
+    assert.match(on, /<button type="button" class="delta-btn delta-cast-pin" data-delta-cast-pin="npc_fenna">★ Pin as Key people<\/button>/);
+    assert.match(on, /the narrator hears about them/);
+    assert.doesNotMatch(castFromHtml(castProjection(castView(made, p))), /delta-cast-pin/, 'not offered, or already pinned: no button');
+});
+
+// Story Director's pin as a stand-in: its own command writes its own state; Delta only asks.
+const keyDirector = ({ withPin = true, feature = true } = {}) => ({
+    id: 'story-director', name: 'Story Director (stand-in)', version: '0.0.0-test',
+    domains: { keys: { initial: () => ({ pins: [], causes: [] }) } },
+    commands: withPin ? {
+        'keypeople.pin': (ctx, payload) => {
+            const slice = ctx.draft('keys');
+            slice.pins.push(JSON.stringify(payload));
+            slice.causes.push(String(ctx.cause));
+            return { summary: `${payload.name} is now a key person.` };
+        },
+    } : {},
+    queries: { 'director.keyPeople': state => (state?.domains?.keys?.pins ?? []).map(text => ({ name: JSON.parse(text).name, aliases: JSON.parse(text).aliases ?? [], here: true, away: null })) },
+    ...(feature ? { features: [{ id: 'story-director.key-people', label: 'Key people', describe: 'x', default: true }] } : {}),
+});
+
+test('the adapter offers the pin only while Story Director registers keypeople.pin (feature on); pinning asks its command as the reader, with the name, aliases and nsd', async () => {
+    const s = await suite({ modules: [director(), keyDirector()] });
+    assert.equal(s.adapter.keyPinOffered(), true);
+    const out = await s.adapter.pinKeyPerson({ name: 'Fenna', aliases: ['the ferrywoman'] });
+    assert.deepEqual([out.ok, out.message], [true, 'Fenna is now a key person.']);
+    const slice = s.host.head().domains.keys;
+    assert.deepEqual(JSON.parse(slice.pins[0]), { name: 'Fenna', aliases: ['the ferrywoman'], nsd: true });
+    assert.deepEqual(slice.causes, ['ui'], 'as the reader\'s action');
+    assert.deepEqual(s.adapter.keyPeople().map(entry => entry.name), ['Fenna'], 'and Delta reads the result back from director.keyPeople');
+
+    const none = await suite({ modules: [director()] });
+    assert.equal(none.adapter.keyPinOffered(), false, 'no Story Director that offers it: no button');
+    assert.equal((await none.adapter.pinKeyPerson({ name: 'Fenna' })).ok, false);
+    const noCommand = await suite({ modules: [director(), keyDirector({ withPin: false })] });
+    assert.equal(noCommand.adapter.keyPinOffered(), false, 'an older Story Director without the command');
+    const off = await suite({ modules: [director(), keyDirector()], features: { 'story-director.key-people': false } });
+    assert.equal(off.adapter.keyPinOffered(), false, 'Key people switched off');
+    assert.equal((await off.adapter.pinKeyPerson({ name: 'Fenna' })).ok, false);
+    assert.deepEqual(off.host.head().domains.keys.pins, [], 'and nothing is asked of it');
+});
+
 // ---- the Ersveil writing: twelve real entries ----
 
 const ERSVEIL = JSON.parse(fs.readFileSync(fileURLToPath(new URL('./fixtures/ersveil-cast.json', import.meta.url)), 'utf8'));
@@ -627,6 +677,71 @@ test('runtime: removing the cast dossier is final; a dossier a scan made earlier
     }));
     assert.equal(alone.npcs, 0);
     assert.equal(alone.views, null);
+});
+
+test('runtime: the dossier view offers the Pin button while Story Director offers it and the person is not pinned; pinning calls its command and the button goes', () => {
+    const scenario = async () => {
+        const api = globalThis.NPCStateDelta;
+        assert.ok(await waitFor(() => mockState.sdk.registered.length === 1));
+        const sdk = mockState.sdk;
+        const say = async text => {
+            mockState.context.chat.push({ is_user: true, is_system: false, name: 'Kazuma', mes: 'And then?' });
+            const userId = mockState.context.chat.length - 1;
+            await Promise.all((mockState.listeners.get('message_sent') || []).map(fn => fn(userId)));
+            mockState.context.chat.push({ is_user: false, is_system: false, name: 'Megumin', mes: text, swipe_id: 0, swipes: [text] });
+            const id = mockState.context.chat.length - 1;
+            await Promise.all((mockState.listeners.get('message_received') || []).map(fn => fn(id)));
+            await Promise.all((mockState.listeners.get('character_message_rendered') || []).map(fn => fn(id)));
+            await sleep(150);
+        };
+        mockState.quietResponder = async () => JSON.stringify({ npcs: [] });
+        sdk.people = [{ key: 'ersveil:fenna', pack: 'ersveil', id: 'fenna', name: 'Fenna', aliases: [], met: { on: 0, where: 'the docks' }, alive: true, entry: { id: 'fenna', name: 'Fenna', aliases: ['the ferrywoman'], about: 'Ferry.', look: 'Tall.', start: { place: 'docks', goal: 'g' } } }];
+        await say('Fenna looks up.');
+        await sdk.turn({ type: 'normal' });
+        await sleep(300);
+        const id = api.getState().npcs.find(npc => npc.name === 'Fenna').id;
+        const pin = () => api.getDossierState().castViews[id].pin;
+        const out = {};
+        out.offered = pin();
+        out.result = await api.pinKeyPerson(id);
+        out.asked = sdk.asked;
+        // Pinned: Story Director now lists her; the button is gone.
+        sdk.keys = [{ name: 'Fenna', aliases: [], here: true, away: null }];
+        out.pinned = pin();
+        sdk.keys = [];
+        sdk.modulesList = [{ id: 'story-director', status: 'ready', commands: [] }];
+        out.noCommand = pin();
+        sdk.modulesList = [];
+        out.noDirector = pin();
+        console.log('RESULT ' + JSON.stringify(out));
+    };
+    const prelude = async () => {
+        const sdk = {
+            registered: [], people: [], made: {}, handlers: {}, keys: [], asked: [],
+            modulesList: [{ id: 'story-director', status: 'ready', commands: ['keypeople.pin', 'keypeople.unpin'] }],
+            registerModule(def) { sdk.registered.push(def); },
+            on(name, fn) { sdk.handlers[name] = fn; return () => {}; },
+            modules: () => structuredClone(sdk.modulesList),
+            turn: async turn => { await sdk.handlers.turn?.(turn); },
+            command: async (type, payload) => {
+                if (type === 'npc.tick') for (const person of sdk.people) if (person.met && person.entry) sdk.made[person.key] = { name: person.name };
+                if (type === 'keypeople.pin') { sdk.asked.push({ type, payload }); return { ok: true, receipt: { summary: payload.name + ' is now a key person.' } }; }
+                return { ok: true, receipt: { summary: '' } };
+            },
+            query: name => (name === 'director.cast' ? structuredClone(sdk.people) : name === 'npc.castMade' ? structuredClone(sdk.made)
+                : name === 'director.keyPeople' ? structuredClone(sdk.keys) : name === 'packs.list' ? [{ id: 'ersveil', name: 'Ersveil' }] : name === 'scene.present' ? [] : null),
+            settings: () => ({}),
+        };
+        mockState.sdk = sdk;
+        globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
+    };
+    const out = scenarioOutput(runHostScenario('cast-pin', prelude, scenario));
+    assert.equal(out.offered, true, 'offered: Story Director has the command and she is not pinned');
+    assert.deepEqual(out.result, { ok: true, message: 'Fenna is now a key person.' });
+    assert.deepEqual(out.asked, [{ type: 'keypeople.pin', payload: { name: 'Fenna', aliases: ['the ferrywoman'], nsd: true } }]);
+    assert.equal(out.pinned, false, 'already pinned (director.keyPeople lists her): no button');
+    assert.equal(out.noCommand, false, 'Story Director without the command: no button');
+    assert.equal(out.noDirector, false, 'no Story Director: no button');
 });
 
 // ---- the opaque panel and section bar (a follow-up from the mockup) ----

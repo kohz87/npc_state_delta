@@ -320,12 +320,12 @@ export function castProjection(view) {
         ? { text: plain(view.lastHeard.text), on: plain(view.lastHeard.on) } : null;
     return {
         badge: plain(view.badge, 'Cast'), packName: plain(view.packName), firstMet: plain(view.firstMet),
-        goal: plain(view.goal), routine: plain(view.routine), lastHeard: heard, where: plain(view.where), doing: plain(view.doing),
+        goal: plain(view.goal), routine: plain(view.routine), lastHeard: heard, where: plain(view.where), doing: plain(view.doing), pin: view.pin === true,
     };
 }
 
 /** The "From the Ersveil cast" block: where the person came from, their own path and when they were last heard of. */
-export function castFromHtml(cast) {
+export function castFromHtml(cast, npcId = '') {
     if (!cast) return '';
     const heard = cast.lastHeard ? `<b>Last heard:</b> ${escapeHtml(cast.lastHeard.text)}${cast.lastHeard.on ? ` (${escapeHtml(cast.lastHeard.on)})` : ''}` : '';
     const now = !cast.lastHeard && (cast.doing || cast.where)
@@ -336,6 +336,8 @@ export function castFromHtml(cast) {
         <h5>From the ${cast.packName ? `${escapeHtml(cast.packName)} ` : ''}cast${cast.firstMet ? ` · first met ${escapeHtml(cast.firstMet)}` : ''}</h5>
         <div>Made at the first meeting from the pack's prepared dossier, no scan needed. Later scans add to it and change it as they do for anyone.</div>
         ${lines}
+        ${cast.pin ? `<button type="button" class="delta-btn delta-cast-pin" data-delta-cast-pin="${escapeHtml(npcId)}">★ Pin as Key people</button>
+        <div class="delta-muted delta-cast-pin-note">Pinned, they get the full Key people track (away, back date, return) and the narrator hears about them.</div>` : ''}
     </section>`;
 }
 
@@ -752,6 +754,8 @@ class DeltaDossierUi {
                 }
                 return;
             }
+            const pin = event.target.closest('.delta-cast-pin');
+            if (pin) { void this.pinKeyPerson(pin); return; }
             const edit = event.target.closest('.delta-edit');
             if (edit) this.openEditor(edit.dataset.npcId || this.selectedNpcId);
         });
@@ -1064,7 +1068,7 @@ class DeltaDossierUi {
                 <button type="button" class="delta-btn delta-edit" data-npc-id="${escapeHtml(selected.id)}">Edit</button>
             </div>
             ${selected.key ? keyAwayHtml(selected.key) : ''}
-            ${selected.cast ? castFromHtml(selected.cast) : ''}
+            ${selected.cast ? castFromHtml(selected.cast, selected.id) : ''}
             ${sectionNavHtml(Boolean(selected.v2Meters?.secrets?.length))}
             <section class="delta-section delta-player-card" data-delta-section="player">
                 <h3>Player relationship${changedMark(selected, 'relationship')}</h3>
@@ -1117,6 +1121,18 @@ class DeltaDossierUi {
             ${v2SecretsHtml(selected.v2Meters)}`, documentPane.dataset.npcId !== selected.id);
         documentPane.dataset.npcId = selected.id;
         documentPane.scrollTop = documentScroll;
+    }
+
+    // (the living cast) "Pin as Key people": Story Director's own command, asked through Delta's api; the button is drawn only while it is offered.
+    async pinKeyPerson(button) {
+        const id = button?.dataset?.deltaCastPin || this.selectedNpcId;
+        if (!id || typeof this.api?.pinKeyPerson !== 'function') return;
+        button.disabled = true;
+        let out = null;
+        try { out = await this.api.pinKeyPerson(id); } catch (error) { out = { ok: false, message: String(error?.message || error) }; }
+        if (out?.ok) globalThis.toastr?.success?.(`NPC State Delta: ${out.message || 'Pinned as a key person.'}`);
+        else { button.disabled = false; globalThis.toastr?.warning?.(`NPC State Delta: ${out?.message || 'Could not pin.'}`); }
+        this.scheduleRefresh();
     }
 
     async openEditor(npcId) {
@@ -1329,6 +1345,8 @@ const STYLES = `
 #${ROOT_ID} .delta-key-badge { display:inline-block; margin-left:8px; padding:1px 9px; border:1px solid rgba(245,200,75,.5); border-radius:999px; background:rgba(245,200,75,.18); color:#f5c84b; font-size:.72rem; font-weight:600; line-height:1.4; vertical-align:middle; white-space:nowrap; }
 #${ROOT_ID} .delta-cast-badge { display:inline-block; margin-left:8px; font-family:var(--ss-font, system-ui, sans-serif); padding:1px 9px; border:1px solid rgba(160,130,255,.5); border-radius:999px; background:rgba(160,130,255,.18); color:#c9b8ff; font-size:.72rem; font-weight:600; line-height:1.4; vertical-align:middle; white-space:nowrap; }
 #${ROOT_ID} .delta-cast-from { display:grid; gap:6px; margin:10px 0; padding:12px 14px; border:1px solid rgba(160,130,255,.35); border-radius:12px; background:rgba(160,130,255,.08); font-size:.86rem; line-height:1.5; }
+#${ROOT_ID} .delta-cast-pin { justify-self:start; border-color:rgba(160,130,255,.6); }
+#${ROOT_ID} .delta-cast-pin-note { font-size:.78rem; }
 #${ROOT_ID} .delta-cast-from h5 { margin:0; font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; opacity:.8; }
 #${ROOT_ID} .delta-key-star { color:#f5c84b; font-size:.85em; }
 #${ROOT_ID} .delta-secrets h3 .delta-secrets-count { margin-left:6px; color:var(--delta-muted); font-size:.74rem; font-weight:400; letter-spacing:0; text-transform:none; }

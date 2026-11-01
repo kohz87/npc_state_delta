@@ -1085,9 +1085,13 @@ function dossierCastViews(state) {
     const made = (state?.npcs || []).filter(npc => npc?.id && npc.castFrom?.key);
     if (!made.length) return null;
     const people = castList();
+    // The pin button: Story Director offers it (hosted) and the person is not a key person yet.
+    let offered = false;
+    try { offered = storySuiteV2Meters()?.keyPinOffered?.() === true; } catch { offered = false; }
+    const keyList = offered ? keyPeopleList() : null;
     const views = {};
     for (const npc of made) {
-        const view = castView(npc, findCastPerson(people, npc.castFrom.key));
+        const view = castView(npc, findCastPerson(people, npc.castFrom.key), { pin: offered && !isKeyNpc(npc, keyList ?? []) });
         if (view) views[npc.id] = view;
     }
     return Object.keys(views).length ? views : null;
@@ -8310,6 +8314,13 @@ window.NPCStateDelta = Object.freeze({
     },
     /** The configured custom field names (the dossier shows these; a stored value under another name stays in the editor only). */
     customFieldNames: () => [...getSettings().customFieldNames],
+    /** (the living cast) The reader pins this dossier's person as a key person (Story Director's `keypeople.pin`) → { ok, message }. */
+    pinKeyPerson: async npcId => {
+        const adapter = storySuiteV2Meters();
+        const npc = getChatState().npcs.find(item => item.id === String(npcId || ''));
+        if (!adapter || !npc) return { ok: false, message: 'Story Director does not offer Key people here.' };
+        return adapter.pinKeyPerson({ name: npc.name, aliases: npc.aliases });
+    },
     getDossierState: () => {
         const state = getChatState();
         const formPortraits = {};

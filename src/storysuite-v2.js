@@ -77,6 +77,9 @@ export const PAGE_API = 'NPCStateDeltaCast';
 export const PAGE_SLOT_CLASS = 'npc-state-delta-v2-slot';
 // Story Block's query for a pack portrait's image URL (read only): packs.portrait({ pack, file }) → a safe URL or null.
 const PORTRAIT_QUERY = 'packs.portrait';
+// Story Director's reader-only pin for key people (its feature switch is `story-director.key-people`).
+const KEY_PIN_COMMAND = 'keypeople.pin';
+const KEY_PEOPLE_FEATURE = 'story-director.key-people';
 export const QUERY_NAMES = Object.freeze(['npc.present', 'npc.dossier', 'npc.known', 'npc.portrait', 'npc.meters', 'npc.cast', 'npc.next', 'npc.keyAway', 'npc.castMade', 'npc.socialModifier', 'npc.identity']);
 export const COMMAND_NAMES = Object.freeze(['npc.adjust', 'npc.set', 'npc.refresh', 'npc.milestone', 'npc.open', 'npc.tick']);
 // The replies after which Delta takes its per-reply step (npc.tick): a new reply or a new swipe of
@@ -786,6 +789,28 @@ export function createStorySuiteV2Adapter({
     function packPortraitUrl(pack, file) {
         if (!hosted || typeof sdkRef?.query !== 'function' || !pack || !file) return null;
         try { return safeImageUrl(sdkRef.query(PORTRAIT_QUERY, { pack, file })); } catch { return null; }
+    }
+    // Whether Story Director offers the reader's pin (`keypeople.pin`, registered by a ready module, its feature not switched off).
+    // Delta only ever asks; Story Director's own command writes its own state.
+    function keyPinOffered() {
+        if (!hosted || typeof sdkRef?.modules !== 'function') return false;
+        try {
+            const offered = (sdkRef.modules() ?? []).some(module => module?.status === 'ready' && Array.isArray(module.commands) && module.commands.includes(KEY_PIN_COMMAND));
+            return offered && hostFeature(KEY_PEOPLE_FEATURE) !== false;
+        } catch {
+            return false;
+        }
+    }
+    // The reader pins a dossier's person as a key person: `keypeople.pin { name, aliases?, nsd: true }` as the reader's action (cause ui).
+    // → { ok, message } (Story Director's own answer, or why not).
+    async function pinKeyPerson({ name, aliases } = {}) {
+        const who = String(name ?? '').trim();
+        if (!who) return { ok: false, message: 'Nobody to pin.' };
+        if (!keyPinOffered()) return { ok: false, message: 'Story Director does not offer Key people here.' };
+        const list = (Array.isArray(aliases) ? aliases : []).map(alias => String(alias ?? '').trim()).filter(Boolean).slice(0, 8);
+        const out = await send(KEY_PIN_COMMAND, { name: who, ...(list.length ? { aliases: list } : {}), nsd: true });
+        if (out?.ok) notifyChange();
+        return { ok: out?.ok === true, message: String(out?.receipt?.summary ?? out?.message ?? (out ? '' : 'Story Director did not answer.')) };
     }
     // Story Director's calendar (`director.calendar`: { era, months, leapYears }), or null when it has none to give; Story Director's
     // key people carry their dates as story minutes, which index.js writes on it (calendar.js storyMinuteText).
@@ -1854,6 +1879,10 @@ export function createStorySuiteV2Adapter({
         keyPeople,
         /** While hosted: Story Director's calendar (`director.calendar`), or null. */
         directorCalendar,
+        /** While hosted: whether Story Director offers `keypeople.pin` (the "Pin as Key people" button shows only then). */
+        keyPinOffered,
+        /** While hosted: the reader pins a person as a key person (`keypeople.pin`, cause ui) → { ok, message }. */
+        pinKeyPerson,
         /** While hosted: Story Director's cast (`director.cast`) as it answers, or null when it cannot. */
         castAnswer,
         /** The same, cleaned (src/cast-dossier.js normalizeCast), dates written on Story Director's calendar. */
