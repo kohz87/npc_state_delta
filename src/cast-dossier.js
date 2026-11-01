@@ -108,9 +108,9 @@ function normalizeMeters(raw) {
 }
 
 /**
- * The hidden notes of a pack entry as the dossier keeps them: [{ id, title?, text, meter?, at?, when? }], at most eight.
- * A note opens on a meter value (`meter` + `at`) or on a story event (`when`, words). THE ONE PLACE this shape is made:
- * the secrets work (the unlock rules, the Secrets section) reads the notes from the dossier's `secrets` list.
+ * The hidden notes of a pack entry as the dossier keeps them: [{ title?, text, meter?, at?, when? }], at most eight. A note opens on
+ * a meter value (`meter` + `at`), on a story event (`when`, words, up to 120 characters), or both. The note ids are made by the
+ * hidden-notes code (src/npc-meters.js normalizeSecrets) wherever the notes are read, from the rule and text only.
  */
 export function castSecrets(raw) {
     const out = [];
@@ -121,23 +121,12 @@ export function castSecrets(raw) {
         const title = clip(item.title, 60);
         const meter = clip(item.meter, 40).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '');
         const at = wholeNumber(item.at);
-        const when = clip(item.when, 200);
-        if (!(meter && at !== null) && !when) continue;
-        const id = secretIdFor(meter || 'story', meter ? at : 0, `${title}|${when}|${text}`);
-        if (out.some(other => other.id === id)) continue;
-        out.push({ id, ...(title ? { title } : {}), text, ...(meter && at !== null ? { meter, at } : {}), ...(when ? { when } : {}) });
+        const when = clip(item.when, 120);
+        const byMeter = Boolean(meter) && at !== null;
+        if (!byMeter && !when) continue;
+        out.push({ ...(title ? { title } : {}), text, ...(byMeter ? { meter, at } : {}), ...(when ? { when } : {}) });
     }
     return out;
-}
-
-// The same stable id the hidden notes use (src/npc-meters.js secretId): FNV-1a of the rule and text, `sec_` and 8 base-36 characters.
-function secretIdFor(meter, at, text) {
-    let hash = 0x811c9dc5;
-    for (const char of `${meter}|${at}|${text}`) {
-        hash ^= char.codePointAt(0);
-        hash = Math.imul(hash, 0x01000193) >>> 0;
-    }
-    return `sec_${hash.toString(36).padStart(8, '0').slice(-8)}`;
 }
 
 /** The pack entry, cleaned (texts cut and flattened, lists bounded), or null without a usable name. */
