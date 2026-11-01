@@ -10,6 +10,7 @@ import {
     secretId, secretsFromLines, secretsToLines, stageAt, validateNpcSlice,
 } from '../src/npc-meters.js';
 import { assemble } from './vendor/story-block/src/v2/prompt.js';
+import { escapeHtml } from '../src/util/html.js';
 import fs from 'node:fs';
 import { projectDossierState, v2SecretsHtml, v2MetersProjection } from '../dossier-ui.js';
 import { hiddenNotePromptRules } from '../core-mechanics.js';
@@ -1104,4 +1105,113 @@ test('secrets: redactSent takes a part\'s whole multi-line text and redacts ever
     assert.equal(now.length, was.length, 'same number of lines');
     was.forEach((line, i) => assert.equal(now[i], line.includes(', hidden: never state or reveal;') ? 'Mira: 1 hidden note' : line));
     assert.equal(now.filter(line => line === 'Mira: 1 hidden note').length, 2);
+});
+
+// ---- the dossier editor shows no locked note it did not write ----
+
+const shownIn = (html, value) => html.includes(value) || html.includes(escapeHtml(value));
+
+test('editor: every locked note of the 12 real entries is only "Hidden note n · opens …" (no title, text or event words anywhere in the form)', async () => {
+    for (const entry of ERSVEIL) {
+        const delta = fakeDelta();
+        delta.records.npc_mira.secrets = normalizeSecrets(handedOver(entry.secrets));
+        delta.records.npc_mira.relationship.trust = -50;
+        const h = await host({ delta });
+        h.reply('Nice.', '~ npc Mira | tension: +1');
+        const html = h.adapter.editorHtml(delta.records.npc_mira);
+        for (const note of entry.secrets) {
+            for (const secret of [note.title, note.text, note.when].filter(Boolean)) assert.equal(shownIn(html, secret), false, `${entry.id}: "${secret.slice(0, 40)}" is not in the form`);
+            // Not even the first words (a title or a text cut short).
+            assert.equal(shownIn(html, note.text.slice(0, 24)), false);
+        }
+        const rows = [...html.matchAll(/<span>(Hidden note \d+ · opens [^<]*)<\/span><select[^>]*aria-label="(Hidden note \d+)"/g)];
+        assert.equal(rows.length, entry.secrets.length, `${entry.id}: one row per hidden note`);
+        rows.forEach((row, i) => {
+            assert.match(row[1], new RegExp(`^Hidden note ${i + 1} · opens (?:at \\w+ -?\\d+|with the story)$`));
+            assert.equal(row[2], `Hidden note ${i + 1}`);
+        });
+        assert.match(html, /<textarea id="npc_state_delta_edit_secrets"[^>]*><\/textarea>/, 'the box is empty: nothing of the reader\'s own and nothing opened');
+        assert.equal((html.match(/data-delta-secret=/g) || []).length, entry.secrets.length, 'every note keeps its open/shut control');
+    }
+});
+
+test('editor: generated and older notes are hidden too; the reader\'s own notes and opened notes are shown, and an opened one stays shown', async () => {
+    const delta = fakeDelta();
+    const generated = normalizeGeneratedSecrets([
+        { title: 'Generated layer', text: 'A generated secret text.', meter: 'trust', at: 50, own: true },
+        { title: 'Generated event', text: 'A generated event text.', when: 'something happens in the story' },
+    ]);
+    assert.equal(generated.some(note => note.own), false, 'a model cannot mark a note as the reader\'s');
+    const own = { ...normalizeSecrets([{ title: 'Mine', text: 'I wrote this one.', meter: 'trust', at: 70 }])[0], own: true };
+    const opened = normalizeSecrets([{ title: 'Known', text: 'Already open to the player.', meter: 'trust', at: 5 }])[0];
+    delta.records.npc_mira.secrets = [...generated, own, opened];
+    const h = await host({ delta });
+    h.reply('Nice.', '~ npc Mira | trust: +5');
+    assert.deepEqual(h.npc('Mira').unlocked, [opened.id]);
+    const html = h.adapter.editorHtml(delta.records.npc_mira);
+    for (const secret of ['Generated layer', 'A generated secret text.', 'Generated event', 'A generated event text.', 'something happens in the story']) assert.equal(shownIn(html, secret), false, secret);
+    for (const secret of ['I wrote this one.', 'Already open to the player.']) assert.equal(shownIn(html, secret), true, `${secret} is shown`);
+    assert.match(html, /<span>Hidden note 1 · opens at Trust 50<\/span>/);
+    assert.match(html, /<span>Hidden note 2 · opens with the story<\/span>/);
+    assert.equal((html.match(/Hidden note \d/g) || []).length, 4, 'two rows, each named twice (row and control)');
+});
+
+test('editor: saving keeps every hidden note exactly as it was (ids and raw words), adds the reader\'s own, and applies a Hidden/Opened choice', async () => {
+    const delta = fakeDelta();
+    const longWhen = 'after a night when the party and Tansy work through casualties together and the river rises again ok';
+    const packed = handedOver([...ERSVEIL[0].secrets, { title: 'Long', text: 'T'.repeat(200), when: `${longWhen} ${'x'.repeat(70)}` }]);
+    const opened = normalizeSecrets([{ title: 'Known', text: 'Already open to the player.', meter: 'trust', at: 5 }])[0];
+    delta.records.npc_mira.secrets = [packed[0], opened, ...packed.slice(1)];
+    const h = await host({ delta });
+    h.reply('Nice.', '~ npc Mira | tension: +1');
+    const dossier = delta.records.npc_mira;
+    const html = h.adapter.editorHtml(dossier);
+    const box = escapeHtml('trust 5: [Known] Already open to the player.');
+    assert.ok(html.includes(`>${box}</textarea>`), 'only the opened note is in the box');
+    const values = new Map([['npc_state_delta_edit_secrets', 'trust 5: [Known] Already open to the player.\nwhen the barge is found => [Mine] A note I wrote.']]);
+    const edits = h.adapter.readEditor(key => values.get(key), dossier);
+    assert.deepEqual(edits.problems, []);
+    const ids = edits.secrets.map(note => note.id);
+    assert.deepEqual(ids.slice(0, 1), [packed[0].id], 'order kept');
+    for (const note of packed) assert.deepEqual(edits.secrets.find(item => item.id === note.id), note, `${note.title}: exactly as it was, whatever its length`);
+    assert.deepEqual(edits.secrets.find(item => item.id === opened.id), opened, 'an opened note left alone is the note it was (not the reader\'s)');
+    const mine = edits.secrets.at(-1);
+    assert.deepEqual([mine.when, mine.title, mine.own], ['the barge is found', 'Mine', true]);
+    assert.equal(edits.secrets.length, packed.length + 2);
+    // The reader deletes the opened line: it goes; the hidden ones stay.
+    values.set('npc_state_delta_edit_secrets', '');
+    const cleared = h.adapter.readEditor(key => values.get(key), dossier);
+    assert.deepEqual(cleared.secrets.map(note => note.id), packed.map(note => note.id));
+    // The hidden control: open the first hidden note by hand.
+    values.set(`npc_state_delta_edit_secret_state_${packed[0].id}`, 'open');
+    const moved = h.adapter.readEditor(key => values.get(key), dossier);
+    assert.deepEqual(moved.noteStates, { open: [packed[0].id], close: [] });
+    await h.adapter.applyEditor('Mira', moved);
+    assert.ok(h.npc('Mira').unlocked.includes(packed[0].id));
+    // Now it is open, so the next editor shows it (the player knows it) and it is the pack's note still.
+    dossier.secrets = moved.secrets;
+    assert.equal(shownIn(h.adapter.editorHtml(dossier), packed[0].title), true);
+    // At most eight in all: the hidden ones are never pushed out by the reader's lines.
+    values.set('npc_state_delta_edit_secrets', Array.from({ length: 6 }, (_, i) => `when event ${i} => note ${i}`).join('\n'));
+    const crowded = h.adapter.readEditor(key => values.get(key), dossier);
+    assert.equal(crowded.secrets.length, MAX_SECRETS, 'eight in all: five hidden, three of the six new lines');
+    // (the opened one was in the box, and the reader's box no longer lists it, so it is gone; every hidden one stays)
+    for (const note of packed.slice(1)) assert.ok(crowded.secrets.some(item => item.id === note.id));
+    assert.equal(crowded.secrets.some(item => item.id === packed[0].id), false);
+    assert.match(crowded.problems.join(' '), /not kept/);
+});
+
+test('secrets view: blank bars take their lengths from a fixed set in turn, never from a note\'s text or length', async () => {
+    const widths = async text => {
+        const delta = fakeDelta();
+        delta.records.npc_mira.secrets = [10, 20, 30, 40, 50].map(at => ({ title: `T${at}`, meter: 'trust', at, text: text.repeat(at) }));
+        delta.records.npc_mira.relationship.trust = -50;
+        const h = await host({ delta });
+        h.reply('Nice.', '~ npc Mira | tension: +1');
+        return h.adapter.dossierMeters(Object.values(delta.records)).npc_mira.secrets.map(note => note.width);
+    };
+    const short = await widths('a');
+    const long = await widths('Quite different words, much longer. ');
+    assert.deepEqual(short, long, 'the same whatever the text');
+    assert.deepEqual(short, [62, 48, 56, 70, 62]);
 });

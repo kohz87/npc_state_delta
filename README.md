@@ -55,7 +55,7 @@ Switches are in Story Suite **Settings → Features**. "No switch" means it is a
   of someone who is present, a locked one as "hidden: never state or reveal; let it shape how they act", an opened one as
   known to the player. While locked, a screen shows only a blank bar and "Opens at Trust 60" or "Opens with the story";
   the dossier's **Secrets** section follows Background / History. When a scan builds a new dossier it also writes 2 to 5
-  layered notes (setting **Hidden notes for new people**, on). A pack's and your notes: up to 8 each.
+  layered notes (setting **Hidden notes for new people**, on). A pack's and your notes: up to 8 each. The dossier editor shows a locked note only if you wrote it there; every other locked note is a row "Hidden note 2 · opens at Trust 35" with an open/shut control, and is kept exactly as it is when you save.
 - **Social checks** (`npc-state-delta.social`, on): a persuade, charm, intimidate or deceive check against an NPC
   gets a bonus or penalty from their meters, stage and disposition, for Story Director's checks (`vs: Name`) or
   another dice module ("Elula trusts you (+2)"). Delta only reads; it sends nothing to the model. Settings **Social checks: strength

@@ -34,7 +34,7 @@ import { resolveDossierTarget } from '../suite-handshake.js';
 import { storyMinuteText } from '../calendar.js';
 import {
     CAST_QUERY, FEATURE_PRESETS, FEATURE_SCAN_EVERY_REPLY, FEATURE_SOCIAL, FEATURE_STAGES, KEY_PEOPLE_QUERY, MILESTONE_KIND, NPC_KIND, SOCIAL_QUERY, createNpcPart, limitsFromLines, limitsToLines, meterValue,
-    normalizeGeneratedSecrets, normalizeSecrets, secretsFromLines, secretsToLines, wordKey,
+    MAX_SECRETS, normalizeGeneratedSecrets, normalizeSecrets, secretsFromLines, secretsToLines, wordKey,
 } from './npc-meters.js';
 import { normalizeLimits, presetCatalog, presetIds } from './npc-meters-presets.js';
 import { METERS_CARD_ID, metersCardScreen } from './npc-meters-screen.js';
@@ -104,6 +104,8 @@ export const SECTION_WATCH_MS = 1000;
 // The scan's short list of story events to watch for: this many people, this many events each.
 const EVENT_WATCH_NPCS = 6;
 const EVENT_WATCH_EACH = 3;
+// The widths (percent) the Secrets section draws its blank bars at, in turn.
+const BAR_WIDTHS = Object.freeze([62, 48, 56, 70]);
 // How long a scan, a pass or a generation waits for the host's head-selection barrier, and how often it looks.
 export const HEAD_SETTLE_MS = 20000;
 export const HEAD_SETTLE_POLL_MS = 50;
@@ -1677,6 +1679,9 @@ export function createStorySuiteV2Adapter({
     });
     const milestoneLines = entry => Object.values(entry?.milestones ?? {}).join('\n');
 
+    // Whether the dossier editor may show a note's title, text and event: the reader wrote it here, or it is opened (the player knows it).
+    const editorShows = (note, opened) => note.own === true || opened.has(note.id);
+
     /**
      * The editor's v2 controls for one dossier, as markup ('' without a host): the hidden notes (with
      * titles), the stage ladder track, the per-meter limits, the milestones and the custom meters'
@@ -1689,12 +1694,27 @@ export function createStorySuiteV2Adapter({
         const setup = setupOf(npc);
         const box = (id, label, help, value, rows = 3) => `
       <label class="npc-state-delta-editor-wide">${label} <small>${help}</small><textarea id="${id}" class="text_pole" rows="${rows}">${escapeHtml(value)}</textarea></label>`;
-        let html = box(EDITOR.secrets, 'Hidden notes', 'One per line: "meter threshold: [title] note" (e.g. "trust 60: [Her past] She is the duke\'s daughter."), "when the duke falls => [title] note" for a note that opens on a story event (up to 120 characters; Delta\'s scan watches for it while this NPC is present), or "trust 60 or when the duke falls => note" for whichever comes first. A meter rule opens at or above its threshold (at or below it for a negative one). The story is told every note while this NPC is present (locked ones as hidden, never to be revealed); you see only that a note is hidden, and when it opens.', secretsToLines(npc.secrets));
+        // A locked note the reader did not write here (a pack's, a scan's, an older one) is not shown: no title, no text, no
+        // event words, only that it is hidden and when it opens, with its open/shut control. The text box holds the reader's
+        // own notes and the notes that are opened. Saving keeps every hidden note exactly as it is (readEditor).
         const opened = new Set(entry?.unlocked ?? []);
         const notes = normalizeSecrets(npc.secrets);
+        const shown = notes.filter(note => editorShows(note, opened));
+        const rules = new Map(part.notes({ name: npc.name, unlocked: [...opened], meters: entry?.meters }).locked.map(note => [note.id, note.opens]));
+        let html = box(EDITOR.secrets, 'Hidden notes', 'One per line: "meter threshold: [title] note" (e.g. "trust 60: [Her past] She is the duke\'s daughter."), "when the duke falls => [title] note" for a note that opens on a story event (up to 120 characters; Delta\'s scan watches for it while this NPC is present), or "trust 60 or when the duke falls => note" for whichever comes first. A meter rule opens at or above its threshold (at or below it for a negative one). The story is told every note while this NPC is present (locked ones as hidden, never to be revealed). This box holds the notes you wrote and the notes that are opened; any other note stays hidden from you until it opens, and is kept as it is when you save.', secretsToLines(shown));
         if (notes.length) {
+            let hiddenCount = 0;
+            const rows = notes.map(note => {
+                const open = opened.has(note.id);
+                const control = label => `<select id="${EDITOR.secretState(note.id)}" class="text_pole" data-delta-secret="${escapeHtml(note.id)}" aria-label="${escapeHtml(label)}"><option value="hidden"${open ? '' : ' selected'}>Hidden</option><option value="open"${open ? ' selected' : ''}>Opened</option></select>`;
+                if (editorShows(note, opened)) return `<label>${escapeHtml(note.title || note.text.slice(0, 40))}${control(note.title || 'Note')}</label>`;
+                hiddenCount += 1;
+                const name = `Hidden note ${hiddenCount}`;
+                const opens = rules.get(note.id) ?? 'Opens with the story';
+                return `<div class="npc-state-delta-v2-editor-hidden"><span>${escapeHtml(`${name} · ${opens[0].toLocaleLowerCase()}${opens.slice(1)}`)}</span>${control(name)}</div>`;
+            });
             html += `
-      <div class="npc-state-delta-editor-wide npc-state-delta-v2-editor-notes"><p class="npc-state-delta-muted">Open or shut a note by hand. A shut note stays shut until you open it.</p>${notes.map(note => `<label>${escapeHtml(note.title || note.text.slice(0, 40))}<select id="${EDITOR.secretState(note.id)}" class="text_pole" data-delta-secret="${escapeHtml(note.id)}"><option value="hidden"${opened.has(note.id) ? '' : ' selected'}>Hidden</option><option value="open"${opened.has(note.id) ? ' selected' : ''}>Opened</option></select></label>`).join('')}</div>`;
+      <div class="npc-state-delta-editor-wide npc-state-delta-v2-editor-notes"><p class="npc-state-delta-muted">Open or shut a note by hand. A shut note stays shut until you open it.</p>${rows.join('')}</div>`;
         }
         const tracks = [...new Set(Object.keys(settings.ladder).filter(Boolean))];
         const presetName = id => catalog().find(preset => preset.id === id)?.name ?? id;
@@ -1726,15 +1746,35 @@ export function createStorySuiteV2Adapter({
         };
         const secrets = value(EDITOR.secrets);
         if (secrets !== undefined) {
-            const parsed = secretsFromLines(secrets, current?.secrets);
-            out.secrets = parsed.secrets;
-            if (parsed.problems.length) out.problems.push(`these hidden notes were not kept (write "meter number: note" or "when the event => note"): ${parsed.problems.join(' / ')}`);
-            // A note whose state select the reader moved (open or shut by hand), among the notes now kept.
+            // The box held only the notes the reader may see (editorHtml); every other note is kept exactly as it was.
             const entry = entryFor(sliceEntries(), current);
             const was = new Set(entry?.unlocked ?? []);
+            const before = normalizeSecrets(current?.secrets);
+            const kept = new Set(before.filter(note => !editorShows(note, was)).map(note => note.id));
+            const parsed = secretsFromLines(secrets, before.filter(note => editorShows(note, was)));
+            const written = new Map(parsed.secrets.map(note => [note.id, note]));
+            const known = new Set(before.map(note => note.id));
+            // The notes as stored (not as cleaned), by id, so a note that stays is exactly the one that was.
+            const stored = new Map();
+            for (const raw of Array.isArray(current?.secrets) ? current.secrets : []) {
+                const id = normalizeSecrets([raw])[0]?.id;
+                if (id && !stored.has(id)) stored.set(id, raw);
+            }
+            const list = [];
+            for (const note of before) {
+                if (kept.has(note.id) || written.has(note.id)) list.push(stored.get(note.id) ?? note);
+            }
+            // New or changed lines are the reader's own notes; a line left as it was is the note it was.
+            const fresh = parsed.secrets.filter(note => !known.has(note.id)).map(note => ({ ...note, own: true }));
+            const room = Math.max(0, MAX_SECRETS - list.length);
+            list.push(...fresh.slice(0, room));
+            out.secrets = list;
+            const problems = [...parsed.problems, ...fresh.slice(room).map(note => (note.title ? `[${note.title}] ` : '') + note.text)];
+            if (problems.length) out.problems.push(`these hidden notes were not kept (write "meter number: note" or "when the event => note"; up to ${MAX_SECRETS} in all): ${problems.join(' / ')}`);
+            // A note whose state select the reader moved (open or shut by hand), among the notes now kept.
             const open = [];
             const close = [];
-            for (const note of parsed.secrets) {
+            for (const note of list) {
                 const state = value(EDITOR.secretState(note.id));
                 if (state === 'open' && !was.has(note.id)) open.push(note.id);
                 if (state === 'hidden' && was.has(note.id)) close.push(note.id);
@@ -1781,13 +1821,13 @@ export function createStorySuiteV2Adapter({
         const opened = new Map(notes.opened.map(note => [note.id, note]));
         const locked = new Map(notes.locked.map(note => [note.id, note]));
         const out = [];
+        let hiddenCount = 0;
         for (const rule of rules) {
             if (opened.has(rule.id)) out.push({ state: 'open', title: rule.title || 'A hidden note', text: rule.text, pill: opened.get(rule.id).text });
             else if (locked.has(rule.id)) {
-                // The bar's length only varies the look; it is taken from the id, so it says nothing about the text.
-                let hash = 0;
-                for (const char of rule.id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-                out.push({ state: 'hidden', opens: locked.get(rule.id).opens, width: 44 + (hash % 28) });
+                // The bar's length only varies the look: a fixed set of widths in turn, never anything from the note itself.
+                out.push({ state: 'hidden', opens: locked.get(rule.id).opens, width: BAR_WIDTHS[hiddenCount % BAR_WIDTHS.length] });
+                hiddenCount += 1;
             }
         }
         return out;

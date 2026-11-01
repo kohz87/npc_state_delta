@@ -417,7 +417,8 @@ export function parseMeterValue(raw) {
  * Hidden notes from a dossier record, cleaned: [{ id, meter?, at?, when?, text, title? }] (at most
  * eight). A note needs text and a rule: a meter id with a whole-number `at`, a story event (`when`,
  * up to 120 characters), or both (it opens by whichever comes first). The id comes from the rule and
- * the text only, so giving a note a title never locks it again.
+ * the text only, so giving a note a title never locks it again. `own: true` marks a note the reader wrote in the dossier
+ * editor (it alone may be shown there while locked); a pack's, a scan's and any older note is not.
  */
 export function normalizeSecrets(list, max = MAX_SECRETS) {
     const out = [];
@@ -433,7 +434,7 @@ export function normalizeSecrets(list, max = MAX_SECRETS) {
         const id = typeof entry.id === 'string' && /^[a-z][a-z0-9]*_[0-9a-z]{8}$/.test(entry.id) ? entry.id : secretId(byMeter ? meter : '', byMeter ? at : 0, text, when);
         if (out.some(other => other.id === id)) continue;
         const title = clean(entry.title, SECRET_TITLE_MAX);
-        out.push({ id, ...(byMeter ? { meter, at } : {}), ...(when ? { when } : {}), text, ...(title ? { title } : {}) });
+        out.push({ id, ...(byMeter ? { meter, at } : {}), ...(when ? { when } : {}), text, ...(title ? { title } : {}), ...(entry.own === true ? { own: true } : {}) });
     }
     return out;
 }
@@ -460,7 +461,7 @@ export function normalizeGeneratedSecrets(list) {
         const meter = slug(entry.meter);
         const at = intOr(entry.at, null);
         const ok = meters.has(meter) && at !== null && at >= -100 && at <= 100 && at !== 0;
-        return { ...entry, id: undefined, meter: ok ? meter : '', at: ok ? at : null };
+        return { ...entry, id: undefined, own: undefined, meter: ok ? meter : '', at: ok ? at : null };
     });
     return normalizeSecrets(usable, MAX_GENERATED_SECRETS);
 }
