@@ -227,7 +227,7 @@ import {
 } from './present-scene.js';
 import { escapeHtml } from './src/util/html.js';
 import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, returnNote } from './src/key-people.js';
-import { applyCastEntry, castView, dossierFor, findCastPerson, metWithEntry, normalizeCast } from './src/cast-dossier.js';
+import { applyCastEntry, applyCastPortrait, castPortraitWanted, castView, dossierFor, findCastPerson, markCastPortraitRemoved, metWithEntry, normalizeCast } from './src/cast-dossier.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
 // The chat text helpers (src/transcript.js) read the host's chat and the Scan context setting.
@@ -979,6 +979,8 @@ function keyReturnNotes(state) {
 // src/npc-meters.js observeCast) records the meeting in the saved slice at that reply; this makes the dossier and commits a
 // branch checkpoint at the reply, so a swipe or a delete takes it back with the reply (as a manual add does). Nothing here
 // without a host or without a Story Director that answers `director.cast`. Rules: src/cast-dossier.js.
+// The same sync gives a cast dossier made while its picture was missing the picture once `packs.portrait` answers for it (see
+// castPortraitTargets): when the step ends, the host's head moves, the host accepts Delta, the Dossiers tab is drawn or a chat opens.
 let castSyncRunning = false;
 // The picture's size in pixels ({ width, height }) when the browser can say, else null.
 function portraitImageSize(dataUrl) {
@@ -1052,57 +1054,118 @@ function castDue(state, adapter) {
     return metWithEntry(people).filter(person => Object.hasOwn(made, person.key)
         && !dossierFor(state.npcs, person) && !castPersonDismissed(state, person));
 }
-async function castSync() {
-    const adapter = storySuiteV2Meters();
-    if (!adapter || castSyncRunning || getSettings().enabled === false) return false;
-    const key = getChatKey();
-    if (!key || key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return false;
-    if (!castDue(getChatState(key), adapter).length) return false;
-    castSyncRunning = true;
+// The cast dossiers that may be given the pack's picture now (src/cast-dossier.js castPortraitWanted: made from the cast, no portrait of
+// their own, none removed on purpose) and for whom Story Block's `packs.portrait` now answers for their entry's `portrait`:
+// [{ npc, person, url, file }]. A picture that could not be read is not asked for again in this session (castPortraitMisses).
+const castPortraitMisses = new Set();
+function castPortraitTargets(state, adapter, key = getChatKey()) {
+    const wanting = (state?.npcs || []).filter(castPortraitWanted);
+    if (!wanting.length) return [];
+    const people = metWithEntry(castList());
+    const targets = [];
+    for (const npc of wanting) {
+        const person = findCastPerson(people, npc.castFrom.key);
+        const file = person?.entry?.portrait;
+        const url = file ? adapter.packPortraitUrl?.(person.pack, file) : null;
+        if (url && !castPortraitMisses.has(`${key}|${npc.id}|${url}`)) targets.push({ npc, person, url, file });
+    }
+    return targets;
+}
+// Whether the sync has a picture to give a cast dossier (a cheap look, no wait): the adapter asks before it runs the sync for this alone.
+function castPortraitDue() {
     try {
-        const mark = chatHeadMark();
-        const names = adapter.packNames?.() ?? {};
-        const portraits = new Map();
-        for (const person of castDue(getChatState(key), adapter)) {
-            const url = person.entry.portrait ? adapter.packPortraitUrl?.(person.pack, person.entry.portrait) : null;
-            if (url) portraits.set(person.key, await castPortraitRecord(url, person.entry.portrait));
-        }
-        // The same checks as any other change to the dossiers, after the waits: the chat and its head are still the ones asked about.
-        if (!await ensureFreshMutationBoundary('make dossiers from the cast', key, { notify: false })) return false;
-        if (getChatKey() !== key || !chatHeadUnchanged(mark)) return false;
-        const settings = getSettings();
-        const messageId = latestMessageId(true);
-        let working = getChatState(key);
-        const made = [];
-        for (const person of castDue(working, adapter)) {
-            const added = applyNpcStateCommand(working, { action: 'add', name: person.entry.name || person.name }, {
-                maxNpcs: settings.maxNpcs, excludeNames: currentExclusions(), turn: working.turn, relationshipBaseline: settings.relationshipBaseline,
-            });
-            if (added.report.status !== 'added') continue;
-            const base = added.state.npcs.find(npc => npc.id === added.report.npcId);
-            const portrait = portraits.get(person.key) ?? null;
-            const filled = base ? applyCastEntry(base, person, { packName: names[person.pack] ?? '', portrait }) : null;
-            if (!filled) continue;
-            const record = normalizeNpcRecord(filled);
-            if (portraitHasImage(record.portrait)) {
-                const fingerprint = appearanceFingerprint(record);
-                if (fingerprint) record.portrait = { ...record.portrait, appearanceFingerprint: fingerprint };
-                // A file-form portrait is kept once, in the dossier; only a picture held in the record gets its portraitAssets copy.
-                if (record.portrait.dataUrl) added.state.portraitAssets = { ...(added.state.portraitAssets || {}), [record.id]: structuredClone(record.portrait) };
-            }
-            added.state.npcs = added.state.npcs.map(npc => (npc.id === record.id ? record : npc));
-            working = added.state;
-            made.push(record);
-        }
-        if (!made.length) return false;
-        if (messageId >= 0) commitBranchCheckpoint(working, messageId, 'cast-dossier');
-        setChatState(key, working);
-        persistCritical(key);
-        renderDossier(); updateInjection();
-        return true;
+        const adapter = storySuiteV2Meters();
+        const key = getChatKey();
+        if (!adapter || getSettings().enabled === false || !key || key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return false;
+        return castPortraitTargets(getChatState(key), adapter, key).length > 0;
+    } catch {
+        return false;
+    }
+}
+// One run at a time. A call that comes while one is running (the step ends while a picture is being read) is not lost: the run goes round once more.
+let castSyncAgain = false;
+async function castSync() {
+    if (castSyncRunning) { castSyncAgain = true; return false; }
+    castSyncRunning = true;
+    let any = false;
+    try {
+        do {
+            castSyncAgain = false;
+            if (await castSyncOnce()) any = true;
+        } while (castSyncAgain);
     } finally {
         castSyncRunning = false;
     }
+    return any;
+}
+async function castSyncOnce() {
+    const adapter = storySuiteV2Meters();
+    if (!adapter || getSettings().enabled === false) return false;
+    const key = getChatKey();
+    if (!key || key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return false;
+    if (!castDue(getChatState(key), adapter).length && !castPortraitTargets(getChatState(key), adapter, key).length) return false;
+    const mark = chatHeadMark();
+    const names = adapter.packNames?.() ?? {};
+    const portraits = new Map();
+    for (const person of castDue(getChatState(key), adapter)) {
+        const url = person.entry.portrait ? adapter.packPortraitUrl?.(person.pack, person.entry.portrait) : null;
+        if (url) portraits.set(person.key, await castPortraitRecord(url, person.entry.portrait));
+    }
+    // A cast dossier made while its picture was missing (the pack imported without pictures) gets it once the pack answers for it.
+    const pictures = new Map();
+    for (const target of castPortraitTargets(getChatState(key), adapter, key)) {
+        const record = await castPortraitRecord(target.url, target.file);
+        if (record) pictures.set(target.npc.id, { url: target.url, record });
+        else castPortraitMisses.add(`${key}|${target.npc.id}|${target.url}`);
+    }
+    // The same checks as any other change to the dossiers, after the waits: the chat and its head are still the ones asked about.
+    if (!await ensureFreshMutationBoundary('make dossiers from the cast', key, { notify: false })) return false;
+    if (getChatKey() !== key || !chatHeadUnchanged(mark)) return false;
+    const settings = getSettings();
+    const messageId = latestMessageId(true);
+    let working = getChatState(key);
+    const made = [];
+    for (const person of castDue(working, adapter)) {
+        const added = applyNpcStateCommand(working, { action: 'add', name: person.entry.name || person.name }, {
+            maxNpcs: settings.maxNpcs, excludeNames: currentExclusions(), turn: working.turn, relationshipBaseline: settings.relationshipBaseline,
+        });
+        if (added.report.status !== 'added') continue;
+        const base = added.state.npcs.find(npc => npc.id === added.report.npcId);
+        const portrait = portraits.get(person.key) ?? null;
+        const filled = base ? applyCastEntry(base, person, { packName: names[person.pack] ?? '', portrait }) : null;
+        if (!filled) continue;
+        const record = normalizeNpcRecord(filled);
+        if (portraitHasImage(record.portrait)) {
+            const fingerprint = appearanceFingerprint(record);
+            if (fingerprint) record.portrait = { ...record.portrait, appearanceFingerprint: fingerprint };
+            // A file-form portrait is kept once, in the dossier; only a picture held in the record gets its portraitAssets copy.
+            if (record.portrait.dataUrl) added.state.portraitAssets = { ...(added.state.portraitAssets || {}), [record.id]: structuredClone(record.portrait) };
+        }
+        added.state.npcs = added.state.npcs.map(npc => (npc.id === record.id ? record : npc));
+        working = added.state;
+        made.push(record);
+    }
+    // The pictures: only a dossier that still has none, still of the cast, whose picture was read for the address the pack gives now.
+    const given = [];
+    for (const target of castPortraitTargets(working, adapter, key)) {
+        const got = pictures.get(target.npc.id);
+        if (!got || got.url !== target.url) continue;
+        const fingerprint = appearanceFingerprint(target.npc);
+        const portrait = fingerprint ? { ...got.record, appearanceFingerprint: fingerprint } : got.record;
+        const next = applyCastPortrait(target.npc, portrait);
+        if (next === target.npc) continue;
+        if (next.portrait.dataUrl) working.portraitAssets = { ...(working.portraitAssets || {}), [next.id]: structuredClone(next.portrait) };
+        working.npcs = working.npcs.map(npc => (npc.id === next.id ? next : npc));
+        given.push(next.id);
+    }
+    if (!made.length && !given.length) return false;
+    if (messageId >= 0 && made.length) commitBranchCheckpoint(working, messageId, 'cast-dossier');
+    else if (messageId >= 0) commitBranchCheckpoint(working, messageId, 'cast-portrait');
+    setChatState(key, working);
+    persistCritical(key);
+    renderDossier();
+    if (made.length) updateInjection();
+    return true;
 }
 // The dossier view's cast data by dossier id ({ badge, packName, firstMet, goal, routine, lastHeard, where, doing }) for the
 // dossiers made from the cast; null with none. Story Director's answer adds the live path and "last heard" when it is there.
@@ -6673,6 +6736,9 @@ function removeNpcPortrait(npcId, { chatKey, form = '' } = {}) {
         return true;
     }
     npc.portrait = null;
+    // A cast dossier remembers the removal: the pack's picture is not put back (castSync fills only a portrait nobody removed).
+    const marked = markCastPortraitRemoved(npc);
+    if (marked !== npc) npc.castFrom = marked.castFrom;
     delete getChatState(chatKey).portraitAssets[npc.id];
     npc.updatedAt = Date.now();
     persistCritical(chatKey);
@@ -8067,6 +8133,7 @@ function registerEvents() {
     if (events.CHAT_CHANGED) {
         source.on(events.CHAT_CHANGED, async () => {
             replacingReply = null;
+            castPortraitMisses.clear();
             narrationCaptureArmed = '';
             sentCaptureRules = '';
             for (const cachedKey of chatStateCache.keys()) cancelScanOperation(cachedKey, 'chat changed');
@@ -8099,6 +8166,8 @@ function registerEvents() {
                 updateInjection();
                 if (!inherited && state?.lineage?.length) queueBranchReconcile({ chatKey: key, rescan: false, reason: 'chat-changed' }, 80);
                 if (key !== 'no-chat') void drainPendingAutoScan(key);
+                // A cast dossier made while its picture was missing gets it now if Story Block has it (no new chat needed).
+                if (key !== 'no-chat' && castPortraitDue()) castSync().catch(error => console.debug('[NPC State Delta] cast portraits were not filled', error));
                 evictDormantChatStates(key);
             } catch (error) {
                 if (getChatKey() === key) { renderDossier(); updateInjection(); }
@@ -8150,7 +8219,7 @@ async function init() {
     clearLegacyPromptKeys();
     connectStorySuite();
     // Story Suite v2 (Story Block 2): optional; without a v2 host the adapter does nothing.
-    import('./src/storysuite-v2.js').then(v2 => { storySuiteV2 = v2.startStorySuiteV2({ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION, headReply: latestReplyIndex, castSync, calendarOwn: () => normalizeSourceOfTruth(getSettings().sourceOfTruth).calendar === 'mine' }); }).catch(error => console.debug('[NPC State Delta] Story Suite v2 adapter is not available', error));
+    import('./src/storysuite-v2.js').then(v2 => { storySuiteV2 = v2.startStorySuiteV2({ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION, headReply: latestReplyIndex, castSync, castPortraitDue, calendarOwn: () => normalizeSourceOfTruth(getSettings().sourceOfTruth).calendar === 'mine' }); }).catch(error => console.debug('[NPC State Delta] Story Suite v2 adapter is not available', error));
     // (v2) Hosted with Story Director, the story's date follows its clock (calendar.js hostedStoryDate)
     // unless the reader keeps the calendar here (Source of truth: calendar "mine"). No host: none.
     setStoryClockSource(hostedStoryClock);

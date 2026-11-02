@@ -222,7 +222,7 @@ function setup({ hostValue, delta = fakeDelta(), loadEmptyCast, calendarOwn } = 
     const adapter = createStorySuiteV2Adapter({
         suiteApi: delta.suiteApi,
         delta: () => delta.api,
-        version: '1.7.1',
+        version: '1.7.2',
         host: () => box.host,
         doc,
         timers,
@@ -279,7 +279,7 @@ test('registers module npc-state-delta once, with the npc domain, its queries an
     assert.equal(sdk.registered.length, 1);
     assert.equal(def.id, MODULE_ID);
     assert.equal(def.name, 'NPC State Delta');
-    assert.equal(def.version, '1.7.1');
+    assert.equal(def.version, '1.7.2');
     assert.deepEqual(Object.keys(def.domains), ['npc'], 'one small domain: the NPC meters (F81, F90)');
     assert.deepEqual(Object.keys(def.queries).sort(), ['npc.cast', 'npc.castMade', 'npc.dossier', 'npc.identity', 'npc.keyAway', 'npc.known', 'npc.meters', 'npc.next', 'npc.portrait', 'npc.present', 'npc.socialModifier']);
     assert.deepEqual([...QUERY_NAMES].sort(), Object.keys(def.queries).sort());
@@ -787,7 +787,7 @@ test('index.js starts the adapter once at startup through an optional import', (
     const index = fs.readFileSync(fileURLToPath(new URL('../index.js', import.meta.url)), 'utf8');
     const calls = index.match(/import\('\.\/src\/storysuite-v2\.js'\)/g) || [];
     assert.equal(calls.length, 1);
-    assert.match(index, /startStorySuiteV2\(\{ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION, headReply: latestReplyIndex, castSync, calendarOwn: \(\) => normalizeSourceOfTruth\(getSettings\(\)\.sourceOfTruth\)\.calendar === 'mine' \}\)/);
+    assert.match(index, /startStorySuiteV2\(\{ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION, headReply: latestReplyIndex, castSync, castPortraitDue, calendarOwn: \(\) => normalizeSourceOfTruth\(getSettings\(\)\.sourceOfTruth\)\.calendar === 'mine' \}\)/);
     assert.equal(/from '\.\/src\/storysuite-v2\.js'/.test(index), false, 'no static import: a copy without src/ still loads');
 });
 
