@@ -23,6 +23,8 @@
 //   headSource()         the Source of the reply at the head, for a host whose head() carries no `source` (optional; the host's head().source is used first)
 //   restored()           told after a restore installed a state (optional)
 //   warn(text)           where problems are told (optional)
+//   ready()              whether Delta has loaded the open chat's state (optional; without it the state is taken as loaded)
+//   load()               loads the open chat's state when it is not loaded yet (asynchronous, optional)
 // `vault` keeps the bytes (vault.js). The np_ map, the reserved ids and the applied deaths live in the chat's state (timeline.js), the restores
 // in flight and the acknowledged deaths in the vault's index of the state's lineage.
 
@@ -91,6 +93,17 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     const warn = text => { try { port.warn?.(text); } catch { /* telling is best effort */ } };
     const keyNow = () => String(port.chatKey() ?? '');
     const usable = key => Boolean(key) && key !== 'no-chat';
+    const readyNow = () => { try { return port.ready() === true; } catch { return false; } };
+    /**
+     * Whether Delta has loaded the open chat's state, loading it first when it has not. Before the load `readState()` is an empty state with
+     * no story line: a lineage read from it would be minted anew and written over the real one, and the vault's index of the real one (the
+     * changes in flight) would never be found again. A port without `ready` is taken as loaded.
+     */
+    async function loaded() {
+        if (typeof port.ready !== 'function' || readyNow()) return true;
+        try { await port.load?.(); } catch { /* answered by the look below */ }
+        return readyNow();
+    }
 
     /** Runs `fn` after every earlier callback is done; a thrown error is a FAILED answer, never a crash of the queue. */
     const exclusive = fn => {
@@ -123,6 +136,12 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     async function hydrate() {
         const key = keyNow();
         if (!usable(key)) return null;
+        // Nothing is read, minted or written before the chat's state is loaded: a retryable failure (the host asks again later).
+        if (!await loaded()) {
+            if (keyNow() !== key) return null;
+            throw new Error('NPC State Delta has not loaded this chat\'s dossiers yet; it is tried again in a moment.');
+        }
+        if (keyNow() !== key) return null;
         const state = port.readState();
         const block = timelineOf(state);
         let write = false;
