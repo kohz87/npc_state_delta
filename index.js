@@ -148,6 +148,7 @@ import {
     migrateLegacyLineage,
     reconcileBranchState,
     snapshotBranchState,
+    setBranchProvenanceHint,
 } from './branch.js';
 import {
     normalizeSocialGraph,
@@ -317,7 +318,7 @@ const freshnessChecks = new Map();
 // (sidecarMissTrusted). The reader's own actions, page resume and the first save still look, and
 // that save never overwrites a file another session created. Without a v2 host nothing changes.
 const missingSidecarChats = new Set();
-// Chats whose branch inheritance (maybeInheritKnownBranch) has run in this session, whatever it decided.
+// Chats whose branch inheritance (maybeInheritKnownBranch) has decided in this session (inherited, or nothing to inherit).
 const branchInheritanceChecked = new Set();
 const freshnessEvents = [];
 const FRESHNESS_EVENT_LIMIT = 24;
@@ -2493,26 +2494,34 @@ async function maybeInheritKnownBranch() {
         const current = getChatState(key);
         const chat = getContext().chat || [];
         const lineageAtStart = chatLineage(chat);
-        const isEmptyState = !current.npcs.length && !current.candidates.length && !current.dismissed.length && !current.checkpoints.length && !current.lineage.length;
-        if (!isEmptyState) return false;
+        // (Message tracking alone, never saved to a file of the chat's own, does not make a branch a chat of its own: Story Block's save point
+        // opens the branch for a moment and goes back, which can leave it seeded in memory, and "Return here" must still carry the dossiers.)
+        const unsaved = !getSettings().dataFiles?.[key]?.path;
+        const isEmptyState = !current.npcs.length && !current.candidates.length && !current.dismissed.length && !current.checkpoints.length && (!current.lineage.length || unsaved);
+        if (!isEmptyState) { branchInheritanceChecked.add(key); return false; }
 
         const metadata = getContext().chatMetadata || getContext().chat_metadata || {};
         const mainChat = String(metadata?.main_chat || '').replace(/\.jsonl$/i, '').trim();
         const parsed = parseQualifiedChatKey(key);
         const explicitParentKey = mainChat && parsed ? buildQualifiedChatKey(parsed.kind, parsed.ownerId, mainChat) : '';
         const hasExplicitParent = Boolean(explicitParentKey && explicitParentKey !== key);
+        if (!hasExplicitParent) branchInheritanceChecked.add(key);
         if (!hasExplicitParent) return false;
 
         await ensureChatStateLoaded(explicitParentKey).catch(error => console.debug(`[NPC State Delta] explicit branch parent ${explicitParentKey} could not be hydrated.`, error));
         if (getChatKey() !== key || firstLineageDivergence(lineageAtStart, chatLineage(getContext().chat || [])) !== -1) return false;
         const parentState = chatStateCache.get(explicitParentKey);
+        // The branch's own provenance: the hint was installed for the chat open at startup only, so a branch opened later (a save point's
+        // "Return here") was matched against the wrong main chat and inherited nothing.
+        setBranchProvenanceHint({ mainChat, currentKey: key });
         const inherited = bestAncestorState(parentState ? { [explicitParentKey]: parentState } : {}, key, chat);
+        // (decided: inherited or nothing to inherit; a return because another chat was opened meanwhile decides nothing)
+        branchInheritanceChecked.add(key);
         if (!inherited) return false;
         setChatState(key, { ...freshChatState(), ...inherited });
         queueStateFileWrite(key, 0);
         return true;
     } finally {
-        branchInheritanceChecked.add(key);
         evictDormantChatStates(key);
     }
 }
