@@ -23,13 +23,18 @@
 //   headSource()         the Source of the reply at the head, for a host whose head() carries no `source` (optional; the host's head().source is used first)
 //   restored()           told after a restore installed a state (optional)
 //   warn(text)           where problems are told (optional)
+//   ready()              whether Delta has loaded the open chat's state (optional; without it the state is taken as loaded)
+//   load()               loads the open chat's state when it is not loaded yet (asynchronous, optional)
+//   normalize(state)     the state as Delta keeps it once installed (its own normalization; synchronous, optional)
+//   branchPending()      whether the open chat is a branch still waiting for its parent's dossiers (optional)
+//   inheritBranch()      runs Delta's branch inheritance for the open chat now (asynchronous, optional)
 // `vault` keeps the bytes (vault.js). The np_ map, the reserved ids and the applied deaths live in the chat's state (timeline.js), the restores
 // in flight and the acknowledged deaths in the vault's index of the state's lineage.
 
 import { PARTICIPANT_SCHEMA, buildCheckpoint, checkpointProblem } from './checkpoint.js';
 import { hydrateIdentity, resolveIdentity } from './identity.js';
 import { hashJson } from './hash.js';
-import { mintLineage, restoredState, storedTimeline, timelineOf } from './timeline.js';
+import { LINEAGE_ID, mintLineage, restoredState, storedTimeline, timelineOf } from './timeline.js';
 import { isTerminalNpcDeath, manualLifeStateRecord } from '../../terminal-lifecycle.js';
 
 export const MODULE_ID = 'npc-state-delta';
@@ -91,6 +96,17 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     const warn = text => { try { port.warn?.(text); } catch { /* telling is best effort */ } };
     const keyNow = () => String(port.chatKey() ?? '');
     const usable = key => Boolean(key) && key !== 'no-chat';
+    const readyNow = () => { try { return port.ready() === true; } catch { return false; } };
+    /**
+     * Whether Delta has loaded the open chat's state, loading it first when it has not. Before the load `readState()` is an empty state with
+     * no story line: a lineage read from it would be minted anew and written over the real one, and the vault's index of the real one (the
+     * changes in flight) would never be found again. A port without `ready` is taken as loaded.
+     */
+    async function loaded() {
+        if (typeof port.ready !== 'function' || readyNow()) return true;
+        try { await port.load?.(); } catch { /* answered by the look below */ }
+        return readyNow();
+    }
 
     /** Runs `fn` after every earlier callback is done; a thrown error is a FAILED answer, never a crash of the queue. */
     const exclusive = fn => {
@@ -123,11 +139,31 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     async function hydrate() {
         const key = keyNow();
         if (!usable(key)) return null;
-        const state = port.readState();
-        const block = timelineOf(state);
+        // Nothing is read, minted or written before the chat's state is loaded: a retryable failure (the host asks again later).
+        if (!await loaded()) {
+            if (keyNow() !== key) return null;
+            throw new Error('NPC State Delta has not loaded this chat\'s dossiers yet; it is tried again in a moment.');
+        }
+        if (keyNow() !== key) return null;
+        let state = port.readState();
+        let block = timelineOf(state);
+        // A branch waiting for its parent's dossiers gets them (and the parent's line) from Delta's branch inheritance: a line minted here first
+        // would be written into the branch's file and the inheritance would never come (the branch's dossiers empty, its parent's checkpoints refused).
+        if (!block.lineage && port.branchPending?.() === true) {
+            try { await port.inheritBranch?.(); } catch { /* looked at below */ }
+            if (keyNow() !== key) return null;
+            if (port.branchPending?.() === true) throw new Error('NPC State Delta is still carrying the parent chat\'s dossiers into this branch; it is tried again in a moment.');
+            state = port.readState();
+            block = timelineOf(state);
+        }
         let write = false;
         if (!block.lineage) {
             block.lineage = mintLineage(random);
+            write = true;
+        }
+        // The open chat's line changed under the participant (another copy of the state was adopted): the line it knew stays this chat's.
+        if (session?.key === key && session.lineage !== block.lineage && !block.former.includes(session.lineage)) {
+            block.former = [...block.former, session.lineage];
             write = true;
         }
         const out = hydrateIdentity(block.identity, state?.npcs, { seed: block.lineage, reserved: block.reserved });
@@ -171,8 +207,26 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         const problem = checkpointProblem(doc, doc?.kind ? hashJson(doc) : '');
         if (problem && /newer|not a native|missing|plain/.test(problem)) return fail('SNAPSHOT_UNAVAILABLE', problem);
         if (hashJson(doc) !== hash) return fail('CONFLICT', `The native checkpoint ${id} is not the one that was saved (another hash).`);
-        if (doc.lineage !== session?.lineage) return fail('CONFLICT', `The native checkpoint ${id} belongs to another story line.`);
+        if (doc.lineage !== session?.lineage && !await formerLine(doc)) return fail('CONFLICT', `The native checkpoint ${id} belongs to another story line.`);
         return { ok: true, doc };
+    }
+
+    /**
+     * Whether `doc` is a checkpoint of an earlier story line of this same chat. Before NSD 1.7.1 a reload's recovery could read the chat's state
+     * before Delta had loaded it and mint a new line over the chat's own (hydrate waits for the load now); the chat's journal still names
+     * checkpoints of the line it had, and refusing them held the chat for good on a swipe, a delete or a branch back past that point. Such a line
+     * is accepted, and only such a line: one the chat records as its former line (`timeline.former`), or a well-formed line this participant kept
+     * an index for whose checkpoint belongs to the chat's own family (`branchFamilyId`, a random id per chat and its branches). A checkpoint of
+     * another chat (another family), or a line nobody kept (forged), is still another story line. Installing it records the line (restoredState).
+     */
+    async function formerLine(doc) {
+        const lineage = doc?.lineage;
+        if (typeof lineage !== 'string' || !LINEAGE_ID.test(lineage)) return false;
+        const live = port.readState();
+        if (timelineOf(live).former.includes(lineage)) return true;
+        const family = typeof live?.branchFamilyId === 'string' ? live.branchFamilyId.trim() : '';
+        if (!family || doc.state?.branchFamilyId !== family) return false;
+        try { return Boolean(await vault.getIndex(lineage)); } catch { return false; }
     }
 
     /**
@@ -194,7 +248,13 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     /** Whether the live state is what installing this checkpoint's document leaves (its state with the timeline block's reserved ids of both timelines). */
     const standsOnBytes = doc => {
         const live = port.readState();
-        return hashJson(restoredState(doc.state, live)) === hashJson(live);
+        const wanted = restoredState(doc.state, live);
+        if (hashJson(wanted) === hashJson(live)) return true;
+        // Delta normalizes a state as it installs it (a milestone's missing turn becomes 0, ...), and a checkpoint made in the run that wrote a
+        // record may hold it as written: compared raw, such a checkpoint never "stands" once installed, and its activation is refused for good.
+        // The bytes are compared as Delta keeps them too.
+        if (typeof port.normalize !== 'function') return false;
+        try { return hashJson(port.normalize(wanted)) === hashJson(live); } catch { return false; }
     };
     const hand = (checkpoint, hash, stateHash) => {
         handed.set(checkpoint, { hash, stateHash });
@@ -438,8 +498,14 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     async function publish() {
         if (!handle) return fail('UNSUPPORTED', 'The host has not given this participant its handle.');
         if (!started()) return { ok: true, unchanged: true };
+        // The change belongs to the chat it was made in: once another chat is open nothing is retried, and the new chat is not hydrated here (a
+        // branch just opened must get its dossiers from Delta's branch inheritance first). The chat publishes what it holds when it is open again.
+        const key = keyNow();
+        const left = { ok: true, unchanged: true, left: true };
         for (let attempt = 0; attempt < 3; attempt += 1) {
-            const settled = await exclusive(async () => ({ ok: true, session: await hydrate(), stateHash: hashJson(port.readState()) }));
+            if (keyNow() !== key) return left;
+            const settled = await exclusive(async () => (keyNow() !== key ? left : { ok: true, session: await hydrate(), stateHash: hashJson(port.readState()) }));
+            if (settled.left) return left;
             if (!settled.ok || !settled.session) return settled.ok ? { ok: true, unchanged: true } : settled;
             if (settled.session.index.base?.stateHash === settled.stateHash) return { ok: true, unchanged: true };
             const head = await handle.head();
@@ -451,6 +517,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
                 source,
                 expectedHead: head.headHash,
                 prepare: () => preparing(async () => {
+                    if (keyNow() !== key) throw new Error('Another chat was opened; the change is published when its chat is open again.');
                     const s = await hydrate();
                     if (!s) throw new Error('There is no open chat.');
                     // A change announced from here on (the state is read now; the upload of its checkpoint takes time) is newer than this publication.
@@ -464,7 +531,9 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
                     return { before: shaped(before), after: shaped(after), prepared };
                 }),
             });
-            if (out?.ok || out?.code !== 'STALE') return out;
+            if (out?.ok) return out;
+            if (keyNow() !== key) return left;   // (refused because the chat changed: not retried, not told)
+            if (out?.code !== 'STALE') return out;
         }
         return fail('STALE', 'The head kept moving; the change is published with the next one.');
     }

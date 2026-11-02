@@ -61,3 +61,25 @@ test('manual dossier editor validates birthday corrections through the canonical
   assert.match(source,/correctedBirthday\.birthDateSourceMessageId = null/);
   assert.match(source,/set\('npc_state_delta_edit_birthday', npc\.birthDateDisplay \|\| ''\)/);
 });
+
+test('a branch with only unsaved message tracking still inherits, and inheritance is marked decided only when it decides', () => {
+  // Story Block's save point opens the branch for a moment and goes back: the branch can be left seeded in memory with its messages and
+  // nothing else. With no file of its own it is still empty for inheritance, so "Return here" carries the parent's dossiers.
+  assert.match(source, /const unsaved = !getSettings\(\)\.dataFiles\?\.\[key\]\?\.path;/);
+  assert.match(source, /!current\.checkpoints\.length && \(!current\.lineage\.length \|\| unsaved\)/);
+  const body = source.slice(source.indexOf('async function maybeInheritKnownBranch'), source.indexOf('function branchInheritancePending'));
+  // a return because another chat was opened meanwhile decides nothing (the participant then still waits for the inheritance)
+  assert.doesNotMatch(body.slice(body.indexOf('} finally {')), /branchInheritanceChecked\.add/);
+  assert.match(body, /if \(!hasExplicitParent\) branchInheritanceChecked\.add\(key\);\n\s+if \(!hasExplicitParent\) return false;/);
+  assert.match(body, /branchInheritanceChecked\.add\(key\);\n\s+if \(!inherited\) return false;/);
+  // and the runtime gives the participant the wait and the inheritance itself
+  assert.match(source, /branchPending: \(\) => branchInheritancePending\(\),/);
+  assert.match(source, /inheritBranch: \(\) => maybeInheritKnownBranch\(\),/);
+});
+
+test('branch inheritance matches the open branch against its own main chat, not the chat open at startup', () => {
+  const body = source.slice(source.indexOf('async function maybeInheritKnownBranch'), source.indexOf('function branchInheritancePending'));
+  const hint = body.indexOf('setBranchProvenanceHint({ mainChat, currentKey: key });');
+  assert.ok(hint > 0, 'the hint is installed for the branch being inherited');
+  assert.ok(hint < body.indexOf('bestAncestorState('), 'before the ancestor is looked for');
+});
