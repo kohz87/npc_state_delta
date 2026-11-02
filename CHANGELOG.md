@@ -1,3 +1,10 @@
+## 1.7.2
+
+- **A missing cast portrait fills itself in.** If you met someone from a pack's cast before the pack's pictures were
+  imported, their dossier now gets the portrait on the next reply once the picture is there (for example after
+  importing Story Block's `ersveil.zip`), in the same chat. A portrait you set, generated or removed yourself is never
+  replaced.
+
 ## 1.7.1
 
 - **A chat no longer gets stuck when the page closes mid-save.** Closing or reloading the page at the instant Delta was
