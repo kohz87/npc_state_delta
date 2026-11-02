@@ -31,7 +31,7 @@
 import { PARTICIPANT_SCHEMA, buildCheckpoint, checkpointProblem } from './checkpoint.js';
 import { hydrateIdentity, resolveIdentity } from './identity.js';
 import { hashJson } from './hash.js';
-import { mintLineage, restoredState, storedTimeline, timelineOf } from './timeline.js';
+import { LINEAGE_ID, mintLineage, restoredState, storedTimeline, timelineOf } from './timeline.js';
 import { isTerminalNpcDeath, manualLifeStateRecord } from '../../terminal-lifecycle.js';
 
 export const MODULE_ID = 'npc-state-delta';
@@ -149,6 +149,11 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
             block.lineage = mintLineage(random);
             write = true;
         }
+        // The open chat's line changed under the participant (another copy of the state was adopted): the line it knew stays this chat's.
+        if (session?.key === key && session.lineage !== block.lineage && !block.former.includes(session.lineage)) {
+            block.former = [...block.former, session.lineage];
+            write = true;
+        }
         const out = hydrateIdentity(block.identity, state?.npcs, { seed: block.lineage, reserved: block.reserved });
         if (out.changed || out.reserved.length !== block.reserved.length) write = true;
         block.identity = out.identity;
@@ -190,8 +195,26 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         const problem = checkpointProblem(doc, doc?.kind ? hashJson(doc) : '');
         if (problem && /newer|not a native|missing|plain/.test(problem)) return fail('SNAPSHOT_UNAVAILABLE', problem);
         if (hashJson(doc) !== hash) return fail('CONFLICT', `The native checkpoint ${id} is not the one that was saved (another hash).`);
-        if (doc.lineage !== session?.lineage) return fail('CONFLICT', `The native checkpoint ${id} belongs to another story line.`);
+        if (doc.lineage !== session?.lineage && !await formerLine(doc)) return fail('CONFLICT', `The native checkpoint ${id} belongs to another story line.`);
         return { ok: true, doc };
+    }
+
+    /**
+     * Whether `doc` is a checkpoint of an earlier story line of this same chat. Before NSD 1.7.1 a reload's recovery could read the chat's state
+     * before Delta had loaded it and mint a new line over the chat's own (hydrate waits for the load now); the chat's journal still names
+     * checkpoints of the line it had, and refusing them held the chat for good on a swipe, a delete or a branch back past that point. Such a line
+     * is accepted, and only such a line: one the chat records as its former line (`timeline.former`), or a well-formed line this participant kept
+     * an index for whose checkpoint belongs to the chat's own family (`branchFamilyId`, a random id per chat and its branches). A checkpoint of
+     * another chat (another family), or a line nobody kept (forged), is still another story line. Installing it records the line (restoredState).
+     */
+    async function formerLine(doc) {
+        const lineage = doc?.lineage;
+        if (typeof lineage !== 'string' || !LINEAGE_ID.test(lineage)) return false;
+        const live = port.readState();
+        if (timelineOf(live).former.includes(lineage)) return true;
+        const family = typeof live?.branchFamilyId === 'string' ? live.branchFamilyId.trim() : '';
+        if (!family || doc.state?.branchFamilyId !== family) return false;
+        try { return Boolean(await vault.getIndex(lineage)); } catch { return false; }
     }
 
     /**
