@@ -8329,6 +8329,8 @@ window.NPCStateDelta = Object.freeze({
     },
     clearDiagnostics: () => diagnosticStore.clear(getChatKey()),
     getState: () => structuredClone(getChatState()),
+    // (timeline participant) A state as installState keeps it: normalized like the chat's state, on a copy (nothing stored).
+    normalizeState: state => structuredClone(normalizeChatState(state)),
     // (timeline participant, src/storysuite-participant/) The open chat's key; SillyTavern's request headers for its user files; and an
     // absolute, durable replacement of the chat's native state (a restore to a save point), refused unless it is the open chat's.
     chatKey: () => getChatKey(),

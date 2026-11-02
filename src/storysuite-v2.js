@@ -1411,6 +1411,8 @@ export function createStorySuiteV2Adapter({
             // Whether Delta has loaded the open chat's state, and its load: the participant reads nothing before it (a reload's recovery comes early).
             ready: () => runtime()?.stateReady?.() === true,
             load: () => runtime()?.ensureFresh?.(),
+            // The state as Delta keeps it once installed (the participant's look after an install compares it so).
+            normalize: state => (typeof runtime()?.normalizeState === 'function' ? runtime().normalizeState(state) : state),
             installState: state => runtime().installState(state),
             writeTimeline: block => runtime().writeTimeline(block),
             busy: () => runtime()?.scanActive?.() === true,

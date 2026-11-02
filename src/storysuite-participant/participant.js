@@ -25,6 +25,7 @@
 //   warn(text)           where problems are told (optional)
 //   ready()              whether Delta has loaded the open chat's state (optional; without it the state is taken as loaded)
 //   load()               loads the open chat's state when it is not loaded yet (asynchronous, optional)
+//   normalize(state)     the state as Delta keeps it once installed (its own normalization; synchronous, optional)
 // `vault` keeps the bytes (vault.js). The np_ map, the reserved ids and the applied deaths live in the chat's state (timeline.js), the restores
 // in flight and the acknowledged deaths in the vault's index of the state's lineage.
 
@@ -236,7 +237,13 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     /** Whether the live state is what installing this checkpoint's document leaves (its state with the timeline block's reserved ids of both timelines). */
     const standsOnBytes = doc => {
         const live = port.readState();
-        return hashJson(restoredState(doc.state, live)) === hashJson(live);
+        const wanted = restoredState(doc.state, live);
+        if (hashJson(wanted) === hashJson(live)) return true;
+        // Delta normalizes a state as it installs it (a milestone's missing turn becomes 0, ...), and a checkpoint made in the run that wrote a
+        // record may hold it as written: compared raw, such a checkpoint never "stands" once installed, and its activation is refused for good.
+        // The bytes are compared as Delta keeps them too.
+        if (typeof port.normalize !== 'function') return false;
+        try { return hashJson(port.normalize(wanted)) === hashJson(live); } catch { return false; }
     };
     const hand = (checkpoint, hash, stateHash) => {
         handed.set(checkpoint, { hash, stateHash });
