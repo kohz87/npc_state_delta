@@ -36,6 +36,7 @@
 
 import { createInstalled } from './installed.js';
 import { createPortraits } from './portraits.js';
+import { browserImageIo } from './portrait-fit.js';
 import { calendarOf, contentOf, craftsOf, economyOf, itemDefsIn, mergeStart, resolveItemIn, applyStart, weatherOf, youRankOf } from './content.js';
 import { renderPacksPanel } from './panel.js';
 import { HOST_VERSION, validatePack, slugify } from './validate.js';
@@ -54,11 +55,12 @@ export { validateDataModules, validateDataMigration, dataModuleDefaults, dataMod
  * registry's own capability list) can bind it to anything.
  *
  * `settings`: `{ read(), save() }` over the storySuite settings object; `readLorebook()`:
- * `→ { character, entries, problem }`; `capabilities()`: names or null; `hostVersion`: a version or a function giving it.
+ * `→ { character, entries, problem }`; `capabilities()`: names or null; `hostVersion`: a version or a function giving it;
+ * `portraitFiles`: the file store for portraits (portraits.js) and `portraitIo`: the decoder and encoder that makes a large one smaller.
  * Returns `{ part, packs, resolveItem, startState, economy }`.
  */
-export function createPacksPart({ settings, readLorebook = async () => ({ character: '', entries: [], problem: 'No lorebook reader.' }), capabilities = () => null, hostVersion = HOST_VERSION, portraitFiles = null } = {}) {
-    const portraits = createPortraits({ settings, files: portraitFiles });
+export function createPacksPart({ settings, readLorebook = async () => ({ character: '', entries: [], problem: 'No lorebook reader.' }), capabilities = () => null, hostVersion = HOST_VERSION, portraitFiles = null, portraitIo = null } = {}) {
+    const portraits = createPortraits({ settings, files: portraitFiles, imageIo: portraitIo });
     const packs = createInstalled({ settings, capabilities, hostVersion, portraits });
 
     /** The pack item def a story name means, or null (see content.js resolveItemIn). */
@@ -170,6 +172,8 @@ const live = createPacksPart({
     capabilities: stCapabilities,
     hostVersion: () => stHostVersion() ?? HOST_VERSION,
     portraitFiles: stPortraitFiles(),
+    // The browser's own decoder and encoder, where there is one (not in Node, where a large portrait is refused as it always was).
+    portraitIo: typeof globalThis.createImageBitmap === 'function' ? browserImageIo(globalThis) : null,
 });
 
 export const part = live.part;

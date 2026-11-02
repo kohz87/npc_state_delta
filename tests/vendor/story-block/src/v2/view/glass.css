@@ -366,6 +366,7 @@
 
 /* ---- hero ---- */
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero {
+    position: relative;
     container-type: inline-size;
     gap: 0;
     padding: var(--ss-space-4);
@@ -544,26 +545,99 @@
     min-width: 0;
     overflow-wrap: anywhere;
 }
-/* the pencil of a corner item (the place, the weather, the people here): quiet, its touch area reaching into the row's gap; the rows of a
-   wrapped corner are 26px apart (compact), so one pencil's area never covers the middle of another's */
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-corner-pencil {
+/* the one Edit button of the header (`where`): a small pill beside the name on a phone, in the card's top-right corner from 600px; its touch
+   area is the 44px one every compact pill draws (size.css, `ss-tap-pill`) */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    max-width: 100%;
+}
+/* with the Edit button the name row is the whole width (the class line goes under it) and the button sits at its far right; a long
+   name is cut with an ellipsis before the button, never wrapped under it */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-has-edit .ss-hero-head {
+    width: 100%;
+    flex: 1 1 100%;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-has-edit .ss-hero-head .ss-hero-name {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* The Edit button is small and quiet: about 24px tall in the meta lines' 12px text, a 12px pencil and the word, tight padding, a faint edge at
+   rest and the accent on hover, focus and while the editor is open. It opts out of the 44px minimum (`data-ss-hit`) and draws its own invisible
+   44px-tall tap area (::after, as `ss-tap-pill` does), as wide as the button, so it never reaches the name beside it or the close button above. */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-head .ss-hero-edit {
+    position: relative;
     display: inline-flex;
     flex: none;
-    align-self: center;
-    margin: -9px 0;
+    align-items: center;
+    gap: 5px;
+    box-sizing: border-box;
+    min-width: 0;
+    min-height: 0;
+    margin: 0 0 0 auto;
+    padding: 4px 8px;
+    border: 1px solid color-mix(in srgb, var(--ss-muted) 35%, transparent);
+    border-radius: var(--ss-radius-pill);
+    background: transparent;
+    color: var(--ss-muted);
+    font-family: var(--ss-font);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 14px;
+    cursor: pointer;
 }
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-head .ss-hero-edit::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: calc(44px / var(--ss-zoomed, 1));
+    transform: translateY(-50%);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-head .ss-hero-edit:hover,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-head .ss-hero-edit:focus-visible,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-head .ss-hero-edit[aria-expanded="true"] {
+    border-color: var(--ss-accent);
+    background: var(--ss-accent-soft);
+    color: var(--ss-text);
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-head .ss-hero-edit:focus-visible {
+    outline: 2px solid var(--ss-accent);
+    outline-offset: 2px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-edit-icon {
+    flex: none;
+    width: 12px;
+    height: 12px;
+}
+/* the editor takes the place of the lines it edits (the time, place, weather and Here; Rank, Wearing and Condition) while it is open */
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero.ss-hero-editing .ss-hero-corner,
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero.ss-hero-editing .ss-hero-you {
+    display: none;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-editor {
+    min-width: 0;
+    margin: 6px 0 2px;
+    font-size: 13px;
+}
+:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-editor > .ss-w-editable {
+    display: flex;
+    width: 100%;
+}
+/* on a phone the groups stack and the date row is two by two */
 @media (max-width: 600px) {
-    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-corner-pencil {
-        margin: -15px 0;
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-editor .ss-w-editable-groups {
+        grid-template-columns: minmax(0, 1fr);
     }
-}
-/* while a pencil's form is open the item wraps: the words keep their line and the form takes the one under them, across */
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-corner-item:has(.ss-w-editable-form) {
-    flex-wrap: wrap;
-}
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-corner-pencil:has(.ss-w-editable-form) {
-    flex: 1 1 100%;
-    margin: 0;
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-editor .ss-w-editable-row {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+    }
 }
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-corner-empty .ss-hero-corner-text {
     color: var(--ss-muted);
@@ -594,6 +668,16 @@
     max-width: 100%;
 }
 @container (min-width: 600px) {
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-head .ss-hero-edit {
+        position: absolute;
+        top: 10px;
+        right: 12px;
+        z-index: 2;
+    }
+    /* the corner button's row: the bars start under it */
+    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-has-edit .ss-hero-vitals {
+        padding-top: 30px;
+    }
     :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-body {
         grid-template-columns: 96px minmax(0, 1fr) minmax(240px, 320px);
         grid-template-areas: "portrait text vitals";
@@ -621,8 +705,8 @@
         grid-template-columns: minmax(0, 1fr);
     }
 }
-/* Wearing and Condition under the place line (`you`, game view header): a label, the words (they wrap) and a quiet pencil; the
-   pencil's touch area reaches into the row's gap, so a row stays a line high */
+/* Wearing and Condition under the place line (`you`, game view header): a label and the words (they wrap); plain text, the header's one
+   Edit button changes them */
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-you {
     display: flex;
     flex-wrap: wrap;
@@ -661,16 +745,6 @@
 }
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-you-empty {
     color: var(--ss-muted);
-}
-:where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-you-pencil {
-    display: inline-flex;
-    align-self: center;
-    margin: -9px 0;
-}
-@media (max-width: 600px) {
-    :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-you-pencil {
-        margin: -15px 0;
-    }
 }
 /* Travel under the Wearing row (`travel`, game view header): a label and the trip's line, which wraps */
 :where(.story-suite-overlay, .story-suite-sheet, .ss-gameview, .ss-dialog, .ss-cards, .ss-card, .ss-hud, [data-ss-screen], .story-suite-bar, .story-suite-extras, .story-suite-reply-note) .ss-hero-travel {

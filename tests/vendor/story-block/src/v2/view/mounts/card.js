@@ -17,6 +17,9 @@
 //   goes over the last RECENT carriers and those on screen; a chat opened, more messages loaded or a delete
 //   go over every drawn message once (to watch them), finding them with one query, not one per message.
 //   With no card screen turned on nothing is looked up at all, and any box left over is removed.
+// * SillyTavern scrolls the chat to a new reply as it lands and the card is drawn just after, under it, so the card could sit below the
+//   fold. When a draw or a growth (a card opened) changes the card box of the newest message and the reader was at the bottom of
+//   the chat before it, the chat is taken to the bottom again (view/scroll.js keepAtBottom); a reader who had scrolled up is not moved.
 // * Drawn cards are cached per (screen, index, swipe, rev, screens version): swiping back or scrolling
 //   back reuses the card instead of drawing it again. An edit drops that message's cards; a delete or a
 //   chat change drops them all (message indexes move).
@@ -44,6 +47,7 @@
 import { STRINGS } from '../../strings.js';
 import { THIS_REPLY_ID, mergeSummaries, orderSections, sectionHeading } from '../../reply-cards.js';
 import { button, dispose, documentOf, drawScreen, icon, make, screensFor } from './common.js';
+import { keepAtBottom } from '../scroll.js';
 
 const THIS_REPLY_ICON = 'fa-list-check';
 
@@ -143,17 +147,55 @@ export function createCardMount(deps) {
         };
     }
 
+    // → whether the card changed: it opened or closed, or its sections were drawn.
     function setOpen(node, open) {
         const info = cards.get(node);
+        const was = info.body.hidden === false;
         node.classList.toggle('ss-card-open', open);
         info.head.setAttribute('aria-expanded', open ? 'true' : 'false');
         info.body.hidden = !open;
+        let drew = false;
         // The first time the card opens every section is filled; one that cannot be drawn leaves the others alone.
         if (open && !info.drawn) {
             info.drawn = true;
+            drew = true;
             info.handles = info.sections.map(section => {
                 try { return mount(section.body, section.id, { index: info.index }); } catch { return null; }
             });
+        }
+        return was !== open || drew;
+    }
+
+    // ---- keeping the newest reply's card in view -------------------------------------------------------------------------
+    // SillyTavern scrolls the chat to a new reply as it lands and the card is drawn just after, so the card sits under the fold. A draw
+    // (or a card opened) that changes the newest message's box takes the chat to its bottom again, but only if the reader was at the
+    // bottom before the change; `following` is the draw or pass in progress, asked once before its first change.
+    let following = null;       // { pass, measured, watch, newest }
+    // The newest message has no `.mes` after it (SillyTavern's chat is a flat list of them).
+    const isNewest = message => {
+        for (let next = message.nextElementSibling; next; next = next.nextElementSibling) if (next.classList?.contains('mes')) return false;
+        return true;
+    };
+    function beforeChange(message) {
+        if (!following || following.measured) return;
+        // A single draw for an older message cannot matter; a pass over many might end at the newest.
+        if (!following.pass && !isNewest(message)) return;
+        following.measured = true;
+        const chat = message.closest?.('#chat') ?? null;
+        following.watch = chat ? keepAtBottom(chat) : null;
+    }
+    function changed(message) {
+        if (following?.measured && isNewest(message)) following.newest = true;
+    }
+    function follow(run, { pass = false } = {}) {
+        if (following) return run();
+        following = { pass, measured: false, watch: null, newest: false };
+        try {
+            return run();
+        } finally {
+            const done = following;
+            following = null;
+            if (done.newest) done.watch?.settle();
         }
     }
 
@@ -233,7 +275,10 @@ export function createCardMount(deps) {
      * Draws (or reuses) the cards under carrier `index`. A pass over many (attachAll) hands in what it
      * worked out once: `element` (the message), `carriers` (a Set) and `entries` (the card screens on).
      */
-    function refresh(index, { force = false, element = null, carriers = null, entries: on = null } = {}) {
+    function refresh(index, options = {}) {
+        return follow(() => drawCards(index, options));
+    }
+    function drawCards(index, { force = false, element = null, carriers = null, entries: on = null } = {}) {
         if (force) dropIndex(index);
         const message = element ?? messageElement(index);
         if (!message) return;
@@ -269,30 +314,33 @@ export function createCardMount(deps) {
             const hit = cache.get(key);
             const node = hit ? hit.node : buildCard(entries, index);
             remember(key, node, index);
-            setOpen(node, expanded.has(index));
+            beforeChange(message);
+            if (setOpen(node, expanded.has(index))) changed(message);
             nodes.push(node);
         }
+        beforeChange(message);
         if (!box) {
             box = make(doc, 'div', 'ss-cards');
             (message.querySelector('.mes_block') ?? message).appendChild(box);
         }
         box.setAttribute('data-ss-index', String(index));
         nodes.push(...replies);
-        syncBox(box, nodes);
+        if (syncBox(box, nodes)) changed(message);
     }
 
-    // The box shows `nodes`, changing only what differs: a node that stays is not moved, so the focus on it stays. A control that
+    // The box shows `nodes`, changing only what differs (→ whether it changed): a node that stays is not moved, so the focus on it stays. A control that
     // was focused on a node that was drawn again (Later, Open, an action followed by `committed`) gets the focus back on the same
     // control of the card with the same key, else on the card's fold line or Later button, else on its first button.
     function syncBox(box, nodes) {
         const current = Array.from(box.children);
-        if (current.length === nodes.length && current.every((node, i) => node === nodes[i])) return;
+        if (current.length === nodes.length && current.every((node, i) => node === nodes[i])) return false;
         const held = focusHeld(box);
         for (const node of current) if (!nodes.includes(node)) node.remove();
         nodes.forEach((node, i) => {
             if (box.children[i] !== node) box.insertBefore(node, box.children[i] ?? null);
         });
         if (held && doc.activeElement !== held.control) restoreFocus(box, held);
+        return true;
     }
 
     const cardKeyOf = node => node.getAttribute?.('data-ss-reply-card') ?? node.getAttribute?.('data-ss-card') ?? null;
@@ -318,7 +366,10 @@ export function createCardMount(deps) {
      * rebuild) goes over the last `recent` carriers and those on screen only: the others were watched when
      * they were drawn, and are drawn when they come into view.
      */
-    function attachAll({ recent = false } = {}) {
+    function attachAll(options = {}) {
+        return follow(() => attachPass(options), { pass: true });
+    }
+    function attachPass({ recent = false } = {}) {
         const entries = screensFor(deps, 'card');
         if (!entries.length && !repliesOn()) {
             // No card screen is on: nothing to draw anywhere; a box left from before goes.
@@ -349,13 +400,17 @@ export function createCardMount(deps) {
     // A change to the story only changes the head carrier's own state and ops. A reply card another message carries can end or move
     // with it, so the messages on screen are looked at again when the module's cards are on (`replyCards`).
     function onCommitted() {
-        const index = typeof deps.headIndex === 'function' ? deps.headIndex() : null;
-        if (Number.isInteger(index) && index >= 0) refresh(index);
-        if (repliesOn()) refreshDrawnMessages();
+        follow(() => {
+            const index = typeof deps.headIndex === 'function' ? deps.headIndex() : null;
+            if (Number.isInteger(index) && index >= 0) refresh(index);
+            if (repliesOn()) refreshDrawnMessages();
+        }, { pass: true });
     }
     function refreshDrawnMessages() {
-        const drawn = drawnMessages();
-        if (drawn) for (const [index, element] of drawn) refresh(index, { element });
+        follow(() => {
+            const drawn = drawnMessages();
+            if (drawn) for (const [index, element] of drawn) refresh(index, { element });
+        }, { pass: true });
     }
 
     /** Opens or closes the reply's one card (the header button does this). */
@@ -363,9 +418,11 @@ export function createCardMount(deps) {
         const next = open === null ? !expanded.has(index) : !!open;
         if (next) expanded.add(index);
         else expanded.delete(index);
-        const box = messageElement(index) && boxOf(messageElement(index));
+        const message = messageElement(index);
+        const box = message && boxOf(message);
         const node = Array.from(box?.children ?? []).find(child => child.getAttribute('data-ss-card') === THIS_REPLY_ID);
-        if (node) setOpen(node, next);
+        // The card grows when it opens: under the newest reply, a reader at the bottom of the chat keeps seeing the end of it.
+        if (node) follow(() => { beforeChange(message); if (setOpen(node, next)) changed(message); });
         return next;
     }
 
@@ -386,7 +443,7 @@ export function createCardMount(deps) {
 
     const offs = [];
     if (typeof deps.on === 'function') {
-        for (const [event, fn] of [['head', () => { attachAll({ recent: true }); if (repliesOn()) refreshDrawnMessages(); }], ['committed', onCommitted]]) {
+        for (const [event, fn] of [['head', () => follow(() => { attachAll({ recent: true }); if (repliesOn()) refreshDrawnMessages(); }, { pass: true })], ['committed', onCommitted]]) {
             const off = deps.on(event, fn);
             if (typeof off === 'function') offs.push(off);
         }

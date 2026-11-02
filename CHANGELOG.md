@@ -1,3 +1,12 @@
+## 1.7.0
+
+- **Cast portraits are kept as their own files.** A portrait of a person met from a pack's cast is saved once in
+  SillyTavern's user files and the dossier keeps only a short reference, so a chat's data stays small (about 300 bytes
+  per person instead of about 200 KB) however many people you meet. Portraits stay when the pack is removed, follow
+  swipes and save points, and travel with an exported dossier. Chats from before keep their portraits as they are.
+- Sharper cast portraits from Story Block 2.16.0 (up to 1200 px) are shown at full quality.
+- A new chat's first save and a new save point no longer log a "not found" request in the browser console.
+
 ## 1.6.1
 
 - A secret that opens **at a relationship value or on a story event, whichever comes first** reads "Opens at Trust 90

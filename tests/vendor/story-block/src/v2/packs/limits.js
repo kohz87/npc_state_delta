@@ -143,11 +143,26 @@ export const CAST_LIMITS = Object.freeze({ entries: 64, name: 80, aliases: 8, ab
 // The meters NPC State Delta has before any preset (a secret or a stage may name them without the entry listing them): its four
 // own and the ones its built-in presets (companion, rival, mentor) add.
 export const CAST_BUILT_IN_METERS = Object.freeze(['trust', 'affection', 'desire', 'tension', 'loyalty', 'respect', 'rivalry', 'approval']);
-// Portraits: image files beside pack.json, named by an entry's `portrait`, imported with the pack (portraits.js).
-export const PORTRAIT_LIMITS = Object.freeze({ bytes: 64 * 1024, perPack: 32, name: 64 });
+// The ids of NPC State Delta's built-in meter presets (its src/npc-meters-presets.js BUILT_IN_PRESETS): what an entry's `meters.preset`
+// may name without the pack, or the reader, defining a preset of that id. The validator checks only that `preset` is a well-formed id
+// (NPC State Delta decides at the first meeting whether it knows it); an editor offers these. tests/v2/packs/cast-presets.test.js pins
+// the list against NPC State Delta's own.
+export const CAST_BUILT_IN_PRESETS = Object.freeze(['companion', 'rival', 'mentor']);
+// Portraits: image files beside pack.json, named by an entry's `portrait`, imported with the pack (portraits.js). What is stored is at
+// most `bytes` each (NPC State Delta keeps a copy per chat); what may be picked is a WebP, PNG or JPEG of up to `source` bytes, which
+// the browser makes smaller until it fits (portrait-fit.js: long side at most `side` px, WebP, quality stepped down).
+export const PORTRAIT_LIMITS = Object.freeze({ bytes: 150 * 1024, source: 10 * 1024 * 1024, side: 1200, perPack: 32, name: 64 });
 // A pack zip (Story Studio's export: pack.json and a portraits/ folder, zip.js and bundle.js): the archive itself, everything in it
-// unpacked, and the entries (folders count) it may hold.
-export const ZIP_LIMITS = Object.freeze({ archive: 5 * 1024 * 1024, unpacked: 4 * 1024 * 1024, entries: 40 });
+// unpacked, one file in it, and the entries (folders count) it may hold. The archive and the unpacked total fit a full pack of
+// portraits at their largest (every portrait at `source`) and a little more. `ratio` is the most a deflated file may grow when
+// unpacked (checked for files over 256 KB), so a zip that squeezes a huge file into a few bytes is refused before it is unpacked.
+export const ZIP_LIMITS = Object.freeze({
+    archive: PORTRAIT_LIMITS.perPack * PORTRAIT_LIMITS.source + 2 * 1024 * 1024,
+    unpacked: PORTRAIT_LIMITS.perPack * PORTRAIT_LIMITS.source + 2 * 1024 * 1024,
+    entry: PORTRAIT_LIMITS.source,
+    entries: 40,
+    ratio: 100,
+});
 export const PORTRAIT_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,58}\.(?:webp|png|jpe?g)$/i;
 
 // Words NPC State Delta keeps for itself (a stage line, a reason): never a meter id.

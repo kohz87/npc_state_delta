@@ -5,6 +5,7 @@ import { STRINGS, fill, refusalText } from '../../strings.js';
 import { h, iconNode, shell } from './dom.js';
 import { defineWidget, resolveProps } from './props.js';
 import { meterRatio } from './meter.js';
+import { focusNode } from '../scroll.js';
 
 const E = STRINGS.editable;
 const props = {
@@ -26,8 +27,19 @@ const props = {
     currency: { type: 'object', default: Object.freeze({}) },
     itemCount: { type: 'number', default: 1 },
     itemNote: { type: 'string', default: '' },
-    // kind 'fields': one input per entry, `{ key, label, type: 'text' | 'number', value, min?, max?, maxLength? }`; only the changed ones go in the payload.
+    // kind 'fields': one input per entry, `{ key, label, type: 'text' | 'number' | 'choice' | 'time', value, min?, max?, maxLength?, options?, soft?, group?, row? }`;
+    // only the changed ones go in the payload. `choice` is a select over `options` (strings or `{ value, label }`); `time` is a time of day ("13:30", '' for none);
+    // a `text` field with `options` suggests them. `soft` keeps `min`/`max` as hints on the box and clamps nothing. A `group` is a heading the fields under it sit
+    // beneath (one fieldset per group, in order of first use); fields with the same `row` sit side by side. A blank number that was blank stays unchanged.
     fields: { type: 'array', default: Object.freeze([]) },
+    // A form with groups: `help` is the line under the fields; `plan(changed, all)` (instead of `command`) answers `{ error }` or `{ steps: [{ command, payload, keys }] }`,
+    // and the steps run in order through the widget api, the first refusal stopping the rest with its sentence under the fields; `bare` leaves out the pencil
+    // and the shown value (the caller opens the form with `open` and hears of its closing in `onClose`).
+    help: { type: 'string', default: '' },
+    plan: { type: 'any', default: null },
+    bare: { type: 'boolean', default: false },
+    open: { type: 'boolean', default: false },
+    onClose: { type: 'any', default: null },
 };
 const cut = (value, max) => [...oneLine(value)].slice(0, Math.max(0, Math.floor(max))).join('');
 
@@ -49,7 +61,10 @@ function render(el, input, api) {
         for (const button of [add, save, cancel]) button.setAttribute('type', 'button');
         const error = h(doc, 'span', 'ss-w-editable-error');
         error.setAttribute('role', 'alert');
-        form.append(chips, fieldSlot, add, save, cancel, error);
+        const helpLine = h(doc, 'span', 'ss-w-editable-help');
+        const actions = h(doc, 'span', 'ss-w-editable-actions');
+        const plain = () => form.replaceChildren(chips, fieldSlot, add, save, cancel, error);
+        plain();
         root.append(shown, pencil);
         let p = resolveProps(props, input);
         let field = null;
@@ -99,18 +114,95 @@ function render(el, input, api) {
             } else if (p.displayValue && p.kind === 'choice' && p.displayPill) {
                 shown.replaceChildren(h(doc, 'span', 'ss-pill', value));
             } else shown.textContent = p.displayValue ? value : '';
-            pencil.hidden = editing || !p.command || typeof api?.command !== 'function';
+            pencil.hidden = editing || p.bare || !canEdit();
             pencil.setAttribute('aria-label', fill(E.edit, { label: p.label || E.value }));
             pencil.setAttribute('title', fill(E.edit, { label: p.label || E.value }));
-            shown.hidden = editing || !p.displayValue;
+            shown.hidden = editing || p.bare || !p.displayValue;
             if (editing && form.parentNode !== root) root.appendChild(form);
             else if (!editing && form.parentNode === root) form.remove();
         }
 
+        function canEdit() {
+            return typeof api?.command === 'function' && (Boolean(p.command) || typeof p.plan === 'function');
+        }
+
+        // The fields of a form with `fields`: one box per spec (a select for a choice), under the heading of its group and in the row it names.
+        const optionList = list => (Array.isArray(list) ? list : []).map(item => {
+            const value = typeof item === 'object' && item !== null ? item.value ?? item.name ?? '' : item;
+            const label = typeof item === 'object' && item !== null ? (item.label ?? item.name ?? value) : item;
+            return { value, label: String(label ?? '') };
+        });
+        function fieldEntry(spec) {
+            const type = ['number', 'choice', 'time'].includes(spec.type) ? spec.type : 'text';
+            const label = String(spec.label ?? spec.key);
+            const options = optionList(spec.options);
+            const input = h(doc, type === 'choice' ? 'select' : 'input', type === 'choice' ? 'ss-select' : 'ss-input');
+            input.setAttribute('aria-label', label);
+            const node = h(doc, 'label', 'ss-w-editable-item-label');
+            node.append(h(doc, 'span', '', label), input);
+            if (type === 'choice') {
+                for (const item of options) {
+                    const option = h(doc, 'option', '', item.label);
+                    option.value = String(item.value ?? '');
+                    input.appendChild(option);
+                }
+            } else {
+                input.setAttribute('type', type);
+                if (type === 'number') {
+                    input.setAttribute('step', '1');
+                    if (Number.isFinite(Number(spec.min))) input.setAttribute('min', String(spec.min));
+                    if (Number.isFinite(Number(spec.max))) input.setAttribute('max', String(spec.max));
+                } else if (type === 'text' && options.length) {
+                    const suggestions = h(doc, 'datalist', 'ss-w-editable-options');
+                    const id = `ss-editable-options-${++nextOptions}`;
+                    suggestions.setAttribute('id', id);
+                    input.setAttribute('list', id);
+                    for (const item of options) suggestions.appendChild(Object.assign(h(doc, 'option'), { value: String(item.value ?? '') }));
+                    node.appendChild(suggestions);
+                }
+            }
+            input.value = String(spec.value ?? '');
+            return { spec, input, node, type, label, options };
+        }
+        // Without groups the boxes are the record grid; with them, a fieldset each (a legend and the boxes, side by side where they share a row).
+        function layFields(list) {
+            if (!list.some(entry => typeof entry.spec.group === 'string' && entry.spec.group)) {
+                fieldSlot.classList.add('ss-w-editable-record-fields');
+                fieldSlot.replaceChildren(...list.map(entry => entry.node));
+                return false;
+            }
+            const groups = new Map();
+            for (const entry of list) {
+                const name = typeof entry.spec.group === 'string' ? entry.spec.group : '';
+                let group = groups.get(name);
+                if (!group) {
+                    group = { node: h(doc, 'fieldset', 'ss-w-editable-group'), row: null, rowName: '' };
+                    if (name) group.node.appendChild(h(doc, 'legend', 'ss-w-editable-legend', name));
+                    groups.set(name, group);
+                }
+                const rowName = typeof entry.spec.row === 'string' ? entry.spec.row : '';
+                if (!rowName) { group.row = null; group.rowName = ''; group.node.appendChild(entry.node); continue; }
+                if (!group.row || group.rowName !== rowName) {
+                    group.row = h(doc, 'span', 'ss-w-editable-row');
+                    group.rowName = rowName;
+                    group.node.appendChild(group.row);
+                }
+                group.row.appendChild(entry.node);
+            }
+            fieldSlot.classList.add('ss-w-editable-groups');
+            fieldSlot.replaceChildren(...[...groups.values()].map(group => group.node));
+            return true;
+        }
+
         function open() {
-            if (!p.command || typeof api?.command !== 'function') return;
+            if (!canEdit()) return;
             editing = true;
             error.textContent = '';
+            plain();
+            form.classList.remove('ss-w-editable-grouped');
+            form.removeAttribute('role');
+            form.removeAttribute('aria-label');
+            fieldSlot.classList.remove('ss-w-editable-groups');
             entries = Array.isArray(p.value) ? p.value.map(String) : [];
             if (p.kind === 'item') {
                 field = h(doc, 'input', 'ss-input');
@@ -136,35 +228,28 @@ function render(el, input, api) {
                 add.hidden = true;
                 form.classList.add('ss-w-editable-item-form');
                 draw();
-                field.focus?.();
+                focusNode(field);
                 return;
             }
             fieldSlot.classList.remove('ss-w-editable-item-fields', 'ss-w-editable-record-fields');
             form.classList.remove('ss-w-editable-item-form');
             if (p.kind === 'fields') {
-                inputs = p.fields.filter(spec => spec && typeof spec === 'object' && /^[A-Za-z][A-Za-z0-9_]*$/.test(String(spec.key))).map(spec => {
-                    const input = h(doc, 'input', 'ss-input');
-                    const number = spec.type === 'number';
-                    input.setAttribute('aria-label', String(spec.label ?? spec.key));
-                    input.setAttribute('type', number ? 'number' : 'text');
-                    if (number) {
-                        input.setAttribute('step', '1');
-                        if (Number.isFinite(Number(spec.min))) input.setAttribute('min', String(spec.min));
-                        if (Number.isFinite(Number(spec.max))) input.setAttribute('max', String(spec.max));
-                    }
-                    input.value = String(spec.value ?? '');
-                    const node = h(doc, 'label', 'ss-w-editable-item-label');
-                    node.append(h(doc, 'span', '', String(spec.label ?? spec.key)), input);
-                    return { spec, input, node, number };
-                });
+                inputs = p.fields.filter(spec => spec && typeof spec === 'object' && /^[A-Za-z][A-Za-z0-9_]*$/.test(String(spec.key))).map(fieldEntry);
                 field = inputs[0]?.input ?? null;
-                fieldSlot.classList.add('ss-w-editable-record-fields');
-                fieldSlot.replaceChildren(...inputs.map(entry => entry.node));
+                if (layFields(inputs)) {
+                    helpLine.textContent = p.help;
+                    helpLine.hidden = !p.help;
+                    actions.replaceChildren(save, cancel);
+                    form.replaceChildren(fieldSlot, helpLine, error, actions);
+                    form.classList.add('ss-w-editable-grouped');
+                    form.setAttribute('role', 'group');
+                    if (p.label) form.setAttribute('aria-label', p.label);
+                }
                 chips.hidden = true;
                 add.hidden = true;
                 form.classList.add('ss-w-editable-item-form');
                 draw();
-                field?.focus?.();
+                focusNode(field);
                 return;
             }
             const choice = p.kind === 'choice';
@@ -188,7 +273,7 @@ function render(el, input, api) {
             if (!choice && p.options.length) {
                 const suggestions = h(doc, 'datalist', 'ss-w-editable-options');
                 const id = `ss-editable-options-${++nextOptions}`;
-                suggestions.id = id;
+                suggestions.setAttribute('id', id);
                 field.setAttribute('list', id);
                 for (const item of p.options) {
                     const option = h(doc, 'option');
@@ -202,13 +287,15 @@ function render(el, input, api) {
             add.hidden = p.kind !== 'list';
             drawChips();
             draw();
-            field.focus?.();
+            focusNode(field);
         }
 
-        function close() {
+        // `quiet`: closed by the caller (the `open` prop turned off), who needs no word of it.
+        function close(quiet = false) {
             editing = false;
             draw();
-            pencil.focus?.();
+            if (!pencil.hidden) focusNode(pencil);
+            if (quiet !== true && typeof p.onClose === 'function') p.onClose();
         }
         function addEntry() {
             const value = cut(field?.value, p.maxLength);
@@ -216,6 +303,81 @@ function render(el, input, api) {
             if (field) field.value = '';
             drawChips();
         }
+        // What the boxes of a `fields` form say: `changed` (the keys that differ from what the form opened with, as their values) and `all`
+        // (every key); or `{ error, input }` naming the box that cannot be read, with nothing saved.
+        function readFields() {
+            const changed = {};
+            const all = {};
+            const named = inputs.some(entry => typeof entry.spec.group === 'string' && entry.spec.group);
+            for (const entry of inputs) {
+                const { spec, input, type, label } = entry;
+                const raw = String(input.value).trim();
+                const key = String(spec.key);
+                let next;
+                let was;
+                if (type === 'number') {
+                    const blankWas = spec.value === '' || spec.value === null || spec.value === undefined;
+                    const wholeNumber = named ? fill(E.fieldWholeNumber, { label }) : E.wholeNumber;
+                    if (raw === '') {
+                        if (!blankWas) return { error: wholeNumber, input };
+                        next = null;
+                        was = null;
+                    } else {
+                        if (!/^-?\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) return { error: wholeNumber, input };
+                        next = Number(raw);
+                        if (!spec.soft) {
+                            if (Number.isFinite(Number(spec.min))) next = Math.max(Number(spec.min), next);
+                            if (Number.isFinite(Number(spec.max))) next = Math.min(Number(spec.max), next);
+                        }
+                        was = blankWas ? null : Number(spec.value);
+                    }
+                } else if (type === 'choice') {
+                    const chosen = entry.options.find(item => String(item.value ?? '') === input.value);
+                    next = chosen ? chosen.value : input.value;
+                    was = spec.value ?? '';
+                    if (String(next ?? '') === String(was ?? '')) was = next;
+                } else if (type === 'time') {
+                    next = raw;
+                    was = String(spec.value ?? '').trim();
+                } else {
+                    next = cut(raw, Number.isFinite(Number(spec.maxLength)) ? Number(spec.maxLength) : p.maxLength);
+                    was = cut(spec.value, 1e6);
+                }
+                all[key] = next;
+                if (next !== was) changed[key] = next;
+            }
+            return { changed, all };
+        }
+
+        // The form's `plan`: the steps run one after the other; a refusal stops the rest and leaves the form open with its sentence. A step that
+        // went through is not sent again by the next Save: its boxes now count as what the form opened with.
+        async function runPlan({ changed, all }) {
+            if (!Object.keys(changed).length) { close(); return; }
+            let outcome;
+            try { outcome = p.plan(changed, all); } catch (failure) { outcome = { error: String(failure?.message ?? failure) }; }
+            if (outcome?.error) { error.textContent = String(outcome.error); return; }
+            const steps = Array.isArray(outcome?.steps) ? outcome.steps : [];
+            if (!steps.length) { close(); return; }
+            busy = true;
+            save.disabled = true;
+            for (const step of steps) {
+                let result;
+                try { result = await api.command(String(step.command), step.payload && typeof step.payload === 'object' ? step.payload : {}); }
+                catch (failure) { result = { ok: false, message: String(failure?.message ?? failure) }; }
+                if (!alive) return;
+                if (!result?.ok) {
+                    busy = false;
+                    save.disabled = false;
+                    error.textContent = refusalText(result, E.failed);
+                    return;
+                }
+                for (const entry of inputs) if (Array.isArray(step.keys) && step.keys.includes(String(entry.spec.key))) entry.spec = { ...entry.spec, value: all[String(entry.spec.key)] ?? '' };
+            }
+            busy = false;
+            save.disabled = false;
+            close();
+        }
+
         async function submit() {
             if (busy || !field) return;
             let value;
@@ -230,20 +392,11 @@ function render(el, input, api) {
                 if (note !== p.itemNote) payload.note = note;
                 if (!('name' in payload) && !('qty' in payload) && !('note' in payload)) { close(); return; }
             } else if (p.kind === 'fields') {
-                payload = { ...p.payload };
-                for (const { spec, input, number } of inputs) {
-                    const raw = String(input.value).trim();
-                    let next;
-                    if (number) {
-                        if (!/^-?\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) { error.textContent = E.wholeNumber; return; }
-                        next = Number(raw);
-                        if (Number.isFinite(Number(spec.min))) next = Math.max(Number(spec.min), next);
-                        if (Number.isFinite(Number(spec.max))) next = Math.min(Number(spec.max), next);
-                    } else next = cut(raw, Number.isFinite(Number(spec.maxLength)) ? Number(spec.maxLength) : p.maxLength);
-                    const was = number ? Number(spec.value) : cut(spec.value, 1e6);
-                    if (next !== was) payload[spec.key] = next;
-                }
-                if (!inputs.some(({ spec }) => Object.hasOwn(payload, spec.key))) { close(); return; }
+                const read = readFields();
+                if (read.error) { error.textContent = read.error; focusNode(read.input); return; }
+                if (typeof p.plan === 'function') { await runPlan(read); return; }
+                if (!Object.keys(read.changed).length) { close(); return; }
+                payload = { ...p.payload, ...read.changed };
             } else if (p.kind === 'number') {
                 const raw = String(field.value).trim();
                 if (!/^-?\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) { error.textContent = E.wholeNumber; return; }
@@ -284,7 +437,7 @@ function render(el, input, api) {
         listen(pencil, 'click', open);
         listen(add, 'click', addEntry);
         listen(save, 'click', submit);
-        listen(cancel, 'click', close);
+        listen(cancel, 'click', () => close());
         listen(form, 'input', event => {
             if (event.target !== field || p.kind !== 'number' || !/^-?\d+$/.test(field.value)) return;
             let value = Number(field.value);
@@ -297,7 +450,12 @@ function render(el, input, api) {
             if (event.key === 'Escape') { event.preventDefault?.(); close(); }
             else if (event.key === 'Enter') { event.preventDefault?.(); submit(); }
         });
-        function update(next) { p = resolveProps(props, next); draw(); }
+        function update(next) {
+            p = resolveProps(props, next);
+            draw();
+            if (p.open && !editing) open();
+            else if (!p.open && editing && p.bare) close(true);
+        }
         update(input);
         return { update, destroy() { alive = false; } };
     });

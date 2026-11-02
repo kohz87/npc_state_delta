@@ -21,6 +21,7 @@ export const STRINGS = deepFreeze({
     editable: {
         edit: 'Edit {label}', value: 'value', save: 'Save', cancel: 'Cancel', add: 'Add',
         remove: 'Remove {value}', wholeNumber: 'Enter a whole number.', failed: 'Could not save this change.',
+        fieldWholeNumber: '{label}: enter a whole number.', fieldRange: '{label}: use a number from {min} to {max}.',
     },
 
     blocks: {
@@ -392,6 +393,11 @@ export const STRINGS = deepFreeze({
     // `story-block/scene`.
     scene: {
         editPlace: 'place', editWeather: 'weather', editPresent: 'people present', editRank: 'your rank', editWearing: 'what you wear', editCondition: 'your condition',
+        // The Game view hero's one editor (view/hero-edit.js): the "Edit" button, its two groups, their fields and the help line.
+        editButton: 'Edit', editAll: 'Edit the story and your character', groupStory: 'Story', groupCharacter: 'Character',
+        fieldYear: 'Year', fieldYearEra: 'Year ({era})', fieldMonth: 'Month', fieldDay: 'Day', fieldTime: 'Time',
+        fieldPlace: 'Place', fieldWeather: 'Weather', fieldHere: 'Here', fieldWearing: 'Wearing', fieldCondition: 'Condition',
+        editHelp: 'Changes apply from this reply on.', clockNeeded: 'Pick a date and a time.',
         title: 'Scene',
         unnamed: 'Somewhere not yet named',
         here: 'Here',
