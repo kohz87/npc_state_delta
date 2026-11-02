@@ -1415,6 +1415,9 @@ export function createStorySuiteV2Adapter({
             chatKey: () => String(runtime()?.chatKey?.() ?? ''),
             readState: () => runtime()?.getState?.() ?? { npcs: [] },
             started: () => runtime()?.timelineStarted?.() === true,
+            // Whether Delta has loaded the open chat's state, and its load: the participant reads nothing before it (a reload's recovery comes early).
+            ready: () => runtime()?.stateReady?.() === true,
+            load: () => runtime()?.ensureFresh?.(),
             installState: state => runtime().installState(state),
             writeTimeline: block => runtime().writeTimeline(block),
             busy: () => runtime()?.scanActive?.() === true,
