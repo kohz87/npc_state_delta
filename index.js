@@ -168,11 +168,15 @@ import {
     probeNpcStateDataFilePointer,
     preserveUndurableNpcStateSnapshot,
     readNpcStateDataFile,
+    readPortraitFileDataUrl,
     retireNpcStateDataFile,
     quarantineUnreadableNpcStateDataFile,
+    savePortraitFile,
     undurableNpcStateSnapshot,
+    verifyPortraitFiles,
     writeNpcStateDataFile,
 } from './storage.js';
+import { isPortraitFileRecord, markPortraitFileMissing, portraitHasImage, portraitSrc, PORTRAIT_FILE_DIR, PORTRAIT_FILE_PREFIX } from './src/portrait-file.js';
 import {
     buildQualifiedChatKey,
     getCharacterOwnerId,
@@ -973,8 +977,22 @@ function keyReturnNotes(state) {
 // branch checkpoint at the reply, so a swipe or a delete takes it back with the reply (as a manual add does). Nothing here
 // without a host or without a Story Director that answers `director.cast`. Rules: src/cast-dossier.js.
 let castSyncRunning = false;
-// A pack portrait as the dossier's portrait record ({ dataUrl, … }) from its safe image URL, or null. Pack portraits are small
-// (64 KB at most), so no re-compression: a data: URL is kept as it is, anything else is fetched once.
+// The picture's size in pixels ({ width, height }) when the browser can say, else null.
+function portraitImageSize(dataUrl) {
+    return new Promise(resolve => {
+        if (typeof Image !== 'function') { resolve(null); return; }
+        const image = new Image();
+        const timer = setTimeout(() => resolve(null), 3000);
+        image.onload = () => { clearTimeout(timer); resolve(image.naturalWidth > 0 && image.naturalHeight > 0 ? { width: image.naturalWidth, height: image.naturalHeight } : null); };
+        image.onerror = () => { clearTimeout(timer); resolve(null); };
+        image.src = dataUrl;
+    });
+}
+// A pack portrait as the dossier's portrait record from its safe image URL, or null. Story Block keeps a cast portrait up to 150 KB and
+// 1200 px, so there is no re-compression: a data: URL is kept as it is, anything else is fetched once. The picture is saved ONCE as its own
+// user file named by its content (storage.js savePortraitFile: written only when absent) and the record is { path, type, hash, width?, height?,
+// sourceName, updatedAt }: the chat's state never holds the picture, and the file outlives the pack. When the file cannot be written the record
+// keeps the picture itself ({ dataUrl, … }) exactly as before.
 async function castPortraitRecord(url, fileName) {
     try {
         let dataUrl = String(url || '');
@@ -997,7 +1015,10 @@ async function castPortraitRecord(url, fileName) {
             }
         }
         if (!/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(dataUrl) || dataUrl.length > 400_000) return null;
-        return { dataUrl, mime: dataUrl.slice(5, dataUrl.indexOf(';')), sourceName: String(fileName || '').slice(0, 120), updatedAt: Date.now() };
+        const own = { sourceName: String(fileName || '').slice(0, 120), updatedAt: Date.now() };
+        const filed = await savePortraitFile(dataUrl, { headers: requestHeaders() });
+        if (filed) return { ...filed, ...(await portraitImageSize(dataUrl) ?? {}), ...own };
+        return { dataUrl, mime: dataUrl.slice(5, dataUrl.indexOf(';')), ...own };
     } catch {
         return null;
     }
@@ -1060,10 +1081,11 @@ async function castSync() {
             const filled = base ? applyCastEntry(base, person, { packName: names[person.pack] ?? '', portrait }) : null;
             if (!filled) continue;
             const record = normalizeNpcRecord(filled);
-            if (record.portrait?.dataUrl) {
+            if (portraitHasImage(record.portrait)) {
                 const fingerprint = appearanceFingerprint(record);
                 if (fingerprint) record.portrait = { ...record.portrait, appearanceFingerprint: fingerprint };
-                added.state.portraitAssets = { ...(added.state.portraitAssets || {}), [record.id]: structuredClone(record.portrait) };
+                // A file-form portrait is kept once, in the dossier; only a picture held in the record gets its portraitAssets copy.
+                if (record.portrait.dataUrl) added.state.portraitAssets = { ...(added.state.portraitAssets || {}), [record.id]: structuredClone(record.portrait) };
             }
             added.state.npcs = added.state.npcs.map(npc => (npc.id === record.id ? record : npc));
             working = added.state;
@@ -1396,7 +1418,7 @@ function normalizeChatState(raw = {}) {
     state.npcs = socialMigration.state.npcs;
     for (const npc of state.npcs) {
         if (npc?.portrait?.dataUrl && !state.portraitAssets[npc.id]) state.portraitAssets[npc.id] = structuredClone(npc.portrait);
-        if (!npc?.portrait?.dataUrl && state.portraitAssets[npc.id]?.dataUrl) npc.portrait = structuredClone(state.portraitAssets[npc.id]);
+        if (!portraitHasImage(npc?.portrait) && state.portraitAssets[npc.id]?.dataUrl) npc.portrait = structuredClone(state.portraitAssets[npc.id]);
     }
     return state;
 }
@@ -1417,9 +1439,31 @@ function setChatState(key, state, { markLoaded = false } = {}) {
         hydratedChatKeys.add(key);
         hydrationErrors.delete(key);
         workingCopyAdoptions.set(key, workingCopyAdoption(key) + 1);
+        checkPortraitFilesSoon(normalized);
     }
     stateVersions.set(key, Number(stateVersions.get(key) || 0) + 1);
     return normalized;
+}
+
+// (cast portraits) A loaded chat's file-form portraits are asked about once, in one request (/api/files/verify: no 404); one the server says is
+// gone (deleted by hand) is remembered, so the person shows the normal no-portrait look instead of a broken picture.
+function checkPortraitFilesSoon(state) {
+    const portraits = (state?.npcs || []).map(npc => npc?.portrait).filter(isPortraitFileRecord);
+    if (!portraits.length) return;
+    verifyPortraitFiles(portraits, { headers: requestHeaders() })
+        .then(gone => { if (gone) renderDossier(); })
+        .catch(() => {});
+}
+let portraitFileListening = false;
+// An image of a portrait file that fails to load (deleted after the check) is remembered as gone and the views draw again without it.
+function portraitFileFailed(event) {
+    const image = event?.target;
+    if (image?.tagName !== 'IMG') return;
+    let path = '';
+    try { path = new URL(image.currentSrc || image.src, globalThis.location?.href || 'http://localhost/').pathname; } catch { return; }
+    if (!path.startsWith(`${PORTRAIT_FILE_DIR}${PORTRAIT_FILE_PREFIX}`)) return;
+    markPortraitFileMissing(path);
+    renderDossier();
 }
 
 // Counts how often a loaded/server copy replaced this session's working copy. Unlike the durable
@@ -5079,7 +5123,7 @@ function findNpcByIdOrName(value) {
 // and the main portrait otherwise.
 function portraitMarkup(npc, displayName, placeholderClass = 'npc-state-delta-inline-avatar-placeholder') {
     const formImage = npc?.currentForm ? formPortraitFor(getChatState().formPortraitAssets, npc.id, npc.currentForm) : null;
-    const portraitUrl = formImage?.dataUrl || npc?.portrait?.dataUrl || '';
+    const portraitUrl = formImage?.dataUrl || portraitSrc(npc?.portrait);
     if (portraitUrl) return `<img src="${escapeHtml(portraitUrl)}" alt="${escapeHtml(displayName)} portrait">`;
     const initial = String(displayName || '?').trim().charAt(0).toUpperCase() || '?';
     return `<div class="${placeholderClass}" aria-hidden="true"><span>${escapeHtml(initial)}</span></div>`;
@@ -6769,19 +6813,50 @@ function safeFilenamePart(value) {
         .slice(0, 80) || 'chat';
 }
 
-function exportBundleBytes() {
+// (cast portraits) A dossier whose portrait is a file carries the picture in an export: it is read back and put in the bundle as the data
+// the bundle format always held (its hash and type stay as the mark that it was a file). A file that is gone leaves the normal no-portrait look.
+async function withPortraitFilesInlined(npcs) {
+    return Promise.all((npcs || []).map(async npc => {
+        if (!isPortraitFileRecord(npc?.portrait)) return npc;
+        const dataUrl = await readPortraitFileDataUrl(npc.portrait);
+        if (!dataUrl) return { ...npc, portrait: null };
+        const { path, ...rest } = npc.portrait;
+        return { ...npc, portrait: { ...rest, dataUrl, mime: npc.portrait.type } };
+    }));
+}
+// (cast portraits) The reverse, on import: a portrait the bundle marks as a file (hash and type with its picture) is written as the same
+// content-named file when it is absent and kept as the file record. Any other portrait (an upload, a generated one, an older bundle) stays as it
+// was; so does one whose file cannot be written.
+async function withPortraitFilesFromBundle(npcs) {
+    return Promise.all((npcs || []).map(async npc => {
+        const portrait = npc?.portrait;
+        if (!portrait?.dataUrl || !portrait.hash || !portrait.type) return npc;
+        const filed = await savePortraitFile(portrait.dataUrl, { headers: requestHeaders() });
+        if (!filed) return npc;
+        const { dataUrl, mime, binary, ...rest } = portrait;
+        return { ...npc, portrait: { ...rest, ...filed } };
+    }));
+}
+
+async function exportBundleBytes() {
     if (!requireReadyChatMutation('export a dossier', getChatKey(), { notify: false })) throw new Error('NPC State Delta chat dossier is not loaded.');
-    return encodeNpcStateBundle(getChatState(), {
+    const state = getChatState();
+    const key = getChatKey();
+    const npcs = await withPortraitFilesInlined(state.npcs);
+    if (getChatKey() !== key) throw new Error('The active chat changed before export; nothing was exported.');
+    return encodeNpcStateBundle({ ...state, npcs }, {
         appVersion: NPC_STATE_VERSION,
-        chatKey: getChatKey(),
+        chatKey: key,
     });
 }
 
-function importBundleBytes(bytes) {
+async function importBundleBytes(bytes) {
     if (!requireReadyChatMutation('import a dossier')) throw new Error('NPC State Delta chat dossier is not loaded.');
     const settings = getSettings();
     const decoded = decodeDeltaNativeBundle(bytes);
     const targetChatKey = getChatKey();
+    if (Array.isArray(decoded.state?.npcs)) decoded.state.npcs = await withPortraitFilesFromBundle(decoded.state.npcs);
+    if (getChatKey() !== targetChatKey) throw new Error('The active chat changed before import; nothing was imported.');
     const foreignOwnership = decoded.metadata.sourceChatKey !== targetChatKey;
     decoded.state = nativeStateForTarget(decoded, targetChatKey);
     const before = getChatState();
@@ -7593,6 +7668,7 @@ function bindUi() {
     $(document).on('click.npcStateDelta', '.npc-state-delta-refresh-chat', function (event) { event.preventDefault?.(); event.stopPropagation?.(); void refreshNpcFromChat(String(this.dataset.npcId || '')); });
     $(document).on('click.npcStateDelta', '.npc-state-delta-portrait-reset', function (event) { event.preventDefault?.(); resetPortraitGeneratorFromDossier(); });
     $(document).on('click.npcStateDelta', '.npc-state-delta-portrait-run', function (event) { event.preventDefault?.(); void generatePortraitFromDialog(); });
+    if (!portraitFileListening) { portraitFileListening = true; document.addEventListener?.('error', portraitFileFailed, true); }
     $(document).on('click.npcStateDelta', '.npc-state-delta-portrait-use', function (event) { event.preventDefault?.(); void useGeneratedPortrait(); });
     $(document).on('click.npcStateDelta', '.npc-state-delta-archive-npc', async function () {
         const key = getChatKey();

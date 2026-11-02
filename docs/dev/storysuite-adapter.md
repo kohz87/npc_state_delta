@@ -130,9 +130,17 @@ Without Story Director, or one without the query, `adapter.castPeople()` is null
 - **The pack's words** (`castFrom.first`: appearance, speech, personality, background as written) are kept exactly by `normalizeNpcRecord` for as long as the stored field still is them (it would otherwise compact them, dropping clauses); once a scan or the reader changes a field it is compacted as for any dossier. `tests/fixtures/ersveil-cast.json` holds the twelve Ersveil entries the tests build from.
 - **The person's own stages** (`castFrom.stages`: the pack's `{ id, name, needs: [{ meter, at }], milestone }`, the milestone kept as the rung's `cue`, the line the story is told when it is reached, never a milestone it needs) run as a ladder before any track, only while
   the stage ladders feature is on (`rungsFor` in npc-meters.js, `settings.stagesOn`); the editor's meter setup never holds them.
-- **Portrait:** `packs.portrait({ pack, file })` → a safe image URL; a `data:` URL is kept, anything else is fetched once (8 s limit,
-  png/jpeg/webp, 256 KB at most, no re-compression) before the dossier is made, so the dossier has it from the start; it joins the
-  chat's portraits (`portraitAssets`) and its appearance fingerprint like an uploaded one.
+- **Portrait:** `packs.portrait({ pack, file })` → a safe image URL (Story Block keeps a cast portrait up to 150 KB and 1200 px); a `data:` URL is kept,
+  anything else is fetched once (8 s limit, png/jpeg/webp, no re-compression) before the dossier is made, so the dossier has it from the start.
+  The picture is saved ONCE as its own SillyTavern user file named by its content, `/user/files/npc-state-delta-portrait-<40 hex of its SHA-256>.<ext>`
+  (`storage.js` `savePortraitFile`: asked about first with `dataFileExists`, written only when absent, never deleted), and the dossier keeps only
+  `{ path, type, hash, width?, height?, sourceName, updatedAt, appearanceFingerprint }` (`src/portrait-file.js`): no `dataUrl`, no copy in
+  `portraitAssets`, a few hundred bytes of state instead of ~230 KB per person. The file outlives the pack, so removing the pack leaves met people with
+  their portrait. Snapshots keep the record (they still omit a picture held in the dossier). Display (`portraitSrc`) reads the file, a `dataUrl` or a plain
+  url; a file the server says is gone (`/api/files/verify` once per load, or an image that fails to load) shows the normal no-portrait look.
+  An export reads the file back into the bundle (its `hash` and `type` stay as the mark); an import writes the file when absent. When the file
+  cannot be written the dossier keeps the picture itself (`dataUrl` and its `portraitAssets` copy) as before. A dossier that holds its picture (an
+  upload, a generated portrait, a chat made before) is read as before and is never rewritten to migrate it: only a person made or imported from now on is a file.
 - **The view:** the dossier shows a badge ("Ersveil cast", `delta-cast-badge`) beside the name and a "From the Ersveil cast · first met
   Gw 12 at the docks" block (`castFromHtml`): their own path (the goal, the routine) and, from `director.cast`, when they were last heard of
   (`lastHeard`), else where and what they are doing now. Data comes from `getDossierState().castViews` (by dossier id), built from

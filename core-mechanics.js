@@ -1,4 +1,5 @@
 import { isTerminalNpcDeath } from './terminal-lifecycle.js';
+import { portraitHasImage } from './src/portrait-file.js';
 import {
     reconcileSocialState,
     remapSocialGraphNpcId,
@@ -5664,7 +5665,7 @@ function mergeAliasLinkedNpcPair(a, b) {
     merged.lastRelationshipChange = structuredClone(relationshipSource.lastRelationshipChange || merged.lastRelationshipChange);
     const lifecycleSource = Number(a?.updatedAt || 0) >= Number(b?.updatedAt || 0) ? a : b;
     for (const field of ['present','worldActive','lifeState','lifeStateCertainty','archived','archiveReason','archivedAt','archiveSourceMessageId']) merged[field] = structuredClone(lifecycleSource?.[field]);
-    merged.portrait = a?.portrait?.dataUrl ? structuredClone(a.portrait) : (b?.portrait?.dataUrl ? structuredClone(b.portrait) : (a?.portrait || b?.portrait || null));
+    merged.portrait = portraitHasImage(a?.portrait) ? structuredClone(a.portrait) : (portraitHasImage(b?.portrait) ? structuredClone(b.portrait) : (a?.portrait || b?.portrait || null));
     merged.portraitPromptPositive = cleanText(newer?.portraitPromptPositive || older?.portraitPromptPositive, PORTRAIT_NPC_PROMPT_LIMIT);
     merged.portraitPromptNegative = cleanText(newer?.portraitPromptNegative || older?.portraitPromptNegative, PORTRAIT_NPC_PROMPT_LIMIT);
     merged.portraitPromptReplace = Boolean(newer?.portraitPromptReplace || older?.portraitPromptReplace);
