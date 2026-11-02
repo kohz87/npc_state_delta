@@ -1413,6 +1413,9 @@ export function createStorySuiteV2Adapter({
             load: () => runtime()?.ensureFresh?.(),
             // The state as Delta keeps it once installed (the participant's look after an install compares it so).
             normalize: state => (typeof runtime()?.normalizeState === 'function' ? runtime().normalizeState(state) : state),
+            // A branch waiting for its parent's dossiers is left to Delta's branch inheritance (asked to run now) before a line is minted.
+            branchPending: () => runtime()?.branchPending?.() === true,
+            inheritBranch: () => runtime()?.inheritBranch?.(),
             installState: state => runtime().installState(state),
             writeTimeline: block => runtime().writeTimeline(block),
             busy: () => runtime()?.scanActive?.() === true,

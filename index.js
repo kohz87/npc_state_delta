@@ -317,6 +317,8 @@ const freshnessChecks = new Map();
 // (sidecarMissTrusted). The reader's own actions, page resume and the first save still look, and
 // that save never overwrites a file another session created. Without a v2 host nothing changes.
 const missingSidecarChats = new Set();
+// Chats whose branch inheritance (maybeInheritKnownBranch) has run in this session, whatever it decided.
+const branchInheritanceChecked = new Set();
 const freshnessEvents = [];
 const FRESHNESS_EVENT_LIMIT = 24;
 const loadingChatStates = new Map();
@@ -2510,8 +2512,20 @@ async function maybeInheritKnownBranch() {
         queueStateFileWrite(key, 0);
         return true;
     } finally {
+        branchInheritanceChecked.add(key);
         evictDormantChatStates(key);
     }
+}
+
+/**
+ * (timeline participant) Whether the open chat is a branch still waiting for its parent's dossiers: no dossier file of its own, its metadata
+ * names a main chat, and branch inheritance has not run for it in this session. The participant mints no story line for such a chat.
+ */
+function branchInheritancePending(key = getChatKey()) {
+    if (!isCanonicalChatKey(key) || branchInheritanceChecked.has(key)) return false;
+    if (!missingSidecarChats.has(key) || getSettings().dataFiles?.[key]?.path) return false;
+    const metadata = getContext().chatMetadata || getContext().chat_metadata || {};
+    return Boolean(String(metadata?.main_chat || '').replace(/\.jsonl$/i, '').trim());
 }
 
 // Chats whose local message history is an older prefix of the adopted dossier's history: another
@@ -8372,6 +8386,9 @@ window.NPCStateDelta = Object.freeze({
     // Whether the open chat uses the timeline (its state has a story line), read without cloning the state; whether the open chat's dossier state is
     // loaded; and whether a scan or pass is in flight.
     timelineStarted: () => Boolean(chatStateCache.get(getChatKey())?.timeline?.lineage),
+    // A branch still waiting for its parent's dossiers, and the inheritance itself (run now; idempotent: an inherited state is not empty).
+    branchPending: () => branchInheritancePending(),
+    inheritBranch: () => maybeInheritKnownBranch(),
     stateReady: () => chatHydrationStatus() === 'ready',
     scanActive: () => scanWorkPending(),
     scanIdle: ms => scanIdle(ms),
