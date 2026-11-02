@@ -8,6 +8,9 @@
 //
 // `memoryVault` is for tests (with `lose(id)` to forget bytes, `fail` to make a write throw). `fileVault` writes SillyTavern's user files
 // the way Delta's own sidecar does (storage.js: POST /api/files/upload, read back from /user/files/<name>), one file per checkpoint.
+// A first write (a new checkpoint, a new lineage's index) asks SillyTavern whether the file exists (storage.js `dataFileExists`) before it
+// reads it, so a file that is not there yet makes no 404 request (a red line in the browser's console); a server that cannot say is read as before.
+import { dataFileExists } from '../../storage.js';
 
 const fnv1a = text => {
     let hash = 0x811c9dc5;
@@ -81,15 +84,20 @@ export function fileVault({ fetchFn = globalThis.fetch, headers = {}, base = '/u
         if (!response?.ok) throw new Error(`The participant's file ${name} could not be read (${response?.status ?? 'no answer'}).`);
         try { return JSON.parse(await response.text()); } catch { return null; }
     }
+    /** True only when the server says the file is not there; false when it is, or when it cannot say (the caller then reads it). */
+    const absent = async name => (await dataFileExists(`${base}/${name}`, { fetchFn: request, headers: headersNow() })) === false;
     return {
         kind: 'file',
         async put(id, doc) {
             const name = nameOf(id);
-            if (await read(name)) return;
+            if (!(await absent(name)) && await read(name)) return;
             await upload(name, JSON.stringify(doc));
         },
         get: id => read(nameOf(id)),
-        getIndex: lineage => read(indexName(lineage)),
+        async getIndex(lineage) {
+            const name = indexName(lineage);
+            return (await absent(name)) ? null : read(name);
+        },
         putIndex: (lineage, index) => upload(indexName(lineage), JSON.stringify(index)),
     };
 }

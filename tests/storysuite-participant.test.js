@@ -413,6 +413,57 @@ test('hydration looks at the chat again after every wait: a chat that changed wh
     assert.equal(participant.checkpoint !== undefined, true);
 });
 
+test('the file vault asks whether a file exists before a first write reads it: a new checkpoint or index makes no 404 request, what is stored is unchanged', async () => {
+    const files = new Map();
+    const calls = [];
+    let verify = 'ok';
+    const fetchFn = async (url, options = {}) => {
+        calls.push({ url, method: options.method ?? 'GET' });
+        if (url === '/api/files/verify') {
+            if (verify === 'throw') throw new Error('offline');
+            if (verify === 'missing') return { ok: false, status: 404, json: async () => ({}) };
+            const { urls } = JSON.parse(options.body);
+            return { ok: true, status: 200, json: async () => Object.fromEntries(urls.map(path => [path, files.has(path.split('/').pop())])) };
+        }
+        if (url === '/api/files/upload') {
+            const { name, data } = JSON.parse(options.body);
+            files.set(name, Buffer.from(data, 'base64').toString('utf8'));
+            return { ok: true, status: 200, json: async () => ({ path: `/user/files/${name}` }) };
+        }
+        const name = url.split('/').pop();
+        return files.has(name) ? { ok: true, status: 200, text: async () => files.get(name) } : { ok: false, status: 404 };
+    };
+    const gets = () => calls.filter(call => call.method === 'GET').map(call => call.url);
+    const vault = fileVault({ fetchFn, headers: { 'X-Test': '1' } });
+    const doc = { a: 1, é: '☃' };
+    // A fresh chat's first writes: the index of a new lineage and its first checkpoint.
+    assert.equal(await vault.getIndex('lg_aaaaaaaa'), null);
+    await vault.put('nk_00000001', doc);
+    await vault.putIndex('lg_aaaaaaaa', { v: 1 });
+    assert.deepEqual(gets(), [], 'nothing was fetched that is not there: no 404');
+    assert.deepEqual(JSON.parse(files.get('npc-state-delta-checkpoint-nk_00000001.json')), doc, 'stored as before');
+    assert.deepEqual(calls.filter(call => call.url === '/api/files/upload').length, 2);
+    // What is there is read, and a checkpoint already kept is not written again.
+    assert.deepEqual(await vault.getIndex('lg_aaaaaaaa'), { v: 1 });
+    await vault.put('nk_00000001', doc);
+    assert.equal(calls.filter(call => call.url === '/api/files/upload').length, 2, 'not written twice');
+    assert.equal(gets().length, 2, 'the existing index and checkpoint were read');
+    // A save point is read straight (no verify): a checkpoint that is gone is still told by its 404.
+    const before = calls.length;
+    assert.equal(await vault.get('nk_0000ffff'), null);
+    assert.deepEqual(calls.slice(before).map(call => call.url), ['/user/files/npc-state-delta-checkpoint-nk_0000ffff.json']);
+    // A server that cannot say (no such route, an error): read as before, the write still happens.
+    for (const mode of ['missing', 'throw']) {
+        verify = mode;
+        const id = `nk_${mode}`;
+        const mark = calls.length;
+        await vault.put(id, { mode });
+        assert.deepEqual(gets().slice(-1), [`/user/files/npc-state-delta-checkpoint-${id}.json`], `${mode}: read first, as before`);
+        assert.deepEqual(JSON.parse(files.get(`npc-state-delta-checkpoint-${id}.json`)), { mode }, `${mode}: written`);
+        assert.ok(calls.length > mark);
+    }
+});
+
 test('the file vault gives up on a request that gets no answer', async () => {
     const vault = fileVault({ fetchFn: (_url, options) => new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted')))), timeoutMs: 20 });
     await assert.rejects(() => vault.get('nk_00000001'), /did not answer in 20 ms/);

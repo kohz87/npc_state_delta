@@ -349,8 +349,8 @@ export function adoptNpcStateDataFileMetadata(pointer, inspected) {
     return pointer;
 }
 
-async function remoteRevision(pointer, chatKey, fetchFn) {
-    const inspected = await inspectNpcStateDataFile(pointer, { fetchFn, expectedChatKey: chatKey });
+async function remoteRevision(pointer, chatKey, fetchFn, probeHeaders = null) {
+    const inspected = await inspectNpcStateDataFile(pointer, { fetchFn, expectedChatKey: chatKey, probeHeaders });
     return {
         revision: inspected.revision,
         writerId: inspected.writerId,
@@ -375,7 +375,10 @@ async function guardedWriteOnce(job) {
         assertCurrent();
         const expectedRevision = Number.isFinite(Number(pointer?.revision)) ? Math.max(0, Math.trunc(Number(pointer.revision))) : null;
         const probedDeterministicPath = !pointer?.path;
-        const current = await remoteRevision(probeNpcStateDataFilePointer(chatKey, pointer), chatKey, fetchFn);
+        // A write with no pointer is a chat's first (the deterministic path is probed): the file is usually not there yet, so
+        // it is asked about first (probeHeaders) and a chat's first save makes no 404 request. Pointered writes read it as before.
+        const probeHeaders = probedDeterministicPath && headers && Object.keys(headers).length ? headers : null;
+        const current = await remoteRevision(probeNpcStateDataFilePointer(chatKey, pointer), chatKey, fetchFn, probeHeaders);
         // The previous attempt of this same job may have become durable although its response or
         // post-upload verification was lost. Only the exact revision/writer/timestamp nonce of that
         // upload proves ownership; the job's state is immutable, so adopting it is byte-equivalent.
