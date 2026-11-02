@@ -254,6 +254,10 @@ export function preserveUserNpcMetadata(restoredNpcs = [], currentNpcs = []) {
         const current = findNpcForMetadataRestore(npc, currentNpcs);
         if (!current) continue;
         if (portraitHasImage(current?.portrait)) npc.portrait = structuredClone(current.portrait);
+        // A cast dossier's portrait the reader removed on purpose stays removed through a restore (the pack's picture is not filled in again).
+        if (current?.castFrom?.portraitRemoved === true && npc.castFrom && typeof npc.castFrom === 'object' && npc.castFrom.key === current.castFrom.key) {
+            npc.castFrom = { ...npc.castFrom, portraitRemoved: true };
+        }
         for (const field of globallyPreserved) {
             if (Object.prototype.hasOwnProperty.call(current, field)) npc[field] = structuredClone(current[field]);
         }

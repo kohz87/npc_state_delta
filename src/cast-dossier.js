@@ -19,6 +19,10 @@
 //   observeCast), meters.preset → the dossier's meter track, stages → the person's own stage ladder (castFrom.stages),
 //   secrets → the hidden notes (castSecrets, the one place that shapes them), portrait → the dossier's portrait.
 //
+// A dossier made while the pack's picture was missing (a pack imported without its pictures) is given the picture later, once Story
+// Block answers `packs.portrait` for the entry's `portrait` (index.js castSync): only a cast dossier whose portrait is empty and was
+// not removed on purpose (`castFrom.portraitRemoved`), never a picture the reader set or generated. castPortraitWanted says which.
+//
 // A dossier made here carries `castFrom` (where it came from: the key, the pack and its name and version, when and where
 // they were met, the starting goal and routine as the pack gave them). Delta's later scans treat the dossier as any other:
 // they add and change as they do for anyone, and every change is marked in the dossier as today.
@@ -270,6 +274,28 @@ export function applyCastEntry(base, person, { packName = '', portrait = null } 
         ...(entry.stages.length ? { stages: entry.stages } : {}),
     };
     return npc;
+}
+
+/**
+ * Whether a dossier made from the cast may be given the pack's picture now: it came from the cast, holds no portrait of its own
+ * (an upload, a generated picture or the pack's own all count as its own) and the reader has not removed one on purpose
+ * (`castFrom.portraitRemoved`, set when the reader removes the portrait of a cast dossier). Pure: the pack's answer is asked separately.
+ */
+export function castPortraitWanted(npc) {
+    return isObject(npc) && isObject(npc.castFrom) && Boolean(npc.castFrom.key)
+        && npc.castFrom.portraitRemoved !== true && !portraitHasImage(npc.portrait);
+}
+
+/** The dossier with the pack's portrait record set on it (a new object; the dossier unchanged without a usable record or when it may not be filled). */
+export function applyCastPortrait(npc, portrait) {
+    if (!castPortraitWanted(npc) || !portraitHasImage(portrait)) return npc;
+    return { ...npc, portrait };
+}
+
+/** The dossier of a cast person after the reader removed its portrait: the removal is recorded in `castFrom` so the pack's picture is not put back. */
+export function markCastPortraitRemoved(npc) {
+    if (!isObject(npc) || !isObject(npc.castFrom) || !npc.castFrom.key) return npc;
+    return { ...npc, castFrom: { ...npc.castFrom, portraitRemoved: true } };
 }
 
 /** The badge words: "Ersveil cast" (the pack's name) or "Cast". */

@@ -230,7 +230,9 @@ const fallbackEmptyCast = reason => `<div class="npc-state-delta-story-empty-sta
  *   version    Delta's version, for the module definition.
  *   host       () => the Story Block global.
  *   headReply  () => the index of the latest reply (the reader's own meter values start its window).
- *   castSync   async () => makes the dossiers of the cast people the step has just recorded (index.js castSync).
+ *   castSync   async () => makes the dossiers of the cast people the step has just recorded (index.js castSync), and gives a cast
+ *              dossier made without its picture the picture once Story Block has it.
+ *   castPortraitDue   () => whether castSync has a picture to give (a cheap look); the adapter asks before it runs the sync for that alone.
  *   doc, timers, loadEmptyCast (() => Promise<emptyCastHtml>), logger.
  */
 // DOM helpers for the Cast markup (text is set with textContent; nothing is parsed as markup).
@@ -294,6 +296,7 @@ export function createStorySuiteV2Adapter({
     host = () => globalThis.StoryBlock,
     headReply = () => null,
     castSync = null,
+    castPortraitDue = null,
     doc = globalThis.document,
     timers = globalThis,
     loadEmptyCast = () => import('../story-block-tabs.js').then(module => module.emptyCastHtml),
@@ -333,6 +336,7 @@ export function createStorySuiteV2Adapter({
     let pending = null;          // the connection attempt in progress, if any
     let sectionLead = null;      // the meter presets block above Delta's panel in the settings section
     let offTurn = null;          // unsubscribes from the host's 'turn' event
+    let offHead = null;          // unsubscribes from the host's 'head' event
     let lastTick = Promise.resolve(null);
     let listParts = null;        // loadDossierList's { rowNodes, project, filter } once loaded
     let rowsCache = { key: null, rows: [] };
@@ -1096,6 +1100,7 @@ export function createStorySuiteV2Adapter({
     // show it, then the dossier list.
     function renderDossiers(el, { track = true } = {}) {
         renderCast(el, { track, cast: !worldShown(), list: true });
+        portraitFill();
     }
 
     // ---- the page API for Story Director's World (PAGE_API) ----
@@ -1291,7 +1296,11 @@ export function createStorySuiteV2Adapter({
         if (!wanted) wanted = (keyPeopleAnswer()?.length ?? 0) > 0 || Object.keys(keyAwayMemory()).length > 0;
         // The living cast: someone met whose dossier is not yet made, or a made one with a stage ladder of their own.
         if (!wanted) wanted = castWanted();
-        if (!wanted) return;
+        if (!wanted) {
+            // Nothing for the step to do: a cast dossier made while its picture was missing may still get it now.
+            portraitFill();
+            return;
+        }
         lastTick = send('npc.tick', {}, { own: true }).then(async out => {
             await madeCastSync();
             return out;
@@ -1307,6 +1316,15 @@ export function createStorySuiteV2Adapter({
     async function madeCastSync() {
         if (typeof castSync !== 'function') return;
         try { await castSync(); } catch (error) { warn('Story Suite v2 cast dossiers were not made', error); }
+    }
+    // A cast dossier made while its picture was missing gets the picture once Story Block answers for it (a pack imported without its pictures,
+    // the pictures imported later). Asked when it can be: the step, the head changing, the host accepting Delta, the Dossiers tab drawn
+    // (and the chat opening, index.js). Only when there is a picture to give, so nothing else is sent or saved.
+    function portraitFill() {
+        if (!hosted || typeof castSync !== 'function' || typeof castPortraitDue !== 'function') return;
+        let due = false;
+        try { due = castPortraitDue() === true; } catch { due = false; }
+        if (due) void madeCastSync();
     }
 
     // ---- Diagnostics (Story Block's Settings → Diagnostics) ----
@@ -1569,9 +1587,14 @@ export function createStorySuiteV2Adapter({
             const off = typeof sdk.on === 'function' ? sdk.on('turn', onTurn) : null;
             offTurn = typeof off === 'function' ? off : null;
         } catch (error) { warn('Story Suite v2 turn events are not available', error); }
+        try {
+            const off = typeof sdk.on === 'function' ? sdk.on('head', portraitFill) : null;
+            offHead = typeof off === 'function' ? off : null;
+        } catch (error) { warn('Story Suite v2 head events are not available', error); }
         listen();
         syncDrawer();
         announceHosted(true);
+        portraitFill();
         startTimeline();
         aliveTimer = timers.setInterval?.(check, aliveMs) ?? null;
         aliveTimer?.unref?.();
@@ -1622,6 +1645,8 @@ export function createStorySuiteV2Adapter({
         stopTimeline();
         try { offTurn?.(); } catch { /* the host is gone */ }
         offTurn = null;
+        try { offHead?.(); } catch { /* the host is gone */ }
+        offHead = null;
         hostRef = null;
         sdkRef = null;
         pendingSection = null;
