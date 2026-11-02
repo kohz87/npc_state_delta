@@ -2,8 +2,9 @@
 // head state. The lead is the party's own character (`party.pc`; without a party module, the reader's persona
 // name), its HP, MP and SP pools, the level under the Terms' word and its conditions. The scene is `scene.place`,
 // `scene.weather` and the story time (`director.time`, Story Director; formatted by the host's `fmt.time`), and, while
-// `story-block.you` is on, the persona's rank, what they wear and how they are (`scene.you`, with the pencil's command). Every
-// read goes through `query(name, args)` and falls back to nothing: a missing module shows no bar, not an error.
+// `story-block.you` is on, the persona's rank, what they wear and how they are (`scene.you`, with the editor's command). The editor's
+// date and time fields come from `clock` (`director.time`'s `parts` and `director.calendar`'s months and era; none from a Story Director that
+// does not answer `parts`). Every read goes through `query(name, args)` and falls back to nothing: a missing module shows no bar, not an error.
 //
 // The portrait is the first safe picture of: the persona's avatar (`/thumbnail?type=persona&file=…`), the character
 // card's avatar (`/thumbnail?type=avatar&file=…`), a picture a module answers for the lead (`npc.portrait`, Delta's
@@ -134,6 +135,26 @@ function safeQuery(query, name, args) {
     }
 }
 
+const wholeIn = (value, min, max) => (Number.isSafeInteger(value) && value >= min && value <= max ? value : null);
+
+/**
+ * The editor's clock: `{ parts: { year, month, day, minutes } | null, era, months: [{ name, days }] }`, or null (the editor then has no date and
+ * time fields): Story Director must answer its time with a `parts` key (an object, or null while the clock is unset) and its calendar with months.
+ */
+export function clockProps(time, calendar) {
+    if (!time || typeof time !== 'object' || !('parts' in time)) return null;
+    const months = (Array.isArray(calendar?.months) ? calendar.months : [])
+        .map(month => ({ name: textOf(month?.name).slice(0, 40), days: count(month?.days) }))
+        .filter(month => month.name && Number.isSafeInteger(month.days) && month.days >= 1)
+        .slice(0, 60);
+    if (!months.length) return null;
+    const raw = time.parts && typeof time.parts === 'object' ? time.parts : null;
+    const parts = raw && Number.isSafeInteger(raw.year) && wholeIn(raw.month, 1, months.length) !== null && wholeIn(raw.day, 1, 1e4) !== null && wholeIn(raw.minutes, 0, 1439) !== null
+        ? { year: raw.year, month: raw.month, day: raw.day, minutes: raw.minutes }
+        : null;
+    return { parts, era: textOf(calendar?.era).slice(0, 20), months };
+}
+
 /**
  * The props of `ss.hero` for the game view's header, or null when there is no state to show (no chat).
  * `query(name, args)` reads the head state; `context` is readHeroContext()'s answer; `formatTime(minutes)` is the host's fmt.time.
@@ -154,6 +175,7 @@ export function gameHeroProps({ state = null, query = null, context = {}, format
     // `scene.you` answers null while the feature is off (or with no Story Block): no rows then, not empty ones.
     const you = safeQuery(query, 'scene.you', {});
     const time = safeQuery(query, 'director.time', {});
+    const clock = clockProps(time, time && typeof time === 'object' && 'parts' in time ? safeQuery(query, 'director.calendar', {}) : null);
     // The trip Story Director keeps (`atlas.trip`, 2.5): its one-line `row`; null with no trip, with the feature off or with an older Story Director.
     const trip = safeQuery(query, 'atlas.trip', {});
     const travel = textOf(trip?.row).slice(0, 200);
@@ -198,5 +220,6 @@ export function gameHeroProps({ state = null, query = null, context = {}, format
         statuses,
         ...(you && typeof you === 'object' ? { you: { ...(textOf(you.rankLabel) ? { rank: textOf(you.rank).slice(0, 120), rankLabel: textOf(you.rankLabel).slice(0, 30) } : {}), wearing: textOf(you.wearing).slice(0, 120), condition: textOf(you.condition).slice(0, 120), command: 'scene.you' } } : {}),
         ...(travel ? { travel } : {}),
+        ...(clock ? { clock } : {}),
     };
 }

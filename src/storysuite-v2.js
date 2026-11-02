@@ -42,6 +42,7 @@ import { DOSSIER_FIELDS } from './fields/registry.js';
 import { findKeyEntry, isKey, normalizeKeyPeople } from './key-people.js';
 import { metWithEntry, normalizeCast } from './cast-dossier.js';
 import { escapeHtml } from './util/html.js';
+import { portraitFileSrc } from './portrait-file.js';
 import { createParticipant, fileVault } from './storysuite-participant/index.js';
 
 export const MODULE_ID = 'npc-state-delta';
@@ -207,7 +208,7 @@ export function portraitUrl(npc, formPortraits = {}) {
         if (image && typeof image === 'object') candidates.push(image.dataUrl);
     }
     const main = npc.portrait && typeof npc.portrait === 'object' ? npc.portrait : {};
-    candidates.push(main.dataUrl, main.url, main.src);
+    candidates.push(main.dataUrl, portraitFileSrc(main), main.url, main.src);
     for (const candidate of candidates) {
         const url = safeImageUrl(candidate);
         if (url) return url;

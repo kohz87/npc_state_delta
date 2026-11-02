@@ -1,6 +1,7 @@
 import { normalizeName } from './core.js';
 import { normalizeSocialGraph } from './social.js';
 import { lockedFieldKeys } from './src/dossier-edit.js';
+import { isPortraitFileRecord, portraitHasImage } from './src/portrait-file.js';
 import { BRANCH_USER_METADATA_FIELDS } from './src/fields/registry.js';
 
 export const BRANCH_HISTORY_LIMIT = 160;
@@ -116,7 +117,9 @@ function cloneNpcList(npcs) {
 }
 
 function cloneNarrativeNpcs(npcs) {
-    return cloneNpcList(npcs).map(npc => ({ ...npc, portrait: null }));
+    // A snapshot omits portrait pictures (the live record or portraitAssets holds them). A file-form record is a few hundred bytes naming a
+    // file that is never deleted, so it stays: a person restored by a rollback has their portrait without any asset kept for them.
+    return cloneNpcList(npcs).map(npc => ({ ...npc, portrait: isPortraitFileRecord(npc?.portrait) ? npc.portrait : null }));
 }
 
 export function snapshotBranchState(state = {}) {
@@ -250,7 +253,7 @@ export function preserveUserNpcMetadata(restoredNpcs = [], currentNpcs = []) {
         delete npc.manual;
         const current = findNpcForMetadataRestore(npc, currentNpcs);
         if (!current) continue;
-        if (current?.portrait?.dataUrl) npc.portrait = structuredClone(current.portrait);
+        if (portraitHasImage(current?.portrait)) npc.portrait = structuredClone(current.portrait);
         for (const field of globallyPreserved) {
             if (Object.prototype.hasOwnProperty.call(current, field)) npc[field] = structuredClone(current[field]);
         }

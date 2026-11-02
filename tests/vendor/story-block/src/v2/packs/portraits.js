@@ -6,19 +6,26 @@
 // it to every device; a browser-only store (IndexedDB) would leave the phone without them. Only a small index stays in settings
 // (`storySuite.portraits[pack][file] = { stored, bytes }`): which stored file is which name of which pack.
 //
-// Limits (limits.js PORTRAIT_LIMITS): webp, png or jpeg, at most 64 KB each (the author compresses), at most 32 per pack. A file
-// is taken only when a cast entry names it, is small enough and really is one of the three types (read from its first bytes, not
-// its name); the others are refused one by one with a reason, and the pack is imported all the same.
+// Limits (limits.js PORTRAIT_LIMITS): webp, png or jpeg, at most 150 KB each once stored, at most 32 per pack. A file is taken only
+// when a cast entry names it and really is one of the three types (read from its first bytes, not its name); the others are refused
+// one by one with a reason, and the pack is imported all the same. A picture of up to 10 MB may be picked: one over 150 KB is made
+// smaller in the browser first (portrait-fit.js: long side at most 1200 px, WebP, quality stepped down until it fits) and a file that
+// cannot be read, or will not fit at the lowest step, is refused. A picture already at most 150 KB is stored as it is, byte for byte
+// (WebP, PNG or JPEG), never re-encoded.
 //
 // `files` (injected; st-adapter.js stPortraitFiles): `{ put(name, bytes), remove(name), exists(names) → { name: bool }, url(name) }`.
 // Without it nothing can be stored and every picked image is refused with that reason.
+// `imageIo` (injected; portrait-fit.js browserImageIo, a fake one in the Node tests): `bytes → { size(), encode(side, quality), close?() }`.
+// Without it a picture over 150 KB is refused as before (there is no decoder to make it smaller).
 
 import { PORTRAIT_LIMITS } from './limits.js';
+import { FitProblem, MAX_PIXELS, fitPortrait, imageSize } from './portrait-fit.js';
 
 export const PORTRAIT_TYPES = Object.freeze({ webp: 'image/webp', png: 'image/png', jpg: 'image/jpeg' });
 const PREFIX = 'storysuite-portrait-';
 const SAFE_NAME = /^storysuite-portrait-([a-z0-9]+(?:-[a-z0-9]+)*)-[0-9a-f]{8}\.(?:webp|png|jpg)$/;
 const kb = bytes => Math.max(1, Math.round(bytes / 1024));
+const mb = bytes => `${(Math.round((bytes / 1048576) * 10) / 10).toString()} MB`;
 
 /** 'webp' | 'png' | 'jpg' from a picture's first bytes, or null: the file's name does not decide. */
 export function sniffImage(bytes) {
@@ -43,10 +50,10 @@ function hashOf(bytes) {
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 /**
- * `settings`: `{ read() → the storySuite settings object, save() }`. `files`: see above, or null.
- * Returns `{ url, files, apply, forget, verify }`.
+ * `settings`: `{ read() → the storySuite settings object, save() }`. `files`: see above, or null. `imageIo`: see above, or null.
+ * Returns `{ url, list, apply, forget, verify }`.
  */
-export function createPortraits({ settings, files = null } = {}) {
+export function createPortraits({ settings, files = null, imageIo = null } = {}) {
     if (!settings || typeof settings.read !== 'function') throw new Error('createPortraits needs settings.read().');
     // Stored files a check found gone (in memory only): their portraits answer null until the pack is imported with them again.
     const gone = new Set();
@@ -72,6 +79,27 @@ export function createPortraits({ settings, files = null } = {}) {
         if (!mine(packId, stored) || used(packId, stored, except)) return;
         gone.delete(stored);
         try { await files?.remove(stored); } catch { /* a file that is already gone is what was wanted */ }
+    }
+
+    // The most a picked file may be: the source limit where it can be made smaller, else the stored limit.
+    const pickLimit = () => (typeof imageIo === 'function' ? PORTRAIT_LIMITS.source : PORTRAIT_LIMITS.bytes);
+    const tooBig = (file, size) => (typeof imageIo === 'function'
+        ? `${file} is ${mb(size)}; a portrait may be picked at up to ${mb(PORTRAIT_LIMITS.source)} (it is made smaller to fit ${kb(PORTRAIT_LIMITS.bytes)} KB).`
+        : `${file} is ${kb(size)} KB; a portrait may be at most ${kb(PORTRAIT_LIMITS.bytes)} KB (compress it and pick it again).`);
+    // A picture over the stored limit, made smaller: → { bytes, type } or a refusal text (the file's name first).
+    async function smaller(file, bytes, type) {
+        const header = imageSize(bytes, type);
+        if (header && header.width * header.height > MAX_PIXELS) return { refusal: `${file} has ${header.width} × ${header.height} pixels, which is too many to make smaller here (at most ${Math.round(MAX_PIXELS / 1e6)} million).` };
+        let io;
+        try {
+            io = imageIo(bytes);
+            const out = await fitPortrait(io);
+            return { bytes: out.bytes, type: out.type };
+        } catch (error) {
+            return { refusal: error instanceof FitProblem ? `${file} ${error.message}.` : `${file} could not be made smaller (${error?.message ?? error}).` };
+        } finally {
+            try { io?.close?.(); } catch { /* the decoded picture is freed anyway */ }
+        }
     }
 
     return {
@@ -107,14 +135,20 @@ export function createPortraits({ settings, files = null } = {}) {
                 seen.add(file);
                 if (!named.has(file)) { refuse(`${file} is not named by any person in this pack (no cast entry has "portrait": "${file}"), so it was left out.`); continue; }
                 const size = Number(item.size);
-                if (Number.isFinite(size) && size > PORTRAIT_LIMITS.bytes) { refuse(`${file} is ${kb(size)} KB; a portrait may be at most ${kb(PORTRAIT_LIMITS.bytes)} KB (compress it and pick it again).`); continue; }
+                if (Number.isFinite(size) && size > pickLimit()) { refuse(tooBig(file, size)); continue; }
                 let bytes;
                 try { bytes = await item.read(); } catch { refuse(`${file} could not be read.`); continue; }
                 if (!(bytes instanceof Uint8Array) || !bytes.length) { refuse(`${file} is empty.`); continue; }
-                if (bytes.length > PORTRAIT_LIMITS.bytes) { refuse(`${file} is ${kb(bytes.length)} KB; a portrait may be at most ${kb(PORTRAIT_LIMITS.bytes)} KB (compress it and pick it again).`); continue; }
-                const type = sniffImage(bytes);
+                if (bytes.length > pickLimit()) { refuse(tooBig(file, bytes.length)); continue; }
+                let type = sniffImage(bytes);
                 if (!type) { refuse(`${file} is not a WebP, PNG or JPEG image.`); continue; }
                 if (!files) { refuse(`${file} could not be saved: SillyTavern's file storage is not available here.`); continue; }
+                // Over the stored limit: made smaller first (a picture at most that big is kept exactly as it came).
+                if (bytes.length > PORTRAIT_LIMITS.bytes) {
+                    const fit = await smaller(file, bytes, type);
+                    if (fit.refusal) { refuse(fit.refusal); continue; }
+                    ({ bytes, type } = fit);
+                }
                 const stored = `${PREFIX}${pack.id}-${hashOf(bytes)}.${type}`;
                 const before = of(pack.id)[file];
                 try {

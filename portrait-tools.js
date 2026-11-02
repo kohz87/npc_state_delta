@@ -4,6 +4,7 @@ import {
     keepPromptDraft, makeSession, mountOverlay, npcById, promptDrafts,
     recordToolEvent, selectedNpcId, setBusy, stage1Refresh, validatePortraitFile,
 } from './dossier-tools-core.js';
+import { portraitSrc } from './src/portrait-file.js';
 
 function toast(kind, message) { globalThis.toastr?.[kind]?.(message); }
 
@@ -22,7 +23,7 @@ function npcForms(npc) {
 }
 
 function targetPortrait(npc, form = '') {
-    if (!form) return npc?.portrait?.dataUrl || '';
+    if (!form) return portraitSrc(npc?.portrait);
     return api()?.formPortraits?.(npc.id)?.[form]?.dataUrl || '';
 }
 

@@ -1,6 +1,7 @@
 import { formPortraitKey, isTerminalNpcDeath, normalizeFormPortraitAssets, normalizeName, normalizeNpcRecord, protectTerminalNpc } from './core.js';
 import { normalizeSocialGraph, remapSocialGraphNpcIds } from './social.js';
 import { LOCKED_FIELD_KEYS } from './src/dossier-edit.js';
+import { portraitHasImage } from './src/portrait-file.js';
 
 const MAGIC = new Uint8Array([0x4e, 0x50, 0x43, 0x53, 0x54, 0x42, 0x30, 0x31]); // NPCSTB01
 const HEADER_SIZE = 12;
@@ -488,7 +489,7 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
                     .filter(Boolean)
                     .filter(alias => normalizeName(alias) !== normalizeName(effectiveName))
                     .slice(0, 8),
-                portrait: npc.portrait?.dataUrl ? structuredClone(npc.portrait) : old.portrait || npc.portrait || null,
+                portrait: portraitHasImage(npc.portrait) ? structuredClone(npc.portrait) : old.portrait || npc.portrait || null,
                 // Activity counters are chat-local clocks. A foreign dossier may update durable
                 // characterization, but cannot move an existing target record backward or forward
                 // on an unrelated source turn axis.

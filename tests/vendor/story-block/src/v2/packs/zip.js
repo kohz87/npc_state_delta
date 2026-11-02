@@ -3,8 +3,10 @@
 // readZip(bytes, { limits }) → `[{ name, size, read() → Promise<Uint8Array> }]`, the files in the order the zip lists them (folders are
 // left out). It refuses, with a `ZipProblem` whose message is plain words: a file that is not a zip, damaged, encrypted, zip64 or
 // spread over several disks, a method other than stored or deflate, a path that is absolute, uses `\` or climbs out with `..`, a name
-// listed twice, more entries than `limits.entries`, more than `limits.unpacked` bytes unpacked in all (by the sizes the zip declares,
-// and again while unpacking, so a zip that lies about its sizes cannot fill memory). `read()` checks the CRC.
+// listed twice, more entries than `limits.entries`, a file larger than `limits.entry`, a deflated file over 256 KB that claims to
+// unpack to more than `limits.ratio` times its packed size, more than `limits.unpacked` bytes unpacked in all (by the sizes the zip
+// declares, and again while unpacking, so a zip that lies about its sizes cannot fill memory). Files are unpacked one at a time, when
+// `read()` is called, so only one file's bytes are unpacked at once. `read()` checks the CRC.
 // Deflate is the browser's own `DecompressionStream('deflate-raw')`.
 
 import { ZIP_LIMITS } from './limits.js';
@@ -17,6 +19,9 @@ const CENTRAL = 0x02014b50;
 const LOCAL = 0x04034b50;
 
 const damaged = () => new ZipProblem('The zip file is damaged.');
+const mb = bytes => Math.round(bytes / 1024 / 1024);
+// Files up to this size are never held to the ratio: text packs well, and a small file cannot hurt.
+const RATIO_FROM = 256 * 1024;
 
 let table = null;
 /** CRC-32 of the bytes (what a zip stores for each file). */
@@ -108,8 +113,10 @@ export function readZip(input, { limits = ZIP_LIMITS } = {}) {
         if (method !== 0 && method !== 8) throw new ZipProblem(`"${name}" is packed in a way this reader does not know (only stored and deflate are supported).`);
         if (seen.has(name)) throw new ZipProblem(`The zip lists "${name}" twice.`);
         seen.add(name);
+        if (limits.entry && size > limits.entry) throw new ZipProblem(`"${name.slice(0, 60)}" in the zip is larger than ${mb(limits.entry)} MB.`);
+        if (limits.ratio && method === 8 && size > RATIO_FROM && size > packed * limits.ratio) throw new ZipProblem(`"${name.slice(0, 60)}" in the zip claims to unpack to far more than it is packed from (over ${limits.ratio} times); the zip is refused.`);
         unpacked += size;
-        if (unpacked > limits.unpacked) throw new ZipProblem(`The zip unpacks to more than ${Math.round(limits.unpacked / 1024 / 1024)} MB; that is too much for a pack.`);
+        if (unpacked > limits.unpacked) throw new ZipProblem(`The zip unpacks to more than ${mb(limits.unpacked)} MB; that is too much for a pack.`);
         entries.push({
             name, size,
             async read() {

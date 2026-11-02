@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "applicationVersion": "1.6.1",
+  "applicationVersion": "1.7.0",
   "entrypoint": "bootstrap.js",
   "modules": [
     { "path": "bootstrap.js", "role": "bootstrap", "required": true },
@@ -49,6 +49,7 @@
     { "path": "src/scanner-request.js", "role": "scanner-request-and-json-retry", "required": true },
     { "path": "src/relationship-pass.js", "role": "focused-relationship-pass", "required": true },
     { "path": "src/key-people.js", "role": "key-people-rules", "required": true },
-    { "path": "src/cast-dossier.js", "role": "cast-dossier-rules", "required": true }
+    { "path": "src/cast-dossier.js", "role": "cast-dossier-rules", "required": true },
+    { "path": "src/portrait-file.js", "role": "cast-portrait-user-files", "required": true }
   ]
 }

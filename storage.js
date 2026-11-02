@@ -1,3 +1,5 @@
+import { dataUrlOfBytes, isPortraitFileRecord, markPortraitFileMissing, markPortraitFilePresent, parseImageDataUrl, portraitFileRecordFor } from './src/portrait-file.js';
+
 export const NPC_STATE_FILE_FORMAT = 'npc_state_delta_chat_data';
 export const NPC_STATE_FILE_FORMAT_VERSION = 1;
 export const NPC_STATE_WRITE_RETRY_DELAYS_MS = Object.freeze([0, 1000, 2000, 5000, 15000, 30000]);
@@ -206,7 +208,7 @@ function compactStateForFile(state) {
     for (const npc of Array.isArray(snapshot.npcs) ? snapshot.npcs : []) {
         if (!npc?.id) continue;
         if (npc.portrait?.dataUrl) snapshot.portraitAssets[npc.id] = structuredClone(npc.portrait);
-        if (snapshot.portraitAssets[npc.id]?.dataUrl) npc.portrait = null;
+        if (snapshot.portraitAssets[npc.id]?.dataUrl && !(isPortraitFileRecord(npc.portrait) && !npc.portrait.dataUrl)) npc.portrait = null;
     }
     return snapshot;
 }
@@ -307,6 +309,75 @@ export async function dataFileExists(path, { fetchFn = globalThis.fetch, headers
     }
 }
 
+// (cast portraits) Several files' existence in one request: { path: boolean }, or null when the server cannot say.
+export async function dataFilesExist(paths, { fetchFn = globalThis.fetch, headers = null } = {}) {
+    const list = [...new Set((paths || []).filter(Boolean))];
+    if (!list.length || typeof fetchFn !== 'function' || !headers) return null;
+    try {
+        const response = await fetchFn('/api/files/verify', { method: 'POST', headers, body: JSON.stringify({ urls: list }) });
+        if (!response?.ok || typeof response.json !== 'function') return null;
+        const result = await response.json();
+        if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
+        return Object.fromEntries(list.filter(path => typeof result[path] === 'boolean').map(path => [path, result[path]]));
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * (cast portraits) Keeps a picture (a raster data URL) once, as its own user file named by its content, and returns the record
+ * { path, type, hash } that names it; null when it is not a stored type, is too big, or the file could not be written (the caller then keeps
+ * the picture as it always did). The file is asked about first (dataFileExists: no 404) and written only when absent; nothing is ever deleted.
+ */
+export async function savePortraitFile(dataUrl, { fetchFn = globalThis.fetch, headers = null } = {}) {
+    const image = parseImageDataUrl(dataUrl);
+    if (!image || typeof fetchFn !== 'function') return null;
+    const record = portraitFileRecordFor(image.bytes, image.type);
+    if (!record) return null;
+    try {
+        if (await dataFileExists(record.path, { fetchFn, headers: headers || null }) !== true) {
+            const response = await fetchFn('/api/files/upload', {
+                method: 'POST',
+                headers: headers || {},
+                body: JSON.stringify({ name: record.path.slice(record.path.lastIndexOf('/') + 1), data: image.base64 }),
+            });
+            if (!response?.ok) return null;
+        }
+    } catch {
+        return null;
+    }
+    markPortraitFilePresent(record.path);
+    return record;
+}
+
+/** (cast portraits) Asks the server which of these records' files are there and remembers the ones that are gone; returns how many are gone. */
+export async function verifyPortraitFiles(portraits, { fetchFn = globalThis.fetch, headers = null } = {}) {
+    const paths = [...new Set((portraits || []).filter(isPortraitFileRecord).map(portrait => portrait.path))];
+    const answer = await dataFilesExist(paths, { fetchFn, headers });
+    if (!answer) return 0;
+    let gone = 0;
+    for (const [path, exists] of Object.entries(answer)) {
+        if (exists) markPortraitFilePresent(path);
+        else { markPortraitFileMissing(path); gone += 1; }
+    }
+    return gone;
+}
+
+/** (cast portraits) The picture of a file-form record as a data URL (an export carries it), or null when the file is gone or is not the record's bytes. */
+export async function readPortraitFileDataUrl(portrait, { fetchFn = globalThis.fetch } = {}) {
+    if (!isPortraitFileRecord(portrait) || typeof fetchFn !== 'function') return null;
+    try {
+        const response = await fetchFn(portrait.path, { cache: 'no-store' });
+        if (response?.status === 404 || !response?.ok || typeof response.arrayBuffer !== 'function') return null;
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (!bytes.length) return null;
+        const record = portraitFileRecordFor(bytes, portrait.type);
+        return record?.hash === portrait.hash ? dataUrlOfBytes(bytes, portrait.type) : null;
+    } catch {
+        return null;
+    }
+}
+
 const MISSING_FILE = Object.freeze({ revision: 0, writerId: '', exists: false, retired: false, updatedAt: 0, payload: null });
 
 // `probeHeaders` (request headers): ask whether the file exists first (dataFileExists) and, when
@@ -349,8 +420,8 @@ export function adoptNpcStateDataFileMetadata(pointer, inspected) {
     return pointer;
 }
 
-async function remoteRevision(pointer, chatKey, fetchFn) {
-    const inspected = await inspectNpcStateDataFile(pointer, { fetchFn, expectedChatKey: chatKey });
+async function remoteRevision(pointer, chatKey, fetchFn, probeHeaders = null) {
+    const inspected = await inspectNpcStateDataFile(pointer, { fetchFn, expectedChatKey: chatKey, probeHeaders });
     return {
         revision: inspected.revision,
         writerId: inspected.writerId,
@@ -375,7 +446,10 @@ async function guardedWriteOnce(job) {
         assertCurrent();
         const expectedRevision = Number.isFinite(Number(pointer?.revision)) ? Math.max(0, Math.trunc(Number(pointer.revision))) : null;
         const probedDeterministicPath = !pointer?.path;
-        const current = await remoteRevision(probeNpcStateDataFilePointer(chatKey, pointer), chatKey, fetchFn);
+        // A write with no pointer is a chat's first (the deterministic path is probed): the file is usually not there yet, so
+        // it is asked about first (probeHeaders) and a chat's first save makes no 404 request. Pointered writes read it as before.
+        const probeHeaders = probedDeterministicPath && headers && Object.keys(headers).length ? headers : null;
+        const current = await remoteRevision(probeNpcStateDataFilePointer(chatKey, pointer), chatKey, fetchFn, probeHeaders);
         // The previous attempt of this same job may have become durable although its response or
         // post-upload verification was lost. Only the exact revision/writer/timestamp nonce of that
         // upload proves ownership; the job's state is immutable, so adopting it is byte-equivalent.

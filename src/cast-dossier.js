@@ -23,6 +23,8 @@
 // they were met, the starting goal and routine as the pack gave them). Delta's later scans treat the dossier as any other:
 // they add and change as they do for anyone, and every change is marked in the dossier as today.
 
+import { portraitHasImage } from './portrait-file.js';
+
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const clip = (value, max) => String(value ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max).trim();
 
@@ -234,7 +236,7 @@ const BUILT_IN_METERS = Object.freeze(['trust', 'affection', 'desire', 'tension'
 /**
  * The record `base` (a fresh dossier from createNpcRecord) filled from the person's entry: the profile, the starting
  * numbers, the hidden notes and `castFrom`. `packName` is the pack's name for the badge; `portrait` is the portrait record
- * ({ dataUrl, … }) or null. Returns a new record; null without an entry.
+ * ({ path, type, hash, … } or, when the file could not be written, { dataUrl, … }) or null. Returns a new record; null without an entry.
  */
 export function applyCastEntry(base, person, { packName = '', portrait = null } = {}) {
     const entry = person?.entry;
@@ -256,7 +258,7 @@ export function applyCastEntry(base, person, { packName = '', portrait = null } 
     if (entry.meters.preset) npc.meterSetup = { track: entry.meters.preset, limits: {} };
     const secrets = castSecrets(entry.secrets);
     if (secrets.length) npc.secrets = secrets;
-    if (portrait?.dataUrl) npc.portrait = portrait;
+    if (portraitHasImage(portrait)) npc.portrait = portrait;
     npc.castFrom = {
         key: person.key, pack: person.pack, id: person.id,
         ...(shortPackName(packName) ? { packName: shortPackName(packName) } : {}),

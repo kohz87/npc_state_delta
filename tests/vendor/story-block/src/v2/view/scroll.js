@@ -11,6 +11,9 @@
 // * `followViewport(doc, layer)` (a phone) keeps the window's layer exactly over what is visible: the visual viewport
 //   (it shrinks for the on-screen keyboard and can be panned by the browser).
 //
+// * `gapBelow(scroller)`, `atBottom(scroller)`, `scrollToBottom(scroller)` and `keepAtBottom(scroller)` are for a list that grows at its end
+//   (the chat: a card drawn under the newest reply): `keepAtBottom` is asked before the growth and `settle()` after it, and the list
+//   is taken to its bottom again only if the reader was at the bottom before; a reader who had scrolled up is never moved.
 // * `zoomOf(node)` is the CSS zoom a node is drawn at (Story Suite's roots are zoomed, size.css): measured distances are drawn
 //   pixels, `scrollTop` is the scroller's own, so a measured distance is divided by it before it moves a scroller.
 //
@@ -35,6 +38,48 @@ export function focusNode(node) {
     if (!node || typeof node.focus !== 'function') return Boolean(node);
     try { node.focus({ preventScroll: true }); } catch { try { node.focus(); } catch { /* not focusable */ } }
     return true;
+}
+
+/** How far (in drawn pixels) the bottom of `scroller`'s content is below what it shows, or null where there is no layout to ask. */
+export function gapBelow(scroller) {
+    const gap = Number(scroller?.scrollHeight) - Number(scroller?.scrollTop) - Number(scroller?.clientHeight);
+    return Number.isFinite(gap) && Number(scroller?.clientHeight) > 0 ? gap : null;
+}
+
+/** The most slack "at the bottom" ever allows, in drawn pixels (Story Director's follow of a new reply used the same 400). */
+export const BOTTOM_SLACK = 400;
+
+/**
+ * How far from its bottom a reader still counts as being at it: half of what the scroller shows, at most BOTTOM_SLACK. SillyTavern scrolls
+ * to a new reply and other extensions still add to it after that (status rows, cards: 100 px or more), so a gap of a line or two would
+ * miss a reader who has not moved; a reader who scrolled up to read is further away than half a screen.
+ */
+export function bottomSlack(scroller) {
+    const shown = Number(scroller?.clientHeight);
+    return Number.isFinite(shown) && shown > 0 ? Math.min(BOTTOM_SLACK, Math.round(shown / 2)) : 0;
+}
+
+/** Whether `scroller` is scrolled to (within `slack` pixels, by default bottomSlack) of its bottom. False where there is no layout. */
+export function atBottom(scroller, slack = bottomSlack(scroller)) {
+    const gap = gapBelow(scroller);
+    return gap !== null && gap <= slack;
+}
+
+/** Takes `scroller` (not its ancestors) to its bottom. → whether it moved. */
+export function scrollToBottom(scroller) {
+    if (!scroller || !(Number(scroller.scrollHeight) > 0)) return false;
+    const before = scroller.scrollTop;
+    scroller.scrollTop = scroller.scrollHeight;
+    return scroller.scrollTop !== before;
+}
+
+/**
+ * Looks now at whether `scroller` is at its bottom. → `{ wasAtBottom, settle() }`: after its content has grown, `settle()` takes it to the
+ * bottom again if (and only if) it was at the bottom when this was called, and returns whether it moved.
+ */
+export function keepAtBottom(scroller, slack = bottomSlack(scroller)) {
+    const wasAtBottom = atBottom(scroller, slack);
+    return { wasAtBottom, settle: () => (wasAtBottom ? scrollToBottom(scroller) : false) };
 }
 
 /** The page scroller a node is in (the settings window's `.ss-settings-content`), or null. */

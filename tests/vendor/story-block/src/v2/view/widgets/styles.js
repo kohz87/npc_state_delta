@@ -50,6 +50,18 @@ export const widgetCss = `
 :where(.ss-w-editable-item-label) { display: grid; gap: 3px; min-width: 0; font-size: 0.85em; color: var(--ss-w-muted); }
 :where(.ss-w-editable-item-label:last-child) { grid-column: 1 / -1; }
 :where(.ss-w-editable-item-fields input, .ss-w-editable-record-fields input) { width: 100%; min-width: 0; color: var(--ss-w-fg); }
+/* a form with groups: a fieldset each (a heading and the boxes), side by side where the room is, the help line, the sentence, then Save and Cancel */
+:where(.ss-w-editable-grouped) { display: grid; gap: 12px; width: 100%; }
+:where(.ss-w-editable-groups) { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 12px; width: 100%; max-width: 660px; }
+:where(.ss-w-editable-group) { display: grid; gap: 8px; align-content: start; min-width: 0; margin: 0; padding: 10px 12px; border: 1px solid var(--ss-w-border); border-radius: 12px; background: color-mix(in srgb, var(--ss-w-fg) 4%, transparent); }
+:where(.ss-w-editable-legend) { padding: 0 4px; font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ss-w-muted); }
+:where(.ss-w-editable-group .ss-w-editable-item-label) { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+:where(.ss-w-editable-group .ss-w-editable-item-label:last-child) { grid-column: auto; }
+:where(.ss-w-editable-group input, .ss-w-editable-group select) { width: 100%; min-width: 0; letter-spacing: 0; text-transform: none; color: var(--ss-w-fg); }
+:where(.ss-w-editable-row) { display: grid; grid-template-columns: repeat(auto-fit, minmax(5em, 1fr)); gap: 8px; }
+:where(.ss-w-editable-row:has(> :nth-child(4))) { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.3fr) minmax(0, 0.8fr) minmax(0, 1.7fr); }
+:where(.ss-w-editable-help) { margin: 0; font-size: 12px; color: var(--ss-w-muted); }
+:where(.ss-w-editable-actions) { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
 /* meter */
 :where(.ss-w-meter) { display: flex; flex-direction: column; gap: 0.2em; }

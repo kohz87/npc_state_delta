@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createHost } from './vendor/story-block/testkit/index.js';
 import { buildInjection, createNpcRecord } from '../core.js';
@@ -495,6 +496,14 @@ test('runtime: the dossier is made at the first meeting from the pack entry, wit
         mockState.quietResponder = async () => JSON.stringify({ npcs: [] });
         const out = {};
         const fenna = () => api.getState().npcs.find(npc => npc.name === 'Fenna');
+        // SillyTavern's file routes the way the server answers them: verify says what exists (so a present file is not written again).
+        const plainFetch = globalThis.fetch;
+        let portraitUploads = 0;
+        globalThis.fetch = async (url, options = {}) => {
+            if (url === '/api/files/verify') return { ok: true, status: 200, json: async () => Object.fromEntries(JSON.parse(options.body).urls.map(path => [path, mockState.files.has(path)])) };
+            if (url === '/api/files/upload' && JSON.parse(options.body).name.startsWith('npc-state-delta-portrait-')) portraitUploads += 1;
+            return plainFetch(url, options);
+        };
 
         // Nobody met: Story Director lists her unmet (no entry).
         sdk.people = [{ key: 'ersveil:fenna', pack: 'ersveil', id: 'fenna', name: 'Fenna', aliases: [], met: null, alive: true }];
@@ -512,7 +521,7 @@ test('runtime: the dossier is made at the first meeting from the pack entry, wit
         out.made = made ? {
             role: made.role, appearance: made.appearance, speech: made.speech, personality: made.personality, background: made.background,
             homeBase: made.homeBase, goal: made.goal, location: made.location, aliases: made.aliases, customFields: made.customFields,
-            trust: made.relationship.trust, meterSetup: made.meterSetup, secrets: made.secrets.length, portrait: made.portrait?.dataUrl ?? null,
+            trust: made.relationship.trust, meterSetup: made.meterSetup, secrets: made.secrets.length, portrait: made.portrait ?? null, files: [...mockState.files.keys()].filter(path => path.includes('npc-state-delta-portrait-')),
             fingerprint: Boolean(made.portrait?.appearanceFingerprint), castFrom: made.castFrom, assets: Boolean(api.getState().portraitAssets?.[made.id]),
         } : null;
         out.count = api.getState().npcs.length;
@@ -549,6 +558,13 @@ test('runtime: the dossier is made at the first meeting from the pack entry, wit
         await say('Fenna hands you a rope. "Hold this," she says.');
         await sleep(300);
         out.afterScan = { personality: fenna().personality, speech: fenna().speech, castFrom: Boolean(fenna().castFrom) };
+        // The picture was written once, through the swipe and the second meeting; the chat's saved state never held it.
+        out.portraitUploads = portraitUploads;
+        out.portraitFiles = [...mockState.files.keys()].filter(path => path.includes('npc-state-delta-portrait-')).length;
+        const sidecars = [...mockState.files.entries()].filter(([path]) => /\/npc-state-delta-[a-z0-9]+\.json$/.test(path));
+        out.sidecarHoldsImage = sidecars.some(([, text]) => text.includes('data:image'));
+        out.sidecarsSaved = sidecars.length;
+        out.remadePortrait = fenna()?.portrait ?? null;
         console.log('RESULT ' + JSON.stringify(out));
     };
     const prelude = async () => {
@@ -591,9 +607,22 @@ test('runtime: the dossier is made at the first meeting from the pack entry, wit
     assert.equal(hosted.made.trust, 10);
     assert.equal(hosted.made.secrets, 2);
     assert.deepEqual(hosted.made.customFields, { Allegiance: 'Ferry guild' });
-    assert.equal(hosted.made.portrait, png, 'the pack\'s portrait is the dossier\'s portrait');
+    // The pack's portrait is saved once as its own user file named by its content; the dossier keeps only the record that names it (no data URL).
+    const bytes = Buffer.from(png.split(',')[1], 'base64');
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    assert.deepEqual(hosted.made.files, [`/user/files/npc-state-delta-portrait-${hash.slice(0, 40)}.png`], 'the picture is one user file named by its content');
+    assert.equal(hosted.made.portrait.path, hosted.made.files[0]);
+    assert.equal(hosted.made.portrait.hash, hash);
+    assert.equal(hosted.made.portrait.type, 'image/png');
+    assert.equal(hosted.made.portrait.dataUrl, undefined, 'no picture in the dossier');
+    assert.equal(hosted.made.portrait.sourceName, 'fenna.webp');
     assert.equal(hosted.made.fingerprint, true);
-    assert.equal(hosted.made.assets, true, 'and is kept with the chat\'s portraits');
+    assert.equal(hosted.made.assets, false, 'and no second copy in the chat\'s portrait assets');
+    assert.equal(hosted.portraitUploads, 1, 'the picture is written once: not again for the swipe, the second meeting or a scan');
+    assert.equal(hosted.portraitFiles, 1);
+    assert.equal(hosted.sidecarsSaved, 1);
+    assert.equal(hosted.sidecarHoldsImage, false, 'the chat\'s saved state holds no picture');
+    assert.equal(hosted.remadePortrait.path, hosted.made.portrait.path, 'met again after the swipe: the same file');
     assert.equal(hosted.made.castFrom.packName, 'Ersveil');
     assert.equal(hosted.made.castFrom.met.on, 'Goldwane 12', 'the meeting date is written on Story Director\'s calendar');
     assert.equal(hosted.view.badge, 'Ersveil cast');

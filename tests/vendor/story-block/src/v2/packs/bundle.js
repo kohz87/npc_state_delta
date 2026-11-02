@@ -2,11 +2,12 @@
 //
 // readPackZip(bytes) → `{ ok: true, text, files }` (`text` the pack.json, `files` the portraits as `[{ name, size, read() }]`, what
 // installed.js `install` takes) or `{ ok: false, message }` in plain words. The zip is refused whole for anything the reader
-// should not trust: what zip.js refuses (encrypted, zip64, several disks, a path with `..`, more than 4 MB unpacked), a zip with no
-// pack.json, and any file other than pack.json and a portrait the pack's cast names (at `portraits/<file>`). Whether the pack
-// itself is good, and whether each image is small enough and really an image, is checked as for a pack picked as files.
+// should not trust: what zip.js refuses (encrypted, zip64, several disks, a path with `..`, too much unpacked, a file over its size
+// cap, a squeezed one), a zip with no pack.json or one over the pack size limit, and any file other than pack.json and a portrait the
+// pack's cast names (at `portraits/<file>`). Whether the pack itself is good, and whether each image is a real image that fits
+// (portraits.js makes a large one smaller), is checked as for a pack picked as files.
 
-import { ZIP_LIMITS } from './limits.js';
+import { LIMITS, ZIP_LIMITS } from './limits.js';
 import { ZipProblem, readZip } from './zip.js';
 
 export const isZipFile = file => /\.zip$/i.test(file?.name ?? '') || /^application\/(?:x-)?zip(?:-compressed)?$/.test(file?.type ?? '');
@@ -17,6 +18,7 @@ export async function readPackZip(bytes, { limits = ZIP_LIMITS } = {}) {
         const entries = readZip(bytes, { limits });
         const packEntry = entries.find(entry => entry.name === 'pack.json');
         if (!packEntry) throw new ZipProblem('The zip has no pack.json at its top level.');
+        if (packEntry.size > LIMITS.packBytes) throw new ZipProblem(`The pack.json in the zip is larger than ${Math.round(LIMITS.packBytes / 1024)} KB.`);
         const text = new TextDecoder('utf-8').decode(await packEntry.read());
         let named = new Set();
         try {

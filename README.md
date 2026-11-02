@@ -1,6 +1,6 @@
-# NPC State Delta v1.6.1 ("Delta")
+# NPC State Delta v1.7.0 ("Delta")
 
-> Story Suite 2.0.0. Delta keeps its own application version: **1.6.1**.
+> Story Suite 2.0.0. Delta keeps its own application version: **1.7.0**.
 
 ## What it is
 

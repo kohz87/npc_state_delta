@@ -3,6 +3,7 @@ import { appearanceFingerprint, currentPresentationText, normalizeAppearanceMode
 import { formatBirthDate } from './birthday.js';
 import { escapeHtml } from './src/util/html.js';
 import { awayRange } from './src/key-people.js';
+import { portraitSrc } from './src/portrait-file.js';
 
 const ROOT_ID = 'npc_state_delta_dossier_root';
 const OPEN_REQUEST_GUARD = '__npcStateDeltaOpenDossierRequests';
@@ -107,7 +108,7 @@ function fieldChangesProjection(value, messageValue) {
 
 function portraitAppearanceChanged(npc = {}, shown = null) {
     const recorded = shown ? shown.fingerprint : plain(npc?.portrait?.appearanceFingerprint);
-    const src = shown ? shown.src : plain(npc?.portrait?.dataUrl || npc?.portrait?.url || npc?.portrait?.src);
+    const src = shown ? shown.src : plain(portraitSrc(npc?.portrait));
     if (!recorded || !src) return false;
     const current = appearanceFingerprint(npc, { version: recorded.startsWith('a1:') ? 1 : 2 });
     return Boolean(current) && current !== recorded;
@@ -116,7 +117,7 @@ function portraitAppearanceChanged(npc = {}, shown = null) {
 function portraitSource(npc = {}, portraitAssets = {}) {
     const direct = npc?.portrait && typeof npc.portrait === 'object' ? npc.portrait : {};
     const asset = portraitAssets?.[npc?.id] && typeof portraitAssets[npc.id] === 'object' ? portraitAssets[npc.id] : {};
-    return plain(direct.dataUrl || direct.url || direct.src || asset.dataUrl || asset.url || asset.src);
+    return plain(portraitSrc(direct) || portraitSrc(asset));
 }
 
 export function dossierLifeBucket(npc = {}) {

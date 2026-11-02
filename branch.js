@@ -2,6 +2,7 @@ import * as branchCore from './branch-core.js';
 import { isTerminalNpcDeath, normalizeName, normalizeNpcRecord } from './core.js';
 import { parseQualifiedChatKey } from './identity.js';
 import { prunePortraitAssetsInPlace } from './storage.js';
+import { portraitHasImage } from './src/portrait-file.js';
 import { normalizeSocialGraph, removeNpcFromSocialGraph, purgeNpcStructuredReferences } from './social.js';
 import { NPC_REVERT_GROUPS, NPC_REVERT_LIST_FIELDS } from './src/fields/registry.js';
 
@@ -1466,7 +1467,7 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
     // user-owned asset before ordinary portrait GC runs.
     for (const npc of Array.isArray(restored.npcs) ? restored.npcs : []) {
         const asset = state?.portraitAssets?.[npc?.id];
-        if (!npc?.portrait?.dataUrl && asset?.dataUrl) npc.portrait = structuredClone(asset);
+        if (!portraitHasImage(npc?.portrait) && portraitHasImage(asset)) npc.portrait = structuredClone(asset);
     }
     enforceUserDismissals(restored, state?.userDismissedGroups);
     restored.lineage = currentLineage;

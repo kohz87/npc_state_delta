@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHost } from './vendor/story-block/testkit/index.js';
 import { createStorySuiteV2Adapter } from '../src/storysuite-v2.js';
-import { inspectNpcStateDataFile, dataFileExists, readNpcStateDataFile } from '../storage.js';
+import { inspectNpcStateDataFile, dataFileExists, readNpcStateDataFile, writeNpcStateDataFile } from '../storage.js';
 import { isEmptyScannerAnswer } from '../scanner-routing.js';
 import { fakeRoot } from './helpers/fake-dom.js';
 
@@ -68,6 +68,57 @@ test('a file that exists is fetched; without probe headers nothing is asked firs
     await inspectNpcStateDataFile({ path: PATH }, { fetchFn: plain.fetchFn });
     assert.deepEqual(plain.calls.map(call => call.url), [PATH], 'no verify call without probe headers');
     assert.equal(await dataFileExists(PATH, { fetchFn: plain.fetchFn, headers: null }), null, 'no headers, no POST');
+});
+
+// A chat's first save (no pointer yet) used to read the file it was about to create, to check its revision: a 404 per new chat.
+function writerServer() {
+    const files = new Map();
+    const calls = [];
+    const fetchFn = async (url, options = {}) => {
+        calls.push({ url, method: options.method ?? 'GET' });
+        if (url === '/api/files/verify') {
+            const { urls } = JSON.parse(options.body);
+            return { ok: true, status: 200, json: async () => Object.fromEntries(urls.map(path => [path, files.has(path)])) };
+        }
+        if (url === '/api/files/upload') {
+            const body = JSON.parse(options.body);
+            const path = `/user/files/${body.name}`;
+            files.set(path, Buffer.from(body.data, 'base64').toString('utf8'));
+            return { ok: true, status: 200, json: async () => ({ path }) };
+        }
+        return files.has(url) ? { ok: true, status: 200, text: async () => files.get(url) } : { ok: false, status: 404, text: async () => '' };
+    };
+    return { files, calls, fetchFn, gets: () => calls.filter(call => call.method === 'GET').map(call => call.url) };
+}
+
+test('a chat\'s first save asks whether its file exists and fetches nothing that is not there: no 404; the stored file is the same', async () => {
+    const s = writerServer();
+    const first = await writeNpcStateDataFile({ chatKey: 'chat:a.png:first', state: { value: 1 }, fetchFn: s.fetchFn, headers: HEADERS });
+    assert.equal(first.revision, 1);
+    assert.equal(s.calls[0].url, '/api/files/verify', 'asked first');
+    assert.equal(s.calls.findIndex(call => call.method === 'GET'), s.calls.findIndex(call => call.url === '/api/files/upload') + 1, 'the first fetch is the read-back after the upload');
+    assert.equal(s.files.size, 1);
+    assert.equal(JSON.parse(s.files.get(first.path)).revision, 1);
+    // The next save has a pointer: the file is read as before, no verify call.
+    const before = s.calls.length;
+    const second = await writeNpcStateDataFile({ chatKey: 'chat:a.png:first', state: { value: 2 }, pointer: first, fetchFn: s.fetchFn, headers: HEADERS });
+    assert.equal(second.revision, 2);
+    assert.equal(s.calls.slice(before).filter(call => call.url === '/api/files/verify').length, 0);
+    assert.equal(s.calls[before].method, 'GET', 'a pointered save reads the revision first');
+    // A file that is there without a pointer (another tab made it) is read, and the conflict is told as before.
+    await assert.rejects(writeNpcStateDataFile({ chatKey: 'chat:a.png:first', state: { value: 3 }, fetchFn: s.fetchFn, headers: HEADERS, continuousRetry: false }), /already has revision 2/);
+    // No request headers (a caller that has none): nothing is asked first, the file is read as before.
+    const plain = writerServer();
+    await writeNpcStateDataFile({ chatKey: 'chat:b.png:plain', state: { value: 1 }, fetchFn: plain.fetchFn });
+    assert.equal(plain.calls.filter(call => call.url === '/api/files/verify').length, 0);
+    assert.equal(plain.calls[0].method, 'GET');
+    // A server that cannot say: the file is fetched as before and the save still lands.
+    const odd = writerServer();
+    const inner = odd.fetchFn;
+    const noVerify = (url, options) => (url === '/api/files/verify' ? Promise.resolve({ ok: false, status: 404, json: async () => ({}) }) : inner(url, options));
+    const saved = await writeNpcStateDataFile({ chatKey: 'chat:c.png:odd', state: { value: 1 }, fetchFn: noVerify, headers: HEADERS });
+    assert.equal(saved.revision, 1);
+    assert.equal(odd.files.size, 1);
 });
 
 test('an empty scanner answer is told apart from other failures', () => {
