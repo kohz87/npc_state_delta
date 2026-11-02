@@ -706,8 +706,9 @@ export function createStorySuiteV2Adapter({
             const action = event.target?.closest?.('[data-npc-state-delta-action]')?.dataset?.npcStateDeltaAction;
             if (action === 'scan') return void runtime()?.scan?.();
             if (action === 'add') return void runtime()?.addNpc?.();
-            // A dossier row opens that dossier (v1's Dossiers tab did the same).
-            const row = event.target?.closest?.('.npc-state-delta-story-row');
+            // A dossier row opens that dossier (v1's Dossiers tab did the same); so does a World → People here row, anywhere on it.
+            const row = event.target?.closest?.('.npc-state-delta-story-row')
+                ?? event.target?.closest?.('.npc-state-delta-world-people[data-npc-id]');
             if (row?.dataset?.npcId) runtime()?.openDossier?.(row.dataset.npcId);
         });
         // The search box filters the list in place: only the list is drawn again, so the box keeps its focus.
@@ -987,8 +988,10 @@ export function createStorySuiteV2Adapter({
     // Delta's own present-cast cards (the same markup as v1's Present NPCs tab; the cards' text is set by fillPresentCast),
     // each with its NPC's stage on the name line, its meters inside the row and its notes under it. Then the NPCs with meters
     // but no card (a block of their own), then the dossier list (`list`). `track: false` (the game view's screen, the World
-    // screen) leaves castEl, the Story panel's tab pane, alone.
-    function renderCast(el, { track = true, cast = true, list = false } = {}) {
+    // screen) leaves castEl, the Story panel's tab pane, alone. `people` (only Story Director's World → Now, the page API)
+    // draws "People here": portrait, name, standing chip and the description; the Look and field lines, the Next line and the
+    // notes (opened and hidden) stay in the dossier and on the Dossiers screen.
+    function renderCast(el, { track = true, cast = true, list = false, people = false } = {}) {
         if (!el) return;
         if (track) castEl = el;
         bindCastActions(el);
@@ -1030,6 +1033,9 @@ export function createStorySuiteV2Adapter({
             for (const cell of el.querySelectorAll?.('.npc-state-delta-present-cell') ?? []) {
                 cell.classList?.add?.('npc-state-delta-world-cell');
                 for (const node of [...(cell.children ?? [])]) if (node.classList?.contains?.('npc-state-delta-present-side')) node.remove?.();
+                if (!people) continue;
+                cell.classList?.add?.('npc-state-delta-world-people');
+                for (const now of [...(cell.querySelectorAll?.('.npc-state-delta-present-now') ?? [])]) now.remove?.();
             }
         }
         if (meters && cast) {
@@ -1049,6 +1055,7 @@ export function createStorySuiteV2Adapter({
                     bars.append(...barNodesOf(owner, entry, defs));
                     text.append(bars);
                 }
+                if (people) continue;
                 for (const line of noteNodes(owner, entry, { card: true })) cell.append(line);
             }
             const apart = world ? [] : meters.shown.filter(entry => !used.has(entry));
@@ -1123,7 +1130,7 @@ export function createStorySuiteV2Adapter({
         render(el, { slot = null } = {}) {
             if (!el || !pageApi.available()) return 0;
             try {
-                renderCast(el, { track: false });
+                renderCast(el, { track: false, people: true });
                 return fillSlots(el, slot);
             } catch (error) {
                 warn('Story Suite v2 World cast failed', error);
@@ -1408,6 +1415,14 @@ export function createStorySuiteV2Adapter({
             chatKey: () => String(runtime()?.chatKey?.() ?? ''),
             readState: () => runtime()?.getState?.() ?? { npcs: [] },
             started: () => runtime()?.timelineStarted?.() === true,
+            // Whether Delta has loaded the open chat's state, and its load: the participant reads nothing before it (a reload's recovery comes early).
+            ready: () => runtime()?.stateReady?.() === true,
+            load: () => runtime()?.ensureFresh?.(),
+            // The state as Delta keeps it once installed (the participant's look after an install compares it so).
+            normalize: state => (typeof runtime()?.normalizeState === 'function' ? runtime().normalizeState(state) : state),
+            // A branch waiting for its parent's dossiers is left to Delta's branch inheritance (asked to run now) before a line is minted.
+            branchPending: () => runtime()?.branchPending?.() === true,
+            inheritBranch: () => runtime()?.inheritBranch?.(),
             installState: state => runtime().installState(state),
             writeTimeline: block => runtime().writeTimeline(block),
             busy: () => runtime()?.scanActive?.() === true,

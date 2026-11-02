@@ -9,6 +9,8 @@
 //     identity,      { map: { np_id: { nativeKey, archived, since } } }: the np_ of every dossier, archived (never reused) when its dossier goes
 //     reserved,      [np_id]: every np_ ever issued in this lineage, including the ones a restore took back (inactive, never issued again)
 //     applied,       { event id: { nativeKey, at } }: the confirmed deaths applied
+//     former,        [lineage]: earlier story lines of this same chat whose checkpoints it still accepts (written only when there is one: a
+//                    chat that never changed its line keeps the block it always had)
 //   }
 //
 // Pure. The block is plain JSON and is part of every checkpoint (restoring puts the saved map and deaths back; `reserved` is merged with the
@@ -21,6 +23,7 @@ export const TIMELINE_VERSION = 1;
 export const LINEAGE_ID = /^lg_[0-9a-z]{8}$/;
 const BASE36 = '0123456789abcdefghijklmnopqrstuvwxyz';
 const NP_ID = /^np_[0-9a-z]{8}$/;
+const FORMER_MAX = 16;
 
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -39,13 +42,19 @@ function defaultRandom() {
 
 /** The block of a state as stored, checked: a whole block for anything, with `lineage` null when there is none yet. */
 export function cleanTimeline(raw) {
-    const block = { v: TIMELINE_VERSION, lineage: null, identity: cleanIdentity(null), reserved: [], applied: {} };
+    const block = { v: TIMELINE_VERSION, lineage: null, identity: cleanIdentity(null), reserved: [], applied: {}, former: [] };
     if (!isRecord(raw)) return block;
     if (typeof raw.lineage === 'string' && LINEAGE_ID.test(raw.lineage)) block.lineage = raw.lineage;
     block.identity = cleanIdentity(raw.identity);
     block.reserved = [...new Set([...(Array.isArray(raw.reserved) ? raw.reserved.filter(id => typeof id === 'string' && NP_ID.test(id)) : []), ...Object.keys(block.identity.map)])].sort();
     block.applied = cleanApplied(raw.applied);
+    block.former = formerOf(raw.former, block.lineage);
     return block;
+}
+
+/** Former lineages as kept: well formed, not the line itself, each once, sorted, at most FORMER_MAX. */
+function formerOf(list, lineage) {
+    return [...new Set((Array.isArray(list) ? list : []).filter(id => typeof id === 'string' && LINEAGE_ID.test(id) && id !== lineage))].sort().slice(0, FORMER_MAX);
 }
 
 /** The block as it is written into the state: no derived index. */
@@ -56,6 +65,7 @@ export function storedTimeline(block) {
         identity: { map: Object.fromEntries(Object.entries(block.identity.map).map(([id, entry]) => [id, { nativeKey: entry.nativeKey, archived: entry.archived === true, since: entry.since }])) },
         reserved: [...block.reserved].sort(),
         applied: Object.fromEntries(Object.entries(block.applied).map(([event, entry]) => [event, { nativeKey: entry.nativeKey, at: entry.at }])),
+        ...(formerOf(block.former, block.lineage).length ? { former: formerOf(block.former, block.lineage) } : {}),
     };
 }
 
@@ -70,7 +80,10 @@ export function restoredState(saved, live) {
     const state = JSON.parse(JSON.stringify(saved ?? {}));
     const then = cleanTimeline(state.timeline);
     const now = cleanTimeline(live?.timeline);
-    then.lineage = now.lineage ?? then.lineage;
+    // A checkpoint of a former line of this chat, installed in the line it has now, leaves that line recorded as a former one.
+    const lineage = now.lineage ?? then.lineage;
+    then.former = formerOf([...then.former, ...now.former, ...(then.lineage && then.lineage !== lineage ? [then.lineage] : [])], lineage);
+    then.lineage = lineage;
     then.reserved = [...new Set([...then.reserved, ...now.reserved, ...Object.keys(now.identity.map)])].sort();
     state.timeline = storedTimeline(then);
     return state;

@@ -1093,6 +1093,16 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
                 if (entry.phase === 'prepared') {
                     raise('A native change is finishing; every part must agree before the story goes on.');
                     const done = await finishNative(archive.get(entry.id));
+                    if (done.ok === false && done.unprepared && entry.kind === 'native-mutation') {
+                        // The participant has no record of the change it published (the page closed before it was activated, and the
+                        // participant's own record of it is gone): it never switched to it, so nothing stands on it. The journal lets it go,
+                        // the barrier comes down below, the reader is told, and the participant publishes what it holds now as a new change.
+                        // (A native event, a death, is never let go: it stays held as before.)
+                        archive.patch(entry.id, { phase: 'aborted', why: `the participant ${entry.participant} has no record of the change (${done.message})` });
+                        const name = registry.module?.(entry.participant)?.name ?? entry.participant;
+                        try { problem?.({ module: entry.participant, code: 'NATIVE_ABORTED', toast: true, message: `A change ${name} was making when the page closed could not be finished; the story goes on from its current state.` }); } catch { /* a listener is not the timeline's business */ }
+                        continue;
+                    }
                     if (done.ok === false && done.code !== 'CONFLICT') return done;
                 }
             }
@@ -1276,7 +1286,8 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
             const done = entry.kind === 'native-event'
                 ? await callParticipant(module, 'applyEvent', { event: entry.event, nativeKey: entry.nativeKey, kind: entry.eventKind })
                 : await callParticipant(module, 'activate', { return: entry.id, prepared: entry.preparedId });
-            if (!done.ok) return done;
+            // (`unprepared`: the participant has nothing prepared under that id, which `recover` may let go for a native mutation)
+            if (!done.ok) return done.code === 'NOT_FOUND' && entry.kind === 'native-mutation' ? { ...done, unprepared: true } : done;
             if (entry.kind === 'native-event' && done.event !== entry.event) return fail('CONFLICT', 'The participant acknowledged another event.');
             answer = done;
         }
