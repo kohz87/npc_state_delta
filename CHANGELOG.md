@@ -1,3 +1,15 @@
+## 1.7.1
+
+- **A chat no longer gets stuck when the page closes mid-save.** Closing or reloading the page at the instant Delta was
+  saving a change (with a Key person pinned this happens a few times each reply) could leave the chat refusing every
+  reply with no way out. Delta now waits for the chat's dossiers to load before it finishes such a change. With Story
+  Block 2.16.1 a chat already stuck heals when it opens, and swipes, deletes and save points back past that point work.
+- **"Return here" keeps the dossiers.** Going back to a save point often opened the branch with Delta's dossiers empty.
+  A save still running when the chat switches now stops, and a branch waits for its parent's dossiers instead of
+  starting blank.
+- **World → Now shows only who is here:** portrait, name, standing and one line about them; tap to open the dossier.
+  The look, the next stage, custom fields and hidden notes stay in the dossier.
+
 ## 1.7.0
 
 - **Cast portraits are kept as their own files.** A portrait of a person met from a pack's cast is saved once in

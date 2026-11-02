@@ -1521,7 +1521,12 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
             return { parts: built.parts, fit: built.fit, own: built.own };
         },
         /** Adds { module?, code?, message, index?, line? } to the Problems list (and the console). */
-        report: entry => problem(entry),
+        // (`toast`: told at once too, not only listed)
+        report: entry => {
+            const item = problem(entry);
+            if (entry?.toast === true) { try { notify?.(item.message, item.module); } catch { /* a missing toastr is not an error */ } }
+            return item;
+        },
         /** The Problems list, oldest first; `moduleId` narrows it (null: the host's own). */
         problems: moduleId => problemLog.filter(item => moduleId === undefined || item.module === moduleId).map(item => ({ ...item })),
         clearProblems: () => { problemLog.length = 0; },
