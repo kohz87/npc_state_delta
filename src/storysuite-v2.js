@@ -78,6 +78,8 @@ export const PAGE_API = 'NPCStateDeltaCast';
 export const PAGE_SLOT_CLASS = 'npc-state-delta-v2-slot';
 // Story Block's query for a pack portrait's image URL (read only): packs.portrait({ pack, file }) → a safe URL or null.
 const PORTRAIT_QUERY = 'packs.portrait';
+// Story Block 2.18.0's query for a pack cast member's signature gear line (read only): packs.castGear({ name }) → { name, line: "Gear: A, B", items } or null.
+const CAST_GEAR_QUERY = 'packs.castGear';
 // Story Director's reader-only pin for key people (its feature switch is `story-director.key-people`).
 const KEY_PIN_COMMAND = 'keypeople.pin';
 const KEY_PEOPLE_FEATURE = 'story-director.key-people';
@@ -798,6 +800,14 @@ export function createStorySuiteV2Adapter({
     function packPortraitUrl(pack, file) {
         if (!hosted || typeof sdkRef?.query !== 'function' || !pack || !file) return null;
         try { return safeImageUrl(sdkRef.query(PORTRAIT_QUERY, { pack, file })); } catch { return null; }
+    }
+    // A pack cast member's one "Gear: A, B" line (`packs.castGear`), or '' (no host, an older Story Block without the query, or it answers null).
+    function castGearLine(name) {
+        if (!hosted || typeof sdkRef?.query !== 'function' || !name) return '';
+        try {
+            const line = sdkRef.query(CAST_GEAR_QUERY, { name })?.line;
+            return typeof line === 'string' ? line.replace(/\s+/g, ' ').trim() : '';
+        } catch { return ''; }
     }
     // Whether Story Director offers the reader's pin (`keypeople.pin`, registered by a ready module, its feature not switched off).
     // Delta only ever asks; Story Director's own command writes its own state.
@@ -1975,6 +1985,8 @@ export function createStorySuiteV2Adapter({
         packNames,
         /** While hosted: a pack portrait's safe image URL, or null. */
         packPortraitUrl,
+        /** While hosted: a pack cast member's "Gear: A, B" line for the narrator's entry, or ''. */
+        castGearLine,
         /** While hosted: the "Scan after every reply" switch (index.js asks before each automatic scan). */
         scanEveryReply: () => part.featureOn(FEATURE_SCAN_EVERY_REPLY) !== false,
         /**
