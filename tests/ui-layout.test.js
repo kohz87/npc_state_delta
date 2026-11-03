@@ -190,7 +190,8 @@ test('dossier exposes species/race, age, form-owned appearance, and portrait gen
 test('scanner uses current-exchange auto context and keeps wider history for manual scans', () => {
     assert.match(fs.readFileSync(path.join(root, 'src', 'transcript.js'), 'utf8'), /export function currentExchangeTranscript/);
     assert.match(index, /const fullWindowScan = Boolean\(!manual && settings\.fullScanEveryTurn\)/);
-    assert.match(index, /\(manual \|\| fullWindowScan\) \? recentTranscript\(settings\.scanDepth\) : currentTranscript/);
+    assert.match(index, /\(manual \|\| fullWindowScan\) \? recentTranscript\(settings\.scanDepth\) : \(skippedWindow\?\.transcript \|\| currentTranscript\)/);
+    assert.match(fs.readFileSync(path.join(root, 'src', 'transcript.js'), 'utf8'), /export function skippedExchangesWindow/);
     assert.match(fs.readFileSync(path.join(root, 'src', 'scanner-request.js'), 'utf8'), /SCAN_RESPONSE_LENGTH = 1800/);
     assert.match(fs.readFileSync(path.join(root, 'src', 'scanner-request.js'), 'utf8'), /FULL_SCAN_RESPONSE_LENGTH = 3200/);
     assert.match(index, /fullWindowScan \? FULL_SCAN_RESPONSE_LENGTH : SCAN_RESPONSE_LENGTH/);

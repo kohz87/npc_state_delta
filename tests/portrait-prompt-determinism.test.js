@@ -241,3 +241,30 @@ test('hybrid and tags portrait formats are byte-identical to the base branch', (
     assert.equal(buildNpcPortraitPrompts(npc, { ...options, format: 'tags' }).positive,
         'fox-beastfolk, female, apparent age 21, red hair, long hair, russet fox ears, itinerant nun, patched ash-grey habit and a flame-cross pendant, Wary, a ruined chapel, waist-up portrait, soft rim light, Soft painterly style');
 });
+
+const prose = (npc, extra = {}) => buildNpcPortraitPrompts(npc, { ...NATURAL_OPTIONS, ...extra }).positive;
+
+test('natural portrait prose keeps a boy or a girl a boy or a girl', () => {
+    assert.match(prose({ name: 'Pip', gender: 'boy', apparentAge: '9', appearance: 'freckles' }), /^A portrait of a 9-year-old boy with freckles\./);
+    assert.match(prose({ name: 'Wren', gender: 'girl', apparentAge: '12', appearance: 'braids' }), /^A portrait of a 12-year-old girl with braids\./);
+    assert.match(prose({ name: 'Tam', gender: 'male', apparentAge: '14', appearance: 'freckles' }), /^A portrait of a 14-year-old boy with freckles\./, 'a numeric age under 18 with male is a boy');
+    assert.match(prose({ name: 'Ila', gender: 'female', apparentAge: '10-12', appearance: 'braids' }), /^A portrait of a 10-12-year-old girl with braids\./);
+    assert.match(prose({ name: 'Orin', gender: 'male', apparentAge: '18', appearance: 'freckles' }), /^A portrait of an 18-year-old man with freckles\./, '18 is an adult');
+    assert.doesNotMatch(prose({ name: 'Pip', gender: 'boy', apparentAge: '9' }), /\bman\b/);
+});
+
+test('natural portrait prose drops a leading "He/She/They has" and puts a bare adjective on the subject', () => {
+    assert.match(prose({ name: 'Rook', gender: 'male', apparentAge: '~80', species: 'Human', appearance: 'He has a white beard. Scar over left eye.' }), /^A portrait of a roughly 80-year-old Human man with a white beard and scar over left eye\./);
+    assert.match(prose({ name: 'Mae', gender: 'female', appearance: 'She has green eyes' }), /^A portrait of a woman with green eyes\./);
+    assert.match(prose({ name: 'Ola', appearance: 'They have a crooked nose' }), /^A portrait of a person with a crooked nose\./);
+    assert.match(prose({ name: 'Bram', gender: 'male', appearance: 'Burly' }), /^A portrait of a burly man\./);
+    assert.match(prose({ name: 'Bram', gender: 'male', apparentAge: '40', appearance: 'Burly; a scarred jaw' }), /^A portrait of a 40-year-old burly man with a scarred jaw\./);
+    assert.doesNotMatch(prose({ name: 'Bram', gender: 'male', appearance: 'Burly' }), /with burly/);
+});
+
+test('natural portrait prose picks a or an by sound', () => {
+    assert.match(prose({ name: 'X', species: 'unicorn-kin', gender: 'female', appearance: 'Silver horn' }), /^A portrait of a unicorn-kin woman with silver horn\./);
+    assert.match(prose({ name: 'X', species: 'elf', gender: 'female' }), /^A portrait of an elf woman\./);
+    assert.match(prose({ name: 'X', species: 'one-eyed ogre', gender: 'male' }), /^A portrait of a one-eyed ogre man\./);
+    assert.match(prose({ name: 'X', species: 'Umbral wraith', gender: 'male' }), /^A portrait of an Umbral wraith man\./);
+});

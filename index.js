@@ -30,6 +30,7 @@ import {
     recentUserDevelopmentContext,
     currentExchangeUserDevelopmentContext,
     currentExchangeTranscript,
+    skippedExchangesWindow,
     currentExchangeProse,
     currentExchangeBodies,
     storyDayAt,
@@ -4394,10 +4395,19 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
     const currentTranscript = currentExchangeTranscript(messageId);
     const currentProse = currentExchangeProse(messageId);
     const fullWindowScan = Boolean(!manual && settings.fullScanEveryTurn);
-    const transcript = (manual || fullWindowScan) ? recentTranscript(settings.scanDepth) : currentTranscript;
+    // (lean) A scan reads every exchange since the last scan, not only this reply: the replies the local check skipped
+    // are in it (within the Scan context window, oldest trimmed first). Nothing skipped: the current exchange alone.
+    const skippedWindow = !manual && !fullWindowScan && Number.isInteger(messageId) && !narrationCaptures.has(narrationCaptureKey(scanChatKey, messageId))
+        ? skippedExchangesWindow(messageId, {
+            afterId: getChatState(scanChatKey)?.lastScannedMessageId,
+            replies: getChatState(scanChatKey)?.assistantSinceScan,
+            limit: settings.scanDepth,
+        })
+        : null;
+    const transcript = (manual || fullWindowScan) ? recentTranscript(settings.scanDepth) : (skippedWindow?.transcript || currentTranscript);
     const userDevelopmentContext = (manual || fullWindowScan)
         ? recentUserDevelopmentContext(settings.scanDepth, { messageIds: true })
-        : currentExchangeUserDevelopmentContext(messageId);
+        : (skippedWindow?.userDevelopmentContext ?? currentExchangeUserDevelopmentContext(messageId));
     if (!transcript) {
         if (manual) globalThis.toastr?.warning?.('NPC State Delta: no story text to scan yet.');
         return false;
@@ -7933,6 +7943,7 @@ function replyNamesSomeone(state, messageId) {
             texts: currentExchangeBodies(messageId),
             roster: [...(state?.npcs || []), ...(state?.candidates || [])],
             ignore: [ctx.name1, ctx.name2],
+            present: scanScenePresent(messageId) || [],
         });
     } catch { return true; }
 }

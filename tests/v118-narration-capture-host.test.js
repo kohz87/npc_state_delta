@@ -439,11 +439,12 @@ test('v1.1.8 a capture merges on the first reply even when Scan every is not due
         h.equal(h.scannerCalls().length, 0, 'no scanner request');
         h.equal(h.status().used, 1);
         h.equal(h.runtime.getState().assistantSinceScan, 0, 'the capture counts as the scan for cadence');
-        // Without a block the cadence applies again: reply 1 of 3 does not scan.
+        // Without a block the local check applies again: Yunyun is in the scene now, so even this quiet reply scans
+        // (a tracked person present is never skipped).
         await h.turn('We walk on.', 'They walk down the road in silence.');
-        h.equal(h.scannerCalls().length, 0, 'an armed reply without a block waits for the cadence');
+        h.equal(h.scannerCalls().length, 1, 'an armed reply without a block, with a tracked NPC in the scene, scans');
         h.equal(h.status().missing, 1, 'the missing block is counted');
-        h.equal(h.runtime.getState().assistantSinceScan, 1);
+        h.equal(h.runtime.getState().assistantSinceScan, 0);
     });
 });
 

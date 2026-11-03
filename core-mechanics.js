@@ -3760,8 +3760,19 @@ function portraitProseClean(value) {
 
 function portraitProseArticle(phrase) {
     const text = String(phrase || '').trim();
-    if (/^(?:a|an|the|his|her|their|its|one|some)\b/i.test(text)) return text;
-    return (/^(?:8\d?|11|18)(?!\d)/.test(text) || /^[aeiou]/i.test(text) ? 'an ' : 'a ') + text;
+    if (/^(?:a|an|the|his|her|their|its|one|some)(?=\s|$)/i.test(text)) return text;
+    // By sound, not by letter: "a unicorn-kin", "a one-eyed man", "an 18-year-old", "an hour-old".
+    const vowelSound = /^(?:8\d?|11|18)(?!\d)/.test(text)
+        || (/^[aeiou]/i.test(text) && !/^(?:uni|use|usu|uti|ute|uro|ura|eu|one|once|ubiq|ufo)/i.test(text))
+        || /^(?:hour|honest|honou?r|heir)/i.test(text);
+    return (vowelSound ? 'an ' : 'a ') + text;
+}
+
+// A clause that is only an adjective ("burly", "tall") describes the subject itself: "a burly man", never "with burly".
+const PORTRAIT_ADJECTIVE = /^(?:tall|short|slim|slender|thin|lean|stout|stocky|burly|brawny|muscular|pale|dark|fair|tan|young|old|elderly|ancient|small|large|big|huge|tiny|petite|plump|fat|heavy|lithe|lanky|wiry|gaunt|frail|sturdy|rugged|handsome|beautiful|pretty|plain|striking|androgynous|scrawny|willowy|curvy|chubby|bald|blind|weathered|broad-shouldered|[a-z]+(?:ed|ful|ous|ish|ive|ly))$/i;
+function portraitProseIsAdjective(item) {
+    const text = String(item || '').trim();
+    return /^[A-Za-z][A-Za-z-]*$/.test(text) && PORTRAIT_ADJECTIVE.test(text);
 }
 
 function portraitProseList(items) {
@@ -3771,7 +3782,7 @@ function portraitProseList(items) {
     return list.slice(0, -1).join(inner ? '; ' : ', ') + (inner ? ', and ' : ' and ') + list[list.length - 1];
 }
 
-function buildNaturalPortraitProse({ name, gender, species, visualAge, role, appearance, mood, location, composition, extraPositive, stylePositive }) {
+function buildNaturalPortraitProse({ name, gender, rawGender, species, visualAge, role, appearance, mood, location, composition, extraPositive, stylePositive }) {
     const noun = gender === 'male' ? 'man' : gender === 'female' ? 'woman' : 'person';
     const subject = gender === 'male' ? 'He' : gender === 'female' ? 'She' : (name || 'The person');
     const possessive = gender === 'male' ? 'His' : gender === 'female' ? 'Her' : (name || 'The person') + "'s";
@@ -3780,9 +3791,16 @@ function buildNaturalPortraitProse({ name, gender, species, visualAge, role, app
     const ageText = portraitProseClean(visualAge).replace(/^~\s*/, '');
     const numericAge = /^\d+(?:\s*[-–]\s*\d+)?$/.test(ageText);
     const speciesText = portraitProseClean(species);
-    const speciesHasNoun = new RegExp('\\b(?:' + noun + '|male|female|man|woman|boy|girl|person)\\b', 'i').test(speciesText);
-    const head = [numericAge ? (approximate ? 'roughly ' : '') + ageText.replace(/\s+/g, '') + '-year-old' : '', speciesText, speciesHasNoun ? '' : noun].filter(Boolean).join(' ');
-    const core = appearance.core.map(item => portraitProseLower(item.replace(/^(?:has|have|having|with)\s+/i, '')));
+    // A boy or a girl stays one: the gender word said so, or the age is under 18 with a male or female gender.
+    const youngest = numericAge ? Math.min(...ageText.match(/\d+/g).map(Number)) : Infinity;
+    const young = gender && (/^(?:boy|girl)$/.test(normalizeName(rawGender)) || youngest < 18);
+    const nounWord = young ? (gender === 'male' ? 'boy' : 'girl') : noun;
+    const speciesHasNoun = new RegExp('\\b(?:' + nounWord + '|male|female|man|woman|boy|girl|person)\\b', 'i').test(speciesText);
+    const stripped = appearance.core.map(item => portraitProseLower(item.replace(/^(?:(?:he|she|they)\s+(?:has|have)|has|have|having|with)\s+/i, '')));
+    const speciesWords = new Set(normalizeName(speciesText).split(' '));
+    const adjectives = stripped.filter(item => portraitProseIsAdjective(item) && !speciesWords.has(normalizeName(item)));
+    const core = stripped.filter(item => !adjectives.includes(item));
+    const head = [numericAge ? (approximate ? 'roughly ' : '') + ageText.replace(/\s+/g, '') + '-year-old' : '', ...adjectives, speciesText, speciesHasNoun ? '' : nounWord].filter(Boolean).join(' ');
     const clothing = appearance.clothing.map(item => portraitProseLower(item));
     const coreKeys = new Set(core.map(portraitPartKey));
     const clothes = clothing.filter(item => !coreKeys.has(portraitPartKey(item)));
@@ -3838,6 +3856,7 @@ export function buildNpcPortraitPrompts(rawNpc = {}, options = {}) {
         positive = buildNaturalPortraitProse({
             name: cleanText(npc.name, 120),
             gender,
+            rawGender: cleanText(npc.gender ?? npc.sex, 40),
             species,
             visualAge,
             role,
@@ -6418,10 +6437,10 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
         return references ? truncateInjectionText(['NPC STATE DELTA DOSSIER. Treat these as established story facts; never mention the dossier.', references].join('\n'), budgetChars) : '';
     }
     const headerFor = () => [
-        'NPC STATE DELTA DOSSIER. Only confirmed-present NPCs; established facts; never mention it.',
-        'Personality sets identity; behavior profile, speech and mannerisms shape response and expression; goals, duties, morals, bonds and CURRENT mood/status decide behavior. Keep each Speech\'s wording, cadence and habits.',
-        'Player relationship only biases openness and attention; high scores never mean obedience, clinginess, jealousy, tsundere behavior or cruelty to others. Mood or player-specific behavior is not identity.',
-        relevant.some(lowPlayerStanding) && 'LOW SCORES: the player is not special to them; no obligation or fixation.',
+        'NPC STATE DELTA DOSSIER. Only confirmed-present NPCs; established facts; never mention it or any numeric value.',
+        'Personality sets identity; behavior profile, speech and mannerisms shape response and expression; goals, duties, morals, bonds and CURRENT mood/status decide behavior. Keep each Speech\'s wording, cadence and habits; do not flatten distinct voices.',
+        'Player relationship only biases openness and attention; high scores never mean obedience, clinginess, jealousy, tsundere behavior or cruelty to others. Mood or player-specific behavior is not identity; durable identity changes gradually unless a time skip.',
+        relevant.some(lowPlayerStanding) && 'LOW SCORES: the player is not special to them; no obligation, fixation or "only them" thinking.',
         relevant.some(calledIn) && 'Exception: NPCs marked "named by player" are not yet confirmed on-screen; use their dossier if they appear.',
     ].filter(Boolean).join('\n');
 

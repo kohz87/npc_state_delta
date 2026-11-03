@@ -100,11 +100,43 @@ test('lean: a quiet reply with no names makes no scanner call; a new name does',
         await h.turn('Who is that?', 'Yunyun steps out of the mist and waves.');
         h.equal(h.scannerCalls().length, 1, 'a new name: one call');
         h.equal(h.runtime.getState().assistantSinceScan, 0, 'the scan resets the count');
-        // A tracked NPC named again scans; a quiet reply after it does not.
+        // A tracked NPC named again scans; so does a quiet reply while she is in the scene ("She sighs" names no one).
         await h.turn('Go on.', 'Yunyun nods and says nothing.');
         h.equal(h.scannerCalls().length, 2, 'a tracked NPC named: a call');
-        await h.turn('We rest.', 'They rest by the fire in silence.');
-        h.equal(h.scannerCalls().length, 2, 'quiet again: no call');
+        await h.turn('We rest.', 'She rests by the fire in silence.');
+        h.equal(h.scannerCalls().length, 3, 'a tracked NPC is in the scene: a quiet reply scans');
+    });
+});
+
+test('lean: a scan reads every reply since the last scan, the ones the local check skipped included', () => {
+    runScenario('skipped-replies-read', async h => {
+        h.settings.scanEvery = 5;
+        h.settings.scanDepth = 6;
+        await h.turn('We walk on.', 'They walk down the road in silence, past the skipped-one milestone.');
+        await h.turn('We walk on.', 'The wind is cold and the road is skipped-two long.');
+        h.equal(h.scannerCalls().length, 0, 'two quiet replies, no tracked NPC in the scene: no call');
+        await h.turn('Who is that?', 'Yunyun steps out of the mist and waves.');
+        const calls = h.scannerCalls();
+        h.equal(calls.length, 1, 'the new name scans');
+        const prompt = String(calls[0].prompt || '');
+        h.check(prompt.includes('skipped-one') && prompt.includes('skipped-two') && prompt.includes('Yunyun steps out'), 'the scan reads the skipped replies and the current one');
+        // The next scan with nothing skipped reads the current exchange alone.
+        await h.turn('Go on.', 'Yunyun nods and says nothing.');
+        const last = String(h.scannerCalls()[1].prompt || '');
+        h.check(last.includes('Yunyun nods') && !last.includes('skipped-one'), 'nothing skipped: the current exchange only');
+    });
+});
+
+test('lean: the skipped replies a scan reads stay within the Scan context window, oldest trimmed first', () => {
+    runScenario('skipped-window', async h => {
+        h.settings.scanEvery = 30;
+        h.settings.scanDepth = 4;
+        for (let i = 1; i <= 4; i += 1) await h.turn('We walk on.', `The road goes on, mile ${i} of skipped-${i}.`);
+        h.equal(h.scannerCalls().length, 0, 'quiet replies: no call');
+        await h.turn('Who is that?', 'Yunyun steps out of the mist and waves.');
+        const prompt = String(h.scannerCalls()[0].prompt || '');
+        h.check(prompt.includes('Yunyun steps out') && prompt.includes('skipped-4'), 'the newest are kept');
+        h.check(!prompt.includes('skipped-1') && !prompt.includes('skipped-2'), 'the oldest are trimmed to the window of 4 messages');
     });
 });
 
@@ -132,12 +164,14 @@ test('lean: autoScanDue lets a reply that names someone scan at once; a quiet re
     assert.equal(due(5), true, 'the safety scan');
     assert.equal(due(1, { replyChanges: true }), true, 'a name in the reply');
     assert.equal(due(1, { replyChanges: true, autoScan: false }), false, 'Auto scan off stays off');
-    assert.equal(due(1, { everyReply: false, replyChanges: true }), false, 'Story Suite "every reply" off keeps its own cadence');
+    assert.equal(due(1, { everyReply: false, replyChanges: true }), true, 'Story Suite "every reply" off: a reply the local check flags still scans');
+    assert.equal(due(1, { everyReply: false }), false, 'Story Suite "every reply" off: a quiet reply keeps its own cadence');
+    assert.equal(due(5, { everyReply: false }), true, 'Story Suite "every reply" off: the safety scan');
 });
 
 test('lean: the local check finds a new name, a tracked NPC or an NPC State line, and nothing in quiet prose', () => {
     const roster = [{ id: 'a', name: 'Yunyun Aldis', aliases: ['Yun'], role: 'adventurer' }];
-    const check = text => replyMayChangeDossiers({ texts: [text], roster, ignore: ['Ari', 'Narrator'] });
+    const check = (text, people = roster, ignore = ['Ari', 'Narrator']) => replyMayChangeDossiers({ texts: [text], roster: people, ignore, present: ignore.includes('Mira Vale') ? ['Mira Vale'] : [] });
     assert.equal(check('They walk down the road in silence. The wind is cold.'), false);
     assert.equal(check('Ari looks at the Narrator and sighs. "Well," he says.'), false, 'the player and the character are not new names');
     assert.equal(check('Rain falls on the road. The rain keeps falling.'), false, 'a capitalised common word that also shows in lower case');
@@ -146,10 +180,21 @@ test('lean: the local check finds a new name, a tracked NPC or an NPC State line
     assert.equal(check('Kael nods and leaves.'), true, 'a new name opening a sentence');
     assert.equal(check('Yun waves.'), true, 'a tracked NPC by alias');
     assert.equal(check('NPC State: Mira is wary.'), true, 'an NPC State line');
+    assert.equal(check('Rain falls on the road. The rain keeps falling.', [{ id: 'm', name: 'Mira Vale', aliases: [], present: true }]), true, 'a tracked NPC is in the scene: "She sighs" scans');
+    assert.equal(check('She sighs and looks away.', [{ id: 'm', name: 'Mira Vale', aliases: [], present: false }]), false, 'a tracked NPC who is away: a quiet scene');
+    assert.equal(check('She sighs and looks away.', [{ id: 'm', name: 'Mira Vale', aliases: [], present: false, archived: false }], ['Mira Vale']), true, 'the scene lists her as present');
+    assert.equal(check('She sighs and looks away.', [{ id: 'm', name: 'Mira Vale', aliases: [], present: true, archived: true }]), false, 'an archived NPC is not in the scene');
+    assert.equal(check('A boy runs up. "I am Bo," he says.'), true, 'a two-letter name');
+    assert.equal(check('Will smiled. He will not be moved.'), true, 'a name that is also a common word, before a person verb');
+    assert.equal(check('美咲という若い女性が微笑んで、こちらへ歩いてきた。'), true, 'a CJK name');
+    assert.equal(check('ミラが扉を開けた。'), true, 'a katakana name');
+    assert.equal(check('雨が降り続いている。'), false, 'quiet CJK prose');
+    assert.equal(check('في الطريق مطر', ), true, 'text in a script without capitals is looked at');
+    assert.equal(check('美咲がこちらを見た。', [{ id: 'c', name: '美咲', aliases: [], present: false }]), true, 'a tracked CJK name');
     assert.equal(check(''), false);
 });
 
-test('lean: the dossier text is short: preamble and rubric about 600 characters, and every field label the narrator reads is kept', () => {
+test('lean: the dossier text is short: preamble and rubric about 750 characters, and every field label the narrator reads is kept', () => {
     const one = buildInjection([{
         id: 'n1', name: 'Vrena', present: true, role: 'Guild clerk', species: 'Human', gender: 'female', age: '30', appearance: 'Slender, dark braid.',
         personality: 'Practical.', speech: 'Clipped.', mannerisms: ['Taps the desk'], mood: 'wary', status: 'on duty', goal: 'Finish the ledger',
@@ -158,11 +203,17 @@ test('lean: the dossier text is short: preamble and rubric about 600 characters,
     }], 'Vrena', 1, 3);
     const [preamble, ...rest] = one.split('\n- Vrena:');
     const rubric = one.slice(one.indexOf('RELATIONSHIP-TO-BEHAVIOR RUBRIC:'));
-    assert.ok(preamble.length + rubric.length <= 700, `preamble + rubric ${preamble.length + rubric.length}`);
+    assert.ok(preamble.length + rubric.length <= 850, `preamble + rubric ${preamble.length + rubric.length}`);
+    for (const rule of [/never mention it or any numeric value/, /do not flatten distinct voices/, /durable identity changes gradually unless a time skip/]) assert.match(one, rule);
     assert.equal(rest.length, 1);
     assert.match(one, /^NPC STATE DELTA DOSSIER\. Only confirmed-present NPCs/);
     assert.match(one, /high scores never mean obedience, clinginess, jealousy, tsundere behavior/);
     for (const label of ['IDENTITY: personality:', 'behavioral profile:', 'speech:', 'mannerisms:', 'AGENCY/BONDS: role:', 'goal:', 'bonds:', 'STATE: mood:', 'status:', 'TOWARD PLAYER (secondary):', 'APPEARANCE (authoritative; species cannot override the form):', 'memories:', 'species:', 'gender:', 'age:', 'location:', 'background:']) {
         assert.ok(one.includes(label), `keeps ${label}`);
     }
+});
+
+test('lean: a low-standing NPC adds the "only them" rule to the dossier header', () => {
+    const low = buildInjection([{ id: 'n1', name: 'Vrena', present: true, role: 'Guild clerk', personality: 'Practical.', relationship: { trust: -40, affection: -30, desire: 0, tension: 60 } }], 'Vrena', 1, 3);
+    assert.match(low, /LOW SCORES: the player is not special to them; no obligation, fixation or "only them" thinking\./);
 });

@@ -119,6 +119,46 @@ export function currentExchangeMessages(messageId = null) {
     return [userId >= 0 ? chat[userId] : null, chat[assistantId]].filter(Boolean);
 }
 
+/**
+ * The replies a lean scan skipped plus the current exchange: every message after the last scanned one (`afterId`), or, with
+ * no marker, the last `replies` assistant replies and the user message before the first. The most recent `limit` messages
+ * (the Scan context window: 2 to 30) are kept, oldest trimmed first. null when no earlier reply was skipped, so a scan with
+ * nothing skipped reads exactly the current exchange as before.
+ */
+export function skippedExchangesWindow(messageId = null, { afterId = null, replies = 0, limit = null } = {}) {
+    const chat = activeChat(readContext().chat || []);
+    let assistantId = Number.isInteger(messageId) ? messageId : chat.length - 1;
+    while (assistantId >= 0 && (chat[assistantId]?.is_system || chat[assistantId]?.is_user)) assistantId -= 1;
+    if (assistantId < 0) return null;
+    const hasMarker = Number.isInteger(afterId) && afterId < assistantId;
+    const wanted = Math.max(0, Math.round(Number(replies) || 0));
+    if (!hasMarker && wanted < 2) return null;
+    const count = Math.max(2, Math.min(30, Number(limit ?? readScanDepth()) || 6));
+    const picked = [];
+    let assistants = 0;
+    for (let i = assistantId; i >= 0; i -= 1) {
+        const message = chat[i];
+        if (!message || message.is_system) continue;
+        if (hasMarker && i <= afterId) break;
+        if (!message.is_user) {
+            if (!hasMarker && assistants >= wanted) break;
+            assistants += 1;
+        }
+        picked.push(i);
+    }
+    if (assistants < 2) return null;
+    const kept = picked.slice(0, count).reverse();
+    const lines = [];
+    const users = [];
+    for (const i of kept) {
+        const line = cleanMessage(chat[i]);
+        if (!line) continue;
+        lines.push(line);
+        if (chat[i].is_user) users.push(`[m${i}] ${line}`);
+    }
+    return lines.length ? { transcript: lines.join('\n'), userDevelopmentContext: users.join('\n'), replies: assistants } : null;
+}
+
 export function currentExchangeTranscript(messageId = null) {
     const messages = currentExchangeMessages(messageId);
     if (!messages) return recentTranscript(2);
