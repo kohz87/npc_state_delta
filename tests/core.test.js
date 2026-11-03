@@ -599,11 +599,11 @@ test('selects recently relevant NPCs but injection is strictly presence-gated', 
     const injection = buildInjection([wiz, yunyun], 'Yunyun enters the guild.', 10, 3, 'CUSTOM BEHAVIOR RUBRIC');
     assert.match(injection, /Yunyun/);
     assert.match(injection, /personality: proud but earnest/);
-    assert.match(injection, /established speech: formal when nervous/);
-    assert.match(injection, /established mannerisms: boasts when embarrassed/);
-    assert.match(injection, /key relationships: Megumin — friend \/ rival \| competitive but loyal/);
+    assert.match(injection, /speech: formal when nervous/);
+    assert.match(injection, /mannerisms: boasts when embarrassed/);
+    assert.match(injection, /bonds: Megumin — friend \/ rival \| competitive but loyal/);
     assert.match(injection, /CUSTOM BEHAVIOR RUBRIC/);
-    assert.match(injection, /PLAYER RELATIONSHIP \(secondary modifier\):/);
+    assert.match(injection, /TOWARD PLAYER \(secondary\):/);
     assert.doesNotMatch(injection, /Wiz:/);
     yunyun.present = false;
     // Since 1.1.7 a mentioned absent NPC gets one reference line, never a dossier block.
@@ -1378,7 +1378,7 @@ test('scanner prompt uses compact identity index, changed-only output, delta rel
     assert.match(prompt, /MUST reuse id/i);
     assert.match(prompt, /old label in aliases/i);
     assert.match(prompt, /never duplicate\/downgrade/i);
-    assert.match(prompt, /EVERY non-zero axis needs grounded CURRENT-exchange evidence/i);
+    assert.match(prompt, /EVERY non-zero axis needs grounded evidence from the CURRENT exchange/i);
     assert.match(prompt, /-100\.\.\+100/i);
     assert.match(prompt, /continuation\/aftermath=>0/i);
     assert.match(prompt, /CUSTOM TRUST RULE/);
@@ -1534,7 +1534,7 @@ test('generation injection includes the retained Important Memories as high-prio
         'Myla discovered the guildmaster forged the quota ledger.',
     ];
     const injection = buildInjection([npc], 'Myla Fenn enters the room.', 10, 1, 'CUSTOM BEHAVIOR RUBRIC', 1800);
-    assert.match(injection, /important memories:/i);
+    assert.match(injection, /memories:/i);
     for (const memory of npc.memories) assert.ok(injection.includes(memory), `missing injected memory: ${memory}`);
 });
 
@@ -1577,7 +1577,7 @@ test('scanner relationship contract requires independent multi-axis deltas', () 
     });
     assert.match(prompt, /relationshipDelta\+relationshipEvidence \(all 4 keys\)/i);
     assert.match(prompt, /axis max 1\/2\/3\/4/i);
-    assert.match(prompt, /EVERY non-zero axis needs grounded CURRENT-exchange evidence/i);
+    assert.match(prompt, /EVERY non-zero axis needs grounded evidence from the CURRENT exchange/i);
     assert.match(prompt, /DELTA-ONLY/i);
     assert.match(prompt, /currentRelationship read-only/i);
     assert.match(prompt, /Desire needs explicit attraction/i);
@@ -1769,7 +1769,7 @@ test('full-window scanner reconciles history while isolating live state and rela
     assert.match(prompt, /recover missed durable facts/);
     assert.match(prompt, /Numeric relationshipImpact\/relationshipDelta MUST use only CURRENT exchange/);
     assert.match(prompt, /anywhere in the supplied recent-history window/);
-    assert.match(prompt, /CURRENT exchange \(authoritative for presence\/live state and numeric relationship deltas\):\nCurrent: Luna quietly greets the player/);
+    assert.match(prompt, /CURRENT exchange \(authoritative for presence, mood and location\):\nCurrent: Luna quietly greets the player/);
 });
 
 test('scanner exposes stored status for every relevant NPC and provides an explicit status clear contract', () => {
@@ -1831,7 +1831,7 @@ test('routine scanner prompt has bounded overhead and delta/profile tiers', () =
     const overhead = prompt.length - transcript.length;
     // 1.0.99 adds the user-authorized "if no named forms" qualifier to the Appearance rule; cleanup
     // step 12 the caps sentence at the stored limits (a few characters more).
-    assert.ok(overhead < 7650, `routine scanner overhead should stay below 7650 chars after the bounded Appearance clarifications and stored-limit caps, got ${overhead}`);
+    assert.ok(overhead < 7750, `routine scanner overhead should stay below 7750 chars after the bounded Appearance clarifications and stored-limit caps, got ${overhead}`);
     assert.match(prompt, /Return compact JSON deltas/i);
     assert.match(prompt, /Existing relationship delta example/i);
     assert.match(prompt, /Relevant live context \(dynamic fields only\)/i);
@@ -2193,7 +2193,7 @@ test('generation injection obeys approximate token budget and keeps identity/cur
     const budget = 700;
     const injection = buildInjection(npcs, 'Yunyun Wiz Luna are all in the room.', 20, 3, DEFAULT_BEHAVIOR_CRITERIA, budget);
     assert.ok(estimateInjectionTokens(injection) <= budget, `estimated injection should stay <= ${budget} tokens`);
-    assert.match(injection, /PLAYER RELATIONSHIP \(secondary modifier\):/);
+    assert.match(injection, /TOWARD PLAYER \(secondary\):/);
     assert.match(injection, /Yunyun/);
 });
 
@@ -2399,12 +2399,12 @@ test('v0.2.5 injection keeps identity ahead of high relationship scores and pres
     ];
     npc.relationship = { trust: 95, affection: 96, desire: 82, tension: 71 };
     const injection = buildInjection([npc], 'Falia', 10, 1, DEFAULT_BEHAVIOR_CRITERIA, 1800);
-    assert.match(injection, /IDENTITY FIRST/i);
+    assert.match(injection, /Personality sets identity/i);
     assert.match(injection, /Kind-hearted, rational, restrained/i);
     assert.match(injection, /Disposition: Broadly considerate/i);
-    assert.match(injection, /cruelty toward others/i);
+    assert.match(injection, /cruelty to others/i);
     assert.match(injection, /tsundere/i);
-    assert.ok(injection.indexOf('IDENTITY (authoritative):') < injection.indexOf('PLAYER RELATIONSHIP (secondary modifier):'), 'identity must constrain relationship interpretation, not follow it');
+    assert.ok(injection.indexOf('IDENTITY:') < injection.indexOf('TOWARD PLAYER (secondary):'), 'identity must constrain relationship interpretation, not follow it');
     assert.ok(estimateInjectionTokens(injection) <= 1800);
 });
 
@@ -2534,10 +2534,10 @@ test('v0.2.6 minimum injection budget preserves every established identity chann
     npc.relationship = { trust: 95, affection: 96, desire: 82, tension: 71 };
     const injection = buildInjection([npc], 'Falia', 20, 1, DEFAULT_BEHAVIOR_CRITERIA, 512);
     assert.ok(estimateInjectionTokens(injection) <= 512);
-    for (const required of [/personality:/i, /behavioral profile:/i, /established speech:/i, /established mannerisms:/i, /role:/i, /current goal:/i, /key relationships:/i]) {
+    for (const required of [/personality:/i, /behavioral profile:/i, /speech:/i, /mannerisms:/i, /role:/i, /goal:/i, /bonds:/i]) {
         assert.match(injection, required);
     }
-    assert.ok(injection.indexOf('IDENTITY (authoritative):') < injection.indexOf('PLAYER RELATIONSHIP (secondary modifier):'));
+    assert.ok(injection.indexOf('IDENTITY:') < injection.indexOf('TOWARD PLAYER (secondary):'));
 });
 
 test('v0.2.6 minimum injection compacts verbose behavior rules without starving cruelty and agency categories', () => {
@@ -2566,10 +2566,10 @@ test('v0.2.6 minimum injection compacts verbose behavior rules without starving 
     assert.match(prompt, /Disposition:/i);
     assert.match(prompt, /Cruelty: low/i);
     assert.match(prompt, /Independence: high/i);
-    assert.match(prompt, /established speech:/i);
-    assert.match(prompt, /established mannerisms:/i);
-    assert.match(prompt, /current goal:/i);
-    assert.match(prompt, /key relationships:/i);
+    assert.match(prompt, /speech:/i);
+    assert.match(prompt, /mannerisms:/i);
+    assert.match(prompt, /goal:/i);
+    assert.match(prompt, /bonds:/i);
 });
 
 test('v0.2.6 omitted developmentScale defaults to gradual and cannot bypass durable evolution', () => {
@@ -3405,13 +3405,13 @@ test('v0.2.9 runtime injection makes identity and live state dominant over high 
         relationship: { trust: 95, affection: 96, desire: 82, tension: 71 },
     });
     const injection = buildInjection([npc], 'Falia refuses to leave the caravan.', 20, 1, DEFAULT_BEHAVIOR_CRITERIA, 900);
-    assert.match(injection, /IDENTITY FIRST \/ DOMINATES/i);
+    assert.match(injection, /Personality sets identity/i);
     assert.match(injection, /Reserved, duty-bound, kind-hearted/i);
-    assert.match(injection, /current goal: Protect the caravan/i);
-    assert.match(injection, /CURRENT STATE: mood: furious; status: wounded but functional/i);
-    assert.match(injection, /PLAYER RELATIONSHIP \(secondary modifier\)/i);
-    assert.ok(injection.indexOf('IDENTITY (authoritative):') < injection.indexOf('PLAYER RELATIONSHIP (secondary modifier):'));
-    assert.ok(injection.indexOf('CURRENT STATE:') < injection.indexOf('PLAYER RELATIONSHIP (secondary modifier):'));
+    assert.match(injection, /goal: Protect the caravan/i);
+    assert.match(injection, /STATE: mood: furious; status: wounded but functional/i);
+    assert.match(injection, /TOWARD PLAYER \(secondary\)/i);
+    assert.ok(injection.indexOf('IDENTITY:') < injection.indexOf('TOWARD PLAYER (secondary):'));
+    assert.ok(injection.indexOf('STATE:') < injection.indexOf('TOWARD PLAYER (secondary):'));
     assert.match(injection, /High scores never mean.*jealousy.*tsundere/i);
     assert.doesNotMatch(buildBehaviorGuidance(npc), /blush|stammer|possessive|tsundere/i);
 });

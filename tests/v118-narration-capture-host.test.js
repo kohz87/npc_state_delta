@@ -439,7 +439,7 @@ test('v1.1.8 a capture merges on the first reply even when Scan every is not due
         h.equal(h.scannerCalls().length, 0, 'no scanner request');
         h.equal(h.status().used, 1);
         h.equal(h.runtime.getState().assistantSinceScan, 0, 'the capture counts as the scan for cadence');
-        // Without a block the cadence applies again: reply 1 of 3 does not scan.
+        // Without a block the cadence applies again: reply 1 of 3 does not scan (a pronoun-only reply is quiet).
         await h.turn('We walk on.', 'They walk down the road in silence.');
         h.equal(h.scannerCalls().length, 0, 'an armed reply without a block waits for the cadence');
         h.equal(h.status().missing, 1, 'the missing block is counted');

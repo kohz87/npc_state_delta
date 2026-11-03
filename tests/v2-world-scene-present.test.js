@@ -106,7 +106,7 @@ test('presentNow: Story Director\'s World view first, else Story Block\'s scene;
 test('index.js: the scan passes the scene list only for the head reply while Story Block keeps the scene', () => {
     const index = fs.readFileSync(fileURLToPath(new URL('../index.js', import.meta.url)), 'utf8');
     // (hidden notes) The same call also carries the hosted notes' options, spread in after the scene list.
-    assert.match(index, /buildScannerPrompt\(scannerPromptOptions\(state, settings, transcript, \{\n        currentTranscript, fullScanMode: fullWindowScan, sceneNames: scanScenePresent\(messageId\), \.\.\.noteOptions,\n    \}\)\)/);
+    assert.match(index, /buildScannerPrompt\(scannerPromptOptions\(state, settings, transcript, \{\n        currentTranscript, earlierOnly, fullScanMode: fullWindowScan, sceneNames: scanScenePresent\(messageId\), \.\.\.noteOptions,\n    \}\)\)/);
     const fn = index.slice(index.indexOf('function scanScenePresent'), index.indexOf('// The chat state a scan works from'));
     assert.match(fn, /storySuiteV2Meters\(\)/);
     assert.match(fn, /defersArea\('scene', getSettings\(\)\.sourceOfTruth\)/);

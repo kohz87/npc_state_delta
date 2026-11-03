@@ -24,24 +24,24 @@ const cast = () => [npc('Elin'), npc('Kora', 'Heavyset matron with ruddy cheeks,
 
 test('the full current appearance is injected when it fits', () => {
     const text = buildInjection(cast(), 'Elin hauls the tub.', 10, 3, undefined, 1800, null);
-    assert.match(line(text, 'Elin'), /CURRENT VISIBLE APPEARANCE \(authoritative anatomy; species\/race cannot override the selected form\): Petite[\s\S]*generous bust[\s\S]*linen shift/);
+    assert.match(line(text, 'Elin'), /APPEARANCE \(authoritative; species cannot override the form\): Petite[\s\S]*generous bust[\s\S]*linen shift/);
 });
 
 test('when the full appearance does not fit, enduring physical features are injected instead of nothing', () => {
-    const text = buildInjection(cast(), 'Elin hauls the tub.', 10, 3, undefined, 1200, null);
+    const text = buildInjection(cast(), 'Elin hauls the tub.', 10, 3, undefined, 950, null);
     const elin = line(text, 'Elin');
-    assert.doesNotMatch(elin, /CURRENT VISIBLE APPEARANCE/);
-    assert.match(elin, /ENDURING PHYSICAL FEATURES \(authoritative anatomy\): Petite[\s\S]*generous bust/);
-    for (const name of ['Elin', 'Kora', 'Tam']) assert.match(line(text, name), /IDENTITY \(authoritative\)/, `${name} keeps its essential block`);
-    assert.ok(text.length <= 1200 * 4);
-    assert.match(line(text, 'Kora'), /ENDURING PHYSICAL FEATURES|CURRENT VISIBLE APPEARANCE/, 'a second NPC also keeps its anatomy');
+    assert.doesNotMatch(elin, /APPEARANCE \(authoritative/);
+    assert.match(elin, /PHYSICAL FEATURES \(authoritative\): Petite[\s\S]*generous bust/);
+    for (const name of ['Elin', 'Kora', 'Tam']) assert.match(line(text, name), /IDENTITY/, `${name} keeps its essential block`);
+    assert.ok(text.length <= 950 * 4);
+    assert.match(line(text, 'Kora'), /PHYSICAL FEATURES|APPEARANCE \(authoritative/, 'a second NPC also keeps its anatomy');
 });
 
 test('a last-resort appearance is cut at a clause boundary, never inside its label or a word', () => {
     const long = `${PHYSICAL.replace(/\.$/, '')}; ${'amber freckles across the nose and shoulders, '.repeat(6)}a thin white scar through the left eyebrow.`;
     const text = buildInjection([npc('Elin', long)], 'Elin hauls the tub.', 10, 3, undefined, 512, null);
     const elin = line(text, 'Elin');
-    const match = elin.match(/(?:CURRENT VISIBLE APPEARANCE|ENDURING PHYSICAL FEATURES)[^:]*\): ([^\n]*)/);
+    const match = elin.match(/(?:APPEARANCE|PHYSICAL FEATURES)[^:]*\): ([^\n]*)/);
     if (match) {
         assert.match(match[1], /^Petite/);
         assert.doesNotMatch(match[1], /…$/);
@@ -54,8 +54,8 @@ test('an NPC in a named form gets no outfit-free variant; its form anatomy is th
     shifter.appearanceForms = [{ name: 'Raptor', appearance: 'Sleek storm-blue raptor with lightning-streaked plumage.' }];
     shifter.currentForm = 'Raptor';
     const text = buildInjection([shifter], 'Sora circles overhead.', 10, 3, undefined, 1800, null);
-    assert.match(line(text, 'Sora'), /CURRENT VISIBLE APPEARANCE[^:]*\): [\s\S]*raptor/i);
-    assert.doesNotMatch(text, /ENDURING PHYSICAL FEATURES/);
+    assert.match(line(text, 'Sora'), /APPEARANCE[^:]*\): [\s\S]*raptor/i);
+    assert.doesNotMatch(text, /PHYSICAL FEATURES/);
 });
 
 test('injected levers keep their effect when there is room, and every category when there is not', () => {

@@ -190,7 +190,8 @@ test('dossier exposes species/race, age, form-owned appearance, and portrait gen
 test('scanner uses current-exchange auto context and keeps wider history for manual scans', () => {
     assert.match(fs.readFileSync(path.join(root, 'src', 'transcript.js'), 'utf8'), /export function currentExchangeTranscript/);
     assert.match(index, /const fullWindowScan = Boolean\(!manual && settings\.fullScanEveryTurn\)/);
-    assert.match(index, /\(manual \|\| fullWindowScan\) \? recentTranscript\(settings\.scanDepth\) : currentTranscript/);
+    assert.match(index, /\(manual \|\| fullWindowScan\) \? recentTranscript\(settings\.scanDepth\) : \(skippedWindow\?\.transcript \|\| currentTranscript\)/);
+    assert.match(fs.readFileSync(path.join(root, 'src', 'transcript.js'), 'utf8'), /export function skippedExchangesWindow/);
     assert.match(fs.readFileSync(path.join(root, 'src', 'scanner-request.js'), 'utf8'), /SCAN_RESPONSE_LENGTH = 1800/);
     assert.match(fs.readFileSync(path.join(root, 'src', 'scanner-request.js'), 'utf8'), /FULL_SCAN_RESPONSE_LENGTH = 3200/);
     assert.match(index, /fullWindowScan \? FULL_SCAN_RESPONSE_LENGTH : SCAN_RESPONSE_LENGTH/);
@@ -199,10 +200,10 @@ test('scanner uses current-exchange auto context and keeps wider history for man
     assert.match(fs.readFileSync(path.join(root, 'src', 'scanner-request.js'), 'utf8'), /CRITICAL COMPACT JSON RETRY/);
     assert.match(index, /'Scan context'/);
     assert.match(index, /Full scan every turn/);
-    assert.match(index, /Quick automatic scans read only the latest user \+ assistant exchange/);
+    assert.match(index, /Quick automatic scans read every reply since the last scan/);
     assert.match(index, /autoScanDueAfterReply\(\{\s*autoScan: settings\.autoScan,\s*full: settings\.fullScanEveryTurn,\s*sinceScan: state\.assistantSinceScan,\s*scanEvery: settings\.scanEvery,/);
     assert.match(index, /prepareFullWindowRelationshipPayload\(resolvedParsed, state\.npcs\)/);
-    assert.match(index, /runFocusedRelationshipPass\(\s*ctx,\s*fullWindowRelationship\.evaluation,\s*state\.npcs,\s*currentTranscript \|\| transcript,\s*settings,\s*\{\s*currentExchangeOnly: manual \|\| fullWindowScan,\s*requestScope: operation\.requestScope,\s*prose: currentProse,/);
+    assert.match(index, /runFocusedRelationshipPass\(\s*ctx,\s*fullWindowRelationship\.evaluation,\s*state\.npcs,\s*skippedWindow \? transcript : \(currentTranscript \|\| transcript\),\s*settings,\s*\{\s*currentExchangeOnly: manual \|\| fullWindowScan,\s*requestScope: operation\.requestScope,\s*prose: skippedWindow \? skippedWindow\.prose : currentProse,/);
     assert.match(index, /npc_state_delta_admission_mode/);
     assert.match(index, /Conservative/);
     assert.match(index, /Balanced/);

@@ -271,7 +271,7 @@ test('roleplay injection gives established Speech explicit voice-fidelity priori
     npc.personality = 'Composed and analytical.';
     npc.speech = 'Conclusion first; short precise sentences; little social padding.';
     const injection = buildInjection([npc], 'Ryu answers the question.', 1, 3);
-    assert.match(injection, /VOICE FIDELITY/i);
-    assert.match(injection, /established speech:/i);
+    assert.match(injection, /Keep each Speech/i);
+    assert.match(injection, /speech:/i);
     assert.match(injection, /Conclusion first/i);
 });

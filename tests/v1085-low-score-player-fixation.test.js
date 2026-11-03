@@ -38,7 +38,7 @@ test('the roleplay injection drops stance moods and adds the low-score rule only
     const low = buildInjection([npc], 'Elena', 10);
     assert.match(low, /mood: Overwhelmed, breathless, awe-struck;/);
     assert.doesNotMatch(low, /devoted|chosen partner/);
-    assert.match(low, /LOW SCORES: the player is not uniquely important/);
+    assert.match(low, /LOW SCORES: the player is not special to them/);
     const high = buildInjection([elena({ trust: 60, affection: 72, desire: 0, tension: 0 })], 'Elena', 10);
     assert.match(high, /mood: Overwhelmed, breathless, awe-struck, devoted/, 'established affection keeps the mood as written');
     assert.doesNotMatch(high, /LOW SCORES/);

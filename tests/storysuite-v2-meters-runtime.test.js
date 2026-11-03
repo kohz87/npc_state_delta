@@ -242,8 +242,8 @@ test('without a v2 host the same turns send nothing, and the sidecar and the inj
         mockState.sdk = sdk;
         globalThis.StoryBlock = { apiVersion: 2, ready: Promise.resolve(sdk), sdk };
     });
-    assert.match(alone.injection, /Only confirmed-present NPCs are included[\s\S]*- Yunyun/);
-    assert.doesNotMatch(elsewhere.injection, /Only confirmed-present NPCs are included/, 'nobody is presented as in the scene');
+    assert.match(alone.injection, /Only confirmed-present NPCs[\s\S]*- Yunyun/);
+    assert.doesNotMatch(elsewhere.injection, /Only confirmed-present NPCs/, 'nobody is presented as in the scene');
     assert.match(elsewhere.injection, /- Yunyun \(mentioned, not present/);
     assert.deepEqual(hosted.presentQuery, ['Yunyun'], 'npc.present follows the scene');
     assert.deepEqual(elsewhere.presentQuery, [], 'npc.present follows the scene when it leaves her out');

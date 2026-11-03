@@ -14,8 +14,10 @@ for (const name of ['index.js', 'core.js', 'core-mechanics.js', 'bundle.js', 'br
 }
 fs.writeFileSync(path.join(tempRoot, 'package.json'), JSON.stringify({ type: 'module' }));
 
+// The host scenarios were written for a scan after every reply; the shipped default is now a safety scan every 5 replies
+// (a reply that names someone still scans at once), so the synthetic host keeps Scan every at 1. tests/lean-scan-cadence.test.js covers the default.
 const mockState = {
-    extensionSettings: {},
+    extensionSettings: { npc_state_delta: { scanEvery: 1 } },
     prompts: [],
     listeners: new Map(),
     quietResponder: null,
@@ -811,12 +813,12 @@ try {
     assert.equal(mockState.popupCalls.at(-1)?.options?.allowVerticalScrolling, true);
     const livePrompt = [...mockState.prompts].reverse().find(args => String(args?.[1] || '').includes('NPC STATE DELTA DOSSIER'))?.[1] || '';
     assert.match(livePrompt, /Runtime custom behavior rubric/);
-    assert.match(livePrompt, /species\/race: Crimson Demon/);
+    assert.match(livePrompt, /species: Crimson Demon/);
     assert.match(livePrompt, /age: 18/);
     assert.doesNotMatch(livePrompt, /current thoughts/i);
     assert.match(livePrompt, /personality: proud but earnest/);
-    assert.match(livePrompt, /established speech: formal when nervous/);
-    assert.match(livePrompt, /PLAYER RELATIONSHIP \(secondary modifier\):/);
+    assert.match(livePrompt, /speech: formal when nervous/);
+    assert.match(livePrompt, /TOWARD PLAYER \(secondary\):/);
     assert.match(livePrompt, /Yunyun/);
     assert.doesNotMatch(livePrompt, /- Wiz:/, 'off-screen NPC must not be injected into generation');
 
@@ -1475,7 +1477,7 @@ try {
     const fullScanArgs = [...mockState.rawCalls].reverse().map(call => call?.[0] || {}).find(args => /automatic full dossier scan/i.test(String(args?.label || '')) || (/isolated dossier scanner/i.test(String(args.systemPrompt || '')) && /FULL-WINDOW RECONCILIATION/.test(String(args.prompt || '')))) || {};
     assert.equal(fullScanArgs.responseLength, 3200, 'full auto scan should receive the larger response budget');
     assert.match(String(fullScanArgs.prompt || ''), /FULL-HISTORY-MARKER/, 'full auto scan should retain earlier messages inside the configured history window');
-    assert.match(String(fullScanArgs.prompt || ''), /CURRENT exchange \(authoritative for presence\/live state and numeric relationship deltas\)/);
+    assert.match(String(fullScanArgs.prompt || ''), /CURRENT exchange \(authoritative for presence, mood and location\)/);
     assert.match(String(fullScanArgs.prompt || ''), /Kazuma: What happens next\?[\s\S]*waits beside the doorway\./);
     assert.equal(globalThis.NPCStateDelta.scanMetrics()?.label, 'automatic-full');
     assert.deepEqual(globalThis.NPCStateDelta.getState().npcs.find(n => n.id === fullScanTarget.id).relationship, relationshipBeforeFullScan, 'full-window scans must not replay numeric relationship deltas from older history');

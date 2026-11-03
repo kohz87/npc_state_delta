@@ -383,20 +383,20 @@ test('v1.2.0 scene deferred: present cards drop the live mood and the current ou
     assert.equal(buildInjection(...args, { customFieldNames: ['Faction'], sceneDeferred: false }), own, 'off is the 1.1.12 injection');
 
     const deferred = buildInjection(...args, { customFieldNames: ['Faction'], sceneDeferred: true });
-    assert.doesNotMatch(deferred, /mood: wary|grey oilskin|CURRENT VISIBLE APPEARANCE/);
-    assert.match(deferred, /CURRENT STATE: status: favoring her left arm; live mood\/outfit: as in World State;/);
-    assert.match(deferred, /ENDURING PHYSICAL FEATURES \(authoritative anatomy\): Tall woman, weathered skin, a scar through the left eyebrow/);
-    for (const kept of [/personality: Dry, protective/, /established speech: Clipped sentences/, /current goal: Keep the gate shut/, /key relationships: Old Brenn/, /established details: Faction: Harbor Watch/, /role: harbor watch captain/]) {
+    assert.doesNotMatch(deferred, /mood: wary|grey oilskin|APPEARANCE \(authoritative/);
+    assert.match(deferred, /; STATE: status: favoring her left arm; live mood\/outfit: as in World State;/);
+    assert.match(deferred, /PHYSICAL FEATURES \(authoritative\): Tall woman, weathered skin, a scar through the left eyebrow/);
+    for (const kept of [/personality: Dry, protective/, /speech: Clipped sentences/, /goal: Keep the gate shut/, /bonds: Old Brenn/, /established details: Faction: Harbor Watch/, /role: harbor watch captain/]) {
         assert.match(deferred, kept);
     }
 
     // A selected form's appearance is its whole anatomy: kept, with World State named for the outfit.
     const formed = { ...MIRA, overallAppearance: '', appearance: '', appearanceForms: [{ name: 'Selkie', appearance: 'Sleek grey seal-woman, webbed hands, a seal-skin mantle' }], currentForm: 'Selkie' };
     const formDeferred = buildInjection([formed], ...args.slice(1), { sceneDeferred: true });
-    assert.match(formDeferred, /CURRENT FORM ANATOMY \(authoritative; World State gives the outfit\): Sleek grey seal-woman/);
+    assert.match(formDeferred, /FORM ANATOMY \(authoritative; World State gives the outfit\): Sleek grey seal-woman/);
     // No mood, no status: the state still points at World State rather than claiming none.
     const quiet = buildInjection([{ ...MIRA, mood: '', status: '' }], ...args.slice(1), { sceneDeferred: true });
-    assert.match(quiet, /CURRENT STATE: live mood\/outfit: as in World State;/);
+    assert.match(quiet, /; STATE: live mood\/outfit: as in World State;/);
 });
 
 test('v1.2.0 calendar deferred: Story Director\'s months and era replace Delta\'s own, with graceful fallback', () => {

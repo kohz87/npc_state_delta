@@ -3642,7 +3642,7 @@ function uniquePortraitParts(values = []) {
     return result;
 }
 
-function normalizePortraitAppearanceClause(value, clothing = false) {
+function normalizePortraitAppearanceClause(value, clothing = false, keepArticle = false) {
     let text = cleanText(value, 1800)
         .replace(/^(?:appearance|current appearance)\s*:\s*/i, '')
         .replace(/^[,;:\s]+|[,;:\s]+$/g, '')
@@ -3651,13 +3651,13 @@ function normalizePortraitAppearanceClause(value, clothing = false) {
         text = text
             .replace(/^(?:wears?|wearing|dressed in|clad in)\s+/i, '')
             .replace(/^(?:outfit|clothing)\s*:\s*/i, '')
-            .replace(/^(?:a|an|the)\s+/i, '')
             .trim();
+        if (!keepArticle) text = text.replace(/^(?:a|an|the)\s+/i, '').trim();
     }
     return text;
 }
 
-function splitPortraitAppearance(value) {
+function splitPortraitAppearance(value, keepArticle = false) {
     const source = cleanText(value, 1800).replace(/\r/g, '');
     if (!source) return { core: [], clothing: [] };
     const core = [];
@@ -3668,7 +3668,7 @@ function splitPortraitAppearance(value) {
         const hasClothing = PORTRAIT_CLOTHING_TERMS.test(clause);
         const hasAnatomy = PORTRAIT_ANATOMY_TERMS.test(clause);
         const clothingOnly = clothingLead || (hasClothing && !hasAnatomy);
-        const normalized = normalizePortraitAppearanceClause(clause, clothingOnly);
+        const normalized = normalizePortraitAppearanceClause(clause, clothingOnly, keepArticle);
         if (!normalized) continue;
         (clothingOnly ? clothing : core).push(normalized);
     }
@@ -3743,6 +3743,110 @@ function derivePortraitContradictionNegatives(appearance, extraPositive, replace
     ]);
 }
 
+function portraitProseLower(value) {
+    const text = String(value ?? '').trim();
+    const word = text.match(/^[A-Z][a-z'-]*(?=\s|$|[,;.])/);
+    return word && !/[A-Z]/.test(text.slice(1, word[0].length)) ? text.charAt(0).toLowerCase() + text.slice(1) : text;
+}
+
+function portraitProseUpper(value) {
+    const text = String(value ?? '').trim();
+    return text ? text.charAt(0).toUpperCase() + text.slice(1) : '';
+}
+
+function portraitProseClean(value) {
+    return String(value ?? '').replace(/\s+/g, ' ').replace(/^[,;:\s]+|[,;:.\s]+$/g, '').trim();
+}
+
+function portraitProseArticle(phrase) {
+    const text = String(phrase || '').trim();
+    if (/^(?:a|an|the|his|her|their|its|one|some)(?=\s|$)/i.test(text)) return text;
+    // By sound, not by letter: "a unicorn-kin", "a utopian", "an uninvited", "an 18-year-old", "an hour-old".
+    const yoo = /^(?:uni(?!n|d)|use|usu|uti(?!l)|uto|ute|uro|ura|eu|one|once|ubiq|ufo|uk)/i.test(text) || /^unanim|^unilat|^unif/i.test(text);
+    const vowelSound = /^(?:8\d?|11|18)(?!\d)/.test(text)
+        || (/^[aeiou]/i.test(text) && !yoo)
+        || /^(?:hour|honest|honou?r|heir)/i.test(text);
+    return (vowelSound ? 'an ' : 'a ') + text;
+}
+
+// A clause that is only an adjective ("burly", "tall") describes the subject itself: "a burly man", never "with burly".
+// Lower case only: a capitalised word ("Red") is a name or a colour, not read as an adjective.
+const PORTRAIT_ADJECTIVE = /^(?:tall|short|slim|slender|thin|lean|stout|stocky|burly|brawny|muscular|pale|dark|fair|tan|young|old|elderly|ancient|small|large|big|huge|tiny|petite|plump|fat|heavy|lithe|lanky|wiry|gaunt|frail|sturdy|rugged|handsome|beautiful|pretty|plain|striking|androgynous|scrawny|willowy|curvy|chubby|bald|blind|weathered|broad-shouldered)$/i;
+const PORTRAIT_ADJECTIVE_SUFFIX = /^[a-z]{3,}(?:ed|ful|ous|ish|ive|ly)$/;
+function portraitProseIsAdjective(item, original = item) {
+    const text = String(item || '').trim();
+    if (!/^[A-Za-z][A-Za-z-]*$/.test(text)) return false;
+    // The suffix guess is for lower-case words only: "Red" is a name or a colour.
+    return PORTRAIT_ADJECTIVE.test(text) || (/^[a-z]/.test(String(original || '').trim()) && PORTRAIT_ADJECTIVE_SUFFIX.test(text));
+}
+
+// A people named first and then a trade or kind ("elf ranger") is still that people; plurals ("elves") read as the singular.
+const PORTRAIT_HUMANOID_FIRST = /^(?:humans?|elf|elves|elven|dwarf|dwarves|dwarven|orcs?|goblins?|halflings?|gnomes?|tieflings?|ogres?|trolls?|centaurs?)$/i;
+const PORTRAIT_HUMANOID = /\b(?:humans?|humanoids?|persons?|people|mortals?|elf|elves|elven|dwarf|dwarves|dwarven|orcs?|goblins?|halflings?|gnomes?|tieflings?|demons?|angels?|vampires?|fae|fey|nymphs?|giants?|ogres?|trolls?|centaurs?|beast-?men|beast-?man|beast-?wom[ae]n|\w*folk|half-\w+|\w+-kin|kin|\w+born)\b/i;
+
+function portraitProseList(items) {
+    const list = items.filter(Boolean);
+    if (list.length <= 1) return list.join('');
+    const inner = list.some(item => item.includes(','));
+    return list.slice(0, -1).join(inner ? '; ' : ', ') + (inner ? ', and ' : ' and ') + list[list.length - 1];
+}
+
+function buildNaturalPortraitProse({ name, gender, rawGender, species, visualAge, role, appearance, mood, location, composition, extraPositive, stylePositive }) {
+    const noun = gender === 'male' ? 'man' : gender === 'female' ? 'woman' : 'person';
+    const subject = gender === 'male' ? 'He' : gender === 'female' ? 'She' : (name || 'The person');
+    const possessive = gender === 'male' ? 'His' : gender === 'female' ? 'Her' : (name || 'The person') + "'s";
+    const objectPronoun = gender === 'male' ? 'him' : gender === 'female' ? 'her' : (name || 'the person');
+    const approximate = /^~/.test(portraitProseClean(visualAge));
+    const ageText = portraitProseClean(visualAge).replace(/^~\s*/, '');
+    const numericAge = /^\d+(?:\s*[-–]\s*\d+)?$/.test(ageText);
+    // No parenthetical ("Elf (wood)" reads "elf"); a plural people reads as the singular ("high elves" is "a high elf man").
+    const singular = (word, to) => (/^[A-Z]/.test(word) ? to.charAt(0).toUpperCase() + to.slice(1) : to);
+    const speciesText = portraitProseClean(String(species ?? '').replace(/\([^)]*\)/g, ' '))
+        .replace(/\belves\b/gi, word => singular(word, 'elf'))
+        .replace(/\bdwarves\b/gi, word => singular(word, 'dwarf'))
+        .replace(/\b(orc|goblin|halfling|gnome|tiefling|ogre|troll|centaur|human)s\b/gi, '$1');
+    // A boy or a girl stays one: the gender word said so, or the age is under 18 with a male or female gender.
+    const teen = /^(?:teens?|teenage|teenaged|teenager|adolescent)$/i.test(ageText);
+    const youngest = numericAge ? Math.min(...ageText.match(/\d+/g).map(Number)) : Infinity;
+    const young = gender && (/^(?:boy|girl)$/.test(normalizeName(rawGender)) || youngest < 18 || teen);
+    const nounWord = young ? (gender === 'male' ? 'boy' : 'girl') : noun;
+    const speciesHasNoun = new RegExp('\\b(?:' + nounWord + '|male|female|man|woman|boy|girl|person)\\b|(?:boy|girl)\\b|beast-?(?:wo)?man\\b', 'i').test(speciesText);
+    // "His hair is white" reads "white hair".
+    const possessiveIs = item => item.replace(/^(?:his|her|their|its)\s+([a-z][a-z' -]{1,30}?)\s+(?:is|are)\s+(.+)$/i, (whole, thing, value) => `${value} ${thing}`);
+    // "Tall, with silver hair" is two clauses: the adjective goes on the subject, the rest follows "with".
+    const rawCore = appearance.core.flatMap(item => item.split(/,\s*(?=(?:with|has|have|having)\s)/i)).map(possessiveIs).map(item => item.replace(/^(?:(?:he|she|they)\s+(?:has|have|is|are)|has|have|having|with)\s+/i, ''));
+    const stripped = rawCore.map(item => portraitProseLower(item));
+    const speciesWords = new Set(normalizeName(speciesText).split(' '));
+    const adjectiveAt = stripped.map((item, at) => portraitProseIsAdjective(item, rawCore[at]) && !speciesWords.has(normalizeName(item)));
+    const adjectives = stripped.filter((item, at) => adjectiveAt[at]);
+    const core = stripped.filter((item, at) => !adjectiveAt[at]);
+    // man / woman / boy / girl / person only for a human, a humanoid people or no species: a wolf, a dragon or a robot is not
+    // given a human form ("a male wolf", "a robot").
+    // Only the head noun (the last word) decides: "giant spider" and "demon wolf" are animals, "half-elf" a people.
+    const speciesWordsList = speciesText.replace(/\([^)]*\)/g, ' ').trim().split(/\s+/).filter(Boolean);
+    const humanoid = !speciesText || !speciesWordsList.length || PORTRAIT_HUMANOID.test(speciesWordsList[speciesWordsList.length - 1]) || PORTRAIT_HUMANOID_FIRST.test(speciesWordsList[0]);
+    const formNoun = humanoid ? (speciesHasNoun ? '' : nounWord) : '';
+    const animalSex = !humanoid && gender && !speciesHasNoun ? gender : '';
+    const head = [numericAge ? (approximate ? 'roughly ' : '') + ageText.replace(/\s+/g, '') + '-year-old' : (teen ? 'teenage' : ''), ...adjectives, animalSex, speciesText, formNoun].filter(Boolean).join(' ');
+    const clothing = appearance.clothing.map(item => portraitProseLower(item));
+    const coreKeys = new Set(core.map(portraitPartKey));
+    const clothes = clothing.filter(item => !coreKeys.has(portraitPartKey(item)));
+
+    const sentences = [];
+    let first = 'A portrait of ' + portraitProseArticle(head);
+    if (ageText && !numericAge && !teen) first += ', of apparent age ' + ageText;
+    if (core.length) first += ' with ' + portraitProseList(core);
+    sentences.push(first);
+    if (role) sentences.push(subject + ' carries the look of ' + portraitProseArticle(portraitProseLower(portraitProseClean(role))));
+    if (clothes.length) sentences.push(subject + ' wears ' + portraitProseList(clothes));
+    if (mood) sentences.push(possessive + ' expression is ' + portraitProseLower(portraitProseClean(mood)));
+    if (location) sentences.push('Behind ' + objectPronoun + ', ' + portraitProseLower(portraitProseClean(location)));
+    if (composition) sentences.push(portraitProseUpper(portraitProseClean(composition)));
+    if (extraPositive) sentences.push(portraitProseUpper(portraitProseClean(extraPositive)));
+    if (stylePositive) sentences.push(portraitProseUpper(portraitProseClean(stylePositive)));
+    return sentences.map(item => item.replace(/\s+([,.])/g, '$1') + '.').join(' ');
+}
+
 export function buildNpcPortraitPrompts(rawNpc = {}, options = {}) {
     const npc = rawNpc && typeof rawNpc === 'object' ? rawNpc : {};
     const format = normalizePortraitPromptFormat(options.format);
@@ -3776,17 +3880,20 @@ export function buildNpcPortraitPrompts(rawNpc = {}, options = {}) {
     if (replaceAutomatic && extraPositive) {
         positive = extraPositive;
     } else if (format === 'natural') {
-        const sentences = [];
-        if (identity.length) sentences.push('Subject: ' + identity.join(', ') + '.');
-        if (appearanceGroups.core.length) sentences.push('Appearance: ' + appearanceGroups.core.join('; ') + '.');
-        if (roleTag) sentences.push('Role: ' + roleTag + '.');
-        if (appearanceGroups.clothing.length) sentences.push('Clothing: ' + appearanceGroups.clothing.join('; ') + '.');
-        if (moodTag) sentences.push('Expression and bearing: ' + moodTag + '.');
-        if (locationTag) sentences.push('Background: ' + locationTag + '.');
-        if (composition) sentences.push('Composition: ' + composition + '.');
-        if (extraPositive) sentences.push('Additional character instructions: ' + extraPositive + '.');
-        if (stylePositive) sentences.push('Visual style: ' + stylePositive + '.');
-        positive = sentences.join(' ');
+        positive = buildNaturalPortraitProse({
+            name: cleanText(npc.name, 120),
+            gender,
+            rawGender: cleanText(npc.gender ?? npc.sex, 40),
+            species,
+            visualAge,
+            role,
+            appearance: splitPortraitAppearance(appearance, true),
+            mood,
+            location,
+            composition,
+            extraPositive,
+            stylePositive,
+        });
     } else {
         const visualAnchors = format === 'tags' ? extractPortraitVisualAnchorTags(appearance) : [];
         const coreAppearance = format === 'tags'
@@ -4820,6 +4927,7 @@ export function buildRelationshipPassPrompt({
     relationshipCriteria = DEFAULT_RELATIONSHIP_CRITERIA,
     impactCriteria = DEFAULT_IMPACT_CRITERIA,
     relationshipCaps = DEFAULT_RELATIONSHIP_CAPS,
+    window = false,
 }) {
     const userName = flatPromptName(rawUserName, 'User');
     const caps = normalizeRelationshipCaps(relationshipCaps);
@@ -4844,7 +4952,7 @@ export function buildRelationshipPassPrompt({
     })).filter(npc => npc.id);
     const relationshipRubric = compactRelationshipRubric(relationshipCriteria);
     const impactRubric = compactImpactRubric(impactCriteria);
-    return `You are NPC State Delta's focused relationship evaluator. Assess ONLY how each target NPC's relationship toward ${userName} changes because of the supplied CURRENT exchange.
+    const prompt = `You are NPC State Delta's focused relationship evaluator. Assess ONLY how each target NPC's relationship toward ${userName} changes because of the supplied CURRENT exchange.
 
 Rules:
 1. Return exactly one result for EACH target id. Never omit a target.
@@ -4863,6 +4971,13 @@ Caps: ordinary ${caps.ordinary}; meaningful ${caps.meaningful}; major ${caps.maj
 Targets: ${JSON.stringify(compactTargets)}
 Current exchange:
 ${String(transcript || '').trim()}`;
+    if (!window) return prompt;
+    // Several exchanges, each read once: a change is scored in the exchange it happened in, with that exchange's own evidence.
+    return prompt
+        .replace('because of the supplied CURRENT exchange.', 'because of the supplied exchanges. They are in order, the latest last; each was read once, so score a change in the exchange where it happened.')
+        .replace('its own short CURRENT-exchange evidence', 'its own short evidence from the exchange it happened in')
+        .replace('grounded relationshipEvidence from CURRENT exchange', 'grounded relationshipEvidence from the exchange it happened in')
+        .replace('\nCurrent exchange:\n', '\nExchanges:\n');
 }
 
 function normalizeProfileUpdateEvidence(raw = {}) {
@@ -6184,8 +6299,8 @@ function compactBehaviorProfileForInjection(value, maxChars = 180) {
 function injectionIdentityCore(npc, identityCap = 540) {
     const others = [
         npc.personality && `personality: ${npc.personality}`,
-        npc.speech && `established speech: ${npc.speech}`,
-        npc.mannerisms?.length && `established mannerisms: ${npc.mannerisms.join(', ')}`,
+        npc.speech && `speech: ${npc.speech}`,
+        npc.mannerisms?.length && `mannerisms: ${npc.mannerisms.join(', ')}`,
     ].filter(Boolean);
     // Size the levers to the room the fair split below will actually give them: other identity
     // fields take at most an equal share and the levers get the rest (never more than 300 chars).
@@ -6206,8 +6321,8 @@ function injectionAgencyCore(npc, agencyCap = 260, customFieldNames = []) {
     const parts = [
         custom && `established details: ${custom}`,
         npc.role && `role: ${npc.role}`,
-        npc.goal && `current goal: ${npc.goal}`,
-        bonds.length && `key relationships: ${bonds.join(' | ')}`,
+        npc.goal && `goal: ${npc.goal}`,
+        bonds.length && `bonds: ${bonds.join(' | ')}`,
     ].filter(Boolean);
     return fairInjectionParts(parts, agencyCap) || 'no additional agency facts established';
 }
@@ -6253,12 +6368,12 @@ function injectionEssentialBlock(npc, behaviorCap = 160, identityCap = 620, agen
     const agency = injectionAgencyCore(npc, agencyCap, customFieldNames);
     const currentState = injectionCurrentStateCore(npc, stateCap, sceneDeferred);
     const relationship = compactRelationshipModifier(npc, behaviorCap);
-    return `- ${npc.name}: IDENTITY (authoritative): ${identity}; AGENCY/OTHER BONDS: ${agency}; CURRENT STATE: ${currentState}; PLAYER RELATIONSHIP (secondary modifier): ${relationship}`;
+    return `- ${npc.name}: IDENTITY: ${identity}; AGENCY/BONDS: ${agency}; STATE: ${currentState}; TOWARD PLAYER (secondary): ${relationship}`;
 }
 
-const INJECTED_APPEARANCE_LABEL = 'CURRENT VISIBLE APPEARANCE (authoritative anatomy; species/race cannot override the selected form): ';
-const INJECTED_PHYSICAL_LABEL = 'ENDURING PHYSICAL FEATURES (authoritative anatomy): ';
-const INJECTED_FORM_ANATOMY_LABEL = 'CURRENT FORM ANATOMY (authoritative; World State gives the outfit): ';
+const INJECTED_APPEARANCE_LABEL = 'APPEARANCE (authoritative; species cannot override the form): ';
+const INJECTED_PHYSICAL_LABEL = 'PHYSICAL FEATURES (authoritative): ';
+const INJECTED_FORM_ANATOMY_LABEL = 'FORM ANATOMY (authoritative; World State gives the outfit): ';
 
 // Appearance is optional continuity, but when the whole current appearance does not fit the
 // remaining budget its enduring physical features still should, so the roleplay model is not left
@@ -6293,13 +6408,13 @@ function injectionOptionalFields(npc, includeAppearance = false, sceneDeferred =
     return [
         appearanceVariants.length && appearanceVariants,
         includeAppearance && !npc.appearance && (npc.currentForm || npc.currentFormUnknown) && 'Current visible appearance is not established; do not infer anatomy from species or another form.',
-        importantMemories.length && `important memories: ${importantMemories.join(' | ')}`,
-        npc.species && `species/race: ${npc.species}`,
+        importantMemories.length && `memories: ${importantMemories.join(' | ')}`,
+        npc.species && `species: ${npc.species}`,
         npc.gender && `gender: ${normalizeGender(npc.gender)}`,
-        npc.age && `chronological age: ${npc.age}`,
+        npc.age && `age: ${npc.age}`,
         npc.apparentAge && `apparent age: ${npc.apparentAge}`,
         npc.location && `location: ${npc.location}`,
-        npc.homeBase && `home base / usual location: ${npc.homeBase}`,
+        npc.homeBase && `home base: ${npc.homeBase}`,
         npc.background && `background: ${cleanText(npc.background, 320)}`,
     ].filter(Boolean);
 }
@@ -6308,7 +6423,7 @@ function compactInjectionBehaviorRubric(criteria, maxChars) {
     const raw = String(criteria || '').trim();
     if (!raw) return '';
     if (raw === DEFAULT_BEHAVIOR_CRITERIA) {
-        return truncateInjectionText('Identity/current state decide behavior first. Relationship only biases player-directed weighting; it need not surface every scene and never implies obedience, devotion, romance tropes, or reduced empathy toward others.', maxChars);
+        return truncateInjectionText('Identity first; relationship only biases player-directed weighting.', maxChars);
     }
     return truncateInjectionText(raw, maxChars);
 }
@@ -6357,12 +6472,10 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
         return references ? truncateInjectionText(['NPC STATE DELTA DOSSIER. Treat these as established story facts; never mention the dossier.', references].join('\n'), budgetChars) : '';
     }
     const headerFor = () => [
-        'NPC STATE DELTA DOSSIER. Only confirmed-present NPCs are included. Treat these as established story facts; never mention the dossier or numeric values.',
-        'IDENTITY FIRST / DOMINATES: personality sets identity; behavioral profile translates it into target-general response/decision levers; speech/mannerisms shape expression; goals, duties, morality, independence, other bonds, and CURRENT mood/status determine behavior first.',
-        'VOICE FIDELITY: established Speech constrains actual dialogue wording and delivery. Preserve its sentence shape, vocabulary, formality, directness, hedging, cadence, question/explanation style, and recurring verbal habits; do not flatten distinct voices into generic polished prose.',
-        'PLAYER RELATIONSHIP IS SECONDARY: it may bias attention, interpretation, openness, tolerance, or willingness toward the player, but need not surface every scene. High scores never mean obedience, universal prioritization, clinginess, jealousy, tsundere behavior, or cruelty toward others.',
-        'Temporary mood, stress, intimacy, or player-specific behavior is not global identity. Durable identity changes gradually unless narration explicitly establishes lasting development or a developmental time skip.',
-        relevant.some(lowPlayerStanding) && 'LOW SCORES: the player is not uniquely important; no obligation, fixation, or "only them" thinking.',
+        'NPC STATE DELTA DOSSIER. Only confirmed-present NPCs; established facts; never mention it or any numeric value.',
+        'Personality sets identity; behavior profile, speech and mannerisms shape response and expression; goals, duties, morals, bonds and CURRENT mood/status decide behavior. Keep each Speech\'s wording, cadence and habits; do not flatten distinct voices.',
+        'Player relationship only biases openness and attention; high scores never mean obedience, clinginess, jealousy, tsundere behavior or cruelty to others. Mood or player-specific behavior is not identity; durable identity changes gradually unless a time skip.',
+        relevant.some(lowPlayerStanding) && 'LOW SCORES: the player is not special to them; no obligation, fixation or "only them" thinking.',
         relevant.some(calledIn) && 'Exception: NPCs marked "named by player" are not yet confirmed on-screen; use their dossier if they appear.',
     ].filter(Boolean).join('\n');
 
@@ -6975,6 +7088,7 @@ export function buildScannerPrompt({
     sceneNames = null,
     layeredSecrets = false,
     eventWatch = null,
+    earlierOnly = false,
 }) {
     const baseline = normalizeRelationshipBaseline(relationshipBaseline);
     const caps = normalizeRelationshipCaps(relationshipCaps);
@@ -7127,9 +7241,20 @@ export function buildScannerPrompt({
         ? `\nFULL-WINDOW RECONCILIATION: Story context contains the configured recent-history window. Use durable evidence anywhere in the supplied recent-history window to recover missed durable facts (identity, role/species/gender/age, profile, background, social ties, memories). Earlier turns are context, NOT new events. For present/worldActive and LIVE mood/location/goal/status, use only the newest CURRENT exchange below; older states must never overwrite newer/established live state. Numeric relationshipImpact/relationshipDelta MUST use only CURRENT exchange, never older window events. Do not replay old deltas.`
         : '';
 
+    // A lean scan of several exchanges: the latest is CURRENT (presence, mood, location, meters come only from it); the
+    // earlier ones are context for durable facts.
+    const wholeStory = String(transcript || '').trim();
+    const earlierStory = !narrationCapture && !fullScanMode && currentExchange && wholeStory.length > currentExchange.length && wholeStory.endsWith(currentExchange)
+        ? wholeStory.slice(0, wholeStory.length - currentExchange.length).trim()
+        : '';
+    const EARLIER_LABEL = 'EARLIER exchanges (replies since the last scan, each read once; durable facts and relationship changes that happened then, with their own evidence; never current presence, mood or location)';
     const storyContext = narrationCapture
         ? NARRATION_CAPTURE_STORY
-        : `Story context:\n${String(transcript || '').trim()}${fullScanMode ? `\n\nCURRENT exchange (authoritative for presence/live state and numeric relationship deltas):\n${currentExchange}` : ''}`;
+        : earlierOnly
+            ? `Story context:\n${EARLIER_LABEL}:\n${wholeStory}`
+            : earlierStory
+            ? `Story context:\n${EARLIER_LABEL}:\n${earlierStory}\n\nCURRENT exchange (authoritative for presence, mood and location):\n${currentExchange}`
+            : `Story context:\n${String(transcript || '').trim()}${fullScanMode ? `\n\nCURRENT exchange (authoritative for presence, mood and location):\n${currentExchange}` : ''}`;
 
     // (1.2.17) Opt-in compact one-pass rules: the same fields and gates in fewer words (about 1,200
     // tokens instead of 2,000). Only for one-pass capture; the scanner keeps its full rules.
@@ -7181,7 +7306,7 @@ Rules:
 9. DEVELOPMENT SPEED: developmentScale=gradual|explicit|batch. assistant/main-speaker=gradual; Player explicit/batch only for declarative canon, not quotes/questions/speculation/requests/conditionals/wishes. Speech evidence/candidate=voice style, not bare quote/personality. Time-compressed refine/evolve/change MUST include developmentReason + changed FULL candidate; unchanged/reinforcing=>omit/keep. Time skip alone invents nothing.
 10. SOCIAL: grounded non-player kin/friend/rival/mentor/partner => ALWAYS top-level keyRelationshipEdges {aId,a,bId,b,aToB=b's role to a,bToA,reason}; one entry/counterpart. Use late/surviving, never dangling "(deceased)". Social change may evolve+reason; omission NEVER erases other bonds.
 11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue ~N; cue=>MUST return apparentAge when age unknown; species literal; no species-aging inference. Birthday/elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual=>apparentAgeState:"evolve"+reason. Appearance:no age; vague time skip insufficient. gender=male|female only if explicit; never infer; change=>genderState:"correct"+reason.
-12. RELATIONSHIP -100..+100 DELTA-ONLY; currentRelationship read-only. Return relationshipDelta+relationshipEvidence (all 4 keys). NEW only; continuation/aftermath=>0. Raw max 1/2/5/10; axis max 1/2/3/4. EVERY non-zero axis needs grounded CURRENT-exchange evidence. Desire needs explicit attraction/intimacy narration; rescue/gratitude/affection/trust/proximity=>0. Trust!=obedience; Affection!=devotion; Tension!=jealousy.
+12. RELATIONSHIP -100..+100 DELTA-ONLY; currentRelationship read-only. Return relationshipDelta+relationshipEvidence (all 4 keys). NEW only; continuation/aftermath=>0. Raw max 1/2/5/10; axis max 1/2/3/4. EVERY non-zero axis needs grounded evidence from the CURRENT exchange or, when EARLIER exchanges are shown, from the EARLIER exchange it happened in (each is read once). Desire needs explicit attraction/intimacy narration; rescue/gratitude/affection/trust/proximity=>0. Trust!=obedience; Affection!=devotion; Tension!=jealousy.
 13. lifeState unknown|alive|deceased; deceased+explicit=terminal death; alive output cannot revive.
 14. Memories: max3 NEW in npcs[] (existing too), ADDED to cap5 stored; no duplicate/paraphrased memories. If crowded use memoryRetention=top5 consequential/durable; recency=tiebreak only. homeBase=durable home/workplace/HQ/haunt, never current scene location; keep-by-default; change needs homeBaseState:"update"+homeBaseReason. Caps: ${PROMPT_CAPS}. COMPACT; never invent.
 15. JSON only: {"npcs":[...],"profileUpdates":[...],"keyRelationshipEdges":[...]}. profileUpdates example: {"id":"npc_myla","evidence":{"appearance":["bronze hair"],"speech":["formal"]},"appearanceState":"refine","appearance":"Bronze hair; wool smock.","speechState":"refine","speech":"Soft, formal."}. Existing relationship delta example: {"id":"npc_myla","relationshipDelta":{"trust":-2,"affection":0,"desire":0,"tension":2},"relationshipEvidence":{"trust":"lie","affection":"","desire":"","tension":"conflict"}}.${hiddenNoteRules}

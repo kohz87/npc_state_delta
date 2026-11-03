@@ -84,7 +84,7 @@ test('prompts gain the custom-field rule only when fields are configured', () =>
 
 test('configured custom fields reach the roleplay injection and the dossier page', () => {
     const npc = live({ customFields: { Level: '3', Class: 'Rogue', Old: 'x' } });
-    assert.match(buildInjection([npc], 'Maelis waves.', 1, 3, undefined, 4000, null, { customFieldNames: ['Level', 'Class'] }), /AGENCY\/OTHER BONDS: established details: Level: 3 · Class: Rogue/);
+    assert.match(buildInjection([npc], 'Maelis waves.', 1, 3, undefined, 4000, null, { customFieldNames: ['Level', 'Class'] }), /AGENCY\/BONDS: established details: Level: 3 · Class: Rogue/);
     assert.doesNotMatch(buildInjection([npc], 'Maelis waves.', 1, 3), /established details/, 'nothing is sent when no fields are configured');
     assert.deepEqual(dossierDetailProjection(npc).customFields, [['Level', '3'], ['Class', 'Rogue'], ['Old', 'x']]);
 });
