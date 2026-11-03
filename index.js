@@ -3134,6 +3134,21 @@ function namedByPlayerNpcIds(state) {
         .map(npc => npc.id);
 }
 
+// (Story Block 2.18.0) The signature gear line of each pack cast dossier: { [npcId]: "Gear: A, B" }, only for those the host answers
+// for. Empty without a host, on an older Story Block without `packs.castGear`, and while gear is off or the person is in the party.
+function castGearLines(state) {
+    const adapter = storySuiteV2Meters();
+    if (!adapter?.castGearLine) return null;
+    const lines = {};
+    for (const npc of state?.npcs || []) {
+        if (!npc?.id || !npc.castFrom?.key || !npc.name) continue;
+        let line = '';
+        try { line = adapter.castGearLine(npc.name); } catch { line = ''; }
+        if (line) lines[npc.id] = line;
+    }
+    return Object.keys(lines).length ? lines : null;
+}
+
 // The live dossier injection under the current settings and scene defer (sent by updateInjection;
 // tokens() measures the same text).
 function liveInjectionText(state, settings, { namedNpcIds = namedByPlayerNpcIds(state), transcript = recentTranscript(4) } = {}) {
@@ -3141,7 +3156,8 @@ function liveInjectionText(state, settings, { namedNpcIds = namedByPlayerNpcIds(
     // only the place and who is present, so under a v2 host the cards keep them.
     const sceneDeferred = defersArea('scene', settings.sourceOfTruth) && !storyBlockIsV2();
     const awayNotes = keyReturnNotes(state);
-    return buildInjection(scenePresenceView(hostedMeterView(state.npcs)), transcript, state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: settings.customFieldNames, sceneDeferred, ...(awayNotes ? { awayNotes } : {}) });
+    const gearLines = castGearLines(state);
+    return buildInjection(scenePresenceView(hostedMeterView(state.npcs)), transcript, state.turn, settings.injectLimit, settings.behaviorCriteria, settings.injectBudgetTokens, state.socialGraph, { namedNpcIds, customFieldNames: settings.customFieldNames, sceneDeferred, ...(awayNotes ? { awayNotes } : {}), ...(gearLines ? { gearLines } : {}) });
 }
 
 function updateInjection() {
