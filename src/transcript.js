@@ -128,12 +128,15 @@ export function currentExchangeMessages(messageId = null) {
  * true count waiting. null when no earlier reply was skipped, so a scan with nothing skipped reads exactly the current
  * exchange as before.
  */
-export function skippedExchangesWindow(messageId = null, { afterId = null, replies = 0, limit = null } = {}) {
+export function skippedExchangesWindow(messageId = null, { afterId: markerId = null, replies = 0, limit = null, fresh = false } = {}) {
+    // A chat never scanned has no marker yet: it reads from the start. Any other missing marker (a fail-closed restore with no
+    // divergence information) reads the latest reply only.
+    const afterId = Number.isInteger(markerId) ? markerId : (fresh ? -1 : null);
     const chat = activeChat(readContext().chat || []);
     let assistantId = Number.isInteger(messageId) ? messageId : chat.length - 1;
     while (assistantId >= 0 && (chat[assistantId]?.is_system || chat[assistantId]?.is_user)) assistantId -= 1;
     if (assistantId < 0) return null;
-    // No marker (a new chat, or a branch restore cleared it): the latest reply alone, as before; nothing already applied is re-read.
+    // No marker and not a new chat: the latest reply alone, as before; nothing already applied is re-read.
     if (!(Number.isInteger(afterId) && afterId < assistantId)) return null;
     const hasMarker = true;
     const wanted = Math.max(0, Math.round(Number(replies) || 0));

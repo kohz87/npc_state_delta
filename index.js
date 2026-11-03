@@ -4412,6 +4412,7 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
     const skippedWindow = !manual && !fullWindowScan && Number.isInteger(messageId) && !narrationCaptures.has(narrationCaptureKey(scanChatKey, messageId))
         ? skippedExchangesWindow(messageId, {
             afterId: getChatState(scanChatKey)?.lastScannedMessageId,
+            fresh: !Number(getChatState(scanChatKey)?.scanCount || 0),
             replies: getChatState(scanChatKey)?.assistantSinceScan,
             limit: settings.scanDepth,
         })

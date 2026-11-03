@@ -3780,7 +3780,7 @@ function portraitProseIsAdjective(item, original = item) {
     return PORTRAIT_ADJECTIVE.test(text) || (/^[a-z]/.test(String(original || '').trim()) && PORTRAIT_ADJECTIVE_SUFFIX.test(text));
 }
 
-const PORTRAIT_HUMANOID = /\b(?:humans?|humanoids?|persons?|people|mortals?|elf|elves|elven|dwarf|dwarves|dwarven|orcs?|goblins?|halflings?|gnomes?|tieflings?|demons?|angels?|vampires?|fae|fey|nymphs?|giants?|ogres?|trolls?|centaurs?|beast-?men|beast-?man|\w*folk|half-\w+|\w+-kin|kin|\w+born)\b/i;
+const PORTRAIT_HUMANOID = /\b(?:humans?|humanoids?|persons?|people|mortals?|elf|elves|elven|dwarf|dwarves|dwarven|orcs?|goblins?|halflings?|gnomes?|tieflings?|demons?|angels?|vampires?|fae|fey|nymphs?|giants?|ogres?|trolls?|centaurs?|beast-?men|beast-?man|beast-?wom[ae]n|\w*folk|half-\w+|\w+-kin|kin|\w+born)\b/i;
 
 function portraitProseList(items) {
     const list = items.filter(Boolean);
@@ -3815,7 +3815,8 @@ function buildNaturalPortraitProse({ name, gender, rawGender, species, visualAge
     const core = stripped.filter((item, at) => !adjectiveAt[at]);
     // man / woman / boy / girl / person only for a human, a humanoid people or no species: a wolf, a dragon or a robot is not
     // given a human form ("a male wolf", "a robot").
-    const humanoid = !speciesText || PORTRAIT_HUMANOID.test(speciesText);
+    // Only the head noun (the last word) decides: "giant spider" and "demon wolf" are animals, "half-elf" a people.
+    const humanoid = !speciesText || PORTRAIT_HUMANOID.test(speciesText.split(/\s+/).pop());
     const formNoun = humanoid ? (speciesHasNoun ? '' : nounWord) : '';
     const animalSex = !humanoid && gender && !speciesHasNoun ? gender : '';
     const head = [numericAge ? (approximate ? 'roughly ' : '') + ageText.replace(/\s+/g, '') + '-year-old' : (teen ? 'teenage' : ''), ...adjectives, animalSex, speciesText, formNoun].filter(Boolean).join(' ');

@@ -112,8 +112,7 @@ test('lean: a scan reads every reply since the last scan, the ones the local che
     runScenario('skipped-replies-read', async h => {
         h.settings.scanEvery = 5;
         h.settings.scanDepth = 6;
-        await h.turn('Hello.', 'Yunyun greets you.');   // a first scan sets the marker; a chat with no marker reads the latest reply only
-        const base = h.scannerCalls().length;
+        const base = 0;
         await h.turn('We walk on.', 'They walk down the road in silence, past the skipped-one milestone.');
         await h.turn('We walk on.', 'The wind is cold and the road is skipped-two long.');
         h.equal(h.scannerCalls().length, base, 'two quiet replies: no call');
@@ -134,8 +133,7 @@ test('lean: the window covers every skipped reply even when it is larger than Sc
     runScenario('skipped-window', async h => {
         h.settings.scanEvery = 30;
         h.settings.scanDepth = 4;
-        await h.turn('Hello.', 'Yunyun greets you.');
-        const base = h.scannerCalls().length;
+        const base = 0;
         for (let i = 1; i <= 4; i += 1) await h.turn('We walk on.', `The road goes on, mile ${i} of skipped-${i}.`);
         h.equal(h.scannerCalls().length, base, 'quiet replies: no call');
         await h.turn('Who is that?', 'Yunyun steps out of the mist and waves.');
@@ -278,11 +276,11 @@ test('lean: the window covers every skipped reply (5 replies at Scan context 6 k
 });
 
 // The walk of index.js's automatic scan: cadence, window, marker and the catch-up flag, over a chat of quiet replies.
-function walk({ replies, everyReply, scanEvery = 5, scanDepth = 6, fail = () => false }) {
+function walk({ replies, everyReply, scanEvery = 5, scanDepth = 6, fail = () => false, initMarker = 0, fresh = false }) {
     const chat = [{ is_user: false, name: 'Nar', mes: 'R0 opening.' }];
     useTranscriptSource({ context: () => ({ chat, name1: 'User', name2: 'Nar' }), scanDepth: () => scanDepth });
     const roster = [{ name: 'Mira Vale', aliases: [], present: true }];
-    let marker = 0; let since = 0; let behind = false;
+    let marker = initMarker; let since = 0; let behind = false;
     const reads = {}; const earlierOnly = [];
     for (let k = 1; k <= replies; k += 1) {
         chat.push({ is_user: true, name: 'User', mes: `U${k}` });
@@ -292,7 +290,7 @@ function walk({ replies, everyReply, scanEvery = 5, scanDepth = 6, fail = () => 
         const changes = replyMayChangeDossiers({ texts: [chat[id - 1].mes, chat[id].mes], roster, ignore: ['User', 'Nar'] });
         if (!autoScanDue({ autoScan: true, full: false, sinceScan: since, scanEvery, everyReply, replyChanges: changes, catchUp: behind })) continue;
         if (fail(k)) continue;
-        const w = skippedExchangesWindow(id, { afterId: marker, replies: since, limit: scanDepth });
+        const w = skippedExchangesWindow(id, { afterId: marker, replies: since, limit: scanDepth, fresh: fresh && marker === null });
         const read = w ? [...w.transcript.matchAll(/Nar: R(\d+)/g)].map(m => +m[1]) : [k];
         for (const r of read) reads[r] = (reads[r] || 0) + 1;
         if (w && !w.latest) earlierOnly.push(read);
@@ -366,12 +364,17 @@ test('lean: a window scan hands the relationship pass the story alone: an Off-Sc
     assert.equal(currentExchangeRelationshipRelevant(mira, w.prose, null, {}), false);
 });
 
-test('lean: with no marker (a new chat, or a branch restore cleared it) only the latest reply is read', () => {
+test('lean: a new chat in Lean mode reads replies 1 to 5 once at the first scan; a null marker on a chat already scanned reads the latest only', () => {
+    const fresh = walk({ replies: 5, everyReply: false, initMarker: null, fresh: true });
+    for (let r = 1; r <= 5; r += 1) assert.equal(fresh.reads[r], 1, `reply ${r} read ${fresh.reads[r] || 0} times`);
+    const lean40 = walk({ replies: 40, everyReply: false, initMarker: null, fresh: true });
+    for (let r = 1; r <= lean40.marker / 2; r += 1) assert.equal(lean40.reads[r], 1, `reply ${r} read ${lean40.reads[r] || 0} times`);
     const chat = [{ is_user: false, name: 'Nar', mes: 'R0' }];
     for (let k = 1; k <= 6; k += 1) { chat.push({ is_user: true, name: 'User', mes: `U${k}` }); chat.push({ is_user: false, name: 'Nar', mes: `R${k}` }); }
     useTranscriptSource({ context: () => ({ chat, name1: 'User', name2: 'Nar' }), scanDepth: () => 6 });
-    assert.equal(skippedExchangesWindow(12, { afterId: null, replies: 6, limit: 6 }), null);
-    assert.equal(skippedExchangesWindow(12, { afterId: undefined, replies: 6 }), null);
+    assert.equal(skippedExchangesWindow(12, { afterId: null, replies: 6, limit: 6 }), null, 'null marker, not a new chat: the latest reply only');
+    const startOfChat = skippedExchangesWindow(12, { afterId: null, replies: 6, limit: 6, fresh: true });
+    assert.ok(startOfChat.transcript.includes('R0') && startOfChat.transcript.includes('R6'), 'a new chat reads from the start');
 });
 
 test('lean: the prompt takes relationship evidence from CURRENT or any EARLIER exchange shown, and CURRENT claims authority only for presence, mood and location', () => {
@@ -404,4 +407,9 @@ test('lean: the relationship evaluator prompt scores a change in the exchange it
     assert.match(multi, /grounded relationshipEvidence from the exchange it happened in/);
     assert.match(multi, /\nExchanges:\nUser: u1/);
     assert.doesNotMatch(multi, /CURRENT/);
+});
+
+test('lean: the relationship evaluator system prompt says exchanges for a window and is unchanged otherwise', () => {
+    const source = fs.readFileSync(new URL('../src/relationship-pass.js', import.meta.url), 'utf8');
+    assert.match(source, /Use only the supplied targets and current exchange\. Return only the requested JSON object\."\.replace\(options\.window === true \? \/current exchange\/ : \/\(\?!\)\/, 'exchanges'\)/);
 });

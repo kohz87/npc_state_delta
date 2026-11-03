@@ -313,3 +313,11 @@ test('natural portrait prose keeps a man for ogres, trolls, giants, centaurs and
     assert.match(prose({ name: 'A', gender: 'male', species: 'beast-man' }), /^A portrait of a beast-man\./);
     assert.match(prose({ name: 'A', gender: 'male', species: 'wolf' }), /^A portrait of a male wolf\./, 'an animal still gets none');
 });
+
+test('natural portrait prose reads only the species head noun: animals with a humanoid first word stay animals', () => {
+    assert.match(prose({ name: 'A', gender: 'female', species: 'giant spider' }), /^A portrait of a female giant spider\./);
+    assert.match(prose({ name: 'A', gender: 'male', species: 'demon wolf' }), /^A portrait of a male demon wolf\./);
+    assert.match(prose({ name: 'A', gender: 'female', species: 'half-elf' }), /^A portrait of a half-elf woman\./);
+    assert.match(prose({ name: 'A', gender: 'female', species: 'fox-beastfolk' }), /^A portrait of a fox-beastfolk woman\./);
+    assert.match(prose({ name: 'A', gender: 'male', species: 'frost giant' }), /^A portrait of a frost giant man\./);
+});

@@ -435,3 +435,16 @@ test('v0.2.12 permanent dismissal strips restored graph edges and stale structur
     const savedBrina = restored.state.npcs.find(npc => npc.id === brina.id);
     assert.equal(savedBrina.keyRelationships.some(entry => /Liza/.test(entry)), false);
 });
+
+test('a restore that is not exact keeps the scan marker just before the divergence instead of clearing it', () => {
+    const swipe0 = [user('Choose.'), assistant('Myla smiles and accepts the promise.', 0)];
+    const state = baseState();
+    state.npcs = [createNpcRecord('Myla')];
+    state.lastScannedMessageId = 1;
+    ensureBranchParentAnchor(state, swipe0, 1, 'assistant-parent');
+    recordBranchCheckpoint(state, swipe0, 1, 'scan');
+    const swipe1 = [user('Choose.'), assistant('Myla refuses and walks away.', 1)];
+    const switched = reconcileBranchState(state, swipe1, { explicitDivergence: 1 });
+    assert.equal(switched.exactRestored, false);
+    assert.equal(switched.state.lastScannedMessageId, 0, 'the reply before the divergence stays applied; nothing earlier is re-read');
+});
