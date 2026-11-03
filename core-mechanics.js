@@ -3780,7 +3780,7 @@ function portraitProseIsAdjective(item, original = item) {
     return PORTRAIT_ADJECTIVE.test(text) || (/^[a-z]/.test(String(original || '').trim()) && PORTRAIT_ADJECTIVE_SUFFIX.test(text));
 }
 
-const PORTRAIT_HUMANOID = /\b(?:humans?|humanoids?|persons?|people|mortals?|elf|elves|elven|dwarf|dwarves|dwarven|orcs?|goblins?|halflings?|gnomes?|tieflings?|demons?|angels?|vampires?|fae|fey|nymphs?|giants?|\w*folk|half-\w+|\w+-kin|kin|\w+born)\b/i;
+const PORTRAIT_HUMANOID = /\b(?:humans?|humanoids?|persons?|people|mortals?|elf|elves|elven|dwarf|dwarves|dwarven|orcs?|goblins?|halflings?|gnomes?|tieflings?|demons?|angels?|vampires?|fae|fey|nymphs?|giants?|ogres?|trolls?|centaurs?|beast-?men|beast-?man|\w*folk|half-\w+|\w+-kin|kin|\w+born)\b/i;
 
 function portraitProseList(items) {
     const list = items.filter(Boolean);
@@ -3803,7 +3803,7 @@ function buildNaturalPortraitProse({ name, gender, rawGender, species, visualAge
     const youngest = numericAge ? Math.min(...ageText.match(/\d+/g).map(Number)) : Infinity;
     const young = gender && (/^(?:boy|girl)$/.test(normalizeName(rawGender)) || youngest < 18 || teen);
     const nounWord = young ? (gender === 'male' ? 'boy' : 'girl') : noun;
-    const speciesHasNoun = new RegExp('\\b(?:' + nounWord + '|male|female|man|woman|boy|girl|person)\\b|(?:boy|girl)\\b', 'i').test(speciesText);
+    const speciesHasNoun = new RegExp('\\b(?:' + nounWord + '|male|female|man|woman|boy|girl|person)\\b|(?:boy|girl)\\b|beast-?(?:wo)?man\\b', 'i').test(speciesText);
     // "His hair is white" reads "white hair".
     const possessiveIs = item => item.replace(/^(?:his|her|their|its)\s+([a-z][a-z' -]{1,30}?)\s+(?:is|are)\s+(.+)$/i, (whole, thing, value) => `${value} ${thing}`);
     // "Tall, with silver hair" is two clauses: the adjective goes on the subject, the rest follows "with".
@@ -4918,6 +4918,7 @@ export function buildRelationshipPassPrompt({
     relationshipCriteria = DEFAULT_RELATIONSHIP_CRITERIA,
     impactCriteria = DEFAULT_IMPACT_CRITERIA,
     relationshipCaps = DEFAULT_RELATIONSHIP_CAPS,
+    window = false,
 }) {
     const userName = flatPromptName(rawUserName, 'User');
     const caps = normalizeRelationshipCaps(relationshipCaps);
@@ -4942,7 +4943,7 @@ export function buildRelationshipPassPrompt({
     })).filter(npc => npc.id);
     const relationshipRubric = compactRelationshipRubric(relationshipCriteria);
     const impactRubric = compactImpactRubric(impactCriteria);
-    return `You are NPC State Delta's focused relationship evaluator. Assess ONLY how each target NPC's relationship toward ${userName} changes because of the supplied CURRENT exchange.
+    const prompt = `You are NPC State Delta's focused relationship evaluator. Assess ONLY how each target NPC's relationship toward ${userName} changes because of the supplied CURRENT exchange.
 
 Rules:
 1. Return exactly one result for EACH target id. Never omit a target.
@@ -4961,6 +4962,13 @@ Caps: ordinary ${caps.ordinary}; meaningful ${caps.meaningful}; major ${caps.maj
 Targets: ${JSON.stringify(compactTargets)}
 Current exchange:
 ${String(transcript || '').trim()}`;
+    if (!window) return prompt;
+    // Several exchanges, each read once: a change is scored in the exchange it happened in, with that exchange's own evidence.
+    return prompt
+        .replace('because of the supplied CURRENT exchange.', 'because of the supplied exchanges. They are in order, the latest last; each was read once, so score a change in the exchange where it happened.')
+        .replace('its own short CURRENT-exchange evidence', 'its own short evidence from the exchange it happened in')
+        .replace('grounded relationshipEvidence from CURRENT exchange', 'grounded relationshipEvidence from the exchange it happened in')
+        .replace('\nCurrent exchange:\n', '\nExchanges:\n');
 }
 
 function normalizeProfileUpdateEvidence(raw = {}) {

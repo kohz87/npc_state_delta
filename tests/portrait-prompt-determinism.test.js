@@ -265,7 +265,7 @@ test('natural portrait prose drops a leading "He/She/They has" and puts a bare a
 test('natural portrait prose picks a or an by sound', () => {
     assert.match(prose({ name: 'X', species: 'unicorn-kin', gender: 'female', appearance: 'Silver horn' }), /^A portrait of a unicorn-kin woman with silver horn\./);
     assert.match(prose({ name: 'X', species: 'elf', gender: 'female' }), /^A portrait of an elf woman\./);
-    assert.match(prose({ name: 'X', species: 'one-eyed ogre', gender: 'male' }), /^A portrait of a male one-eyed ogre\./);
+    assert.match(prose({ name: 'X', species: 'one-eyed ogre', gender: 'male' }), /^A portrait of a one-eyed ogre man\./);
     assert.match(prose({ name: 'X', species: 'Umbral wraith', gender: 'male' }), /^A portrait of a male Umbral wraith\./);
 });
 
@@ -302,4 +302,14 @@ test('natural portrait prose gives no human form to an animal, a dragon or a rob
 test('natural portrait prose joins "Tall, with silver hair" without a doubled "with"', () => {
     assert.match(prose({ name: 'A', gender: 'male', appearance: 'Tall, with silver hair' }), /^A portrait of a tall man with silver hair\./);
     assert.doesNotMatch(prose({ name: 'A', gender: 'male', appearance: 'Tall, with silver hair' }), /with tall|with[^.]*, with/);
+});
+
+test('natural portrait prose keeps a man for ogres, trolls, giants, centaurs and beast-men', () => {
+    assert.match(prose({ name: 'A', gender: 'male', species: 'ogre' }), /^A portrait of an ogre man\./);
+    assert.match(prose({ name: 'A', gender: 'female', species: 'troll' }), /^A portrait of a troll woman\./);
+    assert.match(prose({ name: 'A', gender: 'male', species: 'giant' }), /^A portrait of a giant man\./);
+    assert.match(prose({ name: 'A', gender: 'female', species: 'centaur' }), /^A portrait of a centaur woman\./);
+    assert.match(prose({ name: 'A', gender: 'male', species: 'beastman' }), /^A portrait of a beastman\./);
+    assert.match(prose({ name: 'A', gender: 'male', species: 'beast-man' }), /^A portrait of a beast-man\./);
+    assert.match(prose({ name: 'A', gender: 'male', species: 'wolf' }), /^A portrait of a male wolf\./, 'an animal still gets none');
 });

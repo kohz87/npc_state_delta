@@ -119,6 +119,7 @@ export async function runFocusedRelationshipPass(ctx, parsed, existingNpcs, tran
                 relationshipCriteria: settings.relationshipCriteria,
                 impactCriteria: settings.relationshipImpactCriteria,
                 relationshipCaps: settings.relationshipCaps,
+                window: options.window === true,
             });
             const { parsed: relationshipParsed, raw, retried: batchRetried } = await generateParsedNpcJson(ctx, {
                 systemPrompt: "You are NPC State Delta's isolated relationship evaluator. Use only the supplied targets and current exchange. Return only the requested JSON object.",

@@ -4531,6 +4531,7 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
                 currentExchangeOnly: manual || fullWindowScan,
                 requestScope: operation.requestScope,
                 prose: skippedWindow ? skippedWindow.prose : currentProse,
+                window: Boolean(skippedWindow),
                 // (1.2.12) Only a one-pass block speaks for its relationships this way.
                 ...(capture ? { covered: parsed?.relationshipsCovered === true, review: Array.isArray(parsed?.relationshipReview) ? parsed.relationshipReview : [] } : {}),
             },

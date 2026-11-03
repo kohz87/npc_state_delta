@@ -387,3 +387,21 @@ test('lean: the prompt takes relationship evidence from CURRENT or any EARLIER e
     assert.doesNotMatch(earlierPrompt, /CURRENT exchange \(authoritative/);
     assert.match(earlierPrompt, /EARLIER exchanges[^]*relationship changes[^]*never current presence, mood or location/);
 });
+
+import { buildRelationshipPassPrompt } from '../core.js';
+
+test('lean: the relationship evaluator prompt scores a change in the exchange it happened in for a window, and is unchanged for one exchange', () => {
+    const base = { transcript: 'User: u1\nNar: r1', targets: [{ id: 'n1', name: 'Mira' }], userName: 'User' };
+    const single = buildRelationshipPassPrompt(base);
+    assert.match(single, /because of the supplied CURRENT exchange\./);
+    assert.match(single, /short CURRENT-exchange evidence/);
+    assert.match(single, /grounded relationshipEvidence from CURRENT exchange/);
+    assert.match(single, /\nCurrent exchange:\nUser: u1/);
+    assert.equal(buildRelationshipPassPrompt({ ...base, window: false }), single, 'no window: byte-identical');
+    const multi = buildRelationshipPassPrompt({ ...base, window: true });
+    assert.match(multi, /because of the supplied exchanges\. They are in order, the latest last; each was read once/);
+    assert.match(multi, /short evidence from the exchange it happened in/);
+    assert.match(multi, /grounded relationshipEvidence from the exchange it happened in/);
+    assert.match(multi, /\nExchanges:\nUser: u1/);
+    assert.doesNotMatch(multi, /CURRENT/);
+});
