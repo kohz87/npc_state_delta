@@ -629,7 +629,7 @@ test('host lost mid-reply: Delta stops sending, its views pass through, the host
     // The old host finishing that reply's capture does not throw (its definition still answers).
     const late = h.capture(index, '~ npc Mira | trust: +1 | charm: +2');
     assert.equal(late[0].ok, true);
-    assert.equal(h.npc('Mira').meters.trust, 18);
+    assert.equal(h.npc('Mira').meters.trust, 16, 'the story\'s +5 and +1 only: the scan\'s +2 left trust to the story line (RT2)');
     assert.deepEqual(h.sent.map(item => item.type), ['npc.adjust']);
     h.adapter.stop();
 });

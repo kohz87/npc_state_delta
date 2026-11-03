@@ -8474,6 +8474,8 @@ window.NPCStateDelta = Object.freeze({
     useMessageGate: gate => useMessageGate(gate),
     // (v2 meters) Delta's base relationship values: where a new NPC's slice meters start.
     relationshipBaseline: () => normalizeRelationshipBaseline(getSettings().relationshipBaseline),
+    // (v2 meters) Delta's impact-tier caps: the most a story line's `~ npc` move can be at each tier.
+    relationshipCaps: () => normalizeRelationshipCaps(getSettings().relationshipCaps),
     presentCastHtml: () => storyBlockCastHtml(),
     // (1.2.13) Why the present cast is empty ({ text, scan }), and Add NPC, for the Story Block tabs.
     castEmptyReason: () => castEmptyReason(),

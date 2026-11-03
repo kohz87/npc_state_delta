@@ -55,6 +55,7 @@
 // values, note rules and texts, per-NPC setup, presets, who is present) comes in through the hooks
 // given to createNpcPart.
 import { storyMinuteText } from '../calendar.js';
+import { RELATIONSHIP_KEYS, applyRelationshipDelta, normalizeRelationshipCaps } from '../core-mechanics.js';
 import { BUILT_IN_PRESETS, normalizeLimits, normalizePreset, presetIds } from './npc-meters-presets.js';
 import { RECENT_REPLIES, isAway, isKey, labelKey, labelsOf, memoryKey, normalizeKeyPeople } from './key-people.js';
 import { CAST_KEY, metWithEntry, normalizeCast } from './cast-dossier.js';
@@ -139,7 +140,14 @@ const REASON_LABELS = new Set(['reason', 'why', 'because', 'note', 'cause']);
 const RESERVED_IDS = new Set(['stage', 'stages', 'disposition', 'name', 'meter', 'meters', 'milestone', 'milestones', ...REASON_LABELS]);
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const WORDS = /^[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*$/u;
-const RECORD_FIELDS = Object.freeze(['name', 'meters', 'stages', 'unlocked', 'disposition', 'turn', 'milestones', 'rank', 'low', 'day', 'held']);
+const RECORD_FIELDS = Object.freeze(['name', 'meters', 'stages', 'unlocked', 'disposition', 'turn', 'milestones', 'rank', 'low', 'day', 'held', 'progress']);
+// The impact tiers of a story line (`| impact: major`), the scanner's own: the line's step is held to the tier's cap
+// (the reader's relationshipCaps). A missing or unknown tier is the smallest.
+const IMPACT_TIERS = Object.freeze(['ordinary', 'meaningful', 'major', 'extreme']);
+const tierOf = raw => {
+    const word = String(raw ?? '').trim().toLowerCase().split(/[^a-z]+/)[0];
+    return IMPACT_TIERS.includes(word) ? word : 'ordinary';
+};
 
 const isObject = value => !!value && typeof value === 'object' && !Array.isArray(value);
 const isInt = value => Number.isInteger(value);
@@ -691,6 +699,11 @@ export function validateNpcSlice(slice) {
             if (record.unlocked.some(id => typeof id !== 'string' || !id || id.length > 40)) errors.push(`${where} has an unusable unlocked note id.`);
             if (new Set(record.unlocked).size !== record.unlocked.length) errors.push(`${where} lists an unlocked note twice.`);
         }
+        if (record.progress !== undefined) {
+            if (!isObject(record.progress) || Object.entries(record.progress).some(([id, part]) => !RELATIONSHIP_KEYS.includes(id) || typeof part !== 'number' || !Number.isFinite(part) || part <= -1 || part >= 1)) {
+                errors.push(`${where} has an unusable record of part-points.`);
+            }
+        }
         if (record.held !== undefined) {
             if (!Array.isArray(record.held) || record.held.length > MAX_UNLOCKED || record.held.some(id => typeof id !== 'string' || !id || id.length > 40)
                 || new Set(record.held).size !== record.held.length) errors.push(`${where} has an unusable list of shut notes.`);
@@ -700,7 +713,8 @@ export function validateNpcSlice(slice) {
             const turn = record.turn;
             if (!isObject(turn) || replyKey(turn.reply, turn.reply) === null || !isObject(turn.from)
                 || (turn.at !== undefined && (!isInt(turn.at) || turn.at < 0 || !isReplyId(turn.reply)))
-                || Object.values(turn.from).some(value => !isInt(value))) errors.push(`${where} has an unusable reply window.`);
+                || Object.values(turn.from).some(value => !isInt(value))
+                || (turn.story !== undefined && (!Array.isArray(turn.story) || turn.story.some(id => typeof id !== 'string')))) errors.push(`${where} has an unusable reply window.`);
         }
         if (record.milestones !== undefined) {
             const list = isObject(record.milestones) ? Object.entries(record.milestones) : null;
@@ -748,7 +762,7 @@ const signed = value => (value > 0 ? `+${value}` : String(value));
 // ceiling, a fall at a floor; a value already past one moves only back toward it); without it (the
 // reader's own set) only the range applies. `at`: the reply's index now, kept beside a record ID for
 // "moved lately" in the tail.
-function moveMeters(record, changes, { defs, cap, reply, at = null, limit, limits = {} }) {
+function moveMeters(record, changes, { defs, cap, reply, at = null, limit, limits = {}, story = false }) {
     const byId = new Map(defs.map(def => [def.id, def]));
     const known = replyKey(reply, reply) !== null;
     const windowOf = () => ({ reply, ...(isReplyId(reply) && isInt(at) && at >= 0 ? { at } : {}), from: { ...record.meters } });
@@ -774,7 +788,14 @@ function moveMeters(record, changes, { defs, cap, reply, at = null, limit, limit
         const after = clamp(asked, low, high);
         record.meters[def.id] = after;
         const stop = after !== asked && why && after === (why === 'ceiling' ? high : low) ? why : '';
-        moved.push({ meter: def.id, label: def.label, before, after, asked, held: after !== asked, ...(stop ? { stop } : {}) });
+        // `ask`: what the line asked for before its impact tier cut the step.
+        const wanted = isInt(change.ask) ? change.ask : asked;
+        moved.push({ meter: def.id, label: def.label, before, after, asked: wanted, held: after !== wanted, ...(stop ? { stop } : {}) });
+    }
+    // The meters a story line named in this reply: Delta's own scan of the same reply leaves them to the story.
+    if (story && limit && known && record.turn && sameReply(record.turn, reply)) {
+        const named = new Set([...(Array.isArray(record.turn.story) ? record.turn.story : []), ...changes.map(change => change.meter)]);
+        record.turn.story = [...named].filter(id => byId.has(id));
     }
     // The reader's own values are the new start of this reply's window (or end it).
     if (!limit && moved.length) {
@@ -913,6 +934,7 @@ function result({ name, key, moved, settled, problems, created, disposition, mil
  * "nothing known"):
  *   resolve(name)     → Delta's dossier for that name or alias: { name, aliases, relationship } | null
  *   baseline()        → Delta's base relationship values (new NPCs start there)
+ *   caps()            → Delta's impact-tier caps { ordinary, meaningful, major, extreme } (a story line's step is held to its tier's)
  *   secretRules(name) → that dossier's notes as [{ id, meter?, at?, when?, title? }] (never their text)
  *   secretTexts(name, ids) → [{ id, text }] for those notes (the tail and screens only)
  *   setup(name, labels) → that dossier's meter setup { track, limits } (the editor's)
@@ -936,6 +958,11 @@ export function createNpcPart(hooks = {}) {
     const baseline = () => {
         const value = call(hooks.baseline, {});
         return isObject(value) ? value : {};
+    };
+    // Delta's impact-tier caps, normalized; null when the host gives none (then a story line is held by the per-reply cap alone).
+    const tierCaps = () => {
+        const value = call(hooks.caps, null);
+        return isObject(value) ? normalizeRelationshipCaps(value) : null;
     };
     const rulesFor = (name, aliases = []) => {
         const value = call(hooks.secretRules, [], name, aliases);
@@ -1084,8 +1111,44 @@ export function createNpcPart(hooks = {}) {
         return { opened, changed: JSON.stringify([record.unlocked, [...held]]) !== before };
     }
 
+    // A story line's moves through the impact tiers. The built-in meters move as Delta's scanner moves them
+    // (applyRelationshipDelta: the tier's cap, the resistance of a deep value, the milestone gates), one meter at a
+    // time, so a line that names two meters moves each; a move too small to show a whole point is kept on the record
+    // as `progress` and adds up on the next line. A custom meter's step is held to the tier's cap. `=N` is a move
+    // toward N. The per-reply cap and the meter's range still apply after (moveMeters).
+    // → the changes as { meter, mode: 'add', value, ask } (`ask`: the value the line asked for).
+    function tiered(record, changes, defs, { tier, caps }) {
+        const byId = new Map(defs.map(def => [def.id, def]));
+        const limits = normalizeRelationshipCaps(caps);
+        const live = Object.fromEntries(RELATIONSHIP_KEYS.map(id => [id, meterValue(record, byId.get(id))]));
+        const part = isObject(record.progress) ? { ...record.progress } : {};
+        const out = [];
+        for (const change of changes) {
+            const def = byId.get(change.meter);
+            if (!def) continue;
+            const before = RELATIONSHIP_KEYS.includes(def.id) ? live[def.id] : meterValue(record, def);
+            const asked = change.mode === 'add' ? before + change.value : change.value;
+            const delta = asked - before;
+            let step;
+            if (RELATIONSHIP_KEYS.includes(def.id)) {
+                const update = applyRelationshipDelta(live, { [def.id]: delta }, tier, limits, { [def.id]: Number(part[def.id]) || 0 });
+                step = update.appliedDelta[def.id];
+                live[def.id] = update.relationship[def.id];
+                part[def.id] = update.relationshipProgress[def.id];
+            } else {
+                const cap = limits[tier];
+                step = Math.max(-cap, Math.min(cap, delta));
+            }
+            out.push({ meter: def.id, mode: 'add', value: step, ask: asked });
+        }
+        const kept = Object.fromEntries(Object.entries(part).filter(([, value]) => value));
+        if (Object.keys(kept).length) record.progress = kept;
+        else delete record.progress;
+        return out;
+    }
+
     // `milestone`: { add: [{ key, name }], remove: [key] } (the reader's or a story line's).
-    function run(ctx, { label, changes, problems, limit, reply, at = null, seed, disposition, allowEmpty = false, milestone = null, notes = null }) {
+    function run(ctx, { label, changes, problems, limit, reply, at = null, seed, disposition, allowEmpty = false, milestone = null, notes = null, impact = null, story = false, yieldToStory = false }) {
         const settings = normalized(ctx.settings(), ctx);
         const defs = defsFrom(settings);
         if (!changes.length && disposition === undefined && !allowEmpty) {
@@ -1101,7 +1164,16 @@ export function createNpcPart(hooks = {}) {
         if (!isObject(record.stages)) record.stages = {};
         if (!Array.isArray(record.unlocked)) record.unlocked = [];
         const setup = setupFor(record.name, who.labels);
-        const moved = moveMeters(record, changes, { defs, cap: settings.changeCap, reply, at, limit, limits: limitsFor(settings, setup) });
+        // Delta's scan of a reply whose story line already moved a meter leaves that meter to the line (one move, not two).
+        const left = yieldToStory && limit && record.turn && sameReply(record.turn, reply) && Array.isArray(record.turn.story) ? record.turn.story : [];
+        const mine = left.length ? changes.filter(change => !left.includes(change.meter)) : changes;
+        const stepped = impact ? tiered(record, mine, defs, impact) : mine;
+        const moved = moveMeters(record, stepped, { defs, cap: settings.changeCap, reply, at, limit, limits: limitsFor(settings, setup), story });
+        if (!limit) {
+            // The reader's own value for a built-in meter ends the part-points the story lines had gathered on it.
+            for (const change of changes) if (record.progress) delete record.progress[change.meter];
+            if (record.progress && !Object.keys(record.progress).length) delete record.progress;
+        }
         if (disposition !== undefined) {
             if (disposition) record.disposition = disposition;
             else delete record.disposition;
@@ -1154,9 +1226,11 @@ export function createNpcPart(hooks = {}) {
         const problems = [];
         const changes = [];
         let disposition;
+        let tier = 'ordinary';
         for (const [label, raw] of Object.entries(isObject(line.labels) ? line.labels : {})) {
             const key = slug(label);
             if (REASON_LABELS.has(key)) continue;
+            if (key === 'impact' && !byLabel.has(key)) { tier = tierOf(raw); continue; }
             if (key === 'stage' || key === 'stages') { problems.push(`Stages are set by code from the meters; "stage: ${clean(raw, 60)}" was not used.`); continue; }
             if (key === 'disposition') { disposition = clean(raw, DISPOSITION_MAX); continue; }
             const def = byLabel.get(key);
@@ -1169,7 +1243,7 @@ export function createNpcPart(hooks = {}) {
         // index an older one had is its own reply, with its own cap.
         const at = isInt(ctx.carrier?.index) ? ctx.carrier.index : null;
         const reply = replyKey(ctx.carrier?.sid, at);
-        return run(ctx, { label: line.name, changes, problems, limit: true, reply, at, disposition, allowEmpty: line.op === '+' });
+        return run(ctx, { label: line.name, changes, problems, limit: true, reply, at, disposition, allowEmpty: line.op === '+', impact: tierCaps() ? { tier, caps: tierCaps() } : null, story: true });
     }
 
     // ---- commands (cause ui from Delta itself; capture is the story's) ----
@@ -1195,7 +1269,7 @@ export function createNpcPart(hooks = {}) {
             const defs = defsFrom(normalized(ctx.settings(), ctx));
             const changes = changesFrom(payload?.meters, defs, 'add', problems).filter(change => change.value !== 0);
             const at = isInt(payload?.reply) && payload.reply >= 0 ? payload.reply : null;
-            return run(ctx, { label: payload?.name, changes, problems, limit: true, reply: commandReply(ctx, at), at, seed: isObject(payload?.start) ? payload.start : null });
+            return run(ctx, { label: payload?.name, changes, problems, limit: true, reply: commandReply(ctx, at), at, seed: isObject(payload?.start) ? payload.start : null, yieldToStory: true });
         },
         /**
          * npc.set { name, meters: { meter: n }, reply? }: the reader's own values (range only). From
@@ -1585,8 +1659,9 @@ export function createNpcPart(hooks = {}) {
      */
     function staticText() {
         const settings = storedSettings();
+        const caps = tierCaps();
         const custom = settings.custom.map(def => `, ${def.id} (${def.min}..${def.max})`).join('');
-        const base = `NPC meters: ${BUILT_IN_METERS.map(def => def.id).join(', ')} (-100..100)${custom}. When the scene changes how someone feels: ~ npc Name | meter: +N, -N or =N. Code clamps each meter, moves it at most ${settings.changeCap} a reply and sets the stages; never write a stage.`;
+        const base = `NPC meters: ${BUILT_IN_METERS.map(def => def.id).join(', ')} (-100..100)${custom}. When the scene changes how someone feels: ~ npc Name | meter: +N, -N or =N. Code clamps each meter, moves it at most ${settings.changeCap} a reply and sets the stages; never write a stage.${caps ? ` Add | impact: ordinary|meaningful|major|extreme (the most a move can be: ${IMPACT_TIERS.map(tier => caps[tier]).join('/')}; =N moves toward N; none given: ordinary).` : ''}`;
         const rules = featureOn(FEATURE_PRESETS) ? settings.custom.filter(def => def.describe).map(def => `${def.id} ${def.describe}`) : [];
         return rules.length ? `${base} Meter rules: ${rules.join('; ')}.` : base;
     }
