@@ -95,7 +95,7 @@ test('ordinary scan moves only the invariant compact Stage 4 rule ahead of dynam
     const identityIndex = prompt.indexOf('Identity index (matching only):');
     assert.ok(prompt.indexOf('S4: forms/current; confirmed death terminal.') < identityIndex);
     assert.ok(prompt.indexOf('STAGE 4 APPEARANCE:') > identityIndex, 'conditional detailed rules remain late instead of destabilizing the ordinary prefix');
-    assert.match(prompt, /CURRENT exchange \(authoritative for presence\/live state and numeric relationship deltas\):/);
+    assert.match(prompt, /CURRENT exchange \(authoritative for presence, mood and location\):/);
     assert.ok(prompt.includes(HISTORY));
     assert.ok(prompt.includes(current));
 });

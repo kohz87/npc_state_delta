@@ -265,13 +265,13 @@ test('natural portrait prose drops a leading "He/She/They has" and puts a bare a
 test('natural portrait prose picks a or an by sound', () => {
     assert.match(prose({ name: 'X', species: 'unicorn-kin', gender: 'female', appearance: 'Silver horn' }), /^A portrait of a unicorn-kin woman with silver horn\./);
     assert.match(prose({ name: 'X', species: 'elf', gender: 'female' }), /^A portrait of an elf woman\./);
-    assert.match(prose({ name: 'X', species: 'one-eyed ogre', gender: 'male' }), /^A portrait of a one-eyed ogre man\./);
-    assert.match(prose({ name: 'X', species: 'Umbral wraith', gender: 'male' }), /^A portrait of an Umbral wraith man\./);
+    assert.match(prose({ name: 'X', species: 'one-eyed ogre', gender: 'male' }), /^A portrait of a male one-eyed ogre\./);
+    assert.match(prose({ name: 'X', species: 'Umbral wraith', gender: 'male' }), /^A portrait of a male Umbral wraith\./);
 });
 
 test('natural portrait prose: a/an by sound, is/are stripped, capitalised words are not adjectives, no doubled noun, teen', () => {
     assert.match(prose({ name: 'A', gender: 'male', role: 'uninvited guest' }), /the look of an uninvited guest/);
-    assert.match(prose({ name: 'A', species: 'unidentified beast', gender: 'male' }), /^A portrait of an unidentified beast man\./);
+    assert.match(prose({ name: 'A', species: 'unidentified beast', gender: 'male' }), /^A portrait of a male unidentified beast\./);
     assert.match(prose({ name: 'A', gender: 'female', role: 'utopian dreamer' }), /the look of a utopian dreamer/);
     assert.match(prose({ name: 'A', gender: 'female', role: 'uniform inspector' }), /the look of a uniform inspector/);
     assert.match(prose({ name: 'A', species: 'unicorn-kin', gender: 'female' }), /^A portrait of a unicorn-kin woman\./);
@@ -285,4 +285,21 @@ test('natural portrait prose: a/an by sound, is/are stripped, capitalised words 
 
 test('natural portrait prose turns "His hair is white" into "white hair"', () => {
     assert.match(prose({ name: 'A', gender: 'male', appearance: 'His hair is white; Her eyes are green' }), /^A portrait of a man with white hair and green eyes\./);
+});
+
+test('natural portrait prose gives no human form to an animal, a dragon or a robot; humans and humanoids keep theirs', () => {
+    assert.match(prose({ name: 'Fang', gender: 'male', species: 'wolf' }), /^A portrait of a male wolf\./);
+    assert.match(prose({ name: 'Ember', gender: 'female', species: 'dragon' }), /^A portrait of a female dragon\./);
+    assert.match(prose({ name: 'Unit 7', species: 'robot' }), /^A portrait of a robot\./);
+    assert.match(prose({ name: 'Pup', gender: 'male', species: 'wolf', apparentAge: '2' }), /^A portrait of a 2-year-old male wolf\./);
+    assert.match(prose({ name: 'A', gender: 'female', species: 'Human', apparentAge: '30' }), /^A portrait of a 30-year-old Human woman\./);
+    assert.match(prose({ name: 'Pip', gender: 'boy', species: 'human', apparentAge: '9' }), /^A portrait of a 9-year-old human boy\./, 'a human boy stays a boy');
+    assert.match(prose({ name: 'A', gender: 'female', species: 'fox-beastfolk', apparentAge: '21' }), /^A portrait of a 21-year-old fox-beastfolk woman\./);
+    assert.match(prose({ name: 'A', gender: 'male', species: 'elf' }), /^A portrait of an elf man\./);
+    assert.match(prose({ name: 'A', gender: 'male' }), /^A portrait of a man\./);
+});
+
+test('natural portrait prose joins "Tall, with silver hair" without a doubled "with"', () => {
+    assert.match(prose({ name: 'A', gender: 'male', appearance: 'Tall, with silver hair' }), /^A portrait of a tall man with silver hair\./);
+    assert.doesNotMatch(prose({ name: 'A', gender: 'male', appearance: 'Tall, with silver hair' }), /with tall|with[^.]*, with/);
 });

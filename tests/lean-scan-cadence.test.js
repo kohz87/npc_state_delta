@@ -112,18 +112,20 @@ test('lean: a scan reads every reply since the last scan, the ones the local che
     runScenario('skipped-replies-read', async h => {
         h.settings.scanEvery = 5;
         h.settings.scanDepth = 6;
+        await h.turn('Hello.', 'Yunyun greets you.');   // a first scan sets the marker; a chat with no marker reads the latest reply only
+        const base = h.scannerCalls().length;
         await h.turn('We walk on.', 'They walk down the road in silence, past the skipped-one milestone.');
         await h.turn('We walk on.', 'The wind is cold and the road is skipped-two long.');
-        h.equal(h.scannerCalls().length, 0, 'two quiet replies, no tracked NPC in the scene: no call');
+        h.equal(h.scannerCalls().length, base, 'two quiet replies: no call');
         await h.turn('Who is that?', 'Yunyun steps out of the mist and waves.');
-        const calls = h.scannerCalls();
-        h.equal(calls.length, 1, 'the new name scans');
+        const calls = h.scannerCalls().slice(base);
+        h.equal(calls.length, 1, 'the name scans');
         h.check(/EARLIER exchanges[^]*skipped-one[^]*CURRENT exchange[^]*Yunyun steps out/.test(String(calls[0].prompt || '')), 'earlier replies are labelled EARLIER, the latest CURRENT');
         const prompt = String(calls[0].prompt || '');
         h.check(prompt.includes('skipped-one') && prompt.includes('skipped-two') && prompt.includes('Yunyun steps out'), 'the scan reads the skipped replies and the current one');
         // The next scan with nothing skipped reads the current exchange alone.
         await h.turn('Go on.', 'Yunyun nods and says nothing.');
-        const last = String(h.scannerCalls()[1].prompt || '');
+        const last = String(h.scannerCalls()[base + 1].prompt || '');
         h.check(last.includes('Yunyun nods') && !last.includes('skipped-one'), 'nothing skipped: the current exchange only');
     });
 });
@@ -132,10 +134,12 @@ test('lean: the window covers every skipped reply even when it is larger than Sc
     runScenario('skipped-window', async h => {
         h.settings.scanEvery = 30;
         h.settings.scanDepth = 4;
+        await h.turn('Hello.', 'Yunyun greets you.');
+        const base = h.scannerCalls().length;
         for (let i = 1; i <= 4; i += 1) await h.turn('We walk on.', `The road goes on, mile ${i} of skipped-${i}.`);
-        h.equal(h.scannerCalls().length, 0, 'quiet replies: no call');
+        h.equal(h.scannerCalls().length, base, 'quiet replies: no call');
         await h.turn('Who is that?', 'Yunyun steps out of the mist and waves.');
-        const prompt = String(h.scannerCalls()[0].prompt || '');
+        const prompt = String(h.scannerCalls()[base].prompt || '');
         h.check(prompt.includes('Yunyun steps out') && prompt.includes('skipped-4') && prompt.includes('skipped-1'), 'all 5 replies are read although Scan context is 4');
     });
 });
@@ -344,5 +348,42 @@ test('lean: a scan of several exchanges labels the earlier ones and the latest C
     const prompt = buildScannerPrompt({ transcript: 'User: u1\nNar: r1\nUser: u2\nNar: r2', currentTranscript: 'User: u2\nNar: r2', existingNpcs: [], candidates: [] });
     assert.match(prompt, /EARLIER exchanges[^]*durable facts and relationship changes[^]*User: u1\nNar: r1\n\nCURRENT exchange[^]*User: u2\nNar: r2/);
     const single = buildScannerPrompt({ transcript: 'User: u2\nNar: r2', currentTranscript: 'User: u2\nNar: r2', existingNpcs: [], candidates: [] });
-    assert.doesNotMatch(single, /EARLIER exchanges/);
+    assert.doesNotMatch(single, /EARLIER exchanges \(replies/);
+});
+
+import { currentExchangeRelationshipRelevant } from '../src/relationship-pass.js';
+
+test('lean: a window scan hands the relationship pass the story alone: an Off-Screen name is no target', () => {
+    const chat = [{ is_user: false, name: 'Nar', mes: 'R0' }];
+    const ws = '<World_State>Present: Bram\nOff-Screen: Mira Vale (at the guild)</World_State>';
+    for (let k = 1; k <= 3; k += 1) { chat.push({ is_user: true, name: 'User', mes: `U${k}` }); chat.push({ is_user: false, name: 'Nar', mes: `R${k} Bram nods. ${ws}` }); }
+    useTranscriptSource({ context: () => ({ chat, name1: 'User', name2: 'Nar' }), scanDepth: () => 6 });
+    const w = skippedExchangesWindow(6, { afterId: 0, replies: 3 });
+    const mira = { id: 'm', name: 'Mira Vale', aliases: [] };
+    assert.match(w.transcript, /Off-Screen/, 'the scanner prompt still carries the World State');
+    assert.doesNotMatch(w.prose, /Off-Screen|World_State|Mira/);
+    assert.match(w.prose, /Bram nods/);
+    assert.equal(currentExchangeRelationshipRelevant(mira, w.prose, null, {}), false);
+});
+
+test('lean: with no marker (a new chat, or a branch restore cleared it) only the latest reply is read', () => {
+    const chat = [{ is_user: false, name: 'Nar', mes: 'R0' }];
+    for (let k = 1; k <= 6; k += 1) { chat.push({ is_user: true, name: 'User', mes: `U${k}` }); chat.push({ is_user: false, name: 'Nar', mes: `R${k}` }); }
+    useTranscriptSource({ context: () => ({ chat, name1: 'User', name2: 'Nar' }), scanDepth: () => 6 });
+    assert.equal(skippedExchangesWindow(12, { afterId: null, replies: 6, limit: 6 }), null);
+    assert.equal(skippedExchangesWindow(12, { afterId: undefined, replies: 6 }), null);
+});
+
+test('lean: the prompt takes relationship evidence from CURRENT or any EARLIER exchange shown, and CURRENT claims authority only for presence, mood and location', () => {
+    const cur = 'User: U3\nNar: R3';
+    const windowPrompt = buildScannerPrompt({ existingNpcs: [], candidates: [], transcript: `User: U1\nNar: R1\n${cur}`, currentTranscript: cur });
+    const earlierPrompt = buildScannerPrompt({ existingNpcs: [], candidates: [], transcript: `User: U1\nNar: R1\n${cur}`, currentTranscript: cur, earlierOnly: true });
+    for (const prompt of [windowPrompt, earlierPrompt]) {
+        assert.match(prompt, /grounded evidence from the CURRENT exchange or, when EARLIER exchanges are shown, from the EARLIER exchange it happened in/);
+        assert.doesNotMatch(prompt, /EVERY non-zero axis needs grounded CURRENT-exchange evidence/);
+        assert.doesNotMatch(prompt, /authoritative for [^)]*relationship deltas/);
+    }
+    assert.match(windowPrompt, /CURRENT exchange \(authoritative for presence, mood and location\):\nUser: U3/);
+    assert.doesNotMatch(earlierPrompt, /CURRENT exchange \(authoritative/);
+    assert.match(earlierPrompt, /EARLIER exchanges[^]*relationship changes[^]*never current presence, mood or location/);
 });

@@ -1477,7 +1477,7 @@ try {
     const fullScanArgs = [...mockState.rawCalls].reverse().map(call => call?.[0] || {}).find(args => /automatic full dossier scan/i.test(String(args?.label || '')) || (/isolated dossier scanner/i.test(String(args.systemPrompt || '')) && /FULL-WINDOW RECONCILIATION/.test(String(args.prompt || '')))) || {};
     assert.equal(fullScanArgs.responseLength, 3200, 'full auto scan should receive the larger response budget');
     assert.match(String(fullScanArgs.prompt || ''), /FULL-HISTORY-MARKER/, 'full auto scan should retain earlier messages inside the configured history window');
-    assert.match(String(fullScanArgs.prompt || ''), /CURRENT exchange \(authoritative for presence\/live state and numeric relationship deltas\)/);
+    assert.match(String(fullScanArgs.prompt || ''), /CURRENT exchange \(authoritative for presence, mood and location\)/);
     assert.match(String(fullScanArgs.prompt || ''), /Kazuma: What happens next\?[\s\S]*waits beside the doorway\./);
     assert.equal(globalThis.NPCStateDelta.scanMetrics()?.label, 'automatic-full');
     assert.deepEqual(globalThis.NPCStateDelta.getState().npcs.find(n => n.id === fullScanTarget.id).relationship, relationshipBeforeFullScan, 'full-window scans must not replay numeric relationship deltas from older history');

@@ -3780,6 +3780,8 @@ function portraitProseIsAdjective(item, original = item) {
     return PORTRAIT_ADJECTIVE.test(text) || (/^[a-z]/.test(String(original || '').trim()) && PORTRAIT_ADJECTIVE_SUFFIX.test(text));
 }
 
+const PORTRAIT_HUMANOID = /\b(?:humans?|humanoids?|persons?|people|mortals?|elf|elves|elven|dwarf|dwarves|dwarven|orcs?|goblins?|halflings?|gnomes?|tieflings?|demons?|angels?|vampires?|fae|fey|nymphs?|giants?|\w*folk|half-\w+|\w+-kin|kin|\w+born)\b/i;
+
 function portraitProseList(items) {
     const list = items.filter(Boolean);
     if (list.length <= 1) return list.join('');
@@ -3804,13 +3806,19 @@ function buildNaturalPortraitProse({ name, gender, rawGender, species, visualAge
     const speciesHasNoun = new RegExp('\\b(?:' + nounWord + '|male|female|man|woman|boy|girl|person)\\b|(?:boy|girl)\\b', 'i').test(speciesText);
     // "His hair is white" reads "white hair".
     const possessiveIs = item => item.replace(/^(?:his|her|their|its)\s+([a-z][a-z' -]{1,30}?)\s+(?:is|are)\s+(.+)$/i, (whole, thing, value) => `${value} ${thing}`);
-    const rawCore = appearance.core.map(possessiveIs).map(item => item.replace(/^(?:(?:he|she|they)\s+(?:has|have|is|are)|has|have|having|with)\s+/i, ''));
+    // "Tall, with silver hair" is two clauses: the adjective goes on the subject, the rest follows "with".
+    const rawCore = appearance.core.flatMap(item => item.split(/,\s*(?=(?:with|has|have|having)\s)/i)).map(possessiveIs).map(item => item.replace(/^(?:(?:he|she|they)\s+(?:has|have|is|are)|has|have|having|with)\s+/i, ''));
     const stripped = rawCore.map(item => portraitProseLower(item));
     const speciesWords = new Set(normalizeName(speciesText).split(' '));
     const adjectiveAt = stripped.map((item, at) => portraitProseIsAdjective(item, rawCore[at]) && !speciesWords.has(normalizeName(item)));
     const adjectives = stripped.filter((item, at) => adjectiveAt[at]);
     const core = stripped.filter((item, at) => !adjectiveAt[at]);
-    const head = [numericAge ? (approximate ? 'roughly ' : '') + ageText.replace(/\s+/g, '') + '-year-old' : (teen ? 'teenage' : ''), ...adjectives, speciesText, speciesHasNoun ? '' : nounWord].filter(Boolean).join(' ');
+    // man / woman / boy / girl / person only for a human, a humanoid people or no species: a wolf, a dragon or a robot is not
+    // given a human form ("a male wolf", "a robot").
+    const humanoid = !speciesText || PORTRAIT_HUMANOID.test(speciesText);
+    const formNoun = humanoid ? (speciesHasNoun ? '' : nounWord) : '';
+    const animalSex = !humanoid && gender && !speciesHasNoun ? gender : '';
+    const head = [numericAge ? (approximate ? 'roughly ' : '') + ageText.replace(/\s+/g, '') + '-year-old' : (teen ? 'teenage' : ''), ...adjectives, animalSex, speciesText, formNoun].filter(Boolean).join(' ');
     const clothing = appearance.clothing.map(item => portraitProseLower(item));
     const coreKeys = new Set(core.map(portraitPartKey));
     const clothes = clothing.filter(item => !coreKeys.has(portraitPartKey(item)));
@@ -7228,8 +7236,8 @@ export function buildScannerPrompt({
         : earlierOnly
             ? `Story context:\n${EARLIER_LABEL}:\n${wholeStory}`
             : earlierStory
-            ? `Story context:\n${EARLIER_LABEL}:\n${earlierStory}\n\nCURRENT exchange (authoritative for presence/live state and numeric relationship deltas):\n${currentExchange}`
-            : `Story context:\n${String(transcript || '').trim()}${fullScanMode ? `\n\nCURRENT exchange (authoritative for presence/live state and numeric relationship deltas):\n${currentExchange}` : ''}`;
+            ? `Story context:\n${EARLIER_LABEL}:\n${earlierStory}\n\nCURRENT exchange (authoritative for presence, mood and location):\n${currentExchange}`
+            : `Story context:\n${String(transcript || '').trim()}${fullScanMode ? `\n\nCURRENT exchange (authoritative for presence, mood and location):\n${currentExchange}` : ''}`;
 
     // (1.2.17) Opt-in compact one-pass rules: the same fields and gates in fewer words (about 1,200
     // tokens instead of 2,000). Only for one-pass capture; the scanner keeps its full rules.
@@ -7281,7 +7289,7 @@ Rules:
 9. DEVELOPMENT SPEED: developmentScale=gradual|explicit|batch. assistant/main-speaker=gradual; Player explicit/batch only for declarative canon, not quotes/questions/speculation/requests/conditionals/wishes. Speech evidence/candidate=voice style, not bare quote/personality. Time-compressed refine/evolve/change MUST include developmentReason + changed FULL candidate; unchanged/reinforcing=>omit/keep. Time skip alone invents nothing.
 10. SOCIAL: grounded non-player kin/friend/rival/mentor/partner => ALWAYS top-level keyRelationshipEdges {aId,a,bId,b,aToB=b's role to a,bToA,reason}; one entry/counterpart. Use late/surviving, never dangling "(deceased)". Social change may evolve+reason; omission NEVER erases other bonds.
 11. Age/ApparentAge separate: age=chronology only; apparentAge=visual cue ~N; cue=>MUST return apparentAge when age unknown; species literal; no species-aging inference. Birthday/elapsed=>ageState:"advance"+reason; correction=>ageState:"correct"+reason; visual=>apparentAgeState:"evolve"+reason. Appearance:no age; vague time skip insufficient. gender=male|female only if explicit; never infer; change=>genderState:"correct"+reason.
-12. RELATIONSHIP -100..+100 DELTA-ONLY; currentRelationship read-only. Return relationshipDelta+relationshipEvidence (all 4 keys). NEW only; continuation/aftermath=>0. Raw max 1/2/5/10; axis max 1/2/3/4. EVERY non-zero axis needs grounded CURRENT-exchange evidence. Desire needs explicit attraction/intimacy narration; rescue/gratitude/affection/trust/proximity=>0. Trust!=obedience; Affection!=devotion; Tension!=jealousy.
+12. RELATIONSHIP -100..+100 DELTA-ONLY; currentRelationship read-only. Return relationshipDelta+relationshipEvidence (all 4 keys). NEW only; continuation/aftermath=>0. Raw max 1/2/5/10; axis max 1/2/3/4. EVERY non-zero axis needs grounded evidence from the CURRENT exchange or, when EARLIER exchanges are shown, from the EARLIER exchange it happened in (each is read once). Desire needs explicit attraction/intimacy narration; rescue/gratitude/affection/trust/proximity=>0. Trust!=obedience; Affection!=devotion; Tension!=jealousy.
 13. lifeState unknown|alive|deceased; deceased+explicit=terminal death; alive output cannot revive.
 14. Memories: max3 NEW in npcs[] (existing too), ADDED to cap5 stored; no duplicate/paraphrased memories. If crowded use memoryRetention=top5 consequential/durable; recency=tiebreak only. homeBase=durable home/workplace/HQ/haunt, never current scene location; keep-by-default; change needs homeBaseState:"update"+homeBaseReason. Caps: ${PROMPT_CAPS}. COMPACT; never invent.
 15. JSON only: {"npcs":[...],"profileUpdates":[...],"keyRelationshipEdges":[...]}. profileUpdates example: {"id":"npc_myla","evidence":{"appearance":["bronze hair"],"speech":["formal"]},"appearanceState":"refine","appearance":"Bronze hair; wool smock.","speechState":"refine","speech":"Soft, formal."}. Existing relationship delta example: {"id":"npc_myla","relationshipDelta":{"trust":-2,"affection":0,"desire":0,"tension":2},"relationshipEvidence":{"trust":"lie","affection":"","desire":"","tension":"conflict"}}.${hiddenNoteRules}

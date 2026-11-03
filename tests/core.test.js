@@ -1378,7 +1378,7 @@ test('scanner prompt uses compact identity index, changed-only output, delta rel
     assert.match(prompt, /MUST reuse id/i);
     assert.match(prompt, /old label in aliases/i);
     assert.match(prompt, /never duplicate\/downgrade/i);
-    assert.match(prompt, /EVERY non-zero axis needs grounded CURRENT-exchange evidence/i);
+    assert.match(prompt, /EVERY non-zero axis needs grounded evidence from the CURRENT exchange/i);
     assert.match(prompt, /-100\.\.\+100/i);
     assert.match(prompt, /continuation\/aftermath=>0/i);
     assert.match(prompt, /CUSTOM TRUST RULE/);
@@ -1577,7 +1577,7 @@ test('scanner relationship contract requires independent multi-axis deltas', () 
     });
     assert.match(prompt, /relationshipDelta\+relationshipEvidence \(all 4 keys\)/i);
     assert.match(prompt, /axis max 1\/2\/3\/4/i);
-    assert.match(prompt, /EVERY non-zero axis needs grounded CURRENT-exchange evidence/i);
+    assert.match(prompt, /EVERY non-zero axis needs grounded evidence from the CURRENT exchange/i);
     assert.match(prompt, /DELTA-ONLY/i);
     assert.match(prompt, /currentRelationship read-only/i);
     assert.match(prompt, /Desire needs explicit attraction/i);
@@ -1769,7 +1769,7 @@ test('full-window scanner reconciles history while isolating live state and rela
     assert.match(prompt, /recover missed durable facts/);
     assert.match(prompt, /Numeric relationshipImpact\/relationshipDelta MUST use only CURRENT exchange/);
     assert.match(prompt, /anywhere in the supplied recent-history window/);
-    assert.match(prompt, /CURRENT exchange \(authoritative for presence\/live state and numeric relationship deltas\):\nCurrent: Luna quietly greets the player/);
+    assert.match(prompt, /CURRENT exchange \(authoritative for presence, mood and location\):\nCurrent: Luna quietly greets the player/);
 });
 
 test('scanner exposes stored status for every relevant NPC and provides an explicit status clear contract', () => {
@@ -1831,7 +1831,7 @@ test('routine scanner prompt has bounded overhead and delta/profile tiers', () =
     const overhead = prompt.length - transcript.length;
     // 1.0.99 adds the user-authorized "if no named forms" qualifier to the Appearance rule; cleanup
     // step 12 the caps sentence at the stored limits (a few characters more).
-    assert.ok(overhead < 7650, `routine scanner overhead should stay below 7650 chars after the bounded Appearance clarifications and stored-limit caps, got ${overhead}`);
+    assert.ok(overhead < 7750, `routine scanner overhead should stay below 7750 chars after the bounded Appearance clarifications and stored-limit caps, got ${overhead}`);
     assert.match(prompt, /Return compact JSON deltas/i);
     assert.match(prompt, /Existing relationship delta example/i);
     assert.match(prompt, /Relevant live context \(dynamic fields only\)/i);

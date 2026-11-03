@@ -133,9 +133,10 @@ export function skippedExchangesWindow(messageId = null, { afterId = null, repli
     let assistantId = Number.isInteger(messageId) ? messageId : chat.length - 1;
     while (assistantId >= 0 && (chat[assistantId]?.is_system || chat[assistantId]?.is_user)) assistantId -= 1;
     if (assistantId < 0) return null;
-    const hasMarker = Number.isInteger(afterId) && afterId < assistantId;
+    // No marker (a new chat, or a branch restore cleared it): the latest reply alone, as before; nothing already applied is re-read.
+    if (!(Number.isInteger(afterId) && afterId < assistantId)) return null;
+    const hasMarker = true;
     const wanted = Math.max(0, Math.round(Number(replies) || 0));
-    if (!hasMarker && wanted < 2) return null;
     const waiting = [];
     let assistants = 0;
     for (let i = assistantId; i >= 0; i -= 1) {
@@ -156,9 +157,12 @@ export function skippedExchangesWindow(messageId = null, { afterId = null, repli
     while (kept.length > 1 && chat[kept[kept.length - 1]].is_user && kept.length < waiting.length) kept = kept.slice(0, -1);
     const lines = [];
     const users = [];
+    const proseLines = [];
     for (const i of kept) {
         const line = cleanMessage(chat[i]);
         if (!line) continue;
+        const body = storyProse(chat[i].mes || '');
+        if (body) proseLines.push(`${chat[i].name || (chat[i].is_user ? readContext().name1 : readContext().name2) || ''}: ${body}`);
         lines.push(line);
         if (chat[i].is_user) users.push(`[m${i}] ${line}`);
     }
@@ -169,6 +173,8 @@ export function skippedExchangesWindow(messageId = null, { afterId = null, repli
     return {
         transcript: lines.join('\n'),
         userDevelopmentContext: users.join('\n'),
+        // The window's story alone (no World State, Inner Chatter or blocks): who a relationship change involves.
+        prose: proseLines.join('\n'),
         replies: assistants,
         readThrough,
         latest: readThrough === assistantId,
@@ -183,13 +189,13 @@ export function currentExchangeTranscript(messageId = null) {
     return messages.map(cleanMessage).filter(Boolean).join('\n');
 }
 
-// (1.2.12) The current exchange's story alone (narration and dialogue, no World State or blocks):
-// who a relationship moment involves, and what the relationship evaluator is sent.
 // The story text of the current exchange (the user message and the reply), without speaker labels: for cheap local checks.
 export function currentExchangeBodies(messageId = null) {
     return (currentExchangeMessages(messageId) || []).map(message => storyProse(message.mes || '')).filter(Boolean);
 }
 
+// (1.2.12) The current exchange's story alone (narration and dialogue, no World State or blocks):
+// who a relationship moment involves, and what the relationship evaluator is sent.
 export function currentExchangeProse(messageId = null) {
     const ctx = readContext();
     return (currentExchangeMessages(messageId) || []).map(message => {
