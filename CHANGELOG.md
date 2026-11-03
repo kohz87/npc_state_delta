@@ -1,3 +1,13 @@
+## 1.7.3
+
+- **The narrator's meter changes follow the impact tiers again.** A narrator line such as `~ npc Sanna | trust: +5`
+  used to move the meter by whatever number it named (up to 15 a reply). It now goes through the same tiers and limits
+  as Delta's own scan: the line may add `| impact: ordinary|meaningful|major|extreme`, the step is held to that tier's
+  cap from Settings (1 / 2 / 5 / 10 by default), with the same pull toward neutral on deep values, and a line with no
+  impact counts as ordinary. `=N` moves toward N within the tier.
+- **No double count.** When the narrator's line and Delta's scan both judged the same meter in one reply, both moves
+  were added; the scan now leaves the meters the narrator already moved.
+
 ## 1.7.2
 
 - **A missing cast portrait fills itself in.** If you met someone from a pack's cast before the pack's pictures were
