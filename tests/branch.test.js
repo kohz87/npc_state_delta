@@ -19,6 +19,7 @@ import {
     setBranchProvenanceHint,
 } from '../branch.js';
 import { normalizeSocialGraph } from '../social.js';
+import { skippedExchangesWindow, useTranscriptSource } from '../src/transcript.js';
 import { editorProfileLocks } from '../src/dossier-edit.js';
 
 function user(text, name = 'Kazuma') {
@@ -436,15 +437,32 @@ test('v0.2.12 permanent dismissal strips restored graph edges and stale structur
     assert.equal(savedBrina.keyRelationships.some(entry => /Liza/.test(entry)), false);
 });
 
-test('a restore that is not exact keeps the scan marker just before the divergence instead of clearing it', () => {
-    const swipe0 = [user('Choose.'), assistant('Myla smiles and accepts the promise.', 0)];
-    const state = baseState();
-    state.npcs = [createNpcRecord('Myla')];
-    state.lastScannedMessageId = 1;
-    ensureBranchParentAnchor(state, swipe0, 1, 'assistant-parent');
-    recordBranchCheckpoint(state, swipe0, 1, 'scan');
-    const swipe1 = [user('Choose.'), assistant('Myla refuses and walks away.', 1)];
-    const switched = reconcileBranchState(state, swipe1, { explicitDivergence: 1 });
-    assert.equal(switched.exactRestored, false);
-    assert.equal(switched.state.lastScannedMessageId, 0, 'the reply before the divergence stays applied; nothing earlier is re-read');
+test('a fail-closed restore (an edit of an old reply, a middle delete) leaves the next scan reading the latest reply only', () => {
+    const u = t => ({ is_user: true, is_system: false, name: 'User', mes: `user-${t}`, send_date: `ud${t}` });
+    const b = (t, v = 'A') => ({ is_user: false, is_system: false, name: 'Narrator', mes: `assistant-${t}-${v}`, send_date: `ad${t}${v}`, extra: { gen_id: `g${t}${v}` } });
+    const original = [];
+    for (let t = 0; t < 10; t += 1) { original.push(u(t)); original.push(b(t)); }
+    const makeState = () => {
+        const state = baseState();
+        state.npcs = [createNpcRecord('Seren Lowen')];
+        state.turn = 10; state.lastScannedMessageId = 19; state.scanCount = 4;
+        state.lineage = chatLineage(original);
+        state.rollbackHead = { seq: 0, messageId: 19, lineageKey: lineageCheckpointKey(state.lineage, 19), snapshot: structuredClone({ ...state, checkpoints: [], rollbackJournal: [] }) };
+        return state;
+    };
+    for (const [mutate, opts] of [
+        [c => { c[5] = { ...c[5], mes: 'assistant-2-EDITED' }; return c; }, { operation: 'auto' }],
+        [c => { c[5] = { ...c[5], mes: 'assistant-2-EDITED' }; return c; }, { explicitDivergence: 5, operation: 'edit' }],
+        [c => { c.splice(4, 2); return c; }, { explicitDivergence: 4, operation: 'delete' }],
+    ]) {
+        const next = mutate(original.slice());
+        const restored = reconcileBranchState(makeState(), next, opts);
+        useTranscriptSource({ context: () => ({ chat: next, name1: 'User', name2: 'Narrator' }), scanDepth: () => 6 });
+        const last = next.length - 1;
+        const marker = restored.state.lastScannedMessageId;
+        const window = skippedExchangesWindow(last, { afterId: marker, replies: 1, limit: 6, fresh: false });
+        const reread = window ? [...window.transcript.matchAll(/assistant-(\d+)-A/g)].map(m => Number(m[1])) : [];
+        assert.ok(!reread.length || marker === null || reread.every(t => t >= 9), `the next scan re-reads applied replies: ${reread}`);
+        assert.ok(marker === null || marker >= last - 1 || restored.exactRestored, `marker ${marker}`);
+    }
 });

@@ -1515,8 +1515,7 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
         : rollbackHeadMessageId;
     refreshRollbackJournalRetention(restored);
     if (!exactRestored) {
-        // The marker stays just before the divergence: a restore never re-reads a reply it already applied.
-        if (Number.isInteger(restored.lastScannedMessageId) && restored.lastScannedMessageId >= divergence) restored.lastScannedMessageId = Math.max(-1, divergence - 1);
+        if (Number.isInteger(restored.lastScannedMessageId) && restored.lastScannedMessageId >= divergence) restored.lastScannedMessageId = null;
     }
     prunePortraitAssetsInPlace(restored);
     const rewound = rewindRequested && exactRestored;

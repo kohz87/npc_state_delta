@@ -3780,6 +3780,8 @@ function portraitProseIsAdjective(item, original = item) {
     return PORTRAIT_ADJECTIVE.test(text) || (/^[a-z]/.test(String(original || '').trim()) && PORTRAIT_ADJECTIVE_SUFFIX.test(text));
 }
 
+// A people named first and then a trade or kind ("elf ranger") is still that people; plurals ("elves") read as the singular.
+const PORTRAIT_HUMANOID_FIRST = /^(?:humans?|elf|elves|elven|dwarf|dwarves|dwarven|orcs?|goblins?|halflings?|gnomes?|tieflings?|ogres?|trolls?|centaurs?)$/i;
 const PORTRAIT_HUMANOID = /\b(?:humans?|humanoids?|persons?|people|mortals?|elf|elves|elven|dwarf|dwarves|dwarven|orcs?|goblins?|halflings?|gnomes?|tieflings?|demons?|angels?|vampires?|fae|fey|nymphs?|giants?|ogres?|trolls?|centaurs?|beast-?men|beast-?man|beast-?wom[ae]n|\w*folk|half-\w+|\w+-kin|kin|\w+born)\b/i;
 
 function portraitProseList(items) {
@@ -3797,7 +3799,12 @@ function buildNaturalPortraitProse({ name, gender, rawGender, species, visualAge
     const approximate = /^~/.test(portraitProseClean(visualAge));
     const ageText = portraitProseClean(visualAge).replace(/^~\s*/, '');
     const numericAge = /^\d+(?:\s*[-–]\s*\d+)?$/.test(ageText);
-    const speciesText = portraitProseClean(species);
+    // No parenthetical ("Elf (wood)" reads "elf"); a plural people reads as the singular ("high elves" is "a high elf man").
+    const singular = (word, to) => (/^[A-Z]/.test(word) ? to.charAt(0).toUpperCase() + to.slice(1) : to);
+    const speciesText = portraitProseClean(String(species ?? '').replace(/\([^)]*\)/g, ' '))
+        .replace(/\belves\b/gi, word => singular(word, 'elf'))
+        .replace(/\bdwarves\b/gi, word => singular(word, 'dwarf'))
+        .replace(/\b(orc|goblin|halfling|gnome|tiefling|ogre|troll|centaur|human)s\b/gi, '$1');
     // A boy or a girl stays one: the gender word said so, or the age is under 18 with a male or female gender.
     const teen = /^(?:teens?|teenage|teenaged|teenager|adolescent)$/i.test(ageText);
     const youngest = numericAge ? Math.min(...ageText.match(/\d+/g).map(Number)) : Infinity;
@@ -3816,7 +3823,8 @@ function buildNaturalPortraitProse({ name, gender, rawGender, species, visualAge
     // man / woman / boy / girl / person only for a human, a humanoid people or no species: a wolf, a dragon or a robot is not
     // given a human form ("a male wolf", "a robot").
     // Only the head noun (the last word) decides: "giant spider" and "demon wolf" are animals, "half-elf" a people.
-    const humanoid = !speciesText || PORTRAIT_HUMANOID.test(speciesText.split(/\s+/).pop());
+    const speciesWordsList = speciesText.replace(/\([^)]*\)/g, ' ').trim().split(/\s+/).filter(Boolean);
+    const humanoid = !speciesText || !speciesWordsList.length || PORTRAIT_HUMANOID.test(speciesWordsList[speciesWordsList.length - 1]) || PORTRAIT_HUMANOID_FIRST.test(speciesWordsList[0]);
     const formNoun = humanoid ? (speciesHasNoun ? '' : nounWord) : '';
     const animalSex = !humanoid && gender && !speciesHasNoun ? gender : '';
     const head = [numericAge ? (approximate ? 'roughly ' : '') + ageText.replace(/\s+/g, '') + '-year-old' : (teen ? 'teenage' : ''), ...adjectives, animalSex, speciesText, formNoun].filter(Boolean).join(' ');

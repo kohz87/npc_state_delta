@@ -4376,6 +4376,18 @@ function stripLiveSceneFields(parsed) {
     }
 }
 
+// A chat counts as new (its first scan reads from the start) only when nothing was ever applied to it: no scan, no dossier
+// or candidate, and a history short enough for one window. An imported or cleared chat, or a long chat with no sidecar,
+// reads the latest reply only.
+const NEW_CHAT_MAX_REPLIES = 15;
+function chatNeverScanned(state, messageId) {
+    if (Number(state?.scanCount || 0) > 0 || (state?.npcs || []).length || (state?.candidates || []).length) return false;
+    const chat = getContext().chat || [];
+    let replies = 0;
+    for (let i = 0; i <= Math.min(messageId, chat.length - 1); i += 1) if (chat[i] && !chat[i].is_system && !chat[i].is_user) replies += 1;
+    return replies <= NEW_CHAT_MAX_REPLIES;
+}
+
 async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe = false } = {}) {
     const settings = getSettings();
     if (!settings.enabled) return false;
@@ -4412,7 +4424,7 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
     const skippedWindow = !manual && !fullWindowScan && Number.isInteger(messageId) && !narrationCaptures.has(narrationCaptureKey(scanChatKey, messageId))
         ? skippedExchangesWindow(messageId, {
             afterId: getChatState(scanChatKey)?.lastScannedMessageId,
-            fresh: !Number(getChatState(scanChatKey)?.scanCount || 0),
+            fresh: chatNeverScanned(getChatState(scanChatKey), messageId),
             replies: getChatState(scanChatKey)?.assistantSinceScan,
             limit: settings.scanDepth,
         })
@@ -7846,6 +7858,8 @@ function bindUi() {
         closePortraitGenerator();
         const cleared = freshChatState();
         cleared.lineage = chatLineage(getContext().chat || []);
+        // Cleared, the chat is caught up: only replies from now on are read, not the whole history again.
+        cleared.lastScannedMessageId = latestMessageId(true) >= 0 ? latestMessageId(true) : null;
         setChatState(getChatKey(), cleared);
         persistCritical(); renderDossier(); updateInjection();
     });

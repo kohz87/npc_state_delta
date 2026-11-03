@@ -321,3 +321,11 @@ test('natural portrait prose reads only the species head noun: animals with a hu
     assert.match(prose({ name: 'A', gender: 'female', species: 'fox-beastfolk' }), /^A portrait of a fox-beastfolk woman\./);
     assert.match(prose({ name: 'A', gender: 'male', species: 'frost giant' }), /^A portrait of a frost giant man\./);
 });
+
+test('natural portrait prose drops a parenthetical, reads a leading people name and singularises plurals', () => {
+    assert.match(prose({ name: 'A', gender: 'male', species: 'elf ranger' }), /^A portrait of an elf ranger man\./);
+    assert.match(prose({ name: 'A', gender: 'male', species: 'Elf (wood)' }), /^A portrait of an Elf man\./);
+    assert.match(prose({ name: 'A', gender: 'male', species: 'high elves' }), /^A portrait of a high elf man\./);
+    assert.doesNotMatch(prose({ name: 'A', gender: 'male', species: 'high elves' }), /elves/);
+    assert.match(prose({ name: 'A', gender: 'male', species: 'wolf (grey)' }), /^A portrait of a male wolf\./);
+});

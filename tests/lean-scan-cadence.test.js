@@ -413,3 +413,37 @@ test('lean: the relationship evaluator system prompt says exchanges for a window
     const source = fs.readFileSync(new URL('../src/relationship-pass.js', import.meta.url), 'utf8');
     assert.match(source, /Use only the supplied targets and current exchange\. Return only the requested JSON object\."\.replace\(options\.window === true \? \/current exchange\/ : \/\(\?!\)\/, 'exchanges'\)/);
 });
+
+import { mergeImportedDossierState } from '../bundle.js';
+
+test('lean: a new short chat reads replies 1 to 5 once at its first scan; a long chat with no sidecar reads the latest reply only', () => {
+    runScenario('new-chat-short', async h => {
+        h.settings.scanEvery = 5;
+        for (let i = 1; i <= 5; i += 1) await h.turn('We walk on.', `The road goes on, mile ${i} of marker-${i}.`);
+        const calls = h.scannerCalls();
+        h.equal(calls.length, 1, 'the safety scan');
+        const prompt = String(calls[0].prompt || '');
+        h.check([1, 2, 3, 4, 5].every(i => prompt.split(`marker-${i}.`).length === 2), 'every reply 1 to 5 is read exactly once');
+    });
+    runScenario('long-chat-no-sidecar', async h => {
+        h.settings.scanEvery = 20;
+        for (let i = 1; i <= 20; i += 1) await h.turn('We walk on.', `The road goes on, mile ${i} of marker-${i}.`);
+        const calls = h.scannerCalls();
+        h.equal(calls.length, 1, 'the safety scan');
+        const prompt = String(calls[0].prompt || '');
+        h.check(prompt.includes('marker-20.') && !prompt.includes('marker-1.') && !prompt.includes('marker-19.'), 'more replies than one window: the latest reply only');
+    });
+});
+
+test('lean: an import never leaves a chat looking new, and Clear leaves the marker on the latest reply', () => {
+    const empty = { npcs: [], candidates: [], dismissed: [], socialGraph: { edges: [], unresolved: [] }, scanCount: 0, lastScannedMessageId: null };
+    const scanned = mergeImportedDossierState(empty, { npcs: [], lastScannedMessageId: 79, scanCount: 12 });
+    assert.ok(scanned.scanCount >= 1, 'a bundle that had scans');
+    assert.equal(scanned.lastScannedMessageId, null);
+    const withDossiers = mergeImportedDossierState(empty, { npcs: [{ id: 'a', name: 'Mira Vale' }] });
+    assert.ok(withDossiers.scanCount >= 1, 'a bundle with dossiers');
+    assert.equal(mergeImportedDossierState(empty, { npcs: [] }).scanCount, 0, 'an empty bundle changes nothing');
+    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    assert.match(index, /cleared\.lastScannedMessageId = latestMessageId\(true\) >= 0 \? latestMessageId\(true\) : null;/);
+    assert.match(index, /fresh: chatNeverScanned\(getChatState\(scanChatKey\), messageId\),/);
+});
