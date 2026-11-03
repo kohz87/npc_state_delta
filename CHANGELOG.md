@@ -1,3 +1,7 @@
+## 1.8.0
+
+- **Lighter dossiers and plain-prose portraits.** The dossier scanner runs only when a reply names someone new or tracked (plus a safety scan every 5 replies; a saved 'Scan every' of 1 is kept); shorter dossier text; hidden-note wording said once; Natural portrait prompts are written as plain prose for natural-language image models (Flux, Krea, SD3-class).
+
 ## 1.7.4
 
 - **NPC gear line.** With Story Block 2.18.0, RPG and Gear in fights on, a pack NPC's entry ends with their signature gear until they join.
