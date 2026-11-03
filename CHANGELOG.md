@@ -1,3 +1,7 @@
+## 1.7.4
+
+- **NPC gear line.** With Story Block 2.18.0, RPG and Gear in fights on, a pack NPC's entry ends with their signature gear until they join.
+
 ## 1.7.3
 
 - **The narrator's meter changes follow the impact tiers again.** A narrator line such as `~ npc Sanna | trust: +5`
