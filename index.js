@@ -333,6 +333,8 @@ const assistantReceipts = new Map();
 // receipt and consumed once by that message's automatic scan in place of the scanner request.
 // Kept in memory only; an edit, reload or broken block falls back to the ordinary scan.
 const narrationCaptures = new Map();
+// Chats whose last scan stopped before the latest reply (more waiting than one window holds): the next reply scans at once.
+const catchUpChats = new Set();
 const NARRATION_CAPTURE_LIMIT = 8;
 const narrationCaptureStats = { requested: 0, used: 0, missing: 0, invalid: 0, unterminated: 0, outdated: 0 };
 // The size of the last accepted one-pass capture block this session (0 until one arrives).
@@ -4392,11 +4394,12 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
     if (!await prepareCanonicalScanBase(scanChatKey, manual ? 'manual dossier scan' : 'automatic dossier scan')) return false;
     if (sourceMoved()) return false;
     const scanLineage = chatLineage(ctx.chat || []);
-    const currentTranscript = currentExchangeTranscript(messageId);
+    let currentTranscript = currentExchangeTranscript(messageId);
     const currentProse = currentExchangeProse(messageId);
     const fullWindowScan = Boolean(!manual && settings.fullScanEveryTurn);
     // (lean) A scan reads every exchange since the last scan, not only this reply: the replies the local check skipped
-    // are in it (within the Scan context window, oldest trimmed first). Nothing skipped: the current exchange alone.
+    // are in it, up to 30 messages. More waiting than that: the oldest are read first and the next reply scans at once
+    // (catch-up). Nothing skipped: the current exchange alone.
     const skippedWindow = !manual && !fullWindowScan && Number.isInteger(messageId) && !narrationCaptures.has(narrationCaptureKey(scanChatKey, messageId))
         ? skippedExchangesWindow(messageId, {
             afterId: getChatState(scanChatKey)?.lastScannedMessageId,
@@ -4404,6 +4407,9 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
             limit: settings.scanDepth,
         })
         : null;
+    // A catch-up window that stops before the chat's latest reply is earlier context only: no current presence, mood or meter deltas.
+    const earlierOnly = Boolean(skippedWindow && !skippedWindow.latest);
+    if (earlierOnly) currentTranscript = skippedWindow.lastExchange || currentTranscript;
     const transcript = (manual || fullWindowScan) ? recentTranscript(settings.scanDepth) : (skippedWindow?.transcript || currentTranscript);
     const userDevelopmentContext = (manual || fullWindowScan)
         ? recentUserDevelopmentContext(settings.scanDepth, { messageIds: true })
@@ -4437,7 +4443,7 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
     const noteOptions = hostedNotes && !capture ? hostedNotePromptOptions(state, settings, messageId) : {};
     const eventWatch = capture ? (Array.isArray(capture.watch) ? capture.watch : []) : (noteOptions.eventWatch || []);
     const prompt = capture ? '' : buildScannerPrompt(scannerPromptOptions(state, settings, transcript, {
-        currentTranscript, fullScanMode: fullWindowScan, sceneNames: scanScenePresent(messageId), ...noteOptions,
+        currentTranscript, earlierOnly, fullScanMode: fullWindowScan, sceneNames: scanScenePresent(messageId), ...noteOptions,
     }));
 
     let relationshipEdgeCount = 0;
@@ -4485,7 +4491,7 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
         // (1.2.11) A scan of one reply tags its evidence with that reply, so a habit seen again in a
         // later reply counts as a second sighting (a manual or full-window scan reads many replies).
         const singleReply = !manual && !fullWindowScan && Number.isInteger(messageId);
-        const resolvedParsed = resolveInterimIdentityPromotions(singleReply ? tagScanEvidence(parsed, messageId) : parsed, state.npcs, state.candidates);
+        const resolvedParsed = resolveInterimIdentityPromotions(singleReply ? tagScanEvidence(parsed, skippedWindow?.readThrough ?? messageId) : parsed, state.npcs, state.candidates);
         if (capture) capCaptureAdmissions(resolvedParsed, state.npcs);
         profileUpdateCount = Array.isArray(resolvedParsed.profileUpdates) ? resolvedParsed.profileUpdates.length : (Array.isArray(resolvedParsed.profile_updates) ? resolvedParsed.profile_updates.length : 0);
         // Relationship-edge extraction is a separate channel from ordinary NPC delta admission.
@@ -4499,11 +4505,11 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
         // Any scan that reads rolling history must scrub numeric relationship output from the
         // broad dossier scanner. Relationship movement is evaluated separately against the
         // current exchange only, so manual/full scans cannot replay older relationship events.
-        const fullWindowRelationship = (manual || fullWindowScan)
+        const fullWindowRelationship = (manual || fullWindowScan || earlierOnly)
             ? prepareFullWindowRelationshipPayload(resolvedParsed, state.npcs)
             : { evaluation: resolvedParsed, mergeSafe: resolvedParsed };
         // (user decision 5) Hosted, a one-pass block's own rows are the reply's relationship decision.
-        const relationshipPass = capture && hostedMeters() ? { decisions: new Map(), used: false, responseChars: 0, retried: false, targetCount: 0 } : await runFocusedRelationshipPass(
+        const relationshipPass = (capture && hostedMeters()) || earlierOnly ? { decisions: new Map(), used: false, responseChars: 0, retried: false, targetCount: 0 } : await runFocusedRelationshipPass(
             ctx,
             fullWindowRelationship.evaluation,
             state.npcs,
@@ -4654,10 +4660,11 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
             ...merged.state,
             assistantSinceScan: 0,
             lastScanAt: Date.now(),
-            // A scan whose window could not hold every skipped reply keeps its marker at the oldest reply it read.
-            lastScannedMessageId: Number.isInteger(skippedWindow?.trimmedBefore) ? skippedWindow.trimmedBefore : (Number.isInteger(messageId) ? messageId : ((ctx.chat || []).length - 1)),
+            // The newest reply this scan read: the chat's latest, or, in a catch-up, the newest of the oldest waiting ones.
+            lastScannedMessageId: Number.isInteger(skippedWindow?.readThrough) ? skippedWindow.readThrough : (Number.isInteger(messageId) ? messageId : ((ctx.chat || []).length - 1)),
             scanCount: Number(state.scanCount || 0) + 1,
         };
+        if (skippedWindow && !skippedWindow.latest) catchUpChats.add(scanChatKey); else catchUpChats.delete(scanChatKey);
         if (!manual) {
             // If the broad scanner omitted an NPC explicitly involved anywhere in the current
             // exchange, schedule a silent targeted continuity repair so memories/profile changes
@@ -4795,7 +4802,7 @@ function buildSettingsHtml() {
         settingRow('npc_state_delta_narration_capture_compact', 'Compact one-pass instruction', '<input id="npc_state_delta_narration_capture_compact" type="checkbox">', 'With one-pass capture, the same rules in fewer words: about 1,500 tokens instead of 2,000 on every asked-for reply. Every field, gate and cap is kept, but check the blocks your model writes before relying on it; off sends the full rules.'),
         settingRow('npc_state_delta_narration_capture_catch_up', 'One-pass catch-up', numberControl('npc_state_delta_narration_capture_catch_up', 0, 50, 'replies'), 'With one-pass capture, every this many captured replies the two NPCs most in them get a quiet Refresh (one scanner request each) for mannerisms, levers and memories. 0 turns it off.'),
         settingsSlot('full-cast'),
-        settingRow('npc_state_delta_scan_every', 'Scan every', numberControl('npc_state_delta_scan_every', 1, 20, 'replies'), 'Safety scan cadence when Full scan every turn is off. A reply that names someone new, a tracked person or an NPC State line scans at once; a quiet reply waits for this many replies.'),
+        settingRow('npc_state_delta_scan_every', 'Scan every', numberControl('npc_state_delta_scan_every', 1, 20, 'replies'), 'Safety scan cadence when Full scan every turn is off. A reply that names someone new, a tracked person or an NPC State line scans at once; a quiet reply waits for this many replies, and the scan then reads every reply since the last one.'),
         settingRow('npc_state_delta_admission_mode', 'NPC admission', '<select id="npc_state_delta_admission_mode" class="text_pole"><option value="conservative">Conservative</option><option value="balanced">Balanced</option><option value="manual_only">Manual only</option></select>', 'Conservative: proper names immediately, role labels after recurrence. Balanced: also direct or persistent role NPCs. Manual only: every dossier needs Add NPC.'),
     ].join('');
     const roster = `
@@ -4821,7 +4828,7 @@ function buildSettingsHtml() {
     // (1.2.15) Settings most readers never touch, folded together so the everyday ones stay short.
     // UI only: every key, default and control id is the same as before.
     const advanced = [
-        settingRow('npc_state_delta_scan_depth', 'Scan context', numberControl('npc_state_delta_scan_depth', 2, 30, 'messages'), 'History window for full, manual and Refresh scans. Quick automatic scans read only the latest user + assistant exchange.'),
+        settingRow('npc_state_delta_scan_depth', 'Scan context', numberControl('npc_state_delta_scan_depth', 2, 30, 'messages'), 'History window for full, manual and Refresh scans. Quick automatic scans read every reply since the last scan (up to 30 messages at a time; the oldest first when more are waiting).'),
         settingsSlot('scanner-output'),
         settingRow('npc_state_delta_inject_limit', 'NPCs in the dossier', numberControl('npc_state_delta_inject_limit', 1, 12, 'NPCs'), 'At most this many present NPCs go into the live dossier each reply, the most relevant first (default 3).'),
         settingRow('npc_state_delta_inject_budget', 'Injection budget', numberControl('npc_state_delta_inject_budget', 512, 6000, 'tokens', { step: 100, prefix: '<small>~</small>' }), 'Upper limit; only what the present NPCs need is used. The default 4000 lets detailed dossiers reach the roleplay model in full. When it runs short, lower-priority fields, then lower-ranked NPCs, are trimmed first.'),
@@ -7916,6 +7923,7 @@ async function handleAssistantMessageReceivedInner(messageId, { bypassSwipeGuard
         sinceScan: state.assistantSinceScan,
         scanEvery: settings.scanEvery,
         everyReply: scanAfterEveryReply(),
+        catchUp: settings.autoScan && catchUpChats.has(eventChatKey),
         replyChanges: settings.autoScan && !settings.fullScanEveryTurn && replyNamesSomeone(state, messageId),
     });
     // A complete capture block is a scan already paid for, so it merges whatever Scan every says.

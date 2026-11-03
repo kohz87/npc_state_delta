@@ -12,8 +12,10 @@ export const AUTO_SCAN_EVERY_WITHOUT_EVERY_REPLY = 3;
  * switch (true when no Story Suite is present): off, a scan waits for three replies, or for "Scan every" when that is
  * larger, and "Full scan every turn" then makes that scan a full one instead of making every reply scan.
  */
-export function autoScanDue({ autoScan, full, sinceScan, scanEvery, everyReply = true, replyChanges = false } = {}) {
+export function autoScanDue({ autoScan, full, sinceScan, scanEvery, everyReply = true, replyChanges = false, catchUp = false } = {}) {
     if (!autoScan) return false;
+    // The last scan could not read every waiting reply: the next reply scans at once, whatever the cadence, until caught up.
+    if (catchUp) return true;
     // `replyChanges`: the cheap local check found a name or an NPC State line in the reply. A quiet reply waits for
     // the safety scan (every `scanEvery` replies); "Scan every" 1 therefore still scans every reply.
     if (everyReply !== false) return Boolean(full) || Boolean(replyChanges) || sinceScan >= scanEvery;

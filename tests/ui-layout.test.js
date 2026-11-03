@@ -200,7 +200,7 @@ test('scanner uses current-exchange auto context and keeps wider history for man
     assert.match(fs.readFileSync(path.join(root, 'src', 'scanner-request.js'), 'utf8'), /CRITICAL COMPACT JSON RETRY/);
     assert.match(index, /'Scan context'/);
     assert.match(index, /Full scan every turn/);
-    assert.match(index, /Quick automatic scans read only the latest user \+ assistant exchange/);
+    assert.match(index, /Quick automatic scans read every reply since the last scan/);
     assert.match(index, /autoScanDueAfterReply\(\{\s*autoScan: settings\.autoScan,\s*full: settings\.fullScanEveryTurn,\s*sinceScan: state\.assistantSinceScan,\s*scanEvery: settings\.scanEvery,/);
     assert.match(index, /prepareFullWindowRelationshipPayload\(resolvedParsed, state\.npcs\)/);
     assert.match(index, /runFocusedRelationshipPass\(\s*ctx,\s*fullWindowRelationship\.evaluation,\s*state\.npcs,\s*currentTranscript \|\| transcript,\s*settings,\s*\{\s*currentExchangeOnly: manual \|\| fullWindowScan,\s*requestScope: operation\.requestScope,\s*prose: currentProse,/);

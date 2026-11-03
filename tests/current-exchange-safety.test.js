@@ -41,7 +41,7 @@ test('new NPC admission enriches only the newly admitted dossiers while omitted 
 });
 
 test('v0.2.23 manual and full-window scans scrub rolling relationship output and evaluate only the current exchange', () => {
-    assert.match(source, /const fullWindowRelationship = \(manual \|\| fullWindowScan\)/);
+    assert.match(source, /const fullWindowRelationship = \(manual \|\| fullWindowScan \|\| earlierOnly\)/);
     assert.match(source, /currentExchangeOnly: manual \|\| fullWindowScan/);
     assert.match(passSource, /if \(currentExchangeOnly\) return false/);
     const relevance = passSource.slice(

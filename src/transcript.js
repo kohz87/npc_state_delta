@@ -121,9 +121,12 @@ export function currentExchangeMessages(messageId = null) {
 
 /**
  * The replies a lean scan skipped plus the current exchange: every message after the last scanned one (`afterId`), or, with
- * no marker, the last `replies` assistant replies and the user message before the first. The most recent `limit` messages
- * (the Scan context window: 2 to 30) are kept, oldest trimmed first. null when no earlier reply was skipped, so a scan with
- * nothing skipped reads exactly the current exchange as before.
+ * no marker, the last `replies` assistant replies and the user message before the first. The window holds at most 30
+ * messages (15 replies). When more replies are waiting than that, the OLDEST waiting ones are read first (catch-up): the
+ * result says how far it read (`readThrough`, the newest reply read) and that the chat is still behind (`latest` false), and
+ * the caller moves its marker to `readThrough` and scans again at once, so no reply is read twice or lost. `replies` is the
+ * true count waiting. null when no earlier reply was skipped, so a scan with nothing skipped reads exactly the current
+ * exchange as before.
  */
 export function skippedExchangesWindow(messageId = null, { afterId = null, replies = 0, limit = null } = {}) {
     const chat = activeChat(readContext().chat || []);
@@ -133,7 +136,7 @@ export function skippedExchangesWindow(messageId = null, { afterId = null, repli
     const hasMarker = Number.isInteger(afterId) && afterId < assistantId;
     const wanted = Math.max(0, Math.round(Number(replies) || 0));
     if (!hasMarker && wanted < 2) return null;
-    const picked = [];
+    const waiting = [];
     let assistants = 0;
     for (let i = assistantId; i >= 0; i -= 1) {
         const message = chat[i];
@@ -143,13 +146,14 @@ export function skippedExchangesWindow(messageId = null, { afterId = null, repli
             if (!hasMarker && assistants >= wanted) break;
             assistants += 1;
         }
-        picked.push(i);
+        waiting.push(i);
     }
     if (assistants < 2) return null;
-    // The window covers every skipped reply with its user message (2 per reply, plus the one before the first), never fewer
-    // than the Scan context setting, never more than 30.
-    const count = Math.min(30, Math.max(2, Math.min(30, Number(limit ?? readScanDepth()) || 6), 2 * assistants + 2));
-    const kept = picked.slice(0, count).reverse();
+    waiting.reverse();   // oldest first
+    // Oldest first, at most the cap; with no marker the same, counted back from the latest by `replies`.
+    let kept = waiting.slice(0, WINDOW_MESSAGE_CAP);
+    // A window ends on a reply; the user message after it belongs to the next one.
+    while (kept.length > 1 && chat[kept[kept.length - 1]].is_user && kept.length < waiting.length) kept = kept.slice(0, -1);
     const lines = [];
     const users = [];
     for (const i of kept) {
@@ -159,16 +163,19 @@ export function skippedExchangesWindow(messageId = null, { afterId = null, repli
         if (chat[i].is_user) users.push(`[m${i}] ${line}`);
     }
     if (!lines.length) return null;
-    // The oldest reply actually read, set when the cap trimmed older ones: the caller keeps its marker there, not past it.
-    const readAssistants = kept.filter(i => !chat[i].is_user);
-    const trimmed = kept.length < picked.length;
+    const readThrough = [...kept].reverse().find(i => !chat[i].is_user) ?? assistantId;
+    const last = kept.lastIndexOf(readThrough);
+    const lastExchange = kept.slice(Math.max(0, last - 1), last + 1).map(i => cleanMessage(chat[i])).filter(Boolean).join('\n');
     return {
         transcript: lines.join('\n'),
         userDevelopmentContext: users.join('\n'),
         replies: assistants,
-        trimmedBefore: trimmed && readAssistants.length ? readAssistants[0] : null,
+        readThrough,
+        latest: readThrough === assistantId,
+        lastExchange,
     };
 }
+const WINDOW_MESSAGE_CAP = 30;
 
 export function currentExchangeTranscript(messageId = null) {
     const messages = currentExchangeMessages(messageId);

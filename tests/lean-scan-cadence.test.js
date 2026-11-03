@@ -140,6 +140,33 @@ test('lean: the window covers every skipped reply even when it is larger than Sc
     });
 });
 
+test('lean: more replies waiting than one window holds are caught up oldest first; the earlier-only scan moves no meter', () => {
+    runScenario('catch-up', async h => {
+        h.settings.scanEvery = 20;
+        h.mockState.quietResponder = async (args = {}) => {
+            if (/isolated dossier scanner\./i.test(String(args.systemPrompt || ''))) {
+                return JSON.stringify({ npcs: [{ name: 'Yunyun', present: true, role: 'scanned adventurer', relationshipDelta: { trust: 5, affection: 0, desire: 0, tension: 0 }, relationshipEvidence: { trust: 'she vouched for the player' } }] });
+            }
+            return '{"npcs":[]}';
+        };
+        for (let i = 1; i <= 16; i += 1) await h.turn('We walk on.', `The road goes on, mile ${i} of marker-${i}.`);
+        h.equal(h.scannerCalls().length, 0, 'quiet replies: no call');
+        await h.turn('Who is that?', 'Yunyun steps out of the mist and waves.');
+        const first = String(h.scannerCalls()[0].prompt || '');
+        h.check(first.includes('marker-1.') && first.includes('marker-15.') && !first.includes('marker-16.'), 'the oldest 15 waiting replies are read first');
+        h.check(/EARLIER exchanges/.test(first) && !/CURRENT exchange \(authoritative/.test(first), 'all earlier, no CURRENT');
+        const yunyun = h.runtime.getState().npcs.find(n => n.name === 'Yunyun');
+        h.check(Boolean(yunyun), 'the earlier-only scan still adds the person');
+        const trustAfterEarlier = yunyun?.relationship?.trust;
+        h.check(Number(trustAfterEarlier) === 0, `no numeric delta from an earlier-only window (trust ${trustAfterEarlier})`);
+        await h.turn('Go on.', 'The fog thickens around the gate.');
+        h.equal(h.scannerCalls().length, 2, 'the chat is still behind: the next reply scans at once');
+        const second = String(h.scannerCalls()[1].prompt || '');
+        h.check(second.includes('marker-16.') && second.includes('marker-16.') && second.includes('Yunyun steps out') && second.includes('fog thickens') && !second.includes('marker-15.'), 'the rest is read once');
+        h.check(/CURRENT exchange[^]*fog thickens/.test(second), 'the latest is CURRENT');
+    });
+});
+
 test('lean: the safety scan runs every Scan every replies, and Scan every 1 scans every reply', () => {
     runScenario('safety', async h => {
         h.settings.scanEvery = 3;
@@ -226,14 +253,69 @@ test('lean: the window covers every skipped reply (5 replies at Scan context 6 k
     const w = skippedExchangesWindow(10, { afterId: 0, replies: 5, limit: 6 });
     assert.ok(w.transcript.includes('R1') && w.transcript.includes('U1') && w.transcript.includes('R5'));
     assert.equal(w.replies, 5);
-    assert.equal(w.trimmedBefore, null, 'nothing trimmed');
-    const big = [{ is_user: false, name: 'Nar', mes: 'Opening.' }];
-    for (let k = 1; k <= 20; k += 1) { big.push({ is_user: true, name: 'User', mes: `U${k}` }); big.push({ is_user: false, name: 'Nar', mes: `R${k}` }); }
-    useTranscriptSource({ context: () => ({ chat: big, name1: 'User', name2: 'Nar' }), scanDepth: () => 6 });
-    const t = skippedExchangesWindow(40, { afterId: 0, replies: 20, limit: 6 });
-    assert.equal(t.transcript.split('\n').length, 30, 'capped at 30 messages');
-    assert.equal(t.replies, 20, 'the true count');
-    assert.equal(t.trimmedBefore, 12, 'the marker stays at the oldest reply read (R6 is message 12)');
+    assert.equal(w.latest, true);
+    assert.equal(w.readThrough, 10);
+});
+
+// The walk of index.js's automatic scan: cadence, window, marker and the catch-up flag, over a chat of quiet replies.
+function walk({ replies, everyReply, scanEvery = 5, scanDepth = 6, fail = () => false }) {
+    const chat = [{ is_user: false, name: 'Nar', mes: 'R0 opening.' }];
+    useTranscriptSource({ context: () => ({ chat, name1: 'User', name2: 'Nar' }), scanDepth: () => scanDepth });
+    const roster = [{ name: 'Mira Vale', aliases: [], present: true }];
+    let marker = 0; let since = 0; let behind = false;
+    const reads = {}; const earlierOnly = [];
+    for (let k = 1; k <= replies; k += 1) {
+        chat.push({ is_user: true, name: 'User', mes: `U${k}` });
+        chat.push({ is_user: false, name: 'Nar', mes: `R${k} she sighs.` });
+        const id = chat.length - 1;
+        since += 1;
+        const changes = replyMayChangeDossiers({ texts: [chat[id - 1].mes, chat[id].mes], roster, ignore: ['User', 'Nar'] });
+        if (!autoScanDue({ autoScan: true, full: false, sinceScan: since, scanEvery, everyReply, replyChanges: changes, catchUp: behind })) continue;
+        if (fail(k)) continue;
+        const w = skippedExchangesWindow(id, { afterId: marker, replies: since, limit: scanDepth });
+        const read = w ? [...w.transcript.matchAll(/Nar: R(\d+)/g)].map(m => +m[1]) : [k];
+        for (const r of read) reads[r] = (reads[r] || 0) + 1;
+        if (w && !w.latest) earlierOnly.push(read);
+        marker = w ? w.readThrough : id;
+        behind = Boolean(w && !w.latest);
+        since = 0;
+    }
+    return { reads, earlierOnly, marker, behind, last: chat.length - 1 };
+}
+// Every reply up to the marker was read exactly once; none past it was read; what waits is shorter than the cadence.
+const everyOnce = (result, scanEvery) => {
+    const through = result.marker / 2;
+    for (let r = 1; r <= through; r += 1) assert.equal(result.reads[r], 1, `reply ${r} read ${result.reads[r] || 0} times`);
+    for (const r of Object.keys(result.reads)) assert.ok(Number(r) <= through, `reply ${r} read past the marker`);
+    assert.ok((result.last - result.marker) / 2 < Math.max(scanEvery, 3) || result.behind, 'only a tail shorter than the cadence waits');
+};
+
+test('lean: after failing scans the chat catches up, oldest first, every reply read exactly once (Lean and default)', () => {
+    for (const everyReply of [false, true]) {
+        const result = walk({ replies: 40, everyReply, fail: k => k >= 3 && k <= 15 });
+        everyOnce(result, 5);
+        assert.ok(result.marker / 2 >= 36, 'the scans reached the end of the chat');
+        assert.ok(result.earlierOnly.length >= 1, 'a catch-up window was used');
+        for (const read of result.earlierOnly) assert.ok(read.length <= 15, 'a window holds at most 15 replies');
+        assert.equal(result.earlierOnly[0][0], 1, 'the oldest waiting reply is read first');
+    }
+});
+
+test('lean: Scan every 20 over 60 replies reads every reply once (catch-up, oldest first)', () => {
+    for (const everyReply of [false, true]) {
+        const result = walk({ replies: 60, everyReply, scanEvery: 20 });
+        everyOnce(result, 20);
+        assert.ok(result.marker / 2 >= 40);
+        assert.equal(result.earlierOnly.length, 2, 'two catch-up windows of 15 replies, each followed by a scan of the rest');
+    }
+});
+
+test('lean: a catch-up window labels everything EARLIER and has no CURRENT; the scan is due at once while behind', () => {
+    const prompt = buildScannerPrompt({ transcript: 'User: u1\nNar: r1\nUser: u2\nNar: r2', currentTranscript: 'User: u2\nNar: r2', earlierOnly: true, existingNpcs: [], candidates: [] });
+    assert.match(prompt, /EARLIER exchanges[^]*durable facts only[^]*User: u1[^]*User: u2/);
+    assert.doesNotMatch(prompt, /CURRENT exchange \(authoritative/);
+    assert.equal(autoScanDue({ autoScan: true, full: false, sinceScan: 1, scanEvery: 20, everyReply: false, catchUp: true }), true);
+    assert.equal(autoScanDue({ autoScan: false, full: false, sinceScan: 1, scanEvery: 20, catchUp: true }), false, 'Auto scan off stays off');
 });
 
 test('lean: Lean mode (Scan after every reply off) scans no more often than every 3 replies, as in 1.7.4', () => {

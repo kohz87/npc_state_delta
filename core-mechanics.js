@@ -3802,7 +3802,9 @@ function buildNaturalPortraitProse({ name, gender, rawGender, species, visualAge
     const young = gender && (/^(?:boy|girl)$/.test(normalizeName(rawGender)) || youngest < 18 || teen);
     const nounWord = young ? (gender === 'male' ? 'boy' : 'girl') : noun;
     const speciesHasNoun = new RegExp('\\b(?:' + nounWord + '|male|female|man|woman|boy|girl|person)\\b|(?:boy|girl)\\b', 'i').test(speciesText);
-    const rawCore = appearance.core.map(item => item.replace(/^(?:(?:he|she|they)\s+(?:has|have|is|are)|has|have|having|with)\s+/i, ''));
+    // "His hair is white" reads "white hair".
+    const possessiveIs = item => item.replace(/^(?:his|her|their|its)\s+([a-z][a-z' -]{1,30}?)\s+(?:is|are)\s+(.+)$/i, (whole, thing, value) => `${value} ${thing}`);
+    const rawCore = appearance.core.map(possessiveIs).map(item => item.replace(/^(?:(?:he|she|they)\s+(?:has|have|is|are)|has|have|having|with)\s+/i, ''));
     const stripped = rawCore.map(item => portraitProseLower(item));
     const speciesWords = new Set(normalizeName(speciesText).split(' '));
     const adjectiveAt = stripped.map((item, at) => portraitProseIsAdjective(item, rawCore[at]) && !speciesWords.has(normalizeName(item)));
@@ -7061,6 +7063,7 @@ export function buildScannerPrompt({
     sceneNames = null,
     layeredSecrets = false,
     eventWatch = null,
+    earlierOnly = false,
 }) {
     const baseline = normalizeRelationshipBaseline(relationshipBaseline);
     const caps = normalizeRelationshipCaps(relationshipCaps);
@@ -7219,10 +7222,13 @@ export function buildScannerPrompt({
     const earlierStory = !narrationCapture && !fullScanMode && currentExchange && wholeStory.length > currentExchange.length && wholeStory.endsWith(currentExchange)
         ? wholeStory.slice(0, wholeStory.length - currentExchange.length).trim()
         : '';
+    const EARLIER_LABEL = 'EARLIER exchanges (replies since the last scan; durable facts only, never current presence, mood, location or meter deltas)';
     const storyContext = narrationCapture
         ? NARRATION_CAPTURE_STORY
-        : earlierStory
-            ? `Story context:\nEARLIER exchanges (replies since the last scan; durable facts only, never current presence, mood, location or meter deltas):\n${earlierStory}\n\nCURRENT exchange (authoritative for presence/live state and numeric relationship deltas):\n${currentExchange}`
+        : earlierOnly
+            ? `Story context:\n${EARLIER_LABEL}:\n${wholeStory}`
+            : earlierStory
+            ? `Story context:\n${EARLIER_LABEL}:\n${earlierStory}\n\nCURRENT exchange (authoritative for presence/live state and numeric relationship deltas):\n${currentExchange}`
             : `Story context:\n${String(transcript || '').trim()}${fullScanMode ? `\n\nCURRENT exchange (authoritative for presence/live state and numeric relationship deltas):\n${currentExchange}` : ''}`;
 
     // (1.2.17) Opt-in compact one-pass rules: the same fields and gates in fewer words (about 1,200

@@ -282,3 +282,7 @@ test('natural portrait prose: a/an by sound, is/are stripped, capitalised words 
     assert.match(prose({ name: 'A', gender: 'male', apparentAge: 'teen' }), /^A portrait of a teenage boy\./);
     assert.doesNotMatch(prose({ name: 'A', gender: 'male', apparentAge: 'teen' }), /apparent age/);
 });
+
+test('natural portrait prose turns "His hair is white" into "white hair"', () => {
+    assert.match(prose({ name: 'A', gender: 'male', appearance: 'His hair is white; Her eyes are green' }), /^A portrait of a man with white hair and green eyes\./);
+});
