@@ -203,7 +203,7 @@ test('scanner uses current-exchange auto context and keeps wider history for man
     assert.match(index, /Quick automatic scans read every reply since the last scan/);
     assert.match(index, /autoScanDueAfterReply\(\{\s*autoScan: settings\.autoScan,\s*full: settings\.fullScanEveryTurn,\s*sinceScan: state\.assistantSinceScan,\s*scanEvery: settings\.scanEvery,/);
     assert.match(index, /prepareFullWindowRelationshipPayload\(resolvedParsed, state\.npcs\)/);
-    assert.match(index, /runFocusedRelationshipPass\(\s*ctx,\s*fullWindowRelationship\.evaluation,\s*state\.npcs,\s*currentTranscript \|\| transcript,\s*settings,\s*\{\s*currentExchangeOnly: manual \|\| fullWindowScan,\s*requestScope: operation\.requestScope,\s*prose: currentProse,/);
+    assert.match(index, /runFocusedRelationshipPass\(\s*ctx,\s*fullWindowRelationship\.evaluation,\s*state\.npcs,\s*skippedWindow \? transcript : \(currentTranscript \|\| transcript\),\s*settings,\s*\{\s*currentExchangeOnly: manual \|\| fullWindowScan,\s*requestScope: operation\.requestScope,\s*prose: skippedWindow \? '' : currentProse,/);
     assert.match(index, /npc_state_delta_admission_mode/);
     assert.match(index, /Conservative/);
     assert.match(index, /Balanced/);

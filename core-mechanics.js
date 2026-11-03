@@ -7222,7 +7222,7 @@ export function buildScannerPrompt({
     const earlierStory = !narrationCapture && !fullScanMode && currentExchange && wholeStory.length > currentExchange.length && wholeStory.endsWith(currentExchange)
         ? wholeStory.slice(0, wholeStory.length - currentExchange.length).trim()
         : '';
-    const EARLIER_LABEL = 'EARLIER exchanges (replies since the last scan; durable facts only, never current presence, mood, location or meter deltas)';
+    const EARLIER_LABEL = 'EARLIER exchanges (replies since the last scan, each read once; durable facts and relationship changes that happened then, with their own evidence; never current presence, mood or location)';
     const storyContext = narrationCapture
         ? NARRATION_CAPTURE_STORY
         : earlierOnly

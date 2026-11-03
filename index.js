@@ -4367,6 +4367,15 @@ function lineageMoved(previous, current, messageId) {
     return previous.slice(messageId + 1).some((entry, index) => entry !== current[messageId + 1 + index]);
 }
 
+// Current presence, mood and location belong to the latest scene: an earlier-only window never sets them.
+function stripLiveSceneFields(parsed) {
+    const rows = [...(Array.isArray(parsed?.npcs) ? parsed.npcs : []), ...(Array.isArray(parsed?.profileUpdates) ? parsed.profileUpdates : [])];
+    for (const row of rows) {
+        if (!row || typeof row !== 'object') continue;
+        for (const key of ['present', 'worldActive', 'world_active', 'activeOffscreen', 'active_offscreen', 'mood', 'moodState', 'mood_state', 'clearMood', 'clear_mood', 'location', 'locationState', 'location_state', 'clearLocation', 'clear_location']) delete row[key];
+    }
+}
+
 async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe = false } = {}) {
     const settings = getSettings();
     if (!settings.enabled) return false;
@@ -4505,20 +4514,23 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
         // Any scan that reads rolling history must scrub numeric relationship output from the
         // broad dossier scanner. Relationship movement is evaluated separately against the
         // current exchange only, so manual/full scans cannot replay older relationship events.
-        const fullWindowRelationship = (manual || fullWindowScan || earlierOnly)
+        // A catch-up window reads each reply once, so its relationship changes apply once (evidence is checked against the
+        // window's own text); only current presence, mood and location are not taken from earlier replies.
+        if (earlierOnly) stripLiveSceneFields(resolvedParsed);
+        const fullWindowRelationship = (manual || fullWindowScan)
             ? prepareFullWindowRelationshipPayload(resolvedParsed, state.npcs)
             : { evaluation: resolvedParsed, mergeSafe: resolvedParsed };
         // (user decision 5) Hosted, a one-pass block's own rows are the reply's relationship decision.
-        const relationshipPass = (capture && hostedMeters()) || earlierOnly ? { decisions: new Map(), used: false, responseChars: 0, retried: false, targetCount: 0 } : await runFocusedRelationshipPass(
+        const relationshipPass = capture && hostedMeters() ? { decisions: new Map(), used: false, responseChars: 0, retried: false, targetCount: 0 } : await runFocusedRelationshipPass(
             ctx,
             fullWindowRelationship.evaluation,
             state.npcs,
-            currentTranscript || transcript,
+            skippedWindow ? transcript : (currentTranscript || transcript),
             settings,
             {
                 currentExchangeOnly: manual || fullWindowScan,
                 requestScope: operation.requestScope,
-                prose: currentProse,
+                prose: skippedWindow ? '' : currentProse,
                 // (1.2.12) Only a one-pass block speaks for its relationships this way.
                 ...(capture ? { covered: parsed?.relationshipsCovered === true, review: Array.isArray(parsed?.relationshipReview) ? parsed.relationshipReview : [] } : {}),
             },
@@ -4583,6 +4595,15 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
             // the reader's own "Scan now" is deliberate and writes them.
             ...(manual ? {} : keyAwayScanOptions(mergeBaseState)),
         });
+        if (earlierOnly) {
+            // Presence is the latest scene's: an earlier-only window leaves each person as last confirmed.
+            const before = new Map((state.npcs || []).map(npc => [npc.id, npc]));
+            for (const npc of merged.state.npcs || []) {
+                const prev = before.get(npc.id);
+                npc.present = Boolean(prev?.present) && !npc.archived;
+                npc.worldActive = Boolean(prev?.worldActive) && !npc.present && !npc.archived;
+            }
+        }
         const newlyAdmittedIds = [...new Set([...(merged.report?.created || []), ...(merged.report?.promoted || [])])];
         let newNpcRelationshipPass = { decisions: new Map(), used: false, targetCount: 0, responseChars: 0, retried: false };
         // (user decision 5) Hosted, a new NPC starts at the base meter values: no evaluator request.

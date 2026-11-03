@@ -1,6 +1,6 @@
 ## 1.8.0
 
-- **Lighter dossiers and plain-prose portraits.** The dossier scanner runs only when a reply names someone new or a tracked person (plus a safety scan every 5 replies; a saved 'Scan every' of 1 is kept), and every scan reads every reply since the last one, so a reply it skipped is never lost (up to 30 messages at a time, the oldest first, catching up on the next replies; the latest is marked CURRENT, the earlier ones are context for lasting facts); shorter dossier text; hidden-note wording said once; Natural portrait prompts are written as plain prose for natural-language image models (Flux, Krea, SD3-class).
+- **Lighter dossiers and plain-prose portraits.** The dossier scanner runs only when a reply names someone new or a tracked person (plus a safety scan every 5 replies; a saved 'Scan every' of 1 is kept), and every scan reads every reply since the last one, so a reply it skipped is never lost (up to 30 messages at a time, the oldest first, catching up on the next replies; the latest is marked CURRENT, the earlier ones give lasting facts and relationship changes, each reply read once, but never current presence, mood or location); shorter dossier text; hidden-note wording said once; Natural portrait prompts are written as plain prose for natural-language image models (Flux, Krea, SD3-class).
 
 ## 1.7.4
 

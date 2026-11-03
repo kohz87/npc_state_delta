@@ -140,30 +140,46 @@ test('lean: the window covers every skipped reply even when it is larger than Sc
     });
 });
 
-test('lean: more replies waiting than one window holds are caught up oldest first; the earlier-only scan moves no meter', () => {
+test('lean: a catch-up window applies a relationship change from an earlier reply once, and sets no presence, mood or location', () => {
     runScenario('catch-up', async h => {
         h.settings.scanEvery = 20;
+        const yunyun = () => h.runtime.getState().npcs.find(n => n.name === 'Yunyun');
+        let call = 0;
         h.mockState.quietResponder = async (args = {}) => {
-            if (/isolated dossier scanner\./i.test(String(args.systemPrompt || ''))) {
-                return JSON.stringify({ npcs: [{ name: 'Yunyun', present: true, role: 'scanned adventurer', relationshipDelta: { trust: 5, affection: 0, desire: 0, tension: 0 }, relationshipEvidence: { trust: 'she vouched for the player' } }] });
+            if (!/isolated dossier scanner\./i.test(String(args.systemPrompt || ''))) return '{"npcs":[]}';
+            call += 1;
+            if (call === 1) return JSON.stringify({ npcs: [{ name: 'Yunyun', present: true, role: 'adventurer', mood: 'calm', location: 'the gate' }] });
+            if (call === 2) {
+                return JSON.stringify({ npcs: [{
+                    name: 'Yunyun', present: false, mood: 'furious', location: 'the moon',
+                    relationshipDelta: { trust: 3, affection: 0, desire: 0, tension: 0 }, relationshipImpact: 'major',
+                    relationshipChangeReason: 'She smiled at the player warmly and vouched for them.',
+                    relationshipEvidence: { trust: 'She smiles at you warmly' },
+                    relationshipSummary: 'Warming to the player.',
+                }] });
             }
-            return '{"npcs":[]}';
+            return JSON.stringify({ npcs: [{ name: 'Yunyun', present: true }] });
         };
-        for (let i = 1; i <= 16; i += 1) await h.turn('We walk on.', `The road goes on, mile ${i} of marker-${i}.`);
-        h.equal(h.scannerCalls().length, 0, 'quiet replies: no call');
         await h.turn('Who is that?', 'Yunyun steps out of the mist and waves.');
-        const first = String(h.scannerCalls()[0].prompt || '');
+        h.equal(h.scannerCalls().length, 1, 'she is added');
+        const base = Number(yunyun().relationship.trust);
+        for (let i = 1; i <= 16; i += 1) {
+            await h.turn('We walk on.', i === 3 ? 'She smiles at you warmly, marker-3.' : `The road goes on, mile ${i} of marker-${i}.`);
+        }
+        h.equal(h.scannerCalls().length, 1, 'quiet replies (pronoun only): no call');
+        await h.turn('Who is that?', 'Yunyun waves again.');
+        const first = String(h.scannerCalls()[1].prompt || '');
         h.check(first.includes('marker-1.') && first.includes('marker-15.') && !first.includes('marker-16.'), 'the oldest 15 waiting replies are read first');
         h.check(/EARLIER exchanges/.test(first) && !/CURRENT exchange \(authoritative/.test(first), 'all earlier, no CURRENT');
-        const yunyun = h.runtime.getState().npcs.find(n => n.name === 'Yunyun');
-        h.check(Boolean(yunyun), 'the earlier-only scan still adds the person');
-        const trustAfterEarlier = yunyun?.relationship?.trust;
-        h.check(Number(trustAfterEarlier) === 0, `no numeric delta from an earlier-only window (trust ${trustAfterEarlier})`);
+        const afterEarlier = Number(yunyun().relationship.trust);
+        h.check(afterEarlier > base, `the change from the earlier reply is applied (trust ${base} -> ${afterEarlier})`);
+        h.check(yunyun().present === true && yunyun().mood === 'calm' && yunyun().location === 'the gate', 'an earlier-only window sets no presence, mood or location');
         await h.turn('Go on.', 'The fog thickens around the gate.');
-        h.equal(h.scannerCalls().length, 2, 'the chat is still behind: the next reply scans at once');
-        const second = String(h.scannerCalls()[1].prompt || '');
-        h.check(second.includes('marker-16.') && second.includes('marker-16.') && second.includes('Yunyun steps out') && second.includes('fog thickens') && !second.includes('marker-15.'), 'the rest is read once');
+        h.equal(h.scannerCalls().length, 3, 'the chat is still behind: the next reply scans at once');
+        const second = String(h.scannerCalls()[2].prompt || '');
+        h.check(second.includes('marker-16.') && second.includes('Yunyun waves again') && second.includes('fog thickens') && !second.includes('marker-15.') && !second.includes('smiles at you warmly'), 'the rest is read once; the reply with the change is not re-read');
         h.check(/CURRENT exchange[^]*fog thickens/.test(second), 'the latest is CURRENT');
+        h.equal(Number(yunyun().relationship.trust), afterEarlier, 'the change applied exactly once');
     });
 });
 
@@ -312,7 +328,7 @@ test('lean: Scan every 20 over 60 replies reads every reply once (catch-up, olde
 
 test('lean: a catch-up window labels everything EARLIER and has no CURRENT; the scan is due at once while behind', () => {
     const prompt = buildScannerPrompt({ transcript: 'User: u1\nNar: r1\nUser: u2\nNar: r2', currentTranscript: 'User: u2\nNar: r2', earlierOnly: true, existingNpcs: [], candidates: [] });
-    assert.match(prompt, /EARLIER exchanges[^]*durable facts only[^]*User: u1[^]*User: u2/);
+    assert.match(prompt, /EARLIER exchanges[^]*durable facts and relationship changes[^]*never current presence, mood or location[^]*User: u1[^]*User: u2/);
     assert.doesNotMatch(prompt, /CURRENT exchange \(authoritative/);
     assert.equal(autoScanDue({ autoScan: true, full: false, sinceScan: 1, scanEvery: 20, everyReply: false, catchUp: true }), true);
     assert.equal(autoScanDue({ autoScan: false, full: false, sinceScan: 1, scanEvery: 20, catchUp: true }), false, 'Auto scan off stays off');
@@ -326,7 +342,7 @@ test('lean: Lean mode (Scan after every reply off) scans no more often than ever
 
 test('lean: a scan of several exchanges labels the earlier ones and the latest CURRENT', () => {
     const prompt = buildScannerPrompt({ transcript: 'User: u1\nNar: r1\nUser: u2\nNar: r2', currentTranscript: 'User: u2\nNar: r2', existingNpcs: [], candidates: [] });
-    assert.match(prompt, /EARLIER exchanges[^]*durable facts only[^]*User: u1\nNar: r1\n\nCURRENT exchange[^]*User: u2\nNar: r2/);
+    assert.match(prompt, /EARLIER exchanges[^]*durable facts and relationship changes[^]*User: u1\nNar: r1\n\nCURRENT exchange[^]*User: u2\nNar: r2/);
     const single = buildScannerPrompt({ transcript: 'User: u2\nNar: r2', currentTranscript: 'User: u2\nNar: r2', existingNpcs: [], candidates: [] });
     assert.doesNotMatch(single, /EARLIER exchanges/);
 });
