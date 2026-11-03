@@ -3642,7 +3642,7 @@ function uniquePortraitParts(values = []) {
     return result;
 }
 
-function normalizePortraitAppearanceClause(value, clothing = false) {
+function normalizePortraitAppearanceClause(value, clothing = false, keepArticle = false) {
     let text = cleanText(value, 1800)
         .replace(/^(?:appearance|current appearance)\s*:\s*/i, '')
         .replace(/^[,;:\s]+|[,;:\s]+$/g, '')
@@ -3651,13 +3651,13 @@ function normalizePortraitAppearanceClause(value, clothing = false) {
         text = text
             .replace(/^(?:wears?|wearing|dressed in|clad in)\s+/i, '')
             .replace(/^(?:outfit|clothing)\s*:\s*/i, '')
-            .replace(/^(?:a|an|the)\s+/i, '')
             .trim();
+        if (!keepArticle) text = text.replace(/^(?:a|an|the)\s+/i, '').trim();
     }
     return text;
 }
 
-function splitPortraitAppearance(value) {
+function splitPortraitAppearance(value, keepArticle = false) {
     const source = cleanText(value, 1800).replace(/\r/g, '');
     if (!source) return { core: [], clothing: [] };
     const core = [];
@@ -3668,7 +3668,7 @@ function splitPortraitAppearance(value) {
         const hasClothing = PORTRAIT_CLOTHING_TERMS.test(clause);
         const hasAnatomy = PORTRAIT_ANATOMY_TERMS.test(clause);
         const clothingOnly = clothingLead || (hasClothing && !hasAnatomy);
-        const normalized = normalizePortraitAppearanceClause(clause, clothingOnly);
+        const normalized = normalizePortraitAppearanceClause(clause, clothingOnly, keepArticle);
         if (!normalized) continue;
         (clothingOnly ? clothing : core).push(normalized);
     }
@@ -3743,6 +3743,65 @@ function derivePortraitContradictionNegatives(appearance, extraPositive, replace
     ]);
 }
 
+function portraitProseLower(value) {
+    const text = String(value ?? '').trim();
+    const word = text.match(/^[A-Z][a-z'-]*(?=\s|$|[,;.])/);
+    return word && !/[A-Z]/.test(text.slice(1, word[0].length)) ? text.charAt(0).toLowerCase() + text.slice(1) : text;
+}
+
+function portraitProseUpper(value) {
+    const text = String(value ?? '').trim();
+    return text ? text.charAt(0).toUpperCase() + text.slice(1) : '';
+}
+
+function portraitProseClean(value) {
+    return String(value ?? '').replace(/\s+/g, ' ').replace(/^[,;:\s]+|[,;:.\s]+$/g, '').trim();
+}
+
+function portraitProseArticle(phrase) {
+    const text = String(phrase || '').trim();
+    if (/^(?:a|an|the|his|her|their|its|one|some)\b/i.test(text)) return text;
+    return (/^(?:8\d?|11|18)(?!\d)/.test(text) || /^[aeiou]/i.test(text) ? 'an ' : 'a ') + text;
+}
+
+function portraitProseList(items) {
+    const list = items.filter(Boolean);
+    if (list.length <= 1) return list.join('');
+    const inner = list.some(item => item.includes(','));
+    return list.slice(0, -1).join(inner ? '; ' : ', ') + (inner ? ', and ' : ' and ') + list[list.length - 1];
+}
+
+function buildNaturalPortraitProse({ name, gender, species, visualAge, role, appearance, mood, location, composition, extraPositive, stylePositive }) {
+    const noun = gender === 'male' ? 'man' : gender === 'female' ? 'woman' : 'person';
+    const subject = gender === 'male' ? 'He' : gender === 'female' ? 'She' : (name || 'The person');
+    const possessive = gender === 'male' ? 'His' : gender === 'female' ? 'Her' : (name || 'The person') + "'s";
+    const objectPronoun = gender === 'male' ? 'him' : gender === 'female' ? 'her' : (name || 'the person');
+    const approximate = /^~/.test(portraitProseClean(visualAge));
+    const ageText = portraitProseClean(visualAge).replace(/^~\s*/, '');
+    const numericAge = /^\d+(?:\s*[-–]\s*\d+)?$/.test(ageText);
+    const speciesText = portraitProseClean(species);
+    const speciesHasNoun = new RegExp('\\b(?:' + noun + '|male|female|man|woman|boy|girl|person)\\b', 'i').test(speciesText);
+    const head = [numericAge ? (approximate ? 'roughly ' : '') + ageText.replace(/\s+/g, '') + '-year-old' : '', speciesText, speciesHasNoun ? '' : noun].filter(Boolean).join(' ');
+    const core = appearance.core.map(item => portraitProseLower(item.replace(/^(?:has|have|having|with)\s+/i, '')));
+    const clothing = appearance.clothing.map(item => portraitProseLower(item));
+    const coreKeys = new Set(core.map(portraitPartKey));
+    const clothes = clothing.filter(item => !coreKeys.has(portraitPartKey(item)));
+
+    const sentences = [];
+    let first = 'A portrait of ' + portraitProseArticle(head);
+    if (ageText && !numericAge) first += ', of apparent age ' + ageText;
+    if (core.length) first += ' with ' + portraitProseList(core);
+    sentences.push(first);
+    if (role) sentences.push(subject + ' carries the look of ' + portraitProseArticle(portraitProseLower(portraitProseClean(role))));
+    if (clothes.length) sentences.push(subject + ' wears ' + portraitProseList(clothes));
+    if (mood) sentences.push(possessive + ' expression is ' + portraitProseLower(portraitProseClean(mood)));
+    if (location) sentences.push('Behind ' + objectPronoun + ', ' + portraitProseLower(portraitProseClean(location)));
+    if (composition) sentences.push(portraitProseUpper(portraitProseClean(composition)));
+    if (extraPositive) sentences.push(portraitProseUpper(portraitProseClean(extraPositive)));
+    if (stylePositive) sentences.push(portraitProseUpper(portraitProseClean(stylePositive)));
+    return sentences.map(item => item.replace(/\s+([,.])/g, '$1') + '.').join(' ');
+}
+
 export function buildNpcPortraitPrompts(rawNpc = {}, options = {}) {
     const npc = rawNpc && typeof rawNpc === 'object' ? rawNpc : {};
     const format = normalizePortraitPromptFormat(options.format);
@@ -3776,17 +3835,19 @@ export function buildNpcPortraitPrompts(rawNpc = {}, options = {}) {
     if (replaceAutomatic && extraPositive) {
         positive = extraPositive;
     } else if (format === 'natural') {
-        const sentences = [];
-        if (identity.length) sentences.push('Subject: ' + identity.join(', ') + '.');
-        if (appearanceGroups.core.length) sentences.push('Appearance: ' + appearanceGroups.core.join('; ') + '.');
-        if (roleTag) sentences.push('Role: ' + roleTag + '.');
-        if (appearanceGroups.clothing.length) sentences.push('Clothing: ' + appearanceGroups.clothing.join('; ') + '.');
-        if (moodTag) sentences.push('Expression and bearing: ' + moodTag + '.');
-        if (locationTag) sentences.push('Background: ' + locationTag + '.');
-        if (composition) sentences.push('Composition: ' + composition + '.');
-        if (extraPositive) sentences.push('Additional character instructions: ' + extraPositive + '.');
-        if (stylePositive) sentences.push('Visual style: ' + stylePositive + '.');
-        positive = sentences.join(' ');
+        positive = buildNaturalPortraitProse({
+            name: cleanText(npc.name, 120),
+            gender,
+            species,
+            visualAge,
+            role,
+            appearance: splitPortraitAppearance(appearance, true),
+            mood,
+            location,
+            composition,
+            extraPositive,
+            stylePositive,
+        });
     } else {
         const visualAnchors = format === 'tags' ? extractPortraitVisualAnchorTags(appearance) : [];
         const coreAppearance = format === 'tags'
