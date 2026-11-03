@@ -422,6 +422,7 @@ export function createStorySuiteV2Adapter({
             return npc ? { name: npc.name, aliases: Array.isArray(npc.aliases) ? npc.aliases : [], relationship: npc.relationship } : null;
         },
         baseline: () => runtime()?.relationshipBaseline?.() ?? {},
+        caps: () => runtime()?.relationshipCaps?.() ?? null,
         // Only the rules (and the titles screens show while locked) leave the dossier for the
         // handlers and screens; the texts go to the tail and to an unlocked note's screen line alone.
         secretRules: (name, labels = []) => {
