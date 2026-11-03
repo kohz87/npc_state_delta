@@ -69,8 +69,8 @@ With Story Block, Delta's panel is in the Story Suite settings window as its own
 |---|---|---|
 | Enable NPC State Delta, Auto scan | Top of the panel | on, on |
 | Scanner connection profile | Scanning | the chat's connection |
-| Scan every | Scanning | 1 reply |
-| Scan after every reply (feature) | Features | on (Story Block's Lean preset turns it off: every 3 replies) |
+| Scan every | Scanning | 5 replies (a reply that names someone new or a tracked person scans at once; every scan reads all replies since the last) |
+| Scan after every reply (feature) | Features | on (Story Block's Lean preset turns it off: a scan every 3 replies, or "Scan every" when larger) |
 | Maximum active NPCs | Roster & continuity | 40 |
 | Hidden notes for new people | Roster & continuity | on |
 | Inject present NPC state | Roster & continuity | on |

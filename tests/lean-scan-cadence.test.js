@@ -100,11 +100,11 @@ test('lean: a quiet reply with no names makes no scanner call; a new name does',
         await h.turn('Who is that?', 'Yunyun steps out of the mist and waves.');
         h.equal(h.scannerCalls().length, 1, 'a new name: one call');
         h.equal(h.runtime.getState().assistantSinceScan, 0, 'the scan resets the count');
-        // A tracked NPC named again scans; so does a quiet reply while she is in the scene ("She sighs" names no one).
+        // A tracked NPC named again scans; a pronoun-only reply does not, even with her in the scene.
         await h.turn('Go on.', 'Yunyun nods and says nothing.');
         h.equal(h.scannerCalls().length, 2, 'a tracked NPC named: a call');
         await h.turn('We rest.', 'She rests by the fire in silence.');
-        h.equal(h.scannerCalls().length, 3, 'a tracked NPC is in the scene: a quiet reply scans');
+        h.equal(h.scannerCalls().length, 2, 'a present tracked NPC by pronoun only: the local check skips');
     });
 });
 
@@ -118,6 +118,7 @@ test('lean: a scan reads every reply since the last scan, the ones the local che
         await h.turn('Who is that?', 'Yunyun steps out of the mist and waves.');
         const calls = h.scannerCalls();
         h.equal(calls.length, 1, 'the new name scans');
+        h.check(/EARLIER exchanges[^]*skipped-one[^]*CURRENT exchange[^]*Yunyun steps out/.test(String(calls[0].prompt || '')), 'earlier replies are labelled EARLIER, the latest CURRENT');
         const prompt = String(calls[0].prompt || '');
         h.check(prompt.includes('skipped-one') && prompt.includes('skipped-two') && prompt.includes('Yunyun steps out'), 'the scan reads the skipped replies and the current one');
         // The next scan with nothing skipped reads the current exchange alone.
@@ -127,7 +128,7 @@ test('lean: a scan reads every reply since the last scan, the ones the local che
     });
 });
 
-test('lean: the skipped replies a scan reads stay within the Scan context window, oldest trimmed first', () => {
+test('lean: the window covers every skipped reply even when it is larger than Scan context', () => {
     runScenario('skipped-window', async h => {
         h.settings.scanEvery = 30;
         h.settings.scanDepth = 4;
@@ -135,8 +136,7 @@ test('lean: the skipped replies a scan reads stay within the Scan context window
         h.equal(h.scannerCalls().length, 0, 'quiet replies: no call');
         await h.turn('Who is that?', 'Yunyun steps out of the mist and waves.');
         const prompt = String(h.scannerCalls()[0].prompt || '');
-        h.check(prompt.includes('Yunyun steps out') && prompt.includes('skipped-4'), 'the newest are kept');
-        h.check(!prompt.includes('skipped-1') && !prompt.includes('skipped-2'), 'the oldest are trimmed to the window of 4 messages');
+        h.check(prompt.includes('Yunyun steps out') && prompt.includes('skipped-4') && prompt.includes('skipped-1'), 'all 5 replies are read although Scan context is 4');
     });
 });
 
@@ -164,14 +164,14 @@ test('lean: autoScanDue lets a reply that names someone scan at once; a quiet re
     assert.equal(due(5), true, 'the safety scan');
     assert.equal(due(1, { replyChanges: true }), true, 'a name in the reply');
     assert.equal(due(1, { replyChanges: true, autoScan: false }), false, 'Auto scan off stays off');
-    assert.equal(due(1, { everyReply: false, replyChanges: true }), true, 'Story Suite "every reply" off: a reply the local check flags still scans');
+    assert.equal(due(1, { everyReply: false, replyChanges: true }), false, 'Story Suite "every reply" off: the cadence alone, never earlier than 1.7.4');
     assert.equal(due(1, { everyReply: false }), false, 'Story Suite "every reply" off: a quiet reply keeps its own cadence');
     assert.equal(due(5, { everyReply: false }), true, 'Story Suite "every reply" off: the safety scan');
 });
 
 test('lean: the local check finds a new name, a tracked NPC or an NPC State line, and nothing in quiet prose', () => {
     const roster = [{ id: 'a', name: 'Yunyun Aldis', aliases: ['Yun'], role: 'adventurer' }];
-    const check = (text, people = roster, ignore = ['Ari', 'Narrator']) => replyMayChangeDossiers({ texts: [text], roster: people, ignore, present: ignore.includes('Mira Vale') ? ['Mira Vale'] : [] });
+    const check = (text, people = roster, ignore = ['Ari', 'Narrator']) => replyMayChangeDossiers({ texts: [text], roster: people, ignore,  });
     assert.equal(check('They walk down the road in silence. The wind is cold.'), false);
     assert.equal(check('Ari looks at the Narrator and sighs. "Well," he says.'), false, 'the player and the character are not new names');
     assert.equal(check('Rain falls on the road. The rain keeps falling.'), false, 'a capitalised common word that also shows in lower case');
@@ -180,10 +180,8 @@ test('lean: the local check finds a new name, a tracked NPC or an NPC State line
     assert.equal(check('Kael nods and leaves.'), true, 'a new name opening a sentence');
     assert.equal(check('Yun waves.'), true, 'a tracked NPC by alias');
     assert.equal(check('NPC State: Mira is wary.'), true, 'an NPC State line');
-    assert.equal(check('Rain falls on the road. The rain keeps falling.', [{ id: 'm', name: 'Mira Vale', aliases: [], present: true }]), true, 'a tracked NPC is in the scene: "She sighs" scans');
-    assert.equal(check('She sighs and looks away.', [{ id: 'm', name: 'Mira Vale', aliases: [], present: false }]), false, 'a tracked NPC who is away: a quiet scene');
-    assert.equal(check('She sighs and looks away.', [{ id: 'm', name: 'Mira Vale', aliases: [], present: false, archived: false }], ['Mira Vale']), true, 'the scene lists her as present');
-    assert.equal(check('She sighs and looks away.', [{ id: 'm', name: 'Mira Vale', aliases: [], present: true, archived: true }]), false, 'an archived NPC is not in the scene');
+    assert.equal(check('She sighs and looks away.', [{ id: 'm', name: 'Mira Vale', aliases: [], present: true }]), false, 'a present tracked NPC by pronoun only: the next scan reads it');
+    assert.equal(check('Mira sighs and looks away.', [{ id: 'm', name: 'Mira Vale', aliases: [], present: true }]), true, 'a tracked NPC named');
     assert.equal(check('A boy runs up. "I am Bo," he says.'), true, 'a two-letter name');
     assert.equal(check('Will smiled. He will not be moved.'), true, 'a name that is also a common word, before a person verb');
     assert.equal(check('美咲という若い女性が微笑んで、こちらへ歩いてきた。'), true, 'a CJK name');
@@ -216,4 +214,37 @@ test('lean: the dossier text is short: preamble and rubric about 750 characters,
 test('lean: a low-standing NPC adds the "only them" rule to the dossier header', () => {
     const low = buildInjection([{ id: 'n1', name: 'Vrena', present: true, role: 'Guild clerk', personality: 'Practical.', relationship: { trust: -40, affection: -30, desire: 0, tension: 60 } }], 'Vrena', 1, 3);
     assert.match(low, /LOW SCORES: the player is not special to them; no obligation, fixation or "only them" thinking\./);
+});
+
+import { skippedExchangesWindow, useTranscriptSource } from '../src/transcript.js';
+import { buildScannerPrompt } from '../core.js';
+
+test('lean: the window covers every skipped reply (5 replies at Scan context 6 keep the first) and reports the true count', () => {
+    const chat = [{ is_user: false, name: 'Nar', mes: 'Opening.' }];
+    for (let k = 1; k <= 5; k += 1) { chat.push({ is_user: true, name: 'User', mes: `U${k}` }); chat.push({ is_user: false, name: 'Nar', mes: `R${k}` }); }
+    useTranscriptSource({ context: () => ({ chat, name1: 'User', name2: 'Nar' }), scanDepth: () => 6 });
+    const w = skippedExchangesWindow(10, { afterId: 0, replies: 5, limit: 6 });
+    assert.ok(w.transcript.includes('R1') && w.transcript.includes('U1') && w.transcript.includes('R5'));
+    assert.equal(w.replies, 5);
+    assert.equal(w.trimmedBefore, null, 'nothing trimmed');
+    const big = [{ is_user: false, name: 'Nar', mes: 'Opening.' }];
+    for (let k = 1; k <= 20; k += 1) { big.push({ is_user: true, name: 'User', mes: `U${k}` }); big.push({ is_user: false, name: 'Nar', mes: `R${k}` }); }
+    useTranscriptSource({ context: () => ({ chat: big, name1: 'User', name2: 'Nar' }), scanDepth: () => 6 });
+    const t = skippedExchangesWindow(40, { afterId: 0, replies: 20, limit: 6 });
+    assert.equal(t.transcript.split('\n').length, 30, 'capped at 30 messages');
+    assert.equal(t.replies, 20, 'the true count');
+    assert.equal(t.trimmedBefore, 12, 'the marker stays at the oldest reply read (R6 is message 12)');
+});
+
+test('lean: Lean mode (Scan after every reply off) scans no more often than every 3 replies, as in 1.7.4', () => {
+    const due = (sinceScan, extra = {}) => autoScanDue({ autoScan: true, full: false, scanEvery: 1, sinceScan, everyReply: false, ...extra });
+    assert.deepEqual([1, 2, 3].map(n => due(n, { replyChanges: true })), [false, false, true]);
+    assert.deepEqual([1, 2, 3].map(n => due(n)), [false, false, true]);
+});
+
+test('lean: a scan of several exchanges labels the earlier ones and the latest CURRENT', () => {
+    const prompt = buildScannerPrompt({ transcript: 'User: u1\nNar: r1\nUser: u2\nNar: r2', currentTranscript: 'User: u2\nNar: r2', existingNpcs: [], candidates: [] });
+    assert.match(prompt, /EARLIER exchanges[^]*durable facts only[^]*User: u1\nNar: r1\n\nCURRENT exchange[^]*User: u2\nNar: r2/);
+    const single = buildScannerPrompt({ transcript: 'User: u2\nNar: r2', currentTranscript: 'User: u2\nNar: r2', existingNpcs: [], candidates: [] });
+    assert.doesNotMatch(single, /EARLIER exchanges/);
 });

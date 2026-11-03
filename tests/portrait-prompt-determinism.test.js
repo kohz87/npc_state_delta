@@ -268,3 +268,17 @@ test('natural portrait prose picks a or an by sound', () => {
     assert.match(prose({ name: 'X', species: 'one-eyed ogre', gender: 'male' }), /^A portrait of a one-eyed ogre man\./);
     assert.match(prose({ name: 'X', species: 'Umbral wraith', gender: 'male' }), /^A portrait of an Umbral wraith man\./);
 });
+
+test('natural portrait prose: a/an by sound, is/are stripped, capitalised words are not adjectives, no doubled noun, teen', () => {
+    assert.match(prose({ name: 'A', gender: 'male', role: 'uninvited guest' }), /the look of an uninvited guest/);
+    assert.match(prose({ name: 'A', species: 'unidentified beast', gender: 'male' }), /^A portrait of an unidentified beast man\./);
+    assert.match(prose({ name: 'A', gender: 'female', role: 'utopian dreamer' }), /the look of a utopian dreamer/);
+    assert.match(prose({ name: 'A', gender: 'female', role: 'uniform inspector' }), /the look of a uniform inspector/);
+    assert.match(prose({ name: 'A', species: 'unicorn-kin', gender: 'female' }), /^A portrait of a unicorn-kin woman\./);
+    assert.match(prose({ name: 'A', gender: 'female', appearance: 'She is tall' }), /^A portrait of a tall woman\./);
+    assert.match(prose({ name: 'A', gender: 'male', appearance: 'They are scarred; He has red eyes' }), /with red eyes/);
+    assert.match(prose({ name: 'A', gender: 'male', appearance: 'Red; tall' }), /^A portrait of a tall man with red\./, 'a capitalised -ed word is left alone');
+    assert.match(prose({ name: 'A', gender: 'male', species: 'catboy', apparentAge: '15' }), /^A portrait of a 15-year-old catboy\./);
+    assert.match(prose({ name: 'A', gender: 'male', apparentAge: 'teen' }), /^A portrait of a teenage boy\./);
+    assert.doesNotMatch(prose({ name: 'A', gender: 'male', apparentAge: 'teen' }), /apparent age/);
+});

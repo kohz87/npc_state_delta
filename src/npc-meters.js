@@ -120,8 +120,8 @@ export const FEATURES = Object.freeze([
     // Read-only (src/social-check.js): no prompt text, no state; a dice module asks npc.socialModifier.
     Object.freeze({ id: FEATURE_SOCIAL, label: 'Social checks use the dossier', describe: 'A persuade, charm, intimidate or deceive check against an NPC gets a small bonus or penalty from their meters, stage and disposition (for Story Director\'s checks or another dice module).', default: true }),
     // Read by index.js (scanAfterEveryReply): no prompt text, no state. Off, the automatic scan runs every 3 replies (or
-    // "Scan every" when larger); a manual scan is never held back.
-    Object.freeze({ id: FEATURE_SCAN_EVERY_REPLY, label: 'Scan after every reply', describe: 'Off: the automatic scan runs every 3 replies (or the "Scan every" setting if larger) and a reply in between is not scanned. A manual scan always runs.', default: true, presets: LEAN_OFF }),
+    // "Scan every" when larger), reading every reply since the last scan; a manual scan is never held back.
+    Object.freeze({ id: FEATURE_SCAN_EVERY_REPLY, label: 'Scan after every reply', describe: 'Off: the automatic scan runs every 3 replies (or the "Scan every" setting if larger) and that scan reads every reply since the last one, so a reply in between is read, not lost. A manual scan always runs.', default: true, presets: LEAN_OFF }),
 ]);
 const FEATURE_DEFAULTS = Object.freeze(Object.fromEntries(FEATURES.map(feature => [feature.id, feature.default])));
 

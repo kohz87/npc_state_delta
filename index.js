@@ -910,7 +910,7 @@ function storySuiteV2Meters() {
     return storyBlockV2Hosted() && storySuiteV2?.hosted?.() ? storySuiteV2 : null;
 }
 // (v2) Story Suite's "Scan after every reply" switch (feature npc-state-delta.scan-every-reply, on by default).
-// Off, the automatic scan waits for three replies (or "Scan every" when larger). True without a host, or when
+// Off, the automatic scan waits for three replies (or "Scan every" when larger), as in 1.7.4, and then reads every reply since the last scan. True without a host, or when
 // the host cannot answer: Delta alone scans as it always did. Manual scans never ask.
 function scanAfterEveryReply() {
     const adapter = storySuiteV2Meters();
@@ -4654,7 +4654,8 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
             ...merged.state,
             assistantSinceScan: 0,
             lastScanAt: Date.now(),
-            lastScannedMessageId: Number.isInteger(messageId) ? messageId : ((ctx.chat || []).length - 1),
+            // A scan whose window could not hold every skipped reply keeps its marker at the oldest reply it read.
+            lastScannedMessageId: Number.isInteger(skippedWindow?.trimmedBefore) ? skippedWindow.trimmedBefore : (Number.isInteger(messageId) ? messageId : ((ctx.chat || []).length - 1)),
             scanCount: Number(state.scanCount || 0) + 1,
         };
         if (!manual) {
@@ -7943,7 +7944,6 @@ function replyNamesSomeone(state, messageId) {
             texts: currentExchangeBodies(messageId),
             roster: [...(state?.npcs || []), ...(state?.candidates || [])],
             ignore: [ctx.name1, ctx.name2],
-            present: scanScenePresent(messageId) || [],
         });
     } catch { return true; }
 }

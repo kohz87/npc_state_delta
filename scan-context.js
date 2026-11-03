@@ -10,16 +10,15 @@ export const AUTO_SCAN_EVERY_WITHOUT_EVERY_REPLY = 3;
  * Whether the automatic scan is due after this reply. `sinceScan` counts the replies since the last scan, `scanEvery` is
  * the reader's "Scan every" setting, `full` is "Full scan every turn". `everyReply` is the "Scan after every reply"
  * switch (true when no Story Suite is present): off, a scan waits for three replies, or for "Scan every" when that is
- * larger, and "Full scan every turn" then makes that scan a full one instead of making every reply scan. A reply the
- * local check flags (`replyChanges`) scans either way.
+ * larger, and "Full scan every turn" then makes that scan a full one instead of making every reply scan.
  */
 export function autoScanDue({ autoScan, full, sinceScan, scanEvery, everyReply = true, replyChanges = false } = {}) {
     if (!autoScan) return false;
     // `replyChanges`: the cheap local check found a name or an NPC State line in the reply. A quiet reply waits for
     // the safety scan (every `scanEvery` replies); "Scan every" 1 therefore still scans every reply.
     if (everyReply !== false) return Boolean(full) || Boolean(replyChanges) || sinceScan >= scanEvery;
-    // A reply that names someone new, or has a tracked NPC in the scene, still scans when "Scan after every reply" is off.
-    return Boolean(replyChanges) || sinceScan >= Math.max(AUTO_SCAN_EVERY_WITHOUT_EVERY_REPLY, Number(scanEvery) || 1);
+    // Off, only the cadence applies (no earlier than 1.7.4); the scan then reads every reply since the last one.
+    return sinceScan >= Math.max(AUTO_SCAN_EVERY_WITHOUT_EVERY_REPLY, Number(scanEvery) || 1);
 }
 
 const NAME_STOP = new Set(['i', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december', 'god', 'ok', 'okay', 'the', 'and', 'but', 'she', 'her', 'his', 'they', 'then', 'this', 'that', 'there', 'with', 'when', 'what', 'where', 'who', 'why', 'how', 'you', 'your', 'not', 'for', 'its', 'one', 'he', 'it', 'we', 'after', 'before', 'as', 'at', 'by', 'from', 'in', 'on', 'of', 'to', 'up', 'down', 'out', 'over', 'under', 'into', 'through', 'around', 'behind', 'beyond', 'while', 'if', 'though', 'although', 'because', 'since', 'until', 'so', 'yet', 'now', 'soon', 'later', 'again', 'still', 'just', 'only', 'even', 'perhaps', 'maybe', 'suddenly', 'slowly', 'quickly', 'finally', 'some', 'every', 'each', 'all', 'no', 'yes', 'nothing', 'something', 'everyone', 'someone', 'nobody', 'here', 'there', 'these', 'those', 'their', 'our', 'my', 'me', 'him', 'them', 'us', 'do', 'did', 'does', 'is', 'was', 'are', 'were', 'be', 'can', 'could', 'would', 'should', 'will', 'have', 'had', 'has', 'let', 'look', 'listen', 'well', 'oh', 'ah', 'hey', 'please', 'thank', 'thanks', 'sorry', 'good', 'morning', 'night', 'day', 'outside', 'inside', 'nearby', 'meanwhile', 'once', 'then', 'both', 'another', 'other', 'more', 'most', 'many', 'few', 'two', 'three', 'first', 'second', 'last', 'next', 'what', 'which', 'whose', 'whom', 'an', 'am', 'or', 'go', 'hi', 'us', 'if', 'oh', 'so', 'my']);
@@ -40,24 +39,19 @@ const OTHER_UNCASED = /(?![\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\
 const CAP_WORD = /\p{Lu}[\p{L}\p{M}'\u2019-]*/gu;
 
 /**
- * A cheap local check, no model call: may this reply change a dossier? A reply is quiet only when it names no one new AND
- * no tracked NPC is in the scene: the scene's people (present, not archived) are acting even when the prose says only "She
- * sighs", so any such roster entry makes the reply scan. Otherwise it scans when it names a tracked NPC, carries an NPC
- * State line or names someone new. A capitalised word counts as a new name when it is not the first word of a sentence (or is
- * followed by another capitalised word) and no roster name, alias or `ignore` name (the player, the character) contains it;
- * names of two letters count; a name-like word of a script without capitals (CJK by what introduces it, other scripts by
- * their presence) counts too. A quiet reply that slips through is still read by the next scan, which covers every reply
- * since the last one.
+ * A cheap local check, no model call: may this reply change a dossier? It scans when the reply names a tracked NPC (by name or
+ * alias), carries an NPC State line or names someone new. A capitalised word counts as a new name when it is not the first
+ * word of a sentence (or is followed by another capitalised word) and no roster name, alias or `ignore` name (the player, the
+ * character) contains it; names of two letters count; a common word that is also a given name counts before a person verb
+ * ("Will smiled"); a name-like word of a script without capitals (CJK by what introduces it, other scripts by their
+ * presence) counts too. A reply that only continues with a pronoun ("She sighs") is quiet here: the next scan reads every
+ * reply since the last one, so nothing is lost, only the call is saved.
  */
-export function replyMayChangeDossiers({ texts = [], roster = [], ignore = [], present = [] } = {}) {
+export function replyMayChangeDossiers({ texts = [], roster = [], ignore = [] } = {}) {
     const source = (Array.isArray(texts) ? texts : [texts]).map(item => (typeof item === 'string' ? item : '')).filter(Boolean).join('\n');
     if (!text(source)) return false;
     if (/\bNPC State\b/i.test(source)) return true;
     const people = Array.isArray(roster) ? roster : [];
-    const scene = new Set((Array.isArray(present) ? present : []).map(norm).filter(Boolean));
-    const inScene = npc => npc && typeof npc === 'object' && npc.archived !== true
-        && (npc.present === true || [npc.name, ...(npc.aliases || [])].some(label => scene.has(norm(label))));
-    if (people.some(inScene)) return true;
     if (people.some(npc => npc && typeof npc === 'object' && npcParticipatesInExchange(npc, people, source))) return true;
     const labels = [];
     const known = new Set(NAME_STOP);

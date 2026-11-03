@@ -133,7 +133,6 @@ export function skippedExchangesWindow(messageId = null, { afterId = null, repli
     const hasMarker = Number.isInteger(afterId) && afterId < assistantId;
     const wanted = Math.max(0, Math.round(Number(replies) || 0));
     if (!hasMarker && wanted < 2) return null;
-    const count = Math.max(2, Math.min(30, Number(limit ?? readScanDepth()) || 6));
     const picked = [];
     let assistants = 0;
     for (let i = assistantId; i >= 0; i -= 1) {
@@ -147,6 +146,9 @@ export function skippedExchangesWindow(messageId = null, { afterId = null, repli
         picked.push(i);
     }
     if (assistants < 2) return null;
+    // The window covers every skipped reply with its user message (2 per reply, plus the one before the first), never fewer
+    // than the Scan context setting, never more than 30.
+    const count = Math.min(30, Math.max(2, Math.min(30, Number(limit ?? readScanDepth()) || 6), 2 * assistants + 2));
     const kept = picked.slice(0, count).reverse();
     const lines = [];
     const users = [];
@@ -156,7 +158,16 @@ export function skippedExchangesWindow(messageId = null, { afterId = null, repli
         lines.push(line);
         if (chat[i].is_user) users.push(`[m${i}] ${line}`);
     }
-    return lines.length ? { transcript: lines.join('\n'), userDevelopmentContext: users.join('\n'), replies: assistants } : null;
+    if (!lines.length) return null;
+    // The oldest reply actually read, set when the cap trimmed older ones: the caller keeps its marker there, not past it.
+    const readAssistants = kept.filter(i => !chat[i].is_user);
+    const trimmed = kept.length < picked.length;
+    return {
+        transcript: lines.join('\n'),
+        userDevelopmentContext: users.join('\n'),
+        replies: assistants,
+        trimmedBefore: trimmed && readAssistants.length ? readAssistants[0] : null,
+    };
 }
 
 export function currentExchangeTranscript(messageId = null) {

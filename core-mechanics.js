@@ -3761,18 +3761,23 @@ function portraitProseClean(value) {
 function portraitProseArticle(phrase) {
     const text = String(phrase || '').trim();
     if (/^(?:a|an|the|his|her|their|its|one|some)(?=\s|$)/i.test(text)) return text;
-    // By sound, not by letter: "a unicorn-kin", "a one-eyed man", "an 18-year-old", "an hour-old".
+    // By sound, not by letter: "a unicorn-kin", "a utopian", "an uninvited", "an 18-year-old", "an hour-old".
+    const yoo = /^(?:uni(?!n|d)|use|usu|uti(?!l)|uto|ute|uro|ura|eu|one|once|ubiq|ufo|uk)/i.test(text) || /^unanim|^unilat|^unif/i.test(text);
     const vowelSound = /^(?:8\d?|11|18)(?!\d)/.test(text)
-        || (/^[aeiou]/i.test(text) && !/^(?:uni|use|usu|uti|ute|uro|ura|eu|one|once|ubiq|ufo)/i.test(text))
+        || (/^[aeiou]/i.test(text) && !yoo)
         || /^(?:hour|honest|honou?r|heir)/i.test(text);
     return (vowelSound ? 'an ' : 'a ') + text;
 }
 
 // A clause that is only an adjective ("burly", "tall") describes the subject itself: "a burly man", never "with burly".
-const PORTRAIT_ADJECTIVE = /^(?:tall|short|slim|slender|thin|lean|stout|stocky|burly|brawny|muscular|pale|dark|fair|tan|young|old|elderly|ancient|small|large|big|huge|tiny|petite|plump|fat|heavy|lithe|lanky|wiry|gaunt|frail|sturdy|rugged|handsome|beautiful|pretty|plain|striking|androgynous|scrawny|willowy|curvy|chubby|bald|blind|weathered|broad-shouldered|[a-z]+(?:ed|ful|ous|ish|ive|ly))$/i;
-function portraitProseIsAdjective(item) {
+// Lower case only: a capitalised word ("Red") is a name or a colour, not read as an adjective.
+const PORTRAIT_ADJECTIVE = /^(?:tall|short|slim|slender|thin|lean|stout|stocky|burly|brawny|muscular|pale|dark|fair|tan|young|old|elderly|ancient|small|large|big|huge|tiny|petite|plump|fat|heavy|lithe|lanky|wiry|gaunt|frail|sturdy|rugged|handsome|beautiful|pretty|plain|striking|androgynous|scrawny|willowy|curvy|chubby|bald|blind|weathered|broad-shouldered)$/i;
+const PORTRAIT_ADJECTIVE_SUFFIX = /^[a-z]{3,}(?:ed|ful|ous|ish|ive|ly)$/;
+function portraitProseIsAdjective(item, original = item) {
     const text = String(item || '').trim();
-    return /^[A-Za-z][A-Za-z-]*$/.test(text) && PORTRAIT_ADJECTIVE.test(text);
+    if (!/^[A-Za-z][A-Za-z-]*$/.test(text)) return false;
+    // The suffix guess is for lower-case words only: "Red" is a name or a colour.
+    return PORTRAIT_ADJECTIVE.test(text) || (/^[a-z]/.test(String(original || '').trim()) && PORTRAIT_ADJECTIVE_SUFFIX.test(text));
 }
 
 function portraitProseList(items) {
@@ -3792,22 +3797,25 @@ function buildNaturalPortraitProse({ name, gender, rawGender, species, visualAge
     const numericAge = /^\d+(?:\s*[-–]\s*\d+)?$/.test(ageText);
     const speciesText = portraitProseClean(species);
     // A boy or a girl stays one: the gender word said so, or the age is under 18 with a male or female gender.
+    const teen = /^(?:teens?|teenage|teenaged|teenager|adolescent)$/i.test(ageText);
     const youngest = numericAge ? Math.min(...ageText.match(/\d+/g).map(Number)) : Infinity;
-    const young = gender && (/^(?:boy|girl)$/.test(normalizeName(rawGender)) || youngest < 18);
+    const young = gender && (/^(?:boy|girl)$/.test(normalizeName(rawGender)) || youngest < 18 || teen);
     const nounWord = young ? (gender === 'male' ? 'boy' : 'girl') : noun;
-    const speciesHasNoun = new RegExp('\\b(?:' + nounWord + '|male|female|man|woman|boy|girl|person)\\b', 'i').test(speciesText);
-    const stripped = appearance.core.map(item => portraitProseLower(item.replace(/^(?:(?:he|she|they)\s+(?:has|have)|has|have|having|with)\s+/i, '')));
+    const speciesHasNoun = new RegExp('\\b(?:' + nounWord + '|male|female|man|woman|boy|girl|person)\\b|(?:boy|girl)\\b', 'i').test(speciesText);
+    const rawCore = appearance.core.map(item => item.replace(/^(?:(?:he|she|they)\s+(?:has|have|is|are)|has|have|having|with)\s+/i, ''));
+    const stripped = rawCore.map(item => portraitProseLower(item));
     const speciesWords = new Set(normalizeName(speciesText).split(' '));
-    const adjectives = stripped.filter(item => portraitProseIsAdjective(item) && !speciesWords.has(normalizeName(item)));
-    const core = stripped.filter(item => !adjectives.includes(item));
-    const head = [numericAge ? (approximate ? 'roughly ' : '') + ageText.replace(/\s+/g, '') + '-year-old' : '', ...adjectives, speciesText, speciesHasNoun ? '' : nounWord].filter(Boolean).join(' ');
+    const adjectiveAt = stripped.map((item, at) => portraitProseIsAdjective(item, rawCore[at]) && !speciesWords.has(normalizeName(item)));
+    const adjectives = stripped.filter((item, at) => adjectiveAt[at]);
+    const core = stripped.filter((item, at) => !adjectiveAt[at]);
+    const head = [numericAge ? (approximate ? 'roughly ' : '') + ageText.replace(/\s+/g, '') + '-year-old' : (teen ? 'teenage' : ''), ...adjectives, speciesText, speciesHasNoun ? '' : nounWord].filter(Boolean).join(' ');
     const clothing = appearance.clothing.map(item => portraitProseLower(item));
     const coreKeys = new Set(core.map(portraitPartKey));
     const clothes = clothing.filter(item => !coreKeys.has(portraitPartKey(item)));
 
     const sentences = [];
     let first = 'A portrait of ' + portraitProseArticle(head);
-    if (ageText && !numericAge) first += ', of apparent age ' + ageText;
+    if (ageText && !numericAge && !teen) first += ', of apparent age ' + ageText;
     if (core.length) first += ' with ' + portraitProseList(core);
     sentences.push(first);
     if (role) sentences.push(subject + ' carries the look of ' + portraitProseArticle(portraitProseLower(portraitProseClean(role))));
@@ -7205,9 +7213,17 @@ export function buildScannerPrompt({
         ? `\nFULL-WINDOW RECONCILIATION: Story context contains the configured recent-history window. Use durable evidence anywhere in the supplied recent-history window to recover missed durable facts (identity, role/species/gender/age, profile, background, social ties, memories). Earlier turns are context, NOT new events. For present/worldActive and LIVE mood/location/goal/status, use only the newest CURRENT exchange below; older states must never overwrite newer/established live state. Numeric relationshipImpact/relationshipDelta MUST use only CURRENT exchange, never older window events. Do not replay old deltas.`
         : '';
 
+    // A lean scan of several exchanges: the latest is CURRENT (presence, mood, location, meters come only from it); the
+    // earlier ones are context for durable facts.
+    const wholeStory = String(transcript || '').trim();
+    const earlierStory = !narrationCapture && !fullScanMode && currentExchange && wholeStory.length > currentExchange.length && wholeStory.endsWith(currentExchange)
+        ? wholeStory.slice(0, wholeStory.length - currentExchange.length).trim()
+        : '';
     const storyContext = narrationCapture
         ? NARRATION_CAPTURE_STORY
-        : `Story context:\n${String(transcript || '').trim()}${fullScanMode ? `\n\nCURRENT exchange (authoritative for presence/live state and numeric relationship deltas):\n${currentExchange}` : ''}`;
+        : earlierStory
+            ? `Story context:\nEARLIER exchanges (replies since the last scan; durable facts only, never current presence, mood, location or meter deltas):\n${earlierStory}\n\nCURRENT exchange (authoritative for presence/live state and numeric relationship deltas):\n${currentExchange}`
+            : `Story context:\n${String(transcript || '').trim()}${fullScanMode ? `\n\nCURRENT exchange (authoritative for presence/live state and numeric relationship deltas):\n${currentExchange}` : ''}`;
 
     // (1.2.17) Opt-in compact one-pass rules: the same fields and gates in fewer words (about 1,200
     // tokens instead of 2,000). Only for one-pass capture; the scanner keeps its full rules.
