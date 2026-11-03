@@ -28,8 +28,8 @@ MODULES.md §D and §F (F81 meters, F90 stages), SPEC §2.2 (replay), §5 (own p
   lists present people's locked event notes and answers `secretEvents`, sent as `npc.open` with `by: 'story'`, recorded on
   the reply) or by the reader's hand (`npc.open`; a note shut by hand is kept in the slice's `held`). Their text reaches the
   story only through the tail and only while the NPC is present: an opened note as "known to the player now; may come out",
-  a locked one as "hidden: never state or reveal; let it shape how they act" (optional tail lines, nearest to opening first,
-  so the host's budget drops the deepest first). The hook `redactSent(text)` turns each locked line into "Name: 1 hidden note"
+  a locked one as "Name (hidden): text" with the wording ("never state or reveal; let them shape how that person acts") said once on the
+  nearest line (optional tail lines, nearest to opening first, so the host's budget drops the deepest first). The hook `redactSent(text)` turns each locked line into "Name: 1 hidden note"
   for a view that shows what is sent; a host that does not call it shows the raw text.
   Layers and event watching run in every path that builds a dossier or scans a present person: the ordinary scan (the default:
   one-pass capture and "Scan every reply" full-window are off by default, and Lean scans every third reply), the one-pass block (the

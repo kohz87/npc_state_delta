@@ -85,7 +85,7 @@ test('roleplay injection tells the model to generalize behavioral profile levers
     ];
 
     const injection = buildInjection([npc], 'Marris examines an unfamiliar mechanism.', 4, 1);
-    assert.match(injection, /behavioral profile translates it into target-general response\/decision levers/i);
+    assert.match(injection, /behavior profile, speech and mannerisms shape response and expression/i);
     assert.match(injection, /behavioral profile:/i);
     assert.match(injection, /Analytical Style:/i);
 });

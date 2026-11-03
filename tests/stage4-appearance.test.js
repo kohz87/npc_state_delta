@@ -253,7 +253,7 @@ test('Stage 4 portrait and roleplay injection resolve the same current form', ()
     assert.doesNotMatch(portrait, /Storm-blue plumage/i);
     assert.doesNotMatch(injection, /Storm-blue plumage/i);
     assert.doesNotMatch(portrait, /Stormcrown Thunderbird/i, 'species identity must not override a selected non-Base form in portrait anatomy');
-    assert.match(injection, /CURRENT VISIBLE APPEARANCE \(authoritative anatomy; species\/race cannot override the selected form\)/i);
+    assert.match(injection, /APPEARANCE \(authoritative; species cannot override the form\)/i);
     assert.equal((injection.match(/ordinary human ears/gi) || []).length, 1, 'resolved current appearance should be injected once, not duplicated after the budgeted dossier');
 });
 

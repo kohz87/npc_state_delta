@@ -12,10 +12,46 @@ export const AUTO_SCAN_EVERY_WITHOUT_EVERY_REPLY = 3;
  * switch (true when no Story Suite is present): off, a scan waits for three replies, or for "Scan every" when that is
  * larger, and "Full scan every turn" then makes that scan a full one instead of making every reply scan.
  */
-export function autoScanDue({ autoScan, full, sinceScan, scanEvery, everyReply = true } = {}) {
+export function autoScanDue({ autoScan, full, sinceScan, scanEvery, everyReply = true, replyChanges = false } = {}) {
     if (!autoScan) return false;
-    if (everyReply !== false) return Boolean(full) || sinceScan >= scanEvery;
+    // `replyChanges`: the cheap local check found a name or an NPC State line in the reply. A quiet reply waits for
+    // the safety scan (every `scanEvery` replies); "Scan every" 1 therefore still scans every reply.
+    if (everyReply !== false) return Boolean(full) || Boolean(replyChanges) || sinceScan >= scanEvery;
     return sinceScan >= Math.max(AUTO_SCAN_EVERY_WITHOUT_EVERY_REPLY, Number(scanEvery) || 1);
+}
+
+const NAME_STOP = new Set(['i', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday', 'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december', 'god', 'ok', 'okay', 'the', 'and', 'but', 'she', 'her', 'his', 'they', 'then', 'this', 'that', 'there', 'with', 'when', 'what', 'where', 'who', 'why', 'how', 'you', 'your', 'not', 'for', 'its', 'one', 'he', 'it', 'we', 'after', 'before', 'as', 'at', 'by', 'from', 'in', 'on', 'of', 'to', 'up', 'down', 'out', 'over', 'under', 'into', 'through', 'around', 'behind', 'beyond', 'while', 'if', 'though', 'although', 'because', 'since', 'until', 'so', 'yet', 'now', 'soon', 'later', 'again', 'still', 'just', 'only', 'even', 'perhaps', 'maybe', 'suddenly', 'slowly', 'quickly', 'finally', 'some', 'every', 'each', 'all', 'no', 'yes', 'nothing', 'something', 'everyone', 'someone', 'nobody', 'here', 'there', 'these', 'those', 'their', 'our', 'my', 'me', 'him', 'them', 'us', 'do', 'did', 'does', 'is', 'was', 'are', 'were', 'be', 'can', 'could', 'would', 'should', 'will', 'have', 'had', 'has', 'let', 'look', 'listen', 'well', 'oh', 'ah', 'hey', 'please', 'thank', 'thanks', 'sorry', 'good', 'morning', 'night', 'day', 'outside', 'inside', 'nearby', 'meanwhile', 'once', 'then', 'both', 'another', 'other', 'more', 'most', 'many', 'few', 'two', 'three', 'first', 'second', 'last', 'next', 'what', 'which', 'whose', 'whom']);
+const CAP_WORD = /\p{Lu}[\p{L}\p{M}'\u2019-]*/gu;
+
+/**
+ * A cheap local check, no model call: does the reply (and the message it answers) name someone new, name a tracked NPC,
+ * or carry an NPC State line? Quiet prose with none of these leaves every dossier as it is, so its scan can wait for the
+ * safety scan. A capitalised word counts as a new name when it is not the first word of a sentence (or is followed by
+ * another capitalised word) and no roster name, alias or `ignore` name (the player, the character) contains it.
+ */
+export function replyMayChangeDossiers({ texts = [], roster = [], ignore = [] } = {}) {
+    const source = (Array.isArray(texts) ? texts : [texts]).map(item => (typeof item === 'string' ? item : '')).filter(Boolean).join('\n');
+    if (!text(source)) return false;
+    if (/\bNPC State\b/i.test(source)) return true;
+    const people = Array.isArray(roster) ? roster : [];
+    if (people.some(npc => npc && typeof npc === 'object' && npcParticipatesInExchange(npc, people, source))) return true;
+    const known = new Set(NAME_STOP);
+    for (const label of [...ignore, ...people.flatMap(npc => [npc?.name, ...(npc?.aliases || [])])]) {
+        for (const word of norm(label).split(' ')) if (word) known.add(word);
+    }
+    const prose = participationText(source);
+    for (const match of prose.matchAll(CAP_WORD)) {
+        const word = norm(match[0]);
+        if (word.length < 3 || known.has(word)) continue;
+        const before = prose.slice(0, match.index).replace(/[\s*_"'\u201c\u201d\u2018\u2019\u00ab(\[]+$/u, '');
+        const initial = !before || /[.!?\u2026:\n\u2014>]$/u.test(before);
+        if (!initial) return true;
+        // A sentence's first word is a name unless the same word also shows up in lower case in the text.
+        if (!new RegExp(`(?:^|[^\\p{L}])${match[0].toLowerCase()}(?![\\p{L}])`, 'u').test(prose)) return true;
+        const after = prose.slice(match.index + match[0].length).match(/^[ \t]+(\p{Lu}[\p{L}\p{M}'\u2019-]*)/u);
+        if (after && !known.has(norm(after[1])) && norm(after[1]).length >= 3) return true;
+    }
+    return false;
 }
 
 function text(value) {

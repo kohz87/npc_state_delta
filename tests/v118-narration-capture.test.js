@@ -317,7 +317,7 @@ test('v1.2.17 the capture context leaves out values the live dossier above alrea
     const elke = { id: 'npc_elke', name: 'Elke', present: true, personality: 'Warm.', mood: 'tired', location: 'Back room' };
     const options = { transcript: 'USER: Vrena Tolk and Elke, a moment?', userName: 'Ari', charName: 'Narrator', existingNpcs: [vrena, elke] };
     // Vrena's line repeats her personality, speech, mannerism, mood and role; it also says "tired", Elke's mood.
-    const dossier = '- Vrena Tolk: IDENTITY (authoritative): personality: Dry, exacting, quietly kind.; established speech: Clipped, formal sentences.; established mannerisms: Taps the signature line twice.; role: Guild clerk; mood: busy, a little tired';
+    const dossier = '- Vrena Tolk: IDENTITY: personality: Dry, exacting, quietly kind.; speech: Clipped, formal sentences.; mannerisms: Taps the signature line twice.; role: Guild clerk; mood: busy, a little tired';
     const plain = buildNarrationCaptureParts(options).context;
     const deduped = buildNarrationCaptureParts({ ...options, dossierAbove: dossier }).context;
     assert.ok(deduped.length < plain.length);

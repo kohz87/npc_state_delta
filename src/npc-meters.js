@@ -1680,7 +1680,9 @@ export function createNpcPart(hooks = {}) {
     // The tail's words for a note: an opened one is the player's to know; a locked one shapes how the NPC acts.
     const KNOWN = 'known to the player now; may come out';
     const HIDDEN = 'hidden: never state or reveal; let it shape how they act';
-    const HIDDEN_LINE = new RegExp(`^(.+?), ${HIDDEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: .*$`, 'gm');
+    // (lean) The wording is said once, on the nearest locked note, and each note then reads "Name (hidden): text".
+    const HIDDEN_ONCE = 'Lines marked (hidden) are secrets: never state or reveal them; let them shape how that person acts.';
+    const HIDDEN_LINE = new RegExp(`^(.+?)(?:, ${HIDDEN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}| \\(hidden\\)): .*$`, 'gm');
 
     /**
      * Present NPCs' meters when they moved lately (band words where a meter has them), and their notes: an
@@ -1725,14 +1727,16 @@ export function createNpcPart(hooks = {}) {
                 if (opened.has(rule.id)) {
                     if (known < TAIL_SECRETS_PER_NPC) { notes.push(`${record.name}, ${KNOWN}: ${text}`); known += 1; }
                 } else {
-                    hidden.push({ distance: openingDistance(rule, record, byId), order: order += 1, line: `${record.name}, ${HIDDEN}: ${text}` });
+                    hidden.push({ distance: openingDistance(rule, record, byId), order: order += 1, short: `${record.name} (hidden): ${text}` });
                 }
             }
         }
         const lines = [];
         if (moved.length) lines.push(`NPC meters now: ${moved.join('; ')}.`);
         hidden.sort((a, b) => a.distance - b.distance || a.order - b.order);
-        return { lines: [...lines, ...notes], optional: hidden.map(item => item.line) };
+        // The wording rides on the nearest note (the host drops the farthest first, so it stays while any note does).
+        const optional = hidden.map((item, i) => (i ? item.short : `${HIDDEN_ONCE}\n${item.short}`));
+        return { lines: [...lines, ...notes], optional };
     }
 
     /**

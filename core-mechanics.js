@@ -6184,8 +6184,8 @@ function compactBehaviorProfileForInjection(value, maxChars = 180) {
 function injectionIdentityCore(npc, identityCap = 540) {
     const others = [
         npc.personality && `personality: ${npc.personality}`,
-        npc.speech && `established speech: ${npc.speech}`,
-        npc.mannerisms?.length && `established mannerisms: ${npc.mannerisms.join(', ')}`,
+        npc.speech && `speech: ${npc.speech}`,
+        npc.mannerisms?.length && `mannerisms: ${npc.mannerisms.join(', ')}`,
     ].filter(Boolean);
     // Size the levers to the room the fair split below will actually give them: other identity
     // fields take at most an equal share and the levers get the rest (never more than 300 chars).
@@ -6206,8 +6206,8 @@ function injectionAgencyCore(npc, agencyCap = 260, customFieldNames = []) {
     const parts = [
         custom && `established details: ${custom}`,
         npc.role && `role: ${npc.role}`,
-        npc.goal && `current goal: ${npc.goal}`,
-        bonds.length && `key relationships: ${bonds.join(' | ')}`,
+        npc.goal && `goal: ${npc.goal}`,
+        bonds.length && `bonds: ${bonds.join(' | ')}`,
     ].filter(Boolean);
     return fairInjectionParts(parts, agencyCap) || 'no additional agency facts established';
 }
@@ -6253,12 +6253,12 @@ function injectionEssentialBlock(npc, behaviorCap = 160, identityCap = 620, agen
     const agency = injectionAgencyCore(npc, agencyCap, customFieldNames);
     const currentState = injectionCurrentStateCore(npc, stateCap, sceneDeferred);
     const relationship = compactRelationshipModifier(npc, behaviorCap);
-    return `- ${npc.name}: IDENTITY (authoritative): ${identity}; AGENCY/OTHER BONDS: ${agency}; CURRENT STATE: ${currentState}; PLAYER RELATIONSHIP (secondary modifier): ${relationship}`;
+    return `- ${npc.name}: IDENTITY: ${identity}; AGENCY/BONDS: ${agency}; STATE: ${currentState}; TOWARD PLAYER (secondary): ${relationship}`;
 }
 
-const INJECTED_APPEARANCE_LABEL = 'CURRENT VISIBLE APPEARANCE (authoritative anatomy; species/race cannot override the selected form): ';
-const INJECTED_PHYSICAL_LABEL = 'ENDURING PHYSICAL FEATURES (authoritative anatomy): ';
-const INJECTED_FORM_ANATOMY_LABEL = 'CURRENT FORM ANATOMY (authoritative; World State gives the outfit): ';
+const INJECTED_APPEARANCE_LABEL = 'APPEARANCE (authoritative; species cannot override the form): ';
+const INJECTED_PHYSICAL_LABEL = 'PHYSICAL FEATURES (authoritative): ';
+const INJECTED_FORM_ANATOMY_LABEL = 'FORM ANATOMY (authoritative; World State gives the outfit): ';
 
 // Appearance is optional continuity, but when the whole current appearance does not fit the
 // remaining budget its enduring physical features still should, so the roleplay model is not left
@@ -6293,13 +6293,13 @@ function injectionOptionalFields(npc, includeAppearance = false, sceneDeferred =
     return [
         appearanceVariants.length && appearanceVariants,
         includeAppearance && !npc.appearance && (npc.currentForm || npc.currentFormUnknown) && 'Current visible appearance is not established; do not infer anatomy from species or another form.',
-        importantMemories.length && `important memories: ${importantMemories.join(' | ')}`,
-        npc.species && `species/race: ${npc.species}`,
+        importantMemories.length && `memories: ${importantMemories.join(' | ')}`,
+        npc.species && `species: ${npc.species}`,
         npc.gender && `gender: ${normalizeGender(npc.gender)}`,
-        npc.age && `chronological age: ${npc.age}`,
+        npc.age && `age: ${npc.age}`,
         npc.apparentAge && `apparent age: ${npc.apparentAge}`,
         npc.location && `location: ${npc.location}`,
-        npc.homeBase && `home base / usual location: ${npc.homeBase}`,
+        npc.homeBase && `home base: ${npc.homeBase}`,
         npc.background && `background: ${cleanText(npc.background, 320)}`,
     ].filter(Boolean);
 }
@@ -6308,7 +6308,7 @@ function compactInjectionBehaviorRubric(criteria, maxChars) {
     const raw = String(criteria || '').trim();
     if (!raw) return '';
     if (raw === DEFAULT_BEHAVIOR_CRITERIA) {
-        return truncateInjectionText('Identity/current state decide behavior first. Relationship only biases player-directed weighting; it need not surface every scene and never implies obedience, devotion, romance tropes, or reduced empathy toward others.', maxChars);
+        return truncateInjectionText('Identity first; relationship only biases player-directed weighting.', maxChars);
     }
     return truncateInjectionText(raw, maxChars);
 }
@@ -6357,12 +6357,10 @@ export function buildInjection(npcs, text, turn = 0, limit = 3, behaviorCriteria
         return references ? truncateInjectionText(['NPC STATE DELTA DOSSIER. Treat these as established story facts; never mention the dossier.', references].join('\n'), budgetChars) : '';
     }
     const headerFor = () => [
-        'NPC STATE DELTA DOSSIER. Only confirmed-present NPCs are included. Treat these as established story facts; never mention the dossier or numeric values.',
-        'IDENTITY FIRST / DOMINATES: personality sets identity; behavioral profile translates it into target-general response/decision levers; speech/mannerisms shape expression; goals, duties, morality, independence, other bonds, and CURRENT mood/status determine behavior first.',
-        'VOICE FIDELITY: established Speech constrains actual dialogue wording and delivery. Preserve its sentence shape, vocabulary, formality, directness, hedging, cadence, question/explanation style, and recurring verbal habits; do not flatten distinct voices into generic polished prose.',
-        'PLAYER RELATIONSHIP IS SECONDARY: it may bias attention, interpretation, openness, tolerance, or willingness toward the player, but need not surface every scene. High scores never mean obedience, universal prioritization, clinginess, jealousy, tsundere behavior, or cruelty toward others.',
-        'Temporary mood, stress, intimacy, or player-specific behavior is not global identity. Durable identity changes gradually unless narration explicitly establishes lasting development or a developmental time skip.',
-        relevant.some(lowPlayerStanding) && 'LOW SCORES: the player is not uniquely important; no obligation, fixation, or "only them" thinking.',
+        'NPC STATE DELTA DOSSIER. Only confirmed-present NPCs; established facts; never mention it.',
+        'Personality sets identity; behavior profile, speech and mannerisms shape response and expression; goals, duties, morals, bonds and CURRENT mood/status decide behavior. Keep each Speech\'s wording, cadence and habits.',
+        'Player relationship only biases openness and attention; high scores never mean obedience, clinginess, jealousy, tsundere behavior or cruelty to others. Mood or player-specific behavior is not identity.',
+        relevant.some(lowPlayerStanding) && 'LOW SCORES: the player is not special to them; no obligation or fixation.',
         relevant.some(calledIn) && 'Exception: NPCs marked "named by player" are not yet confirmed on-screen; use their dossier if they appear.',
     ].filter(Boolean).join('\n');
 

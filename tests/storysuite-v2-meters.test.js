@@ -394,13 +394,15 @@ test('secrets: unlocked at the threshold with a receipt; locked ones are sent on
         const all = JSON.stringify(h.runQuery('npc.meters', {})) + JSON.stringify(h.runQuery('npc.cast'));
         return [statics, state, dossier, all].some(text => text.includes(SECRET) || text.includes(SECRET_TWO));
     };
-    const hidden = text => `Mira, hidden: never state or reveal; let it shape how they act: ${text}`;
+    // (lean) Two or more locked notes: the wording once, on the nearest note; each note then reads "Mira (hidden): text".
+    const ONCE = 'Lines marked (hidden) are secrets: never state or reveal them; let them shape how that person acts.';
+    const hidden = (text, first = false) => `${first ? `${ONCE}\n` : ''}Mira (hidden): ${text}`;
     h.reply('Nice.', '~ npc Mira | trust: +15');
     assert.equal(h.npc('Mira').meters.trust, 25);
     assert.deepEqual(h.npc('Mira').unlocked, []);
     assert.equal(leaks(), false, 'locked: nowhere in the static part, the state or the queries');
     const locked = h.def.context.tail(h.view());
-    assert.deepEqual(locked.optional, [hidden(SECRET), hidden(SECRET_TWO)], 'present and locked: sent as hidden, the nearer to opening first (trust 25 of 30; tension 0 of -20)');
+    assert.deepEqual(locked.optional, [hidden(SECRET, true), hidden(SECRET_TWO)], 'present and locked: sent as hidden, the nearer to opening first (trust 25 of 30; tension 0 of -20)');
     assert.equal(locked.lines.some(line => line.includes(SECRET) || line.includes(SECRET_TWO)), false, 'never as a known line');
     // Delta's own prompts never carry the hidden notes.
     const record = h.delta.api.getNpc('npc_mira');
@@ -420,7 +422,7 @@ test('secrets: unlocked at the threshold with a receipt; locked ones are sent on
     assert.equal(JSON.stringify(h.store.head()).includes(SECRET), false, 'the text never enters the state');
     const opened = h.def.context.tail(h.view());
     assert.deepEqual(opened.lines.filter(line => line.includes(SECRET)), [`Mira, known to the player now; may come out: ${SECRET}`]);
-    assert.deepEqual(opened.optional, [hidden(SECRET_TWO)], 'the other note is still locked: hidden wording');
+    assert.deepEqual(opened.optional, [hidden(SECRET_TWO, true)], 'the other note is still locked: hidden wording');
     assert.equal(leaks(), false);
     // Not present: not told, locked or opened.
     h.delta.records.npc_mira.present = false;
@@ -444,7 +446,7 @@ test('secrets: a swipe of the unlocking reply locks it again, and nothing leaks'
     assert.deepEqual(h.npc('Mira').unlocked, []);
     const again = h.def.context.tail(h.view());
     assert.equal(again.lines.some(line => line.includes(SECRET)), false, 'locked again: no longer told as known');
-    assert.ok(again.optional.includes(`Mira, hidden: never state or reveal; let it shape how they act: ${SECRET}`), 'only as hidden');
+    assert.ok(again.optional.some(line => line.endsWith(`Mira (hidden): ${SECRET}`)), 'only as hidden');
     h.swipeTo(index, 0);
     assert.equal(h.npc('Mira').unlocked.length, 1, 'back on the first swipe, its unlock is back');
 });
@@ -678,7 +680,7 @@ test('the Dossiers tab (once Cast) shows a meter bar per shown meter for the pre
 
 const EVENT = 'The duke is exposed as a traitor';
 const EVENT_SECRET = 'She has known about the duke all along.';
-const HIDDEN = text => `Mira, hidden: never state or reveal; let it shape how they act: ${text}`;
+const HIDDEN = (text, first = false) => `${first ? 'Lines marked (hidden) are secrets: never state or reveal them; let them shape how that person acts.\n' : ''}Mira (hidden): ${text}`;
 const KNOWN = text => `Mira, known to the player now; may come out: ${text}`;
 const eventNote = () => ({ title: 'The duke', when: EVENT, text: EVENT_SECRET });
 
@@ -738,7 +740,7 @@ test('secrets: a story event opens an event note; recorded on the reply, a swipe
     const watch = h.adapter.eventWatch(Object.values(h.delta.records));
     assert.deepEqual(watch.map(({ key, name, note, event }) => ({ key, name, note, event })), [{ key: 's1', name: 'Mira', note: noteId, event: EVENT }]);
     // Locked, an event note is sent as hidden while she is here; nothing is "known".
-    assert.ok(h.def.context.tail(h.view()).optional.includes(HIDDEN(EVENT_SECRET)));
+    assert.ok(h.def.context.tail(h.view()).optional.some(line => line.endsWith(HIDDEN(EVENT_SECRET))));
 
     const { index } = h.reply('The duke is dragged out in chains.', '');
     const out = await h.adapter.openByEvent({ name: 'Mira', ids: [noteId] });
@@ -749,7 +751,7 @@ test('secrets: a story event opens an event note; recorded on the reply, a swipe
     assert.deepEqual(h.sent.at(-1).payload, { name: 'Mira', open: [noteId], by: 'story' });
     assert.deepEqual(h.adapter.eventWatch(Object.values(h.delta.records)), [], 'opened: no longer watched');
     assert.ok(h.def.context.tail(h.view()).lines.includes(KNOWN(EVENT_SECRET)));
-    assert.equal(h.def.context.tail(h.view()).optional.includes(HIDDEN(EVENT_SECRET)), false);
+    assert.equal(h.def.context.tail(h.view()).optional.some(line => line.endsWith(HIDDEN(EVENT_SECRET))), false);
 
     // Replay equals live; a Re-read of the reply's story lines keeps it (it is Delta's, not a story line).
     const live = JSON.stringify(h.store.head());
@@ -796,7 +798,7 @@ test('secrets: the reader opens or shuts a note by hand; a shut note stays shut 
     assert.deepEqual(h.npc('Mira').held, [id]);
     h.reply('More.', '~ npc Mira | trust: +5');
     assert.deepEqual(h.npc('Mira').unlocked, [], 'the meter is past 30 and the note stays shut');
-    assert.ok(h.def.context.tail(h.view()).optional.includes(HIDDEN(SECRET)), 'shut: hidden wording again');
+    assert.ok(h.def.context.tail(h.view()).optional.some(line => line.endsWith(HIDDEN(SECRET))), 'shut: hidden wording again');
     assert.equal((await h.sdk.command('npc.open', { name: 'Mira', open: [id, 'sec_nonexistent'] })).ok, true);
     assert.deepEqual(h.npc('Mira').unlocked, [id]);
     assert.equal(h.npc('Mira').held, undefined);
@@ -813,7 +815,7 @@ test('secrets: the reader opens or shuts a note by hand; a shut note stays shut 
 });
 
 test('secrets: five layers over a small budget: the nearest to opening are sent, the deep ones wait until the person gets close', async () => {
-    const layers = [10, 25, 40, 60, 80].map((at, i) => ({ title: `Layer ${i + 1}`, meter: 'trust', at, text: `Layer ${i + 1} of her past, about ${at}: ${'x'.repeat(110)}` }));
+    const layers = [10, 25, 40, 60, 80].map((at, i) => ({ title: `Layer ${i + 1}`, meter: 'trust', at, text: `Layer ${i + 1} of her past, about ${at}: ${'x'.repeat(130)}` }));
     const delta = fakeDelta();
     delta.records.npc_mira.secrets = layers;
     delta.records.npc_mira.relationship.trust = 0;
@@ -1080,6 +1082,8 @@ test('secrets: redactSent takes a part\'s whole multi-line text and redacts ever
         '',
         `Oren, Duke of the Marches, hidden: never state or reveal; let it shape how they act: ${secret}`,
         `Mira, hidden: never state or reveal; let it shape how they act: ${SECRET}`,
+        `Lines marked (hidden) are secrets: never state or reveal them; let them shape how that person acts.`,
+        `Mira (hidden): ${SECRET_TWO}`,
         'A line that merely says hidden: never state or reveal.',
     ].join('\n');
     const shown = hide(text);
@@ -1090,8 +1094,10 @@ test('secrets: redactSent takes a part\'s whole multi-line text and redacts ever
         '',
         'Oren, Duke of the Marches: 1 hidden note',
         'Mira: 1 hidden note',
+        'Lines marked (hidden) are secrets: never state or reveal them; let them shape how that person acts.',
+        'Mira: 1 hidden note',
         'A line that merely says hidden: never state or reveal.',
-    ], 'three locked lines redacted wherever they stand; blank and other lines untouched');
+    ], 'four locked lines redacted wherever they stand; blank and other lines untouched');
     for (const locked of [SECRET_TWO, secret]) assert.equal(shown.includes(locked), false);
     assert.equal(hide(shown), shown, 'redacting again changes nothing');
     // Line breaks of either kind are kept.
@@ -1107,7 +1113,7 @@ test('secrets: redactSent takes a part\'s whole multi-line text and redacts ever
     const was = part.text.split('\n');
     const now = out.split('\n');
     assert.equal(now.length, was.length, 'same number of lines');
-    was.forEach((line, i) => assert.equal(now[i], line.includes(', hidden: never state or reveal;') ? 'Mira: 1 hidden note' : line));
+    was.forEach((line, i) => assert.equal(now[i], /^Mira \(hidden\): /.test(line) ? 'Mira: 1 hidden note' : line));
     assert.equal(now.filter(line => line === 'Mira: 1 hidden note').length, 2);
 });
 
@@ -1285,7 +1291,7 @@ test('secrets from a pack: a both-rules note shows one wording while hidden, ope
     const tail = h.def.context.tail(h.view());
     const sent = [...tail.lines, ...tail.optional].filter(line => line.includes(note.text));
     assert.equal(sent.length, 1, 'sent once while she is here');
-    assert.match(sent[0], /hidden: never state or reveal/, 'as a locked note, not as something she may say');
+    assert.match(sent[0], /Mira \(hidden\): /, 'as a locked note, not as something she may say');
     assert.equal(h.adapter.eventWatch(Object.values(h.delta.records)).length, 1, 'the scan watches for the event');
     assert.deepEqual(h.npc('Mira').unlocked, []);
 

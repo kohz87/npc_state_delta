@@ -127,6 +127,11 @@ export function currentExchangeTranscript(messageId = null) {
 
 // (1.2.12) The current exchange's story alone (narration and dialogue, no World State or blocks):
 // who a relationship moment involves, and what the relationship evaluator is sent.
+// The story text of the current exchange (the user message and the reply), without speaker labels: for cheap local checks.
+export function currentExchangeBodies(messageId = null) {
+    return (currentExchangeMessages(messageId) || []).map(message => storyProse(message.mes || '')).filter(Boolean);
+}
+
 export function currentExchangeProse(messageId = null) {
     const ctx = readContext();
     return (currentExchangeMessages(messageId) || []).map(message => {

@@ -96,13 +96,13 @@ test('Stage 6 current appearance cannot consume the baseline identity/agency all
     for (const budget of [400, 600, 800, 1200, 1800]) {
         const base = baselineInjection([npc], 'Mira answers.', 2, 3, undefined, budget);
         const rendered = core.buildInjection([npc], 'Mira answers.', 2, 3, undefined, budget);
-        const identity = base.split('\n').find(line => line.startsWith('- Mira:'))?.split('; important memories:')[0].split('; species/race:')[0];
+        const identity = base.split('\n').find(line => line.startsWith('- Mira:'))?.split('; memories:')[0].split('; species:')[0];
         assert.ok(identity && rendered.includes(identity), `identity/agency lost at budget ${budget}`);
         assert.ok(rendered.length <= core.normalizeInjectionBudgetTokens(budget) * 4);
     }
     const full = core.buildInjection([npc], 'Mira answers.', 2, 3, undefined, 1800);
-    assert.equal((full.match(/CURRENT VISIBLE APPEARANCE/g) || []).length, 1);
-    assert.ok(full.indexOf('IDENTITY (authoritative)') < full.indexOf('CURRENT VISIBLE APPEARANCE'));
+    assert.equal((full.match(/APPEARANCE \(authoritative/g) || []).length, 1);
+    assert.ok(full.indexOf('IDENTITY') < full.indexOf('APPEARANCE (authoritative'));
 });
 
 test('Stage 6 unknown form is not replaced with species anatomy in continuity', () => {

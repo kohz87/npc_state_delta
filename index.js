@@ -19,6 +19,7 @@ import {
     backfillNeedsRequest,
     normalizeAutomaticBackfillRequest,
     npcParticipatesInExchange,
+    replyMayChangeDossiers,
 } from './scan-context.js';
 import { createDiagnosticStore } from './diagnostics-core.js';
 import { EDITOR_FIELDS, editorManualMemories, editorProfileLocks, settleEditorSave, untouchedEditorFields } from './src/dossier-edit.js';
@@ -30,6 +31,7 @@ import {
     currentExchangeUserDevelopmentContext,
     currentExchangeTranscript,
     currentExchangeProse,
+    currentExchangeBodies,
     storyDayAt,
     storyDaysForTranscript,
     currentExclusions,
@@ -589,7 +591,7 @@ const DEFAULTS = Object.freeze({
     portraitUseMood: true,
     portraitUseLocation: false,
     portraitSaveToGallery: false,
-    scanEvery: 1,
+    scanEvery: 5,
     scanDepth: 6,
     maxNpcs: 40,
     autoPruneStale: true,
@@ -4782,7 +4784,7 @@ function buildSettingsHtml() {
         settingRow('npc_state_delta_narration_capture_compact', 'Compact one-pass instruction', '<input id="npc_state_delta_narration_capture_compact" type="checkbox">', 'With one-pass capture, the same rules in fewer words: about 1,500 tokens instead of 2,000 on every asked-for reply. Every field, gate and cap is kept, but check the blocks your model writes before relying on it; off sends the full rules.'),
         settingRow('npc_state_delta_narration_capture_catch_up', 'One-pass catch-up', numberControl('npc_state_delta_narration_capture_catch_up', 0, 50, 'replies'), 'With one-pass capture, every this many captured replies the two NPCs most in them get a quiet Refresh (one scanner request each) for mannerisms, levers and memories. 0 turns it off.'),
         settingsSlot('full-cast'),
-        settingRow('npc_state_delta_scan_every', 'Scan every', numberControl('npc_state_delta_scan_every', 1, 20, 'replies'), 'Quick-scan cadence when Full scan every turn is off.'),
+        settingRow('npc_state_delta_scan_every', 'Scan every', numberControl('npc_state_delta_scan_every', 1, 20, 'replies'), 'Safety scan cadence when Full scan every turn is off. A reply that names someone new, a tracked person or an NPC State line scans at once; a quiet reply waits for this many replies.'),
         settingRow('npc_state_delta_admission_mode', 'NPC admission', '<select id="npc_state_delta_admission_mode" class="text_pole"><option value="conservative">Conservative</option><option value="balanced">Balanced</option><option value="manual_only">Manual only</option></select>', 'Conservative: proper names immediately, role labels after recurrence. Balanced: also direct or persistent role NPCs. Manual only: every dossier needs Add NPC.'),
     ].join('');
     const roster = `
@@ -7903,6 +7905,7 @@ async function handleAssistantMessageReceivedInner(messageId, { bypassSwipeGuard
         sinceScan: state.assistantSinceScan,
         scanEvery: settings.scanEvery,
         everyReply: scanAfterEveryReply(),
+        replyChanges: settings.autoScan && !settings.fullScanEveryTurn && replyNamesSomeone(state, messageId),
     });
     // A complete capture block is a scan already paid for, so it merges whatever Scan every says.
     const captureDue = narrationCaptureEnabled(settings) && narrationCaptures.has(narrationCaptureKey(eventChatKey, messageId));
@@ -7919,6 +7922,19 @@ async function handleAssistantMessageReceivedInner(messageId, { bypassSwipeGuard
     }
     if (getChatKey() !== eventChatKey || latestMessageId(true) !== messageId || !sourceStillHere()) return;
     scheduleReplyBackfills(eventChatKey, messageId);
+}
+
+// (lean) The cheap local check before an automatic scan: a quiet reply (no new name, no tracked NPC, no NPC State line) waits
+// for the safety scan every "Scan every" replies. The same text and roster give the same answer when a reply is replayed.
+function replyNamesSomeone(state, messageId) {
+    try {
+        const ctx = getContext();
+        return replyMayChangeDossiers({
+            texts: currentExchangeBodies(messageId),
+            roster: [...(state?.npcs || []), ...(state?.candidates || [])],
+            ignore: [ctx.name1, ctx.name2],
+        });
+    } catch { return true; }
 }
 
 async function refreshCurrentChatFromServer(reason = 'resume') {

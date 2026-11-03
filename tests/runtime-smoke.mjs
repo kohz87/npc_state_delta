@@ -14,8 +14,10 @@ for (const name of ['index.js', 'core.js', 'core-mechanics.js', 'bundle.js', 'br
 }
 fs.writeFileSync(path.join(tempRoot, 'package.json'), JSON.stringify({ type: 'module' }));
 
+// The host scenarios were written for a scan after every reply; the shipped default is now a safety scan every 5 replies
+// (a reply that names someone still scans at once), so the synthetic host keeps Scan every at 1. tests/lean-scan-cadence.test.js covers the default.
 const mockState = {
-    extensionSettings: {},
+    extensionSettings: { npc_state_delta: { scanEvery: 1 } },
     prompts: [],
     listeners: new Map(),
     quietResponder: null,
@@ -811,12 +813,12 @@ try {
     assert.equal(mockState.popupCalls.at(-1)?.options?.allowVerticalScrolling, true);
     const livePrompt = [...mockState.prompts].reverse().find(args => String(args?.[1] || '').includes('NPC STATE DELTA DOSSIER'))?.[1] || '';
     assert.match(livePrompt, /Runtime custom behavior rubric/);
-    assert.match(livePrompt, /species\/race: Crimson Demon/);
+    assert.match(livePrompt, /species: Crimson Demon/);
     assert.match(livePrompt, /age: 18/);
     assert.doesNotMatch(livePrompt, /current thoughts/i);
     assert.match(livePrompt, /personality: proud but earnest/);
-    assert.match(livePrompt, /established speech: formal when nervous/);
-    assert.match(livePrompt, /PLAYER RELATIONSHIP \(secondary modifier\):/);
+    assert.match(livePrompt, /speech: formal when nervous/);
+    assert.match(livePrompt, /TOWARD PLAYER \(secondary\):/);
     assert.match(livePrompt, /Yunyun/);
     assert.doesNotMatch(livePrompt, /- Wiz:/, 'off-screen NPC must not be injected into generation');
 
