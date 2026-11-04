@@ -12,8 +12,26 @@
 // The Standard stat formula (formula.js) is a second set of numbers: `formula: 'standard'` plus its nine numbers travel in the same
 // payload. A payload with no `formula` is Classic and is read exactly as before, so every old roll replays unchanged; Classic's
 // own normalised numbers never carry the key.
-import { FORMULA, LIMITS } from './names.js';
-import { DEFAULT_FORMULA, STANDARD_NUMBERS, foeBonus, statPart } from './formula.js';
+import { FORMULA, LEVEL, LEVEL_CAP_SETTING, LIMITS, levelCapOf } from './names.js';
+import { DEFAULT_FORMULA, STANDARD_NUMBERS, foeBonus, levelBonus, levelOfClass, statPart } from './formula.js';
+
+// LEVELS (2.17.0, names.js LEVEL): a set of numbers may carry `levelDivisor` (3..8): then the roll's term for a party member is levelBonus(level, divisor) in place
+// of classWeight × Soul Class, and a foe's is its base + levelBonus(foe level, divisor). A set without it (every roll made before) is read exactly as before.
+// It is not one of RULE_KEYS / STANDARD_RULE_KEYS (the Custom rows of the settings window keep their count); normalize keeps it, last, when it is valid.
+
+/** Whether numbers are the level-based ones (a roll made from 2.17.0 on). */
+export const hasLevels = rules => Number.isInteger(rules?.levelDivisor);
+
+/** A level divisor: a whole number from LEVEL.minDivisor to LEVEL.maxDivisor, else null. */
+export const divisorOf = value => (Number.isInteger(value) && value >= LEVEL.minDivisor && value <= LEVEL.maxDivisor ? value : null);
+
+/**
+ * What a party member adds to a roll under `rules` besides the stat and the rank: `{ classValue, classBonus }`. Levelled numbers: the character's level and
+ * levelBonus(level, divisor). Earlier numbers: the Soul Class and classWeight × it.
+ */
+export const classTerm = (rules, character) => (hasLevels(rules)
+    ? { classValue: character.level, classBonus: levelBonus(character.level, rules.levelDivisor) }
+    : { classValue: character.soul, classBonus: rules.classWeight * character.soul });
 
 /** The numbers, in the order they are stored and shown. */
 export const RULE_KEYS = Object.freeze(['foeBase', 'classWeight', 'statDivisor', 'costMargin', 'decisiveMargin', 'roundCap']);
@@ -41,7 +59,7 @@ export const STAT_ABOVE_FROM = 5;
 export const statShare = (value, rules) => (rules.statDivisor === STAT_ABOVE ? value - STAT_ABOVE_FROM : Math.floor(value / rules.statDivisor));
 
 const preset = (foeBase, costMargin) => Object.freeze({
-    foeBase, classWeight: 2, statDivisor: 2, costMargin, decisiveMargin: LIMITS.decisiveMargin, roundCap: LIMITS.roundCap,
+    foeBase, classWeight: 2, statDivisor: 2, costMargin, decisiveMargin: LIMITS.decisiveMargin, roundCap: LIMITS.roundCapDefault,
 });
 
 /** The three presets. Standard is today's formula. */
@@ -60,6 +78,14 @@ export const DIFFICULTY_SETTING = 'rpgDifficulty';
 export const CUSTOM_SETTING = 'rpgCustom';
 export const NOTE_SETTING = 'rpgPlannerNote';
 export const NOTE_MAX = 400;
+
+// ---- the level cap -----------------------------------------------------------------------------------------------------
+
+/**
+ * The highest level a new character may reach: the story's pack asks for one (`packCap`, a whole number 1..99), else the reader's setting `rpgLevelCap`, else 99.
+ * It is the default of the Character block's `cap` field (a made character keeps its own).
+ */
+export const levelCapFor = (values, packCap = null) => levelCapOf(packCap) ?? levelCapOf(values?.[LEVEL_CAP_SETTING]) ?? LEVEL.max;
 
 // ---- the Standard formula's numbers ------------------------------------------------------------------------------------
 
@@ -83,9 +109,9 @@ export const formulaOf = (values, pack = null) => {
  * `{ formula?, numbers? }`, or null. The reader's own choices win over it: it is the default of a story whose reader has not chosen.
  */
 export function packRulesOf(records) {
-    const found = (Array.isArray(records) ? records : []).find(record => record && typeof record === 'object' && record.slug === 'formula' && (record.formula || record.numbers));
+    const found = (Array.isArray(records) ? records : []).find(record => record && typeof record === 'object' && record.slug === 'formula' && (record.formula || record.numbers || levelCapOf(record.levelCap)));
     if (!found) return null;
-    return { ...(typeof found.pack === 'string' ? { pack: found.pack } : {}), ...(found.formula === 'standard' || found.formula === 'classic' ? { formula: found.formula } : {}),
+    return { ...(typeof found.pack === 'string' ? { pack: found.pack } : {}), ...(levelCapOf(found.levelCap) ? { levelCap: found.levelCap } : {}), ...(found.formula === 'standard' || found.formula === 'classic' ? { formula: found.formula } : {}),
         ...(found.numbers && typeof found.numbers === 'object' && !Array.isArray(found.numbers) ? { numbers: { ...found.numbers } } : {}) };
 }
 
@@ -111,7 +137,7 @@ export const STANDARD_RANGES = Object.freeze({
 });
 
 const standardPreset = foeBase => {
-    const all = { formula: 'standard', ...STANDARD_NUMBERS, foeBase, classWeight: FORMULA.classWeight, costMargin: FORMULA.costMargin, decisiveMargin: LIMITS.decisiveMargin, roundCap: LIMITS.roundCap };
+    const all = { formula: 'standard', ...STANDARD_NUMBERS, foeBase, classWeight: FORMULA.classWeight, costMargin: FORMULA.costMargin, decisiveMargin: LIMITS.decisiveMargin, roundCap: LIMITS.roundCapDefault };
     return Object.freeze(Object.fromEntries(STANDARD_RULE_KEYS.map(key => [key, all[key]])));
 };
 
@@ -126,6 +152,12 @@ export const STANDARD_PRESETS = Object.freeze({
 });
 export const STANDARD_FORMULA = STANDARD_PRESETS.standard;
 
+/**
+ * The numbers of a roll recorded before the numbers were kept (a payload with no `rules`): Classic's Standard difficulty as it was then, with the
+ * cap of 5 exchanges it had. Replay reads those with this, never with today's presets.
+ */
+export const EARLIER_RULES = Object.freeze({ ...PRESETS.standard, roundCap: LIMITS.roundCap });
+
 /** Whether numbers are the Standard formula's. */
 export const isStandard = rules => rules?.formula === 'standard';
 
@@ -138,7 +170,8 @@ const whole = (value, range, fallback) => (Number.isSafeInteger(value) && value 
 export function normalizeRules(value) {
     const given = value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {};
     if (given.formula === 'standard') return normalizeStandard(given);
-    return Object.fromEntries(RULE_KEYS.map(key => [key, key === 'statDivisor' && given[key] === STAT_ABOVE ? STAT_ABOVE : whole(given[key], RULE_RANGES[key], STANDARD[key])]));
+    const out = Object.fromEntries(RULE_KEYS.map(key => [key, key === 'statDivisor' && given[key] === STAT_ABOVE ? STAT_ABOVE : whole(given[key], RULE_RANGES[key], STANDARD[key])]));
+    return divisorOf(given.levelDivisor) ? { ...out, levelDivisor: given.levelDivisor } : out;
 }
 
 /**
@@ -151,6 +184,7 @@ export function normalizeStandard(value) {
     if (!(out.createMin <= out.startStat && out.startStat <= out.createMax && out.createMax <= out.statMax)) {
         for (const key of ['startStat', 'createMin', 'createMax', 'statMax']) out[key] = STANDARD_FORMULA[key];
     }
+    if (divisorOf(given.levelDivisor)) out.levelDivisor = given.levelDivisor;
     return out;
 }
 
@@ -159,6 +193,13 @@ export const difficultyOf = values => (DIFFICULTIES.includes(values?.[DIFFICULTY
 
 /** The numbers the settings give now: the preset, or the Custom numbers (held to their ranges); `pack` (packRulesOf) fills in what the reader has not chosen. */
 export function rulesFromSettings(values, pack = null) {
+    // Every roll planned from now on is a levelled one: the divisor is the Custom row's (3..8), else 5.
+    const base = plainRulesFromSettings(values, pack), custom = difficultyOf(values) === 'custom';
+    const typed = custom ? divisorOf((formulaOf(values, pack) === 'standard' ? values?.[STANDARD_SETTING] : values?.[CUSTOM_SETTING])?.levelDivisor) : null;
+    return { ...base, levelDivisor: typed ?? LEVEL.divisor };
+}
+
+function plainRulesFromSettings(values, pack) {
     const difficulty = difficultyOf(values), standard = formulaOf(values, pack) === 'standard';
     if (difficulty === 'custom') return standard ? normalizeStandard({ ...values?.[STANDARD_SETTING], formula: 'standard' }) : normalizeRules(values?.[CUSTOM_SETTING]);
     const preset = standard ? { ...STANDARD_PRESETS[difficulty] } : { ...PRESETS[difficulty] };
@@ -189,11 +230,14 @@ export function plannerNoteOf(values) {
 /** Whether two sets of numbers are the same numbers. */
 export const sameRules = (a, b) => {
     const [x, y] = [normalizeRules(a), normalizeRules(b)];
-    return isStandard(x) === isStandard(y) && Object.keys(x).every(key => x[key] === y[key]);
+    return isStandard(x) === isStandard(y) && Object.keys(x).every(key => x[key] === y[key]) && (x.levelDivisor ?? LEVEL.divisor) === (y.levelDivisor ?? LEVEL.divisor);
 };
 
 /** The preset these numbers are exactly, else 'custom'. */
 export const presetOf = rules => DIFFICULTIES.slice(0, 3).find(name => sameRules(isStandard(rules) ? STANDARD_PRESETS[name] : PRESETS[name], rules)) ?? 'custom';
+
+// What a foe of `foeClass` (its level, under levelled numbers) adds to its die.
+const foeSide = (r, foeClass) => (hasLevels(r) ? r.foeBase + levelBonus(foeClass, r.levelDivisor) : isStandard(r) ? foeBonus(foeClass, r) : r.foeBase + r.classWeight * foeClass);
 
 /**
  * The exact chances of one roll under `rules`: the party member's d20 + `bonus` against a foe's d20 + the foe's base + the
@@ -206,7 +250,7 @@ export function oddsFor(rules, { bonus, foeClass }) {
     let success = 0, cost = 0, fail = 0;
     for (let mine = 1; mine <= die; mine += 1) {
         for (let theirs = 1; theirs <= die; theirs += 1) {
-            const total = mine + bonus, against = theirs + (isStandard(r) ? foeBonus(foeClass, r) : r.foeBase + r.classWeight * foeClass);
+            const total = mine + bonus, against = theirs + foeSide(r, foeClass);
             if (mine === die || (mine !== 1 && total >= against)) success += 1;
             else if (mine !== 1 && total >= against - r.costMargin) cost += 1;
             else fail += 1;
@@ -236,7 +280,7 @@ export function oddsSubject(sheet, own, { rankNames, soulNames, fold, standard =
     if (!stat || !Number.isInteger(who.stats[stat])) return null;
     const rank = best?.rank ?? 0;
     return {
-        who: who.who, stat, statValue: who.stats[stat], soul: who.soul, rank, skill: best?.name ?? null, foeClass: who.soul,
+        who: who.who, stat, statValue: who.stats[stat], soul: who.soul, level: who.level ?? levelOfClass(who.soul), rank, skill: best?.name ?? null, foeClass: who.soul, foeLevel: who.level ?? levelOfClass(who.soul),
         ...(standard ? { stats: who.stats, uses: best?.uses ?? null } : {}),
         rankName: best ? rankNames[rank] ?? String(rank) : '', soulName: who.soulWord ?? soulNames[who.soul - 1] ?? String(who.soul),
     };
@@ -247,6 +291,7 @@ export function subjectOdds(rules, subject) {
     const r = normalizeRules(rules);
     // Standard: the skill's stat in the main slot with half of DEX (a stamina skill is physical, a mana skill magic), halved.
     const stat = isStandard(r) ? statPart(subject.uses === 'mana' ? 'magic' : 'physical', subject.stats ?? { [subject.stat]: subject.statValue }, { skillStat: subject.stat }).value : statShare(subject.statValue, r);
-    const bonus = stat + r.classWeight * subject.soul + subject.rank;
-    return { bonus, ...oddsFor(r, { bonus, foeClass: subject.foeClass }) };
+    const levels = hasLevels(r);
+    const bonus = stat + (levels ? levelBonus(subject.level, r.levelDivisor) : r.classWeight * subject.soul) + subject.rank;
+    return { bonus, ...oddsFor(r, { bonus, foeClass: levels ? subject.foeLevel : subject.foeClass }) };
 }

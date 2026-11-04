@@ -21,6 +21,7 @@ export function itemDef(item) {
     const def = {};
     for (const field of DEF_FIELDS) def[field] = copy(item[field]);
     if (Number.isSafeInteger(item.carry) && item.carry > 0) def.carry = item.carry;
+    if (Number.isSafeInteger(item.bonus) && item.bonus >= 0) def.bonus = item.bonus;
     return def;
 }
 

@@ -24,6 +24,8 @@ export const MAX_COUNT = 8;
 export const MAX_PACE = 200;
 export const MAX_CONDITION = 60;
 export const MAX_WHERE = 80;
+/** The most a mount row's own carry may be (the reader sets it; without one the kind's usual carry counts, gear.js kindCarry). */
+export const MAX_CARRY = 1000;
 /** What a party without enough mounts does: km per day on foot. */
 export const WALK_PACE = 20;
 /** The pace of a kind with no entry below. */
@@ -42,7 +44,7 @@ export function paceOfKind(kind) {
 
 const nameKey = name => foldKey(cleanName(name));
 const rowKey = name => `m:${nameKey(name)}`;
-const FIELDS = ['name', 'kind', 'count', 'pace', 'condition', 'where'];
+const FIELDS = ['name', 'kind', 'count', 'pace', 'condition', 'where', 'carry'];
 
 /** §2.5 validator for the scene's mounts (called with the scene slice): [] when fine, else plain sentences. */
 export function validateMounts(slice) {
@@ -72,6 +74,7 @@ export function validateMounts(slice) {
         }
         if (!Number.isSafeInteger(row.count) || row.count < 1 || row.count > MAX_COUNT) errors.push(`${label}'s count is not a whole number from 1 to ${MAX_COUNT}.`);
         if (!Number.isSafeInteger(row.pace) || row.pace < 1 || row.pace > MAX_PACE) errors.push(`${label}'s pace is not a whole number from 1 to ${MAX_PACE} km a day.`);
+        if (row.carry !== undefined && (!Number.isSafeInteger(row.carry) || row.carry < 1 || row.carry > MAX_CARRY)) errors.push(`${label}'s carry is not a whole number from 1 to ${MAX_CARRY}.`);
     }
     return errors;
 }
@@ -83,6 +86,7 @@ export function mountRows(state) {
     return Object.values(mounts).filter(isPlainObject).map(row => ({
         name: String(row.name ?? ''), kind: String(row.kind ?? ''), count: Number.isSafeInteger(row.count) ? row.count : 1,
         pace: Number.isSafeInteger(row.pace) ? row.pace : DEFAULT_PACE, condition: String(row.condition ?? ''), where: String(row.where ?? ''),
+        ...(Number.isSafeInteger(row.carry) && row.carry > 0 ? { carry: row.carry } : {}),
     }));
 }
 
@@ -144,7 +148,7 @@ const paceNumber = text => {
 };
 
 // `match` is the mount the line names; `rename` (the pencil only) is the name it should have now.
-function apply(ctx, { match, rename: to = null, kind, count, pace, condition, where }, { create, notes = [] }) {
+function apply(ctx, { match, rename: to = null, kind, count, pace, condition, where, carry = null }, { create, notes = [] }) {
     const scene = ctx.draft('scene');
     const name = match;
     const [key, found] = rowOf(scene, match);
@@ -176,8 +180,10 @@ function apply(ctx, { match, rename: to = null, kind, count, pace, condition, wh
     if (pace !== null && pace !== undefined) row.pace = pace;
     if (condition !== null && condition !== undefined) row.condition = condition;
     if (where !== null && where !== undefined) row.where = where;
+    // The reader's own carry (0 or empty clears it, back to the kind's usual one).
+    if (carry !== null && carry !== undefined) { if (carry > 0) row.carry = carry; else delete row.carry; }
     const changed = FIELDS.filter(field => row[field] !== before[field]);
-    const parts = changed.filter(field => field !== 'name').map(field => (field === 'pace' ? `${row.pace} km/day` : field === 'count' ? `×${row.count}` : row[field] || fill(M.cleared, { field })));
+    const parts = changed.filter(field => field !== 'name').map(field => (field === 'pace' ? `${row.pace} km/day` : field === 'count' ? `×${row.count}` : field === 'carry' ? (row.carry ? `carry ${row.carry}` : fill(M.cleared, { field })) : row[field] || fill(M.cleared, { field })));
     const rename = changed.includes('name') ? fill(M.renamed, { old: before.name, name: row.name }) : '';
     return {
         summary: changed.length ? `${[rename, parts.length ? `${row.name}: ${parts.join(', ')}` : ''].filter(Boolean).join('; ')}.` : fill(M.same, { name: row.name }),
@@ -222,7 +228,17 @@ export function captureMount(ctx, line) {
     return apply(ctx, { ...fields, match: name }, { create: line.op === '+', notes });
 }
 
-/** `mounts.edit({ mount, name?, kind?, count?, pace?, condition?, where? })`: the reader's pencil on a row, kept on the latest reply. */
+// The pencil's carry: a whole number 1…MAX_CARRY, or 0 / empty to clear it; null when the field was not sent.
+function carryArg(ctx, value) {
+    if (value === undefined || value === null) return null;
+    const text = String(value).trim();
+    if (text === '') return 0;
+    const n = Number(text);
+    if (!Number.isSafeInteger(n) || n < 0 || n > MAX_CARRY) ctx.fail('INVALID', `The carry must be a whole number from 1 to ${MAX_CARRY}, or empty.`);
+    return n;
+}
+
+/** `mounts.edit({ mount, name?, kind?, count?, pace?, condition?, where?, carry? })`: the reader's pencil on a row, kept on the latest reply. */
 function editRow(ctx, payload = {}) {
     if (ctx.cause !== 'ui' || ctx.caller !== null) ctx.fail('REFUSED', M.readerOnly);
     const mount = cleanName(payload.mount);
@@ -239,7 +255,7 @@ function editRow(ctx, payload = {}) {
     if (name !== null && Array.from(name).length > MAX_NAME) ctx.fail('INVALID', fill(M.longName, { max: MAX_NAME }));
     const result = apply(ctx, {
         match: mount, rename: name, kind: text('kind', MAX_KIND), count: number('count', MAX_COUNT, parseCount), pace: number('pace', MAX_PACE, paceNumber),
-        condition: text('condition', MAX_CONDITION), where: text('where', MAX_WHERE),
+        condition: text('condition', MAX_CONDITION), where: text('where', MAX_WHERE), carry: carryArg(ctx, payload.carry),
     }, { create: false, notes });
     return { ...result, data: { ...result.data, edit: true } };
 }

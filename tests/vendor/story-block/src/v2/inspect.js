@@ -15,6 +15,7 @@
 
 import { carrierIndexes, readRecord } from './persist.js';
 import { cutAt, oneLine } from '../text.js';
+import { receiptCue } from './lean-rpg/cue.js';
 
 export const LIMITS = Object.freeze({
     diff: 300,       // changed paths listed for one reply
@@ -153,13 +154,13 @@ export function replyList(chat, { head = null } = {}) {
     return out.reverse();
 }
 
-const receiptView = receipt => ({
+export const receiptView = receipt => ({
     id: String(receipt?.id ?? ''),
     type: String(receipt?.type ?? ''),
     module: String(receipt?.module ?? ''),
     cause: String(receipt?.cause ?? ''),
     rev: Number.isInteger(receipt?.rev) ? receipt.rev : null,
-    summary: oneLine(receipt?.summary ?? '', 300),
+    summary: oneLine(receiptCue(receipt), 300),
     narrate: receipt?.narrate !== false,
 });
 

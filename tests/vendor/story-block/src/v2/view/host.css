@@ -54,7 +54,8 @@
     background: linear-gradient(var(--ss-accent-soft, transparent), var(--ss-accent-soft, transparent)), var(--ss-glass-strong, var(--story-suite-bg));
 }
 .story-suite-bar .menu_button[hidden] { display: none; }
-.story-suite-bar .story-suite-notice {
+.story-suite-bar .story-suite-notice,
+.story-suite-sheet .story-suite-notice {
     display: flex; align-items: center; gap: 8px; flex: 1 1 220px; min-width: 0;
     padding: 6px 8px 6px 14px; border-radius: var(--ss-radius-l, 14px);
     border: 1px solid var(--ss-accent, var(--story-suite-accent));
@@ -62,9 +63,41 @@
     -webkit-backdrop-filter: var(--ss-blur, none); backdrop-filter: var(--ss-blur, none);
     box-shadow: var(--ss-shadow, none);
 }
-/* The notice's class is shared with the other modules' own notices (their Extensions drawers): only the bar's gets the glass. */
+/* The notice's class is shared with the other modules' own notices (their Extensions drawers): only the bar's and the Story panel's get the glass. */
 .story-suite-notice[hidden] { display: none; }
 .story-suite-notice-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: 0.9em; }
+/* The card offer at the top of the Story panel (packs/card-offer-ui.js): the notice, an optional "Also apply" line, muted lines, Install and Not now. */
+.ss-card-offers { flex: none; display: grid; gap: 8px; padding: 8px 12px 0; }
+.ss-card-offers[hidden] { display: none; }
+.story-suite-sheet .story-suite-notice.ss-card-offer {
+    display: grid; grid-template-columns: 1.1em minmax(0, 1fr) auto; align-items: center; gap: 6px 10px; flex: none;
+    padding: 8px 10px; margin: 0;
+}
+.ss-card-offer > .ss-card-offer-icon { grid-column: 1; grid-row: 1; }
+.ss-card-offer > .story-suite-notice-text { grid-column: 2 / -1; }
+.ss-card-offer > .story-suite-notice-close { grid-column: 3; grid-row: 1; }
+.ss-card-offer:is([data-state="done"], [data-state="failed"]) > .story-suite-notice-text { grid-column: 2; grid-row: 1; }
+.story-suite-sheet .ss-card-offer .story-suite-notice-close {
+    width: 36px; height: 36px; min-height: 36px; margin: 0; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--ss-border, var(--story-suite-line)); border-radius: 999px; background: var(--ss-tile, transparent); color: var(--ss-text, inherit);
+}
+.ss-card-offer .ss-card-offer-settings { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; margin: 0; font-size: 0.9em; }
+.ss-card-offer .ss-card-offer-settings input { flex: none; width: 1.1em; height: 1.1em; margin: 0; }
+.ss-card-offer .ss-card-offer-note { grid-column: 2 / -1; margin: 0; font-size: 12px; }
+.ss-card-offer .ss-card-offer-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+.ss-card-offer .ss-card-offer-actions .ss-button { min-height: 36px; flex: 0 0 auto; min-width: 44px; white-space: nowrap; padding-inline: 16px; }
+/* Only a pack: the buttons sit beside the text on one row. */
+.ss-card-offer:is([data-state="offer"], [data-state="working"]):not(:has(.ss-card-offer-settings, .ss-card-offer-note)) .ss-card-offer-actions { grid-column: 3; grid-row: 1; flex-wrap: nowrap; }
+.ss-card-offer:is([data-state="offer"], [data-state="working"]):not(:has(.ss-card-offer-settings, .ss-card-offer-note)) > .story-suite-notice-text { grid-column: 2; grid-row: 1; }
+@media (max-width: 759.98px) {
+    .ss-card-offer .ss-card-offer-actions .ss-button, .story-suite-sheet .ss-card-offer .story-suite-notice-close { width: 44px; height: 44px; min-height: 44px; }
+    .ss-card-offer:is([data-state="offer"], [data-state="working"]):not(:has(.ss-card-offer-settings, .ss-card-offer-note)) .ss-card-offer-actions { grid-column: 1 / -1; grid-row: auto; flex-wrap: wrap; }
+    .ss-card-offer:is([data-state="offer"], [data-state="working"]):not(:has(.ss-card-offer-settings, .ss-card-offer-note)) > .story-suite-notice-text { grid-column: 2 / -1; }
+}
+/* The dot on the Story button while an offer waits: the alert dot, put at the button's own top-right corner. */
+.story-suite-bar-story { position: relative; }
+.story-suite-bar-story > .ss-screenbar-alert { top: 3px; right: 3px; }
+.story-suite-bar-story > .ss-screenbar-alert[hidden] { display: none; }
 .story-suite-bar .story-suite-notice .menu_button { min-height: 28px; padding: 0 10px; }
 
 /* ---- the story panel: a bottom sheet on phones, a side sheet from 760px (the line the game view switches at) ----
@@ -424,7 +457,76 @@ body.story-suite-open { overflow: hidden; }
 .ss-block-page-head, .ss-block-card-head { position: relative; }
 .ss-block-menu, .ss-block-chooser { position: absolute; z-index: 2; top: 100%; right: 0; min-width: min(15rem, 100%); max-width: 100%; display: grid; gap: 4px; padding: 8px; }
 .ss-block-menu[hidden] { display: none; }
+.ss-block-value-slot { display: flex; align-items: center; justify-content: flex-end; min-width: 0; }
+.ss-block-value-slot > .ss-w-editable { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
 .ss-block-value { display: grid; grid-template-columns: minmax(8em, 1fr) 3fr; gap: 8px; align-items: center; overflow-wrap: anywhere; padding: 6px 0; border-bottom: 1px solid var(--story-suite-line); }
+/* A block's (or a data module screen's) records, maps of numbers and record cards (screens/block-layouts.js). One pencil column: the pencil is the last
+   cell of every row, the value before it right-aligned. --ss-b-pen is the pencil's own box (44px on a phone, the size.css minimum). */
+.ss-b-quests-root, .ss-b-map, .ss-b-recsec, .ss-w-block-fields { --ss-b-pen: 32px; display: flex; flex-direction: column; gap: 6px; min-width: 0; color: var(--ss-text); }
+.ss-b-quests-root { gap: 10px; }
+.ss-b-quests-root *, .ss-b-map *, .ss-b-recsec * { box-sizing: border-box; }
+.ss-b-sec { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ss-b-sub { margin: 0; color: var(--ss-muted); font-size: 12px; }
+.ss-b-box { padding: 2px 12px; gap: 0; }
+.ss-b-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.ss-b-row { display: grid; grid-template-columns: minmax(0, 1fr) auto var(--ss-b-pen); column-gap: 8px; row-gap: 5px; align-items: center; padding: 6px 0; border-bottom: 1px solid color-mix(in srgb, var(--ss-muted) 22%, transparent); }
+.ss-b-row:last-child { border-bottom: 0; }
+.ss-b-name { font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
+.ss-b-val { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; min-width: 3.4em; }
+.ss-b-row .ss-w-editable-pencil { grid-column: 3; grid-row: 1 / 3; justify-self: end; align-self: center; }
+.ss-b-row .ss-w-editable-form { grid-column: 1 / -1; grid-row: 3; }
+.ss-b-row > .ss-bar-track { grid-column: 1 / 3; grid-row: 2; height: 6px; }
+.ss-b-pen, .ss-b-pen .ss-w-editable, .ss-b-pen-cell { display: contents; }
+.ss-b-pen .ss-w-editable-pencil { width: var(--ss-b-pen); height: var(--ss-b-pen); }
+.ss-b-track-c { position: relative; }
+.ss-b-track-c .ss-b-mid { position: absolute; left: 50%; top: -1px; bottom: -1px; width: 1px; background: var(--ss-muted); opacity: .6; }
+.ss-b-track-c .ss-bar-fill { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; border-radius: 0; background: var(--ss-bar-color, var(--ss-accent)); }
+.ss-b-track-c .ss-bar-fill.ss-b-neg { left: auto; right: 50%; }
+.ss-b-fold { border-top: 1px solid color-mix(in srgb, var(--ss-muted) 22%, transparent); margin-top: 2px; }
+.ss-b-fold > summary { display: flex; align-items: center; gap: 8px; min-height: 44px; cursor: pointer; color: var(--ss-muted); font-size: 13px; font-weight: 600; list-style: none; }
+.ss-b-fold > summary::-webkit-details-marker { display: none; }
+.ss-b-fold > summary::before { content: ""; width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform .15s; }
+.ss-b-fold[open] > summary::before { transform: rotate(45deg); }
+.ss-b-row-plain { grid-template-columns: minmax(0, 1fr) var(--ss-b-pen); }
+.ss-b-row-plain .ss-b-name { color: var(--ss-muted); }
+.ss-b-row-plain .ss-w-editable-pencil { grid-column: 2; grid-row: 1; }
+.ss-b-qs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 460px)); gap: 8px; }
+.ss-b-quest { display: grid; gap: 5px; padding: 10px 12px; border: 1px solid var(--ss-border); border-radius: var(--ss-radius); background: var(--ss-surface, transparent); min-width: 0; }
+.ss-b-q1 { display: grid; grid-template-columns: minmax(0, 1fr) auto var(--ss-b-pen); gap: 8px; align-items: center; }
+.ss-b-q1 .ss-w-editable-pencil { grid-column: 3; }
+.ss-b-q1 .ss-w-editable-form { grid-column: 1 / -1; grid-row: 2; }
+.ss-b-qt { font-size: 15px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.ss-b-q2 { margin: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--ss-muted); font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+.ss-b-q2[data-open="true"] { -webkit-line-clamp: unset; display: block; }
+.ss-b-q3 { display: flex; align-items: center; gap: 6px; font-size: 13px; min-width: 0; }
+.ss-b-q3[hidden] { display: none; }
+.ss-b-stepicon { flex: none; color: var(--ss-accent); }
+.ss-b-step { min-width: 0; overflow-wrap: anywhere; }
+.ss-b-more { flex: none; margin-left: auto; font-size: 12px; padding: 1px 10px; }
+.ss-b-more[hidden] { display: none; }
+.ss-b-none { margin: 0; color: var(--ss-muted); font-size: 13px; }
+.ss-b-card { display: flex; flex-direction: column; gap: 0; padding: 2px 12px; margin: 0; }
+.ss-b-card .ss-b-line { display: grid; grid-template-columns: 9em minmax(0, 1fr) var(--ss-b-pen); column-gap: 12px; align-items: center; min-height: 48px; border-bottom: 1px solid color-mix(in srgb, var(--ss-muted) 22%, transparent); }
+.ss-b-card .ss-b-line:last-child { border-bottom: 0; }
+.ss-b-line dt { margin: 0; color: var(--ss-muted); font-size: 13px; }
+.ss-b-line dd { margin: 0; font-weight: 600; min-width: 0; overflow-wrap: anywhere; display: flex; align-items: center; }
+.ss-b-line .ss-w-editable-pencil { grid-column: 3; justify-self: end; }
+.ss-b-line .ss-w-editable-form { grid-column: 1 / -1; grid-row: 2; }
+.ss-b-entries { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ss-b-rec { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--ss-border); border-radius: var(--ss-radius); }
+.ss-b-lines { display: grid; margin: 0; }
+.ss-b-lines .ss-b-line { display: grid; grid-template-columns: 9em minmax(0, 1fr); column-gap: 12px; }
+.ss-b-plain { display: flex; flex-direction: column; padding: 2px 12px; min-width: 0; }
+.ss-b-plain .ss-block-value, .ss-b-plain .ss-block-value:last-child { grid-template-columns: minmax(5.5em, 9em) minmax(0, 1fr); column-gap: 12px; min-height: 48px; padding: 0; }
+.ss-b-plain .ss-block-value:last-child { border-bottom: 0; }
+.ss-b-plain .ss-block-value-slot { justify-content: stretch; }
+.ss-b-plain .ss-block-value-slot > .ss-w-editable { flex-wrap: nowrap; align-items: center; }
+.ss-b-plain .ss-w-editable-value { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; padding-block: 6px; }
+.ss-b-plain .ss-w-editable-pencil { flex: none; }
+.ss-b-plain .ss-block-value-name { color: var(--ss-muted); font-size: 13px; }
+@media (max-width: 759.98px), (pointer: coarse) {
+    .ss-b-quests-root, .ss-b-map, .ss-b-recsec, .ss-w-block-fields { --ss-b-pen: calc(44px / var(--ss-zoomed, 1)); }
+}
 .ss-w-editable-value-list { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .ss-w-editable-value-list[hidden] { display: none; }
 .ss-w-editable-meter { display: inline-flex; align-items: center; gap: 8px; }
@@ -443,6 +545,39 @@ body.story-suite-open { overflow: hidden; }
 .ss-block-hint { color: var(--ss-text); opacity: .75; }
 @media (max-width: 759.98px) {
     .ss-block-fields-editor, .ss-block-effect, .ss-block-value { grid-template-columns: minmax(0, 1fr); }
+}
+/* The block editor's starters, List of entries parts, Layout with its card roles and status colours, and the Preview (screens/blocks-editor.js). */
+.ss-block-starter-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.ss-block-starter-row .ss-block-starter { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 2px; text-align: left; min-width: 0; overflow-wrap: anywhere; }
+.ss-block-starter-on { border-color: var(--ss-accent); background: var(--ss-accent-soft); }
+.ss-block-field-wide { grid-column: 1 / -1; }
+.ss-block-parts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.ss-block-parts-title { grid-column: 1 / -1; margin: 0; font-size: 13px; }
+.ss-block-parts > button { grid-column: 1 / -1; justify-self: start; }
+.ss-block-part { display: grid; gap: 5px; padding: 8px; min-width: 0; border: 1px solid var(--ss-border, currentColor); border-radius: var(--ss-radius, 8px); }
+.ss-block-layout, .ss-block-starters, .ss-block-roles, .ss-block-tones { display: grid; gap: 6px; min-width: 0; }
+.ss-block-roles { margin-top: 4px; }
+.ss-block-tone-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: center; }
+.ss-block-tone-row .ss-block-control-label { display: none; }
+.ss-block-tone-row .ss-pill { justify-self: start; }
+.ss-block-tone-active { border-color: var(--ss-accent); }
+.ss-block-tone-done { border-color: var(--ss-tick, currentColor); }
+.ss-block-tone-failed { border-color: var(--ss-bad, currentColor); }
+.ss-block-tone-neutral { opacity: .8; }
+.ss-block-preview { display: grid; gap: 8px; padding: 12px; min-width: 0; }
+.ss-block-sketch { display: grid; gap: 6px; max-width: 460px; }
+.ss-block-sketch-card { display: grid; gap: 2px; padding: 8px; border: 1px solid var(--ss-border, currentColor); border-radius: var(--ss-radius, 8px); }
+.ss-block-sketch-head { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; justify-content: space-between; }
+.ss-block-sketch-bar, .ss-block-sketch-line { display: grid; gap: 2px; }
+.ss-block-sketch-track { display: block; height: 8px; border-radius: 4px; background: var(--ss-accent-soft); overflow: hidden; }
+.ss-block-sketch-fill { display: block; height: 100%; background: var(--ss-accent); }
+@media (min-width: 900px) and (min-height: 700px) {
+    /* The preview stays in view at the bottom of the window while the fields above it are edited, then settles under the layout. */
+    .ss-block-preview { position: sticky; bottom: 0; max-height: min(38vh, 200px); overflow: auto; z-index: 1; background: var(--ss-panel-opaque, var(--ss-glass-strong)); }
+}
+@media (max-width: 759.98px) {
+    .ss-block-starter-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ss-block-parts, .ss-block-tone-row { grid-template-columns: minmax(0, 1fr); }
 }
 /* Settings → Blocks (screens/blocks.js `page`): the buttons and the count line, then a row for each block: its name and words, Show as, Edit and more. */
 .ss-blocks-page { display: grid; gap: 12px; min-width: 0; }

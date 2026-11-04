@@ -14,6 +14,7 @@
 // * query `packs.portrait({ pack, file })` → the safe image URL of a cast portrait the pack names (`/user/files/…`), or null: the pack
 //   is not installed, does not name that file, no picture was imported with it, or the file is gone (portraits.js).
 //   `packs.content({ kind: 'cast' })` gives each person with `pack` and `packVersion` (cast.js).
+// * query `packs.castGear({ name })` → a cast member's signature gear for the narrator's cast entry (`{ name, line, items }`), or null (cast.js `gear`).
 // * query `packs.calendar` → the first enabled pack's calendar for the story clock, or null.
 // * query `packs.crafts` → the craft table (default crafts, enabled packs' `crafts` laid over them:
 //   `[{ craft, title, stats, stations, note?, pack }]`) for modules that use recipes.
@@ -42,6 +43,8 @@ import { renderPacksPanel } from './panel.js';
 import { HOST_VERSION, validatePack, slugify } from './validate.js';
 import { readCharacterLorebook, stCapabilities, stHostVersion, stPortraitFiles, stSettings } from './st-adapter.js';
 import { marketEntries } from './lorebook.js';
+import { castGearOf, gearLine } from './cast-gear.js';
+import { readSheet, sameWho } from '../lean-rpg/read.js';
 
 export { validatePack, slugify, applyStart, mergeStart, resolveItemIn, contentOf, calendarOf, craftsOf, economyOf, weatherOf, youRankOf, createInstalled, renderPacksPanel };
 export { LIMITS, CONTENT_KINDS, DEFAULT_CRAFTS, STATIONS } from './limits.js';
@@ -73,17 +76,25 @@ export function createPacksPart({ settings, readLorebook = async () => ({ charac
     // The character lorebook's market lines, read when a chat opens and from the Packs panel.
     const lore = { markets: [], character: '', problem: '' };
     let reading = null;
+    let asked = false;   // asked again while a read was on its way: that read may be of the chat before
     /** Reads the open character's lorebook again for its `market:` lines; resolves to how many places it gave. */
     const refreshLore = () => {
+        if (reading) asked = true;
         reading ??= (async () => {
             try {
-                const got = await readLorebook();
-                lore.markets = marketEntries(got?.entries);
-                lore.character = String(got?.character ?? '');
-                lore.problem = String(got?.problem ?? '');
-            } catch (error) {
-                lore.markets = [];
-                lore.problem = `The lorebook could not be read: ${error?.message ?? error}`;
+                // A read that ended after another chat asked is dropped and the lorebook read again: the answer is for the one open now.
+                do {
+                    asked = false;
+                    let next = null;
+                    try {
+                        const got = await readLorebook();
+                        next = { markets: marketEntries(got?.entries), character: String(got?.character ?? ''), problem: String(got?.problem ?? '') };
+                    } catch (error) {
+                        next = { markets: [], character: lore.character, problem: `The lorebook could not be read: ${error?.message ?? error}` };
+                    }
+                    if (asked) continue;
+                    Object.assign(lore, next);
+                } while (asked);
             } finally {
                 reading = null;
             }
@@ -114,6 +125,19 @@ export function createPacksPart({ settings, readLorebook = async () => ({ charac
             'packs.markets': () => markets(),
             // The URL of a cast portrait (see above): a file name the installed pack names and has a stored picture for, else null.
             'packs.portrait': (_state, { pack, file } = {}) => portraits.url(pack, file),
+            // `{ name }` → `{ name, line: 'Gear: Cane Sword, Oak Buckler', items: [{ id, name, slot }] }`: a cast member's signature gear (cast.js `gear`) for the
+            // narrator's cast entry, or null: no such person, no gear, they are in the party now (by their name, first name or an alias: sameWho), or gear is off (`story-block.gear` and the RPG).
+            'packs.castGear': (state, { name } = {}, tools) => {
+                let on = false;
+                try { on = tools?.query?.('inventory.gear', { owner: 'party' })?.on === true; } catch { on = false; }
+                if (!on) return null;
+                const found = castGearOf(packs.packs(), name);
+                if (!found?.items.length) return null;
+                // (the sheet holds the Characters in the party now: one who left is not on it; read.js is the RPG's small shared reader, the rest stays lazy)
+                const party = readSheet(state).characters;
+                if (party.some(person => sameWho(person, found.name, found.aliases, party))) return null;
+                return { name: found.name, line: gearLine(found.items), items: found.items };
+            },
         },
         kinds: {},
         context: { static: () => '', tail: () => ({ lines: [], optional: [] }), budget: 0 },

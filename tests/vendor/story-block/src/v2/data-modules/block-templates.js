@@ -44,11 +44,16 @@ export function createBlockTemplates({ read, save = () => {} }) {
 }
 
 /** The pack validator writes the new pack-qualified definition id on import. */
+// (a block with a list of entries, a layout, card roles, status tones or a tab to join is read only by Story Block 2.22: an older one refuses the keys)
+const needsEntries = raw => Boolean(raw.layout || raw.roles || raw.tones || raw.show?.into || Object.values(raw.state ?? {}).some(field => field?.type === 'entries'));
+export const ENTRIES_VERSION = '2.22.0';
+
 export function exportBlockPack(definition) {
-    const raw = rawDefinition(definition), id = raw.slug;
-    const pack = { id, name: raw.name, version: '1.0.0', requires: { storyBlock: '^2', capabilities: ['data-modules-v1'] }, content: { dataModules: [raw] } };
+    const raw = rawDefinition(definition), id = raw.slug, newer = needsEntries(raw);
+    const pack = { id, name: raw.name, version: '1.0.0', requires: { storyBlock: newer ? `^${ENTRIES_VERSION}` : '^2', capabilities: ['data-modules-v1'] }, content: { dataModules: [raw] } };
     if (raw.timers?.length || raw.scope === 'character') pack.requires.capabilities.push('story-director');
-    const checked = validatePack(pack);
+    // (the keys are checked here by the code that knows them; the host's own version number only moves when 2.22 is released)
+    const checked = validatePack(pack, newer ? { hostVersion: ENTRIES_VERSION } : {});
     if (!checked.ok) return { ok: false, errors: checked.errors };
     return { ok: true, pack, filename: `${id}.pack.json`, text: `${JSON.stringify(pack, null, 2)}\n` };
 }

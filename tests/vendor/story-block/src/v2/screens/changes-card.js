@@ -322,9 +322,9 @@ export function replyCardLines(entries, info = {}) {
     return out;
 }
 
-// The RPG's lines (src/v2/lean-rpg/view/changes-lines.js) beside the others: "Rolled for you: 3 exchanges", "Wessel: Soul Class
-// II → III". A rise is told by its own line, so the plain "Rule: class-up" line the same rule leaves is left out then.
-const RISE_RULE = /\b(class|rank|soul|xp|practice)\b/i;
+// The RPG's lines (src/v2/lean-rpg/view/changes-lines.js) beside the others: "Rolled for you: 3 exchanges", "Wessel reached Lv 15
+// (+1 point to spend)". A rise is told by its own line, so the plain "Rule: level-up" line the same rule leaves is left out then.
+const RISE_RULE = /\b(class|level|rank|soul|xp|practice)\b/i;
 export function mergeRpgLines(lines, rpg) {
     const own = Array.isArray(rpg) ? rpg : [];
     if (!own.length) return lines;

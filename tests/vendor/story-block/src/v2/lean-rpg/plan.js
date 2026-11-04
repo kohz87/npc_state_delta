@@ -1,10 +1,10 @@
 // The plan (SPEC_RPG §2 A2): what the pre-call answers, as plain data the roll reads.
 //
 //   { pace: 'careful' | 'normal' | 'all',
-//     acts:   [{ who, skill?, uses?, stat?, target, edge?, why? }],  a party member's action against a foe
+//     acts:   [{ who, skill?, then?, else?, uses?, stat?, target, edge?, why? }],  `then`: the skill rounds 2 on use (mark 3); `else`: the skill to use when the current one's resource is spent (Standard)  a party member's action against a foe
 //     foes:   [{ slot, target, defend, skill? } | { slot, hold: true }],  what a foe slot does (a number 1–4); `skill`: the
 //                                                                         defender's skill that counts when they defend
-//     checks: [{ who, skill?, uses?, stat?, difficulty }] }         a roll outside a fight
+//     checks: [{ who, skill?, uses?, stat?, difficulty, ambush? }] }  a roll outside a fight; `ambush`: a skill used to set up the fight (ambush.js)
 //
 // A skill the character has brings its own stat and resource (the Skills block's `statN` and `usesN`): an act or check
 // that names one carries no `stat` or `uses` of its own, and any it does carry are not read. `stat` is for an act with no
@@ -23,6 +23,7 @@
 import { FOE_SLOTS, FORMULA, LIMITS, PACE, STATS, USES } from './names.js';
 import { matchCharacter, matchFoe, matchSkill } from './read.js';
 import { ROLL_TYPES } from './formula.js';
+import { openErrors } from './open.js';
 
 /** The roll types a plan may name for an action (a defence is never planned: a foe's attack makes it). */
 const PLAN_TYPES = Object.freeze(ROLL_TYPES.filter(type => type !== 'defence'));
@@ -41,6 +42,7 @@ export function validatePlan(plan) {
     if (!isObject(plan)) return { ok: false, errors: ['A plan must be an object.'] };
     if (plan.formula !== undefined && plan.formula !== 'standard') errors.push('formula must be standard when a plan has one.');
     const std = plan.formula === 'standard';
+    if (plan.open !== undefined) errors.push(...openErrors(plan.open));
     if (!Object.hasOwn(PACE, plan.pace)) errors.push('pace must be careful, normal or all.');
     const lists = [['acts', LIMITS.acts], ['foes', LIMITS.foes], ['checks', LIMITS.checks]];
     for (const [key, max] of lists) {
@@ -63,8 +65,8 @@ export function validatePlan(plan) {
     (Array.isArray(plan.acts) ? plan.acts : []).forEach((act, n) => {
         const where = `act ${n + 1}`;
         if (!isObject(act)) { errors.push(`${where} must be an object.`); return; }
-        known(act, ['who', 'skill', 'uses', 'stat', 'target', 'edge', 'why', ...(std ? ['type', 'fit', 'area', 'support', 'difficulty'] : [])], where);
-        text(act, 'who', where); text(act, 'skill', where, false); text(act, 'target', where); text(act, 'why', where, false);
+        known(act, ['who', 'skill', 'then', 'else', 'uses', 'stat', 'target', 'edge', 'why', ...(std ? ['type', 'fit', 'area', 'support', 'difficulty'] : [])], where);
+        text(act, 'who', where); text(act, 'skill', where, false); text(act, 'then', where, false); text(act, 'else', where, false); text(act, 'target', where); text(act, 'why', where, false);
         stat(act, 'stat', where, !std && act.skill === undefined);
         if (std) {
             if (act.type !== undefined && !PLAN_TYPES.includes(act.type)) errors.push(`${where} type must be one of ${PLAN_TYPES.join(', ')}.`);
@@ -94,7 +96,8 @@ export function validatePlan(plan) {
     (Array.isArray(plan.checks) ? plan.checks : []).forEach((check, n) => {
         const where = `check ${n + 1}`;
         if (!isObject(check)) { errors.push(`${where} must be an object.`); return; }
-        known(check, ['who', 'skill', 'uses', 'stat', 'difficulty', ...(std ? ['type', 'fit'] : [])], where);
+        known(check, ['who', 'skill', 'uses', 'stat', 'difficulty', 'ambush', ...(std ? ['type', 'fit'] : [])], where);
+        if (check.ambush !== undefined && check.ambush !== true) errors.push(`${where} ambush must be true.`);
         text(check, 'who', where); text(check, 'skill', where, false);
         stat(check, 'stat', where, !std && check.skill === undefined);
         if (std) {
@@ -105,6 +108,16 @@ export function validatePlan(plan) {
         if (check.uses !== undefined && !USES.includes(check.uses)) errors.push(`${where} uses must be mana or stamina.`);
     });
     return errors.length ? { ok: false, errors } : { ok: true, errors: [] };
+}
+
+/** The foes an answer lists as new (`foe <name> | new | count: n | level: N | rank: R`; an old `class: X` is still read), as written: [{ name, count?, level?, rank?, class? }]. */
+export function openLinesOf(answer) {
+    const out = [];
+    for (const raw of String(answer ?? '').split(/\r?\n/)) {
+        const line = lineOf(raw);
+        if (line?.head === 'foe' && line.labels.new) out.push({ name: line.name, count: line.labels.count, ...(line.labels.level !== undefined ? { level: line.labels.level } : {}), ...(line.labels.rank !== undefined ? { rank: line.labels.rank } : {}), ...(line.labels.class !== undefined ? { class: line.labels.class } : {}) });
+    }
+    return out;
 }
 
 /** Whether a plan has anything to roll. */
@@ -126,7 +139,7 @@ function lineOf(raw) {
     for (const part of rest) {
         const at = part.indexOf(':');
         if (at < 0) {
-            const flag = /^\s*(hold|area|magic|support)\s*$/i.exec(part);
+            const flag = /^\s*(hold|area|magic|support|new|ambush)\s*$/i.exec(part);
             if (flag) labels[flag[1].toLowerCase()] = true;
             continue;
         }
@@ -148,6 +161,30 @@ function edgeOf(value) {
     const edge = Math.max(-FORMULA.edgeMax, Math.min(FORMULA.edgeMax, Number(match[1])));
     const why = oneLine(match[2]);
     return { ...(edge ? { edge } : {}), ...(why && edge ? { why } : {}) };
+}
+
+// "else: Iaijutsu": the skill an act goes on with when its own skill's resource is spent. Only for an act that names a skill; the backup is a skill the character has.
+function elseOf(character, labels, skill) {
+    const named = oneLine(labels.else);
+    if (!named || !skill.named || /^(none|no|-|—)$/i.test(named)) return {};
+    const found = character ? matchSkill(character, named) : null;
+    return found ? { else: found.name } : {};
+}
+
+// "guard: Shadow Step": the skill the character defends with in this message (evade, dodge, parry, block). It is copied onto the foe lines aimed at
+// the character at parse time, so the plan recorded holds it on the foe lines and a replay never works it out again.
+const guardOf = (character, labels) => {
+    const named = oneLine(labels.guard);
+    if (!named || /^(none|no|-|—)$/i.test(named)) return null;
+    return (character ? matchSkill(character, named) : null)?.name ?? null;
+};
+
+// "then: Iaijutsu": the skill an act uses from round 2 on (round 1 and an opening action use `skill:`). A skill the character has, other than the first.
+function thenOf(character, labels, skill) {
+    const named = oneLine(labels.then);
+    if (!named || /^(none|no|-|—)$/i.test(named)) return {};
+    const found = character ? matchSkill(character, named) : null;
+    return found && found.name !== skill.entry.skill ? { then: found.name } : {};
 }
 
 const difficultyOf = value => {
@@ -193,6 +230,7 @@ export function parsePlanAnswer(answer, sheet, { formula = 'classic' } = {}) {
     let read = 0;
     let dropped = 0;
     let none = false;
+    const guards = new Map();
     for (const raw of text.split(/\r?\n/)) {
         const line = lineOf(raw);
         if (!line) {
@@ -208,6 +246,8 @@ export function parsePlanAnswer(answer, sheet, { formula = 'classic' } = {}) {
             const who = matchCharacter(sheet, name);
             const skill = skillOf(who, labels);
             const stat = skill.stat;
+            const guard = who ? guardOf(who, labels) : null;
+            if (guard && !guards.has(who.who)) guards.set(who.who, guard);
             if (std) {
                 // Standard: the type decides the stat, so a line needs only a character and a target (a foe, or an ally for support).
                 const support = labels.support !== undefined && !/^(no|none|false|-|—)$/i.test(String(labels.support));
@@ -217,14 +257,16 @@ export function parsePlanAnswer(answer, sheet, { formula = 'classic' } = {}) {
                 if (!who || !target || plan.acts.length >= LIMITS.acts) { dropped += 1; continue; }
                 const type = typeOf(labels.type);
                 const fit = type === 'check' ? statOf(labels.fit ?? labels.stat) : null;
-                plan.acts.push({ who: who.who, ...skill.entry, ...(type ? { type } : {}), ...(fit ? { fit } : {}), ...(!support && labels.area ? { area: true } : {}),
+                plan.acts.push({ who: who.who, ...skill.entry, ...thenOf(who, labels, skill), ...elseOf(who, labels, skill), ...(type ? { type } : {}), ...(fit ? { fit } : {}), ...(!support && labels.area ? { area: true } : {}),
                     ...(support ? { support: true, difficulty } : {}), target: support ? mate.who : target.name, ...edgeOf(labels.edge) });
                 continue;
             }
             const target = matchFoe(sheet, labels.target);
             if (!who || !(stat || skill.named) || !target || plan.acts.length >= LIMITS.acts) { dropped += 1; continue; }
-            plan.acts.push({ who: who.who, ...skill.entry, target: target.name, ...edgeOf(labels.edge) });
+            plan.acts.push({ who: who.who, ...skill.entry, ...thenOf(who, labels, skill), ...elseOf(who, labels, skill), target: target.name, ...edgeOf(labels.edge) });
         } else if (head === 'foe') {
+            // A foe listed as new (open.js) is read apart (openLinesOf): a line that asks for one is not a line to place.
+            if (labels.new) continue;
             const foe = matchFoe(sheet, name);
             if (!foe || plan.foes.some(entry => entry.slot === foe.slot) || plan.foes.length >= LIMITS.foes) { dropped += 1; continue; }
             if (labels.hold) { plan.foes.push({ slot: foe.slot, hold: true }); continue; }
@@ -244,12 +286,18 @@ export function parsePlanAnswer(answer, sheet, { formula = 'classic' } = {}) {
                 if (!who || !difficulty || plan.checks.length >= LIMITS.checks) { dropped += 1; continue; }
                 const type = ['social', 'check'].includes(typeOf(labels.type)) ? typeOf(labels.type) : null;
                 const fit = statOf(labels.fit ?? labels.stat);
-                plan.checks.push({ who: who.who, ...skill.entry, ...(type ? { type } : {}), ...(fit && !skill.entry.stat ? { fit } : {}), difficulty });
+                plan.checks.push({ who: who.who, ...skill.entry, ...(type ? { type } : {}), ...(fit && !skill.entry.stat ? { fit } : {}), difficulty, ...(labels.ambush ? { ambush: true } : {}) });
                 continue;
             }
             if (!who || !(skill.stat || skill.named) || !difficulty || plan.checks.length >= LIMITS.checks) { dropped += 1; continue; }
-            plan.checks.push({ who: who.who, ...skill.entry, difficulty });
+            plan.checks.push({ who: who.who, ...skill.entry, difficulty, ...(labels.ambush ? { ambush: true } : {}) });
         }
+    }
+    // A guard skill goes on every foe line aimed at that character that names no skill of its own (a hold line has no target, and a skill the planner gave stays).
+    for (const foe of plan.foes) if (!foe.hold && !foe.skill && guards.has(foe.target)) foe.skill = guards.get(foe.target);
+    // No ambush edge without an ambush check: an act's own "+2 ambush" is dropped when the plan has no check that carries `ambush` (ambush.js).
+    if (!plan.checks.some(check => check.ambush === true)) {
+        for (const act of plan.acts) if (act.edge && /\bambush/i.test(act.why ?? '')) { delete act.edge; delete act.why; }
     }
     if (none && !read) return { none: true };
     if (!read && !none) return { error: `"${oneLine(text, 80)}" has no pace, act, foe or check line and is not "none"` };

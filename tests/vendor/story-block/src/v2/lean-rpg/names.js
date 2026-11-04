@@ -9,6 +9,23 @@ export const LEAN_RPG_FEATURE = 'story-block.rpg';
 /** The prelude command a planned reply's rolls are committed through (turn.js prelude list). */
 export const RESOLVE = 'rpg.resolve';
 
+/** The step after a reply's lines that gives the party its XP for a won fight (fight.js); also the kind of its replay guard. */
+export const FIGHT = 'rpg.fight';
+
+/** The step after a reply's lines that gives practice for the skills its rolls used (practice.js); also the kind of its replay guard. */
+export const PRACTICE_STEP = 'rpg.practice';
+
+/**
+ * Practice by code (practice.js): each use of a skill in a reply's rolls (an act's or a check's skill, a defender's skill) gives the reader's setting
+ * (`perUse` unless set, 1 to 5), summed per skill and held to `max` a reply (the same 1..20 the Skills block's practice line takes). A roll made from stage 50 on
+ * carries the value in its payload (`practice`); a roll made before has none and gives no practice by code.
+ */
+export const PRACTICE = Object.freeze({ perUse: 3, minPerUse: 1, maxPerUse: 5, max: 20 });
+/** The setting (Story Block's own bucket, Settings → RPG): the practice one use gives, 1 to 5 (3 unset). A roll records the value it was made with (`practice` in its payload). */
+export const PRACTICE_SETTING = 'rpgPracticePerUse';
+/** `value` as a practice per use: a whole number from 1 to 5, else null. */
+export const practiceOf = value => (Number.isInteger(value) && value >= PRACTICE.minPerUse && value <= PRACTICE.maxPerUse ? value : null);
+
 /** `role` on a block definition: what the RPG reads it as. A Character, Skills or Foes block names its `who`. */
 export const ROLES = Object.freeze(['character', 'skills', 'foes', 'rules']);
 
@@ -35,11 +52,10 @@ export const stageWord = (words, value, size) => spreadWord(words, Number.isFini
 /** The formula (SPEC_RPG §0): PC d20 + stat/2 + 2×class + skill rank vs foe d20 + 5 + 2×class. */
 export const FORMULA = Object.freeze({ die: 20, statDivisor: 2, classWeight: 2, foeBase: 5, edgeMax: 3, costMargin: 2 });
 
-/** Pacing: exchanges per reply. */
+/** Pacing: exchanges per reply. (From the second flow, FLOW_VERSION in resolve.js, only `careful` limits a reply: 1 exchange; the others run to the cap.) */
 export const PACE = Object.freeze({ careful: 1, normal: 5, all: 8 });
 
-/** How many skill slots a Skills block has (`skill1`…`skill5`, `rank1`…, `practice1`…) and foe slots a Foes block (`foe1`…`foe4`). */
-export const SKILL_SLOTS = 5;
+/** Foe slots of a Foes block: `foe1`…`foe4` (skill slots: ../skill-slots.js). */
 export const FOE_SLOTS = 4;
 
 /**
@@ -48,7 +64,10 @@ export const FOE_SLOTS = 4;
  * `cueTokens` (about four characters each). `dc` is the number a check's difficulty word stands for.
  */
 export const LIMITS = Object.freeze({
+    // The cap of a roll made before the flow of stage 49 (`flow` absent in its payload): such a roll, and one recorded with no numbers at all, keeps it.
     roundCap: 5,
+    // The most exchanges one reply holds by default (every preset; Custom may pick 1 to 8): a fight now runs until something happens (resolve.js).
+    roundCapDefault: 8,
     decisiveMargin: 8,
     cueTokens: 600,
     dc: Object.freeze({ easy: 10, normal: 15, hard: 20, 'very hard': 25 }),
@@ -63,9 +82,33 @@ export const LIMITS = Object.freeze({
  */
 export const ROLLS_SETTING = 'rpgRolls';
 export const ROLLS = Object.freeze(['automatic', 'off']);
+/** Skill practice comes only from rolled uses while the RPG is on and Rolls is automatic (the narrator's `practice-N` line is not offered and is refused). */
+export const practiceFromRollsOnly = (rpgOn, values) => rpgOn === true && values?.[ROLLS_SETTING] !== 'off';
+
+/**
+ * XP for a won fight (fight.js), worked out for each party member who has not Left, group by group from the member's level against the group's:
+ * base = count × max(1, ceil(foeLevel / `perLevels`)) × `perBand`, times clamp(100 + `gapPercent` × (foeLevel − memberLevel), 0, `maxPercent`) per cent. The groups
+ * are added (whole per cents, so no rounding error) and rounded down; a total above 0 is held to `min` .. `max`, a total of 0 gives nothing.
+ * Level 5 against six level 5 crawlers: 6 × 1 × 2 = 12.
+ */
+export const FIGHT_XP = Object.freeze({ perBand: 2, perLevels: 10, gapPercent: 10, maxPercent: 200, min: 1, max: 60 });
 
 /** The line the narrator writes where the fight is told (the battle log is drawn there). */
 export const BATTLE_MARKER = '[battle]';
+
+/**
+ * Levels (2.17.0, replaces the Soul Class I–IX): a character has a level 1..`max`, `xpPerLevel` XP raise it by one (up to the character's own `cap`: the
+ * pack's `rpg.levelCap` first, else the setting `rpgLevelCap`, else 99), every `pointEvery`-th level gives a point to spend. A roll adds `levelBonus(level, divisor)`
+ * = floor(level / divisor) in place of the old weight × Soul Class (formula.js; `divisor` 5 by default, Custom `minDivisor`..`maxDivisor`). A roll made
+ * with it carries `lv: 1` (LV_VERSION) and the divisor in its rules (`levelDivisor`); a roll without them replays with the Soul Class exactly as before.
+ */
+export const LEVEL = Object.freeze({ min: 1, max: 99, xpPerLevel: 100, xpMax: 9999, pointEvery: 3, divisor: 5, minDivisor: 3, maxDivisor: 8 });
+/** The version of the roll term a payload asks for (`lv` in the payload of `rpg.resolve`): 1 = level bonus. */
+export const LV_VERSION = 1;
+/** The setting (Story Block's own bucket, Settings → RPG): the highest level a character can reach, 1 to 99 (99 unset). A pack's own cap comes first (levelCapFor: pack, then this setting, then 99). */
+export const LEVEL_CAP_SETTING = 'rpgLevelCap';
+/** `value` as a level cap: a whole number from 1 to 99, else null. */
+export const levelCapOf = value => (Number.isInteger(value) && value >= LEVEL.min && value <= LEVEL.max ? value : null);
 
 /** What a skill's rank (0–3) and a Soul Class (1–9) are called. */
 export const RANK_NAMES = Object.freeze(['Novice', 'Adept', 'Expert', 'Master']);
@@ -80,7 +123,7 @@ export const USES = Object.freeze(['stamina', 'mana']);
  * `skills` skills, at most `adept` of them at Adept and the rest Novice. Text limits are the Character and Skills fields'.
  */
 export const CREATION = Object.freeze({
-    start: 10, budget: 6, min: 8, max: 15, skills: SKILL_SLOTS, adept: 1,
+    start: 10, budget: 6, min: 8, max: 15, skills: 5, adept: 1,
     name: 40, about: 240, skillName: 40, skillAbout: 120,
 });
 
@@ -92,3 +135,6 @@ export const CREATION = Object.freeze({
 export const JOIN_SETTING = 'rpgJoin';
 export const JOINS = Object.freeze(['ask', 'auto', 'off']);
 export const PARTY_MAX = 8;
+
+/** A roll's rules mark (`fix` in `rpg.resolve`; 2: stage 65, 3: `then:`); none replays as before. */
+export const FIX_VERSION = 3;

@@ -16,7 +16,8 @@ const boundsOf = schema => schema.type === 'int' ? `${schema.min} to ${schema.ma
     : schema.type === 'bool' ? `true or false, starts ${schema.default}`
         : schema.type === 'enum' ? `${schema.values.join(', ')}; starts ${schema.default}`
             : schema.type === 'text' ? `text up to ${schema.max}; starts "${schema.default}"`
-                : `${schema.keys.join(', ')}, each ${boundsOf(schema.values)}`;
+                : schema.type === 'entries' ? `a list of up to ${schema.max ?? L.entriesDefault} entries of ${Object.keys(schema.of).join(', ')}`
+                    : `${schema.keys.join(', ')}, each ${boundsOf(schema.values)}`;
 
 /** The facts a reader needs before enabling a module, as plain lines: fields, lines, rewards, needs, screens, budgets. */
 export function describe(row) {
@@ -85,7 +86,7 @@ export function renderDataModules(root, api = {}) {
         const facts = [`Definition ${row.hash}`, `Pack ${row.packId} ${row.packVersion} (${row.packHash})`];
         if (type === 'dm.pin' && row.definition.scope === 'character') facts.push(subjects.length ? `Characters: ${subjects.join(', ')}` : 'Characters: none yet (attach them afterwards)');
         for (const [alias, value] of Object.entries(row.baseline ?? {})) facts.push(`Starts from ${alias}: ${value === null ? 'not set yet; the first set value becomes the baseline' : JSON.stringify(value)}`);
-        if (row.additions) facts.push(`New fields: ${JSON.stringify(row.additions)}`);
+        if (row.additions && Object.keys(row.additions).length) facts.push(`New fields: ${JSON.stringify(row.additions)}`);
         facts.push('Nothing is applied backwards; the choice is saved with the latest reply.');
         const ul = make('ul', 'ss-dm-list', '', box);
         for (const fact of facts) make('li', '', fact, ul);
@@ -130,7 +131,7 @@ export function renderDataModules(root, api = {}) {
             const fields = make('div', 'ss-dm-fields', '', item);
             make('span', 'ss-dm-label', STRINGS.editMessages.fields, fields);
             for (const subject of subjects) for (const [field, schema] of Object.entries(active.state)) {
-                if (schema.edit === false) continue;
+                if (schema.edit === false || schema.type === 'entries') continue;
                 const scalar = schema.type === 'map' ? schema.values : schema;
                 for (const key of schema.type === 'map' ? schema.keys : [null]) {
                     const label = [subject.name, schema.label ?? field, key].filter(Boolean).join(' · ');

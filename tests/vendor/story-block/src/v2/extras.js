@@ -4,8 +4,8 @@
 // * `? choice Climb the wall`: one of 2–4 short next moves for the reader's character. The latest
 //   reply shows them as buttons; a click only puts the text into SillyTavern's message box (the
 //   reader still sends it, edits it or ignores it). Code never acts on a choice (MODULES §F95, §F96).
-// * `~ chatter Minke: …he'd better not die down there`: an NPC's unspoken thought (at most 3 a
-//   reply). Shown in a folded "Inner chatter" strip under the reply, never in the story text, and
+// * `~ chatter Minke: …he'd better not die down there`: an NPC's unspoken thought (up to the reader's
+//   "Most chatter lines per reply" setting, 3 unless set). Shown in a folded "Inner chatter" strip under the reply, never in the story text, and
 //   never sent back to the model unless the reader's setting says so (then only the last reply's,
 //   as one optional tail line).
 //
@@ -19,7 +19,7 @@
 // Problem; a text is cut by code points (never inside a character), flattened to one line, and drawn
 // as text only (ui-host's extras, textContent). Pure: no DOM, no SillyTavern.
 
-import { extractBlock, lineBody, parseChanges } from './capture.js';
+import { capsOf, extractBlock, lineBody, parseChanges } from './capture.js';
 import { CORE_FEATURE } from './features.js';
 import { foldKey } from '../text.js';
 
@@ -31,6 +31,15 @@ export const CHOICE_MAX = 4;
 export const CHOICE_CHARS = 80;
 /** At most this many chatter lines a reply; a thought at most CHATTER_CHARS code points, a name NAME_CHARS. */
 export const CHATTER_MAX = 3;
+/** The reader's setting (Most chatter lines per reply): 1 to CHATTER_LIMIT, CHATTER_MAX when unset. */
+export const CHATTER_LIMIT = 10;
+export function chatterCap(value) {
+    return Number.isInteger(value) && value >= 1 && value <= CHATTER_LIMIT ? value : CHATTER_MAX;
+}
+/** The `~ chatter` grammar line for a cap of `cap` lines a reply. */
+export function chatterGrammar(cap = CHATTER_MAX) {
+    return `~ chatter Name: …a short unspoken thought, one line for each NPC in the scene who has something on their mind, up to ${chatterCap(cap)} (only NPCs in the scene, at most ${CHATTER_CHARS} characters; nobody hears it, so the story never reacts to it)`;
+}
 export const CHATTER_CHARS = 140;
 export const NAME_CHARS = 40;
 
@@ -90,7 +99,7 @@ export const EXTRA_KINDS = Object.freeze({
         display: Object.freeze({ perReply: CHOICE_MAX, noun: 'choices', read: readChoice }),
     }),
     chatter: Object.freeze({
-        grammar: `~ chatter Name: …a short unspoken thought (at most ${CHATTER_MAX}, only NPCs in the scene, at most ${CHATTER_CHARS} characters; nobody hears it, so the story never reacts to it)`,
+        grammar: chatterGrammar(CHATTER_MAX),
         feature: CHATTER_FEATURE,
         display: Object.freeze({ perReply: CHATTER_MAX, noun: 'chatter lines', read: readChatter }),
     }),
@@ -101,7 +110,7 @@ export const EXTRA_KINDS = Object.freeze({
  * ways). `entry`: the registry's capture entry ({ kind, display: { perReply?, noun?, read? } });
  * `counts`: a Map kind → lines kept so far in this reply. → { ok: true, value } | { ok: false, code, message }.
  */
-export function readDisplayLine(entry, line, counts) {
+export function readDisplayLine(entry, line, counts, caps = null) {
     const display = entry?.display;
     let answer;
     try {
@@ -113,7 +122,9 @@ export function readDisplayLine(entry, line, counts) {
         return { ok: false, code: 'INVALID', message: typeof answer?.error === 'string' ? answer.error : 'it could not be read' };
     }
     const seen = counts.get(entry.kind) ?? 0;
-    const max = Number.isInteger(display?.perReply) && display.perReply > 0 ? display.perReply : Infinity;
+    // `caps` ({ [kind]: n }): the cap the reply was read with, kept in its hidden comment (capture.js markCaps).
+    const kept = caps?.[entry.kind];
+    const max = Number.isInteger(kept) && kept > 0 ? kept : Number.isInteger(display?.perReply) && display.perReply > 0 ? display.perReply : Infinity;
     if (seen >= max) {
         const noun = typeof display?.noun === 'string' && display.noun ? display.noun : `${entry.kind} lines`;
         return { ok: false, code: 'LIMITED', message: `a reply shows at most ${max} ${noun}, and this one had more` };
@@ -135,11 +146,13 @@ export function displayLines(mes, { entryOf, max = Infinity } = {}) {
     if (block === null || typeof entryOf !== 'function') return out;
     const lines = parseChanges(block, { max }).lines.slice(0, Number.isFinite(max) ? max : undefined);
     const counts = new Map();
+    // The cap the reply was read with: the mark in its comment, else what every reply had before the setting (3).
+    const caps = { chatter: CHATTER_MAX, ...capsOf(mes) };
     for (const line of lines) {
         let entry = null;
         try { entry = entryOf(line.kind); } catch { entry = null; }
         if (!entry?.display || entry.off) continue;
-        const read = readDisplayLine(entry, line, counts);
+        const read = readDisplayLine(entry, line, counts, caps);
         if (read.ok) (out[entry.kind] ??= []).push(read.value);
     }
     return out;

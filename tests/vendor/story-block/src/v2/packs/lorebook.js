@@ -40,6 +40,35 @@ export function findPackEntries(entries) {
     return out;
 }
 
+// A card may carry more than a pack: its portraits (`[storysuite:portraits]`) and the settings it recommends
+// (`[storysuite:settings]`), in entries tagged and written the same way (card.js reads their JSON).
+export const PORTRAITS_TAG = '[storysuite:portraits]';
+export const SETTINGS_TAG = '[storysuite:settings]';
+const PORTRAITS = /\[\s*storysuite\s*:\s*portraits\s*\]/i;
+const SETTINGS = /\[\s*storysuite\s*:\s*settings\s*\]/i;
+
+/** Is this title tagged as the card's portraits / recommended settings? */
+export const isPortraitsTitle = title => PORTRAITS.test(String(title ?? ''));
+export const isSettingsTitle = title => SETTINGS.test(String(title ?? ''));
+
+const findTagged = (entries, test, tag) => {
+    const out = [];
+    for (const entry of Array.isArray(entries) ? entries : []) {
+        if (!entry || !test(entry.title)) continue;
+        out.push({
+            origin: `lorebook:${entry.book ?? ''}#${entry.uid ?? ''}`,
+            title: String(entry.title).replace(tag, '').trim(),
+            text: entryText(entry.content),
+        });
+    }
+    return out;
+};
+
+/** The `[storysuite:portraits]` entries of a list, in lorebook order: `[{ origin, title, text }]`. */
+export const findPortraitEntries = entries => findTagged(entries, isPortraitsTitle, PORTRAITS);
+/** The `[storysuite:settings]` entries of a list, in lorebook order: `[{ origin, title, text }]`. */
+export const findSettingsEntries = entries => findTagged(entries, isSettingsTitle, SETTINGS);
+
 // ---------------------------------------------------------------------------------------
 // Market lines (PACKS.md "Markets"): a lorebook entry about a place may say what kind of market it is
 // with one plain line of its content,

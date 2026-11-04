@@ -57,9 +57,12 @@ import { STRINGS, fill } from './strings.js';
 import { readRecord } from './persist.js';
 import { laterStore, replyEdits, replyRules, scanReplyCards } from './reply-cards.js';
 import { drawReplyCard } from './view/reply-cards-ui.js';
-import { CORE_FEATURE, withHiddenFeatures } from './features.js';
+import { CORE_FEATURE, GEAR_FEATURE, withHiddenFeatures } from './features.js';
 import { createBlockTemplates } from './data-modules/block-templates.js';
 import { createBlockWidgets } from './screens/blocks.js';
+import { createFieldsWidgets } from './screens/block-fields.js';
+import { renderBlockPreview } from './screens/block-layouts.js';
+import { mergeTabs } from './view/tab-merge.js';
 import { ROLES_WITHOUT_TAB } from './lean-rpg/names.js';
 import { createInspectorSource } from './inspect.js';
 import { createSavePoints } from './rewind.js';
@@ -69,6 +72,9 @@ import { createReadyHintWidget, READY_HINT_WIDGET } from './screens/ready-hint.j
 import { RPG_START_WIDGET } from './screens/home.js';
 import { createShowMoreWidget, SHOW_MORE_WIDGET } from './screens/show-more.js';
 import { createInventoryAddWidget, INVENTORY_ADD_WIDGET } from './screens/inventory-add.js';
+import { createCardOffer, enableDataModules } from './packs/card-offer.js';
+import { renderCardOffers } from './packs/card-offer-ui.js';
+import { readCharacterLorebook, saveSettingsNow } from './packs/st-adapter.js';
 import { buildReport, captureConsole, caughtSoFar, reportFileName } from './diagnostics.js';
 import { createThemeBridge } from './view/theme.js';
 import { activeNow } from './view/mounts/common.js';
@@ -146,7 +152,7 @@ function readerStore(ctx) {
  * setHidden(id, hidden), reset(), isDefault()), syncScreens(), destroy() }.
  * Re-read uses `sdk.reread(index)` (or `runtime.turn.reread(index)`) when the runtime has one.
  */
-export function mountUi({ runtime, ctx, doc = globalThis.document, version = '', loadLeanRpg = () => import('./lean-rpg/view/index.js') }) {
+export function mountUi({ runtime, ctx, doc = globalThis.document, version = '', loadLeanRpg = () => import('./lean-rpg/view/index.js'), readLorebook = readCharacterLorebook, flushSettings = saveSettingsNow }) {
     const { registry, store, sdk, settings, events } = runtime;
     // A screen asking a query no module answers (an optional module that is not installed, like NSD's
     // npc.portrait) gets null, not a problem line.
@@ -170,7 +176,9 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
         if (!es.storySuite || typeof es.storySuite !== 'object') es.storySuite = {};
         return es.storySuite;
     }, save: () => ctx.saveSettingsDebounced?.() });
-    const blockWidgets = createBlockWidgets({ templates: blockTemplates,
+    // The tabs screens share (a pack's `tab` ids and titles), for a block's Show in tab.
+    let sharedTabs = [];
+    const blockWidgets = createBlockWidgets({ templates: blockTemplates, tabs: () => sharedTabs, renderPreview: renderBlockPreview,
         directorOn: () => registry.lifecycle?.('story-director')?.status === 'ready',
         // Off unless Story Block's core is there to own the switch (unlike coreOn, which counts a missing feature as on).
         leanRpgOn: () => (registry.feature?.(CORE_FEATURE.leanRpg) ? registry.featureOn(CORE_FEATURE.leanRpg) : false),
@@ -189,6 +197,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
     });
     const hostWidgets = {
         ...blockWidgets.widgets,
+        ...createFieldsWidgets(),
         [INSPECTOR_WIDGET]: createInspectorWidget(inspector, { enabled: () => coreOn(CORE_FEATURE.inspector) }),
         [SAVEPOINTS_WIDGET]: createSavePointsWidget({
             points: savePoints,
@@ -279,6 +288,9 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
             }
         } catch { /* older host */ }
         try { packScreens.push(...(blockPresentation() ?? [])); } catch { /* older host */ }
+        // Screens that name one `tab` (a pack's, or a block's show.into) become sections of one tab.
+        sharedTabs = [...new Map(packScreens.filter(screen => typeof screen?.tab === 'string' && screen.tab).map(screen => [screen.tab, { id: screen.tab, title: screen.tabTitle ?? screen.title ?? screen.tab }])).values()];
+        packScreens = mergeTabs(packScreens);
         const byPack = new Map();
         for (const screen of packScreens) {
             const { pack, ...def } = screen ?? {};
@@ -371,7 +383,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
     const cardLines = (index, state, changes, before = null) => {
         const lines = [
             ...replyCardLines(registry.hookEntries?.('replyCard') ?? [], { index, state, changes }),
-            ...replyRules(recordAt(index), store.problems?.() ?? [], index),
+            ...replyRules(recordAt(index), store.problems?.() ?? [], index, { state, before }),
         ];
         // The RPG's own lines (rolls, class and rank rises), only while its screens are mounted.
         return rpg ? mergeRpgLines(lines, rpg.cardLines({ state, before, record: recordAt(index), problems: (store.problems?.() ?? []).filter(item => item?.index === index) })) : lines;
@@ -638,7 +650,10 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
     const panelClose = iconButton(doc, 'story-suite-sheet-close', 'fa-xmark', '', S.panel.close);
     panelHead.appendChild(panelClose);
     const panelBody = el(doc, 'div', 'story-suite-sheet-body');
-    panel.append(panelHead, panelBody);
+    // The card's offer (packs/card-offer.js): one notice per pack the open card brings, between the head and the tabs.
+    const offerBox = el(doc, 'div', 'ss-card-offers');
+    offerBox.hidden = true;
+    panel.append(panelHead, offerBox, panelBody);
     doc.body.appendChild(panel);
 
     // The strip's slots before More: four on a phone's bottom sheet; on the side sheet (from 760px, the game view's line) as many as its width holds.
@@ -708,6 +723,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
             chat: () => liveCtx()?.chat ?? [],
             chatOpen: () => Boolean(liveCtx()?.getCurrentChatId?.() ?? liveCtx()?.chatId),
             hooks: () => registry.hookEntries?.('diagnostics') ?? [],
+            cardOffers: () => cardLog.slice(),
         }),
         fileName: () => reportFileName(),
         // A story Story Block keeps as it is (read-only) can be repaired, only when the reader says so (turn.repair).
@@ -719,7 +735,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
         overlay = openSettingsWindow({
             // The status strip's switch is there only while some screen asks for the strip (a pack's, a module's `hud` mount); its stored
             // choice stays, and the strip works as before.
-            registry, settings, doc, sdk, features: withHiddenFeatures(runtime.features ?? null, feature => feature.id === CORE_FEATURE.hud && !hudAsked()), fold, diagnostics,
+            registry, settings, doc, sdk, features: withHiddenFeatures(runtime.features ?? null, feature => (feature.id === CORE_FEATURE.hud && !hudAsked()) || feature.id === GEAR_FEATURE), fold, diagnostics,
             promptParts, tabs: tabsControl, theme, blockTemplates, blocks: blockWidgets,
             chatOpen: () => Boolean(liveCtx()?.getCurrentChatId?.() ?? liveCtx()?.chatId),
             ...(rpg ? { extraSections: rpg.settingsSections() } : {}),
@@ -738,6 +754,50 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
     const gameButton = iconButton(doc, 'story-suite-bar-game', 'fa-expand', S.bar.game, S.bar.gameTitle);
     gameButton.setAttribute('aria-keyshortcuts', 'Alt+G');
     const settingsButton = iconButton(doc, 'story-suite-bar-settings', 'fa-sliders', S.bar.suite, S.bar.suiteTitle);
+    // The dot on the Story button while a card offer waits for an answer (the app's own alert dot, view/mounts.css).
+    const offerDot = el(doc, 'span', 'ss-screenbar-alert ss-card-offer-dot');
+    offerDot.hidden = true;
+    storyButton.appendChild(offerDot);
+    const cardLog = [];
+    const cardOffer = runtime.packs?.packs && runtime.cardSettings ? createCardOffer({
+        readLorebook,
+        packs: runtime.packs.packs,
+        cardSettings: runtime.cardSettings,
+        remember: {
+            read: () => ctx.extensionSettings?.storySuite?.cardOffers?.notNow ?? {},
+            write: map => {
+                const es = ctx.extensionSettings ?? {};
+                if (!es.storySuite || typeof es.storySuite !== 'object') es.storySuite = {};
+                if (!es.storySuite.cardOffers || typeof es.storySuite.cardOffers !== 'object') es.storySuite.cardOffers = {};
+                es.storySuite.cardOffers.notNow = map;
+                ctx.saveSettingsDebounced?.();
+            },
+        },
+        single: () => !(liveCtx()?.groupId),
+        enableModules: (packId, options) => enableDataModules({ sdk, packId, save: () => store.saveSoon?.(), ...options }),
+        chatId: () => { try { return String((typeof (liveCtx() ?? ctx).getCurrentChatId === 'function' ? (liveCtx() ?? ctx).getCurrentChatId() : (liveCtx() ?? ctx).chatId) ?? ''); } catch { return ''; } },
+        notify: text => globalThis.toastr?.warning?.(text, 'Story Block'),
+        flushSettings: () => flushSettings(),
+        report: entry => {
+            cardLog.push(entry.message);
+            if (cardLog.length > 30) cardLog.shift();
+            runtime.turn?.report?.({ module: null, code: entry.code, message: entry.message, quiet: true });
+        },
+    }) : null;
+    const showDot = () => {
+        const waiting = cardOffer?.waiting() === true;
+        offerDot.hidden = !waiting;
+        storyButton.setAttribute('aria-label', waiting ? S.bar.storyOffer : S.bar.storyTitle);
+        storyButton.title = waiting ? S.bar.storyOffer : S.bar.storyTitle;
+    };
+    const offerView = cardOffer ? renderCardOffers(offerBox, cardOffer, { doc }) : null;
+    const offs0 = [];
+    if (cardOffer) {
+        offs0.push(cardOffer.subscribe(showDot));
+        // A module or extension that registers after the chat opened changes what is missing; the notices are drawn again.
+        offs0.push(runtime.cardSettings.subscribe(() => offerView.refresh()));
+        offs0.push(events.on('modules', () => offerView.refresh()));
+    }
     const notice = el(doc, 'div', 'story-suite-notice');
     notice.setAttribute('role', 'status');
     notice.hidden = true;
@@ -885,6 +945,8 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
             rpgLoading = false;
             if (rpgGone || rpg || !rpgOn()) return;
             rpg = view.mountLeanRpg({ doc, ctx, store, events, screens, widgets: hostWidgets, headState: headStateNow, featureOn: rpgOn,
+                // Settings → RPG holds the gear switch (the feature stays out of the Features list).
+                gear: { on: () => registry.featureOn?.(GEAR_FEATURE) === true, set: value => runtime.features?.set?.(GEAR_FEATURE, Boolean(value)) },
                 readerName: () => String(liveCtx()?.name1 ?? ctx.name1 ?? ''),
                 // The active persona's description: the one property of SillyTavern's settings this reads (never another persona or setting).
                 readerAbout: () => { try { return String((liveCtx()?.powerUserSettings ?? ctx.powerUserSettings)?.persona_description ?? ''); } catch { return ''; } },
@@ -901,7 +963,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
             if (overlay?.isOpen?.()) { const page = overlay.section(); openSettings(); overlay.select(page); }
         }).catch(error => { rpgLoading = false; console.warn('[Story Suite] the RPG screens could not load', error?.message ?? error); });
     }
-    const offs = [...replyOffs];
+    const offs = [...replyOffs, ...offs0];
     // Story Suite's console errors, kept for Diagnostics (once per page; the console still prints them).
     offs.push(captureConsole());
     let dataPresentation = '';
@@ -921,6 +983,8 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
         mounts.dialog?.closeAll();
         mounts.screen?.closeMore?.();
         tabHost?.bar?.closeMore?.({ focus: false });
+        // The new chat's card is read for its offer (a read of the chat before is dropped).
+        cardOffer?.refresh().catch(error => console.warn('[Story Suite] the card offer could not be read', error));
     };
     if (typeof ctx.eventSource?.on === 'function' && chatTypes.CHAT_CHANGED) {
         ctx.eventSource.on(chatTypes.CHAT_CHANGED, onChatChanged);
@@ -953,6 +1017,8 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
     }));
     offs.push(events.on('turn', done => {
         clearBlocked();
+        // The "Installed …" notice stays for one reply.
+        cardOffer?.clearDone();
         if (!panel.hidden) tabHost?.refresh();
         // The card under that reply now knows its refused lines.
         if (Number.isInteger(done?.index)) mounts.card?.refresh?.(done.index, { force: true });
@@ -962,6 +1028,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
     syncLeanRpg();
     refresh();
     mounts.card?.attachAll?.();
+    cardOffer?.refresh().catch(error => console.warn('[Story Suite] the card offer could not be read', error));
 
     return {
         refresh,
@@ -983,8 +1050,10 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
         savePoints,
         inspector,
         theme,
+        cardOffer,
         destroy() {
             rpgGone = true;
+            offerView?.destroy();
             rpg?.destroy();
             rpg = null;
             overlay?.close?.();

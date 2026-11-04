@@ -14,7 +14,7 @@ import { CLASS_NAMES, CREATION, JOINS, JOIN_SETTING, PARTY_MAX, STATS } from './
 import { fold } from './read.js';
 import { RPG_STRINGS, fill } from './strings.js';
 import { buildDefinitions, creationOf, hasRoom, newDraft, newSoul, readDraft } from './view/wizard-data.js';
-import { companionStats } from './formula.js';
+import { classOfLevel, companionStats, levelOfClass } from './formula.js';
 import { isStandard } from './rules.js';
 import { soulReading } from './soul.js';
 
@@ -86,7 +86,7 @@ export function soulNaming(state) {
     return newSoul();
 }
 
-/** The characters of the story's party, from a state: `[{ module, name, soul, left, canLeave }]` in block order (the ones who left too). */
+/** The characters of the story's party, from a state: `[{ module, name, soul, left, canLeave }]` in block order (the ones who left too). `soul` is the Soul Class of an earlier block, else the class the level stands for (formula.js classOfLevel). */
 export function partyOf(state) {
     const domain = state?.domains?.dataModules;
     const out = [];
@@ -97,7 +97,7 @@ export function partyOf(state) {
         if (!isRecord(fields)) continue;
         const name = oneLine(fields.who) || oneLine(definition.name);
         if (!name) continue;
-        out.push({ module, name, soul: Number.isSafeInteger(fields.soul) ? fields.soul : 1, left: fields.left === true, canLeave: Object.hasOwn(definition.state ?? {}, 'left') });
+        out.push({ module, name, soul: Number.isSafeInteger(fields.soul) ? fields.soul : Number.isSafeInteger(fields.level) ? classOfLevel(fields.level) : 1, left: fields.left === true, canLeave: Object.hasOwn(definition.state ?? {}, 'left') });
     }
     return out;
 }
@@ -121,26 +121,28 @@ export function checkJoin(state, request) {
 }
 
 /** The wizard's draft for a joining companion (the card's Edit first opens it): name, about, class, the best stat raised to 14 (under the Standard formula `rules`: formula.js companionStats). */
-export function joinDraft({ name = '', about = '', soul = 1, best = '' } = {}, rules = null) {
+export function joinDraft({ name = '', about = '', soul = 1, best = '', skills = [] } = {}, rules = null) {
+    // (a cast member's signature skills, as the pack wrote them: they fill the slots in order, at the rank written, marked `sig` so the story never renames or replaces them)
+    const signed = (Array.isArray(skills) ? skills : []).map(skill => ({ name: skill.name, about: skill.about, stat: skill.stat, uses: skill.uses, start: 0, rank: skill.rank, sig: true }));
     if (isStandard(rules)) {
-        // Standard: every stat 5 and the best 9, then the points of each Soul Class above I (formula.js companionStats); the draft's budget is
+        // Standard: every stat 5 and the best 9, then a point for every third level the class stands for (formula.js companionStats); the draft's budget is
         // exactly what they cost, so "Edit first" can move points around but is not handed more.
-        const stats = companionStats(best, soul, rules), creation = creationOf(rules);
+        const stats = companionStats(best, levelOfClass(soul), rules), creation = creationOf(rules);
         const spent = STATS.reduce((sum, stat) => sum + stats[stat] - creation.start, 0);
-        return readDraft({ name, about, soul, stats, kind: 'companion', skills: [], set: '', creation: { ...creation, budget: spent, max: creation.statMax } });
+        return readDraft({ name, about, soul, stats, kind: 'companion', skills: signed, set: '', creation: { ...creation, budget: spent, max: creation.statMax } });
     }
     const draft = newDraft({ hasYou: true });
     const stats = { ...draft.stats };
     if (STATS.includes(best)) stats[best] = 14;
-    return readDraft({ ...draft, name, about, soul, stats, kind: 'companion' });
+    return readDraft({ ...draft, name, about, soul, stats, kind: 'companion', skills: signed });
 }
 
 /**
  * The two definitions a joining companion is made of (`used`: the ids of the story's blocks, so the slugs are free). The Character
  * starts with no unspent points: the named stat is raised and the rest left as it was, as the line said.
  */
-export const joinDefinitions = (request, { used = [], soul = request.soul, rules = null } = {}) =>
-    buildDefinitions(joinDraft({ ...request, soul }, rules), { used, points: 0 });
+export const joinDefinitions = (request, { used = [], soul = request.soul, rules = null, cap = null, legacy = false } = {}) =>
+    buildDefinitions(joinDraft({ ...request, soul }, rules), { used, points: 0, cap, legacy });
 
 /**
  * The offers on a reply: the `+ party` lines that asked (Ask), read from the reply's receipts (`entries`: store.receipts() as a
@@ -159,7 +161,8 @@ export function joinOffers(entries, index, party = []) {
         const key = fold(join.name);
         if (!key || seen.has(key) || answered.has(key) || party.some(person => fold(person.name) === key)) continue;
         seen.add(key);
-        out.push({ name: oneLine(join.name), about: oneLine(join.about), soul: Number.isSafeInteger(join.soul) ? join.soul : 1, best: STATS.includes(join.best) ? join.best : '' });
+        out.push({ name: oneLine(join.name), about: oneLine(join.about), soul: Number.isSafeInteger(join.soul) ? join.soul : 1, best: STATS.includes(join.best) ? join.best : '',
+            ...(Array.isArray(join.skills) && join.skills.length ? { skills: join.skills.slice(0, 8).map(skill => ({ name: oneLine(skill?.name), about: oneLine(skill?.about), stat: skill?.stat, uses: skill?.uses, rank: skill?.rank })) } : {}) });
     }
     return out;
 }
@@ -168,9 +171,10 @@ export function joinOffers(entries, index, party = []) {
 export function joinCard(offers, state = null) {
     const offer = offers[0];
     if (!offer) return null;
-    const naming = soulNaming(state);
-    const payload = { name: offer.name, about: offer.about, soul: offer.soul, best: offer.best };
-    const rows = [{ icon: 'fa-star', text: fill(J.rowSoul, { label: naming.label, name: CLASS_NAMES[offer.soul - 1] ? naming.word(offer.soul) : naming.word(1) }) }];
+    // (a cast member's signature skills, as the pack had them when the line came, go with Edit first: the wizard's draft keeps them marked)
+    const payload = { name: offer.name, about: offer.about, soul: offer.soul, best: offer.best, ...(offer.skills ? { skills: offer.skills } : {}) };
+    // (the class a line writes stands for a level, 10n - 5: the card says the level the companion will start at)
+    const rows = [{ icon: 'fa-star', text: fill(J.rowLevel, { level: levelOfClass(CLASS_NAMES[offer.soul - 1] ? offer.soul : 1) }) }];
     if (offer.best) rows.push({ icon: 'fa-arrow-up', text: fill(J.rowBest, { stat: offer.best.toUpperCase() }) });
     return {
         tone: 'accent', icon: 'fa-user-plus', title: fill(J.title, { name: offer.name }), text: offer.about, rows,

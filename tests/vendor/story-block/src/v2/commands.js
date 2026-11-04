@@ -19,7 +19,7 @@
 //   module whose handler made this ctx.call (null at the top), `ctx.rev` the meta.rev this receipt will
 //   have, `ctx.id(prefix)` a new `<prefix>_<8 base36>` drawn from the receipt's seed (so the same seed
 //   gives the same IDs, and ctx.rng() is not disturbed), and, for capture runs, `ctx.carrier`
-//   ({ index, swipe, key }) and `ctx.chat` ({ lastUser, reply }); both are null for other commands.
+//   ({ index, swipe, key, practiceRule? }) and `ctx.chat` ({ lastUser, reply }); both are null for other commands.
 //   `ctx.reply` ({ index, sid }) is the reply the command's changes are stored on, for every command:
 //   the capture's carrier, else the head carrier (the last reply, where store.append puts a click's
 //   ops, SPEC §2.2); null when the chat has no reply yet. Queries get the same as `tools.reply`, so
@@ -51,6 +51,8 @@ import { CLOCK_COMMANDS, markerHash } from './timeline/boundary.js';
 import { capture as captureSnapshot } from './timeline/manifest.js';
 import { stateHash } from './timeline/host-block.js';
 import { newRoot, occurrenceOf, operationKey, receiptEvidence, submitProof } from './evidence.js';
+import { rpgLib } from './rpg-lazy.js';
+import { entriesWithCue } from './lean-rpg/cue.js';
 
 export const MAX_DEPTH = 8;
 const CAUSES = ['ui', 'story', 'system'];
@@ -232,8 +234,10 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
     // A checkpoint over guarded blocks keeps the mark it was made under (store.js chain): a different owner set, or a new
     // version of an owner (its guard code may answer otherwise), makes it fail and the prefix replays with the guards asked.
     // (the host's own hook, `hostOwned`, answers from the story alone, whoever is ready: it is no owner whose readiness changes an answer)
-    const guardMark = () => (registry.modules?.() ?? [])
-        .filter(def => typeof def?.hooks?.replayGuard === 'function' && def.hooks.replayGuard.hostOwned !== true && registry.held?.(def.id) !== true).map(def => `${def.id}@${def.version ?? ''}`).join(',');
+    // (The RPG's code is loaded on demand, rpg-lazy.js: while it is missing the stand-in's guard answers for none of its blocks, so a checkpoint made then must not be trusted
+    // once the code is there, nor the other way round: the mark says `rpg:missing` while it is; loaded, the mark is what it always was, so the checkpoints of a chat stay trusted.)
+    const guardMark = () => `${(registry.modules?.() ?? [])
+        .filter(def => typeof def?.hooks?.replayGuard === 'function' && def.hooks.replayGuard.hostOwned !== true && registry.held?.(def.id) !== true).map(def => `${def.id}@${def.version ?? ''}`).join(',')}${rpgLib() ? '' : ';rpg:missing'}`;
     if (typeof store.attachGuard === 'function') store.attachGuard(replayGuardCheck, guardMark);
 
     // The Source this transaction's block will carry: its reply's canonical pair and ordinal (store.sourceAt).
@@ -333,7 +337,7 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
                 if (!fn) fail('NOT_FOUND', `There is no query called "${name}".`);
                 return frozenCopy(fn(state, deepFreeze(clone(args)), tools));
             },
-            receipts: () => store.receipts?.() ?? [],
+            receipts: () => entriesWithCue(store.receipts?.() ?? []),
             // The proof this root has given so far (not stored yet), for story.evidence (evidence.js).
             pendingProofs: () => [...(tx.planned ?? []), ...(tx.proofs?.list ?? [])].map(proof => ({ proof, block: null })),
         });
@@ -379,6 +383,8 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
             // A Re-read's capture (turn.js): the reply's state as it stood before the Re-read, read-only, so
             // per-reply bookkeeping that the reply's kept blocks (its clicks) wrote can be counted; else null.
             standing: tx.standing,
+            // The receipts the reply being read again recorded (turn.js), read-only, else null.
+            standingReceipts: tx.standingReceipts,
             cause: tx.cause,
             module: moduleId,
             caller,
@@ -668,7 +674,7 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
     }
 
     // Runs one command against `head` and returns { ok, ops, receipt, state } without storing anything.
-    function transact(head, type, payload, { cause, seed: seedValue, receiptId, capture, carrier = null, chat = null, again = false, standing = null, reply = null, planned = null, replacing = null, occurrence = null, reusing = null }) {
+    function transact(head, type, payload, { cause, seed: seedValue, receiptId, capture, carrier = null, chat = null, again = false, standing = null, standingReceipts = null, reply = null, planned = null, replacing = null, occurrence = null, reusing = null }) {
         let tx = null;
         try {
             if (!CAUSES.includes(cause)) fail('INVALID', `"${cause}" is not a cause (ui, story or system).`);
@@ -688,6 +694,7 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
                 head, cause, receiptId, random: makeRng(seedValue), idRandom: makeRng((seedValue ^ ID_STREAM) >>> 0),
                 rev: headRev + 1, carrier: carrierOf(carrier), chat: chatOf(chat), again: again === true && cause === 'story',
                 standing: cause === 'story' && isRecord(standing) ? (isDeepFrozen(standing) ? standing : deepFreeze(clone(standing))) : null,
+                standingReceipts: cause === 'story' && Array.isArray(standingReceipts) ? deepFreeze(clone(standingReceipts)) : null,
                 drafts: new Map(), meta: null, failure: null, closed: false, absolute: new Set(), within: new Set(), unique: new Set(),
                 clockBoundaries: [], guard: null, recorded: null, source: undefined, pending: 0, ordinal: undefined, proofs: newRoot(), cursor: undefined, opsBefore: null, reusing,
                 // The proof a Re-read's earlier lines gave (planned, not stored yet), for parents and story.evidence.
@@ -811,7 +818,7 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
         if (!isRecord(carrier) || !Number.isInteger(carrier.index)) return null;
         const swipe = Number.isInteger(carrier.swipe) ? carrier.swipe : 0;
         const key = `${carrier.index}:${swipe}`;
-        const out = { index: carrier.index, swipe, sid: typeof carrier.sid === 'string' ? carrier.sid : null, key };
+        const out = { index: carrier.index, swipe, sid: typeof carrier.sid === 'string' ? carrier.sid : null, key, ...(carrier.practiceRule === 'rolls' ? { practiceRule: 'rolls' } : {}) };
         Object.defineProperty(out, 'toString', { value: () => key });
         return Object.freeze(out);
     }
@@ -921,8 +928,8 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
          * `replacing` (the proof of the blocks being replaced): a proof of the same kind and key at the same place among those keeps the id of its old one.
          * A guarded transaction's result has a `block` too (REPLAY.md), which store.append or replaceStory keeps.
          */
-        run(type, payload, { cause = 'story', seed: seedValue, state, capture, carrier = null, chat = null, again = false, standing = null, reply = null, planned = null, replacing = null, occurrence = null, reusing = null } = {}) {
-            return guarded(() => transact(state ?? store.head(), type, payload, { ...fresh(cause, seedValue), capture, carrier, chat, again: again === true && cause === 'story', standing, reply, planned, replacing, occurrence, reusing }));
+        run(type, payload, { cause = 'story', seed: seedValue, state, capture, carrier = null, chat = null, again = false, standing = null, standingReceipts = null, reply = null, planned = null, replacing = null, occurrence = null, reusing = null } = {}) {
+            return guarded(() => transact(state ?? store.head(), type, payload, { ...fresh(cause, seedValue), capture, carrier, chat, again: again === true && cause === 'story', standing, standingReceipts, reply, planned, replacing, occurrence, reusing }));
         },
     };
 }

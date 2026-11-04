@@ -42,10 +42,12 @@ export const ECONOMY_LIMITS = Object.freeze({ min: 0.001, max: 1000, note: 500 }
 // Item definitions follow Story Block's inventory def (SPEC §7).
 export const ITEM_KINDS = Object.freeze(['goods', 'material', 'consumable', 'equipment', 'quest', 'money']);
 export const RARITIES = Object.freeze(['common', 'uncommon', 'rare', 'epic', 'legendary']);
-export const ITEM_FIELDS = Object.freeze(['name', 'slug', 'aliases', 'kind', 'rarity', 'value', 'stack', 'slot', 'stats', 'effect', 'tags', 'note', 'carry']);
+export const ITEM_FIELDS = Object.freeze(['name', 'slug', 'aliases', 'kind', 'rarity', 'value', 'stack', 'slot', 'stats', 'effect', 'tags', 'note', 'carry', 'bonus']);
 // `carry`: the carry capacity an item adds while it is owned (worn, when it is equipment), a whole number
 // (PACKS.md "Carry capacity"). Only a pack (or the reader's settings in a carry module) sets it; the story never does.
 export const ITEM_CARRY = Object.freeze({ min: 1, max: 1000 });
+// `bonus`: the gear bonus an item gives while worn (0–6), instead of the one its rarity gives (`story-block.gear`). A pack sets it; the story never does.
+export const ITEM_BONUS = Object.freeze({ min: 0, max: 6 });
 export const EVENT_FIELDS = Object.freeze(['id', 'when', 'cue', 'once', 'after', 'then']);
 // The events part's own limits (src/v2/events), so a pack that passes here also runs there.
 export const EVENT_LIMITS = Object.freeze({ when: 500, cue: 500, then: 8 });
@@ -61,7 +63,7 @@ export const STAT_NAME = /^[A-Z]{2,12}$/;
 // `hidden: true` (or its alias `secret: true`): the map keeps the place off until the story goes there.
 // `market` and `tags` (PACKS.md "Markets"): the place's settlement type ('village', 'city') and environment
 // tags ('river', 'port') that set its prices.
-export const PLACE_FIELDS = Object.freeze(['name', 'slug', 'aliases', 'region', 'kind', 'layer', 'x', 'y', 'note', 'hidden', 'secret', 'market', 'tags']);
+export const PLACE_FIELDS = Object.freeze(['name', 'slug', 'aliases', 'region', 'kind', 'layer', 'x', 'y', 'note', 'hidden', 'secret', 'market', 'tags', 'loot']);
 export const ROUTE_FIELDS = Object.freeze(['slug', 'from', 'to', 'kind', 'km', 'hours', 'corridor', 'note']);
 // Display terms a pack suggests (MODULES §F25): `{ id?, name?, levelName?, xpName?, tiers? }`, `tiers`
 // being `true` or `{ size?, numerals?, enabled? }`. A term is a label in a module's blocks
@@ -119,7 +121,14 @@ export const METER_LIMITS = Object.freeze({ presets: 4, meters: 6, min: -1000, m
 // Skill sets for the RPG's New character wizard, `content.rpg.skillSets` (normalized to a list of sets):
 // `[{ name, slug?, about?, skills: [{ name, about, stat, uses? }] }]`. The limits follow the Skills block's fields; `stats` and `uses`
 // are the words the block's `statN` and `usesN` take (src/v2/lean-rpg/names.js STATS and USES, kept apart so packs need nothing of it).
-export const LEAN_RPG_FIELDS = Object.freeze(['skillSets', 'formula', 'numbers']);
+export const LEAN_RPG_FIELDS = Object.freeze(['skillSets', 'formula', 'numbers', 'ranks', 'levelCap', 'playerRank']);
+// Ranks (`content.rpg.ranks`): names for bands of levels, `[{ name, from, to }]`, contiguous and ascending from 1, up to 99; `content.rpg.levelCap`: 1..99.
+// Kept as one more record of the list, `{ id, slug: 'ranks', pack, ranks?, levelCap? }`, which the skill-set readers pass over.
+export const RPG_RANK_FIELDS = Object.freeze(['name', 'from', 'to']);
+export const RPG_RANK_LIMITS = Object.freeze({ entries: 20, name: 12, maxLevel: 99 });
+// `content.rpg.playerRank`: { module, field, label } names a data-module field as the party's rank (shown "Lv 14 · Guild F"); module and field are text of 1 to `ref`, the label 1 to `label`.
+export const RPG_PLAYER_RANK_FIELDS = Object.freeze(['module', 'field', 'label']);
+export const RPG_PLAYER_RANK_LIMITS = Object.freeze({ ref: 40, label: 12 });
 // A pack may also say which stat formula its story plays on and the numbers of it (`content.rpg.formula`: 'standard' | 'classic'; `content.rpg.numbers`:
 // whole numbers by name, the names of src/v2/lean-rpg/rules.js STANDARD_RULE_KEYS and RULE_KEYS, kept apart so packs need nothing of it). They are
 // kept as one more record of the list, `{ id, slug: 'formula', pack, formula?, numbers? }`, which the skill-set readers pass over.
@@ -135,11 +144,16 @@ export const LEAN_RPG_LIMITS = Object.freeze({ sets: 12, skills: 5, name: 40, ab
 // `{ id, name, aliases?, about, look, voice?, personality?, history?, portrait?, start: { place, goal, routine? }, drawnTo?,
 // meters?: { preset?, <meter>: n }, stages?, fields?, secrets?, canDieUnmet? }`. All text is plain: no < > { } (and no | in
 // the short lines a change line may carry), line breaks become spaces. `stages` take the shape of a meter preset's stages.
-export const CAST_FIELDS = Object.freeze(['id', 'name', 'aliases', 'about', 'look', 'voice', 'personality', 'history', 'portrait', 'start', 'drawnTo', 'meters', 'stages', 'fields', 'secrets', 'canDieUnmet']);
+export const CAST_FIELDS = Object.freeze(['id', 'name', 'aliases', 'about', 'look', 'voice', 'personality', 'history', 'portrait', 'start', 'drawnTo', 'meters', 'stages', 'fields', 'secrets', 'canDieUnmet', 'gear', 'skills']);
+// A cast member's signature skills (`cast[].skills`): the same seven stats as the RPG's (lean-rpg/names.js STATS, pinned by a test), the ranks, the resources and the most a person brings (lean-rpg/names.js SKILL_SLOTS_MAX, pinned too).
+export const CAST_SKILL_FIELDS = Object.freeze(['name', 'about', 'stat', 'uses', 'rank']);
+export const CAST_SKILL_STATS = Object.freeze(['str', 'vit', 'agi', 'dex', 'int', 'luk', 'cha']);
+export const CAST_SKILL_USES = Object.freeze(['stamina', 'mana']);
+export const CAST_SKILL_RANK_WORDS = Object.freeze(['novice', 'adept', 'expert', 'master']);
 export const CAST_START_FIELDS = Object.freeze(['place', 'goal', 'routine']);
 export const CAST_SECRET_FIELDS = Object.freeze(['title', 'text', 'meter', 'at', 'when']);
 export const CAST_LIMITS = Object.freeze({ entries: 64, name: 80, aliases: 8, about: 300, look: 600, voice: 300, personality: 600, history: 1200,
-    place: 80, goal: 200, routine: 200, drawnTo: 6, phrase: 80, fields: 6, fieldName: 40, fieldValue: 60, secrets: 8, secretTitle: 60, secretText: 300, secretWhen: 120, meters: 10 });
+    place: 80, goal: 200, routine: 200, drawnTo: 6, phrase: 80, fields: 6, fieldName: 40, fieldValue: 60, secrets: 8, secretTitle: 60, secretText: 300, secretWhen: 120, meters: 10, gear: 6, skills: 8, skillName: 40, skillAbout: 120 });
 // The meters NPC State Delta has before any preset (a secret or a stage may name them without the entry listing them): its four
 // own and the ones its built-in presets (companion, rival, mentor) add.
 export const CAST_BUILT_IN_METERS = Object.freeze(['trust', 'affection', 'desire', 'tension', 'loyalty', 'respect', 'rivalry', 'approval']);
@@ -181,7 +195,11 @@ export const WEATHER_TABLE_FIELDS = Object.freeze(['season', 'region', 'weather'
 export const WEATHER_LIMITS = Object.freeze({ seasons: 12, months: 60, season: 24, region: 80, tables: 120, kinds: 24, text: 60 });
 export const START_FIELDS = Object.freeze(['scene', 'inventory']);
 // Screens (SPEC §13.1) a pack adds or overrides by id.
-export const SCREEN_FIELDS = Object.freeze(['id', 'title', 'icon', 'mounts', 'template', 'layout', 'css', 'theme', 'data', 'steps']);
+// `tab` puts a screen in a shared tab (the same `tab` on several screens draws them as sections of one tab, in `order`; `tabTitle` names it, the first one
+// given wins); a block's `show.into` names the same tab. `order` is the screen's place among the tabs (lower first).
+export const SCREEN_FIELDS = Object.freeze(['id', 'title', 'icon', 'mounts', 'template', 'layout', 'css', 'theme', 'data', 'steps', 'tab', 'tabTitle', 'order']);
+export const TAB_ID = /^[a-z][a-z0-9-]{0,39}$/;
+export const TAB_TITLE_MAX = 24;
 export const MOUNTS = Object.freeze(['tab', 'screen', 'card', 'hud', 'dialog']);
 
 // Slugs are lowercase words joined by single dashes, as Story Block's definition IDs need.

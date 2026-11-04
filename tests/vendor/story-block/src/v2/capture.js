@@ -130,6 +130,39 @@ export function markOff(mes, words, from = 0) {
     });
 }
 
+/**
+ * `mes` with the header of each hidden comment from `from` on saying how many lines of a display kind a reply
+ * could show when its lines were read (`cap:chatter=5`), for a kind whose cap is the reader's setting: the same
+ * reply shows the same lines whatever the setting is later. `caps`: { [written word]: whole number }; a kind not
+ * in it loses its mark (a Re-read marks every comment of the reply anew).
+ */
+export function markCaps(mes, caps, from = 0) {
+    const text = String(mes ?? '');
+    const list = Object.entries(caps ?? {}).filter(([word, n]) => KIND_WORD.test(String(word).toLowerCase()) && Number.isInteger(n) && n > 0).map(([word, n]) => `cap:${String(word).toLowerCase()}=${n}`).sort();
+    const pairs = hiddenPairs(text).filter(pair => pair.start >= from);
+    if (!pairs.length) return text;
+    return replacePairs(text, pairs, pair => {
+        const body = text.slice(pair.bodyStart, pair.bodyEnd);
+        const nl = body.indexOf('\n');
+        const words = (nl < 0 ? body : body.slice(0, nl)).trim().split(/\s+/).filter(word => word && !word.startsWith('cap:'));
+        words.push(...list);
+        return `${text.slice(pair.start, pair.bodyStart)}${words.map(word => ` ${word}`).join('')}${nl < 0 ? '' : body.slice(nl)}${text.slice(pair.bodyEnd, pair.end)}`;
+    });
+}
+
+/** The caps a reply's hidden comments carry (markCaps): { [kind word]: n }, the largest where comments differ. */
+export function capsOf(mes) {
+    const text = String(mes ?? '');
+    const out = {};
+    for (const pair of hiddenPairs(text)) {
+        for (const word of commentParts(text, pair).head) {
+            const found = /^cap:([a-z][a-z0-9_-]*)=(\d{1,4})$/.exec(word);
+            if (found && Number(found[2]) > 0) out[found[1]] = Math.max(out[found[1]] ?? 0, Number(found[2]));
+        }
+    }
+    return out;
+}
+
 // Every function here is linear in the length of the reply: a looping model can write a run of
 // thousands of spaces or blank lines, and the text is read again for every later prompt (turn.js).
 // So there are no regexes that can retry from each place in a run (`\s+$`, `\n\s*$`, `\s*x|\s+y`);
@@ -337,6 +370,89 @@ export function defangMarker(mes, from = 0) {
     const text = String(mes ?? '');
     const at = Math.max(0, Math.min(text.length, from | 0));
     return text.slice(0, at) + text.slice(at).replace(HIDDEN_OPEN, found => `${found}_`);
+}
+
+// --- Story Block v1's envelope -----------------------------------------------------------------------
+// v1 kept a reply's blocks in `<!-- STORY_BLOCKS_V1 … -->` (also STORY_BLOCKS_V1_CUT, and Inventory Block's
+// INVENTORY_BLOCK_V05; src/envelope.js). v2 never writes one, but a card greeting or an old reply may hold one,
+// and a model that sees it in the history copies it, change lines and all. So it is never sent to the model
+// (stripBlock, and turn.js for the prompt), and a reply that wrote its changes only there has them read
+// (adoptLegacy). `\b` keeps STORY_BLOCKS_V1_CONTEXT_* out; the cut marker is listed first so it wins.
+const LEGACY_OPEN = /<!--\s*(?:STORY_BLOCKS_V1_CUT|STORY_BLOCKS_V1|INVENTORY_BLOCK_V05)\b/gi;
+const HAS_LEGACY = /<!--\s*(?:STORY_BLOCKS_V1|INVENTORY_BLOCK_V05)/i;
+/** The one Problem a reply that wrote its changes only in a v1 envelope gets. */
+export const LEGACY_PROBLEM = 'The narrator wrote its changes in an old format; they were read anyway.';
+// The word after the hidden comment's marker when its block was read from a v1 envelope, so a Re-read tells it again.
+const LEGACY_MARK = 'legacy';
+
+// Every v1 envelope of `text`: closed ones, and one left open (the reply was cut off in it) to the end.
+function legacyPairs(text) {
+    const pairs = closedPairs(text, LEGACY_OPEN, HIDDEN_CLOSE);
+    LEGACY_OPEN.lastIndex = pairs.length ? pairs.at(-1).end : 0;
+    const open = LEGACY_OPEN.exec(text);
+    if (open) pairs.push({ start: open.index, end: text.length, bodyStart: LEGACY_OPEN.lastIndex, bodyEnd: text.length, open: true });
+    return pairs;
+}
+
+// `text` with each pair taken out with the whitespace before it (not before `from`), or put back as what `put(pair, i)` gives.
+function cutPairs(text, pairs, from = 0, put = () => '') {
+    let out = '';
+    let at = 0;
+    pairs.forEach((pair, i) => {
+        let start = pair.start;
+        while (start > Math.max(at, from) && isSpace(text[start - 1])) start -= 1;
+        const kept = put(pair, i);
+        out += text.slice(at, start) + (kept ? `${start > 0 ? '\n\n' : ''}${kept}` : '');
+        at = pair.end;
+    });
+    return out + text.slice(at);
+}
+
+/** True when `mes` holds a v1 envelope. */
+export function hasLegacy(mes) {
+    return HAS_LEGACY.test(String(mes ?? '')) && legacyPairs(String(mes)).length > 0;
+}
+
+/** `mes` without its v1 envelopes (and the whitespace before each). Unchanged when it has none. */
+export function stripLegacy(mes) {
+    const text = String(mes ?? '');
+    return HAS_LEGACY.test(text) ? cutPairs(text, legacyPairs(text)) : text;
+}
+
+/**
+ * A reply's v1 envelopes, from `at.from` on (a Continue's own text), before it is read: when the reply has no block of
+ * its own (bare or kept; with `at`, none the Continue added), the change lines in them become its block, in the place
+ * of the first one, each once; otherwise they are taken out and never read. → { text, legacy }: legacy 'read' (lines
+ * were taken), 'ignored' (envelopes taken out), or null (none; `text` is `mes`).
+ */
+export function adoptLegacy(mes, { tag = 'Changes', at = null } = {}) {
+    const text = String(mes ?? '');
+    if (!HAS_LEGACY.test(text)) return { text, legacy: null };
+    const from = Math.max(0, Math.min(text.length, at?.from ?? 0));
+    const pairs = legacyPairs(text).filter(pair => pair.start >= from);
+    if (!pairs.length) return { text, legacy: null };
+    const own = readBlocks(replacePairs(text, pairs, blank), tag, at).length > 0;
+    const lines = new Map();
+    if (!own) {
+        for (const pair of pairs) {
+            const body = text.slice(pair.bodyStart, pair.bodyEnd);
+            // (An envelope left open may end in the middle of its last line: that one is left out.)
+            const rows = body.split('\n').slice(0, pair.open && !body.endsWith('\n') ? -1 : undefined);
+            for (const row of rows) {
+                const line = row.trim();
+                if (line && line.length <= MAX_LINE && !parseLine(line).error && !lines.has(sameLine(line))) lines.set(sameLine(line), line);
+            }
+        }
+    }
+    if (!lines.size) return { text: cutPairs(text, pairs, from), legacy: 'ignored' };
+    const block = `<${tag}>\n${[...lines.values()].join('\n')}\n</${tag}>`;
+    return { text: cutPairs(text, pairs, from, (_, i) => (i === 0 ? block : '')), legacy: 'read' };
+}
+
+/** True when a hidden comment of `mes` says its block was read from a v1 envelope (hideBlock's `legacy`). */
+export function legacyRead(mes) {
+    const text = String(mes ?? '');
+    return hiddenPairs(text).some(pair => commentParts(text, pair).head.has(LEGACY_MARK));
 }
 // The bare blocks of `mes` (not hidden in Story Suite's comment, not inside closed reasoning), at
 // their places in `mes`.
@@ -589,7 +705,8 @@ export function extractBlock(mes, tag = 'Changes', at = null, { stopped = false,
  * Whitespace left at the end is trimmed.
  */
 export function stripBlock(mes, tag = 'Changes', { heads = null } = {}) {
-    const given = String(mes ?? '');
+    // (A v1 envelope goes too: it is never shown or sent, adoptLegacy.)
+    const given = stripLegacy(mes);
     // `heads` (grammarHeads): the change lines written in the story near the block go too.
     const raw = heads ? dropLines(given, strayLines(given, heads, { tag }).taken) : given;
     // A hidden comment goes when it holds a block, or only the lines left in the story or a cut line.
@@ -613,9 +730,10 @@ export function stripBlock(mes, tag = 'Changes', { heads = null } = {}) {
  * block on (a Continue's own text), are moved; the ones before are left as they are. A block left
  * open is kept with the word `open` after the marker, so a Continue can tell it goes on with it, and its
  * unfinished last line is kept beside it (<Changes-cut>). With `heads`, the change lines a capture left in
- * the story are listed in it (<Changes-story>), so a Re-read leaves them too.
+ * the story are listed in it (<Changes-story>), so a Re-read leaves them too. `legacy`: the block was read from a v1
+ * envelope (adoptLegacy), which the comment says.
  */
-export function hideBlock(mes, tag = 'Changes', { from = 0, skip = 0, tail = false, cut = null, stopped = false, heads = null } = {}) {
+export function hideBlock(mes, tag = 'Changes', { from = 0, skip = 0, tail = false, cut = null, stopped = false, heads = null, legacy = false } = {}) {
     const given = String(mes ?? '');
     // `heads` (grammarHeads): the change lines written in the story near the block (strayLines) are
     // taken out of the story and kept after the blocks, in a block of their own.
@@ -652,7 +770,8 @@ export function hideBlock(mes, tag = 'Changes', { from = 0, skip = 0, tail = fal
     const unfinished = open ? wholeLines(bare.at(-1)).cut : '';
     if (unfinished && !unfinished.includes('<')) parts.push(`<${names.cut}>\n${commentSafe(unfinished)}\n</${names.cut}>`);
     // A block left open (the reply was cut off in it) is said so, for a Continue (continuation()).
-    const mark = open ? ` ${CUT_MARK}` : '';
+    // `legacy`: the block was read from a v1 envelope (adoptLegacy), said so a Re-read tells it again (legacyRead).
+    const mark = `${open ? ` ${CUT_MARK}` : ''}${legacy && bare.length ? ` ${LEGACY_MARK}` : ''}`;
     return `${trimEnd(story)}\n\n<!-- ${HIDDEN_MARKER}${mark}\n${parts.join('\n')}\n-->`;
 }
 
@@ -775,6 +894,8 @@ export function grammarHeads(kinds) {
     for (const entry of Array.isArray(kinds) ? kinds : []) {
         const word = String(entry?.kind ?? '').toLowerCase();
         if (!KIND_WORD.test(word)) continue;
+        // A kind's own `heads` (registry.contexts()): taken as they are written, for a kind with no grammar line in the prompt.
+        for (const head of Array.isArray(entry?.heads) ? entry.heads : []) if (typeof head === 'string' && new RegExp(`^[+\\-~!?] ${escapeRe(word)}$`, 'iu').test(head)) heads.add(head.toLowerCase());
         const re = new RegExp(`(?:^|[\\s(;,])([+\\-~!?]) ${escapeRe(word)}(?![\\p{L}\\p{N}_-])`, 'gu');
         for (const found of String(entry?.grammar ?? '').matchAll(re)) heads.add(`${found[1]} ${word}`);
     }

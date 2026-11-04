@@ -1,5 +1,5 @@
 // The Party tab: one card per Character block (you first, then block order), side by side on a wide screen and
-// stacked on a phone. Each card has the name and role line, Soul Class, the XP bar, the three stage bars, the seven
+// stacked on a phone. Each card has the name and role line, the level pill ("Lv 14 · Guild F"), the XP bar ("24 / 100 to Lv 15"), the three stage bars, the seven
 // stats in a row and the skills from that character's Skills block. A character with points to spend shows
 // "N points to spend" and a Spend points button; any other shows Stats. Both open the Spend points sheet (distribute.js)
 // over the cards; Skills opens the character's Skills view (skills.js) the same way. A fallen character (`alive` false) is greyed
@@ -12,7 +12,8 @@ import { meter } from '../../view/widgets/meter.js';
 import { RPG_STRINGS, fill } from '../strings.js';
 import { drawStageBars } from './bars.js';
 import { newSession, renderDistribute } from './distribute.js';
-import { growthText, readParty } from './party-data.js';
+import { growthText, readParty, xpLine } from './party-data.js';
+import { newGearSession, renderGearCard } from './gear-card.js';
 import { newSkillsSession, renderSkills } from './skills.js';
 
 const P = RPG_STRINGS.party;
@@ -38,8 +39,9 @@ const sameCharacter = (a, b) => a.module === b.module && a.subject === b.subject
  * its draft, is kept here, outside the widget (as Settings → Blocks keeps its editor): `shared.open` is the Spend points sheet's
  * session and `shared.skills` the Skills view's; at most one of them is open.
  */
-export function createPartyWidget({ headState = () => null, readerName = () => '', roleOf, openWizard = null, exportCharacter = null, rules = undefined } = {}) {
-    const shared = { open: null, skills: null };
+export function createPartyWidget({ headState = () => null, readerName = () => '', roleOf, openWizard = null, exportCharacter = null, rules = undefined, rolled = () => false, levels = () => ({}), gear = null } = {}) {
+    // `gear` ({ on(), view(args) }, none without a host): while Gear in fights is on a card has an Inventory button that opens the slot card (gear-card.js).
+    const shared = { open: null, skills: null, gear: null };
     const live = new Set();
     const tell = () => { for (const redraw of [...live]) redraw(); };
     return {
@@ -51,7 +53,7 @@ export function createPartyWidget({ headState = () => null, readerName = () => '
             const main = h(doc, 'div', 'rpg-main'), host = h(doc, 'div', 'rpg-sheet-host');
             root.append(main, host);
 
-            const read = () => readParty(headState(), { own: readerName(), roleOf });
+            const read = () => readParty(headState(), { own: readerName(), roleOf, ...levels() });
             const clear = () => {
                 for (const handle of handles) handle.destroy?.();
                 handles = [];
@@ -68,10 +70,13 @@ export function createPartyWidget({ headState = () => null, readerName = () => '
             };
 
             // A sheet opened, closed or ended in any instance is drawn in every one that is on a page.
-            const openSheet = character => { shared.open = newSession(character); shared.skills = null; tell(); };
+            const openSheet = character => { shared.open = newSession(character); shared.skills = null; shared.gear = null; tell(); };
             const closeSheet = () => { shared.open = null; tell(); };
             const ended = ({ ok }) => { if (ok) shared.open = null; tell(); };
-            const openSkills = character => { shared.skills = newSkillsSession(character); shared.open = null; tell(); };
+            const openSkills = character => { shared.skills = newSkillsSession(character); shared.open = null; shared.gear = null; tell(); };
+            const openGear = character => { shared.gear = newGearSession(character); shared.open = null; shared.skills = null; tell(); };
+            const closeGear = () => { shared.gear = null; tell(); };
+            const gearOn = () => { try { return gear?.on?.() === true; } catch { return false; } };
             const closeSkills = () => { shared.skills = null; tell(); };
             const newCharacter = () => { try { openWizard?.(); } catch { /* the dialog may not open here */ } };
 
@@ -86,13 +91,13 @@ export function createPartyWidget({ headState = () => null, readerName = () => '
                 const pills = h(doc, 'div', 'rpg-pills');
                 if (character.left) pills.appendChild(h(doc, 'span', 'ss-pill rpg-fallen-pill rpg-left-pill', P.left));
                 else if (!character.alive) pills.appendChild(h(doc, 'span', 'ss-pill rpg-fallen-pill', P.fallen));
-                pills.appendChild(h(doc, 'span', 'ss-pill', fill(P.soul, { label: character.soulLabel, name: character.soulName })));
+                pills.appendChild(h(doc, 'span', 'ss-pill rpg-level-pill', character.levelText));
                 if (character.points > 0) pills.appendChild(h(doc, 'span', 'ss-pill rpg-points', fill(character.points === 1 ? P.pointsOne : P.points, { n: character.points })));
                 top.append(who, pills);
                 node.appendChild(top);
                 const xp = h(doc, 'div', 'rpg-xp');
                 node.appendChild(xp);
-                handles.push(meter.render(xp, { label: P.xp, value: character.xp, max: 100, tone: 'accent', text: fill(P.xpText, { xp: character.xp }), icon: 'fa-star' }, {}));
+                handles.push(meter.render(xp, { label: P.xp, value: character.xp, max: 100, tone: 'accent', text: xpLine(character), icon: 'fa-star' }, {}));
                 drawStageBars(doc, node, character, { api, handles });
                 const stats = h(doc, 'div', 'rpg-stats');
                 for (const stat of character.stats) {
@@ -105,10 +110,11 @@ export function createPartyWidget({ headState = () => null, readerName = () => '
                 if (character.skillsBlock) node.appendChild(h(doc, 'div', 'rpg-skills', character.skills.length ? character.skills.map(skill => `${skill.name} (${skill.rankName})`).join(' · ') : P.noSkills));
                 // The Standard formula's bars grow with VIT, AGI and INT: how many blocks each has and the stat that earns the next one, and Luck's next step.
                 if (character.growth) node.appendChild(h(doc, 'p', 'rpg-growth', growthText(character.growth)));
-                const actions = h(doc, 'div', 'rpg-card-actions');
+                const actions = h(doc, 'div', `rpg-card-actions${gearOn() ? ' rpg-card-actions-gear' : ''}`);
                 const spend = character.points > 0;
                 button(actions, spend ? P.spend : P.stats, `ss-button${spend ? ' ss-button-primary' : ''} rpg-open`, () => openSheet(character));
                 if (character.skillsBlock) button(actions, P.skills, 'ss-button rpg-skills-open', () => openSkills(character));
+                if (gearOn()) button(actions, P.inventory, 'ss-button rpg-gear-open', () => openGear(character));
                 if (exportCharacter) {
                     const out = button(actions, '', 'ss-button rpg-export-open', () => { try { exportCharacter(character); } catch { /* the dialog may not open here */ } });
                     const icon = h(doc, 'i', 'fa-solid fa-file-export');
@@ -127,9 +133,13 @@ export function createPartyWidget({ headState = () => null, readerName = () => '
                 if (shared.open && !open) shared.open = null;
                 const looking = shared.skills ? party.find(character => sameCharacter(character, shared.skills) && character.skillsBlock) : null;
                 if (shared.skills && !looking) shared.skills = null;
-                main.hidden = Boolean(open || looking);
+                const wearing = shared.gear && gearOn() ? party.find(character => sameCharacter(character, shared.gear)) : null;
+                const wearView = wearing ? (() => { try { return gear.view({ who: wearing.name, own: wearing.own }); } catch { return null; } })() : null;
+                if (shared.gear && !(wearing && wearView)) shared.gear = null;
+                main.hidden = Boolean(open || looking || shared.gear);
                 if (open) sheet = renderDistribute(host, { character: open, session: shared.open, api, doc, onClose: closeSheet, onDone: ended, ...(rules ? { rules } : {}) });
-                else if (looking) sheet = renderSkills(host, { character: looking, session: shared.skills, api, doc, onBack: closeSkills, onSaved: tell, ...(rules ? { rules } : {}) });
+                else if (shared.gear) sheet = renderGearCard(host, { character: wearing, view: wearView, onBack: closeGear, doc });
+                else if (looking) sheet = renderSkills(host, { character: looking, session: shared.skills, api, doc, onBack: closeSkills, onSaved: tell, rolled, ...(rules ? { rules } : {}) });
                 const head = h(doc, 'div', 'rpg-head');
                 head.appendChild(h(doc, 'h3', '', P.title));
                 const count = h(doc, 'div', 'rpg-pills');
