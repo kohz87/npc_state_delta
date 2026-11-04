@@ -24,6 +24,8 @@
     { "path": "core-development.js", "role": "durable-profile-update", "required": true },
     { "path": "core-merge-incoming.js", "role": "incoming-npc-merge", "required": true },
     { "path": "core-merge.js", "role": "scan-merge", "required": true },
+    { "path": "core-prompts.js", "role": "scanner-prompt-builders", "required": true },
+    { "path": "core-injection.js", "role": "prompt-injection-builders", "required": true },
     { "path": "diagnostics-core.js", "role": "bounded-operation-diagnostics", "required": true },
     { "path": "appearance.js", "role": "appearance-forms", "required": true },
     { "path": "terminal-lifecycle.js", "role": "terminal-lifecycle", "required": true },
