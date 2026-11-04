@@ -1,6 +1,6 @@
 /* NPC State Delta portrait prompt building: visual anchor tags, appearance splitting, natural-language portrait prose,
    and buildNpcPortraitPrompts, with the portrait style limits and prompt-format normalizer it reads. A pure part of
-   core-mechanics.js (same owner, moved without change); core-mechanics.js re-exports every name. Imports only
+   core-mechanics.js (same owner, moved without change); core-mechanics.js re-exports every name it exported before. Imports only
    core-text.js and core-identity.js. */
 import { normalizeName, cleanText } from './core-text.js';
 import { normalizeGender } from './core-identity.js';

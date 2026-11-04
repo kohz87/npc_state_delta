@@ -1,6 +1,6 @@
 /* NPC State Delta scan text and JSON helpers: evidence extraction and stripping, scanner JSON repair and parsing,
    narration-capture reading, and the clean* text helpers. A pure part of core-mechanics.js (same owner, moved
-   without change); core-mechanics.js re-exports every name. Imports nothing, so it never forms a cycle. */
+   without change); core-mechanics.js re-exports every name it exported before. Imports nothing, so it never forms a cycle. */
 
 export function normalizeName(value) {
     return String(value ?? '')

@@ -1,6 +1,6 @@
 /* NPC State Delta identity and age helpers: clamp and value normalizers, identity kind, interim and role labels,
    slug/id/hash, age and apparent-age normalization. A pure part of core-mechanics.js (same owner, moved without
-   change); core-mechanics.js re-exports every name. Imports only core-text.js. */
+   change); core-mechanics.js re-exports every name it exported before. Imports only core-text.js. */
 import { normalizeName, cleanText, cleanList } from './core-text.js';
 
 export function clamp(value, min = 0, max = 100) {
