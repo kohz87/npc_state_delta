@@ -55,6 +55,14 @@ test('card settings: valid accepts only the formats normalizePortraitPromptForma
     assert.equal(keys.scanEvery.valid(99), false);
 });
 
+test('card settings: valid accepts only the exact lowercase value, no case or spacing variants', async () => {
+    for (const bad of ['Natural', 'NATURAL', ' natural', 'natural ', 'Tags', 'hybrid\n']) assert.equal(validPortraitPromptFormat(bad), false, JSON.stringify(bad));
+    const { definition, store } = memory();
+    assert.equal(definition.keys.portraitPromptFormat.valid('Natural'), false);
+    assert.deepEqual(await definition.apply({ portraitPromptFormat: ' Natural ' }), { applied: [] });
+    assert.deepEqual(store.saves, []);
+});
+
 test('card settings: read returns the current settings; apply saves each valid key and reports them', async () => {
     const { definition, store } = memory({ portraitPromptFormat: 'tags', scanEvery: 3 });
     assert.equal(definition.read('portraitPromptFormat'), 'tags');
@@ -209,4 +217,37 @@ test('card settings: with a custom portrait preset active, apply changes the pre
     assert.equal(result.after, 'tags');
     assert.equal(result.setting, 'tags');
     assert.equal(result.preset, 'tags');
+});
+
+test('card settings: a dirty Portrait-panel draft survives apply; only the format changes', () => {
+    const result = runInHost(async ({ card, mockState }) => {
+        const D = globalThis.NPCStateDelta;
+        const orig = globalThis.$;
+        const fields = { '#npc_state_delta_portrait_composition': 'my unsaved composition', '#npc_state_delta_portrait_prompt_format': 'hybrid' };
+        const written = {};
+        globalThis.$ = selector => {
+            const q = orig(selector);
+            if (!(selector in fields)) return q;
+            return Object.assign(Object.create(q), {
+                val(value) { if (value === undefined) return fields[selector]; written[selector] = value; return this; },
+            });
+        };
+        try {
+            uiHandlers.get('input.npcStateDelta|#npc_state_delta_portrait_style_positive, #npc_state_delta_portrait_style_negative, #npc_state_delta_portrait_composition').call({ id: 'npc_state_delta_portrait_composition' });
+            const dirtyBefore = D.portraitSettingsDirty();
+            const out = await card.apply({ portraitPromptFormat: 'natural' });
+            const s = mockState.extensionSettings.npc_state_delta;
+            return {
+                dirtyBefore, out, dirtyAfter: D.portraitSettingsDirty(), savedFormat: s.portraitPromptFormat, savedComposition: s.portraitComposition,
+                panelComposition: written['#npc_state_delta_portrait_composition'], panelFormat: written['#npc_state_delta_portrait_prompt_format'],
+            };
+        } finally { globalThis.$ = orig; }
+    });
+    assert.equal(result.dirtyBefore, true);
+    assert.deepEqual(result.out, { applied: ['portraitPromptFormat'] });
+    assert.equal(result.dirtyAfter, true, 'the draft is still unsaved');
+    assert.equal(result.savedFormat, 'natural', 'the saved format is the card\'s');
+    assert.notEqual(result.savedComposition, 'my unsaved composition', 'the draft itself was not saved');
+    assert.equal(result.panelComposition, 'my unsaved composition', 'the draft is back in the panel');
+    assert.equal(result.panelFormat, 'natural', 'with only the format replaced');
 });

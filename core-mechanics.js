@@ -3786,15 +3786,17 @@ const PORTRAIT_HUMANOID_FIRST = /^(?:humans?|elf|elves|elven|dwarf|dwarves|dwarv
 // bat-kin) or by its last part (wood-elf is an elf, elf-hound is a hound); the first part never decides.
 const PORTRAIT_HUMANOID_WORD = /^(?:humans?|humanoids?|persons?|people|mortals?|elf|elves|elven|dwarf|dwarves|dwarven|orcs?|goblins?|halflings?|gnomes?|tieflings?|demons?|angels?|vampires?|fae|fey|nymphs?|giants?|ogres?|trolls?|centaurs?|beast-?men|beast-?man|beast-?wom[ae]n|\w*folk|kin|\w+born)$/i;
 const PORTRAIT_HUMANOID_COMPOUND = /^(?:half-\w+|\w+-kin|(?:\w+-)*beast-?(?:men|man|wom[ae]n)|(?:\w+-)*\w*folk)$/i;
-// "elf ranger", "dwarf smith": a people named first counts only when what follows is a person (a trade or a rank), so
-// "troll bridge" stays a bridge.
-const PORTRAIT_PERSON_TAIL = /^(?:\w*(?:ist|ian|man|woman|men|women|smith|lord|lady|ess|maid|knight|mage|wizard|witch)|ranger|archer|hunter|fighter|warrior|scout|guard|guardian|priest|thief|rogue|noble|king|queen|prince|sage|monk|nun|bard|healer|elder|child|girl|boy|youth|chief|chieftain|captain|shaman|druid|cleric|paladin|mercenary|assassin|sentinel|soldier|slave|servant|wanderer|merchant|trader|sailor|pirate|bandit|outlaw|scholar|apprentice|mystic|seer|oracle|sorcerer|sorceress|necromancer|duelist|swordsman|spy|courier|messenger|ambassador|emissary|diplomat)$/i;
+// "elf ranger", "orc warchief", "troll-wife": a people named first is still that people, unless what follows is a thing or an
+// animal ("troll bridge", "elf-hound").
+const PORTRAIT_NON_PERSON_TAIL = /^(?:bridges?|hounds?|dogs?|wolf|wolves|spiders?|horses?|steeds?|mounts?|birds?|cats?|beasts?|golems?|constructs?|statues?|trees?|camps?|markets?|towers?|ships?|boats?|castles?|caves?|forests?|mountains?|rivers?|swamps?|hills?|villages?|cities|city|fortress|gate|gates|axes?|swords?|hammers?|shields?|banners?|drums?|fires?|stones?|rocks?|snakes?|serpents?|rats?|bears?|boars?|hawks?|eagles?|owls?|ravens?|crows?|bats?|hogs?|pigs?|lizards?|drakes?|dragons?|wyrms?|worms?|insects?|beetles?|ants?|bugs?|flies|fly|robots?|machines?|puppets?|dolls?|scarecrows?|totems?|idols?)$/i;
 function portraitSpeciesIsHumanoid(words) {
     if (!words.length) return true;
     const last = words[words.length - 1];
     if (PORTRAIT_HUMANOID_COMPOUND.test(last) || PORTRAIT_HUMANOID_WORD.test(last)) return true;
     if (last.includes('-') && PORTRAIT_HUMANOID_WORD.test(last.split('-').pop())) return true;
-    return words.length > 1 && PORTRAIT_HUMANOID_FIRST.test(words[0]) && PORTRAIT_PERSON_TAIL.test(last);
+    // A hyphenated word led by a people word is that people unless its last part is a thing or an animal (troll-wife, not elf-hound).
+    if (last.includes('-') && PORTRAIT_HUMANOID_FIRST.test(last.split('-')[0]) && !PORTRAIT_NON_PERSON_TAIL.test(last.split('-').pop())) return true;
+    return words.length > 1 && PORTRAIT_HUMANOID_FIRST.test(words[0]) && !PORTRAIT_NON_PERSON_TAIL.test(last);
 }
 
 function portraitProseList(items) {

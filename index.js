@@ -8306,7 +8306,19 @@ function registerEvents() {
 function nsdCardSettings() {
     return createCardSettingsDefinition({
         readFormat: () => portraitSettingsSnapshot(getSettings()).portraitPromptFormat,
-        saveFormat: format => savePortraitSettingsDraft({ portraitPromptFormat: format }),
+        // An unsaved draft in the Portrait panel is the reader's: only the format is saved, then the draft goes back into the
+        // panel with the card's format in it, still marked unsaved.
+        saveFormat: async format => {
+            if (!portraitSettingsDirty) return savePortraitSettingsDraft({ portraitPromptFormat: format });
+            const draft = portraitSettingsDraftFromUi();
+            const saved = await savePortraitSettingsDraft({ portraitPromptFormat: format });
+            if (saved) {
+                writePortraitSettingsDraftToUi({ ...draft, portraitPromptFormat: format });
+                portraitSettingsDirty = true;
+                updatePortraitSettingsSaveUi();
+            }
+            return saved;
+        },
         readScanEvery: () => getSettings().scanEvery,
         saveScanEvery: value => {
             const next = Math.max(SCAN_EVERY_RANGE.min, Math.min(SCAN_EVERY_RANGE.max, Math.round(Number(value)) || 2));

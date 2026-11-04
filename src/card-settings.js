@@ -15,10 +15,9 @@ export const SCAN_EVERY_RANGE = Object.freeze({ min: 1, max: 20 });
 // The names the prompt format has in Delta's own settings select.
 const FORMAT_NAMES = Object.freeze({ hybrid: 'Structured hybrid', tags: 'Comma tags', natural: 'Natural' });
 
-/** True for a value `normalizePortraitPromptFormat` accepts as itself (it would otherwise fall back to hybrid). */
+/** True only for the exact lowercase value of a format Delta has (no case or spacing variants). */
 export function validPortraitPromptFormat(value) {
-    return typeof value === 'string' && PORTRAIT_PROMPT_FORMATS.includes(value.trim().toLowerCase())
-        && normalizePortraitPromptFormat(value) === value.trim().toLowerCase();
+    return typeof value === 'string' && PORTRAIT_PROMPT_FORMATS.includes(value);
 }
 
 export function validScanEvery(value) {
@@ -56,7 +55,7 @@ export function createCardSettingsDefinition({ readFormat, saveFormat, readScanE
         async apply(values = {}) {
             const applied = [];
             if (Object.prototype.hasOwnProperty.call(values, 'portraitPromptFormat') && validPortraitPromptFormat(values.portraitPromptFormat)) {
-                if (await saveFormat?.(values.portraitPromptFormat.trim().toLowerCase()) !== false) applied.push('portraitPromptFormat');
+                if (await saveFormat?.(values.portraitPromptFormat) !== false) applied.push('portraitPromptFormat');
             }
             if (Object.prototype.hasOwnProperty.call(values, 'scanEvery') && validScanEvery(values.scanEvery)) {
                 if (await saveScanEvery?.(values.scanEvery) !== false) applied.push('scanEvery');

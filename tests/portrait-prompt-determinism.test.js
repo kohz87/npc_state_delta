@@ -345,3 +345,13 @@ test('natural portrait prose: half-elf, fox-beastfolk, elf ranger and high elves
     assert.match(prose({ name: 'A', gender: 'male', species: 'wood-elf' }), /^A portrait of a wood-elf man\./);
     assert.match(prose({ name: 'A', gender: 'female', species: 'bat-kin' }), /^A portrait of a bat-kin woman\./);
 });
+
+test('natural portrait prose: a people named first stays a people for any trade or kind, unless a thing or animal follows', () => {
+    const people = { 'orc warchief': 'an', 'orc berserker': 'an', 'ogre bruiser': 'an', 'elf champion': 'an', 'goblin raider': 'a', 'elf maiden': 'an', 'dwarf miner': 'a', 'troll matriarch': 'a', 'troll-wife': 'a' };
+    for (const [species, article] of Object.entries(people)) {
+        assert.match(prose({ name: 'A', gender: 'female', species }), new RegExp(`^A portrait of ${article} ${species} woman\\.`), species);
+    }
+    for (const species of ['elf-hound', 'troll bridge', 'giant spider', 'demon wolf']) {
+        assert.doesNotMatch(prose({ name: 'A', gender: 'female', species }), /woman\./, species);
+    }
+});
