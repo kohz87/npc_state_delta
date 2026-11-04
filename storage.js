@@ -275,11 +275,19 @@ function wait(ms, sleepFn = globalThis.setTimeout) {
 
 async function uploadPayload({ name, json, fetchFn, headers }) {
     const data = bytesToBase64(new TextEncoder().encode(json));
-    const response = await fetchFn('/api/files/upload', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ name, data }),
-    });
+    // A check that overlaps this upload may have read the file before or after it: neither it nor any earlier
+    // check is shared or reused afterwards (noteLocalWrite before and after the request).
+    noteLocalWrite();
+    let response;
+    try {
+        response = await fetchFn('/api/files/upload', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ name, data }),
+        });
+    } finally {
+        noteLocalWrite();
+    }
     if (!response?.ok) {
         const detail = typeof response?.text === 'function' ? await response.text() : '';
         const error = new Error(`NPC State Delta data file write failed${detail ? `: ${detail}` : ''}.`);
@@ -433,15 +441,61 @@ function inspectionResult(meta, text, payload = null) {
     return result;
 }
 
+// (perf checks) One reply asks the server about the same sidecar many times (the caller map is in CHANGELOG "Unreleased").
+// Two rules cut the requests without letting any write decide on an old answer:
+// 1. Single-flight: a check that starts while a request for the same path is in flight (same fetch, no upload of
+//    ours since it started) shares that request and its answer instead of queueing a second one behind it.
+// 2. Reuse: a caller that asks for it (`reuse`) may take the answer of the check just before it: same path, same
+//    turn (beginNpcStateCheckTurn: every host event starts one), no upload or delete of ours since that check, and
+//    at most NPC_STATE_CHECK_REUSE_MS old. Our own verified write is such a check (its read-back), so the check
+//    right after it needs no request. Write guards (`fresh`: the revision check before an upload, the read-back
+//    after it, retirement) never reuse and never join a request: they always send their own.
+export const NPC_STATE_CHECK_REUSE_MS = 2000;
+const RECENT_CHECKS_LIMIT = 4;
+const recentChecks = new Map();
+const checksInFlight = new Map();
+let localWriteGeneration = 0;
+let checkTurn = 0;
+
+function noteLocalWrite() { localWriteGeneration += 1; }
+
+/** A new turn (a host event): no answer from an earlier turn is reused. */
+export function beginNpcStateCheckTurn() { checkTurn += 1; }
+
+function rememberCheck(path, entry) {
+    recentChecks.delete(path);
+    recentChecks.set(path, entry);
+    while (recentChecks.size > RECENT_CHECKS_LIMIT) recentChecks.delete(recentChecks.keys().next().value);
+}
+
+// Every caller gets its own view of an answer: the meta fields copied, and the decoded file only for the caller
+// whose request decoded it (the others decode the shared text when they read `payload`).
+function observedCopy(observed, own = false) {
+    if (observed.missing) return { missing: true };
+    return { meta: { ...observed.meta }, text: observed.text, payload: own ? observed.payload : null };
+}
+
+function reusableCheck(path, fetchFn) {
+    const entry = recentChecks.get(path);
+    if (!entry || entry.fetchFn !== fetchFn || entry.turn !== checkTurn || entry.generation !== localWriteGeneration
+        || Date.now() - entry.at > NPC_STATE_CHECK_REUSE_MS) return null;
+    return observedCopy(entry.observed);
+}
+
 // `writtenText`: the exact JSON this session just uploaded to this path. When the server returns those bytes,
 // their fields are the ones written (`writtenMeta`) and the file is not parsed again to learn them.
-async function inspectSidecar(pointer, { fetchFn = globalThis.fetch, expectedChatKey = '', probeHeaders = null, writtenText = null, writtenMeta = null } = {}) {
-    if (!pointer?.path) return { inspected: { ...MISSING_FILE }, updatedAtText: '' };
-    if (typeof fetchFn !== 'function') throw new Error('fetch() is unavailable for NPC State Delta data-file inspection.');
-    const path = pointer.path;
+async function requestSidecar(path, { fetchFn, probeHeaders = null, writtenText = null, writtenMeta = null }) {
+    const generation = localWriteGeneration;
+    const turn = checkTurn;
+    const settle = observed => {
+        // Remembered for reuse only when no upload of ours overlapped the request.
+        if (generation === localWriteGeneration) rememberCheck(path, { fetchFn, generation, turn, at: Date.now(), observed: observedCopy(observed) });
+        else recentChecks.delete(path);
+        return observed;
+    };
     if (probeHeaders && await dataFileExists(path, { fetchFn, headers: probeHeaders }) === false) {
         inspectedFiles.delete(path);
-        return { inspected: { ...MISSING_FILE }, updatedAtText: '' };
+        return settle({ missing: true });
     }
     // Always revalidated with the server ('no-cache'), never read stale; but an unchanged sidecar
     // comes back as "304 Not Modified" from SillyTavern's file route instead of re-downloading the
@@ -450,7 +504,7 @@ async function inspectSidecar(pointer, { fetchFn = globalThis.fetch, expectedCha
     const response = await withReadSlot(() => fetchFn(path, { method: 'GET', cache: 'no-cache' }));
     if (response?.status === 404) {
         inspectedFiles.delete(path);
-        return { inspected: { revision: 0, writerId: '', exists: false, retired: false, updatedAt: 0, payload: null }, updatedAtText: '' };
+        return settle({ missing: true });
     }
     const known = inspectedFiles.get(path);
     const etag = responseHeader(response, 'etag');
@@ -466,6 +520,7 @@ async function inspectSidecar(pointer, { fetchFn = globalThis.fetch, expectedCha
         rememberInspectedFile(path, known);
     } else {
         if (!response?.ok) {
+            recentChecks.delete(path);
             const error = new Error(`NPC State Delta data file revision check failed with HTTP ${response?.status || 'error'}.`);
             error.status = Number(response?.status || 0);
             throw error;
@@ -479,6 +534,31 @@ async function inspectSidecar(pointer, { fetchFn = globalThis.fetch, expectedCha
         if (etag) rememberInspectedFile(path, { etag, lastModified, text, meta });
         else inspectedFiles.delete(path);
     }
+    return settle({ meta, text, payload });
+}
+
+async function observeSidecar(path, { fetchFn, probeHeaders = null, writtenText = null, writtenMeta = null, fresh = false, reuse = false }) {
+    if (reuse && !fresh) {
+        const reused = reusableCheck(path, fetchFn);
+        if (reused) return reused;
+    }
+    const shared = checksInFlight.get(path);
+    if (!fresh && shared && shared.fetchFn === fetchFn && shared.generation === localWriteGeneration) {
+        return observedCopy(await shared.promise);
+    }
+    const entry = { fetchFn, generation: localWriteGeneration, promise: requestSidecar(path, { fetchFn, probeHeaders, writtenText, writtenMeta }) };
+    checksInFlight.set(path, entry);
+    try { return observedCopy(await entry.promise, true); }
+    finally { if (checksInFlight.get(path) === entry) checksInFlight.delete(path); }
+}
+
+// `fresh`: a write guard; `reuse`: may take the check just before (both above).
+async function inspectSidecar(pointer, { fetchFn = globalThis.fetch, expectedChatKey = '', probeHeaders = null, writtenText = null, writtenMeta = null, fresh = false, reuse = false } = {}) {
+    if (!pointer?.path) return { inspected: { ...MISSING_FILE }, updatedAtText: '' };
+    if (typeof fetchFn !== 'function') throw new Error('fetch() is unavailable for NPC State Delta data-file inspection.');
+    const observed = await observeSidecar(pointer.path, { fetchFn, probeHeaders, writtenText, writtenMeta, fresh, reuse });
+    if (observed.missing) return { inspected: { ...MISSING_FILE }, updatedAtText: '' };
+    const { meta, text, payload } = observed;
     if (expectedChatKey && meta.chatKey !== String(expectedChatKey)) throw new Error('NPC State Delta data file belongs to a different chat.');
     return { inspected: inspectionResult(meta, text, payload), updatedAtText: meta.updatedAtText };
 }
@@ -486,8 +566,9 @@ async function inspectSidecar(pointer, { fetchFn = globalThis.fetch, expectedCha
 // `probeHeaders` (request headers): ask whether the file exists first (dataFileExists) and, when
 // the server says it does not, answer "missing" without fetching it. Used where a missing file is
 // expected (a chat's first look for its file); everywhere else the file is fetched directly.
-export async function inspectNpcStateDataFile(pointer, { fetchFn = globalThis.fetch, expectedChatKey = '', probeHeaders = null } = {}) {
-    return (await inspectSidecar(pointer, { fetchFn, expectedChatKey, probeHeaders })).inspected;
+// `reuse`: the caller is no write guard and may take the answer of the check just before it (see above).
+export async function inspectNpcStateDataFile(pointer, { fetchFn = globalThis.fetch, expectedChatKey = '', probeHeaders = null, reuse = false } = {}) {
+    return (await inspectSidecar(pointer, { fetchFn, expectedChatKey, probeHeaders, reuse })).inspected;
 }
 
 export function adoptNpcStateDataFileMetadata(pointer, inspected) {
@@ -499,8 +580,9 @@ export function adoptNpcStateDataFileMetadata(pointer, inspected) {
     return pointer;
 }
 
+// The write guards' read (before an upload, its read-back, retirement): always its own request (`fresh`).
 async function remoteRevision(pointer, chatKey, fetchFn, probeHeaders = null, written = null) {
-    const { inspected, updatedAtText } = await inspectSidecar(pointer, { fetchFn, expectedChatKey: chatKey, probeHeaders, writtenText: written?.text ?? null, writtenMeta: written?.meta ?? null });
+    const { inspected, updatedAtText } = await inspectSidecar(pointer, { fetchFn, expectedChatKey: chatKey, probeHeaders, writtenText: written?.text ?? null, writtenMeta: written?.meta ?? null, fresh: true });
     return {
         revision: inspected.revision,
         writerId: inspected.writerId,
@@ -839,11 +921,17 @@ export async function readNpcStateDataFile(pointer, { fetchFn = globalThis.fetch
 export async function deleteNpcStateDataFile(pointer, { fetchFn = globalThis.fetch, headers = {} } = {}) {
     if (!pointer?.path) return false;
     if (typeof fetchFn !== 'function') throw new Error('fetch() is unavailable for NPC State Delta data-file persistence.');
-    const response = await fetchFn('/api/files/delete', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ path: pointer.path }),
-    });
+    noteLocalWrite();
+    let response;
+    try {
+        response = await fetchFn('/api/files/delete', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ path: pointer.path }),
+        });
+    } finally {
+        noteLocalWrite();
+    }
     if (response?.status === 404) return false;
     if (!response?.ok) {
         const detail = typeof response?.text === 'function' ? await response.text() : '';

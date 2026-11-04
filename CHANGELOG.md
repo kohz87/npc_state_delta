@@ -1,3 +1,7 @@
+## Unreleased
+
+- **Fewer requests for the chat's data file per reply.** A reply asked SillyTavern for the data file 12 times on the synthetic host (the boundary checks of the generation, the reply and the scan, the scan base, four scan commit checks, and each of the reply's two saves' guard and read-back); it now asks 9 times, with the same two saves. Concurrent checks of the file share one request and its answer instead of queueing behind each other. The scan's own boundary check and its base reuse the answer of the check just before them (the reply's boundary check, or the read-back of the save flushed before the scan) when it is from the same host event, less than 2 seconds old and no save or delete of Delta's came between. A scan commit check asks again only when a model request was made since the previous one; the check right before the final commit (which always asks) no longer repeats it. Every save still checks the file's revision with its own request before uploading and reads it back after, and the final commit check of a scan always asks, so another tab's or device's save is caught exactly as before. What is saved is unchanged.
+
 ## 1.10.1
 
 - **Faster saves of a large chat.** Encoding the chat's data file for upload took hundreds of milliseconds per save on a chat with many dossiers and portraits (it built the text one character at a time); it is now one step per 32 KB block. The uploaded bytes are the same.

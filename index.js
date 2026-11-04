@@ -169,6 +169,7 @@ import {
 } from './social.js';
 import {
     adoptNpcStateDataFileMetadata,
+    beginNpcStateCheckTurn,
     cancelPendingNpcStateWrite,
     deleteNpcStateDataFile,
     inspectNpcStateDataFile,
@@ -423,10 +424,13 @@ function beginScanOperation(key, label, metadata = {}) {
     return operation;
 }
 function scanOperationCurrent(key, operation) { return scanOperations.isCurrent(key, operation); }
-async function scanCanonicalBaseCurrent(key, operation, label = 'scan') {
+// `ask: false` (perf checks): the server was asked by the scan's previous check and nothing since waited on a model
+// request, or the next check follows with no wait at all; a repeat request is purely redundant. Every local condition
+// below is still checked. The final commit check always asks.
+async function scanCanonicalBaseCurrent(key, operation, label = 'scan', { ask = true } = {}) {
     const baseRevision = Math.max(0, Math.trunc(Number(operation?.canonicalRevision) || 0));
     try {
-        await ensureHydratedStateFresh(key, { reason: `${label}-commit` });
+        if (ask) await ensureHydratedStateFresh(key, { reason: `${label}-commit` });
     } catch (error) {
         recordFreshnessEvent(key, 'stale-operation-rejected', {
             reason: label,
@@ -1687,7 +1691,9 @@ async function reconcileCrossSessionWriteConflict(key, error, snapshot, knownPoi
     return inspected;
 }
 
-async function ensureHydratedStateFresh(key = getChatKey(), { reason = 'boundary', notify = false, probeMissing = false } = {}) {
+// `reuse`: this boundary is no write or commit guard, so it may take the answer of the state-file check just before it
+// in the same turn, with no write of ours since (storage.js inspectNpcStateDataFile). Only the callers named there pass it.
+async function ensureHydratedStateFresh(key = getChatKey(), { reason = 'boundary', notify = false, probeMissing = false, reuse = false } = {}) {
     const normalized = String(key || '');
     if (!normalized || normalized === 'no-chat' || !isCanonicalChatKey(normalized)) return getChatState(normalized);
     if (!hydratedChatKeys.has(normalized)) return getChatState(normalized);
@@ -1723,7 +1729,7 @@ async function ensureHydratedStateFresh(key = getChatKey(), { reason = 'boundary
         const localRevision = hydratedRevision(normalized);
         const localWriterId = String(hydratedStateMeta.get(normalized)?.writerId || pointer?.writerId || '');
         // (beta) Unpointered, a missing file is the usual answer: asked first, so no 404 is fetched.
-        const inspected = await inspectNpcStateDataFile(pointer, { expectedChatKey: normalized, probeHeaders: unpointered ? requestHeaders() : null });
+        const inspected = await inspectNpcStateDataFile(pointer, { expectedChatKey: normalized, probeHeaders: unpointered ? requestHeaders() : null, reuse });
         // A deletion, rename or retirement that completed while this read was in flight owns the
         // chat now; the late result must not restore its pointer, tombstone or cached dossier.
         if (!ownershipEpochCurrent(normalized, epoch) || getSettings().sidecarTombstones?.[normalized]) throw staleOwnershipError(normalized);
@@ -1958,13 +1964,13 @@ function holdRetiredLocalWork(key) {
 
 // probeMissing: an explicit look (the reader's own action, page resume) that asks the server even
 // when this session already found no sidecar for the chat (sidecarMissTrusted).
-async function ensureChatStateLoaded(key = getChatKey(), { probeMissing = false } = {}) {
+async function ensureChatStateLoaded(key = getChatKey(), { probeMissing = false, reuse = false } = {}) {
     if (!key || key === 'no-chat' || !isCanonicalChatKey(key)) return freshChatState();
     if (retiredInSessionChats.has(key)) {
         hydrationErrors.set(key, retiredInSessionChats.get(key));
         throw retiredInSessionChats.get(key);
     }
-    if (hydratedChatKeys.has(key)) return ensureHydratedStateFresh(key, { reason: 'hydrate-boundary', probeMissing });
+    if (hydratedChatKeys.has(key)) return ensureHydratedStateFresh(key, { reason: 'hydrate-boundary', probeMissing, reuse });
     if (loadingChatStates.has(key)) return loadingChatStates.get(key);
     const epoch = ownershipEpoch(key);
     let task;
@@ -3476,10 +3482,12 @@ function setNpcDossierScanIndicator(npcId, busy) {
     });
 }
 
-async function prepareCanonicalScanBase(key, label = 'scan') {
+// `reuse` (the automatic scan only): the base may be the answer of the check just before, usually the read-back of
+// the write flushed here. The scan's commit checks still ask the server before its result is kept.
+async function prepareCanonicalScanBase(key, label = 'scan', { reuse = false } = {}) {
     try {
         await settleStateFileWrite(key, { flush: true });
-        await ensureHydratedStateFresh(key, { reason: `${label}-start` });
+        await ensureHydratedStateFresh(key, { reason: `${label}-start`, reuse });
         if (staleHostActive(key)) {
             globalThis.toastr?.warning?.('NPC State Delta: this chat has not loaded the newest messages another session added, so scanning it would roll the dossier back. Reload the chat first.');
             return false;
@@ -4417,7 +4425,8 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
     const sourceMoved = () => getChatKey() !== scanChatKey || (sourceFingerprint !== null
         && sourceFingerprint !== fingerprintMessage(getContext().chat?.[messageId] || {})
         && !sameReplyRewritten(scanChatKey, messageId, sourceParent));
-    await ensureChatStateLoaded(scanChatKey);
+    // Called right after the event's own boundary check (handleAssistantMessageReceivedInner): its answer is reused.
+    await ensureChatStateLoaded(scanChatKey, { reuse: true });
     await refreshMessageGate();
     if (sourceMoved()) return false;
     if (isScanBusy(scanChatKey)) {
@@ -4425,7 +4434,7 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
         else if (Number.isInteger(messageId)) queuePendingAutoScan(scanChatKey, messageId, 'busy-auto-scan');
         return false;
     }
-    if (!await prepareCanonicalScanBase(scanChatKey, manual ? 'manual dossier scan' : 'automatic dossier scan')) return false;
+    if (!await prepareCanonicalScanBase(scanChatKey, manual ? 'manual dossier scan' : 'automatic dossier scan', { reuse: !manual })) return false;
     if (sourceMoved()) return false;
     const scanLineage = chatLineage(ctx.chat || []);
     let currentTranscript = currentExchangeTranscript(messageId);
@@ -4497,7 +4506,8 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
             requestScope: operation.requestScope,
         });
         let currentLineage = chatLineage(getContext().chat || []);
-        if (!await scanCanonicalBaseCurrent(scanChatKey, operation, 'dossier scan')
+        // A one-pass block (capture) made no request since the scan base was checked.
+        if (!await scanCanonicalBaseCurrent(scanChatKey, operation, 'dossier scan', { ask: !capture })
             || !scanOperationCurrent(scanChatKey, operation) || getChatKey() !== scanChatKey
             || lineageMoved(scanLineage, currentLineage, messageId) || Number(stateVersions.get(scanChatKey) || 0) !== scanStateVersion) {
             const scanFinishedAt = performance.now?.() ?? Date.now();
@@ -4585,7 +4595,8 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
             at: Date.now(),
         };
         currentLineage = chatLineage(getContext().chat || []);
-        if (!await scanCanonicalBaseCurrent(scanChatKey, operation, 'dossier scan relationship evaluation')
+        // Asked again only when the relationship evaluator made a request (it has targets) since the previous check.
+        if (!await scanCanonicalBaseCurrent(scanChatKey, operation, 'dossier scan relationship evaluation', { ask: relationshipPass.targetCount > 0 })
             || !scanOperationCurrent(scanChatKey, operation) || getChatKey() !== scanChatKey
             || lineageMoved(scanLineage, currentLineage, messageId) || Number(stateVersions.get(scanChatKey) || 0) !== scanStateVersion) {
             console.info('[NPC State Delta] discarded stale dossier scan after chat, dossier, or canonical state changed during relationship evaluation.');
@@ -4673,7 +4684,8 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
             }
         }
         currentLineage = chatLineage(getContext().chat || []);
-        if (!await scanCanonicalBaseCurrent(scanChatKey, operation, 'dossier scan new-NPC relationship evaluation')
+        // The final commit check below follows with no wait in between and asks the server: this one checks locally.
+        if (!await scanCanonicalBaseCurrent(scanChatKey, operation, 'dossier scan new-NPC relationship evaluation', { ask: false })
             || !scanOperationCurrent(scanChatKey, operation)
             || getChatKey() !== scanChatKey
             || lineageMoved(scanLineage, currentLineage, messageId)
@@ -8090,9 +8102,11 @@ function registerEvents() {
     if (eventsRegistered) return;
     const ctx = getContext();
     const events = ctx.eventTypes || ctx.event_types || {};
-    const source = ctx.eventSource;
-    if (!source?.on) return;
+    const hostSource = ctx.eventSource;
+    if (!hostSource?.on) return;
     eventsRegistered = true;
+    // (perf checks) Every host event begins a new check turn: no state-file answer from before it is reused (storage.js).
+    const source = { on: (name, handler) => hostSource.on(name, (...args) => { beginNpcStateCheckTurn(); return handler(...args); }) };
     for (const name of ['CONNECTION_PROFILE_CREATED', 'CONNECTION_PROFILE_UPDATED', 'CONNECTION_PROFILE_DELETED']) {
         if (events[name]) source.on(events[name], syncScannerProfileControl);
     }
