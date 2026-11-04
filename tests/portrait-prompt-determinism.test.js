@@ -329,3 +329,29 @@ test('natural portrait prose drops a parenthetical, reads a leading people name 
     assert.doesNotMatch(prose({ name: 'A', gender: 'male', species: 'high elves' }), /elves/);
     assert.match(prose({ name: 'A', gender: 'male', species: 'wolf (grey)' }), /^A portrait of a male wolf\./);
 });
+
+test('natural portrait prose: the head noun is a whole word, never half of a hyphenated one', () => {
+    assert.doesNotMatch(prose({ name: 'A', gender: 'female', species: 'elf-hound' }), /elf-hound woman/);
+    assert.match(prose({ name: 'A', gender: 'female', species: 'elf-hound' }), /^A portrait of a female elf-hound\./, 'a hound is not given a human form');
+    assert.doesNotMatch(prose({ name: 'A', gender: 'female', species: 'troll bridge' }), /troll bridge woman/);
+    assert.match(prose({ name: 'A', gender: 'female', species: 'troll bridge' }), /^A portrait of a female troll bridge\./);
+});
+
+test('natural portrait prose: half-elf, fox-beastfolk, elf ranger and high elves read as in 1.8.0, and a hyphenated people keeps its noun', () => {
+    assert.match(prose({ name: 'A', gender: 'female', species: 'half-elf' }), /^A portrait of a half-elf woman\./);
+    assert.match(prose({ name: 'A', gender: 'female', species: 'fox-beastfolk' }), /^A portrait of a fox-beastfolk woman\./);
+    assert.match(prose({ name: 'A', gender: 'male', species: 'elf ranger' }), /^A portrait of an elf ranger man\./);
+    assert.match(prose({ name: 'A', gender: 'male', species: 'high elves' }), /^A portrait of a high elf man\./);
+    assert.match(prose({ name: 'A', gender: 'male', species: 'wood-elf' }), /^A portrait of a wood-elf man\./);
+    assert.match(prose({ name: 'A', gender: 'female', species: 'bat-kin' }), /^A portrait of a bat-kin woman\./);
+});
+
+test('natural portrait prose: a people named first stays a people for any trade or kind, unless a thing or animal follows', () => {
+    const people = { 'orc warchief': 'an', 'orc berserker': 'an', 'ogre bruiser': 'an', 'elf champion': 'an', 'goblin raider': 'a', 'elf maiden': 'an', 'dwarf miner': 'a', 'troll matriarch': 'a', 'troll-wife': 'a' };
+    for (const [species, article] of Object.entries(people)) {
+        assert.match(prose({ name: 'A', gender: 'female', species }), new RegExp(`^A portrait of ${article} ${species} woman\\.`), species);
+    }
+    for (const species of ['elf-hound', 'troll bridge', 'giant spider', 'demon wolf']) {
+        assert.doesNotMatch(prose({ name: 'A', gender: 'female', species }), /woman\./, species);
+    }
+});
