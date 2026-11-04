@@ -729,3 +729,27 @@ test('v1.2.12 one-pass relationship targets: story names only, the block covers 
         h.equal(h.relationshipCalls().length, 2, '"relationshipReview" asks for a check');
     });
 });
+
+// ---- 1.10.0 (L2a): a capture read its own reply; the replies that still wait are read by the next scan, and that scan skips the captured one ----
+
+test('v1.10.0 a capture leaves the marker behind waiting replies; the next scan reads them and not the captured reply', () => {
+    runScenario('capture-read-ahead', async h => {
+        h.settings.narrationCapture = true;
+        h.settings.scanEvery = 30;
+        for (let i = 1; i <= 3; i += 1) await h.turn('We walk on.', `The road goes on, mile ${i} of marker-${i}.`);
+        h.equal(h.scannerCalls().length, 0, 'quiet replies: no scanner request');
+        const id = await h.turn('Who is at the gate?', `${h.REPLY}${h.block()}`);
+        h.equal(h.scannerCalls().length, 0, 'the capture made no scanner request');
+        const state = h.runtime.getState();
+        h.equal(state.readAhead, [id], 'the captured reply is remembered as read');
+        h.check(state.lastScannedMessageId < id, 'the marker stayed behind the three waiting replies');
+        h.equal(state.assistantSinceScan, 3, 'the three unread replies count toward the safety scan');
+        await h.turn('And then?', 'Yunyun says nothing more, and Megumin watches her go.');
+        h.equal(h.scannerCalls().length, 1, 'a tracked name scans');
+        const prompt = String(h.scannerCalls()[0].prompt || '');
+        h.check(['marker-1.', 'marker-2.', 'marker-3.', 'Megumin watches her go'].every(text => prompt.includes(text)), 'the waiting replies and the new one are read');
+        h.check(!prompt.includes('waves awkwardly'), 'the captured reply is not read again');
+        h.equal(h.runtime.getState().readAhead, [], 'nothing is left read ahead');
+        h.equal(h.runtime.getState().lastScannedMessageId, h.mockState.context.chat.length - 1, 'the marker is at the latest reply');
+    });
+});

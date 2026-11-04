@@ -133,6 +133,7 @@ export function snapshotBranchState(state = {}) {
         assistantSinceScan: Number(state.assistantSinceScan || 0),
         lastScanAt: Number(state.lastScanAt || 0),
         lastScannedMessageId: Number.isInteger(state.lastScannedMessageId) ? state.lastScannedMessageId : null,
+        readAhead: Array.isArray(state.readAhead) ? state.readAhead.filter(Number.isInteger) : [],
         scanCount: Number(state.scanCount || 0),
     };
 }
@@ -150,6 +151,7 @@ export function restoreSnapshotIntoState(current = {}, snapshot = null) {
         assistantSinceScan: Number(snapshot.assistantSinceScan || 0),
         lastScanAt: Number(snapshot.lastScanAt || 0),
         lastScannedMessageId: Number.isInteger(snapshot.lastScannedMessageId) ? snapshot.lastScannedMessageId : null,
+        readAhead: Array.isArray(snapshot.readAhead) ? snapshot.readAhead.filter(Number.isInteger) : [],
         scanCount: Number(snapshot.scanCount || 0),
     };
 }

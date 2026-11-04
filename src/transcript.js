@@ -68,6 +68,29 @@ export function recentTranscript(limit = null, { messageIds = false } = {}) {
     return lines.reverse().join('\n');
 }
 
+/** The ids of the replies (not the user's messages) that `recentTranscript(limit)` holds, oldest first: what a manual or full-window scan reads. */
+export function recentReplyIds(limit = null) {
+    const chat = activeChat(readContext().chat || []);
+    const count = Math.max(2, Math.min(30, Number(limit ?? readScanDepth()) || 6));
+    const ids = [];
+    let lines = 0;
+    for (let i = chat.length - 1; i >= 0 && lines < count; i -= 1) {
+        if (!chat[i] || chat[i].is_system) continue;
+        if (!cleanMessage(chat[i])) continue;
+        lines += 1;
+        if (!chat[i].is_user) ids.push(i);
+    }
+    return ids.reverse();
+}
+
+/** The ids of every reply the story stands on (not the user's, not system or faded), oldest first. */
+export function activeReplyIds() {
+    const chat = activeChat(readContext().chat || []);
+    const ids = [];
+    for (let i = 0; i < chat.length; i += 1) if (chat[i] && !chat[i].is_system && !chat[i].is_user) ids.push(i);
+    return ids;
+}
+
 export function recentUserDevelopmentContext(limit = null, { messageIds = true } = {}) {
     const chat = activeChat(readContext().chat || []);
     const count = Math.max(2, Math.min(30, Number(limit ?? readScanDepth()) || 6));
@@ -128,7 +151,7 @@ export function currentExchangeMessages(messageId = null) {
  * true count waiting. null when no earlier reply was skipped, so a scan with nothing skipped reads exactly the current
  * exchange as before.
  */
-export function skippedExchangesWindow(messageId = null, { afterId: markerId = null, replies = 0, limit = null, fresh = false } = {}) {
+export function skippedExchangesWindow(messageId = null, { afterId: markerId = null, replies = 0, limit = null, fresh = false, skip = [] } = {}) {
     // A chat never scanned has no marker yet: it reads from the start. Any other missing marker (a fail-closed restore with no
     // divergence information) reads the latest reply only.
     const afterId = Number.isInteger(markerId) ? markerId : (fresh ? -1 : null);
@@ -154,6 +177,21 @@ export function skippedExchangesWindow(messageId = null, { afterId: markerId = n
     }
     if (assistants < 2) return null;
     waiting.reverse();   // oldest first
+    // Replies a manual scan or a narration capture already read (`skip`, ids): not read again, with the user message each one answers. The reply
+    // this scan is for is always read.
+    const already = new Set((Array.isArray(skip) ? skip : [...(skip || [])]).filter(id => Number.isInteger(id) && id !== assistantId));
+    if (already.size) {
+        const drop = new Set();
+        for (const [at, id] of waiting.entries()) {
+            if (!already.has(id) || chat[id]?.is_user) continue;
+            drop.add(id);
+            const before = waiting[at - 1];
+            if (before !== undefined && chat[before]?.is_user) drop.add(before);
+        }
+        for (let at = waiting.length - 1; at >= 0; at -= 1) if (drop.has(waiting[at])) waiting.splice(at, 1);
+        assistants = waiting.filter(id => !chat[id].is_user).length;
+        if (assistants < 2) return null;
+    }
     // Oldest first, at most the cap; with no marker the same, counted back from the latest by `replies`.
     let kept = waiting.slice(0, WINDOW_MESSAGE_CAP);
     // A window ends on a reply; the user message after it belongs to the next one.
@@ -179,6 +217,8 @@ export function skippedExchangesWindow(messageId = null, { afterId: markerId = n
         // The window's story alone (no World State, Inner Chatter or blocks): who a relationship change involves.
         prose: proseLines.join('\n'),
         replies: assistants,
+        // The replies this window holds, for the record of what was read.
+        readIds: kept.filter(i => !chat[i].is_user),
         readThrough,
         latest: readThrough === assistantId,
         lastExchange,

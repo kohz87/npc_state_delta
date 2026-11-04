@@ -1,4 +1,4 @@
-# AI-README: NPC State Delta 1.9.0
+# AI-README: NPC State Delta 1.10.0
 
 For AI assistants that read this repository. Plain facts, no marketing. For people, read [README.md](README.md). For the rules
 every change must keep, read [AGENTS.md](AGENTS.md) and [docs/core-contract.md](docs/core-contract.md). Depth lives in `docs/`;
@@ -14,9 +14,9 @@ roleplay model about the NPCs who are present. With Story Block it also keeps me
 
 | Repo | Module id | Version | Owns |
 |---|---|---|---|
-| kohz87/Story_block | `story-block` | 2.16.1 | The host: store, replay, command bus, `<Changes>` capture, prompt assembly, module registry, settings window, Game view, packs and portraits, save points. |
+| kohz87/Story_block | `story-block` | 2.22.0 | The host: store, replay, command bus, `<Changes>` capture, prompt assembly, module registry, settings window, Game view, packs and portraits, save points. |
 | kohz87/Story_director | `story-director` | 2.9.1 | Story clock and calendar, quests, map, World, key people, the living cast (who has been met, where everyone is). Needs Story Block. |
-| kohz87/npc_state_delta (this) | `npc-state-delta` | 1.9.0 | NPC dossiers, meters, stages, hidden notes ("secrets"), the Dossiers screen, cast dossiers and cast portraits, social-check modifiers. |
+| kohz87/npc_state_delta (this) | `npc-state-delta` | 1.10.0 | NPC dossiers, meters, stages, hidden notes ("secrets"), the Dossiers screen, cast dossiers and cast portraits, social-check modifiers. |
 | kohz87/Story_studio | (not an extension) | 0.6.0 | A separate page that writes and checks packs. |
 
 Data flows one way: Studio writes a pack; Story Block validates and stores it; Story Director reads what Story Block holds; Delta
@@ -294,7 +294,7 @@ Detail: [docs/dev/storysuite-adapter.md](docs/dev/storysuite-adapter.md), [docs/
 
 ## Version
 
-NPC State Delta 1.9.0. The version lives in `manifest.json`, `package.json`, `runtime-modules.json`, `core.js`
+NPC State Delta 1.10.0. The version lives in `manifest.json`, `package.json`, `runtime-modules.json`, `core.js`
 (`NPC_STATE_VERSION`) and the `bootstrap.js` banner; `scripts/validate.mjs` checks they agree with README and CHANGELOG.
-Built for Story Block 2.16.1 and Story Director 2.9.1 in Story Suite with Story Studio 0.6.0. Persisted schema versions are
+Built for Story Block 2.22.0 and Story Director 2.9.1 in Story Suite with Story Studio 0.6.0. Persisted schema versions are
 separate from the application version.

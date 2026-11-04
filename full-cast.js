@@ -130,7 +130,9 @@ export async function runFullCastScan(messageId = null, before = null, { manual 
     // An absent marker (null: never scanned) is not message 0.
     const marker = state.lastScannedMessageId;
     const lastScanned = marker === null || marker === undefined || marker === '' ? null : Number(marker);
-    if (lastScanned !== exchange.assistantId) {
+    // A reply a scan read ahead (a capture, a manual scan while older replies waited) is scanned too.
+    const readAhead = Array.isArray(state.readAhead) ? state.readAhead : [];
+    if (lastScanned !== exchange.assistantId && !readAhead.includes(exchange.assistantId)) {
         broadScanOk = Boolean(await npcApi.scan());
         if (!await waitIdle(chatKey, token)) return false;
         if (latestAssistantId() !== exchange.assistantId || api()?.uiStatus?.().chatKey !== chatKey) return false;

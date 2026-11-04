@@ -43,6 +43,7 @@ import { findKeyEntry, isKey, normalizeKeyPeople } from './key-people.js';
 import { metWithEntry, normalizeCast } from './cast-dossier.js';
 import { escapeHtml } from './util/html.js';
 import { portraitFileSrc } from './portrait-file.js';
+import { createPublicPathsDefinition } from './public-paths.js';
 import { createParticipant, fileVault } from './storysuite-participant/index.js';
 
 export const MODULE_ID = 'npc-state-delta';
@@ -342,6 +343,8 @@ export function createStorySuiteV2Adapter({
     let offTurn = null;          // unsubscribes from the host's 'turn' event
     let offHead = null;          // unsubscribes from the host's 'head' event
     let offCardSettings = null;  // unregisters Delta's card settings
+    let baselineKey = null;      // the chat whose first loaded render was taken as the public paths' baseline
+    let offPublicPaths = null;   // unregisters Delta's public paths (npc.<name>.<meter>); `.changed()` tells the host the values moved
     let lastTick = Promise.resolve(null);
     let listParts = null;        // loadDossierList's { rowNodes, project, filter } once loaded
     let rowsCache = { key: null, rows: [] };
@@ -1549,6 +1552,25 @@ export function createStorySuiteV2Adapter({
         notifyChange();
     }
 
+    // The chat the dossiers belong to (the revision is "<chat key>|<version>"), and whether they are loaded. Older Delta: always loaded.
+    function chatKeyOf() {
+        try {
+            const revision = String(runtime()?.dossierRevision?.() ?? '');
+            const at = revision.lastIndexOf('|');
+            return at < 0 ? '' : revision.slice(0, at);
+        } catch { return ''; }
+    }
+    function dossiersReady() {
+        try { return runtime()?.dossiersReady?.() !== false; } catch { return true; }
+    }
+    // The values of a chat just opened are the host's baseline, not changes: registering again tells the host the paths came, not that values moved.
+    function rebaselinePublicPaths() {
+        const sdk = sdkRef;
+        if (!hosted || !sdk || typeof offPublicPaths !== 'function') return;
+        try { offPublicPaths(); } catch (error) { warn('Story Block public paths could not be released', error); }
+        offPublicPaths = registerPublicPaths(sdk);
+    }
+
     function listen() {
         if (listening || typeof doc?.addEventListener !== 'function') return;
         listening = true;
@@ -1562,6 +1584,14 @@ export function createStorySuiteV2Adapter({
         // is let go until the host renders the Cast tab again.
         const rerender = () => {
             if (!hosted) return;
+            // A scan that finished late moved moods and presence: the host compares and tells `story:changed`.
+            // The first render of a chat's loaded dossiers is no news: its values are the baseline (a quiet re-registration).
+            try {
+                const key = chatKeyOf();
+                if (key !== baselineKey) {
+                    if (dossiersReady()) { baselineKey = key; rebaselinePublicPaths(); }
+                } else offPublicPaths?.changed?.();
+            } catch (error) { warn('Story Block public paths change failed', error); }
             // Story Director's World screen (the page API's subscribers) redraws its cards too.
             notifyChange();
             redrawCastViews();
@@ -1585,6 +1615,100 @@ export function createStorySuiteV2Adapter({
             return typeof off === 'function' ? off : (typeof off?.unregister === 'function' ? () => off.unregister() : null);
         } catch (error) {
             warn('Story Block card settings were not registered', error);
+            return null;
+        }
+    }
+
+    // The people behind `npc.<name>.<meter>` (src/public-paths.js): the slice's meters at the head, only the meters the reader shows, and the dossier's
+    // mood and presence. A tracked person with no entry in the slice yet reads from the dossier's relationship numbers (where the entry would start).
+    // An archived person is left out. Nothing while Delta is off or the host is gone.
+    function publicPeople() {
+        if (!hosted || !enabled() || typeof sdkRef?.query !== 'function') return [];
+        const rows = sdkRef.query('npc.meters', {});
+        if (!Array.isArray(rows)) return [];
+        const defs = part.defs();
+        const shown = defs.filter(def => def.show !== false);
+        const hiddenMeters = defs.filter(def => def.show === false).map(def => def.id);
+        const list = npcList();   // once: the list already carries names, aliases, presence and archived
+        const fold = value => String(value ?? '').normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+        const labelsOf = npc => [npc.name, ...(Array.isArray(npc.aliases) ? npc.aliases : [])].map(fold).filter(Boolean);
+        const archived = new Set(list.filter(npc => npc.archived === true).flatMap(labelsOf));
+        const here = new Set(list.filter(npc => npc.present === true && npc.archived !== true).map(npc => fold(npc.name)));
+        // Mood and the seed numbers are read without copying the dossier (portraits and notes stay where they are).
+        const fieldsOf = entry => {
+            if (!entry) return null;
+            try {
+                const given = runtime()?.publicFields?.(entry.id);
+                if (given) return given;
+                const full = runtime()?.getNpc?.(entry.id);
+                return full && typeof full === 'object' ? { mood: typeof full.mood === 'string' ? full.mood : null, relationship: full.relationship } : null;
+            } catch { return null; }
+        };
+        const entryOf = name => {
+            const id = resolveDossierTarget(list, name);
+            return id ? list.find(npc => String(npc.id ?? '') === String(id)) ?? null : null;
+        };
+        const people = [];
+        const taken = new Set();
+        for (const row of rows) {
+            if (archived.has(fold(row.name))) continue;
+            const entry = entryOf(row.name);
+            const fields = fieldsOf(entry);
+            const meters = {};
+            for (const def of shown) if (Number.isFinite(row.meters?.[def.id])) meters[def.id] = row.meters[def.id];
+            people.push({
+                name: row.name, meters, hiddenMeters, present: here.has(fold(entry?.name ?? row.name)),
+                ...(typeof fields?.mood === 'string' ? { mood: fields.mood } : {}),
+            });
+            taken.add(fold(row.name));
+            for (const label of entry ? labelsOf(entry) : []) taken.add(label);
+        }
+        for (const npc of list) {
+            if (npc.archived === true || labelsOf(npc).some(label => taken.has(label))) continue;
+            const fields = fieldsOf(npc);
+            const given = fields?.relationship && typeof fields.relationship === 'object' ? fields.relationship : {};
+            const meters = {};
+            for (const def of shown) {
+                const seed = Number.isFinite(given[def.id]) ? Math.round(given[def.id]) : def.start;
+                meters[def.id] = Math.min(def.max, Math.max(def.min, seed));
+            }
+            people.push({
+                name: String(npc.name ?? '').trim(), meters, hiddenMeters, present: here.has(fold(npc.name)),
+                ...(typeof fields?.mood === 'string' ? { mood: fields.mood } : {}),
+            });
+        }
+        return people.filter(person => person.name);
+    }
+
+    // The names in Story Block's scene (`scene.present`), or null when it cannot answer; also the adapter's scenePresent().
+    function scenePresentNames() {
+        if (!hosted || typeof sdkRef?.query !== 'function') return null;
+        try {
+            const list = sdkRef.query('scene.present');
+            return Array.isArray(list) ? list.map(name => String(name ?? '').trim()).filter(Boolean) : null;
+        } catch {
+            return null;
+        }
+    }
+
+    // A cheap token of what publicPeople() reads: the slice's rows, the dossier revision, who is present, the meter settings and Delta's switch. While it is
+    // the same the table built for one synchronous read is reused (src/public-paths.js); any change reads fresh.
+    function publicVersion() {
+        if (!hosted || !enabled() || typeof sdkRef?.query !== 'function') return 'off';
+        let revision = '';
+        try { revision = String(runtime()?.dossierRevision?.() ?? ''); } catch { revision = ''; }
+        return JSON.stringify([revision, sdkRef.query('npc.meters', {}), scenePresentNames(), storedSettings()]);
+    }
+
+    // Delta's public paths, for a Story Block that has sdk.registerPublicPaths (2.22.0); an older one has none and nothing happens.
+    // A refusal is logged and never stops Delta being hosted. Returns the unregister function (with `.changed` when the host gives one) or null.
+    function registerPublicPaths(sdk) {
+        if (typeof sdk?.registerPublicPaths !== 'function') return null;
+        try {
+            const off = sdk.registerPublicPaths(createPublicPathsDefinition({ people: publicPeople, version: publicVersion }));
+            return typeof off === 'function' ? off : null;
+        } catch (error) {
+            warn('Story Block public paths were not registered', error);
             return null;
         }
     }
@@ -1619,6 +1743,8 @@ export function createStorySuiteV2Adapter({
             offHead = typeof off === 'function' ? off : null;
         } catch (error) { warn('Story Suite v2 head events are not available', error); }
         offCardSettings = registerCardSettings(sdk, cardSettings);
+        offPublicPaths = registerPublicPaths(sdk);
+        baselineKey = dossiersReady() ? chatKeyOf() : null;
         listen();
         syncDrawer();
         announceHosted(true);
@@ -1677,6 +1803,9 @@ export function createStorySuiteV2Adapter({
         offHead = null;
         try { offCardSettings?.(); } catch { /* the host is gone */ }
         offCardSettings = null;
+        try { offPublicPaths?.(); } catch { /* the host is gone */ }
+        offPublicPaths = null;
+        baselineKey = null;
         hostRef = null;
         sdkRef = null;
         pendingSection = null;
@@ -2018,15 +2147,7 @@ export function createStorySuiteV2Adapter({
         /** What Delta sends with the next reply under its own keys: [{ label, text }] (the `ownPrompt` hook). */
         ownPrompt,
         /** While hosted: the names in Story Block's scene (`scene.present`), or null when it cannot answer. */
-        scenePresent: () => {
-            if (!hosted || typeof sdkRef?.query !== 'function') return null;
-            try {
-                const list = sdkRef.query('scene.present');
-                return Array.isArray(list) ? list.map(name => String(name ?? '').trim()).filter(Boolean) : null;
-            } catch {
-                return null;
-            }
-        },
+        scenePresent: scenePresentNames,
         /**
          * While hosted: who is in the scene now, for the scanner: Story Director's World view
          * (`director.world.here` → `present`) when it answers, else Story Block's `scene.present`; null
