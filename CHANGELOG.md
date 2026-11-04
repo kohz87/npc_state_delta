@@ -1,4 +1,4 @@
-## Unreleased
+## 1.10.1
 
 - **Faster saves of a large chat.** Encoding the chat's data file for upload took hundreds of milliseconds per save on a chat with many dossiers and portraits (it built the text one character at a time); it is now one step per 32 KB block. The uploaded bytes are the same.
 - **The story's date is read once per pass.** Hosted with Story Director, loading or updating a chat's dossiers asked Story Block for the story's clock twice for every person; it is now asked once for all of them. Ages, birthdays and derived birth years are the same.
