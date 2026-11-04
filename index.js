@@ -8129,7 +8129,11 @@ function registerEvents() {
     if (!hostSource?.on) return;
     eventsRegistered = true;
     // (perf checks) Every host event begins a new check turn: no state-file answer from before it is reused (storage.js).
-    const source = { on: (name, handler) => hostSource.on(name, (...args) => { beginNpcStateCheckTurn(); return handler(...args); }) };
+    const turnStart = handler => (...args) => { beginNpcStateCheckTurn(); return handler(...args); };
+    const source = {
+        on: (name, handler) => hostSource.on(name, turnStart(handler)),
+        ...(typeof hostSource.makeFirst === 'function' ? { makeFirst: (name, handler) => hostSource.makeFirst(name, turnStart(handler)) } : {}),
+    };
     for (const name of ['CONNECTION_PROFILE_CREATED', 'CONNECTION_PROFILE_UPDATED', 'CONNECTION_PROFILE_DELETED']) {
         if (events[name]) source.on(events[name], syncScannerProfileControl);
     }
