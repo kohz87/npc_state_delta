@@ -18,6 +18,7 @@ import {
     hostedStoryDate,
     migrateLegacyStoryDay,
     normalizeCalendarDate,
+    withStoryDateMemo,
 } from './calendar.js';
 import {
     applyNpcBirthdayUpdate,
@@ -1728,7 +1729,7 @@ export function setNpcArchived(npc, archived, options = {}) {
 
 export function applyNpcStateCommand(state, command, options = {}) {
     const result = continuity.applyNpcStateCommand(state, command, options);
-    result.state.npcs = (result.state.npcs || []).map(npc => normalizeNpcBirthday(npc));
+    result.state.npcs = withStoryDateMemo(() => (result.state.npcs || []).map(npc => normalizeNpcBirthday(npc)));
     return result;
 }
 
@@ -1736,6 +1737,10 @@ export function applyNpcStateCommand(state, command, options = {}) {
 // profile fields and custom fields are held as if locked for this merge only (src/key-people.js); nothing of
 // the hold is stored, and without it the merge is exactly as before.
 export function mergeScanResult(state, scanResult, rawOptions = {}) {
+    return withStoryDateMemo(() => mergeScanResultInPass(state, scanResult, rawOptions));
+}
+
+function mergeScanResultInPass(state, scanResult, rawOptions = {}) {
     const hold = lockAwayNpcs(state, rawOptions.awayNpcIds);
     if (!hold) return mergeScanResultHeld(state, scanResult, rawOptions);
     const result = mergeScanResultHeld(hold.state, scanResult, rawOptions);
@@ -1888,4 +1893,4 @@ export function buildProfileRefreshPrompt(options = {}) {
 }
 
 // NPC State Delta application version. Persisted bundle, branch, and data schemas are versioned independently.
-export const NPC_STATE_VERSION = '1.10.0';
+export const NPC_STATE_VERSION = '1.10.1';

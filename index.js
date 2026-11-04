@@ -128,6 +128,7 @@ import {
     setExternalCalendarSource,
     setStoryClockSource,
     storyMinuteText,
+    withStoryDateMemo,
     currentPresentationText,
 } from './core.js';
 import { applyNpcBirthdayUpdate, normalizeBirthDate } from './birthday.js';
@@ -1430,7 +1431,12 @@ function freshChatState() {
     };
 }
 
+// (1.10.1) The whole pass reads the story's date once (calendar.js withStoryDateMemo), not once or twice per dossier.
 function normalizeChatState(raw = {}) {
+    return withStoryDateMemo(() => normalizeChatStateOnce(raw));
+}
+
+function normalizeChatStateOnce(raw = {}) {
     const state = { ...freshChatState(), ...(raw && typeof raw === 'object' ? structuredClone(raw) : {}) };
     const currentBranchFormat = Number(raw?.branchLineageVersion || 0) === BRANCH_LINEAGE_VERSION;
     state.branchLineageVersion = BRANCH_LINEAGE_VERSION;
