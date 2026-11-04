@@ -16,10 +16,27 @@ const fold = value => String(value ?? '').normalize('NFKC').toLowerCase().replac
 /**
  * The definition handed to sdk.registerPublicPaths.
  *   people()   [{ name, meters: { id: number }, hiddenMeters?: [id], present?: boolean, mood?: string }], archived people left out
+ *   version()  optional, a cheap string that changes whenever people() would give something else
  * Reading is one pass over people() (the host asks for all values at once when it compares for `story:changed`).
  */
-export function createPublicPathsDefinition({ people }) {
+export function createPublicPathsDefinition({ people, version = null }) {
+    // The host asks hidden(path) and get(path) once per path in one synchronous pass; the table is built once for that pass. It is kept only
+    // while `version()` (a cheap token of what the table is made from) stays the same, and dropped on the next microtask in any case, so a
+    // read after a scan, an edit or a chat switch sees the live values. Without a version it is kept for the microtask only.
+    let memo = null;
+    const token = () => {
+        if (typeof version !== 'function') return '';
+        try { return String(version()); } catch { return null; }
+    };
     function table() {
+        const now = token();
+        if (memo && now !== null && memo.token === now) return memo.table;
+        const built = build();
+        memo = { token: now, table: built };
+        try { queueMicrotask(() => { memo = null; }); } catch { memo = null; }
+        return built;
+    }
+    function build() {
         const shown = new Map();    // folded path → { path, value }
         const hidden = new Set();   // folded paths of hidden meters
         let list = [];

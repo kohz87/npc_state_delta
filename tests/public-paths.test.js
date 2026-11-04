@@ -39,7 +39,10 @@ function fakeDelta() {
     delta.suiteApi = { npcs: () => Object.values(delta.records).map(({ id, name, aliases, present, archived }) => ({ id, name, aliases, present, archived })) };
     delta.api = {
         isEnabled: () => delta.enabled,
-        getNpc: id => (delta.records[id] ? structuredClone(delta.records[id]) : null),
+        getNpc: id => { delta.cloned = (delta.cloned ?? 0) + 1; return delta.records[id] ? structuredClone(delta.records[id]) : null; },
+        // The real revision moves whenever a dossier does; the fake's records are changed in place, so the revision is their content.
+        dossierRevision: () => JSON.stringify(delta.records),
+        publicFields: id => (delta.records[id] ? { mood: typeof delta.records[id].mood === 'string' ? delta.records[id].mood : null, relationship: { ...(delta.records[id].relationship ?? {}) } } : null),
         relationshipBaseline: () => ({ ...delta.baseline }),
         presentCastHtml: () => '<section class="npc-state-delta-present-roster">cast</section>',
         castEmptyReason: () => ({ text: 'Nobody here.' }),
@@ -310,4 +313,35 @@ test('createPublicPathsDefinition on its own: duplicate names, non-finite values
     assert.deepEqual(broken.paths(), []);
     assert.equal(broken.get('npc.Ann.trust'), undefined);
     assert.deepEqual(broken.values(), {});
+});
+
+test('1.10.0 cost: one pass of the host (paths, then hidden and get for every path) builds the table once, and reads no dossier copy', async () => {
+    const h = await host();
+    h.delta.records.npc_mira.mood = 'wary';
+    const d = live(h);
+    // Each build of the people reads Delta's list once; count those reads.
+    const list = h.delta.suiteApi.npcs;
+    let builds = 0;
+    h.delta.suiteApi.npcs = () => { builds += 1; return list(); };
+    h.delta.cloned = 0;
+    // What Story Block's api.paths() does: the paths, then hidden(path) and get(path) for each, all in one synchronous read.
+    const pass = d.paths();
+    for (const path of pass) { d.hidden(path); d.get(path); }
+    assert.ok(pass.length >= 8, 'a real table');
+    assert.ok(builds <= 2, `at most 2 people() calls per pass, got ${builds}`);
+    assert.equal(h.delta.cloned, 0, 'no dossier is copied to read the public paths');
+    assert.equal(d.get('npc.Mira.mood'), 'wary', 'the mood still reads');
+});
+
+test('1.10.0 cost: the table is rebuilt for a read after the microtask (a value moved in between is seen)', async () => {
+    let value = 1;
+    let sources = 0;
+    const d = createPublicPathsDefinition({ people: () => { sources += 1; return [{ name: 'Ann', meters: { trust: value } }]; } });
+    assert.equal(d.get('npc.Ann.trust'), 1);
+    assert.equal(d.get('npc.Ann.trust'), 1);
+    assert.equal(sources, 1, 'one build for the synchronous reads');
+    value = 2;
+    await Promise.resolve();
+    assert.equal(d.get('npc.Ann.trust'), 2, 'a later read sees the new value');
+    assert.equal(sources, 2);
 });

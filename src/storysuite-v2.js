@@ -1603,29 +1603,44 @@ export function createStorySuiteV2Adapter({
         const defs = part.defs();
         const shown = defs.filter(def => def.show !== false);
         const hiddenMeters = defs.filter(def => def.show === false).map(def => def.id);
-        const list = npcList();
+        const list = npcList();   // once: the list already carries names, aliases, presence and archived
         const fold = value => String(value ?? '').normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim();
         const labelsOf = npc => [npc.name, ...(Array.isArray(npc.aliases) ? npc.aliases : [])].map(fold).filter(Boolean);
         const archived = new Set(list.filter(npc => npc.archived === true).flatMap(labelsOf));
-        const here = new Set(presentList().map(npc => fold(npc.name)));
+        const here = new Set(list.filter(npc => npc.present === true && npc.archived !== true).map(npc => fold(npc.name)));
+        // Mood and the seed numbers are read without copying the dossier (portraits and notes stay where they are).
+        const fieldsOf = entry => {
+            if (!entry) return null;
+            try {
+                const given = runtime()?.publicFields?.(entry.id);
+                if (given) return given;
+                const full = runtime()?.getNpc?.(entry.id);
+                return full && typeof full === 'object' ? { mood: typeof full.mood === 'string' ? full.mood : null, relationship: full.relationship } : null;
+            } catch { return null; }
+        };
+        const entryOf = name => {
+            const id = resolveDossierTarget(list, name);
+            return id ? list.find(npc => String(npc.id ?? '') === String(id)) ?? null : null;
+        };
         const people = [];
         const taken = new Set();
         for (const row of rows) {
             if (archived.has(fold(row.name))) continue;
-            const dossier = dossierOf(row.name);
+            const entry = entryOf(row.name);
+            const fields = fieldsOf(entry);
             const meters = {};
             for (const def of shown) if (Number.isFinite(row.meters?.[def.id])) meters[def.id] = row.meters[def.id];
             people.push({
-                name: row.name, meters, hiddenMeters, present: here.has(fold(dossier?.name ?? row.name)),
-                ...(dossier && typeof dossier.mood === 'string' ? { mood: dossier.mood } : {}),
+                name: row.name, meters, hiddenMeters, present: here.has(fold(entry?.name ?? row.name)),
+                ...(typeof fields?.mood === 'string' ? { mood: fields.mood } : {}),
             });
             taken.add(fold(row.name));
-            for (const label of dossier ? labelsOf(dossier) : []) taken.add(label);
+            for (const label of entry ? labelsOf(entry) : []) taken.add(label);
         }
         for (const npc of list) {
             if (npc.archived === true || labelsOf(npc).some(label => taken.has(label))) continue;
-            const dossier = dossierOf(npc.name);
-            const given = dossier?.relationship && typeof dossier.relationship === 'object' ? dossier.relationship : {};
+            const fields = fieldsOf(npc);
+            const given = fields?.relationship && typeof fields.relationship === 'object' ? fields.relationship : {};
             const meters = {};
             for (const def of shown) {
                 const seed = Number.isFinite(given[def.id]) ? Math.round(given[def.id]) : def.start;
@@ -1633,10 +1648,19 @@ export function createStorySuiteV2Adapter({
             }
             people.push({
                 name: String(npc.name ?? '').trim(), meters, hiddenMeters, present: here.has(fold(npc.name)),
-                ...(dossier && typeof dossier.mood === 'string' ? { mood: dossier.mood } : {}),
+                ...(typeof fields?.mood === 'string' ? { mood: fields.mood } : {}),
             });
         }
         return people.filter(person => person.name);
+    }
+
+    // A cheap token of what publicPeople() reads: the slice's rows, the dossier revision, the meter settings and Delta's switch. While it is
+    // the same the table built for one synchronous read is reused (src/public-paths.js); any change reads fresh.
+    function publicVersion() {
+        if (!hosted || !enabled() || typeof sdkRef?.query !== 'function') return 'off';
+        let revision = '';
+        try { revision = String(runtime()?.dossierRevision?.() ?? ''); } catch { revision = ''; }
+        return JSON.stringify([revision, sdkRef.query('npc.meters', {}), storedSettings()]);
     }
 
     // Delta's public paths, for a Story Block that has sdk.registerPublicPaths (2.22.0); an older one has none and nothing happens.
@@ -1644,7 +1668,7 @@ export function createStorySuiteV2Adapter({
     function registerPublicPaths(sdk) {
         if (typeof sdk?.registerPublicPaths !== 'function') return null;
         try {
-            const off = sdk.registerPublicPaths(createPublicPathsDefinition({ people: publicPeople }));
+            const off = sdk.registerPublicPaths(createPublicPathsDefinition({ people: publicPeople, version: publicVersion }));
             return typeof off === 'function' ? off : null;
         } catch (error) {
             warn('Story Block public paths were not registered', error);

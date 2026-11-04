@@ -8632,6 +8632,13 @@ window.NPCStateDelta = Object.freeze({
         const npc = getChatState().npcs.find(item => item.id === String(npcId || ''));
         return npc ? structuredClone(npc) : null;
     },
+    /** What the public paths read of a dossier without copying it (no portraits, no notes): { mood, relationship } as plain values, or null. */
+    publicFields: npcId => {
+        const npc = getChatState().npcs.find(item => item.id === String(npcId || ''));
+        if (!npc) return null;
+        const relationship = npc.relationship && typeof npc.relationship === 'object' ? { ...npc.relationship } : {};
+        return { mood: typeof npc.mood === 'string' ? npc.mood : null, relationship };
+    },
     /** The configured custom field names (the dossier shows these; a stored value under another name stays in the editor only). */
     customFieldNames: () => [...getSettings().customFieldNames],
     /** (the living cast) The reader pins this dossier's person as a key person (Story Director's `keypeople.pin`) → { ok, message }. */
