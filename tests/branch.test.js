@@ -19,6 +19,7 @@ import {
     setBranchProvenanceHint,
 } from '../branch.js';
 import { normalizeSocialGraph } from '../social.js';
+import { readAheadOf } from '../scan-context.js';
 import { skippedExchangesWindow, useTranscriptSource } from '../src/transcript.js';
 import { editorProfileLocks } from '../src/dossier-edit.js';
 
@@ -481,5 +482,36 @@ test('1.10.0 an edit of an old reply forgets the replies read ahead from it on, 
     edited[11] = { ...edited[11], mes: 'assistant-5-EDITED' };
     const restored = reconcileBranchState(state, edited, { explicitDivergence: 11, operation: 'edit' });
     assert.equal(restored.exactRestored, false, 'a fail-closed restore');
-    assert.deepEqual(restored.state.readAhead, [7], 'only the replies before the edited one stay read');
+    // 1.10.0 review: the fail-closed restore keeps the current state, which already holds the replies read ahead past the edit, so the
+    // marker and the read-ahead list are reset as in 1.9.0 (the next scan reads the latest reply only; nothing is read a second time).
+    assert.equal(restored.state.lastScannedMessageId, null, 'the marker is reset');
+    assert.deepEqual(restored.state.readAhead, [], 'the replies read ahead are not read again');
+});
+
+test('1.10.0 a fail-closed restore after a manual scan read ahead: the next scan does not read the read-ahead replies again', () => {
+    const u = t => ({ is_user: true, is_system: false, name: 'User', mes: `user-${t}`, send_date: `ud${t}` });
+    const b = (t, v = 'A') => ({ is_user: false, is_system: false, name: 'Narrator', mes: `assistant-${t}-${v}`, send_date: `ad${t}${v}`, extra: { gen_id: `g${t}${v}` } });
+    const original = [];
+    for (let t = 0; t < 10; t += 1) { original.push(u(t)); original.push(b(t)); }
+    // Replies 2..5 waited; a manual scan read 6..9 (messages 13..19): marker 3, read ahead [13,15,17,19].
+    const makeState = () => {
+        const state = baseState();
+        state.turn = 10; state.scanCount = 4; state.lastScannedMessageId = 3; state.readAhead = [13, 15, 17, 19];
+        state.lineage = chatLineage(original);
+        state.rollbackHead = { seq: 0, messageId: 19, lineageKey: lineageCheckpointKey(state.lineage, 19), snapshot: structuredClone({ ...state, checkpoints: [], rollbackJournal: [] }) };
+        return state;
+    };
+    for (const [label, mutate, opts] of [
+        ['edit of a waiting reply', c => { c[9] = { ...c[9], mes: 'assistant-4-EDITED' }; return c; }, { explicitDivergence: 9, operation: 'edit' }],
+        ['edit of a read-ahead reply', c => { c[13] = { ...c[13], mes: 'assistant-6-EDITED' }; return c; }, { explicitDivergence: 13, operation: 'edit' }],
+        ['delete of a middle user message', c => { c.splice(8, 1); return c; }, { explicitDivergence: 8, operation: 'delete' }],
+    ]) {
+        const next = mutate(original.slice());
+        const restored = reconcileBranchState(makeState(), next, opts);
+        assert.equal(restored.exactRestored, false, `${label}: fail-closed`);
+        useTranscriptSource({ context: () => ({ chat: next, name1: 'User', name2: 'Narrator' }), scanDepth: () => 6 });
+        const window = skippedExchangesWindow(next.length - 1, { afterId: restored.state.lastScannedMessageId, replies: 1, limit: 6, fresh: false, skip: readAheadOf(restored.state) });
+        const reread = window ? [...window.transcript.matchAll(/assistant-(\d+)-A/g)].map(m => Number(m[1])).filter(t => t >= 6 && t < 9) : [];
+        assert.deepEqual(reread, [], `${label}: reads applied replies again: ${reread} (marker ${restored.state.lastScannedMessageId}, readAhead ${JSON.stringify(restored.state.readAhead)})`);
+    }
 });

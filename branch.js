@@ -1518,7 +1518,11 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
     if (!exactRestored) {
         if (Number.isInteger(restored.lastScannedMessageId) && restored.lastScannedMessageId >= divergence) restored.lastScannedMessageId = null;
         // Replies read ahead from the changed message on are not the ones the chat holds now.
+        const readPastChange = Array.isArray(restored.readAhead) && restored.readAhead.some(id => Number.isInteger(id) && id >= divergence);
         if (Array.isArray(restored.readAhead)) restored.readAhead = restored.readAhead.filter(id => Number.isInteger(id) && id < divergence);
+        // A fail-closed restore keeps the current state, which already holds what was read ahead past the change. Those replies can no
+        // longer be told apart, so as in 1.9.0 the next scan reads the latest reply only instead of reading them a second time.
+        if (failClosed && readPastChange) { restored.lastScannedMessageId = null; restored.readAhead = []; }
     }
     prunePortraitAssetsInPlace(restored);
     const rewound = rewindRequested && exactRestored;
