@@ -23,6 +23,8 @@
 // `ownPrompt` hook says what, turn.js ownPrompt) counts toward the share too: the tail gets what the
 // static part and that leave, still never below MIN_TAIL_BUDGET. It never cuts the static part.
 
+import { receiptCue } from './lean-rpg/cue.js';
+
 export const TAIL_ORDER = Object.freeze(['scene', 'inventory', 'party', 'combat', 'trade', 'director']);
 export const DEFAULT_TAIL_BUDGET = 1500;
 // The most of the prompt's room (percent) Story Suite's static and tail may take together, by default.
@@ -40,19 +42,16 @@ export const STATIC_MARKER = '[Story Suite: how this story is kept]';
 
 const HEADER = [
     STATIC_MARKER,
-    'Code keeps this story\'s facts and numbers; you narrate.',
-    `When a note starts with ${HAPPENED}, those things have just happened: tell them as they happen in the scene and keep their numbers. Do not write them again as changes.`,
+    `Code keeps this story's facts and numbers; you narrate. A note starting ${HAPPENED} has just happened: tell it in the scene, keep its numbers, do not write it again as a change.`,
 ].join('\n');
 
 const CHANGES_HEADER = [
-    'At the very end of your reply, after the story, list what changed in one block, one change per line:',
+    'At the very end of your reply, after the story, list what changed in one block (outside any thinking, once; it counts toward no length limit):',
     '<Changes>',
     'op kind Name — what happened | label: value',
     '</Changes>',
-    'op: + new or gained, - gone or lost, ~ changed, ! happened, ? asks code to decide (a check, a roll).',
-    'Use only the kinds below. Leave out what did not change, and the whole block when nothing did.',
-    'This is the only block you write: no state, inventory or party blocks; code keeps those and shows them to you.',
-    'Write it outside any thinking, once. It does not count toward any reply length limit.',
+    'op: + new or gained, - gone or lost, ~ changed, ! happened, ? asks code to decide (a check, a roll). One change per line, only the kinds below; leave out what did not change, and the whole block when nothing did.',
+    'This is the only block you write: no state, inventory or party blocks.',
     'Kinds:',
 ].join('\n');
 
@@ -84,16 +83,17 @@ export function tailOrder(contexts) {
 
 /**
  * The static text alone (header + kind grammar + module statics), built from the registry only.
- * `problems` collects what failed (a throwing static() is left out, logged there).
+ * `problems` collects what failed (a throwing static() is left out, logged there). `hint` (optional): { view, rolled }, what the reply being
+ * prepared tells the parts that write less on a quiet reply (the RPG's combat text, data-modules/part.js); without it every part is in full.
  */
-export function staticParts(registry, problems = []) {
-    const contexts = registry.contexts();
-    const kinds = contexts.flatMap(context => context.kinds.map(kind => kind.grammar));
+export function staticParts(registry, problems = [], hint = undefined) {
+    const contexts = registry.contexts(hint);
+    const kinds = contexts.flatMap(context => context.kinds.map(kind => kind.grammar)).filter(Boolean);
     const header = kinds.length ? `${HEADER}\n${CHANGES_HEADER}\n${kinds.join('\n')}` : HEADER;
     const parts = [{ module: 'story-suite', label: 'Story Suite: instructions', place: 'static', text: header }];
     for (const context of contexts) {
         if (typeof context.static !== 'function') continue;
-        const text = attempt(() => context.static(), '', problems, `${context.name}: instructions`);
+        const text = attempt(() => context.static(hint), '', problems, `${context.name}: instructions`);
         const clean = typeof text === 'string' ? text.trim() : '';
         if (clean) parts.push({ module: context.moduleId, label: `${context.name}: instructions`, place: 'static', text: clean });
     }
@@ -186,7 +186,8 @@ export function contextNotice(fit) {
 /**
  * Builds both texts for the next reply.
  * - `registry`: createRegistry() result; `view`: { state, query, settings, chat } (§6).
- * - `untold`: receipts to tell (oldest first); only those with narrate !== false and a summary.
+ * - `untold`: receipts to tell (oldest first); only those with narrate !== false and a summary. A receipt whose `data.told` is
+ *   a text has it told after its summary in brackets (what the narrator must not read into the line; the reader's card does not show it).
  * - `settings`: the host settings ({ tailBudget } in tokens, default 1500; { contextShare } percent, 40).
  * - `context` (optional): { size, reply, room } of the reader's context (contextFit); the tail is cut so
  *   static + tail fit the share, the static part never is.
@@ -194,21 +195,24 @@ export function contextNotice(fit) {
  * - `substitute` (optional): text → text, run on every text before it is counted (turn.js fills in
  *   `{{user}}` and `{{char}}` with it).
  * - `ownTokens` (optional): what modules send on their own this reply (contextFit), 0 by default.
+ * - `rolled` (optional): the reply has automatic rolls (the RPG's planner returned some), told to the static parts as `hint.rolled`.
  * Returns { staticText, tailText, parts: [{ module, label, place, text, tokens, dropped? }],
  * problems, fit (contextFit, or null) }. `parts` is what the What's-sent preview lists, in prompt order.
  */
-export function assemble({ registry, view, untold = [], settings = {}, cues = {}, substitute = null, context = null, ownTokens = 0 }) {
+export function assemble({ registry, view, untold = [], settings = {}, cues = {}, substitute = null, context = null, ownTokens = 0, rolled = false }) {
     const problems = [];
     const fill = typeof substitute === 'function' ? text => String(substitute(text) ?? '') : text => text;
-    const statics = staticParts(registry, problems).map(part => ({ ...part, text: fill(part.text) }));
+    const statics = staticParts(registry, problems, { view, rolled: rolled === true }).map(part => ({ ...part, text: fill(part.text) }));
     const staticText = statics.map(part => part.text).join('\n\n');
     const fitted = contextFit(context, estimateTokens(staticText), settings, ownTokens);
     const total = fitted ? fitted.budget
         : Number.isInteger(settings?.tailBudget) && settings.tailBudget > 0 ? settings.tailBudget : DEFAULT_TAIL_BUDGET;
 
     const happened = untold
-        .filter(receipt => receipt && receipt.narrate !== false && typeof receipt.summary === 'string' && receipt.summary.trim())
-        .map(receipt => fill(receipt.summary).trim().split(/\n/).map(part => part.trim()).filter(Boolean).join(' '));
+        .map(receipt => receipt && receipt.narrate !== false && typeof receipt.summary === 'string' ? { receipt, text: receiptCue(receipt) } : null)
+        .filter(entry => entry && entry.text.trim())
+        .map(({ receipt, text }) => fill(`${text}${typeof receipt.data?.told === 'string' && receipt.data.told.trim() ? ` (${receipt.data.told.trim()})` : ''}`)
+            .trim().split(/\n/).map(part => part.trim()).filter(Boolean).join(' '));
     const head = happened.length
         ? { module: 'story-suite', label: 'Happened', text: happenedLines(happened, Math.floor(total / 2)).join('\n') }
         : null;

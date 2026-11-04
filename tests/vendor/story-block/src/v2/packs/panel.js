@@ -14,7 +14,8 @@ const COUNT_WORDS = { items: 'item', creatures: 'creature', shops: 'shop', recip
 export function countsLine(counts, hasStart) {
     const parts = Object.entries(COUNT_WORDS).filter(([kind]) => counts[kind]).map(([kind, word]) => plural(counts[kind], word));
     if (hasStart) parts.push('start state');
-    return parts.join(', ') || 'no content';
+    // A pack of data modules alone is not "no content": its modules are what it holds.
+    return parts.join(', ') || (counts.dataModules ? plural(counts.dataModules, 'data module') : 'no content');
 }
 
 /** Everything a pack adds, in words: its content lists, a start state, then its coins, calendar, weather tables, screens… */

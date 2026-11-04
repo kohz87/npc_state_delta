@@ -12,12 +12,16 @@ import { createBattleLog } from './battle-log.js';
 import { FIGHT_WIDGET, createFightScreen, createFightWidget } from './fight.js';
 import { rpgReplyLines } from './changes-lines.js';
 import { PARTY_WIDGET, createPartyScreen, createPartyWidget } from './party.js';
-import { packInForce, packRulesOf, rulesFromSettings } from '../rules.js';
+import { levelCapFor, packInForce, packRulesOf, rulesFromSettings } from '../rules.js';
 import { rpgSection } from './settings.js';
 import { heroLead } from './hero-data.js';
 import { HOLD_WIDGET, createStart } from './start.js';
 import { WIZARD_WIDGET, createWizard } from './wizard.js';
 import { EXPORT_WIDGET, createExporter } from './export.js';
+import { packLevelsOf } from '../levels.js';
+import { practiceFromRollsOnly } from '../names.js';
+import { planGear } from '../gear.js';
+import { readSheet } from '../read.js';
 import { readRecord } from '../../persist.js';
 
 export { PARTY_SCREEN_ID, PARTY_WIDGET } from './party.js';
@@ -57,7 +61,7 @@ function addStyle(doc) {
  * commands (the settings page saves the Combat rules text through `dm.redefine`); `closeView()` closes the game view
  * ("See it in the story" on the Fight tab); `refresh()` redraws the tabs.
  */
-export function mountLeanRpg({ doc, ctx, store, events = null, screens, widgets, headState, readerName = () => '', readerAbout = () => '', meta = () => null, save = () => {}, roleOf, featureOn = () => true, openDialog = null, closeView = () => {}, refresh = () => {}, command = null, values = () => ({}), query = null }) {
+export function mountLeanRpg({ doc, ctx, store, events = null, screens, widgets, headState, readerName = () => '', readerAbout = () => '', meta = () => null, save = () => {}, roleOf, featureOn = () => true, gear = null, openDialog = null, closeView = () => {}, refresh = () => {}, command = null, values = () => ({}), query = null }) {
     const link = addStyle(doc);
     // The numbers a roll would be made with now (Settings → RPG): the roll line on a skill and a class-up note state them.
     // What the story's pack asks for (its formula and numbers), with the pack's name: the default of a reader who has chosen nothing.
@@ -70,6 +74,9 @@ export function mountLeanRpg({ doc, ctx, store, events = null, screens, widgets,
         } catch { return null; }
     };
     const rules = () => rulesFromSettings(values(), pack());
+    // What the story's pack says about levels: its rank bands and the field that names the party's rank (a story with neither shows "Lv 14" and "Rank F · Lv 7" only where a band exists).
+    const levels = () => { let found = null; try { found = packLevelsOf(query?.('packs.content', { kind: 'rpg' })); } catch { found = null; } return { ranks: found?.ranks ?? [], playerRank: found?.playerRank ?? null, levelCap: found?.levelCap ?? null }; };
+    const levelCap = () => levelCapFor(values(), levels().levelCap);
     // "From the pack: Ersveil" under the wizard's Stats, when the pack decides the numbers.
     const packNote = () => { const given = pack(); return given && packInForce(values(), given).numbers ? given.name || given.pack || '' : ''; };
     // The head reply's key in the blocks' per-reply action count (data-modules/part.js pairKey): the wizard asks it for room before Create.
@@ -77,15 +84,17 @@ export function mountLeanRpg({ doc, ctx, store, events = null, screens, widgets,
         const source = readRecord(ctx?.chat?.[store?.headIndex?.()])?.source;
         return source?.logical && source?.swipeKey ? `${source.logical}/${source.swipeKey}` : '';
     };
-    const wizard = createWizard({ headState, readerName, readerAbout, roleOf, openDialog, replyKey, rules, packNote });
+    const wizard = createWizard({ headState, readerName, readerAbout, roleOf, openDialog, replyKey, rules, packNote, levels, levelCap });
     const exporter = createExporter({ headState, readerName, roleOf, openDialog });
     const start = createStart({ doc, headState, readerName, featureOn, roleOf, openDialog, wizard, meta, save, redraw: () => refresh() });
-    widgets[PARTY_WIDGET] = createPartyWidget({ headState, readerName, roleOf, openWizard: openDialog ? wizard.open : null, exportCharacter: openDialog ? exporter.open : null, rules });
+    widgets[PARTY_WIDGET] = createPartyWidget({ headState, readerName, roleOf, openWizard: openDialog ? wizard.open : null, exportCharacter: openDialog ? exporter.open : null, rules, rolled: () => practiceFromRollsOnly(true, values()), levels,
+        // The slot card behind a card's Inventory button: the switch and the `gear.view` answer (null while off).
+        gear: gear ? { on: () => gear.on(), view: args => { try { return query?.('gear.view', args) ?? null; } catch { return null; } } } : null });
     widgets[WIZARD_WIDGET] = wizard.widget;
     widgets[EXPORT_WIDGET] = exporter.widget;
     widgets[HOLD_WIDGET] = start.holdWidget;
-    const battleLog = createBattleLog({ ctx, doc, store, events, featureOn, roleOf });
-    widgets[FIGHT_WIDGET] = createFightWidget({ headState, readerName, roleOf, battleLog, closeView });
+    const battleLog = createBattleLog({ ctx, doc, store, events, featureOn, roleOf, levels });
+    widgets[FIGHT_WIDGET] = createFightWidget({ headState, readerName, roleOf, battleLog, closeView, levels });
     screens.setPack(PACK, [createPartyScreen(), createFightScreen({ roleOf }), wizard.screen, exporter.screen, start.holdScreen]);
     start.attach();
     battleLog.refreshAll();
@@ -96,8 +105,8 @@ export function mountLeanRpg({ doc, ctx, store, events = null, screens, widgets,
         exporter,
         start,
         cardLines: info => { try { return rpgReplyLines({ ...info, roleOf, rules: rules() }); } catch { return []; } },
-        settingsSections: () => [rpgSection({ featureOn, headState, readerName, roleOf, command, pack })],
-        heroLead: state => { try { return heroLead(state, { own: readerName(), roleOf }); } catch { return null; } },
+        settingsSections: () => [rpgSection({ featureOn, headState, readerName, roleOf, command, pack, gear, gearOf: () => { try { return planGear(readSheet(headState()), (name, args) => query?.(name, args), readerName()); } catch { return null; } } })],
+        heroLead: state => { try { return heroLead(state, { own: readerName(), roleOf, ...levels() }); } catch { return null; } },
         destroy() {
             battleLog.destroy();
             start.detach();

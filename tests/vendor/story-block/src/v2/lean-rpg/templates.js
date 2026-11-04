@@ -1,10 +1,11 @@
 // The RPG block templates (Character, Skills, Foes, Combat rules): data-module definitions that the block
 // chooser offers while the RPG feature is on (Settings → Blocks → From a template). Each carries a `role`
 // (see ROLES in index.js) and keeps the field keys the RPG reads. Stage fields are indexes (0 = empty) with
-// `names` from STAGES; Soul Class and ranks are numbers with names. The block engine adds three things these
+// `names` from STAGES; the level is a number 1–99 (stage 51; the Soul Class I–IX of earlier blocks is not in new templates) and ranks are numbers with names. The block engine adds three things these
 // use: `names` and `prompt: false` on fields, and the `replyEnd` and `cards` lists. The Skills block's rank and practice
 // are `edit: false` (they only move through play); SKILL_SETS are the New character wizard's built-in skill sets.
-import { CREATION, STATS, STAGES, USES } from './names.js';
+import { CREATION, LEVEL, STATS, STAGES, USES } from './names.js';
+import { SIGNATURE_FIELD, SKILL_SLOTS_MAX } from '../skill-slots.js';
 import { STANDARD_NUMBERS } from './formula.js';
 
 const names = (words, first = 0) => Object.fromEntries(words.map((word, index) => [String(index + first), word]));
@@ -13,7 +14,7 @@ const MANA = names(STAGES.mana);
 const STAMINA = names(STAGES.stamina);
 const SOUL = names(['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX'], 1);
 const RANK = names(['Novice', 'Adept', 'Expert', 'Master']);
-const SKILLS = [1, 2, 3, 4, 5];
+const SKILLS = Array.from({ length: SKILL_SLOTS_MAX }, (_, at) => at + 1);
 const SLOTS = [1, 2, 3, 4];
 
 const text = (label, max = CREATION.skillName) => ({ type: 'text', max, default: '', label });
@@ -23,16 +24,27 @@ const get = field => ['get', [field]];
 
 export const COMBAT_PROMPT = [
     '[COMBAT SYSTEM]',
-    'No Plot Armor: combat follows physical reality and the lore. Size, skill, numbers, reach, armor, terrain, preparation and Soul Class all matter. Against a stronger foe, {{user}} loses unless a believable edge exists: ambush, terrain, numbers, poison, preparation.',
+    'No Plot Armor: combat follows physical reality and the lore. Size, skill, numbers, reach, armor, terrain, preparation and Level all matter. Against a stronger foe, {{user}} loses unless a believable edge exists: ambush, terrain, numbers, poison, preparation.',
     'Exchanges: a fight is told exchange by exchange, each with clear cause, cost and consequence, in the order things happen. Most fights are short; one exchange may be the whole fight. Never skip the moment that decides it.',
     'Weight & Risk: every strike, miss, wound and hesitation carries impact. Injury, fatigue, fear and pain carry into the next exchange and the next scene.',
     'Believable Outcomes: fights end when logic demands it: death, surrender, retreat, capture or collapse. NPCs take those exits when the fight turns against them. Victory must be earned; survival must be justified.',
-    'XP guide: a small fight 5 to 15, a hard fight 20 to 40, a boss 50 or more. Practice a skill 5 to 20 for each use.',
+    'XP guide: code gives XP for a won fight; write none for it. Other deeds 5 to 40. Practice a skill 5 to 20 per use.',
 ].join('\n');
+
+// The level rise. The XP field holds up to LEVEL.xpMax, so XP above 100 is kept: a reply that gives 95 + 40 leaves 35 over. The rise is worked out once from the
+// XP and the room under the cap, `rise` = min(floor(xp / 100), cap − level) levels, and carries the remainder: it gives one point to spend for every multiple of
+// LEVEL.pointEvery (3) the new levels cross (floor((level + rise) / 3) − floor(level / 3)), raises the level by `rise` and takes 100 XP for each. `rise` is the
+// rule's own working number (hidden, not in the prompt). A second rule holds the XP at 100 at the cap, so the XP past the cap is not kept.
+const levelUp = () => ({ id: 'level-up', when: ['and', ['ge', get('xp'), LEVEL.xpPerLevel], ['lt', get('level'), get('cap')]],
+    then: [{ op: 'set', path: ['rise'], value: ['min', ['floorDiv', get('xp'), LEVEL.xpPerLevel], ['sub', get('cap'), get('level')]] },
+        { op: 'add', path: ['points'], value: ['sub', ['floorDiv', ['add', get('level'), get('rise')], LEVEL.pointEvery], ['floorDiv', get('level'), LEVEL.pointEvery]], bounds: 'clamp' },
+        { op: 'add', path: ['level'], value: get('rise'), bounds: 'clamp' }, { op: 'add', path: ['xp'], value: ['mul', get('rise'), -LEVEL.xpPerLevel], bounds: 'clamp' },
+        { op: 'set', path: ['rise'], value: 0 }] });
+const xpCap = () => ({ id: 'xp-cap', when: ['and', ['ge', get('level'), get('cap')], ['gt', get('xp'), LEVEL.xpPerLevel]], then: [{ op: 'set', path: ['xp'], value: LEVEL.xpPerLevel }] });
 
 const character = {
     slug: 'character', name: 'Character', role: 'character', schema: 1, stateVersion: 1, scope: 'chat',
-    prompt: 'One character: who they are, health, mana and stamina (words, shown as bars), seven stats from 1 to 20, unspent points, Soul Class I to IX and XP to 100. The narrator sets health, mana, stamina and XP; the story cannot kill a character outright: they die only when they were already Down before a reply and are still Down at its end. The reader sets stats and points. XP at 100 raises the Soul Class by one, up to IX, and gives 3 points to spend on stats.',
+    prompt: 'One character: who they are, health, mana and stamina (words, shown as bars), seven stats from 1 to 20, unspent points, Level 1 to 99 and XP to 100. The narrator sets health, mana, stamina and XP; the story cannot kill a character outright: they die only when they were already Down before a reply and are still Down at its end. The reader sets stats and points. XP at 100 raises the Level by one, up to the Level cap, and every third Level gives a point to spend on stats.',
     show: { tab: true, card: false, tabName: 'Character', icon: 'ph-user' },
     state: {
         who: text('Name'),
@@ -42,8 +54,10 @@ const character = {
         stamina: int('Stamina', 0, 4, 4, { names: STAMINA }),
         ...Object.fromEntries(STATS.map(stat => [stat, int(stat.toUpperCase(), 1, 20, 10)])),
         points: int('Points', 0, 60, 0),
-        soul: int('Soul Class', 1, 9, 1, { names: SOUL }),
-        xp: int('XP', 0, 100, 0),
+        level: int('Level', LEVEL.min, LEVEL.max, 1),
+        xp: int('XP', 0, LEVEL.xpMax, 0),
+        rise: int('Rise', 0, LEVEL.max, 0, { prompt: false, edit: false }),
+        cap: int('Level cap', LEVEL.min, LEVEL.max, LEVEL.max, { prompt: false }),
         down: { type: 'bool', default: false, label: 'Down', prompt: false },
         alive: { type: 'bool', default: true, label: 'Alive' },
         // A companion who left the party (a `- party Name` line, join.js): kept on the Party tab, greyed, and no longer rolled for.
@@ -56,8 +70,7 @@ const character = {
         'add-xp': { op: '+', labels: { amount: range(0, 100) }, effects: [{ op: 'add', path: ['xp'], value: ['arg', 'amount'], bounds: 'clamp' }] },
         'button-rest': { op: '!', ui: true, title: 'Rest', labels: {}, effects: [{ op: 'set', path: ['stamina'], value: 4 }, { op: 'set', path: ['mana'], value: 4 }] },
     },
-    rules: [{ id: 'class-up', when: ['and', ['ge', get('xp'), 100], ['lt', get('soul'), 9]],
-        then: [{ op: 'add', path: ['soul'], value: 1, bounds: 'clamp' }, { op: 'set', path: ['xp'], value: 0 }, { op: 'add', path: ['points'], value: 3, bounds: 'clamp' }] }],
+    rules: [levelUp(), xpCap()],
     // The story has no kind that sets `alive`: death comes only through this latch. (The reader may still fix `alive` with the pencil.)
     // Death is a latch over two reply-end functions, run in this order: the first ends the story only when the
     // character was already Down when the reply started; the second then records whether they are Down now.
@@ -73,7 +86,7 @@ const character = {
 
 const skills = {
     slug: 'skills', name: 'Skills', role: 'skills', schema: 1, stateVersion: 1, scope: 'chat',
-    prompt: 'Up to five skills for one character. Each has a description, the stat it rolls with, what it uses (stamina or mana), a rank (Novice, Adept, Expert, Master) and practice from 0 to 100. The narrator names a skill with a learn line (name, what it does, stat, uses) and adds practice. At 100 practice the rank rises by one and practice starts again at 0; a Master stays at 100.',
+    prompt: 'Five skills for one character, a sixth at Lv 20, a seventh at 40 and an eighth at 60. Each has a description, the stat it rolls with, what it uses (stamina or mana), a rank (Novice, Adept, Expert, Master) and practice from 0 to 100. The narrator names a skill with a learn line (name, what it does, stat, uses) and adds practice. At 100 practice the rank rises by one and practice starts again at 0; a Master stays at 100.',
     show: { tab: true, card: false, tabName: 'Skills', icon: 'ph-book-open' },
     state: {
         who: text('Name'),
@@ -85,6 +98,8 @@ const skills = {
             [`rank${n}`, int(`Rank ${n}`, 0, 3, 0, { names: RANK, edit: false })],
             [`practice${n}`, int(`Practice ${n}`, 0, 100, 0, { edit: false })],
         ])),
+        // (a bit for each slot a pack's cast member brought, names.js signatureAt: the story never renames or replaces those; the reader cannot type it and the narrator is not told it)
+        [SIGNATURE_FIELD]: int('Signature skills', 0, 2 ** SKILL_SLOTS_MAX - 1, 0, { edit: false, prompt: false }),
     },
     kinds: Object.fromEntries(SKILLS.flatMap(n => [
         [`learn-${n}`, { op: '~', labels: { name: { type: 'text', max: CREATION.skillName }, about: { type: 'text', max: CREATION.skillAbout }, stat: { type: 'enum', values: [...STATS] }, uses: { type: 'enum', values: [...USES] } },
@@ -98,21 +113,47 @@ const skills = {
         then: [{ op: 'add', path: [`rank${n}`], value: 1, bounds: 'clamp' }, { op: 'set', path: [`practice${n}`], value: 0 }] })),
 };
 
+// The Standard formula's Skills: Classic's block with one more guard (Classic's definition, and so its hash, never changes). A filled slot is never
+// overwritten: the host sends a `learn-N` line to the slot already holding that name (updating it) or to a free one (data-modules/part.js
+// skillRoute), so what reaches this condition is a free slot.
+const standardSkills = {
+    ...skills,
+    // (Shorter text than Classic's, whose definition and hash stay as they were; a chat that already pinned the Standard Skills block keeps the text it was made with.)
+    prompt: 'Five skills for one character (a sixth at Lv 20, a seventh at 40, an eighth at 60): what it does, its stat, what it uses (stamina or mana), a rank (Novice, Adept, Expert, Master) and practice 0 to 100. The narrator names a skill with a learn line and adds practice; 100 practice raises the rank.',
+    kinds: Object.fromEntries(Object.entries(skills.kinds).map(([name, kind]) => [name, /^learn-/u.test(name)
+        ? { ...kind, when: ['eq', get(`skill${name.slice(6)}`), ''], refusal: 'That slot holds a skill; use a free slot.' } : kind])),
+};
+
+// The Skills templates as 2.21 made them (five slots, no `sig`, the earlier text): frozen, derived from today's by taking the later slots and the signature mark out, so
+// a Re-read of a join made before the extra slots builds the block that reply made (same fields, same pin) and not today's. Used only with `legacy` (join.js).
+const FIVE = [1, 2, 3, 4, 5];
+const upTo5 = key => !/^(skill|about|stat|uses|rank|practice)[6-9]$/u.test(key) && key !== SIGNATURE_FIELD;
+const frozenSkills = (from, prompt) => ({
+    ...from, prompt,
+    state: Object.fromEntries(Object.entries(from.state).filter(([key]) => upTo5(key))),
+    kinds: Object.fromEntries(Object.entries(from.kinds).filter(([name]) => FIVE.includes(Number(name.slice(name.lastIndexOf('-') + 1))))),
+    rules: from.rules.filter(rule => FIVE.includes(Number(rule.id.slice(rule.id.lastIndexOf('-') + 1)))),
+});
+const skillsV1 = frozenSkills(skills, 'Up to five skills for one character. Each has a description, the stat it rolls with, what it uses (stamina or mana), a rank (Novice, Adept, Expert, Master) and practice from 0 to 100. The narrator names a skill with a learn line (name, what it does, stat, uses) and adds practice. At 100 practice the rank rises by one and practice starts again at 0; a Master stays at 100.');
+const standardSkillsV1 = frozenSkills(standardSkills, 'Up to five skills for one character: what it does, its stat, what it uses (stamina or mana), a rank (Novice, Adept, Expert, Master) and practice 0 to 100. The narrator names a skill with a learn line and adds practice; 100 practice raises the rank.');
+/** The Skills template of the formula as 2.21 had it (a join made before the extra slots, read again). */
+export const skillsV1For = formula => structuredClone(formula === 'classic' ? skillsV1 : standardSkillsV1);
+
 const foes = {
     slug: 'foes', name: 'Foes', role: 'foes', schema: 1, stateVersion: 1, scope: 'chat',
-    prompt: 'Up to four foe groups in the current fight. A group is one slot: its name, how many it has (count 0 means the slot is empty), its Soul Class from I to IX and its health. The narrator sets a slot when a group arrives, hurts it as the fight goes and clears it when the group is down, gone, fled, captured or has yielded.',
+    prompt: 'Up to four foe groups in the current fight. A group is one slot: its name, how many it has (count 0 means the slot is empty), its level from 1 to 99 and its health. The narrator sets a slot when a group arrives, hurts it as the fight goes and clears it when the group is down, gone, fled, captured or has yielded.',
     show: { tab: true, card: false, tabName: 'Foes', icon: 'ph-skull' },
     state: Object.fromEntries(SLOTS.flatMap(n => [
         [`foe${n}`, text(`Foe ${n}`)],
         [`count${n}`, int(`Count ${n}`, 0, 99, 0)],
-        [`class${n}`, int(`Class ${n}`, 1, 9, 1, { names: SOUL })],
+        [`level${n}`, int(`Level ${n}`, 1, 99, 1)],
         [`hurt${n}`, int(`Health ${n}`, 0, 5, 5, { names: HEALTH })],
     ])),
     kinds: Object.fromEntries(SLOTS.flatMap(n => [
-        [`set-slot-${n}`, { op: '+', labels: { name: { type: 'text', max: 40 }, count: range(1, 99), class: range(1, 9) },
+        [`set-slot-${n}`, { op: '+', labels: { name: { type: 'text', max: 40 }, count: range(1, 99), level: range(1, 99) },
             when: ['eq', get(`count${n}`), 0], refusal: 'That slot is taken; clear it first.',
             effects: [{ op: 'set', path: [`foe${n}`], value: ['arg', 'name'] }, { op: 'set', path: [`count${n}`], value: ['arg', 'count'] },
-                { op: 'set', path: [`class${n}`], value: ['arg', 'class'] }, { op: 'set', path: [`hurt${n}`], value: 5 }] }],
+                { op: 'set', path: [`level${n}`], value: ['arg', 'level'] }, { op: 'set', path: [`hurt${n}`], value: 5 }] }],
         [`hurt-${n}`, { op: '~', labels: { to: range(0, 5) }, when: ['gt', get(`count${n}`), 0], refusal: 'That slot is empty.',
             effects: [{ op: 'set', path: [`hurt${n}`], value: ['arg', 'to'] }] }],
         [`clear-${n}`, { op: '-', labels: { why: { type: 'enum', values: ['down', 'fled', 'yielded', 'captured', 'gone'] } },
@@ -149,7 +190,7 @@ const SIZE = {
     stamina: ['add', 3, ['floorDiv', get('agi'), 5]],
     mana: ['add', 3, ['floorDiv', get('int'), 5]],
 };
-const FOE_SIZE = n => ['add', 4, ['floorDiv', get(`class${n}`), 3]];
+const FOE_SIZE = n => ['add', 4, ['floorDiv', get(`level${n}`), 30]];
 // Blocks for a stage word, in a bar of `size` blocks: round(word index × size / (words − 1)), half up; the first word is 0 and the last the full bar.
 const blocksOf = (word, size, count) => ['floorDiv', ['add', ['mul', word, size], Math.floor((count - 1) / 2)], count - 1];
 const stageLabel = words => ({ type: 'int', min: 0, max: words.length - 1, names: names(words) });
@@ -165,7 +206,7 @@ const sizeRule = (id, key, sizeKey, size) => ({ id, when: ['ne', get(sizeKey), s
 
 const standardCharacter = {
     slug: 'character', name: 'Character', role: 'character', schema: 1, stateVersion: 2, scope: 'chat',
-    prompt: 'One character: who they are, health, stamina and mana (words, shown as bars of blocks that grow with VIT, AGI and INT), seven stats from 1 to 20, unspent points, Soul Class I to IX and XP to 100. The narrator sets health, mana, stamina and XP by words; the story cannot kill a character outright: they die only when they were already Down before a reply and are still Down at its end. The reader sets stats and points. XP at 100 raises the Soul Class by one, up to IX, and gives 4 points to spend on stats.',
+    prompt: 'One character: who they are, health, stamina and mana (words, shown as bars), seven stats 1 to 20, points, Level 1 to 99 and XP to 100. The narrator sets health, mana, stamina and XP by words. The story cannot kill them outright: they die only when Down before a reply and still Down at its end. The reader sets stats and points; XP at 100 raises the Level, and every third Level gives a point.',
     show: character.show,
     state: {
         who: text('Name'),
@@ -175,8 +216,10 @@ const standardCharacter = {
         stamina: bar('Stamina', 7, 'stamina', 4),
         ...Object.fromEntries(STATS.map(stat => [stat, int(stat.toUpperCase(), 1, STANDARD_NUMBERS.statMax, STANDARD_STAT)])),
         points: int('Points', 0, 60, 0),
-        soul: int('Soul Class', 1, 9, 1, { names: SOUL }),
-        xp: int('XP', 0, 100, 0),
+        level: int('Level', LEVEL.min, LEVEL.max, 1),
+        xp: int('XP', 0, LEVEL.xpMax, 0),
+        rise: int('Rise', 0, LEVEL.max, 0, { prompt: false, edit: false }),
+        cap: int('Level cap', LEVEL.min, LEVEL.max, LEVEL.max, { prompt: false }),
         down: { type: 'bool', default: false, label: 'Down', prompt: false },
         alive: { type: 'bool', default: true, label: 'Alive' },
         left: { type: 'bool', default: false, label: 'Left' },
@@ -191,31 +234,29 @@ const standardCharacter = {
         'add-xp': character.kinds['add-xp'],
         'button-rest': { op: '!', ui: true, title: 'Rest', labels: {}, effects: [{ op: 'set', path: ['stamina'], value: SIZE.stamina }, { op: 'set', path: ['mana'], value: SIZE.mana }] },
     },
-    // The bars first (they read the stats as they stand), then the class rise (4 points to spend with each).
+    // The bars first (they read the stats as they stand), then the level rise (a point to spend with every third level).
     rules: [sizeRule('health-bar', 'health', 'health-blocks', SIZE.health), sizeRule('stamina-bar', 'stamina', 'stamina-blocks', SIZE.stamina),
         sizeRule('mana-bar', 'mana', 'mana-blocks', SIZE.mana),
-        { id: 'class-up', when: ['and', ['ge', get('xp'), 100], ['lt', get('soul'), 9]],
-            then: [{ op: 'add', path: ['soul'], value: 1, bounds: 'clamp' }, { op: 'set', path: ['xp'], value: 0 },
-                { op: 'add', path: ['points'], value: STANDARD_NUMBERS.pointsPerSoul, bounds: 'clamp' }] }],
+        levelUp(), xpCap()],
     replyEnd: character.replyEnd,
     cards: character.cards,
 };
 
 const standardFoes = {
     slug: 'foes', name: 'Foes', role: 'foes', schema: 1, stateVersion: 2, scope: 'chat',
-    prompt: 'Up to four foe groups in the current fight. A group is one slot: its name, how many it has (count 0 means the slot is empty), its Soul Class from I to IX and its health (words: a group of a higher class has more blocks of health). The narrator sets a slot when a group arrives, hurts it as the fight goes and clears it when the group is down, gone, fled, captured or has yielded.',
+    prompt: 'Up to four foe groups in the fight, one slot each: name, count (0 = empty slot), its level from 1 to 99 and health (words). The narrator sets a slot when a group arrives, hurts it as the fight goes and clears it when the group is down, gone, fled, captured or yielded.',
     show: foes.show,
     state: Object.fromEntries(SLOTS.flatMap(n => [
         [`foe${n}`, text(`Foe ${n}`)],
         [`count${n}`, int(`Count ${n}`, 0, 99, 0)],
-        [`class${n}`, int(`Class ${n}`, 1, 9, 1, { names: SOUL })],
+        [`level${n}`, int(`Level ${n}`, 1, 99, 1)],
         [`hurt${n}`, bar(`Health ${n}`, 8, 'foe', 4)],
     ])),
     kinds: Object.fromEntries(SLOTS.flatMap(n => [
-        [`set-slot-${n}`, { op: '+', labels: { name: { type: 'text', max: 40 }, count: range(1, 99), class: range(1, 9) },
+        [`set-slot-${n}`, { op: '+', labels: { name: { type: 'text', max: 40 }, count: range(1, 99), level: range(1, 99) },
             when: ['eq', get(`count${n}`), 0], refusal: 'That slot is taken; clear it first.',
             effects: [{ op: 'set', path: [`foe${n}`], value: ['arg', 'name'] }, { op: 'set', path: [`count${n}`], value: ['arg', 'count'] },
-                { op: 'set', path: [`class${n}`], value: ['arg', 'class'] }, { op: 'set', path: [`hurt${n}`], value: ['add', 4, ['floorDiv', ['arg', 'class'], 3]] }] }],
+                { op: 'set', path: [`level${n}`], value: ['arg', 'level'] }, { op: 'set', path: [`hurt${n}`], value: ['add', 4, ['floorDiv', ['arg', 'level'], 30]] }] }],
         [`hurt-${n}`, { op: '~', labels: { to: stageLabel(STAGES.health) }, when: ['gt', get(`count${n}`), 0], refusal: 'That slot is empty.',
             effects: [{ op: 'set', path: [`hurt${n}`], value: blocksOf(['arg', 'to'], FOE_SIZE(n), STAGES.health.length) }] }],
         [`clear-${n}`, { op: '-', labels: { why: { type: 'enum', values: ['down', 'fled', 'yielded', 'captured', 'gone'] } },
@@ -229,23 +270,39 @@ const standardFoes = {
  */
 export const COMBAT_PROMPT_STANDARD = [
     '[COMBAT SYSTEM]',
-    'No Plot Armor: combat follows physical reality and the lore. Size, skill, numbers, reach, armor, terrain, preparation and Soul Class all matter. Against a stronger foe, {{user}} loses unless a believable edge exists: ambush, terrain, numbers, poison, preparation.',
-    'Exchanges: a fight is told exchange by exchange, each with clear cause, cost and consequence, in the order things happen. Most fights are short; never skip the moment that decides it.',
+    'No Plot Armor: combat follows physical reality and the lore. Size, skill, numbers, reach, armor, terrain, preparation and Level all matter. Against a stronger foe, {{user}} loses unless a believable edge exists: ambush, terrain, numbers, poison, preparation.',
+    'Exchanges: tell a fight exchange by exchange, each with clear cause, cost and consequence, in order. Most fights are short; never skip the moment that decides it.',
     'Weight & Risk: every strike, miss, wound and hesitation carries impact. Injury, fatigue, fear and pain carry into the next exchange and the next scene.',
     'Believable Outcomes: fights end when logic demands it: death, surrender, retreat, capture or collapse. Victory must be earned; survival must be justified.',
-    'Rolls: attacks, spells, defence, talk and checks each pair a main stat with half of a second one. Health, stamina and mana are rows of blocks: a hit takes one, a Decisive hit two, and a foe of a higher Soul Class has more. Tell the rolled result; code moves the bars for hits, heals, skill costs: never set those.',
-    'XP guide: a small fight 5 to 15, a hard fight 20 to 40, a boss 50 or more. Practice a skill 5 to 20 for each use.',
+    'Rolls: tell the rolled result as given; code moves the bars for hits, heals, skill costs: never set those.',
+    'XP guide: code gives XP for a won fight and practises rolled skills; write none for them. Other deeds 5 to 40.',
 ].join('\n');
 
 const standardCombat = { ...combat, stateVersion: 2, prompt: COMBAT_PROMPT_STANDARD };
 
-/** The Standard formula's four templates, in the chooser's order. Skills are the same block as Classic's. */
+/** The Standard formula's four templates, in the chooser's order. Skills are Classic's block with the learn guard. */
 export const STANDARD_TEMPLATES = Object.freeze([
     { name: 'Character', definition: standardCharacter },
-    { name: 'Skills', definition: skills },
+    { name: 'Skills', definition: standardSkills },
     { name: 'Foes', definition: standardFoes },
     { name: 'Combat rules', definition: standardCombat },
 ]);
+
+/**
+ * The additive upgrade of a Skills block made before the extra skill slots (five slots, no `sig`): the same definition with the fields, kinds and rules of the slots
+ * and the signature mark it lacks added from today's template (Standard's learn guard when the block has it). Nothing is removed, renamed or changed, and the text
+ * (`prompt`) stays as it was. → the extended definition, or null when it lacks nothing (or is not a Skills block). Pure.
+ */
+export function grownSkills(definition) {
+    if (definition?.role !== 'skills' || typeof definition.state !== 'object' || typeof definition.kinds !== 'object') return null;
+    const base = definition.kinds['learn-1']?.when ? standardSkills : skills;
+    const state = { ...definition.state }, kinds = { ...definition.kinds }, rules = [...(definition.rules ?? [])];
+    let changed = false;
+    for (const [key, schema] of Object.entries(base.state)) if (!Object.hasOwn(state, key)) { state[key] = structuredClone(schema); changed = true; }
+    for (const [name, kind] of Object.entries(base.kinds)) if (!Object.hasOwn(kinds, name)) { kinds[name] = structuredClone(kind); changed = true; }
+    for (const rule of base.rules) if (!rules.some(other => other.id === rule.id)) { rules.push(structuredClone(rule)); changed = true; }
+    return changed ? { ...definition, state, kinds, rules } : null;
+}
 
 /** The templates a chat's formula makes blocks from: 'classic' the originals, anything else Standard's. */
 export const templatesFor = formula => (formula === 'classic' ? LEAN_RPG_TEMPLATES : STANDARD_TEMPLATES);

@@ -235,8 +235,17 @@ export function definitionProblems(def) {
                 // `grammar` may be a function answering the line when the static part is built (a line that depends on what is
                 // installed, such as an enabled pack: Story Block's `you`); it must answer one line of text.
                 if (typeof spec.grammar === 'function') { /* read where it is used (grammarOf) */ }
+                // (`heads`: a kind may send no grammar line and only name the heads a stray line of it is taken by, ['+ event', '~ event'].)
+                else if (typeof spec.grammar === 'string' && !spec.grammar.trim() && headsOf(spec).length) { /* no line in the prompt, only heads */ }
                 else if (typeof spec.grammar !== 'string' || !spec.grammar.trim()) problems.push(`capture kind "${kind}" has no grammar line`);
                 else if (/\n/.test(spec.grammar.trim())) problems.push(`capture kind "${kind}" grammar is more than one line`);
+                // Heads take stray lines for a kind, so each must name that kind (or an alias of it): another kind's head would take its lines.
+                if (spec.heads !== undefined) {
+                    const own = new Set([kind, ...(Array.isArray(spec.aliases) ? spec.aliases : [])]);
+                    for (const head of Array.isArray(spec.heads) ? spec.heads : [spec.heads]) {
+                        if (!own.has(typeof head === 'string' ? head.split(' ')[1] : undefined)) problems.push(`capture kind "${kind}" has a head "${String(head)}" that does not name the kind itself`);
+                    }
+                }
                 if (spec.aliases !== undefined && (!Array.isArray(spec.aliases) || spec.aliases.some(alias => typeof alias !== 'string' || !KIND.test(alias)))) {
                     problems.push(`capture kind "${kind}" aliases must be a list of lowercase words`);
                 }
@@ -400,11 +409,19 @@ function neededVersion(range, version) {
  * `requires.storyBlock`; null skips that check (a registry built outside the host).
  * `warn(message)`: where definition warnings and failed initial() calls go (default console.warn).
  */
-/** A capture kind's grammar line: its text, or what its function answers now (one line of text; '' when it answers anything else). */
-function grammarOf(spec) {
+/** The heads a kind names for stray lines (`heads`: ['+ event', '- event']): only well-formed "op kind" strings; [] for none. */
+function headsOf(spec) {
+    return Array.isArray(spec?.heads) ? spec.heads.filter(head => typeof head === 'string' && /^[+\-~!?] \p{L}[\p{L}\p{N}_-]*$/u.test(head)) : [];
+}
+
+/**
+ * A capture kind's grammar line: its text, or what its function answers now (one line of text; '' when it answers anything else).
+ * `hint` (optional) is what the prompt being built tells the function (prompt.js assemble: { view, rolled }); without it the line is the full one.
+ */
+function grammarOf(spec, hint) {
     let line = spec?.grammar;
     if (typeof line === 'function') {
-        try { line = line(); } catch { line = ''; }
+        try { line = line(hint); } catch { line = ''; }
     }
     line = typeof line === 'string' ? line.trim() : '';
     return /\n/.test(line) ? '' : line;
@@ -416,6 +433,10 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
     // definition changed afterwards (a label set to a number, a feature pushed later) changes nothing.
     const declared = new Map();
     const owners = { domain: new Map(), command: new Map(), query: new Map(), kind: new Map(), tab: new Map(), screen: new Map(), widget: new Map(), feature: new Map() };
+    // A query marked `fallback: true` answers only while no other module owns that name: it takes no ownership (a module that registers the name, before
+    // or after, owns it and is the one asked), and a second fallback of the same name is refused as any second owner is. name → module id.
+    const fallbacks = new Map();
+    const isFallback = (def, name) => def.queries?.[name]?.fallback === true;
     // Every capture kind and alias → its canonical kind.
     const canonical = new Map();
 
@@ -446,7 +467,7 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         const out = [];
         for (const name of Object.keys(def.domains ?? {})) out.push(['domain', name, `the domain "${name}"`]);
         for (const type of Object.keys(def.commands ?? {})) out.push(['command', type, `the command "${type}"`]);
-        for (const name of Object.keys(def.queries ?? {})) out.push(['query', name, `the query "${name}"`]);
+        for (const name of Object.keys(def.queries ?? {})) out.push([isFallback(def, name) ? 'fallback' : 'query', name, `the query "${name}"`]);
         for (const [kind, spec] of Object.entries(def.capture?.kinds ?? {})) {
             out.push(['kind', kind, `the capture kind "${kind}"`]);
             for (const alias of spec.aliases ?? []) out.push(['kind', alias, `the capture kind "${alias}" (an alias of "${kind}")`]);
@@ -475,11 +496,11 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
             const key = `${table}:${name}`;
             if (seen.has(key)) clashes.push(`${label} is named twice in it`);
             seen.add(key);
-            const owner = owners[table].get(name);
+            const owner = (table === 'fallback' ? fallbacks : owners[table]).get(name);
             if (owner) clashes.push(`${label} already belongs to "${owner}"`);
         }
         if (clashes.length) refuse(id, clashes, def);
-        for (const [table, name] of claims(def)) owners[table].set(name, id);
+        for (const [table, name] of claims(def)) (table === 'fallback' ? fallbacks : owners[table]).set(name, id);
         for (const [kind, spec] of Object.entries(def.capture?.kinds ?? {})) {
             canonical.set(kind, kind);
             for (const alias of spec.aliases ?? []) canonical.set(alias, kind);
@@ -540,7 +561,7 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
     const there = (table, name) => table.has(name) && !held(table.get(name));
     const availableFor = needs => needs.kinds.every(kind => canonical.has(kind.toLowerCase()) && !held(owners.kind.get(canonical.get(kind.toLowerCase()))))
         && needs.commands.every(type => there(owners.command, type))
-        && needs.queries.every(name => there(owners.query, name));
+        && needs.queries.every(name => there(owners.query, name) || there(fallbacks, name));
     // What a read would say with other switches (`withFeatures`): feature id → true | false, set only while that call runs.
     let asIf = null;
     // On: the reader's choice when there is one, else the feature's default; an id no module declares, or
@@ -561,6 +582,8 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         asIf = switches instanceof Map ? switches : new Map(Object.entries(isObject(switches) ? switches : {}));
         try { return read(); } finally { asIf = before; }
     }
+    // True while a `withFeatures` read runs: what it asks is not the story as it is.
+    const hypothetical = () => asIf !== null;
     // Is this item (a kind spec, a command, a hook, a tab…) under a feature that is off?
     const off = item => {
         const id = featureOf(item);
@@ -664,7 +687,7 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         const statics = parts.map(part => part.static).filter(item => typeof item === 'function');
         const tails = parts.map(part => part.tail).filter(item => typeof item === 'function');
         const joined = statics.length <= 1 ? statics[0] ?? null
-            : () => statics.map(item => item()).filter(text => typeof text === 'string' && text.trim()).map(text => text.trim()).join('\n');
+            : hint => statics.map(item => item(hint)).filter(text => typeof text === 'string' && text.trim()).map(text => text.trim()).join('\n');
         const tail = tails.length <= 1 ? tails[0] ?? null : view => {
             const lines = [];
             const optional = [];
@@ -858,11 +881,22 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         },
         /** The query function; one answering null while its feature is off. */
         query(name) {
-            const owner = owners.query.get(name);
+            const owner = owners.query.get(name) ?? fallbacks.get(name);
             if (!owner) return null;
             const fn = defs.get(owner).queries[name];
             if (fn.enabled === false) return null;
-            return off(fn) || held(owner) ? offQuery : fn;
+            const asked = off(fn) || held(owner) ? offQuery : fn;
+            // A fallback stands behind the owner: asked when the owner is held back (switched off, dormant) or its feature is off, and when the owner answers nothing
+            // (null or an empty list: an older party module in a chat that is not its own), so it cannot hide the fallback's answer.
+            const behind = fallbacks.get(name);
+            if (!behind || behind === owner) return asked;
+            const back = defs.get(behind).queries[name];
+            if (back.enabled === false || off(back) || held(behind)) return asked;
+            if (asked === offQuery) return back;
+            return Object.assign((state, args, tools) => {
+                const answer = asked(state, args, tools);
+                return answer === null || answer === undefined || (Array.isArray(answer) && answer.length === 0) ? back(state, args, tools) : answer;
+            }, {});
         },
         initialState,
         /**
@@ -941,6 +975,7 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
         /** Whether feature `id` is on (the reader's choice, else its default); false for an id no module declares. */
         featureOn,
         withFeatures,
+        hypothetical,
         /** The feature command `type` belongs to, or null; the bus refuses it with FEATURE_OFF while that is off. */
         commandFeature,
         /**
@@ -961,15 +996,21 @@ export function createRegistry({ hostVersion = null, warn = message => console.w
                 .map(item => ({ id: item.id, title: item.title.trim(), hint: typeof item.hint === 'string' ? item.hint : '', render: item.render, place: placeOf(item.place) })),
             place: placeOf(def.settings.place),
         })),
-        /** [{ moduleId, name, domains, kinds: [{ kind, grammar }], static, tail, budget }] in module-id order. */
+        /**
+         * [{ moduleId, name, domains, kinds: [{ kind, grammar }], static, tail, budget }] in module-id order. `hint` (optional): what the prompt being built
+         * tells the grammar functions and `static(hint)` (prompt.js assemble); without it they answer in full.
+         */
         // Kinds and context (parts) under a feature that is off are left out (MODULES §F100).
-        contexts: () => sorted().filter(def => !held(def.id)).map(def => {
+        contexts: hint => sorted().filter(def => !held(def.id)).map(def => {
             const context = contextOf(def);
             return {
                 moduleId: def.id,
                 name: def.name ?? def.id,
                 domains: Object.keys(def.domains ?? {}),
-                kinds: Object.keys(def.capture?.kinds ?? {}).sort().filter(kind => def.capture.kinds[kind].enabled !== false && !off(def.capture.kinds[kind])).map(kind => ({ kind, grammar: grammarOf(def.capture.kinds[kind]) })).filter(entry => entry.grammar),
+                kinds: Object.keys(def.capture?.kinds ?? {}).sort().filter(kind => def.capture.kinds[kind].enabled !== false && !off(def.capture.kinds[kind])).map(kind => {
+                    const heads = headsOf(def.capture.kinds[kind]);
+                    return { kind, grammar: grammarOf(def.capture.kinds[kind], hint), ...(heads.length ? { heads } : {}) };
+                }).filter(entry => entry.grammar || entry.heads),
                 static: context.static,
                 tail: context.tail,
                 budget: def.context?.budget ?? null,

@@ -10,6 +10,8 @@
 import { createFakeContext } from './fake-st.js';
 import { createFakeBus, createFakeStore } from './fakes.js';
 import { createRuntime } from '../src/v2/runtime.js';
+import { setRpgLib } from '../src/v2/rpg-lazy.js';
+import * as leanRpg from '../src/v2/lean-rpg/index.js';
 
 const RUNTIME = { store: '../src/v2/store.js', commands: '../src/v2/commands.js' };
 
@@ -41,15 +43,18 @@ export async function hostAvailable() {
  * (register Story Block's core module: scene, inventory, packs, events, assist), callModel?(prompt, opts)
  * (the model behind sdk.callModel and the assist helpers; createFakeModel in model.js scripts one), storeOptions?: the real store's thresholds, fakes?: false (use fakes.js), st?: options for
  * createFakeContext (plus onBlocked?), settings?: initial extension_settings.storySuite, timelineFaults?: { at(phase) } (the
- * timeline calls it at every phase; a test makes it throw to stop there) }.
- * Returns { st, ctx, registry, settings, features, store, bus, events, sdk, turn, packs, timeline (the host's side of the
+ * timeline calls it at every phase; a test makes it throw to stop there), lazyRpg?: true (the RPG's code is NOT handed to the host: it is
+ * imported by `rpgLoad?()` (default: lean-rpg/index.js) only when the feature is on or the chat holds the RPG's records, as in the real page; by
+ * default the host has it at once, so a test may switch the feature on and use the RPG without waiting) }.
+ * Returns { st, ctx, registry, settings, features, store, bus, events, sdk, api (the public API), turn, packs, timeline (the host's side of the
  * timeline: { host, capability, … }, docs/v2/TIMELINE.md), send(text, reply, { stopped }),
  * swipe(reply), regenerate(reply), cont(reply), quiet(), head(), close() }; `st` is the fake
  * SillyTavern (fake-st.js), with `st.notices` = [{ reason, moduleId }] for held-back generations; `features` is the
  * reader's feature choices (createFeatureStore: `features.set('my-module.wear', false)`). Throws when the runtime is missing and `fakes` is not set.
  */
 export async function createHost(options = {}) {
-    const { modules = [], core = true, fakes = false, st: stOptions = {}, settings: initialSettings = null, callModel = null, storeOptions = null } = options;
+    const { modules = [], core = true, fakes = false, st: stOptions = {}, settings: initialSettings = null, callModel = null, storeOptions = null, lazyRpg = false, rpgLoad = undefined } = options;
+    setRpgLib(lazyRpg ? null : leanRpg);
     let createStore = createFakeStore;
     let createCommandBus = createFakeBus;
     if (!fakes) {
@@ -70,18 +75,18 @@ export async function createHost(options = {}) {
     // `storeOptions` (checkpointEvery, receiptKeep, …): the real store's own thresholds, for tests that need checkpoints or trimmed receipts early.
     const makeStore = storeOptions && !fakes ? base => createStore({ ...base, ...storeOptions }) : createStore;
     const runtime = createRuntime({
-        ctx, core, modules, createStore: makeStore, createCommandBus, callModel, timelineFaults: options.timelineFaults ?? null,
+        ctx, core, modules, createStore: makeStore, createCommandBus, callModel, timelineFaults: options.timelineFaults ?? null, rpgLoad,
         onBlocked: stOptions.onBlocked ?? null,
         notify: (reason, moduleId) => st.notices.push({ reason, moduleId }),
     });
-    const { registry, settings, store, bus, events, sdk, turn, markReady, timeline } = runtime;
+    const { registry, settings, store, bus, events, sdk, api, turn, markReady, timeline } = runtime;
     turn.install({ globalName: null });
     st.interceptor = turn.interceptor;
     await turn.onChatChanged();
     markReady();
 
     return {
-        st, ctx, registry, settings, features: runtime.features, store, bus, events, sdk, turn, packs: runtime.packs, timeline,
+        st, ctx, registry, settings, features: runtime.features, store, bus, events, sdk, api, turn, packs: runtime.packs, timeline, rpgLoader: runtime.rpgLoader, cardSettings: runtime.cardSettings,
         send: (text, reply = '', { stopped = false } = {}) => st.send(text, { reply, stopped }),
         swipe: (reply = '') => st.generate('swipe', { reply }),
         regenerate: (reply = '') => st.generate('regenerate', { reply }),

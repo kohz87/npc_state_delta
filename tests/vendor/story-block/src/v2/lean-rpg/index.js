@@ -11,28 +11,42 @@
 // (its header documents the `data.v2.result` record the battle log draws from) and the cue text in cue.js.
 import { stCallModel, stChat, stChatId } from '../assist/st-adapter.js';
 import { TIMEOUT_MS } from '../assist/common.js';
-import { LEAN_RPG_FEATURE, RESOLVE, ROLLS, ROLLS_SETTING } from './names.js';
+import { FIGHT, LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING, PRACTICE, PRACTICE_SETTING, PRACTICE_STEP, RESOLVE, ROLLS, ROLLS_SETTING } from './names.js';
+import { fightHook, fightXp } from './fight.js';
+import { RANK_QUERY, SETTINGS_SCHEMA, XP_RATE, XP_RATE_SETTING, rankQuery } from './levels.js';
+import { practiceHook, practiceStep } from './practice.js';
 import { createPlanHold } from './plan.js';
 import { JOIN_NO, joinCard, joinOffers, partyOf } from './join.js';
 import { createPrecall } from './precall.js';
 import { leanRpgGuard, resolve, rollsOf } from './resolve.js';
 import { skipOf } from './start.js';
+import { rosterQueries } from './roster.js';
 
 export * from './names.js';
-export { CUSTOM_SETTING, DIFFICULTIES, DIFFICULTY_SETTING, FORMULA_SETTING, NOTE_MAX, NOTE_SETTING, PRESETS, RULE_KEYS, RULE_RANGES, STANDARD, STANDARD_FORMULA, STANDARD_PRESETS, STANDARD_RANGES, STANDARD_RULE_KEYS, STANDARD_SETTING, STAT_ABOVE, difficultyOf, formulaOf, isStandard, normalizeRules, packInForce, packRulesOf, normalizeStandard, oddsFor, oddsSubject, plannerNoteOf, presetOf, rulesFromSettings, sameRules, statShare, subjectOdds } from './rules.js';
+export { CUSTOM_SETTING, DIFFICULTIES, DIFFICULTY_SETTING, EARLIER_RULES, FORMULA_SETTING, NOTE_MAX, NOTE_SETTING, PRESETS, RULE_KEYS, RULE_RANGES, STANDARD, STANDARD_FORMULA, STANDARD_PRESETS, STANDARD_RANGES, STANDARD_RULE_KEYS, STANDARD_SETTING, STAT_ABOVE, difficultyOf, formulaOf, isStandard, normalizeRules, packInForce, packRulesOf, normalizeStandard, oddsFor, oddsSubject, plannerNoteOf, presetOf, rulesFromSettings, sameRules, statShare, subjectOdds } from './rules.js';
+export { classTerm, divisorOf, hasLevels, levelCapFor } from './rules.js';
+export { classOfLevel, levelBonus, levelOfClass } from './formula.js';
 export { createPlanHold, parsePlanAnswer, planIsEmpty, validatePlan } from './plan.js';
 export { characterOf, fold, matchCharacter, matchFoe, matchName, matchSkill, readSheet } from './read.js';
-export { NO_ROLLS_LINE, OUTCOME_WORD, cueText, fitCue, lineText } from './cue.js';
-export { JOIN_ADD, JOIN_NO, checkJoin, joinCard, joinDefinitions, joinDraft, joinGrammar, joinMode, joinOffers, partyCap, partyOf, readJoin, soulOf } from './join.js';
+export { RANK_QUERY, SETTINGS_SCHEMA, XP_RATE, XP_RATE_SETTING, bandsOf, clampLevel, levelLabel, packLevelsOf, playerRankValue, rankNamed, rankOf, scaleXp, xpRateFrom, xpRateOf } from './levels.js';
+export { FIGHT_XP_HELD, fightOf, memberXp, standingSlots } from './fight.js';
+export { PRACTICE_HELD, practiceStep, usesOf } from './practice.js';
+export { NO_ROLLS_LINE, OPEN_FIGHT_LINE, OUTCOME_WORD, cueOfResult, cueText, fitCue, lineText, receiptCue } from './cue.js';
+export { QUIET_GRAMMAR, fightIsOpen, isQuiet } from './quiet.js';
+export { JOIN_ADD, JOIN_NO, checkJoin, joinCard, joinDefinitions, joinDraft, joinGrammar, joinMode, joinOffers, partyCap, partyOf, readJoin, soulNaming, soulOf } from './join.js';
+// What the data modules' companion steps (data-modules/part.js) reach through the loaded library (rpg-lazy.js).
+export { RPG_EXTRAS, extraDefinitions, extraName, extrasPlan } from './view/wizard-data.js';
+export { RPG_STRINGS } from './strings.js';
+export { grownSkills } from './templates.js';
 export { setStartNotes, skipOf, startNotes } from './start.js';
 export { PRECALL_HEAD, claimed, createPrecall, precallPrompt, sheetText } from './precall.js';
-export { DICE_VERSION, RESULT_VERSION, claimKey, leanRpgGuard, outcomeOf, positionalDice, prepare, resolve, rollPrepared, rollsOf } from './resolve.js';
+export { DICE_VERSION, FLOW_VERSION, RESULT_VERSION, claimKey, leanRpgGuard, outcomeOf, positionalDice, prepare, resolve, rollPrepared, rollsOf } from './resolve.js';
 
 // How much longer the hook may take than the planner's call, for the work around it.
 const HOOK_MARGIN_MS = 2000;
 
 /** The part's setting (Story Block's own bucket): when the pre-call plans the rolls. */
-export const DEFAULT_SETTINGS = Object.freeze({ [ROLLS_SETTING]: ROLLS[0] });
+export const DEFAULT_SETTINGS = Object.freeze({ [ROLLS_SETTING]: ROLLS[0], [PRACTICE_SETTING]: PRACTICE.perUse, [XP_RATE_SETTING]: XP_RATE.default, [LEVEL_CAP_SETTING]: LEVEL.max });
 
 /** The offers a reply's `+ party` lines made under Ask (the card under the reply reads them): `rpg.joins { index? }` → [{ name, about, soul, best }] on the head reply (or the reply `index`). */
 export const JOINS_QUERY = 'rpg.joins';
@@ -47,16 +61,22 @@ export const ROLLS_QUERY = 'rpg.rolls';
  *   metadata() → the chat's metadata object, for the held plan   (default: held in memory)
  *   problem(entry)                                              (the turn's Problems list; default: none)
  *   moduleId = 'story-block' (whose settings it reads), timeoutMs, timer
+ *   rosterOn() → whether the RPG and Gear in fights are both on (the roster is answered only then, or when asked for `recorded`)
+ *   persona() → the reader's name, for `party.pc` (default: none, the first block)
  * → { commands, queries, hooks, settings: { defaults }, guard }; `guard` is the replay guard for `rpg.resolve` blocks
  * (domains/index.js routes the guards of that predicate to it).
  */
-export function createLeanRpgPart({ callModel = stCallModel, chat = stChat, chatId = stChatId, metadata = () => null, problem = null, moduleId = 'story-block', timeoutMs, timer } = {}) {
+export function createLeanRpgPart({ callModel = stCallModel, chat = stChat, chatId = stChatId, metadata = () => null, problem = null, moduleId = 'story-block', timeoutMs, timer, persona = () => '', rosterOn } = {}) {
     const precall = createPrecall({ callModel, chat, chatId, hold: createPlanHold({ metadata }), problem, moduleId, timeoutMs, timer, skip: skipOf(metadata) });
     return {
         // A prelude: previewed before the reply and stored on it before its story lines (turn.js). Not tied to the
         // feature, so a Re-read of a reply that has rolls keeps them whatever the feature says now.
         commands: {
             [RESOLVE]: Object.assign((ctx, payload) => resolve(ctx, payload), { prelude: true, internal: true }),
+            // XP for a won fight, a step after the reply's lines (fight.js). Not tied to the feature either: a Re-read keeps it.
+            [FIGHT]: Object.assign((ctx, payload) => fightXp(ctx, payload), { internal: true }),
+            // Practice for the skills a reply's rolls used, a step after the reply's lines (practice.js). Not tied to the feature either.
+            [PRACTICE_STEP]: Object.assign((ctx, payload) => practiceStep(ctx, payload), { internal: true }),
             // "No" on a companion's card (join.js): the reader's answer, kept in the reply's own receipt like the offer it answers.
             [JOIN_NO]: Object.assign((ctx, payload) => {
                 if (ctx.cause !== 'ui') ctx.fail('REFUSED', 'Only the reader answers a companion\'s card.');
@@ -69,16 +89,25 @@ export function createLeanRpgPart({ callModel = stCallModel, chat = stChat, chat
         cards: { 'rpg-join': { feature: LEAN_RPG_FEATURE, for: (state, _message, ctx) => joinCard(ctx?.query?.(JOINS_QUERY, Number.isInteger(ctx?.index) ? { index: ctx.index } : {}) ?? [], state) } },
         queries: {
             [JOINS_QUERY]: Object.assign((state, args, tools) => joinOffers(tools?.receipts?.() ?? [], Number.isInteger(args?.index) ? args.index : tools?.reply?.index, partyOf(state)), { feature: LEAN_RPG_FEATURE }),
-            [ROLLS_QUERY]: Object.assign((_state, args, tools) => rollsOf(tools?.receipts?.() ?? [], Number.isInteger(args?.index) ? args.index : tools?.reply?.index), { feature: LEAN_RPG_FEATURE }) },
+            // The rank a level falls in, by the story's pack (levels.js): { level } → { name } | null.
+            [RANK_QUERY]: Object.assign(rankQuery, { feature: LEAN_RPG_FEATURE }),
+            [ROLLS_QUERY]: Object.assign((_state, args, tools) => rollsOf(tools?.receipts?.() ?? [], Number.isInteger(args?.index) ? args.index : tools?.reply?.index), { feature: LEAN_RPG_FEATURE }),
+            // The party's members and the reader's own Character, from the Character blocks (roster.js; fallbacks: a module that answers them itself is asked instead).
+            ...rosterQueries({ persona, on: rosterOn }) },
         // The planner's model call has its own limit (timeoutMs, Assist's 20 s by default); the hook is given a little longer, so
         // its own skip path (quiet ROLLS_SKIPPED, the no-rolls cue) runs on a slow answer and the turn's generic limit never cuts in.
         hooks: {
             beforeGenerate: Object.assign((view, info) => precall.beforeGenerate(view, info), { timeoutMs: (Number.isFinite(timeoutMs) ? timeoutMs : TIMEOUT_MS) + HOOK_MARGIN_MS }),
-            afterCapture: view => { precall.afterCapture(view); },
+            afterCapture: (view, info) => {
+                precall.afterCapture(view);
+                // The fight's XP, then the rolled skills' practice: two steps after the reply's lines.
+                const commands = [fightHook(view, info), practiceHook(view, info)].flatMap(out => out?.commands ?? []);
+                return commands.length ? { commands } : undefined;
+            },
             // Every reply, whatever else answers afterCapture and with or without change lines: the plan it used is let go.
             afterReceive: view => { precall.afterCapture(view); },
         },
-        settings: { defaults: { ...DEFAULT_SETTINGS } },
+        settings: { defaults: { ...DEFAULT_SETTINGS }, schema: SETTINGS_SCHEMA },
         guard: leanRpgGuard,
     };
 }

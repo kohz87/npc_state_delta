@@ -4,7 +4,8 @@
 
 import { oneLine } from '../../../text.js';
 import { CLASS_NAMES, RANK_NAMES } from '../names.js';
-import { DIFFICULTIES, PRESETS, STANDARD_PRESETS, STANDARD_SETTING, formulaOf, isStandard, normalizeRules, normalizeStandard, oddsSubject, presetOf, rulesFromSettings, subjectOdds, CUSTOM_SETTING, DIFFICULTY_SETTING, difficultyOf } from '../rules.js';
+import { DIFFICULTIES, hasLevels, PRESETS, STANDARD_PRESETS, STANDARD_SETTING, formulaOf, isStandard, normalizeRules, normalizeStandard, oddsSubject, presetOf, rulesFromSettings, subjectOdds, CUSTOM_SETTING, DIFFICULTY_SETTING, difficultyOf } from '../rules.js';
+import { applyGear } from '../gear.js';
 import { fold, readSheet } from '../read.js';
 import { precallPrompt } from '../precall.js';
 import { COMBAT_PROMPT, COMBAT_PROMPT_STANDARD, templatesFor } from '../templates.js';
@@ -56,16 +57,19 @@ export const combatTemplate = (templates, formula = 'classic') => {
  * Each formula keeps its own: Classic's six in `rpgCustom`, Standard's in `rpgStandard`.
  */
 export const customOf = (values, pack = null) => (formulaOf(values, pack) === 'standard'
-    ? normalizeStandard(values?.[STANDARD_SETTING] ?? (difficultyOf(values) === 'custom' ? null : rulesFromSettings(values, pack)))
-    : normalizeRules(values?.[CUSTOM_SETTING] ?? (difficultyOf(values) === 'custom' ? null : rulesFromSettings({ ...values, rpgFormula: 'classic' }, pack))));
+    ? normalizeStandard(values?.[STANDARD_SETTING] ?? (difficultyOf(values) === 'custom' ? null : inForce(rulesFromSettings(values, pack))))
+    : normalizeRules(values?.[CUSTOM_SETTING] ?? (difficultyOf(values) === 'custom' ? null : inForce(rulesFromSettings({ ...values, rpgFormula: 'classic' }, pack)))));
+// (The level divisor, 3 to 8, is in the Custom numbers only when the reader typed one: a switch to Custom starts from the numbers of the difficulty.)
+const inForce = ({ levelDivisor: _divisor, ...rest }) => rest;
 
 /**
  * The odds shown: `{ label, now: { success, cost, fail }, compare: [{ name, success, cost, fail }] }` for the reader's own
  * character (`own`, else the first Character block; their best skill) against a foe of their Soul Class, under `rules`, and the
  * same fight under each preset the reader has not chosen (all three for Custom). Null while the story has no character.
  */
-export function oddsView(state, own, rules) {
-    const sheet = readSheet(state);
+export function oddsView(state, own, rules, gear = null) {
+    // (With gear in fights on, the odds are for the stats the character rolls with: gear.js.)
+    const sheet = applyGear(readSheet(state), gear);
     const standard = isStandard(rules);
     const subject = oddsSubject(sheet, own, { rankNames: RANK_NAMES, soulNames: CLASS_NAMES, fold, standard });
     if (!subject) return null;
@@ -75,7 +79,7 @@ export function oddsView(state, own, rules) {
     return {
         label: fill(text, words),
         now: pick(subjectOdds(rules, subject)),
-        compare: DIFFICULTIES.slice(0, 3).filter(name => name !== chosen).map(name => ({ name, ...pick(subjectOdds(presets[name], subject)) })),
+        compare: DIFFICULTIES.slice(0, 3).filter(name => name !== chosen).map(name => ({ name, ...pick(subjectOdds(hasLevels(rules) ? { ...presets[name], levelDivisor: rules.levelDivisor } : presets[name], subject)) })),
     };
 }
 

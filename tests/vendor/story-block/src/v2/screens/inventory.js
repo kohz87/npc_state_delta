@@ -8,6 +8,7 @@ import { BASE_CSS, RARITY_THEME } from './style.js';
 export const INVENTORY_SCREEN_ID = 'story-block/inventory';
 
 const S = STRINGS.inventory;
+const G = S.gear;
 
 /** The kinds' group titles (src/v2/strings.js). */
 export const KIND_TITLES = S.kinds;
@@ -40,38 +41,72 @@ const foldPanel = (kind, cls, when, question, body) => `
             <button type="button" class="ss-button fold-cancel" data-draft-cancel>${html(S.cancel)}</button>
           </div>`;
 
-function group(kind) {
-    return `
-  <section class="group" data-kind="${kind}" data-if="${anyKind(kind)}">
-    <h4 class="ss-section-label"><i class="fa-solid ${KIND_ICONS[kind]}" aria-hidden="true"></i> ${html(KIND_TITLES[kind])}</h4>
-    <ul>
-      <li class="item ss-glass" data-each="q.items as it" data-draft-close="fold[it.stack]" data-if="it.kind == '${kind}' && ${ITEM_FILTER}"
-          data-class="${RARITY_CLASSES}; equipped: it.equipped != null">
-        <span class="ss-tile-box" aria-hidden="true"><i class="fa-solid ${KIND_ICONS[kind]}"></i><span class="ss-tile-count" data-if="it.qty != 1">{{ it.qty }}</span></span>
-        <div class="body">
-        <div class="line">
-          <span class="name">{{ it.name }}</span>
-          <span class="item-edit" data-inline-control="ss.editable" data-props='{"value":"{{ it.name }}","itemCount":{{ q.counts[it.stack] }},"itemNote":"{{ it.note }}","displayValue":false,"kind":"item","label":"${jsonText(S.editItem)}","command":"inventory.edit","payload":{"stack":"{{ it.stack }}","group":true}}'></span>
+// A cast member's signature piece (gear on) is bound: it has no Drop (and its Edit is locked, see the Edit form).
+const BOUND_FREE = "q.gx.rows[it.stack].bound == null";
+// The lock of a bound chip: the app's own ph-lock-simple (solid), drawn by the badge widget (a template cannot carry an svg's path).
+const LOCK = `<ss-widget class="bound-lock" name="ss.badge" data-props='{"icon":"ph-lock-simple:fill","label":"${jsonText(G.bound)}"}'></ss-widget>`;
+
+// With Gear in fights on (`q.gx` answers; it is null while off) the same card gains the gear parts; `group(kind)` without `gear` is the template as it
+// always was, so the gear-off render is exactly that.
+function group(kind, gear = false) {
+    const row = 'q.gx.rows[it.stack]';
+    const edit = `{"value":"{{ it.name }}","itemCount":{{ q.counts[it.stack] }},"itemNote":"{{ it.note }}","displayValue":false,"kind":"item","label":"${jsonText(S.editItem)}","command":"inventory.edit","payload":{"stack":"{{ it.stack }}","group":true}${gear
+        ? `,"gear":{"kind":"{{ it.kind }}","stack":"{{ it.stack }}","owner":"{{ it.owner }}","by":"{{ ${row}.byId }}","place":"{{ ${row}.place }}","slot":"{{ ${row}.slotKey }}","bound":"{{ ${row}.bound.who }}","def":"{{ it.def }}","rarity":"{{ it.rarity }}","row":{{ ${row} }},"kit":{{ q.gx.kit.open }},"owners":{{ q.gx.owners }}}` : ''}}`;
+    // The chips and the condition of a row: today's, or (gear on) the slot, who wears it and the condition bar with its word.
+    const chips = gear ? `
+          <span class="rarity">{{ it.rarity }}</span>
+          <span class="chip slot" data-if="it.kind == 'equipment' && it.slot != null" title="${html(G.slotTitle)}">{{ it.slot }}</span>` : `
           <span class="chip eq worn-by" data-if="it.equipped != null && it.owner == 'party'" title="${html(S.equippedTitle)}">${html(S.wornByParty)}</span>
           <span class="chip key" data-if="it.key" title="${html(S.keyTitle)}">${html(S.key)}</span>
           <span class="chip carry" data-if="it.carry" title="${html(S.carryTitle)}">+{{ it.carry }} ${html(S.carry)}</span>
           <span class="rarity">{{ it.rarity }}</span>
           <span class="cond muted" data-if="it.cond != null" title="${html(S.condTitle)}">{{ it.cond }}/100</span>
+          <span class="owner muted" data-if="it.owner != 'party'">{{ state.party.actors[it.owner].name }}</span>`;
+    // Gear on, line 2: who has it (Equipped · name, or the lock and Bound · name for a cast member's signature piece), the key, who carries it.
+    // The line is always there, so every row is as tall as the next.
+    const line2 = `
+        <div class="g-l2">
+          <span class="chip eq worn-by" data-if="${row}.by != '' && ${row}.bound == null" title="${html(G.equippedByTitle, { name: '{{ ' + row + '.by }}' })}">${html(G.equippedBy, { name: '{{ ' + row + '.by }}' })}</span>
+          <span class="chip eq worn-by bound" data-if="${row}.bound != null" title="${html(G.boundTitle, { name: '{{ ' + row + '.bound.who }}' })}">${LOCK}${html(G.boundBy, { name: '{{ ' + row + '.bound.who }}' })}</span>
+          <span class="chip key" data-if="it.key" title="${html(S.keyTitle)}">${html(S.key)}</span>
           <span class="owner muted" data-if="it.owner != 'party'">{{ state.party.actors[it.owner].name }}</span>
-        </div>
-        <p class="note muted" data-if="it.note">{{ it.note }}</p>
-        <div class="actions">
+        </div>`;
+    // Line 3: the stat bonus, the condition bar and word, then the note (muted), one line.
+    const detail = gear ? `
+        <div class="detail gear-line g-l3">
+          <span class="bonus" data-if="${row}.bonus != ''">{{ ${row}.bonus }}</span>
+          <span class="carry-note" data-if="it.carry">+{{ it.carry }} ${html(S.carry)}</span>
+          <span class="cbar" data-if="it.kind == 'equipment'" title="${html(G.condTitle)}" data-bind-var="--ss-fill: ${row}.fill" data-class="w-worn: ${row}.word == 'worn'; w-torn: ${row}.word == 'torn'; w-broken: ${row}.word == 'broken'"><i></i></span>
+          <span class="cword" data-if="it.kind == 'equipment'" data-class="w-worn: ${row}.word == 'worn'; w-torn: ${row}.word == 'torn'; w-broken: ${row}.word == 'broken'">${['good', 'worn', 'torn', 'broken'].map(word => `<span data-if="${row}.word == '${word}'">${html(G.words[word])}</span>`).join('')}<span data-if="${row}.broken"> ${html(G.brokenNoBonus)}</span></span>
+          <p class="note muted" data-if="it.note">{{ it.note }}</p>
+        </div>` : '';
+    const buttons = gear ? '' : `
           <button class="ss-button" data-if="it.kind == 'equipment' && it.equipped == null" data-command="inventory.equip"
-                  data-payload='{"stack":"{{ it.stack }}"}' title="${html(S.equipTitle, { name: '{{ it.name }}' })}"><i class="fa-solid fa-hand-fist" aria-hidden="true"></i> ${html(S.equip)}</button>
-          ${foldAction('use', "it.kind == 'consumable' && len(q.gear.users[it.stack]) > 0", 'fa-flask', html(S.useOn), html(S.useOnTitle, { name: '{{ it.name }}' }))}
+                  data-payload='{"stack":"{{ it.stack }}"}' title="${html(S.equipTitle, { name: '{{ it.name }}' })}"><i class="fa-solid fa-hand-fist" aria-hidden="true"></i> ${html(S.equip)}</button>`;
+    const unequip = gear ? '' : `
           <button class="ss-button" data-if="it.equipped != null" data-command="inventory.unequip"
-                  data-payload='{"stack":"{{ it.stack }}"}' title="${html(S.unequipTitle, { name: '{{ it.name }}' })}">${html(S.unequip)}</button>
-          ${foldAction('drop', '', 'fa-trash-can', html(S.drop), html(S.dropTitle, { name: '{{ it.name }}' }))}
+                  data-payload='{"stack":"{{ it.stack }}"}' title="${html(S.unequipTitle, { name: '{{ it.name }}' })}">${html(S.unequip)}</button>`;
+    return `
+  <section class="group" data-kind="${kind}" data-if="${gear ? `q.gx != null && ${anyKind(kind)}` : `q.gx == null && ${anyKind(kind)}`}">
+    <h4 class="ss-section-label"><i class="fa-solid ${KIND_ICONS[kind]}" aria-hidden="true"></i> ${html(KIND_TITLES[kind])}</h4>
+    <ul>
+      <li class="item ss-glass${gear ? ' grow' : ''}" data-each="q.items as it" data-draft-close="fold[it.stack]" data-if="it.kind == '${kind}' && ${ITEM_FILTER}"
+          data-class="${RARITY_CLASSES}; equipped: it.equipped != null${gear ? `; broken: ${row}.broken` : ''}">
+        <span class="ss-tile-box" aria-hidden="true"><i class="fa-solid ${KIND_ICONS[kind]}"></i><span class="ss-tile-count" data-if="it.qty != 1">{{ it.qty }}</span></span>
+        <div class="body">
+        <div class="line${gear ? ' g-l1' : ''}">
+          <span class="name">{{ it.name }}</span>
+          <span class="item-edit" data-inline-control="ss.editable" data-props='${edit}'></span>${chips}
+        </div>${gear ? line2 : `
+        <p class="note muted" data-if="it.note">{{ it.note }}</p>`}${detail}
+        <div class="actions">${buttons}
+          ${foldAction('use', "it.kind == 'consumable' && len(q.gear.users[it.stack]) > 0", 'fa-flask', html(S.useOn), html(S.useOnTitle, { name: '{{ it.name }}' }))}${unequip}
+          ${foldAction('drop', gear ? BOUND_FREE : '', 'fa-trash-can', html(S.drop), html(S.dropTitle, { name: '{{ it.name }}' }))}
         </div>
           ${foldPanel('use', 'use-on', "it.kind == 'consumable' && len(q.gear.users[it.stack]) > 0", html(S.useOn), `
             <button class="ss-button" data-each="q.gear.users[it.stack] as who" data-command="item.use"
                     data-payload='{"stack":"{{ it.stack }}","target":"{{ who.id }}"}' title="${html(S.useOnWho, { name: '{{ it.name }}' })}">{{ who.name }}</button>`)}
-          ${foldPanel('drop', 'drop', '', html(S.dropAsk, { name: '{{ it.name }}' }), `
+          ${foldPanel('drop', 'drop', gear ? BOUND_FREE : '', html(S.dropAsk, { name: '{{ it.name }}' }), `
             <button class="ss-button ss-button-danger" data-if="it.qty != 1" data-command="inventory.drop"
                     data-payload='{"stack":"{{ it.stack }}","qty":1}'>${html(S.dropOne)}</button>
             <button class="ss-button ss-button-danger" data-command="inventory.drop"
@@ -82,8 +117,25 @@ function group(kind) {
   </section>`;
 }
 
+// With Gear in fights on, the sections come in this order (equipment first); the kinds it does not name follow, so nothing is hidden.
+const GEAR_ORDER = Object.freeze(['equipment', 'consumable', 'goods', 'quest', 'material', 'money']);
+
+const CARRY = `<section class="carry-sec" data-if="q.gx != null">
+    <h4 class="ss-section-label"><i class="fa-solid fa-weight-hanging" aria-hidden="true"></i> ${html(G.carry)}</h4>
+    <ul>
+      <li class="item ss-glass carry-card" aria-label="${html(G.carryLabel)}" data-class="heavy: q.gx.carry.level == 'heavy'; over: q.gx.carry.level == 'over'">
+        <div class="carry-line"><b class="carry-num">{{ q.gx.carry.load }} / {{ q.gx.carry.capacity }}</b>
+          <span class="carry-state" data-if="q.gx.carry.level == 'heavy'">${html(G.heavy)}</span>
+          <span class="carry-state" data-if="q.gx.carry.level == 'over'">${html(G.over, { n: '{{ q.gx.carry.lose }}' })}</span></div>
+        <div class="ss-bar-track carry-bar" data-bind-var="--ss-fill: ratio(q.gx.carry.load, q.gx.carry.capacity)"><div class="ss-bar-fill"></div></div>
+        <p class="carry-break muted" data-if="q.gx.carry.breakdown != ''">{{ q.gx.carry.breakdown }}</p>
+        <p class="carry-break carry-away muted" data-each="q.gx.carry.away as line">{{ line }}</p>
+      </li>
+    </ul>
+  </section>`;
+
 const TEMPLATE = `
-<div class="inv">
+<div class="inv" data-class="gear: q.gx != null">
   <header class="top">
     <div class="wallet-and-add">
     <div class="wallet" title="${html(S.walletTitle)}">
@@ -112,7 +164,7 @@ ${RARITIES.map(rarity => `          <option value="${rarity}">${html(S.rarities[
       </label>
       <label class="check"><input type="checkbox" data-draft="equippedOnly"> ${html(S.equippedOnly)}</label>
     </div>
-  </header>
+  </header>${CARRY}
   <section class="loot" data-if="len(q.loot) > 0">
     <h4 class="ss-section-label"><i class="fa-solid fa-sack-dollar" aria-hidden="true"></i> ${html(S.lootTitle)}</h4>
     <div class="offer" data-each="q.loot as o">
@@ -126,7 +178,8 @@ ${RARITIES.map(rarity => `          <option value="${rarity}">${html(S.rarities[
     </div>
   </section>
   <p class="empty muted" data-if="len(q.items) == 0">${html(S.empty)}</p>
-  <div class="groups">${KIND_ORDER.map(group).join('')}
+
+  <div class="groups">${GEAR_ORDER.map(kind => group(kind, true).trim()).join('')}${KIND_ORDER.map(kind => group(kind)).join('')}
   </div>
   <p class="nomatch muted" data-if="len(q.items) > 0">${html(S.noMatch)}</p>
 </div>`;
@@ -140,6 +193,19 @@ const CSS = `${BASE_CSS}
 .inv-add-form { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .inv-add-form input { width: 10em; max-width: 100%; }
 .inv-add-error { flex-basis: 100%; color: var(--ss-bad-text); }
+/* Gear in fights: "+ Add item" opens the grouped form full width under the button; while a row is being edited on a phone it takes the whole row. */
+.wallet-and-add:has(.inv-add-gear) { display: flex; width: 100%; }
+.wallet-and-add:has(.inv-add-gear) > :has(.inv-add-gear) { flex: 1 1 100%; min-width: 0; }
+/* the slim 32px boxes only where there is room and a fine pointer; a phone keeps size.css's 44px controls */
+@media (min-width: 760px) and (pointer: fine) {
+  .ss-w-editable-group input, .ss-w-editable-group select { box-sizing: border-box !important; min-height: 32px !important; height: 32px !important; }
+}
+.ss-w-inventory-add:has(.inv-add-gear), .inv-add-gear, .inv-add-gear > .ss-w-editable { display: block; width: 100%; min-width: 0; }
+.inv.gear .item:has(.ss-w-editable-gear) > .body > .actions { display: none; }
+@media (max-width: 600px) {
+  .inv.gear .item:has(.ss-w-editable-gear) > .ss-tile-box { display: none; }
+  .inv.gear .item.grow:has(.ss-w-editable-gear) { grid-template-columns: minmax(0, 1fr); }
+}
 .filter { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-left: auto; font-size: 0.85em; }
 .filter label { display: inline-flex; gap: 4px; align-items: center; }
 .filter select, .filter .find { font: inherit; color: var(--sb-fg); background: var(--sb-surface); border: 1px solid var(--sb-border);
@@ -215,6 +281,65 @@ const CSS = `${BASE_CSS}
 @media (max-width: 480px) { .filter { width: 100%; } }
 /* Every action is a 44px target (Equip on…, Use on…, Unequip, Drop, and the fold rows' buttons). */
 .actions .ss-button { min-height: 44px; }
+/* ---- Gear in fights (the .gear class is on only while it is on) ---- */
+.inv.gear, .inv.gear .groups { gap: 22px; }
+.inv.gear .top { gap: 8px 12px; }
+/* "+ Add item" is the slim pill of the filter row's height, on one line, wherever it sits. */
+.inv.gear .wallet-and-add { flex-wrap: wrap; }
+.inv.gear .ss-w-inventory-add > button.ss-button { min-height: 0; padding: 4px 12px; font-size: 12px; line-height: 1.3; white-space: nowrap; flex: 0 0 auto; width: auto; }
+.carry-sec { display: grid; gap: 8px; }
+.carry-sec > ul { margin: 0; }
+/* The Carry card is an item row's card: its content is one column (the load and its state, the bar, the breakdown). */
+.item.carry-card { grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: stretch; margin-bottom: 0; }
+.carry-line { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; }
+.carry-num { font-variant-numeric: tabular-nums; color: var(--ss-good, var(--sb-good)); }
+.carry-bar { height: 8px; }
+.carry-card .ss-bar-fill { --ss-bar-color: var(--ss-good, var(--sb-good)); }
+.carry-card.heavy .carry-line, .carry-card.heavy .carry-line .carry-num { color: var(--ss-warn-text, #e0b04a); }
+.carry-card.heavy .ss-bar-fill { --ss-bar-color: var(--ss-warn, #e0b04a); }
+.carry-card.over .carry-line, .carry-card.over .carry-line .carry-num { color: var(--ss-bad-text, var(--sb-bad)); }
+.carry-card.over .ss-bar-fill { --ss-bar-color: var(--ss-bad, var(--sb-bad)); }
+.carry-break { margin: 0; font-size: 0.8em; }
+.carry-away { opacity: 0.75; }
+.chip.slot { text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.7em; }
+.gear-line { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: 0.8em; }
+.gear-line .bonus { color: var(--rarity); font-weight: 600; font-variant-numeric: tabular-nums; }
+.gear-line .carry-note { color: var(--sb-em); }
+.cbar { --ss-fill: 1; position: relative; display: inline-block; width: 38px; height: 4px; border-radius: 2px; background: var(--ss-track, rgba(127, 127, 127, 0.3)); overflow: hidden; }
+.cbar > i { position: absolute; inset: 0 auto 0 0; width: calc(var(--ss-fill, 1) * 100%); border-radius: inherit; background: var(--ss-good, var(--sb-good)); }
+.cbar.w-worn > i { background: var(--ss-warn, #e0b04a); }
+.cbar.w-torn > i { background: color-mix(in srgb, var(--ss-warn, #e0b04a) 55%, var(--ss-bad, var(--sb-bad))); }
+.cbar.w-broken > i { background: var(--ss-bad, var(--sb-bad)); }
+.cword { color: var(--ss-good, var(--sb-good)); }
+.cword.w-worn { color: var(--ss-warn-text, #e0b04a); }
+.cword.w-torn { color: color-mix(in srgb, var(--ss-warn-text, #e0b04a) 55%, var(--ss-bad-text, var(--sb-bad))); }
+.cword.w-broken { color: var(--ss-bad-text, var(--sb-bad)); }
+.item.broken .name { text-decoration: none; }
+/* ---- Gear on: every row is three lines (name, pencil, rarity word, slot chip / who has it / bonus, condition, note), the same height, the same text
+   edge; the compact Drop sits in the middle of the row. The row being edited keeps the form above (no fixed lines then). ---- */
+.inv.gear .item.grow:not(:has(.ss-w-editable-item-form)) { min-height: 84px; box-sizing: border-box; padding-top: 12px; padding-bottom: 12px; }
+.inv.gear .item.grow:not(:has(.ss-w-editable-item-form)) > .body { grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 20px 16px 16px; row-gap: 4px; column-gap: 10px; align-items: center; }
+.inv.gear .item.grow:not(:has(.ss-w-editable-item-form)) > .body > :is(.g-l1, .g-l2, .g-l3) { grid-column: 1; grid-row: auto; display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-width: 0; margin: 0; overflow: hidden; white-space: nowrap; }
+.inv.gear .item.grow:not(:has(.ss-w-editable-item-form)) > .body > .g-l1 { height: 20px; }
+.inv.gear .item.grow:not(:has(.ss-w-editable-item-form)) > .body > :is(.g-l2, .g-l3) { height: 16px; }
+.inv.gear .item.grow:not(:has(.ss-w-editable-item-form)) > .body > .actions { grid-column: 2; grid-row: 1 / 4; align-self: center; justify-self: end; margin: 0; }
+.inv.gear .item.grow:not(:has(.ss-w-editable-item-form)) > .body > .fold { grid-column: 1 / -1; grid-row: 4; }
+.inv.gear .item.grow .actions .ss-button { min-height: 32px; height: 32px; padding: 0 10px; font-size: 12px; }
+.inv.gear .g-l1 > .name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.inv.gear .g-l1 > :not(.name) { flex: none; }
+.inv.gear .g-l1 .item-edit .ss-w-editable-pencil { height: 18px; min-height: 0; min-width: 0; padding: 0 2px; margin: 0; }
+.inv.gear .g-l1 .rarity { font-size: 9px; }
+.inv.gear .g-l2 .chip.eq { display: inline-flex; align-items: center; }
+.inv.gear .item.grow .g-l3 { font-size: 1em; }
+.inv.gear .g-l3 .note { flex: 1 1 0; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.inv.gear .item.grow:has(.ss-w-editable-item-form) > .body > :is(.g-l2, .g-l3) { display: none; }
+.chip.bound { display: inline-flex; align-items: center; }
+.bound > .bound-lock { display: inline-flex; flex: none; margin: 0 3px 0 0; }
+.bound > .bound-lock .ss-w-badge { padding: 0; border: 0; background: none; min-height: 0; gap: 0; }
+.bound > .bound-lock .ss-w-badge-icon { color: inherit; display: inline-flex; }
+.bound > .bound-lock .ss-icon-svg { width: 9px; height: 9px; }
+/* The rarity word is for desktop widths: on a phone the name's colour already says it. */
+@media (max-width: 500px) { .inv.gear .g-l1 { gap: 4px; } .inv.gear .g-l1 .rarity { display: none; } .inv.gear .g-l1 .chip.slot { padding: 0 4px; } }
 `;
 
 export const inventoryScreen = Object.freeze({
@@ -232,6 +357,8 @@ export const inventoryScreen = Object.freeze({
         gear: Object.freeze({ query: 'inventory.equipment' }),
         // The loot laid out and not yet taken, so it can be taken with the cards off too.
         loot: Object.freeze({ query: 'inventory.loot' }),
+        // Gear in fights (Settings -> RPG): the Carry card, each row's bonus and condition, who can wear. Null while it is off.
+        gx: Object.freeze({ query: 'gear.view' }),
     }),
     theme: RARITY_THEME,
     template: TEMPLATE,

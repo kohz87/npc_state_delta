@@ -49,6 +49,11 @@ export const widgetCss = `
 :where(.ss-w-editable-record-fields) { display: grid; grid-template-columns: repeat(auto-fit, minmax(8em, 1fr)); gap: 8px; width: 100%; }
 :where(.ss-w-editable-item-label) { display: grid; gap: 3px; min-width: 0; font-size: 0.85em; color: var(--ss-w-muted); }
 :where(.ss-w-editable-item-label:last-child) { grid-column: 1 / -1; }
+:where(.ss-w-editable-item-wide, .ss-w-editable-item-pair) { grid-column: 1 / -1; }
+:where(.ss-w-editable-item-pair) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; min-width: 0; }
+:where(.ss-w-editable-item-pair select) { width: 100%; min-width: 0; }
+:where(.ss-w-editable-item-hint) { grid-column: 1 / -1; margin: 0; font-size: 0.85em; color: var(--ss-w-muted); }
+:where(.ss-w-editable-item-pair .ss-w-editable-item-label:last-child) { grid-column: auto; }
 :where(.ss-w-editable-item-fields input, .ss-w-editable-record-fields input) { width: 100%; min-width: 0; color: var(--ss-w-fg); }
 /* a form with groups: a fieldset each (a heading and the boxes), side by side where the room is, the help line, the sentence, then Save and Cancel */
 :where(.ss-w-editable-grouped) { display: grid; gap: 12px; width: 100%; }
@@ -58,9 +63,24 @@ export const widgetCss = `
 :where(.ss-w-editable-group .ss-w-editable-item-label) { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
 :where(.ss-w-editable-group .ss-w-editable-item-label:last-child) { grid-column: auto; }
 :where(.ss-w-editable-group input, .ss-w-editable-group select) { width: 100%; min-width: 0; letter-spacing: 0; text-transform: none; color: var(--ss-w-fg); }
+/* the host gives selects a bottom margin; inside a group it would push a select above the input next to it */
+.ss-w-editable-group input, .ss-w-editable-group select { margin: 0; }
 :where(.ss-w-editable-row) { display: grid; grid-template-columns: repeat(auto-fit, minmax(5em, 1fr)); gap: 8px; }
 :where(.ss-w-editable-row:has(> :nth-child(4))) { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.3fr) minmax(0, 0.8fr) minmax(0, 1.7fr); }
 :where(.ss-w-editable-help) { margin: 0; font-size: 12px; color: var(--ss-w-muted); }
+:where(.ss-w-editable-group input:disabled, .ss-w-editable-group select:disabled) { opacity: 0.6; cursor: not-allowed; }
+:where(.ss-w-editable-gear .ss-w-editable-groups) { max-width: none; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18em), 1fr)); } /* two groups side by side from about 600px of room, stacked below it */
+:where(.ss-w-editable-gear .ss-w-editable-row) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: end; }
+:where(.ss-w-editable-sr) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+:where(.ss-w-editable-tone)::after { content: attr(data-word); margin-left: 0.6em; text-transform: uppercase; font-size: 0.85em; letter-spacing: 0.04em; }
+:where(.ss-w-editable-tone[data-tone="uncommon"])::after { color: var(--sb-uncommon); }
+:where(.ss-w-editable-tone[data-tone="rare"])::after { color: var(--sb-rare); }
+:where(.ss-w-editable-tone[data-tone="epic"])::after { color: var(--sb-epic); }
+:where(.ss-w-editable-tone[data-tone="legendary"])::after { color: var(--sb-legendary); }
+:where(.ss-w-editable-group .ss-w-editable-note) { grid-column: auto; }
+:where(.ss-w-editable-points) { margin: 0; font-size: 12px; color: var(--ss-w-muted); font-variant-numeric: tabular-nums; }
+:where(.ss-w-editable-points.ss-w-editable-over) { color: var(--ss-bad-text, var(--ss-w-bad)); font-weight: 600; }
+
 :where(.ss-w-editable-actions) { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
 /* meter */

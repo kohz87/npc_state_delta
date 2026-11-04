@@ -77,6 +77,18 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
     };
 
     return {
+        /**
+         * Checks a pack (text or parsed) as install would, but for its capabilities, and installs nothing: `{ ok: true, pack, missing }`
+         * (`missing`: the capability names it needs that no installed module provides, none while they are unknown) or `{ ok: false, errors }`.
+         * The card offer (card-offer.js) uses it to tell "cannot install yet" from "refused".
+         */
+        inspect(input) {
+            const result = validatePack(input, { hostVersion: host(), capabilities: null, limits });
+            if (!result.ok) return result;
+            const names = have();
+            return { ok: true, pack: result.pack, raw: result.raw, missing: names ? result.pack.requires.capabilities.filter(name => !names.includes(name)) : [] };
+        },
+
         /** The installed packs for the settings list, in order. */
         list() {
             const names = have();
@@ -92,7 +104,7 @@ export function createInstalled({ settings, hostVersion = HOST_VERSION, capabili
                     enabled: entry.enabled !== false,
                     source: SOURCES.includes(entry.source) ? entry.source : 'file',
                     origin: String(entry.origin ?? ''),
-                    counts: pack ? Object.fromEntries(Object.entries(pack.content).map(([kind, list]) => [kind, list.length])) : {},
+                    counts: pack ? Object.fromEntries(Object.entries(pack.content).map(([kind, list]) => [kind, kind === 'rpg' ? list.filter(record => record?.slug !== 'formula' && record?.slug !== 'ranks').length : list.length])) : {},
                     hasStart: Boolean(pack?.start),
                     // What else it adds, beside its content lists: its coins, a money scale, a calendar, weather tables, screens, a theme.
                     extras: pack ? extrasOf(pack) : [],

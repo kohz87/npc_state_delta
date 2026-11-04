@@ -1,6 +1,7 @@
 // Add an editor beside a displayed local field in a data-module layout. Authored templates opt in with ss.editable.
 import { validateLayout } from '../layout/validate.js';
 import { standardWidgets } from '../view/widgets/index.js';
+import { BLOCK_NODE_WIDGETS } from './fields-widget.js';
 
 function propsFor(module, field, key, schema, label) {
     const scalar = schema.type === 'map' ? schema.values : schema;
@@ -35,6 +36,9 @@ export function editableLayout(layout, definition) {
         const [field, key] = parts;
         const schema = Object.hasOwn(definition.state, field) ? definition.state[field] : null;
         if (!schema || parts.length !== (schema.type === 'map' ? 2 : 1) || (schema.type === 'map' && !schema.keys.includes(key))) return next;
+        // A meter that gives no maximum takes the field's own (a whole number from 0), so it draws its bar and shows "18 / 100", not a dash.
+        const scalar = schema.type === 'map' ? schema.values : schema;
+        if (node.type === 'meter' && node.max === undefined && scalar.type === 'int' && scalar.min === 0) next.max = scalar.max;
         const props = propsFor(definition.id, field, key, schema, typeof node.label === 'string' ? node.label : field);
         if (!props) return next;
         if (characterRow) props.payload.who = '$item.id';
@@ -42,5 +46,5 @@ export function editableLayout(layout, definition) {
     }
     const result = { ...layout, root: visit(layout.root) };
     // Existing valid layouts can already be at the renderer's size limit. Never make them fail to draw.
-    return validateLayout(result, { widgets: standardWidgets, meta: false }).length ? layout : result;
+    return validateLayout(result, { widgets: { ...standardWidgets, ...BLOCK_NODE_WIDGETS }, meta: false }).length ? layout : result;
 }

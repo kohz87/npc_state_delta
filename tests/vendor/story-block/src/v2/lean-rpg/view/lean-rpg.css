@@ -83,6 +83,8 @@
 .rpg-skill-uses { font-size: 12px; color: var(--ss-muted); margin-left: auto; }
 .rpg-skill-pencil { width: 32px; height: 32px; min-width: 32px; display: inline-grid; place-items: center; border-radius: 8px; border: 0; background: transparent; color: var(--ss-muted); cursor: pointer; }
 .rpg-skill-uses + .rpg-skill-pencil { margin-left: 0; }
+.rpg-skill-lock { width: 13px; height: 13px; flex: none; color: var(--ss-muted); opacity: 0.95; }
+.rpg-skill-legend-lock { display: inline-flex; align-items: center; gap: 2px; }
 .rpg-skill-about { margin: 0; font-size: 12.5px; color: var(--ss-muted); overflow-wrap: anywhere; }
 .rpg-skill-roll { margin: 0; font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .rpg-skill-roll span { color: var(--ss-muted); }
@@ -168,15 +170,15 @@
     font-family: var(--monoFontFamily, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: 13px; line-height: 1.5; text-align: left; overflow: hidden; }
 .rpg-battle-card { margin: 8px 0; }
 .rpg-battle button { font: inherit; color: inherit; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
-.rpg-bl-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 8px 12px; border-bottom: 1px solid var(--ss-border); }
-.rpg-bl-folded .rpg-bl-head { border-bottom: 0; }
+.rpg-battle .rpg-bl-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 8px 12px; border-bottom: 1px solid var(--ss-border); }
+.rpg-battle.rpg-bl-folded .rpg-bl-head { border-bottom: 0; }
 .rpg-bl-title { flex: 1 1 auto; }
 .rpg-bl-chevron { margin-left: auto; color: var(--ss-muted); }
 .rpg-bl-body { padding: 8px 12px 12px; display: grid; gap: 6px; }
 .rpg-bl-order { margin: 0; color: var(--ss-muted); }
 .rpg-bl-round { display: grid; gap: 2px; }
 .rpg-bl-round-title { margin: 6px 0 2px; font-weight: 700; }
-.rpg-act-line { display: flex; gap: 6px; align-items: baseline; width: 100%; min-height: 28px; padding-left: 4px; }
+.rpg-battle .rpg-act-line { display: flex; gap: 6px; align-items: baseline; width: 100%; min-height: 28px; padding-left: 4px; }
 .rpg-act-mark { flex: none; width: 1em; color: var(--ss-muted); }
 .rpg-act-text { min-width: 0; overflow-wrap: anywhere; }
 .rpg-skill { color: var(--ss-accent-text, var(--ss-accent)); }
@@ -304,3 +306,32 @@
 @media (min-width: 700px) { .rpg-order-note { flex-basis: auto; } }
 .rpg-quick-start { margin: 0; font-size: 12.5px; color: var(--ss-muted); }
 .rpg-bl-skip { font-style: italic; opacity: 0.75; }
+.rpg-bl-wear { font-style: italic; color: var(--ss-warn-text, var(--ss-warn)); }
+
+/* Levels: the level pill on a card's name row (the app's small pill at 12px text, 20px tall) and the starting level's narrow field. */
+.rpg-level-pill { font-size: 12px; line-height: 20px; min-height: 20px; height: 20px; padding-top: 0; padding-bottom: 0; white-space: nowrap; }
+.rpg-wiz-level { width: 76px; max-width: 100%; }
+
+/* ---- Slot card (Party -> Inventory, only while Gear in fights is on): eight equal tiles in two columns ---- */
+.rpg-slots { display: grid; grid-auto-flow: column; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(4, 54px); gap: 8px; margin-top: 6px; }
+.rpg-slot { --rarity: var(--ss-text); position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 12px; box-sizing: border-box; border-radius: 8px; background: var(--ss-tile); border: 1px solid var(--ss-border); overflow: hidden; }
+.rpg-slot.r-uncommon { --rarity: var(--ss-uncommon); }
+.rpg-slot.r-rare { --rarity: var(--ss-rare); }
+.rpg-slot.r-epic { --rarity: var(--ss-epic); }
+.rpg-slot.r-legendary { --rarity: var(--ss-legendary); }
+.rpg-slot-empty { border-style: dashed; background: transparent; color: var(--ss-muted); }
+.rpg-slot-icon { flex: none; width: 22px; font-size: 18px; text-align: center; color: var(--rarity); }
+.rpg-slot-empty .rpg-slot-icon { color: var(--ss-muted); }
+.rpg-slot-body { display: grid; gap: 1px; min-width: 0; line-height: 1.25; }
+.rpg-slot-place { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ss-muted); }
+.rpg-slot-name { font-size: 13px; font-weight: 600; color: var(--rarity); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rpg-slot-bonus { font-size: 11px; color: var(--rarity); font-variant-numeric: tabular-nums; }
+.rpg-slot-lock { position: absolute; top: 5px; right: 6px; width: 13px; height: 13px; opacity: 0.95; }
+.rpg-slot-cond { position: absolute; inset: auto 0 0 0; height: 3px; background: transparent; }
+.rpg-slot.w-worn .rpg-slot-cond { background: var(--ss-warn); }
+.rpg-slot.w-torn .rpg-slot-cond { background: color-mix(in srgb, var(--ss-warn) 55%, var(--ss-bad)); }
+.rpg-slot.w-broken .rpg-slot-cond { background: var(--ss-bad); }
+.rpg-gear .rpg-actions { align-items: flex-start; }
+/* The card's buttons are a little tighter while Gear in fights is on, and wrap to a second row when a label would not fit its button. */
+.rpg-card-actions-gear { flex-wrap: wrap; gap: 6px; }
+.rpg-card-actions-gear .ss-button { flex: 1 1 auto; min-width: fit-content; justify-content: center; padding-inline: 6px; white-space: nowrap; }

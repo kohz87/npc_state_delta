@@ -59,7 +59,8 @@ export function pathType(path, env, at, add, visit) {
         if (field?.type === 'map') {
             if (path.length !== 2) { add('DM_SCHEMA', at, 'A map path must select a fixed scalar key.'); continue; }
             if (segment(path[1], field.keys ?? [], `${at}[1]`).length) types.push(fieldType(field.values));
-        } else if (path.length !== 1) add('DM_SCHEMA', at, 'A scalar field has no child keys.');
+        } else if (field?.type === 'entries') add('DM_SCHEMA', at, STRINGS.blocks.entriesFormula);
+        else if (path.length !== 1) add('DM_SCHEMA', at, 'A scalar field has no child keys.');
         else types.push(fieldType(field));
     }
     if (!types.length || types.some(type => type.type === 'invalid')) return BAD;

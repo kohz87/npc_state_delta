@@ -6,6 +6,7 @@ import { h, iconNode, shell } from './dom.js';
 import { defineWidget, resolveProps } from './props.js';
 import { meterRatio } from './meter.js';
 import { focusNode } from '../scroll.js';
+import { editFields, editPlan } from '../gear-form.js';
 
 const E = STRINGS.editable;
 const props = {
@@ -27,9 +28,15 @@ const props = {
     currency: { type: 'object', default: Object.freeze({}) },
     itemCount: { type: 'number', default: 1 },
     itemNote: { type: 'string', default: '' },
+    // kind 'item' while Gear in fights is on, for a piece of equipment: `{ kind: 'equipment', stack, owner, by, place, slot, owners: [{ value, label }] }` adds the two choices
+    // Slot (the eight places, or none) and Equipped by (a member, or none); a changed choice goes through inventory.transfer / item.equip / inventory.unequip.
+    gear: { type: 'object', default: Object.freeze({}) },
     // kind 'fields': one input per entry, `{ key, label, type: 'text' | 'number' | 'choice' | 'time', value, min?, max?, maxLength?, options?, soft?, group?, row? }`;
     // only the changed ones go in the payload. `choice` is a select over `options` (strings or `{ value, label }`); `time` is a time of day ("13:30", '' for none);
-    // a `text` field with `options` suggests them. `soft` keeps `min`/`max` as hints on the box and clamps nothing. A `group` is a heading the fields under it sit
+    // a `text` field with `options` suggests them. A field may also carry `disabled` (read-only, dimmed; `title` says why) and `showWhen: { key, in: [values] }` (drawn only while
+    // that box holds one of them; a hidden box is not read). Two more kinds of entry have no box: `note` (`text`, a muted line) and `points` (a live line: `rarity` the box that
+    // names the rarity, `lines` the [stat box, points box] pairs, `budget` the points a rarity allows, `words`, `text` with {n} {max} {a} {rarity}, `none` for a budget of 0).
+    // `soft` keeps `min`/`max` as hints on the box and clamps nothing. A `group` is a heading the fields under it sit
     // beneath (one fieldset per group, in order of first use); fields with the same `row` sit side by side. A blank number that was blank stays unchanged.
     fields: { type: 'array', default: Object.freeze([]) },
     // A form with groups: `help` is the line under the fields; `plan(changed, all)` (instead of `command`) answers `{ error }` or `{ steps: [{ command, payload, keys }] }`,
@@ -38,6 +45,9 @@ const props = {
     help: { type: 'string', default: '' },
     plan: { type: 'any', default: null },
     bare: { type: 'boolean', default: false },
+    // A line above the fields of a grouped form (muted), and `always`: run the plan on Save even when no box changed (a form that adds something new).
+    intro: { type: 'string', default: '' },
+    always: { type: 'boolean', default: false },
     open: { type: 'boolean', default: false },
     onClose: { type: 'any', default: null },
 };
@@ -62,6 +72,7 @@ function render(el, input, api) {
         const error = h(doc, 'span', 'ss-w-editable-error');
         error.setAttribute('role', 'alert');
         const helpLine = h(doc, 'span', 'ss-w-editable-help');
+        const introLine = h(doc, 'span', 'ss-w-editable-help ss-w-editable-intro');
         const actions = h(doc, 'span', 'ss-w-editable-actions');
         const plain = () => form.replaceChildren(chips, fieldSlot, add, save, cancel, error);
         plain();
@@ -70,11 +81,17 @@ function render(el, input, api) {
         let field = null;
         let itemCount = null;
         let itemNote = null;
+        let slotSelect = null;
+        let bySelect = null;
         let inputs = [];
+        let groupList = [];
         let entries = [];
         let editing = false;
         let busy = false;
         let alive = true;
+        // The grouped form being edited: its fields and plan (the props' own, or, for a piece the reader added by hand with Gear in fights on, the gear form's).
+        let formFields = null;
+        let formPlan = null;
 
         function drawChips() {
             chips.replaceChildren(...entries.map((value, index) => {
@@ -133,13 +150,23 @@ function render(el, input, api) {
             return { value, label: String(label ?? '') };
         });
         function fieldEntry(spec) {
+            if (spec.type === 'note' || spec.type === 'points') {
+                const line = h(doc, 'p', spec.type === 'note' ? 'ss-w-editable-item-hint ss-w-editable-note' : 'ss-w-editable-points');
+                if (spec.type === 'note') line.textContent = String(spec.text ?? '');
+                else line.setAttribute('role', 'status');
+                return { spec, input: null, node: line, type: spec.type, label: '', options: [] };
+            }
             const type = ['number', 'choice', 'time'].includes(spec.type) ? spec.type : 'text';
             const label = String(spec.label ?? spec.key);
             const options = optionList(spec.options);
             const input = h(doc, type === 'choice' ? 'select' : 'input', type === 'choice' ? 'ss-select' : 'ss-input');
             input.setAttribute('aria-label', label);
             const node = h(doc, 'label', 'ss-w-editable-item-label');
-            node.append(h(doc, 'span', '', label), input);
+            const caption = h(doc, 'span', spec.hideLabel === true ? 'ss-w-editable-sr' : '', label);
+            node.append(caption, input);
+            // `tone`: the chosen option's word follows the label in its colour (the rarity word), kept current by refresh().
+            const tone = spec.tone === true ? caption : null;
+            if (tone) tone.classList.add('ss-w-editable-tone');
             if (type === 'choice') {
                 for (const item of options) {
                     const option = h(doc, 'option', '', item.label);
@@ -162,7 +189,11 @@ function render(el, input, api) {
                 }
             }
             input.value = String(spec.value ?? '');
-            return { spec, input, node, type, label, options };
+            if (spec.disabled === true) {
+                input.disabled = true;
+                if (spec.title) input.setAttribute('title', String(spec.title));
+            }
+            return { spec, input, node, type, label, options, tone };
         }
         // Without groups the boxes are the record grid; with them, a fieldset each (a legend and the boxes, side by side where they share a row).
         function layFields(list) {
@@ -172,14 +203,18 @@ function render(el, input, api) {
                 return false;
             }
             const groups = new Map();
+            groupList = [];
             for (const entry of list) {
                 const name = typeof entry.spec.group === 'string' ? entry.spec.group : '';
                 let group = groups.get(name);
                 if (!group) {
                     group = { node: h(doc, 'fieldset', 'ss-w-editable-group'), row: null, rowName: '' };
                     if (name) group.node.appendChild(h(doc, 'legend', 'ss-w-editable-legend', name));
+                    group.entries = [];
                     groups.set(name, group);
+                    groupList.push(group);
                 }
+                group.entries.push(entry);
                 const rowName = typeof entry.spec.row === 'string' ? entry.spec.row : '';
                 if (!rowName) { group.row = null; group.rowName = ''; group.node.appendChild(entry.node); continue; }
                 if (!group.row || group.rowName !== rowName) {
@@ -194,6 +229,39 @@ function render(el, input, api) {
             return true;
         }
 
+        // The live parts of a grouped form: a box with `showWhen` is drawn only while the box it names holds one of its values (a group with nothing drawn goes too),
+        // and a `points` line counts the points of the Bonus boxes against what the rarity allows.
+        const valueOf = key => inputs.find(entry => entry.input && String(entry.spec.key) === key)?.input?.value ?? '';
+        function refresh() {
+            for (const entry of inputs) {
+                const when = entry.spec.showWhen;
+                entry.hidden = Boolean(when && typeof when === 'object' && !(Array.isArray(when.in) ? when.in : []).includes(valueOf(String(when.key))));
+                entry.node.hidden = entry.hidden;
+            }
+            for (const group of groupList) group.node.hidden = group.entries.every(entry => entry.hidden);
+            for (const entry of inputs) {
+                if (!entry.tone || !entry.input) continue;
+                const value = String(entry.input.value);
+                entry.tone.setAttribute('data-word', entry.options.find(item => String(item.value) === value)?.label ?? '');
+                entry.tone.setAttribute('data-tone', value);
+            }
+            for (const entry of inputs) {
+                if (entry.type !== 'points' || entry.hidden) continue;
+                const spec = entry.spec;
+                const rarity = valueOf(String(spec.rarity));
+                const max = Number(spec.budget?.[rarity] ?? 0);
+                let total = 0;
+                for (const [stat, points] of Array.isArray(spec.lines) ? spec.lines : []) {
+                    const n = Number(valueOf(String(points)));
+                    if (valueOf(String(stat)) && Number.isFinite(n) && n > 0) total += n;
+                }
+                const word = String(spec.words?.[rarity] ?? rarity).toLowerCase();
+                const text = total === 0 && max === 0 ? String(spec.none ?? '') : fill(String(spec.text ?? ''), { n: total, max, a: /^[aeiou]/i.test(word) ? 'an' : 'a', rarity: word });
+                entry.node.textContent = text;
+                entry.node.classList.toggle('ss-w-editable-over', total > max);
+            }
+        }
+
         function open() {
             if (!canEdit()) return;
             editing = true;
@@ -204,7 +272,12 @@ function render(el, input, api) {
             form.removeAttribute('aria-label');
             fieldSlot.classList.remove('ss-w-editable-groups');
             entries = Array.isArray(p.value) ? p.value.map(String) : [];
-            if (p.kind === 'item') {
+            // (a piece the reader added by hand, Gear in fights on: the grouped gear form in place of the three boxes)
+            const handForm = p.kind === 'item' && p.gear?.row?.hand === true && !(typeof p.gear.bound === 'string' && p.gear.bound);
+            formFields = handForm ? editFields(p) : p.kind === 'fields' ? p.fields : null;
+            formPlan = handForm ? editPlan(p) : p.plan;
+            introLine.textContent = handForm ? (p.gear.kit === true ? `${STRINGS.inventory.gear.form.kitHint} ${STRINGS.inventory.gear.form.kitGreeting}` : '') : p.intro;
+            if (p.kind === 'item' && !handForm) {
                 field = h(doc, 'input', 'ss-input');
                 itemCount = h(doc, 'input', 'ss-input');
                 itemNote = h(doc, 'input', 'ss-input');
@@ -223,31 +296,67 @@ function render(el, input, api) {
                     return node;
                 };
                 fieldSlot.classList.add('ss-w-editable-item-fields');
-                fieldSlot.replaceChildren(label(STRINGS.inventory.itemName, field), label(STRINGS.inventory.itemCount, itemCount), label(STRINGS.inventory.itemNote, itemNote));
+                const rows = [label(STRINGS.inventory.itemName, field), label(STRINGS.inventory.itemCount, itemCount), label(STRINGS.inventory.itemNote, itemNote)];
+                slotSelect = null;
+                bySelect = null;
+                if (p.gear?.kind === 'equipment') {
+                    const G = STRINGS.inventory.gear;
+                    const choice = (text, options, value) => {
+                        const select = h(doc, 'select', 'ss-select');
+                        select.setAttribute('aria-label', text);
+                        for (const [optionValue, optionLabel] of [['', G.none], ...options]) {
+                            const option = h(doc, 'option', '', optionLabel);
+                            option.value = optionValue;
+                            select.appendChild(option);
+                        }
+                        select.value = value;
+                        pair.appendChild(label(text, select));
+                        return select;
+                    };
+                    const pair = h(doc, 'span', 'ss-w-editable-item-pair');
+                    rows[2].classList.add('ss-w-editable-item-wide');
+                    rows.push(pair);
+                    slotSelect = choice(G.editSlot, Object.entries(G.slots), String(p.gear.slot ?? ''));
+                    bySelect = choice(G.editBy, (Array.isArray(p.gear.owners) ? p.gear.owners : []).map(entry => [String(entry?.value ?? ''), String(entry?.label ?? '')]), String(p.gear.by ?? ''));
+                    // A cast member's signature piece (`gear.bound`: their name): everything but the note is read-only, with one line saying why.
+                    if (typeof p.gear.bound === 'string' && p.gear.bound) {
+                        for (const control of [field, itemCount, slotSelect, bySelect]) { control.disabled = true; control.setAttribute('title', fill(G.boundTitle, { name: p.gear.bound })); }
+                        const hint = h(doc, 'p', 'ss-w-editable-item-hint', fill(G.boundHint, { name: p.gear.bound }));
+                        rows.push(hint);
+                    }
+                }
+                // A pack's item keeps its kind, slot and rarity (the choice of where it is worn stays): one line says so.
+                if (p.gear && typeof p.gear.def === 'string' && p.gear.def.startsWith('pack.') && !(typeof p.gear.bound === 'string' && p.gear.bound)) {
+                    rows.push(h(doc, 'p', 'ss-w-editable-item-hint ss-w-editable-pack-hint', STRINGS.inventory.gear.form.packHint));
+                }
+                fieldSlot.replaceChildren(...rows);
                 chips.hidden = true;
                 add.hidden = true;
                 form.classList.add('ss-w-editable-item-form');
                 draw();
-                focusNode(field);
+                focusNode(field.disabled ? itemNote : field);
                 return;
             }
             fieldSlot.classList.remove('ss-w-editable-item-fields', 'ss-w-editable-record-fields');
             form.classList.remove('ss-w-editable-item-form');
-            if (p.kind === 'fields') {
-                inputs = p.fields.filter(spec => spec && typeof spec === 'object' && /^[A-Za-z][A-Za-z0-9_]*$/.test(String(spec.key))).map(fieldEntry);
-                field = inputs[0]?.input ?? null;
+            if (formFields) {
+                inputs = formFields.filter(spec => spec && typeof spec === 'object' && /^[A-Za-z][A-Za-z0-9_]*$/.test(String(spec.key))).map(fieldEntry);
+                field = inputs.find(entry => entry.input && !entry.input.disabled)?.input ?? null;
                 if (layFields(inputs)) {
                     helpLine.textContent = p.help;
                     helpLine.hidden = !p.help;
+                    introLine.hidden = !introLine.textContent;
                     actions.replaceChildren(save, cancel);
-                    form.replaceChildren(fieldSlot, helpLine, error, actions);
+                    form.replaceChildren(...(introLine.textContent ? [introLine] : []), fieldSlot, helpLine, error, actions);
                     form.classList.add('ss-w-editable-grouped');
+                    form.classList.toggle('ss-w-editable-gear', inputs.some(entry => entry.spec.showWhen));
                     form.setAttribute('role', 'group');
                     if (p.label) form.setAttribute('aria-label', p.label);
                 }
                 chips.hidden = true;
                 add.hidden = true;
                 form.classList.add('ss-w-editable-item-form');
+                refresh();
                 draw();
                 focusNode(field);
                 return;
@@ -311,6 +420,7 @@ function render(el, input, api) {
             const named = inputs.some(entry => typeof entry.spec.group === 'string' && entry.spec.group);
             for (const entry of inputs) {
                 const { spec, input, type, label } = entry;
+                if (!input || entry.hidden) continue;
                 const raw = String(input.value).trim();
                 const key = String(spec.key);
                 let next;
@@ -352,9 +462,9 @@ function render(el, input, api) {
         // The form's `plan`: the steps run one after the other; a refusal stops the rest and leaves the form open with its sentence. A step that
         // went through is not sent again by the next Save: its boxes now count as what the form opened with.
         async function runPlan({ changed, all }) {
-            if (!Object.keys(changed).length) { close(); return; }
+            if (!Object.keys(changed).length && !p.always) { close(); return; }
             let outcome;
-            try { outcome = p.plan(changed, all); } catch (failure) { outcome = { error: String(failure?.message ?? failure) }; }
+            try { outcome = formPlan(changed, all); } catch (failure) { outcome = { error: String(failure?.message ?? failure) }; }
             if (outcome?.error) { error.textContent = String(outcome.error); return; }
             const steps = Array.isArray(outcome?.steps) ? outcome.steps : [];
             if (!steps.length) { close(); return; }
@@ -378,23 +488,60 @@ function render(el, input, api) {
             close();
         }
 
+        // The steps an item's Slot and Equipped by choices need: taken off, or handed to the wearer and put on. [] when nothing changed.
+        function wearSteps() {
+            if (!slotSelect || !bySelect || slotSelect.disabled) return []; // (a bound piece: the choices are locked)
+            const stack = p.payload?.stack;
+            const by = bySelect.value, slot = slotSelect.value;
+            const placed = String(p.gear.place ?? ''), wearer = String(p.gear.by ?? '');
+            if (by === '' || slot === '') return placed ? [{ command: 'inventory.unequip', payload: { stack } }] : [];
+            if (placed === slot && wearer === by) return [];
+            // (one command, so a refusal of the slot leaves the item with its owner: all or nothing)
+            return [{ command: 'item.equip', payload: { stack, owner: by, slot, ...(by !== p.gear.owner ? { transfer: true } : {}) } }];
+        }
+
+        // Commands one after the other: a refusal stops the rest and leaves the form open with its sentence.
+        async function runSteps(steps) {
+            busy = true;
+            save.disabled = true;
+            for (const step of steps) {
+                let result;
+                try { result = await api.command(step.command, step.payload); }
+                catch (failure) { result = { ok: false, message: String(failure?.message ?? failure) }; }
+                if (!alive) return;
+                if (!result?.ok) {
+                    busy = false;
+                    save.disabled = false;
+                    error.textContent = refusalText(result, E.failed);
+                    return;
+                }
+            }
+            busy = false;
+            save.disabled = false;
+            close();
+        }
+
         async function submit() {
             if (busy || !field) return;
             let value;
             let payload;
-            if (p.kind === 'item') {
+            if (p.kind === 'item' && !formFields) {
                 const raw = String(itemCount.value).trim(), qty = Number(raw);
                 if (!/^\d+$/.test(raw) || !Number.isSafeInteger(qty) || qty < 1) { error.textContent = STRINGS.inventory.countError; return; }
                 payload = { ...p.payload };
-                const name = cut(field.value, 60), note = cut(itemNote.value, 300);
+                // The name is sent only when the reader changed it (a long name shown in full and left alone is no rename), held to the inventory's 120.
+                const name = field.value === p.value ? p.value : cut(field.value, 120), note = cut(itemNote.value, 300);
                 if (name !== p.value) payload.name = name;
                 if (qty !== p.itemCount) payload.qty = qty;
                 if (note !== p.itemNote) payload.note = note;
-                if (!('name' in payload) && !('qty' in payload) && !('note' in payload)) { close(); return; }
-            } else if (p.kind === 'fields') {
+                const edited = 'name' in payload || 'qty' in payload || 'note' in payload;
+                const worn = wearSteps();
+                if (!edited && !worn.length) { close(); return; }
+                if (worn.length) { await runSteps([...(edited ? [{ command: p.command, payload }] : []), ...worn]); return; }
+            } else if (formFields) {
                 const read = readFields();
                 if (read.error) { error.textContent = read.error; focusNode(read.input); return; }
-                if (typeof p.plan === 'function') { await runPlan(read); return; }
+                if (typeof formPlan === 'function') { await runPlan(read); return; }
                 if (!Object.keys(read.changed).length) { close(); return; }
                 payload = { ...p.payload, ...read.changed };
             } else if (p.kind === 'number') {
@@ -438,6 +585,8 @@ function render(el, input, api) {
         listen(add, 'click', addEntry);
         listen(save, 'click', submit);
         listen(cancel, 'click', () => close());
+        listen(form, 'input', () => { if (formFields) refresh(); });
+        listen(form, 'change', () => { if (formFields) refresh(); });
         listen(form, 'input', event => {
             if (event.target !== field || p.kind !== 'number' || !/^-?\d+$/.test(field.value)) return;
             let value = Number(field.value);

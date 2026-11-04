@@ -91,6 +91,11 @@ export function createFakeStore({ chat, save = async () => {} }) {
             sync(index);
             dirty = true;
         },
+        setPracticeRule(index) {
+            data(index).practiceRule = 'rolls';
+            sync(index);
+            dirty = true;
+        },
         setNarrated(index, ids) {
             data(index).narrated = [...ids];
             sync(index);

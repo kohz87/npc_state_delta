@@ -16,7 +16,7 @@
 //   Line               { kind, type: physical|magic|defence|social|check, skill, pc: { who, die, type, stat, second, mainValue, secondValue, statBonus, style,
 //                        classValue, classBonus, rank, luck, edge, total }, foe, outcome, decisive?, damage?: { name, blocks (+ hurt, − healed), from, to, size },
 //                        area?, support? (kind 'check', `target` the one helped), opening? }; the breakdown on tap is built from these
-//                        ("Physical: d20 17 + (AGI 10 + DEX 6/2)/2 = 6 + Expert 2 + Class II 4 = 29 · vs Weir-drake d20 9 + 3 + Class IV 12 = 24")
+//                        ("Physical: d20 17 + (AGI 10 + DEX 6/2)/2 = 6 + Expert 2 + Lv 14 ÷ 5 = 2 = 29 · vs Weir-drake d20 9 + 3 + Lv 7 ÷ 5 = 1 = 24"; a record made before Levels says "Class II 4")
 //   Line.breakdown     (or the roll's breakdown as one plain string, which then wins)
 // A's result record (`data.v2.result` of the `rpg.resolve` receipt; see the header of lean-rpg/resolve.js), as `readResolve` reads it:
 //   { v: 1, key, pace, stop, checks: [Line], rounds: [{ n, decisive, lines: [Line] }], refused: [{ who, text }], summary: { exchanges, acts, refused } }
@@ -26,11 +26,12 @@
 // For a 'foe' line `pc` is the defender. The numbers read the party's total against the foe's total (or the DC).
 
 import { RESOLVE } from '../index.js';
-import { CLASS_NAMES, RANK_NAMES } from '../names.js';
+import { LEVEL, CLASS_NAMES, RANK_NAMES } from '../names.js';
 import { readRecord } from '../../persist.js';
 import { fold } from '../read.js';
-import { soulReading, soulShortOf } from '../soul.js';
+import { characterReading, soulShortOf } from '../soul.js';
 import { RPG_STRINGS, fill } from '../strings.js';
+import { wearLine } from '../cue.js';
 import { BARS, readFoes, readParty } from './party-data.js';
 
 const B = RPG_STRINGS.battle;
@@ -67,11 +68,21 @@ export function rollText(roll) {
 // "Class II", or what the Character block calls it ("Level 3"): `soul` is its soulReading (null: the template's words).
 const classText = (value, soul) => `${soul ? soulShortOf(soul.label, 'Class') : 'Class'} ${soul ? soul.word(value) : CLASS_NAMES[value - 1] ?? value}`;
 
+// A roll made under Levels (the record's `lv` mark, on the result, the line or a side) tells the level term: "Lv 14 ÷ 5 = 2"; the side keeps its
+// level in `level` (else `classValue`) and the term in `levelBonus` (else `classBonus`). A record without the mark reads as it always did: "Class II 4".
+const isLevelSide = (side, lv) => lv === true || side?.lv === 1 || side?.level !== undefined;
+const termLabel = (side, soul, lv) => (isLevelSide(side, lv) ? `Lv ${side.level ?? side.classValue} ÷ ${side.divisor ?? LEVEL.divisor} =` : classText(side.classValue, soul));
+const termValue = (side, lv) => (isLevelSide(side, lv) ? side.levelBonus ?? side.classBonus : side.classBonus);
+
 // The party side of a Line: the die, the stat, the class, the skill's rank and the edge.
-const pcRoll = (pc, skill, soul) => ({ d20: pc.die, total: pc.total, parts: [
-    { label: words(pc.stat, 12).toUpperCase(), value: pc.statBonus }, { label: classText(pc.classValue, soul), value: pc.classBonus },
+const pcRoll = (pc, skill, soul, lv) => ({ d20: pc.die, total: pc.total, parts: [
+    { label: words(pc.stat, 12).toUpperCase(), value: pc.statBonus }, { label: termLabel(pc, soul, lv), value: termValue(pc, lv) },
     { label: skill ? RANK_NAMES[pc.rank] ?? `Rank ${pc.rank}` : '', value: pc.rank }, { label: 'Edge', value: pc.edge }] });
-const foeRoll = (foe, soul) => ({ d20: foe.die, total: foe.total, parts: [{ label: '', value: foe.base }, { label: classText(foe.classValue, soul), value: foe.classBonus }] });
+const foeRoll = (foe, soul, lv) => ({ d20: foe.die, total: foe.total, parts: [{ label: '', value: foe.base }, { label: termLabel(foe, soul, lv), value: termValue(foe, lv) }] });
+
+// Gear in the roll (the record's `pc.gear`, gear.js): "Cane Sword +2 DEX, Encumbered −2 AGI". A record without it says nothing.
+const gearText = gear => list(gear).filter(item => isRecord(item) && Number.isFinite(item.n) && item.n !== 0 && words(item.name, 40) && words(item.stat, 12))
+    .map(item => `${words(item.name, 40)} ${item.n < 0 ? '−' : '+'}${Math.abs(item.n)} ${words(item.stat, 12).toUpperCase()}`).join(', ');
 
 // ---- the Standard formula's lines ----
 
@@ -79,12 +90,12 @@ const TYPE_WORDS = Object.freeze({ physical: 'Physical', magic: 'Magic', defence
 const signed = value => `${value < 0 ? '−' : '+'} ${Math.abs(value)}`;
 
 // "Physical: d20 17 + (AGI 10 + DEX 6/2)/2 = 6 + Expert 2 + Class II 4 + edge 1 = 29": the party side of a Standard line.
-function pcStandard(raw, skill, soul) {
+function pcStandard(raw, skill, soul, lv) {
     const pc = raw.pc, stat = words(pc.stat, 12).toUpperCase(), second = words(pc.second, 12).toUpperCase();
     const head = `${TYPE_WORDS[raw.type] ?? 'Roll'}${words(pc.style, 12) ? `, ${words(pc.style, 12)}` : ''}`;
     const terms = [`${Number.isFinite(pc.die) ? `d20 ${pc.die} + ` : ''}(${stat} ${pc.mainValue} + ${second} ${pc.secondValue}/2)/2 = ${pc.statBonus}`];
     if (skill) terms.push(`+ ${RANK_NAMES[pc.rank] ?? `Rank ${pc.rank}`} ${pc.rank}`);
-    if (pc.classBonus) terms.push(`+ ${classText(pc.classValue, soul)} ${pc.classBonus}`);
+    if (termValue(pc, lv)) terms.push(`+ ${termLabel(pc, soul, lv)} ${termValue(pc, lv)}`);
     if (Number.isFinite(pc.edge) && pc.edge !== 0) terms.push(`${signed(pc.edge).replace(' ', ' edge ')}${pc.window && pc.edge !== pc.situation ? ` (luck window ${pc.window.min}..${pc.window.max})` : ''}`);
     return `${head}: ${terms.join(' ')} = ${pc.total}`;
 }
@@ -96,28 +107,35 @@ function damageText(damage) {
     return fill(damage.blocks > 0 ? B.loses : B.heals, { who: words(damage.name, 40), n, blocks: n === 1 ? B.blockOne : B.blockMany, to: damage.to, size: damage.size });
 }
 
-function breakdownStandard(raw, skill, soul, foeSide, against) {
-    const theirs = foeSide ? `${words(foeSide.name, 40)} ${rollText(foeRoll(foeSide, soul))}`.trim() : Number.isFinite(against) ? `DC ${against}` : '';
-    return [`${pcStandard(raw, skill, soul)}${theirs ? ` · vs ${theirs}` : ''}`, damageText(raw.damage), raw.decisive === true ? B.decisive : ''].filter(Boolean).join(' · ');
+function breakdownStandard(raw, skill, soul, foeSide, against, lv) {
+    const theirs = foeSide ? `${words(foeSide.name, 40)} ${rollText(foeRoll(foeSide, soul, lv))}`.trim() : Number.isFinite(against) ? `DC ${against}` : '';
+    return [`${pcStandard(raw, skill, soul, lv)}${theirs ? ` · vs ${theirs}` : ''}`, damageText(raw.damage), raw.decisive === true ? B.decisive : ''].filter(Boolean).join(' · ');
 }
+
+// The bar a skill's cost moved on a recorded line ('mana' | 'stamina'), from the cost's bar id; '' when the line has none (a record from before kept none).
+const costOf = cost => (isRecord(cost) ? /:(mana|stamina)$/.exec(String(cost.id ?? ''))?.[1] ?? '' : '');
 
 // One Line as the panel draws it: who acts, on whom, the acting side's total against the other's, and the roll behind it. A party
 // act or check reads the party's total first; a foe's attack reads from the attacker's side, so the foe's total and roll come first.
-function lineOf(raw, soulOf = () => null) {
+function lineOf(raw, soulOf = () => null, lv = false, divisor = null) {
     if (!isRecord(raw) || !isRecord(raw.pc) || !Number.isFinite(raw.pc.total)) return null;
+    // The divisor the roll was made with is the result's own (rules.levelDivisor): both sides of the line tell it, not today's default.
+    if (lv && divisor !== null) raw = { ...raw, pc: { ...raw.pc, divisor: raw.pc.divisor ?? divisor }, ...(isRecord(raw.foe) ? { foe: { ...raw.foe, divisor: raw.foe.divisor ?? divisor } } : {}) };
     const outcome = outcomeOf(raw.outcome);
     const foeSide = isRecord(raw.foe) && Number.isFinite(raw.foe.total) ? raw.foe : null;
     const skill = words(raw.skill, 40), why = words(raw.why, 120), told = words(raw.breakdown, 400);
     // A foe's class is told in the words of the party member it is rolled against, so one line reads in one set of words.
     const soul = soulOf(words(raw.pc.who, 40));
-    const mine = pcRoll(raw.pc, skill, soul);
+    lv = lv || raw.lv === 1;
+    const mine = pcRoll(raw.pc, skill, soul, lv);
     const against = raw.kind === 'check' ? (Number.isFinite(raw.dc) ? raw.dc : null) : foeSide?.total ?? null;
-    const theirs = foeSide ? rollText(foeRoll(foeSide, soul)) : against !== null ? `DC ${against}` : '';
+    const theirs = foeSide ? rollText(foeRoll(foeSide, soul, lv)) : against !== null ? `DC ${against}` : '';
     const detail = (raw.kind === 'foe' ? [theirs, rollText(mine)] : [rollText(mine), theirs]).filter(Boolean).join(' vs ');
     // A Standard line (typed, with both stats of the pair recorded) tells its roll as the formula makes it; a Classic one is as it was.
     const standard = typeof raw.type === 'string' && Number.isFinite(raw.pc.mainValue) && Number.isFinite(raw.pc.secondValue);
-    const breakdown = told || (standard ? breakdownStandard(raw, skill, soul, foeSide, against) : why ? `${detail} · ${why}` : detail);
-    const base = { outcome, total: raw.pc.total, vs: against, skill, breakdown, arrows: [], ...(raw.decisive === true ? { decisive: true } : {}), ...(raw.area === true ? { area: true } : {}) };
+    const breakdown = told || (standard ? breakdownStandard(raw, skill, soul, foeSide, against, lv) : why ? `${detail} · ${why}` : detail);
+    const gear = gearText(raw.pc.gear);
+    const base = { outcome, total: raw.pc.total, vs: against, skill, breakdown: gear && breakdown ? `${breakdown} · ${gear}` : breakdown, arrows: [], ...(costOf(raw.cost) ? { cost: costOf(raw.cost) } : {}), ...(raw.decisive === true ? { decisive: true } : {}), ...(raw.area === true ? { area: true } : {}), ...(gear ? { gear } : {}) };
     // A support action (a heal or a buff, a `check` line that names the one helped) reads like an act on that character.
     if (raw.kind === 'check' && raw.support === true && words(raw.target, 40)) return { ...base, who: words(raw.pc.who, 40), target: words(raw.target, 40), stat: words(raw.pc.stat, 12).toUpperCase(), foe: false, support: true, heals: isRecord(raw.damage) && raw.damage.blocks < 0 };
     if (raw.kind === 'foe') return { ...base, total: foeSide?.total ?? null, vs: raw.pc.total, who: words(foeSide?.name, 40), target: words(raw.pc.who, 40), skill: '', defence: skill, stat: words(raw.pc.stat, 12).toUpperCase(), foe: true };
@@ -131,21 +149,37 @@ function lineOf(raw, soulOf = () => null) {
  */
 export function readResolve(result, { soulOf = () => null } = {}) {
     if (!isRecord(result)) return null;
+    const lv = result.lv === 1;
+    const divisor = Number.isInteger(result.rules?.levelDivisor) ? result.rules.levelDivisor : null;
     const rounds = list(result.rounds).map((round, at) => {
         // Who does not act this round: Standard's `idle` entries (with why), or plain names (read as beaten before their turn).
         const skipped = list(round?.idle ?? round?.skipped).map(item => ({ who: words(isRecord(item) ? item.who ?? item.name : item, 40), why: IDLE[item?.why] ? item.why : 'beaten' })).filter(item => item.who);
-        return { n: Number.isSafeInteger(round?.n) ? round.n : at + 1, lines: list(round?.lines).map(line => lineOf(line, soulOf)).filter(line => line?.who), ...(skipped.length ? { skipped } : {}) };
+        const n = Number.isSafeInteger(round?.n) ? round.n : at + 1;
+        // What the round wore out (gear.js): "Boiled Leather Jerkin is worn (Torn)", from the roll's own record.
+        const wear = list(result.wear).filter(item => isRecord(item) && item.n === n && words(item.item, 60)).map(item => wearLine({ ...item, item: words(item.item, 60) }));
+        return { n, lines: list(round?.lines).map(line => lineOf(line, soulOf, lv, divisor)).filter(line => line?.who), ...(skipped.length ? { skipped } : {}), ...(wear.length ? { wear } : {}) };
     }).filter(round => round.lines.length || round.skipped?.length);
-    const opening = list(result.opening).map(line => lineOf(line, soulOf)).filter(line => line?.who);
-    const checks = list(result.checks).map(line => lineOf(line, soulOf)).filter(line => line?.who);
+    const opening = list(result.opening).map(line => lineOf(line, soulOf, lv, divisor)).filter(line => line?.who);
+    const checks = list(result.checks).map(line => lineOf(line, soulOf, lv, divisor)).filter(line => line?.who);
     const refused = list(result.refused).filter(isRecord).map(item => ({ who: words(item.who, 40), why: words(item.text, 160) })).filter(item => item.why);
     if (!rounds.length && !checks.length) return null;
     // The order they act in: the names of the first round, each once.
     // The Standard formula records the order itself, with the totals rolled (result.order); else it is the names of the first round.
-    const entries = list(result.order).filter(isRecord).map(item => ({ name: words(item.name, 40), total: Number.isFinite(item.total) ? item.total : null, party: item.party === true })).filter(item => item.name);
+    // The level each one rolled with (the sides of the recorded lines), so the turn order says the level of the roll, not of the state after the reply.
+    const rolledAt = new Map();
+    if (lv) for (const raw of [...list(result.opening), ...list(result.rounds).flatMap(round => list(round?.lines)), ...list(result.checks)]) {
+        if (!isRecord(raw)) continue;
+        if (isRecord(raw.pc) && raw.pc.who) rolledAt.set(fold(words(raw.pc.who, 40)), raw.pc.level ?? raw.pc.classValue);
+        if (isRecord(raw.foe) && raw.foe.name) rolledAt.set(fold(words(raw.foe.name, 40)), raw.foe.level ?? raw.foe.classValue);
+    }
+    const entries = list(result.order).filter(isRecord).map(item => ({ name: words(item.name, 40), total: Number.isFinite(item.total) ? item.total : null, party: item.party === true,
+        ...(rolledAt.has(fold(words(item.name, 40))) && Number.isFinite(rolledAt.get(fold(words(item.name, 40)))) ? { level: rolledAt.get(fold(words(item.name, 40))) } : {}) })).filter(item => item.name);
     const order = entries.length ? entries.map(item => item.name) : [...new Set(rounds[0]?.lines.map(line => line.who) ?? [])];
     const quickStart = list(result.quickStart).filter(isRecord).map(item => ({ who: words(item.who, 40), against: words(item.against, 40) })).filter(item => item.who && item.against);
-    return { rounds, checks, refused, order, ...(entries.length ? { orderEntries: entries } : {}), ...(quickStart.length ? { quickStart } : {}), ...(opening.length ? { opening } : {}), ended: '' };
+    // An ambush check's result (ambush.js): told in one line before Round 1.
+    const ambush = isRecord(result.ambush) && words(result.ambush.who, 40) && typeof result.ambush.success === 'boolean'
+        ? { who: words(result.ambush.who, 40), what: words(result.ambush.skill, 40) ? `${words(result.ambush.skill, 40)} check` : 'check', success: result.ambush.success, half: result.ambush.outcome === 'cost', drop: result.ambush.drop === true, total: Number.isFinite(result.ambush.total) ? result.ambush.total : '?', dc: Number.isFinite(result.ambush.dc) ? result.ambush.dc : '?' } : null;
+    return { rounds, checks, refused, order, ...(ambush ? { ambush } : {}), ...(entries.length ? { orderEntries: entries } : {}), ...(quickStart.length ? { quickStart } : {}), ...(opening.length ? { opening } : {}), ended: '' };
 }
 
 /** The recorded rolls of a reply's record: the result of its `rpg.resolve` receipt that the replay kept, or null. */
@@ -171,7 +205,7 @@ function consequences(state, before, roleOf) {
     for (const character of readParty(state, { roleOf })) {
         const old = was.get(`${character.module}|${character.subject}`);
         if (!old) continue;
-        for (const key of BARS) if (old.bars[key].value !== character.bars[key].value) out.push({ name: character.name, kind: key, text: `${character.name} ${character.bars[key].word}` });
+        for (const key of BARS) if (old.bars[key].value !== character.bars[key].value) out.push({ name: character.name, kind: key, text: key === 'health' ? `${character.name} ${character.bars[key].word}` : fill(B.arrowBar, { name: character.name, bar: character.definition.state?.[key]?.label ?? RPG_STRINGS.bars[key], word: character.bars[key].word }) });
     }
     return out;
 }
@@ -183,7 +217,9 @@ function attach(model, changes) {
     const lines = [...(model.opening ?? []), ...model.rounds.flatMap(round => round.lines)];
     for (const change of changes) {
         const aimed = line => (change.kind === 'health' ? (line.target && same(line.target, change.name)) || (line.foe && same(line.who, change.name)) : same(line.who, change.name));
-        lines.findLast(aimed)?.arrows.push(change.text);
+        // A Mana or Stamina change sits on the first line whose recorded cost moved that bar; a record with no cost keeps the last line the actor took.
+        const paid = change.kind === 'health' ? null : lines.find(line => line.cost === change.kind && same(line.foe ? line.target : line.who, change.name));
+        (paid ?? lines.findLast(aimed))?.arrows.push(change.text);
     }
 }
 
@@ -191,16 +227,22 @@ function attach(model, changes) {
  * The panel's content for a reply: the recorded rolls, the arrows, the Status rows and the Foes line.
  * `state` and `before` are the reply's state and the one before it (null for none).
  */
-export function panelModel({ resolve, state, before = null, roleOf }) {
+export function panelModel({ resolve, state, before = null, roleOf, ranks = [] }) {
     const model = { ...resolve, rounds: resolve.rounds.map(round => ({ ...round, lines: round.lines.map(line => ({ ...line, arrows: [] })) })),
         ...(resolve.opening ? { opening: resolve.opening.map(line => ({ ...line, arrows: [] })) } : {}) };
     attach(model, consequences(state, before, roleOf));
     const names = new Set([...(model.opening ?? []), ...model.rounds.flatMap(round => round.lines)].flatMap(line => [line.who, line.target]));
     const party = readParty(state, { roleOf });
+    const foes = readFoes(state, { roleOf, ranks });
+    // The turn order says each one's level, "Astra (Lv 14)": the level the roll used where the record has it, else read from the reply's state (so a swipe and a Re-read agree).
+    const levelByName = new Map([...party, ...foes].map(item => [fold(item.name), item.level]));
+    if (model.orderEntries) model.orderEntries = model.orderEntries.map(item => (item.level === undefined && levelByName.has(fold(item.name)) ? { ...item, level: levelByName.get(fold(item.name)) } : item));
     const involved = party.filter(character => names.has(character.name));
     model.status = (involved.length ? involved : party).map(character => ({ name: character.name,
         rows: BARS.map(key => ({ key, ...character.bars[key], label: character.definition.state?.[key]?.label ?? RPG_STRINGS.bars[key] })) }));
-    model.foes = model.rounds.length ? readFoes(state, { roleOf }).map(foe => ({ text: `${foe.count > 1 ? `${foe.name} ${fill(B.count, { n: foe.count })}` : foe.name}: ${foe.hurt === 0 ? B.down : foe.word}` })) : [];
+    // The Foes line lists the groups that took part in this reply's rolls (a group left on the block from an earlier fight is not this reply's).
+    const rolledFoes = new Set([...(model.opening ?? []), ...model.rounds.flatMap(round => round.lines)].filter(line => line.foe).map(line => fold(line.who)).concat([...(model.opening ?? []), ...model.rounds.flatMap(round => round.lines)].filter(line => !line.foe && line.target).map(line => fold(line.target))));
+    model.foes = model.rounds.length ? foes.filter(foe => !rolledFoes.size || rolledFoes.has(fold(foe.name))).map(foe => ({ text: `${foe.count > 1 ? `${foe.name} ${fill(B.count, { n: foe.count })}` : foe.name} · ${foe.levelText}: ${foe.hurt === 0 ? B.down : foe.word}` })) : [];
     return model;
 }
 
@@ -242,14 +284,16 @@ function lineNode(doc, line, { check = false } = {}) {
         } else {
             text.append(`${line.who} ${line.skill ? B.uses : B.attacks} `);
             if (line.skill) text.appendChild(el(doc, 'span', 'rpg-skill', line.skill));
+            if (line.skill && line.gear && !line.foe) text.append(` (${line.gear})`);
             if (line.target) text.append(`${line.skill ? ` ${B.on} ` : ''}${line.target}${line.area ? ` (${B.area})` : ''}`);
+            if (!line.skill && line.gear && !line.foe) text.append(` (${line.gear})`);
         }
         // The skill a defender used ("Sluice Rat A attacks Astra (Iaijutsu) — Blocked"); a roll made before there were any has none.
         if (line.defence) {
             text.append(' (');
             text.appendChild(el(doc, 'span', 'rpg-skill', line.defence));
-            text.append(')');
-        }
+            text.append(line.gear ? `, ${line.gear})` : ')');
+        } else if (line.gear && line.foe) text.append(` (${line.gear})`);
         if (outcome) {
             text.append(' — ');
             text.appendChild(el(doc, 'span', `rpg-out rpg-out-${line.outcome}`, outcome));
@@ -306,9 +350,13 @@ export function buildPanel(doc, model, { folded = false, onFold = () => {}, vari
         onFold(on);
     });
 
-    if (model.order.length) body.appendChild(el(doc, 'p', 'rpg-bl-order', `${B.turnOrder} ${(model.orderEntries ?? model.order.map(name => ({ name, total: null }))).map(item => (item.total === null ? item.name : `${item.name} ${item.total}`)).join(' > ')}`));
+    if (model.order.length) body.appendChild(el(doc, 'p', 'rpg-bl-order', `${B.turnOrder} ${(model.orderEntries ?? model.order.map(name => ({ name, total: null }))).map(item => { const name = item.level ? fill(RPG_STRINGS.blocks.orderNameLevel, item) : item.name; return item.total === null ? name : `${name} ${item.total}`; }).join(' > ')}`));
     for (const item of model.quickStart ?? []) body.appendChild(el(doc, 'p', 'rpg-bl-note rpg-bl-quick', fill(RPG_STRINGS.blocks.quickStartLine, item)));
     for (const check of model.checks) body.appendChild(lineNode(doc, check, { check: true }));
+    if (model.ambush && (model.rounds.length || model.ambush.drop)) {
+        const a = model.ambush, which = a.success ? (a.drop ? 'ambushDrop' : 'ambushWon') : a.half ? 'ambushHalf' : 'ambushLost';
+        body.appendChild(el(doc, 'p', `rpg-bl-note rpg-bl-ambush rpg-bl-ambush-${a.success ? 'won' : 'lost'}`, fill(RPG_STRINGS.blocks[which], a)));
+    }
     if (model.opening?.length) {
         const box = el(doc, 'div', 'rpg-bl-round rpg-bl-opening');
         box.appendChild(el(doc, 'p', 'rpg-bl-round-title', B.opening));
@@ -320,6 +368,7 @@ export function buildPanel(doc, model, { folded = false, onFold = () => {}, vari
         box.appendChild(el(doc, 'p', 'rpg-bl-round-title', fill(B.round, { n: round.n })));
         for (const line of round.lines) box.appendChild(lineNode(doc, line));
         for (const item of round.skipped ?? []) box.appendChild(el(doc, 'p', 'rpg-bl-note rpg-bl-skip', fill(IDLE[item.why], { who: item.who })));
+        for (const text of round.wear ?? []) box.appendChild(el(doc, 'p', 'rpg-bl-note rpg-bl-wear', text));
         body.appendChild(box);
     }
     for (const item of model.refused) body.appendChild(el(doc, 'p', 'rpg-bl-note', fill(B.refused, { why: item.why })));
@@ -376,6 +425,57 @@ export function markerNodes(root) {
 // The marker text a panel took out of the story (placeAtMarker), kept on the panel itself.
 const CONSUMED = Symbol('consumed marker');
 
+// A marker line with no panel to stand for (the reply has no recorded rolls, the feature is off) is hidden, never shown as
+// text: a paragraph that holds only it is hidden, else the line is put in a hidden span of its own. It stays in the message,
+// so a panel drawn later still finds it (markerNodes walks into it; placeAtMarker shows it again first).
+export const MARKER_HIDDEN = 'rpg-battle-marker';
+const isHiddenMarker = node => node?.nodeType === 1 && String(node.className ?? '').split(/\s+/).includes(MARKER_HIDDEN);
+const onlyMarker = node => textOf(node).split(/\r?\n/).every(line => !line.trim() || MARKER_LINE.test(line));
+
+/** Hides every marker line under `root` (see above). */
+export function hideMarkers(doc, root) {
+    for (const node of markerNodes(root)) {
+        const parent = node.parentNode;
+        if (!parent || isHiddenMarker(parent)) continue;
+        if (parent !== root && parent.tagName === 'P' && nodesOf(parent).every(child => child === node || blank(child)) && onlyMarker(node)) {
+            parent.hidden = true;
+            parent.classList?.add?.(MARKER_HIDDEN) ?? (parent.className = `${parent.className ?? ''} ${MARKER_HIDDEN}`.trim());
+            continue;
+        }
+        const lines = textOf(node).split(/\r?\n/);
+        // (A line break drawn right after a marker that stood alone in its text goes into the hidden span with it, so no empty line is left.)
+        const next = lines.length === 1 && node.nextSibling?.tagName === 'BR' ? node.nextSibling : null;
+        lines.forEach((line, i) => {
+            if (MARKER_LINE.test(line)) {
+                const span = doc.createElement('span');
+                span.className = MARKER_HIDDEN;
+                span.hidden = true;
+                span.appendChild(doc.createTextNode(line));
+                if (next) span.appendChild(next);
+                parent.insertBefore(span, node);
+            } else if (line) parent.insertBefore(doc.createTextNode(line), node);
+            if (i < lines.length - 1) parent.insertBefore(doc.createTextNode('\n'), node);
+        });
+        node.remove();
+    }
+}
+
+// Shows again the marker lines hideMarkers hid under `root`.
+function showMarkers(doc, root) {
+    const hidden = [];
+    const walk = node => { for (const child of nodesOf(node)) if (child.nodeType === 1) { if (isHiddenMarker(child)) hidden.push(child); else walk(child); } };
+    walk(root);
+    for (const node of hidden) {
+        if (node.tagName === 'SPAN') {
+            for (const child of nodesOf(node)) node.parentNode?.insertBefore(child, node);
+            node.remove();
+        } else {
+            node.hidden = false;
+            node.classList?.remove?.(MARKER_HIDDEN) ?? (node.className = String(node.className ?? '').split(/\s+/).filter(name => name && name !== MARKER_HIDDEN).join(' '));
+        }
+    }
+}
+
 /**
  * Takes a panel out of the message. An inline panel that stood in the place of a marker line leaves that line behind, so the place
  * is kept for the next time (switching the RPG off and on again draws the panel where the narrator wrote it).
@@ -400,6 +500,7 @@ const textOf = node => String(node.data ?? node.textContent ?? '');
  * marker line is taken out of the text.
  */
 export function placeAtMarker(doc, root, panel) {
+    showMarkers(doc, root);
     const found = markerNodes(root);
     if (!found.length) return false;
     const [first, ...extra] = found;
@@ -462,7 +563,7 @@ export function createFoldStore(doc) {
  * → { refresh(index, element?), refreshAll({ recent }), modelAt(index), latest(), destroy() }.
  * Draws, redraws or removes the panel of every drawn reply that has recorded rolls; `featureOn()` false removes them all.
  */
-export function createBattleLog({ ctx, doc = globalThis.document, store, events = null, featureOn = () => true, roleOf, messageElement = null } = {}) {
+export function createBattleLog({ ctx, doc = globalThis.document, store, events = null, featureOn = () => true, roleOf, levels = () => ({}), messageElement = null, Observer = doc?.defaultView?.MutationObserver ?? globalThis.MutationObserver } = {}) {
     const chat = () => (Array.isArray(ctx?.chat) ? ctx.chat : []);
     const elementOf = messageElement ?? (index => doc.querySelector(`.mes[mesid="${index}"]`));
     const folds = createFoldStore(doc);
@@ -480,16 +581,16 @@ export function createBattleLog({ ctx, doc = globalThis.document, store, events 
         if (!featureOn() || !message || message.is_user || message.is_system) return null;
         const record = readRecord(message);
         if (!record) return null;
-        // What each party member calls the Soul Class comes from the reply's own state, read once and only when a line is drawn.
+        // What each party member calls the Soul Class (a roll made before Levels) comes from the reply's own state, read once and only when a line is drawn.
         let souls = null;
         const soulOf = who => {
-            souls ??= new Map((stateAt(index) ? readParty(stateAt(index), { roleOf }) : []).map(character => [fold(character.name), soulReading(character.definition.state?.soul)]));
+            souls ??= new Map((stateAt(index) ? readParty(stateAt(index), { roleOf }) : []).map(character => [fold(character.name), characterReading(character.definition)]));
             return souls.get(fold(who)) ?? null;
         };
         const resolve = resolveOf(record, problems().filter(problem => problem?.index === index), { soulOf });
         const state = resolve ? stateAt(index) : null;
         if (!state) return null;
-        return { key: `${chatKey()}|${record.sid ?? index}`, model: panelModel({ resolve, state, before: beforeOf(index), roleOf }) };
+        return { key: `${chatKey()}|${record.sid ?? index}`, model: panelModel({ resolve, state, before: beforeOf(index), roleOf, ranks: levels().ranks ?? [] }) };
     }
 
     /** The latest reply with recorded rolls, searching the whole chat from the newest back: { index, key, model } or null. */
@@ -517,6 +618,8 @@ export function createBattleLog({ ctx, doc = globalThis.document, store, events 
         const shown = modelAt(index);
         if (!shown) {
             for (const node of old) releasePanel(doc, node);
+            const text = message.querySelector('.mes_text');
+            if (text) hideMarkers(doc, text);
             return null;
         }
         const text = message.querySelector('.mes_text');
@@ -555,6 +658,40 @@ export function createBattleLog({ ctx, doc = globalThis.document, store, events 
     }
 
     const offs = [];
+    // Another extension may draw a reply's text again after the panel was drawn (SillyTavern's updateMessageBlock, which no
+    // event follows: NPC State Delta does it on CHARACTER_MESSAGE_RENDERED after taking its own block out), so the panel is
+    // gone and the raw marker is back until something redraws the reply. A watch on the chat's message texts draws that
+    // reply again whenever a marker shows in it (a consumed or hidden one does not count, so drawing never feeds itself).
+    const shownMarkers = text => markerNodes(text).filter(node => !isHiddenMarker(node.parentNode));
+    if (typeof Observer === 'function' && doc) {
+        const waiting = new Map();
+        let queued = false;
+        const flush = () => {
+            queued = false;
+            const list = [...waiting.values()];
+            waiting.clear();
+            for (const message of list) {
+                const index = Number(message.getAttribute?.('mesid'));
+                const text = message.querySelector?.('.mes_text');
+                if (Number.isInteger(index) && text && shownMarkers(text).length) refresh(index, messageElement ? null : message);
+            }
+        };
+        try {
+            const watch = new Observer(records => {
+                for (const record of records) {
+                    const target = record.target?.nodeType === 1 ? record.target : record.target?.parentNode;
+                    const message = target?.closest?.('.mes[mesid]');
+                    if (message && target.closest?.('.mes_text')) waiting.set(message, message);
+                }
+                if (waiting.size && !queued) { queued = true; Promise.resolve().then(flush); }
+            });
+            const root = doc.querySelector?.('#chat') ?? doc.body ?? null;
+            if (root) {
+                watch.observe(root, { childList: true, subtree: true });
+                offs.push(() => watch.disconnect());
+            }
+        } catch { /* no watch: the events below still draw the panel */ }
+    }
     const source = ctx?.eventSource;
     const types = ctx?.eventTypes ?? ctx?.event_types ?? {};
     if (typeof source?.on === 'function') {
@@ -579,7 +716,11 @@ export function createBattleLog({ ctx, doc = globalThis.document, store, events 
         refresh, refreshAll, modelAt, latest,
         destroy() {
             offs.splice(0).forEach(off => off());
-            for (const node of doc.querySelectorAll(`.${BATTLE_ROOT}`)) releasePanel(doc, node);
+            for (const node of doc.querySelectorAll(`.${BATTLE_ROOT}`)) {
+                const text = node.parentNode;
+                releasePanel(doc, node);
+                if (text) hideMarkers(doc, text);
+            }
         },
     };
 }

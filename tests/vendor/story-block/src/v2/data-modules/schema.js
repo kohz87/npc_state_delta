@@ -26,8 +26,15 @@ export const DM_LIMITS = freeze({
     prompt: 1200, names: 32, nameText: 40, cards: 4, replyEnd: 4, cardTitle: 60, cardText: 240,
     // A block with a `role` (a Character or Skills sheet) says more in the tail: five skills with what each does, or a character with who they are.
     roleTailTokens: 300,
+    // A Skills block (role `skills`) holds up to eight skill slots of six fields each, their `who` and the signature mark: more than other blocks' 32 (names.js SKILL_SLOTS_MAX).
+    // Its tail may be longer too, by 47 tokens for each skill it holds past five (tailRoom in part.js: the longest line one skill makes, measured).
+    skillsFields: 56, skillTailTokens: 47,
     // The most stages a role block's bar field (health, mana, stamina, a foe's health) may have, counted up from 0.
     stages: 10,
+    // A List of entries field (`type: "entries"`): the sub-fields of one entry, the entries a story may add (default and most), and the longest `at` a line may write.
+    entrySubs: 8, entriesDefault: 30, entriesMax: 50, entryAt: 60,
+    // A block with a List of entries says more in the tail (its open entries by number and title): 250 tokens instead of 100.
+    listTailTokens: 250,
 });
 
 export const DM_DIAGNOSTICS = freeze({
@@ -40,15 +47,21 @@ export const DM_DIAGNOSTICS = freeze({
 
 export const DM_DESCRIPTORS = freeze({
     definition: { required: ['slug', 'name', 'schema', 'stateVersion', 'scope', 'state', 'kinds'],
-        optional: ['imports', 'rules', 'timers', 'rewards', 'exports', 'screens', 'layouts', 'migrations', 'prompt', 'show', 'role', 'cards', 'replyEnd'] },
+        optional: ['imports', 'rules', 'timers', 'rewards', 'exports', 'screens', 'layouts', 'migrations', 'prompt', 'show', 'role', 'cards', 'replyEnd', 'layout', 'roles', 'tones'] },
     defaults: { imports: {}, rules: [], timers: [], rewards: {}, exports: {}, screens: [], layouts: [], migrations: [] },
     scope: ['chat', 'character'],
     fields: {
         int: { required: ['type', 'min', 'max', 'default'], optional: ['edit', 'label', 'names', 'prompt', 'blocks'] }, bool: { required: ['type', 'default'], optional: ['edit', 'label', 'prompt'] },
         enum: { required: ['type', 'values', 'default'], optional: ['edit', 'label', 'prompt'] }, text: { required: ['type', 'max', 'default'], optional: ['edit', 'list', 'label', 'prompt'] },
         map: { required: ['type', 'keys', 'values'], optional: ['edit', 'label', 'prompt'] },
+        // A list of entries: `of` holds the sub-fields (text, int or enum, no `edit`/`prompt`/`label` of their own to speak of), `max` the most entries.
+        entries: { required: ['type', 'of'], optional: ['max', 'edit', 'label', 'prompt'] },
     },
-    labels: { int: { required: ['type', 'min', 'max'], optional: ['names'] }, bool: ['type'], enum: ['type', 'values'], text: ['type', 'max'] },
+    // (`optional: true` on a label of an entries line: the line may leave it out)
+    labels: { int: { required: ['type', 'min', 'max'], optional: ['names', 'optional'] }, bool: ['type'], enum: { required: ['type', 'values'], optional: ['optional'] }, text: { required: ['type', 'max'], optional: ['optional'] } },
+    layouts: ['cards', 'bars', 'fields'],
+    roleKeys: ['field', 'title', 'status', 'step'],
+    toneNames: ['active', 'done', 'failed', 'neutral'],
     kind: { required: ['op', 'labels', 'effects'], optional: ['when', 'refusal', 'oncePerReply', 'ui', 'check', 'title'] },
     ops: [...OPS],
     effects: {
@@ -58,6 +71,10 @@ export const DM_DESCRIPTORS = freeze({
         reward: { required: ['op', 'template', 'bind'], optional: [] },
         offer: { required: ['op', 'template', 'key', 'bind'], optional: [] },
         award: { required: ['op', 'offer'], optional: [] },
+        // The three lines of a List of entries field: add an entry, change one (`at`: its number or title), drop one.
+        entryAdd: { required: ['op', 'path'], optional: [] },
+        entrySet: { required: ['op', 'path'], optional: [] },
+        entryDrop: { required: ['op', 'path'], optional: [] },
     },
     arities: { get: 1, arg: 1, bind: 1, input: 2, reward: 1, check: 1, timer: 1,
         eq: 2, ne: 2, lt: 2, le: 2, gt: 2, ge: 2, and: 2, or: 2, not: 1,
@@ -83,6 +100,10 @@ export const DM_DESCRIPTORS = freeze({
     v11Effects: ['grantCoin', 'grantItem', 'grantXp'],
 });
 
+/** The effects that work a List of entries field (the interpreter reads the line's labels itself). */
+export const DM_ENTRY_EFFECTS = Object.freeze(['entryAdd', 'entrySet', 'entryDrop']);
+/** The tone a status value has unless the author changed it: active, done and failed by name, anything else neutral. */
+export const dmDefaultTone = value => (['active', 'done', 'failed'].includes(value) ? value : 'neutral');
 export const dmObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 export const dmOwn = (value, key) => dmObject(value) && typeof key === 'string' && Object.hasOwn(value, key);
 export const dmSlug = value => typeof value === 'string' && /^[a-z0-9][a-z0-9-]{0,39}$/.test(value)
