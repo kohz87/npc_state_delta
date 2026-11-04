@@ -321,6 +321,8 @@ export function createStorySuiteV2Adapter({
     // How long Delta waits for the host's head-selection barrier to come down, and how often it looks (messageGate.settled).
     settleMs = HEAD_SETTLE_MS,
     settlePollMs = HEAD_SETTLE_POLL_MS,
+    // Delta's card settings (src/card-settings.js); registered with a Story Block that has sdk.registerCardSettings (2.21.0).
+    cardSettings = null,
 } = {}) {
     let started = false;
     let pollTimer = null;
@@ -339,6 +341,7 @@ export function createStorySuiteV2Adapter({
     let sectionLead = null;      // the meter presets block above Delta's panel in the settings section
     let offTurn = null;          // unsubscribes from the host's 'turn' event
     let offHead = null;          // unsubscribes from the host's 'head' event
+    let offCardSettings = null;  // unregisters Delta's card settings
     let lastTick = Promise.resolve(null);
     let listParts = null;        // loadDossierList's { rowNodes, project, filter } once loaded
     let rowsCache = { key: null, rows: [] };
@@ -1573,6 +1576,19 @@ export function createStorySuiteV2Adapter({
         doc.addEventListener(EVENTS.enabledChanged, rerender);
     }
 
+    // Delta's card settings (src/card-settings.js), for a Story Block that has sdk.registerCardSettings (2.21.0); an older one
+    // has none and nothing happens. A refusal is logged and never stops Delta being hosted. Returns the unregister function.
+    function registerCardSettings(sdk, definition) {
+        if (typeof sdk?.registerCardSettings !== 'function' || !definition) return null;
+        try {
+            const off = sdk.registerCardSettings(definition);
+            return typeof off === 'function' ? off : (typeof off?.unregister === 'function' ? () => off.unregister() : null);
+        } catch (error) {
+            warn('Story Block card settings were not registered', error);
+            return null;
+        }
+    }
+
     async function register(sdk, from, attempt) {
         if (hostRef !== from) return false;
         if (host() !== from) {
@@ -1602,6 +1618,7 @@ export function createStorySuiteV2Adapter({
             const off = typeof sdk.on === 'function' ? sdk.on('head', portraitFill) : null;
             offHead = typeof off === 'function' ? off : null;
         } catch (error) { warn('Story Suite v2 head events are not available', error); }
+        offCardSettings = registerCardSettings(sdk, cardSettings);
         listen();
         syncDrawer();
         announceHosted(true);
@@ -1658,6 +1675,8 @@ export function createStorySuiteV2Adapter({
         offTurn = null;
         try { offHead?.(); } catch { /* the host is gone */ }
         offHead = null;
+        try { offCardSettings?.(); } catch { /* the host is gone */ }
+        offCardSettings = null;
         hostRef = null;
         sdkRef = null;
         pendingSection = null;

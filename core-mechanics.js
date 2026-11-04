@@ -3782,7 +3782,20 @@ function portraitProseIsAdjective(item, original = item) {
 
 // A people named first and then a trade or kind ("elf ranger") is still that people; plurals ("elves") read as the singular.
 const PORTRAIT_HUMANOID_FIRST = /^(?:humans?|elf|elves|elven|dwarf|dwarves|dwarven|orcs?|goblins?|halflings?|gnomes?|tieflings?|ogres?|trolls?|centaurs?)$/i;
-const PORTRAIT_HUMANOID = /\b(?:humans?|humanoids?|persons?|people|mortals?|elf|elves|elven|dwarf|dwarves|dwarven|orcs?|goblins?|halflings?|gnomes?|tieflings?|demons?|angels?|vampires?|fae|fey|nymphs?|giants?|ogres?|trolls?|centaurs?|beast-?men|beast-?man|beast-?wom[ae]n|\w*folk|half-\w+|\w+-kin|kin|\w+born)\b/i;
+// The head noun is judged as a whole word. A hyphenated word is judged by its own pattern (half-elf, fox-beastfolk,
+// bat-kin) or by its last part (wood-elf is an elf, elf-hound is a hound); the first part never decides.
+const PORTRAIT_HUMANOID_WORD = /^(?:humans?|humanoids?|persons?|people|mortals?|elf|elves|elven|dwarf|dwarves|dwarven|orcs?|goblins?|halflings?|gnomes?|tieflings?|demons?|angels?|vampires?|fae|fey|nymphs?|giants?|ogres?|trolls?|centaurs?|beast-?men|beast-?man|beast-?wom[ae]n|\w*folk|kin|\w+born)$/i;
+const PORTRAIT_HUMANOID_COMPOUND = /^(?:half-\w+|\w+-kin|(?:\w+-)*beast-?(?:men|man|wom[ae]n)|(?:\w+-)*\w*folk)$/i;
+// "elf ranger", "dwarf smith": a people named first counts only when what follows is a person (a trade or a rank), so
+// "troll bridge" stays a bridge.
+const PORTRAIT_PERSON_TAIL = /^(?:\w*(?:ist|ian|man|woman|men|women|smith|lord|lady|ess|maid|knight|mage|wizard|witch)|ranger|archer|hunter|fighter|warrior|scout|guard|guardian|priest|thief|rogue|noble|king|queen|prince|sage|monk|nun|bard|healer|elder|child|girl|boy|youth|chief|chieftain|captain|shaman|druid|cleric|paladin|mercenary|assassin|sentinel|soldier|slave|servant|wanderer|merchant|trader|sailor|pirate|bandit|outlaw|scholar|apprentice|mystic|seer|oracle|sorcerer|sorceress|necromancer|duelist|swordsman|spy|courier|messenger|ambassador|emissary|diplomat)$/i;
+function portraitSpeciesIsHumanoid(words) {
+    if (!words.length) return true;
+    const last = words[words.length - 1];
+    if (PORTRAIT_HUMANOID_COMPOUND.test(last) || PORTRAIT_HUMANOID_WORD.test(last)) return true;
+    if (last.includes('-') && PORTRAIT_HUMANOID_WORD.test(last.split('-').pop())) return true;
+    return words.length > 1 && PORTRAIT_HUMANOID_FIRST.test(words[0]) && PORTRAIT_PERSON_TAIL.test(last);
+}
 
 function portraitProseList(items) {
     const list = items.filter(Boolean);
@@ -3824,7 +3837,7 @@ function buildNaturalPortraitProse({ name, gender, rawGender, species, visualAge
     // given a human form ("a male wolf", "a robot").
     // Only the head noun (the last word) decides: "giant spider" and "demon wolf" are animals, "half-elf" a people.
     const speciesWordsList = speciesText.replace(/\([^)]*\)/g, ' ').trim().split(/\s+/).filter(Boolean);
-    const humanoid = !speciesText || !speciesWordsList.length || PORTRAIT_HUMANOID.test(speciesWordsList[speciesWordsList.length - 1]) || PORTRAIT_HUMANOID_FIRST.test(speciesWordsList[0]);
+    const humanoid = !speciesText || portraitSpeciesIsHumanoid(speciesWordsList);
     const formNoun = humanoid ? (speciesHasNoun ? '' : nounWord) : '';
     const animalSex = !humanoid && gender && !speciesHasNoun ? gender : '';
     const head = [numericAge ? (approximate ? 'roughly ' : '') + ageText.replace(/\s+/g, '') + '-year-old' : (teen ? 'teenage' : ''), ...adjectives, animalSex, speciesText, formNoun].filter(Boolean).join(' ');

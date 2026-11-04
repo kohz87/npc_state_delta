@@ -1,3 +1,9 @@
+## 1.9.0
+
+- **Card settings.** A character card can recommend two of Delta's settings: the portrait prompt format and Scan every. With Story Block 2.21.0 they are offered with the card's pack and applied only when the reader ticks them and installs; Delta saves them exactly as its own Save prompt settings button and Scan every box do, so they survive a reload. With an older Story Block nothing changes. (Requires Story Block 2.21.0 for card settings; Delta works as before with older versions.)
+- **Clear every dossier keeps the chat from looking new.** Clear now leaves the scan count at one or more, so a swipe or a fail-closed restore on a short chat afterwards reads the latest reply only, not the older ones again.
+- **Portrait species is read as a whole word.** "elf-hound" is no longer given a human form ("elf-hound woman"), and neither is "troll bridge"; "half-elf", "fox-beastfolk", "wood-elf", "elf ranger" and "high elves" read as before.
+
 ## 1.8.0
 
 - **Lighter dossiers and plain-prose portraits.** The dossier scanner runs only when a reply names someone new or a tracked person (plus a safety scan every 5 replies; a saved 'Scan every' of 1 is kept), and every scan reads every reply since the last one, so a reply it skipped is never lost (up to 30 messages at a time, the oldest first, catching up on the next replies; the latest is marked CURRENT, the earlier ones give lasting facts and relationship changes, each reply read once, but never current presence, mood or location); shorter dossier text; hidden-note wording said once; Natural portrait prompts are written as plain prose for natural-language image models (Flux, Krea, SD3-class).

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "applicationVersion": "1.8.0",
+  "applicationVersion": "1.9.0",
   "entrypoint": "bootstrap.js",
   "modules": [
     { "path": "bootstrap.js", "role": "bootstrap", "required": true },
@@ -50,6 +50,7 @@
     { "path": "src/relationship-pass.js", "role": "focused-relationship-pass", "required": true },
     { "path": "src/key-people.js", "role": "key-people-rules", "required": true },
     { "path": "src/cast-dossier.js", "role": "cast-dossier-rules", "required": true },
-    { "path": "src/portrait-file.js", "role": "cast-portrait-user-files", "required": true }
+    { "path": "src/portrait-file.js", "role": "cast-portrait-user-files", "required": true },
+    { "path": "src/card-settings.js", "role": "story-block-card-settings", "required": true }
   ]
 }

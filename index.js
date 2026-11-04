@@ -229,6 +229,7 @@ import {
     worldStatePeople,
 } from './present-scene.js';
 import { escapeHtml } from './src/util/html.js';
+import { createCardSettingsDefinition, SCAN_EVERY_RANGE } from './src/card-settings.js';
 import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, returnNote } from './src/key-people.js';
 import { applyCastEntry, applyCastPortrait, castPortraitWanted, castView, dossierFor, findCastPerson, markCastPortraitRemoved, metWithEntry, normalizeCast } from './src/cast-dossier.js';
 
@@ -7856,7 +7857,10 @@ function bindUi() {
         if (!await ensureFreshMutationBoundary('clear this chat dossier')) return;
         if (!window.confirm('Clear every NPC State Delta dossier for this chat? Portraits and inline dossier cards will also be removed.')) return;
         closePortraitGenerator();
+        const previousScanCount = Number(getChatState()?.scanCount || 0);
         const cleared = freshChatState();
+        // A cleared chat is never "new" again: a swipe or a fail-closed restore on a short chat must not read the older replies back in.
+        cleared.scanCount = Math.max(1, Math.round(previousScanCount) || 0);
         cleared.lineage = chatLineage(getContext().chat || []);
         // Cleared, the chat is caught up: only replies from now on are read, not the whole history again.
         cleared.lastScannedMessageId = latestMessageId(true) >= 0 ? latestMessageId(true) : null;
@@ -8297,6 +8301,23 @@ function registerEvents() {
     });
 }
 
+// What a character card may recommend (Story Block 2.21.0 card settings, src/card-settings.js). Each save is the one the
+// settings panel itself makes: the prompt format through "Save prompt settings", Scan every as its box does.
+function nsdCardSettings() {
+    return createCardSettingsDefinition({
+        readFormat: () => portraitSettingsSnapshot(getSettings()).portraitPromptFormat,
+        saveFormat: format => savePortraitSettingsDraft({ portraitPromptFormat: format }),
+        readScanEvery: () => getSettings().scanEvery,
+        saveScanEvery: value => {
+            const next = Math.max(SCAN_EVERY_RANGE.min, Math.min(SCAN_EVERY_RANGE.max, Math.round(Number(value)) || 2));
+            getSettings().scanEvery = next;
+            $('#npc_state_delta_scan_every').val(next);
+            persistSettings();
+            return true;
+        },
+    });
+}
+
 async function init() {
     if (initialized) {
         scheduleSettingsMountRetries();
@@ -8307,7 +8328,7 @@ async function init() {
     clearLegacyPromptKeys();
     connectStorySuite();
     // Story Suite v2 (Story Block 2): optional; without a v2 host the adapter does nothing.
-    import('./src/storysuite-v2.js').then(v2 => { storySuiteV2 = v2.startStorySuiteV2({ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION, headReply: latestReplyIndex, castSync, castPortraitDue, calendarOwn: () => normalizeSourceOfTruth(getSettings().sourceOfTruth).calendar === 'mine' }); }).catch(error => console.debug('[NPC State Delta] Story Suite v2 adapter is not available', error));
+    import('./src/storysuite-v2.js').then(v2 => { storySuiteV2 = v2.startStorySuiteV2({ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION, headReply: latestReplyIndex, castSync, castPortraitDue, calendarOwn: () => normalizeSourceOfTruth(getSettings().sourceOfTruth).calendar === 'mine', cardSettings: nsdCardSettings() }); }).catch(error => console.debug('[NPC State Delta] Story Suite v2 adapter is not available', error));
     // (v2) Hosted with Story Director, the story's date follows its clock (calendar.js hostedStoryDate)
     // unless the reader keeps the calendar here (Source of truth: calendar "mine"). No host: none.
     setStoryClockSource(hostedStoryClock);
@@ -8418,6 +8439,8 @@ window.NPCStateDelta = Object.freeze({
     portraitSettings: () => portraitSettingsSnapshot(getSettings()),
     portraitSettingsDirty: () => portraitSettingsDirty,
     savePortraitSettings: draft => savePortraitSettingsDraft(draft),
+    /** What a character card may recommend (the definition Story Block 2.21.0 registers as card settings). */
+    cardSettings: () => nsdCardSettings(),
     render: renderDossier,
     renderInline: renderInlineCards,
     openEditor: value => { const npc = findNpcByIdOrName(value); return npc ? openNpcEditorSafely(npc.id) : false; },

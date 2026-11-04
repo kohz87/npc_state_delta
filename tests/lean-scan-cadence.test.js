@@ -81,7 +81,7 @@ function cadenceHelpers(mockState, eventSource, sleep) {
         if (/isolated dossier scanner\./i.test(String(args.systemPrompt || ''))) return JSON.stringify({ npcs: [{ name: 'Yunyun', present: true, role: 'scanned adventurer' }] });
         return '{"npcs":[]}';
     };
-    return { fail, check, equal, runtime, settings, scannerCalls, turn, mockState, sleep };
+    return { fail, check, equal, runtime, settings, scannerCalls, turn, emitAsync, mockState, sleep };
 }
 
 test('lean: the shipped default of Scan every is 5', () => {
@@ -446,4 +446,36 @@ test('lean: an import never leaves a chat looking new, and Clear leaves the mark
     const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
     assert.match(index, /cleared\.lastScannedMessageId = latestMessageId\(true\) >= 0 \? latestMessageId\(true\) : null;/);
     assert.match(index, /fresh: chatNeverScanned\(getChatState\(scanChatKey\), messageId\),/);
+});
+
+test('lean: Clear every dossier, then a swipe, then the next scan reads the latest reply only', () => {
+    runScenario('clear-then-swipe', async h => {
+        h.settings.scanEvery = 20;
+        await h.turn('Who is that?', 'Yunyun steps out of the mist and waves.');
+        for (let i = 1; i <= 3; i += 1) await h.turn('We walk on.', `The road goes on, mile ${i} of older-${i}.`);
+        const before = h.runtime.getState().scanCount;
+        h.check(before >= 1, 'the chat was scanned once');
+        const previous = globalThis.window.confirm;
+        globalThis.window.confirm = () => true;
+        try {
+            const clear = uiHandlers.get('click.npcStateDelta|#npc_state_delta_clear_chat');
+            h.check(typeof clear === 'function', 'Clear must be connected to the production handler');
+            await clear();
+        } finally { globalThis.window.confirm = previous; }
+        const cleared = h.runtime.getState();
+        h.equal(cleared.npcs.length, 0, 'every dossier is gone');
+        h.equal(cleared.scanCount, Math.max(1, before), 'scanCount stays at max(1, previous)');
+        // A swipe of the latest reply, then the next reply: the marker is gone after a swipe, the chat must still not look new.
+        const chat = h.mockState.context.chat;
+        chat[chat.length - 1] = { ...chat[chat.length - 1], mes: 'The road goes on, a swiped-mile.', swipe_id: 1, swipes: [chat[chat.length - 1].mes, 'The road goes on, a swiped-mile.'] };
+        await h.emitAsync('message_swiped', chat.length - 1);
+        h.runtime.getState().lastScannedMessageId = null;
+        h.settings.scanEvery = 1;
+        const calls = h.scannerCalls().length;
+        await h.turn('Who is that?', 'Wiz walks in and nods at the counter.');
+        const scans = h.scannerCalls().slice(calls);
+        h.equal(scans.length, 1, 'one scan');
+        const prompt = String(scans[0].prompt || '');
+        h.check(prompt.includes('Wiz walks in') && !prompt.includes('older-1.') && !prompt.includes('older-2.') && !prompt.includes('Yunyun steps out'), 'the older replies are not read back in');
+    });
 });
