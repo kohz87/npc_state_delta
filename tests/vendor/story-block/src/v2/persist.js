@@ -625,6 +625,8 @@ export function createSaver({
             if (!verdict?.moved && !verdict?.wait) {
                 orphans.splice(orphans.indexOf(orphan), 1);
                 if (!verdict?.gone) {
+                    // A change of a third chat still pending (`latest`) is that chat's: handed on, not overwritten.
+                    if (version !== saved && latest && latest.chatId !== orphan.target?.chatId) orphans.push({ target: latest, tries: 0 });
                     if (version === saved) version++;
                     latest = orphan.target;
                 }

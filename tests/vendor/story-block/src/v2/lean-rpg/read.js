@@ -2,18 +2,20 @@
 //
 // An RPG block is a pinned chat block whose definition has a `role` (names.js ROLES). Field keys are fixed
 // (suite-notes/rpg-briefs/COMMON.md):
-//   character: who, health, mana, stamina (stage indexes, 0 = empty), str vit agi dex int luk cha, points, soul (1–9),
+//   character: who, health, mana, stamina (stage indexes, 0 = empty), str vit agi dex int luk cha, points, level (1–99; a block made before levels has soul 1–9 instead), cap,
 //              xp, down (the death latch, hidden), alive
 //   skills:    who, then per slot 1…5: skillN (name), aboutN (what it does), statN (one of the seven stats), usesN (stamina |
 //              mana), rankN (0–3), practiceN (0–100)
-//   foes:      foe1…foe4 (text), count1…count4, class1…class4 (1–9), hurt1…hurt4 (0–5)
+//   foes:      foe1…foe4 (text), count1…count4, level1…level4 (1–99; a block of the earlier rules has class1…class4, 1–9), hurt1…hurt4 (0–5)
 // Pure and read-only: it takes a state (or anything shaped `{ domains: { dataModules } }`) and answers plain data. It
 // never validates the definitions (the data-module checker did when they were pinned); a block it cannot read is left
 // out, with a plain `problems` line.
-import { FOE_SLOTS, SKILL_SLOTS, STAGES, STATS, USES } from './names.js';
+import { FOE_SLOTS, LEVEL, STAGES, STATS, USES } from './names.js';
+import { SKILL_SLOTS_MAX } from '../skill-slots.js';
 import { dmHidden } from '../data-modules/schema.js';
 import { barOf, characterBars, sizeOf } from './blocks.js';
 import { soulReading } from './soul.js';
+import { classOfLevel, levelOfClass } from './formula.js';
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const int = value => (Number.isSafeInteger(value) ? value : null);
@@ -21,6 +23,26 @@ const text = value => (typeof value === 'string' ? value.replace(/\s+/g, ' ').tr
 
 /** A name as the matcher compares it: NFKC, lower case, spaces and hyphens gone ("Iron-Breath" = "iron breath"). */
 export const fold = value => String(value ?? '').normalize('NFKC').toLowerCase().replace(/[\s\-‐‑–—]+/gu, '');
+
+/**
+ * Whether a party member called `name` (with `aliases`) is the Character `character` (readSheet's), among the Characters `characters` (the whole sheet):
+ * the same name (case, spaces and hyphens do not count); else the first name against the whole one (Ren is Ren Ashby) or an alias of the member that is
+ * either, but only when exactly one Character is meant that way and no Character is called that exactly ("Ren Ashby" and "Ren Holt" with a member "Ren"
+ * are neither: it is not guessed). An exact name always wins over a first name.
+ */
+export function sameWho(character, name, aliases = [], characters = [character]) {
+    const first = value => fold(String(value ?? '').trim().split(/\s+/u)[0]);
+    const values = [name, ...(Array.isArray(aliases) ? aliases : [])].filter(value => typeof value === 'string' && value.trim());
+    const exact = entry => values.some(value => fold(value) === entry?.key);
+    const loose = entry => {
+        const whole = String(entry?.who ?? entry?.key ?? '');
+        return values.some(value => (!/\s/u.test(value.trim()) && fold(value) === first(whole)) || (!/\s/u.test(whole.trim()) && fold(whole) === first(value)));
+    };
+    if (exact(character)) return true;
+    const all = Array.isArray(characters) && characters.includes(character) ? characters : [...(Array.isArray(characters) ? characters : []), character];
+    if (all.some(exact)) return false;
+    return loose(character) && all.filter(loose).length === 1;
+}
 
 /**
  * Which of `entries` a phrase names (SPEC_RPG_v1 §4.5.1): an entry whose folded name equals the folded phrase, else the
@@ -84,18 +106,23 @@ const shownFields = (fields, hidden) => (hidden.size ? Object.fromEntries(Object
 // the Standard formula's blocks (blocks.js): then the record also has `size` (how many blocks each bar has now), and health, mana and stamina
 // are the blocks left. A Classic block's record is exactly what it was.
 function character(id, fields, own = '', hidden = new Set(), definition = null) {
-    const schema = isObject(definition?.state) ? definition.state.soul : null;
+    const levelled = isObject(definition?.state) && isObject(definition.state.level);
+    const schema = isObject(definition?.state) ? (levelled ? definition.state.level : definition.state.soul) : null;
     const who = text(fields.who) || text(own);
     if (!who) return null;
     const stats = Object.fromEntries(STATS.map(stat => [stat, int(fields[stat])]));
     // What the pack calls the Soul Class field and its current value (soul.js), for the planner's lines and the odds.
+    // (A block made before levels has the Soul Class and no level: its level reads as the class stands for, levelOfClass. `soul` stays what the field says,
+    // which is what a roll recorded before levels used.)
     const soul = int(fields.soul) ?? 1, reading = soulReading(schema);
+    const level = Math.max(1, Math.min(LEVEL.max, int(fields.level) ?? (Object.hasOwn(fields, 'soul') ? levelOfClass(soul) : 1)));
+    const cap = Math.max(1, Math.min(LEVEL.max, int(fields.cap) ?? LEVEL.max));
     const bars = characterBars(definition, fields);
     return {
         module: id, who, key: fold(who),
         health: int(fields.health), mana: int(fields.mana), stamina: int(fields.stamina),
         ...(bars ? { size: { health: bars.health.size, stamina: bars.stamina.size, mana: bars.mana.size } } : {}),
-        stats, soul, soulLabel: reading.label, soulWord: reading.word(soul), xp: int(fields.xp), points: int(fields.points),
+        stats, soul, level, cap, ...(levelled ? { levelled: true } : {}), soulLabel: reading.label, soulWord: levelled ? String(level) : reading.word(soul), xp: int(fields.xp), points: int(fields.points),
         alive: fields.alive !== false,
         skills: [],
         hidden: [...hidden].filter(key => !TEXT_KEY.test(key)),
@@ -104,7 +131,7 @@ function character(id, fields, own = '', hidden = new Set(), definition = null) 
 
 function skillsOf(fields, hidden = new Set()) {
     const out = [];
-    for (let n = 1; n <= SKILL_SLOTS; n += 1) {
+    for (let n = 1; n <= SKILL_SLOTS_MAX; n += 1) {
         const name = text(fields[`skill${n}`]);
         if (!name) continue;
         // A Skills block made before the stat and the resource were fields has neither: null, and the plan's stat is used.
@@ -128,8 +155,11 @@ function foesOf(id, fields, offset = 0, hidden = new Set(), state = null) {
         const size = barOf(state?.[`hurt${n}`]) ? sizeOf(state[`hurt${n}`], fields, `hurt${n}`) : null;
         const name = hidden.has(`foe${n}`) ? (text(fields[`foe${n}`]) ? `Foe ${offset + n}` : '') : text(fields[`foe${n}`]);
         const count = int(fields[`count${n}`]) ?? 0;
-        out.push({ slot: offset + n, module: id, name, count, class: int(fields[`class${n}`]) ?? 1, hurt: int(fields[`hurt${n}`]) ?? 0, ...(size ? { size } : {}), filled: Boolean(name) && count > 0,
-            hidden: ['count', 'class', 'hurt'].filter(part => hidden.has(`${part}${n}`)) });
+        // A block of the Levels rules has `level{n}`; one of the earlier rules has `class{n}` (kept as it was), whose level is worked out from it.
+        const levelled = Object.hasOwn(fields, `level${n}`), soulClass = int(fields[`class${n}`]) ?? 1;
+        const level = levelled ? Math.max(1, Math.min(99, int(fields[`level${n}`]) ?? 1)) : levelOfClass(soulClass) ?? 1;
+        out.push({ slot: offset + n, module: id, name, count, class: levelled ? classOfLevel(level) : soulClass, level, ...(levelled ? { levelled } : {}), hurt: int(fields[`hurt${n}`]) ?? 0, ...(size ? { size } : {}), filled: Boolean(name) && count > 0,
+            hidden: ['count', 'class', 'level', 'hurt'].filter(part => hidden.has(`${part}${n}`)) });
     }
     return out;
 }
@@ -140,7 +170,7 @@ function foesOf(id, fields, offset = 0, hidden = new Set(), state = null) {
  *                  skills: [{ slot, name, about, rank, practice, stat, uses }] }]   (a Skills block joins the character its `who` names;
  *                  stat is one of STATS and uses 'stamina' | 'mana', or null for a block that has neither)
  *                  `size`: { health, stamina, mana } only for a Standard Character block, where those three are the blocks left)
- *   foes: the four slots of every Foes block in block order, [{ slot, module, name, count, class, hurt, size?, filled }] ([] without one); `size`: the
+ *   foes: the four slots of every Foes block in block order, [{ slot, module, name, count, level, class, hurt, size?, filled }] ([] without one; `level` 1–99, worked out from `class` for a block of the earlier rules, which has no `levelled`; `class` of a levelled group is the Soul Class its level stands for, which the fight XP table of the earlier rules still reads); `size`: the
  *         blocks a Standard group's Health has (`hurt` is the blocks left); `slot`
  *         counts on across blocks (1–4, then 5–8, …), `filled` = a name and a count above 0
  *   problems: plain sentences for blocks left out (no `who`, two characters of one name)

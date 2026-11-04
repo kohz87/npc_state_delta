@@ -25,10 +25,12 @@ import { createCommandBus as realBus } from './commands.js';
 import { CORE_MODULE_ID, createCoreModule } from './domains/index.js';
 import { WALLET_KEY } from './domains/money.js';
 import { SETTING as ASSIST_SETTING, TIMEOUT_MS as ASSIST_TIMEOUT_MS, createAssistPart } from './assist/index.js';
-import { CORE_FEATURE, createFeatureStore } from './features.js';
+import { CORE_FEATURE, GEAR_FEATURE, createFeatureStore } from './features.js';
+import { createCardSettings } from './packs/card-settings.js';
+import { XP_RATE_SETTING, xpRateFrom, xpRateOf } from './lean-rpg/levels.js';
 import { applyStart, createPacksPart } from './packs/index.js';
 import { MODEL_CALL_ERRORS, createCallQueue, createModelCalls, createOwnCalls, profileName, stModelCall } from './model-call.js';
-import { carryRecord } from './persist.js';
+import { carryRecord, readRecord } from './persist.js';
 import { createRegistry } from './registry.js';
 import { MAX_CHANGE_LINES, announceModules, createEvents, createSdk, createSettings, newId, runQuery } from './sdk.js';
 import { displayLines } from './extras.js';
@@ -38,8 +40,11 @@ import { createRewind } from './rewind.js';
 import { createTimeline, withRuleOverlay } from './timeline/index.js';
 import { createStore as realStore } from './store.js';
 import { createTurn, substituteNames } from './turn.js';
+import { createRpgLoader } from './rpg-lazy.js';
+import { createPublicApi } from './public-api.js';
+import { createPublicPaths } from './public-paths.js';
 
-export const VERSION = '2.16.2';
+export const VERSION = '2.22.5';
 
 /**
  * Settings where Story Block's `currency` (and `currencyShort`, `currencyPlural`, `coins`) fall back to
@@ -346,7 +351,8 @@ export function saveOnUnload(store, page, { fits = () => true } = {}) {
  * profile, system, signal }) → text (the assist helpers' and sdk.callModel's model call), modelTimeoutMs? (sdk.callModel's default limit),
  * live?() (SillyTavern's live getContext(); default: globalThis.SillyTavern's, else ctx), fetch?, page? (for
  * beforeunload; default: globalThis.window), timelineFaults? ({ at(phase) }, a test seam: called at every phase of a save
- * point, a restore and a native change) }) → { registry, settings, features, store, bus, events, sdk, turn,
+ * point, a restore and a native change), rpgLoad?() → the RPG's library (default: import('./lean-rpg/index.js'); the code is fetched only when the
+ * feature is on or the chat holds the RPG's records, rpg-lazy.js) }) → { registry, settings, features, store, bus, events, sdk, turn,
  * markReady, initial, packs, setDialog, ownCalls, timeline }. `timeline` is the host's side of sdk.timeline
  * (src/v2/timeline/, docs/v2/TIMELINE.md): `host` (prepare, activate, abort, recover, nativeEvent, registerParticipant, with the
  * host's authority bound) and `capability`; it is never given to a module. `ownCalls` marks Story Suite's own model calls on the chat's connection (model-call.js). `features` is createFeatureStore() (the reader's choices). `ctx` is SillyTavern's context (or the testkit's fake); `packs` a
@@ -355,7 +361,7 @@ export function saveOnUnload(store, page, { fits = () => true } = {}) {
 export function createRuntime({
     ctx, packs = null, core = true, modules = [], createStore = realStore, createCommandBus = realBus,
     notify, onBlocked = null, onSaveError = null, onRegister = null, branch = null, callModel = null, modelTimeoutMs = undefined,
-    live = () => globalThis.SillyTavern?.getContext?.() ?? ctx, fetch = null, page = globalThis.window ?? null, timelineFaults = null,
+    live = () => globalThis.SillyTavern?.getContext?.() ?? ctx, fetch = null, page = globalThis.window ?? null, timelineFaults = null, rpgLoad = undefined,
 } = {}) {
     let features = null;
     let events = null;
@@ -372,9 +378,36 @@ export function createRuntime({
     const settings = withRuleOverlay(withPackCurrency(base, () => packPart.startState().currency), {
         registry, state: () => { try { return store.head(); } catch { return null; } },
     });
+    // The settings a card may recommend (packs/card-settings.js); Story Block's own are registered below, the others' through sdk.registerCardSettings.
+    const cardSettings = createCardSettings();
     let sdk = null;
     let bus = null;
     let timeline = null;
+    // The reader's messages on the line of history (the timeline's `view.lastUser` reader leaves out the faded ones): the starting kit is open at 0.
+    const readersOf = () => {
+        const list = Array.isArray(ctx.chat) ? ctx.chat : null;
+        if (!list) return null;
+        const seen = typeof timeline?.active === 'function' ? timeline.active('view.lastUser').messages(list) : list;
+        return seen.filter(message => message?.is_user).length;
+    };
+    // Whether the line of history is still just the opening greetings: at least one message, none from the reader and none that carries a Story Block reply record (null: not known).
+    // A narrator or member that spoke on its own, or a reply, ends it, so deleting only the reader's messages does not reopen the starting kit; a group chat's several greetings do not.
+    const greetingOnlyOf = () => {
+        const list = Array.isArray(ctx.chat) ? ctx.chat : null;
+        if (!list) return null;
+        const seen = typeof timeline?.active === 'function' ? timeline.active('view.lastUser').messages(list) : list;
+        return seen.length > 0 && seen.every(message => {
+            if (!message || message.is_user) return false;
+            // A captured reply carries `reply: true` (turn.js); a record from before the mark (no `mv`) other than the head greeting's is taken for a reply, so old chats stay closed.
+            // A record with `mv` and no mark is the reader's own edits on a greeting (the kit's adds), and stays a greeting.
+            const record = readRecord(message);
+            if (!record) return true;
+            if (record.reply === true) return false;
+            // (whatever the mark: a story block or a receipt of the story is a reply's)
+            if ((record.spans ?? []).some(span => span?.story !== false) || (record.receipts ?? []).some(receipt => receipt?.cause !== 'ui')) return false;
+            return record.mv === 1 || (record.checkpoint !== undefined && message === seen[0]);
+        });
+    };
     let chatterReaders = null;   // the timeline's readers of earlier messages for the Inner chatter tail line and its two queries
     let assistCall = async () => { throw new Error('Story Block is not ready.'); };
     let turn = null;
@@ -399,7 +432,7 @@ export function createRuntime({
             // The chatter the reader may send back to the story (its setting): the replies and how to read one.
             // The head reply's index too, for `scene.moved` (the store is made below; asked only later).
             // Whether Story Director's World screen is there (it shows the chatter; else Scene does: `scene.chatter`).
-            extras: { promptChat: () => chatterReaders.prompt.messages(ctx.chat), headChat: () => chatterReaders.head.messages(ctx.chat), sceneChat: () => chatterReaders.scene.messages(ctx.chat), display, headIndex: () => store.headIndex(), proofs: () => store.proofs(), rpgOn: () => registry.featureOn(CORE_FEATURE.leanRpg), worldShown: () => registry.screens().some(screen => screen.id === DEFAULT_HIDDEN[SCENE_SCREEN_ID]) },
+            extras: { promptChat: () => chatterReaders.prompt.messages(ctx.chat), headChat: () => chatterReaders.head.messages(ctx.chat), sceneChat: () => chatterReaders.scene.messages(ctx.chat), display, headIndex: () => store.headIndex(), proofs: () => store.proofs(), readers: () => readersOf(), greetingOnly: () => greetingOnlyOf(), chatEmpty: () => Array.isArray(ctx.chat) && ctx.chat.length === 0, rpgOn: () => registry.featureOn(CORE_FEATURE.leanRpg), gearOn: () => registry.featureOn('story-block.gear') && registry.featureOn(CORE_FEATURE.leanRpg), persona: () => { try { return (live() ?? ctx)?.name1 ?? ''; } catch { return ctx?.name1 ?? ''; } }, worldShown: () => registry.screens().some(screen => screen.id === DEFAULT_HIDDEN[SCENE_SCREEN_ID]) },
             version: VERSION,
             timeline: () => timeline,
             dataModules: { state: () => store.head(), lifecycle: id => registry.lifecycle(id), restore: () => registry.restore(), persona: () => { try { return (live() ?? ctx)?.name1 ?? ''; } catch { return ctx?.name1 ?? ''; } } },
@@ -428,7 +461,15 @@ export function createRuntime({
                     [ASSIST_SETTING.classifier]: registry.featureOn(CORE_FEATURE.preroll),
                     [ASSIST_SETTING.extractor]: registry.featureOn(CORE_FEATURE.extractor),
                 }),
-                grammar: () => registry.contexts().flatMap(context => context.kinds.map(kind => kind.grammar)),
+                grammar: () => registry.contexts().flatMap(context => context.kinds.map(kind => kind.grammar)).filter(Boolean),
+                // The scene's place, the map's places (the atlas's when Story Director is on, else the packs') and the story's date and
+                // time, for the safety net (assist/where.js). A query that is not there or throws is none of it.
+                where: () => {
+                    const ask = (name, args) => { try { return sdk?.query(name, args); } catch { return null; } };
+                    const clock = ask('director.time', {});
+                    return { here: ask('scene.place', {}), places: [...(ask('atlas.places', {}) ?? []), ...(ask('packs.content', { kind: 'places' }) ?? [])],
+                        time: typeof clock?.text === 'string' ? clock.text : '' };
+                },
                 chat: () => ctx.chat,
                 chatId: () => ctx.getCurrentChatId?.() ?? ctx.chatId ?? '',
                 hasKind: kind => {
@@ -455,7 +496,7 @@ export function createRuntime({
         }
     });
     const saving = storeSaving({ ctx, live, fetch, onSaveError, storage: pageStorage(page) });
-    const store = createStore({ ...saving, validate, scratch: name => registry.scratch(name) });
+    const store = createStore({ ...saving, validate, scratch: name => registry.scratch(name), replayEnv: () => registry.features().map(feature => `${feature.id}${registry.featureOn(feature.id) ? '+' : '-'}`).join(','), marked: () => { try { return registry.featureOn('story-block.gear') && registry.featureOn(CORE_FEATURE.leanRpg); } catch { return false; } } });
     saveOnUnload(store, page, { fits: saving.keepaliveFits });
     bus = createCommandBus({ store, registry, settings });
     events = createEvents();
@@ -497,16 +538,69 @@ export function createRuntime({
         if (result.error === MODEL_CALL_ERRORS.EMPTY) return '';
         throw Object.assign(new Error(result.message), { code: result.error });
     };
-    const made = createSdk({ store, bus, registry, settings, events, chat: () => ctx.chat, onRegister: def => onRegister?.(def), rewind,
+    const publicPaths = createPublicPaths();   // the paths modules offer to the public API (sdk.registerPublicPaths)
+    const made = createSdk({ publicPaths, store, bus, registry, settings, events, chat: () => ctx.chat, onRegister: def => onRegister?.(def), rewind,
         substitute: text => substituteNames(text, ctx), dialog: (screenId, opts) => dialogOpener?.(screenId, opts) ?? null,
-        dialogCurrent: () => dialogCurrent?.() ?? null, reread: index => turn?.reread(index), callModel: modelCalls.callModel, timeline });
+        dialogCurrent: () => dialogCurrent?.() ?? null, reread: index => turn?.reread(index), callModel: modelCalls.callModel, timeline, seed: () => turn?.seed(), cardSettings });
     sdk = made.sdk;
+    registerOwnCardSettings();
+    // Story Block's own owner of card settings: the RPG, Gear in fights and the XP rate. Applying persists exactly as Settings → RPG does
+    // (the feature store's set, the settings' set).
+    function registerOwnCardSettings() {
+        const onOff = value => (value ? 'on' : 'off');
+        cardSettings.registerOwn({
+            owner: CORE_MODULE_ID,
+            label: 'Story Block',
+            keys: {
+                rpg: { label: 'RPG', valueText: onOff, valid: value => typeof value === 'boolean' },
+                gear: { label: 'Gear', valueText: onOff, valid: value => typeof value === 'boolean' },
+                rpgXpRate: { label: 'XP rate', valueText: value => `${value}%`, valid: value => xpRateOf(value) !== null },
+            },
+            read: key => (key === 'rpg' ? registry.featureOn(CORE_FEATURE.leanRpg) === true
+                : key === 'gear' ? registry.featureOn(GEAR_FEATURE) === true
+                    : xpRateFrom(settings(CORE_MODULE_ID) ?? {})),
+            apply: async values => {
+                const applied = [];
+                for (const [key, value] of Object.entries(values)) {
+                    if (key === 'rpg' || key === 'gear') {
+                        if (features.set(key === 'rpg' ? CORE_FEATURE.leanRpg : GEAR_FEATURE, value) !== undefined) applied.push(key);
+                    } else if (key === 'rpgXpRate' && xpRateOf(value) !== null) {
+                        if (settings.set(CORE_MODULE_ID, XP_RATE_SETTING, value) !== undefined) applied.push(key);
+                    }
+                }
+                return { applied };
+            },
+        });
+    }
     const initial = () => initialWithStart(registry);
-    turn = createTurn({ ctx, live, store, bus, timeline, registry, settings, events, onBlocked, initial, ownPrompt: eventData => ownCalls.owns(eventData), ...(notify ? { notify } : {}) });
+    // The RPG's code comes in before a chat that needs it is read (the turn awaits `prepare`), and the moment the reader switches the feature on.
+    const rpgLoader = createRpgLoader({
+        ...(rpgLoad ? { load: rpgLoad } : {}),
+        featureOn: () => registry.featureOn(CORE_FEATURE.leanRpg), chat: () => ctx.chat, metadata: chatMetadata, problem: entry => turn?.report(entry),
+    });
+    events.on('feature', () => { rpgLoader.ensure({ scan: false }); });
+    turn = createTurn({ ctx, live, store, bus, timeline, registry, settings, events, onBlocked, initial, prepare: options => rpgLoader.ensure(options), ownPrompt: eventData => ownCalls.owns(eventData), ...(notify ? { notify } : {}) });
+    // The public API (public-api.js, docs/v2/PUBLIC-API.md): the head state read through the queries and readers that exist, events after the store has written.
+    const apiPersona = () => { try { return String((live() ?? ctx)?.name1 ?? ''); } catch { return String(ctx?.name1 ?? ''); } };
+    const api = createPublicApi({
+        version: VERSION,
+        hostReady: made.sdk.ready,
+        state: () => store.head(),
+        before: index => { try { return store.before?.(index) ?? null; } catch { return null; } },
+        ask: (state, name, args) => runQuery(registry, state, name, args, { receipts: () => store.receipts?.() ?? [] }),
+        rpgOn: () => registry.featureOn(CORE_FEATURE.leanRpg),
+        persona: apiPersona,
+        events,
+        publicPaths,
+        latestIndex: () => { try { return Math.max(0, (ctx.chat?.length ?? 1) - 1); } catch { return 0; } },
+        chatId: () => (typeof ctx.getCurrentChatId === 'function' ? ctx.getCurrentChatId() : ctx.chatId) ?? '',
+        // A reply's state is written before its events go out (a reply's idle save is brought forward only while a listener waits for it).
+        saved: async () => { try { if (store.dirty?.() === true) await store.saveSoon?.(); } catch { /* a failed save is told and tried again by the store */ } },
+    });
     // The UI (ui-host.js) plugs its dialog mount in here, for sdk.dialog.open (and .current).
     const setDialog = (fn, current = null) => {
         dialogOpener = typeof fn === 'function' ? fn : null;
         dialogCurrent = typeof current === 'function' ? current : null;
     };
-    return { registry, settings, features, store, bus, events, sdk, turn, markReady: made.markReady, initial, packs: packPart, setDialog, display, ownCalls, callQueue, timeline };
+    return { registry, settings, features, store, bus, events, sdk, api, turn, rpgLoader, markReady: made.markReady, initial, packs: packPart, cardSettings, setDialog, display, ownCalls, callQueue, timeline };
 }

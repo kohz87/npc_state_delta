@@ -156,6 +156,9 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
     // time whether its participants stand on the checkpoints of its selected head, whether or not an operation is running: a head
     // change met meanwhile raises the barrier at once, and the operation ends by reconciling (`reconcile`).
     function settle() {
+        // A read as other Features would have it (registry.withFeatures: the Features page counting a preset) is not the open chat as it
+        // is: it settles nothing, and works out no witness under switches the chat was not made with.
+        if (registry.hypothetical?.()) return;
         const holder = archive.holder();
         owed = owed.filter(each => each.holder === holder);
         if (barrierOwner !== null && barrierOwner !== holder) {
@@ -1138,9 +1141,17 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
 
     // One selection rule for every head change. Prefix identity AND replayed state must match;
     // no revision, positional fallback or nearest-swipe rebinding is allowed.
+    // The hash of a witness's state, worked out once per state object: the store hands out the same deep-frozen state while the chat is unchanged.
+    const witnessHashes = new WeakMap();
+    function witnessStateHash(state) {
+        if (!state || typeof state !== 'object' || !Object.isFrozen(state)) return stateHash(state);
+        let hash = witnessHashes.get(state);
+        if (hash === undefined) witnessHashes.set(state, hash = stateHash(state));
+        return hash;
+    }
     function selectionPlan(limit = null) {
         if (!archive.exists()) return {};
-        return withWholePrefixes(() => {
+        return withWholePrefixes(() => (store.witnessScope ?? (read => read()))(() => {
             const result = { ...archive.baseline() };
             const through = limit ? store.prefixWitness(limit) : null;
             if (limit && !through) throw new Error('The marker root no longer has a unique prefix.');
@@ -1149,7 +1160,7 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
                 for (const mapping of archive.prefixes(module)) {
                     if (!mapping.boundary || !mapping.after) continue;
                     const witness = store.prefixWitness(mapping.boundary.cursor);
-                    if (witness && (!through || witness.index < through.index || (witness.index === through.index && witness.op <= through.op)) && witness.prefixHash === mapping.boundary.prefixHash && stateHash(witness.state) === mapping.boundary.stateHash) {
+                    if (witness && (!through || witness.index < through.index || (witness.index === through.index && witness.op <= through.op)) && witness.prefixHash === mapping.boundary.prefixHash && witnessStateHash(witness.state) === mapping.boundary.stateHash) {
                         candidates.push({ mapping, index: witness.index, op: witness.op });
                     }
                 }
@@ -1157,7 +1168,7 @@ export function createTimeline({ store, registry, metadata, chat = () => [], bar
                 if (candidates.length) result[module] = candidates.at(-1).mapping.after;
             }
             return result;
-        });
+        }));
     }
     function withWholePrefixes(fn) {
         const was = registry.restore();

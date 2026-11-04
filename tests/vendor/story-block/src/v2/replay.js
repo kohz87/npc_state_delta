@@ -259,4 +259,4 @@ export function replayInputsOf(record) {
 }
 
 /** Record fields replay (or the chain around it) reads that are not replay inputs: bookkeeping about the record or the chain. */
-export const REPLAY_BOOKKEEPING = Object.freeze(['v', 'narrated', 'swipe', 'mark', 'rev', 'checkpoint', 'covers', 'coverHash', 'guardEnv', 'prefix', 'carried', 'owned']);
+export const REPLAY_BOOKKEEPING = Object.freeze(['v', 'narrated', 'swipe', 'mark', 'rev', 'checkpoint', 'covers', 'coverHash', 'guardEnv', 'prefix', 'carried', 'owned', 'practiceRule']);

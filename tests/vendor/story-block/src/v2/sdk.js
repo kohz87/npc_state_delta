@@ -8,6 +8,11 @@ import { headReply } from './commands.js';
 import { KEY as RECORD_KEY, isCarrier, recordFault } from './persist.js';
 import { cutAt } from '../text.js';
 import { MODEL_CALL_ERRORS, MODEL_CALL_TEXT, profileName } from './model-call.js';
+import { RESOLVE as RPG_RESOLVE } from './lean-rpg/names.js';
+import { receiptCue, entriesWithCue } from './lean-rpg/cue.js';
+import { createPublicPaths } from './public-paths.js';
+
+import { createCardSettings } from './packs/card-settings.js';
 
 // sdk.check comes from check.js (SB-commands); the sdk still loads without it.
 const checkModule = await import('./check.js').catch(() => null);
@@ -201,13 +206,17 @@ export function createSettings({ root, registry, save = () => {} }) {
  * tools.reply ({ index, sid } or null, the `reply` option): the reply the state is the head of, as a
  * command's ctx.reply (commands.js).
  */
+// A roll's receipt keeps no cue text (stage 51: it is rebuilt from the record); a reader of the receipts (Story Director's chronicle) is given the text in
+// `summary`, computed here and not stored, so the day facts of a roll are still there.
+const withCue = entriesWithCue;
+
 export function runQuery(registry, state, name, args, { receipts = () => [], reply = null, pendingProofs = null } = {}) {
     const query = registry.query(name);
     if (!query) throw new Error(`Story Suite: no module answers the query "${name}".`);
     const tools = Object.freeze({
         reply,
         query: (other, otherArgs) => runQuery(registry, state, other, otherArgs, { receipts, reply, pendingProofs }),
-        receipts: () => receipts() ?? [],
+        receipts: () => withCue(receipts() ?? []),
         // The proof a Re-read has planned but not stored (evidence.js), for story.evidence; none otherwise.
         ...(typeof pendingProofs === 'function' ? { pendingProofs } : {}),
     });
@@ -224,7 +233,7 @@ export const mountQuery = (registry, receipts = () => []) => (name, args, state)
 
 /**
  * What modules read (§6): { state (frozen head), query(name, args), settings(id), feature(id), chat:
- * { length, lastUser } }. `chat`: SillyTavern's chat array (or nothing). `feature(id)`: whether the
+ * { length, lastUser, readers (how many messages are the reader's) } }. `chat`: SillyTavern's chat array (or nothing). `feature(id)`: whether the
  * reader has that feature on (MODULES §F100); false for an id no module declares. `state` and `reply`
  * (optional): another state than the head and the reply it stands for (`tools.reply`), for a Re-read's
  * afterCapture hook, which reads the reply's state after its new story lines (turn.js).
@@ -232,13 +241,16 @@ export const mountQuery = (registry, receipts = () => []) => (name, args, state)
 export function makeView({ store, registry, settings, chat = [], active = null, state = store.head(), reply = headReply(store), pendingProofs = null }) {
     const messages = Array.isArray(chat) ? chat : [];
     // (`active`: the timeline's reader of earlier messages, so a faded message of the reader's is not the last one a module sees)
-    const lastUser = [...(active ? active.messages(messages) : messages)].reverse().find(message => message?.is_user);
+    const seen = active ? active.messages(messages) : messages;
+    const lastUser = [...seen].reverse().find(message => message?.is_user);
     return Object.freeze({
         state,
         query: (name, args) => runQuery(registry, state, name, args, { receipts: () => store.receipts?.() ?? [], reply, pendingProofs }),
         settings,
         feature: id => featureOn(registry, id),
-        chat: Object.freeze({ length: messages.length, lastUser: String(lastUser?.mes ?? '') }),
+        chat: Object.freeze({ length: messages.length, lastUser: String(lastUser?.mes ?? ''), readers: seen.filter(message => message?.is_user).length }),
+        // The state before the reply this view stands for (the one its lines start from), or null: asked by a step that compares the reply with it (the RPG's fight XP).
+        before: () => { try { return Number.isInteger(reply?.index) ? store.before?.(reply.index) ?? null : null; } catch { return null; } },
     });
 }
 
@@ -455,7 +467,7 @@ export function preflight({ store, registry, chat = () => [], apiVersion = 2 }, 
  * Returns { sdk, events, markReady }:
  * `sdk.ready` resolves to the sdk once the host calls markReady().
  */
-export function createSdk({ store, bus, registry, settings, events = createEvents(), chat = () => [], check = checkModule, onRegister = null, rewind = null, substitute = text => String(text ?? ''), dialog = null, dialogCurrent = null, reread = null, callModel = null, timeline = null }) {
+export function createSdk({ store, bus, registry, settings, events = createEvents(), chat = () => [], check = checkModule, onRegister = null, rewind = null, substitute = text => String(text ?? ''), dialog = null, dialogCurrent = null, reread = null, callModel = null, timeline = null, seed = null, cardSettings = createCardSettings(), publicPaths = createPublicPaths() }) {
     let markReady;
     const ready = new Promise(resolve => { markReady = () => resolve(sdk); });
     const refused = message => ({ ok: false, code: 'REFUSED', message });
@@ -477,6 +489,10 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
     // not whether a change was announced: a view may have announced it already. A quiet host costs a scan.
     const settle = () => {
         timeline?.settle();
+        // A chat with a message but no state yet (Story Block has not heard of the chat, turn.seed): the state starts first.
+        if (typeof seed === 'function' && !store.head?.()) {
+            try { seed(); } catch (error) { console.warn('[Story Suite] the chat\'s state could not be started', error); }
+        }
         announceModules(registry, events);
         if (registry.restore?.().state === 'pending' || store.headIndex?.() < 0) return null;
         const head = store.head?.();
@@ -536,7 +552,7 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
         commit: async token => saved(committed(await bus.commit(token))),
         query: (name, args) => { timeline?.settle(); return runQuery(registry, store.head(), name, args, { receipts: () => store.receipts?.() ?? [], reply: headReply(store) }); },
         /** The stored receipts on the current line of history, in chat order: [{ index, receipt }]. */
-        receipts: () => store.receipts?.() ?? [],
+        receipts: () => withCue(store.receipts?.() ?? []),
         /**
          * Return in time (MODULES §F17): a SillyTavern branch of the chat at carrier `index`, without
          * that carrier's receipts from `beforeRev` on, opened as the current chat. → Promise<{ ok, … }>.
@@ -573,6 +589,12 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
          */
         preflight: options => preflight({ store, registry, chat, apiVersion: 2 }, options),
         on: (name, fn) => events.on(name, fn),
+        /**
+         * Public paths from a module (docs/v2/PUBLIC-API.md "Paths from modules"): `({ owner, prefix, paths() → [path], get(path) → value,
+         * hidden(path) → bool, values()? → { path: value } })` → `unregister()` (call `unregister.changed()` when the values moved). One owner per prefix; the prefix may not
+         * be scene, money, items, party or blocks. Throws on a bad registration.
+         */
+        registerPublicPaths: options => publicPaths.register(options),
         /** `{{user}}` / `{{char}}` in a text → the persona's and the character's names (for tabs, screens). */
         substitute: text => substitute(text),
         /**
@@ -592,6 +614,11 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
          */
         timeline: timeline ? timeline.api : Object.freeze(Object.fromEntries(['head', 'make', 'list', 'status', 'history', 'forget', 'registerParticipant', 'prepare', 'activate', 'abort', 'recover', 'nativeEvent', 'nativeMutation'].map(name => [name, noTimeline]))),
         id: newId,
+        /**
+         * The settings a character card may recommend (packs/card-settings.js): `registerCardSettings({ owner, label, keys: { <key>: { label,
+         * valueText(v), valid(v) } }, read(key), apply(values) → Promise<{ applied: [key] }> })` → `unregister()`. Internal: not in the public api.
+         */
+        registerCardSettings: spec => cardSettings.register(spec),
         check: check ? Object.freeze({ ...check }) : null,
         settings: id => settings(id),
         /** Whether the reader has feature `id` on (MODULES §F100); false for an id no module declares. */

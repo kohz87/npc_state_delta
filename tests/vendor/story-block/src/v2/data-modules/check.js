@@ -1,10 +1,10 @@
 // Pure data-modules-v1 checker. The pack validator and Studio share these entry points.
-import { DM_DESCRIPTORS as D, DM_LIMITS as L, DM_BLOCK_BARS, DATA_MODULES_CAPABILITY, dmObject, dmOwn, dmSlug, dmInt, dmId, dmKindWritesHidden } from './schema.js';
-import { ROLES } from '../lean-rpg/index.js';
+import { DM_DESCRIPTORS as D, DM_LIMITS as L, DM_BLOCK_BARS, DM_ENTRY_EFFECTS, DATA_MODULES_CAPABILITY, dmObject, dmOwn, dmSlug, dmInt, dmId, dmKindWritesHidden } from './schema.js';
+import { ROLES } from '../lean-rpg/names.js';
 import { HASH_BASIS_V1 } from './hash-basis-v1.js';
 import { fieldType, compatible, expressionType, conditionType, pathType } from './expressions.js';
 import { byteLength, checkPlain } from '../packs/safety.js';
-import { LIMITS as PACK_LIMITS } from '../packs/limits.js';
+import { LIMITS as PACK_LIMITS, TAB_ID } from '../packs/limits.js';
 import { validateLayout } from '../layout/validate.js';
 import { validateScreen } from '../view/screens.js';
 import { parseHtml } from '../view/template/html.js';
@@ -13,6 +13,7 @@ import { sha256Hex as sha256 } from '../domains/digest.js';
 import { STRINGS, fill } from '../strings.js';
 import { oneLine } from '../../text.js';
 import { fullModuleGrammar } from './grammar.js';
+import { BLOCK_NODE_WIDGETS, FIELDS_WIDGET, fieldsNodeProblems } from './fields-widget.js';
 import { hasIcon } from '../view/icons/index.js';
 
 const E = STRINGS.editMessages;
@@ -78,8 +79,9 @@ function normalizedKeys(value, path, add) {
 function scalar(schema, path, add, { label = false, map = true } = {}) {
     const schemas = label ? D.labels : D.fields;
     const descriptor = dmOwn(schemas, schema?.type) && schemas[schema.type];
-    if (!descriptor || (!map && schema.type === 'map')) { add(label ? 'DM_LABEL' : 'DM_SCHEMA', path, fill(E.declaredSchema, { schema: label ? E.labelSchema : E.fieldSchema })); return; }
+    if (!descriptor || (!map && (schema.type === 'map' || schema.type === 'entries'))) { add(label ? 'DM_LABEL' : 'DM_SCHEMA', path, fill(E.declaredSchema, { schema: label ? E.labelSchema : E.fieldSchema })); return; }
     if (!shape(schema, descriptor, path, add, label ? 'DM_LABEL' : 'DM_SCHEMA')) return;
+    if (schema.optional !== undefined && (!label || typeof schema.optional !== 'boolean')) add('DM_SCHEMA', `${path}.optional`, STRINGS.blocks.entryLabel);
     if (!label && schema.edit !== undefined && typeof schema.edit !== 'boolean') add('DM_SCHEMA', `${path}.edit`, E.editBoolean);
     if (!label && schema.label !== undefined) {
         if (typeof schema.label !== 'string' || !oneLine(schema.label) || [...schema.label].length > 60) add('DM_SCHEMA', `${path}.label`, STRINGS.blocks.labelLimit);
@@ -111,6 +113,21 @@ function scalar(schema, path, add, { label = false, map = true } = {}) {
         distinct(schema.keys, `${path}.keys`, add, { max: L.mapKeys, keys: true });
         scalar(schema.values, `${path}.values`, add, { map: false });
     }
+    if (schema.type === 'entries') entriesField(schema, path, add);
+}
+
+// A List of entries: at most `max` entries, each holding the small set of sub-fields in `of` (text, number or choice). A sub-field's name is one lowercase word,
+// because it is also the label a story line writes it under ("| status: done"); `at`, `kind` and `who` belong to the line itself.
+function entriesField(schema, path, add) {
+    if (schema.max !== undefined && !dmInt(schema.max, 1, L.entriesMax)) add('DM_BOUNDS', `${path}.max`, fill(STRINGS.blocks.entriesMax, { max: L.entriesMax }));
+    if (!sized(schema.of, L.entrySubs, `${path}.of`, add, { min: 1 })) return;
+    for (const [key, sub] of Object.entries(schema.of)) {
+        const at = `${path}.of.${key}`;
+        if (!/^[a-z]{1,20}$/.test(key) || ['at', 'kind', 'who'].includes(key)) add('DM_SCHEMA', at, STRINGS.blocks.entrySubName);
+        if (!dmObject(sub) || !['text', 'int', 'enum'].includes(sub.type)) { add('DM_SCHEMA', at, STRINGS.blocks.entrySubType); continue; }
+        if (sub.edit !== undefined || sub.list !== undefined) add('DM_SCHEMA', at, STRINGS.blocks.entrySubType);
+        scalar(sub, at, add, { map: false });
+    }
 }
 
 const foldedName = text => String(text).normalize('NFKC').toLowerCase();
@@ -132,7 +149,7 @@ function names(schema, path, add) {
 
 export function dataModuleDefaults(state) {
     return Object.fromEntries(entries(state).map(([key, schema]) => [key, schema.type === 'map'
-        ? Object.fromEntries(schema.keys.map(key => [key, schema.values.default])) : schema.default]));
+        ? Object.fromEntries(schema.keys.map(key => [key, schema.values.default])) : schema.type === 'entries' ? [] : schema.default]));
 }
 
 function rewardTypes(reward, path, add) {
@@ -159,6 +176,29 @@ function rewardTypes(reward, path, add) {
     return out;
 }
 
+// The line a List of entries field is worked by: the labels are the field's sub-fields (each one the sub-field's own type, no wider) and, to change or drop
+// one, `at` (a number or a title). An add may leave a sub-field out (it keeps its default); a change names at least one to change.
+function entryEffect(effect, env, at, add) {
+    const path = Array.isArray(effect.path) && effect.path.length === 1 && typeof effect.path[0] === 'string' ? effect.path : null;
+    const field = path && dmOwn(env.state, path[0]) ? env.state[path[0]] : null;
+    if (field?.type !== 'entries') { add('DM_SCHEMA', `${at}.path`, STRINGS.blocks.entryPath); return; }
+    const labels = env.args ?? {}, subs = field.of ?? {};
+    const needsAt = effect.op !== 'entryAdd';
+    for (const [key, label] of Object.entries(labels)) {
+        if (key === 'at') {
+            if (!needsAt || label?.type !== 'text' || !dmInt(label.max, 1, L.entryAt)) add('DM_LABEL', `${at}.labels.at`, STRINGS.blocks.entryAt);
+            continue;
+        }
+        const sub = dmOwn(subs, key) ? subs[key] : null;
+        const fits = sub && label?.type === sub.type && (sub.type === 'text' ? label.max <= sub.max
+            : sub.type === 'int' ? label.min >= sub.min && label.max <= sub.max : array(label.values).every(value => array(sub.values).includes(value)));
+        if (effect.op === 'entryDrop' || !fits) add('DM_LABEL', `${at}.labels.${key}`, STRINGS.blocks.entryLabel);
+    }
+    if (needsAt && !dmOwn(labels, 'at')) add('DM_LABEL', `${at}.labels.at`, STRINGS.blocks.entryAt);
+    const named = Object.keys(labels).filter(key => key !== 'at');
+    if (effect.op === 'entrySet' && !named.length) add('DM_LABEL', `${at}.labels`, STRINGS.blocks.entryLabel);
+}
+
 function effects(list, env, path, add, { timer = false, reward = false, plain = false } = {}) {
     if (!sized(list, L.effects, path, add, { list: true })) return;
     list.forEach((effect, i) => {
@@ -169,6 +209,11 @@ function effects(list, env, path, add, { timer = false, reward = false, plain = 
         if (timer && effect.op !== 'add') add('DM_SCHEMA', at, 'Timer effects must be additive field changes, optionally clamped; no checks, rewards or offers.');
         if (reward && ['reward', 'offer', 'award'].includes(effect.op)) add('DM_SCHEMA', at, 'Reward templates cannot dispatch rewards, offers or awards recursively.');
         if (plain && ['reward', 'offer', 'award'].includes(effect.op)) add('DM_SCHEMA', at, STRINGS.blocks.replyEndPlain);
+        if (DM_ENTRY_EFFECTS.includes(effect.op)) {
+            if (timer || reward || plain || !env.args) add('DM_SCHEMA', at, STRINGS.blocks.entryKindOnly);
+            else entryEffect(effect, env, at, add);
+            return;
+        }
         if (['set', 'add', 'clamp'].includes(effect.op)) {
             const target = pathType(effect.path, { ...env, writing: true }, `${at}.path`, add, (v, p) => expressionType(v, env, p, add));
             if (effect.op === 'clamp') {
@@ -254,7 +299,7 @@ function migrations(definition, path, add) {
         if (!dmInt(step.from, 1, Number.MAX_SAFE_INTEGER - 1) || step.to !== step.from + 1 || step.to > definition.stateVersion) add('DM_SCHEMA', at, 'Migrations must move forward one adjacent stateVersion, up to this definition version.');
         if (seen.has(step.from) || (i && definition.migrations[i - 1]?.to !== step.from)) add('DM_SCHEMA', at, 'Migrations must form one ordered chain without cycles or branches.');
         seen.add(step.from);
-        for (const [field, schema] of named(step.add, L.fields, `${at}.add`, add, { min: 1 })) {
+        for (const [field, schema] of named(step.add, L.fields, `${at}.add`, add, { min: 0 })) {
             scalar(schema, `${at}.add.${field}`, add);
             if (fields.has(field) || !dmOwn(definition.state, field) || !same(definition.state[field], schema)) add('DM_SCHEMA', `${at}.add.${field}`, 'A migration adds a field once, with exactly its current schema and default.');
             fields.add(field);
@@ -291,7 +336,7 @@ function presentation(definition, path, add) {
     if (!Array.isArray(definition.layouts)) add('DM_SCHEMA', `${path}.layouts`, 'layouts must be a list of existing renderer layouts.');
     const seen = new Set();
     array(definition.layouts).forEach((layout, i) => {
-        rendererCheck(() => validateLayout(layout), `${path}.layouts[${i}]`);
+        rendererCheck(() => validateLayout(layout, { widgets: BLOCK_NODE_WIDGETS }), `${path}.layouts[${i}]`);
         if (seen.has(layout?.id)) add('DM_SCHEMA', `${path}.layouts[${i}].id`, 'Duplicate module layout ID.');
         seen.add(layout?.id);
     });
@@ -304,6 +349,7 @@ function presentation(definition, path, add) {
                 if (value.path !== undefined) viewPath(definition, value.path, `${at}.path`, add);
             } else if (!entries(definition.imports).some(([, entry]) => entry?.query === value.query && same(entry.args ?? {}, value.args ?? {}))) add('DM_SCHEMA', `${at}.query`, 'Module presentation queries must use its own view or an explicitly declared public import.');
         }
+        if (value.type === FIELDS_WIDGET) for (const { at: where, message } of fieldsNodeProblems(definition, value.props)) add('DM_SCHEMA', `${at}.props${where}`, message);
         if (dmOwn(value, 'command')) {
             if (value.command !== 'dm.act') add('DM_SCHEMA', `${at}.command`, 'Data module actions may call only dm.act.');
             else actionPayload(definition, value.payload, `${at}.payload`, add);
@@ -316,7 +362,7 @@ function presentation(definition, path, add) {
     array(definition.screens).forEach((screen, i) => {
         const at = `${path}.screens[${i}]`;
         if (dmObject(screen)) rendererCheck(() => validateScreen({ ...screen, mounts: screen.mounts ?? ['tab'] }), at);
-        if (screen?.layout) rendererCheck(() => validateLayout(screen.layout, { meta: false }), `${at}.layout`);
+        if (screen?.layout) rendererCheck(() => validateLayout(screen.layout, { meta: false, widgets: BLOCK_NODE_WIDGETS }), `${at}.layout`);
         const template = (text, where) => {
             if (typeof text !== 'string') return;
             // Read the same HTML tree as the renderer, including decoded attributes.
@@ -406,6 +452,37 @@ function viewPath(definition, path, at, add) {
     if (definition.scope === 'character' && ['id', 'name'].includes(parts[0]) && parts.length === 1) return;
     const field = dmOwn(definition.state, parts[0]) && definition.state[parts[0]];
     if (!field || parts.length > (field.type === 'map' ? 2 : 1) || (parts.length === 2 && !array(field.keys).includes(parts[1]))) add('DM_SCHEMA', at, 'Unknown module view field or fixed map key.');
+}
+
+// How the host draws a block: `layout` ("cards", "bars" or "fields"), the `roles` a list of cards reads from one List of entries field (`field`, and the
+// sub-fields that are its `title`, `status` and `step`), and the `tones` of the status values. Display only: none of it changes what the story can write.
+function layoutKeys(definition, at, add) {
+    const { layout, roles, tones } = definition;
+    const state = dmObject(definition.state) ? definition.state : {};
+    if (layout !== undefined && !D.layouts.includes(layout)) { add('DM_SCHEMA', `${at}.layout`, STRINGS.blocks.layoutInvalid); return; }
+    if (layout === 'bars' && !Object.values(state).every(schema => schema?.type === 'int')) add('DM_SCHEMA', `${at}.layout`, STRINGS.blocks.layoutBarsNumbers);
+    if (layout === 'cards' && roles === undefined) add('DM_SCHEMA', `${at}.roles`, STRINGS.blocks.rolesNeeded);
+    let status = null;
+    if (roles !== undefined) {
+        if (layout !== 'cards') add('DM_SCHEMA', `${at}.roles`, STRINGS.blocks.rolesCards);
+        if (!shape(roles, { required: ['field', 'title'], optional: ['status', 'step'] }, `${at}.roles`, add)) return;
+        const field = typeof roles.field === 'string' && dmOwn(state, roles.field) ? state[roles.field] : null;
+        if (field?.type !== 'entries') { add('DM_SCHEMA', `${at}.roles.field`, STRINGS.blocks.rolesField); return; }
+        const sub = (key, type) => {
+            if (roles[key] === undefined) return null;
+            const schema = typeof roles[key] === 'string' && dmOwn(field.of, roles[key]) ? field.of[roles[key]] : null;
+            if (schema?.type !== type) add('DM_SCHEMA', `${at}.roles.${key}`, STRINGS.blocks.rolesSub);
+            return schema?.type === type ? schema : null;
+        };
+        sub('title', 'text'); sub('step', 'text');
+        status = sub('status', 'enum');
+    }
+    if (tones !== undefined) {
+        if (!dmObject(tones) || !status) { add('DM_SCHEMA', `${at}.tones`, STRINGS.blocks.tonesNeedStatus); return; }
+        for (const [value, tone] of Object.entries(tones)) {
+            if (!status.values.includes(value) || !D.toneNames.includes(tone)) add('DM_SCHEMA', `${at}.tones.${value}`, STRINGS.blocks.tonesInvalid);
+        }
+    }
 }
 
 // The RPG draws a role block's health, mana, stamina and foe-health fields as stage bars, one cell and one choice for each stage, so
@@ -503,13 +580,15 @@ export function validateDataModules(value, { packId, capabilities = [], definiti
         else if (definition.role !== undefined && definition.scope === 'character') add('DM_SCHEMA', `${at}.role`, STRINGS.blocks.roleChat);
         if (definition.show !== undefined) {
             const show = definition.show;
-            if (!dmObject(show) || Object.keys(show).some(key => !['tab', 'card', 'tabName', 'icon'].includes(key))
+            if (!dmObject(show) || Object.keys(show).some(key => !['tab', 'card', 'tabName', 'icon', 'into'].includes(key))
                 || typeof show.tab !== 'boolean' || typeof show.card !== 'boolean'
+                || (show.into !== undefined && (typeof show.into !== 'string' || !TAB_ID.test(show.into) || show.tab !== true))
                 || typeof show.tabName !== 'string' || !show.tabName.trim() || [...show.tabName].length > 24 || !hasIcon(show.icon)) add('DM_SCHEMA', `${at}.show`, STRINGS.blocks.showOptions);
             else show.tabName = oneLine(show.tabName);
         }
         if (byteLength(JSON.stringify(definition)) > L.definitionBytes) add('DM_BUDGET', at, `A definition must fit ${L.definitionBytes} UTF-8 JSON bytes.`);
-        for (const [key, schema] of named(definition.state, L.fields, `${at}.state`, add)) scalar(schema, `${at}.state.${key}`, add);
+        for (const [key, schema] of named(definition.state, definition.role === 'skills' ? L.skillsFields : L.fields, `${at}.state`, add)) scalar(schema, `${at}.state.${key}`, add);
+        layoutKeys(definition, at, add);
         if (definition.role !== undefined) stageFields(definition, at, add);
         imports(definition, at, add); // forms first, linking before expression analysis below
         migrations(definition, at, add);
@@ -627,14 +706,29 @@ export function validateDataModules(value, { packId, capabilities = [], definiti
     return errors.length ? { ok: false, errors } : { ok: true, definitions: normalized };
 }
 
+// SHA-256 of a text, remembered by the text itself (a hash is a pure function of it, so a hit is always the same answer). The settings
+// window asks for every installed pack's hash each time it opens; the packs' text is the same until a pack changes, and the new text misses.
+const hashed = new Map();
+function hashOf(text) {
+    let hash = hashed.get(text);
+    if (hash === undefined) {
+        if (hashed.size >= 64) hashed.clear();
+        hashed.set(text, hash = sha256(text));
+    }
+    return hash;
+}
+
+/** How many texts the hash memo holds (tests). */
+export const hashMemoSize = () => hashed.size;
+
 /** Hash checked normalized definitions only; envelope identity is deliberately separate. */
 export function dataModuleHash(definition) {
-    return sha256(JSON.stringify(stable({ definition, ...HASH_BASIS_V1 })));
+    return hashOf(JSON.stringify(stable({ definition, ...HASH_BASIS_V1 })));
 }
 
 /** Whole normalized pack identity; added only for packs containing dataModules. */
 export function dataModulesPackHash(pack) {
-    return sha256(JSON.stringify(stable(pack)));
+    return hashOf(JSON.stringify(stable(pack)));
 }
 
 /** Compare two CHECKED definitions. New fields/defaults are the only mechanical changes. */

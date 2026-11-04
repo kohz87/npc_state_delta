@@ -26,8 +26,9 @@ export {
     ANSWER_TOKENS as CLASSIFIER_ANSWER_TOKENS, CHECK_KIND, CLASSIFIER_HEAD, MESSAGE_LIMIT, PRECHECK, PROMPT_BUDGET, ROLLED_LINE,
     checkLine, claimKey, classifierPrompt, createClassifier, normalizeDc, parseClassifierAnswer, precheck,
 } from './classifier.js';
-export { EXTRACTOR_FOOT, EXTRACTOR_HEAD, MAX_LINES, REPLY_HEAD, REPLY_LIMIT, WRITTEN_HEAD, allowedGrammar, createExtractor, extractorPrompt, grammarKind, notWritten, parseExtractorAnswer } from './extractor.js';
+export { EXTRACTOR_FOOT, EXTRACTOR_HEAD, MAX_LINES, REPLY_HEAD, REPLY_LIMIT, WHERE_HEAD, WRITTEN_HEAD, allowedGrammar, createExtractor, extractorPrompt, grammarKind, notWritten, parseExtractorAnswer } from './extractor.js';
 export { DEFAULT_KINDS, KIND_CHOICES, allowedKinds, refusedWhy, safeLines } from './safety.js';
+export { MAX_NEAR, hasClockTime, knownPlace, mapPlaces, whereLines, whereNow, whereWhy } from './where.js';
 export { renderAssistSection, runLine } from './section.js';
 export { answerText, findProfile, stCallModel, stChat, stChatId } from './st-adapter.js';
 
@@ -51,6 +52,7 @@ export function sdkHasKind(kind) {
  *   hasKind(kind) → boolean                             (default: the sdk's module list)
  *   grammar() → the kinds' one-line grammars            (default: none; the host passes the registry's)
  *   capture(text, { index, swipe })                     (default: none; the host passes it per reply)
+ *   where() → { here, places, time }                    (default: none; the scene's place, the map's places, the story's date and time: where.js)
  *   moduleId = 'story-block', timeoutMs = 20000, timer, warn(text)
  */
 export function createAssistPart({
@@ -61,6 +63,7 @@ export function createAssistPart({
     hasKind = sdkHasKind,
     grammar = () => [],
     capture = null,
+    where = null,
     moduleId = HOST_MODULE_ID,
     timeoutMs = TIMEOUT_MS,
     timer,
@@ -80,7 +83,7 @@ export function createAssistPart({
     const log = createRunLog();
     const shared = { callModel, log, warn, timeoutMs, timer, chatId };
     const classifier = createClassifier({ ...shared, settings: read, chat, hasKind });
-    const extractor = createExtractor({ ...shared, settings: () => read(null), grammar, capture });
+    const extractor = createExtractor({ ...shared, settings: () => read(null), grammar, capture, where });
 
     /** assist.status: { classifier: { on, last }, extractor: { on, last }, profile, runs }. */
     function status() {

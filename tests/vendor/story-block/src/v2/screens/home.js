@@ -38,6 +38,9 @@ export const HOME_SCREEN_ID = 'story-block/home';
 
 // A card's list is capped at about two normal cards with a "Show all" toggle (screens/show-more.js), so no count limit.
 
+// The mount pencil: six fields, and with gear on (`q.gear`) a seventh, Carry (what the mount adds to what the party can carry). Gear off keeps the six it always had.
+const mountEdit = (withCarry, when) => `<ss-widget ${when} name="ss.editable" data-props='{"value":"{{ m.name }}","displayValue":false,"kind":"fields","label":"${jsonText(M.edit)}","command":"mounts.edit","payload":{"mount":"{{ m.name }}"},"fields":[{"key":"name","label":"${jsonText(M.editName)}","value":"{{ m.name }}","maxLength":40},{"key":"kind","label":"${jsonText(M.editKind)}","value":"{{ m.kind }}","maxLength":20},{"key":"count","label":"${jsonText(M.editCount)}","type":"number","value":"{{ m.count }}","min":1,"max":8},{"key":"pace","label":"${jsonText(M.editPace)}","type":"number","value":"{{ m.pace }}","min":1,"max":200},{"key":"condition","label":"${jsonText(M.editCondition)}","value":"{{ m.condition }}","maxLength":60},{"key":"where","label":"${jsonText(M.editWhere)}","value":"{{ m.where }}","maxLength":80}]}'></ss-widget>`.replace(/\]\}'><\/ss-widget>$/, withCarry ? `,{"key":"carry","label":"${jsonText(M.editCarry)}","type":"number","value":"{{ m.carry }}","min":0,"max":1000}]}'></ss-widget>` : `]}'></ss-widget>`);
+
 const TEMPLATE = `
 <div class="home">
   <ss-widget name="${RPG_START_WIDGET}" class="rpg-start-slot"></ss-widget>
@@ -93,7 +96,7 @@ const TEMPLATE = `
           <i class="fa-solid fa-horse-head" data-if="!contains(m.kind, 'cart') && !contains(m.kind, 'wagon') && !contains(m.kind, 'horse') && !contains(m.kind, 'pony')"></i>
         </span>
         <div class="mount-text">
-          <div class="mount-name"><b>{{ m.name }}</b><span data-if="m.count > 1"> ×{{ m.count }}</span><ss-widget name="ss.editable" data-props='{"value":"{{ m.name }}","displayValue":false,"kind":"fields","label":"${jsonText(M.edit)}","command":"mounts.edit","payload":{"mount":"{{ m.name }}"},"fields":[{"key":"name","label":"${jsonText(M.editName)}","value":"{{ m.name }}","maxLength":40},{"key":"kind","label":"${jsonText(M.editKind)}","value":"{{ m.kind }}","maxLength":20},{"key":"count","label":"${jsonText(M.editCount)}","type":"number","value":"{{ m.count }}","min":1,"max":8},{"key":"pace","label":"${jsonText(M.editPace)}","type":"number","value":"{{ m.pace }}","min":1,"max":200},{"key":"condition","label":"${jsonText(M.editCondition)}","value":"{{ m.condition }}","maxLength":60},{"key":"where","label":"${jsonText(M.editWhere)}","value":"{{ m.where }}","maxLength":80}]}'></ss-widget></div>
+          <div class="mount-name"><b>{{ m.name }}</b><span data-if="m.count > 1"> ×{{ m.count }}</span>${mountEdit(false, 'data-if="!q.gear"')}${mountEdit(true, 'data-if="q.gear"')}</div>
           <div class="mount-sub muted"><span data-if="m.kind">{{ m.kind }}</span><span data-if="m.kind != '' && m.condition != ''"> · </span><span data-if="m.condition">{{ m.condition }}</span><span data-if="m.kind != '' && m.condition == '' && m.where != ''"> · </span><span data-if="m.condition != '' && m.where != ''"> · </span><span data-if="m.where">{{ m.where }}</span></div>
         </div>
         <span class="chip mount-pace">{{ m.pace }} ${html(M.perDay)}</span>
@@ -194,6 +197,7 @@ export const homeScreen = Object.freeze({
         board: Object.freeze({ query: 'quest.board' }),                               // a module that keeps quests
         mounts: Object.freeze({ query: 'mounts.list' }),
         pace: Object.freeze({ query: 'mounts.pace' }),
+        gear: Object.freeze({ query: 'inventory.gear', args: Object.freeze({ owner: 'party' }) }),   // null while gear is off: the mount pencil has no Carry field then
     }),
     template: TEMPLATE,
     css: CSS,

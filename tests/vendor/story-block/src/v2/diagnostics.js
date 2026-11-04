@@ -348,6 +348,13 @@ export async function buildReport(source = {}) {
         if (list.length) out.push(`By code: ${[...counts].map(([code, count]) => `${code} ${count}`).join(', ')}.`);
     });
 
+    // What the open card's offer left out or declined, one line each (packs/card-offer.js): pack, portrait and setting names only, scrubbed.
+    const cardLines = (() => { try { return source.cardOffers?.() ?? []; } catch { return []; } })();
+    if (cardLines.length) {
+        section('Card offers');
+        for (const text of cardLines.slice(-LIST_MAX)) out.push(`- ${scrubLine(text, 240)}`);
+    }
+
     section('Saving');
     tryPart('the save status', () => {
         const save = source.save?.() ?? {};

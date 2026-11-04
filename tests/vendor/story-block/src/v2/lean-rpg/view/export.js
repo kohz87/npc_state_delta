@@ -10,6 +10,7 @@
 import { h, shell } from '../../view/widgets/dom.js';
 import { saveTextFile } from '../../view/download.js';
 import { DEFAULT_CURRENCY } from '../../domains/money.js';
+import { classOfLevel } from '../formula.js';
 import { FILE_LIMITS, buildCharacterFile, fileNameOf, fileText, itemLine, itemsForFile, moneyText, skillLine, thingsWord } from '../charfile.js';
 import { CREATION, STATS, USES } from '../names.js';
 import { fold } from '../read.js';
@@ -38,7 +39,7 @@ export function createExportScreen() {
 }
 
 /**
- * What a card's character gives a saved file, from the party record `character` (party-data.js): { soul, points, stats, skills } in the file's shape
+ * What a card's character gives a saved file, from the party record `character` (party-data.js): { level, soul, points, stats, skills } in the file's shape
  * (every value inside the file's limits, whatever the block held).
  */
 export function characterOfCard(character) {
@@ -51,7 +52,7 @@ export function characterOfCard(character) {
         ...(STATS.includes(skill.stat) ? { stat: skill.stat } : {}), uses: USES.includes(skill.uses) ? skill.uses : USES[0],
         rank: clamp(Number.isSafeInteger(skill.rank) ? skill.rank : 0, 0, FILE_LIMITS.rank),
     }));
-    return { soul: clamp(character.soul, ...FILE_LIMITS.soul), points: clamp(character.points, 0, FILE_LIMITS.points), stats, skills };
+    return { level: clamp(character.level, ...FILE_LIMITS.level), soul: classOfLevel(clamp(character.level, ...FILE_LIMITS.level)), points: clamp(character.points, 0, FILE_LIMITS.points), stats, skills };
 }
 
 /**
@@ -143,7 +144,7 @@ export function createExporter({ headState = () => null, readerName = () => '', 
                 const points = card.points === 0 ? X.noPoints : fill(card.points === 1 ? P.pointsOne : P.points, { n: card.points });
                 const soulName = character.soulName;
                 option('character', X.character, [
-                    fill(X.soulLine, { label: character.soulLabel, soul: soulName, points }),
+                    fill(X.soulLine, { soul: character.level, points }),
                     statsLine({ stats: card.stats }),
                     card.skills.length ? fill(X.skillsLine, { list: card.skills.map(skillLine).join(' · ') }) : X.noSkills,
                 ], { checked: true, disabled: true });

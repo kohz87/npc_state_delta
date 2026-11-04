@@ -189,7 +189,9 @@ export function createFakeContext(options = {}) {
         return messages.map(message => ({ ...message, mes: fake.promptRegex.reduce((text, rule) => text.replace(rule.find, rule.replace ?? ''), String(message.mes ?? '')) }));
     }
 
-    function buildRequest(history, type) {
+    // `quiet`: a quiet generation's instruction, macros run, last in the prompt (SillyTavern's quietPrompt, the last control prompt;
+    // in text completion added after the chat).
+    function buildRequest(history, type, quiet = '') {
         if (ctx.mainApi === 'openai') {
             const chat = [];
             // In-prompt extension prompts sit next to the Main Prompt; a preset without it drops them.
@@ -200,11 +202,13 @@ export function createFakeContext(options = {}) {
                 const at = type === 'continue' ? chat.length - 1 : chat.length;
                 chat.splice(at, 0, { role: 'system', content: tail.join('\n') });
             }
+            if (quiet) chat.push({ role: 'system', content: quiet });
             return { chat, dryRun: false };
         }
         const lines = [MAIN_PROMPT, ...promptText('in-prompt')];
         for (const message of history) lines.push(`${message.name}: ${message.mes}`);
         lines.push(...promptText('in-chat'));
+        if (quiet) lines.push(quiet);
         if (type !== 'continue') lines.push(`${ctx.name2}:`);
         return { prompt: lines.join('\n'), dryRun: false };
     }
@@ -223,13 +227,14 @@ export function createFakeContext(options = {}) {
 
         /**
          * One generation as SillyTavern runs it. `type`: normal | swipe | regenerate | continue |
-         * quiet | impersonate. `reply`: the model's text (for continue, the text added).
+         * quiet | impersonate. `reply`: the model's text (for continue, the text added). `quietPrompt`: a quiet generation's
+         * instruction (generateQuietPrompt's), told in GENERATION_STARTED as `quiet_prompt` and put in the prompt with its macros run.
          * Returns { request, reply, index, aborted? } (index: where the reply landed, or -1; aborted:
          * an interceptor stopped it, so no request was built).
          */
         // `stopped`: the reader pressed Stop while it was written (GENERATION_STOPPED comes before the
         // partial reply is received, as SillyTavern's stopGeneration does).
-        async generate(type = 'normal', { reply = '', dryRun = false, stopped = false } = {}) {
+        async generate(type = 'normal', { reply = '', dryRun = false, stopped = false, quietPrompt = '' } = {}) {
             const last = ctx.chat.length - 1;
             if (type === 'regenerate' && ctx.chat[last] && !ctx.chat[last].is_user) {
                 ctx.chat.pop();
@@ -247,7 +252,7 @@ export function createFakeContext(options = {}) {
                 delete message.extra?.display_text;
                 await emit(EVENT_TYPES.MESSAGE_SWIPED, last);
             }
-            await emit(EVENT_TYPES.GENERATION_STARTED, type, {}, dryRun);
+            await emit(EVENT_TYPES.GENERATION_STARTED, type, quietPrompt ? { quiet_prompt: quietPrompt } : {}, dryRun);
             const interceptor = fake.interceptor ?? globalThis[interceptorName];
             // An interceptor may stop the generation (SillyTavern's abort argument): nothing is sent.
             // A dry run runs none (SillyTavern 1.19's Generate: `if (!dryRun) runGenerationInterceptors`).
@@ -258,7 +263,7 @@ export function createFakeContext(options = {}) {
                 await emit(EVENT_TYPES.GENERATION_STOPPED);
                 return { request: null, reply: '', index: -1, aborted: true };
             }
-            const request = buildRequest(coreChat, type);
+            const request = buildRequest(coreChat, type, quietPrompt ? ctx.substituteParams(quietPrompt) : '');
             request.dryRun = dryRun;
             await emit(ctx.mainApi === 'openai' ? EVENT_TYPES.CHAT_COMPLETION_PROMPT_READY : EVENT_TYPES.GENERATE_AFTER_COMBINE_PROMPTS, request);
             fake.requests.push({ type, ...clone(request) });

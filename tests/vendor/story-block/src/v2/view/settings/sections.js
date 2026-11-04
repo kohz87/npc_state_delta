@@ -58,7 +58,8 @@ export function routeOf(piece) {
         case 'panel': return piece.moduleId === CORE_ID ? 'assist' : 'modules';
         case 'group':
             if (piece.moduleId !== CORE_ID) return 'modules';
-            return piece.group === 'General' ? 'money' : piece.group === 'Assist' ? 'assist' : 'modules';
+            // (the RPG group is the Level cap: Settings → RPG draws that row itself, so the Modules page does not draw it a second time)
+            return piece.group === 'General' ? 'money' : piece.group === 'Assist' ? 'assist' : piece.group === 'RPG' ? 'rpg' : 'modules';
         case 'diagnostics': return 'diagnostics';
         default: return 'modules';
     }

@@ -153,7 +153,9 @@ const RENDER = {
             value = value.cur ?? value.value;
         }
         const numbers = typeof value === 'number' && Number.isFinite(value) && typeof max === 'number' && Number.isFinite(max);
-        if (!numbers && (value !== undefined || max !== undefined)) problem(ctx, where, 'a meter needs a number and a maximum');
+        // A number with no maximum is shown as it is (an empty bar); anything else the meter cannot read is a problem.
+        const bare = !numbers && max === undefined && typeof value === 'number' && Number.isFinite(value);
+        if (!numbers && !bare && (value !== undefined || max !== undefined)) problem(ctx, where, 'a meter needs a number and a maximum');
         const label = node.label === undefined ? '' : toText(resolve(node.label, ctx, scope, `${where}.label`), ctx, `${where}.label`);
         const tone = node.tone === undefined ? '' : resolve(node.tone, ctx, scope, `${where}.tone`);
         const percent = numbers && max > 0 ? Math.min(100, Math.max(0, (value / max) * 100)) : 0;
@@ -168,7 +170,7 @@ const RENDER = {
         if (label) out.setAttribute('aria-label', label);
         const head = make(ctx, 'div', 'ss-l-meter-head');
         if (label) head.appendChild(make(ctx, 'span', 'ss-l-label', label));
-        head.appendChild(make(ctx, 'span', 'ss-l-meter-num', numbers ? `${value} / ${max}` : '—'));
+        head.appendChild(make(ctx, 'span', 'ss-l-meter-num', numbers ? `${value} / ${max}` : bare ? String(value) : '—'));
         const bar = make(ctx, 'div', 'ss-l-meter-bar');
         const fill = make(ctx, 'div', 'ss-l-meter-fill');
         fill.style.width = `${Math.round(percent * 10) / 10}%`;

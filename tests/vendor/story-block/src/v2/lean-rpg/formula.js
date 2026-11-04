@@ -93,6 +93,18 @@ export function blocksFor(stats) {
     };
 }
 
+/**
+ * What a level adds to a roll (names.js LEVEL): floor(level / divisor), the divisor 5 by default (3 to 8 when the reader's Custom numbers say so). A level is
+ * held to 1..99 and a divisor outside 3..8 reads as 5.
+ */
+export const levelBonus = (level, divisor = 5) => Math.floor(Math.max(1, Math.min(99, num(level))) / (Number.isInteger(divisor) && divisor >= 3 && divisor <= 8 ? divisor : 5));
+
+/** The level a Soul Class stands for where only the class is known (a character block made before levels): class n → level 10n − 5 (I → 5 … IX → 85). */
+export const levelOfClass = soul => 10 * Math.max(1, Math.min(9, num(soul))) - 5;
+
+/** The Soul Class (1..9) a level stands for where only a class is asked (the `+ party` line's class): the inverse of levelOfClass (10n - 5), floor(level / 10) + 1 (levels 1-9 are class I, 10-19 II ... 80+ IX). */
+export const classOfLevel = level => Math.max(1, Math.min(9, Math.floor(Math.max(1, num(level)) / 10) + 1));
+
 /** A foe's Health blocks: 4 + class/3 (Classes I–II 4, III–V 5, VI–VIII 6, IX 7). */
 export const foeHealthBlocks = foeClass => 4 + Math.floor(Math.max(1, num(foeClass)) / 3);
 
@@ -117,18 +129,18 @@ export function turnOrder(entries) {
 }
 
 /**
- * A companion the story adds on the Standard scale: every stat 5, the best stat 9, then pointsPerSoul for each Soul
- * Class above I spent one at a time on the best stat and DEX in turn (each up to statMax); once both are full, the rest
+ * A companion the story adds on the Standard scale: every stat 5, the best stat 9, then one point for every third level
+ * (floor(level / 3), the same as the Character's own rise) spent one at a time on the best stat and DEX in turn (each up to statMax); once both are full, the rest
  * go to VIT, then AGI, INT, CHA, LUK and STR in that order, so no point is left unspent.
  */
-export function companionStats(best, soul, numbers = STANDARD_NUMBERS) {
+export function companionStats(best, level, numbers = STANDARD_NUMBERS) {
     const max = num(numbers.statMax);
     const stats = Object.fromEntries(STAT_KEYS.map(key => [key, num(numbers.startStat)]));
     const lead = STAT_KEYS.includes(best) ? best : 'str';
     stats[lead] = Math.min(max, num(numbers.startStat) + 4);
     const pairKeys = lead === 'dex' ? ['dex', 'agi'] : [lead, 'dex'];
     const spill = ['vit', 'agi', 'int', 'cha', 'luk', 'str'].filter(key => !pairKeys.includes(key));
-    let points = num(numbers.pointsPerSoul) * Math.max(0, num(soul) - 1);
+    let points = Math.floor(Math.max(0, num(level)) / 3);
     for (let turn = 0; points > 0; turn += 1) {
         const first = pairKeys[turn % 2], second = pairKeys[(turn + 1) % 2];
         const target = [first, second, ...spill].find(key => stats[key] < max);

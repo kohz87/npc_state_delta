@@ -76,7 +76,7 @@ export function renderDistribute(parent, { character, session = null, api = {}, 
         const head = h(doc, 'div', 'rpg-sheet-head');
         head.appendChild(h(doc, 'h3', 'rpg-sheet-name', character.name));
         const pills = h(doc, 'div', 'rpg-pills');
-        pills.appendChild(h(doc, 'span', 'ss-pill', fill(RPG_STRINGS.party.soul, { label: character.soulLabel, name: character.soulName })));
+        pills.appendChild(h(doc, 'span', 'ss-pill rpg-level-pill', character.levelText));
         pills.appendChild(h(doc, 'span', 'ss-pill', fill(S.xpPill, { xp: character.xp })));
         pill = h(doc, 'span', 'ss-pill rpg-points-left');
         pill.setAttribute('role', 'status');

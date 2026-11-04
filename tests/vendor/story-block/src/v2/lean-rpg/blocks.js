@@ -10,6 +10,7 @@
 // Pure: no DOM, no state, no randomness.
 
 import { STAT_KEYS, blocksFor, foeHealthBlocks, LUCK_STEPS, luckWindow } from './formula.js';
+import { foeBlocksByLevel } from './foes.js';
 import { STAGES } from './names.js';
 
 const whole = value => (Number.isSafeInteger(value) ? value : 0);
@@ -45,13 +46,15 @@ export const wordToBlocks = (index, size, count) => Math.floor((2 * index * size
 
 /**
  * How many blocks the bar `key` of a block has now, or null when the field is not a block bar. `key` is `health`, `mana`, `stamina` or a
- * foe slot's `hurtN`; `fields` holds the stats (a character) or the slot's class (a foe).
+ * foe slot's `hurtN`; `fields` holds the stats (a character) or the slot's level (a foe).
  */
 export function sizeOf(schema, fields, key) {
     const bar = barOf(schema);
     if (!bar) return null;
     if (bar === 'foe') {
         const slot = /^hurt(\d+)$/.exec(String(key))?.[1];
+        // A block of the Levels rules has `level{n}`: 4 + level/30 blocks; one of the earlier rules has `class{n}` (4 + class/3).
+        if (slot && Object.hasOwn(fields ?? {}, `level${slot}`)) return foeBlocksByLevel(whole(fields[`level${slot}`]) || 1);
         return foeHealthBlocks(slot ? whole(fields?.[`class${slot}`]) || 1 : 1);
     }
     return blocksFor(statsOfFields(fields))[bar];

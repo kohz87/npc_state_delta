@@ -1,6 +1,6 @@
 // The prompt tail's lines for the RPG's blocks (a block whose definition has a `role`), written compact: a party of three with
 // five skills each would otherwise send about 880 tokens every reply. Rules, in plain words:
-//   * a value at its field's default is left out (a full Health bar, no points, no XP, alive), except a stat, a Soul Class and a name;
+//   * a value at its field's default is left out (a full Health bar, no points, no XP, alive), except a stat, a Level (or Soul Class) and a name;
 //   * values go by their names where the field has them ("Hurt", "II", "Adept"), never the stored number;
 //   * a Skills block is one line per skill, empty slots left out ("Short blade (Novice, agi, stamina): what it does");
 //   * a Foes block lists only the groups in the fight, one clause each; with none, and for a Rules block with no fields, there is no line;
@@ -12,9 +12,10 @@
 
 import { barOf, characterBars, sizeOf, spreadWord, wordsOf } from './blocks.js';
 import { STATS } from './names.js';
+import { SKILL_SLOTS_MAX } from '../skill-slots.js';
 import { oneLine } from '../../text.js';
 
-const SLOTS = Object.freeze({ skills: 5, foes: 4 });
+const SLOTS = Object.freeze({ skills: SKILL_SLOTS_MAX, foes: 4 });
 const word = value => (typeof value === 'string' ? oneLine(value) : '');
 
 // "Hurt, Fresh" style bits of one instance, in the definition's field order: what is not at its default, the stats as one run.
@@ -35,7 +36,7 @@ function sheetBody(definition, fields, { hidden, text }) {
             stats.push(`${label} ${value}`);
         } else if (schema.type === 'text') {
             if (word(value)) parts.push(`${key} "${word(value)}"`);
-        } else if (value !== schema.default || key === 'soul') parts.push(text(key, value));
+        } else if (value !== schema.default || key === 'soul' || key === 'level') parts.push(text(key, value));
     }
     return parts.map(part => (Array.isArray(part) ? part.join(' ') : part)).join('; ');
 }
@@ -60,7 +61,8 @@ function foesBody(definition, fields, { hidden, named }) {
         if (!name) continue;
         const count = hidden(`count${slot}`) ? null : fields[`count${slot}`], hurt = fields[`hurt${slot}`];
         const bits = [];
-        if (!hidden(`class${slot}`)) bits.push(`Class ${named(`class${slot}`, fields[`class${slot}`])}`);
+        if (Object.hasOwn(fields, `level${slot}`)) { if (!hidden(`level${slot}`)) bits.push(`Lv ${fields[`level${slot}`]}`); }
+        else if (!hidden(`class${slot}`)) bits.push(`Class ${named(`class${slot}`, fields[`class${slot}`])}`);
         const schema = definition.state[`hurt${slot}`], size = barOf(schema) ? sizeOf(schema, fields, `hurt${slot}`) : null;
         if (size) { if (!hidden(`hurt${slot}`) && Number.isSafeInteger(hurt) && hurt < size) bits.push(spreadWord(wordsOf('foe'), Math.max(0, hurt), size)); }
         else if (!hidden(`hurt${slot}`) && hurt !== schema?.default) bits.push(named(`hurt${slot}`, hurt));

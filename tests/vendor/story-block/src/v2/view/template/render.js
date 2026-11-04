@@ -24,41 +24,7 @@ import {
     evalExpr, interpolate, isLoopName, isScope, makeScope, pathKeys, pointerOf, resolvePath, setIn, toText, valueAtKeys,
     withDraft, withItem,
 } from '../bind.js';
-import { cssVarValue, templateIdPrefix } from '../css.js';
-
-// A DOM member as the element's own interface has it, never a <form>'s control of that name or id: the
-// prototype chain first (the browser's members live there), then the element's own property (the test
-// DOM keeps some on the instance).
-function descriptorOf(el, name) {
-    for (let proto = Object.getPrototypeOf(el); proto && proto !== Object.prototype; proto = Object.getPrototypeOf(proto)) {
-        const found = Object.getOwnPropertyDescriptor(proto, name);
-        if (found) return found;
-    }
-    return Object.getOwnPropertyDescriptor(el, name) ?? null;
-}
-function dom(el, name) {
-    const found = descriptorOf(el, name);
-    if (!found) return undefined;
-    return found.get ? found.get.call(el) : found.value;
-}
-function setDom(el, name, value) {
-    const found = descriptorOf(el, name);
-    if (found?.set) found.set.call(el, value);
-    else el[name] = value;
-}
-const call = (el, name, ...args) => dom(el, name).apply(el, args);
-
-// A control the reader cannot use (`:disabled`, so a disabled fieldset counts); a <form> never is.
-function isDisabled(el) {
-    try {
-        const matches = dom(el, 'matches');
-        if (typeof matches === 'function') return Boolean(matches.call(el, ':disabled'));
-    } catch { /* a DOM without :disabled (the tests'): the property below */ }
-    return dom(el, 'disabled') === true;
-}
-
-// The elements a control `name` is prefixed on (the form-associated ones a <form> exposes by name).
-const CONTROLS = new Set(['input', 'select', 'textarea', 'button', 'fieldset', 'output', 'object']);
+import { cssVarValue } from '../css.js';
 
 /** Set a value in a draft the host holds, creating records on the way (frozen ones are copied). */
 function writeInPlace(target, keys, value) {
@@ -81,64 +47,9 @@ function withItems(scope, names) {
     return next;
 }
 import { fillJson } from './json.js';
-import { RESERVED_NAMES, classAllowed, cleanClasses, isUrlAttr, urlAllowed } from './sanitize.js';
-
-// Attributes whose value is one id, or a space-separated list of ids, in the same template.
-const ID_LISTS = new Set(['for', 'headers', 'aria-labelledby', 'aria-describedby', 'aria-controls', 'aria-owns', 'aria-activedescendant', 'aria-details', 'aria-errormessage', 'aria-flowto']);
-const PAINT_REFS = new Set(['fill', 'stroke', 'clip-path', 'mask', 'marker-start', 'marker-mid', 'marker-end', 'filter']);
-
-/** The id prefix for the screen a scope belongs to (`ss-t-` alone when no screen is named). */
-const idPrefixOf = screenId => (typeof screenId === 'string' && screenId ? templateIdPrefix(screenId) : 'ss-t-');
-
-// A screen is often drawn more than once at a time (a card under every reply, a tab and a hud), and
-// ids and control names must not be shared between the copies (B-b5b-robust-r2-1: a label would check
-// another copy's box, radios would be one group). The first copy of a screen on the page keeps the
-// screen's ids (`ss-t-<screen>-<id>`); each other copy drawn at the same time adds `--c<n>`. A screen's
-// CSS reaches every copy (css.js: `#id` is scoped to the screen's ids with or without the copy mark).
-const COPIES = new Map();   // id prefix → the copy numbers drawn now
-
-function takeCopy(prefix) {
-    const taken = COPIES.get(prefix) ?? new Set();
-    COPIES.set(prefix, taken);
-    let n = 1;
-    while (taken.has(n)) n += 1;
-    taken.add(n);
-    return n;
-}
-
-function freeCopy(prefix, n) {
-    const taken = COPIES.get(prefix);
-    taken?.delete(n);
-    if (taken && !taken.size) COPIES.delete(prefix);
-}
-
-// `id` as drawn in this view: the screen's prefix, and the copy's mark after the first copy.
-const pageId = (view, id) => `${view.idPrefix}${id}${view.copy > 1 ? `--c${view.copy}` : ''}`;
-
-/**
- * The value an attribute is set to in the page: ids and references to them get the screen's prefix, class
- * lists lose reserved classes, reserved control names go. `null` leaves the attribute out.
- */
-function pageValue(view, tag, name, value) {
-    const lower = name.toLowerCase();
-    if (lower === 'id') return value.trim() ? pageId(view, value.trim()) : null;
-    if (ID_LISTS.has(lower)) return value.split(/\s+/).filter(Boolean).map(id => pageId(view, id)).join(' ');
-    if ((lower === 'href' || lower === 'xlink:href') && /^\s*#./.test(value)) return `#${pageId(view, value.replace(/^\s*#/, ''))}`;
-    if (PAINT_REFS.has(lower)) return value.replace(/url\(\s*(['"]?)\s*#([^)'"\s]*)/gi, (_, quote, id) => `url(${quote}#${pageId(view, id)}`);
-    if (lower === 'class') {
-        const classes = cleanClasses(value);
-        if (classes.dropped.length) view.warn(`The class ${classes.dropped.join(', ')} was left off <${tag}>: SillyTavern acts on it.`);
-        return classes.value;
-    }
-    if (lower === 'name' && tag !== 'ss-widget') {
-        if (RESERVED_NAMES.has(value.trim())) {
-            view.warn(`name="${value.trim()}" was left off <${tag}>: SillyTavern reads controls by that name.`);
-            return null;
-        }
-        if (tag === 'form' || CONTROLS.has(tag)) return value.trim() ? pageId(view, value.trim()) : null;
-    }
-    return value;
-}
+import { classAllowed, isUrlAttr, urlAllowed } from './sanitize.js';
+import { idPrefixOf, freeCopy, takeCopy, pageValue, PAINT_REFS } from './render/page-ids.js';
+import { call, setDom, dom, isDisabled } from './render/dom.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 

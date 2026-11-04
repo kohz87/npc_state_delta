@@ -78,6 +78,7 @@ export function createReplyNotes({
     const refused = new Map();     // `${index}|${swipe}` → [{ line, reason }]
     const busy = new Map();        // index → true while a Re-read runs
     const failed = new Map();      // `${index}|${swipe}` → message of the last failed Re-read
+    let era = 0;                   // forget() starts a new one: what a Re-read answers after it is for indexes that no longer hold
     const keyOf = index => `${index}|${swipeOf(chat()[index])}`;
 
     /** 'missing' | 'edited' | null: which note reply `index` gets now. */
@@ -181,6 +182,7 @@ export function createReplyNotes({
     async function runReread(index) {
         if (!canReread || busy.has(index)) return null;
         const key = keyOf(index);
+        const began = era;
         busy.set(index, true);
         failed.delete(key);
         refresh(index);
@@ -190,6 +192,7 @@ export function createReplyNotes({
         } catch (error) {
             result = { ok: false, message: error?.message ?? String(error) };
         }
+        if (began !== era) return result;   // the chat changed or messages moved meanwhile: the answer is not for these indexes
         busy.delete(index);
         if (result?.ok) {
             edited.delete(key);
@@ -229,6 +232,7 @@ export function createReplyNotes({
 
     /** Message indexes moved (a delete) or the chat changed: nothing kept by index still holds. */
     function forget() {
+        era += 1;
         edited.clear();
         refused.clear();
         failed.clear();

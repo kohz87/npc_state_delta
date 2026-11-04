@@ -7,8 +7,9 @@
 // checkCast(list, packId, add) → the normalized entries `[{ id, name, aliases, about, look, … , pack }]`, or `[]` when
 // anything is wrong (the problems went to `add`). `id` stays the entry's own slug: the cast key is `pack:id`.
 
-import { CAST_BUILT_IN_METERS, CAST_FIELDS, CAST_LIMITS, CAST_SECRET_FIELDS, CAST_START_FIELDS, METER_LIMITS, METER_RESERVED, METER_STAGE_FIELDS, PORTRAIT_LIMITS, PORTRAIT_NAME, SLUG } from './limits.js';
+import { CAST_BUILT_IN_METERS, CAST_FIELDS, CAST_SKILL_FIELDS, CAST_SKILL_RANK_WORDS, CAST_SKILL_STATS, CAST_SKILL_USES, CAST_LIMITS, CAST_SECRET_FIELDS, CAST_START_FIELDS, METER_LIMITS, METER_RESERVED, METER_STAGE_FIELDS, PORTRAIT_LIMITS, PORTRAIT_NAME, SLUG } from './limits.js';
 import { foldKey, oneLine } from '../../text.js';
+import { slotWordOf } from '../domains/gear.js';
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 // Markup and brace characters never belong in a person's text; `|` splits a change line, so the short lines refuse it too.
@@ -18,9 +19,10 @@ const whole = value => Number.isInteger(value) && value >= METER_LIMITS.min && v
 
 /**
  * The normalized cast of one pack. `add(code, path, message)` collects problems. At most
- * `CAST_LIMITS.entries` entries and `PORTRAIT_LIMITS.perPack` different portrait files.
+ * `CAST_LIMITS.entries` entries and `PORTRAIT_LIMITS.perPack` different portrait files. `items`: the pack's own normalized
+ * items, which a person's `gear` is checked against (it is kept as their item ids).
  */
-export function checkCast(list, packId, add) {
+export function checkCast(list, packId, add, items = []) {
     if (!Array.isArray(list)) {
         add('BAD_CONTENT', 'content.cast', 'content.cast must be a list of people like [{ "id": "fenna", "name": "Fenna", "about": "…", "look": "…", "start": { "place": "…", "goal": "…" } }].');
         return [];
@@ -219,6 +221,54 @@ export function checkCast(list, packId, add) {
 
         if (record.canDieUnmet !== undefined && typeof record.canDieUnmet !== 'boolean') say('canDieUnmet', 'canDieUnmet must be true or false.');
 
+        // Signature gear (`story-block.gear`): at most CAST_LIMITS.gear of this pack's equipment, one item per slot (an accessory may take two).
+        let gear;
+        if (record.gear !== undefined) {
+            if (!Array.isArray(record.gear) || record.gear.length > CAST_LIMITS.gear) say('gear', `gear must be a list of at most ${CAST_LIMITS.gear} item names or slugs from this pack's items.`);
+            else {
+                const kept = [];
+                const used = new Map();
+                record.gear.forEach((entry, n) => {
+                    const at = `gear[${n}]`;
+                    const wanted = typeof entry === 'string' ? entry.trim() : '';
+                    const item = wanted ? gearItem(items, wanted) : null;
+                    if (!item) return say(at, `${at} must name an item of this pack (its slug or name)${wanted ? `; "${oneLine(wanted, 60)}" is not one` : ''}.`, 'UNKNOWN_REF');
+                    const slot = slotWordOf(item.slot);
+                    if (item.kind !== 'equipment' || !slot) return say(at, `${at}: "${item.name}" is not equipment with a gear slot (weapon, body, off-hand, head, cloak, feet or accessory).`);
+                    if (kept.includes(item.id)) return say(at, `${at}: "${item.name}" is listed twice.`, 'DUPLICATE');
+                    const base = slot.replace(/-\d+$/, '');
+                    const taken = used.get(base) ?? [];
+                    if (taken.length >= (base === 'accessory' ? 2 : 1)) return say(at, `${at}: "${item.name}" and "${taken[0]}" both take the ${base} slot${base === 'accessory' ? ' (a person wears two accessories at most)' : ' (one item to a slot)'}.`, 'DUPLICATE');
+                    used.set(base, [...taken, item.name]);
+                    kept.push(item.id);
+                });
+                gear = kept;
+            }
+        }
+
+        // Signature skills: 1 to CAST_LIMITS.skills of { name, about, stat, uses?, rank? }; a name once for each person; any other key is refused.
+        let skills;
+        if (record.skills !== undefined) {
+            const example = '[{ "name": "Spark", "about": "A small burst of magic.", "stat": "int", "uses": "mana", "rank": "novice" }]';
+            if (!Array.isArray(record.skills) || !record.skills.length || record.skills.length > CAST_LIMITS.skills) say('skills', `skills must be a list of 1 to ${CAST_LIMITS.skills} skills: ${example}.`);
+            else {
+                const kept = [];
+                record.skills.forEach((skill, n) => {
+                    const at = `skills[${n}]`;
+                    if (!isObject(skill)) return say(at, `${at} must be an object like ${example.slice(1, -1)}.`);
+                    for (const key of Object.keys(skill)) if (!CAST_SKILL_FIELDS.includes(key)) say(`${at}.${key}`, `"${key}" is not a skill field (expected ${CAST_SKILL_FIELDS.join(', ')}).`, 'UNKNOWN_FIELD');
+                    const skillName = text(`${at}.name`, skill.name, CAST_LIMITS.skillName, { required: true, short: true, what: `${at}.name` });
+                    const about = text(`${at}.about`, skill.about, CAST_LIMITS.skillAbout, { required: true, short: true, what: `${at}.about` });
+                    if (!CAST_SKILL_STATS.includes(skill.stat)) say(`${at}.stat`, `${at}.stat must be one of ${CAST_SKILL_STATS.join(', ')}.`);
+                    if (skill.uses !== undefined && !CAST_SKILL_USES.includes(skill.uses)) say(`${at}.uses`, `${at}.uses must be ${CAST_SKILL_USES.join(' or ')}.`);
+                    if (skill.rank !== undefined && !CAST_SKILL_RANK_WORDS.includes(skill.rank)) say(`${at}.rank`, `${at}.rank must be one of ${CAST_SKILL_RANK_WORDS.join(', ')}.`);
+                    if (skillName && kept.some(other => foldKey(other.name) === foldKey(skillName))) say(`${at}.name`, `${at}.name repeats "${skillName}"; a person names each skill once.`, 'DUPLICATE');
+                    if (skillName && about && CAST_SKILL_STATS.includes(skill.stat)) kept.push({ name: skillName, about, stat: skill.stat, uses: skill.uses ?? 'stamina', rank: skill.rank ?? 'novice' });
+                });
+                if (kept.length === record.skills.length) skills = kept;
+            }
+        }
+
         if (name) {
             for (const each of [name, ...aliases]) {
                 const key = foldKey(each);
@@ -238,6 +288,8 @@ export function checkCast(list, packId, add) {
             ...(fields && Object.keys(fields).length ? { fields } : {}),
             ...(secrets?.length ? { secrets } : {}),
             ...(record.canDieUnmet !== undefined ? { canDieUnmet: record.canDieUnmet } : {}),
+            ...(gear?.length ? { gear } : {}),
+            ...(skills?.length ? { skills } : {}),
             pack: packId,
         });
     });
@@ -246,4 +298,14 @@ export function checkCast(list, packId, add) {
         add('BAD_CONTENT', 'content.cast', `A pack may name at most ${PORTRAIT_LIMITS.perPack} different portrait files; this one names ${portraits.size}.`);
     }
     return ok ? out : [];
+}
+
+// The pack item a `gear` entry means: its slug, its name or alias (folded), or its full id.
+function gearItem(items, wanted) {
+    const list = Array.isArray(items) ? items : [];
+    const key = foldKey(wanted);
+    return list.find(item => item.slug === wanted || item.id === wanted)
+        ?? list.find(item => foldKey(item.name) === key)
+        ?? list.find(item => (item.aliases ?? []).some(alias => foldKey(alias) === key))
+        ?? null;
 }

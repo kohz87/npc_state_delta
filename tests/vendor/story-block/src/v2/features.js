@@ -35,6 +35,9 @@ const NAME = /^[a-z0-9][a-z0-9_-]*$/;
 export const LABEL_MAX = 60;
 export const DESCRIBE_MAX = 240;
 
+// The gear switch (inventory.js FEATURE.gear): shown with the RPG settings, not in the Features list (ui-host.js hides it there).
+export const GEAR_FEATURE = 'story-block.gear';
+
 // Story Block's own features (src/v2/domains/index.js declares them).
 export const CORE_FEATURE = Object.freeze({
     hud: 'story-block.hud',

@@ -427,9 +427,10 @@ export const sceneQueries = {
 /**
  * The scene's tail lines: the place and who is present (nothing when both are empty). With `weather`
  * (the feature is on), the weather ends the Place line, cut to WEATHER_TAIL_CHARS code points. With `you` (the feature is
- * on), one more line says {{user}}'s rank, what they wear and their condition, whichever are set.
+ * on), one more line says {{user}}'s rank, what they wear and their condition, whichever are set, and while wearing or condition is
+ * empty a second line asks the narrator to write the empty ones (`youNote`).
  */
-export function sceneTail(state, { weather = false, you = false, rankLabel = '' } = {}) {
+export function sceneTail(state, { weather = false, you = false, rankLabel = '', askLook = true } = {}) {
     const scene = state?.domains?.scene;
     const lines = [];
     const place = scene?.place;
@@ -444,6 +445,22 @@ export function sceneTail(state, { weather = false, you = false, rankLabel = '' 
             .map(([part, word]) => [word, typeof scene?.you?.[part] === 'string' ? scene.you[part] : '']).filter(([, text]) => text);
         // "{{user}}: Guild rank …; wears …; condition …" (the pack's word for the Rank, only with a pack that gives one), only the parts that are set.
         if (said.length) lines.push(`{{user}}: ${said.map(([word, text]) => `${word} ${text}`).join('; ')}`);
+        // (Prompt diet: the ask for the look is made once per chat, on the reader's first message (`askLook` false after it), not on every reply until it is set.)
+        const note = askLook ? youNote(scene?.you, rankLabel) : '';
+        if (note) lines.push(note);
     }
     return lines;
+}
+
+/**
+ * The one-line ask while Wearing or Condition is still empty (and the feature is on): write the empty parts on this reply, from what the
+ * narrator already knows. The Rank is asked only when a pack gives a rank word (`rankLabel`) and it is empty. '' once both are set, so
+ * the tail is then the same as without the note. It only asks for empty parts: nothing the reader set is ever overwritten.
+ */
+export function youNote(you, rankLabel = '') {
+    const empty = part => !(typeof you?.[part] === 'string' && you[part]);
+    const wanted = ['wearing', 'condition'].filter(empty);
+    if (!wanted.length) return '';
+    if (rankLabel && empty('rank')) wanted.unshift('rank');
+    return `Your look is not set yet: on this reply write ~ you ${wanted.map(part => `${part}: …`).join(' | ')} for {{user}}, from the persona and what they carry.`;
 }

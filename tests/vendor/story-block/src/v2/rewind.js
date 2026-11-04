@@ -115,7 +115,7 @@ export function createRewind({ ctx, store, events = null, branch = stBranch(ctx)
             let unsaved = '';
             try { await store.flush(); } catch (error) { unsaved = String(error?.message ?? error); }
             store.rebuild();
-            events?.emit('head', { index: store.headIndex() });
+            events?.emit('head', { index: store.headIndex(), reason: 'rewind' });
             return { ok: true, branch: name, index, rev: result.rev, dropped: result.dropped, ...(unsaved ? { unsaved } : {}) };
         } finally {
             running = false;
