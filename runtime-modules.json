@@ -14,6 +14,7 @@
     { "path": "core-mechanics.js", "role": "core-mechanics", "required": true },
     { "path": "core-text.js", "role": "scan-text-and-json", "required": true },
     { "path": "core-identity.js", "role": "npc-identity-age", "required": true },
+    { "path": "core-portrait.js", "role": "portrait-prompt-building", "required": true },
     { "path": "diagnostics-core.js", "role": "bounded-operation-diagnostics", "required": true },
     { "path": "appearance.js", "role": "appearance-forms", "required": true },
     { "path": "terminal-lifecycle.js", "role": "terminal-lifecycle", "required": true },
