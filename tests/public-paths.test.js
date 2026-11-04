@@ -70,6 +70,7 @@ async function host({ settings = {}, delta = fakeDelta(), headReply = () => null
     listeners.clear();
     const registered = [];
     let changedCalls = 0;
+    let registrations = 0;
     const chat = [{ is_user: false, name: 'Narrator', mes: 'The forge is warm.', swipe_id: 0, swipes: ['The forge is warm.'], swipe_info: [{ extra: {} }], extra: {} }];
     chat[0].swipe_info[0].extra = chat[0].extra;
     const registry = createRegistry();
@@ -96,7 +97,7 @@ async function host({ settings = {}, delta = fakeDelta(), headReply = () => null
         },
         query: (name, args) => runQuery(name, args),
         settings: id => settingsOf(id),
-        ...(publicPaths === 'with' ? { registerPublicPaths: def => { registered.push(def); const off = () => { registered.splice(registered.indexOf(def), 1); }; off.changed = () => { changedCalls += 1; }; return off; } } : {}),
+        ...(publicPaths === 'with' ? { registerPublicPaths: def => { registrations += 1; registered.push(def); const off = () => { registered.splice(registered.indexOf(def), 1); }; off.changed = () => { changedCalls += 1; }; return off; } } : {}),
         ...(publicPaths === 'refusing' ? { registerPublicPaths: () => { throw new Error('prefix taken'); } } : {}),
     };
     const box = { host: { ready: Promise.resolve(sdk), sdk } };
@@ -160,7 +161,7 @@ async function host({ settings = {}, delta = fakeDelta(), headReply = () => null
     const npc = name => runQuery('npc.meters', { name });
     const view = () => ({ state: store.head(), query: runQuery, settings: settingsOf, chat: { length: chat.length, lastUser: '' } });
     const setSettings = next => { moduleSettings[MODULE_ID] = structuredClone(next); };
-    return { registered, changedCalls: () => changedCalls, chat, registry, store, bus, sdk, sent, box, adapter, def, delta, warnings, problems, capture, reply, swipe, swipeTo, remove, npc, view, runQuery, setSettings };
+    return { registered, registrations: () => registrations, changedCalls: () => changedCalls, chat, registry, store, bus, sdk, sent, box, adapter, def, delta, warnings, problems, capture, reply, swipe, swipeTo, remove, npc, view, runQuery, setSettings };
 }
 
 
@@ -344,4 +345,33 @@ test('1.10.0 cost: the table is rebuilt for a read after the microtask (a value 
     await Promise.resolve();
     assert.equal(d.get('npc.Ann.trust'), 2, 'a later read sees the new value');
     assert.equal(sources, 2);
+});
+
+test('1.10.0 no spurious change on chat open: the first render of a chat\'s loaded dossiers is the baseline, later renders tell changes', async () => {
+    const delta = fakeDelta();
+    let ready = false;
+    let chatKey = 'chat-one';
+    delta.api.dossiersReady = () => ready;
+    delta.api.dossierRevision = () => `${chatKey}|1`;
+    const h = await host({ delta });
+    assert.equal(h.registrations(), 1);
+    // The chat opens: renders before its dossiers are loaded say nothing.
+    fire('npc-state-delta:cast-rendered');
+    assert.equal(h.changedCalls(), 0, 'nothing loaded yet: nothing to tell');
+    // The dossiers load and the hydration render comes: that is the baseline (registered again quietly), not a change.
+    ready = true;
+    fire('npc-state-delta:cast-rendered');
+    assert.equal(h.changedCalls(), 0, 'the first values after the chat opened are the baseline');
+    assert.equal(h.registrations(), 2, 'the host takes its baseline from a fresh registration');
+    assert.equal(h.registered.length, 1, 'still one registration');
+    // A later render of the same chat (a scan finished late) is told.
+    fire('npc-state-delta:cast-rendered');
+    assert.equal(h.changedCalls(), 1, 'a later change is told');
+    // A chat switch starts a new baseline.
+    chatKey = 'chat-two'; ready = false;
+    fire('npc-state-delta:cast-rendered');
+    ready = true;
+    fire('npc-state-delta:cast-rendered');
+    assert.equal(h.changedCalls(), 1, 'the second chat\'s first values are its baseline');
+    assert.equal(h.registrations(), 3);
 });

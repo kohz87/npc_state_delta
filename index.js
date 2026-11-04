@@ -8628,6 +8628,8 @@ window.NPCStateDelta = Object.freeze({
     /** Fill the now/chatter text of present-cast markup inserted under `root` (textContent only). */
     fillPresentCast: root => fillPresentSceneText(root),
     dossierRevision: () => `${getChatKey()}|${Number(stateVersions.get(getChatKey()) || 0)}`,
+    /** The current chat's dossiers are loaded (before that the list is empty and a render is not news). */
+    dossiersReady: () => { const key = getChatKey(); return key !== 'no-chat' && chatHydrationStatus(key) === 'ready'; },
     getNpc: npcId => {
         const npc = getChatState().npcs.find(item => item.id === String(npcId || ''));
         return npc ? structuredClone(npc) : null;

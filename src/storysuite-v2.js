@@ -343,6 +343,7 @@ export function createStorySuiteV2Adapter({
     let offTurn = null;          // unsubscribes from the host's 'turn' event
     let offHead = null;          // unsubscribes from the host's 'head' event
     let offCardSettings = null;  // unregisters Delta's card settings
+    let baselineKey = null;      // the chat whose first loaded render was taken as the public paths' baseline
     let offPublicPaths = null;   // unregisters Delta's public paths (npc.<name>.<meter>); `.changed()` tells the host the values moved
     let lastTick = Promise.resolve(null);
     let listParts = null;        // loadDossierList's { rowNodes, project, filter } once loaded
@@ -1551,6 +1552,25 @@ export function createStorySuiteV2Adapter({
         notifyChange();
     }
 
+    // The chat the dossiers belong to (the revision is "<chat key>|<version>"), and whether they are loaded. Older Delta: always loaded.
+    function chatKeyOf() {
+        try {
+            const revision = String(runtime()?.dossierRevision?.() ?? '');
+            const at = revision.lastIndexOf('|');
+            return at < 0 ? '' : revision.slice(0, at);
+        } catch { return ''; }
+    }
+    function dossiersReady() {
+        try { return runtime()?.dossiersReady?.() !== false; } catch { return true; }
+    }
+    // The values of a chat just opened are the host's baseline, not changes: registering again tells the host the paths came, not that values moved.
+    function rebaselinePublicPaths() {
+        const sdk = sdkRef;
+        if (!hosted || !sdk || typeof offPublicPaths !== 'function') return;
+        try { offPublicPaths(); } catch (error) { warn('Story Block public paths could not be released', error); }
+        offPublicPaths = registerPublicPaths(sdk);
+    }
+
     function listen() {
         if (listening || typeof doc?.addEventListener !== 'function') return;
         listening = true;
@@ -1565,7 +1585,13 @@ export function createStorySuiteV2Adapter({
         const rerender = () => {
             if (!hosted) return;
             // A scan that finished late moved moods and presence: the host compares and tells `story:changed`.
-            try { offPublicPaths?.changed?.(); } catch (error) { warn('Story Block public paths change failed', error); }
+            // The first render of a chat's loaded dossiers is no news: its values are the baseline (a quiet re-registration).
+            try {
+                const key = chatKeyOf();
+                if (key !== baselineKey) {
+                    if (dossiersReady()) { baselineKey = key; rebaselinePublicPaths(); }
+                } else offPublicPaths?.changed?.();
+            } catch (error) { warn('Story Block public paths change failed', error); }
             // Story Director's World screen (the page API's subscribers) redraws its cards too.
             notifyChange();
             redrawCastViews();
@@ -1707,6 +1733,7 @@ export function createStorySuiteV2Adapter({
         } catch (error) { warn('Story Suite v2 head events are not available', error); }
         offCardSettings = registerCardSettings(sdk, cardSettings);
         offPublicPaths = registerPublicPaths(sdk);
+        baselineKey = dossiersReady() ? chatKeyOf() : null;
         listen();
         syncDrawer();
         announceHosted(true);
@@ -1767,6 +1794,7 @@ export function createStorySuiteV2Adapter({
         offCardSettings = null;
         try { offPublicPaths?.(); } catch { /* the host is gone */ }
         offPublicPaths = null;
+        baselineKey = null;
         hostRef = null;
         sdkRef = null;
         pendingSection = null;
