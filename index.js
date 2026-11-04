@@ -186,7 +186,7 @@ import {
     verifyPortraitFiles,
     writeNpcStateDataFile,
 } from './storage.js';
-import { isPortraitFileRecord, markPortraitFileMissing, portraitHasImage, portraitSrc, PORTRAIT_FILE_DIR, PORTRAIT_FILE_PREFIX } from './src/portrait-file.js';
+import { isPortraitFileRecord, markPortraitFileMissing, portraitFilesVersion, portraitHasImage, portraitSrc, PORTRAIT_FILE_DIR, PORTRAIT_FILE_PREFIX } from './src/portrait-file.js';
 import {
     buildQualifiedChatKey,
     getCharacterOwnerId,
@@ -1246,6 +1246,25 @@ function dossierKeyViews(state) {
         if (view) views[npc.id] = view;
     }
     return Object.keys(views).length ? views : null;
+}
+// What the dossier view reads from the host beside the dossiers: v2 meters, key-person and living-cast views.
+function dossierHostViews(state) {
+    const meterViews = storySuiteV2Meters()?.dossierMeters?.(state.npcs) ?? {};
+    const keyViews = dossierKeyViews(state);
+    const castViews = dossierCastViews(state);
+    return { meterViews, ...(keyViews ? { keyViews } : {}), ...(castViews ? { castViews } : {}) };
+}
+// (perf) The dossiers as the views read them: a copy, except that a portrait's picture (its data URL, an immutable string of up to
+// a few hundred KB) is shared rather than copied; the portrait record itself is still a copy.
+function viewNpcCopies(npcs) {
+    return (Array.isArray(npcs) ? npcs : []).map(npc => {
+        const portrait = npc?.portrait;
+        if (!portrait || typeof portrait !== 'object' || typeof portrait.dataUrl !== 'string') return structuredClone(npc);
+        const copy = structuredClone({ ...npc, portrait: null });
+        const { dataUrl, ...record } = portrait;
+        copy.portrait = { ...structuredClone(record), dataUrl };
+        return copy;
+    });
 }
 function keyAwayScanOptions(state) {
     const list = keyPeopleList();
@@ -8663,10 +8682,26 @@ window.NPCStateDelta = Object.freeze({
             formPortraits[npcId] = Object.fromEntries(Object.values(forms || {}).filter(portrait => portrait?.dataUrl)
                 .map(portrait => [portrait.form, { dataUrl: portrait.dataUrl, appearanceFingerprint: portrait.appearanceFingerprint || '' }]));
         }
-        const meterViews = storySuiteV2Meters()?.dossierMeters?.(state.npcs) ?? {};
-        const keyViews = dossierKeyViews(state);
-        const castViews = dossierCastViews(state);
-        return { turn: state.turn, reply: latestReplyIndex(), npcs: structuredClone(hostedMeterView(state.npcs)), portraitAssets: {}, formPortraits, customFieldNames: [...getSettings().customFieldNames], meterViews, ...(keyViews ? { keyViews } : {}), ...(castViews ? { castViews } : {}) };
+        return { turn: state.turn, reply: latestReplyIndex(), npcs: viewNpcCopies(hostedMeterView(state.npcs)), portraitAssets: {}, formPortraits, customFieldNames: [...getSettings().customFieldNames], ...dossierHostViews(state) };
+    },
+    /** (perf) What the dossier panel needs before it draws: the chat and its load state (uiStatus also builds branch diagnostics). */
+    dossierViewStatus: () => {
+        const key = getChatKey();
+        return { chatKey: key, hydrationStatus: chatHydrationStatus(key), hydrationError: hydrationErrors.get(key)?.message || null };
+    },
+    /**
+     * (perf) A cheap token of everything getDossierState shows: the chat and its load state, the stored revision (every durable
+     * write moves it), the latest reply, the configured fields, which portrait files are known gone, and the host's views and
+     * meter numbers. The panel draws again only when it moves.
+     */
+    dossierViewToken: () => {
+        const key = getChatKey();
+        const hydration = chatHydrationStatus(key);
+        if (key === 'no-chat' || hydration !== 'ready') return JSON.stringify([key, hydration, hydrationErrors.get(key)?.message || null]);
+        const state = getChatState(key);
+        const npcs = hostedMeterView(state.npcs);
+        return JSON.stringify([key, hydration, Number(stateVersions.get(key) || 0), latestReplyIndex(), getSettings().customFieldNames, portraitFilesVersion(),
+            npcs === state.npcs ? null : npcs.map(npc => npc?.relationship ?? null), dossierHostViews(state)]);
     },
     persistenceStatus: () => {
         const key = getChatKey();

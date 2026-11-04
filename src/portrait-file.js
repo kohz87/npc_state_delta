@@ -77,8 +77,11 @@ export function isPortraitFileRecord(portrait) {
 
 // The files the server said are not there, this session. A file this session wrote or the server confirmed is taken out again.
 const missing = new Set();
-export const markPortraitFileMissing = path => { missing.add(String(path || '')); };
-export const markPortraitFilePresent = path => { missing.delete(String(path || '')); };
+let missingVersion = 0;
+export const markPortraitFileMissing = path => { const key = String(path || ''); if (!missing.has(key)) { missing.add(key); missingVersion += 1; } };
+export const markPortraitFilePresent = path => { if (missing.delete(String(path || ''))) missingVersion += 1; };
+/** Moves whenever the set of files known gone changes (the dossier view's token: what shows changed without a state write). */
+export const portraitFilesVersion = () => missingVersion;
 
 /** The record's file path while the file is not known to be gone, else ''. */
 export const portraitFileSrc = portrait => (isPortraitFileRecord(portrait) && !missing.has(portrait.path) ? portrait.path : '');

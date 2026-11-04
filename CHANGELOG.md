@@ -1,3 +1,8 @@
+## Unreleased
+
+- **The dossier page no longer copies its portraits into the page.** A portrait picture reaches the panel by reference: the panel's markup carries a short key and the image's source is set once the image is in the page, so twelve portraits are no longer escaped into about 1.6 MB of HTML, parsed back out of it and copied into every render check. The runtime's read for the panel (`getDossierState`) no longer copies the pictures either (the dossier record is still a copy), and a refresh no longer builds the branch diagnostics just to learn the chat's load state. Nothing saved changes.
+- **A window focus or a settings-panel change redraws the dossier page only when something on it changed.** The panel keeps a cheap token of what it last drew (the chat, its stored revision, the latest reply, the configured fields, the host's meter, key-person and cast views) and skips a focus or a settings-panel mutation that leaves it as it was; the mutations caused by its own draw are dropped. Opening the panel always draws.
+
 ## 1.10.1
 
 - **Faster saves of a large chat.** Encoding the chat's data file for upload took hundreds of milliseconds per save on a chat with many dossiers and portraits (it built the text one character at a time); it is now one step per 32 KB block. The uploaded bytes are the same.
