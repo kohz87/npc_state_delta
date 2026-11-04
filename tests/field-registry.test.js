@@ -130,13 +130,15 @@ test('the snapshot built from the registry is today\'s snapshotNpc, key order in
 
 test('the modules use the derived lists, not copies of their own', () => {
     const read = path => fs.readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
-    assert.match(read('core-mechanics.js'), /import \{ ALIAS_MERGE_TEXT_FIELDS, PROFILE_EVIDENCE_FIELDS, RETURN_KEYS, RETURN_SHAPES, TEXT_FIELDS \} from '\.\/src\/fields\/registry\.js';/);
+    assert.match(read('core-mechanics.js'), /import \{ PROFILE_EVIDENCE_FIELDS, RETURN_KEYS, RETURN_SHAPES \} from '\.\/src\/fields\/registry\.js';/);
+    assert.match(read('core-merge-incoming.js'), /import \{ TEXT_FIELDS \} from '\.\/src\/fields\/registry\.js';/);
+    assert.match(read('core-merge.js'), /import \{ ALIAS_MERGE_TEXT_FIELDS \} from '\.\/src\/fields\/registry\.js';/);
     assert.match(read('core.js'), /import \{ CHANGE_TRACKED_FIELDS, DAY_TRACKED_FIELDS \} from '\.\/src\/fields\/registry\.js';/);
     assert.match(read('branch.js'), /import \{ NPC_REVERT_GROUPS, NPC_REVERT_LIST_FIELDS \} from '\.\/src\/fields\/registry\.js';/);
     assert.match(read('branch-core.js'), /const globallyPreserved = BRANCH_USER_METADATA_FIELDS;/);
     assert.match(read('terminal-lifecycle.js'), /for \(const field of TERMINAL_FROZEN_FIELDS\)/);
     assert.match(read('index.js'), /return REFRESH_CHANGED_FIELDS\.filter\(/);
-    for (const path of ['core-mechanics.js', 'core-text.js', 'core-identity.js', 'core-portrait.js', 'core-relationship.js', 'core-durable.js', 'core-behavior.js', 'core-evidence.js', 'core-keyrel.js', 'core.js', 'branch.js', 'index.js', 'src/storysuite-v2.js', 'src/dossier-edit.js', 'bundle.js']) {
+    for (const path of ['core-mechanics.js', 'core-text.js', 'core-identity.js', 'core-portrait.js', 'core-relationship.js', 'core-durable.js', 'core-behavior.js', 'core-evidence.js', 'core-keyrel.js', 'core-record.js', 'core-development.js', 'core-merge-incoming.js', 'core-merge.js', 'core.js', 'branch.js', 'index.js', 'src/storysuite-v2.js', 'src/dossier-edit.js', 'bundle.js']) {
         assert.doesNotMatch(read(path), /const (?:TEXT_FIELDS|CHANGE_TRACKED_FIELDS|DAY_TRACKED_FIELDS|NPC_REVERT_GROUPS|DOSSIER_FIELDS|IMPORT_LOCKED_FIELD_KEYS) = /, `${path} keeps no copy`);
     }
 });

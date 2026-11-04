@@ -1,5 +1,5 @@
 /* NPC State Delta terminal lifecycle helpers. */
-import { normalizeLifeState } from './core-mechanics.js';
+import { normalizeLifeState } from './core-identity.js';
 import { TERMINAL_FROZEN_FIELDS } from './src/fields/registry.js';
 
 export function isTerminalNpcDeath(npc = {}) {
