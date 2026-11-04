@@ -10,7 +10,7 @@ import { runEditorHostScenario } from './editor-host.mjs';
 // and the settings other modules keep controls for are declared and normalized by the settings owner.
 
 const runtime = JSON.parse(fs.readFileSync(new URL('../runtime-modules.json', import.meta.url), 'utf8')).modules.map(module => module.path);
-const sources = Object.fromEntries([...runtime, 'src/storysuite-v2.js', 'src/npc-meters.js', 'src/npc-meters-screen.js']
+const sources = Object.fromEntries([...runtime, 'src/storysuite-v2.js', 'src/npc-meters.js', 'src/npc-meters-config.js', 'src/npc-meters-secrets.js', 'src/npc-meters-slice.js', 'src/npc-meters-schema.js', 'src/npc-meters-screen.js']
     .filter((path, i, all) => all.indexOf(path) === i && fs.existsSync(new URL(`../${path}`, import.meta.url)))
     .map(path => [path, fs.readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')]));
 
