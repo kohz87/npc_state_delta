@@ -347,6 +347,19 @@ test('1.10.0 cost: the table is rebuilt for a read after the microtask (a value 
     assert.equal(sources, 2);
 });
 
+test('1.10.0 the per-read cache key covers presence: who is present moving inside one synchronous read is seen', async () => {
+    const h = await host();
+    h.delta.api.dossierRevision = () => 'fixed';
+    let here = [];
+    const query = h.sdk.query;
+    h.sdk.query = (name, args) => (name === 'scene.present' ? here.slice() : query(name, args));
+    const d = live(h);
+    assert.equal(d.get('npc.Oren.present'), false);
+    h.delta.records.npc_oren.present = true;
+    here = ['Oren'];
+    assert.equal(d.get('npc.Oren.present'), true, 'same tick, same revision, presence moved: the table is rebuilt');
+});
+
 test('1.10.0 no spurious change on chat open: the first render of a chat\'s loaded dossiers is the baseline, later renders tell changes', async () => {
     const delta = fakeDelta();
     let ready = false;

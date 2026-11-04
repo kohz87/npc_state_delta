@@ -1680,13 +1680,24 @@ export function createStorySuiteV2Adapter({
         return people.filter(person => person.name);
     }
 
-    // A cheap token of what publicPeople() reads: the slice's rows, the dossier revision, the meter settings and Delta's switch. While it is
+    // The names in Story Block's scene (`scene.present`), or null when it cannot answer; also the adapter's scenePresent().
+    function scenePresentNames() {
+        if (!hosted || typeof sdkRef?.query !== 'function') return null;
+        try {
+            const list = sdkRef.query('scene.present');
+            return Array.isArray(list) ? list.map(name => String(name ?? '').trim()).filter(Boolean) : null;
+        } catch {
+            return null;
+        }
+    }
+
+    // A cheap token of what publicPeople() reads: the slice's rows, the dossier revision, who is present, the meter settings and Delta's switch. While it is
     // the same the table built for one synchronous read is reused (src/public-paths.js); any change reads fresh.
     function publicVersion() {
         if (!hosted || !enabled() || typeof sdkRef?.query !== 'function') return 'off';
         let revision = '';
         try { revision = String(runtime()?.dossierRevision?.() ?? ''); } catch { revision = ''; }
-        return JSON.stringify([revision, sdkRef.query('npc.meters', {}), storedSettings()]);
+        return JSON.stringify([revision, sdkRef.query('npc.meters', {}), scenePresentNames(), storedSettings()]);
     }
 
     // Delta's public paths, for a Story Block that has sdk.registerPublicPaths (2.22.0); an older one has none and nothing happens.
@@ -2136,15 +2147,7 @@ export function createStorySuiteV2Adapter({
         /** What Delta sends with the next reply under its own keys: [{ label, text }] (the `ownPrompt` hook). */
         ownPrompt,
         /** While hosted: the names in Story Block's scene (`scene.present`), or null when it cannot answer. */
-        scenePresent: () => {
-            if (!hosted || typeof sdkRef?.query !== 'function') return null;
-            try {
-                const list = sdkRef.query('scene.present');
-                return Array.isArray(list) ? list.map(name => String(name ?? '').trim()).filter(Boolean) : null;
-            } catch {
-                return null;
-            }
-        },
+        scenePresent: scenePresentNames,
         /**
          * While hosted: who is in the scene now, for the scanner: Story Director's World view
          * (`director.world.here` → `present`) when it answers, else Story Block's `scene.present`; null
