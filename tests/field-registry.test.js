@@ -136,7 +136,7 @@ test('the modules use the derived lists, not copies of their own', () => {
     assert.match(read('branch-core.js'), /const globallyPreserved = BRANCH_USER_METADATA_FIELDS;/);
     assert.match(read('terminal-lifecycle.js'), /for \(const field of TERMINAL_FROZEN_FIELDS\)/);
     assert.match(read('index.js'), /return REFRESH_CHANGED_FIELDS\.filter\(/);
-    for (const path of ['core-mechanics.js', 'core.js', 'branch.js', 'index.js', 'src/storysuite-v2.js', 'src/dossier-edit.js', 'bundle.js']) {
+    for (const path of ['core-mechanics.js', 'core-text.js', 'core-identity.js', 'core-portrait.js', 'core-relationship.js', 'core-durable.js', 'core-behavior.js', 'core-evidence.js', 'core-keyrel.js', 'core.js', 'branch.js', 'index.js', 'src/storysuite-v2.js', 'src/dossier-edit.js', 'bundle.js']) {
         assert.doesNotMatch(read(path), /const (?:TEXT_FIELDS|CHANGE_TRACKED_FIELDS|DAY_TRACKED_FIELDS|NPC_REVERT_GROUPS|DOSSIER_FIELDS|IMPORT_LOCKED_FIELD_KEYS) = /, `${path} keeps no copy`);
     }
 });
