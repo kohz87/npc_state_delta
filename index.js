@@ -4124,6 +4124,10 @@ async function processPendingBackfillsInner(messageId = null, { limit = Infinity
         const succeeded = await backfillNpcFromHistory(request, messageId, { automatic: true });
         if (succeeded === null) break;
         if (getChatKey() !== chatKey || !requireReadyChatMutation('settle queued dossier backfill', chatKey, { notify: false })) break;
+        // (1.10.1) A scan that began while this backfill was getting ready holds the chat: the backfill made no request (it found the chat
+        // busy). Writing the queue now would change the dossier state under that scan, which then discards its result; the request stays
+        // queued, uncounted, for the next run.
+        if (isScanBusy(chatKey)) break;
         const latest = getChatState(chatKey);
         const currentRequest = (latest.pendingBackfills || []).find(item => item.npcId === request.npcId);
         if (!currentRequest || currentRequest.requestedAt !== request.requestedAt || currentRequest.requestedMessageId !== request.requestedMessageId) continue;
