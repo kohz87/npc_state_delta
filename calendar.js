@@ -201,6 +201,27 @@ export function setStoryClockSource(source = null) {
     storyClockSource = typeof source === 'function' ? source : null;
 }
 
+// (1.10.1) One synchronous pass over every dossier (a chat state's normalization) asks for the story's
+// clock once, not twice per dossier: each ask is two Story Block queries. Nothing can move the clock
+// inside a synchronous pass, so every dossier sees the same answer it would have got on its own.
+let storyClockMemo = null;
+
+export function withStoryDateMemo(task) {
+    if (storyClockMemo) return task();
+    storyClockMemo = { read: false, clock: null };
+    try { return task(); }
+    finally { storyClockMemo = null; }
+}
+
+function readStoryClock() {
+    if (!storyClockMemo) return storyClockSource();
+    if (!storyClockMemo.read) {
+        storyClockMemo.read = true;
+        try { storyClockMemo.clock = storyClockSource(); } catch { storyClockMemo.clock = null; }
+    }
+    return storyClockMemo.clock;
+}
+
 const STORY_DAY_MINUTES = 1440;
 const GREGORIAN_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
@@ -281,7 +302,7 @@ export function storyClockDate(clock = null, config = null) {
 export function hostedStoryDate(config = getActiveCalendarConfig()) {
     if (!storyClockSource) return null;
     let clock = null;
-    try { clock = storyClockSource(); } catch { return null; }
+    try { clock = readStoryClock(); } catch { return null; }
     return clock ? storyClockDate(clock, config) : null;
 }
 
