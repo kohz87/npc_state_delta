@@ -400,9 +400,55 @@ function proseHtml(value, empty = 'Unknown') {
     return `<p${text ? '' : ' class="delta-muted"'}>${escapeHtml(text || empty)}</p>`;
 }
 
-function portraitHtml(npc, className, { alt = true } = {}) {
+// (perf) A data-URL picture reaches the panel by reference: the markup carries a short key (data-delta-portrait="3") and the
+// controller sets the image's src property once the element is in the page, so the picture is never escaped into HTML, parsed
+// back out of it, or copied into a render signature. A file path or plain URL stays in the markup as before. Presentation
+// only: the stored record is never touched. A key lives while some dossier in the view shows its picture.
+export function createPortraitRefs() {
+    const keys = new Map();
+    const sources = new Map();
+    let next = 0;
+    return {
+        /** The key for a data URL (made the first time it is shown), or '' for anything else. */
+        key(value) {
+            const src = String(value ?? '');
+            if (!src.startsWith('data:')) return '';
+            let key = keys.get(src);
+            if (!key) { next += 1; key = String(next); keys.set(src, key); sources.set(key, src); }
+            return key;
+        },
+        src: key => sources.get(String(key)) || '',
+        /** Forgets every picture not in `keep` (a Set of the sources the view still shows). */
+        release(keep = new Set()) {
+            for (const [src, key] of [...keys]) if (!keep.has(src)) { keys.delete(src); sources.delete(key); }
+        },
+        get size() { return keys.size; },
+        /** Sets the src of every keyed image under `container` that has none yet. */
+        fill(container) {
+            for (const img of container?.querySelectorAll?.('img[data-delta-portrait]') || []) {
+                if (img.hasAttribute?.('src')) continue;
+                const src = sources.get(String(img.dataset?.deltaPortrait ?? ''));
+                if (src) img.src = src;
+            }
+        },
+    };
+}
+
+// The image's source attribute: the key for a data URL when `refs` is given, the escaped URL otherwise.
+function imageSourceAttribute(src, refs = null) {
+    const key = refs ? refs.key(src) : '';
+    return key ? `data-delta-portrait="${key}"` : `src="${escapeHtml(src)}"`;
+}
+
+// What a render signature records for a picture: its key, or the URL itself.
+function portraitMark(src, refs) {
+    const key = refs.key(src);
+    return key ? `ref:${key}` : plain(src);
+}
+
+function portraitHtml(npc, className, { alt = true, refs = null } = {}) {
     const src = plain(npc?.portrait);
-    if (src) return `<img class="${className}" src="${escapeHtml(src)}" alt="${alt ? `${escapeHtml(npc?.name || 'NPC')} portrait` : ''}" loading="lazy" decoding="async">`;
+    if (src) return `<img class="${className}" ${imageSourceAttribute(src, refs)} alt=""${alt ? `${escapeHtml(npc?.name || 'NPC')} portrait` : ''}" loading="lazy" decoding="async">`;
     const initial = escapeHtml(String(npc?.name || '?').trim().charAt(0).toUpperCase() || '?');
     return `<div class="${className} delta-portrait-placeholder" aria-hidden="true"><span>${initial}</span></div>`;
 }
@@ -444,7 +490,7 @@ function birthdayCard(npc) {
     return `<div class="delta-current-card delta-continuity-birthday-card"><b>Birthday${changedMark(npc, 'birthDate')}</b><span>${escapeHtml(npc.birthday || 'Unknown')}</span>${source ? `<small class="delta-continuity-source">${escapeHtml(source)}</small>` : ''}</div>`;
 }
 
-export function appearanceFormsHtml(npc) {
+export function appearanceFormsHtml(npc, { portraitRefs = null } = {}) {
     const model = npc.appearanceModel;
     const presentation = npc.currentPresentation || '';
     const compatibilityCurrent = !model.currentForm && !model.currentFormUnknown && presentation
@@ -459,7 +505,7 @@ export function appearanceFormsHtml(npc) {
     const rows = model.appearanceForms.map(form => {
         const image = formImages[form.name] || '';
         const thumb = image
-            ? `<img class="delta-form-portrait-thumb" src="${escapeHtml(image)}" alt="${escapeHtml(form.name)} form portrait" loading="lazy" decoding="async">`
+            ? `<img class="delta-form-portrait-thumb" ${imageSourceAttribute(image, portraitRefs)} alt=""${escapeHtml(form.name)} form portrait" loading="lazy" decoding="async">`
             : '<span class="delta-form-portrait-thumb delta-form-portrait-empty" aria-hidden="true">+</span>';
         const action = npc.id ? `<button type="button" class="delta-btn delta-experience-portrait delta-form-portrait-button" data-npc-id="${escapeHtml(npc.id)}" data-form="${escapeHtml(form.name)}">${image ? 'Change portrait' : 'Add portrait'}</button>` : '';
         return `<div class="delta-appearance-form-row delta-appearance-form-with-portrait">${thumb}<div><b>${escapeHtml(form.name)}${form.name === model.currentForm ? '<span class="delta-appearance-current-badge">Current</span>' : ''}</b>${proseHtml(form.appearance)}${action}</div></div>`;
@@ -636,7 +682,7 @@ function visibleElement(element) {
     return Boolean(element && element.isConnected && element.getClientRects?.().length);
 }
 
-class DeltaDossierUi {
+export class DeltaDossierUi {
     constructor(api) {
         this.api = api;
         this.root = null;
@@ -655,6 +701,9 @@ class DeltaDossierUi {
         this.legacyObserver = null;
         this.observerRetryTimer = null;
         this.observerAttempts = 0;
+        this.portraitRefs = createPortraitRefs();
+        // The view token (api.dossierViewToken) the panel last drew from; '' when unknown (always draw).
+        this.renderedToken = '';
         this.boundEscape = event => this.onDocumentKeydown(event);
         this.boundFocus = () => { if (this.panelOpen) this.scheduleRefresh(); };
     }
@@ -683,6 +732,7 @@ class DeltaDossierUi {
         this.observerRetryTimer = null;
         document.removeEventListener?.('keydown', this.boundEscape);
         window.removeEventListener?.('focus', this.boundFocus);
+        this.portraitRefs.release();
         this.root?.remove?.();
         this.root = null;
     }
@@ -799,13 +849,40 @@ class DeltaDossierUi {
         return true;
     }
 
+    // (perf) A cheap string from the runtime (index.js dossierViewToken) that moves whenever anything the panel shows moves:
+    // the chat and its load state, the stored revision, the latest reply, the configured fields, the host's views. '' when the
+    // runtime has none (an older one), and then every refresh draws, as before.
+    viewToken() {
+        try { return typeof this.api?.dossierViewToken === 'function' ? String(this.api.dossierViewToken() ?? '') : ''; }
+        catch { return ''; }
+    }
+
+    // A window focus, a settings-panel mutation or a pin asks for a refresh; it draws only when the view token moved since the
+    // panel last drew (opening the panel always draws).
     scheduleRefresh() {
         if (this.refreshQueued) return;
         this.refreshQueued = true;
         queueMicrotask(() => {
             this.refreshQueued = false;
+            const token = this.viewToken();
+            if (token && token === this.renderedToken) return;
             void this.refresh();
         });
+    }
+
+    // After a draw: remember what it was drawn from, let go of pictures no dossier in the view shows any more, and drop the
+    // settings-panel mutations queued up to now (the state was read after them, and the rest are this draw's own).
+    drewFrom(token) {
+        this.renderedToken = token;
+        const projection = this.projection || {};
+        const shown = new Set();
+        for (const row of projection.index || []) if (row.portrait) shown.add(row.portrait);
+        for (const npc of projection.npcs || []) {
+            if (npc.portrait) shown.add(npc.portrait);
+            for (const src of Object.values(npc.formPortraits || {})) if (src) shown.add(src);
+        }
+        this.portraitRefs.release(shown);
+        this.legacyObserver?.takeRecords?.();
     }
 
     // Full-size portrait view: presentation only, reusing the already-projected portrait source.
@@ -819,7 +896,8 @@ class DeltaDossierUi {
         overlay.setAttribute('role', 'dialog');
         overlay.setAttribute('aria-modal', 'true');
         overlay.setAttribute('aria-label', `${selected.name} portrait`);
-        overlay.innerHTML = `<img src="${escapeHtml(selected.portrait)}" alt="${escapeHtml(selected.name)} portrait"><button type="button" class="delta-btn delta-lightbox-close">Close</button>`;
+        overlay.innerHTML = `<img alt="${escapeHtml(selected.name)} portrait"><button type="button" class="delta-btn delta-lightbox-close">Close</button>`;
+        overlay.querySelector('img').src = selected.portrait;
         panel.appendChild(overlay);
         overlay.querySelector('.delta-lightbox-close')?.focus?.({ preventScroll: true });
     }
@@ -891,6 +969,13 @@ class DeltaDossierUi {
         if (restoreFocus) this.root.querySelector('.delta-launcher')?.focus?.({ preventScroll: true });
     }
 
+    // What a refresh needs (chat key and load state), without the diagnostics uiStatus builds (a copy of the branch state).
+    safeViewStatus() {
+        if (typeof this.api?.dossierViewStatus !== 'function') return this.safeUiStatus();
+        try { return this.api.dossierViewStatus(); }
+        catch (error) { return { chatKey: 'no-chat', hydrationStatus: 'error', hydrationError: error?.message || String(error) }; }
+    }
+
     safeUiStatus() {
         try { return typeof this.api?.uiStatus === 'function' ? this.api.uiStatus() : {}; }
         catch (error) { return { chatKey: 'no-chat', hydrationStatus: 'error', hydrationError: error?.message || String(error) }; }
@@ -901,7 +986,8 @@ class DeltaDossierUi {
             this.dirtyWhileClosed = true;
             return;
         }
-        const status = this.safeUiStatus();
+        const token = this.viewToken();
+        const status = this.safeViewStatus();
         const chatKey = plain(status?.chatKey, 'no-chat');
         const chatChanged = chatKey !== this.lastChatKey;
         if (chatChanged) {
@@ -928,12 +1014,14 @@ class DeltaDossierUi {
             this.projection = projectDossierState({}, status);
             this.dirtyWhileClosed = false;
             this.renderFromProjection({ forceRail: true, forceDetail: true });
+            this.drewFrom(token);
             return;
         }
         if (status?.hydrationStatus && status.hydrationStatus !== 'ready') {
             this.projection = projectDossierState({}, status);
             this.dirtyWhileClosed = false;
             this.renderFromProjection({ forceRail: true, forceDetail: true });
+            this.drewFrom(token);
             return;
         }
         try {
@@ -941,9 +1029,11 @@ class DeltaDossierUi {
             this.projection = projectDossierState(state, status);
             this.dirtyWhileClosed = false;
             this.renderFromProjection({ forceRail: force || chatChanged, forceDetail: force || chatChanged });
+            this.drewFrom(token);
         } catch (error) {
             this.projection = projectDossierState({}, { ...status, hydrationStatus: 'error', hydrationError: error?.message || String(error) });
             this.renderFromProjection({ forceRail: true, forceDetail: true });
+            this.drewFrom('');
         }
     }
 
@@ -1003,7 +1093,8 @@ class DeltaDossierUi {
 
     renderRail(filtered, { force = false } = {}) {
         const list = this.root.querySelector('.delta-cast-list');
-        const signature = JSON.stringify(filtered.map(row => [row.id, row.name, row.statusLabel, row.role, row.species, row.gender, row.portrait, row.id === this.selectedNpcId, row.key === true]));
+        const refs = this.portraitRefs;
+        const signature = JSON.stringify(filtered.map(row => [row.id, row.name, row.statusLabel, row.role, row.species, row.gender, portraitMark(row.portrait, refs), row.id === this.selectedNpcId, row.key === true]));
         if (!force && signature === this.lastRailSignature) return;
         this.lastRailSignature = signature;
         const scrollLeft = list.scrollLeft;
@@ -1019,10 +1110,11 @@ class DeltaDossierUi {
             const selected = npc.id === this.selectedNpcId;
             const firstDead = npc.bucket === 'dead' && index > 0 && filtered[index - 1]?.bucket !== 'dead';
             return `<button type="button" class="delta-cast-card${selected ? ' selected' : ''}${firstDead ? ' delta-cast-first-dead' : ''}" role="option" aria-selected="${selected}" data-npc-id="${escapeHtml(npc.id)}" data-bucket="${escapeHtml(npc.bucket)}" data-has-portrait="${npc.portrait ? 'true' : 'false'}">
-                ${portraitHtml(npc, 'delta-cast-portrait', { alt: false })}
+                ${portraitHtml(npc, 'delta-cast-portrait', { alt: false, refs })}
                 <span class="delta-cast-copy"><b>${escapeHtml(npc.name)}${npc.key ? ' <span class="delta-key-star" title="Key person" aria-label="Key person">★</span>' : ''}</b><small>${escapeHtml(meta)}</small><em class="delta-status delta-status-${escapeHtml(npc.bucket)}">${escapeHtml(npc.statusLabel)}</em></span>
             </button>`;
         }).join('');
+        refs.fill(list);
         list.scrollLeft = scrollLeft;
         if (focusedId) list.querySelector(`.delta-cast-card[data-npc-id="${CSS.escape(focusedId)}"]`)?.focus?.({ preventScroll: true });
     }
@@ -1033,10 +1125,13 @@ class DeltaDossierUi {
         const selected = this.projection.npcs.find(npc => npc.id === this.selectedNpcId) || null;
         const selectedVisible = filtered.some(row => row.id === this.selectedNpcId);
         const subtitle = selected ? identityLine(selected) : '';
+        const refs = this.portraitRefs;
+        const heroPortrait = selected ? portraitMark(selected.portrait, refs) : '';
+        const formPortraits = selected ? Object.fromEntries(Object.entries(selected.formPortraits || {}).map(([name, src]) => [name, portraitMark(src, refs)])) : {};
         const signature = selectedVisible && selected
-            ? JSON.stringify({ ...selected, portrait: undefined, updatedAt: undefined, reply: this.projection.reply }) : `empty:${this.filter}:${this.query}`;
+            ? JSON.stringify({ ...selected, portrait: undefined, formPortraits, updatedAt: undefined, reply: this.projection.reply }) : `empty:${this.filter}:${this.query}`;
         const heroSignature = selectedVisible && selected
-            ? JSON.stringify([selected.id, selected.name, subtitle, selected.bucket, selected.statusLabel, selected.portrait, selected.portraitAppearanceChanged, selected.appearanceModel.currentForm, Boolean(selected.key), selected.cast?.badge ?? '']) : signature;
+            ? JSON.stringify([selected.id, selected.name, subtitle, selected.bucket, selected.statusLabel, heroPortrait, selected.portraitAppearanceChanged, selected.appearanceModel.currentForm, Boolean(selected.key), selected.cast?.badge ?? '']) : signature;
         const documentChanged = force || signature !== this.lastDetailSignature;
         const heroChanged = force || heroSignature !== this.lastHeroSignature;
         if (!documentChanged && !heroChanged) return;
@@ -1052,7 +1147,7 @@ class DeltaDossierUi {
 
         if (heroChanged) this.root.querySelector('.delta-lightbox')?.remove();
         if (heroChanged) hero.innerHTML = `
-            <div class="delta-hero-media">${portraitHtml(selected, 'delta-hero-portrait')}
+            <div class="delta-hero-media">${portraitHtml(selected, 'delta-hero-portrait', { refs })}
                 ${selected.portraitAppearanceChanged ? `<span class="delta-portrait-stale" title="The dossier appearance changed after this portrait was attached. Generate or upload a new portrait to match.">${escapeHtml(selected.portraitForm && selected.portraitForm !== selected.appearanceModel.currentForm ? `Portrait shows the ${selected.portraitForm} form` : 'Appearance changed since portrait')}</span>` : ''}
                 ${selected.portrait ? `<button type="button" class="delta-portrait-expand" data-npc-id="${escapeHtml(selected.id)}" aria-label="View ${escapeHtml(selected.name)} portrait full size" title="View full size">⤢</button>` : ''}
                 <div class="delta-hero-caption">
@@ -1062,6 +1157,7 @@ class DeltaDossierUi {
                 </div>
             </div>
             <div class="delta-hero-actions"><button type="button" class="delta-btn delta-primary delta-edit" data-npc-id="${escapeHtml(selected.id)}">Edit dossier</button></div>`;
+        if (heroChanged) refs.fill(hero);
 
         if (documentChanged) reconcileDocumentSections(documentPane, `
             <div class="delta-document-head">
@@ -1103,7 +1199,7 @@ class DeltaDossierUi {
                     <div><h4>Personality${changedMark(selected, 'personality')}</h4>${proseHtml(selected.personality)}</div>
                     <div><h4>Speech${changedMark(selected, 'speech')}</h4>${proseHtml(selected.speech)}</div>
                     <div class="delta-wide"><h4>Behavioral Levers${changedMark(selected, 'behaviorProfile')}</h4>${listHtml(selected.behaviorProfile, 'No behavioral levers established yet.')}</div>
-                    <div class="delta-wide"><h4>Appearance${changedMark(selected, 'appearance')}</h4>${appearanceFormsHtml(selected)}</div>
+                    <div class="delta-wide"><h4>Appearance${changedMark(selected, 'appearance')}</h4>${appearanceFormsHtml(selected, { portraitRefs: refs })}</div>
                     <div class="delta-wide"><h4>Mannerisms${changedMark(selected, 'mannerisms')}</h4>${listHtml(selected.mannerisms)}</div>
                 </div>
             </section>
@@ -1120,6 +1216,7 @@ class DeltaDossierUi {
                 <h3>Background / History${changedMark(selected, 'background')}</h3>${proseHtml(selected.background, 'No background established yet.')}
             </section>
             ${v2SecretsHtml(selected.v2Meters)}`, documentPane.dataset.npcId !== selected.id);
+        if (documentChanged) refs.fill(documentPane);
         documentPane.dataset.npcId = selected.id;
         documentPane.scrollTop = documentScroll;
     }
