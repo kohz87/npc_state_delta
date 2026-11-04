@@ -19,7 +19,10 @@ import {
     backfillNeedsRequest,
     normalizeAutomaticBackfillRequest,
     npcParticipatesInExchange,
+    readAheadOf,
     replyMayChangeDossiers,
+    replyScanned,
+    settleScan,
 } from './scan-context.js';
 import { createDiagnosticStore } from './diagnostics-core.js';
 import { EDITOR_FIELDS, editorManualMemories, editorProfileLocks, settleEditorSave, untouchedEditorFields } from './src/dossier-edit.js';
@@ -31,6 +34,8 @@ import {
     currentExchangeUserDevelopmentContext,
     currentExchangeTranscript,
     skippedExchangesWindow,
+    recentReplyIds,
+    activeReplyIds,
     currentExchangeProse,
     currentExchangeBodies,
     storyDayAt,
@@ -1410,6 +1415,7 @@ function freshChatState() {
         assistantSinceScan: 0,
         lastScanAt: 0,
         lastScannedMessageId: null,
+        readAhead: [],
         scanCount: 0,
         dismissed: [],
         inlineCards: [],
@@ -3121,7 +3127,7 @@ function pendingPlayerMessage(state) {
     while (tail >= 0 && chat[tail]?.is_system) tail -= 1;
     if (tail < 0) return '';
     if (chat[tail]?.is_user) return cleanMessage(chat[tail]);
-    if (state?.lastScannedMessageId === tail) return '';
+    if (replyScanned(state, tail)) return '';
     for (let i = tail - 1; i >= 0; i -= 1) {
         if (chat[i]?.is_system) continue;
         return chat[i]?.is_user ? cleanMessage(chat[i]) : '';
@@ -4428,6 +4434,7 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
             fresh: chatNeverScanned(getChatState(scanChatKey), messageId),
             replies: getChatState(scanChatKey)?.assistantSinceScan,
             limit: settings.scanDepth,
+            skip: readAheadOf(getChatState(scanChatKey)),
         })
         : null;
     // A catch-up window that stops before the chat's latest reply is earlier context only: no current presence, mood or meter deltas.
@@ -4453,6 +4460,7 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
     // (v2 meters) While hosted the slice is the truth: the scan shows, scores and forwards relationship
     // changes from the slice's numbers (the sidecar then follows them). Without a host it is the record.
     const state = hostedScanState(getChatState(scanChatKey));
+    const newChatAtStart = chatNeverScanned(state, Number.isInteger(messageId) ? messageId : (ctx.chat || []).length - 1);
     const scanStateVersion = Number(stateVersions.get(scanChatKey) || 0);
     const capture = !manual && !fullWindowScan && Number.isInteger(messageId)
         ? takeNarrationCapture(scanChatKey, messageId)
@@ -4692,12 +4700,25 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
             targeted: false,
         });
         const chatKey = scanChatKey;
+        // The newest reply this scan read: the chat's latest, or, in a catch-up, the newest of the oldest waiting ones.
+        const scanTarget = Number.isInteger(skippedWindow?.readThrough) ? skippedWindow.readThrough : (Number.isInteger(messageId) ? messageId : ((ctx.chat || []).length - 1));
+        // (1.10.0) The marker passes only replies that were all read: a manual scan, a Refresh or a narration capture that read the latest
+        // reply while older ones still wait leaves the marker behind them and remembers what it read, so the next window reads the waiting
+        // replies and skips exactly those (each reply read once).
+        const currentReplyId = activeReplyIds().filter(id => id <= (Number.isInteger(messageId) ? messageId : (ctx.chat || []).length - 1)).at(-1);
+        const readIds = skippedWindow
+            ? skippedWindow.readIds
+            : ((manual || fullWindowScan) ? recentReplyIds(settings.scanDepth) : (Number.isInteger(currentReplyId) ? [currentReplyId] : []));
+        const settled = settleScan({
+            marker: state.lastScannedMessageId, readAhead: state.readAhead, readIds, target: scanTarget, replyIds: activeReplyIds(), fresh: newChatAtStart,
+        });
         const nextState = {
             ...merged.state,
-            assistantSinceScan: 0,
+            // The replies the marker was held back for count toward the next safety scan (Scan every); nothing is waiting otherwise.
+            assistantSinceScan: settled.deferred ? settled.waiting : 0,
             lastScanAt: Date.now(),
-            // The newest reply this scan read: the chat's latest, or, in a catch-up, the newest of the oldest waiting ones.
-            lastScannedMessageId: Number.isInteger(skippedWindow?.readThrough) ? skippedWindow.readThrough : (Number.isInteger(messageId) ? messageId : ((ctx.chat || []).length - 1)),
+            lastScannedMessageId: settled.marker,
+            readAhead: settled.readAhead,
             scanCount: Number(state.scanCount || 0) + 1,
         };
         if (skippedWindow && !skippedWindow.latest) catchUpChats.add(scanChatKey); else catchUpChats.delete(scanChatKey);
@@ -7420,7 +7441,7 @@ function castEmptyReason() {
     if (!(state.npcs || []).some(npc => npc && !npc.archived)) {
         return { text: 'No NPC has a dossier in this chat yet, so nobody shows here even when the story or the World State names them. A scan of the latest reply makes dossiers for the NPCs in it.', scan: true };
     }
-    if (latest >= 0 && state.lastScannedMessageId !== latest) {
+    if (latest >= 0 && !replyScanned(state, latest)) {
         return { text: 'The latest reply has not been scanned yet, so who is present is not known.', scan: true };
     }
     return { text: 'The latest scan found no NPC in the scene.', scan: true };
@@ -7864,6 +7885,7 @@ function bindUi() {
         cleared.lineage = chatLineage(getContext().chat || []);
         // Cleared, the chat is caught up: only replies from now on are read, not the whole history again.
         cleared.lastScannedMessageId = latestMessageId(true) >= 0 ? latestMessageId(true) : null;
+        cleared.readAhead = [];
         setChatState(getChatKey(), cleared);
         persistCritical(); renderDossier(); updateInjection();
     });
@@ -7946,7 +7968,7 @@ async function handleAssistantMessageReceivedInner(messageId, { bypassSwipeGuard
     migrateLegacyLineage(state, getContext().chat || []);
     const receipts = assistantReceipts.get(eventChatKey) || new Set();
     if (!forceBranchRescan && (receipts.has(eventSourceKey)
-        || (state.lastScannedMessageId === messageId && eventSourceKey === lineageCheckpointKey(state.lineage, messageId)))) return;
+        || (replyScanned(state, messageId) && eventSourceKey === lineageCheckpointKey(state.lineage, messageId)))) return;
     // Receipt deduplication is separate from successful scan completion and cadence.
     // Store bounded source keys, never copies of narrative text or dossier state.
     receipts.add(eventSourceKey);

@@ -590,6 +590,7 @@ export function mergeImportedDossierState(currentState, importedState, { maxNpcs
         dismissed,
         formPortraitAssets: normalizeFormPortraitAssets(formPortraitAssets),
         lastScannedMessageId: null,
+        readAhead: [],
         assistantSinceScan: 0,
         // An import is never a chat that was not scanned yet: what the bundle holds was applied once, so the next scan
         // reads the latest reply only.

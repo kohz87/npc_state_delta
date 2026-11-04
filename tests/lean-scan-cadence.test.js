@@ -479,3 +479,31 @@ test('lean: Clear every dossier, then a swipe, then the next scan reads the late
         h.check(prompt.includes('Wiz walks in') && !prompt.includes('older-1.') && !prompt.includes('older-2.') && !prompt.includes('Yunyun steps out'), 'the older replies are not read back in');
     });
 });
+
+// ---- 1.10.0 (L2a): a manual scan, a Refresh or a narration capture no longer moves the marker past replies that still wait ----
+
+test('lean: a manual scan reads the latest replies without losing the older waiting ones; the next scan reads those and skips what the manual scan read', () => {
+    runScenario('manual-read-ahead', async h => {
+        h.settings.scanEvery = 30;
+        h.settings.scanDepth = 4;
+        for (let i = 1; i <= 6; i += 1) await h.turn('We walk on.', `The road goes on, mile ${i} of marker-${i}.`);
+        h.equal(h.scannerCalls().length, 0, 'quiet replies: no call');
+        h.check(await h.runtime.scan(), 'the manual scan ran');
+        h.equal(h.scannerCalls().length, 1, 'one manual call');
+        const manual = String(h.scannerCalls()[0].prompt || '');
+        h.check(manual.includes('marker-6') && manual.includes('marker-5') && !manual.includes('marker-1.'), 'the manual scan reads the last Scan context messages');
+        const state = h.runtime.getState();
+        h.check(Array.isArray(state.readAhead) && state.readAhead.length === 2, `the two replies it read are remembered (${JSON.stringify(state.readAhead)})`);
+        h.check(state.lastScannedMessageId < state.readAhead[0], 'the marker stayed behind the unread replies');
+        h.equal(state.assistantSinceScan, 4, 'the four unread replies count toward the safety scan');
+        await h.turn('Who is that?', 'Yunyun steps out of the mist and waves.');
+        h.equal(h.scannerCalls().length, 2, 'the name scans');
+        const next = String(h.scannerCalls()[1].prompt || '');
+        h.check(['marker-1.', 'marker-2.', 'marker-3.', 'marker-4.', 'Yunyun steps out'].every(text => next.includes(text)), 'the waiting replies and the new one are read');
+        h.check(!next.includes('marker-5.') && !next.includes('marker-6.'), 'the replies the manual scan read are not read again');
+        const after = h.runtime.getState();
+        h.equal(after.readAhead, [], 'nothing is left read ahead');
+        h.equal(after.lastScannedMessageId, h.mockState.context.chat.length - 1, 'the marker is at the latest reply');
+        h.equal(after.assistantSinceScan, 0, 'the count restarts');
+    });
+});

@@ -466,3 +466,20 @@ test('a fail-closed restore (an edit of an old reply, a middle delete) leaves th
         assert.ok(marker === null || marker >= last - 1 || restored.exactRestored, `marker ${marker}`);
     }
 });
+
+test('1.10.0 an edit of an old reply forgets the replies read ahead from it on, and keeps the ones before it', () => {
+    const u = t => ({ is_user: true, is_system: false, name: 'User', mes: `user-${t}`, send_date: `ud${t}` });
+    const b = (t, v = 'A') => ({ is_user: false, is_system: false, name: 'Narrator', mes: `assistant-${t}-${v}`, send_date: `ad${t}${v}`, extra: { gen_id: `g${t}${v}` } });
+    const original = [];
+    for (let t = 0; t < 10; t += 1) { original.push(u(t)); original.push(b(t)); }
+    const state = baseState();
+    state.npcs = [createNpcRecord('Seren Lowen')];
+    state.turn = 10; state.lastScannedMessageId = 3; state.readAhead = [7, 13, 17]; state.scanCount = 4;
+    state.lineage = chatLineage(original);
+    state.rollbackHead = { seq: 0, messageId: 19, lineageKey: lineageCheckpointKey(state.lineage, 19), snapshot: structuredClone({ ...state, checkpoints: [], rollbackJournal: [] }) };
+    const edited = original.slice();
+    edited[11] = { ...edited[11], mes: 'assistant-5-EDITED' };
+    const restored = reconcileBranchState(state, edited, { explicitDivergence: 11, operation: 'edit' });
+    assert.equal(restored.exactRestored, false, 'a fail-closed restore');
+    assert.deepEqual(restored.state.readAhead, [7], 'only the replies before the edited one stay read');
+});

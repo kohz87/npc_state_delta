@@ -210,6 +210,7 @@ const ROLLBACK_SCALAR_KEYS = Object.freeze([
     'assistantSinceScan',
     'lastScanAt',
     'lastScannedMessageId',
+    'readAhead',
     'scanCount',
 ]);
 
@@ -1516,6 +1517,8 @@ export function reconcileBranchState(state, chat, { explicitDivergence = null, o
     refreshRollbackJournalRetention(restored);
     if (!exactRestored) {
         if (Number.isInteger(restored.lastScannedMessageId) && restored.lastScannedMessageId >= divergence) restored.lastScannedMessageId = null;
+        // Replies read ahead from the changed message on are not the ones the chat holds now.
+        if (Array.isArray(restored.readAhead)) restored.readAhead = restored.readAhead.filter(id => Number.isInteger(id) && id < divergence);
     }
     prunePortraitAssetsInPlace(restored);
     const rewound = rewindRequested && exactRestored;

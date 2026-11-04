@@ -43,6 +43,7 @@ import { findKeyEntry, isKey, normalizeKeyPeople } from './key-people.js';
 import { metWithEntry, normalizeCast } from './cast-dossier.js';
 import { escapeHtml } from './util/html.js';
 import { portraitFileSrc } from './portrait-file.js';
+import { createPublicPathsDefinition } from './public-paths.js';
 import { createParticipant, fileVault } from './storysuite-participant/index.js';
 
 export const MODULE_ID = 'npc-state-delta';
@@ -342,6 +343,7 @@ export function createStorySuiteV2Adapter({
     let offTurn = null;          // unsubscribes from the host's 'turn' event
     let offHead = null;          // unsubscribes from the host's 'head' event
     let offCardSettings = null;  // unregisters Delta's card settings
+    let offPublicPaths = null;   // unregisters Delta's public paths (npc.<name>.<meter>); `.changed()` tells the host the values moved
     let lastTick = Promise.resolve(null);
     let listParts = null;        // loadDossierList's { rowNodes, project, filter } once loaded
     let rowsCache = { key: null, rows: [] };
@@ -1562,6 +1564,8 @@ export function createStorySuiteV2Adapter({
         // is let go until the host renders the Cast tab again.
         const rerender = () => {
             if (!hosted) return;
+            // A scan that finished late moved moods and presence: the host compares and tells `story:changed`.
+            try { offPublicPaths?.changed?.(); } catch (error) { warn('Story Block public paths change failed', error); }
             // Story Director's World screen (the page API's subscribers) redraws its cards too.
             notifyChange();
             redrawCastViews();
@@ -1585,6 +1589,65 @@ export function createStorySuiteV2Adapter({
             return typeof off === 'function' ? off : (typeof off?.unregister === 'function' ? () => off.unregister() : null);
         } catch (error) {
             warn('Story Block card settings were not registered', error);
+            return null;
+        }
+    }
+
+    // The people behind `npc.<name>.<meter>` (src/public-paths.js): the slice's meters at the head, only the meters the reader shows, and the dossier's
+    // mood and presence. A tracked person with no entry in the slice yet reads from the dossier's relationship numbers (where the entry would start).
+    // An archived person is left out. Nothing while Delta is off or the host is gone.
+    function publicPeople() {
+        if (!hosted || !enabled() || typeof sdkRef?.query !== 'function') return [];
+        const rows = sdkRef.query('npc.meters', {});
+        if (!Array.isArray(rows)) return [];
+        const defs = part.defs();
+        const shown = defs.filter(def => def.show !== false);
+        const hiddenMeters = defs.filter(def => def.show === false).map(def => def.id);
+        const list = npcList();
+        const fold = value => String(value ?? '').normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+        const labelsOf = npc => [npc.name, ...(Array.isArray(npc.aliases) ? npc.aliases : [])].map(fold).filter(Boolean);
+        const archived = new Set(list.filter(npc => npc.archived === true).flatMap(labelsOf));
+        const here = new Set(presentList().map(npc => fold(npc.name)));
+        const people = [];
+        const taken = new Set();
+        for (const row of rows) {
+            if (archived.has(fold(row.name))) continue;
+            const dossier = dossierOf(row.name);
+            const meters = {};
+            for (const def of shown) if (Number.isFinite(row.meters?.[def.id])) meters[def.id] = row.meters[def.id];
+            people.push({
+                name: row.name, meters, hiddenMeters, present: here.has(fold(dossier?.name ?? row.name)),
+                ...(dossier && typeof dossier.mood === 'string' ? { mood: dossier.mood } : {}),
+            });
+            taken.add(fold(row.name));
+            for (const label of dossier ? labelsOf(dossier) : []) taken.add(label);
+        }
+        for (const npc of list) {
+            if (npc.archived === true || labelsOf(npc).some(label => taken.has(label))) continue;
+            const dossier = dossierOf(npc.name);
+            const given = dossier?.relationship && typeof dossier.relationship === 'object' ? dossier.relationship : {};
+            const meters = {};
+            for (const def of shown) {
+                const seed = Number.isFinite(given[def.id]) ? Math.round(given[def.id]) : def.start;
+                meters[def.id] = Math.min(def.max, Math.max(def.min, seed));
+            }
+            people.push({
+                name: String(npc.name ?? '').trim(), meters, hiddenMeters, present: here.has(fold(npc.name)),
+                ...(dossier && typeof dossier.mood === 'string' ? { mood: dossier.mood } : {}),
+            });
+        }
+        return people.filter(person => person.name);
+    }
+
+    // Delta's public paths, for a Story Block that has sdk.registerPublicPaths (2.22.0); an older one has none and nothing happens.
+    // A refusal is logged and never stops Delta being hosted. Returns the unregister function (with `.changed` when the host gives one) or null.
+    function registerPublicPaths(sdk) {
+        if (typeof sdk?.registerPublicPaths !== 'function') return null;
+        try {
+            const off = sdk.registerPublicPaths(createPublicPathsDefinition({ people: publicPeople }));
+            return typeof off === 'function' ? off : null;
+        } catch (error) {
+            warn('Story Block public paths were not registered', error);
             return null;
         }
     }
@@ -1619,6 +1682,7 @@ export function createStorySuiteV2Adapter({
             offHead = typeof off === 'function' ? off : null;
         } catch (error) { warn('Story Suite v2 head events are not available', error); }
         offCardSettings = registerCardSettings(sdk, cardSettings);
+        offPublicPaths = registerPublicPaths(sdk);
         listen();
         syncDrawer();
         announceHosted(true);
@@ -1677,6 +1741,8 @@ export function createStorySuiteV2Adapter({
         offHead = null;
         try { offCardSettings?.(); } catch { /* the host is gone */ }
         offCardSettings = null;
+        try { offPublicPaths?.(); } catch { /* the host is gone */ }
+        offPublicPaths = null;
         hostRef = null;
         sdkRef = null;
         pendingSection = null;
