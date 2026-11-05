@@ -12,11 +12,13 @@ export const PARTICIPANT_TIMEOUT_MS = 10000;
 
 // One bound for every asynchronous participant callback, including native prepare. A timed-out
 // call remains quarantined until it really settles: a late activation must not race a new selection.
+const TIMED_OUT = Symbol.for('story-block.timeline.participant-timeout');
+const IN_FLIGHT = Symbol.for('story-block.timeline.participant-in-flight');
 export async function boundedParticipant(callback, timeoutMs = PARTICIPANT_TIMEOUT_MS) {
     let timer;
     try {
         return await Promise.race([Promise.resolve().then(callback), new Promise((_, reject) => {
-            timer = setTimeout(() => reject(new Error(`participant callback timed out after ${timeoutMs} ms`)), timeoutMs);
+            timer = setTimeout(() => reject(Object.assign(new Error(`participant callback timed out after ${timeoutMs} ms`), { [TIMED_OUT]: true })), timeoutMs);
         })]);
     } finally { clearTimeout(timer); }
 }
@@ -43,7 +45,7 @@ export function createParticipants({ timeoutMs = PARTICIPANT_TIMEOUT_MS, chat = 
         const holder = chat();
         let calls = inflight.get(holder);
         if (!calls) { calls = new Map(); inflight.set(holder, calls); }
-        if (calls.has(module)) throw new Error(`The participant ${module} still has a timed-out callback in flight.`);
+        if (calls.has(module)) throw Object.assign(new Error(`The participant ${module} still has a timed-out callback in flight.`), { [IN_FLIGHT]: true });
         const pending = Promise.resolve().then(callback);
         calls.set(module, pending);
         const clear = () => {
@@ -115,6 +117,10 @@ export function createParticipants({ timeoutMs = PARTICIPANT_TIMEOUT_MS, chat = 
                 answer = await run(module, () => callback(structuredClone(input)));
             } catch (error) {
                 if (crashing(error)) throw error;
+                // A call that ran out of time is still running (its late answer is quarantined, never used), and one that met it is
+                // refused for as long as it runs: neither means the saved state is gone, so both are "retry shortly" (STALE), not a loss.
+                if (error?.[TIMED_OUT]) return fail('STALE', `The participant ${module} did not answer ${method} in time (${Math.round(timeoutMs / 1000)} s); its call is still running. Retry shortly.`);
+                if (error?.[IN_FLIGHT]) return fail('STALE', `The participant ${module} is still running an earlier ${method === 'status' ? 'call' : 'call that timed out'}; its late answer is ignored. Retry shortly.`);
                 return fail('FAILED', `The participant ${module} failed at ${method}: ${error?.message ?? error}`);
             }
             if (!isObject(answer) || typeof answer.ok !== 'boolean') return fail('FAILED', `The participant ${module} answered ${method} with neither a success nor a failure.`);

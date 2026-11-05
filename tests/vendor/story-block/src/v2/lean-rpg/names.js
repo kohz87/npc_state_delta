@@ -8,6 +8,8 @@ export const LEAN_RPG_FEATURE = 'story-block.rpg';
 
 /** The prelude command a planned reply's rolls are committed through (turn.js prelude list). */
 export const RESOLVE = 'rpg.resolve';
+/** The prelude that records, with the reply, that a live fight's roll planner gave nothing usable (noroll.js): the note under the reply is drawn from it. */
+export const NOROLL = 'rpg.noroll';
 
 /** The step after a reply's lines that gives the party its XP for a won fight (fight.js); also the kind of its replay guard. */
 export const FIGHT = 'rpg.fight';
@@ -82,6 +84,21 @@ export const LIMITS = Object.freeze({
  */
 export const ROLLS_SETTING = 'rpgRolls';
 export const ROLLS = Object.freeze(['automatic', 'off']);
+/** The setting (Settings → RPG → Rolls): how many seconds a reply waits for the roll planner, 10 to 120 on a step of 5, 45 unset (it was a fixed 20). Only the planner's call and its hook read it. */
+export const PLANNER_LIMIT_SETTING = 'rpgPlannerSeconds';
+export const PLANNER_LIMIT = Object.freeze({ min: 10, max: 120, step: 5, default: 45 });
+/** `value` as a planner limit: a whole number from 10 to 120 on the step of 5, else null. */
+export const plannerSecondsOf = value => (Number.isInteger(value) && value >= PLANNER_LIMIT.min && value <= PLANNER_LIMIT.max && (value - PLANNER_LIMIT.min) % PLANNER_LIMIT.step === 0 ? value : null);
+/** The seconds the settings say (45 when unset or not a number; a number off the step or outside the range is brought to the nearest step inside 10..120). */
+export function plannerSecondsFrom(values) {
+    const raw = values?.[PLANNER_LIMIT_SETTING];
+    if (plannerSecondsOf(raw) !== null) return raw;
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) return PLANNER_LIMIT.default;
+    const stepped = PLANNER_LIMIT.min + Math.round((Math.max(PLANNER_LIMIT.min, Math.min(PLANNER_LIMIT.max, raw)) - PLANNER_LIMIT.min) / PLANNER_LIMIT.step) * PLANNER_LIMIT.step;
+    return plannerSecondsOf(stepped) ?? PLANNER_LIMIT.default;
+}
+/** The planner's limit in ms: `fixed` when a part was built with one (tests), else the setting. */
+export const plannerLimitMs = (values, fixed) => (Number.isFinite(fixed) ? fixed : plannerSecondsFrom(values) * 1000);
 /** Skill practice comes only from rolled uses while the RPG is on and Rolls is automatic (the narrator's `practice-N` line is not offered and is refused). */
 export const practiceFromRollsOnly = (rpgOn, values) => rpgOn === true && values?.[ROLLS_SETTING] !== 'off';
 

@@ -32,6 +32,7 @@ import { fold } from '../read.js';
 import { characterReading, soulShortOf } from '../soul.js';
 import { RPG_STRINGS, fill } from '../strings.js';
 import { wearLine } from '../cue.js';
+import { noRollOf } from '../noroll.js';
 import { BARS, readFoes, readParty } from './party-data.js';
 
 const B = RPG_STRINGS.battle;
@@ -403,6 +404,26 @@ export function buildPanel(doc, model, { folded = false, onFold = () => {}, vari
     return root;
 }
 
+/**
+ * The note for a reply whose live fight got no rolls (noroll.js; approved mockup rpg-no-rolls.html): "No rolls this reply:" and the reason. It stands where the
+ * battle log would have stood (the same slot, so placeAtMarker / placeCard take it), and is drawn from the reply's own receipt like the log is.
+ */
+export function noteText(note) {
+    const reason = RPG_STRINGS.noRolls[note?.reason] ?? RPG_STRINGS.noRolls.failed;
+    return fill(reason, { s: note?.limit ?? '' });
+}
+export function buildNote(doc, note, { variant = 'inline', index = -1 } = {}) {
+    const root = el(doc, 'div', `${BATTLE_ROOT} rpg-norolls rpg-battle-${variant}`);
+    root.setAttribute('data-ss-screen', BATTLE_ID);
+    root.setAttribute('data-variant', variant);
+    root.setAttribute('data-ss-index', String(index));
+    root.setAttribute('role', 'note');
+    const text = el(doc, 'span', 'rpg-norolls-text');
+    text.append(el(doc, 'b', '', RPG_STRINGS.noRolls.lead), doc.createTextNode(` ${noteText(note)}`));
+    root.append(el(doc, 'span', 'rpg-norolls-dot'), text);
+    return root;
+}
+
 // ---- finding the marker in a drawn message ---------------------------------------------------------------------------
 
 const nodesOf = node => Array.from(node?.childNodes ?? []);
@@ -593,6 +614,15 @@ export function createBattleLog({ ctx, doc = globalThis.document, store, events 
         return { key: `${chatKey()}|${record.sid ?? index}`, model: panelModel({ resolve, state, before: beforeOf(index), roleOf, ranks: levels().ranks ?? [] }) };
     }
 
+    /** The no-rolls note reply `index` shows: { key, model: note } or null (it has rolls, no note, a message of the reader's, the feature off). */
+    function noteAt(index) {
+        const message = chat()[index];
+        if (!featureOn() || !message || message.is_user || message.is_system) return null;
+        const record = readRecord(message);
+        const note = record ? noRollOf(record.receipts) : null;
+        return note ? { key: `${chatKey()}|${record.sid ?? index}|noroll`, model: note } : null;
+    }
+
     /** The latest reply with recorded rolls, searching the whole chat from the newest back: { index, key, model } or null. */
     function latest() {
         for (let index = chat().length - 1; index >= 0; index -= 1) {
@@ -615,7 +645,8 @@ export function createBattleLog({ ctx, doc = globalThis.document, store, events 
         const message = element ?? elementOf(index);
         if (!message) return null;
         const old = panelsIn(message);
-        const shown = modelAt(index);
+        const log = modelAt(index);
+        const shown = log ?? noteAt(index);
         if (!shown) {
             for (const node of old) releasePanel(doc, node);
             const text = message.querySelector('.mes_text');
@@ -633,7 +664,7 @@ export function createBattleLog({ ctx, doc = globalThis.document, store, events 
             if (variant === 'card') placeCard(message, kept);
             return kept;
         }
-        const node = buildPanel(doc, shown.model, { folded: folds.has(shown.key), variant, index, onFold: on => folds.set(shown.key, on) });
+        const node = log ? buildPanel(doc, shown.model, { folded: folds.has(shown.key), variant, index, onFold: on => folds.set(shown.key, on) }) : buildNote(doc, shown.model, { variant, index });
         node.setAttribute('data-ss-sign', sign);
         if (marked) {
             for (const item of old) item.remove();
@@ -713,7 +744,7 @@ export function createBattleLog({ ctx, doc = globalThis.document, store, events 
     }
 
     return {
-        refresh, refreshAll, modelAt, latest,
+        refresh, refreshAll, modelAt, noteAt, latest,
         destroy() {
             offs.splice(0).forEach(off => off());
             for (const node of doc.querySelectorAll(`.${BATTLE_ROOT}`)) {

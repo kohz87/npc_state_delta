@@ -4,7 +4,7 @@
 //   timeline (sdk.js). Straight at the command bus it is REFUSED, as is `savepoint.restore`, which is internal and runs only
 //   as a block the coordinator stores after a prepared restore (never a command handler: it writes every module's domain).
 // * `savepoint.list({})` → the eligible save points in target order.
-// * `hooks.replayGuard` answers for the host's own blocks (coordinator.js guard).
+// * `hooks.replayGuard` answers for the host's own blocks (coordinator-native.js guard).
 
 const refuse = what => ctx => ctx.fail('REFUSED', what);
 

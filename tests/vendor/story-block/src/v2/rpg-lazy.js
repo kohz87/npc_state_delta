@@ -12,8 +12,8 @@
 // This file holds: the loaded library's holder (`rpgLib`), the part's stand-in (`createLazyRpgPart`: the same commands,
 // cards, queries, hooks, settings and guard as lean-rpg/index.js createLeanRpgPart, handed to the real part once the
 // library is there), the loader (`createRpgLoader`) and the check of a chat (`holdsRpg`). No DOM, no SillyTavern.
-import { FIGHT, LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING, PRACTICE, PRACTICE_SETTING, PRACTICE_STEP, RESOLVE, ROLLS, ROLLS_SETTING } from './lean-rpg/names.js';
-import { TIMEOUT_MS } from './assist/common.js';
+import { FIGHT, LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING, NOROLL, PLANNER_LIMIT, PLANNER_LIMIT_SETTING, PRACTICE, PRACTICE_SETTING, PRACTICE_STEP, RESOLVE, ROLLS, ROLLS_SETTING, plannerLimitMs } from './lean-rpg/names.js';
+import { noRoll } from './lean-rpg/noroll.js';
 import { RANK_QUERY, SETTINGS_SCHEMA, XP_RATE, XP_RATE_SETTING, rankQuery } from './lean-rpg/levels.js';
 import { rosterQueries } from './lean-rpg/roster.js';
 
@@ -105,9 +105,12 @@ export function createLazyRpgPart(deps = {}) {
     const waiting = ctx => ctx.fail('FAILED', 'The RPG is still loading. Try again in a moment.');
     const run = (name, fallback) => (...args) => { const made = part(); return made ? made.commands[name](...args) : fallback(...args); };
     const timeoutMs = deps?.timeoutMs;
+    const plannerValues = () => { try { const values = deps?.plannerValues?.(); return values && typeof values === 'object' ? values : {}; } catch { return {}; } };
     return {
         commands: {
             [RESOLVE]: Object.assign(run(RESOLVE, ctx => waiting(ctx)), { prelude: true, internal: true }),
+            // (a tiny record with no state, answered at once, the library or not: a stored note replays whatever is loaded)
+            [NOROLL]: Object.assign((ctx, payload) => noRoll(ctx, payload), { prelude: true, internal: true }),
             [FIGHT]: Object.assign(run(FIGHT, ctx => waiting(ctx)), { internal: true }),
             [PRACTICE_STEP]: Object.assign(run(PRACTICE_STEP, ctx => waiting(ctx)), { internal: true }),
             // "No" on a companion's card (join.js JOIN_NO): the reader's answer, only while the feature is on.
@@ -123,11 +126,11 @@ export function createLazyRpgPart(deps = {}) {
             ...rosterQueries({ persona: deps?.persona, on: deps?.rosterOn }),
         },
         hooks: {
-            beforeGenerate: Object.assign((view, info) => part()?.hooks.beforeGenerate(view, info), { timeoutMs: (Number.isFinite(timeoutMs) ? timeoutMs : TIMEOUT_MS) + HOOK_MARGIN_MS }),
+            beforeGenerate: Object.defineProperty((view, info) => part()?.hooks.beforeGenerate(view, info), 'timeoutMs', { enumerable: true, get: () => plannerLimitMs(plannerValues(), timeoutMs) + HOOK_MARGIN_MS }),
             afterCapture: (view, info) => part()?.hooks.afterCapture(view, info),
             afterReceive: view => { part()?.hooks.afterReceive(view); },
         },
-        settings: { defaults: { [ROLLS_SETTING]: ROLLS[0], [PRACTICE_SETTING]: PRACTICE.perUse, [XP_RATE_SETTING]: XP_RATE.default, [LEVEL_CAP_SETTING]: LEVEL.max }, schema: SETTINGS_SCHEMA },
+        settings: { defaults: { [ROLLS_SETTING]: ROLLS[0], [PRACTICE_SETTING]: PRACTICE.perUse, [XP_RATE_SETTING]: XP_RATE.default, [LEVEL_CAP_SETTING]: LEVEL.max, [PLANNER_LIMIT_SETTING]: PLANNER_LIMIT.default }, schema: SETTINGS_SCHEMA },
         guard: (view, info) => { const made = part(); return made ? made.guard(view, info) : { ok: false, reason: 'The RPG is not loaded.' }; },
     };
 }

@@ -31,6 +31,10 @@ const K = new Uint32Array([
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ]);
 
+// (the message schedule and the hash words are reused: sha256 is synchronous and never re-enters itself)
+const W = new Uint32Array(64);
+const HEX = Array.from({ length: 256 }, (_, byte) => byte.toString(16).padStart(2, '0'));
+
 /** SHA-256 of a string (as UTF-8) or bytes, as 64 lowercase hex characters. */
 export function sha256(input) {
     const bytes = typeof input === 'string' ? utf8.encode(input) : input;
@@ -41,8 +45,8 @@ export function sha256(input) {
     const view = new DataView(padded.buffer);
     view.setUint32(padded.length - 8, Math.floor(length / 0x20000000), false);
     view.setUint32(padded.length - 4, (length << 3) >>> 0, false);
-    const h = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
-    const w = new Uint32Array(64);
+    const w = W;
+    let h0 = 0x6a09e667, h1 = 0xbb67ae85, h2 = 0x3c6ef372, h3 = 0xa54ff53a, h4 = 0x510e527f, h5 = 0x9b05688c, h6 = 0x1f83d9ab, h7 = 0x5be0cd19;
     for (let offset = 0; offset < padded.length; offset += 64) {
         for (let i = 0; i < 16; i++) w[i] = view.getUint32(offset + i * 4, false);
         for (let i = 16; i < 64; i++) {
@@ -52,7 +56,7 @@ export function sha256(input) {
             const s1 = ((b >>> 17) | (b << 15)) ^ ((b >>> 19) | (b << 13)) ^ (b >>> 10);
             w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
         }
-        let [a, b, c, d, e, f, g, hh] = h;
+        let a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, hh = h7;
         for (let i = 0; i < 64; i++) {
             const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
             const ch = (e & f) ^ (~e & g);
@@ -62,10 +66,12 @@ export function sha256(input) {
             const t2 = (S0 + maj) | 0;
             hh = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
         }
-        h[0] = (h[0] + a) | 0; h[1] = (h[1] + b) | 0; h[2] = (h[2] + c) | 0; h[3] = (h[3] + d) | 0;
-        h[4] = (h[4] + e) | 0; h[5] = (h[5] + f) | 0; h[6] = (h[6] + g) | 0; h[7] = (h[7] + hh) | 0;
+        h0 = (h0 + a) | 0; h1 = (h1 + b) | 0; h2 = (h2 + c) | 0; h3 = (h3 + d) | 0;
+        h4 = (h4 + e) | 0; h5 = (h5 + f) | 0; h6 = (h6 + g) | 0; h7 = (h7 + hh) | 0;
     }
-    return Array.from(h, word => (word >>> 0).toString(16).padStart(8, '0')).join('');
+    let out = '';
+    for (const word of [h0, h1, h2, h3, h4, h5, h6, h7]) out += HEX[word >>> 24] + HEX[(word >>> 16) & 255] + HEX[(word >>> 8) & 255] + HEX[word & 255];
+    return out;
 }
 
 // ---------- normalized JSON ----------

@@ -5,15 +5,15 @@
 //
 // The signs are v1's own, so nothing else sets them off: its public object, `globalThis.StoryBlock` with `apiVersion: 1` and
 // v1's block functions (v2's has `apiVersion: 2` and an sdk), seen before this file set its own or put back over it later;
-// and its settings drawer, whose element ids v2 never uses (index.v1.js). A legacy envelope in a chat is no sign: chats
+// and its settings drawer, whose element ids v2 never uses (v1's entry file, `index.js` on the `v1` branch). A legacy envelope in a chat is no sign: chats
 // made while v1 ran keep theirs after it is gone.
 
 export const V1_COPY_CODE = 'V1_COPY';
 export const V1_COPY_PROBLEM = 'An old copy of Story Block (version 1) seems to be installed too; remove it under Extensions.';
-// v1's settings drawer (index.v1.js): its Rescan button and its display and money pickers.
+// v1's settings drawer (v1's `index.js`, on the `v1` branch): its Rescan button and its display and money pickers.
 const V1_IDS = ['story_block_rescan', 'story_block_display', 'story_block_money'];
 
-/** True when `api` is v1's public object (index.v1.js: frozen, apiVersion 1, listBlocks / getBlock / registerBlock). */
+/** True when `api` is v1's public object (v1's `index.js`, on the `v1` branch: frozen, apiVersion 1, listBlocks / getBlock / registerBlock). */
 export function isV1Api(api) {
     if (!api || typeof api !== 'object') return false;
     try {

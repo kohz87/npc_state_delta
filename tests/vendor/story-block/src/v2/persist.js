@@ -401,6 +401,14 @@ export const RECHECK_MS = Object.freeze([10000, 20000, 40000, 80000, 160000]);
 // first one not yet saved.
 export const IDLE_MS = 1500;
 export const IDLE_MAX_MS = 8000;
+// After the turn's save, other parties keep changing the story for a while: a module's forwards (through
+// `sdk.command`) and the timeline participant's catch-up, seconds apart with model calls between, each of them
+// saving the whole chat 400 ms / IDLE_MS after itself. For FOLLOW_MS after a turn's (or late) save, such a
+// change joins one late window instead: saved LATE_MS after the last of them, and never later than
+// LATE_MAX_MS after the first one not yet saved. A generation starting ends the phase.
+export const LATE_MS = 6000;
+export const LATE_MAX_MS = 15000;
+export const FOLLOW_MS = 30000;
 export function createSaver({
     save, onError = null, timers = globalThis, verify = null, target = null, check = null, rescue = null,
     retry = [1000, 2000, 4000, 8000, 15000], waitMs = 200, waits = 50, timeout = 20000,
@@ -411,6 +419,8 @@ export function createSaver({
     let saved = 0;
     let timer = null;
     let deadline = null;        // the idle window's latest save (idle())
+    let lateWindow = false;     // the window was opened as a late one (late()) and the turn's save has not taken it over
+    let follow = null;          // timer: the turn's save went out less than FOLLOW_MS ago (late changes join a late window)
     let running = null;
     let latest = null;          // target of the newest change
     const orphans = [];         // [{ target, tries }]: changes of a chat that is no longer open
@@ -431,8 +441,19 @@ export function createSaver({
     function clearDeadline() {
         if (deadline !== null) timers.clearTimeout(deadline);
         deadline = null;
+        lateWindow = false;
+    }
+    function endFollow() {
+        if (follow !== null) timers.clearTimeout(follow);
+        follow = null;
+    }
+    function startFollow() {
+        endFollow();
+        follow = timers.setTimeout(() => { follow = null; }, FOLLOW_MS);
+        follow?.unref?.();
     }
     function cancel() {
+        endFollow();   // an explicit save (flush, saveSoon, urgent) or a chat switch ends the late phase
         clearTimer();
         clearDeadline();
     }
@@ -441,23 +462,34 @@ export function createSaver({
         clearTimer();
         timer = timers.setTimeout(() => {
             timer = null;
+            const window = deadline !== null;
             clearDeadline();
+            if (window) startFollow();
             saveNow().then(followUp, failed);
         }, ms);
         timer?.unref?.();
     }
 
+    // The window's latest save: `ms` after the call that opens it (a window already open keeps its own).
+    function openWindow(ms) {
+        if (deadline !== null) return;
+        deadline = timers.setTimeout(() => {
+            deadline = null;
+            lateWindow = false;
+            clearTimer();
+            startFollow();
+            saveNow().then(followUp, failed);
+        }, ms);
+        deadline?.unref?.();
+    }
+
     // The idle window (see IDLE_MS): each call puts the save `wait` ms after it, never past `max` ms after
     // the call that opened the window.
     function idle(wait = IDLE_MS, max = IDLE_MAX_MS) {
-        if (deadline === null) {
-            deadline = timers.setTimeout(() => {
-                deadline = null;
-                clearTimer();
-                saveNow().then(followUp, failed);
-            }, Math.max(wait, max));
-            deadline?.unref?.();
-        }
+        // The turn's save or a reader's action joins a late window: the window becomes the turn's own, with
+        // its shorter limit counted from now.
+        if (deadline !== null && lateWindow) clearDeadline();
+        openWindow(Math.max(wait, max));
         later(wait);
     }
 
@@ -783,6 +815,7 @@ export function createSaver({
          * (the page is going away and may cut that request off).
          */
         urgent({ force = false, ...options } = {}) {
+            endFollow();
             if (!sending || version === saved || !latest) return this.saveSoon(options);
             if (!force && sending.goal === version) return Promise.resolve(false);
             const now = latest;
@@ -811,11 +844,31 @@ export function createSaver({
          */
         idle,
         /**
+         * A module's own step after the reply (`sdk.command` with `background`; the only user of the late phase):
+         * inside the turn's window it is saveIdle; inside a late window the wait is extended (a pending failure retry
+         * is kept); within FOLLOW_MS of a window's save it opens a late window (LATE_MS, LATE_MAX_MS); otherwise it is
+         * the turn's save (IDLE_MS).
+         */
+        late() {
+            // A failed save's retry (backoff) is earlier than any late wait: it stays.
+            if (deadline !== null) {
+                if (!lateWindow) idle();
+                else if (failures === 0) later(LATE_MS);
+                return;
+            }
+            if (follow === null) { idle(); return; }
+            openWindow(LATE_MAX_MS);
+            lateWindow = true;
+            if (!(failures > 0 && timer !== null)) later(LATE_MS);
+        },
+        /**
          * Puts off the save that is only waiting (the reply's own save takes it along). Inside an idle window
          * its latest save (`max`) still stands, so a change never waits longer than that.
          */
         defer() {
+            endFollow();
             clearTimer();
+            if (lateWindow) clearDeadline();   // a late window's bound (15 s) must not outlive the generation that ends the phase
         },
         /** Saves now; resolves to true when saved, false when not (told and tried again). */
         saveSoon(options = {}) {

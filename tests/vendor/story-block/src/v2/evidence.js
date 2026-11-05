@@ -351,7 +351,7 @@ const checked = new WeakMap();
 
 /**
  * [{ proof, block }] a stored record holds on its blocks, in block order (kept per record). `parts` is the record's
- * blocks as the store replays them ([{ ops, span }], store.js blockParts). Only a block that replay could apply
+ * blocks as the store replays them ([{ ops, span }], store/memo.js blockParts). Only a block that replay could apply
  * counts: it has changes (an empty span is never replayed), its metadata is whole and is the record's own, and it holds
  * exactly the proof its changes pin. A block that is none of these gives none, whatever its span says.
  */
