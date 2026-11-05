@@ -425,8 +425,12 @@ const stripEvidenceCitations = item => {
 };
 export function stripRecordCitations(raw) {
     const out = { ...raw };
-    for (const key of CITATION_TEXT_FIELDS) if (typeof out[key] === 'string') out[key] = stripMessageCitations(out[key]);
-    for (const key of CITATION_LIST_FIELDS) if (Array.isArray(out[key])) out[key] = out[key].map(item => (typeof item === 'string' ? stripMessageCitations(item) : item));
+    // The reader's own fields (locked in the editor) and a cast pack's words still as the pack wrote them are not the scanner's: left as they are.
+    const locked = new Set(Array.isArray(raw?.manualProfileFields) ? raw.manualProfileFields.map(value => String(value || '').trim()) : []);
+    const first = raw?.castFrom?.first && typeof raw.castFrom.first === 'object' ? raw.castFrom.first : {};
+    const keep = key => locked.has(key) || (first[key] !== undefined && JSON.stringify(first[key]) === JSON.stringify(out[key]));
+    for (const key of CITATION_TEXT_FIELDS) if (typeof out[key] === 'string' && !keep(key)) out[key] = stripMessageCitations(out[key]);
+    for (const key of CITATION_LIST_FIELDS) if (Array.isArray(out[key]) && !keep(key)) out[key] = out[key].map(item => (typeof item === 'string' ? stripMessageCitations(item) : item));
     if (Array.isArray(out.appearanceForms)) {
         out.appearanceForms = out.appearanceForms.map(form => (form && typeof form.appearance === 'string' ? { ...form, appearance: stripMessageCitations(form.appearance) } : form));
     }

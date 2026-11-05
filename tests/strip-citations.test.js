@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { stripMessageCitations } from '../core-text.js';
 import { buildInjection, createNpcRecord, mergeScanResult, normalizeNpcRecord } from '../core.js';
 import { tagScanEvidence } from '../core-evidence.js';
+import { stripRecordCitations } from '../core-record.js';
 
 const USER_SENTENCE = 'Young woman with a slight frame and an easily distressed demeanor';
 
@@ -15,7 +16,7 @@ test('each citation pattern goes, with no stray space or punctuation left', () =
         ['calm [m1] and', 'calm and'], ['calm [m1, m2] and', 'calm and'], ['calm [m1,m2,m14] and', 'calm and'],
         ['calm [m3-m5] and', 'calm and'], ['calm [m3–5] and', 'calm and'], ['calm [m3–m5] and', 'calm and'],
         ['calm (m1, m2) and', 'calm and'], ['calm [message 12] and', 'calm and'], ['calm [messages 3, 4] and', 'calm and'],
-        ['calm [message 12 · user] and', 'calm and'], ['calm [M7] and', 'calm and'],
+        ['calm [message 12 · user] and', 'calm and'], ['calm [M7] and', 'calm [M7] and'],
         ['calm [m1]. Next', 'calm. Next'], ['calm [m1], then', 'calm, then'], ['calm, [m1]', 'calm'],
         ['calm [m1] [m2] and', 'calm and'], ['[m1] calm', 'calm'], ['calm.[m1]', 'calm.'],
     ];
@@ -85,4 +86,16 @@ test('the narrator injection of a cleaned dossier shows no citation tags', () =>
     const text = buildInjection([npc], 'Mira hauls the tub.', 10, 3, undefined, 1800, null);
     assert.match(text, /easily distressed demeanor/);
     assert.doesNotMatch(text, /\[m\d|\(m\d|\[message/i);
+});
+
+test('review follow-ups: uppercase look-alikes stay; locked fields and unchanged pack words are not touched', () => {
+    assert.equal(stripMessageCitations('Room [M3] is cold'), 'Room [M3] is cold');
+    assert.equal(stripMessageCitations('Message [Message 4]'), 'Message [Message 4]');
+    assert.equal(stripMessageCitations('Gentle [m1, m2]'), 'Gentle');
+    const locked = stripRecordCitations({ personality: 'Lives in room (m2) by choice', manualProfileFields: ['personality'], speech: 'Soft [m3]' });
+    assert.equal(locked.personality, 'Lives in room (m2) by choice');
+    assert.equal(locked.speech, 'Soft');
+    const cast = stripRecordCitations({ overallAppearance: 'Wears the (m2) badge', castFrom: { first: { overallAppearance: 'Wears the (m2) badge' } }, mood: 'Calm [m4]' });
+    assert.equal(cast.overallAppearance, 'Wears the (m2) badge');
+    assert.equal(cast.mood, 'Calm');
 });
