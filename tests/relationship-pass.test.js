@@ -65,7 +65,7 @@ test('a decided NPC\'s primary relationship output is zeroed; matching by name r
 });
 
 test('index.js imports the pass and keeps no copy', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     assert.match(index, /\} from '\.\/src\/relationship-pass\.js';/);
     assert.doesNotMatch(runtimeSource(), /function (?:runFocusedRelationshipPass|applyFocusedRelationshipDecisions|suppressPrimaryRelationshipForFocusedDecisions|stampNpcChanges|currentExchangeRelationshipRelevant)\(/);
     assert.match(index, /suppressPrimaryRelationshipForFocusedDecisions\(fullWindowRelationship\.mergeSafe, relationshipPass\.decisions, \(\) => getChatState\(\)\.npcs\)/);

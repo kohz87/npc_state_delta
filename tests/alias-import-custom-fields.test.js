@@ -6,6 +6,7 @@ import { mergeImportedDossierState } from '../bundle.js';
 import { dossierDetailProjection, projectDossierState } from '../dossier-ui.js';
 import { dossierFields } from '../src/storysuite-v2.js';
 import { adapterSource } from './helpers/adapter-source.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // Cleanup step 7 (audit I-8, I-9, I-13): an alias merge keeps the newer custom values and live
 // state and honours an aliases lock; a bundle import honours the target's aliases lock; the Megumin
@@ -62,8 +63,8 @@ test('bundle import keeps the target\'s locked aliases', () => {
 });
 
 test('the Megumin dossier import merges configured custom fields like every other path', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
-    const importer = index.slice(index.indexOf('async function scanNpcDossier'), index.indexOf('function setNpcChatRefreshIndicator'));
+    const index = runtimeSource();
+    const importer = index.slice(index.indexOf('async function scanNpcDossier'), index.indexOf('function syncOpenNpcEditorFields'));
     assert.match(importer, /return runTargetedDossierPass\(\{/, 'the import runs the shared targeted pass');
     const runner = index.slice(index.indexOf('async function runTargetedDossierPass'), index.indexOf('function scopeTargetedChannels'));
     assert.match(runner, /customFieldNames: settings\.customFieldNames,/, 'whose merge gets the configured custom fields');

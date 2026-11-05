@@ -27,7 +27,7 @@ test('a reply rewritten in place by another extension is still the same reply (1
     assert.match(index, /function sameReplyRewritten\(chatKey, messageId, parentKey\)[\s\S]*?replyParentKey\(messageId\) === parentKey/);
     assert.match(index, /function lineageMoved\(previous, current, messageId\)[\s\S]*?at !== messageId \|\| previous\.length !== current\.length/);
     assert.match(index, /const sourceStillHere = \(\) => \{[\s\S]*?sameReplyRewritten\(eventChatKey, messageId, eventParent\)[\s\S]*?eventSourceKey = now;/);
-    assert.match(index, /if \(!sourceStillHere\(\)\) return;\n\n    \/\/ SillyTavern 1\.18 emits MESSAGE_SWIPED/);
+    assert.match(index, /if \(!sourceStillHere\(\)\) return;\n\n        \/\/ SillyTavern 1\.18 emits MESSAGE_SWIPED/);
     assert.match(index, /const sourceMoved = \(\) => getChatKey\(\) !== scanChatKey \|\| \(sourceFingerprint !== null[\s\S]*?!sameReplyRewritten\(scanChatKey, messageId, sourceParent\)\)/);
     assert.match(index, /operation\.sourceMessageId = Number\.isInteger\(messageId\) \? messageId : null;/);
     const scanNowBody = index.slice(index.indexOf('async function scanNow('), index.indexOf('\nasync function ', index.indexOf('async function scanNow(') + 10));
