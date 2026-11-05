@@ -804,7 +804,7 @@ test('the dossier panel and its sticky section bar are opaque: a floor under the
 });
 
 test('index.js wiring: the cast reader, the checkpoint, the dismissal check, the views (source)', () => {
-    const index = fs.readFileSync(fileURLToPath(new URL('../index.js', import.meta.url)), 'utf8');
+    const index = runtimeSource();
     assert.match(index, /commitBranchCheckpoint\(working, messageId, 'cast-dossier'\)/, 'a swipe takes the dossier back with its reply');
     assert.match(index, /castPersonDismissed\(state, person\)/, 'a dossier the reader removed is not made again');
     assert.match(index, /v2\.startStorySuiteV2\(\{[^}]*castSync/, 'the adapter calls the sync after the step');

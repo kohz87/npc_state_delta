@@ -12,6 +12,7 @@ import {
     runFocusedRelationshipPass,
     suppressPrimaryRelationshipForFocusedDecisions,
 } from '../src/relationship-pass.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // Cleanup step 10: the focused relationship pass moved from index.js to src/relationship-pass.js unchanged.
 
@@ -66,6 +67,6 @@ test('a decided NPC\'s primary relationship output is zeroed; matching by name r
 test('index.js imports the pass and keeps no copy', () => {
     const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
     assert.match(index, /\} from '\.\/src\/relationship-pass\.js';/);
-    assert.doesNotMatch(index, /function (?:runFocusedRelationshipPass|applyFocusedRelationshipDecisions|suppressPrimaryRelationshipForFocusedDecisions|stampNpcChanges|currentExchangeRelationshipRelevant)\(/);
+    assert.doesNotMatch(runtimeSource(), /function (?:runFocusedRelationshipPass|applyFocusedRelationshipDecisions|suppressPrimaryRelationshipForFocusedDecisions|stampNpcChanges|currentExchangeRelationshipRelevant)\(/);
     assert.match(index, /suppressPrimaryRelationshipForFocusedDecisions\(fullWindowRelationship\.mergeSafe, relationshipPass\.decisions, \(\) => getChatState\(\)\.npcs\)/);
 });

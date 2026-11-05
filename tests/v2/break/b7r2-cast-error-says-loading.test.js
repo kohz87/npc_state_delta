@@ -9,9 +9,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { runtimeSource } from '../../helpers/runtime-source.js';
 
 test('castEmptyReason tells a failed load apart from a load in progress', () => {
-    const source = fs.readFileSync(new URL('../../../index.js', import.meta.url), 'utf8');
+    const source = runtimeSource();
     const start = source.indexOf('function castEmptyReason()');
     assert.ok(start >= 0, 'castEmptyReason is in index.js');
     const body = source.slice(start, source.indexOf('\n}\n', start));

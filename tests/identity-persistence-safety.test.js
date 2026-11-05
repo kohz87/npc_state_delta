@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { bestAncestorState, chatLineage, recordBranchCheckpoint } from '../branch.js';
 import { encodeRetiredStateFilePayload, decodeStateFilePayload, makeNpcStateRecoveryFileName } from '../storage.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
-const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+const index = runtimeSource();
 const runtimeState = fs.readFileSync(new URL('../runtime-state.js', import.meta.url), 'utf8');
 const identity = fs.readFileSync(new URL('../identity.js', import.meta.url), 'utf8');
 const ci = fs.readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');

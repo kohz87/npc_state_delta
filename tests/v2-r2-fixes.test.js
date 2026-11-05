@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 import { CAST_TAB_ID, createStorySuiteV2Adapter } from '../src/storysuite-v2.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 import {
     PROMPT_NAME_MAX,
     buildBackfillPrompt,
@@ -128,7 +129,7 @@ test('R2-3: Delta\'s page events redraw the Cast tab only while the pane shows i
 // ---- R2-5: a sidecar that could not be read ----
 
 test('R2-5: a hydration error has its own Cast reason that points to Retry Load and Detach Broken Sidecar', () => {
-    const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const source = runtimeSource();
     const start = source.indexOf('function castEmptyReason()');
     const body = source.slice(start, source.indexOf('\n}\n', start));
     assert.match(body, /hydration === 'error'/);
@@ -239,7 +240,7 @@ test('C-1: the reader can still correct a death by hand', () => {
 });
 
 test('C-1: Story Block\'s scene cannot put a confirmed-dead NPC on stage (hosted presence view)', () => {
-    const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const source = runtimeSource();
     const start = source.indexOf('function scenePresenceView(npcs)');
     const body = source.slice(start, source.indexOf('\n}\n', start));
     assert.match(body, /here\.has\(String\(npc\.id\)\) && !npc\.archived && !isTerminalNpcDeath\(npc\)/);

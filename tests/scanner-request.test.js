@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { BACKFILL_RESPONSE_LENGTH, JSON_RETRY_RESPONSE_LENGTH, SCAN_RESPONSE_LENGTH, compactRetryPrompt, generateParsedNpcJson, isTruncatedScannerJsonError } from '../src/scanner-request.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // Cleanup step 10: the scanner request moved from index.js to src/scanner-request.js unchanged.
 
@@ -32,5 +33,5 @@ test('a text reply twice is reported with a short excerpt', async () => {
 test('index.js imports the request and keeps no copy', () => {
     const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
     assert.match(index, /generateParsedNpcJson,\n\} from '\.\/src\/scanner-request\.js';/);
-    assert.doesNotMatch(index, /function (?:generateParsedNpcJson|compactRetryPrompt|isTruncatedScannerJsonError)\(/);
+    assert.doesNotMatch(runtimeSource(), /function (?:generateParsedNpcJson|compactRetryPrompt|isTruncatedScannerJsonError)\(/);
 });
