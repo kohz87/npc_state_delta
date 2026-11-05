@@ -19,7 +19,7 @@ export { PROFILE_EVIDENCE_LIMIT, durableProfileEvidenceRelated, durableProfileEv
 export { KEY_RELATIONSHIP_LIMIT, normalizeKeyRelationshipEdges, extractExplicitKeyRelationshipEdges } from './core-keyrel.js';
 import { setNpcArchived, npcMatchesLabel, candidateRecordMatches, createNpcRecord } from './core-record.js';
 
-export { NPC_ADMISSION_MODES, IMPORTANT_MEMORY_LIMIT, PORTRAIT_SEED_MAX, normalizePortraitSeed, normalizeNpcAdmissionMode, setNpcArchived, NPC_CANDIDATE_TTL_TURNS, NPC_CANDIDATE_LIMIT, npcMatchesLabel, normalizeScanNpc, normalizeNpcCandidate, CUSTOM_FIELD_LIMIT, normalizeCustomFieldNames, normalizeCustomFields, customFieldValues, normalizeNpcRecord, createNpcRecord, applyStaleNpcLifecycle } from './core-record.js';
+export { NPC_ADMISSION_MODES, IMPORTANT_MEMORY_LIMIT, PORTRAIT_SEED_MAX, normalizePortraitSeed, normalizeNpcAdmissionMode, setNpcArchived, NPC_CANDIDATE_TTL_TURNS, NPC_CANDIDATE_LIMIT, npcMatchesLabel, normalizeScanNpc, normalizeNpcCandidate, CUSTOM_FIELD_LIMIT, normalizeCustomFieldNames, normalizeCustomFields, customFieldValues, normalizeNpcRecord, createNpcRecord, applyStaleNpcLifecycle, castAppearanceKept, CAST_APPEARANCE_WIDE } from './core-record.js';
 export { developmentEpisodeDiagnostic, developmentEpisodeEvidence, developmentScaleReady, resolveInterimIdentityPromotions } from './core-development.js';
 export { applyScenePresence, mergeScanResult, npcNamedInText } from './core-merge.js';
 

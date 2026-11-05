@@ -9,11 +9,14 @@
 // person is never more than a count to anyone but Story Director. `met.on`, `lastHeard.on` are story minutes (null when
 // unknown); `dateText` (minutes → "Gw 12") writes them on Story Director's calendar, words are kept as given.
 //
-// The pack entry: { id, name, aliases?, about, look, voice?, personality?, history?, portrait? (file name),
+// The pack entry: { id, name, aliases?, about, look, wears?, voice?, personality?, history?, portrait? (file name),
 // start: { place, goal, routine? }, drawnTo?[], meters?: { preset?, <meter>: n }, stages?[] ({ id, name, needs: [{ meter, at }], milestone }), fields?{}, secrets?[]
 // ({ title, text, meter + at | when }), canDieUnmet? }.
 //
-//   about → role, look → appearance, voice → speech, personality, history → background, start.place → home base,
+//   about → role, look → overallAppearance (the body: what lasts), wears → appearance (what they usually wear and carry: the current
+//   look; an older pack without `wears` mixed body and outfit in `look`: it still goes to overallAppearance, whole, and the current
+//   appearance stays empty for the scanner to fill from the story, so a later scan never merges its own physical text into outfit
+//   words or the other way round), voice → speech, personality, history → background, start.place → home base,
 //   start.goal → goal, the place they were met → location, fields → custom fields, meters (built-in four → the dossier's
 //   relationship numbers; any meter's value is also the first value in the saved slice, see src/npc-meters.js
 //   observeCast), meters.preset → the dossier's meter track, stages → the person's own stage ladder (castFrom.stages),
@@ -148,6 +151,7 @@ export function normalizeEntry(raw) {
         aliases: (Array.isArray(raw.aliases) ? raw.aliases : []).map(alias => clip(alias, NAME_MAX)).filter(alias => alias && labelKey(alias) !== labelKey(name)).slice(0, ALIASES_MAX),
         about: clip(raw.about, 300),
         look: clip(raw.look, TEXT_MAX),
+        wears: clip(raw.wears, TEXT_MAX),
         voice: clip(raw.voice, 600),
         personality: clip(raw.personality, 900),
         history: clip(raw.history, 1200),
@@ -248,7 +252,8 @@ export function applyCastEntry(base, person, { packName = '', portrait = null } 
     const npc = { ...base };
     npc.aliases = entry.aliases.filter(alias => labelKey(alias) !== labelKey(npc.name)).slice(0, ALIASES_MAX);
     if (entry.about) npc.role = entry.about;
-    if (entry.look) npc.appearance = entry.look;
+    if (entry.look) npc.overallAppearance = entry.look;
+    if (entry.wears) npc.appearance = entry.wears;
     if (entry.voice) npc.speech = entry.voice;
     if (entry.personality) npc.personality = entry.personality;
     if (entry.history) npc.background = entry.history;
@@ -270,7 +275,7 @@ export function applyCastEntry(base, person, { packName = '', portrait = null } 
         met: { on: person.met?.on ?? '', where: person.met?.where ?? '' },
         goal: entry.start.goal, routine: entry.start.routine,
         // The pack's own words, kept exactly while the stored field still is them (core-mechanics normalizeNpcRecord).
-        first: Object.fromEntries([['appearance', entry.look], ['speech', entry.voice], ['personality', entry.personality], ['background', entry.history]].filter(([, text]) => text)),
+        first: Object.fromEntries([['overallAppearance', entry.look], ['appearance', entry.wears], ['speech', entry.voice], ['personality', entry.personality], ['background', entry.history]].filter(([, text]) => text)),
         ...(entry.stages.length ? { stages: entry.stages } : {}),
     };
     return npc;

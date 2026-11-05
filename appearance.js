@@ -6,6 +6,8 @@ import {
     groundedAppearanceCorrection,
     isSafeUnmarkedDurableRefinement,
     isSafeUnmarkedDurableReplacement,
+    castAppearanceKept,
+    CAST_APPEARANCE_WIDE,
 } from './core-mechanics.js';
 
 export const APPEARANCE_FORM_LIMIT = 8;
@@ -21,22 +23,22 @@ function truthy(value) {
     if (typeof value === 'boolean') return value;
     return ['1', 'true', 'yes', 'on'].includes(String(value ?? '').trim().toLowerCase());
 }
-function appearanceText(value) { return clean(value, DURABLE_PROFILE_LIMITS?.appearance || 800); }
+function appearanceText(value, max = DURABLE_PROFILE_LIMITS?.appearance || 800) { return clean(value, max); }
 function sameAppearance(a, b) { return normalizeName(a) === normalizeName(b); }
 function regexEscape(value) { return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
-function appearanceClauses(value) {
-    return appearanceText(value).split(/\s*;\s*|(?<=[.!?])\s+/).map(part => appearanceText(part)).filter(Boolean);
+function appearanceClauses(value, max) {
+    return appearanceText(value, max).split(/\s*;\s*|(?<=[.!?])\s+/).map(part => appearanceText(part, max)).filter(Boolean);
 }
-function stripOverallPrefix(value, overall) {
-    const current = appearanceText(value);
-    const shared = appearanceText(overall);
+function stripOverallPrefix(value, overall, max) {
+    const current = appearanceText(value, max);
+    const shared = appearanceText(overall, max);
     if (!current || !shared) return current;
     if (sameAppearance(current, shared)) return '';
 
-    const sharedClauses = appearanceClauses(shared);
-    const currentClauses = appearanceClauses(current);
+    const sharedClauses = appearanceClauses(shared, max);
+    const currentClauses = appearanceClauses(current, max);
     const remaining = currentClauses.filter(clause => !sharedClauses.some(sharedClause => sameAppearance(clause, sharedClause)));
-    if (remaining.length !== currentClauses.length) return appearanceText(remaining.join('; '));
+    if (remaining.length !== currentClauses.length) return appearanceText(remaining.join('; '), max);
 
     // Some providers repeat the shared phrase before a comma/colon rather than as a complete
     // sentence. Match the exact normalized word sequence only, never loose keyword overlap, so
@@ -51,20 +53,20 @@ function stripOverallPrefix(value, overall) {
         if (match) {
             const remainder = current.slice(match[0].length);
             if (!/^\s*(?:is|are|was|were|be|been|being|not|never|no|hidden|covered|concealed|veiled|beneath|under|obscured)\b/i.test(remainder)) {
-                return appearanceText(remainder);
+                return appearanceText(remainder, max);
             }
         }
     }
     return current;
 }
-function combineAppearance(overall, specific) {
-    const shared = appearanceText(overall);
-    const local = stripOverallPrefix(specific, shared);
+function combineAppearance(overall, specific, max) {
+    const shared = appearanceText(overall, max);
+    const local = stripOverallPrefix(specific, shared, max);
     if (!shared) return local;
     if (!local) return shared;
     if (sameAppearance(shared, local)) return shared;
     if (normalizeName(local).startsWith(normalizeName(shared))) return local;
-    return appearanceText(`${shared.replace(/[\s.;,]+$/, '')}; ${local}`);
+    return appearanceText(`${shared.replace(/[\s.;,]+$/, '')}; ${local}`, max);
 }
 function formKey(value) { return clean(value, 120).normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim(); }
 function formState(value) {
@@ -344,9 +346,18 @@ export function appearanceFormByName(npc = {}, name = '') {
     return normalizeAppearanceForms(npc.appearanceForms ?? npc.appearance_forms).find(form => formKey(form.name) === key) || null;
 }
 
+// A cast dossier still holding the pack's own words (castFrom.first) keeps them whole: the physical text up to 1800 characters and the
+// resolved appearance ("<physical>; <wears>") up to the wide limit; every other dossier keeps the usual 800.
+function castWords(raw) {
+    const kept = castAppearanceKept(raw);
+    return { overall: kept.overall, wide: kept.overall || kept.appearance, resolved: kept.appearance && kept.split };
+}
+
 export function normalizeAppearanceModel(raw = {}, { locked = false } = {}) {
-    const appearance = locked ? clean(raw.appearance, 1800) : appearanceText(raw.appearance);
-    const overallAppearance = locked
+    const words = locked ? { overall: false, wide: false } : castWords(raw);
+    const wideMax = words.wide ? CAST_APPEARANCE_WIDE : undefined;
+    const appearance = locked ? clean(raw.appearance, 1800) : appearanceText(raw.appearance, wideMax);
+    const overallAppearance = locked || words.overall
         ? clean(raw.overallAppearance ?? raw.overall_appearance, 1800)
         : appearanceText(raw.overallAppearance ?? raw.overall_appearance);
     let unclassifiedAppearance = locked
@@ -369,7 +380,7 @@ export function normalizeAppearanceModel(raw = {}, { locked = false } = {}) {
     if (currentForm) currentFormUnknown = false;
     const convertingV1 = appearanceForms.length && overallAppearance && !(Number(raw.appearanceModelVersion) >= APPEARANCE_MODEL_VERSION);
     if (currentFormUnknown && !unclassifiedAppearance) {
-        unclassifiedAppearance = appearanceForms.length && !convertingV1 ? appearance : stripOverallPrefix(appearance, overallAppearance);
+        unclassifiedAppearance = appearanceForms.length && !convertingV1 ? appearance : stripOverallPrefix(appearance, overallAppearance, wideMax);
     }
     // A version-1 unknown-form presentation showed the overall features in front of it; keep that.
     if (convertingV1 && currentFormUnknown && unclassifiedAppearance) {
@@ -448,11 +459,16 @@ export function resolveNpcAppearance(rawNpc = {}) {
     // An unknown transformed form of an NPC with named forms is described completely too; the
     // overall slot serves only an NPC without forms.
     if (model.currentFormUnknown && model.appearanceForms.length) return appearanceText(model.unclassifiedAppearance || model.appearance);
+    const words = castWords(rawNpc);
+    const wideMax = words.wide ? CAST_APPEARANCE_WIDE : undefined;
+    // The stored text of a cast dossier still is "<pack's look>; <pack's wears>": it is already the resolved appearance, kept as it is
+    // (resolving it again would strip the look from it and join the outfit's sentences with "; " a second time).
+    if (words.resolved && !model.currentFormUnknown && !model.currentForm && model.appearance) return model.appearance;
     if (model.currentFormUnknown) return combineAppearance(overall, model.unclassifiedAppearance || model.appearance);
     if (model.currentForm) return combineAppearance(overall, model.unclassifiedAppearance || model.appearance);
     // Without a selected form, enduring physical features (the shared slot) plus the current
     // outfit/presentation make up what is visible now.
-    if (model.appearance || overall) return combineAppearance(overall, model.appearance);
+    if (model.appearance || overall) return combineAppearance(overall, model.appearance, wideMax);
     return appearanceFormByName(model, 'Base')?.appearance || model.appearanceForms[0]?.appearance || '';
 }
 
@@ -463,7 +479,7 @@ export function currentPresentationText(rawNpc = {}) {
         locked: Array.isArray(rawNpc?.manualProfileFields) && rawNpc.manualProfileFields.includes('appearance'),
     });
     if (model.currentForm || model.currentFormUnknown) return '';
-    return stripOverallPrefix(model.appearance, model.overallAppearance);
+    return stripOverallPrefix(model.appearance, model.overallAppearance, castWords(rawNpc).wide ? CAST_APPEARANCE_WIDE : undefined);
 }
 
 function reconcileFormAppearance(existing, update, context = '') {
