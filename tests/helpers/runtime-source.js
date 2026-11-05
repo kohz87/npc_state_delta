@@ -9,6 +9,9 @@ export const RUNTIME_SOURCE_FILES = [
     'index.js',
     'runtime-settings.js',
     'runtime-suite.js',
+    'runtime-inline-cards.js',
+    'runtime-settings-html.js',
+    'runtime-settings-bind.js',
 ];
 
 export function runtimeSource() {

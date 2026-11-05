@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { lifeStateChoice, setNodeTextIfChanged } from '../dossier-experience.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const source = fs.readFileSync(fileURLToPath(new URL('../dossier-experience.js', import.meta.url)), 'utf8');
 
@@ -107,7 +108,7 @@ test('editor uses one scroll body and task-grouped form sections', () => {
 });
 
 test('settings are grouped by task and extension-wide backup diagnostics live in Settings', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     const html = index.slice(index.indexOf('function buildSettingsHtml()'), index.indexOf('function readOpenSettingsGroups()'));
     const groups = [...html.matchAll(/settingsGroup\('([a-z]+)', '([^']+)'/g)].map(match => match[2]);
     // The rarely needed groups sit inside one closed "Expert" fold (built first in the source, shown last); the rest are the everyday groups.

@@ -7,6 +7,7 @@ import {
     normalizeScannerMaxOutputTokens,
     SCANNER_MAX_OUTPUT_TOKENS_MAX,
 } from '../scanner-routing.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 function fixture(profileId = '') {
     const calls = { host: [], profile: [] };
@@ -74,7 +75,7 @@ test('zero scanner output setting preserves built-in request lengths', async () 
 
 test('scanner output UI mounts into the Scanning slot, leaves panel styling to style.css, and keeps cast cards taller', () => {
     const source = fs.readFileSync(new URL('../scanner-output-ui.js', import.meta.url), 'utf8');
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     const css = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
     assert.match(source, /Maximum output tokens/);
     assert.match(source, /\[data-delta-settings-slot="scanner-output"\]/);

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { relationshipStepHtml } from '../dossier-ui.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const change = { impact: 'meaningful', delta: { trust: 3, affection: 0, desire: 0, tension: 2 }, reason: 'She trusted him with the key.', message: 14 };
 
@@ -30,7 +31,7 @@ test('v1.2.15 nothing beside a meter when the axis did not move, or the change i
 test('v1.2.15 the meters pass the last change and the latest reply; settings fold the rarely touched ones under Advanced', () => {
     const ui = fs.readFileSync(new URL('../dossier-ui.js', import.meta.url), 'utf8');
     assert.match(ui, /relationshipAxis\(label, selected\.relationship\[axis\], axis, selected\.lastRelationshipChange, this\.projection\?\.reply\)/);
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     const advanced = index.match(/const advanced = \[([\s\S]*?)\]\.join\(''\);/)?.[1] ?? '';
     for (const id of ['npc_state_delta_scan_depth', 'npc_state_delta_inject_budget', 'npc_state_delta_mid_delete_rewind', 'npc_state_delta_branch_rescan']) {
         assert.ok(advanced.includes(`'${id}'`), `${id} is under Advanced`);

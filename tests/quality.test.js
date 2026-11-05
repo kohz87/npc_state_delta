@@ -71,7 +71,7 @@ test('retired helper and legacy dossier CSS are absent', () => {
 });
 
 test('settings-only UI changes do not rewrite the per-chat sidecar', () => {
-    const body = functionBody(index, 'function bindUi()', "\n    $(document).on('click.npcStateDelta', '#npc_state_delta_scan_now'");
+    const body = functionBody(index, 'function bindUi()', "\n        $(document).on('click.npcStateDelta', '#npc_state_delta_scan_now'");
     assert.match(body, /bindSettingsCheckbox/);
     assert.match(body, /persistSettings\(\)/);
     assert.doesNotMatch(body, /\bpersist\(\)/);

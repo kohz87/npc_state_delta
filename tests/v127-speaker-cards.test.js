@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { othersSlotsHtml, presentSceneModel, speakerChatterHtml, speakerGroups } from '../present-scene.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // Present NPCs (1.2.7): someone who speaks in the chatter without a present card gets a card of
 // their own, in the same card-and-bubble cell; only lines with no speaker stay under Others.
@@ -35,7 +36,7 @@ test('v1.2.7 one speaker alone thinks; a line with no speaker stays under Others
 });
 
 test('v1.2.7 the roster renders speaker cards after the present ones: a dossier\'s portrait, else the initial', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     assert.match(index, /const speakerCells = speakerGroups\(scene\)\.map\(group => speakerCellHtml\(group, scene, messageId\)\)\.filter\(Boolean\);/);
     assert.match(index, /<small>\$\{visible\.length \+ speakerCells\.length\} shown<\/small>/, 'the count covers every card shown');
     assert.match(index, /othersSlotsHtml\(scene, \{ speakerless: true \}\)/);

@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { runtimeSource } from './helpers/runtime-source.js';
 
-const source=readFileSync(new URL('../index.js',import.meta.url),'utf8');
+const source=runtimeSource();
 const runtimeState=readFileSync(new URL('../runtime-state.js',import.meta.url),'utf8');
 
 test('runtime integration uses per-chat scan operations and no legacy global scanBusy flag',()=>{

@@ -15,6 +15,7 @@ import {
 } from '../src/key-people.js';
 import { fakeDocument } from './helpers/fake-dom.js';
 import { runHostScenario } from './helpers/host-scenario.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // Key people (the user's decision, 1 Nov): Story Director owns who is a key person and where they are; Delta reads
 // its query `director.keyPeople` and shows it (badge, "While away", ★ on cards and in the library), tells the narrator
@@ -274,7 +275,7 @@ test('the dossier shows the badge and "While away" (live and after the return); 
 });
 
 test('index.js wiring: the card tag, the badge data, the one-time note, the scan hold and the memory (source)', () => {
-    const index = fs.readFileSync(fileURLToPath(new URL('../index.js', import.meta.url)), 'utf8');
+    const index = runtimeSource();
     assert.match(index, /\$\{isKeyNpc\(npc\) \? '<span class="npc-state-delta-key-tag" title="Key person \(Story Director\)">★ Key<\/span>' : ''\}/);
     assert.match(index, /keyAwayScanOptions\(mergeBaseState\)/);
     assert.match(index, /\.\.\.\(awayNotes \? \{ awayNotes \} : \{\}\)/);
