@@ -325,28 +325,30 @@ export function createStorySuiteV2Adapter({
     // Delta's card settings (src/card-settings.js); registered with a Story Block that has sdk.registerCardSettings (2.21.0).
     cardSettings = null,
 } = {}) {
-    let started = false;
-    let pollTimer = null;
+    const session = {
+        started: false,
+        pollTimer: null,
+        sdkRef: null,           // the sdk we registered with (once per sdk)
+        hosted: false,
+        emptyCast: fallbackEmptyCast,
+        mounted: null,          // { el, node, placeholder, drawer } while the panel is in the overlay
+        pendingSection: null,   // a section element waiting for the panel to mount
+        castEl: null,           // the last element the Cast tab rendered into
+        pending: null,          // the connection attempt in progress, if any
+        baselineKey: null,      // the chat whose first loaded render was taken as the public paths' baseline
+        offPublicPaths: null,   // unregisters Delta's public paths (npc.<name>.<meter>); `.changed()` tells the host the values moved
+        lastTick: Promise.resolve(null),
+        listParts: null,        // loadDossierList's { rowNodes, project, filter } once loaded
+    };
     let aliveTimer = null;
     let watchTimer = null;
     let hostRef = null;          // the Story Block global we connected to
-    let sdkRef = null;           // the sdk we registered with (once per sdk)
-    let hosted = false;
-    let emptyCast = fallbackEmptyCast;
-    let mounted = null;          // { el, node, placeholder, drawer } while the panel is in the overlay
-    let pendingSection = null;   // a section element waiting for the panel to mount
-    let castEl = null;           // the last element the Cast tab rendered into
     const castViews = new Set(); // the game view's Cast screens (CAST_WIDGET) drawn now
     let listening = false;
-    let pending = null;          // the connection attempt in progress, if any
     let sectionLead = null;      // the meter presets block above Delta's panel in the settings section
     let offTurn = null;          // unsubscribes from the host's 'turn' event
     let offHead = null;          // unsubscribes from the host's 'head' event
     let offCardSettings = null;  // unregisters Delta's card settings
-    let baselineKey = null;      // the chat whose first loaded render was taken as the public paths' baseline
-    let offPublicPaths = null;   // unregisters Delta's public paths (npc.<name>.<meter>); `.changed()` tells the host the values moved
-    let lastTick = Promise.resolve(null);
-    let listParts = null;        // loadDossierList's { rowNodes, project, filter } once loaded
     let rowsCache = { key: null, rows: [] };
     const watchers = new Set();  // the page API's onChange subscribers
     const savedDisplay = new WeakMap();
@@ -390,7 +392,7 @@ export function createStorySuiteV2Adapter({
         return npc && typeof npc === 'object' ? npc : null;
     };
     const storedSettings = () => {
-        try { return sdkRef?.settings?.(MODULE_ID) ?? {}; } catch { return {}; }
+        try { return session.sdkRef?.settings?.(MODULE_ID) ?? {}; } catch { return {}; }
     };
 
     // ---- the npc slice (src/npc-meters.js) ----
@@ -399,17 +401,17 @@ export function createStorySuiteV2Adapter({
     // API yet (the part then uses the feature's default).
     const hostFeature = id => {
         try {
-            if (typeof sdkRef?.feature === 'function') return sdkRef.feature(id);
-            if (typeof sdkRef?.features?.isOn === 'function') return sdkRef.features.isOn(id);
+            if (typeof session.sdkRef?.feature === 'function') return session.sdkRef.feature(id);
+            if (typeof session.sdkRef?.features?.isOn === 'function') return session.sdkRef.features.isOn(id);
         } catch { /* the default */ }
         return undefined;
     };
     // The presets the reader may use: the built-in ones and the enabled packs' `meterPresets`.
     const catalog = () => {
         let records = [];
-        if (hosted && typeof sdkRef?.query === 'function') {
+        if (session.hosted && typeof session.sdkRef?.query === 'function') {
             try {
-                const list = sdkRef.query('packs.content', { kind: PRESET_KIND });
+                const list = session.sdkRef.query('packs.content', { kind: PRESET_KIND });
                 records = Array.isArray(list) ? list : [];
             } catch { records = []; }
         }
@@ -451,9 +453,9 @@ export function createStorySuiteV2Adapter({
     });
     // The slice entries at the head, by key (null when the host cannot answer).
     const sliceEntries = () => {
-        if (!hosted || typeof sdkRef?.query !== 'function') return null;
+        if (!session.hosted || typeof session.sdkRef?.query !== 'function') return null;
         try {
-            const list = sdkRef.query('npc.meters', {});
+            const list = session.sdkRef.query('npc.meters', {});
             return Array.isArray(list) ? list : null;
         } catch {
             return null;
@@ -473,7 +475,7 @@ export function createStorySuiteV2Adapter({
     // and the props are passed as they are: ss.meter reads only the props it knows).
     const meterProps = () => {
         try {
-            const widgets = typeof sdkRef?.widgets === 'function' ? sdkRef.widgets() : host()?.widgets;
+            const widgets = typeof session.sdkRef?.widgets === 'function' ? session.sdkRef.widgets() : host()?.widgets;
             const props = widgets?.['ss.meter']?.props;
             return props && typeof props === 'object' ? new Set(Object.keys(props)) : null;
         } catch {
@@ -607,8 +609,8 @@ export function createStorySuiteV2Adapter({
     // While hosted, the panel is hidden wherever it is except inside the overlay.
     function syncDrawer() {
         const node = panel();
-        if (!node || (mounted && mounted.node === node)) return;
-        if (hosted) hidePanel(node);
+        if (!node || (session.mounted && session.mounted.node === node)) return;
+        if (session.hosted) hidePanel(node);
         else showPanel(node);
     }
 
@@ -623,9 +625,9 @@ export function createStorySuiteV2Adapter({
     // one whose place is gone stays where it is.
     function unmountSection() {
         stopWatch();
-        if (!mounted) return;
-        const { el, node, placeholder, drawer, parent } = mounted;
-        mounted = null;
+        if (!session.mounted) return;
+        const { el, node, placeholder, drawer, parent } = session.mounted;
+        session.mounted = null;
         drawer?.classList?.remove?.('story-suite-drawer');
         if (node.dataset) delete node.dataset.storySuiteMoved;
         clearLead(node);
@@ -641,8 +643,8 @@ export function createStorySuiteV2Adapter({
         // The overlay may drop the section's element without telling anyone: the panel then goes
         // home at once, so Delta's own code (which finds it by id) keeps finding it.
         watchTimer = timers.setInterval?.(() => {
-            if (!mounted) return stopWatch();
-            if (!mounted.el.isConnected || mounted.node.parentNode !== mounted.el) unmountSection();
+            if (!session.mounted) return stopWatch();
+            if (!session.mounted.el.isConnected || session.mounted.node.parentNode !== session.mounted.el) unmountSection();
         }, watchMs) ?? null;
         watchTimer?.unref?.();
     }
@@ -669,21 +671,21 @@ export function createStorySuiteV2Adapter({
     // `lead`: the meter presets block, shown in Delta's "Meter presets" fold (above the panel when it has none).
     function mountSection(el, lead = null) {
         if (!el) return () => {};
-        if (mounted && mounted.el !== el) unmountSection();
+        if (session.mounted && session.mounted.el !== el) unmountSection();
         const node = panel();
         if (lead) sectionLead = lead;
         if (!node) {
-            pendingSection = el;
+            session.pendingSection = el;
             const loading = "NPC State Delta's settings are still loading.";
             if (sectionLead && typeof el.replaceChildren === 'function' && typeof doc?.createElement === 'function') {
                 const line = doc.createElement('p');
                 line.textContent = loading;
                 el.replaceChildren(sectionLead, line);
             } else el.textContent = loading;
-            return () => { if (pendingSection === el) pendingSection = null; };
+            return () => { if (session.pendingSection === el) session.pendingSection = null; };
         }
-        pendingSection = null;
-        if (!mounted) {
+        session.pendingSection = null;
+        if (!session.mounted) {
             const placeholder = doc.createElement('div');
             placeholder.className = 'story-suite-placeholder';
             placeholder.hidden = true;
@@ -694,7 +696,7 @@ export function createStorySuiteV2Adapter({
             const drawer = node.querySelector?.('.inline-drawer') || null;
             drawer?.classList?.add?.('story-suite-drawer');
             if (node.dataset) node.dataset.storySuiteMoved = MODULE_ID;
-            mounted = { el, node, placeholder, drawer, parent: placeholder.parentNode };
+            session.mounted = { el, node, placeholder, drawer, parent: placeholder.parentNode };
         }
         showPanel(node);
         const top = sectionLead && sectionLead.ownerDocument === node.ownerDocument ? sectionLead : null;
@@ -707,7 +709,7 @@ export function createStorySuiteV2Adapter({
             el.appendChild(node);
         }
         watchSection();
-        return () => { if (mounted?.el === el) unmountSection(); };
+        return () => { if (session.mounted?.el === el) unmountSection(); };
     }
 
     // ---- the Dossiers tab (once Cast) ----
@@ -737,18 +739,18 @@ export function createStorySuiteV2Adapter({
     // Whether Story Director's World screen shows the present cast (its feature on); a host without the
     // Features API: whether Story Director is registered.
     function worldShown() {
-        if (!hosted) return false;
+        if (!session.hosted) return false;
         const on = hostFeature(WORLD_FEATURE);
         if (on !== undefined) return on === true;
-        try { return (sdkRef?.modules?.() ?? []).some(module => module?.id === 'story-director'); } catch { return false; }
+        try { return (session.sdkRef?.modules?.() ?? []).some(module => module?.id === 'story-director'); } catch { return false; }
     }
 
     // Story Director's key people (`director.keyPeople`, read only) as it answers, or null: not hosted, no Story Director,
     // or one without the query. Null means "no key people anywhere", never an error.
     function keyPeopleAnswer() {
-        if (!hosted || typeof sdkRef?.query !== 'function') return null;
+        if (!session.hosted || typeof session.sdkRef?.query !== 'function') return null;
         try {
-            const answer = sdkRef.query(KEY_PEOPLE_QUERY, {});
+            const answer = session.sdkRef.query(KEY_PEOPLE_QUERY, {});
             return Array.isArray(answer) ? answer : null;
         } catch {
             return null;
@@ -756,9 +758,9 @@ export function createStorySuiteV2Adapter({
     }
     // The memory of key people's last absences (npc.keyAway; the slice's `keyAway`), {} when there is none or no host.
     function keyAwayMemory() {
-        if (!hosted || typeof sdkRef?.query !== 'function') return {};
+        if (!session.hosted || typeof session.sdkRef?.query !== 'function') return {};
         try {
-            const memory = sdkRef.query('npc.keyAway', {});
+            const memory = session.sdkRef.query('npc.keyAway', {});
             return memory && typeof memory === 'object' && !Array.isArray(memory) ? memory : {};
         } catch {
             return {};
@@ -767,9 +769,9 @@ export function createStorySuiteV2Adapter({
     // The living cast (Story Director's `director.cast`, read only): the cleaned answer with its dates written on Story Director's
     // calendar, or null (not hosted, no Story Director, or one without the query). Null means "no cast anywhere".
     function castAnswer() {
-        if (!hosted || typeof sdkRef?.query !== 'function') return null;
+        if (!session.hosted || typeof session.sdkRef?.query !== 'function') return null;
         try {
-            const answer = sdkRef.query(CAST_QUERY, {});
+            const answer = session.sdkRef.query(CAST_QUERY, {});
             return Array.isArray(answer) ? answer : null;
         } catch {
             return null;
@@ -783,9 +785,9 @@ export function createStorySuiteV2Adapter({
     }
     // The slice's record of the cast dossiers made (npc.castMade), {} when there is none or no host.
     function castMade() {
-        if (!hosted || typeof sdkRef?.query !== 'function') return {};
+        if (!session.hosted || typeof session.sdkRef?.query !== 'function') return {};
         try {
-            const made = sdkRef.query('npc.castMade', {});
+            const made = session.sdkRef.query('npc.castMade', {});
             return made && typeof made === 'object' && !Array.isArray(made) ? made : {};
         } catch {
             return {};
@@ -793,9 +795,9 @@ export function createStorySuiteV2Adapter({
     }
     // Packs' names by id (`packs.list`), for the badge; {} when the host cannot say.
     function packNames() {
-        if (!hosted || typeof sdkRef?.query !== 'function') return {};
+        if (!session.hosted || typeof session.sdkRef?.query !== 'function') return {};
         try {
-            const list = sdkRef.query('packs.list', {});
+            const list = session.sdkRef.query('packs.list', {});
             return Object.fromEntries((Array.isArray(list) ? list : []).filter(pack => pack && typeof pack.id === 'string')
                 .map(pack => [pack.id, String(pack.name ?? pack.title ?? '').trim()]).filter(([, name]) => name));
         } catch {
@@ -804,23 +806,23 @@ export function createStorySuiteV2Adapter({
     }
     // A pack portrait's image URL (`packs.portrait`) as a safe URL (safeImageUrl), or null.
     function packPortraitUrl(pack, file) {
-        if (!hosted || typeof sdkRef?.query !== 'function' || !pack || !file) return null;
-        try { return safeImageUrl(sdkRef.query(PORTRAIT_QUERY, { pack, file })); } catch { return null; }
+        if (!session.hosted || typeof session.sdkRef?.query !== 'function' || !pack || !file) return null;
+        try { return safeImageUrl(session.sdkRef.query(PORTRAIT_QUERY, { pack, file })); } catch { return null; }
     }
     // A pack cast member's one "Gear: A, B" line (`packs.castGear`), or '' (no host, an older Story Block without the query, or it answers null).
     function castGearLine(name) {
-        if (!hosted || typeof sdkRef?.query !== 'function' || !name) return '';
+        if (!session.hosted || typeof session.sdkRef?.query !== 'function' || !name) return '';
         try {
-            const line = sdkRef.query(CAST_GEAR_QUERY, { name })?.line;
+            const line = session.sdkRef.query(CAST_GEAR_QUERY, { name })?.line;
             return typeof line === 'string' ? line.replace(/\s+/g, ' ').trim() : '';
         } catch { return ''; }
     }
     // Whether Story Director offers the reader's pin (`keypeople.pin`, registered by a ready module, its feature not switched off).
     // Delta only ever asks; Story Director's own command writes its own state.
     function keyPinOffered() {
-        if (!hosted || typeof sdkRef?.modules !== 'function') return false;
+        if (!session.hosted || typeof session.sdkRef?.modules !== 'function') return false;
         try {
-            const offered = (sdkRef.modules() ?? []).some(module => module?.status === 'ready' && Array.isArray(module.commands) && module.commands.includes(KEY_PIN_COMMAND));
+            const offered = (session.sdkRef.modules() ?? []).some(module => module?.status === 'ready' && Array.isArray(module.commands) && module.commands.includes(KEY_PIN_COMMAND));
             return offered && hostFeature(KEY_PEOPLE_FEATURE) !== false;
         } catch {
             return false;
@@ -841,7 +843,7 @@ export function createStorySuiteV2Adapter({
     // key people carry their dates as story minutes, which index.js writes on it (calendar.js storyMinuteText).
     function directorCalendar() {
         try {
-            const config = hosted && typeof sdkRef?.query === 'function' ? sdkRef.query('director.calendar', {}) : null;
+            const config = session.hosted && typeof session.sdkRef?.query === 'function' ? session.sdkRef.query('director.calendar', {}) : null;
             return config && typeof config === 'object' && Array.isArray(config.months) ? config : null;
         } catch {
             return null;
@@ -859,12 +861,12 @@ export function createStorySuiteV2Adapter({
         const api = runtime();
         let revision = '';
         try { revision = String(api?.dossierRevision?.() ?? ''); } catch { revision = ''; }
-        const key = revision ? `${listParts ? 'full' : 'plain'}|${revision}` : null;
+        const key = revision ? `${session.listParts ? 'full' : 'plain'}|${revision}` : null;
         if (key && rowsCache.key === key) return rowsCache.rows;
         let rows = [];
         try {
-            const state = listParts?.project ? api?.getDossierState?.() : null;
-            if (state && Array.isArray(state.npcs)) rows = state.npcs.map(npc => listParts.project(npc, state.portraitAssets || {}));
+            const state = session.listParts?.project ? api?.getDossierState?.() : null;
+            if (state && Array.isArray(state.npcs)) rows = state.npcs.map(npc => session.listParts.project(npc, state.portraitAssets || {}));
             else {
                 rows = npcList().map(npc => ({
                     id: String(npc.id ?? ''), name: String(npc.name ?? '').trim() || 'Unnamed NPC', aliases: Array.isArray(npc.aliases) ? npc.aliases : [],
@@ -901,14 +903,14 @@ export function createStorySuiteV2Adapter({
         const rows = dossierRows();
         let visible;
         try {
-            if (listParts?.filter) visible = listParts.filter(rows, { query });
+            if (session.listParts?.filter) visible = session.listParts.filter(rows, { query });
             else {
                 const needle = String(query).trim().toLocaleLowerCase();
                 visible = rows.filter(row => !needle || [row.name, ...(row.aliases ?? [])].some(name => String(name).toLocaleLowerCase().includes(needle)));
             }
         } catch { visible = rows; }
         try {
-            return listParts?.rowNodes ? listParts.rowNodes(withMeters(visible), doc, { query, total: rows.length }) : plainRowNodes(visible, doc, rows.length);
+            return session.listParts?.rowNodes ? session.listParts.rowNodes(withMeters(visible), doc, { query, total: rows.length }) : plainRowNodes(visible, doc, rows.length);
         } catch {
             return plainRowNodes(visible, doc, rows.length);
         }
@@ -923,11 +925,11 @@ export function createStorySuiteV2Adapter({
     }
     function withMeters(rows) {
         rows = withKeyMarks(rows);
-        if (!hosted || !rows.length || typeof sdkRef?.query !== 'function') return rows;
+        if (!session.hosted || !rows.length || typeof session.sdkRef?.query !== 'function') return rows;
         let cast;
         try {
             const head = headReply?.();
-            cast = sdkRef.query('npc.cast', Number.isInteger(head) ? { headReply: head } : {});
+            cast = session.sdkRef.query('npc.cast', Number.isInteger(head) ? { headReply: head } : {});
         } catch {
             return rows;
         }
@@ -961,11 +963,11 @@ export function createStorySuiteV2Adapter({
     // lines gave meters who have no dossier yet (no scan has made one), straight from the state: those Story Block's scene has
     // here, or all of them when the scene cannot say. → { shown, byKey, cast } or null.
     function meterEntries() {
-        if (!hosted || typeof sdkRef?.query !== 'function') return null;
+        if (!session.hosted || typeof session.sdkRef?.query !== 'function') return null;
         let cast;
         try {
             const head = headReply?.();
-            cast = sdkRef.query('npc.cast', Number.isInteger(head) ? { headReply: head } : {});
+            cast = session.sdkRef.query('npc.cast', Number.isInteger(head) ? { headReply: head } : {});
         } catch {
             return null;
         }
@@ -979,7 +981,7 @@ export function createStorySuiteV2Adapter({
         }
         let scene = null;
         try {
-            const list = sdkRef.query('scene.present');
+            const list = session.sdkRef.query('scene.present');
             scene = Array.isArray(list) ? list.map(name => part.identify(byKey, String(name ?? ''))?.key).filter(Boolean) : null;
         } catch { scene = null; }
         for (const entry of cast) {
@@ -1014,15 +1016,15 @@ export function createStorySuiteV2Adapter({
     // notes (opened and hidden) stay in the dossier and on the Dossiers screen.
     function renderCast(el, { track = true, cast = true, list = false, people = false } = {}) {
         if (!el) return;
-        if (track) castEl = el;
+        if (track) session.castEl = el;
         bindCastActions(el);
         const api = runtime();
         const owner = el.ownerDocument ?? doc;
         let body = '';
         if (cast) {
-            if (!api) body = emptyCast({ text: 'NPC State Delta is still loading.' });
-            else if (!enabled()) body = emptyCast({ text: 'NPC State Delta is off.' });
-            else body = String(api.presentCastHtml?.() || '') || emptyCast(api.castEmptyReason?.());
+            if (!api) body = session.emptyCast({ text: 'NPC State Delta is still loading.' });
+            else if (!enabled()) body = session.emptyCast({ text: 'NPC State Delta is off.' });
+            else body = String(api.presentCastHtml?.() || '') || session.emptyCast(api.castEmptyReason?.());
         }
         // World → Here (track false) shows no meters: its present cards keep the stage, notes and now lines; the Dossiers screen keeps the meters.
         const world = track === false;
@@ -1030,8 +1032,8 @@ export function createStorySuiteV2Adapter({
         let listPart = null;
         let listText = '';
         if (list && !(cast && (!api || !enabled()))) {
-            if (!api) listText = emptyCast({ text: 'NPC State Delta is still loading.' });
-            else if (!enabled()) listText = emptyCast({ text: 'NPC State Delta is off.' });
+            if (!api) listText = session.emptyCast({ text: 'NPC State Delta is still loading.' });
+            else if (!enabled()) listText = session.emptyCast({ text: 'NPC State Delta is off.' });
             else listPart = dossierListNode(el, owner);
         }
         const pane = `<div class="${PANE_CLASS}">${body}${listText}</div>`;
@@ -1147,7 +1149,7 @@ export function createStorySuiteV2Adapter({
     const pageApi = Object.freeze({
         version: 1,
         /** True while Delta is hosted, loaded and on: its cards can be drawn. */
-        available: () => hosted && Boolean(runtime()) && enabled(),
+        available: () => session.hosted && Boolean(runtime()) && enabled(),
         /** Draws the present cast's cards and meters into `el`; → how many present cards it drew (0: none, or not available). */
         render(el, { slot = null } = {}) {
             if (!el || !pageApi.available()) return 0;
@@ -1250,7 +1252,7 @@ export function createStorySuiteV2Adapter({
         const write = ids => {
             try {
                 if (typeof api?.set === 'function') api.set('presets', ids);
-                else sdkRef?.settings?.set?.(MODULE_ID, 'presets', ids);
+                else session.sdkRef?.settings?.set?.(MODULE_ID, 'presets', ids);
             } catch (error) { warn('Story Suite v2 preset setting failed', error); }
         };
         const draw = () => {
@@ -1306,7 +1308,7 @@ export function createStorySuiteV2Adapter({
     // ---- the per-reply step (npc.tick) ----
 
     function onTurn(turn) {
-        if (!hosted || !TICK_TURNS.includes(turn?.type) || !enabled()) return;
+        if (!session.hosted || !TICK_TURNS.includes(turn?.type) || !enabled()) return;
         let wanted = false;
         try { wanted = part.tickWanted(); } catch { wanted = false; }
         // Key people (Story Director's): the step also keeps the memory of their last absence up to date.
@@ -1318,7 +1320,7 @@ export function createStorySuiteV2Adapter({
             portraitFill();
             return;
         }
-        lastTick = send('npc.tick', {}, { own: true }).then(async out => {
+        session.lastTick = send('npc.tick', {}, { own: true }).then(async out => {
             await madeCastSync();
             return out;
         });
@@ -1338,7 +1340,7 @@ export function createStorySuiteV2Adapter({
     // the pictures imported later). Asked when it can be: the step, the head changing, the host accepting Delta, the Dossiers tab drawn
     // (and the chat opening, index.js). Only when there is a picture to give, so nothing else is sent or saved.
     function portraitFill() {
-        if (!hosted || typeof castSync !== 'function' || typeof castPortraitDue !== 'function') return;
+        if (!session.hosted || typeof castSync !== 'function' || typeof castPortraitDue !== 'function') return;
         let due = false;
         try { due = castPortraitDue() === true; } catch { due = false; }
         if (due) void madeCastSync();
@@ -1354,7 +1356,7 @@ export function createStorySuiteV2Adapter({
             const npcs = suiteApi?.npcs?.() ?? [];
             if (Array.isArray(npcs)) lines.push(`Dossiers in this chat: ${npcs.filter(npc => !npc?.archived).length} active, ${npcs.filter(npc => npc?.archived).length} archived, ${npcs.filter(npc => npc?.present).length} present.`);
         } catch { /* the counts are optional */ }
-        lines.push(`Hosted in Story Block: ${hosted ? 'yes' : 'no'}. Settings panel in the overlay: ${mounted ? 'yes' : 'no'}.`);
+        lines.push(`Hosted in Story Block: ${session.hosted ? 'yes' : 'no'}. Settings panel in the overlay: ${session.mounted ? 'yes' : 'no'}.`);
         return lines;
     }
 
@@ -1381,14 +1383,14 @@ export function createStorySuiteV2Adapter({
     // calendar in Delta (`calendarOwn`). calendar.js turns it
     // into a date on Delta's own calendar (storyClockDate) when the two calendars agree.
     function storyClock() {
-        if (!hosted || typeof sdkRef?.query !== 'function') return null;
+        if (!session.hosted || typeof session.sdkRef?.query !== 'function') return null;
         try { if (calendarOwn?.() === true) return null; } catch { return null; }
         let time = null;
         let calendar = null;
         try {
-            time = sdkRef.query('director.time', {});
+            time = session.sdkRef.query('director.time', {});
             if (!Number.isSafeInteger(time?.minutes)) return null;
-            calendar = sdkRef.query('director.calendar', {});
+            calendar = session.sdkRef.query('director.calendar', {});
         } catch {
             return null;
         }
@@ -1400,10 +1402,10 @@ export function createStorySuiteV2Adapter({
     // Whether Delta's calendar settings matter: Story Director's calendar answers (`director.calendar`) and the reader has
     // not kept the calendar in Delta, or neither. Read only; the settings panel's Expert note follows it.
     function calendarLink() {
-        if (!hosted || typeof sdkRef?.query !== 'function') return 'none';
+        if (!session.hosted || typeof session.sdkRef?.query !== 'function') return 'none';
         try { if (calendarOwn?.() === true) return 'own'; } catch { return 'none'; }
         try {
-            const calendar = sdkRef.query('director.calendar', {});
+            const calendar = session.sdkRef.query('director.calendar', {});
             return calendar && typeof calendar === 'object' && Array.isArray(calendar.months) ? 'story-director' : 'none';
         } catch {
             return 'none';
@@ -1422,7 +1424,7 @@ export function createStorySuiteV2Adapter({
     // after a restore the host hides the faded replies with SillyTavern's own flag as well. Never cached here: a delete or a swipe moves the indexes.
     const activeMessages = async () => {
         try {
-            const history = await sdkRef?.timeline?.history?.();
+            const history = await session.sdkRef?.timeline?.history?.();
             return history?.ok === true && Array.isArray(history.messages) ? history.messages.map(message => message?.active !== false) : null;
         } catch { return null; }
     };
@@ -1432,12 +1434,12 @@ export function createStorySuiteV2Adapter({
     // answers RESTORE_PENDING while it is up), so Delta asks it before it reads or writes the dossiers and waits for it. true once the barrier is
     // down (or when the host has no such barrier), false if it is still up after `settleMs`.
     const headSettled = async () => {
-        const head = sdkRef?.timeline?.head;
+        const head = session.sdkRef?.timeline?.head;
         if (typeof head !== 'function') return true;
         const until = Date.now() + settleMs;
         for (;;) {
             let answer = null;
-            try { answer = await sdkRef.timeline.head({}); } catch { return true; }
+            try { answer = await session.sdkRef.timeline.head({}); } catch { return true; }
             if (answer?.ok !== false || answer.code !== 'RESTORE_PENDING') return true;
             if (Date.now() >= until) return false;
             await new Promise(resolve => { const timer = setTimeout(resolve, settlePollMs); timer?.unref?.(); });
@@ -1565,42 +1567,42 @@ export function createStorySuiteV2Adapter({
     }
     // The values of a chat just opened are the host's baseline, not changes: registering again tells the host the paths came, not that values moved.
     function rebaselinePublicPaths() {
-        const sdk = sdkRef;
-        if (!hosted || !sdk || typeof offPublicPaths !== 'function') return;
-        try { offPublicPaths(); } catch (error) { warn('Story Block public paths could not be released', error); }
-        offPublicPaths = registerPublicPaths(sdk);
+        const sdk = session.sdkRef;
+        if (!session.hosted || !sdk || typeof session.offPublicPaths !== 'function') return;
+        try { session.offPublicPaths(); } catch (error) { warn('Story Block public paths could not be released', error); }
+        session.offPublicPaths = registerPublicPaths(sdk);
     }
 
     function listen() {
         if (listening || typeof doc?.addEventListener !== 'function') return;
         listening = true;
         doc.addEventListener(EVENTS.settingsMounted, () => {
-            if (!hosted) return;
-            if (pendingSection?.isConnected) mountSection(pendingSection);
+            if (!session.hosted) return;
+            if (session.pendingSection?.isConnected) mountSection(session.pendingSection);
             else syncDrawer();
         });
         // Delta's own page events (a cast drawn in the chat, Delta turned on or off) redraw the Cast
         // tab only while the pane still shows it; once the reader has moved to another tab the pane
         // is let go until the host renders the Cast tab again.
         const rerender = () => {
-            if (!hosted) return;
+            if (!session.hosted) return;
             // A scan that finished late moved moods and presence: the host compares and tells `story:changed`.
             // The first render of a chat's loaded dossiers is no news: its values are the baseline (a quiet re-registration).
             try {
                 const key = chatKeyOf();
-                if (key !== baselineKey) {
-                    if (dossiersReady()) { baselineKey = key; rebaselinePublicPaths(); }
-                } else offPublicPaths?.changed?.();
+                if (key !== session.baselineKey) {
+                    if (dossiersReady()) { session.baselineKey = key; rebaselinePublicPaths(); }
+                } else session.offPublicPaths?.changed?.();
             } catch (error) { warn('Story Block public paths change failed', error); }
             // Story Director's World screen (the page API's subscribers) redraws its cards too.
             notifyChange();
             redrawCastViews();
-            if (!castEl) return;
-            if (!castEl.isConnected || !castStillShown(castEl)) {
-                castEl = null;
+            if (!session.castEl) return;
+            if (!session.castEl.isConnected || !castStillShown(session.castEl)) {
+                session.castEl = null;
                 return;
             }
-            try { renderDossiers(castEl); } catch (error) { warn('Story Suite v2 Dossiers tab failed', error); }
+            try { renderDossiers(session.castEl); } catch (error) { warn('Story Suite v2 Dossiers tab failed', error); }
         };
         doc.addEventListener(EVENTS.castRendered, rerender);
         doc.addEventListener(EVENTS.enabledChanged, rerender);
@@ -1623,8 +1625,8 @@ export function createStorySuiteV2Adapter({
     // mood and presence. A tracked person with no entry in the slice yet reads from the dossier's relationship numbers (where the entry would start).
     // An archived person is left out. Nothing while Delta is off or the host is gone.
     function publicPeople() {
-        if (!hosted || !enabled() || typeof sdkRef?.query !== 'function') return [];
-        const rows = sdkRef.query('npc.meters', {});
+        if (!session.hosted || !enabled() || typeof session.sdkRef?.query !== 'function') return [];
+        const rows = session.sdkRef.query('npc.meters', {});
         if (!Array.isArray(rows)) return [];
         const defs = part.defs();
         const shown = defs.filter(def => def.show !== false);
@@ -1682,9 +1684,9 @@ export function createStorySuiteV2Adapter({
 
     // The names in Story Block's scene (`scene.present`), or null when it cannot answer; also the adapter's scenePresent().
     function scenePresentNames() {
-        if (!hosted || typeof sdkRef?.query !== 'function') return null;
+        if (!session.hosted || typeof session.sdkRef?.query !== 'function') return null;
         try {
-            const list = sdkRef.query('scene.present');
+            const list = session.sdkRef.query('scene.present');
             return Array.isArray(list) ? list.map(name => String(name ?? '').trim()).filter(Boolean) : null;
         } catch {
             return null;
@@ -1694,10 +1696,10 @@ export function createStorySuiteV2Adapter({
     // A cheap token of what publicPeople() reads: the slice's rows, the dossier revision, who is present, the meter settings and Delta's switch. While it is
     // the same the table built for one synchronous read is reused (src/public-paths.js); any change reads fresh.
     function publicVersion() {
-        if (!hosted || !enabled() || typeof sdkRef?.query !== 'function') return 'off';
+        if (!session.hosted || !enabled() || typeof session.sdkRef?.query !== 'function') return 'off';
         let revision = '';
         try { revision = String(runtime()?.dossierRevision?.() ?? ''); } catch { revision = ''; }
-        return JSON.stringify([revision, sdkRef.query('npc.meters', {}), scenePresentNames(), storedSettings()]);
+        return JSON.stringify([revision, session.sdkRef.query('npc.meters', {}), scenePresentNames(), storedSettings()]);
     }
 
     // Delta's public paths, for a Story Block that has sdk.registerPublicPaths (2.22.0); an older one has none and nothing happens.
@@ -1718,22 +1720,22 @@ export function createStorySuiteV2Adapter({
         if (host() !== from) {
             // Replaced while it was getting ready: look again (still within the bound).
             hostRef = null;
-            if (started) schedulePoll(attempt + 1);
+            if (session.started) schedulePoll(attempt + 1);
             return false;
         }
-        if (typeof sdk?.registerModule !== 'function' || sdkRef === sdk) return false;
-        sdkRef = sdk;
+        if (typeof sdk?.registerModule !== 'function' || session.sdkRef === sdk) return false;
+        session.sdkRef = sdk;
         // The host's registerModule is async: Delta is hosted (drawer copy, launcher and in-chat cast
         // step aside) only once the host has accepted the module, never on a refusal.
         try {
             await sdk.registerModule(definition);
         } catch (error) {
-            if (sdkRef === sdk) sdkRef = null;
+            if (session.sdkRef === sdk) session.sdkRef = null;
             warn('Story Suite v2 registration failed; Delta keeps working on its own', error);
             return false;
         }
-        if (!started || hostRef !== from || sdkRef !== sdk) return false;
-        hosted = true;
+        if (!session.started || hostRef !== from || session.sdkRef !== sdk) return false;
+        session.hosted = true;
         try {
             const off = typeof sdk.on === 'function' ? sdk.on('turn', onTurn) : null;
             offTurn = typeof off === 'function' ? off : null;
@@ -1743,8 +1745,8 @@ export function createStorySuiteV2Adapter({
             offHead = typeof off === 'function' ? off : null;
         } catch (error) { warn('Story Suite v2 head events are not available', error); }
         offCardSettings = registerCardSettings(sdk, cardSettings);
-        offPublicPaths = registerPublicPaths(sdk);
-        baselineKey = dossiersReady() ? chatKeyOf() : null;
+        session.offPublicPaths = registerPublicPaths(sdk);
+        session.baselineKey = dossiersReady() ? chatKeyOf() : null;
         listen();
         syncDrawer();
         announceHosted(true);
@@ -1759,11 +1761,11 @@ export function createStorySuiteV2Adapter({
         hostRef = sb;
         const ready = typeof sb.ready?.then === 'function' ? sb.ready : Promise.resolve(sb.sdk);
         const cast = Promise.resolve().then(() => loadEmptyCast()).then(fn => {
-            if (typeof fn === 'function') emptyCast = fn;
+            if (typeof fn === 'function') session.emptyCast = fn;
         }, () => { /* keep the fallback line */ });
         // The dossier list's markup; until it loads (or if it cannot), plain rows of names.
         Promise.resolve().then(() => loadDossierList?.()).then(parts => {
-            if (parts && typeof parts.rowNodes === 'function') listParts = parts;
+            if (parts && typeof parts.rowNodes === 'function') session.listParts = parts;
         }, () => { /* plain rows */ });
         return Promise.all([ready, cast])
             .then(([sdk]) => register(sdk, sb, attempt))
@@ -1774,28 +1776,28 @@ export function createStorySuiteV2Adapter({
     }
 
     function poll(attempt) {
-        pollTimer = null;
-        if (!started || hostRef) return;
+        session.pollTimer = null;
+        if (!session.started || hostRef) return;
         const sb = host();
         if (isV2Host(sb)) {
-            pending = connect(sb, attempt);
+            session.pending = connect(sb, attempt);
             return;
         }
         schedulePoll(attempt + 1);
     }
 
     function schedulePoll(attempt) {
-        if (attempt > attempts || pollTimer !== null) return;
-        pollTimer = timers.setTimeout?.(() => poll(attempt), retryMs) ?? null;
-        pollTimer?.unref?.();
+        if (attempt > attempts || session.pollTimer !== null) return;
+        session.pollTimer = timers.setTimeout?.(() => poll(attempt), retryMs) ?? null;
+        session.pollTimer?.unref?.();
     }
 
     // The host went away (or was replaced): everything goes back as it was before hosting.
     function unhost() {
         if (aliveTimer !== null) timers.clearInterval?.(aliveTimer);
         aliveTimer = null;
-        const was = hosted;
-        hosted = false;
+        const was = session.hosted;
+        session.hosted = false;
         stopTimeline();
         try { offTurn?.(); } catch { /* the host is gone */ }
         offTurn = null;
@@ -1803,13 +1805,13 @@ export function createStorySuiteV2Adapter({
         offHead = null;
         try { offCardSettings?.(); } catch { /* the host is gone */ }
         offCardSettings = null;
-        try { offPublicPaths?.(); } catch { /* the host is gone */ }
-        offPublicPaths = null;
-        baselineKey = null;
+        try { session.offPublicPaths?.(); } catch { /* the host is gone */ }
+        session.offPublicPaths = null;
+        session.baselineKey = null;
         hostRef = null;
-        sdkRef = null;
-        pendingSection = null;
-        castEl = null;
+        session.sdkRef = null;
+        session.pendingSection = null;
+        session.castEl = null;
         unmountSection();
         syncDrawer();
         if (was) announceHosted(false);
@@ -1817,9 +1819,9 @@ export function createStorySuiteV2Adapter({
 
     /** Checks that the host is still there; restores the drawer and looks again when it is not. */
     function check() {
-        if (!hostRef || host() === hostRef) return hosted;
+        if (!hostRef || host() === hostRef) return session.hosted;
         unhost();
-        if (started) poll(0);
+        if (session.started) poll(0);
         return false;
     }
 
@@ -1828,11 +1830,11 @@ export function createStorySuiteV2Adapter({
     // A command to the host as Delta's own action (cause ui; the host keeps other causes for itself).
     // `own`: the command is one npc.adjust takes only from Delta itself (ownSends, while it runs).
     async function send(type, payload, { own = false } = {}) {
-        if (!hosted || typeof sdkRef?.command !== 'function') return null;
+        if (!session.hosted || typeof session.sdkRef?.command !== 'function') return null;
         const key = own ? sendKey(type, payload) : null;
         if (key) ownSends.set(key, (ownSends.get(key) ?? 0) + 1);
         try {
-            const out = await sdkRef.command(type, payload);
+            const out = await session.sdkRef.command(type, payload);
             if (out && out.ok === false && out.code !== 'REFUSED' && out.code !== 'NOT_FOUND') warn(`Story Suite v2 ${type} was not kept: ${out.message ?? out.code}`);
             return out ?? null;
         } catch (error) {
@@ -1852,7 +1854,7 @@ export function createStorySuiteV2Adapter({
      * has an entry; the same array when not hosted or when nothing differs. Never changes `npcs`.
      */
     function sliceView(npcs) {
-        if (!Array.isArray(npcs) || !hosted) return npcs;
+        if (!Array.isArray(npcs) || !session.hosted) return npcs;
         const entries = sliceEntries();
         if (!entries?.length) return npcs;
         let changed = false;
@@ -1888,7 +1890,7 @@ export function createStorySuiteV2Adapter({
      * values (the slice's). Every value is escaped.
      */
     function editorHtml(npc) {
-        if (!hosted || !npc) return '';
+        if (!session.hosted || !npc) return '';
         const settings = part.meterSettings();
         const entry = entryFor(sliceEntries(), npc);
         const setup = setupOf(npc);
@@ -1940,7 +1942,7 @@ export function createStorySuiteV2Adapter({
      */
     function readEditor(read, current) {
         const out = { problems: [] };
-        if (!hosted || typeof read !== 'function') return out;
+        if (!session.hosted || typeof read !== 'function') return out;
         const value = id => {
             try { const got = read(id); return got === null || got === undefined ? undefined : String(got); } catch { return undefined; }
         };
@@ -2039,11 +2041,11 @@ export function createStorySuiteV2Adapter({
      * [names], secrets: [see secretsViewOf] }. A hidden note is its rule only, never its title or text.
      */
     function dossierMeters(npcs) {
-        if (!hosted || !Array.isArray(npcs) || typeof sdkRef?.query !== 'function') return {};
+        if (!session.hosted || !Array.isArray(npcs) || typeof session.sdkRef?.query !== 'function') return {};
         let cast;
         try {
             const head = headReply?.();
-            cast = sdkRef.query('npc.cast', Number.isInteger(head) ? { headReply: head } : {});
+            cast = session.sdkRef.query('npc.cast', Number.isInteger(head) ? { headReply: head } : {});
         } catch {
             return {};
         }
@@ -2077,7 +2079,7 @@ export function createStorySuiteV2Adapter({
      * [{ key: 's1', id: dossier id, name, note: noteId, event }]. [] without a host or without such notes.
      */
     function eventWatch(npcs) {
-        if (!hosted || !Array.isArray(npcs)) return [];
+        if (!session.hosted || !Array.isArray(npcs)) return [];
         const entries = sliceEntries() ?? [];
         const out = [];
         let people = 0;
@@ -2154,9 +2156,9 @@ export function createStorySuiteV2Adapter({
          * when neither can answer. Both are optional: Delta alone (or Story Block alone) still works.
          */
         presentNow: () => {
-            if (!hosted || typeof sdkRef?.query !== 'function') return null;
+            if (!session.hosted || typeof session.sdkRef?.query !== 'function') return null;
             const ask = name => {
-                try { return sdkRef.query(name, {}); } catch { return undefined; }
+                try { return session.sdkRef.query(name, {}); } catch { return undefined; }
             };
             const here = ask('director.world.here');
             const list = Array.isArray(here?.present) ? here.present : ask('scene.present');
@@ -2173,7 +2175,7 @@ export function createStorySuiteV2Adapter({
          * go to the slice (npc.milestone, npc.set), then stages and notes are settled again (npc.refresh).
          */
         applyEditor: async (name, edits = {}) => {
-            if (!hosted) return null;
+            if (!session.hosted) return null;
             if (edits.meters && Object.keys(edits.meters).length) await send('npc.set', { name, meters: edits.meters });
             if (edits.milestones) await send('npc.milestone', { name, add: edits.milestones.add ?? [], remove: edits.milestones.remove ?? [] });
             if (edits.noteStates) await send('npc.open', { name, open: edits.noteStates.open ?? [], close: edits.noteStates.close ?? [] });
@@ -2190,27 +2192,27 @@ export function createStorySuiteV2Adapter({
         /** While hosted: Delta's per-reply step now (the host's 'turn' event sends it on its own). */
         tick: () => send('npc.tick', {}, { own: true }),
         /** Resolves once the latest per-reply step has settled. */
-        ticked: () => lastTick,
+        ticked: () => session.lastTick,
         /** Start looking for the host (idempotent). */
         start() {
-            if (started) return;
-            started = true;
+            if (session.started) return;
+            session.started = true;
             offerPage(true);
             poll(0);
         },
         /** Stop looking and give everything back (tests; a reload of Delta). */
         stop() {
-            started = false;
+            session.started = false;
             offerPage(false);
             watchers.clear();
-            if (pollTimer !== null) timers.clearTimeout?.(pollTimer);
-            pollTimer = null;
+            if (session.pollTimer !== null) timers.clearTimeout?.(session.pollTimer);
+            session.pollTimer = null;
             unhost();
         },
         check,
-        hosted: () => hosted,
+        hosted: () => session.hosted,
         /** Resolves (true when it registered) once the latest connection attempt has settled. */
-        settled: () => pending ?? Promise.resolve(false),
+        settled: () => session.pending ?? Promise.resolve(false),
     });
 }
 
