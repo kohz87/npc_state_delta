@@ -1433,7 +1433,8 @@ const STYLES = `
 #${ROOT_ID} .delta-rel-track { position:relative; height:8px; border-radius:999px; background:rgba(0,0,0,.34); border:1px solid rgba(255,255,255,.07); }
 #${ROOT_ID} .delta-v2-meters { margin-top:9px; }
 #${ROOT_ID} .delta-rel-ceiling { position:absolute; top:-3px; bottom:-3px; width:2px; background:rgba(235,163,163,.8); }
-#${ROOT_ID} .delta-v2-rank, #${ROOT_ID} .delta-v2-next, #${ROOT_ID} .delta-v2-milestones, #${ROOT_ID} .delta-v2-note { margin:6px 0 0; font-size:.8rem; }
+/* (p.class, so the 6px beats the rule giving .delta-section p no margin: it never applied, and "Next:" sat flush under the meters) */
+#${ROOT_ID} .delta-section p.delta-v2-rank, #${ROOT_ID} .delta-section p.delta-v2-next, #${ROOT_ID} .delta-section p.delta-v2-milestones, #${ROOT_ID} .delta-section p.delta-v2-note { margin:6px 0 0; font-size:.8rem; }
 #${ROOT_ID} .delta-rel-zero { position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:rgba(255,255,255,.32); }
 #${ROOT_ID} .delta-rel-track i { position:absolute; top:50%; width:10px; height:10px; transform:translate(-50%,-50%); border-radius:50%; background:var(--delta-accent); box-shadow:0 0 0 2px rgba(0,0,0,.45); }
 #${ROOT_ID} .delta-summary { margin-top:12px; padding-top:10px; border-top:1px solid rgba(218,193,148,.12); }
@@ -1489,6 +1490,9 @@ const STYLES = `
 #${ROOT_ID} .delta-error-copy { color:var(--delta-danger); }
 #${ROOT_ID} .delta-section-nav { position:sticky; top:-22px; z-index:3; display:flex; gap:6px; overflow-x:auto; margin:-26px 0 12px; padding:30px 0 8px; background-color:var(--delta-floor); background-image:linear-gradient(var(--delta-bg),var(--delta-bg)); scrollbar-width:none; }
 #${ROOT_ID} .delta-section-nav::-webkit-scrollbar { display:none; }
+/* The bar reaches up over the panel's padding (its negative margin), which is right as the first child but pulled it over the cast box that now comes before it: after the box the bar starts where the box ends (its 10px margin cancels the -10px; the 30px padding is the gap, and stays the cover once the bar is stuck). */
+#${ROOT_ID} .delta-cast-from + .delta-section-nav { margin-top:-10px; }
+#${ROOT_ID} .delta-section .delta-rel-grid + p { margin-top:12px; }
 #${ROOT_ID} .delta-section-jump { appearance:none; flex:0 0 auto; min-height:30px; padding:4px 10px; border:1px solid rgba(218,193,148,.18); border-radius:999px; color:var(--delta-muted); background:rgba(255,255,255,.03); font-size:.74rem; cursor:pointer; }
 #${ROOT_ID} .delta-section-jump:hover { color:var(--delta-accent-soft); border-color:var(--delta-line-strong); background:rgba(216,188,120,.09); }
 #${ROOT_ID} [data-delta-section] { scroll-margin-top:52px; }
@@ -1542,6 +1546,7 @@ const STYLES = `
   #${ROOT_ID} .delta-hero { min-height:max(330px,min(62dvh,540px)); border-right:0; border-bottom:1px solid rgba(218,193,148,.16); }
   #${ROOT_ID} .delta-document { overflow:visible; }
   #${ROOT_ID} .delta-section-nav { top:0; margin-top:-4px; padding-top:8px; }
+  #${ROOT_ID} .delta-cast-from + .delta-section-nav { margin-top:-4px; }
   #${ROOT_ID} .delta-current-grid, #${ROOT_ID} .delta-prose-grid, #${ROOT_ID} .delta-two-column, #${ROOT_ID} .delta-rel-grid { grid-template-columns:1fr; }
   #${ROOT_ID} .delta-prose-grid .delta-wide { grid-column:auto; }
   #${ROOT_ID} .delta-cast-card { flex-basis:190px; }

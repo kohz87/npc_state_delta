@@ -983,6 +983,17 @@ test('runtime: the dossier view offers the Pin button while Story Director offer
     assert.equal(out.noDirector, false, 'no Story Director: no button');
 });
 
+test('the section bar after the cast box starts where the box ends, and the "Next:" line has its own space under the meters', () => {
+    const ui = fs.readFileSync(fileURLToPath(new URL('../dossier-ui.js', import.meta.url)), 'utf8');
+    // The bar's -26px margin collapsed with the box's 10px: it pulled its opaque padding over the box's bottom edge.
+    assert.match(ui, /\.delta-cast-from \+ \.delta-section-nav \{ margin-top:-10px; \}/, 'on the desktop the box margin and this one cancel: the bar starts at the box end');
+    assert.match(ui, /@media \(max-width: 650px\)[\s\S]*\.delta-cast-from \+ \.delta-section-nav \{ margin-top:-4px; \}/, 'on a phone the same, with that layout\'s -4px');
+    // `.delta-section p { margin:0 }` outranks a bare class: the 6px of the rank, next and milestones lines never applied.
+    assert.match(ui, /\.delta-section p\.delta-v2-next, [^\n]*\.delta-section p\.delta-v2-note \{ margin:6px 0 0;/);
+    assert.doesNotMatch(ui, /#\$\{ROOT_ID\} \.delta-v2-next/, 'no bare-class rule for the lines (it loses to .delta-section p)');
+    assert.match(ui, /\.delta-section \.delta-rel-grid \+ p \{ margin-top:12px; \}/, 'the first line under the meter grid gets 12px');
+});
+
 // ---- the opaque panel and section bar (a follow-up from the mockup) ----
 
 test('the dossier panel and its sticky section bar are opaque: a floor under the tint, the tint over it', () => {
