@@ -238,6 +238,7 @@ import { escapeHtml } from './src/util/html.js';
 import { createCardSettingsDefinition, SCAN_EVERY_RANGE } from './src/card-settings.js';
 import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, returnNote } from './src/key-people.js';
 import { applyCastEntry, applyCastPortrait, castPortraitWanted, castView, dossierFor, findCastPerson, markCastPortraitRemoved, metWithEntry, normalizeCast } from './src/cast-dossier.js';
+import { createRuntimeState } from './runtime-state.js';
 
 const EXTENSION_NAME = 'npc_state_delta';
 // The chat text helpers (src/transcript.js) read the host's chat and the Scan context setting.
@@ -254,27 +255,53 @@ const CAPTURE_RULES_KEY = 'story_suite_static_npc_state_delta';
 // Keys of earlier versions, emptied on load so a stale copy never lingers in the prompt.
 const LEGACY_PROMPT_KEYS = ['npc_state_delta_live_dossier', 'npc_state_delta_capture'];
 const UI_ID = 'npc_state_delta_settings';
-let eventsRegistered = false;
-let initialized = false;
+// Runtime state: closure variables and session collections the controller shares, held on one object created here so each import of this module gets its own (runtime-state.js).
+const rt = createRuntimeState();
+const {
+    branchReconciliationEvents,
+    chatStateCache,
+    hydratedChatKeys,
+    hydratedStateMeta,
+    workingCopyAdoptions,
+    freshnessChecks,
+    missingSidecarChats,
+    branchInheritanceChecked,
+    freshnessEvents,
+    loadingChatStates,
+    hydrationErrors,
+    pendingAutoScans,
+    assistantReceipts,
+    narrationCaptures,
+    catchUpChats,
+    captureRerenderPending,
+    stateWriteTimers,
+    stateWritePromises,
+    stateVersions,
+    persistedVersions,
+    ownershipEpochs,
+    chatCacheTouches,
+    lifecycleEventOperations,
+    lifecycleRetryTimers,
+    castPortraitMisses,
+    retiredInSessionChats,
+    nativeChangeListeners,
+    participantWrites,
+    scanIntents,
+    deferredWork,
+    staleHostChats,
+    openingHostChats,
+    emptyAnswerChats,
+    runningTargetedPasses,
+    captureCatchUp,
+    portraitActions,
+} = rt;
 let mountRetryTimer = null;
 let inlineRenderTimer = null;
-let inlineObserver = null;
-let inlineObserverChat = null;
 let inlineWatchdogTimer = null;
 let uiCaptureBridgeInstalled = false;
-let activeEditorPopup = null;
-let activeEditorChatKey = '';
-let activeEditorBaseRevision = null;
-let activePortraitGeneratorOverlay = null;
-let activePortraitGeneratorChatKey = '';
-let activePortraitGeneratorNpcId = '';
 let activePortraitGenerationUrl = '';
-let portraitGenerationBusy = false;
-let portraitSettingsDirty = false;
-let portraitSettingsSaveBusy = false;
 let lastPresentCardActivation = { npcId: '', at: 0 };
 let lastEditorActivation = { npcId: '', at: 0 };
-let lastScanMetrics = null;
 const diagnosticStore = createDiagnosticStore({ limit: 40 });
 function diagnosticNpcIds(scanResult = {}, report = null) {
     const values = [];
@@ -305,47 +332,14 @@ function recordScanDiagnostics(chatKey, metrics = {}, scanResult = {}, report = 
         birthdayDiagnostics: report?.birthdayDiagnostics || [],
     });
 }
-let branchReconcileTimer = null;
-let branchReconcilePending = null;
-const branchReconciliationEvents = [];
 const BRANCH_RECONCILIATION_EVENT_LIMIT = 16;
-let swipeSettlementTimer = null;
-let swipeSettlementPending = null;
-let deferredSwipeMessageId = null;
-let swipeSettlementSequence = 0;
 const SWIPE_SETTLE_POLL_MS = 80;
 const SWIPE_SETTLE_TIMEOUT_MS = 120000;
 const INLINE_HISTORY_LIMIT = 80;
 const STATE_WRITE_DELAY = 120;
-const chatStateCache = new Map();
-const hydratedChatKeys = new Set();
-const hydratedStateMeta = new Map();
-const workingCopyAdoptions = new Map();
-const freshnessChecks = new Map();
-// Chats whose deterministic sidecar this session looked for and did not find: "no sidecar yet" is
-// an empty dossier. While a Story Block v2 host carries Delta, automatic boundaries (chat events,
-// scan start and commit) trust that miss instead of asking the server again each time
-// (sidecarMissTrusted). The reader's own actions, page resume and the first save still look, and
-// that save never overwrites a file another session created. Without a v2 host nothing changes.
-const missingSidecarChats = new Set();
-// Chats whose branch inheritance (maybeInheritKnownBranch) has decided in this session (inherited, or nothing to inherit).
-const branchInheritanceChecked = new Set();
-const freshnessEvents = [];
 const FRESHNESS_EVENT_LIMIT = 24;
-const loadingChatStates = new Map();
-const hydrationErrors = new Map();
-const pendingAutoScans = new Map();
-const assistantReceipts = new Map();
-// One-pass narration capture: armed for each roleplay reply, stripped from the stored message on
-// receipt and consumed once by that message's automatic scan in place of the scanner request.
-// Kept in memory only; an edit, reload or broken block falls back to the ordinary scan.
-const narrationCaptures = new Map();
-// Chats whose last scan stopped before the latest reply (more waiting than one window holds): the next reply scans at once.
-const catchUpChats = new Set();
 const NARRATION_CAPTURE_LIMIT = 8;
 const narrationCaptureStats = { requested: 0, used: 0, missing: 0, invalid: 0, unterminated: 0, outdated: 0 };
-// The size of the last accepted one-pass capture block this session (0 until one arrives).
-let lastCaptureBlockChars = 0;
 // Swipe and regenerate rebuild the branch after the reply arrives, so their instruction would
 // describe the replaced sibling; only fresh replies and continues are asked for a block.
 const NARRATION_CAPTURE_TYPES = new Set(['', 'normal', 'continue']);
@@ -354,26 +348,11 @@ const NARRATION_CAPTURE_TYPES = new Set(['', 'normal', 'continue']);
 // the same on a swipe; only the reminder and context (the request for a block) follow the arming.
 // Quiet and impersonate generations never carry them.
 const CAPTURE_RULES_TYPES = new Set([...NARRATION_CAPTURE_TYPES, 'swipe', 'regenerate']);
-let captureRulesWithheld = false;
-// (b6-soak-5) Replies whose capture block was removed at MESSAGE_RECEIVED, re-rendered once the host
-// has drawn them (CHARACTER_MESSAGE_RENDERED): at MESSAGE_RECEIVED the reply is not fully drawn.
-const captureRerenderPending = new Set();
-let narrationCaptureArmed = '';
-// (v2 hidden notes) The story events the armed reply's instruction asked about, kept until its block arrives.
-let narrationCaptureWatch = [];
 let narrationCaptureVersion = null;
-const stateWriteTimers = new Map();
-const stateWritePromises = new Map();
-const stateVersions = new Map();
-const persistedVersions = new Map();
-const ownershipEpochs = new Map();
-const chatCacheTouches = new Map();
 const CHAT_CACHE_LIMIT = 6;
 const SCAN_OPERATION_TIMEOUT_MS = 5 * 60 * 1000;
 const LIFECYCLE_EVENT_WAIT_MS = 12_000;
 const LIFECYCLE_RETRY_DELAY_MS = 30_000;
-const lifecycleEventOperations = new Map();
-const lifecycleRetryTimers = new Map();
 let lifecycleEventSequence = 0;
 const scanOperations = createScanOperationRegistry({
     timeoutMs: SCAN_OPERATION_TIMEOUT_MS,
@@ -914,9 +893,8 @@ function storyBlockV2Hosted() {
 
 // (v2 meters, F81/F90) While hosted, Story Block's per-reply `npc` slice holds the meter values. Every
 // helper here is a no-op without a host: the records pass through untouched and nothing is sent.
-let storySuiteV2 = null;
 function storySuiteV2Meters() {
-    return storyBlockV2Hosted() && storySuiteV2?.hosted?.() ? storySuiteV2 : null;
+    return storyBlockV2Hosted() && rt.storySuiteV2?.hosted?.() ? rt.storySuiteV2 : null;
 }
 // (v2) Story Suite's "Scan after every reply" switch (feature npc-state-delta.scan-every-reply, on by default).
 // Off, the automatic scan waits for three replies (or "Scan every" when larger), as in 1.7.4, and then reads every reply since the last scan. True without a host, or when
@@ -957,17 +935,12 @@ function keyPeopleList() {
 function isKeyNpc(npc, list = keyPeopleList()) {
     return Boolean(list?.length) && isKey(findKeyEntry(list, npc));
 }
-// (key people) A swipe or a regenerate replaces the latest reply, and SillyTavern's chat still holds that reply while the new
-// one is being written; the story it continues from is the reply before it. `replacingReply` is set when such a generation
-// starts (with that reply's message) and cleared when the reply arrives, the generation stops, the next message is sent or
-// the chat changes.
-let replacingReply = null;
 // The index of the reply the story stands on for the next generation: the latest reply, or the one before it while the
 // latest is being replaced.
 function keyHeadIndex() {
     const latest = latestReplyIndex();
     const chat = getContext().chat || [];
-    if (!replacingReply || replacingReply.key !== getChatKey() || latest < 0 || chat[latest] !== replacingReply.message) return latest;
+    if (!rt.replacingReply || rt.replacingReply.key !== getChatKey() || latest < 0 || chat[latest] !== rt.replacingReply.message) return latest;
     for (let at = latest - 1; at >= 0; at -= 1) if (chat[at] && !chat[at].is_system && !chat[at].is_user) return at;
     return -1;
 }
@@ -1069,7 +1042,6 @@ function castDue(state, adapter) {
 // The cast dossiers that may be given the pack's picture now (src/cast-dossier.js castPortraitWanted: made from the cast, no portrait of
 // their own, none removed on purpose) and for whom Story Block's `packs.portrait` now answers for their entry's `portrait`:
 // [{ npc, person, url, file }]. A picture that could not be read is not asked for again in this session (castPortraitMisses).
-const castPortraitMisses = new Set();
 function castPortraitTargets(state, adapter, key = getChatKey()) {
     const wanting = (state?.npcs || []).filter(castPortraitWanted);
     if (!wanting.length) return [];
@@ -1946,14 +1918,8 @@ function requestHeaders() {
     }
 }
 
-// Chats whose canonical sidecar this session watched another session retire. The tombstone makes a
-// later hydration start an empty dossier (intentional reuse of a retired name), but the same open
-// chat must stay blocked: retrying Scan would otherwise revive the retired dossier from the stale
-// host narration. Reopening the chat (CHAT_CHANGED) is the host lifecycle that releases it.
-const retiredInSessionChats = new Map();
 // The last pre-generation freshness read, which the one MESSAGE_SENT that follows it may reuse.
 const GENERATION_FRESHNESS_REUSE_MS = 5000;
-let generationFreshness = { key: '', at: 0 };
 
 // Observed retirement is authoritative at the durability boundary too: dirty local work for that
 // chat must never be published over the retired marker (an unpointered writer may otherwise reuse
@@ -2105,12 +2071,6 @@ function markStateDirty(key = getChatKey()) {
     announceNativeChange(key);
 }
 
-// (timeline participant, src/storysuite-participant/) Every durable write of a chat's state ends in markStateDirty (persist, persistCritical,
-// persistCriticalDurable), whatever made it: a scan, a targeted pass, a branch reconcile, a manual add or delete or edit, an import, the
-// canonical server state, a rename, the v2 meter sync. The participant is told, and publishes the change to the timeline as a native mutation.
-// The participant's own writes (an install, its block) are not changes: they carry a count **per chat**, so one chat's install never hides another's change.
-const nativeChangeListeners = new Set();
-const participantWrites = new Map();
 function announceNativeChange(key) {
     if ((participantWrites.get(key) || 0) > 0 || key !== getChatKey()) return;
     for (const listener of nativeChangeListeners) {
@@ -2125,11 +2085,6 @@ async function quietly(key, task) {
     }
 }
 
-// Scan **intent**: work that is going to change the dossiers but is not yet (or no longer) in the scan registry. `isScanBusy` is the registry's active set,
-// so it is false for the moment between one scan ending and a queued one beginning (scanNow awaits the server before it begins an operation), and
-// for a reply whose scan is due but not started. A save point taken then would miss what the scan writes a moment later. Counted per chat from the
-// reply arriving (handleAssistantMessageReceived) and from every scan, queued drain, backfill pass and targeted pass until it ends.
-const scanIntents = new Map();
 async function withScanIntent(key, task, skipped = false, defer = null) {
     scanIntents.set(key, (scanIntents.get(key) || 0) + 1);
     const check = defer?.guard?.() ?? null;   // what the work stood on when it was asked for, kept for a retry
@@ -2149,7 +2104,6 @@ async function withScanIntent(key, task, skipped = false, defer = null) {
 // waits for it). If the host does not settle within HEAD_SETTLE_PROBLEM_MS a Problem tells the reader the work is pending; it is still not dropped. It
 // is given up only when its chat is no longer the open one, or the reply it was for is no longer there (the new one has its own event).
 const HEAD_SETTLE_PROBLEM_MS = 10 * 60 * 1000;
-const deferredWork = new Map();
 function deferredWorkPending(key) {
     for (const entry of deferredWork.values()) if (entry.key === key) return true;
     return false;
@@ -2444,46 +2398,46 @@ function queueSettledSwipeReconcile(options = {}) {
 
     // A normal branch timer must never be allowed to fire inside SillyTavern's swipe window.
     // Fold it into the swipe settlement instead.
-    if (branchReconcileTimer) {
-        clearTimeout(branchReconcileTimer);
-        branchReconcileTimer = null;
+    if (rt.branchReconcileTimer) {
+        clearTimeout(rt.branchReconcileTimer);
+        rt.branchReconcileTimer = null;
     }
-    if (branchReconcilePending) {
-        next = mergeBranchOptions(branchReconcilePending, next);
-        branchReconcilePending = null;
+    if (rt.branchReconcilePending) {
+        next = mergeBranchOptions(rt.branchReconcilePending, next);
+        rt.branchReconcilePending = null;
     }
-    if (swipeSettlementPending) next = mergeBranchOptions(swipeSettlementPending, next);
-    swipeSettlementPending = next;
+    if (rt.swipeSettlementPending) next = mergeBranchOptions(rt.swipeSettlementPending, next);
+    rt.swipeSettlementPending = next;
 
-    const sequence = ++swipeSettlementSequence;
-    if (swipeSettlementTimer) clearTimeout(swipeSettlementTimer);
+    const sequence = ++rt.swipeSettlementSequence;
+    if (rt.swipeSettlementTimer) clearTimeout(rt.swipeSettlementTimer);
     const startedAt = Date.now();
 
     const poll = async () => {
-        if (sequence !== swipeSettlementSequence) return;
+        if (sequence !== rt.swipeSettlementSequence) return;
         if (getChatKey() !== originKey) {
-            swipeSettlementTimer = null;
-            swipeSettlementPending = null;
-            deferredSwipeMessageId = null;
+            rt.swipeSettlementTimer = null;
+            rt.swipeSettlementPending = null;
+            rt.deferredSwipeMessageId = null;
             return;
         }
         if (isHostSwipeActive()) {
             if (Date.now() - startedAt >= SWIPE_SETTLE_TIMEOUT_MS) {
-                swipeSettlementTimer = null;
-                swipeSettlementPending = null;
-                deferredSwipeMessageId = null;
+                rt.swipeSettlementTimer = null;
+                rt.swipeSettlementPending = null;
+                rt.deferredSwipeMessageId = null;
                 console.warn('[NPC State Delta] swipe stayed active too long; branch rescan was skipped to avoid hijacking the host generation pipeline.');
                 return;
             }
-            swipeSettlementTimer = setTimeout(poll, SWIPE_SETTLE_POLL_MS);
+            rt.swipeSettlementTimer = setTimeout(poll, SWIPE_SETTLE_POLL_MS);
             return;
         }
 
-        swipeSettlementTimer = null;
-        const pending = swipeSettlementPending || {};
-        swipeSettlementPending = null;
-        const receivedMessageId = Number.isInteger(deferredSwipeMessageId) ? deferredSwipeMessageId : null;
-        deferredSwipeMessageId = null;
+        rt.swipeSettlementTimer = null;
+        const pending = rt.swipeSettlementPending || {};
+        rt.swipeSettlementPending = null;
+        const receivedMessageId = Number.isInteger(rt.deferredSwipeMessageId) ? rt.deferredSwipeMessageId : null;
+        rt.deferredSwipeMessageId = null;
 
         try {
             const reconciliation = await reconcileCurrentBranch({ ...pending, rescan: false, reason: `${pending.reason || 'message-swiped'}-settled` });
@@ -2509,7 +2463,7 @@ function queueSettledSwipeReconcile(options = {}) {
 
     // The host emits MESSAGE_SWIPED before Generate('swipe'). Polling the host's own
     // swipe state keeps NPC State Delta completely out of that pre-generation gap.
-    swipeSettlementTimer = setTimeout(poll, 0);
+    rt.swipeSettlementTimer = setTimeout(poll, 0);
 }
 
 function diagnosticSerializedBytes(value) {
@@ -2637,15 +2591,6 @@ function branchInheritancePending(key = getChatKey()) {
     return Boolean(String(metadata?.main_chat || '').replace(/\.jsonl$/i, '').trim());
 }
 
-// Chats whose local message history is an older prefix of the adopted dossier's history: another
-// session wrote messages this browser has not loaded yet. The mark survives local saves (a metadata
-// save proves nothing about the chat) and clears once the local chat catches up with or diverges
-// from the dossier, or once the host reloads the chat.
-const staleHostChats = new Set();
-// SillyTavern emits CHAT_CHANGED after reading the chat from the server, so the history it opens is
-// current. A dossier it only prefixes lost those messages to a deletion (for example one whose
-// truncation was not saved before a reload), not to a session this browser is behind.
-const openingHostChats = new Set();
 
 // After adopting another session's newer dossier, the local chat is stale when it does not contain
 // that dossier's whole history: an older prefix, or older history plus a turn typed locally since.
@@ -2805,18 +2750,18 @@ function queueBranchReconcile(options = {}, delay = 90) {
         return;
     }
     let next = { ...options };
-    if (branchReconcilePending?.chatKey && branchReconcilePending.chatKey !== originKey) {
-        if (branchReconcileTimer) clearTimeout(branchReconcileTimer);
-        branchReconcileTimer = null;
-        branchReconcilePending = null;
+    if (rt.branchReconcilePending?.chatKey && rt.branchReconcilePending.chatKey !== originKey) {
+        if (rt.branchReconcileTimer) clearTimeout(rt.branchReconcileTimer);
+        rt.branchReconcileTimer = null;
+        rt.branchReconcilePending = null;
     }
-    if (branchReconcilePending) next = mergeBranchOptions(branchReconcilePending, next);
-    branchReconcilePending = next;
-    if (branchReconcileTimer) clearTimeout(branchReconcileTimer);
-    branchReconcileTimer = setTimeout(async () => {
-        const pending = branchReconcilePending || {};
-        branchReconcilePending = null;
-        branchReconcileTimer = null;
+    if (rt.branchReconcilePending) next = mergeBranchOptions(rt.branchReconcilePending, next);
+    rt.branchReconcilePending = next;
+    if (rt.branchReconcileTimer) clearTimeout(rt.branchReconcileTimer);
+    rt.branchReconcileTimer = setTimeout(async () => {
+        const pending = rt.branchReconcilePending || {};
+        rt.branchReconcilePending = null;
+        rt.branchReconcileTimer = null;
         try {
             if (pending.chatKey && getChatKey() !== pending.chatKey) return;
             await reconcileCurrentBranch(pending);
@@ -3125,10 +3070,6 @@ function flushCurrentChatOnPageHide() {
     void settleStateFileWrite(key, { flush: true }).catch(error => console.debug('[NPC State Delta] page-hide flush deferred', error));
 }
 
-// (beta) A scanner call that came back with no text at all (SillyTavern's "No message generated") is a
-// quiet note, once per chat: nothing was changed and the next reply scans again, so it is not a red
-// console error with a stack on every reply. Every other failure is logged as before.
-const emptyAnswerChats = new Set();
 function noteScanFailure(label, error, chatKey = '') {
     if (!isEmptyScannerAnswer(error)) {
         console.error(`[NPC State Delta] ${label} failed`, error);
@@ -3140,9 +3081,6 @@ function noteScanFailure(label, error, chatKey = '') {
     console.warn(`[NPC State Delta] ${label}: the model answered nothing, so nothing changed; the next reply scans again. (Said once per chat.)`);
 }
 
-// The text last handed to the host for roleplay generation, with the reason when it is empty, so
-// Diagnostics can show what the roleplay model actually receives. Runtime-only; never persisted.
-let lastInjection = { text: '', reason: 'Not built yet in this session.', at: 0, chatKey: '' };
 
 // The player message the next generation will answer: the chat tail when it is a user turn, or
 // the user turn before an assistant reply that is not yet reflected by a scan (swipe/regenerate).
@@ -3202,11 +3140,11 @@ function updateInjection() {
     const ctx = getContext();
     const injectionKey = getChatKey();
     const clear = reason => {
-        lastInjection = { text: '', reason, at: Date.now(), chatKey: injectionKey };
+        rt.lastInjection = { text: '', reason, at: Date.now(), chatKey: injectionKey };
         ctx.setExtensionPrompt?.(PROMPT_KEY, '', extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
         ctx.setExtensionPrompt?.(CAPTURE_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, CAPTURE_PROMPT_DEPTH, false, extension_prompt_roles.SYSTEM);
         ctx.setExtensionPrompt?.(CAPTURE_RULES_KEY, '', extension_prompt_types.IN_PROMPT, 0, false, extension_prompt_roles.SYSTEM);
-        sentCaptureRules = '';
+        rt.sentCaptureRules = '';
     };
     if (injectionKey !== 'no-chat' && chatHydrationStatus(injectionKey) !== 'ready') {
         clear(`This chat's dossiers are not loaded (status: ${chatHydrationStatus(injectionKey)}); nothing is sent until they are.`);
@@ -3217,8 +3155,8 @@ function updateInjection() {
     const state = getChatState();
     // The recent story and who the player's message names: worked out once for both parts.
     const transcript = recentTranscript(4);
-    const armed = narrationCaptureArmed === injectionKey && narrationCaptureEnabled(settings);
-    const rulesSent = narrationCaptureEnabled(settings) && !captureRulesWithheld;
+    const armed = rt.narrationCaptureArmed === injectionKey && narrationCaptureEnabled(settings);
+    const rulesSent = narrationCaptureEnabled(settings) && !rt.captureRulesWithheld;
     if (!settings.inject && !armed && !rulesSent) return clear('"Inject present NPC state" is off.');
     const namedNpcIds = namedByPlayerNpcIds(state);
     const prompt = settings.inject ? liveInjectionText(state, settings, { namedNpcIds, transcript }) : '';
@@ -3233,7 +3171,7 @@ function updateInjection() {
     const capture = captureParts.context;
     const present = (state.npcs || []).filter(npc => npc?.present && !npc?.archived);
     const depth = injectDepthOf(settings);
-    lastInjection = {
+    rt.lastInjection = {
         text: prompt,
         reason: prompt ? '' : (!settings.inject ? '"Inject present NPC state" is off.' : (present.length ? 'No present NPC was selected for injection.' : 'No NPC is marked present in the latest scanned scene.')),
         at: Date.now(),
@@ -3250,24 +3188,17 @@ function updateInjection() {
     // the rules go and come with it (only armed replies carry them, byte-identical each time).
     ctx.setExtensionPrompt?.(CAPTURE_PROMPT_KEY, capture, extension_prompt_types.IN_CHAT, CAPTURE_PROMPT_DEPTH, false, extension_prompt_roles.SYSTEM);
     ctx.setExtensionPrompt?.(CAPTURE_RULES_KEY, captureParts.rules, extension_prompt_types.IN_PROMPT, 0, false, extension_prompt_roles.SYSTEM);
-    if (!captureParts.rules) sentCaptureRules = '';
+    if (!captureParts.rules) rt.sentCaptureRules = '';
 }
 
-// (1.2.16) A chat-completion preset whose prompt order has no Main Prompt drops in-prompt extension
-// text, so the capture's rules would vanish while its context still asks for the block. At
-// prompt-ready they go back in, once, after the leading system messages (still early, so still
-// cacheable). Only for the reply's own generation: the rules are held from its arming until the
-// reply arrives or is stopped (sentCaptureRules, '' otherwise), never on a dry run, never in a
-// prompt without the chat's replies (another extension's call), never in Delta's own requests.
-let sentCaptureRules = '';
 const OWN_REQUEST = /NPC State Delta's (?:isolated|targeted)|isolated relationship evaluator|Private NPC dossier scanner/;
 function holdCaptureRules() {
     const ctx = getContext();
-    const rules = String(lastInjection.captureRules || '');
-    sentCaptureRules = rules && typeof ctx.substituteParams === 'function' ? ctx.substituteParams(rules) : rules;
+    const rules = String(rt.lastInjection.captureRules || '');
+    rt.sentCaptureRules = rules && typeof ctx.substituteParams === 'function' ? ctx.substituteParams(rules) : rules;
 }
 function keepCaptureRules(eventData) {
-    const rules = String(sentCaptureRules || '').trim();
+    const rules = String(rt.sentCaptureRules || '').trim();
     if (!rules || eventData?.dryRun === true || !Array.isArray(eventData?.chat)) return;
     const chat = eventData.chat;
     if (chat.some(message => typeof message?.content === 'string' && message.content.includes(rules))) return;
@@ -3287,26 +3218,26 @@ function clearLegacyPromptKeys() {
 function injectionPreview() {
     const settings = getSettings();
     const state = getChatKey() === 'no-chat' ? { npcs: [] } : getChatState();
-    const text = String(lastInjection.text || '');
+    const text = String(rt.lastInjection.text || '');
     const lines = text.split('\n');
     const injectedNpcs = lines.map(line => line.match(/^- (.+?)(?: \(named by player\))?: IDENTITY/)?.[1]).filter(Boolean);
     const referencedNpcs = lines.map(line => line.match(/^- (.+?) \((?:mentioned, not present|deceased)/)?.[1]).filter(Boolean);
     return {
         sending: Boolean(text),
-        reason: lastInjection.reason || '',
-        placement: (lastInjection.depth ?? injectDepthOf(settings)) === 0
+        reason: rt.lastInjection.reason || '',
+        placement: (rt.lastInjection.depth ?? injectDepthOf(settings)) === 0
             ? 'In chat as a system message at the end, after your latest message (depth 0)'
-            : `In chat as a system message, ${lastInjection.depth ?? injectDepthOf(settings)} message(s) from the end`,
+            : `In chat as a system message, ${rt.lastInjection.depth ?? injectDepthOf(settings)} message(s) from the end`,
         capturePlacement: 'One-pass capture: its rules in the system prompt (unchanged reply to reply), its context and reminder in their own system message at the very end (depth 0)',
-        builtAt: lastInjection.at ? new Date(lastInjection.at).toISOString() : '',
+        builtAt: rt.lastInjection.at ? new Date(rt.lastInjection.at).toISOString() : '',
         presentNpcs: (state.npcs || []).filter(npc => npc?.present && !npc?.archived).map(npc => npc.name),
-        namedByPlayer: (lastInjection.namedByPlayer || []).filter(name => injectedNpcs.includes(name)),
+        namedByPlayer: (rt.lastInjection.namedByPlayer || []).filter(name => injectedNpcs.includes(name)),
         injectedNpcs,
         referencedNpcs,
         chars: text.length,
         estimatedTokens: Math.ceil(text.length / 4),
         budgetTokens: Number(settings.injectBudgetTokens) || 0,
-        captureChars: Number(lastInjection.captureChars) || 0,
+        captureChars: Number(rt.lastInjection.captureChars) || 0,
         text,
     };
 }
@@ -3546,9 +3477,6 @@ function targetedRowFor(returned, target, roster, { npcId = target?.id, label = 
     return match && !rowContradictsTarget(match, target, roster) ? match : null;
 }
 
-// Running targeted passes. An explicit edit or swipe of the reply a pass tolerates being rewritten in
-// place ends that tolerance: from then on any change to the history makes the result stale.
-const runningTargetedPasses = new Set();
 function endTargetedRewriteTolerance(messageId) {
     for (const operation of runningTargetedPasses) {
         if (!Number.isInteger(messageId) || operation.sourceMessageId === messageId) operation.sourceMessageId = null;
@@ -3594,7 +3522,7 @@ async function runTargetedDossierPassInner(job) {
         if (!scoped.ok) {
             if (scoped.noChange) {
                 const metrics = targetedPassMetrics(metricsLabel, { startedAt, prompt, raw, retried, parsed, localEdges: scoped.localEdges });
-                if (job.reportsScanMetrics) lastScanMetrics = metrics;
+                if (job.reportsScanMetrics) rt.lastScanMetrics = metrics;
                 recordScanDiagnostics(chatKey, metrics, parsed, null, { targeted: true, npcIds: [id], sourceMessageId: latestMessageId(true) });
             }
             return scoped.result;
@@ -3644,7 +3572,7 @@ async function runTargetedDossierPassInner(job) {
         updateInjection();
         // (I-19) Every kind leaves a diagnostics receipt; only Refresh reports as the last scan's metrics.
         const metrics = targetedPassMetrics(metricsLabel, { startedAt, prompt, raw, retried, parsed, merged, localEdges: scoped.localEdges });
-        if (job.reportsScanMetrics) lastScanMetrics = metrics;
+        if (job.reportsScanMetrics) rt.lastScanMetrics = metrics;
         recordScanDiagnostics(chatKey, metrics, parsed, merged.report, { targeted: true, npcIds: [id], sourceMessageId: targetMessageId });
         console.info(`[NPC State Delta] ${metricsLabel} metrics`, metrics);
         return job.onDone(getChatState(chatKey).npcs.find(npc => npc.id === id));
@@ -4231,7 +4159,6 @@ function scannerPromptOptions(state, settings, transcript, extra = {}) {
 const CATCH_UP_TARGETS = 2;
 const CATCH_UP_RETRY_MS = 3000;
 const CATCH_UP_RETRIES = 20;
-const captureCatchUp = new Map();
 
 /** Counts one captured reply and the NPCs in it; the NPC ids due a catch-up now, or []. */
 function noteCaptureCatchUp(chatKey, npcIds = []) {
@@ -4301,7 +4228,7 @@ function dropNarrationCaptures() {
 // The instruction describes the dossier as it was when the prompt was built; any dossier write
 // before the reply arrives (a finishing scan, a reconcile) makes the block outdated.
 function noteNarrationCaptureVersion(key) {
-    if (narrationCaptureArmed === key) narrationCaptureVersion = Number(stateVersions.get(key) || 0);
+    if (rt.narrationCaptureArmed === key) narrationCaptureVersion = Number(stateVersions.get(key) || 0);
 }
 // Runs before any lineage key reads the reply, so every checkpoint binds the stripped text. Any
 // block is removed even with the mode off; only a complete, parseable one is kept for the scan.
@@ -4344,14 +4271,14 @@ function captureNarrationBlock(chatKey, messageId, message, armed, watch = []) {
     }
     narrationCaptures.set(narrationCaptureKey(chatKey, messageId), { parsed, raw: extracted.raw, watch });
     // Only its size is kept, for the tokens() output estimate; never the block itself.
-    lastCaptureBlockChars = String(extracted.raw ?? '').length;
+    rt.lastCaptureBlockChars = String(extracted.raw ?? '').length;
     while (narrationCaptures.size > NARRATION_CAPTURE_LIMIT) narrationCaptures.delete(narrationCaptures.keys().next().value);
 }
 function receiveNarrationBlock(messageId) {
     const chatKey = getChatKey();
-    const armedHere = Boolean(narrationCaptureArmed) && narrationCaptureArmed === chatKey;
+    const armedHere = Boolean(rt.narrationCaptureArmed) && rt.narrationCaptureArmed === chatKey;
     const current = armedHere && Number(stateVersions.get(chatKey) || 0) === narrationCaptureVersion;
-    const watched = armedHere ? narrationCaptureWatch : [];
+    const watched = armedHere ? rt.narrationCaptureWatch : [];
     disarmNarrationCapture();
     const message = Number.isInteger(messageId) ? getContext().chat?.[messageId] : null;
     if (!getSettings().enabled || chatKey === 'no-chat' || !message || message.is_user || message.is_system) return;
@@ -4372,9 +4299,9 @@ function stripSwipedNarrationBlock(messageId) {
 // Later receipt paths may return before refreshing the injection, and a quiet generation from
 // another extension must never carry the instruction.
 function disarmNarrationCapture() {
-    narrationCaptureArmed = '';
-    narrationCaptureWatch = [];
-    if (lastInjection.captureChars) updateInjection();
+    rt.narrationCaptureArmed = '';
+    rt.narrationCaptureWatch = [];
+    if (rt.lastInjection.captureChars) updateInjection();
 }
 function takeNarrationCapture(chatKey, messageId) {
     const key = narrationCaptureKey(chatKey, messageId);
@@ -4524,7 +4451,7 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
             || !scanOperationCurrent(scanChatKey, operation) || getChatKey() !== scanChatKey
             || lineageMoved(scanLineage, currentLineage, messageId) || Number(stateVersions.get(scanChatKey) || 0) !== scanStateVersion) {
             const scanFinishedAt = performance.now?.() ?? Date.now();
-            lastScanMetrics = {
+            rt.lastScanMetrics = {
                 label: scanLabel,
                 durationMs: Math.max(0, Math.round(scanFinishedAt - scanStartedAt)),
                 promptChars: prompt.length,
@@ -4588,7 +4515,7 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
             },
         );
         const scanFinishedAt = performance.now?.() ?? Date.now();
-        lastScanMetrics = {
+        rt.lastScanMetrics = {
             label: scanLabel,
             durationMs: Math.max(0, Math.round(scanFinishedAt - scanStartedAt)),
             promptChars: prompt.length,
@@ -4689,9 +4616,9 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
                     retried: combinedRetried,
                 };
                 applyFocusedRelationshipDecisions(merged.state, combinedDecisions, settings.relationshipCaps, targetMessageId, merged.report);
-                if (lastScanMetrics) {
-                    lastScanMetrics.newNpcRelationshipTargets = combinedTargetCount;
-                    lastScanMetrics.newNpcRelationshipResponseChars = combinedResponseChars;
+                if (rt.lastScanMetrics) {
+                    rt.lastScanMetrics.newNpcRelationshipTargets = combinedTargetCount;
+                    rt.lastScanMetrics.newNpcRelationshipResponseChars = combinedResponseChars;
                 }
             }
         }
@@ -4705,11 +4632,11 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
             if (manual) globalThis.toastr?.info?.('NPC State Delta: chat changed during scan; stale result was discarded.');
             return false;
         }
-        if (lastScanMetrics) {
-            lastScanMetrics.profileApplied = Number(merged.report?.profileUpdateStats?.applied || 0);
-            lastScanMetrics.profileEvidenceAdded = Number(merged.report?.profileUpdateStats?.evidenceAdded || 0);
-            lastScanMetrics.profileDevelopment = Array.isArray(merged.report?.profileDevelopment) ? structuredClone(merged.report.profileDevelopment) : [];
-            console.info('[NPC State Delta] dossier scan metrics', lastScanMetrics);
+        if (rt.lastScanMetrics) {
+            rt.lastScanMetrics.profileApplied = Number(merged.report?.profileUpdateStats?.applied || 0);
+            rt.lastScanMetrics.profileEvidenceAdded = Number(merged.report?.profileUpdateStats?.evidenceAdded || 0);
+            rt.lastScanMetrics.profileDevelopment = Array.isArray(merged.report?.profileDevelopment) ? structuredClone(merged.report.profileDevelopment) : [];
+            console.info('[NPC State Delta] dossier scan metrics', rt.lastScanMetrics);
         }
         applyFocusedRelationshipDecisions(merged.state, relationshipPass.decisions, settings.relationshipCaps, targetMessageId, merged.report);
         const postCleanup = applyStaleLifecycleAfterScan(merged.state, parsedForMerge, currentTranscript || transcript, settings);
@@ -4720,11 +4647,11 @@ async function scanNowInner({ manual = false, messageId = null, allowDuringSwipe
         merged.state = postCleanup.state;
         merged.report.staleArchived = staleArchived;
         merged.report.stalePruned = stalePruned;
-        if (lastScanMetrics) {
-            lastScanMetrics.staleArchived = staleArchived.length;
-            lastScanMetrics.stalePruned = stalePruned.length;
+        if (rt.lastScanMetrics) {
+            rt.lastScanMetrics.staleArchived = staleArchived.length;
+            rt.lastScanMetrics.stalePruned = stalePruned.length;
         }
-        recordScanDiagnostics(scanChatKey, lastScanMetrics || {}, parsedForMerge, merged.report, {
+        recordScanDiagnostics(scanChatKey, rt.lastScanMetrics || {}, parsedForMerge, merged.report, {
             sourceMessageId: targetMessageId,
             targeted: false,
         });
@@ -5142,7 +5069,7 @@ function syncExpertNote(root = globalThis.document) {
     const note = root?.querySelector?.('[data-delta-expert-note]');
     if (!note) return;
     let link = 'none';
-    try { link = storySuiteV2?.calendarLink?.() ?? 'none'; } catch { link = 'none'; }
+    try { link = rt.storySuiteV2?.calendarLink?.() ?? 'none'; } catch { link = 'none'; }
     const text = EXPERT_NOTES[link] ?? EXPERT_NOTES.none;
     if (note.textContent !== text) note.textContent = text;
 }
@@ -5178,7 +5105,7 @@ function syncSettingsControls() {
     $('#npc_state_delta_launcher_with_story_block').prop('checked', s.launcherWithStoryBlock === true);
     $('#npc_state_delta_launcher_with_story_block_v2').prop('checked', s.launcherWithStoryBlockV2 === true);
     applyLauncherFlag();
-    if (!portraitSettingsDirty) writePortraitSettingsDraftToUi(portraitSettingsSnapshot(s));
+    if (!rt.portraitSettingsDirty) writePortraitSettingsDraftToUi(portraitSettingsSnapshot(s));
     updatePortraitSettingsSaveUi();
     $('#npc_state_delta_base_trust').val(s.relationshipBaseline.trust);
     $('#npc_state_delta_base_affection').val(s.relationshipBaseline.affection);
@@ -5747,10 +5674,10 @@ function ensureInlineObserver() {
     if (typeof globalThis.MutationObserver !== 'function') return false;
     const chat = chatElementForInlineObserver();
     if (!chat) return false;
-    if (inlineObserver && inlineObserverChat === chat) return true;
-    try { inlineObserver?.disconnect?.(); } catch {}
-    inlineObserverChat = chat;
-    inlineObserver = new globalThis.MutationObserver(mutations => {
+    if (rt.inlineObserver && rt.inlineObserverChat === chat) return true;
+    try { rt.inlineObserver?.disconnect?.(); } catch {}
+    rt.inlineObserverChat = chat;
+    rt.inlineObserver = new globalThis.MutationObserver(mutations => {
         // Ignore text-only mutations inside our own card. Host message redraws, removed
         // anchors, pagination and markdown replacements all arrive as child-list changes.
         const relevant = (mutations || []).some(mutation => {
@@ -5762,12 +5689,12 @@ function ensureInlineObserver() {
         if (relevant) queueInlineRender(45);
     });
     try {
-        inlineObserver.observe(chat, { childList: true, subtree: true });
+        rt.inlineObserver.observe(chat, { childList: true, subtree: true });
         return true;
     } catch (error) {
         console.debug('[NPC State Delta] inline MutationObserver could not attach', error);
-        inlineObserver = null;
-        inlineObserverChat = null;
+        rt.inlineObserver = null;
+        rt.inlineObserverChat = null;
         return false;
     }
 }
@@ -5798,9 +5725,9 @@ function inlineMountNeedsRepair() {
 function stopInlineWatchdog() {
     if (inlineWatchdogTimer) clearInterval(inlineWatchdogTimer);
     inlineWatchdogTimer = null;
-    try { inlineObserver?.disconnect?.(); } catch {}
-    inlineObserver = null;
-    inlineObserverChat = null;
+    try { rt.inlineObserver?.disconnect?.(); } catch {}
+    rt.inlineObserver = null;
+    rt.inlineObserverChat = null;
 }
 
 function startInlineWatchdog() {
@@ -5944,7 +5871,7 @@ function activatePresentCardFromEvent(event) {
 function handlePortraitGeneratorEscape(event) {
     if (event?.key !== 'Escape' || event.defaultPrevented
         || document.getElementById?.('npc_state_delta_tools_overlay')) return false;
-    if (!activePortraitGeneratorOverlay) return false;
+    if (!rt.activePortraitGeneratorOverlay) return false;
     event.preventDefault?.();
     event.stopPropagation?.();
     closePortraitGenerator();
@@ -5952,8 +5879,8 @@ function handlePortraitGeneratorEscape(event) {
 }
 
 function editorIsMounted() {
-    if (activeEditorPopup?.dlg) {
-        return Boolean(activeEditorPopup.dlg.open || activeEditorPopup.dlg.isConnected || document.body?.contains?.(activeEditorPopup.dlg));
+    if (rt.activeEditorPopup?.dlg) {
+        return Boolean(rt.activeEditorPopup.dlg.open || rt.activeEditorPopup.dlg.isConnected || document.body?.contains?.(rt.activeEditorPopup.dlg));
     }
     return Boolean(document.querySelector?.('.popup.npc-state-delta-editor-popup'));
 }
@@ -6132,8 +6059,8 @@ function openNpcEditor(npcId) {
     const npc = currentNpcById(npcId);
     if (!npc) return null;
     closeNpcEditor();
-    activeEditorChatKey = originChatKey;
-    activeEditorBaseRevision = workingCopyAdoption(originChatKey);
+    rt.activeEditorChatKey = originChatKey;
+    rt.activeEditorBaseRevision = workingCopyAdoption(originChatKey);
     const ctx = getContext();
     const Popup = ctx.Popup;
     const POPUP_TYPE = ctx.POPUP_TYPE;
@@ -6214,13 +6141,13 @@ function openNpcEditor(npcId) {
             return true;
         },
         onClose: () => {
-            if (activeEditorPopup === popup) activeEditorPopup = null;
+            if (rt.activeEditorPopup === popup) rt.activeEditorPopup = null;
         },
     });
     popup.dlg?.classList?.add?.('npc-state-delta-editor-popup');
-    activeEditorPopup = popup;
+    rt.activeEditorPopup = popup;
     Promise.resolve(popup.show()).catch(error => {
-        if (activeEditorPopup === popup) activeEditorPopup = null;
+        if (rt.activeEditorPopup === popup) rt.activeEditorPopup = null;
         console.error('[NPC State Delta] native dossier popup failed', error);
         globalThis.toastr?.error?.(`NPC State Delta editor failed: ${error?.message || error}`);
     });
@@ -6317,12 +6244,12 @@ function portraitGeneratorHtml(npc, prompts) {
 }
 
 function closePortraitGenerator() {
-    const overlay = activePortraitGeneratorOverlay;
-    activePortraitGeneratorOverlay = null;
-    activePortraitGeneratorChatKey = '';
-    activePortraitGeneratorNpcId = '';
+    const overlay = rt.activePortraitGeneratorOverlay;
+    rt.activePortraitGeneratorOverlay = null;
+    rt.activePortraitGeneratorChatKey = '';
+    rt.activePortraitGeneratorNpcId = '';
     activePortraitGenerationUrl = '';
-    portraitGenerationBusy = false;
+    rt.portraitGenerationBusy = false;
     overlay?.remove?.();
     document.body?.classList?.remove?.('npc-state-delta-portrait-generator-open');
     document.documentElement?.classList?.remove?.('npc-state-delta-portrait-generator-open');
@@ -6362,28 +6289,28 @@ function openPortraitGenerator(npcId) {
     document.body?.appendChild?.(overlay);
     document.body?.classList?.add?.('npc-state-delta-portrait-generator-open');
     document.documentElement?.classList?.add?.('npc-state-delta-portrait-generator-open');
-    activePortraitGeneratorOverlay = overlay;
-    activePortraitGeneratorChatKey = originChatKey;
-    activePortraitGeneratorNpcId = id;
+    rt.activePortraitGeneratorOverlay = overlay;
+    rt.activePortraitGeneratorChatKey = originChatKey;
+    rt.activePortraitGeneratorNpcId = id;
     activePortraitGenerationUrl = '';
     globalThis.requestAnimationFrame?.(() => overlay.querySelector?.('#npc_state_delta_portrait_positive')?.focus?.());
     return true;
 }
 
 function setPortraitGeneratorBusy(busy, text = '') {
-    portraitGenerationBusy = Boolean(busy);
-    const overlay = activePortraitGeneratorOverlay;
+    rt.portraitGenerationBusy = Boolean(busy);
+    const overlay = rt.activePortraitGeneratorOverlay;
     if (!overlay) return;
     const run = overlay.querySelector?.('.npc-state-delta-portrait-run');
     const reset = overlay.querySelector?.('.npc-state-delta-portrait-reset');
     const use = overlay.querySelector?.('.npc-state-delta-portrait-use');
     const close = overlay.querySelector?.('.npc-state-delta-portrait-generator-close');
     const status = overlay.querySelector?.('.npc-state-delta-portrait-generator-status');
-    if (run) { run.disabled = portraitGenerationBusy; run.innerHTML = portraitGenerationBusy ? '<i class="fa-solid fa-spinner fa-spin"></i> Generating...' : '<i class="fa-solid fa-wand-magic-sparkles"></i> Generate again'; }
-    if (reset) reset.disabled = portraitGenerationBusy;
+    if (run) { run.disabled = rt.portraitGenerationBusy; run.innerHTML = rt.portraitGenerationBusy ? '<i class="fa-solid fa-spinner fa-spin"></i> Generating...' : '<i class="fa-solid fa-wand-magic-sparkles"></i> Generate again'; }
+    if (reset) reset.disabled = rt.portraitGenerationBusy;
     // Closing invalidates this dialog; late generation/decoding cannot apply a result.
     if (close) close.disabled = false;
-    if (use) use.disabled = portraitGenerationBusy || !activePortraitGenerationUrl;
+    if (use) use.disabled = rt.portraitGenerationBusy || !activePortraitGenerationUrl;
     if (status) {
         status.hidden = !text;
         status.textContent = text;
@@ -6391,24 +6318,24 @@ function setPortraitGeneratorBusy(busy, text = '') {
 }
 
 function resetPortraitGeneratorFromDossier() {
-    if (!activePortraitGeneratorOverlay || !activePortraitGeneratorNpcId || portraitGenerationBusy) return false;
-    if (getChatKey() !== activePortraitGeneratorChatKey || !requireReadyChatMutation('reset portrait prompts', activePortraitGeneratorChatKey)) return false;
-    const npc = currentNpcById(activePortraitGeneratorNpcId);
+    if (!rt.activePortraitGeneratorOverlay || !rt.activePortraitGeneratorNpcId || rt.portraitGenerationBusy) return false;
+    if (getChatKey() !== rt.activePortraitGeneratorChatKey || !requireReadyChatMutation('reset portrait prompts', rt.activePortraitGeneratorChatKey)) return false;
+    const npc = currentNpcById(rt.activePortraitGeneratorNpcId);
     if (!npc) return false;
     const prompts = npcImagePromptPair(npc);
-    const positive = activePortraitGeneratorOverlay.querySelector?.('#npc_state_delta_portrait_positive');
-    const negative = activePortraitGeneratorOverlay.querySelector?.('#npc_state_delta_portrait_negative');
+    const positive = rt.activePortraitGeneratorOverlay.querySelector?.('#npc_state_delta_portrait_positive');
+    const negative = rt.activePortraitGeneratorOverlay.querySelector?.('#npc_state_delta_portrait_negative');
     if (positive) positive.value = prompts.positive;
     if (negative) negative.value = prompts.negative;
     return true;
 }
 
 async function generatePortraitFromDialog() {
-    const overlay = activePortraitGeneratorOverlay;
-    const originChatKey = activePortraitGeneratorChatKey;
+    const overlay = rt.activePortraitGeneratorOverlay;
+    const originChatKey = rt.activePortraitGeneratorChatKey;
     if (!originChatKey || getChatKey() !== originChatKey || !requireReadyChatMutation('generate a portrait', originChatKey)) return false;
-    const npc = currentNpcById(activePortraitGeneratorNpcId);
-    if (!overlay || !npc || portraitGenerationBusy) return false;
+    const npc = currentNpcById(rt.activePortraitGeneratorNpcId);
+    if (!overlay || !npc || rt.portraitGenerationBusy) return false;
     const positive = String(overlay.querySelector?.('#npc_state_delta_portrait_positive')?.value || '').trim();
     const negative = String(overlay.querySelector?.('#npc_state_delta_portrait_negative')?.value || '').trim();
     if (!positive) {
@@ -6420,14 +6347,14 @@ async function generatePortraitFromDialog() {
     setPortraitGeneratorBusy(true, 'Generating through SillyTavern Image Generation…');
     try {
         const url = await executeNativePortraitGeneration(positive, negative, npc.portraitSeed);
-        if (activePortraitGeneratorOverlay !== overlay || activePortraitGeneratorNpcId !== npc.id || activePortraitGeneratorChatKey !== originChatKey || getChatKey() !== originChatKey || !currentNpcById(npc.id)) return false;
+        if (rt.activePortraitGeneratorOverlay !== overlay || rt.activePortraitGeneratorNpcId !== npc.id || rt.activePortraitGeneratorChatKey !== originChatKey || getChatKey() !== originChatKey || !currentNpcById(npc.id)) return false;
         if (Number(stateVersions.get(originChatKey) || 0) !== revision) {
             setPortraitGeneratorBusy(false, 'The dossier changed during generation; the stale preview was discarded.');
             return false;
         }
         activePortraitGenerationUrl = url;
-        const image = activePortraitGeneratorOverlay.querySelector?.('.npc-state-delta-portrait-generator-image');
-        const placeholder = activePortraitGeneratorOverlay.querySelector?.('.npc-state-delta-portrait-generator-placeholder');
+        const image = rt.activePortraitGeneratorOverlay.querySelector?.('.npc-state-delta-portrait-generator-image');
+        const placeholder = rt.activePortraitGeneratorOverlay.querySelector?.('.npc-state-delta-portrait-generator-placeholder');
         if (image) {
             image.src = url;
             image.hidden = false;
@@ -6436,7 +6363,7 @@ async function generatePortraitFromDialog() {
         setPortraitGeneratorBusy(false, 'Generation complete. Review the result before applying it.');
         return true;
     } catch (error) {
-        if (activePortraitGeneratorOverlay !== overlay || getChatKey() !== originChatKey) return false;
+        if (rt.activePortraitGeneratorOverlay !== overlay || getChatKey() !== originChatKey) return false;
         console.error('[NPC State Delta] portrait generation failed', error);
         setPortraitGeneratorBusy(false, 'Generation failed.');
         globalThis.toastr?.error?.(`NPC State Delta portrait generation: ${error?.message || error}`);
@@ -6458,17 +6385,17 @@ async function portraitFileFromGeneratedUrl(url, npcName = 'npc') {
 }
 
 async function useGeneratedPortrait() {
-    const overlay = activePortraitGeneratorOverlay;
-    const npcId = activePortraitGeneratorNpcId;
+    const overlay = rt.activePortraitGeneratorOverlay;
+    const npcId = rt.activePortraitGeneratorNpcId;
     const url = activePortraitGenerationUrl;
-    const originChatKey = activePortraitGeneratorChatKey;
-    if (!overlay || !npcId || !url || portraitGenerationBusy || getChatKey() !== originChatKey) return false;
+    const originChatKey = rt.activePortraitGeneratorChatKey;
+    if (!overlay || !npcId || !url || rt.portraitGenerationBusy || getChatKey() !== originChatKey) return false;
     if (!requireReadyChatMutation('apply a generated portrait', originChatKey)) return false;
     const npc = currentNpcById(npcId);
     if (!npc) return false;
     const revision = Number(stateVersions.get(originChatKey) || 0);
-    const current = () => activePortraitGeneratorOverlay === overlay && getChatKey() === originChatKey
-        && activePortraitGeneratorNpcId === npcId && activePortraitGenerationUrl === url;
+    const current = () => rt.activePortraitGeneratorOverlay === overlay && getChatKey() === originChatKey
+        && rt.activePortraitGeneratorNpcId === npcId && activePortraitGenerationUrl === url;
     setPortraitGeneratorBusy(true, 'Importing generated image into the NPC dossier...');
     let applied = false;
     try {
@@ -6492,10 +6419,10 @@ async function useGeneratedPortrait() {
 }
 
 function closeNpcEditor() {
-    const popup = activeEditorPopup;
-    activeEditorPopup = null;
-    activeEditorChatKey = '';
-    activeEditorBaseRevision = null;
+    const popup = rt.activeEditorPopup;
+    rt.activeEditorPopup = null;
+    rt.activeEditorChatKey = '';
+    rt.activeEditorBaseRevision = null;
     if (popup?.completeCancelled) {
         Promise.resolve(popup.completeCancelled()).catch(error => console.debug('[NPC State Delta] editor popup close failed', error));
     }
@@ -6511,8 +6438,8 @@ function clampEditorRelationshipStat(id) {
 }
 
 async function saveNpcEditor(npcId, { close = true, silent = false, popup = null } = {}) {
-    const originChatKey = activeEditorChatKey || getChatKey();
-    const editorAtStart = activeEditorPopup;
+    const originChatKey = rt.activeEditorChatKey || getChatKey();
+    const editorAtStart = rt.activeEditorPopup;
     if (getChatKey() !== originChatKey || !await ensureFreshMutationBoundary('save dossier edits', originChatKey)) {
         globalThis.toastr?.warning?.('NPC State Delta: this editor belongs to a different or unloaded chat. Reopen the dossier in the active chat.');
         return false;
@@ -6523,10 +6450,10 @@ async function saveNpcEditor(npcId, { close = true, silent = false, popup = null
     // popup it started under must not have been cancelled meanwhile either. Host Popup sets the
     // result before its closing animation, while the draft inputs and activeEditorPopup still exist.
     const affirmative = getContext().POPUP_RESULT?.AFFIRMATIVE;
-    if ((editorAtStart && activeEditorPopup !== editorAtStart)
+    if ((editorAtStart && rt.activeEditorPopup !== editorAtStart)
         || (popup && popup.result !== affirmative)
         || (!popup && editorAtStart && editorAtStart.result !== undefined && editorAtStart.result !== affirmative)) return false;
-    if (activeEditorBaseRevision !== null && Number(activeEditorBaseRevision) !== workingCopyAdoption(originChatKey)) {
+    if (rt.activeEditorBaseRevision !== null && Number(rt.activeEditorBaseRevision) !== workingCopyAdoption(originChatKey)) {
         globalThis.toastr?.warning?.('NPC State Delta: this editor was opened on an older server revision. Your typed draft is still open, but it was not applied. Review the newly loaded dossier and reopen the editor before saving.');
         return false;
     }
@@ -6697,8 +6624,8 @@ function updateNpcAppearance(npcId, draft, { chatKey, lockAppearance = false } =
     if (!chatKey || chatKey !== getChatKey() || !requireReadyChatMutation('edit appearance forms', chatKey)) return false;
     // The appearance draft lives in the dossier editor; like its main Save, it must not overwrite a
     // newer server copy adopted after the editor opened.
-    if (editorIsMounted() && activeEditorChatKey === chatKey && activeEditorBaseRevision !== null
-        && Number(activeEditorBaseRevision) !== workingCopyAdoption(chatKey)) {
+    if (editorIsMounted() && rt.activeEditorChatKey === chatKey && rt.activeEditorBaseRevision !== null
+        && Number(rt.activeEditorBaseRevision) !== workingCopyAdoption(chatKey)) {
         globalThis.toastr?.warning?.('NPC State Delta: this editor was opened on an older server revision. The appearance draft was not applied; review the newly loaded dossier and reopen the editor.');
         return false;
     }
@@ -6739,7 +6666,6 @@ function updateNpcLifeState(npcId, choice, { chatKey } = {}) {
     return true;
 }
 
-const portraitActions = new Map();
 function portraitAction(chatKey, npcId) {
     const key = `${chatKey}::${npcId}`;
     const action = {};
@@ -7230,37 +7156,37 @@ function writePortraitSettingsDraftToUi(draft) {
 }
 
 function confirmDiscardPortraitDraft() {
-    if (!portraitSettingsDirty) return true;
+    if (!rt.portraitSettingsDirty) return true;
     return globalThis.window?.confirm?.('Discard unsaved portrait preset edits and switch?') !== false;
 }
 
 function updatePortraitSettingsSaveUi() {
     const button = $('#npc_state_delta_save_portrait_settings');
     const status = $('#npc_state_delta_portrait_settings_status');
-    button.toggleClass?.('npc-state-delta-busy', portraitSettingsSaveBusy);
-    button.prop?.('disabled', portraitSettingsSaveBusy);
-    if (portraitSettingsSaveBusy) status.text?.('Saving…');
-    else if (portraitSettingsDirty) status.text?.('Unsaved changes');
+    button.toggleClass?.('npc-state-delta-busy', rt.portraitSettingsSaveBusy);
+    button.prop?.('disabled', rt.portraitSettingsSaveBusy);
+    if (rt.portraitSettingsSaveBusy) status.text?.('Saving…');
+    else if (rt.portraitSettingsDirty) status.text?.('Unsaved changes');
     else status.text?.('Saved');
 }
 
 function markPortraitSettingsDirty() {
-    portraitSettingsDirty = true;
+    rt.portraitSettingsDirty = true;
     updatePortraitSettingsSaveUi();
 }
 
 async function savePortraitSettingsDraft(explicitDraft = null) {
-    if (portraitSettingsSaveBusy) return false;
+    if (rt.portraitSettingsSaveBusy) return false;
     const settings = getSettings();
     const before = portraitSettingsSnapshot(settings);
     const next = normalizePortraitSettingsDraft(explicitDraft || portraitSettingsDraftFromUi());
     Object.assign(settings, next);
-    portraitSettingsSaveBusy = true;
+    rt.portraitSettingsSaveBusy = true;
     updatePortraitSettingsSaveUi();
     try {
         await saveHostSettings();
-        portraitSettingsDirty = false;
-        portraitSettingsSaveBusy = false;
+        rt.portraitSettingsDirty = false;
+        rt.portraitSettingsSaveBusy = false;
         syncSettingsControls();
         globalThis.toastr?.success?.(next.portraitThemePreset === 'custom'
             ? `NPC State Delta: saved custom portrait preset ${portraitCustomPresetFor(next).name}.`
@@ -7268,8 +7194,8 @@ async function savePortraitSettingsDraft(explicitDraft = null) {
         return true;
     } catch (error) {
         Object.assign(settings, before);
-        portraitSettingsSaveBusy = false;
-        portraitSettingsDirty = true;
+        rt.portraitSettingsSaveBusy = false;
+        rt.portraitSettingsDirty = true;
         updatePortraitSettingsSaveUi();
         console.error('[NPC State Delta] portrait settings save failed', error);
         globalThis.toastr?.error?.(`NPC State Delta portrait settings were not saved: ${error?.message || error}`);
@@ -7278,7 +7204,7 @@ async function savePortraitSettingsDraft(explicitDraft = null) {
 }
 
 async function persistPortraitCustomPresetLibrary(settings, presets, selectedId, { theme = 'custom', operational = null } = {}) {
-    if (portraitSettingsSaveBusy) return null;
+    if (rt.portraitSettingsSaveBusy) return null;
     const before = {
         portraitGenerationEnabled: settings.portraitGenerationEnabled,
         portraitThemePreset: settings.portraitThemePreset,
@@ -7310,18 +7236,18 @@ async function persistPortraitCustomPresetLibrary(settings, presets, selectedId,
         settings.portraitGenerationEnabled = operational.portraitGenerationEnabled !== false;
         settings.portraitSaveToGallery = operational.portraitSaveToGallery === true;
     }
-    portraitSettingsSaveBusy = true;
+    rt.portraitSettingsSaveBusy = true;
     updatePortraitSettingsSaveUi();
     try {
         await saveHostSettings();
-        portraitSettingsDirty = false;
-        portraitSettingsSaveBusy = false;
+        rt.portraitSettingsDirty = false;
+        rt.portraitSettingsSaveBusy = false;
         syncSettingsControls();
         return portraitSettingsSnapshot(settings);
     } catch (error) {
         Object.assign(settings, before);
-        portraitSettingsSaveBusy = false;
-        portraitSettingsDirty = true;
+        rt.portraitSettingsSaveBusy = false;
+        rt.portraitSettingsDirty = true;
         updatePortraitSettingsSaveUi();
         console.error('[NPC State Delta] custom portrait preset save failed', error);
         globalThis.toastr?.error?.(`NPC State Delta custom portrait preset was not saved: ${error?.message || error}`);
@@ -7423,7 +7349,7 @@ function nextReplyTokens() {
     return replyTokenEstimate({
         injection,
         captureChars: capture.length,
-        captureOutputChars: capture ? (lastCaptureBlockChars || NARRATION_CAPTURE_OUTPUT_ESTIMATE_CHARS) : 0,
+        captureOutputChars: capture ? (rt.lastCaptureBlockChars || NARRATION_CAPTURE_OUTPUT_ESTIMATE_CHARS) : 0,
     });
 }
 
@@ -7629,11 +7555,11 @@ function bindUi() {
         const settings = getSettings();
         const saved = portraitSettingsSnapshot(settings);
         const key = PORTRAIT_THEME_PRESETS[this.value] ? this.value : 'custom';
-        if (portraitSettingsDirty && key !== saved.portraitThemePreset && !confirmDiscardPortraitDraft()) {
+        if (rt.portraitSettingsDirty && key !== saved.portraitThemePreset && !confirmDiscardPortraitDraft()) {
             this.value = saved.portraitThemePreset;
             return;
         }
-        portraitSettingsDirty = false;
+        rt.portraitSettingsDirty = false;
         if (key === 'custom') {
             const custom = portraitCustomPresetFor(settings);
             writePortraitSettingsDraftToUi({
@@ -7663,11 +7589,11 @@ function bindUi() {
         const saved = portraitSettingsSnapshot(settings);
         const target = saved.portraitCustomPresets.find(item => item.id === String(this.value || ''));
         if (!target) return writePortraitCustomPresetOptions(saved);
-        if (portraitSettingsDirty && target.id !== saved.portraitCustomPresetId && !confirmDiscardPortraitDraft()) {
+        if (rt.portraitSettingsDirty && target.id !== saved.portraitCustomPresetId && !confirmDiscardPortraitDraft()) {
             this.value = saved.portraitCustomPresetId;
             return;
         }
-        portraitSettingsDirty = false;
+        rt.portraitSettingsDirty = false;
         writePortraitSettingsDraftToUi({
             ...saved,
             portraitThemePreset: 'custom',
@@ -7692,7 +7618,7 @@ function bindUi() {
         markPortraitSettingsDirty();
     });
     $(document).on('click.npcStateDelta', '#npc_state_delta_portrait_custom_add, #npc_state_delta_portrait_custom_duplicate', async function () {
-        if (portraitSettingsSaveBusy) return;
+        if (rt.portraitSettingsSaveBusy) return;
         const settings = getSettings();
         const snapshot = portraitSettingsDraftFromUi();
         const presets = portraitCustomPresetLibrary(settings.portraitCustomPresets);
@@ -7728,7 +7654,7 @@ function bindUi() {
         if (saved) globalThis.toastr?.success?.(`NPC State Delta: saved custom portrait preset ${created.name}.`);
     });
     $(document).on('click.npcStateDelta', '#npc_state_delta_portrait_custom_rename', async function () {
-        if (portraitSettingsSaveBusy) return;
+        if (rt.portraitSettingsSaveBusy) return;
         let settings = getSettings();
         let snapshot = portraitSettingsSnapshot(settings);
         const id = String($('#npc_state_delta_portrait_custom_preset').val() || snapshot.portraitCustomPresetId);
@@ -7741,7 +7667,7 @@ function bindUi() {
             globalThis.toastr?.warning?.(`NPC State Delta: a custom portrait preset named "${name}" already exists.`);
             return;
         }
-        if (portraitSettingsDirty && !(await savePortraitSettingsDraft())) return;
+        if (rt.portraitSettingsDirty && !(await savePortraitSettingsDraft())) return;
         settings = getSettings();
         snapshot = portraitSettingsSnapshot(settings);
         index = snapshot.portraitCustomPresets.findIndex(item => item.id === id);
@@ -7753,7 +7679,7 @@ function bindUi() {
         if (saved) globalThis.toastr?.success?.(`NPC State Delta: renamed portrait preset to ${name}.`);
     });
     $(document).on('click.npcStateDelta', '#npc_state_delta_portrait_custom_delete', async function () {
-        if (portraitSettingsSaveBusy) return;
+        if (rt.portraitSettingsSaveBusy) return;
         const settings = getSettings();
         let snapshot = portraitSettingsSnapshot(settings);
         if (snapshot.portraitCustomPresets.length <= 1) {
@@ -7765,7 +7691,7 @@ function bindUi() {
         let target = snapshot.portraitCustomPresets[targetIndex];
         if (!target) return;
         if (globalThis.window?.confirm?.(`Delete custom portrait preset "${target.name}"?`) === false) return;
-        if (portraitSettingsDirty && !(await savePortraitSettingsDraft())) return;
+        if (rt.portraitSettingsDirty && !(await savePortraitSettingsDraft())) return;
         snapshot = portraitSettingsSnapshot(getSettings());
         id = String($('#npc_state_delta_portrait_custom_preset').val() || id);
         targetIndex = snapshot.portraitCustomPresets.findIndex(item => item.id === id);
@@ -7984,7 +7910,7 @@ async function handleAssistantMessageReceivedInner(messageId, { bypassSwipeGuard
     // backends then emit MESSAGE_RECEIVED while swipeState is still SWIPING. Never run
     // dossier generation in that window; settlement will replay this message safely.
     if (!bypassSwipeGuard && isHostSwipeActive()) {
-        if (Number.isInteger(messageId)) deferredSwipeMessageId = messageId;
+        if (Number.isInteger(messageId)) rt.deferredSwipeMessageId = messageId;
         queueSettledSwipeReconcile({
             explicitDivergence: Number.isInteger(messageId) ? messageId : null,
             rescan: true,
@@ -8110,19 +8036,19 @@ async function runBoundedLifecycleEvent(operationKey, label, task) {
 }
 
 function registerEvents() {
-    if (eventsRegistered) return;
+    if (rt.eventsRegistered) return;
     const ctx = getContext();
     const events = ctx.eventTypes || ctx.event_types || {};
     const source = ctx.eventSource;
     if (!source?.on) return;
-    eventsRegistered = true;
+    rt.eventsRegistered = true;
     for (const name of ['CONNECTION_PROFILE_CREATED', 'CONNECTION_PROFILE_UPDATED', 'CONNECTION_PROFILE_DELETED']) {
         if (events[name]) source.on(events[name], syncScannerProfileControl);
     }
 
     if (events.MESSAGE_SENT) {
         source.on(events.MESSAGE_SENT, async (messageId) => {
-            replacingReply = null;
+            rt.replacingReply = null;
             const key = getChatKey();
             if (key === 'no-chat') return;
             // SillyTavern waits for this listener before generating. The freshness read must stay: a
@@ -8131,9 +8057,9 @@ function registerEvents() {
             // read, so an unchanged sidecar costs a 304 rather than a full download. The generation
             // that sends this message already revalidated moments ago (GENERATION_AFTER_COMMANDS
             // runs first), so one read per send is enough.
-            const recentlyChecked = generationFreshness.key === key && Date.now() - generationFreshness.at < GENERATION_FRESHNESS_REUSE_MS
+            const recentlyChecked = rt.generationFreshness.key === key && Date.now() - rt.generationFreshness.at < GENERATION_FRESHNESS_REUSE_MS
                 && chatHydrationStatus(key) === 'ready';
-            generationFreshness = { key: '', at: 0 };
+            rt.generationFreshness = { key: '', at: 0 };
             if (!recentlyChecked) {
                 try { await ensureChatStateLoaded(key); } catch (error) { console.error('[NPC State Delta] user-turn lineage update skipped because chat hydration failed.', error); return; }
             }
@@ -8157,52 +8083,52 @@ function registerEvents() {
             // The capture block is asked for only in fresh replies and continues; quiet, impersonate,
             // swipe and regenerate generations never carry the instruction.
             const captureType = NARRATION_CAPTURE_TYPES.has(String(type ?? '')) && narrationCaptureEnabled();
-            captureRulesWithheld = !CAPTURE_RULES_TYPES.has(String(type ?? ''));
+            rt.captureRulesWithheld = !CAPTURE_RULES_TYPES.has(String(type ?? ''));
             if (type === 'quiet') {
-                sentCaptureRules = '';
+                rt.sentCaptureRules = '';
                 disarmNarrationCapture();
                 // Another extension's background request never carries the capture rules. Nothing else
                 // of the injection is rebuilt for it.
-                if (lastInjection.captureRules || lastInjection.captureContext) {
+                if (rt.lastInjection.captureRules || rt.lastInjection.captureContext) {
                     getContext().setExtensionPrompt?.(CAPTURE_RULES_KEY, '', extension_prompt_types.IN_PROMPT, 0, false, extension_prompt_roles.SYSTEM);
                     getContext().setExtensionPrompt?.(CAPTURE_PROMPT_KEY, '', extension_prompt_types.IN_CHAT, CAPTURE_PROMPT_DEPTH, false, extension_prompt_roles.SYSTEM);
-                    lastInjection = { ...lastInjection, captureChars: 0, captureRules: '', captureContext: '' };
+                    rt.lastInjection = { ...rt.lastInjection, captureChars: 0, captureRules: '', captureContext: '' };
                 }
                 return;
             }
-            narrationCaptureArmed = '';
+            rt.narrationCaptureArmed = '';
             {
                 const chat = getContext().chat || [];
                 const last = chat[chat.length - 1];
-                replacingReply = (type === 'swipe' || type === 'regenerate') && last && !last.is_user && !last.is_system ? { key, message: last } : null;
+                rt.replacingReply = (type === 'swipe' || type === 'regenerate') && last && !last.is_user && !last.is_system ? { key, message: last } : null;
             }
             // Every roleplay generation revalidates the canonical dossier (a 304 when unchanged)
             // before its prompt is built: regenerate/swipe/continue, an empty Send, impersonate and
             // group member turns have no MESSAGE_SENT, and an ordinary send reuses this read there.
             try {
                 await ensureChatStateLoaded(key);
-                generationFreshness = { key, at: Date.now() };
+                rt.generationFreshness = { key, at: Date.now() };
             } catch (error) { console.warn('[NPC State Delta] pre-generation freshness check failed; the injection keeps the last verified dossier.', error); }
             if (getChatKey() !== key) return;
             // (timeline) The prompt is built from the selected head: the barrier is down and the gate has been asked.
             if (!await generationReady(key)) return;
-            narrationCaptureArmed = captureType ? key : '';
+            rt.narrationCaptureArmed = captureType ? key : '';
             updateInjection();
             // Armed only when the instruction actually went out (hydration may have withheld it).
-            if (!lastInjection.captureContext) narrationCaptureArmed = '';
-            if (lastInjection.captureRules) holdCaptureRules();
-            else sentCaptureRules = '';
+            if (!rt.lastInjection.captureContext) rt.narrationCaptureArmed = '';
+            if (rt.lastInjection.captureRules) holdCaptureRules();
+            else rt.sentCaptureRules = '';
             noteNarrationCaptureVersion(key);
-            narrationCaptureWatch = narrationCaptureArmed ? structuredClone(lastInjection.captureEventWatch || []) : [];
+            rt.narrationCaptureWatch = rt.narrationCaptureArmed ? structuredClone(rt.lastInjection.captureEventWatch || []) : [];
         });
     }
-    if (events.GENERATION_STOPPED) source.on(events.GENERATION_STOPPED, () => { sentCaptureRules = ''; replacingReply = null; disarmNarrationCapture(); });
+    if (events.GENERATION_STOPPED) source.on(events.GENERATION_STOPPED, () => { rt.sentCaptureRules = ''; rt.replacingReply = null; disarmNarrationCapture(); });
     if (events.CHAT_COMPLETION_PROMPT_READY) source.on(events.CHAT_COMPLETION_PROMPT_READY, eventData => keepCaptureRules(eventData));
 
     if (events.MESSAGE_RECEIVED) {
         // The capture block leaves the reply before any other listener (TTS, full cast, other
         // extensions) or lineage key reads it.
-        const stripCapture = messageId => { sentCaptureRules = ''; replacingReply = null; return receiveNarrationBlock(messageId); };
+        const stripCapture = messageId => { rt.sentCaptureRules = ''; rt.replacingReply = null; return receiveNarrationBlock(messageId); };
         if (typeof source.makeFirst === 'function') source.makeFirst(events.MESSAGE_RECEIVED, stripCapture);
         else source.on(events.MESSAGE_RECEIVED, stripCapture);
         source.on(events.MESSAGE_RECEIVED, async (messageId) => {
@@ -8275,19 +8201,19 @@ function registerEvents() {
 
     if (events.CHAT_CHANGED) {
         source.on(events.CHAT_CHANGED, async () => {
-            replacingReply = null;
+            rt.replacingReply = null;
             castPortraitMisses.clear();
-            narrationCaptureArmed = '';
-            sentCaptureRules = '';
+            rt.narrationCaptureArmed = '';
+            rt.sentCaptureRules = '';
             for (const cachedKey of chatStateCache.keys()) cancelScanOperation(cachedKey, 'chat changed');
-            if (branchReconcileTimer) clearTimeout(branchReconcileTimer);
-            branchReconcileTimer = null;
-            branchReconcilePending = null;
-            if (swipeSettlementTimer) clearTimeout(swipeSettlementTimer);
-            swipeSettlementTimer = null;
-            swipeSettlementPending = null;
-            deferredSwipeMessageId = null;
-            swipeSettlementSequence += 1;
+            if (rt.branchReconcileTimer) clearTimeout(rt.branchReconcileTimer);
+            rt.branchReconcileTimer = null;
+            rt.branchReconcilePending = null;
+            if (rt.swipeSettlementTimer) clearTimeout(rt.swipeSettlementTimer);
+            rt.swipeSettlementTimer = null;
+            rt.swipeSettlementPending = null;
+            rt.deferredSwipeMessageId = null;
+            rt.swipeSettlementSequence += 1;
             closePortraitGenerator();
             closeNpcEditor();
             let key = getChatKey();
@@ -8360,12 +8286,12 @@ function nsdCardSettings() {
         // An unsaved draft in the Portrait panel is the reader's: only the format is saved, then the draft goes back into the
         // panel with the card's format in it, still marked unsaved.
         saveFormat: async format => {
-            if (!portraitSettingsDirty) return savePortraitSettingsDraft({ portraitPromptFormat: format });
+            if (!rt.portraitSettingsDirty) return savePortraitSettingsDraft({ portraitPromptFormat: format });
             const draft = portraitSettingsDraftFromUi();
             const saved = await savePortraitSettingsDraft({ portraitPromptFormat: format });
             if (saved) {
                 writePortraitSettingsDraftToUi({ ...draft, portraitPromptFormat: format });
-                portraitSettingsDirty = true;
+                rt.portraitSettingsDirty = true;
                 updatePortraitSettingsSaveUi();
             }
             return saved;
@@ -8382,16 +8308,16 @@ function nsdCardSettings() {
 }
 
 async function init() {
-    if (initialized) {
+    if (rt.initialized) {
         scheduleSettingsMountRetries();
         return;
     }
-    initialized = true;
+    rt.initialized = true;
     getSettings();
     clearLegacyPromptKeys();
     connectStorySuite();
     // Story Suite v2 (Story Block 2): optional; without a v2 host the adapter does nothing.
-    import('./src/storysuite-v2.js').then(v2 => { storySuiteV2 = v2.startStorySuiteV2({ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION, headReply: latestReplyIndex, castSync, castPortraitDue, calendarOwn: () => normalizeSourceOfTruth(getSettings().sourceOfTruth).calendar === 'mine', cardSettings: nsdCardSettings() }); }).catch(error => console.debug('[NPC State Delta] Story Suite v2 adapter is not available', error));
+    import('./src/storysuite-v2.js').then(v2 => { rt.storySuiteV2 = v2.startStorySuiteV2({ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION, headReply: latestReplyIndex, castSync, castPortraitDue, calendarOwn: () => normalizeSourceOfTruth(getSettings().sourceOfTruth).calendar === 'mine', cardSettings: nsdCardSettings() }); }).catch(error => console.debug('[NPC State Delta] Story Suite v2 adapter is not available', error));
     // (v2) Hosted with Story Director, the story's date follows its clock (calendar.js hostedStoryDate)
     // unless the reader keeps the calendar here (Source of truth: calendar "mine"). No host: none.
     setStoryClockSource(hostedStoryClock);
@@ -8429,7 +8355,7 @@ async function safeInit() {
     try {
         await init();
     } catch (error) {
-        initialized = false;
+        rt.initialized = false;
         console.error('[NPC State Delta] initialization failed', error);
     }
 }
@@ -8500,7 +8426,7 @@ window.NPCStateDelta = Object.freeze({
     },
     openPortraitGenerator: value => { const npc = findNpcByIdOrName(value); return npc ? openPortraitGenerator(npc.id) : false; },
     portraitSettings: () => portraitSettingsSnapshot(getSettings()),
-    portraitSettingsDirty: () => portraitSettingsDirty,
+    portraitSettingsDirty: () => rt.portraitSettingsDirty,
     savePortraitSettings: draft => savePortraitSettingsDraft(draft),
     /** What a character card may recommend (the definition Story Block 2.21.0 registers as card settings). */
     cardSettings: () => nsdCardSettings(),
@@ -8518,29 +8444,29 @@ window.NPCStateDelta = Object.freeze({
         scanBusyForChat: isScanBusy(getChatKey()),
         scanOperation: scanOperations.status(getChatKey()),
         scannerRouting: scannerRoutingMetrics(),
-        narrationCapture: { ...narrationCaptureStats, enabled: narrationCaptureEnabled(), armed: Boolean(narrationCaptureArmed), pending: narrationCaptures.size },
+        narrationCapture: { ...narrationCaptureStats, enabled: narrationCaptureEnabled(), armed: Boolean(rt.narrationCaptureArmed), pending: narrationCaptures.size },
         inlineEntries: chatHydrationStatus(getChatKey()) === 'ready' ? (getChatState().inlineCards?.length || 0) : 0,
         mountedInlineAnchors: document.querySelectorAll?.('.npc-state-delta-inline-anchor')?.length || 0,
         integratedMeguminBlocks: document.querySelectorAll?.('.npc-state-delta-megumin-pane')?.length || 0,
         settingsPanelMounted: Boolean(document.querySelector?.(`#${UI_ID}`)),
         rosterMounted: Boolean(document.querySelector?.('#npc_state_delta_roster_summary')),
         editorMounted: editorIsMounted(),
-        editorMode: activeEditorPopup ? 'sillytavern-popup' : 'closed',
+        editorMode: rt.activeEditorPopup ? 'sillytavern-popup' : 'closed',
         presentCastDisplay: presentCastDisplayMode(),
-        portraitGeneratorOpen: Boolean(activePortraitGeneratorOverlay),
-        portraitGeneratorNpcId: activePortraitGeneratorNpcId || null,
-        portraitGenerationBusy,
+        portraitGeneratorOpen: Boolean(rt.activePortraitGeneratorOverlay),
+        portraitGeneratorNpcId: rt.activePortraitGeneratorNpcId || null,
+        portraitGenerationBusy: rt.portraitGenerationBusy,
         inlineAnchors: document.querySelectorAll?.('.npc-state-delta-inline-anchor')?.length || 0,
-        inlineObserver: Boolean(inlineObserver && inlineObserverChat),
+        inlineObserver: Boolean(rt.inlineObserver && rt.inlineObserverChat),
         inlineNeedsRepair: inlineMountNeedsRepair(),
-        lastScan: lastScanMetrics ? { ...lastScanMetrics } : null,
+        lastScan: rt.lastScanMetrics ? { ...rt.lastScanMetrics } : null,
         branchHistory: chatHydrationStatus(getChatKey()) === 'ready' ? branchHistoryDiagnostic(getChatState()) : null,
         branchReconciliations: branchReconciliationEvents
             .filter(event => event.chatKey === getChatKey())
             .slice(-8)
             .map(event => structuredClone(event)),
         swipeState: hostSwipeState(),
-        swipeSettlementPending: Boolean(swipeSettlementPending || swipeSettlementTimer),
+        swipeSettlementPending: Boolean(rt.swipeSettlementPending || rt.swipeSettlementTimer),
         hydratedRevision: hydratedRevision(getChatKey()),
         latestObservedServerRevision: hydratedStateMeta.get(getChatKey())?.latestObservedServerRevision ?? null,
         freshnessLastCheckedAt: hydratedStateMeta.get(getChatKey())?.lastCheckedAt || null,
@@ -8569,7 +8495,7 @@ window.NPCStateDelta = Object.freeze({
         return importBundleBytes(bytes);
     },
     reconcile: (options = {}) => reconcileCurrentBranch(options),
-    scanMetrics: () => lastScanMetrics ? { ...lastScanMetrics } : null,
+    scanMetrics: () => rt.lastScanMetrics ? { ...rt.lastScanMetrics } : null,
     diagnosticsSummary: () => diagnosticStore.summary(getChatKey()),
     diagnosticsRecords: options => diagnosticStore.records(getChatKey(), options || {}),
     diagnosticsForNpc: npcId => diagnosticStore.records(getChatKey(), { npcId: String(npcId || '') }),

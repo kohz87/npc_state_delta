@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const runtimeState = fs.readFileSync(new URL('../runtime-state.js', import.meta.url), 'utf8');
 const core = fs.readFileSync(new URL('../core.js', import.meta.url), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(new URL('../manifest.json', import.meta.url), 'utf8'));
 
@@ -48,8 +49,8 @@ test('automatic backfill retries are durable cooled down bounded and version-sco
 });
 
 test('editor and portrait workflows are chat-affine', () => {
-    assert.match(index, /let activeEditorChatKey = ''/);
-    assert.match(index, /let activePortraitGeneratorChatKey = ''/);
+    assert.match(runtimeState, /activeEditorChatKey: ''/);
+    assert.match(runtimeState, /activePortraitGeneratorChatKey: ''/);
     assert.match(index, /activeEditorChatKey = originChatKey/);
     assert.match(index, /activePortraitGeneratorChatKey = originChatKey/);
     assert.match(index, /originRevision = Number\(stateVersions\.get\(originChatKey\)/);
