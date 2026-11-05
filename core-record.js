@@ -475,12 +475,19 @@ export function normalizeNpcRecord(raw = {}) {
         : [];
     if (manualMemories.length) npc.manualMemories = [...new Set(manualMemories)];
     else delete npc.manualMemories;
+    // A pack's levers and mannerisms are lists: whole while the stored list still is the pack's list (the cast builds them to pass the
+    // normalizers unchanged; this keeps them if a normalizer ever changes).
+    const packList = (field, max, chars) => {
+        const first = Array.isArray(packFirst[field]) ? cleanList(packFirst[field], max, chars) : [];
+        const stored = cleanList(field === 'behaviorProfile' ? raw.behaviorProfile ?? raw.behavior_profile : raw[field], max, chars);
+        return first.length && first.length === stored.length && first.every((item, index) => item === stored[index]) ? stored : null;
+    };
     npc.mannerisms = locked.has('mannerisms')
         ? cleanList(raw.mannerisms, 8, 320)
-        : normalizeMannerisms(raw.mannerisms);
+        : packList('mannerisms', 4, DURABLE_PROFILE_LIMITS.mannerism) ?? normalizeMannerisms(raw.mannerisms);
     npc.behaviorProfile = locked.has('behaviorProfile')
         ? cleanList(raw.behaviorProfile ?? raw.behavior_profile, BEHAVIOR_PROFILE_LIMIT, 320)
-        : normalizeBehaviorProfile(raw.behaviorProfile ?? raw.behavior_profile);
+        : packList('behaviorProfile', BEHAVIOR_PROFILE_LIMIT, DURABLE_PROFILE_LIMITS.behaviorProfile) ?? normalizeBehaviorProfile(raw.behaviorProfile ?? raw.behavior_profile);
     npc.keyRelationships = locked.has('keyRelationships')
         ? (Array.isArray(raw.keyRelationships ?? raw.key_relationships ?? raw.innerCircle ?? raw.inner_circle ?? raw.family)
             ? (raw.keyRelationships ?? raw.key_relationships ?? raw.innerCircle ?? raw.inner_circle ?? raw.family)

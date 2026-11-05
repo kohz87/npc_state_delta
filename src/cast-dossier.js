@@ -10,13 +10,15 @@
 // unknown); `dateText` (minutes → "Gw 12") writes them on Story Director's calendar, words are kept as given.
 //
 // The pack entry: { id, name, aliases?, about, look, wears?, voice?, personality?, history?, portrait? (file name),
-// start: { place, goal, routine? }, drawnTo?[], meters?: { preset?, <meter>: n }, stages?[] ({ id, name, needs: [{ meter, at }], milestone }), fields?{}, secrets?[]
+// behaviour?[] ("Lever: level - effect"), mannerisms?[], withYou?, start: { place, goal, routine? }, drawnTo?[], meters?: { preset?, <meter>: n }, stages?[] ({ id, name, needs: [{ meter, at }], milestone }), fields?{}, secrets?[]
 // ({ title, text, meter + at | when }), canDieUnmet? }.
 //
 //   about → role, look → overallAppearance (the body: what lasts), wears → appearance (what they usually wear and carry: the current
 //   look; an older pack without `wears` mixed body and outfit in `look`: it still goes to overallAppearance, whole, and the current
 //   appearance stays empty for the scanner to fill from the story, so a later scan never merges its own physical text into outfit
-//   words or the other way round), voice → speech, personality, history → background, start.place → home base,
+//   words or the other way round), voice → speech, personality, history → background, behaviour → behaviorProfile (levers in Delta's
+//   own form, up to 6; a lever Delta's rules would drop or merge is skipped), mannerisms → mannerisms (up to 4), withYou → the
+//   relationship summary (read up to 400, then compacted to 320 and calibrated like any summary: the pack's words are not kept whole), start.place → home base,
 //   start.goal → goal, the place they were met → location, fields → custom fields, meters (built-in four → the dossier's
 //   relationship numbers; any meter's value is also the first value in the saved slice, see src/npc-meters.js
 //   observeCast), meters.preset → the dossier's meter track, stages → the person's own stage ladder (castFrom.stages),
@@ -31,6 +33,9 @@
 // they add and change as they do for anyone, and every change is marked in the dossier as today.
 
 import { portraitHasImage } from './portrait-file.js';
+import { isBehaviorLever, normalizeBehaviorProfile } from '../core-behavior.js';
+import { normalizeMannerisms } from '../core-durable.js';
+import { DURABLE_PROFILE_LIMITS } from '../core-relationship.js';
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const clip = (value, max) => String(value ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max).trim();
@@ -46,6 +51,10 @@ export const FIELD_VALUE_MAX = 300;
 export const FIELDS_MAX = 12;
 export const STAGES_MAX = 8;
 export const SECRETS_MAX = 8;
+/** How many behaviour levers, mannerisms and characters of "with you" a pack entry may give (Delta's own limits: 6 levers, 4 mannerisms; 400 is wider than the stored 320). */
+export const BEHAVIOUR_MAX = 6;
+export const MANNERISMS_MAX = 4;
+export const WITH_YOU_MAX = 400;
 export const DATE_MAX = 40;
 /** A cast key: "pack:id" (letters, digits and . _ : -). */
 export const CAST_KEY = /^[\p{L}\p{N}][\p{L}\p{N}._:-]{0,119}$/u;
@@ -138,6 +147,41 @@ export function castSecrets(raw) {
     return out;
 }
 
+const sameList = (a, b) => a.length === b.length && a.every((item, index) => item === b[index]);
+const LEVER_LINE = /^([^:]{1,40}?)\s*:\s*(low|medium|high)\b\s*[-\u2013\u2014]\s*(\S.*)$/i;
+
+/**
+ * The pack's behaviour levers as the dossier stores them: ["Label: level - effect"], at most six. Each item is written in Delta's own
+ * form (level low|medium|high) and kept only if Delta's lever rules would keep it as it stands: a recognised lever label, not
+ * about the player or one named person (that is "with you"), and not merged into another lever of the same kind. Anything else
+ * is skipped, so the stored list is exactly what Delta's normalizer gives back (nothing is changed after the first meeting).
+ */
+export function castBehaviour(raw) {
+    const out = [];
+    for (const item of (Array.isArray(raw) ? raw : []).slice(0, BEHAVIOUR_MAX * 4)) {
+        if (out.length >= BEHAVIOUR_MAX) break;
+        const match = typeof item === 'string' ? LEVER_LINE.exec(clip(item, 400)) : null;
+        if (!match) continue;
+        const line = clip(`${match[1].trim()}: ${match[2].toLowerCase()} - ${match[3]}`, DURABLE_PROFILE_LIMITS.behaviorProfile);
+        const next = [...out, line];
+        if (!isBehaviorLever(line) || !sameList(normalizeBehaviorProfile(next), next)) continue;
+        out.push(line);
+    }
+    return out;
+}
+
+/** The pack's mannerisms: at most four short habits (160 characters each), kept only when Delta's mannerism rules keep them as they stand (a near-repeat of an earlier one is skipped). */
+export function castMannerisms(raw) {
+    const out = [];
+    for (const item of (Array.isArray(raw) ? raw : []).slice(0, MANNERISMS_MAX * 4)) {
+        if (out.length >= MANNERISMS_MAX) break;
+        const line = typeof item === 'string' ? clip(item, DURABLE_PROFILE_LIMITS.mannerism) : '';
+        const next = [...out, line];
+        if (line && sameList(normalizeMannerisms(next), next)) out.push(line);
+    }
+    return out;
+}
+
 /** The pack entry, cleaned (texts cut and flattened, lists bounded), or null without a usable name. */
 export function normalizeEntry(raw) {
     if (!isObject(raw)) return null;
@@ -155,6 +199,9 @@ export function normalizeEntry(raw) {
         voice: clip(raw.voice, 600),
         personality: clip(raw.personality, 900),
         history: clip(raw.history, 1200),
+        behaviour: castBehaviour(raw.behaviour),
+        mannerisms: castMannerisms(raw.mannerisms),
+        withYou: clip(raw.withYou, WITH_YOU_MAX),
         portrait: clip(raw.portrait, 120),
         start: { place: clip(start.place, 300), goal: clip(start.goal, 500), routine: clip(start.routine, 300) },
         drawnTo: (Array.isArray(raw.drawnTo) ? raw.drawnTo : []).map(item => clip(item, 120)).filter(Boolean).slice(0, 8),
@@ -257,6 +304,9 @@ export function applyCastEntry(base, person, { packName = '', portrait = null } 
     if (entry.voice) npc.speech = entry.voice;
     if (entry.personality) npc.personality = entry.personality;
     if (entry.history) npc.background = entry.history;
+    if (entry.behaviour?.length) npc.behaviorProfile = [...entry.behaviour];
+    if (entry.mannerisms?.length) npc.mannerisms = [...entry.mannerisms];
+    if (entry.withYou) npc.relationshipSummary = entry.withYou;
     if (entry.start.place) npc.homeBase = entry.start.place;
     if (entry.start.goal) npc.goal = entry.start.goal;
     if (person.met?.where) npc.location = person.met.where;
@@ -275,7 +325,7 @@ export function applyCastEntry(base, person, { packName = '', portrait = null } 
         met: { on: person.met?.on ?? '', where: person.met?.where ?? '' },
         goal: entry.start.goal, routine: entry.start.routine,
         // The pack's own words, kept exactly while the stored field still is them (core-mechanics normalizeNpcRecord).
-        first: Object.fromEntries([['overallAppearance', entry.look], ['appearance', entry.wears], ['speech', entry.voice], ['personality', entry.personality], ['background', entry.history]].filter(([, text]) => text)),
+        first: Object.fromEntries([['overallAppearance', entry.look], ['appearance', entry.wears], ['speech', entry.voice], ['personality', entry.personality], ['background', entry.history], ['behaviorProfile', entry.behaviour], ['mannerisms', entry.mannerisms]].filter(([, words]) => (Array.isArray(words) ? words.length : words)).map(([field, words]) => [field, Array.isArray(words) ? [...words] : words])),
         ...(entry.stages.length ? { stages: entry.stages } : {}),
     };
     return npc;
