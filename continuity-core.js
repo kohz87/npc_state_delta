@@ -1,5 +1,6 @@
 /* NPC State Delta Stage 4 continuity facade. */
 import * as mechanics from './core-mechanics.js';
+import { stripRecordCitations } from './core-record.js';
 import {
     APPEARANCE_MODEL_VERSION,
     applyAppearanceUpdate,
@@ -65,7 +66,8 @@ function mergeAppearanceKnowledge(sources = [], current = {}) {
 export function normalizeNpcRecord(raw = {}) {
     return applyModel(mechanics.normalizeNpcRecord(raw));
 }
-export function normalizeScanNpc(raw = {}, options = {}) {
+export function normalizeScanNpc(rawInput = {}, options = {}) {
+    const raw = stripRecordCitations(rawInput);
     return {
         ...mechanics.normalizeScanNpc(raw, options),
         overallAppearance: String(raw.overallAppearance ?? raw.overall_appearance ?? '').trim().slice(0, 800),
@@ -130,7 +132,17 @@ export function applyNpcStateCommand(state, command, options = {}) {
     return result;
 }
 
-export function mergeScanResult(state, scanResult, options = {}) {
+// (stage 73) A scan row's text fields lose the message citations the model appended ("... [m1, m2]") before anything reads them.
+function stripScanCitations(scanResult) {
+    if (!scanResult || typeof scanResult !== 'object') return scanResult;
+    const clean = rows => (Array.isArray(rows) ? rows.map(row => (row && typeof row === 'object' ? stripRecordCitations(row) : row)) : rows);
+    const out = { ...scanResult };
+    for (const key of ['npcs', 'profileUpdates', 'profile_updates']) if (Array.isArray(out[key])) out[key] = clean(out[key]);
+    return out;
+}
+
+export function mergeScanResult(state, rawScanResult, options = {}) {
+    const scanResult = stripScanCitations(rawScanResult);
     const previous = (state?.npcs || []).map(normalizeNpcRecord);
     // (C05, C-1) Confirmed death is terminal for every merge: scanner, Refresh, backfill and import
     // output, with or without a source message, cannot make the NPC alive or present again. Only

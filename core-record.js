@@ -7,7 +7,8 @@
    core-mechanics.js or core.js. */
 import { AGE_NUMBER_WORD_RE, ageSpecificity, inferNpcIdentityKind, isInterimNpcLabel, isRoleDescriptionLabel, makeNpcId, normalizeAgeFields, normalizeBoolean, normalizeDossierSignal, normalizeGender, normalizeLifeState, normalizeStoredAgeFields, slugify } from './core-identity.js';
 import { appendRelationshipEvent, calibrateRelationshipSummary, compactDurableText, DEFAULT_RELATIONSHIP, DURABLE_PROFILE_LIMITS, durableSeedGrounded, durableSemanticSimilarity, normalizeRelationshipAbsolutePatch, normalizeRelationshipAuditDelta, normalizeRelationshipBaseline, normalizeRelationshipDelta, normalizeRelationshipEventHistory, normalizeRelationshipEvidence, normalizeRelationshipImpact, normalizeRelationshipMilestones, normalizeRelationshipProgress, normalizeScannerRelationshipImpact, RELATIONSHIP_KEYS, relationshipEventMessage, semanticDedupeItems } from './core-relationship.js';
-import { cleanList, cleanText, normalizeName } from './core-text.js';
+import { cleanList, cleanText, normalizeName, stripMessageCitations } from './core-text.js';
+import { TEXT_FIELDS } from './src/fields/registry.js';
 import { compactKeyRelationshipEntry, KEY_RELATIONSHIP_LIMIT, keyRelationshipSubject, mergeKeyRelationshipUpdates } from './core-keyrel.js';
 import { isSafeUnmarkedDurableReplacement, normalizeMannerisms } from './core-durable.js';
 import { BEHAVIOR_PROFILE_LIMIT, isBehaviorLever, normalizeBehaviorProfile } from './core-behavior.js';
@@ -127,7 +128,8 @@ export function normalizeStoredMemories(value) {
     return cleaned.slice(-IMPORTANT_MEMORY_LIMIT);
 }
 
-export function normalizeScanNpc(raw = {}, options = {}) {
+export function normalizeScanNpc(rawInput = {}, options = {}) {
+    const raw = stripRecordCitations(rawInput);
     const memoryInputLimit = Math.max(1, Math.min(IMPORTANT_MEMORY_LIMIT, Math.round(Number(options.memoryInputLimit) || 3)));
     const relationshipDeltaProvided = Object.prototype.hasOwnProperty.call(raw, 'relationshipDelta')
         || Object.prototype.hasOwnProperty.call(raw, 'relationship_delta');
@@ -411,7 +413,34 @@ function mergeCustomFieldValues(existing, incoming, { names = [], reason = '', c
     return changed ? out : null;
 }
 
-export function normalizeNpcRecord(raw = {}) {
+// (stage 73) Message citations ("[m1, m2]") the scanner's model appended to a field are not dossier text: normalizeNpcRecord strips them from
+// every stored text field and list item, so a saved dossier is cleaned the next time it is normalized. An evidence item keeps its intended
+// leading "[mN] " tag (message attribution); only citations after it go.
+const CITATION_LIST_FIELDS = ['aliases', 'mannerisms', 'behaviorProfile', 'behavior_profile', 'memories', 'manualMemories', 'keyRelationships', 'key_relationships', 'innerCircle', 'inner_circle', 'family'];
+const CITATION_TEXT_FIELDS = [...TEXT_FIELDS, 'overallAppearance', 'unclassifiedAppearance', 'lifeStateReason'];
+const stripEvidenceCitations = item => {
+    if (typeof item !== 'string') return item;
+    const lead = item.match(/^\s*\[m\d+\]\s*/i);
+    return lead ? lead[0] + stripMessageCitations(item.slice(lead[0].length)) : stripMessageCitations(item);
+};
+export function stripRecordCitations(raw) {
+    const out = { ...raw };
+    for (const key of CITATION_TEXT_FIELDS) if (typeof out[key] === 'string') out[key] = stripMessageCitations(out[key]);
+    for (const key of CITATION_LIST_FIELDS) if (Array.isArray(out[key])) out[key] = out[key].map(item => (typeof item === 'string' ? stripMessageCitations(item) : item));
+    if (Array.isArray(out.appearanceForms)) {
+        out.appearanceForms = out.appearanceForms.map(form => (form && typeof form.appearance === 'string' ? { ...form, appearance: stripMessageCitations(form.appearance) } : form));
+    }
+    for (const key of ['profileEvidence', 'profile_evidence']) {
+        const evidence = out[key];
+        if (evidence && typeof evidence === 'object' && !Array.isArray(evidence)) {
+            out[key] = Object.fromEntries(Object.entries(evidence).map(([field, list]) => [field, Array.isArray(list) ? list.map(stripEvidenceCitations) : list]));
+        }
+    }
+    return out;
+}
+
+export function normalizeNpcRecord(rawInput = {}) {
+    const raw = stripRecordCitations(rawInput);
     const npc = { ...raw };
     // Manual profile locks block scanner rewrites. Data hygiene still normalizes whitespace,
     // but semantic compaction is skipped for explicitly locked stable fields.
