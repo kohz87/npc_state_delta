@@ -4,10 +4,11 @@ import fs from 'node:fs';
 import { snapshotNpc } from '../src/fields/registry.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
-const index = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
+const index = runtimeSource();
 const continuityUi = fs.readFileSync(path.join(root, 'continuity-ui.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
 const dossierUi = fs.readFileSync(path.join(root, 'dossier-ui.js'), 'utf8');

@@ -13,6 +13,7 @@ import {
     normalizeNpcRecord,
 } from '../core.js';
 import { dossierDetailProjection } from '../dossier-ui.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const dead = (extra = {}) => normalizeNpcRecord({
     id: 'npc_brenn', name: 'Old Brenn', gender: 'male', role: "ship's mate", archived: true, archiveReason: 'deceased',
@@ -90,7 +91,7 @@ test('configured custom fields reach the roleplay injection and the dossier page
 });
 
 test('settings, editor, scans and imports are wired to the custom fields', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     assert.match(index, /customFieldNames: \[\],/);
     assert.match(index, /assign\('customFieldNames', normalizeCustomFieldNames\(settings\.customFieldNames\), sameJson\)/);
     assert.match(index, /id="npc_state_delta_custom_fields"/);

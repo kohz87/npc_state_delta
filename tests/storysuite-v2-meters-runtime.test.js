@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // NPC meters (F81, F90) with Delta's real runtime: the established synthetic host (runtime-smoke.mjs)
 // loads Delta, alone or beside a fake Story Block v2 global, and runs the same turns. Hosted, a
@@ -261,7 +262,7 @@ test('without a v2 host the same turns send nothing, and the sidecar and the inj
 });
 
 test('index.js: the v2 meter hooks are the identity without a host', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     // Every hook asks storySuiteV2Meters() first, which is null unless the page flag is set and the adapter is hosted.
     assert.match(index, /function storySuiteV2Meters\(\) \{\n    return storyBlockV2Hosted\(\) && rt\.storySuiteV2\?\.hosted\?\.\(\) \? rt\.storySuiteV2 : null;\n\}/);
     assert.match(index, /function hostedMeterView\(npcs\) \{\n    const adapter = storySuiteV2Meters\(\);\n    if \(!adapter\) return npcs;/);
@@ -504,7 +505,7 @@ test('hosted: the scan watches present people\'s event notes, and a story event 
 });
 
 test('index.js: after the editor applies its notes to the slice the dossier is drawn again, and the scan carries the hosted notes\' options only while hosted', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     assert.match(index, /await hostedMeters\.applyEditor\(savedName, v2Edits\);\n[^\n]*\n        renderDossier\(\);\n        updateInjection\(\);/);
     assert.match(index, /const hostedNotes = hostedMeters\(\);\n    const noteOptions = hostedNotes && !capture \? hostedNotePromptOptions\(state, settings, messageId\) : \{\};/);
     assert.match(index, /const eventWatch = capture \? \(Array\.isArray\(capture\.watch\) \? capture\.watch : \[\]\) : \(noteOptions\.eventWatch \|\| \[\]\);/);

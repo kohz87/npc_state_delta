@@ -1,5 +1,5 @@
 /* NPC State Delta - standalone SillyTavern extension */
-import { extension_settings, getContext } from '../../../extensions.js';
+import { getContext } from '../../../extensions.js';
 import { extension_prompt_types, extension_prompt_roles, getRequestHeaders, saveSettings as saveHostSettings } from '../../../../script.js';
 import {
     isEmptyScannerAnswer,
@@ -8,9 +8,7 @@ import {
     scannerRoutingMetrics,
     scannerProfileOptions,
     scannerDiagnosticLines,
-    normalizeScannerMaxOutputTokens,
 } from './scanner-routing.js';
-import { normalizeRelationshipMapSettings } from './relationship-map-core.js';
 import {
     AUTOMATIC_BACKFILL_QUEUE_VERSION,
     AUTOMATIC_MISSED_PARTICIPANT_REPAIR_LIMIT,
@@ -96,7 +94,6 @@ import {
     protectTerminalNpc,
     extractNarrationCapture,
     parseNarrationCapture,
-    buildNarrationCapturePrompt,
     buildNarrationCaptureParts,
     tagScanEvidence,
     npcMatchesLabel,
@@ -125,7 +122,6 @@ import {
     normalizeFormPortraitAssets,
     normalizeCustomFieldNames,
     normalizeCustomFields,
-    setExternalCalendarSource,
     setStoryClockSource,
     storyMinuteText,
     withStoryDateMemo,
@@ -200,25 +196,14 @@ import {
     resolveDeletedLifecycleKeyFromPresence,
     resolveOwnedLifecycleKey,
 } from './hardening-core.js';
-import { storySuite } from './suite.js';
 import {
     SUITE_AREAS,
-    SUITE_SHOWS,
-    NARRATION_CAPTURE_OUTPUT_ESTIMATE_CHARS,
-    announceNpcStateDelta,
     areaOwner,
-    buildManageApi,
-    buildNpcProfiles,
     defersArea,
-    ensureSuiteStylesheet,
-    replyTokenEstimate,
     resolveDossierTarget,
     storyBlockIsV2,
-    externalCalendar,
     normalizeSourceOfTruth,
     openSuiteOverlay,
-    statsOverlapWarning,
-    suiteManageAvailable,
 } from './suite-handshake.js';
 import {
     chatterSlotsHtml,
@@ -239,8 +224,9 @@ import { createCardSettingsDefinition, SCAN_EVERY_RANGE } from './src/card-setti
 import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, returnNote } from './src/key-people.js';
 import { applyCastEntry, applyCastPortrait, castPortraitWanted, castView, dossierFor, findCastPerson, markCastPortraitRemoved, metWithEntry, normalizeCast } from './src/cast-dossier.js';
 import { createRuntimeState } from './runtime-state.js';
+import { PORTRAIT_THEME_PRESETS, PORTRAIT_CUSTOM_PRESET_LIMIT, portraitCustomPreset, portraitCustomPresetLibrary, portraitCustomPresetFor, nextPortraitCustomPresetId, portraitCustomPresetNameTaken, uniquePortraitCustomPresetName, persistSettings, injectDepthOf, getSettings, normalizePresentCastDisplay } from './runtime-settings.js';
+import { createSuitePart } from './runtime-suite.js';
 
-const EXTENSION_NAME = 'npc_state_delta';
 // The chat text helpers (src/transcript.js) read the host's chat and the Scan context setting.
 useTranscriptSource({ context: () => getContext(), scanDepth: () => getSettings().scanDepth });
 // (1.2.16) Cache-friendly layout (the Story Suite convention): text that never changes from reply
@@ -449,293 +435,6 @@ function cancelScanOperation(key, reason = 'cancelled') {
         if (npcId && operation.metadata?.indicator === 'refresh') setNpcChatRefreshIndicator(npcId, false);
     }
     return true;
-}
-
-const PORTRAIT_THEME_PRESETS = Object.freeze({
-    fantasy_anime: {
-        label: 'Fantasy Anime',
-        positive: DEFAULT_PORTRAIT_STYLE_POSITIVE,
-        negative: DEFAULT_PORTRAIT_STYLE_NEGATIVE,
-    },
-    anime_key_visual: {
-        label: 'Anime Key Visual',
-        positive: 'high-end fantasy anime key visual, crisp expressive linework, polished cel shading, luminous detailed eyes, elegant costume rendering, cinematic color design, studio-quality character illustration',
-        negative: DEFAULT_PORTRAIT_STYLE_NEGATIVE,
-    },
-    painterly_fantasy: {
-        label: 'Painterly Fantasy',
-        positive: 'painterly fantasy character portrait, refined brushwork, detailed face and eyes, rich textile rendering, atmospheric cinematic light, elegant high-fantasy illustration',
-        negative: 'low quality, blurry, bad anatomy, malformed hands, extra limbs, duplicate character, text, watermark, logo, flat cel shading, cheap 3d render',
-    },
-    dark_medieval: {
-        label: 'Dark Medieval',
-        positive: 'grounded dark medieval fantasy character portrait, weathered materials, restrained dramatic lighting, detailed practical clothing and armor, serious illustrated realism',
-        negative: 'low quality, blurry, bad anatomy, extra limbs, duplicate character, text, watermark, logo, neon cyberpunk, modern streetwear, glossy plastic armor',
-    },
-    semi_realistic: {
-        label: 'Semi-Realistic',
-        positive: 'semi-realistic fantasy character portrait, natural facial anatomy, detailed eyes and hair, realistic fabric and metal textures, soft cinematic lighting, polished digital illustration',
-        negative: 'low quality, blurry, bad anatomy, malformed hands, extra limbs, duplicate character, text, watermark, logo, chibi, super-deformed proportions, cheap 3d render',
-    },
-    custom: { label: 'Custom Library', positive: '', negative: '' },
-});
-
-const PORTRAIT_CUSTOM_PRESET_LIMIT = 24;
-const DEFAULT_CUSTOM_PORTRAIT_PRESET_ID = 'custom-default';
-
-function portraitCustomPreset(raw = {}, index = 0) {
-    const id = String(raw.id || '').trim().replace(/[^a-zA-Z0-9_-]+/g, '').slice(0, 64)
-        || (index === 0 ? DEFAULT_CUSTOM_PORTRAIT_PRESET_ID : `custom-${index + 1}`);
-    const name = String(raw.name || '').trim().slice(0, 80) || `Custom ${index + 1}`;
-    return {
-        id,
-        name,
-        positive: String(raw.positive ?? DEFAULT_PORTRAIT_STYLE_POSITIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT),
-        negative: String(raw.negative ?? DEFAULT_PORTRAIT_STYLE_NEGATIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT),
-        composition: String(raw.composition ?? DEFAULT_PORTRAIT_COMPOSITION).slice(0, PORTRAIT_COMPOSITION_PROMPT_LIMIT),
-        promptFormat: normalizePortraitPromptFormat(raw.promptFormat ?? 'hybrid'),
-        useMood: raw.useMood !== undefined ? Boolean(raw.useMood) : true,
-        useLocation: raw.useLocation !== undefined ? Boolean(raw.useLocation) : false,
-    };
-}
-
-function portraitCustomPresetLibrary(raw) {
-    const source = Array.isArray(raw) ? raw : [];
-    const seen = new Set();
-    const result = [];
-    for (let index = 0; index < source.length && result.length < PORTRAIT_CUSTOM_PRESET_LIMIT; index += 1) {
-        const preset = portraitCustomPreset(source[index], index);
-        let id = preset.id;
-        let suffix = 2;
-        while (seen.has(id)) id = `${preset.id.slice(0, 56)}-${suffix++}`;
-        seen.add(id);
-        result.push({ ...preset, id });
-    }
-    if (!result.length) {
-        result.push(portraitCustomPreset({
-            id: DEFAULT_CUSTOM_PORTRAIT_PRESET_ID,
-            name: 'Custom 1',
-        }, 0));
-    }
-    return result;
-}
-
-function portraitCustomPresetFor(source = {}, id = '') {
-    const presets = portraitCustomPresetLibrary(source.portraitCustomPresets);
-    const selectedId = String(id || source.portraitCustomPresetId || '').trim();
-    return presets.find(item => item.id === selectedId) || presets[0];
-}
-
-function nextPortraitCustomPresetId(presets = []) {
-    const taken = new Set((presets || []).map(item => String(item?.id || '')));
-    const base = `custom-${Date.now().toString(36)}`;
-    let id = base;
-    let suffix = 2;
-    while (taken.has(id)) id = `${base}-${suffix++}`;
-    return id;
-}
-
-function portraitCustomPresetNameKey(value) {
-    return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
-}
-
-function portraitCustomPresetNameTaken(presets, name, excludeId = '') {
-    const key = portraitCustomPresetNameKey(name);
-    if (!key) return false;
-    return (presets || []).some(item => String(item?.id || '') !== String(excludeId || '')
-        && portraitCustomPresetNameKey(item?.name) === key);
-}
-
-function uniquePortraitCustomPresetName(presets, base, excludeId = '') {
-    const root = String(base || 'Custom').trim().slice(0, 72) || 'Custom';
-    if (!portraitCustomPresetNameTaken(presets, root, excludeId)) return root;
-    for (let suffix = 2; suffix < 1000; suffix += 1) {
-        const candidate = `${root} ${suffix}`.slice(0, 80);
-        if (!portraitCustomPresetNameTaken(presets, candidate, excludeId)) return candidate;
-    }
-    return `${root.slice(0, 68)} ${Date.now().toString(36)}`.slice(0, 80);
-}
-
-
-const DEFAULTS = Object.freeze({
-    schemaVersion: 30,
-    enabled: true,
-    autoScan: true,
-    fullScanEveryTurn: false,
-    narrationCapture: false,
-    // (1.2.11) With one-pass capture: a quiet Refresh of the NPCs most in the last N captured
-    // replies (0 = never), for the slow fields a block beside the story tends to leave thin.
-    narrationCaptureCatchUp: 8,
-    // (1.2.17) Opt-in: the one-pass rules in fewer words (about 500 tokens less per armed reply).
-    narrationCaptureCompact: false,
-    scannerConnectionProfile: '',
-    portraitGenerationEnabled: true,
-    portraitThemePreset: 'fantasy_anime',
-    portraitCustomPresetId: DEFAULT_CUSTOM_PORTRAIT_PRESET_ID,
-    portraitCustomPresets: [portraitCustomPreset({ id: DEFAULT_CUSTOM_PORTRAIT_PRESET_ID, name: 'Custom 1' })],
-    portraitStylePositive: DEFAULT_PORTRAIT_STYLE_POSITIVE,
-    portraitStyleNegative: DEFAULT_PORTRAIT_STYLE_NEGATIVE,
-    portraitComposition: DEFAULT_PORTRAIT_COMPOSITION,
-    portraitPromptFormat: 'hybrid',
-    portraitUseMood: true,
-    portraitUseLocation: false,
-    portraitSaveToGallery: false,
-    scanEvery: 5,
-    scanDepth: 6,
-    maxNpcs: 40,
-    autoPruneStale: true,
-    staleArchiveAfter: 30,
-    staleDeleteAfter: 50,
-    admissionMode: 'conservative',
-    inject: true,
-    // (1.2.16) 0: after the player's message, the cache-friendly tail. An install still on the old
-    // default 1 is moved once (injectDepthTailUpgraded); any other depth the player set is kept.
-    injectDepth: 0,
-    // How many present NPCs the live dossier carries at most (the most relevant first).
-    injectLimit: 3,
-    injectBudgetTokens: 4000,
-    customFieldNames: [],
-    sourceOfTruth: normalizeSourceOfTruth(),
-    branchRescan: true,
-    midDeleteRewind: false,
-    presentCastDisplay: 'full',
-    presentCastDisplayChosen: false,
-    // The floating npc state button while Story Block carries Delta's Present NPCs and Dossiers tabs.
-    launcherWithStoryBlock: false,
-    // The same button while a Story Block v2 host carries Delta (its Cast tab and overlay).
-    launcherWithStoryBlockV2: false,
-    relationshipBaseline: { ...DEFAULT_RELATIONSHIP },
-    relationshipCaps: { ...DEFAULT_RELATIONSHIP_CAPS },
-    relationshipCriteria: DEFAULT_RELATIONSHIP_CRITERIA,
-    relationshipImpactCriteria: DEFAULT_IMPACT_CRITERIA,
-    memoryCriteria: DEFAULT_MEMORY_CRITERIA,
-    behaviorCriteria: DEFAULT_BEHAVIOR_CRITERIA,
-    autoArchiveDeaths: true,
-    autoReactivateArchived: true,
-    // (v2 hidden notes) A scan that builds a new dossier also writes 2 to 5 layered hidden notes. Hosted only.
-    layeredSecrets: true,
-    dataFiles: {},
-    sidecarTombstones: {},
-    recoveryFiles: {},
-    recoveryHistory: {},
-    recoveryGarbage: {},
-    // Settings whose controls live in their own modules (full-cast.js, scanner-output-ui.js,
-    // relationship-map.js, calendar-settings.js); declared and normalized here, the one settings owner.
-    fullCastScanEveryTurn: false,
-    scannerMaxOutputTokens: 0,
-    relationshipMap: normalizeRelationshipMapSettings(),
-});
-
-
-function persistSettings() {
-    const ctx = getContext();
-    if (typeof ctx.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
-}
-
-// The dossier's depth: 0 to 20, 0 kept (it is the default since 1.2.16).
-function injectDepthOf(settings) {
-    const depth = Math.round(Number(settings?.injectDepth));
-    return Number.isFinite(depth) ? Math.max(0, Math.min(20, depth)) : 0;
-}
-
-function getSettings() {
-    let settings = extension_settings[EXTENSION_NAME];
-    let dirty = false;
-    if (!settings || typeof settings !== 'object') {
-        settings = structuredClone(DEFAULTS);
-        extension_settings[EXTENSION_NAME] = settings;
-        dirty = true;
-    }
-
-    const assign = (key, value, equal = Object.is) => {
-        if (equal(settings[key], value)) return;
-        settings[key] = structuredClone(value);
-        dirty = true;
-    };
-    const sameJson = (a, b) => {
-        try { return JSON.stringify(a) === JSON.stringify(b); }
-        catch { return false; }
-    };
-
-    for (const [key, value] of Object.entries(DEFAULTS)) {
-        if (settings[key] === undefined) assign(key, value);
-    }
-    if (!settings.dataFiles || typeof settings.dataFiles !== 'object') assign('dataFiles', {});
-    if (!settings.sidecarTombstones || typeof settings.sidecarTombstones !== 'object') assign('sidecarTombstones', {});
-    if (!settings.recoveryFiles || typeof settings.recoveryFiles !== 'object') assign('recoveryFiles', {});
-    if (!settings.recoveryHistory || typeof settings.recoveryHistory !== 'object') assign('recoveryHistory', {});
-    if (!settings.recoveryGarbage || typeof settings.recoveryGarbage !== 'object') assign('recoveryGarbage', {});
-
-    // Current-format settings are canonicalized in place; older Delta schemas are unsupported.
-    assign('relationshipBaseline', normalizeRelationshipBaseline(settings.relationshipBaseline), sameJson);
-    assign('relationshipCaps', normalizeRelationshipCaps(settings.relationshipCaps), sameJson);
-    assign('customFieldNames', normalizeCustomFieldNames(settings.customFieldNames), sameJson);
-    assign('sourceOfTruth', normalizeSourceOfTruth(settings.sourceOfTruth), sameJson);
-    assign('relationshipCriteria', typeof settings.relationshipCriteria === 'string' ? settings.relationshipCriteria : DEFAULT_RELATIONSHIP_CRITERIA);
-    assign('relationshipImpactCriteria', typeof settings.relationshipImpactCriteria === 'string' ? settings.relationshipImpactCriteria : DEFAULT_IMPACT_CRITERIA);
-    assign('memoryCriteria', typeof settings.memoryCriteria === 'string' ? settings.memoryCriteria : DEFAULT_MEMORY_CRITERIA);
-    assign('behaviorCriteria', typeof settings.behaviorCriteria === 'string' ? settings.behaviorCriteria : DEFAULT_BEHAVIOR_CRITERIA);
-    assign('admissionMode', normalizeNpcAdmissionMode(settings.admissionMode));
-    assign('presentCastDisplay', normalizePresentCastDisplay(settings.presentCastDisplay));
-    assign('presentCastDisplayChosen', settings.presentCastDisplayChosen === true);
-    assign('launcherWithStoryBlock', settings.launcherWithStoryBlock === true);
-    assign('launcherWithStoryBlockV2', settings.launcherWithStoryBlockV2 === true);
-    // 1.0.70 raised the default budget from 1800 to 4000 tokens. An install still on the old default
-    // is moved once; any value the player chose, including a later deliberate 1800, is kept.
-    const legacyDefaultBudget = settings.injectBudgetDefaultUpgraded !== true && Number(settings.injectBudgetTokens) === 1800;
-    assign('injectBudgetTokens', legacyDefaultBudget ? 4000 : Math.max(512, Math.min(6000, Math.round(Number(settings.injectBudgetTokens) || 4000))));
-    assign('injectBudgetDefaultUpgraded', true);
-    const legacyDefaultDepth = settings.injectDepthTailUpgraded !== true && Number(settings.injectDepth) === 1;
-    assign('injectDepth', legacyDefaultDepth ? 0 : injectDepthOf(settings));
-    assign('injectDepthTailUpgraded', true);
-    assign('layeredSecrets', settings.layeredSecrets !== false);
-    assign('fullScanEveryTurn', settings.fullScanEveryTurn === true);
-    assign('narrationCapture', settings.narrationCapture === true);
-    assign('narrationCaptureCompact', settings.narrationCaptureCompact === true);
-    assign('narrationCaptureCatchUp', Number.isFinite(Number(settings.narrationCaptureCatchUp)) ? Math.max(0, Math.min(50, Math.round(Number(settings.narrationCaptureCatchUp)))) : 8);
-    assign('scannerConnectionProfile', typeof settings.scannerConnectionProfile === 'string' ? settings.scannerConnectionProfile.trim() : '');
-    assign('portraitGenerationEnabled', settings.portraitGenerationEnabled !== false);
-    assign('portraitThemePreset', PORTRAIT_THEME_PRESETS[settings.portraitThemePreset] ? settings.portraitThemePreset : 'custom');
-    const portraitCustomPresets = portraitCustomPresetLibrary(settings.portraitCustomPresets);
-    assign('portraitCustomPresets', portraitCustomPresets, sameJson);
-    const portraitCustomPresetId = portraitCustomPresets.some(item => item.id === settings.portraitCustomPresetId)
-        ? settings.portraitCustomPresetId
-        : portraitCustomPresets[0].id;
-    assign('portraitCustomPresetId', portraitCustomPresetId);
-    const activeCustomPortraitPreset = portraitCustomPresets.find(item => item.id === portraitCustomPresetId) || portraitCustomPresets[0];
-    if (settings.portraitThemePreset === 'custom') {
-        assign('portraitStylePositive', activeCustomPortraitPreset.positive);
-        assign('portraitStyleNegative', activeCustomPortraitPreset.negative);
-        assign('portraitComposition', activeCustomPortraitPreset.composition);
-        assign('portraitPromptFormat', activeCustomPortraitPreset.promptFormat);
-        assign('portraitUseMood', activeCustomPortraitPreset.useMood);
-        assign('portraitUseLocation', activeCustomPortraitPreset.useLocation);
-    }
-    assign('portraitStylePositive', String(settings.portraitStylePositive ?? DEFAULT_PORTRAIT_STYLE_POSITIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT));
-    assign('portraitStyleNegative', String(settings.portraitStyleNegative ?? DEFAULT_PORTRAIT_STYLE_NEGATIVE).slice(0, PORTRAIT_STYLE_PROMPT_LIMIT));
-    assign('portraitComposition', String(settings.portraitComposition ?? DEFAULT_PORTRAIT_COMPOSITION).slice(0, PORTRAIT_COMPOSITION_PROMPT_LIMIT));
-    assign('portraitPromptFormat', normalizePortraitPromptFormat(settings.portraitPromptFormat));
-    assign('portraitUseMood', settings.portraitUseMood !== false);
-    assign('portraitUseLocation', settings.portraitUseLocation === true);
-    assign('portraitSaveToGallery', settings.portraitSaveToGallery === true);
-    assign('autoPruneStale', settings.autoPruneStale !== false);
-    const archiveAfter = Math.max(10, Math.min(999, Math.round(Number(settings.staleArchiveAfter) || 30)));
-    assign('staleArchiveAfter', archiveAfter);
-    assign('staleDeleteAfter', Math.max(archiveAfter + 1, Math.min(1000, Math.round(Number(settings.staleDeleteAfter) || 50))));
-    assign('injectLimit', Math.max(1, Math.min(12, Math.round(Number(settings.injectLimit) || 3))));
-    assign('fullCastScanEveryTurn', settings.fullCastScanEveryTurn === true);
-    assign('scannerMaxOutputTokens', normalizeScannerMaxOutputTokens(settings.scannerMaxOutputTokens));
-    assign('relationshipMap', normalizeRelationshipMapSettings(settings.relationshipMap), sameJson);
-    // The fantasy calendar (calendar-settings.js) is optional: absent means none; only a stored
-    // object is a calendar.
-    if (settings.calendarConfig !== undefined && (!settings.calendarConfig || typeof settings.calendarConfig !== 'object' || Array.isArray(settings.calendarConfig))) {
-        delete settings.calendarConfig;
-        dirty = true;
-    }
-    assign('schemaVersion', DEFAULTS.schemaVersion);
-
-    if (dirty) persistSettings();
-    return settings;
 }
 
 function getChatIdentity(ctx = getContext()) {
@@ -5449,12 +5148,6 @@ function messageElement(messageId) {
     return null;
 }
 
-const PRESENT_CAST_DISPLAY_MODES = Object.freeze(['full', 'compact', 'storyblock', 'off']);
-
-function normalizePresentCastDisplay(value) {
-    return PRESENT_CAST_DISPLAY_MODES.includes(value) ? value : 'full';
-}
-
 function presentCastDisplayMode() {
     return normalizePresentCastDisplay(getSettings().presentCastDisplay);
 }
@@ -7274,84 +6967,7 @@ function bindCustomFieldSettings() {
     });
 }
 
-// Story Suite (docs/STORY_SUITE.md): Delta announces itself (with `enabled: false` while switched
-// off, so Story Suite's overlay can switch it back on) and asks who owns the scene, calendar and
-// stats. Alone it owns all four areas, so nothing below changes Delta.
-const SUITE_API = Object.freeze({
-    /** The current chat's tracked NPCs (copies; empty until the chat's dossiers load). */
-    npcs: () => {
-        const key = getChatKey();
-        if (key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return [];
-        return scenePresenceView(getChatState(key).npcs || []).map(npc => ({
-            id: String(npc?.id || ''),
-            name: String(npc?.name || ''),
-            aliases: [...(npc?.aliases || [])],
-            present: Boolean(npc?.present && !npc?.archived),
-            archived: Boolean(npc?.archived),
-        }));
-    },
-    /** The tracked, non-archived, not-deceased NPCs' { id, name, aliases, present, role, summary } (frozen copies; empty until the chat's dossiers load). */
-    npcProfiles: () => {
-        try {
-            const key = getChatKey();
-            if (key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return Object.freeze([]);
-            return buildNpcProfiles(getChatState(key).npcs, { customFieldNames: getSettings().customFieldNames });
-        } catch (error) {
-            console.warn('[NPC State Delta] Story Suite NPC profiles failed', error);
-            return Object.freeze([]);
-        }
-    },
-    /** Open Delta's dossier view on one NPC (id, or name/alias fallback), as the launcher and present cast do; false when archived, unknown or not opened. */
-    openDossier: value => {
-        try {
-            const key = getChatKey();
-            if (key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return false;
-            const id = resolveDossierTarget(getChatState(key).npcs, value);
-            return id ? openLauncherDossier(id) === true : false;
-        } catch (error) {
-            console.warn('[NPC State Delta] Story Suite openDossier failed', error);
-            return false;
-        }
-    },
-    /** For Story Suite's overlay: the same actions as Delta's own Source of truth selects and Enable checkbox. */
-    manage: buildManageApi({
-        sources: () => getSettings().sourceOfTruth,
-        setSource: (area, choice) => applySourceOfTruth(area, choice),
-        enabled: () => getSettings().enabled !== false,
-        setEnabled: on => applyEnabled(on),
-        tokens: () => nextReplyTokens(),
-        preview: () => nextReplyTexts(),
-    }),
-});
-let suiteConnected = false;
-let suiteRefreshQueued = false;
-
-// What Delta adds to the next ordinary reply, estimated at about four characters a token: the
-// live dossier injection and, with one-pass capture on, its instruction (input) and the block the
-// model is asked to write back (output). Scans and other quiet requests are not counted.
-// (1.2.13) The texts the next ordinary reply gets, for tokens() and preview(): { injection, capture }.
-function nextReplyTexts() {
-    const settings = getSettings();
-    const key = getChatKey();
-    if (settings.enabled === false || key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return { injection: '', capture: '' };
-    const state = getChatState(key);
-    const transcript = recentTranscript(4);
-    const injection = settings.inject ? liveInjectionText(state, settings, { transcript }) : '';
-    const capture = narrationCaptureEnabled(settings)
-        ? buildNarrationCapturePrompt(scannerPromptOptions(state, settings, transcript, { dossierAbove: injection, ...hostedNotePromptOptions(state, settings) }))
-        : '';
-    return { injection, capture };
-}
-
-function nextReplyTokens() {
-    const { injection, capture } = nextReplyTexts();
-    if (!injection && !capture) return replyTokenEstimate();
-    return replyTokenEstimate({
-        injection,
-        captureChars: capture.length,
-        captureOutputChars: capture ? (rt.lastCaptureBlockChars || NARRATION_CAPTURE_OUTPUT_ESTIMATE_CHARS) : 0,
-    });
-}
+const { SUITE_API, renderWhatsSent, afterEnabledChange, applySourceOfTruth, syncSuiteControls, connectStorySuite } = createSuitePart(rt, { chatHydrationStatus, effectivePresentCastChoice, getChatKey, getChatState, hostedNotePromptOptions, liveInjectionText, narrationCaptureEnabled, openLauncherDossier, queueInlineRender, renderDossier, scannerPromptOptions, scenePresenceView, startInlineWatchdog, UI_ID, updateInjection });
 
 // The panel's Add NPC and (1.2.13) the Dossiers tab's: ask a name, add a dossier for it.
 async function addNpcManually() {
@@ -7400,106 +7016,6 @@ function castEmptyReason() {
         return { text: 'The latest reply has not been scanned yet, so who is present is not known.', scan: true };
     }
     return { text: 'The latest scan found no NPC in the scene.', scan: true };
-}
-
-// (1.2.13) The "What's sent" fold: each part the next ordinary reply gets, with its size, as text.
-function renderWhatsSent() {
-    const root = globalThis.document?.querySelector?.('[data-delta-whats-sent]');
-    if (!root) return;
-    const { parts } = SUITE_API.manage.preview();
-    root.replaceChildren();
-    if (!parts.length) {
-        const empty = document.createElement('small');
-        empty.className = 'delta-whats-sent-empty';
-        empty.textContent = 'Nothing is sent with the next reply (no present NPC, or injection and one-pass capture are off).';
-        root.append(empty);
-        return;
-    }
-    for (const part of parts) {
-        const head = document.createElement('div');
-        head.className = 'delta-whats-sent-head';
-        head.textContent = `${part.label} · about ${part.tokens} tokens`;
-        const body = document.createElement('pre');
-        body.className = 'delta-whats-sent-text';
-        body.textContent = part.text;
-        root.append(head, body);
-    }
-}
-
-function announceToSuite() {
-    announceNpcStateDelta({ enabled: getSettings().enabled !== false, version: NPC_STATE_VERSION, api: SUITE_API, settings: `#${UI_ID}`, shows: SUITE_SHOWS });
-}
-
-// What the Enable checkbox does after saving; Story Suite's setEnabled does the same.
-function afterEnabledChange() {
-    announceToSuite();
-    updateInjection();
-    renderDossier();
-    // (1.2.15) Story Block's Present NPCs and Dossiers tabs leave with Delta and come back with it.
-    if (typeof CustomEvent === 'function') globalThis.document?.dispatchEvent?.(new CustomEvent('npc-state-delta:enabled-changed', { detail: { enabled: getSettings().enabled !== false } }));
-}
-
-function applyEnabled(on) {
-    const settings = getSettings();
-    const next = Boolean(on);
-    $('#npc_state_delta_enabled').prop('checked', next);
-    if ((settings.enabled !== false) === next) return;
-    settings.enabled = next;
-    persistSettings();
-    afterEnabledChange();
-}
-
-// What a Source of truth select does; Story Suite's setSource does the same.
-function applySourceOfTruth(area, choice) {
-    const settings = getSettings();
-    settings.sourceOfTruth = normalizeSourceOfTruth({ ...settings.sourceOfTruth, [area]: choice });
-    persistSettings();
-    syncSuiteControls();
-    updateInjection();
-}
-
-function syncSuiteControls() {
-    const choices = normalizeSourceOfTruth(extension_settings[EXTENSION_NAME]?.sourceOfTruth);
-    for (const area of SUITE_AREAS) {
-        $(`#npc_state_delta_source_${area}`).val(choices[area]);
-        const owner = areaOwner(area, choices);
-        $(`[data-delta-source-status="${area}"]`).text(owner ? `Now: ${owner.name}` : 'Now: this extension');
-    }
-    const warning = statsOverlapWarning(extension_settings[EXTENSION_NAME]?.customFieldNames || [], choices);
-    $('#npc_state_delta_custom_fields_stats_warning').text(warning).prop('hidden', !warning);
-    $('#npc_state_delta_suite_manage').prop('hidden', !suiteManageAvailable());
-}
-
-function connectStorySuite() {
-    if (suiteConnected) return;
-    suiteConnected = true;
-    ensureSuiteStylesheet();
-    // Read straight from the settings object: the calendar is consulted per NPC projection.
-    setExternalCalendarSource(() => externalCalendar(extension_settings[EXTENSION_NAME]?.sourceOfTruth));
-    announceToSuite();
-    try {
-        storySuite().onChange(() => {
-            if (suiteRefreshQueued) return;
-            suiteRefreshQueued = true;
-            queueMicrotask(() => {
-                suiteRefreshQueued = false;
-                syncSuiteControls();
-                updateInjection();
-            });
-        });
-    } catch (error) {
-        console.warn('[NPC State Delta] Story Suite is unavailable', error);
-    }
-    // Story Suite v2: when Delta registers with a Story Block v2 host, or that host goes away, the v1
-    // announcement and the "Open Story Suite" button follow (suite-handshake.js, storyBlockIsV2), and
-    // so do the in-chat cast's "Only in Story Block" default and the settings shown for it.
-    globalThis.document?.addEventListener?.('npc-state-delta:v2-host', () => {
-        announceToSuite();
-        syncSuiteControls();
-        try { $('#npc_state_delta_present_cast_display').val(effectivePresentCastChoice()); } catch { /* settings not mounted */ }
-        startInlineWatchdog();
-        queueInlineRender(0);
-    });
 }
 
 function bindSourceOfTruthSettings() {
