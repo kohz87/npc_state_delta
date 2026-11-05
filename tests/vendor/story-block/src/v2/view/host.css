@@ -148,16 +148,8 @@
         box-shadow: -8px 0 28px rgba(0, 0, 0, 0.3);
     }
 }
-/* With room for both, the side sheet docks: SillyTavern's chat column (#sheld: absolute, left 0 / right 0,
-   auto margins) is centred in what is left of the window instead of running under the sheet. Narrower
-   windows keep the sheet over the chat. A chat the reader moved by hand (inline left / top) keeps its place. */
-@media (min-width: 1000px) {
-    body.story-suite-sheet-open #sheld:not([style*="left"]) {
-        right: var(--story-suite-sheet-width);
-        width: min(var(--sheldWidth, 50vw), calc(100vw - var(--story-suite-sheet-width)));
-        max-width: calc(100vw - var(--story-suite-sheet-width));
-    }
-}
+/* The side sheet floats over SillyTavern's chat column on every width: opening or closing it never moves or resizes the chat
+   (the reader's choice, 5 Nov 2026; it used to dock from 1000px, narrowing the chat column beside it). */
 
 /* ---- the tab host: the pane under the head; the tabs are the screen bar at the foot (mounts/screen-bar: glass.css) ---- */
 .story-suite-pane { padding-top: 8px; min-width: 0; }

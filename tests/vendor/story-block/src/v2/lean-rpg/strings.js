@@ -358,6 +358,13 @@ export const RPG_STRINGS = Object.freeze({
         changed: 'Your points changed while this was open. Close it and open it again.',
         failed: 'Could not save these stats.',
     }),
+    // The note on a reply whose live fight got no rolls (noroll.js; approved mockup rpg-no-rolls.html): the lead in bold, then the reason.
+    noRolls: Object.freeze({
+        lead: 'No rolls this reply:',
+        timeout: 'the roll planner did not answer within {s} s. Swipe to try again, or pick a faster connection in Settings → Assist.',
+        failed: 'the roll planner’s call failed. Swipe to try again; Settings → Diagnostics has the error.',
+        unreadable: 'the roll planner’s answer could not be read. Swipe to try again.',
+    }),
     battle: Object.freeze({
         header: 'Combat · Exchange {n}',
         headerMany: 'Combat · Exchanges {from}–{to}',
@@ -470,6 +477,9 @@ export const RPG_STRINGS = Object.freeze({
         gearOn: 'On',
         gearHelp: 'On: worn gear adds stat points by rarity (common +0 up to legendary +4); gear wears down after a decisive hit taken, a bag raises what a character can carry, and a heavy load lowers AGI and DEX. Off: fights run as before; items, rarity and slots are kept.',
         rollsHelp: 'Automatic: before each reply a short AI call plans the actions and code rolls the dice. Off: no dice; the story decides.',
+        plannerLimit: 'Planner time limit',
+        plannerLimitUnit: 'seconds',
+        plannerLimitHelp: 'How long the reply waits for the roll planner before it goes on without dice. 10 to 120, default 45 (it was a fixed 20). A slow model in Settings → Assist needs more; a fast one answers in a few seconds.',
         automatic: 'Automatic',
         off: 'Off',
         formula: 'Stat formula',

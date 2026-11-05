@@ -8,10 +8,10 @@
 // list (Settings → Diagnostics), never a popup, and, while a fight is on, a tail line so the narrator keeps it undecided.
 // The model call is Assist's (assist/st-adapter.js, or the host's queued one the runtime passes in) with Assist's
 // connection profile and time limit; the answer is a plan, never a number.
-import { SETTING, TIMEOUT_MS, clip, estimateTokens, hashText, normalizeType, withTimeout } from '../assist/common.js';
+import { SETTING, clip, estimateTokens, hashText, normalizeType, withTimeout } from '../assist/common.js';
 import { stripBlock } from '../capture.js';
 import { GEAR_VERSION, gearIsOn, gearMarkOf } from './gear.js';
-import { CLASS_NAMES, LEAN_RPG_FEATURE, LV_VERSION, PRACTICE, PRACTICE_SETTING, RANK_NAMES, practiceOf, RESOLVE, ROLLS_SETTING, STAGES, STATS, stageWord } from './names.js';
+import { CLASS_NAMES, LEAN_RPG_FEATURE, LV_VERSION, NOROLL, PRACTICE, plannerLimitMs, PRACTICE_SETTING, RANK_NAMES, practiceOf, RESOLVE, ROLLS_SETTING, STAGES, STATS, stageWord } from './names.js';
 import { isStandard, packRulesOf, plannerNoteOf, rulesFromSettings } from './rules.js';
 import { NO_ROLLS_LINE, OPEN_FIGHT_LINE } from './cue.js';
 import { openLinesOf, parsePlanAnswer } from './plan.js';
@@ -181,13 +181,19 @@ export const claimed = (state, key) => state?.meta?.claims?.[claimKey(key)] === 
 /**
  * The pre-call. `deps`: { callModel(prompt, { maxTokens, profile, helper }) → text, chat() → SillyTavern's chat array,
  * chatId() → the open chat's id, hold (plan.js createPlanHold), problem(entry) (the turn's Problems list), moduleId,
- * timeoutMs, timer, skip { peek() → whether the next reply is to go out with no dice, clear() } (start.js: "Send without the RPG for now") }. Returns { beforeGenerate(view, info) → { commands, lines? } | { lines } | null, afterCapture(view) }.
+ * timeoutMs (the planner's limit in ms; none: the setting Settings → RPG → Rolls → Planner time limit, read at each call), timer, skip { peek() → whether the next reply is to go out with no dice, clear() } (start.js: "Send without the RPG for now") }. Returns { beforeGenerate(view, info) → { commands, lines? } | { lines } | null, afterCapture(view) }.
  */
-export function createPrecall({ callModel, chat, chatId, hold, problem = null, moduleId = 'story-block', timeoutMs = TIMEOUT_MS, timer, skip: noDice = { peek: () => false, clear: () => {} } }) {
-    const skip = (sheet, message) => {
-        try { problem?.({ module: moduleId, code: 'ROLLS_SKIPPED', quiet: true, message: `Rolls skipped for this reply: ${message} Swipe to try again.` }); } catch { /* the Problems list is optional */ }
-        // While a fight is on the narrator is told to keep it undecided; outside one there is nothing to hold back.
-        if (sheet.foes.some(foe => foe.filled && foe.hurt > 0)) return { lines: [NO_ROLLS_LINE] };
+export function createPrecall({ callModel, chat, chatId, hold, problem = null, moduleId = 'story-block', timeoutMs, timer, skip: noDice = { peek: () => false, clear: () => {} } }) {
+    // The planner's limit in ms: the one the part was given (tests), else the setting of this moment.
+    const limitOf = values => plannerLimitMs(values, timeoutMs);
+    const skip = (sheet, failure, key) => {
+        try { problem?.({ module: moduleId, code: 'ROLLS_SKIPPED', quiet: true, message: `Rolls skipped for this reply: ${failure.failed} Swipe to try again.` }); } catch { /* the Problems list is optional */ }
+        // While a fight is on the narrator is told to keep it undecided (outside one there is nothing to hold back), and the reply keeps a record of
+        // it (noroll.js) for the note where the battle log would stand: the same fact, shown to the reader, never told to the narrator.
+        if (sheet.foes.some(foe => foe.filled && foe.hurt > 0)) {
+            const seconds = Math.max(1, Math.round(failure.limit / 1000));
+            return { lines: [NO_ROLLS_LINE], commands: [{ type: NOROLL, payload: { key, reason: failure.reason, ...(failure.reason === 'timeout' ? { limit: seconds } : {}) } }] };
+        }
         return noFight(sheet);
     };
     // No foe is filled in and nothing was rolled: if a fight starts in this reply, the narrator sets the Foes line and stops at the first clash.
@@ -201,10 +207,12 @@ export function createPrecall({ callModel, chat, chatId, hold, problem = null, m
         const rankAt = level => { try { return view.query?.(RANK_QUERY, { level }) ?? null; } catch { return null; } };
         const prompt = precallPrompt({ sheet, message, excerpt, note: plannerNoteOf(values), standard, rankAt });
         let answer;
+        const limit = limitOf(values);
         try {
-            answer = await withTimeout(() => callModel(prompt, { maxTokens: ANSWER_TOKENS, profile: String(values[SETTING.profile] ?? ''), helper: 'rolls' }), timeoutMs, timer);
+            answer = await withTimeout(() => callModel(prompt, { maxTokens: ANSWER_TOKENS, profile: String(values[SETTING.profile] ?? ''), helper: 'rolls', timeoutMs: limit }), limit, timer);
         } catch (error) {
-            return { failed: error?.code === 'TIMEOUT' ? 'the planning call timed out.' : `the planning call failed (${String(error?.message ?? error).slice(0, 120)}).` };
+            return error?.code === 'TIMEOUT' ? { failed: 'the planning call timed out.', reason: 'timeout', limit }
+                : { failed: `the planning call failed (${String(error?.message ?? error).slice(0, 120)}).`, reason: 'failed', limit };
         }
         // Foes the planner lists as new (open.js): the ones the reader's message or the reply before names are put on a copy of the Foes block, and the
         // plan is read against that copy, so its lines may target them. They are added for real only when the plan is rolled (resolve.js).
@@ -222,7 +230,7 @@ export function createPrecall({ callModel, chat, chatId, hold, problem = null, m
             }
         }
         const parsed = parsePlanAnswer(answer, looked, { formula: standard ? 'standard' : 'classic' });
-        if (parsed.error) return { failed: `the answer could not be read (${parsed.error}).` };
+        if (parsed.error) return { failed: `the answer could not be read (${parsed.error}).`, reason: 'unreadable', limit };
         if (parsed.none) return { plan: null, tokens: estimateTokens(prompt) };
         // A plan that names nothing this sheet can roll is the same as no plan.
         const ready = prepare(parsed.plan, looked, rules);
@@ -271,7 +279,7 @@ export function createPrecall({ callModel, chat, chatId, hold, problem = null, m
             const before = messages[index - 1];
             const excerpt = before && !before.is_user ? stripBlock(String(before.mes ?? '')) : '';
             planned = await plan(view, sheet, text, excerpt, rules);
-            if (planned.failed) return skip(sheet, planned.failed);
+            if (planned.failed) return skip(sheet, planned, key);
             hold.put(where, key, planned.plan);
         }
         // A Standard fight keeps its turn order across replies: the nearest earlier reply's order goes on in the payload (resolve.js), so a swipe of

@@ -532,8 +532,8 @@ export function createRuntime({
     });
     // The assist helpers' call (assist/index.js: (prompt, { maxTokens, profile, helper }) → text, throwing
     // with a code on failure; an empty answer is '' as before).
-    assistCall = async (prompt, { maxTokens, profile = '', helper = 'pre-roll' } = {}) => {
-        const result = await modelCalls.callModel({ prompt, maxTokens, profile, module: `${CORE_MODULE_ID} (${helper === 'extractor' ? 'safety net' : helper === 'rolls' ? 'rolls' : 'pre-roll'})`, timeoutMs: ASSIST_TIMEOUT_MS }, { idle: false });
+    assistCall = async (prompt, { maxTokens, profile = '', helper = 'pre-roll', timeoutMs } = {}) => {
+        const result = await modelCalls.callModel({ prompt, maxTokens, profile, module: `${CORE_MODULE_ID} (${helper === 'extractor' ? 'safety net' : helper === 'rolls' ? 'rolls' : 'pre-roll'})`, timeoutMs: helper === 'rolls' && Number.isFinite(timeoutMs) ? timeoutMs : ASSIST_TIMEOUT_MS }, { idle: false });
         if (result.ok) return result.text;
         if (result.error === MODEL_CALL_ERRORS.EMPTY) return '';
         throw Object.assign(new Error(result.message), { code: result.error });

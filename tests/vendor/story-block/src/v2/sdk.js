@@ -480,8 +480,10 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
     // the action into its own chat's file (the store's rescue, B-b2-timeline-1). Where that cannot be done
     // (no chat file this page can write) it is saved at once, before the result comes back. A failed save
     // is told and tried again by the store; the action itself stands.
-    const saved = async result => {
-        if (result?.ok && !store.saveIdle?.()) await store.saveSoon?.();
+    // `background` (a module's own step after the reply, e.g. a forward of what its scan found, no reader waits
+    // for it): within the late phase it joins one late window (store.saveLate) instead of saving 1.5 s later.
+    const saved = async (result, background = false) => {
+        if (result?.ok && !(background && typeof store.saveLate === 'function' ? store.saveLate() : store.saveIdle?.())) await store.saveSoon?.();
         return result;
     };
     // A module that became ready (a peer registered, a switch, the barrier dropped) is set up before the
@@ -541,7 +543,7 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
             // A save point waits for the participants' checkpoints, which a command handler cannot: the timeline makes it
             // (docs/v2/TIMELINE.md) and answers with the same receipt envelope.
             if (type === 'savepoint.make' && timeline) return saved(await timeline.makeCommand(payload));   // (the timeline tells the `committed` event itself)
-            return held(type) ?? saved(committed(await bus.command(type, payload, { cause: 'ui' })));
+            return held(type) ?? saved(committed(await bus.command(type, payload, { cause: 'ui' })), isObject(options) && options.background === true);
         },
         preview: async (type, payload) => {
             if (registry.isInternal?.(type)) return refused(`"${type}" is a step Story Block takes itself; it cannot be sent as an action.`);
