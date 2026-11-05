@@ -7,6 +7,8 @@ import { createHost } from './vendor/story-block/testkit/index.js';
 import { runtimeSource } from './helpers/runtime-source.js';
 import { buildInjection, createNpcRecord } from '../core.js';
 import { normalizeNpcRecord } from '../core-mechanics.js';
+import { mergeScanResult, normalizeNpcRecord as normalizeProduction } from '../core.js';
+import { currentPresentationText, normalizeAppearanceModel, resolveNpcAppearance } from '../appearance.js';
 import { castFromHtml, castProjection, projectDossierState } from '../dossier-ui.js';
 import { FEATURE_STAGES, normalizeSecrets, observeCast, validateNpcSlice } from '../src/npc-meters.js';
 import {
@@ -102,7 +104,9 @@ test('the dossier is made from the entry: profile, numbers, fields, notes, portr
     const portrait = { dataUrl: 'data:image/webp;base64,AAAA', mime: 'image/webp', sourceName: 'fenna.webp', updatedAt: 1 };
     const made = normalizeNpcRecord(applyCastEntry(createNpcRecord('Fenna', []), p, { packName: 'Ersveil', portrait }));
     assert.equal(made.role, 'Runs the night ferry at Bluewatch docks.');
-    assert.equal(made.appearance, FENNA_ENTRY.look);
+    // Changed with the wears rule: the pack's look is the physical appearance (this entry has no `wears`: the current slot stays empty).
+    assert.equal(made.overallAppearance, FENNA_ENTRY.look);
+    assert.equal(made.appearance, '');
     assert.equal(made.speech, FENNA_ENTRY.voice);
     assert.equal(made.personality, FENNA_ENTRY.personality);
     assert.equal(made.background, FENNA_ENTRY.history);
@@ -118,7 +122,7 @@ test('the dossier is made from the entry: profile, numbers, fields, notes, portr
     assert.deepEqual(made.castFrom, {
         key: 'ersveil:fenna', pack: 'ersveil', id: 'fenna', packName: 'Ersveil', met: { on: 'Gw 12', where: 'Bluewatch docks' },
         goal: 'Find out who opened the weir', routine: 'evenings at the ferry', stages: FENNA_ENTRY.stages.map(({ name, needs }) => ({ name, needs })),
-        first: { appearance: FENNA_ENTRY.look, speech: FENNA_ENTRY.voice, personality: FENNA_ENTRY.personality, background: FENNA_ENTRY.history },
+        first: { overallAppearance: FENNA_ENTRY.look, speech: FENNA_ENTRY.voice, personality: FENNA_ENTRY.personality, background: FENNA_ENTRY.history },
     });
     // The narrator hears the pack's words like any dossier's.
     const injection = buildInjection([{ ...made, present: true }], 'Fenna is here.', 1);
@@ -145,6 +149,129 @@ test('the pack\'s words stay exactly as written until the field is changed; then
     assert.equal(normalizeNpcRecord(structuredClone(made)).speech, p.entry.voice, 'and again on the next load');
     const changed = normalizeNpcRecord({ ...made, speech: `${p.entry.voice} Whistles at the weir.` });
     assert.notEqual(changed.speech, `${p.entry.voice} Whistles at the weir.`, 'a changed field is compacted as for anyone');
+});
+
+// ---- `wears`: the body in look, the outfit in wears (5 Nov, the user's decision, option 1) ----
+
+const TEMIWA_ENTRY = {
+    id: 'temiwa', name: 'Temiwa', about: 'A fox-woman courier.',
+    look: 'Slender fox-woman, amber eyes, russet fur, a white-tipped tail.',
+    wears: 'Veil of grey gauze, a grey sash binding the tail, flame-cross pendants.',
+    start: { place: 'The north gate', goal: 'Deliver the letter' },
+};
+const temiwaPerson = (entry = TEMIWA_ENTRY) => normalizeCast([{
+    key: 'ersveil:temiwa', pack: 'ersveil', id: 'temiwa', name: 'Temiwa', met: { on: 0, where: 'The north gate' }, alive: true, entry,
+}], dateText)[0];
+const madeTemiwa = entry => normalizeProduction(applyCastEntry(createNpcRecord('Temiwa', []), temiwaPerson(entry), { packName: 'Ersveil' }));
+const TEMIWA_SCENE = 'Temiwa stood slender, amber eyes bright, russet fur damp, white-tipped tail showing: the veil pinned back and the tail in a grey linen wrap.';
+const temiwaScan = npc => mergeScanResult({ npcs: [npc], turn: 2 }, { profileUpdates: [{
+    id: npc.id, evidence: { appearance: [TEMIWA_SCENE] },
+    overallAppearance: 'Slender fox-woman, amber eyes, russet fur, white-tipped tail',
+    appearance: 'Veil pinned back, tail in a grey linen wrap', appearanceState: 'change',
+    appearanceReason: 'The veil is pinned back and the tail is in a grey linen wrap.',
+}] }, { turn: 3, sourceMessageId: 9, developmentContext: TEMIWA_SCENE }).state.npcs[0];
+const BODY = /fox-woman|amber eyes|russet fur|white-tipped tail/i;
+const OUTFIT = /veil|sash|pendant|linen|gauze/i;
+
+test('wears is read like look: cut to 1800 characters and flattened; absent it is empty', () => {
+    const entry = normalizeEntry({ ...TEMIWA_ENTRY, wears: `a\n\n${'word '.repeat(700)}` });
+    assert.ok(entry.wears.length <= 1800 && !/\n/.test(entry.wears));
+    assert.equal(normalizeEntry({ ...TEMIWA_ENTRY, wears: undefined }).wears, '');
+    assert.equal(normalizeEntry({ ...TEMIWA_ENTRY, wears: 42 }).wears, '42', 'any value is read as text like look');
+    assert.equal(temiwaPerson().entry.wears, TEMIWA_ENTRY.wears, 'it comes through the answer for a met person');
+});
+
+test('a cast entry with wears: look is the physical appearance, wears the current one, each in the pack\'s exact words', () => {
+    const made = madeTemiwa();
+    assert.equal(made.overallAppearance, TEMIWA_ENTRY.look, 'look → physical');
+    assert.equal(currentPresentationText(made), TEMIWA_ENTRY.wears, 'wears → current appearance');
+    assert.doesNotMatch(made.overallAppearance, OUTFIT, 'no clothing in the physical text');
+    assert.doesNotMatch(currentPresentationText(made), BODY, 'no body in the current text');
+    assert.equal(made.currentForm, '');
+    assert.deepEqual(made.appearanceForms, []);
+    assert.deepEqual(made.castFrom.first, { overallAppearance: TEMIWA_ENTRY.look, appearance: TEMIWA_ENTRY.wears }, 'the pack\'s words per field');
+    const raw = applyCastEntry(createNpcRecord('Temiwa', []), temiwaPerson(), { packName: 'Ersveil' });
+    assert.equal(raw.overallAppearance, TEMIWA_ENTRY.look);
+    assert.equal(raw.appearance, TEMIWA_ENTRY.wears, 'the record before normalization: current = wears alone');
+    // What the narrator hears: the body and the outfit, each once.
+    const shown = resolveNpcAppearance(made);
+    assert.equal(shown.split('white-tipped tail').length - 1, 1, 'the body words once, not restated by the outfit');
+    assert.match(buildInjection([{ ...made, present: true }], 'Temiwa is here.', 1), /flame-cross pendants/);
+    // Idempotent: normalizing again changes nothing.
+    const again = normalizeProduction(structuredClone(made));
+    assert.deepEqual([again.overallAppearance, again.appearance, currentPresentationText(again)], [made.overallAppearance, made.appearance, currentPresentationText(made)]);
+});
+
+test('an older entry without wears: look is the physical appearance whole, the current appearance is left empty for the scanner', () => {
+    const made = madeTemiwa({ ...TEMIWA_ENTRY, wears: undefined });
+    assert.equal(made.overallAppearance, TEMIWA_ENTRY.look);
+    assert.equal(currentPresentationText(made), '', 'nothing in the current slot');
+    assert.equal(normalizeAppearanceModel(made).appearance, made.appearance);
+    assert.equal(resolveNpcAppearance(made), TEMIWA_ENTRY.look, 'the narrator still hears the pack\'s look');
+    assert.deepEqual(made.castFrom.first, { overallAppearance: TEMIWA_ENTRY.look }, 'no pack words are recorded for the current appearance');
+    assert.ok(!applyCastEntry(createNpcRecord('Temiwa', []), temiwaPerson({ ...TEMIWA_ENTRY, wears: undefined }), {}).appearance, 'the raw record leaves appearance empty');
+    // An entry with neither sets neither.
+    const bare = applyCastEntry(createNpcRecord('Temiwa', []), temiwaPerson({ ...TEMIWA_ENTRY, look: '', wears: '' }), {});
+    assert.ok(!bare.overallAppearance && !bare.appearance);
+    assert.deepEqual(bare.castFrom.first, {});
+    // Only wears (no look): the outfit is the current appearance and the physical slot is left for the scanner.
+    const onlyWears = madeTemiwa({ ...TEMIWA_ENTRY, look: '' });
+    assert.equal(onlyWears.overallAppearance, '');
+    assert.equal(onlyWears.appearance, TEMIWA_ENTRY.wears);
+});
+
+test('the pack\'s words per field are kept while unchanged and follow the new keys (normalizeNpcRecord)', () => {
+    const long = `Veil of grey gauze. ${Array.from({ length: 30 }, (_, i) => `Pendant number ${i} of carved bone on a thin cord`).join('. ')}.`;
+    assert.ok(long.length > 1000);
+    const made = madeTemiwa({ ...TEMIWA_ENTRY, wears: long });
+    // The mechanics layer (before the appearance model resolves) keeps the pack's exact words for a field that still is them…
+    const kept = normalizeNpcRecord({ ...createNpcRecord('Temiwa', []), appearance: long, castFrom: { key: 'k', first: { appearance: long } } });
+    assert.equal(kept.appearance, long);
+    // …and compacts a field that no longer is, or one with no pack words recorded under that key.
+    const changed = normalizeNpcRecord({ ...createNpcRecord('Temiwa', []), appearance: `${long} Also a bell.`, castFrom: { key: 'k', first: { appearance: long } } });
+    assert.notEqual(changed.appearance, `${long} Also a bell.`);
+    const oldKey = normalizeNpcRecord({ ...createNpcRecord('Temiwa', []), appearance: long, castFrom: { key: 'k', first: { overallAppearance: long } } });
+    assert.notEqual(oldKey.appearance, long, 'a pack word kept under overallAppearance does not hold current appearance');
+});
+
+test('the user\'s case: a scanner result on a dossier made from the entry keeps the body out of the outfit and the outfit out of the body, the tail once', () => {
+    const made = madeTemiwa();
+    const scanned = temiwaScan(made);
+    assert.equal(scanned.overallAppearance, TEMIWA_ENTRY.look, 'the scene\'s physical words equal the pack\'s: unchanged');
+    assert.doesNotMatch(scanned.overallAppearance, OUTFIT, 'physical has no clothing');
+    const current = currentPresentationText(scanned);
+    assert.equal(current, 'Veil pinned back, tail in a grey linen wrap', 'current has the outfit');
+    assert.doesNotMatch(current, BODY);
+    assert.equal(resolveNpcAppearance(scanned).match(/tail/gi).length, 2, 'one tail in the body words, one in the outfit: not the same tail described in two ways');
+    assert.doesNotMatch(scanned.appearance, /sash|pendants/, 'the old outfit is replaced, not stacked');
+    assert.ok(!/;\s*\d+\.\s*;/.test(scanned.appearance) && !/\b21\b/.test(scanned.appearance));
+    assert.equal(scanned.appearanceForms.length, 0, 'no form was invented');
+    assert.equal(scanned.unclassifiedAppearance, '');
+    assert.equal(scanned.castFrom.first.appearance, TEMIWA_ENTRY.wears, 'the pack\'s words stay recorded as given');
+    assert.equal(scanned.castFrom.first.overallAppearance, TEMIWA_ENTRY.look);
+    // …and the same on the next normalization.
+    const again = normalizeProduction(structuredClone(scanned));
+    assert.deepEqual([again.overallAppearance, currentPresentationText(again)], [scanned.overallAppearance, current]);
+});
+
+test('the user\'s case on an older entry (no wears): the scanner fills the current appearance, the physical text stays the pack\'s look', () => {
+    const made = madeTemiwa({ ...TEMIWA_ENTRY, wears: undefined });
+    const scanned = temiwaScan(made);
+    assert.equal(scanned.overallAppearance, TEMIWA_ENTRY.look);
+    assert.doesNotMatch(scanned.overallAppearance, OUTFIT);
+    assert.equal(currentPresentationText(scanned), 'Veil pinned back, tail in a grey linen wrap');
+    assert.equal(scanned.appearance.match(/white-tipped tail/gi).length, 1, 'the body words once');
+});
+
+test('a dossier made before this change is read as stored: no migration', () => {
+    // The old shape: look in appearance, castFrom.first.appearance = look, no overallAppearance.
+    const old = normalizeProduction({
+        ...createNpcRecord('Temiwa', []), appearance: 'Slender fox-woman, amber eyes; veil of grey gauze, grey sash.',
+        castFrom: { key: 'ersveil:temiwa', pack: 'ersveil', id: 'temiwa', first: { appearance: 'Slender fox-woman, amber eyes; veil of grey gauze, grey sash.' } },
+    });
+    assert.equal(old.overallAppearance, '', 'physical stays empty');
+    assert.equal(old.appearance, 'Slender fox-woman, amber eyes; veil of grey gauze, grey sash.', 'current stays as it was');
+    assert.deepEqual(old.castFrom.first, { appearance: 'Slender fox-woman, amber eyes; veil of grey gauze, grey sash.' });
 });
 
 test('a dossier already standing for the person is found by the cast key, name or alias, and is never replaced', () => {
@@ -243,7 +370,8 @@ test('the twelve Ersveil entries all make a dossier: profile whole, fields, thre
         assert.ok(p?.entry, raw.id);
         const made = normalizeNpcRecord(applyCastEntry(createNpcRecord(raw.name, []), p, { packName: 'Ersveil (open world)' }));
         for (const field of ['look', 'voice', 'personality', 'history']) assert.ok(raw[field].length < 600 && p.entry[field] === raw[field], `${raw.id} ${field} kept whole`);
-        assert.equal(made.appearance, raw.look, raw.id);
+        assert.equal(made.overallAppearance, raw.look, raw.id);
+        assert.equal(resolveNpcAppearance(made), raw.look, raw.id);
         assert.equal(made.speech, raw.voice, raw.id);
         assert.equal(made.personality, raw.personality, raw.id);
         assert.equal(made.background, raw.history, raw.id);
@@ -479,7 +607,7 @@ test('with no Story Director the per-reply step and the slice are exactly as bef
 const scenarioOutput = output => JSON.parse(String(output).split('\n').find(line => line.startsWith('RESULT ')).slice(7));
 
 test('runtime: the dossier is made at the first meeting from the pack entry, with portrait and badge; swipe undoes it; delete is final; a standing dossier is left alone', () => {
-    const entry = FENNA_ENTRY;
+    const entry = { ...FENNA_ENTRY, wears: 'A sou\'wester hat and a coil of rope over one shoulder.' };
     const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
     const scenario = async () => {
         const api = globalThis.NPCStateDelta;
@@ -523,7 +651,7 @@ test('runtime: the dossier is made at the first meeting from the pack entry, wit
         await sleep(300);
         const made = fenna();
         out.made = made ? {
-            role: made.role, appearance: made.appearance, speech: made.speech, personality: made.personality, background: made.background,
+            role: made.role, appearance: made.appearance, overallAppearance: made.overallAppearance, speech: made.speech, personality: made.personality, background: made.background,
             homeBase: made.homeBase, goal: made.goal, location: made.location, aliases: made.aliases, customFields: made.customFields,
             trust: made.relationship.trust, meterSetup: made.meterSetup, secrets: made.secrets.length, portrait: made.portrait ?? null, files: [...mockState.files.keys()].filter(path => path.includes('npc-state-delta-portrait-')),
             fingerprint: Boolean(made.portrait?.appearanceFingerprint), castFrom: made.castFrom, assets: Boolean(api.getState().portraitAssets?.[made.id]),
@@ -602,7 +730,10 @@ test('runtime: the dossier is made at the first meeting from the pack entry, wit
     assert.equal(hosted.unmet.npcs, 0, 'nobody met: no dossier');
     assert.equal(hosted.count, 1, 'one dossier at the first meeting, without a scan');
     assert.equal(hosted.made.role, 'Runs the night ferry at Bluewatch docks.');
-    assert.equal(hosted.made.appearance, FENNA_ENTRY.look);
+    // The host path (production runtime): look → physical, wears → current, each in the pack's exact words.
+    assert.equal(hosted.made.overallAppearance, FENNA_ENTRY.look);
+    assert.equal(hosted.made.appearance, `${FENNA_ENTRY.look.replace(/\.$/, '')}; ${entry.wears}`, 'the resolved appearance: body, then the outfit once');
+    assert.deepEqual([hosted.made.castFrom.first.overallAppearance, hosted.made.castFrom.first.appearance], [FENNA_ENTRY.look, entry.wears]);
     assert.equal(hosted.made.speech, FENNA_ENTRY.voice);
     assert.equal(hosted.made.personality, FENNA_ENTRY.personality);
     assert.equal(hosted.made.background, FENNA_ENTRY.history);
