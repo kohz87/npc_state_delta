@@ -263,7 +263,7 @@ test('without a v2 host the same turns send nothing, and the sidecar and the inj
 test('index.js: the v2 meter hooks are the identity without a host', () => {
     const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
     // Every hook asks storySuiteV2Meters() first, which is null unless the page flag is set and the adapter is hosted.
-    assert.match(index, /function storySuiteV2Meters\(\) \{\n    return storyBlockV2Hosted\(\) && storySuiteV2\?\.hosted\?\.\(\) \? storySuiteV2 : null;\n\}/);
+    assert.match(index, /function storySuiteV2Meters\(\) \{\n    return storyBlockV2Hosted\(\) && rt\.storySuiteV2\?\.hosted\?\.\(\) \? rt\.storySuiteV2 : null;\n\}/);
     assert.match(index, /function hostedMeterView\(npcs\) \{\n    const adapter = storySuiteV2Meters\(\);\n    if \(!adapter\) return npcs;/);
     assert.match(index, /function forwardRelationshipChangesToHost\(before, after, messageId, head = null\) \{\n    const adapter = storySuiteV2Meters\(\);\n    if \(!adapter\) return;/);
     assert.match(index, /function hostedSecretsEditorHtml\(npc\) \{\n    const adapter = storySuiteV2Meters\(\);\n    if \(!adapter\) return '';/);

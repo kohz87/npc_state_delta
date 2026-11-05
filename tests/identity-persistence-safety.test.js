@@ -5,6 +5,7 @@ import { bestAncestorState, chatLineage, recordBranchCheckpoint } from '../branc
 import { encodeRetiredStateFilePayload, decodeStateFilePayload, makeNpcStateRecoveryFileName } from '../storage.js';
 
 const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+const runtimeState = fs.readFileSync(new URL('../runtime-state.js', import.meta.url), 'utf8');
 const identity = fs.readFileSync(new URL('../identity.js', import.meta.url), 'utf8');
 const ci = fs.readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
 
@@ -24,7 +25,7 @@ test('group identity takes precedence over host chatId and pending identities ar
 });
 
 test('delete and hydration use ownership epochs and stale loader cannot clear a newer promise', () => {
-    assert.match(index, /const ownershipEpochs = new Map\(\)/);
+    assert.match(runtimeState, /ownershipEpochs: new Map\(\)/);
     const lifecycleCache = index.slice(index.indexOf('function clearLifecycleCacheKey'), index.indexOf('async function loadLatestLifecycleState'));
     assert.match(lifecycleCache, /bumpOwnershipEpoch\(key\)/);
     assert.match(lifecycleCache, /cancelScanOperation\(key, reason\)/);
