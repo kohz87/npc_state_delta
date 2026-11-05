@@ -73,7 +73,6 @@ import {
     buildBackfillPrompt,
     buildDossierImportPrompt,
     buildProfileRefreshPrompt,
-    applyNpcStateCommand,
     mergeScanResult,
     isTerminalNpcDeath,
     protectTerminalNpc,
@@ -89,11 +88,9 @@ import {
     hasCompactMeguminWorldState,
     extractExplicitKeyRelationshipEdges,
     applyStaleNpcLifecycle,
-    appearanceFingerprint,
     normalizeFormPortraitAssets,
     normalizeCustomFields,
     setStoryClockSource,
-    storyMinuteText,
     withStoryDateMemo,
 } from './core.js';
 import {
@@ -135,7 +132,6 @@ import {
     readNpcStateDataFile,
     retireNpcStateDataFile,
     quarantineUnreadableNpcStateDataFile,
-    savePortraitFile,
     undurableNpcStateSnapshot,
     verifyPortraitFiles,
     writeNpcStateDataFile,
@@ -156,7 +152,6 @@ import {
 } from './hardening-core.js';
 import {
     defersArea,
-    resolveDossierTarget,
     storyBlockIsV2,
     normalizeSourceOfTruth,
 } from './suite-handshake.js';
@@ -164,9 +159,9 @@ import {
     fillPresentSceneText,
 } from './present-scene.js';
 import { createCardSettingsDefinition, SCAN_EVERY_RANGE } from './src/card-settings.js';
-import { awayNpcIds, findKeyEntry, isKey, keyView, normalizeKeyPeople, returnNote } from './src/key-people.js';
-import { applyCastEntry, applyCastPortrait, castPortraitWanted, castView, dossierFor, findCastPerson, metWithEntry, normalizeCast } from './src/cast-dossier.js';
 import { createRuntimeState } from './runtime-state.js';
+import { createHostedPart } from './runtime-hosted.js';
+import { createCastSyncPart } from './runtime-cast-sync.js';
 import { createEditorPart } from './runtime-editor.js';
 import { createMutationsPart } from './runtime-mutations.js';
 import { createPortraitPart } from './runtime-portrait.js';
@@ -530,494 +525,6 @@ function bumpOwnershipEpoch(key) {
     return next;
 }
 
-// Set by src/storysuite-v2.js while Delta is registered with a Story Block v2 host.
-function storyBlockV2Hosted() {
-    return globalThis.document?.documentElement?.dataset?.npcStateDeltaStoryBlockV2 === '1';
-}
-
-// (v2 meters, F81/F90) While hosted, Story Block's per-reply `npc` slice holds the meter values. Every
-// helper here is a no-op without a host: the records pass through untouched and nothing is sent.
-function storySuiteV2Meters() {
-    return storyBlockV2Hosted() && rt.storySuiteV2?.hosted?.() ? rt.storySuiteV2 : null;
-}
-// (v2) Story Suite's "Scan after every reply" switch (feature npc-state-delta.scan-every-reply, on by default).
-// Off, the automatic scan waits for three replies (or "Scan every" when larger), as in 1.7.4, and then reads every reply since the last scan. True without a host, or when
-// the host cannot answer: Delta alone scans as it always did. Manual scans never ask.
-function scanAfterEveryReply() {
-    const adapter = storySuiteV2Meters();
-    if (!adapter) return true;
-    try { return adapter.scanEveryReply?.() !== false; } catch { return true; }
-}
-// (v2) Story Director's clock while hosted ({ minutes, calendar }), for calendar.js; null otherwise (and
-// while the reader keeps the calendar here: the adapter's calendarOwn).
-function hostedStoryClock() {
-    const adapter = storySuiteV2Meters();
-    if (!adapter) return null;
-    try { return adapter.storyClock?.() ?? null; } catch { return null; }
-}
-// Delta's records with their relationship numbers read from the slice (views and the injection).
-function hostedMeterView(npcs) {
-    const adapter = storySuiteV2Meters();
-    if (!adapter) return npcs;
-    try { return adapter.sliceView(npcs) || npcs; } catch { return npcs; }
-}
-// (v2, key people) Story Director's key people (`director.keyPeople`, read only), or null: no host, no Story Director,
-// or one without the query. Null means Delta alone: no badge, no section, no hold, nothing sent. src/key-people.js.
-function keyPeopleList() {
-    const adapter = storySuiteV2Meters();
-    if (!adapter) return null;
-    try {
-        const answer = adapter.keyPeopleAnswer?.();
-        if (!Array.isArray(answer)) return null;
-        const calendar = adapter.directorCalendar?.() ?? null;
-        return normalizeKeyPeople(answer, minutes => storyMinuteText(minutes, calendar));
-    } catch {
-        return null;
-    }
-}
-// Whether this dossier (or snapshot of one) is a current key person.
-function isKeyNpc(npc, list = keyPeopleList()) {
-    return Boolean(list?.length) && isKey(findKeyEntry(list, npc));
-}
-// The index of the reply the story stands on for the next generation: the latest reply, or the one before it while the
-// latest is being replaced.
-function keyHeadIndex() {
-    const latest = latestReplyIndex();
-    const chat = getContext().chat || [];
-    if (!rt.replacingReply || rt.replacingReply.key !== getChatKey() || latest < 0 || chat[latest] !== rt.replacingReply.message) return latest;
-    for (let at = latest - 1; at >= 0; at -= 1) if (chat[at] && !chat[at].is_system && !chat[at].is_user) return at;
-    return -1;
-}
-// What the narrator is told once about key people who just came back: { dossier id: "WHILE AWAY, NOW BACK …" }.
-// It stands while the latest reply is the one the return was noticed at, so a swipe of the next reply repeats it and
-// the next reply that stays drops it.
-function keyReturnNotes(state) {
-    const list = keyPeopleList();
-    if (!list?.length) return null;
-    const head = keyHeadIndex();
-    const memory = storySuiteV2Meters()?.keyAwayMemory?.() ?? {};
-    const notes = {};
-    for (const npc of state?.npcs || []) {
-        const view = npc?.id ? keyView(list, memory, npc, head) : null;
-        if (view?.recent?.justReturned) notes[npc.id] = returnNote(view.recent.away);
-    }
-    return Object.keys(notes).length ? notes : null;
-}
-// (v2, the living cast) Delta reads Story Director's `director.cast` and Story Block's `packs.portrait` (never writes to them). At
-// the first meeting it makes the person's dossier at once from the pack entry: no scan, no model call. The step (npc.tick,
-// src/npc-meters.js observeCast) records the meeting in the saved slice at that reply; this makes the dossier and commits a
-// branch checkpoint at the reply, so a swipe or a delete takes it back with the reply (as a manual add does). Nothing here
-// without a host or without a Story Director that answers `director.cast`. Rules: src/cast-dossier.js.
-// The same sync gives a cast dossier made while its picture was missing the picture once `packs.portrait` answers for it (see
-// castPortraitTargets): when the step ends, the host's head moves, the host accepts Delta, the Dossiers tab is drawn or a chat opens.
-let castSyncRunning = false;
-// The picture's size in pixels ({ width, height }) when the browser can say, else null.
-function portraitImageSize(dataUrl) {
-    return new Promise(resolve => {
-        if (typeof Image !== 'function') { resolve(null); return; }
-        const image = new Image();
-        const timer = setTimeout(() => resolve(null), 3000);
-        image.onload = () => { clearTimeout(timer); resolve(image.naturalWidth > 0 && image.naturalHeight > 0 ? { width: image.naturalWidth, height: image.naturalHeight } : null); };
-        image.onerror = () => { clearTimeout(timer); resolve(null); };
-        image.src = dataUrl;
-    });
-}
-// A pack portrait as the dossier's portrait record from its safe image URL, or null. Story Block keeps a cast portrait up to 150 KB and
-// 1200 px, so there is no re-compression: a data: URL is kept as it is, anything else is fetched once. The picture is saved ONCE as its own
-// user file named by its content (storage.js savePortraitFile: written only when absent) and the record is { path, type, hash, width?, height?,
-// sourceName, updatedAt }: the chat's state never holds the picture, and the file outlives the pack. When the file cannot be written the record
-// keeps the picture itself ({ dataUrl, … }) exactly as before.
-async function castPortraitRecord(url, fileName) {
-    try {
-        let dataUrl = String(url || '');
-        if (!/^data:/i.test(dataUrl)) {
-            const controller = typeof AbortController === 'function' ? new AbortController() : null;
-            const timer = controller ? setTimeout(() => controller.abort(), 8000) : null;
-            try {
-                const response = await fetch(dataUrl, controller ? { signal: controller.signal } : undefined);
-                if (!response?.ok) return null;
-                const blob = await response.blob();
-                if (!/^image\/(?:png|jpeg|webp)$/i.test(String(blob?.type || '')) || blob.size > 256 * 1024) return null;
-                dataUrl = await new Promise(resolve => {
-                    const reader = new FileReader();
-                    reader.onload = () => resolve(String(reader.result || ''));
-                    reader.onerror = () => resolve('');
-                    reader.readAsDataURL(blob);
-                });
-            } finally {
-                if (timer) clearTimeout(timer);
-            }
-        }
-        if (!/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(dataUrl) || dataUrl.length > 400_000) return null;
-        const own = { sourceName: String(fileName || '').slice(0, 120), updatedAt: Date.now() };
-        const filed = await savePortraitFile(dataUrl, { headers: requestHeaders() });
-        if (filed) return { ...filed, ...(await portraitImageSize(dataUrl) ?? {}), ...own };
-        return { dataUrl, mime: dataUrl.slice(5, dataUrl.indexOf(';')), ...own };
-    } catch {
-        return null;
-    }
-}
-// Whether the reader removed this person's dossier before (their name is in the dismissed groups).
-function castPersonDismissed(state, person) {
-    const labels = new Set([person.name, person.entry?.name, ...(person.aliases || [])].map(normalizeName).filter(Boolean));
-    return (state?.userDismissedGroups || []).some(group => (group?.labels || []).some(label => labels.has(label)));
-}
-// The people the step has recorded as made (the slice's `cast`), met now with their entry, with no dossier standing for them
-// and not removed by the reader.
-function castList() {
-    const adapter = storySuiteV2Meters();
-    if (!adapter) return null;
-    try {
-        const answer = adapter.castAnswer?.();
-        if (!Array.isArray(answer)) return null;
-        const calendar = adapter.directorCalendar?.() ?? null;
-        return normalizeCast(answer, minutes => storyMinuteText(minutes, calendar));
-    } catch {
-        return null;
-    }
-}
-function castDue(state, adapter) {
-    const people = castList();
-    if (!Array.isArray(people) || !people.length) return [];
-    const made = adapter.castMade?.() ?? {};
-    return metWithEntry(people).filter(person => Object.hasOwn(made, person.key)
-        && !dossierFor(state.npcs, person) && !castPersonDismissed(state, person));
-}
-// The cast dossiers that may be given the pack's picture now (src/cast-dossier.js castPortraitWanted: made from the cast, no portrait of
-// their own, none removed on purpose) and for whom Story Block's `packs.portrait` now answers for their entry's `portrait`:
-// [{ npc, person, url, file }]. A picture that could not be read is not asked for again in this session (castPortraitMisses).
-function castPortraitTargets(state, adapter, key = getChatKey()) {
-    const wanting = (state?.npcs || []).filter(castPortraitWanted);
-    if (!wanting.length) return [];
-    const people = metWithEntry(castList());
-    const targets = [];
-    for (const npc of wanting) {
-        const person = findCastPerson(people, npc.castFrom.key);
-        const file = person?.entry?.portrait;
-        const url = file ? adapter.packPortraitUrl?.(person.pack, file) : null;
-        if (url && !castPortraitMisses.has(`${key}|${npc.id}|${url}`)) targets.push({ npc, person, url, file });
-    }
-    return targets;
-}
-// Whether the sync has a picture to give a cast dossier (a cheap look, no wait): the adapter asks before it runs the sync for this alone.
-function castPortraitDue() {
-    try {
-        const adapter = storySuiteV2Meters();
-        const key = getChatKey();
-        if (!adapter || getSettings().enabled === false || !key || key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return false;
-        return castPortraitTargets(getChatState(key), adapter, key).length > 0;
-    } catch {
-        return false;
-    }
-}
-// One run at a time. A call that comes while one is running (the step ends while a picture is being read) is not lost: the run goes round once more.
-let castSyncAgain = false;
-async function castSync() {
-    if (castSyncRunning) { castSyncAgain = true; return false; }
-    castSyncRunning = true;
-    let any = false;
-    try {
-        do {
-            castSyncAgain = false;
-            if (await castSyncOnce()) any = true;
-        } while (castSyncAgain);
-    } finally {
-        castSyncRunning = false;
-    }
-    return any;
-}
-async function castSyncOnce() {
-    const adapter = storySuiteV2Meters();
-    if (!adapter || getSettings().enabled === false) return false;
-    const key = getChatKey();
-    if (!key || key === 'no-chat' || chatHydrationStatus(key) !== 'ready') return false;
-    if (!castDue(getChatState(key), adapter).length && !castPortraitTargets(getChatState(key), adapter, key).length) return false;
-    const mark = chatHeadMark();
-    const names = adapter.packNames?.() ?? {};
-    const portraits = new Map();
-    for (const person of castDue(getChatState(key), adapter)) {
-        const url = person.entry.portrait ? adapter.packPortraitUrl?.(person.pack, person.entry.portrait) : null;
-        if (url) portraits.set(person.key, await castPortraitRecord(url, person.entry.portrait));
-    }
-    // A cast dossier made while its picture was missing (the pack imported without pictures) gets it once the pack answers for it.
-    const pictures = new Map();
-    for (const target of castPortraitTargets(getChatState(key), adapter, key)) {
-        const record = await castPortraitRecord(target.url, target.file);
-        if (record) pictures.set(target.npc.id, { url: target.url, record });
-        else castPortraitMisses.add(`${key}|${target.npc.id}|${target.url}`);
-    }
-    // The same checks as any other change to the dossiers, after the waits: the chat and its head are still the ones asked about.
-    if (!await ensureFreshMutationBoundary('make dossiers from the cast', key, { notify: false })) return false;
-    if (getChatKey() !== key || !chatHeadUnchanged(mark)) return false;
-    const settings = getSettings();
-    const messageId = latestMessageId(true);
-    let working = getChatState(key);
-    const made = [];
-    for (const person of castDue(working, adapter)) {
-        const added = applyNpcStateCommand(working, { action: 'add', name: person.entry.name || person.name }, {
-            maxNpcs: settings.maxNpcs, excludeNames: currentExclusions(), turn: working.turn, relationshipBaseline: settings.relationshipBaseline,
-        });
-        if (added.report.status !== 'added') continue;
-        const base = added.state.npcs.find(npc => npc.id === added.report.npcId);
-        const portrait = portraits.get(person.key) ?? null;
-        const filled = base ? applyCastEntry(base, person, { packName: names[person.pack] ?? '', portrait }) : null;
-        if (!filled) continue;
-        const record = normalizeNpcRecord(filled);
-        if (portraitHasImage(record.portrait)) {
-            const fingerprint = appearanceFingerprint(record);
-            if (fingerprint) record.portrait = { ...record.portrait, appearanceFingerprint: fingerprint };
-            // A file-form portrait is kept once, in the dossier; only a picture held in the record gets its portraitAssets copy.
-            if (record.portrait.dataUrl) added.state.portraitAssets = { ...(added.state.portraitAssets || {}), [record.id]: structuredClone(record.portrait) };
-        }
-        added.state.npcs = added.state.npcs.map(npc => (npc.id === record.id ? record : npc));
-        working = added.state;
-        made.push(record);
-    }
-    // The pictures: only a dossier that still has none, still of the cast, whose picture was read for the address the pack gives now.
-    const given = [];
-    for (const target of castPortraitTargets(working, adapter, key)) {
-        const got = pictures.get(target.npc.id);
-        if (!got || got.url !== target.url) continue;
-        const fingerprint = appearanceFingerprint(target.npc);
-        const portrait = fingerprint ? { ...got.record, appearanceFingerprint: fingerprint } : got.record;
-        const next = applyCastPortrait(target.npc, portrait);
-        if (next === target.npc) continue;
-        if (next.portrait.dataUrl) working.portraitAssets = { ...(working.portraitAssets || {}), [next.id]: structuredClone(next.portrait) };
-        working.npcs = working.npcs.map(npc => (npc.id === next.id ? next : npc));
-        given.push(next.id);
-    }
-    if (!made.length && !given.length) return false;
-    if (messageId >= 0 && made.length) commitBranchCheckpoint(working, messageId, 'cast-dossier');
-    else if (messageId >= 0) commitBranchCheckpoint(working, messageId, 'cast-portrait');
-    setChatState(key, working);
-    persistCritical(key);
-    renderDossier();
-    if (made.length) updateInjection();
-    return true;
-}
-// The dossier view's cast data by dossier id ({ badge, packName, firstMet, goal, routine, lastHeard, where, doing }) for the
-// dossiers made from the cast; null with none. Story Director's answer adds the live path and "last heard" when it is there.
-function dossierCastViews(state) {
-    const made = (state?.npcs || []).filter(npc => npc?.id && npc.castFrom?.key);
-    if (!made.length) return null;
-    const people = castList();
-    // The pin button: Story Director offers it (hosted) and the person is not a key person yet.
-    let offered = false;
-    try { offered = storySuiteV2Meters()?.keyPinOffered?.() === true; } catch { offered = false; }
-    const keyList = offered ? keyPeopleList() : null;
-    const views = {};
-    for (const npc of made) {
-        const view = castView(npc, findCastPerson(people, npc.castFrom.key), { pin: offered && !isKeyNpc(npc, keyList ?? []) });
-        if (view) views[npc.id] = view;
-    }
-    return Object.keys(views).length ? views : null;
-}
-
-// (v2) While hosted, Story Block's scene says who is here unless the reader keeps the scene in Delta
-// ("scene: mine"): the dossier injection, the Cast tab and the module's queries all follow its
-// `scene.present`, so the prompt never carries two different casts. Delta's stored presence is not
-// changed. Without a host, or when the scene cannot answer, Delta's own presence stands.
-function scenePresenceView(npcs) {
-    const adapter = storySuiteV2Meters();
-    if (!adapter || !Array.isArray(npcs) || !defersArea('scene', getSettings().sourceOfTruth)) return npcs;
-    let names = null;
-    try { names = adapter.scenePresent?.(); } catch { names = null; }
-    if (!Array.isArray(names)) return npcs;
-    const here = new Set(names.map(name => resolveDossierTarget(npcs, name)).filter(Boolean));
-    let changed = false;
-    const out = npcs.map(npc => {
-        // (C-1) The scene cannot bring a confirmed-dead NPC back on stage.
-        const present = Boolean(npc?.id) && here.has(String(npc.id)) && !npc.archived && !isTerminalNpcDeath(npc);
-        if (Boolean(npc?.present) === present) return npc;
-        changed = true;
-        return { ...npc, present, worldActive: present ? false : Boolean(npc.worldActive) };
-    });
-    return changed ? out : npcs;
-}
-// (v2 World view) Who the story's scene lists as present now, for the scanner's dynamic context: only
-// while hosted with Story Block keeping the scene (as scenePresenceView) and only for a scan of the
-// head reply (the scene is the head's). Story Director's World view first, else Story Block's scene;
-// null otherwise, and the scanner prompt is then exactly as before.
-function scanScenePresent(messageId) {
-    const adapter = storySuiteV2Meters();
-    if (!adapter || !defersArea('scene', getSettings().sourceOfTruth)) return null;
-    if (Number.isInteger(messageId) && messageId !== latestMessageId(true)) return null;
-    try {
-        const names = adapter.presentNow?.();
-        return Array.isArray(names) && names.length ? names : null;
-    } catch {
-        return null;
-    }
-}
-// The merge option that holds away key people's stable fields (as if locked) for one scan: { awayNpcIds } or nothing.
-// The dossier view's key-person data by dossier id ({ name, here, away, recent }), or null with no key people.
-function dossierKeyViews(state) {
-    const list = keyPeopleList();
-    if (!list?.length) return null;
-    const head = keyHeadIndex();
-    const memory = storySuiteV2Meters()?.keyAwayMemory?.() ?? {};
-    const views = {};
-    for (const npc of state?.npcs || []) {
-        const view = npc?.id ? keyView(list, memory, npc, head) : null;
-        if (view) views[npc.id] = view;
-    }
-    return Object.keys(views).length ? views : null;
-}
-// What the dossier view reads from the host beside the dossiers: v2 meters, key-person and living-cast views.
-function dossierHostViews(state) {
-    const meterViews = storySuiteV2Meters()?.dossierMeters?.(state.npcs) ?? {};
-    const keyViews = dossierKeyViews(state);
-    const castViews = dossierCastViews(state);
-    return { meterViews, ...(keyViews ? { keyViews } : {}), ...(castViews ? { castViews } : {}) };
-}
-// (perf) The dossiers as the views read them: a copy, except that a portrait's picture (its data URL, an immutable string of up to
-// a few hundred KB) is shared rather than copied; the portrait record itself is still a copy.
-function viewNpcCopies(npcs) {
-    return (Array.isArray(npcs) ? npcs : []).map(npc => {
-        const portrait = npc?.portrait;
-        if (!portrait || typeof portrait !== 'object' || typeof portrait.dataUrl !== 'string') return structuredClone(npc);
-        const copy = structuredClone({ ...npc, portrait: null });
-        const { dataUrl, ...record } = portrait;
-        copy.portrait = { ...structuredClone(record), dataUrl };
-        return copy;
-    });
-}
-function keyAwayScanOptions(state) {
-    const list = keyPeopleList();
-    if (!list?.length) return {};
-    const ids = awayNpcIds(list, state?.npcs);
-    return ids.size ? { awayNpcIds: [...ids] } : {};
-}
-// The chat state a scan works from: with the slice's relationship numbers while hosted (a copy;
-// the stored state is never changed here), the state itself otherwise.
-function hostedScanState(state) {
-    const npcs = hostedMeterView(state?.npcs);
-    return npcs === state?.npcs ? state : { ...state, npcs };
-}
-// Which message is the head of the chat, and which of its swipes is shown. Story Block writes a
-// module's command onto its head reply, so a scan's changes may go there only while it is the head
-// the scan started from: the same message object at the same place with the same swipe.
-function chatHeadMark() {
-    const chat = getContext().chat || [];
-    const message = chat[chat.length - 1] ?? null;
-    return { length: chat.length, message, swipe: Number.isInteger(message?.swipe_id) ? message.swipe_id : null };
-}
-function chatHeadUnchanged(mark) {
-    if (!mark) return true;
-    const now = chatHeadMark();
-    return now.length === mark.length && now.message === mark.message && now.swipe === mark.swipe;
-}
-// A committed scan's relationship changes go to the slice as npc.adjust (same clamps as a story
-// line), in dossier order; the sidecar keeps its own numbers by v1's rules. `head` (chatHeadMark,
-// taken when the scan started): when the reader swiped, or a reply was added or deleted, since
-// then, nothing is sent; the changes belonged to a reply that is no longer the one Story Block
-// would write them on, and the reply now shown gets its own scan.
-function forwardRelationshipChangesToHost(before, after, messageId, head = null) {
-    const adapter = storySuiteV2Meters();
-    if (!adapter) return;
-    const dropped = () => {
-        console.info('[NPC State Delta] the chat moved on during the scan (a swipe or a new or deleted reply); its relationship changes were not sent to Story Suite.');
-    };
-    if (!chatHeadUnchanged(head)) return dropped();
-    const prior = new Map((before || []).map(npc => [npc?.id, npc]));
-    const baseline = normalizeRelationshipBaseline(getSettings().relationshipBaseline);
-    const changes = [];
-    for (const npc of after || []) {
-        if (!npc?.id || npc.archived) continue;
-        const from = prior.has(npc.id) ? normalizeRelationshipBaseline(prior.get(npc.id).relationship) : baseline;
-        const to = normalizeRelationshipBaseline(npc.relationship);
-        const meters = Object.fromEntries(Object.keys(to).filter(key => to[key] !== from[key]).map(key => [key, to[key] - from[key]]));
-        if (Object.keys(meters).length) changes.push({ name: npc.name, meters, start: from, reply: messageId });
-    }
-    if (!changes.length) return;
-    void (async () => {
-        for (const change of changes) {
-            if (!chatHeadUnchanged(head)) return dropped();
-            await adapter.adjust(change);
-        }
-    })();
-}
-
-// (v2 hidden notes) The story events of present people's locked notes this scan should look for ([] when none): only for
-// a scan of the head reply (an opened note is recorded on the head), and only for the people in the scene now.
-function hostedEventWatch(state, messageId) {
-    const adapter = storySuiteV2Meters();
-    if (!adapter || (Number.isInteger(messageId) && messageId !== latestMessageId(true))) return [];
-    try { return adapter.eventWatch?.(scenePresenceView(state?.npcs || [])) || []; } catch { return []; }
-}
-
-// (v2 hidden notes) What a scanner or one-pass prompt is asked about hidden notes while hosted: the layered notes for a new
-// dossier (setting) and the story events of present people's locked notes; {} when neither (the prompt is then as before).
-function hostedNotePromptOptions(state, settings, messageId = null) {
-    if (!storySuiteV2Meters()) return {};
-    const eventWatch = hostedEventWatch(state, Number.isInteger(messageId) ? messageId : undefined);
-    return {
-        ...(settings.layeredSecrets !== false ? { layeredSecrets: true } : {}),
-        ...(eventWatch.length ? { eventWatch } : {}),
-    };
-}
-
-// (v2 hidden notes) What a targeted pass (backfill, Refresh) is asked about hidden notes: { layered, watch } or null when
-// nothing is asked (not hosted, or no setting and no event note to look for). `layered`: this dossier is new (a backfill
-// queued at admission) and has no notes yet. `watch`: this one person's locked event notes, when they are present.
-function hostedTargetNotes(npc, { newDossier = false, messageId = null } = {}) {
-    const adapter = storySuiteV2Meters();
-    if (!adapter || !npc) return null;
-    const layered = newDossier && getSettings().layeredSecrets !== false && !(Array.isArray(npc.secrets) && npc.secrets.length);
-    const watch = hostedEventWatch({ npcs: [npc] }, messageId);
-    return layered || watch.length ? { layered, watch } : null;
-}
-const targetNoteOptions = notes => ({
-    ...(notes?.layered ? { layeredSecrets: true } : {}),
-    ...(notes?.watch?.length ? { eventWatch: notes.watch } : {}),
-});
-
-// A committed scan's `secretEvents` (the keys of the watched story events the current exchange showed) open those notes
-// as npc.open (cause ui, recorded on the head reply, so a swipe takes them back). Nothing is sent when the chat moved
-// on during the scan (as forwardRelationshipChangesToHost).
-function forwardSecretEventsToHost(watched, answered, head = null) {
-    const adapter = storySuiteV2Meters();
-    if (!adapter || !Array.isArray(watched) || !watched.length || !Array.isArray(answered) || !answered.length) return;
-    if (!chatHeadUnchanged(head)) {
-        console.info('[NPC State Delta] the chat moved on during the scan; its story events were not sent to Story Suite.');
-        return;
-    }
-    const keys = new Set(answered.map(item => String(item ?? '')));
-    const byName = new Map();
-    for (const item of watched) {
-        if (!keys.has(item.key)) continue;
-        byName.set(item.name, [...(byName.get(item.name) || []), item.note]);
-    }
-    if (!byName.size) return;
-    void (async () => {
-        for (const [name, ids] of byName) {
-            if (!chatHeadUnchanged(head)) return;
-            await adapter.openByEvent({ name, ids });
-        }
-    })();
-}
-
-// (v2 hidden notes) The layered notes a scan wrote for the dossiers it just built (`ids`), read from the rows the model
-// returned: 2 to 5 per person, cleaned, set once and never rewritten by a later scan. A dossier that already has notes
-// (the pack's, the reader's) keeps them. Returns how many dossiers got notes.
-function attachGeneratedSecrets(state, ids, ...sources) {
-    const adapter = storySuiteV2Meters();
-    if (!adapter || !Array.isArray(state?.npcs)) return 0;
-    const rows = sources.flatMap(source => (Array.isArray(source?.npcs) ? source.npcs : []));
-    let count = 0;
-    for (const id of ids || []) {
-        const npc = state.npcs.find(item => item?.id === id && !item.archived);
-        if (!npc || (Array.isArray(npc.secrets) && npc.secrets.length)) continue;
-        const row = rows.find(item => Array.isArray(item?.secrets) && item.secrets.length
-            && (String(item.id || '') === npc.id || npcMatchesLabel(npc, String(item.name || ''))));
-        let made = [];
-        try { made = row ? adapter.generatedSecrets(row.secrets) : []; } catch { made = []; }
-        if (!made.length) continue;
-        npc.secrets = made;
-        count += 1;
-    }
-    return count;
-}
 
 // A v2-hosted automatic boundary may skip the deterministic-path probe: this session already found
 // no sidecar for the chat, has no pointer for it and nothing has found or written one since.
@@ -4471,6 +3978,8 @@ function clearUserDismissedSuppression(state, target) {
     return state;
 }
 
+const { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, attachGeneratedSecrets, castEmptyReason } = createHostedPart(rt, { chatHydrationStatus, getChatKey, getChatState, latestMessageId, latestReplyIndex });
+
 const { recordInlineCardsInState, clearInlineCardsAtMessage, removeNpcInlineCardAtMessage, purgeInlineCardsInState, scanInlineNpcIds, currentNpcById, findNpcByIdOrName, scenePresentAt, presentCastDisplayMode, applyLauncherFlag, effectivePresentCastChoice, storyBlockCastHtml, ensureInlineObserver, inlineMountNeedsRepair, startInlineWatchdog, renderInlineCards, queueInlineRender } = createInlineCardsPart(rt, { chatHydrationStatus, currentLineageKeyForMessage, getChatKey, getChatState, INLINE_HISTORY_LIMIT, isKeyNpc, latestMessageId, scenePresenceView, storyBlockV2Hosted });
 
 function eventTargetClosest(event, selector) {
@@ -4534,6 +4043,8 @@ function installUiCaptureBridge() {
 }
 
 
+const { castPortraitDue, castSync } = createCastSyncPart(rt, { castList, chatHeadMark, chatHeadUnchanged, chatHydrationStatus, commitBranchCheckpoint, ensureFreshMutationBoundary, getChatKey, getChatState, latestMessageId, persistCritical, renderDossier, requestHeaders, setChatState, storySuiteV2Meters, updateInjection });
+
 const { updateNpcAppearance, updateNpcLifeState, npcFormName, setNpcPortrait, setNpcPortraitSeed, removeNpcPortrait, deleteNpcById, setNpcArchiveStateById, exportBundleBytes, importBundleBytes, addNpcManually } = createMutationsPart(rt, { clearUserDismissedSuppression, closeNpcEditor, commitBranchCheckpoint, editorIsMounted, ensureFreshMutationBoundary, ensureHydratedStateFresh, getChatKey, getChatState, hydratedRevision, latestMessageId, ownershipEpoch, ownershipEpochCurrent, persistCritical, persistCriticalDurable, purgeInlineCardsInState, recordFreshnessEvent, renderDossier, requestHeaders, requireReadyChatMutation, setChatState, stampManualEdit, updateInjection, workingCopyAdoption });
 
 
@@ -4544,30 +4055,6 @@ const { buildSettingsHtml, bindSettingsGroupMemory, syncScannerProfileControl, s
 const { savePortraitSettingsDraft, persistPortraitCustomPresetLibrary } = createPortraitSettingsPart(rt, { normalizePortraitSettingsDraft, portraitSettingsDraftFromUi, portraitSettingsSnapshot, syncSettingsControls, updatePortraitSettingsSaveUi });
 
 const { bindUi, scheduleSettingsMountRetries } = createSettingsBindPart(rt, { addNpcManually, afterEnabledChange, applyLauncherFlag, applySourceOfTruth, bindSettingsGroupMemory, buildSettingsHtml, closePortraitGenerator, confirmDiscardPortraitDraft, deleteNpcById, detachBrokenSidecar, ensureFreshMutationBoundary, freshChatState, generatePortraitFromDialog, getChatKey, getChatState, hostedOnePass, latestMessageId, markPortraitSettingsDirty, openNpcEditorSafely, persistCritical, persistPortraitCustomPresetLibrary, portraitFileFailed, portraitSettingsDraftFromUi, portraitSettingsSnapshot, processPendingBackfills, queueInlineRender, refreshNpcFromChat, renderDossier, renderWhatsSent, resetPortraitGeneratorFromDossier, retryCurrentChatHydration, savePortraitSettingsDraft, scanNow, scanNpcDossier, setChatState, setNpcArchiveStateById, startInlineWatchdog, syncSettingsControls, syncSuiteControls, UI_ID, updateInjection, useGeneratedPortrait, writePortraitCustomPresetOptions, writePortraitSettingsDraftToUi });
-
-// (1.2.13) Why no NPC shows as present, in words, and whether a scan could change that.
-function castEmptyReason() {
-    const key = getChatKey();
-    if (key === 'no-chat') return { text: 'No chat is open.', scan: false };
-    if (getSettings().enabled === false) return { text: 'NPC State Delta is off.', scan: false };
-    const hydration = chatHydrationStatus(key);
-    // (R2-5) A sidecar that could not be read is not "still loading": say so, and where to fix it
-    // (the settings section's roster, the same notice the drawer shows).
-    if (hydration === 'error') {
-        const detach = getSettings().dataFiles?.[key]?.path ? ' or Detach Broken Sidecar' : '';
-        return { text: `This chat's dossiers could not be loaded, so nothing is shown and nothing is changed. NPC State Delta's settings section has Retry Load${detach}.`, scan: false };
-    }
-    if (hydration !== 'ready') return { text: "This chat's dossiers are still loading.", scan: false };
-    const state = getChatState(key);
-    const latest = latestMessageId(true);
-    if (!(state.npcs || []).some(npc => npc && !npc.archived)) {
-        return { text: 'No NPC has a dossier in this chat yet, so nobody shows here even when the story or the World State names them. A scan of the latest reply makes dossiers for the NPCs in it.', scan: true };
-    }
-    if (latest >= 0 && !replyScanned(state, latest)) {
-        return { text: 'The latest reply has not been scanned yet, so who is present is not known.', scan: true };
-    }
-    return { text: 'The latest scan found no NPC in the scene.', scan: true };
-}
 
 async function handleAssistantMessageReceivedInner(messageId, { bypassSwipeGuard = false, forceBranchRescan = false } = {}) {
     const settings = getSettings();

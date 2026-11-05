@@ -10,8 +10,10 @@ const root = new URL('../../', import.meta.url);
 export const RUNTIME_SOURCE_PARTS = [
     { file: 'runtime-settings.js', before: 'function getChatIdentity(' },
     { file: 'runtime-settings-html.js', before: 'function relationshipNumber(' },
+    { file: 'runtime-hosted.js', before: 'const { storyBlockV2Hosted' },
     { file: 'runtime-inline-cards.js', before: 'const { recordInlineCardsInState' },
     { file: 'runtime-editor.js', before: 'const { editorIsMounted' },
+    { file: 'runtime-cast-sync.js', before: 'const { castPortraitDue' },
     { file: 'runtime-mutations.js', before: 'const { updateNpcAppearance' },
     { file: 'runtime-portrait.js', before: 'const { handlePortraitGeneratorEscape' },
     { file: 'runtime-suite.js', before: 'const { SUITE_API' },

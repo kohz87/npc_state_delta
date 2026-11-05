@@ -12,6 +12,7 @@ import { buildScannerPrompt, createNpcRecord } from '../core.js';
 import { scenePresentFocus, withScenePresent } from '../core-mechanics.js';
 import { createStorySuiteV2Adapter } from '../src/storysuite-v2.js';
 import { createHost } from './vendor/story-block/testkit/index.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 function npc(name, extra = {}) {
     return { ...createNpcRecord(name, []), ...extra };
@@ -104,7 +105,7 @@ test('presentNow: Story Director\'s World view first, else Story Block\'s scene;
 });
 
 test('index.js: the scan passes the scene list only for the head reply while Story Block keeps the scene', () => {
-    const index = fs.readFileSync(fileURLToPath(new URL('../index.js', import.meta.url)), 'utf8');
+    const index = runtimeSource();
     // (hidden notes) The same call also carries the hosted notes' options, spread in after the scene list.
     assert.match(index, /buildScannerPrompt\(scannerPromptOptions\(state, settings, transcript, \{\n        currentTranscript, earlierOnly, fullScanMode: fullWindowScan, sceneNames: scanScenePresent\(messageId\), \.\.\.noteOptions,\n    \}\)\)/);
     const fn = index.slice(index.indexOf('function scanScenePresent'), index.indexOf('// The chat state a scan works from'));

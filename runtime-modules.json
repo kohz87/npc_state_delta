@@ -15,6 +15,8 @@
     { "path": "runtime-mutations.js", "role": "scoped-manual-mutations", "required": true },
     { "path": "runtime-portrait.js", "role": "portrait-generator-and-settings", "required": true },
     { "path": "runtime-portrait-settings.js", "role": "portrait-settings-save", "required": true },
+    { "path": "runtime-hosted.js", "role": "hosted-suite-views", "required": true },
+    { "path": "runtime-cast-sync.js", "role": "cast-sync", "required": true },
     { "path": "destructive-settlement.js", "role": "destructive-host-settlement", "required": true },
     { "path": "destructive-settlement-core.js", "role": "destructive-settlement-primitives", "required": true },
     { "path": "scanner-routing.js", "role": "scanner-request-routing", "required": true },
