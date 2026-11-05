@@ -15,6 +15,7 @@ import {
     readNpcStateDataFile,
     writeNpcStateDataFile,
 } from '../storage.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const keyA = buildQualifiedChatKey('chat', 'A.png', 'Adventure');
 const keyB = buildQualifiedChatKey('chat', 'B.png', 'Adventure');
@@ -112,7 +113,7 @@ test('recovery filenames are distinct across separate module instances at the sa
 });
 
 test('runtime wiring uses pure owner-safe helpers and cheap host chat listing', () => {
-    const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const source = runtimeSource();
     assert.match(source, /resolveOwnedLifecycleKey\(candidates, kind, id, resolvedOwner, ownerWasProvided\)/);
     assert.match(source, /resolveDeletedLifecycleKeyFromPresence\(candidates, presence\)/);
     assert.match(source, /avatar_url: owner, simple: true/);
@@ -141,7 +142,7 @@ test('historical tombstone replay cannot poison an already-live renamed destinat
 });
 
 test('lifecycle wrappers schedule retries for late background rejection and owner flush fails closed', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     const hardening = fs.readFileSync(new URL('../hardening.js', import.meta.url), 'utf8');
     assert.match(index, /void operation\.catch\(error =>[\s\S]*scheduleLifecycleRetry/);
     assert.match(hardening, /void operation\.catch\(error =>[\s\S]*scheduleHardeningRetry/);
@@ -159,7 +160,7 @@ test('owner-wide partial failures are surfaced to the retry scheduler after succ
 });
 
 test('final review protects all rename destination representations and event instances are unique', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     const hardening = fs.readFileSync(new URL('../hardening.js', import.meta.url), 'utf8');
     assert.match(index, /destinationRepresentations = \[destinationState, destinationCache\]/);
     assert.match(index, /const eventId = \+\+lifecycleEventSequence/);
@@ -180,7 +181,7 @@ test('storage has a cross-tab lease fallback when Web Locks are unavailable', ()
 });
 
 test('transient host ownership probe failure is surfaced for bounded retry', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     const block = index.slice(index.indexOf('async function resolveDeletedChatKey'), index.indexOf('function touchChatCache'));
     assert.match(block, /presence\.some\(item => item\.value === null\)/);
     assert.match(block, /NPC_STATE_DELETE_OWNERSHIP_UNAVAILABLE/);

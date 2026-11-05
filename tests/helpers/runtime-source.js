@@ -8,7 +8,10 @@ import fs from 'node:fs';
 const root = new URL('../../', import.meta.url);
 
 export const RUNTIME_SOURCE_PARTS = [
-    { file: 'runtime-settings.js', before: 'function getChatIdentity(' },
+    { file: 'runtime-settings.js', before: 'const { getChatKey,' },
+    { file: 'runtime-chat-keys.js', before: 'const { getChatKey,' },
+    { file: 'runtime-hydration.js', before: 'const { freshChatState,' },
+    { file: 'runtime-persist.js', before: 'const { queueStateFileWrite,' },
     { file: 'runtime-settings-html.js', before: 'function relationshipNumber(' },
     { file: 'runtime-hosted.js', before: 'const { storyBlockV2Hosted' },
     { file: 'runtime-inline-cards.js', before: 'const { recordInlineCardsInState' },

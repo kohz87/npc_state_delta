@@ -11,6 +11,7 @@ import {
 } from '../branch.js';
 import { buildQualifiedChatKey } from '../identity.js';
 import { makeNpcStateRecoveryFileName, readNpcStateDataFile, writeNpcStateDataFile } from '../storage.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const user = (mes, send_date = '') => ({ is_user: true, is_system: false, name: 'User', mes, send_date });
 const bot = (name, mes, send_date = '') => ({ is_user: false, is_system: false, name, mes, send_date });
@@ -82,7 +83,7 @@ test('lifecycle hardening does not monkey-patch the shared SillyTavern event emi
 });
 
 test('destructive chat lifecycle retires the revision-checked source before publishing ownership metadata', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     const deletion = index.slice(index.indexOf('async function removeDeletedChatState'), index.indexOf('async function moveRenamedChatState'));
     assert.ok(deletion.indexOf('retireNpcStateDataFile') >= 0);
     assert.ok(deletion.indexOf('retireNpcStateDataFile') < deletion.indexOf('settings.sidecarTombstones[key]'));
@@ -93,7 +94,7 @@ test('destructive chat lifecycle retires the revision-checked source before publ
 });
 
 test('retired canonical sidecars are physically removed only after synchronous ownership metadata persistence', () => {
-  const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  const index = runtimeSource();
   const deletion = index.slice(index.indexOf('async function removeDeletedChatState'), index.indexOf('async function moveRenamedChatState'));
   const settingsSave = deletion.indexOf('await saveHostSettings()');
   const physicalDelete = deletion.indexOf('deleteNpcStateDataFile(pointer');
@@ -107,7 +108,7 @@ test('retired canonical sidecars are physically removed only after synchronous o
 
 
 test('ambiguous filename deletion uses host ownership proof and never falls back to the active owner', () => {
-  const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  const index = runtimeSource();
   assert.match(index, /async function resolveDeletedChatKey/);
   assert.match(index, /\/api\/characters\/chats/);
   assert.match(index, /resolveDeletedLifecycleKeyFromPresence\(candidates, presence\)/);
@@ -138,7 +139,7 @@ test('owner-wide retired canonical predecessors are deleted only after settings 
 });
 
 test('ambiguous delete proof considers only live ownership and ignores historical tombstone/recovery records', () => {
-  const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  const index = runtimeSource();
   const wrapper = index.slice(index.indexOf('function lifecycleCandidateKeys'), index.indexOf('async function hostCharacterChatPresence'));
   assert.match(wrapper, /liveLifecycleCandidateKeys\(getSettings\(\), chatStateCache\.keys\(\), kind, id\)/);
   const core = fs.readFileSync(new URL('../hardening-core.js', import.meta.url), 'utf8');

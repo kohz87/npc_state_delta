@@ -6,8 +6,9 @@ import {
     chatLineage,
     recordBranchCheckpoint,
 } from '../branch.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
-const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+const index = runtimeSource();
 
 function msg(text, isUser = false) {
     return { mes: text, is_user: isUser, is_system: false, name: isUser ? 'User' : 'Character' };
