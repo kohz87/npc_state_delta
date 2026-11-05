@@ -507,6 +507,27 @@ test('rapid swipes: each swipe keeps its own meters, the cap window included', a
     assert.equal(JSON.stringify(h.store.head()), head);
 });
 
+test('Delta\'s own scan forwards are background changes; the reader\'s sends are not', async () => {
+    const h = await host();
+    await h.adapter.adjust({ name: 'Oren', meters: { trust: 3 }, start: { trust: 0, affection: 0, desire: 0, tension: 0 }, reply: 0 });
+    await h.adapter.setMeters({ name: 'Oren', meters: { trust: 1 } });
+    await h.adapter.refresh('Oren');
+    assert.deepEqual(h.sent.map(item => [item.type, item.options.background === true]), [['npc.adjust', true], ['npc.set', false], ['npc.refresh', false]]);
+    assert.equal(h.sent[0].options.cause, undefined, 'still the reader-level cause: background only says when to save');
+});
+
+test('a Story Block that ignores the command options still takes the forwards', async () => {
+    const h = await host();
+    const seen = [];
+    const original = h.box.host.sdk.command;
+    // an older Story Block: command(type, payload) only, a third argument is never looked at
+    h.box.host.sdk.command = async function (type, payload) { seen.push(arguments.length); return original(type, payload); };
+    const out = await h.adapter.adjust({ name: 'Oren', meters: { trust: 3 }, start: { trust: 0, affection: 0, desire: 0, tension: 0 }, reply: 0 });
+    assert.equal(out.ok, true);
+    assert.deepEqual(h.npc('Oren').meters.trust, 3);
+    assert.deepEqual(seen, [3], 'the option is passed; the old command ignores it and applies the change');
+});
+
 test('Delta\'s scanner path: npc.adjust from the adapter, seeded from the dossier, with the same clamps', async () => {
     const h = await host();
     const out = await h.adapter.adjust({ name: 'Oren', meters: { trust: 3, tension: 40 }, start: { trust: -5, affection: 2, desire: 0, tension: 1 }, reply: 0 });

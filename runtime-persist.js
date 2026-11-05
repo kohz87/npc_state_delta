@@ -4,7 +4,7 @@
 
 import { NPC_STATE_VERSION } from './core.js';
 import { writeNpcStateDataFile } from './storage.js';
-import { persistSettings, getSettings } from './runtime-settings.js';
+import { persistSettings, persistSettingsLazy, getSettings } from './runtime-settings.js';
 
 export function createPersistPart(rt, deps) {
     const { assertChatHydratedForWrite, chatHydrationStatus, getChatKey, getChatState, holdRetiredLocalWork, isCanonicalChatKey, markStateDirty, ownershipEpoch, ownershipEpochCurrent, reconcileCrossSessionWriteConflict, requestHeaders, requireReadyChatMutation, updateHydratedStateMeta } = deps;
@@ -80,7 +80,7 @@ export function createPersistPart(rt, deps) {
                     writerId: String(written.writerId || ''),
                     latestObservedServerWriterId: String(written.writerId || ''),
                 });
-                persistSettings();
+                persistSettingsLazy();
                 if (Number(stateVersions.get(key) || 0) <= writeVersion) break;
             }
             return pointer;
@@ -108,7 +108,7 @@ export function createPersistPart(rt, deps) {
             console.warn(`[NPC State Delta] refused to persist unhydrated chat state for ${key}.`);
             return false;
         }
-        persistSettings();
+        // Dossier state goes to the sidecar; settings.json holds only the sidecar pointer, which flushStateFile saves (coalesced) after the upload.
         queueStateFileWrite(key);
         return true;
     }

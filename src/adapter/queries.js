@@ -461,12 +461,14 @@ export function createQueriesPart(session, deps) {
 
     // A command to the host as Delta's own action (cause ui; the host keeps other causes for itself).
     // `own`: the command is one npc.adjust takes only from Delta itself (ownSends, while it runs).
-    async function send(type, payload, { own = false } = {}) {
+    // `background`: a change Delta's own scan makes on its own (not the reader's action): Story Block saves it in its late window, one
+    // write for a burst instead of one per command. A Story Block that does not know the option ignores it and saves as before.
+    async function send(type, payload, { own = false, background = false } = {}) {
         if (!session.hosted || typeof session.sdkRef?.command !== 'function') return null;
         const key = own ? sendKey(type, payload) : null;
         if (key) ownSends.set(key, (ownSends.get(key) ?? 0) + 1);
         try {
-            const out = await session.sdkRef.command(type, payload);
+            const out = background ? await session.sdkRef.command(type, payload, { background: true }) : await session.sdkRef.command(type, payload);
             if (out && out.ok === false && out.code !== 'REFUSED' && out.code !== 'NOT_FOUND') warn(`Story Suite v2 ${type} was not kept: ${out.message ?? out.code}`);
             return out ?? null;
         } catch (error) {

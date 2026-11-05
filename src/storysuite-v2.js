@@ -211,7 +211,7 @@ export function createStorySuiteV2Adapter({
         /** The page API Story Director's World screen uses (PAGE_API). */
         pageApi,
         /** While hosted: Delta's scanner changes for one NPC → `npc.adjust` (a promise of the result, or null). */
-        adjust: ({ name, meters, start, reply } = {}) => send('npc.adjust', { name, meters, ...(start ? { start } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}) }, { own: true }),
+        adjust: ({ name, meters, start, reply } = {}) => send('npc.adjust', { name, meters, ...(start ? { start } : {}), ...(Number.isInteger(reply) && reply >= 0 ? { reply } : {}) }, { own: true, background: true }),
         /** While hosted: the reader's own values from the dossier editor → `npc.set` (the host's latest reply; headReply). */
         setMeters: ({ name, meters } = {}) => send('npc.set', { name, meters }),
         /** While hosted: stages and notes again for one NPC (after its notes were edited) → `npc.refresh`. */
@@ -296,7 +296,7 @@ export function createStorySuiteV2Adapter({
         /** The story events of present people's locked notes the scan should look for (see eventWatch); [] when none. */
         eventWatch,
         /** While hosted: a story event the scan saw opens these notes of one NPC → `npc.open` (Delta's own send). */
-        openByEvent: ({ name, ids } = {}) => send('npc.open', { name, open: ids, by: 'story' }, { own: true }),
+        openByEvent: ({ name, ids } = {}) => send('npc.open', { name, open: ids, by: 'story' }, { own: true, background: true }),
         /** The notes a scan wrote for someone new, cleaned to 2 to 5 layers (src/npc-meters.js normalizeGeneratedSecrets). */
         generatedSecrets: list => normalizeGeneratedSecrets(list),
         /** While hosted: Delta's per-reply step now (the host's 'turn' event sends it on its own). */

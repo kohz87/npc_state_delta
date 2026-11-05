@@ -10,7 +10,7 @@ import { chatLineage } from './branch.js';
 import { deleteNpcStateDataFile, makeNpcStateDataFileName, makeNpcStateRecoveryFileName, readNpcStateDataFile, retireNpcStateDataFile, quarantineUnreadableNpcStateDataFile, writeNpcStateDataFile } from './storage.js';
 import { buildQualifiedChatKey, getCharacterOwnerId, parseQualifiedChatKey } from './identity.js';
 import { lifecycleRenameStateIsEmpty } from './hardening-core.js';
-import { persistSettings, getSettings } from './runtime-settings.js';
+import { persistSettings, flushPendingSettingsSave, getSettings } from './runtime-settings.js';
 
 export function createLifecyclePart(rt, deps) {
     const { bumpOwnershipEpoch, cancelScanOperation, chatHydrationStatus, ensureChatStateLoaded, freshChatState, getChatKey, getChatState, holdRetiredLocalWork, isCanonicalChatKey, renderDossier, requestHeaders, resolveDeletedChatKey, resolveOwnedChatKey, setChatState, settleStateFileWrite, updateHydratedStateMeta, updateInjection } = deps;
@@ -20,6 +20,7 @@ export function createLifecyclePart(rt, deps) {
     const LIFECYCLE_RETRY_DELAY_MS = 30_000;
 
     async function retryCurrentChatHydration() {
+        flushPendingSettingsSave();
         const key = getChatKey();
         if (!key || key === 'no-chat') return false;
         try {
@@ -383,6 +384,7 @@ export function createLifecyclePart(rt, deps) {
     }
 
     function flushCurrentChatOnPageHide() {
+        flushPendingSettingsSave();
         const key = getChatKey();
         if (key === 'no-chat' || !hydratedChatKeys.has(key) || !chatStateCache.has(key)) return;
         void settleStateFileWrite(key, { flush: true }).catch(error => console.debug('[NPC State Delta] page-hide flush deferred', error));
