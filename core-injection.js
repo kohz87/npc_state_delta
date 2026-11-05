@@ -319,6 +319,19 @@ const DECEASED_HEADER = 'DECEASED, REFERENCED ONLY: these NPCs are dead and only
 // NPCs the recent story names who are not in the injected cast get one compact line each: a living
 // off-screen (or archived) NPC its established facts, a confirmed-dead NPC who they were and how they
 // died. At most four, living first; never a dossier block.
+// The "toward the player" fact of a mentioned-but-absent NPC. A cast dossier's summary comes from the pack, not from a gated scanner write,
+// so it passes the same calibrate + consistency check as the present path (compactRelationshipModifier); any other dossier is printed as stored.
+function towardPlayer(npc) {
+    if (!npc.relationshipSummary) return '';
+    let summary = npc.relationshipSummary;
+    if (npc.castFrom?.key) {
+        const rel = normalizeRelationshipBaseline(npc.relationship || DEFAULT_RELATIONSHIP);
+        summary = calibrateRelationshipSummary(summary, rel);
+        if (!summary || !relationshipSummaryConsistent(summary, rel)) return '';
+    }
+    return `toward the player: ${cleanText(summary, 90)}`;
+}
+
 function referenceBlock(npcs = [], text = '', castIds = new Set(), customFieldNames = []) {
     const roster = Array.isArray(npcs) ? npcs : [];
     const haystack = normalizeName(text);
@@ -331,7 +344,7 @@ function referenceBlock(npcs = [], text = '', castIds = new Set(), customFieldNa
     const mentioned = named.filter(npc => !isTerminalNpcDeath(npc)).slice(0, REFERENCE_LINE_LIMIT).map(npc => {
         const custom = Object.entries(customFieldValues(npc, customFieldNames)).map(([name, value]) => `${name}: ${value}`).join(' · ');
         const facts = [normalizeGender(npc.gender), cleanText(npc.role, 70), npc.homeBase && `home base: ${cleanText(npc.homeBase, 60)}`,
-            custom, npc.relationshipSummary && `toward the player: ${cleanText(npc.relationshipSummary, 90)}`].filter(Boolean);
+            custom, towardPlayer(npc)].filter(Boolean);
         return truncateInjectionText(`- ${npc.name} (${['mentioned, not present', ...facts].join('; ')})`, REFERENCE_LINE_CHARS);
     });
     const deceased = named.filter(npc => isTerminalNpcDeath(npc)).slice(0, Math.min(3, REFERENCE_LINE_LIMIT - mentioned.length)).map(npc => {

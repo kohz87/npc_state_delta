@@ -458,11 +458,7 @@ export function normalizeNpcRecord(raw = {}) {
     npc.background = locked.has('background') || packWords('background', 1200)
         ? cleanText(raw.background, 1200)
         : compactDurableText(raw.background, DURABLE_PROFILE_LIMITS.background, 8);
-    // The pack's "with you" (400 characters) is kept whole, and not calibrated, while the stored summary still is those words.
-    const summaryKept = packWords('relationshipSummary', 400);
-    npc.relationshipSummary = summaryKept
-        ? cleanText(raw.relationshipSummary, 400)
-        : compactDurableText(raw.relationshipSummary, DURABLE_PROFILE_LIMITS.relationshipSummary, 6);
+    npc.relationshipSummary = compactDurableText(raw.relationshipSummary, DURABLE_PROFILE_LIMITS.relationshipSummary, 6);
     npc.mood = cleanText(raw.mood, 300);
     npc.location = cleanText(raw.location, 300);
     npc.goal = cleanText(raw.goal, 500);
@@ -506,7 +502,7 @@ export function normalizeNpcRecord(raw = {}) {
     npc.relationshipProgress = normalizeRelationshipProgress(raw.relationshipProgress ?? raw.relationship_progress);
     npc.relationshipMilestones = normalizeRelationshipMilestones(raw.relationshipMilestones ?? raw.relationship_milestones, npc.relationship);
     npc.relationshipEventHistory = normalizeRelationshipEventHistory(raw.relationshipEventHistory ?? raw.relationship_event_history);
-    if (!summaryKept) npc.relationshipSummary = calibrateRelationshipSummary(npc.relationshipSummary, npc.relationship);
+    npc.relationshipSummary = calibrateRelationshipSummary(npc.relationshipSummary, npc.relationship);
     const lastChange = raw.lastRelationshipChange && typeof raw.lastRelationshipChange === 'object' ? raw.lastRelationshipChange : {};
     const normalizedAuditDelta = normalizeRelationshipAuditDelta(lastChange.delta ?? {});
     const auditHasDelta = RELATIONSHIP_KEYS.some(key => normalizedAuditDelta[key] !== 0);

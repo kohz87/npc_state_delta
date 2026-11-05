@@ -18,7 +18,7 @@
 //   appearance stays empty for the scanner to fill from the story, so a later scan never merges its own physical text into outfit
 //   words or the other way round), voice → speech, personality, history → background, behaviour → behaviorProfile (levers in Delta's
 //   own form, up to 6; a lever Delta's rules would drop or merge is skipped), mannerisms → mannerisms (up to 4), withYou → the
-//   relationship summary (up to 400, kept whole while unchanged), start.place → home base,
+//   relationship summary (read up to 400, then compacted to 320 and calibrated like any summary: the pack's words are not kept whole), start.place → home base,
 //   start.goal → goal, the place they were met → location, fields → custom fields, meters (built-in four → the dossier's
 //   relationship numbers; any meter's value is also the first value in the saved slice, see src/npc-meters.js
 //   observeCast), meters.preset → the dossier's meter track, stages → the person's own stage ladder (castFrom.stages),
@@ -325,7 +325,7 @@ export function applyCastEntry(base, person, { packName = '', portrait = null } 
         met: { on: person.met?.on ?? '', where: person.met?.where ?? '' },
         goal: entry.start.goal, routine: entry.start.routine,
         // The pack's own words, kept exactly while the stored field still is them (core-mechanics normalizeNpcRecord).
-        first: Object.fromEntries([['overallAppearance', entry.look], ['appearance', entry.wears], ['speech', entry.voice], ['personality', entry.personality], ['background', entry.history], ['relationshipSummary', entry.withYou], ['behaviorProfile', entry.behaviour], ['mannerisms', entry.mannerisms]].filter(([, words]) => (Array.isArray(words) ? words.length : words)).map(([field, words]) => [field, Array.isArray(words) ? [...words] : words])),
+        first: Object.fromEntries([['overallAppearance', entry.look], ['appearance', entry.wears], ['speech', entry.voice], ['personality', entry.personality], ['background', entry.history], ['behaviorProfile', entry.behaviour], ['mannerisms', entry.mannerisms]].filter(([, words]) => (Array.isArray(words) ? words.length : words)).map(([field, words]) => [field, Array.isArray(words) ? [...words] : words])),
         ...(entry.stages.length ? { stages: entry.stages } : {}),
     };
     return npc;

@@ -1335,11 +1335,10 @@ test('the made dossier: levers to the behavioral profile, mannerisms to manneris
     assert.equal(made.relationshipSummary, TEMIWA_WITH_YOU);
     assert.deepEqual(made.castFrom.first.behaviorProfile, TEMIWA_BEHAVIOUR);
     assert.deepEqual(made.castFrom.first.mannerisms, TEMIWA_MANNERISMS);
-    assert.equal(made.castFrom.first.relationshipSummary, TEMIWA_WITH_YOU);
+    assert.equal(made.castFrom.first.relationshipSummary, undefined, 'the summary is not a kept pack word: it is compacted and calibrated like any summary');
     assert.equal(made.personality, '', 'the personality is the personality field alone');
     const stored = normalizeProduction(made);
-    assert.equal(stored.relationshipSummary, TEMIWA_WITH_YOU, 'withYou (over the stored 320) is kept whole');
-    assert.ok(TEMIWA_WITH_YOU.length > 190);
+    assert.ok(stored.relationshipSummary.length <= 320 && /^Jealous once you matter/.test(stored.relationshipSummary), 'withYou is stored as any summary is (at most 320)');
 });
 
 test('an entry without the fields makes the dossier it made before: nothing set, no new castFrom.first keys', () => {
@@ -1349,21 +1348,43 @@ test('an entry without the fields makes the dossier it made before: nothing set,
     assert.deepEqual(Object.keys(made.castFrom.first).sort(), ['appearance', 'overallAppearance']);
     const partial = applyTemiwa({ ...TEMIWA_ENTRY, withYou: 'Wary of you.' });
     assert.deepEqual([partial.behaviorProfile, partial.mannerisms], [base.behaviorProfile, base.mannerisms]);
-    assert.deepEqual(Object.keys(partial.castFrom.first).sort(), ['appearance', 'overallAppearance', 'relationshipSummary']);
+    assert.deepEqual(Object.keys(partial.castFrom.first).sort(), ['appearance', 'overallAppearance']);
     // Fenna's entry (no wears, no new fields) is as it was.
     const [p] = normalizeCast([person()], dateText);
     assert.deepEqual(Object.keys(applyCastEntry(createNpcRecord('Fenna', []), p).castFrom.first).sort(), ['background', 'overallAppearance', 'personality', 'speech']);
 });
 
-test('the pack\'s withYou stays whole (not compacted, not calibrated) until the summary is changed; then it is compacted and calibrated like any other', () => {
-    const words = `${'Would do anything for you, and cannot live without you. '.repeat(1)}${'She keeps a ledger of every kindness you have shown her and repays each one twice over. '.repeat(3)}`.trim().slice(0, 400);
-    const made = normalizeProduction(applyTemiwa({ ...TEMIWA_ENTRY, withYou: words }));
-    assert.equal(made.relationshipSummary, words.replace(/\s+/g, ' ').trim());
-    assert.match(made.relationshipSummary, /would do anything for/i, 'the strong wording is the pack\'s and is not softened');
-    assert.equal(normalizeProduction(structuredClone(made)).relationshipSummary, made.relationshipSummary, 'again on the next load');
-    const changed = normalizeProduction({ ...made, relationshipSummary: `${words} Plus a late change.` });
-    assert.ok(changed.relationshipSummary.length <= 320, 'a changed summary is compacted to the stored limit');
-    assert.doesNotMatch(changed.relationshipSummary, /would do anything for/i, 'and calibrated against the numbers');
+const LEAK = 'Jealous once you matter: cold cruelty to rivals, sudden sweetness to you. She would do anything for you and cannot live without you.';
+const away = npc => ({ ...npc, present: false });
+const referenceLine = npc => buildInjection([away(npc)], 'People talk about Temiwa at the inn.', 3, 3).split('\n').find(line => line.includes('mentioned, not present')) ?? '';
+
+test('round 2: the pack\'s withYou is stored calibrated and compacted like any summary, once and for good (no uncalibrated exception)', () => {
+    const made = normalizeProduction(applyTemiwa({ ...TEMIWA_ENTRY, withYou: LEAK }));
+    assert.doesNotMatch(made.relationshipSummary, /would do anything for|cannot live without/i, 'calibrated against the 0 numbers');
+    assert.match(made.relationshipSummary, /cares deeply for you/);
+    assert.equal(normalizeProduction(structuredClone(made)).relationshipSummary, made.relationshipSummary, 'the same on the next load');
+    const long = normalizeProduction(applyTemiwa({ ...TEMIWA_ENTRY, withYou: `${'She keeps a ledger of every kindness you have shown her. '.repeat(8)}`.trim().slice(0, 400) }));
+    assert.ok(long.relationshipSummary.length <= 320, 'a long withYou is compacted to the stored limit, as any summary');
+    // The first scanner merge (a mood-only update) leaves the stored summary exactly as it was stored at the first meeting.
+    const merged = mergeScanResult({ npcs: [made], turn: 2 }, { npcs: [{ id: made.id, name: made.name, mood: 'calm' }] }, { turn: 3, sourceMessageId: 9 }).state.npcs[0];
+    assert.equal(merged.relationshipSummary, made.relationshipSummary, 'the first merge changes nothing in the summary');
+});
+
+test('round 2 (reviewer\'s leak): a named-but-away cast person never shows an unsupported claim; present shows the neutral line; a supported summary shows in both', () => {
+    const made = normalizeProduction(applyTemiwa({ ...TEMIWA_ENTRY, withYou: LEAK }));
+    const scene = 'Temiwa stands at the north gate.';
+    assert.match(buildInjection([{ ...made, present: true }], scene, 3, 3), /TOWARD PLAYER \(secondary\): relationship remains mostly neutral/);
+    const line = referenceLine(made);
+    assert.match(line, /Temiwa \(mentioned, not present/);
+    assert.doesNotMatch(line, /toward the player|Jealous|anything for|live without/i);
+    const mild = normalizeProduction(applyTemiwa({ ...TEMIWA_ENTRY, withYou: 'Wary of you, but curious; tests your patience before she trusts.' }));
+    assert.match(buildInjection([{ ...mild, present: true }], scene, 3, 3), /TOWARD PLAYER \(secondary\): Wary of you, but curious/);
+    assert.match(referenceLine(mild), /toward the player: Wary of you, but curious/);
+});
+
+test('round 2: a dossier that is not from the cast keeps its reference line exactly as stored (no calibration, no gate)', () => {
+    const plain = normalizeProduction({ ...createNpcRecord('Temiwa', []), role: 'courier', homeBase: 'gate', relationshipSummary: 'Jealous once you matter: cold cruelty to rivals.' });
+    assert.match(referenceLine(plain), /toward the player: Jealous once you matter: cold cruelty to rivals\./);
 });
 
 test('the pack\'s levers and mannerisms are kept whole while the stored list is the pack\'s list; a changed list is normalized like any other', () => {
