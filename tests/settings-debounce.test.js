@@ -265,7 +265,7 @@ test('upload, then a crash before any settings write: a chat with no pointer at 
         state.npcs[0].note = 'only';
         part.persist(KEY);
         await tick(200);
-        
+
         assert.equal(host.saves, 0);
         // reload: settings.json has no pointer for the chat
         const probe = storage.probeNpcStateDataFilePointer(KEY, undefined);
