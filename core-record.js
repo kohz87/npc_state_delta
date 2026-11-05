@@ -458,7 +458,11 @@ export function normalizeNpcRecord(raw = {}) {
     npc.background = locked.has('background') || packWords('background', 1200)
         ? cleanText(raw.background, 1200)
         : compactDurableText(raw.background, DURABLE_PROFILE_LIMITS.background, 8);
-    npc.relationshipSummary = compactDurableText(raw.relationshipSummary, DURABLE_PROFILE_LIMITS.relationshipSummary, 6);
+    // The pack's "with you" (400 characters) is kept whole, and not calibrated, while the stored summary still is those words.
+    const summaryKept = packWords('relationshipSummary', 400);
+    npc.relationshipSummary = summaryKept
+        ? cleanText(raw.relationshipSummary, 400)
+        : compactDurableText(raw.relationshipSummary, DURABLE_PROFILE_LIMITS.relationshipSummary, 6);
     npc.mood = cleanText(raw.mood, 300);
     npc.location = cleanText(raw.location, 300);
     npc.goal = cleanText(raw.goal, 500);
@@ -475,12 +479,19 @@ export function normalizeNpcRecord(raw = {}) {
         : [];
     if (manualMemories.length) npc.manualMemories = [...new Set(manualMemories)];
     else delete npc.manualMemories;
+    // A pack's levers and mannerisms are lists: whole while the stored list still is the pack's list (the cast builds them to pass the
+    // normalizers unchanged; this keeps them if a normalizer ever changes).
+    const packList = (field, max, chars) => {
+        const first = Array.isArray(packFirst[field]) ? cleanList(packFirst[field], max, chars) : [];
+        const stored = cleanList(field === 'behaviorProfile' ? raw.behaviorProfile ?? raw.behavior_profile : raw[field], max, chars);
+        return first.length && first.length === stored.length && first.every((item, index) => item === stored[index]) ? stored : null;
+    };
     npc.mannerisms = locked.has('mannerisms')
         ? cleanList(raw.mannerisms, 8, 320)
-        : normalizeMannerisms(raw.mannerisms);
+        : packList('mannerisms', 4, DURABLE_PROFILE_LIMITS.mannerism) ?? normalizeMannerisms(raw.mannerisms);
     npc.behaviorProfile = locked.has('behaviorProfile')
         ? cleanList(raw.behaviorProfile ?? raw.behavior_profile, BEHAVIOR_PROFILE_LIMIT, 320)
-        : normalizeBehaviorProfile(raw.behaviorProfile ?? raw.behavior_profile);
+        : packList('behaviorProfile', BEHAVIOR_PROFILE_LIMIT, DURABLE_PROFILE_LIMITS.behaviorProfile) ?? normalizeBehaviorProfile(raw.behaviorProfile ?? raw.behavior_profile);
     npc.keyRelationships = locked.has('keyRelationships')
         ? (Array.isArray(raw.keyRelationships ?? raw.key_relationships ?? raw.innerCircle ?? raw.inner_circle ?? raw.family)
             ? (raw.keyRelationships ?? raw.key_relationships ?? raw.innerCircle ?? raw.inner_circle ?? raw.family)
@@ -495,7 +506,7 @@ export function normalizeNpcRecord(raw = {}) {
     npc.relationshipProgress = normalizeRelationshipProgress(raw.relationshipProgress ?? raw.relationship_progress);
     npc.relationshipMilestones = normalizeRelationshipMilestones(raw.relationshipMilestones ?? raw.relationship_milestones, npc.relationship);
     npc.relationshipEventHistory = normalizeRelationshipEventHistory(raw.relationshipEventHistory ?? raw.relationship_event_history);
-    npc.relationshipSummary = calibrateRelationshipSummary(npc.relationshipSummary, npc.relationship);
+    if (!summaryKept) npc.relationshipSummary = calibrateRelationshipSummary(npc.relationshipSummary, npc.relationship);
     const lastChange = raw.lastRelationshipChange && typeof raw.lastRelationshipChange === 'object' ? raw.lastRelationshipChange : {};
     const normalizedAuditDelta = normalizeRelationshipAuditDelta(lastChange.delta ?? {});
     const auditHasDelta = RELATIONSHIP_KEYS.some(key => normalizedAuditDelta[key] !== 0);
