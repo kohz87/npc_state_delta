@@ -5,6 +5,7 @@ import * as registry from '../src/fields/registry.js';
 import { DOSSIER_FIELDS as V2_DOSSIER_FIELDS } from '../src/storysuite-v2.js';
 import { EDITOR_LOCKABLE_FIELDS as EDITOR_LOCKS, LOCKED_FIELD_KEYS as EDITOR_LOCK_KEYS } from '../src/dossier-edit.js';
 import * as core from '../core.js';
+import { adapterFiles } from './helpers/adapter-source.js';
 
 // Cleanup step 4: the field registry is read-only. Every list derived from it is exactly the hand-kept
 // list it replaced; these are those lists as they stood (v2 @ 2b8a3ea), copied verbatim. Step 6 adds the
@@ -138,7 +139,7 @@ test('the modules use the derived lists, not copies of their own', () => {
     assert.match(read('branch-core.js'), /const globallyPreserved = BRANCH_USER_METADATA_FIELDS;/);
     assert.match(read('terminal-lifecycle.js'), /for \(const field of TERMINAL_FROZEN_FIELDS\)/);
     assert.match(read('index.js'), /return REFRESH_CHANGED_FIELDS\.filter\(/);
-    for (const path of ['core-mechanics.js', 'core-text.js', 'core-identity.js', 'core-portrait.js', 'core-relationship.js', 'core-durable.js', 'core-behavior.js', 'core-evidence.js', 'core-keyrel.js', 'core-record.js', 'core-development.js', 'core-merge-incoming.js', 'core-merge.js', 'core-prompts.js', 'core-injection.js', 'core-birthday.js', 'core-profile-development.js', 'core-profile-finalize.js', 'core.js', 'branch.js', 'index.js', 'src/storysuite-v2.js', 'src/dossier-edit.js', 'bundle.js']) {
+    for (const path of ['core-mechanics.js', 'core-text.js', 'core-identity.js', 'core-portrait.js', 'core-relationship.js', 'core-durable.js', 'core-behavior.js', 'core-evidence.js', 'core-keyrel.js', 'core-record.js', 'core-development.js', 'core-merge-incoming.js', 'core-merge.js', 'core-prompts.js', 'core-injection.js', 'core-birthday.js', 'core-profile-development.js', 'core-profile-finalize.js', 'core.js', 'branch.js', 'index.js', ...adapterFiles().map(name => `src/${name}`), 'src/dossier-edit.js', 'bundle.js']) {
         assert.doesNotMatch(read(path), /const (?:TEXT_FIELDS|CHANGE_TRACKED_FIELDS|DAY_TRACKED_FIELDS|NPC_REVERT_GROUPS|DOSSIER_FIELDS|IMPORT_LOCKED_FIELD_KEYS) = /, `${path} keeps no copy`);
     }
 });

@@ -14,6 +14,7 @@ import {
 import { preserveUserNpcMetadata } from '../branch-core.js';
 import { MODULE_ID, createStorySuiteV2Adapter } from '../src/storysuite-v2.js';
 import { runHostScenario } from './helpers/host-scenario.js';
+import { adapterSource } from './helpers/adapter-source.js';
 
 // The living cast (the user's decision, 1 Nov): Story Director owns who has been met (`director.cast`, read only); at the first
 // meeting Delta makes the dossier at once from the pack entry: profile, portrait, starting numbers, stages, fields and hidden
@@ -807,7 +808,7 @@ test('index.js wiring: the cast reader, the checkpoint, the dismissal check, the
     assert.match(index, /castPersonDismissed\(state, person\)/, 'a dossier the reader removed is not made again');
     assert.match(index, /v2\.startStorySuiteV2\(\{[^}]*castSync/, 'the adapter calls the sync after the step');
     assert.match(index, /const castViews = dossierCastViews\(state\);/);
-    const adapter = fs.readFileSync(fileURLToPath(new URL('../src/storysuite-v2.js', import.meta.url)), 'utf8');
+    const adapter = adapterSource();
     assert.doesNotMatch(adapter, /sdkRef\.command\(['"]director\./, 'Delta never writes to Story Director');
 });
 
@@ -1062,7 +1063,7 @@ test('index.js wiring: the picture sync is asked for by the adapter, runs when a
     assert.match(index, /commitBranchCheckpoint\(working, messageId, 'cast-portrait'\)/, 'the picture is checkpointed at its reply');
     assert.match(index, /castPortraitDue\(\)\) castSync\(\)/, 'a chat opened gives the picture too');
     assert.match(index, /markCastPortraitRemoved\(npc\)/, 'the reader\'s removal is recorded');
-    const adapter = fs.readFileSync(fileURLToPath(new URL('../src/storysuite-v2.js', import.meta.url)), 'utf8');
+    const adapter = adapterSource();
     assert.match(adapter, /sdk\.on\('head', portraitFill\)/, 'and so does the host\'s head event');
     assert.doesNotMatch(adapter, /sdkRef\.command\(['"]director\./, 'Delta never writes to Story Director');
 });

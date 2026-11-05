@@ -5,6 +5,7 @@ import { mergeScanResult, normalizeNpcRecord } from '../core.js';
 import { mergeImportedDossierState } from '../bundle.js';
 import { dossierDetailProjection, projectDossierState } from '../dossier-ui.js';
 import { dossierFields } from '../src/storysuite-v2.js';
+import { adapterSource } from './helpers/adapter-source.js';
 
 // Cleanup step 7 (audit I-8, I-9, I-13): an alias merge keeps the newer custom values and live
 // state and honours an aliases lock; a bundle import honours the target's aliases lock; the Megumin
@@ -81,6 +82,6 @@ test('the dossier view and npc.dossier show the configured custom fields only', 
     assert.deepEqual(dossierFields(npc, { customFieldNames: ['Level'] }).customFields, { Level: '4' });
     assert.deepEqual(dossierFields(npc).customFields, { Level: '4', Retired: 'old value' });
     assert.equal('customFields' in dossierFields(npc, { customFieldNames: [] }), false);
-    const adapter = fs.readFileSync(new URL('../src/storysuite-v2.js', import.meta.url), 'utf8');
+    const adapter = adapterSource();
     assert.match(adapter, /const names = runtime\(\)\?\.customFieldNames\?\.\(\);/);
 });
