@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { runEditorHostScenario } from './editor-host.mjs';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // Cleanup step 8: Refresh, backfill and the Megumin dossier import run one targeted pass. Fixed on the
 // way: the stale rule (I-16: a reply another extension rewrote in place is still the source; an
@@ -10,7 +11,7 @@ import { runEditorHostScenario } from './editor-host.mjs';
 // (v2 meters) the relationship forward from every targeted pass, and a hosted scan working from the
 // slice's numbers.
 
-const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+const index = runtimeSource();
 
 test('the three targeted passes share one runner', () => {
     for (const name of ['scanNpcDossier', 'refreshNpcFromChat', 'backfillNpcFromHistory']) {

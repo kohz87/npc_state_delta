@@ -31,7 +31,7 @@ test('a text reply twice is reported with a short excerpt', async () => {
 });
 
 test('index.js imports the request and keeps no copy', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
-    assert.match(index, /generateParsedNpcJson,\n\} from '\.\/src\/scanner-request\.js';/);
+    const index = runtimeSource();
+    assert.match(index, /import \{[^}]*\bgenerateParsedNpcJson\b[^}]*\} from '\.\/src\/scanner-request\.js';/);
     assert.doesNotMatch(runtimeSource(), /function (?:generateParsedNpcJson|compactRetryPrompt|isTruncatedScannerJsonError)\(/);
 });

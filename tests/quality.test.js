@@ -44,7 +44,7 @@ test('recent transcript collection stops after the requested meaningful tail', (
 });
 
 test('Megumin dossier import searches newest-first and stops at the latest base', () => {
-    const body = functionBody(index, 'export function findMeguminDossierSources', '\nfunction setNpcDossierScanIndicator');
+    const body = functionBody(index, 'export function findMeguminDossierSources', '\nconst BACKFILL_MAX_ATTEMPTS');
     assert.match(body, /for \(let messageId = chat\.length - 1; messageId >= 0; messageId -= 1\)/);
     assert.match(body, /const latestBase/);
     assert.match(body, /break;/);
