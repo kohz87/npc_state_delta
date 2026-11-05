@@ -185,7 +185,7 @@ for (const [label, compact, rule] of [['full rules', false, 16], ['compact rules
         assert.equal(out.second.rules, out.first.rules, 'the rules are byte-identical from reply to reply');
         assert.equal(out.opened.length, 1, 'one npc.open: the key the block returned (an unknown key is ignored)');
         assert.deepEqual(out.opened[0].payload, { name: 'Yunyun', open: [out.noteId], by: 'story' });
-        assert.equal(out.opened[0].options, null, 'sent as Delta\'s own action');
+        assert.deepEqual(out.opened[0].options, { background: true }, 'sent as Delta\'s own action, as a background change (Story Block\'s late save window)');
     });
 }
 
@@ -248,7 +248,7 @@ test('hosted: a backfill of a new dossier asks for layered notes and keeps them;
     assert.equal(refreshes.at(-1).events, true, 'the later Refresh lists the event');
     assert.equal(out.opened.length, 1, 'its answer held only the event, and it was sent');
     assert.deepEqual(out.opened[0].payload, { name: 'Yunyun', open: [out.noteId], by: 'story' });
-    assert.equal(out.opened[0].options, null);
+    assert.deepEqual(out.opened[0].options, { background: true });
 });
 
 test('a backfill of a dossier that already has notes, and any pass without a host, asks for none', () => {

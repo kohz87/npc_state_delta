@@ -60,7 +60,7 @@ import { createPortraitSettingsPart } from './runtime-portrait-settings.js';
 import { createInlineCardsPart } from './runtime-inline-cards.js';
 import { createSettingsHtmlPart } from './runtime-settings-html.js';
 import { createSettingsBindPart } from './runtime-settings-bind.js';
-import { persistSettings, getSettings } from './runtime-settings.js';
+import { persistSettings, flushPendingSettingsSave, getSettings } from './runtime-settings.js';
 import { createSuitePart } from './runtime-suite.js';
 
 // The chat text helpers (src/transcript.js) read the host's chat and the Scan context setting.
@@ -580,6 +580,7 @@ function registerEvents() {
 
     if (events.CHAT_CHANGED) {
         source.on(events.CHAT_CHANGED, async () => {
+            flushPendingSettingsSave();
             rt.replacingReply = null;
             castPortraitMisses.clear();
             rt.narrationCaptureArmed = '';

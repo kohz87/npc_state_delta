@@ -137,7 +137,7 @@ test('hosted: a scan\'s relationship change goes to the slice as npc.adjust; the
         assert.deepEqual(sent[0].payload.meters, { trust: relationship.trust });
         assert.deepEqual(sent[0].payload.start, { trust: 0, affection: 0, desire: 0, tension: 0 });
         assert.equal(sent[0].payload.reply, id);
-        assert.equal(sent[0].options, null, 'sent as Delta\'s own action (cause ui)');
+        assert.deepEqual(sent[0].options, { background: true }, 'sent as Delta\'s own action (cause ui), and as a background change: Story Block saves it in its late window');
         const injectionBefore = api.injectionPreview().text;
         // The slice says otherwise: views and the injection follow it, Delta's own data does not.
         mockState.sdk.entries = [{ key: 'yunyun', name: 'Yunyun', meters: { trust: 88, affection: 0, desire: 0, tension: 0 }, stages: {}, unlocked: [] }];
@@ -500,7 +500,7 @@ test('hosted: the scan watches present people\'s event notes, and a story event 
     assert.equal(result.leaksText, false, 'the note\'s text never goes to the scanner');
     assert.equal(result.opened.length, 1, 'one npc.open, for the key the exchange showed (an unknown key is ignored)');
     assert.deepEqual(result.opened[0].payload, { name: 'Yunyun', open: [result.noteId], by: 'story' });
-    assert.equal(result.opened[0].options, null, 'sent as Delta\'s own action');
+    assert.deepEqual(result.opened[0].options, { background: true }, 'sent as Delta\'s own action, and as a background change (Story Block\'s late save window)');
     assert.equal(result.watchedAgain, false, 'an opened note is not watched again');
 });
 
