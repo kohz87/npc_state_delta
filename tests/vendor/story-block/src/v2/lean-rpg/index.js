@@ -10,8 +10,8 @@
 // names.js, the plan in plan.js, the sheet reader in read.js, the pre-call in precall.js, the roll in resolve.js
 // (its header documents the `data.v2.result` record the battle log draws from) and the cue text in cue.js.
 import { stCallModel, stChat, stChatId } from '../assist/st-adapter.js';
-import { TIMEOUT_MS } from '../assist/common.js';
-import { FIGHT, LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING, PRACTICE, PRACTICE_SETTING, PRACTICE_STEP, RESOLVE, ROLLS, ROLLS_SETTING } from './names.js';
+import { FIGHT, LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING, NOROLL, PLANNER_LIMIT, PLANNER_LIMIT_SETTING, PRACTICE, PRACTICE_SETTING, PRACTICE_STEP, RESOLVE, ROLLS, ROLLS_SETTING, plannerLimitMs } from './names.js';
+import { noRoll } from './noroll.js';
 import { fightHook, fightXp } from './fight.js';
 import { RANK_QUERY, SETTINGS_SCHEMA, XP_RATE, XP_RATE_SETTING, rankQuery } from './levels.js';
 import { practiceHook, practiceStep } from './practice.js';
@@ -46,7 +46,9 @@ export { DICE_VERSION, FLOW_VERSION, RESULT_VERSION, claimKey, leanRpgGuard, out
 const HOOK_MARGIN_MS = 2000;
 
 /** The part's setting (Story Block's own bucket): when the pre-call plans the rolls. */
-export const DEFAULT_SETTINGS = Object.freeze({ [ROLLS_SETTING]: ROLLS[0], [PRACTICE_SETTING]: PRACTICE.perUse, [XP_RATE_SETTING]: XP_RATE.default, [LEVEL_CAP_SETTING]: LEVEL.max });
+export const DEFAULT_SETTINGS = Object.freeze({ [ROLLS_SETTING]: ROLLS[0], [PRACTICE_SETTING]: PRACTICE.perUse, [XP_RATE_SETTING]: XP_RATE.default, [LEVEL_CAP_SETTING]: LEVEL.max, [PLANNER_LIMIT_SETTING]: PLANNER_LIMIT.default });
+
+const safeValues = read => { try { const values = read(); return values && typeof values === 'object' ? values : {}; } catch { return {}; } };
 
 /** The offers a reply's `+ party` lines made under Ask (the card under the reply reads them): `rpg.joins { index? }` → [{ name, about, soul, best }] on the head reply (or the reply `index`). */
 export const JOINS_QUERY = 'rpg.joins';
@@ -60,19 +62,22 @@ export const ROLLS_QUERY = 'rpg.rolls';
  *   chat() → SillyTavern's chat array, chatId() → its id        (default: st-adapter)
  *   metadata() → the chat's metadata object, for the held plan   (default: held in memory)
  *   problem(entry)                                              (the turn's Problems list; default: none)
- *   moduleId = 'story-block' (whose settings it reads), timeoutMs, timer
+ *   moduleId = 'story-block' (whose settings it reads), timeoutMs (the planner's limit; none: the setting), timer
+ *   plannerValues() → the settings of `moduleId` now, for the hook's time limit (default: the defaults)
  *   rosterOn() → whether the RPG and Gear in fights are both on (the roster is answered only then, or when asked for `recorded`)
  *   persona() → the reader's name, for `party.pc` (default: none, the first block)
  * → { commands, queries, hooks, settings: { defaults }, guard }; `guard` is the replay guard for `rpg.resolve` blocks
  * (domains/index.js routes the guards of that predicate to it).
  */
-export function createLeanRpgPart({ callModel = stCallModel, chat = stChat, chatId = stChatId, metadata = () => null, problem = null, moduleId = 'story-block', timeoutMs, timer, persona = () => '', rosterOn } = {}) {
+export function createLeanRpgPart({ callModel = stCallModel, chat = stChat, chatId = stChatId, metadata = () => null, problem = null, moduleId = 'story-block', timeoutMs, timer, persona = () => '', rosterOn, plannerValues = () => ({}) } = {}) {
     const precall = createPrecall({ callModel, chat, chatId, hold: createPlanHold({ metadata }), problem, moduleId, timeoutMs, timer, skip: skipOf(metadata) });
     return {
         // A prelude: previewed before the reply and stored on it before its story lines (turn.js). Not tied to the
         // feature, so a Re-read of a reply that has rolls keeps them whatever the feature says now.
         commands: {
             [RESOLVE]: Object.assign((ctx, payload) => resolve(ctx, payload), { prelude: true, internal: true }),
+            // The note that a live fight's planner gave nothing usable, kept with the reply (noroll.js). Not tied to the feature either.
+            [NOROLL]: Object.assign((ctx, payload) => noRoll(ctx, payload), { prelude: true, internal: true }),
             // XP for a won fight, a step after the reply's lines (fight.js). Not tied to the feature either: a Re-read keeps it.
             [FIGHT]: Object.assign((ctx, payload) => fightXp(ctx, payload), { internal: true }),
             // Practice for the skills a reply's rolls used, a step after the reply's lines (practice.js). Not tied to the feature either.
@@ -94,10 +99,10 @@ export function createLeanRpgPart({ callModel = stCallModel, chat = stChat, chat
             [ROLLS_QUERY]: Object.assign((_state, args, tools) => rollsOf(tools?.receipts?.() ?? [], Number.isInteger(args?.index) ? args.index : tools?.reply?.index), { feature: LEAN_RPG_FEATURE }),
             // The party's members and the reader's own Character, from the Character blocks (roster.js; fallbacks: a module that answers them itself is asked instead).
             ...rosterQueries({ persona, on: rosterOn }) },
-        // The planner's model call has its own limit (timeoutMs, Assist's 20 s by default); the hook is given a little longer, so
-        // its own skip path (quiet ROLLS_SKIPPED, the no-rolls cue) runs on a slow answer and the turn's generic limit never cuts in.
+        // The planner's model call has its own limit (the setting Planner time limit, 45 s by default, read at each call; `timeoutMs` fixes it); the hook is
+        // given a little longer, so its own skip path (quiet ROLLS_SKIPPED, the no-rolls cue and note) runs on a slow answer and the turn's generic limit never cuts in.
         hooks: {
-            beforeGenerate: Object.assign((view, info) => precall.beforeGenerate(view, info), { timeoutMs: (Number.isFinite(timeoutMs) ? timeoutMs : TIMEOUT_MS) + HOOK_MARGIN_MS }),
+            beforeGenerate: Object.defineProperty((view, info) => precall.beforeGenerate(view, info), 'timeoutMs', { enumerable: true, get: () => plannerLimitMs(safeValues(plannerValues), timeoutMs) + HOOK_MARGIN_MS }),
             afterCapture: (view, info) => {
                 precall.afterCapture(view);
                 // The fight's XP, then the rolled skills' practice: two steps after the reply's lines.

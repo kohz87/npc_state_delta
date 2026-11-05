@@ -268,7 +268,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
     // The pinned blocks' screens. A block with an RPG role (character, skills, foes, rules) never gets a tab of its own: with the feature on
     // the Party and Fight tabs draw them, with it off they are only data (they stay in Settings → Blocks, and come back to use when it is on).
     const blockPresentation = () => sdk.query('dataModules.presentation', { kind: 'screens', noTab: ROLES_WITHOUT_TAB });
-    function syncScreens() {
+    function syncScreens(pinned = null) {
         const byModule = new Map();
         // Every module with screens, even one whose screens are all off just now (its list is then empty).
         for (const def of registry.modules()) if (Array.isArray(def.screens) && def.screens.length) byModule.set(def.id, []);
@@ -287,7 +287,7 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
                 if (!packScreens.some(screen => screen.pack === pack && screen.id === id)) packScreens.push({ id, title, icon, mounts: ['tab'], layout, pack });
             }
         } catch { /* older host */ }
-        try { packScreens.push(...(blockPresentation() ?? [])); } catch { /* older host */ }
+        try { packScreens.push(...(pinned ?? blockPresentation() ?? [])); } catch { /* older host */ }
         // Screens that name one `tab` (a pack's, or a block's show.into) become sections of one tab.
         sharedTabs = [...new Map(packScreens.filter(screen => typeof screen?.tab === 'string' && screen.tab).map(screen => [screen.tab, { id: screen.tab, title: screen.tabTitle ?? screen.title ?? screen.tab }])).values()];
         packScreens = mergeTabs(packScreens);
@@ -966,11 +966,28 @@ export function mountUi({ runtime, ctx, doc = globalThis.document, version = '',
     const offs = [...replyOffs, ...offs0];
     // Story Suite's console errors, kept for Diagnostics (once per page; the console still prints them).
     offs.push(captureConsole());
-    let dataPresentation = '';
+    // The blocks' screens come from `dataModules.presentation`, a query that settles the timeline and reads the story. It depends only on
+    // which block definitions are pinned, so it is asked again only when that stamp moved (a pin, unpin, edit or migration changes a
+    // block's hash; a swipe, delete, Re-read, rewind, restore or chat switch changes which blocks the head holds). One reply sends many
+    // `head` and `committed` events: each looks at the stamp at once (the listeners after this one read the screens in the same event, so
+    // the screens are not left for later), and only the first to see a new stamp asks. The last state always wins: every event checks it.
+    let dataPresentation = '', dataStamp = null;
+    const presentationStamp = () => {
+        try {
+            if (!registry.query?.('dataModules.presentation')) return null;
+            const modules = store.head()?.domains?.dataModules;
+            return JSON.stringify(Object.entries(modules?.active ?? {}).map(([id, entry]) => [id, entry?.hash, Boolean(modules.pins?.[entry?.hash])]));
+        } catch { return null; }   // (not known: asked every time, as before)
+    };
     for (const name of ['head', 'committed']) offs.push(events.on(name, () => {
-        let next = '';
-        try { const pinned = blockPresentation() ?? []; if (pinned.length) next = JSON.stringify(pinned); } catch { /* older host */ }
-        if (next !== dataPresentation) { dataPresentation = next; syncScreens(); }
+        const stamp = presentationStamp();
+        if (stamp === null || stamp !== dataStamp) {
+            dataStamp = stamp;
+            let next = '', pinned = null;
+            // (A query that throws leaves no stamp behind, so the next event asks again, as before the stamp.)
+            try { pinned = blockPresentation() ?? []; if (pinned.length) next = JSON.stringify(pinned); } catch { dataStamp = null; /* older host */ }
+            if (next !== dataPresentation) { dataPresentation = next; syncScreens(pinned); }
+        }
         mounts.tab.register(); if (!panel.hidden) tabHost?.refresh();
     }));
     // A feature turned on or off: its screens, tabs, widgets and cards come and go; nothing else changes.

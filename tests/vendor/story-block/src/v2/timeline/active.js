@@ -4,7 +4,7 @@
 // `retainedChatRestore` only while every name has been asked for.
 //
 // A generation request is not read here. SillyTavern builds it, and leaves out every hidden message (`is_system`); a restore hides the
-// messages it faded (coordinator.js `syncHidden`), so they are not in any prompt SillyTavern builds, whatever regexes run over it.
+// messages it faded (coordinator-read.js `syncHidden`), so they are not in any prompt SillyTavern builds, whatever regexes run over it.
 
 /** Story Block's readers of earlier messages. Adding one means asking for it by name, so the capability cannot claim more than is wired. */
 export const ACTIVE_READERS = Object.freeze([

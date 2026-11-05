@@ -293,7 +293,7 @@ export function mergeParts(parts) {
     }
     for (const [name, fns] of Object.entries(hookLists)) {
         out.hooks[name] = fns.length === 1 ? fns[0] : name === 'beforeGenerate'
-            ? Object.assign(async (...args) => {
+            ? Object.defineProperty(async (...args) => {
                 const lines = [];
                 const commands = [];
                 const problems = [];
@@ -317,7 +317,7 @@ export function mergeParts(parts) {
                     }
                 }
                 return { lines, commands, ...(problems.length ? { problems } : {}) };
-            }, { timeoutMs: fns.reduce((sum, fn) => sum + hookTimeout(fn), 500) })
+            }, 'timeoutMs', { enumerable: true, get: () => fns.reduce((sum, fn) => sum + hookTimeout(fn), 500) })
             // afterCapture: every part's steps are run, in part order (the data blocks' timers and reply-end steps, then the RPG's fight XP).
             : name === 'afterCapture' ? (...args) => {
                 const answers = fns.map(fn => fn(...args));
@@ -390,7 +390,7 @@ export function createCoreModule({ hooks = () => [], settings = () => ({}), vers
     });
     const dataPart = createDataModulesPart({ packs: packs.packs, settings: () => settings(), ...dataModules });
     // The RPG's pre-call and rolls (`leanRpg`: the runtime's queued model call, the chat and its metadata; src/v2/lean-rpg/).
-    const rpg = createLazyRpgPart({ ...leanRpg, problem, persona: () => extras?.persona?.() ?? '', rosterOn: () => { try { return extras?.rpgOn?.() === true && extras?.gearOn?.() === true; } catch { return false; } } });
+    const rpg = createLazyRpgPart({ ...leanRpg, problem, plannerValues: () => settings(), persona: () => extras?.persona?.() ?? '', rosterOn: () => { try { return extras?.rpgOn?.() === true && extras?.gearOn?.() === true; } catch { return false; } } });
     const merged = mergeParts([core, packs.part, events, assist ?? createAssistPart({ settings: () => settings() }), createTimelinePart({ timeline }), dataPart, rpg]);
     const timelineGuard = merged.hooks.replayGuard;
     // One host-owned hook for the host's guarded blocks, by predicate: data modules (`dm.*`), the RPG's rolls

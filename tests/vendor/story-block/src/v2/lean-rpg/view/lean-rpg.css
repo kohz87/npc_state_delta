@@ -169,6 +169,11 @@
     margin: 10px 0; border: 1px solid var(--ss-border); border-radius: 6px; background: var(--rpg-panel); color: var(--ss-text);
     font-family: var(--monoFontFamily, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); font-size: 13px; line-height: 1.5; text-align: left; overflow: hidden; }
 .rpg-battle-card { margin: 8px 0; }
+/* The no-rolls note (battle-log.js buildNote; approved mockup rpg-no-rolls.html): a dashed amber note where the log would stand. */
+.rpg-battle.rpg-norolls { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px; border: 1px dashed var(--ss-warn); border-radius: 6px;
+    background: color-mix(in srgb, var(--ss-warn) 12%, transparent); font-family: inherit; font-size: 0.86em; line-height: 1.5; }
+.rpg-norolls-dot { flex: none; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--ss-warn); }
+.rpg-norolls-text b { font-weight: 600; }
 .rpg-battle button { font: inherit; color: inherit; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
 .rpg-battle .rpg-bl-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 8px 12px; border-bottom: 1px solid var(--ss-border); }
 .rpg-battle.rpg-bl-folded .rpg-bl-head { border-bottom: 0; }
@@ -231,6 +236,10 @@
 .rpg-set-nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 14px; }
 .rpg-set-num { display: grid; gap: 4px; font-size: 13px; align-content: start; min-width: 0; }
 .rpg-set-num small { color: var(--ss-muted); font-size: 11.5px; }
+.rpg-set-nums-one { grid-template-columns: minmax(0, 24em); }
+.rpg-set-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.rpg-set-row .rpg-set-input { width: 76px; }
+.rpg-set-unit { font-size: 12.5px; color: var(--ss-muted); }
 .rpg-set-input, .rpg-set-area { box-sizing: border-box; width: 100%; padding: 7px 9px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--ss-text) 20%, transparent); background: var(--ss-field); color: inherit; font: inherit; font-size: 13px; }
 .rpg-set-area { font: 12.5px/1.45 ui-monospace, Menlo, monospace; resize: vertical; }
 .rpg-odds { display: grid; gap: 6px; }
@@ -249,6 +258,7 @@
 .rpg-set-fold > summary { cursor: pointer; font-size: 13px; }
 .rpg-set-pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.45 ui-monospace, Menlo, monospace; padding: 10px; border-radius: 8px; background: color-mix(in srgb, black 25%, transparent); max-height: 220px; overflow: auto; margin: 8px 0; }
 @media (max-width: 600px) { .rpg-set-nums { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 600px) { .rpg-set-nums.rpg-set-nums-one { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 600px) { .rpg-formula-nums { grid-template-columns: 1fr 1fr; } }
 
 /* ---- A new chat with no character (mockup sections 7 and 7b): Home's card, and the dialog that holds the first Send ---- */

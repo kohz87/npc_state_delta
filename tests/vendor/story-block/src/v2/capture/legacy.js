@@ -7,7 +7,7 @@ import { sameLine } from './echo.js';
 
 // --- Story Block v1's envelope -----------------------------------------------------------------------
 // v1 kept a reply's blocks in `<!-- STORY_BLOCKS_V1 … -->` (also STORY_BLOCKS_V1_CUT, and Inventory Block's
-// INVENTORY_BLOCK_V05; src/envelope.js). v2 never writes one, but a card greeting or an old reply may hold one,
+// INVENTORY_BLOCK_V05; src/envelope.js on the `v1` branch). v2 never writes one, but a card greeting or an old reply may hold one,
 // and a model that sees it in the history copies it, change lines and all. So it is never sent to the model
 // (stripBlock, and turn.js for the prompt), and a reply that wrote its changes only there has them read
 // (adoptLegacy). `\b` keeps STORY_BLOCKS_V1_CONTEXT_* out; the cut marker is listed first so it wins.

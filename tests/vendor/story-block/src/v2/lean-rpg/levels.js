@@ -5,7 +5,7 @@
 //   rankOf(level, ranks)          the rank whose band holds the level → { name, from, to } | null
 //   levelLabel(level, ranks)      "Rank E · Lv 14", or "Lv 14" when no rank holds the level (or there are none)
 //   RANK_QUERY `rpg.rank`         { level } → { name } | null (the story's pack, or `ranks` in the arguments)
-import { LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING } from './names.js';
+import { LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING, PLANNER_LIMIT, PLANNER_LIMIT_SETTING } from './names.js';
 
 /** A level runs from 1 to 99 (names.js LEVEL: the character's `level`, a foe's `level{n}`, a pack's rank bands and level cap). */
 export const LEVEL_MIN = LEVEL.min;
@@ -15,6 +15,8 @@ export const LEVEL_MAX = LEVEL.max;
 export const SETTINGS_SCHEMA = Object.freeze({
     [LEVEL_CAP_SETTING]: Object.freeze({ type: 'int', min: LEVEL.min, max: LEVEL.max, group: 'RPG', label: 'Level cap', feature: LEAN_RPG_FEATURE,
         help: 'The highest level a new character can reach, from 1 to 99. A character made keeps the cap it was made with; the pack may name one.' }),
+    [PLANNER_LIMIT_SETTING]: Object.freeze({ type: 'int', min: PLANNER_LIMIT.min, max: PLANNER_LIMIT.max, group: 'RPG', label: 'Planner time limit', feature: LEAN_RPG_FEATURE,
+        help: 'How many seconds a reply waits for the roll planner before it goes on without dice, from 10 to 120, default 45.' }),
 });
 
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);

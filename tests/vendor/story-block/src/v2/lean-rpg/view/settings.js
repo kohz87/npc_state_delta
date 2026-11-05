@@ -14,7 +14,7 @@
 import { h } from '../../view/widgets/dom.js';
 import { refusalText } from '../../strings.js';
 import { LEAN_RPG_TEMPLATES } from '../templates.js';
-import { LEVEL, LEVEL_CAP_SETTING, levelCapOf, JOIN_SETTING, PRACTICE, PRACTICE_SETTING, ROLLS_SETTING, practiceOf } from '../names.js';
+import { LEVEL, LEVEL_CAP_SETTING, levelCapOf, JOIN_SETTING, PLANNER_LIMIT, PLANNER_LIMIT_SETTING, PRACTICE, PRACTICE_SETTING, ROLLS_SETTING, plannerSecondsFrom, practiceOf } from '../names.js';
 import { joinMode } from '../join.js';
 import { packInForce, CUSTOM_SETTING, DIFFICULTIES, DIFFICULTY_SETTING, FORMULA_SETTING, NOTE_MAX, NOTE_SETTING, PRESETS, RULE_RANGES, STANDARD_RANGES, STANDARD_SETTING, STAT_ABOVE, difficultyOf, formulaOf, isStandard, normalizeRules, normalizeStandard, plannerNoteOf, rulesFromSettings } from '../rules.js';
 import { CREATION } from '../names.js';
@@ -184,10 +184,15 @@ export function renderRpgSettings(parent, { settings, doc = parent.ownerDocument
         const box = card('rolls', S.rolls);
         chips(box, S.rolls, [['automatic', S.automatic], ['off', S.off]], rollsOf(settings), value => put(ROLLS_KEY, value));
         box.appendChild(h(doc, 'p', 'rpg-set-help', S.rollsHelp));
+        // The planner's time limit: read when a reply asks the planner, so a change moves only the replies after it. Only the planner's call uses it.
+        const grid = h(doc, 'div', 'rpg-set-nums rpg-set-nums-one');
+        numberRow(grid, { label: S.plannerLimit, help: S.plannerLimitHelp, setting: PLANNER_LIMIT_SETTING, min: PLANNER_LIMIT.min, max: PLANNER_LIMIT.max, step: PLANNER_LIMIT.step, unit: S.plannerLimitUnit, current: () => plannerSecondsFrom(values()),
+            clean: typed => Math.min(PLANNER_LIMIT.max, Math.max(PLANNER_LIMIT.min, PLANNER_LIMIT.min + Math.round((typed - PLANNER_LIMIT.min) / PLANNER_LIMIT.step) * PLANNER_LIMIT.step)) });
+        box.appendChild(grid);
     }
 
     // ---- Levels and practice: the level cap, the practice a skill use gives, the XP rate
-    function numberRow(grid, { label, help, setting, min, max, step, current, clean }) {
+    function numberRow(grid, { label, help, setting, min, max, step, current, clean, unit = '' }) {
         const slot = field(grid, label, help);
         const input = doc.createElement('input');
         input.setAttribute('type', 'number');
@@ -206,7 +211,12 @@ export function renderRpgSettings(parent, { settings, doc = parent.ownerDocument
             input.value = String(next);
             put(setting, next);
         });
-        slot.add(input);
+        // A unit stands beside the input on the same row (approved mockup rpg-no-rolls.html: `<div class="row"><input> <span>seconds</span></div>`).
+        if (unit) {
+            const row = h(doc, 'div', 'rpg-set-row');
+            row.append(input, h(doc, 'span', 'rpg-set-unit', unit));
+            slot.add(row);
+        } else slot.add(input);
     }
     function drawLevels() {
         const box = card('levels', S.levels);
