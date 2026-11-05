@@ -114,7 +114,17 @@ export function createTimelinePart(session, deps) {
     // it only when they do. Nothing here selects a head. `head()` is the host's own look at it (it raises the barrier when a selection is needed and
     // answers RESTORE_PENDING while it is up), so Delta asks it before it reads or writes the dossiers and waits for it. true once the barrier is
     // down (or when the host has no such barrier), false if it is still up after `settleMs`.
-    const headSettled = async () => {
+    //
+    // The wait is bounded by `settleMs`, and ends at once when the host says the block is permanent: a refused head carries `blockedBy`
+    // ({ module, code }, Story Block's answer from the version that classifies it); FAILED and STALE are the transient codes the host tries again
+    // itself, any other code (SNAPSHOT_UNAVAILABLE, CONFLICT, ...) will not clear by waiting. A host that gives no `blockedBy` is waited for in full.
+    // `wait: false` is one look, no waiting (the second look of a send that already waited).
+    const TRANSIENT_BLOCKS = new Set(['FAILED', 'STALE']);
+    const permanentBlock = answer => {
+        const code = answer?.blockedBy?.code;
+        return typeof code === 'string' && code !== '' && !TRANSIENT_BLOCKS.has(code);
+    };
+    const headSettled = async ({ wait = true } = {}) => {
         const head = session.sdkRef?.timeline?.head;
         if (typeof head !== 'function') return true;
         const until = Date.now() + settleMs;
@@ -122,7 +132,7 @@ export function createTimelinePart(session, deps) {
             let answer = null;
             try { answer = await session.sdkRef.timeline.head({}); } catch { return true; }
             if (answer?.ok !== false || answer.code !== 'RESTORE_PENDING') return true;
-            if (Date.now() >= until) return false;
+            if (!wait || permanentBlock(answer) || Date.now() >= until) return false;
             await new Promise(resolve => { const timer = setTimeout(resolve, settlePollMs); timer?.unref?.(); });
         }
     };
@@ -135,6 +145,8 @@ export function createTimelinePart(session, deps) {
             started: () => runtime()?.timelineStarted?.() === true,
             // Whether Delta has loaded the open chat's state, and its load: the participant reads nothing before it (a reload's recovery comes early).
             ready: () => runtime()?.stateReady?.() === true,
+            // Delta tried to load the chat's state and could not: waiting for it would only hold the host's callback.
+            loadFailed: () => runtime()?.stateFailed?.() === true,
             load: () => runtime()?.ensureFresh?.(),
             // The state as Delta keeps it once installed (the participant's look after an install compares it so).
             normalize: state => (typeof runtime()?.normalizeState === 'function' ? runtime().normalizeState(state) : state),

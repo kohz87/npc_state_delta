@@ -80,7 +80,7 @@ export function confirmedDeath(npc, { event, now }) {
 
 const RETRY_CODES = new Set(['STALE', 'RESTORE_PENDING']);
 
-export function createParticipant({ port, vault, module = MODULE_ID, now = () => Date.now(), random, schedule = (fn, ms) => setTimeout(fn, ms), cancel = id => clearTimeout(id), debounceMs = 300, retryMs = 1500, idleMs = 20000 }) {
+export function createParticipant({ port, vault, module = MODULE_ID, now = () => Date.now(), random, schedule = (fn, ms) => setTimeout(fn, ms), cancel = id => clearTimeout(id), debounceMs = 300, retryMs = 1500, idleMs = 8000, boundMs = 8000, pollMs = 50 }) {
     let session = null;      // { key, lineage, index }
     let handle = null;
     let queue = Promise.resolve();
@@ -102,11 +102,22 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
      * no story line: a lineage read from it would be minted anew and written over the real one, and the vault's index of the real one (the
      * changes in flight) would never be found again. A port without `ready` is taken as loaded.
      */
-    async function loaded() {
+    async function loaded(until = null) {
         if (typeof port.ready !== 'function' || readyNow()) return true;
-        try { await port.load?.(); } catch { /* answered by the look below */ }
+        const load = Promise.resolve().then(() => port.load?.()).catch(() => { /* answered by the look below */ });
+        if (until === null) { await load; return readyNow(); }
+        // A callback of the host has a bound of its own (10 s): the load is waited for inside it, never past it. Another load may be running
+        // (the chat just opened), so the state is looked at every `pollMs`, not only when this load answers. A load that failed (`loadFailed`) ends the wait.
+        const failedNow = () => { try { return port.loadFailed?.() === true; } catch { return false; } };
+        while (!readyNow() && !failedNow() && until - now() > 0) {
+            await Promise.race([load, new Promise(resolve => { const id = schedule(resolve, Math.min(pollMs, Math.max(1, until - now()))); id?.unref?.(); })]);
+        }
         return readyNow();
     }
+    /** When a host callback that must answer inside the host's bound has to be done: now + boundMs. */
+    const deadline = () => now() + boundMs;
+    /** `exclusive` for a callback with the host's bound: its deadline starts when the host asks (waiting its turn in the queue counts). */
+    const bounded = fn => input => { const until = deadline(); return exclusive(() => fn(input, until)); };
 
     /** Runs `fn` after every earlier callback is done; a thrown error is a FAILED answer, never a crash of the queue. */
     const exclusive = fn => {
@@ -136,11 +147,11 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
      * question to `npc.identity`. Opening a chat, a reply, or a scan writes nothing (`started`).
      * → the session { key, lineage, index } or null (no chat, or it changed).
      */
-    async function hydrate() {
+    async function hydrate(until = null) {
         const key = keyNow();
         if (!usable(key)) return null;
         // Nothing is read, minted or written before the chat's state is loaded: a retryable failure (the host asks again later).
-        if (!await loaded()) {
+        if (!await loaded(until)) {
             if (keyNow() !== key) return null;
             throw new Error('NPC State Delta has not loaded this chat\'s dossiers yet; it is tried again in a moment.');
         }
@@ -260,7 +271,8 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         handed.set(checkpoint, { hash, stateHash });
         while (handed.size > 16) handed.delete(handed.keys().next().value);
     };
-    const quiet = async () => (typeof port.idle === 'function' ? (await port.idle(idleMs)) !== false : true);
+    // Ends inside the host's bound for the callback (`until`): longer than that, the host gives up on the call and calls the save a failure.
+    const quiet = async until => (typeof port.idle === 'function' ? (await port.idle(Math.max(0, Math.min(idleMs, until - now())))) !== false : true);
 
     const participant = {
         schema: PARTICIPANT_SCHEMA,
@@ -268,10 +280,10 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         // A save point is a moment: Delta must be at rest in it. A scan or dossier pass still reading the latest reply would land after the
         // checkpoint and be missing from it (a restore would then drop a person the story still has), so the checkpoint waits for it, and when
         // it does not finish or the state moves while the checkpoint is made, answers a retryable STALE rather than a save that is not true.
-        checkpoint: ({ cursor = null, headHash = null } = {}) => exclusive(async () => {
+        checkpoint: bounded(async ({ cursor = null, headHash = null } = {}, until) => {
             for (let attempt = 0; attempt < 3; attempt += 1) {
-                if (!await quiet()) return fail('STALE', 'NPC State Delta is still reading the latest reply; save again in a moment.');
-                const s = await hydrate();
+                if (!await quiet(until)) return fail('STALE', 'NPC State Delta is still reading the latest reply; save again in a moment.');
+                const s = await hydrate(until);
                 if (!s) return fail('FAILED', 'There is no open chat to save.');
                 const at = hashJson(port.readState());
                 // A change Delta saved that the timeline has not recorded yet is recorded first: the save point would carry it, but the host would
@@ -298,8 +310,8 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
          */
         current: input => ({ ok: true, current: isRecord(input) && stands(input.checkpoint, input.hash) && !busy() }),
 
-        prepare: input => exclusive(async () => {
-            const s = await hydrate();
+        prepare: bounded(async (input, until) => {
+            const s = await hydrate(until);
             if (!s) return fail('FAILED', 'There is no open chat.');
             const idx = s.index;
             if (!isRecord(input) || typeof input.checkpoint !== 'string' || typeof input.return !== 'string' || typeof input.hash !== 'string') return fail('INVALID', 'prepare takes { return, checkpoint, hash }.');

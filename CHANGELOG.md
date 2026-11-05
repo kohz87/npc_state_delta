@@ -1,3 +1,11 @@
+## Unreleased
+
+- **A chat that is not ready answers in time, and a send into it no longer hangs for 40 seconds.** Fixes on Delta's side of Story Block's save points and restores. Nothing saved changes, and no prompt, request count or retry changes.
+  - The participant's `prepare` waits for Delta to load the chat (up to 8 seconds, inside Story Block's 10 second limit for a participant) instead of failing at once with "has not loaded this chat's dossiers yet"; a chat whose load has failed still fails at once.
+  - A send waits for Story Block's barrier once, not twice: the second of the two handlers of one send only looks, and the wait ends at once when Story Block names a permanent block (`blockedBy` with a code other than FAILED or STALE). A Story Block that does not name one is waited for as before (at most 20 seconds).
+  - A save point waits for Delta's own scan to go idle for at most 8 seconds (it was 20), so the answer reaches Story Block before its 10 second limit: the retryable "still reading the latest reply" instead of a timed-out callback.
+  - Not changed: a swipe that returns to a reply other than the newest is still read again, because the rollback to its parent drops that reply's save point (see the group A report).
+
 ## 1.10.2
 
 - **The dossier page no longer copies its portraits into the page.** A portrait picture reaches the panel by reference: the panel's markup carries a short key and the image's source is set once the image is in the page, so twelve portraits are no longer escaped into about 1.6 MB of HTML, parsed back out of it and copied into every render check. The runtime's read for the panel (`getDossierState`) no longer copies the pictures either (the dossier record is still a copy), and a refresh no longer builds the branch diagnostics just to learn the chat's load state. Nothing saved changes.

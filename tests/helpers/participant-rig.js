@@ -111,7 +111,7 @@ export async function played(t, options = {}) {
  * The real adapter registers Delta's module (with its participant and npc.identity) on a real host; `api` is the fake runtime it talks to
  * (`window.NPCStateDelta`): the chat's state, an absolute install, the change announcements, the scan counters and the message gate.
  */
-export async function adapterRig(t, { state = freshState(), vault = memoryVault(), image = null, live = null, modules = [], participantOptions = { debounceMs: 1, retryMs: 5 }, settle = {} } = {}) {
+export async function adapterRig(t, { state = freshState(), vault = memoryVault(), image = null, live = null, modules = [], participantOptions = { debounceMs: 1, retryMs: 5 }, settle = {}, wrapSdk = sdk => sdk } = {}) {
     const { createStorySuiteV2Adapter } = await import('../../src/storysuite-v2.js');
     t.mock.method(console, 'warn', () => {});
     const mine = live ?? { chatKey: 'chat:avatar.png:one', state: structuredClone(state), installs: 0, writes: 0, scans: 0, waiting: 0 };
@@ -123,7 +123,8 @@ export async function adapterRig(t, { state = freshState(), vault = memoryVault(
     t.after(() => host.close());
     const listeners = new Set();
     const warnings = [];
-    const box = { ready: Promise.resolve(host.sdk), sdk: host.sdk };
+    const sdk = wrapSdk(host.sdk);
+    const box = { ready: Promise.resolve(sdk), sdk };
     const api = {
         gate: null,
         isEnabled: () => true,
