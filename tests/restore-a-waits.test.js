@@ -143,8 +143,9 @@ test('a save point waits for Delta to be idle at most the host\'s bound, then an
     const participant = createParticipant({ port: p, vault: memoryVault() }).participant;
     const out = await participant.checkpoint({});
     assert.equal(out.code, 'STALE');
-    assert.deepEqual(seen, [8000], 'the idle wait is 8 s, inside the host\'s 10 s');
-    assert.ok(seen[0] < 10000);
+    // The wait is what is left of the 8 s bound when it starts, so a millisecond may already be gone on a busy machine.
+    assert.equal(seen.length, 1);
+    assert.ok(seen[0] <= 8000 && seen[0] >= 7900, `the idle wait is about 8 s, inside the host's 10 s (got ${seen[0]})`);
 });
 
 test('the idle wait gets only what is left of the bound', async t => {
