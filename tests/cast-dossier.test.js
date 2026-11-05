@@ -263,6 +263,69 @@ test('the user\'s case on an older entry (no wears): the scanner fills the curre
     assert.equal(scanned.appearance.match(/white-tipped tail/gi).length, 1, 'the body words once');
 });
 
+// Round 2 (review B1/F2): the pack's words stay whole while unchanged, whatever their size within the pack's limits.
+// The model shows the current part with its sentences joined by "; " (existing, F1): compare the words.
+const sameWords = text => String(text).replace(/\.;\s/g, '. ');
+// Whole sentences, each different, joined up to `max` characters.
+const sentences = (label, max) => {
+    const out = [];
+    for (let i = 1; ; i += 1) {
+        const next = [...out, `${label} ${i} of oiled leather with brass buckles and a stitched hem`].join('. ');
+        if (next.length + 1 > max) break;
+        out.push(`${label} ${i} of oiled leather with brass buckles and a stitched hem`);
+    }
+    return `${out.join('. ')}.`;
+};
+const LONG_LOOK = sentences('Body trait', 600);
+const LONG_WEARS = sentences('Outfit piece', 300);
+
+test('B1: a long look (600) and a long wears (300) are kept whole at creation and after every normalization; all outfit sentences stay', () => {
+    assert.ok(LONG_LOOK.length > 500 && LONG_WEARS.length > 250 && LONG_LOOK.length <= 600 && LONG_WEARS.length <= 300 && (LONG_LOOK.match(/\./g) || []).length > 6 && (LONG_WEARS.match(/\./g) || []).length >= 4, 'a fixture beyond the old canon (10 sentences, 800 characters in all)');
+    const entry = { ...TEMIWA_ENTRY, look: LONG_LOOK, wears: LONG_WEARS };
+    const made = madeTemiwa(entry);
+    assert.ok(`${LONG_LOOK}; ${LONG_WEARS}`.length > 800, 'together over the old 800');
+    assert.equal(made.overallAppearance, LONG_LOOK);
+    assert.equal(sameWords(currentPresentationText(made)), LONG_WEARS, 'every outfit sentence, whole');
+    assert.equal(made.appearance, `${LONG_LOOK.replace(/[\s.;,]+$/, '')}; ${LONG_WEARS}`, 'the resolved text is body then outfit, unclipped');
+    let again = made;
+    for (let i = 0; i < 3; i += 1) again = normalizeProduction(structuredClone(again));
+    assert.deepEqual([again.overallAppearance, again.appearance], [made.overallAppearance, made.appearance], 'normalized again and again: identical');
+    assert.equal(sameWords(currentPresentationText(again)), LONG_WEARS);
+    // The mechanics layer alone (a save/load of the stored record) keeps it too.
+    const stored = normalizeNpcRecord(structuredClone(made));
+    assert.equal(stored.appearance, made.appearance);
+    assert.match(resolveNpcAppearance(again), /Outfit piece 4/);
+});
+
+test('F2: a look beyond 800 characters is kept whole (physical and resolved), with or without wears', () => {
+    const look = sentences('Body trait', 1500);
+    assert.ok(look.length > 1000);
+    const noWears = madeTemiwa({ ...TEMIWA_ENTRY, look, wears: undefined });
+    assert.equal(noWears.overallAppearance, look);
+    assert.equal(noWears.appearance, look, 'the narrator and portrait get the whole look');
+    assert.equal(normalizeProduction(structuredClone(noWears)).appearance, look, 'and after the next load');
+    const withWears = madeTemiwa({ ...TEMIWA_ENTRY, look, wears: LONG_WEARS });
+    assert.equal(withWears.overallAppearance, look);
+    assert.equal(sameWords(currentPresentationText(normalizeProduction(structuredClone(withWears)))), LONG_WEARS);
+});
+
+test('B1: after a scanner changes the outfit the normal canon applies to the outfit alone; the pack\'s physical words stay in front', () => {
+    const made = madeTemiwa({ ...TEMIWA_ENTRY, look: LONG_LOOK, wears: LONG_WEARS });
+    const longOutfit = sentences('New garment', 1200);
+    const edited = normalizeProduction({ ...made, appearance: `${LONG_LOOK.replace(/[\s.;,]+$/, '')}; ${longOutfit}` });
+    assert.equal(edited.overallAppearance, LONG_LOOK, 'the physical words untouched');
+    const part = currentPresentationText(edited);
+    assert.ok((part.match(/\./g) || []).length <= 10 && part.length <= 800, 'the outfit is compacted by the usual canon (10 sentences, 800 characters)');
+    assert.ok(part.startsWith('New garment 1'), 'and starts as given');
+    assert.deepEqual(normalizeProduction(structuredClone(edited)).appearance, edited.appearance, 'and is stable');
+    // A scanner-style change in the Temiwa case (short entry): as before.
+    const scanned = temiwaScan(madeTemiwa());
+    assert.equal(currentPresentationText(scanned), 'Veil pinned back, tail in a grey linen wrap');
+    // Body changed by a scan, outfit still the pack's: the outfit stays whole.
+    const bodyChanged = normalizeProduction({ ...made, overallAppearance: 'Slender fox-woman with a notched ear.', appearance: `Slender fox-woman with a notched ear; ${LONG_WEARS}` });
+    assert.equal(sameWords(currentPresentationText(bodyChanged)), LONG_WEARS);
+});
+
 test('a dossier made before this change is read as stored: no migration', () => {
     // The old shape: look in appearance, castFrom.first.appearance = look, no overallAppearance.
     const old = normalizeProduction({

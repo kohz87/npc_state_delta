@@ -64,6 +64,36 @@ export function setNpcArchived(npc, archived, { reason = 'manual', sourceMessage
 
 
 
+/** The longest a cast dossier's stored appearance can be: the pack's look and wears (1800 each) joined by "; ". */
+export const CAST_APPEARANCE_WIDE = 3700;
+
+/**
+ * (the living cast) Which of a cast dossier's appearance fields still are the pack's own words (`castFrom.first`), and the stored
+ * current appearance split into its parts. The stored `appearance` is the RESOLVED text, "<overallAppearance>; <current part>", so the
+ * pack's `wears` is compared with the part after the physical words, not with the whole. Returns
+ * { overall, appearance, head, part } where `overall` / `appearance` say the field still is the pack's words, `head` is the physical
+ * text and `part` the stored text after it (the whole stored text when it does not start with the physical words).
+ */
+export function castAppearanceKept(raw) {
+    const first = raw?.castFrom && typeof raw.castFrom.first === 'object' && raw.castFrom.first ? raw.castFrom.first : {};
+    const text = (value, max) => (typeof value === 'string' ? cleanText(value, max) : '');
+    const physical = text(raw?.overallAppearance, 1800);
+    const stored = text(raw?.appearance, CAST_APPEARANCE_WIDE);
+    const head = physical.replace(/[\s.;,]+$/, '');
+    let part = stored;
+    let split = false;
+    if (physical) {
+        if (stored === physical || stored === head) { part = ''; split = true; }
+        else if (stored.startsWith(`${head}; `)) { part = stored.slice(head.length + 2); split = true; }
+    }
+    const firstPhysical = text(first.overallAppearance, 1800);
+    const firstCurrent = text(first.appearance, 1800);
+    const overall = Boolean(physical) && physical === firstPhysical;
+    // No pack words for the current part (an entry without `wears`): the stored text is the physical words alone while it still is them.
+    const appearance = Boolean(stored) && (firstCurrent ? part === firstCurrent : (overall && part === ''));
+    return { overall, appearance, head, part, split };
+}
+
 export const NPC_CANDIDATE_TTL_TURNS = 15;
 export const NPC_CANDIDATE_LIMIT = 60;
 
@@ -415,9 +445,16 @@ export function normalizeNpcRecord(raw = {}) {
     npc.speech = locked.has('speech') || packWords('speech', 600)
         ? cleanText(raw.speech, 600)
         : compactDurableText(raw.speech, DURABLE_PROFILE_LIMITS.speech, 5);
-    npc.appearance = locked.has('appearance') || packWords('appearance', 1800)
-        ? cleanText(raw.appearance, 1800)
-        : normalizeAppearanceCanon(raw.appearance);
+    // The stored appearance of a cast dossier is "<physical>; <current part>": the pack's `wears` is the current part, compared apart
+    // from the physical words. While it is unchanged the whole text stays exact (any size the pack allows); once a scan or the reader
+    // changed the current part, the normal canon applies to that part alone and the pack's physical words stay in front of it.
+    const castKept = castAppearanceKept(raw);
+    if (locked.has('appearance')) npc.appearance = cleanText(raw.appearance, 1800);
+    else if (castKept.appearance) npc.appearance = cleanText(raw.appearance, CAST_APPEARANCE_WIDE);
+    else if (castKept.overall && castKept.split && castKept.part) {
+        const part = normalizeAppearanceCanon(castKept.part);
+        npc.appearance = part ? cleanText(`${castKept.head}; ${part}`, CAST_APPEARANCE_WIDE) : cleanText(castKept.head, CAST_APPEARANCE_WIDE);
+    } else npc.appearance = normalizeAppearanceCanon(raw.appearance);
     npc.background = locked.has('background') || packWords('background', 1200)
         ? cleanText(raw.background, 1200)
         : compactDurableText(raw.background, DURABLE_PROFILE_LIMITS.background, 8);
