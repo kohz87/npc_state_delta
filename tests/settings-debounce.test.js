@@ -201,6 +201,20 @@ test('persist() on dossier changes saves no settings; the sidecar upload costs o
     });
 });
 
+test('a sidecar write that removes a tombstone (the key reused) saves settings at once, not lazily', async () => {
+    await withServer(async server => {
+        freshSettings();
+        const { part, state } = persistRig();
+        getSettings().sidecarTombstones = { [KEY]: { at: 1, reason: 'deleted' } };
+        state.npcs[0].note = 'reused key';
+        assert.equal(part.persist(KEY), true);
+        await tick(1500);
+        assert.equal(server.files.size, 1, 'the dossier went to the sidecar');
+        assert.equal(getSettings().sidecarTombstones[KEY], undefined, 'the tombstone is gone in memory');
+        assert.equal(host.saves, 1, 'and on disk at once: no lazy wait for a tombstone removal');
+    });
+});
+
 test('persistCritical and persistCriticalDurable still save settings at once', async () => {
     await withServer(async () => {
         freshSettings();

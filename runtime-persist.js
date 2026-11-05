@@ -71,6 +71,9 @@ export function createPersistPart(rt, deps) {
                 if (!ownershipEpochCurrent(key, epoch)) return written;
                 pointer = written;
                 settings.dataFiles[key] = pointer;
+                // A tombstone removed here (the key reused after a delete, rename or detach) is saved at once, not lazily: a stale
+                // tombstone with no pointer on disk would show the chat empty after a crash until the next write repaired it.
+                const hadTombstone = Object.prototype.hasOwnProperty.call(settings.sidecarTombstones || {}, key);
                 delete settings.sidecarTombstones[key];
                 missingSidecarChats.delete(key);
                 persistedVersions.set(key, writeVersion);
@@ -80,7 +83,7 @@ export function createPersistPart(rt, deps) {
                     writerId: String(written.writerId || ''),
                     latestObservedServerWriterId: String(written.writerId || ''),
                 });
-                persistSettingsLazy();
+                if (hadTombstone) persistSettings(); else persistSettingsLazy();
                 if (Number(stateVersions.get(key) || 0) <= writeVersion) break;
             }
             return pointer;
