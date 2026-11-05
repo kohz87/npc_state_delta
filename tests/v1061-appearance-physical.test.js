@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { appearanceDraftRecord, currentPresentationText, resolveNpcAppearance } from '../appearance.js';
 import { createNpcRecord, mergeScanResult } from '../core.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // Scans go through the full production merge: the core applies an accepted flat Appearance update
 // before the appearance model sees it, which is where physical traits used to be lost.
@@ -82,7 +83,7 @@ test('applying the appearance editor on an NPC without named forms keeps its cur
 });
 
 test('the dossier editor identifies its NPC so appearance, life-state and section add-ons mount', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     const experience = fs.readFileSync(new URL('../dossier-experience.js', import.meta.url), 'utf8');
     const continuityUi = fs.readFileSync(new URL('../continuity-ui.js', import.meta.url), 'utf8');
     assert.match(index, /content\.id = 'npc_state_delta_editor_content';[\s\S]{0,200}content\.dataset\.npcId = npc\.id;/);

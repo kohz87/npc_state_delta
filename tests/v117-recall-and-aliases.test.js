@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { EDITOR_LOCKABLE_FIELDS, LOCKED_FIELD_KEYS } from '../src/fields/registry.js';
 import { buildInjection, createNpcRecord, isRoleDescriptionLabel, mergeScanResult, normalizeNpcRecord, npcNamedInText } from '../core.js';
 import { dossierDetailProjection } from '../dossier-ui.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const hask = { id: 'h', name: 'Capt. Orrin Hask' };
 const roster = [hask, { id: 'm', name: 'Maelis Varn' }, { id: 'a', name: 'Adaine Varn' }, { id: 'w', name: 'Will Turner' },
@@ -63,7 +64,7 @@ test('hand-edited aliases are kept from scanner additions and shown on the dossi
     base.npcs[0].manualProfileFields = [];
     assert.deepEqual(mergeScanResult(base, { npcs: [{ id: 'npc_red', name: 'Redmond Shaw', aliases: ['Old Red'] }] }, { turn: 1 }).state.npcs[0].aliases, ['Red', 'Old Red']);
     assert.match(dossierDetailProjection(locked).aliases.join(','), /Red/);
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     assert.match(index, /id="npc_state_delta_edit_aliases"/);
     assert.match(index, /aliases: editorList\('aliases', 8\)/);
     assert.ok(EDITOR_LOCKABLE_FIELDS.includes('aliases'), 'hand-edited aliases can be locked');

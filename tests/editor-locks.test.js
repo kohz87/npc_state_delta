@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { EDITOR_LOCKABLE_FIELDS, LOCKED_FIELD_KEYS, editorProfileLocks } from '../src/dossier-edit.js';
 import { preserveUserNpcMetadata } from '../branch-core.js';
 import { runEditorHostScenario } from './editor-host.mjs';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // Cleanup step 1: a lock the reader sets in the dossier editor stays set. Before, the protect
 // checkbox was never pre-checked (a Set has no .length), so every later Save cleared every lock,
@@ -19,7 +20,7 @@ test('editor locks: the Save keeps existing locks, adds changed fields and is al
     assert.deepEqual(editorProfileLocks(current, next, { protect: false }),
         { manualProfileFields: [], manualProfileLocksExplicit: true }, 'unticked clears them, explicitly');
     assert.equal(EDITOR_LOCKABLE_FIELDS.length, 21, 'stable fields, Player Dynamic, the live fields and memories');
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     assert.doesNotMatch(index, /locked\.length/, 'the editor reads the Set size');
     assert.match(index, /editorProfileLocks\(current, next, \{ protect: Boolean\(document\.getElementById\('npc_state_delta_edit_lock_profile'\)\?\.checked\) \}\)/);
 });

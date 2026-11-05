@@ -11,7 +11,11 @@ export const RUNTIME_SOURCE_PARTS = [
     { file: 'runtime-settings.js', before: 'function getChatIdentity(' },
     { file: 'runtime-settings-html.js', before: 'function relationshipNumber(' },
     { file: 'runtime-inline-cards.js', before: 'const { recordInlineCardsInState' },
+    { file: 'runtime-editor.js', before: 'const { editorIsMounted' },
+    { file: 'runtime-mutations.js', before: 'const { updateNpcAppearance' },
+    { file: 'runtime-portrait.js', before: 'const { handlePortraitGeneratorEscape' },
     { file: 'runtime-suite.js', before: 'const { SUITE_API' },
+    { file: 'runtime-portrait-settings.js', before: 'const { savePortraitSettingsDraft' },
     { file: 'runtime-settings-bind.js', before: 'const { bindUi,' },
 ];
 

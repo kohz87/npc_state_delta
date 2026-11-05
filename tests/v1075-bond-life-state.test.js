@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createNpcRecord, mergeScanResult, normalizeNpcRecord } from '../core.js';
 import { compactSocialKeyRelationship, reconcileSocialState } from '../social.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const CORIN = 'Master Corin — late father | original builder and owner of The Grey Post, deeply revered by Elena; deceased';
 
 function editorList() {
-    const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
-    const body = source.match(/function cleanEditorList\(value, max = 12\) \{([\s\S]*?)\n\}/)[1];
+    const source = runtimeSource();
+    const body = source.match(/function cleanEditorList\(value, max = 12\) \{([\s\S]*?)\n    \}/)[1];
     return new Function('value', 'max = 12', body);
 }
 

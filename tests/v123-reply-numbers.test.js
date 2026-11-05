@@ -7,6 +7,7 @@ import { createNpcRecord, mergeScanResult, normalizeFieldChangeMessages, normali
 import { mergeImportedDossierState } from '../bundle.js';
 import { changeStamp, changeSummaryHtml, dossierDetailProjection, lastRelationshipChangeHtml, projectDossierState, replyHeaderLabel } from '../dossier-ui.js';
 import { buildMapModel } from '../relationship-map-core.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // 1.2.3: the dossiers show the chat's reply number (the latest assistant reply's message index, as
 // Story Block's "reply #N") instead of Delta's own turn counter, which keeps its internal meaning.
@@ -49,7 +50,7 @@ test('v1.2.3 header: Reply #N from the live chat, never Delta\'s counter', () =>
     const ui = fs.readFileSync(new URL('../dossier-ui.js', import.meta.url), 'utf8');
     assert.match(ui, /const replyLabel = replyHeaderLabel\(projection\)/);
     assert.doesNotMatch(ui, /`Turn \$\{projection\.turn\}`/);
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     assert.match(index, /return \{ turn: state\.turn, reply: latestReplyIndex\(\), npcs:/);
 });
 
@@ -91,7 +92,7 @@ test('v1.2.3 relationship events recorded by a scan carry the reply\'s message i
     const legacy = normalizeNpcRecord({ ...mira(), lastRelationshipChange: { impact: 'ordinary', reason: 'Old.', turn: 5, message: -2 } });
     assert.equal('message' in legacy.lastRelationshipChange, false);
 
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     const relationshipPass = fs.readFileSync(new URL('../src/relationship-pass.js', import.meta.url), 'utf8');
     assert.match(relationshipPass, /turn: Number\.isFinite\(Number\(state\.turn\)\) \? Number\(state\.turn\) : null,\n\s*\.\.\.relationshipEventMessage\(\{ message: sourceMessageId \}\),/, 'focused relationship pass');
     assert.match(index, /\.\.\.relationshipEventMessage\(\{ message: latestReplyIndex\(\) \}\),/, 'manual relationship edit');

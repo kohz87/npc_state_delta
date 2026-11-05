@@ -4,8 +4,9 @@ import fs from 'node:fs';
 import { BRANCH_SNAPSHOT_BUDGET_BYTES, chatLineage, pruneBranchCheckpoints } from '../branch.js';
 import { prunePortraitAssetsForState } from '../storage.js';
 import { buildQualifiedChatKey } from '../identity.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
-const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const index = runtimeSource().replace(/\r\n/g, '\n');
 const ci = fs.readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
 
 function msg(text, isUser = false) { return { mes: text, is_user: isUser, is_system: false, name: isUser ? 'User' : 'Character' }; }

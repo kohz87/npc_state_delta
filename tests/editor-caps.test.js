@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { normalizeNpcRecord } from '../core.js';
 import { EDITOR_FIELDS, EDITOR_LOCKABLE_FIELDS, editorShownValue, settleEditorSave, untouchedEditorFields } from '../src/dossier-edit.js';
 import { runEditorHostScenario } from './editor-host.mjs';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // Cleanup step 2: the editor keeps what the stored record keeps. Before, Save cut role and mood to
 // 240 and status to 300 (the record keeps 300, 300 and 500), the inputs had no maxlength, and a
@@ -51,7 +52,7 @@ test('the editor reads a field as untouched only when its control still shows th
 });
 
 test('the editor inputs carry maxlength from the same table the Save cuts with', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     for (const [key, field] of Object.entries(EDITOR_FIELDS)) {
         if (!field.max) continue;
         assert.match(index, new RegExp(`id="npc_state_delta_edit_${field.id}" class="text_pole"[^>]*maxlength="\\$\\{EDITOR_FIELDS\\.${key}\\.max\\}"`), key);

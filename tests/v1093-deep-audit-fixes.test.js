@@ -23,6 +23,7 @@ import {
 import { mergeImportedDossierState } from '../bundle.js';
 import { applyManualKeyRelationshipEdit, normalizeSocialGraph, reconcileSocialState, remapSocialGraphNpcIds } from '../social.js';
 import { quarantineUnreadableNpcStateDataFile } from '../storage.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const CALENDAR = { era: 'CR', months: [{ name: 'Redleaf', days: 30 }, { name: 'Sunwane', days: 31 }], currentYear: 821, currentMonth: 'Redleaf', currentDay: 16 };
 
@@ -249,8 +250,8 @@ test('RB92-20/21/22/23: workflow guards are in place', () => {
     assert.match(portrait, /session\.generationBase = portraitGenerationBase\(session\.npcId, session\.form\)/);
     assert.match(portrait, /session\.generationBase !== portraitGenerationBase\(session\.npcId, session\.form\)/);
     assert.match(portrait, /setPortraitSeed\?\.\(session\.npcId, seed, \{ chatKey: session\.chatKey, isCurrent: \(\) => currentSessionIs\(session\) \}\)/);
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
-    assert.match(index, /function setNpcPortraitSeed\(npcId, seed, \{ chatKey, isCurrent = \(\) => true \} = \{\}\) \{\n[^\n]*\n    if \(!isCurrent\(\)\) return false;/);
+    const index = runtimeSource();
+    assert.match(index, /function setNpcPortraitSeed\(npcId, seed, \{ chatKey, isCurrent = \(\) => true \} = \{\}\) \{\n[^\n]*\n        if \(!isCurrent\(\)\) return false;/);
     assert.match(index, /!popup && editorAtStart && editorAtStart\.result !== undefined && editorAtStart\.result !== affirmative/);
     const fullCast = fs.readFileSync(new URL('../full-cast.js', import.meta.url), 'utf8');
     assert.match(fullCast, /marker === null \|\| marker === undefined \|\| marker === '' \? null : Number\(marker\)/);
