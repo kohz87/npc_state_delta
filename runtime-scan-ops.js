@@ -212,8 +212,18 @@ export function createScanOpsPart(rt, deps) {
     // (timeline participant) The entry points that start dossier work hold a scan intent for their whole run (see scanWorkPending).
     // (timeline) Before a generation's prompt is built from the dossiers and the chat: the host's barrier is down and the gate has been asked. If it is
     // not down in time the injection is built when it is (the host holds the generation meanwhile).
+    //
+    // One bounded wait per send: a send runs this twice (GENERATION_AFTER_COMMANDS, then MESSAGE_SENT). When the first found the barrier still up
+    // after its wait (or the host said the block is permanent), the second only looks once, so a send into a chat that is not ready is held for
+    // one wait at most, not two. The memo belongs to that one send: the second handler uses it up, and it lapses within seconds (a handler of the
+    // same send follows at once), so the next send waits in full again.
+    const GENERATION_WAIT_MEMO_MS = 3 * 1000;
+    let generationBlocked = { key: '', at: 0 };
     async function generationReady(key) {
-        if (!await messageGateSettled()) {
+        const waited = generationBlocked.key === key && Date.now() - generationBlocked.at < GENERATION_WAIT_MEMO_MS;
+        generationBlocked = { key: '', at: 0 };
+        if (!await messageGateSettled(waited ? { wait: false } : undefined)) {
+            if (!waited) generationBlocked = { key, at: Date.now() };
             deferUntilSettled(key, { label: 'injection', what: 'the dossier injection', retry: async () => { await refreshMessageGate(); if (getChatKey() === key) updateInjection(); } }, null, false);
             return false;
         }

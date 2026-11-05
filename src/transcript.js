@@ -36,10 +36,11 @@ export async function refreshMessageGate() {
 /**
  * Whether the host's head-selection barrier is down and Delta stands on the checkpoint of the selected head (Story Block's barrier;
  * participants.md). Awaited before a scan, a targeted pass, a branch reconcile or a generation reads or writes the dossiers. true without a gate.
+ * `{ wait: false }`: one look at the barrier, no waiting.
  */
-export async function messageGateSettled() {
+export async function messageGateSettled(options = undefined) {
     if (typeof gate?.settled !== 'function') return true;
-    try { return (await gate.settled()) !== false; } catch { return true; }
+    try { return (await gate.settled(options)) !== false; } catch { return true; }
 }
 /** The chat as the story stands on it: the faded messages read as system messages; the same array when none is faded. */
 export function activeChat(chat = readContext().chat || []) {
