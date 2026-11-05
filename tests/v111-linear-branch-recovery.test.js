@@ -12,6 +12,7 @@ import {
     recordBranchCheckpoint,
     reconcileBranchState,
 } from '../branch.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const user = turn => ({
     is_user: true,
@@ -227,7 +228,7 @@ test('v1.0.11 explicit edit is linear and removes the replaced descendant checkp
 });
 
 test('v1.0.11 production host events classify only swipes as sibling branching', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+    const index = runtimeSource().replace(/\r\n/g, '\n');
     const eventBlock = index.slice(index.indexOf('if (events.MESSAGE_DELETED)'), index.indexOf('if (events.CHAT_CHANGED)'));
     assert.match(eventBlock, /MESSAGE_DELETED[\s\S]*operation: 'delete'/);
     assert.match(eventBlock, /MESSAGE_EDITED[\s\S]*operation: 'edit'/);

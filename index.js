@@ -1,6 +1,6 @@
 /* NPC State Delta - standalone SillyTavern extension */
 import { getContext } from '../../../extensions.js';
-import { extension_prompt_types, extension_prompt_roles, getRequestHeaders, saveSettings as saveHostSettings } from '../../../../script.js';
+import { extension_prompt_types, extension_prompt_roles, getRequestHeaders } from '../../../../script.js';
 import {
     isEmptyScannerAnswer,
     isScannerRoutingError,
@@ -89,49 +89,24 @@ import {
     setStoryClockSource,
 } from './core.js';
 import {
-    BRANCH_LINEAGE_VERSION,
-    BRANCH_SNAPSHOT_BUDGET_BYTES,
-    BRANCH_SNAPSHOT_MAX_BYTES,
-    ROLLBACK_JOURNAL_BUDGET_BYTES,
     createScanOperationRegistry,
-    bestAncestorState,
     chatLineage,
     fingerprintMessage,
     firstLineageDivergence,
     lineageCheckpointKey,
     clearUserDismissedGroupsFor,
     ensureBranchParentAnchor,
-    recordBranchCheckpoint,
     migrateLegacyLineage,
-    reconcileBranchState,
-    snapshotBranchState,
-    setBranchProvenanceHint,
 } from './branch.js';
 import {
     resolveNpcReference,
 } from './social.js';
 import {
     adoptNpcStateDataFileMetadata,
-    deleteNpcStateDataFile,
-    makeNpcStateDataFileName,
-    makeNpcStateRecoveryFileName,
-    currentWriterId,
-    readNpcStateDataFile,
-    retireNpcStateDataFile,
-    quarantineUnreadableNpcStateDataFile,
     undurableNpcStateSnapshot,
     verifyPortraitFiles,
-    writeNpcStateDataFile,
 } from './storage.js';
 import { isPortraitFileRecord, markPortraitFileMissing, portraitFilesVersion, PORTRAIT_FILE_DIR, PORTRAIT_FILE_PREFIX } from './src/portrait-file.js';
-import {
-    buildQualifiedChatKey,
-    getCharacterOwnerId,
-    parseQualifiedChatKey,
-} from './identity.js';
-import {
-    lifecycleRenameStateIsEmpty,
-} from './hardening-core.js';
 import {
     defersArea,
     storyBlockIsV2,
@@ -142,6 +117,9 @@ import {
 } from './present-scene.js';
 import { createCardSettingsDefinition, SCAN_EVERY_RANGE } from './src/card-settings.js';
 import { createRuntimeState } from './runtime-state.js';
+import { createBranchPart } from './runtime-branch.js';
+import { createReconcilePart } from './runtime-reconcile.js';
+import { createLifecyclePart } from './runtime-lifecycle.js';
 import { createChatKeysPart } from './runtime-chat-keys.js';
 import { createHydrationPart } from './runtime-hydration.js';
 import { createPersistPart } from './runtime-persist.js';
@@ -180,9 +158,7 @@ const {
     hydratedStateMeta,
     freshnessChecks,
     missingSidecarChats,
-    branchInheritanceChecked,
     freshnessEvents,
-    loadingChatStates,
     hydrationErrors,
     pendingAutoScans,
     assistantReceipts,
@@ -193,9 +169,6 @@ const {
     stateWritePromises,
     stateVersions,
     persistedVersions,
-    chatCacheTouches,
-    lifecycleEventOperations,
-    lifecycleRetryTimers,
     castPortraitMisses,
     retiredInSessionChats,
     nativeChangeListeners,
@@ -240,9 +213,6 @@ function recordScanDiagnostics(chatKey, metrics = {}, scanResult = {}, report = 
         birthdayDiagnostics: report?.birthdayDiagnostics || [],
     });
 }
-const BRANCH_RECONCILIATION_EVENT_LIMIT = 16;
-const SWIPE_SETTLE_POLL_MS = 80;
-const SWIPE_SETTLE_TIMEOUT_MS = 120000;
 const INLINE_HISTORY_LIMIT = 80;
 const NARRATION_CAPTURE_LIMIT = 8;
 const narrationCaptureStats = { requested: 0, used: 0, missing: 0, invalid: 0, unterminated: 0, outdated: 0 };
@@ -256,8 +226,6 @@ const NARRATION_CAPTURE_TYPES = new Set(['', 'normal', 'continue']);
 const CAPTURE_RULES_TYPES = new Set([...NARRATION_CAPTURE_TYPES, 'swipe', 'regenerate']);
 let narrationCaptureVersion = null;
 const SCAN_OPERATION_TIMEOUT_MS = 5 * 60 * 1000;
-const LIFECYCLE_EVENT_WAIT_MS = 12_000;
-const LIFECYCLE_RETRY_DELAY_MS = 30_000;
 let lifecycleEventSequence = 0;
 const scanOperations = createScanOperationRegistry({
     timeoutMs: SCAN_OPERATION_TIMEOUT_MS,
@@ -435,76 +403,6 @@ function installCanonicalServerState(key, pointer, inspected, { reason = 'freshn
     return installed;
 }
 
-async function retryCurrentChatHydration() {
-    const key = getChatKey();
-    if (!key || key === 'no-chat') return false;
-    try {
-        await ensureChatStateLoaded(key, { probeMissing: true });
-        if (getChatKey() !== key) return false;
-        renderDossier();
-        updateInjection();
-        globalThis.toastr?.success?.('NPC State Delta: chat dossier loaded successfully.');
-        return true;
-    } catch (error) {
-        if (getChatKey() === key) { renderDossier(); updateInjection(); }
-        globalThis.toastr?.error?.(`NPC State Delta still cannot load this chat dossier: ${error?.message || error}`);
-        return false;
-    }
-}
-
-async function detachBrokenSidecar() {
-    const key = getChatKey();
-    const settings = getSettings();
-    const pointer = settings.dataFiles?.[key] || null;
-    if (!isCanonicalChatKey(key) || !pointer?.path || chatHydrationStatus(key) !== 'error') return false;
-    if (!window.confirm('Detach the broken NPC State Delta sidecar for this chat and start a fresh empty dossier? The old pointer is retained under recovery metadata and is not deleted automatically.')) return false;
-    let preserved = null;
-    let registered = false;
-    const registerBackup = copy => {
-        settings.recoveryFiles[key] = { ...copy, reason: 'manual-detach', retiredAt: Date.now() };
-        registered = true;
-        persistSettings();
-    };
-    try {
-        preserved = await quarantineUnreadableNpcStateDataFile({ chatKey: key, pointer, appVersion: NPC_STATE_VERSION, headers: requestHeaders(), onPreserved: registerBackup });
-    } catch (error) {
-        console.error('[NPC State Delta] broken sidecar detach did not complete.', error);
-        globalThis.toastr?.error?.(registered
-            ? `NPC State Delta: the broken sidecar was preserved and its backup registered, but detaching did not complete. Retry Detach. ${error?.message || error}`
-            : `NPC State Delta: the broken sidecar could not be preserved, so it was not detached. ${error?.message || error}`);
-        return false;
-    }
-    if (getChatKey() !== key) return false;
-    bumpOwnershipEpoch(key);
-    // A retry that finds this detach already committed keeps the registered original backup; a
-    // marker another session wrote names its backup. The empty marker itself is never registered
-    // as the preserved sidecar.
-    const ownRegistration = settings.recoveryFiles[key]?.reason === 'manual-detach' && settings.recoveryFiles[key]?.preservedFrom === pointer.path;
-    if (preserved?.path && !(preserved.alreadyDetached && ownRegistration)) {
-        const { alreadyDetached, ...copy } = preserved;
-        settings.recoveryFiles[key] = { ...copy, reason: 'manual-detach', retiredAt: Date.now() };
-    } else if (!preserved) {
-        settings.recoveryFiles[key] = { ...pointer, reason: 'manual-detach', retiredAt: Date.now() };
-    }
-    settings.sidecarTombstones[key] = { reason: 'manual-detach', at: Date.now() };
-    delete settings.dataFiles[key];
-    chatStateCache.delete(key);
-    hydratedChatKeys.delete(key);
-    hydratedStateMeta.delete(key);
-    freshnessChecks.delete(key);
-    hydrationErrors.delete(key);
-    stateVersions.delete(key);
-    persistedVersions.delete(key);
-    stateWritePromises.delete(key);
-    const state = setChatState(key, freshChatState(), { markLoaded: true });
-    state.lineage = chatLineage(getContext().chat || []);
-    persistSettings();
-    renderDossier();
-    updateInjection();
-    globalThis.toastr?.warning?.('NPC State Delta: broken sidecar detached. The chat now has a fresh dossier; the previous pointer remains in recovery metadata.');
-    return true;
-}
-
 function requestHeaders() {
     try {
         return typeof getRequestHeaders === 'function' ? getRequestHeaders() : { 'Content-Type': 'application/json' };
@@ -638,366 +536,6 @@ function handleAssistantMessageReceived(...args) {
     return withScanIntent(getChatKey(), () => handleAssistantMessageReceivedInner(...args), undefined, { label: `reply:${args[0]}`, what: 'the scan of a new reply', retry: () => handleAssistantMessageReceived(...args), guard: () => replyGuard(args[0]) });
 }
 
-function commitBranchCheckpoint(state, messageId, reason = 'state') {
-    // A checkpoint records the local chat as the lineage; on a stale chat that would truncate the
-    // adopted dossier's newer history.
-    if (staleHostActive()) return state;
-    recordBranchCheckpoint(state, getContext().chat || [], messageId, reason);
-    return state;
-}
-
-function seedBranchTracking(state = getChatState()) {
-    const lineage = chatLineage(getContext().chat || []);
-    if (!Array.isArray(state.lineage) || state.lineage.length === 0) state.lineage = lineage;
-    if (!Array.isArray(state.checkpoints)) state.checkpoints = [];
-    state.branchLineageVersion = BRANCH_LINEAGE_VERSION;
-    return state;
-}
-
-function findLatestAssistantAtOrAfter(messageId) {
-    const chat = getContext().chat || [];
-    for (let i = chat.length - 1; i >= Math.max(0, Number(messageId) || 0); i -= 1) {
-        if (chat[i] && !chat[i].is_system && !chat[i].is_user && String(chat[i].mes || '').trim()) return i;
-    }
-    return -1;
-}
-
-function hostSwipeState() {
-    try {
-        const state = getContext().swipe?.state?.();
-        return typeof state === 'string' && state ? state : 'none';
-    } catch {
-        return 'none';
-    }
-}
-
-function isHostSwipeActive() {
-    return hostSwipeState() !== 'none';
-}
-
-function branchOperationPriority(value) {
-    return ({ auto: 0, edit: 1, delete: 2, swipe: 3 })[String(value || 'auto').toLowerCase()] ?? 0;
-}
-
-function mergeBranchOptions(base = {}, incoming = {}) {
-    const next = { ...base, ...incoming };
-    const a = base.explicitDivergence;
-    const b = incoming.explicitDivergence;
-    if (Number.isInteger(a) && Number.isInteger(b)) next.explicitDivergence = Math.min(a, b);
-    else if (Number.isInteger(a)) next.explicitDivergence = a;
-    else if (Number.isInteger(b)) next.explicitDivergence = b;
-    const baseOperation = String(base.operation || 'auto').toLowerCase();
-    const incomingOperation = String(incoming.operation || 'auto').toLowerCase();
-    next.operation = branchOperationPriority(incomingOperation) >= branchOperationPriority(baseOperation)
-        ? incomingOperation
-        : baseOperation;
-    next.rescan = Boolean(base.rescan || incoming.rescan);
-    return next;
-}
-
-function queueSettledSwipeReconcile(options = {}) {
-    const originKey = options.chatKey || getChatKey();
-    if (originKey === 'no-chat') return;
-    let next = { reason: 'message-swiped', rescan: true, ...options, operation: 'swipe', chatKey: originKey };
-
-    // A normal branch timer must never be allowed to fire inside SillyTavern's swipe window.
-    // Fold it into the swipe settlement instead.
-    if (rt.branchReconcileTimer) {
-        clearTimeout(rt.branchReconcileTimer);
-        rt.branchReconcileTimer = null;
-    }
-    if (rt.branchReconcilePending) {
-        next = mergeBranchOptions(rt.branchReconcilePending, next);
-        rt.branchReconcilePending = null;
-    }
-    if (rt.swipeSettlementPending) next = mergeBranchOptions(rt.swipeSettlementPending, next);
-    rt.swipeSettlementPending = next;
-
-    const sequence = ++rt.swipeSettlementSequence;
-    if (rt.swipeSettlementTimer) clearTimeout(rt.swipeSettlementTimer);
-    const startedAt = Date.now();
-
-    const poll = async () => {
-        if (sequence !== rt.swipeSettlementSequence) return;
-        if (getChatKey() !== originKey) {
-            rt.swipeSettlementTimer = null;
-            rt.swipeSettlementPending = null;
-            rt.deferredSwipeMessageId = null;
-            return;
-        }
-        if (isHostSwipeActive()) {
-            if (Date.now() - startedAt >= SWIPE_SETTLE_TIMEOUT_MS) {
-                rt.swipeSettlementTimer = null;
-                rt.swipeSettlementPending = null;
-                rt.deferredSwipeMessageId = null;
-                console.warn('[NPC State Delta] swipe stayed active too long; branch rescan was skipped to avoid hijacking the host generation pipeline.');
-                return;
-            }
-            rt.swipeSettlementTimer = setTimeout(poll, SWIPE_SETTLE_POLL_MS);
-            return;
-        }
-
-        rt.swipeSettlementTimer = null;
-        const pending = rt.swipeSettlementPending || {};
-        rt.swipeSettlementPending = null;
-        const receivedMessageId = Number.isInteger(rt.deferredSwipeMessageId) ? rt.deferredSwipeMessageId : null;
-        rt.deferredSwipeMessageId = null;
-
-        try {
-            const reconciliation = await reconcileCurrentBranch({ ...pending, rescan: false, reason: `${pending.reason || 'message-swiped'}-settled` });
-            if (reconciliation?.requiresRescan === false) return;
-            const chat = getContext().chat || [];
-            const received = Number.isInteger(receivedMessageId) ? chat[receivedMessageId] : null;
-            if (received && !received.is_user && !received.is_system && String(received.mes || '').trim()) {
-                await handleAssistantMessageReceived(receivedMessageId, {
-                    bypassSwipeGuard: true,
-                    forceBranchRescan: Boolean(pending.rescan),
-                });
-                return;
-            }
-
-            if (pending.rescan && getSettings().branchRescan !== false) {
-                const targetAssistant = findLatestAssistantAtOrAfter(pending.explicitDivergence);
-                if (targetAssistant >= 0) await scanNow({ manual: false, messageId: targetAssistant, allowDuringSwipe: true });
-            }
-        } catch (error) {
-            console.warn('[NPC State Delta] settled swipe reconciliation failed', error);
-        }
-    };
-
-    // The host emits MESSAGE_SWIPED before Generate('swipe'). Polling the host's own
-    // swipe state keeps NPC State Delta completely out of that pre-generation gap.
-    rt.swipeSettlementTimer = setTimeout(poll, 0);
-}
-
-function diagnosticSerializedBytes(value) {
-    try {
-        const text = JSON.stringify(value ?? null);
-        return typeof TextEncoder === 'function' ? new TextEncoder().encode(text).byteLength : text.length;
-    } catch {
-        return 0;
-    }
-}
-
-function branchHistoryDiagnostic(state) {
-    if (!state || typeof state !== 'object') return null;
-    const checkpoints = Array.isArray(state.checkpoints) ? state.checkpoints : [];
-    const rollbackJournal = Array.isArray(state.rollbackJournal) ? state.rollbackJournal : [];
-    const checkpointSizes = checkpoints.map(item => diagnosticSerializedBytes(item?.snapshot || {}) + 256);
-    return {
-        lineageVersion: Number(state.branchLineageVersion || 0),
-        lineageMessages: Array.isArray(state.lineage) ? state.lineage.length : 0,
-        currentNarrativeSnapshotBytes: diagnosticSerializedBytes(snapshotBranchState(state)),
-        checkpointCount: checkpoints.length,
-        checkpointBytes: checkpointSizes.reduce((sum, size) => sum + size, 0),
-        largestCheckpointBytes: checkpointSizes.length ? Math.max(...checkpointSizes) : 0,
-        checkpointBudgetBytes: BRANCH_SNAPSHOT_BUDGET_BYTES,
-        checkpointMaxBytes: BRANCH_SNAPSHOT_MAX_BYTES,
-        rollbackJournalEntries: rollbackJournal.length,
-        rollbackJournalBytes: Number(state.rollbackJournalBytes || 0) || diagnosticSerializedBytes(rollbackJournal),
-        rollbackJournalBudgetBytes: ROLLBACK_JOURNAL_BUDGET_BYTES,
-        rollbackJournalCoverageMessages: Number(state.rollbackJournalCoverageMessages || 0),
-        rollbackJournalBudgetExceeded: state.rollbackJournalBudgetExceeded === true,
-    };
-}
-
-function recordBranchReconciliationEvent({ key, reason, operation, result, beforeNpcCount, previousLength, currentLength }) {
-    if (!result) return;
-    const state = result.state || null;
-    branchReconciliationEvents.push({
-        at: Date.now(),
-        chatKey: key,
-        reason: String(reason || 'branch'),
-        operation: String(result.recoveryOperation || operation || 'auto'),
-        relation: String(result.lineageRelation || 'unknown'),
-        divergence: Number.isInteger(result.divergence) ? result.divergence : null,
-        action: String(result.recoveryAction || (result.invalidated ? 'reconciled' : 'none')),
-        invalidated: Boolean(result.invalidated),
-        exactRestored: Boolean(result.exactRestored),
-        requestedRecoveryMessageId: Number.isInteger(result.requestedRecoveryMessageId) ? result.requestedRecoveryMessageId : null,
-        affectedAssistantMessages: Math.max(0, Number(result.affectedAssistantMessages || 0)),
-        linearSuffixReplaySafe: result.linearSuffixReplaySafe !== false,
-        recoveryBlockedByRetainedDescendants: Boolean(result.recoveryBlockedByRetainedDescendants),
-        journalTargetReachable: Boolean(result.journalTargetReachable),
-        exactCheckpointAvailable: Boolean(result.exactCheckpointAvailable),
-        nearestOlderCheckpointMessageId: Number.isInteger(result.nearestOlderCheckpointMessageId) ? result.nearestOlderCheckpointMessageId : null,
-        olderCheckpointRejected: Boolean(result.olderCheckpointRejected),
-        recoveryDistance: Number.isInteger(result.recoveryDistance) ? result.recoveryDistance : null,
-        requiresRescan: Boolean(result.requiresRescan),
-        restoredFromMessageId: Number.isInteger(result.restoredFromMessageId) ? result.restoredFromMessageId : null,
-        restoredFromJournal: Boolean(result.restoredFromJournal),
-        restoredFromRoot: Boolean(result.restoredFromRoot),
-        failClosed: Boolean(result.failClosed),
-        revertedNpcCount: Array.isArray(result.deletedEffects?.reverted) ? result.deletedEffects.reverted.length : 0,
-        removedNpcCount: Array.isArray(result.deletedEffects?.removed) ? result.deletedEffects.removed.length : 0,
-        rewoundToBoundary: Boolean(result.rewoundToBoundary),
-        linearHistoryPruned: Boolean(result.linearHistoryPruned),
-        previousLength: Math.max(0, Number(previousLength || 0)),
-        currentLength: Math.max(0, Number(currentLength || 0)),
-        npcCountBefore: Math.max(0, Number(beforeNpcCount || 0)),
-        npcCountAfter: Array.isArray(state?.npcs) ? state.npcs.length : 0,
-        history: branchHistoryDiagnostic(state),
-    });
-    if (branchReconciliationEvents.length > BRANCH_RECONCILIATION_EVENT_LIMIT) {
-        branchReconciliationEvents.splice(0, branchReconciliationEvents.length - BRANCH_RECONCILIATION_EVENT_LIMIT);
-    }
-}
-
-async function maybeInheritKnownBranch() {
-    const key = getChatKey();
-    if (key === 'no-chat' || !isCanonicalChatKey(key)) return false;
-    try {
-        await ensureChatStateLoaded(key);
-        if (getChatKey() !== key) return false;
-        const current = getChatState(key);
-        const chat = getContext().chat || [];
-        const lineageAtStart = chatLineage(chat);
-        // (Message tracking alone, never saved to a file of the chat's own, does not make a branch a chat of its own: Story Block's save point
-        // opens the branch for a moment and goes back, which can leave it seeded in memory, and "Return here" must still carry the dossiers.)
-        const unsaved = !getSettings().dataFiles?.[key]?.path;
-        const isEmptyState = !current.npcs.length && !current.candidates.length && !current.dismissed.length && !current.checkpoints.length && (!current.lineage.length || unsaved);
-        if (!isEmptyState) { branchInheritanceChecked.add(key); return false; }
-
-        const metadata = getContext().chatMetadata || getContext().chat_metadata || {};
-        const mainChat = String(metadata?.main_chat || '').replace(/\.jsonl$/i, '').trim();
-        const parsed = parseQualifiedChatKey(key);
-        const explicitParentKey = mainChat && parsed ? buildQualifiedChatKey(parsed.kind, parsed.ownerId, mainChat) : '';
-        const hasExplicitParent = Boolean(explicitParentKey && explicitParentKey !== key);
-        if (!hasExplicitParent) branchInheritanceChecked.add(key);
-        if (!hasExplicitParent) return false;
-
-        await ensureChatStateLoaded(explicitParentKey).catch(error => console.debug(`[NPC State Delta] explicit branch parent ${explicitParentKey} could not be hydrated.`, error));
-        if (getChatKey() !== key || firstLineageDivergence(lineageAtStart, chatLineage(getContext().chat || [])) !== -1) return false;
-        const parentState = chatStateCache.get(explicitParentKey);
-        // The branch's own provenance: the hint was installed for the chat open at startup only, so a branch opened later (a save point's
-        // "Return here") was matched against the wrong main chat and inherited nothing.
-        setBranchProvenanceHint({ mainChat, currentKey: key });
-        const inherited = bestAncestorState(parentState ? { [explicitParentKey]: parentState } : {}, key, chat);
-        // (decided: inherited or nothing to inherit; a return because another chat was opened meanwhile decides nothing)
-        branchInheritanceChecked.add(key);
-        if (!inherited) return false;
-        setChatState(key, { ...freshChatState(), ...inherited });
-        queueStateFileWrite(key, 0);
-        return true;
-    } finally {
-        evictDormantChatStates(key);
-    }
-}
-
-/**
- * (timeline participant) Whether the open chat is a branch still waiting for its parent's dossiers: no dossier file of its own, its metadata
- * names a main chat, and branch inheritance has not run for it in this session. The participant mints no story line for such a chat.
- */
-function branchInheritancePending(key = getChatKey()) {
-    if (!isCanonicalChatKey(key) || branchInheritanceChecked.has(key)) return false;
-    if (!missingSidecarChats.has(key) || getSettings().dataFiles?.[key]?.path) return false;
-    const metadata = getContext().chatMetadata || getContext().chat_metadata || {};
-    return Boolean(String(metadata?.main_chat || '').replace(/\.jsonl$/i, '').trim());
-}
-
-
-// After adopting another session's newer dossier, the local chat is stale when it does not contain
-// that dossier's whole history: an older prefix, or older history plus a turn typed locally since.
-function noteAdoptedDossier(key, state, writerId = '') {
-    if (key !== getChatKey() || openingHostChats.has(key)) return;
-    if (writerId && String(writerId) === currentWriterId()) return;
-    const stored = Array.isArray(state?.lineage) ? state.lineage : [];
-    const divergence = firstLineageDivergence(stored, chatLineage(getContext().chat || []));
-    if (stored.length && divergence !== -1 && divergence < stored.length) staleHostChats.add(key);
-}
-
-// Messages this browser adds locally (a new turn, a reply) do not load the missing remote history,
-// so only a host reload or a local chat that contains the whole adopted lineage clears the mark.
-function staleHostActive(key = getChatKey()) {
-    if (!staleHostChats.has(key) || key !== getChatKey()) return false;
-    const stored = Array.isArray(getChatState(key)?.lineage) ? getChatState(key).lineage : [];
-    const live = chatLineage(getContext().chat || []);
-    if (live.length >= stored.length && [-1, stored.length].includes(firstLineageDivergence(stored, live))) {
-        staleHostChats.delete(key);
-        return false;
-    }
-    return true;
-}
-
-function staleHostPrefix(key, operation, explicitDivergence) {
-    if (String(operation || 'auto') !== 'auto' || Number.isInteger(explicitDivergence)) return false;
-    return staleHostActive(key);
-}
-
-async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true, reason = 'branch', chatKey = null, operation = 'auto' } = {}) {
-    const key = chatKey || getChatKey();
-    if (key === 'no-chat' || getChatKey() !== key) return null;
-    // (timeline) A head that moved is followed by the host first (Delta installs the checkpoint of the selected head); this reads Delta's state after.
-    if (!await messageGateSettled()) {
-        // Not dropped: it runs, with every request made meanwhile merged, when the barrier is down.
-        return deferUntilSettled(key, { label: 'reconcile', what: 'a rollback after a deleted or swiped message', options: { explicitDivergence, rescan, reason, chatKey, operation }, merge: mergeBranchOptions, retry: options => reconcileCurrentBranch(options) }, null, null);
-    }
-    if (getChatKey() !== key) return null;
-    const ctx = getContext();
-    await ensureChatStateLoaded(key);
-    if (getChatKey() !== key) return null;
-    const before = getChatState(key);
-    seedBranchTracking(before);
-    const beforeNpcCount = Array.isArray(before.npcs) ? before.npcs.length : 0;
-    const previousLength = Array.isArray(before.lineage) ? before.lineage.length : 0;
-    const lineageBefore = chatLineage(ctx.chat || []);
-    // The dossier can be newer than this browser's chat: another session wrote it after messages
-    // this chat has not loaded yet. Until the host reloads the chat, a local chat that is only a
-    // shorter prefix of that dossier is stale, not a deletion, so it must not roll the dossier back.
-    if (staleHostPrefix(key, operation, explicitDivergence)) {
-        recordBranchReconciliationEvent({
-            key, reason, operation,
-            result: { recoveryOperation: operation, lineageRelation: 'tail-truncation', recoveryAction: 'deferred-stale-chat', invalidated: false, divergence: lineageBefore.length },
-            beforeNpcCount, previousLength, currentLength: lineageBefore.length,
-        });
-        return null;
-    }
-    const result = reconcileBranchState(before, ctx.chat || [], { explicitDivergence, operation, rewindMidDelete: getSettings().midDeleteRewind === true });
-    if (getChatKey() !== key || firstLineageDivergence(lineageBefore, chatLineage(getContext().chat || [])) !== -1) return null;
-    recordBranchReconciliationEvent({
-        key, reason, operation, result, beforeNpcCount,
-        previousLength, currentLength: lineageBefore.length,
-    });
-    if (!result.invalidated) {
-        before.lineage = result.state.lineage;
-        return result;
-    }
-
-    cancelScanOperation(key, reason);
-    assistantReceipts.delete(key);
-    setChatState(key, result.state);
-    persist(key);
-    renderDossier();
-    updateInjection();
-    // A message deleted from the middle keeps the dossiers (later messages depend on them), except
-    // what the deleted message itself changed and nothing later touched, which is undone exactly.
-    if (result.rewoundToBoundary) {
-        globalThis.toastr?.info?.('NPC State Delta: a message was deleted from the middle of the chat, so every dossier was rewound to how it was just before it. Changes made by the messages after it were discarded.');
-    } else if (result.failClosed && result.recoveryBlockedByRetainedDescendants && result.recoveryOperation === 'delete') {
-        const names = list => {
-            const values = (Array.isArray(list) ? list : []).map(item => item.name).filter(Boolean);
-            return `${values.slice(0, 4).join(', ')}${values.length > 4 ? ` +${values.length - 4} more` : ''}`;
-        };
-        const reverted = result.deletedEffects?.reverted || [];
-        const removed = result.deletedEffects?.removed || [];
-        const parts = [];
-        if (reverted.length) parts.push(`reverted what the deleted message changed for ${names(reverted)}`);
-        if (removed.length) parts.push(`removed ${names(removed)}, who only appeared in it`);
-        globalThis.toastr?.info?.(parts.length
-            ? `NPC State Delta: a message was deleted from the middle of the chat. Later messages depend on the dossiers, so they were kept, but Delta ${parts.join(' and ')}. Anything a later message also changed was left as it is.`
-            : 'NPC State Delta: a message was deleted from the middle of the chat. Later messages depend on the dossiers, so they were kept as they are; edit them manually if the deleted message had changed anything.');
-    }
-
-    const targetAssistant = findLatestAssistantAtOrAfter(result.divergence);
-    const shouldRescan = result.requiresRescan !== undefined ? Boolean(result.requiresRescan) : !result.exactRestored;
-    if (rescan && shouldRescan && getSettings().branchRescan !== false && targetAssistant >= 0) {
-        if (getChatKey() !== key) return result;
-        if (isScanBusy(key)) queueBranchRescan(targetAssistant, 0, key);
-        else await scanNow({ manual: false, messageId: targetAssistant });
-    }
-    return result;
-}
-
 function queuePendingAutoScan(chatKey, messageId, reason = 'automatic') {
     if (!chatKey || chatKey === 'no-chat' || getChatKey() !== chatKey || !Number.isInteger(messageId) || messageId < 0) return false;
     const chat = getContext().chat || [];
@@ -1038,340 +576,6 @@ async function drainPendingAutoScanInner(chatKey) {
         scheduleReplyBackfills(chatKey, pending.messageId);
     }
     return succeeded;
-}
-
-function queueBranchRescan(messageId, _attempt = 0, originKey = getChatKey()) {
-    if (!queuePendingAutoScan(originKey, messageId, 'branch-rescan')) return;
-    if (getChatKey() === originKey && !isScanBusy(originKey) && !isHostSwipeActive()) void drainPendingAutoScan(originKey);
-}
-
-function queueBranchReconcile(options = {}, delay = 90) {
-    const originKey = options.chatKey || getChatKey();
-    if (originKey === 'no-chat') return;
-    options = { ...options, chatKey: originKey };
-    if (isHostSwipeActive()) {
-        queueSettledSwipeReconcile(options);
-        return;
-    }
-    let next = { ...options };
-    if (rt.branchReconcilePending?.chatKey && rt.branchReconcilePending.chatKey !== originKey) {
-        if (rt.branchReconcileTimer) clearTimeout(rt.branchReconcileTimer);
-        rt.branchReconcileTimer = null;
-        rt.branchReconcilePending = null;
-    }
-    if (rt.branchReconcilePending) next = mergeBranchOptions(rt.branchReconcilePending, next);
-    rt.branchReconcilePending = next;
-    if (rt.branchReconcileTimer) clearTimeout(rt.branchReconcileTimer);
-    rt.branchReconcileTimer = setTimeout(async () => {
-        const pending = rt.branchReconcilePending || {};
-        rt.branchReconcilePending = null;
-        rt.branchReconcileTimer = null;
-        try {
-            if (pending.chatKey && getChatKey() !== pending.chatKey) return;
-            await reconcileCurrentBranch(pending);
-        } catch (error) {
-            console.warn('[NPC State Delta] branch reconciliation failed', error);
-        }
-    }, delay);
-}
-
-function queueRecoveryGarbagePointer(pointer, reason = 'temporary-recovery-cleanup') {
-    if (!pointer?.path) return false;
-    const settings = getSettings();
-    const key = `${String(reason || 'recovery')}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
-    settings.recoveryGarbage[key] = { ...structuredClone(pointer), queuedAt: Date.now(), reason: String(reason || 'recovery') };
-    persistSettings();
-    return true;
-}
-
-function stateLooksEmptyForLifecycleRename(state) {
-    return lifecycleRenameStateIsEmpty(state);
-}
-
-function clearLifecycleCacheKey(key, reason = 'external-lifecycle') {
-    if (!key || key === 'no-chat') return false;
-    bumpOwnershipEpoch(key);
-    cancelScanOperation(key, reason);
-    if (stateWriteTimers.has(key)) {
-        clearTimeout(stateWriteTimers.get(key));
-        stateWriteTimers.delete(key);
-    }
-    chatStateCache.delete(key);
-    hydratedChatKeys.delete(key);
-    hydratedStateMeta.delete(key);
-    freshnessChecks.delete(key);
-    loadingChatStates.delete(key);
-    hydrationErrors.delete(key);
-    stateVersions.delete(key);
-    persistedVersions.delete(key);
-    stateWritePromises.delete(key);
-    pendingAutoScans.delete(key);
-    assistantReceipts.delete(key);
-    chatCacheTouches.delete(key);
-    return true;
-}
-
-async function loadLatestLifecycleState(key, pointer = null, inlineState = null, { fallbackOnMissing = false } = {}) {
-    if (pointer?.path) {
-        try {
-            const payload = await readNpcStateDataFile(pointer, { expectedChatKey: key });
-            if (payload && !payload.retired && payload.state) return structuredClone(payload.state);
-            if (!fallbackOnMissing) return null;
-        } catch (error) {
-            if (!fallbackOnMissing) throw error;
-            console.warn(`[NPC State Delta] lifecycle recovery could not read ${pointer.path}; falling back to the settled cache/inline state.`, error);
-        }
-    }
-    if (hydratedChatKeys.has(key) && chatStateCache.has(key)) return structuredClone(getChatState(key));
-    return inlineState && typeof inlineState === 'object' ? structuredClone(inlineState) : null;
-}
-
-async function removeDeletedChatState(rawId, kind = 'chat', ownerId = '') {
-    const key = await resolveDeletedChatKey(rawId, kind, ownerId);
-    if (!key) return false;
-    const settings = getSettings();
-    const canonical = { name: makeNpcStateDataFileName(key), path: `/user/files/${makeNpcStateDataFileName(key)}` };
-    let pointer = settings.dataFiles?.[key] || canonical;
-    let recoveryPointer = null;
-    let retired = false;
-
-    try {
-        try { await settleStateFileWrite(key, { flush: true }); }
-        catch (error) {
-            if (error?.code !== 'NPC_STATE_WRITE_CONFLICT') throw error;
-            console.info(`[NPC State Delta] delete observed a newer writer for ${key}; refreshing before retirement.`);
-        }
-        pointer = settings.dataFiles?.[key] || pointer;
-
-        for (let attempt = 0; attempt < 4; attempt += 1) {
-            const state = await loadLatestLifecycleState(key, pointer, { fallbackOnMissing: true });
-            if (recoveryPointer?.path) {
-                try { await deleteNpcStateDataFile(recoveryPointer, { headers: requestHeaders() }); } catch { queueRecoveryGarbagePointer(recoveryPointer, 'chat-lifecycle-temp'); }
-                recoveryPointer = null;
-            }
-            if (state) {
-                recoveryPointer = await writeNpcStateDataFile({
-                    chatKey: key,
-                    state,
-                    appVersion: NPC_STATE_VERSION,
-                    pointer: { name: makeNpcStateRecoveryFileName(key) },
-                    operationKey: `delete-recovery:${key}:${Date.now()}:${attempt}`,
-                    continuousRetry: false,
-                    headers: requestHeaders(),
-                });
-            }
-            if (!pointer?.path) { retired = true; break; }
-            try {
-                await retireNpcStateDataFile({ chatKey: key, pointer, reason: 'chat-deleted', appVersion: NPC_STATE_VERSION, headers: requestHeaders() });
-                retired = true;
-                break;
-            } catch (error) {
-                if (error?.retirementUncertain || error?.code !== 'NPC_STATE_WRITE_CONFLICT' || attempt >= 3) throw error;
-                console.info(`[NPC State Delta] delete retirement raced another writer for ${key}; retrying from the newest revision.`);
-            }
-        }
-        if (!retired) return false;
-    } catch (error) {
-        if (error?.retirementUncertain) {
-            // The source may already be retired: keep and register the verified recovery copy so the
-            // dossier stays restorable, like the character rename/delete transactions.
-            if (recoveryPointer?.path) {
-                settings.recoveryFiles[key] = { ...recoveryPointer, reason: 'chat-delete-retirement-uncertain', retiredAt: Date.now() };
-                persistSettings();
-                try { await saveHostSettings(); } catch (saveError) { console.warn(`[NPC State Delta] recovery registration for ${key} could not be persisted immediately.`, saveError); }
-            }
-            console.warn(`[NPC State Delta] chat deletion could not confirm retirement of ${key}; kept the recovery copy.`, error);
-            throw error;
-        }
-        if (recoveryPointer?.path) {
-            try { await deleteNpcStateDataFile(recoveryPointer, { headers: requestHeaders() }); } catch { queueRecoveryGarbagePointer(recoveryPointer, 'chat-lifecycle-temp'); }
-        }
-        console.warn(`[NPC State Delta] refused destructive retirement for ${key}; live ownership remains intact.`, error);
-        throw error;
-    }
-
-    clearLifecycleCacheKey(key, 'chat-deleted');
-    if (recoveryPointer) settings.recoveryFiles[key] = { ...recoveryPointer, reason: 'chat-deleted', retiredAt: Date.now() };
-    settings.sidecarTombstones[key] = { reason: 'chat-deleted', at: Date.now() };
-    delete settings.dataFiles[key];
-    persistSettings();
-    let tombstoneDurable = false;
-    try {
-        await saveHostSettings();
-        tombstoneDurable = true;
-    } catch (error) {
-        console.warn(`[NPC State Delta] chat deletion tombstone for ${key} could not be synchronously persisted; the retired sidecar is being retained as the crash-safe marker.`, error);
-    }
-    if (tombstoneDurable && pointer?.path) {
-        try { await deleteNpcStateDataFile(pointer, { headers: requestHeaders() }); }
-        catch (error) { console.warn(`[NPC State Delta] retired sidecar for ${key} could not be physically deleted; the durable tombstone still prevents recovery.`, error); }
-    }
-    return true;
-}
-
-async function moveRenamedChatState(eventData = {}) {
-    const oldId = String(eventData.oldFileName || '').replace(/\.jsonl$/i, '');
-    const newId = String(eventData.newFileName || '').replace(/\.jsonl$/i, '');
-    if (!oldId || !newId || oldId === newId) return false;
-    const isGroup = eventData.groupId !== undefined && eventData.groupId !== null && String(eventData.groupId) !== '';
-    const kind = isGroup ? 'group' : 'chat';
-    const eventOwner = isGroup ? String(eventData.groupId || '') : String(eventData.avatarId || getCharacterOwnerId(getContext()) || '');
-    const oldKey = resolveOwnedChatKey(oldId, kind, eventOwner);
-    const parsedOld = parseQualifiedChatKey(oldKey);
-    const newKey = buildQualifiedChatKey(kind, parsedOld?.ownerId || eventOwner, newId);
-    if (!oldKey || !newKey) return false;
-
-    const settings = getSettings();
-    const oldPointerInitial = settings.dataFiles?.[oldKey] || null;
-    if (!oldPointerInitial?.path && !chatStateCache.has(oldKey)) return false;
-
-    let destinationPointer = settings.dataFiles?.[newKey] || null;
-    let destinationState = null;
-    if (destinationPointer?.path) {
-        try { destinationState = await loadLatestLifecycleState(newKey, destinationPointer); }
-        catch (error) { console.warn(`[NPC State Delta] rename could not verify destination ${newKey}.`, error); return false; }
-    }
-    const destinationCache = chatStateCache.get(newKey) || null;
-    const destinationRepresentations = [destinationState, destinationCache].filter(value => value && typeof value === 'object');
-    const destinationEphemeral = destinationRepresentations.every(stateLooksEmptyForLifecycleRename);
-    if ((destinationPointer?.path || chatStateCache.has(newKey)) && !destinationEphemeral) {
-        console.warn(`[NPC State Delta] refused to rename ${oldKey} onto existing non-empty state ${newKey}.`);
-        return false;
-    }
-
-    try {
-        try { await settleStateFileWrite(oldKey, { flush: true }); }
-        catch (error) {
-            if (error?.code !== 'NPC_STATE_WRITE_CONFLICT') throw error;
-            console.info(`[NPC State Delta] rename observed a newer writer for ${oldKey}; the newest durable state will be moved.`);
-        }
-
-        let oldPointer = settings.dataFiles?.[oldKey] || oldPointerInitial;
-        let state = null;
-        let newPointer = destinationPointer;
-        let recoveryPointer = null;
-        let retired = false;
-        for (let attempt = 0; attempt < 4; attempt += 1) {
-            state = await loadLatestLifecycleState(oldKey, oldPointer);
-            if (!state) throw new Error(`NPC State Delta rename source ${oldKey} has no live state.`);
-
-            newPointer = await writeNpcStateDataFile({
-                chatKey: newKey,
-                state,
-                appVersion: NPC_STATE_VERSION,
-                pointer: newPointer?.path ? newPointer : { name: makeNpcStateDataFileName(newKey) },
-                continuousRetry: false,
-                headers: requestHeaders(),
-            });
-            const verified = await readNpcStateDataFile(newPointer, { expectedChatKey: newKey });
-            if (!verified?.state || verified.retired) throw new Error('NPC State Delta renamed sidecar verification failed.');
-
-            if (recoveryPointer?.path) {
-                try { await deleteNpcStateDataFile(recoveryPointer, { headers: requestHeaders() }); } catch { queueRecoveryGarbagePointer(recoveryPointer, 'chat-lifecycle-temp'); }
-            }
-            recoveryPointer = await writeNpcStateDataFile({
-                chatKey: oldKey,
-                state,
-                appVersion: NPC_STATE_VERSION,
-                pointer: { name: makeNpcStateRecoveryFileName(oldKey) },
-                operationKey: `rename-recovery:${oldKey}:${Date.now()}:${attempt}`,
-                continuousRetry: false,
-                headers: requestHeaders(),
-            });
-
-            if (!oldPointer?.path) { retired = true; break; }
-            try {
-                await retireNpcStateDataFile({ chatKey: oldKey, pointer: oldPointer, reason: `renamed-to:${newKey}`, appVersion: NPC_STATE_VERSION, headers: requestHeaders() });
-                retired = true;
-                break;
-            } catch (error) {
-                if (error?.code !== 'NPC_STATE_WRITE_CONFLICT' || attempt >= 3) throw error;
-                console.info(`[NPC State Delta] rename retirement raced another writer for ${oldKey}; refreshing and retrying.`);
-            }
-        }
-        if (!retired) return false;
-
-        clearLifecycleCacheKey(oldKey, 'chat-renamed');
-        clearLifecycleCacheKey(newKey, 'chat-renamed-target');
-        settings.recoveryFiles[oldKey] = { ...recoveryPointer, reason: `renamed-to:${newKey}`, retiredAt: Date.now() };
-        settings.sidecarTombstones[oldKey] = { reason: `renamed-to:${newKey}`, at: Date.now() };
-        settings.dataFiles[newKey] = newPointer;
-        delete settings.sidecarTombstones[newKey];
-        delete settings.dataFiles[oldKey];
-        const installed = setChatState(newKey, state, { markLoaded: true });
-        updateHydratedStateMeta(newKey, newPointer?.revision || 0, {
-            hydratedAt: Date.now(),
-            lastCheckedAt: Date.now(),
-            latestObservedServerRevision: newPointer?.revision || 0,
-            writerId: String(newPointer?.writerId || ''),
-            latestObservedServerWriterId: String(newPointer?.writerId || ''),
-        });
-        persistedVersions.set(newKey, Number(stateVersions.get(newKey) || 0));
-        persistSettings();
-        let renameOwnershipDurable = false;
-        try {
-            await saveHostSettings();
-            renameOwnershipDurable = true;
-        } catch (error) {
-            console.warn(`[NPC State Delta] renamed ownership for ${newKey} could not be synchronously persisted; the retired predecessor is being retained as a crash-safe marker.`, error);
-        }
-        if (renameOwnershipDurable && oldPointer?.path) {
-            try { await deleteNpcStateDataFile(oldPointer, { headers: requestHeaders() }); }
-            catch (error) { console.warn(`[NPC State Delta] retired rename predecessor for ${oldKey} could not be physically deleted.`, error); }
-        }
-        renderDossier();
-        updateInjection();
-        return true;
-    } catch (error) {
-        console.warn(`[NPC State Delta] transactional rename failed for ${oldKey}; original durable ownership remains recoverable and no tombstone was published.`, error);
-        throw error;
-    }
-}
-
-
-async function flushLifecycleOwner(kind = 'chat', ownerId = '') {
-    const owner = String(ownerId || '').trim();
-    if (!owner) return [];
-    const keys = [...chatStateCache.keys()].filter(key => {
-        const parsed = parseQualifiedChatKey(key);
-        return parsed?.kind === kind && parsed.ownerId === owner;
-    });
-    const failures = [];
-    for (const key of keys) {
-        // A chat retired in this session has no live owner state to move; its dirty work stays
-        // recovery-only instead of being flushed back over the retired marker.
-        if (holdRetiredLocalWork(key)) continue;
-        try { await settleStateFileWrite(key, { flush: true }); }
-        catch (error) {
-            failures.push({ key, error });
-            console.warn(`[NPC State Delta] lifecycle flush could not settle ${key}; owner lifecycle will fail closed and retry later.`, error);
-        }
-    }
-    if (failures.length) {
-        const error = new AggregateError(failures.map(item => item.error), `NPC State Delta could not settle ${failures.length} owner chat(s) before lifecycle mutation.`);
-        error.code = 'NPC_STATE_OWNER_FLUSH_INCOMPLETE';
-        error.failures = failures.map(item => item.key);
-        throw error;
-    }
-    return keys;
-}
-
-function invalidateLifecycleOwner(kind = 'chat', ownerId = '') {
-    const owner = String(ownerId || '').trim();
-    if (!owner) return 0;
-    const keys = new Set([...chatStateCache.keys(), ...hydratedChatKeys, ...loadingChatStates.keys()]);
-    let count = 0;
-    for (const key of keys) {
-        const parsed = parseQualifiedChatKey(key);
-        if (parsed?.kind === kind && parsed.ownerId === owner && clearLifecycleCacheKey(key, 'owner-lifecycle')) count += 1;
-    }
-    return count;
-}
-
-function flushCurrentChatOnPageHide() {
-    const key = getChatKey();
-    if (key === 'no-chat' || !hydratedChatKeys.has(key) || !chatStateCache.has(key)) return;
-    void settleStateFileWrite(key, { flush: true }).catch(error => console.debug('[NPC State Delta] page-hide flush deferred', error));
 }
 
 function noteScanFailure(label, error, chatKey = '') {
@@ -3138,6 +2342,8 @@ const { freshChatState, normalizeChatState, getChatState, setChatState, workingC
 
 const { queueStateFileWrite, flushStateFile, settleStateFileWrite, persist, persistCritical, persistCriticalDurable } = createPersistPart(rt, { assertChatHydratedForWrite, chatHydrationStatus, getChatKey, getChatState, holdRetiredLocalWork, isCanonicalChatKey, markStateDirty, ownershipEpoch, ownershipEpochCurrent, reconcileCrossSessionWriteConflict, requestHeaders, requireReadyChatMutation, updateHydratedStateMeta });
 
+const { commitBranchCheckpoint, seedBranchTracking, hostSwipeState, isHostSwipeActive, maybeInheritKnownBranch, branchInheritancePending, noteAdoptedDossier, staleHostActive, staleHostPrefix } = createBranchPart(rt, { ensureChatStateLoaded, evictDormantChatStates, freshChatState, getChatKey, getChatState, isCanonicalChatKey, queueStateFileWrite, setChatState });
+
 const { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, attachGeneratedSecrets, castEmptyReason } = createHostedPart(rt, { chatHydrationStatus, getChatKey, getChatState, latestMessageId, latestReplyIndex });
 
 const { recordInlineCardsInState, clearInlineCardsAtMessage, removeNpcInlineCardAtMessage, purgeInlineCardsInState, scanInlineNpcIds, currentNpcById, findNpcByIdOrName, scenePresentAt, presentCastDisplayMode, applyLauncherFlag, effectivePresentCastChoice, storyBlockCastHtml, ensureInlineObserver, inlineMountNeedsRepair, startInlineWatchdog, renderInlineCards, queueInlineRender } = createInlineCardsPart(rt, { chatHydrationStatus, currentLineageKeyForMessage, getChatKey, getChatState, INLINE_HISTORY_LIMIT, isKeyNpc, latestMessageId, scenePresenceView, storyBlockV2Hosted });
@@ -3182,6 +2388,10 @@ function activatePresentCardFromEvent(event) {
 }
 
 const { editorIsMounted, openNpcEditorSafely, activateNpcEditorFromEvent, renderDossier, closeNpcEditor, saveNpcEditor } = createEditorPart(rt, { chatHydrationStatus, commitBranchCheckpoint, currentNpcById, ensureFreshMutationBoundary, eventTargetClosest, getChatKey, getChatState, hostedMeterView, latestMessageId, latestReplyIndex, persistCriticalDurable, queueInlineRender, relationshipNumber, requireReadyChatMutation, stampManualEdit, startInlineWatchdog, storySuiteV2Meters, updateInjection, workingCopyAdoption });
+
+const { queueSettledSwipeReconcile, branchHistoryDiagnostic, reconcileCurrentBranch, queueBranchReconcile } = createReconcilePart(rt, { cancelScanOperation, deferUntilSettled, drainPendingAutoScan, ensureChatStateLoaded, getChatKey, getChatState, handleAssistantMessageReceived, isHostSwipeActive, isScanBusy, persist, queuePendingAutoScan, renderDossier, scanNow, seedBranchTracking, setChatState, staleHostPrefix, updateInjection });
+
+const { retryCurrentChatHydration, detachBrokenSidecar, clearLifecycleCacheKey, removeDeletedChatState, moveRenamedChatState, flushLifecycleOwner, invalidateLifecycleOwner, flushCurrentChatOnPageHide, refreshCurrentChatFromServer, runBoundedLifecycleEvent } = createLifecyclePart(rt, { bumpOwnershipEpoch, cancelScanOperation, chatHydrationStatus, ensureChatStateLoaded, freshChatState, getChatKey, getChatState, holdRetiredLocalWork, isCanonicalChatKey, renderDossier, requestHeaders, resolveDeletedChatKey, resolveOwnedChatKey, setChatState, settleStateFileWrite, updateHydratedStateMeta, updateInjection });
 
 function installUiCaptureBridge() {
     if (uiCaptureBridgeInstalled || typeof document?.addEventListener !== 'function') return;
@@ -3308,67 +2518,6 @@ function replyNamesSomeone(state, messageId) {
             ignore: [ctx.name1, ctx.name2],
         });
     } catch { return true; }
-}
-
-async function refreshCurrentChatFromServer(reason = 'resume') {
-    const key = getChatKey();
-    if (key === 'no-chat' || !isCanonicalChatKey(key)) return false;
-    try {
-        await ensureChatStateLoaded(key, { probeMissing: true });
-        if (getChatKey() !== key) return false;
-        renderDossier();
-        updateInjection();
-        return true;
-    } catch (error) {
-        console.warn(`[NPC State Delta] ${reason} freshness check failed safely; cached state will not be used for mutation until the server can be verified.`, error);
-        return false;
-    }
-}
-
-function scheduleLifecycleRetry(operationKey, label, task) {
-    if (lifecycleRetryTimers.has(operationKey)) return;
-    const timer = setTimeout(() => {
-        lifecycleRetryTimers.delete(operationKey);
-        void runBoundedLifecycleEvent(operationKey, label, task);
-    }, LIFECYCLE_RETRY_DELAY_MS);
-    lifecycleRetryTimers.set(operationKey, timer);
-}
-
-async function runBoundedLifecycleEvent(operationKey, label, task) {
-    const key = String(operationKey || label || 'lifecycle');
-    let operation = lifecycleEventOperations.get(key);
-    if (!operation) {
-        operation = Promise.resolve().then(task);
-        lifecycleEventOperations.set(key, operation);
-        void operation.catch(error => {
-            console.warn(`[NPC State Delta] ${label} background transaction failed; scheduling retry.`, error);
-            scheduleLifecycleRetry(key, label, task);
-        });
-        operation.then(
-            () => lifecycleEventOperations.get(key) === operation && lifecycleEventOperations.delete(key),
-            () => lifecycleEventOperations.get(key) === operation && lifecycleEventOperations.delete(key),
-        );
-    }
-    let timer = null;
-    const timeout = new Promise(resolve => {
-        timer = setTimeout(() => resolve({ timedOut: true }), LIFECYCLE_EVENT_WAIT_MS);
-    });
-    const observed = operation.then(
-        value => ({ timedOut: false, value }),
-        error => ({ timedOut: false, error }),
-    );
-    const outcome = await Promise.race([observed, timeout]);
-    if (timer) clearTimeout(timer);
-    if (outcome.timedOut) {
-        console.warn(`[NPC State Delta] ${label} exceeded ${LIFECYCLE_EVENT_WAIT_MS / 1000}s; SillyTavern may continue while the fail-closed transaction retries in the background.`);
-        return false;
-    }
-    if (outcome.error) {
-        console.error(`[NPC State Delta] ${label} failed safely; scheduling a background retry.`, outcome.error);
-        scheduleLifecycleRetry(key, label, task);
-        return false;
-    }
-    return true;
 }
 
 function registerEvents() {
