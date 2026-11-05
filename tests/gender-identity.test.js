@@ -20,11 +20,12 @@ import {
     projectDossierState,
 } from '../dossier-ui.js';
 import { encodeNpcStateBundle, decodeNpcStateBundle } from '../bundle.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
 const dossierUiSource = fs.readFileSync(path.join(root, 'dossier-ui.js'), 'utf8');
-const runtimeSource = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
+const runtimeText = runtimeSource();
 
 test('gender is canonical male/female identity metadata with blank unknown', () => {
     assert.equal(normalizeGender('male'), 'male');
@@ -227,8 +228,8 @@ test('dossier UI places gender between species and role and makes it searchable'
 
     assert.match(dossierUiSource, /npc\?\.species,\s*\n\s*npc\?\.gender,\s*\n\s*npc\?\.role/);
     assert.match(dossierUiSource, /\[npc\.species, npc\.gender, npc\.role\]/);
-    assert.match(runtimeSource, /id="npc_state_delta_edit_gender"/);
-    assert.match(runtimeSource, /Gender<select/);
+    assert.match(runtimeText, /id="npc_state_delta_edit_gender"/);
+    assert.match(runtimeText, /Gender<select/);
 });
 
 test('native bundle preserves canonical gender without a format bump', () => {

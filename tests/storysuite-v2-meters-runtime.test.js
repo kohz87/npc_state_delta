@@ -267,7 +267,7 @@ test('index.js: the v2 meter hooks are the identity without a host', () => {
     assert.match(index, /function storySuiteV2Meters\(\) \{\n    return storyBlockV2Hosted\(\) && rt\.storySuiteV2\?\.hosted\?\.\(\) \? rt\.storySuiteV2 : null;\n\}/);
     assert.match(index, /function hostedMeterView\(npcs\) \{\n    const adapter = storySuiteV2Meters\(\);\n    if \(!adapter\) return npcs;/);
     assert.match(index, /function forwardRelationshipChangesToHost\(before, after, messageId, head = null\) \{\n    const adapter = storySuiteV2Meters\(\);\n    if \(!adapter\) return;/);
-    assert.match(index, /function hostedSecretsEditorHtml\(npc\) \{\n    const adapter = storySuiteV2Meters\(\);\n    if \(!adapter\) return '';/);
+    assert.match(index, /function hostedSecretsEditorHtml\(npc\) \{\n        const adapter = storySuiteV2Meters\(\);\n        if \(!adapter\) return '';/);
     assert.match(index, /const v2Edits = hostedMeters \? hostedMeters\.readEditor\(id => document\.getElementById\(id\)\?\.value, current\) : null;/);
     assert.match(index, /const meterViews = storySuiteV2Meters\(\)\?\.dossierMeters\?\.\(state\.npcs\) \?\? \{\};/);
     assert.match(index, /if \(shownRelationship\) \{/);
@@ -506,7 +506,7 @@ test('hosted: the scan watches present people\'s event notes, and a story event 
 
 test('index.js: after the editor applies its notes to the slice the dossier is drawn again, and the scan carries the hosted notes\' options only while hosted', () => {
     const index = runtimeSource();
-    assert.match(index, /await hostedMeters\.applyEditor\(savedName, v2Edits\);\n[^\n]*\n        renderDossier\(\);\n        updateInjection\(\);/);
+    assert.match(index, /await hostedMeters\.applyEditor\(savedName, v2Edits\);\n[^\n]*\n            renderDossier\(\);\n            updateInjection\(\);/);
     assert.match(index, /const hostedNotes = hostedMeters\(\);\n    const noteOptions = hostedNotes && !capture \? hostedNotePromptOptions\(state, settings, messageId\) : \{\};/);
     assert.match(index, /const eventWatch = capture \? \(Array\.isArray\(capture\.watch\) \? capture\.watch : \[\]\) : \(noteOptions\.eventWatch \|\| \[\]\);/);
     assert.match(index, /if \(hostedNotes && settings\.layeredSecrets !== false\) attachGeneratedSecrets\(nextState, newlyAdmittedIds, parsedForMerge, resolvedParsed, parsed\);/);

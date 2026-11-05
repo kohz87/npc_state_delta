@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 async function serverAuthorityChecks(mockState, eventSource, manualAddNpc, sleep) {
     const runtime = globalThis.NPCStateDelta;
@@ -135,7 +136,7 @@ test('server-authoritative multi-session freshness and stale provider guards exe
 });
 
 test('freshness boundaries cover resume, editor, portrait and destructive mutation paths without polling', () => {
-    const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const source = runtimeSource();
     assert.match(source, /addEventListener\?\.\('pageshow',[\s\S]*refreshCurrentChatFromServer\('pageshow'\)/);
     assert.match(source, /visibilityState === 'visible'[\s\S]*refreshCurrentChatFromServer\('visibility-resume'\)/);
     assert.match(source, /activeEditorBaseRevision[\s\S]*workingCopyAdoption\(originChatKey\)/);

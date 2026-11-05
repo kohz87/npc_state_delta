@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createHost } from './vendor/story-block/testkit/index.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 import { buildInjection, createNpcRecord } from '../core.js';
 import { normalizeNpcRecord } from '../core-mechanics.js';
 import { castFromHtml, castProjection, projectDossierState } from '../dossier-ui.js';
@@ -1058,7 +1059,7 @@ test('runtime: a cast dossier made without its picture gets it when Story Block 
 });
 
 test('index.js wiring: the picture sync is asked for by the adapter, runs when a chat opens, and a removal is recorded (source)', () => {
-    const index = fs.readFileSync(fileURLToPath(new URL('../index.js', import.meta.url)), 'utf8');
+    const index = runtimeSource();
     assert.match(index, /v2\.startStorySuiteV2\(\{[^}]*castSync, castPortraitDue/, 'the adapter can ask whether there is a picture to give');
     assert.match(index, /commitBranchCheckpoint\(working, messageId, 'cast-portrait'\)/, 'the picture is checkpointed at its reply');
     assert.match(index, /castPortraitDue\(\)\) castSync\(\)/, 'a chat opened gives the picture too');
