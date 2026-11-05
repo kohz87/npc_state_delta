@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { appearanceUiModel } from '../continuity-ui.js';
 import { appearanceDraftRecord } from '../appearance.js';
 import { normalizeNpcRecord, resolveNpcAppearance } from '../core.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 function formNpc() {
     return normalizeNpcRecord({
@@ -93,7 +94,7 @@ test('appearance form editor supports an explicitly unclassified current present
 test('continuity UI ships dedicated calendar/birthday and appearance-form surfaces', () => {
     const source = readFileSync(new URL('../continuity-ui.js', import.meta.url), 'utf8');
     const bootstrap = readFileSync(new URL('../bootstrap.js', import.meta.url), 'utf8');
-    const index = readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     const calendar = readFileSync(new URL('../calendar-settings.js', import.meta.url), 'utf8');
     assert.match(index, /settingsGroup\('calendar', 'Calendar & birthdays'/);
     assert.match(calendar, /\[data-delta-settings-slot="calendar"\]/);

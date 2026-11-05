@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { connectStoryBlock, dossierRowNodes, emptyCastHtml, STORY_BLOCK_TAB_IDS } from '../story-block-tabs.js';
 import { fakeDocument } from './helpers/fake-dom.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // Story Block integration: Present NPCs and Dossiers tabs registered through Story Block's public
 // registerTab API. Unit tests drive the adapter with fakes; the host scenario runs the real
@@ -230,7 +231,7 @@ test('v1.1.11 with Story Block, Only in Story Block clears the chat cast and the
 });
 
 test('v1.1.12 a choice made in settings is remembered; the Story Block pane is padded and keeps its cards to one column (UI 4c)', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     const css = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
     assert.match(index, /presentCastDisplayChosen: false,/);
     assert.match(index, /getSettings\(\)\.presentCastDisplayChosen = true;/, 'picking any choice marks it deliberate');

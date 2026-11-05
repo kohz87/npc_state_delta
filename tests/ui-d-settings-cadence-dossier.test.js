@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AUTO_SCAN_EVERY_WITHOUT_EVERY_REPLY, autoScanDue } from '../scan-context.js';
 import { FEATURES, FEATURE_SCAN_EVERY_REPLY, FEATURE_SOCIAL, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_PRESETS } from '../src/npc-meters.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // UI cleanup (1 Nov): "Scan after every reply" (npc-state-delta.scan-every-reply) and its presets, the settings folds
 // (Meter presets, Expert) and the phone-width dossier window.
@@ -38,7 +39,7 @@ test('scan after every reply: on is the old cadence, off waits for three replies
 });
 
 test('the scan switch is read by the automatic scan only; a manual scan does not ask it', () => {
-    const index = read('index.js');
+    const index = runtimeSource();
     assert.match(index, /function scanAfterEveryReply\(\) \{\s*const adapter = storySuiteV2Meters\(\);\s*if \(!adapter\) return true;/);
     assert.match(index, /everyReply: scanAfterEveryReply\(\)/);
     assert.equal(index.split('scanAfterEveryReply()').length - 1, 2, 'asked in one place only (plus its definition)');
@@ -66,7 +67,7 @@ test('features: scan-every-reply is on by default; Lean turns off it, stages and
 });
 
 test('settings panel: Meter presets fold; Expert holds the five rarely needed groups, last; every group keeps its key', () => {
-    const index = read('index.js');
+    const index = runtimeSource();
     const html = index.slice(index.indexOf('<div class="delta-settings-experience story-suite-folds">'), index.indexOf('const SETTINGS_OPEN_GROUPS_KEY'));
     const top = [...html.matchAll(/\$\{settingsGroup\('(\w+)'/g)].map(match => match[1]);
     assert.deepEqual(top, ['scanning', 'roster', 'presets', 'portrait', 'maintenance', 'expert'], 'everyday groups, then Expert last');
@@ -84,7 +85,7 @@ test('settings panel: Meter presets fold; Expert holds the five rarely needed gr
 });
 
 test('the Expert note says the Story Director sentence only while it is true', () => {
-    const index = read('index.js');
+    const index = runtimeSource();
     const notes = index.slice(index.indexOf('const EXPERT_NOTES = '), index.indexOf('function syncExpertNote'));
     assert.match(notes, /'story-director': 'Rarely needed\. With Story Director installed its calendar is used, so the calendar here only matters on its own\.'/);
     assert.match(notes, /own: "Rarely needed\. You keep the calendar here \(Source of truth\), so Story Director's calendar is not used\."/);

@@ -5,6 +5,7 @@ import { escapeHtml } from '../src/util/html.js';
 import { escapeHtml as toolsEscape } from '../dossier-tools-core.js';
 import { matchingNpcRecords, scanRowMatchesNpc } from '../core.js';
 import { runEditorHostScenario } from './editor-host.mjs';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // Cleanup step 11: one HTML escape, one "is this row / record that NPC" pair, no dead pass-through,
 // and the settings other modules keep controls for are declared and normalized by the settings owner.
@@ -35,7 +36,7 @@ test('one sameNpc / matchingPrevious: core-mechanics owns them', () => {
 });
 
 test('dead code is gone', () => {
-    const index = sources['index.js'];
+    const index = runtimeSource();
     assert.doesNotMatch(index, /function prepareFullWindowRelationshipEvaluation/);
     assert.doesNotMatch(index, /npc\.worldActive = Boolean\(npc\.worldActive\)/);
 });
@@ -56,7 +57,7 @@ test('the settings owner declares the settings other modules keep controls for, 
         assert.deepEqual(settings().relationshipMap, { enabled: false, defaultLens: 'warmth' });
         assert.equal('calendarConfig' in settings(), false, 'a stored non-object is not a calendar');
     });
-    const index = sources['index.js'];
+    const index = runtimeSource();
     assert.match(index, /settingRow\('npc_state_delta_inject_limit', 'NPCs in the dossier', numberControl\('npc_state_delta_inject_limit', 1, 12, 'NPCs'\)/);
     assert.match(index, /bindSettingsNumber\('#npc_state_delta_inject_limit', 'injectLimit', 1, 12, 3, updateInjection\);/);
     assert.match(index, /\$\('#npc_state_delta_inject_limit'\)\.val\(s\.injectLimit\);/);

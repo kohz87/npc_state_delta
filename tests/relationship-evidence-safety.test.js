@@ -11,6 +11,7 @@ import {
     mergeScanResult,
     relationshipAxisEvidenceGrounded,
 } from '../core.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 test('v0.2.22 stock policy allows fresh mundane low-band progression', () => {
     assert.match(DEFAULT_RELATIONSHIP_CRITERIA, /LOW-BAND FAMILIARITY/i);
@@ -144,7 +145,7 @@ test('rolling full-window relationships are scrubbed for new and existing NPCs',
 });
 
 test('runtime wires targeted new-NPC enrichment and post-admission relationship repair', () => {
-    const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const source = runtimeSource();
     assert.match(source, /for \(const id of newlyAdmittedIds\)/);
     assert.match(source, /queueNpcBackfillInState\(nextState, admitted\.id, admitted\.name, targetMessageId/);
     assert.doesNotMatch(source, /deepSweep: true/);

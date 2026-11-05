@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { runtimeSource } from './helpers/runtime-source.js';
 
-const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+const source = runtimeSource();
 // (cleanup step 10) The focused relationship pass moved to src/relationship-pass.js.
 const passSource = fs.readFileSync(new URL('../src/relationship-pass.js', import.meta.url), 'utf8');
 

@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
-const index = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
+const index = runtimeSource();
 const core = fs.readFileSync(path.join(root, 'core.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
 
@@ -19,7 +20,7 @@ function functionBody(source, signature, nextSignature) {
 }
 
 test('settings migration batches historical changes into one save', () => {
-    const body = functionBody(index, 'function getSettings()', '\nfunction getChatKey()');
+    const body = functionBody(fs.readFileSync(path.join(root, 'runtime-settings.js'), 'utf8'), 'function getSettings()', '\nconst PRESENT_CAST_DISPLAY_MODES');
     assert.equal((body.match(/persistSettings\(\)/g) || []).length, 1);
     assert.match(body, /assign\('schemaVersion', DEFAULTS\.schemaVersion\)/);
     assert.match(body, /if \(dirty\) persistSettings\(\)/);
@@ -70,7 +71,7 @@ test('retired helper and legacy dossier CSS are absent', () => {
 });
 
 test('settings-only UI changes do not rewrite the per-chat sidecar', () => {
-    const body = functionBody(index, 'function bindUi()', "\n    $(document).on('click.npcStateDelta', '#npc_state_delta_scan_now'");
+    const body = functionBody(index, 'function bindUi()', "\n        $(document).on('click.npcStateDelta', '#npc_state_delta_scan_now'");
     assert.match(body, /bindSettingsCheckbox/);
     assert.match(body, /persistSettings\(\)/);
     assert.doesNotMatch(body, /\bpersist\(\)/);

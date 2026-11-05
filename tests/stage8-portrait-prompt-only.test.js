@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const portraitToolsUrl = new URL('../portrait-tools.js', import.meta.url);
 const controlsUrl = new URL('../dossier-tools.js', import.meta.url);
@@ -36,7 +37,7 @@ test('dossier Portrait control routes to the maintained manager and suppresses t
     const source = await readFile(controlsUrl, 'utf8');
     const experience = await readFile(new URL('../dossier-experience.js', import.meta.url), 'utf8');
     assert.match(experience, /from '\.\/portrait-tools\.js'/);
-    const index = await readFile(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     assert.doesNotMatch(index + source, /npc-state-delta-generate-portrait/, 'the legacy image-generation button is gone, not merely hidden');
     assert.match(source, /\.npc-state-delta-portrait-run, \.npc-state-delta-portrait-use \{ display:none !important; \}/);
     assert.match(source, /top layer/i);

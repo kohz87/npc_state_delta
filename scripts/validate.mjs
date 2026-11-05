@@ -105,7 +105,7 @@ requireCheck(!/connectionManager\s*\.\s*selectedProfile\s*=/.test(scannerRouting
 // The runtime controller and its src/ modules (the scanner request lives in src/scanner-request.js).
 const runtimeAndModules = [runtime, ...declaredSrcModules.filter(name => fs.existsSync(path.join(root, name))).map(name => fs.readFileSync(path.join(root, name), 'utf8'))].join('\n');
 requireCheck(runtimeAndModules.includes('dispatchScannerRequest') && runtimeAndModules.includes('dispatchScannerRequest(ctx,'), 'runtime scanner calls are not wired through the shared dispatcher');
-requireCheck(runtime.includes("scannerConnectionProfile: ''"), 'scanner connection profile is missing from active Delta settings defaults');
+requireCheck(fs.readFileSync(path.join(root, 'runtime-settings.js'), 'utf8').includes("scannerConnectionProfile: ''"), 'scanner connection profile is missing from active Delta settings defaults');
 
 for (const file of ['AGENTS.md', 'docs/core-contract.md', 'docs/WORKPLAN.md', 'DEVELOPMENT.md', 'docs/seed-provenance.md', 'docs/seed-provenance.json', 'LICENSE']) {
   requireCheck(fs.existsSync(path.join(root, file)), `missing ${file}`);

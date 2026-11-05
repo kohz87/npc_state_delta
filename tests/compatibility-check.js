@@ -2,11 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
 const bootstrap = fs.readFileSync(path.join(root, 'bootstrap.js'), 'utf8');
-const index = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
+const index = runtimeSource();
 const identity = fs.readFileSync(path.join(root, 'identity.js'), 'utf8');
 const hardening = fs.readFileSync(path.join(root, 'hardening.js'), 'utf8');
 const scannerRouting = fs.readFileSync(path.join(root, 'scanner-routing.js'), 'utf8');

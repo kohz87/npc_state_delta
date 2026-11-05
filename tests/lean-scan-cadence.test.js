@@ -85,7 +85,7 @@ function cadenceHelpers(mockState, eventSource, sleep) {
 }
 
 test('lean: the shipped default of Scan every is 5', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     assert.match(index, /\n    scanEvery: 5,\n    scanDepth: 6,/);
 });
 
@@ -415,6 +415,7 @@ test('lean: the relationship evaluator system prompt says exchanges for a window
 });
 
 import { mergeImportedDossierState } from '../bundle.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 test('lean: a new short chat reads replies 1 to 5 once at its first scan; a long chat with no sidecar reads the latest reply only', () => {
     runScenario('new-chat-short', async h => {
@@ -443,7 +444,7 @@ test('lean: an import never leaves a chat looking new, and Clear leaves the mark
     const withDossiers = mergeImportedDossierState(empty, { npcs: [{ id: 'a', name: 'Mira Vale' }] });
     assert.ok(withDossiers.scanCount >= 1, 'a bundle with dossiers');
     assert.equal(mergeImportedDossierState(empty, { npcs: [] }).scanCount, 0, 'an empty bundle changes nothing');
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     assert.match(index, /cleared\.lastScannedMessageId = latestMessageId\(true\) >= 0 \? latestMessageId\(true\) : null;/);
     assert.match(index, /fresh: chatNeverScanned\(getChatState\(scanChatKey\), messageId\),/);
 });

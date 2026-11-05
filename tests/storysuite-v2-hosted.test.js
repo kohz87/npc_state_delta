@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // Story Suite v2 hosted-mode polish, with the real runtime: the established synthetic host
 // (runtime-smoke.mjs) loads Delta beside a fake Story Block v2 global.
@@ -259,7 +260,7 @@ test('the launcher rule, the setting row and its CSS follow the hosted flag', ()
     assert.match(launcher, /html\[data-npc-state-delta-story-block-v2="1"\]:not\(\[data-npc-state-delta-launcher-v2="keep"\]\) #\$\{LAUNCHER_ID\} \{ display: none !important; \}/);
     // v1's rule is unchanged.
     assert.match(launcher, /html\[data-npc-state-delta-story-block="1"\]:not\(\[data-npc-state-delta-launcher="keep"\]\) #\$\{LAUNCHER_ID\} \{ display: none !important; \}/);
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     assert.match(index, /<div class="npc-state-delta-v2-hosted-only">\$\{settingRow\('npc_state_delta_launcher_with_story_block_v2', 'Show NSD\\'s own launcher with Story Block v2'/);
     assert.match(index, /launcherWithStoryBlockV2: false,/);
     const css = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');

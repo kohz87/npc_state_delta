@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { scannerDiagnosticLines } from '../scanner-routing.js';
 import { createStorySuiteV2Adapter } from '../src/storysuite-v2.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 function ctxWith(profiles, { disabled = [], service = true } = {}) {
     return {
@@ -82,7 +83,7 @@ test('the module definition offers hooks.diagnostics: the scanner report, the do
 });
 
 test('the scanner profile list says plainly when there is no profile to pick; the drawer is held open in Story Block\'s fold', () => {
-    const index = readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     assert.match(index, /id="npc_state_delta_scanner_profile_none"[^>]*hidden> There is no connection profile yet/);
     assert.match(index, /\$\('#npc_state_delta_scanner_profile_none'\)\.prop\('hidden', usable\)/);
     assert.match(index, /scannerReport: \(\) => scannerDiagnosticLines\(/);

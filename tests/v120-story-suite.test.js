@@ -32,6 +32,7 @@ import {
 } from '../suite-handshake.js';
 import { buildInjection, getActiveCalendarConfig, normalizeNpcRecord, setNpcArchived, setActiveCalendarConfig, setExternalCalendarSource, stripUiNoise } from '../core.js';
 import { deterministicCalendarBirthday } from '../calendar.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // Story Suite handshake (docs/STORY_SUITE.md): the shared registry in suite.js, Delta's
 // announcement and the three defers (scene, calendar, stats), plus World State read from inside
@@ -611,7 +612,7 @@ test('v1.2.1 the runtime shares its panel and api.manage, and shows Manage all i
 });
 
 test('v1.2.1 the settings panel starts with a hidden Manage all in Story Suite line', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     const html = index.slice(index.indexOf('function buildSettingsHtml()'), index.indexOf('function readOpenSettingsGroups()'));
     assert.match(html, /<div id="\$\{UI_ID\}" class="extension_container[\s\S]*npc-state-delta-drawer story-suite-panel">\s*<div id="npc_state_delta_suite_manage" class="npc-state-delta-suite-manage story-suite-manage" data-story-suite-link hidden>\s*<button type="button" class="menu_button" data-delta-open-suite>[^<]*<i class="fa-solid fa-layer-group"><\/i> Manage all in Story Suite<\/button>\s*<\/div>\s*<div class="delta-settings-quickbar story-suite-quickbar">/);
     assert.match(index, /const UI_ID = 'npc_state_delta_settings';/);

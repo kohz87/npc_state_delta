@@ -18,6 +18,7 @@ import {
     storyBlockTags,
 } from '../present-scene.js';
 import { ensureSuiteStylesheet, SUITE_STYLESHEET_ID } from '../suite-handshake.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // Present NPCs view (1.2.2), display only: the now line and NPC Inner Chatter bubbles.
 
@@ -238,7 +239,7 @@ test('v1.2.3 the card shows labelled now lines that wrap to two lines, the name 
     assert.match(rule('.npc-state-delta-present-card-name'), /text-overflow: ellipsis/, 'a long name is cut with an ellipsis');
     assert.doesNotMatch(rule('.npc-state-delta-present-card-text'), /background/, 'no footer over the portrait: the text sits on the row');
     assert.doesNotMatch(css, /present-card-overlay/, 'no text over the portrait');
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     assert.match(index, /<span class="npc-state-delta-present-card-portrait">\$\{portrait\}<\/span>\s*<span class="npc-state-delta-present-card-text">/);
     assert.match(index, /class="npc-state-delta-present-chip"/, 'the compact strip stays compact');
 });
@@ -270,7 +271,7 @@ test('v1.2.2 a malformed scene shapes to nothing instead of throwing', () => {
 });
 
 test('v1.2.2 the present cards render now/chatter slots and the Story Block tab fills them', () => {
-    const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     const tabs = fs.readFileSync(new URL('../story-block-tabs.js', import.meta.url), 'utf8');
     assert.match(index, /function inlineCardHtml\(npc, messageId, scene = null\)[\s\S]*nowSlotHtml\(scene, npc\.id\)[\s\S]*chatterSlotsHtml\(scene, npc\.id\)/);
     assert.match(index, /npc-state-delta-present-roster" data-message-id="\$\{messageId\}"\$\{sceneAttr\(scene\)\}/);
@@ -288,8 +289,8 @@ test('v1.2.2 the present cards render now/chatter slots and the Story Block tab 
 });
 
 test('v1.2.2 the settings panel carries the shared story-suite-* classes beside its own', () => {
-    const sources = ['index.js', 'calendar-settings.js', 'relationship-map.js', 'full-cast.js', 'scanner-output-ui.js']
-        .map(name => fs.readFileSync(new URL(`../${name}`, import.meta.url), 'utf8'));
+    const sources = [runtimeSource(), ...['calendar-settings.js', 'relationship-map.js', 'full-cast.js', 'scanner-output-ui.js']
+        .map(name => fs.readFileSync(new URL(`../${name}`, import.meta.url), 'utf8'))];
     const [index] = sources;
     for (const [own, shared] of [
         ['inline-drawer-content npc-state-delta-drawer', 'story-suite-panel'],

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -34,7 +35,7 @@ test('superseded enhancement dossier library is not retained beside Stage 1 UI',
 });
 
 test('full-cast setting and manual action mount into the settings owner slots', () => {
-  const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+  const index = runtimeSource();
   assert.match(index, /settingsSlot\('full-cast'\)/);
   assert.match(index, /settingsSlot\('full-cast-action'\)/);
   assert.match(source, /\[data-delta-settings-slot="full-cast"\]/);

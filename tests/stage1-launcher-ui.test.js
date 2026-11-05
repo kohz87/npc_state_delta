@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { clampLauncherPosition, launcherPositionRecord } from '../launcher-ui.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -57,7 +58,7 @@ test('launcher hides while Story Block\'s game view is open (its .ss-gameview cl
 
 test('launcher hides while Story Block carries Delta\'s tabs, unless the player keeps it', () => {
     assert.match(source, /html\[data-npc-state-delta-story-block="1"\]:not\(\[data-npc-state-delta-launcher="keep"\]\) #\$\{LAUNCHER_ID\} \{ display: none !important; \}/);
-    const index = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
+    const index = runtimeSource();
     assert.match(index, /launcherWithStoryBlock: false,/, 'hidden by default');
     assert.match(index, /data\.npcStateDeltaLauncher = getSettings\(\)\.launcherWithStoryBlock === true \? 'keep' : 'auto'/);
     assert.match(index, /id="npc_state_delta_launcher_with_story_block" type="checkbox"/);

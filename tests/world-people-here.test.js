@@ -8,10 +8,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CAST_TAB_ID, PAGE_API, WORLD_FEATURE, createStorySuiteV2Adapter } from '../src/storysuite-v2.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const css = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
-const indexSource = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
+const indexSource = runtimeSource();
 
 const esc = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const classesOf = n => n.className.split(/\s+/).filter(Boolean);
