@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
-const index = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
+const index = runtimeSource();
 const scannerRouting = fs.readFileSync(path.join(root, 'scanner-routing.js'), 'utf8');
 // (cleanup step 10) The scanner request moved to src/scanner-request.js.
 const request = fs.readFileSync(path.join(root, 'src', 'scanner-request.js'), 'utf8');
