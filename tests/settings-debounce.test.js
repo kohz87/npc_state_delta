@@ -68,13 +68,24 @@ test('a burst of lazy settings saves is one save, SETTINGS_LAZY_QUIET_MS after t
     } finally { stopTimers(); }
 });
 
+test('sidecar writes 6 s apart (the catch-up\'s model calls in the real-ST run) are still one settings save', async () => {
+    startTimers();
+    try {
+        freshSettings();
+        for (let i = 0; i < 3; i += 1) { persistSettingsLazy(); await tick(6000); }
+        assert.equal(host.saves, 0, 'each gap is shorter than the quiet time, so the window keeps extending');
+        await tick(SETTINGS_LAZY_QUIET_MS);
+        assert.equal(host.saves, 1);
+    } finally { stopTimers(); }
+});
+
 test('a burst that never goes quiet is saved at the SETTINGS_LAZY_MAX_MS bound, then a new window starts', async () => {
     startTimers();
     try {
         freshSettings();
         const step = 3000;
         for (let elapsed = 0; elapsed < SETTINGS_LAZY_MAX_MS; elapsed += step) { persistSettingsLazy(); await tick(step); }
-        // requests every 3 s for 21 s: the first window closes at the bound (20 s), not 5 s after the last request
+        // requests every 3 s: the first window closes at the bound (SETTINGS_LAZY_MAX_MS), not SETTINGS_LAZY_QUIET_MS after the last request
         assert.equal(host.saves, 1);
         persistSettingsLazy();
         await tick(SETTINGS_LAZY_QUIET_MS);

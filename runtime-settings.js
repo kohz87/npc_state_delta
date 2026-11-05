@@ -190,8 +190,8 @@ const DEFAULTS = Object.freeze({
 // every dossier write is not urgent: the sidecar path is deterministic and hydration re-reads its revision, so those saves are
 // coalesced (SETTINGS_LAZY_QUIET_MS after the last request, never later than SETTINGS_LAZY_MAX_MS after the first) and flushed on
 // page hide, chat change and any immediate save. Each save writes ST's whole settings body, so a burst costs one, not one per write.
-export const SETTINGS_LAZY_QUIET_MS = 5000;
-export const SETTINGS_LAZY_MAX_MS = 20000;
+export const SETTINGS_LAZY_QUIET_MS = 8000;
+export const SETTINGS_LAZY_MAX_MS = 30000;
 const lazySave = { timer: null, firstAt: 0 };
 
 function cancelLazySettingsSave() {
