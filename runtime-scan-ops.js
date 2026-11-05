@@ -215,17 +215,18 @@ export function createScanOpsPart(rt, deps) {
     //
     // One bounded wait per send: a send runs this twice (GENERATION_AFTER_COMMANDS, then MESSAGE_SENT). When the first found the barrier still up
     // after its wait (or the host said the block is permanent), the second only looks once, so a send into a chat that is not ready is held for
-    // one wait at most, not two. The memo is by chat and short: a later send waits again.
-    const GENERATION_WAIT_MEMO_MS = 30 * 1000;
+    // one wait at most, not two. The memo belongs to that one send: the second handler uses it up, and it lapses within seconds (a handler of the
+    // same send follows at once), so the next send waits in full again.
+    const GENERATION_WAIT_MEMO_MS = 3 * 1000;
     let generationBlocked = { key: '', at: 0 };
     async function generationReady(key) {
         const waited = generationBlocked.key === key && Date.now() - generationBlocked.at < GENERATION_WAIT_MEMO_MS;
+        generationBlocked = { key: '', at: 0 };
         if (!await messageGateSettled(waited ? { wait: false } : undefined)) {
-            generationBlocked = { key, at: Date.now() };
+            if (!waited) generationBlocked = { key, at: Date.now() };
             deferUntilSettled(key, { label: 'injection', what: 'the dossier injection', retry: async () => { await refreshMessageGate(); if (getChatKey() === key) updateInjection(); } }, null, false);
             return false;
         }
-        generationBlocked = { key: '', at: 0 };
         await refreshMessageGate();
         return getChatKey() === key;
     }

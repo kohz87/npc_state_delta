@@ -104,13 +104,19 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
      */
     async function loaded(until = null) {
         if (typeof port.ready !== 'function' || readyNow()) return true;
-        const load = Promise.resolve().then(() => port.load?.()).catch(() => { /* answered by the look below */ });
+        let settled = false;
+        const load = Promise.resolve().then(() => port.load?.()).catch(() => { /* answered by the look below */ }).then(() => { settled = true; });
         if (until === null) { await load; return readyNow(); }
         // A callback of the host has a bound of its own (10 s): the load is waited for inside it, never past it. Another load may be running
-        // (the chat just opened), so the state is looked at every `pollMs`, not only when this load answers. A load that failed (`loadFailed`) ends the wait.
+        // (the chat just opened), so the state is looked at every `pollMs`, not only when this load answers. A load that failed (`loadFailed`)
+        // ends the wait; so does a load that answered while nothing is loading and the state is still not ready (a chat that cannot be loaded
+        // now, e.g. not saved yet): the host asks again. A settled load is never raced again (it would answer at once and the timer would never run).
         const failedNow = () => { try { return port.loadFailed?.() === true; } catch { return false; } };
+        const loadingNow = () => { try { return port.loading?.() !== false; } catch { return true; } };
         while (!readyNow() && !failedNow() && until - now() > 0) {
-            await Promise.race([load, new Promise(resolve => { const id = schedule(resolve, Math.min(pollMs, Math.max(1, until - now()))); id?.unref?.(); })]);
+            if (settled && !loadingNow()) break;
+            const tick = new Promise(resolve => { const id = schedule(resolve, Math.min(pollMs, Math.max(1, until - now()))); id?.unref?.(); });
+            await (settled ? tick : Promise.race([load, tick]));
         }
         return readyNow();
     }

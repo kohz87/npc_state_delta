@@ -949,6 +949,7 @@ window.NPCStateDelta = Object.freeze({
     inheritBranch: () => maybeInheritKnownBranch(),
     stateReady: () => chatHydrationStatus() === 'ready',
     stateFailed: () => chatHydrationStatus() === 'error',
+    stateLoading: () => chatHydrationStatus() === 'loading',
     scanActive: () => scanWorkPending(),
     scanIdle: ms => scanIdle(ms),
     // Which messages the story stands on (the Story Suite adapter's gate): scans do not read what Story Block faded.

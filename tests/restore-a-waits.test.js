@@ -74,6 +74,11 @@ test('a send waits for the host once: the second handler of the same send only l
         assert.ok(first >= 280, `the first handler waited its bound (${first} ms)`);
         assert.ok(second < 150, `the second only looked (${second} ms): one wait for the send, not two`);
         assert.ok(asked.includes('look'));
+        // A second send right after a failed one waits in full again when the head is still settling (the memo was the first send's).
+        const again = await timed('generation_after_commands');
+        assert.ok(again >= 280, `the next send's first handler waits its bound (${again} ms)`);
+        const againSecond = await timed('message_sent');
+        assert.ok(againSecond < 150, `and its second handler only looks (${againSecond} ms)`);
         // When the barrier is down the next send is not held.
         down = true;
         asked.length = 0;
@@ -158,4 +163,42 @@ test('the idle wait gets only what is left of the bound', async t => {
     await Promise.all([first, second]);
     assert.equal(seen.length, 2);
     assert.equal(seen[1], 2000, 'the second had 8 s from its own asking, and 6 s were spent before it ran');
+});
+
+// ---- B1: a load that answered must not be raced again (the page's event loop must keep running) ----
+
+/** Real clock. `ticks` counts a 20 ms interval during `fn`. */
+async function ticking(fn) {
+    let ticks = 0;
+    const id = setInterval(() => { ticks += 1; }, 20);
+    const started = Date.now();
+    try { return { out: await fn(), ticks, took: Date.now() - started }; } finally { clearInterval(id); }
+}
+
+test('a load that answers at once and leaves the state not ready does not hold the event loop (no "loading" hook: polled with real timers)', async () => {
+    const { port: p } = port({ load: async () => {} });
+    const participant = createParticipant({ port: p, vault: memoryVault(), boundMs: 600 }).participant;
+    const { out, ticks, took } = await ticking(() => participant.prepare(PREPARE).catch(error => ({ thrown: error.message })));
+    assert.match(out.thrown ?? out.message ?? '', /not loaded this chat's dossiers yet/);
+    assert.ok(took >= 550 && took < 900, `bounded (${took} ms)`);
+    assert.ok(ticks >= 10, `the interval kept ticking during the wait (${ticks} ticks in ${took} ms)`);
+});
+
+test('a load that answered while nothing is loading ends the wait at once with the retryable failure', async () => {
+    let loads = 0;
+    const { port: p } = port({ load: async () => { loads += 1; }, loading: () => false });
+    const participant = createParticipant({ port: p, vault: memoryVault(), boundMs: 5000 }).participant;
+    const { out, took } = await ticking(() => participant.prepare(PREPARE).catch(error => ({ thrown: error.message })));
+    assert.match(out.thrown ?? out.message ?? '', /not loaded this chat's dossiers yet/);
+    assert.ok(took < 300, `at once (${took} ms)`);
+    assert.equal(loads, 1, 'one load asked');
+});
+
+test('a load that answers while another load is still running keeps waiting for it', async () => {
+    const { live, port: p } = port({ load: async () => {}, loading: () => true });
+    const participant = createParticipant({ port: p, vault: memoryVault(), boundMs: 2000 }).participant;
+    setTimeout(() => { live.loaded = true; }, 150);
+    const { out, took } = await ticking(() => participant.prepare(PREPARE));
+    assert.equal(out.code, 'SNAPSHOT_UNAVAILABLE', 'it got past the load');
+    assert.ok(took >= 140 && took < 600, `${took} ms`);
 });
