@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const source=readFileSync(new URL('../index.js',import.meta.url),'utf8');
+const runtimeState=readFileSync(new URL('../runtime-state.js',import.meta.url),'utf8');
 
 test('runtime integration uses per-chat scan operations and no legacy global scanBusy flag',()=>{
   assert.match(source,/createScanOperationRegistry/);
@@ -40,7 +41,7 @@ test('deep hardening gates rendering and injection on hydration readiness',()=>{
 });
 
 test('busy automatic scans coalesce instead of being silently dropped',()=>{
-  assert.match(source,/const pendingAutoScans = new Map\(\)/);
+  assert.match(runtimeState,/pendingAutoScans: new Map\(\)/);
   assert.match(source,/queuePendingAutoScan\(scanChatKey, messageId, 'busy-auto-scan'\)/);
   assert.match(source,/drainPendingAutoScan\(scanChatKey\)/);
   assert.doesNotMatch(source,/attempt < 250/);
