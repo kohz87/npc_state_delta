@@ -18,7 +18,8 @@ Story Block (kohz87/Story_block, the host), RPG Battle (kohz87/rpg_battle), Stor
 - `runtime-modules.json`: the **only** shipping JS inventory; every root `.js` file must be listed exactly once.
 - Root `*.js`: canonical owners (`scanner-routing.js` the only request dispatcher, `core-mechanics.js`,
   `branch-core.js`, `continuity-core.js`, `appearance.js`, `bundle.js`, `dossier-*.js`, `full-cast.js`, ...).
-- `src/storysuite-v2.js`: the Story Suite v2 adapter (queries `npc.*`, commands `npc.adjust|set|refresh|milestone|tick`).
+- `src/storysuite-v2.js`: the Story Suite v2 adapter (queries `npc.*`, commands `npc.adjust|set|refresh|milestone|tick`); its factory's
+  parts live in `src/adapter/` (`queries`, `cast-ui`, `timeline`, `connect`, `editor`), assembled and re-exported by `storysuite-v2.js`.
 - `src/npc-meters.js`, `npc-meters-presets.js`, `npc-meters-screen.js`: the hosted `npc` domain, presets, card.
 - `src/fields/registry.js`: the one table of stored dossier fields. `src/scanner-request.js`, `relationship-pass.js`,
   `transcript.js`, `dossier-edit.js`, `util/html.js`.
