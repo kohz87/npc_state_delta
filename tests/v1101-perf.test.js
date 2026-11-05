@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bytesToBase64, encodeStateFilePayload, inspectNpcStateDataFile, writeNpcStateDataFile } from '../storage.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 // 1.10.1: the freezes of a long chat with many dossiers and portraits. Each fix keeps what is saved, read
 // and shown exactly as before; these tests hold the results equal and count the work that was removed.
@@ -86,8 +87,8 @@ test('1.10.1 story date: one clock read per normalize pass, the same dossiers as
 
 test('1.10.1 story date: the chat state normalization is one memo pass (index.js)', async () => {
     const fs = await import('node:fs');
-    const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
-    assert.match(source, /function normalizeChatState\(raw = \{\}\) \{\n\s+return withStoryDateMemo\(\(\) => normalizeChatStateOnce\(raw\)\);\n\}/);
+    const source = runtimeSource();
+    assert.match(source, /function normalizeChatState\(raw = \{\}\) \{\n\s+return withStoryDateMemo\(\(\) => normalizeChatStateOnce\(raw\)\);\n    \}/);
     assert.equal((source.match(/normalizeChatStateOnce\(/g) || []).length, 2, 'only the memo wrapper calls the pass');
 });
 

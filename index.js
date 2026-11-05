@@ -14,7 +14,6 @@ import {
     autoScanDue as autoScanDueAfterReply,
     automaticBackfillStillRelevant,
     backfillNeedsRequest,
-    normalizeAutomaticBackfillRequest,
     npcParticipatesInExchange,
     readAheadOf,
     replyMayChangeDossiers,
@@ -82,23 +81,18 @@ import {
     tagScanEvidence,
     npcMatchesLabel,
     normalizeName,
-    normalizeNpcRecord,
-    normalizeNpcCandidate,
     resolveInterimIdentityPromotions,
     hasCompactMeguminWorldState,
     extractExplicitKeyRelationshipEdges,
     applyStaleNpcLifecycle,
-    normalizeFormPortraitAssets,
     normalizeCustomFields,
     setStoryClockSource,
-    withStoryDateMemo,
 } from './core.js';
 import {
     BRANCH_LINEAGE_VERSION,
     BRANCH_SNAPSHOT_BUDGET_BYTES,
     BRANCH_SNAPSHOT_MAX_BYTES,
     ROLLBACK_JOURNAL_BUDGET_BYTES,
-    ROLLBACK_JOURNAL_VERSION,
     createScanOperationRegistry,
     bestAncestorState,
     chatLineage,
@@ -107,7 +101,6 @@ import {
     lineageCheckpointKey,
     clearUserDismissedGroupsFor,
     ensureBranchParentAnchor,
-    normalizeUserDismissedGroups,
     recordBranchCheckpoint,
     migrateLegacyLineage,
     reconcileBranchState,
@@ -115,20 +108,14 @@ import {
     setBranchProvenanceHint,
 } from './branch.js';
 import {
-    normalizeSocialGraph,
-    reconcileSocialState,
     resolveNpcReference,
 } from './social.js';
 import {
     adoptNpcStateDataFileMetadata,
-    cancelPendingNpcStateWrite,
     deleteNpcStateDataFile,
-    inspectNpcStateDataFile,
     makeNpcStateDataFileName,
     makeNpcStateRecoveryFileName,
     currentWriterId,
-    probeNpcStateDataFilePointer,
-    preserveUndurableNpcStateSnapshot,
     readNpcStateDataFile,
     retireNpcStateDataFile,
     quarantineUnreadableNpcStateDataFile,
@@ -136,19 +123,14 @@ import {
     verifyPortraitFiles,
     writeNpcStateDataFile,
 } from './storage.js';
-import { isPortraitFileRecord, markPortraitFileMissing, portraitFilesVersion, portraitHasImage, PORTRAIT_FILE_DIR, PORTRAIT_FILE_PREFIX } from './src/portrait-file.js';
+import { isPortraitFileRecord, markPortraitFileMissing, portraitFilesVersion, PORTRAIT_FILE_DIR, PORTRAIT_FILE_PREFIX } from './src/portrait-file.js';
 import {
     buildQualifiedChatKey,
     getCharacterOwnerId,
-    getChatIdentityFromContext,
-    isQualifiedChatKey,
     parseQualifiedChatKey,
 } from './identity.js';
 import {
     lifecycleRenameStateIsEmpty,
-    liveLifecycleCandidateKeys,
-    resolveDeletedLifecycleKeyFromPresence,
-    resolveOwnedLifecycleKey,
 } from './hardening-core.js';
 import {
     defersArea,
@@ -160,6 +142,9 @@ import {
 } from './present-scene.js';
 import { createCardSettingsDefinition, SCAN_EVERY_RANGE } from './src/card-settings.js';
 import { createRuntimeState } from './runtime-state.js';
+import { createChatKeysPart } from './runtime-chat-keys.js';
+import { createHydrationPart } from './runtime-hydration.js';
+import { createPersistPart } from './runtime-persist.js';
 import { createHostedPart } from './runtime-hosted.js';
 import { createCastSyncPart } from './runtime-cast-sync.js';
 import { createEditorPart } from './runtime-editor.js';
@@ -193,7 +178,6 @@ const {
     chatStateCache,
     hydratedChatKeys,
     hydratedStateMeta,
-    workingCopyAdoptions,
     freshnessChecks,
     missingSidecarChats,
     branchInheritanceChecked,
@@ -209,14 +193,12 @@ const {
     stateWritePromises,
     stateVersions,
     persistedVersions,
-    ownershipEpochs,
     chatCacheTouches,
     lifecycleEventOperations,
     lifecycleRetryTimers,
     castPortraitMisses,
     retiredInSessionChats,
     nativeChangeListeners,
-    participantWrites,
     scanIntents,
     deferredWork,
     staleHostChats,
@@ -262,8 +244,6 @@ const BRANCH_RECONCILIATION_EVENT_LIMIT = 16;
 const SWIPE_SETTLE_POLL_MS = 80;
 const SWIPE_SETTLE_TIMEOUT_MS = 120000;
 const INLINE_HISTORY_LIMIT = 80;
-const STATE_WRITE_DELAY = 120;
-const FRESHNESS_EVENT_LIMIT = 24;
 const NARRATION_CAPTURE_LIMIT = 8;
 const narrationCaptureStats = { requested: 0, used: 0, missing: 0, invalid: 0, unterminated: 0, outdated: 0 };
 // Swipe and regenerate rebuild the branch after the reply arrives, so their instruction would
@@ -275,7 +255,6 @@ const NARRATION_CAPTURE_TYPES = new Set(['', 'normal', 'continue']);
 // Quiet and impersonate generations never carry them.
 const CAPTURE_RULES_TYPES = new Set([...NARRATION_CAPTURE_TYPES, 'swipe', 'regenerate']);
 let narrationCaptureVersion = null;
-const CHAT_CACHE_LIMIT = 6;
 const SCAN_OPERATION_TIMEOUT_MS = 5 * 60 * 1000;
 const LIFECYCLE_EVENT_WAIT_MS = 12_000;
 const LIFECYCLE_RETRY_DELAY_MS = 30_000;
@@ -377,154 +356,6 @@ function cancelScanOperation(key, reason = 'cancelled') {
     return true;
 }
 
-function getChatIdentity(ctx = getContext()) {
-    return getChatIdentityFromContext(ctx);
-}
-
-function getChatKey() {
-    return getChatIdentity().key;
-}
-
-function isCanonicalChatKey(key = getChatKey()) {
-    return isQualifiedChatKey(key);
-}
-
-function resolveOwnedChatKey(rawId, kind = 'chat', ownerId = undefined) {
-    const id = String(rawId ?? '').replace(/\.jsonl$/i, '').trim();
-    if (!id) return '';
-    const ownerWasProvided = ownerId !== undefined;
-    const resolvedOwner = String(ownerWasProvided ? (ownerId || '') : (kind === 'group' ? getContext().groupId || '' : getCharacterOwnerId(getContext()))).trim();
-    const settings = getSettings();
-    const candidates = liveLifecycleCandidateKeys(settings, chatStateCache.keys(), kind, id);
-    const resolved = resolveOwnedLifecycleKey(candidates, kind, id, resolvedOwner, ownerWasProvided);
-    if (!resolved && candidates.length > 1) {
-        console.warn(`[NPC State Delta] refused ambiguous ${kind} lifecycle lookup for ${id}; ${candidates.length} live owner-qualified states share that chat id.`);
-    }
-    return resolved;
-}
-
-function lifecycleCandidateKeys(rawId, kind = 'chat') {
-    const id = String(rawId ?? '').replace(/\.jsonl$/i, '').trim();
-    return liveLifecycleCandidateKeys(getSettings(), chatStateCache.keys(), kind, id);
-}
-
-async function hostCharacterChatPresence(ownerId, rawId) {
-    const owner = String(ownerId || '').trim();
-    const id = String(rawId ?? '').replace(/\.jsonl$/i, '').trim();
-    if (!owner || !id) return null;
-    try {
-        const response = await globalThis.fetch?.('/api/characters/chats', {
-            method: 'POST',
-            headers: requestHeaders(),
-            body: JSON.stringify({ avatar_url: owner, simple: true }),
-        });
-        if (!response?.ok) return null;
-        const data = typeof response.json === 'function' ? await response.json() : null;
-        if (!data || typeof data !== 'object') return null;
-        const chats = Array.isArray(data) ? data : Object.values(data);
-        return chats.some(item => String(item?.file_name ?? item?.fileName ?? item?.name ?? '').replace(/\.jsonl$/i, '').trim() === id);
-    } catch (error) {
-        console.debug(`[NPC State Delta] host ownership probe failed for ${owner}/${id}.`, error);
-        return null;
-    }
-}
-
-function hostGroupChatPresence(ownerId, rawId) {
-    const owner = String(ownerId || '').trim();
-    const id = String(rawId ?? '').replace(/\.jsonl$/i, '').trim();
-    const groups = getContext()?.groups;
-    if (!owner || !id || !Array.isArray(groups)) return null;
-    const group = groups.find(item => String(item?.id ?? '').trim() === owner);
-    if (!group) return false;
-    const chats = [
-        ...(Array.isArray(group?.chats) ? group.chats : []),
-        group?.chat_id,
-    ].map(value => String(value ?? '').replace(/\.jsonl$/i, '').trim()).filter(Boolean);
-    return chats.includes(id);
-}
-
-async function resolveDeletedChatKey(rawId, kind = 'chat', ownerId = '') {
-    const id = String(rawId ?? '').replace(/\.jsonl$/i, '').trim();
-    if (!id) return '';
-    const hint = String(ownerId || '').trim();
-    if (hint) return resolveOwnedChatKey(id, kind, hint);
-    const candidates = lifecycleCandidateKeys(id, kind);
-    if (!candidates.length) return '';
-
-    const presence = [];
-    for (const key of candidates) {
-        const parsed = parseQualifiedChatKey(key);
-        if (!parsed) continue;
-        const value = kind === 'group'
-            ? hostGroupChatPresence(parsed.ownerId, id)
-            : await hostCharacterChatPresence(parsed.ownerId, id);
-        presence.push({ key, value });
-    }
-    if (presence.some(item => item.value === null)) {
-        const error = new Error(`NPC State Delta could not prove deleted ${kind} ${id} ownership because the SillyTavern ownership probe was unavailable.`);
-        error.code = 'NPC_STATE_DELETE_OWNERSHIP_UNAVAILABLE';
-        throw error;
-    }
-    const resolved = resolveDeletedLifecycleKeyFromPresence(candidates, presence);
-    if (resolved) {
-        console.info(`[NPC State Delta] resolved deleted ${kind} ${id} from authoritative host ownership: ${resolved}.`);
-        return resolved;
-    }
-    console.warn(`[NPC State Delta] preserved deleted ${kind} ${id}; host ownership did not prove one unique removed owner.`);
-    return '';
-}
-
-function touchChatCache(key) {
-    if (!isCanonicalChatKey(key)) return;
-    chatCacheTouches.set(key, Date.now());
-}
-
-function forgetCachedChat(key) {
-    if (!key || key === getChatKey()) return false;
-    if (stateWriteTimers.has(key) || stateWritePromises.has(key) || loadingChatStates.has(key) || isScanBusy(key)) return false;
-    chatStateCache.delete(key);
-    hydratedChatKeys.delete(key);
-    hydratedStateMeta.delete(key);
-    freshnessChecks.delete(key);
-    missingSidecarChats.delete(key);
-    hydrationErrors.delete(key);
-    pendingAutoScans.delete(key);
-    assistantReceipts.delete(key);
-    stateVersions.delete(key);
-    persistedVersions.delete(key);
-    chatCacheTouches.delete(key);
-    return true;
-}
-
-function evictDormantChatStates(activeKey = getChatKey(), limit = CHAT_CACHE_LIMIT) {
-    const cap = Math.max(2, Number(limit) || CHAT_CACHE_LIMIT);
-    const loaded = [...chatStateCache.keys()].filter(isCanonicalChatKey);
-    if (loaded.length <= cap) return 0;
-    const candidates = loaded
-        .filter(key => key !== activeKey)
-        .sort((a, b) => Number(chatCacheTouches.get(a) || 0) - Number(chatCacheTouches.get(b) || 0));
-    let removed = 0;
-    for (const key of candidates) {
-        if (chatStateCache.size <= cap) break;
-        if (forgetCachedChat(key)) removed += 1;
-    }
-    return removed;
-}
-
-function ownershipEpoch(key) {
-    return Number(ownershipEpochs.get(String(key || '')) || 0);
-}
-
-function bumpOwnershipEpoch(key) {
-    const normalized = String(key || '');
-    if (!normalized || normalized === 'no-chat') return 0;
-    const next = ownershipEpoch(normalized) + 1;
-    ownershipEpochs.set(normalized, next);
-    loadingChatStates.delete(normalized);
-    missingSidecarChats.delete(normalized);
-    return next;
-}
-
 
 // A v2-hosted automatic boundary may skip the deterministic-path probe: this session already found
 // no sidecar for the chat, has no pointer for it and nothing has found or written one since.
@@ -532,143 +363,6 @@ function sidecarMissTrusted(key) {
     if (!missingSidecarChats.has(key) || !storyBlockV2Hosted()) return false;
     const settings = getSettings();
     return !settings.dataFiles?.[key]?.path && !settings.sidecarTombstones?.[key];
-}
-
-function ownershipEpochCurrent(key, epoch) {
-    return ownershipEpoch(key) === Number(epoch || 0);
-}
-
-function staleOwnershipError(key) {
-    const error = new Error(`NPC State Delta ownership changed while loading ${key}; stale completion was discarded.`);
-    error.code = 'NPC_STATE_STALE_OWNERSHIP';
-    return error;
-}
-
-function assertOwnershipEpoch(key, epoch) {
-    if (!ownershipEpochCurrent(key, epoch)) throw staleOwnershipError(key);
-}
-
-function freshChatState() {
-    return {
-        npcs: [],
-        candidates: [],
-        pendingBackfills: [],
-        socialGraph: normalizeSocialGraph(),
-        turn: 0,
-        assistantSinceScan: 0,
-        lastScanAt: 0,
-        lastScannedMessageId: null,
-        readAhead: [],
-        scanCount: 0,
-        dismissed: [],
-        inlineCards: [],
-        portraitAssets: {},
-        checkpoints: [],
-        lineage: [],
-        branchLineageVersion: BRANCH_LINEAGE_VERSION,
-        branchParent: null,
-        branchForkMessageId: null,
-        branchRootSnapshot: null,
-        userDismissedGroups: [],
-    };
-}
-
-// (1.10.1) The whole pass reads the story's date once (calendar.js withStoryDateMemo), not once or twice per dossier.
-function normalizeChatState(raw = {}) {
-    return withStoryDateMemo(() => normalizeChatStateOnce(raw));
-}
-
-function normalizeChatStateOnce(raw = {}) {
-    const state = { ...freshChatState(), ...(raw && typeof raw === 'object' ? structuredClone(raw) : {}) };
-    const currentBranchFormat = Number(raw?.branchLineageVersion || 0) === BRANCH_LINEAGE_VERSION;
-    state.branchLineageVersion = BRANCH_LINEAGE_VERSION;
-    if (!currentBranchFormat) {
-        state.checkpoints = [];
-        state.lineage = [];
-        state.inlineCards = [];
-        state.branchParent = null;
-        state.branchForkMessageId = null;
-        state.branchRootSnapshot = null;
-    }
-    if (!currentBranchFormat || Number(raw?.rollbackJournalVersion || 0) !== ROLLBACK_JOURNAL_VERSION) {
-        delete state.rollbackJournalVersion;
-        delete state.rollbackJournal;
-        delete state.rollbackJournalSequence;
-        delete state.rollbackHead;
-        delete state.rollbackJournalFloorMessageId;
-        delete state.rollbackJournalBytes;
-        delete state.rollbackJournalBudgetExceeded;
-        delete state.rollbackJournalCoverageMessages;
-    }
-    state.npcs = Array.isArray(state.npcs) ? state.npcs.map(normalizeNpcRecord) : [];
-    state.candidates = Array.isArray(state.candidates) ? state.candidates.map(normalizeNpcCandidate).filter(Boolean) : [];
-    state.socialGraph = normalizeSocialGraph(state.socialGraph);
-    state.pendingBackfills = Array.isArray(state.pendingBackfills)
-        ? state.pendingBackfills
-            .map(normalizeAutomaticBackfillRequest)
-            .filter(Boolean)
-            .map(item => ({
-                ...item,
-                requestedAt: item.requestedAt || Date.now(),
-                attempts: Math.max(0, Math.min(BACKFILL_MAX_ATTEMPTS, item.attempts)),
-            }))
-        : [];
-    state.dismissed = Array.isArray(state.dismissed) ? [...state.dismissed] : [];
-    state.userDismissedGroups = normalizeUserDismissedGroups(state.userDismissedGroups);
-    state.inlineCards = Array.isArray(state.inlineCards) ? state.inlineCards.map(entry => ({
-        ...entry,
-        cards: Array.isArray(entry?.cards) ? entry.cards.map(card => normalizeNpcRecord(card)) : [],
-    })) : [];
-    state.portraitAssets = state.portraitAssets && typeof state.portraitAssets === 'object' ? state.portraitAssets : {};
-    state.formPortraitAssets = normalizeFormPortraitAssets(state.formPortraitAssets);
-    state.checkpoints = Array.isArray(state.checkpoints) ? state.checkpoints.map(checkpoint => {
-        if (!checkpoint || typeof checkpoint !== 'object' || !checkpoint.snapshot || typeof checkpoint.snapshot !== 'object') return checkpoint;
-        const snapshot = { ...checkpoint.snapshot };
-        snapshot.npcs = Array.isArray(snapshot.npcs) ? snapshot.npcs.map(normalizeNpcRecord) : [];
-        snapshot.candidates = Array.isArray(snapshot.candidates) ? snapshot.candidates.map(normalizeNpcCandidate).filter(Boolean) : [];
-        snapshot.socialGraph = normalizeSocialGraph(snapshot.socialGraph);
-        return { ...checkpoint, snapshot };
-    }).filter(Boolean) : [];
-    if (state.branchRootSnapshot && typeof state.branchRootSnapshot === 'object') {
-        const root = { ...state.branchRootSnapshot };
-        root.npcs = Array.isArray(root.npcs) ? root.npcs.map(normalizeNpcRecord) : [];
-        root.candidates = Array.isArray(root.candidates) ? root.candidates.map(normalizeNpcCandidate).filter(Boolean) : [];
-        root.socialGraph = normalizeSocialGraph(root.socialGraph);
-        state.branchRootSnapshot = root;
-    } else {
-        state.branchRootSnapshot = null;
-    }
-    state.lineage = Array.isArray(state.lineage) ? state.lineage : [];
-    const socialMigration = reconcileSocialState(state, { provenance: 'migration', confidence: 'migration' });
-    state.socialGraph = socialMigration.socialGraph;
-    state.npcs = socialMigration.state.npcs;
-    for (const npc of state.npcs) {
-        if (npc?.portrait?.dataUrl && !state.portraitAssets[npc.id]) state.portraitAssets[npc.id] = structuredClone(npc.portrait);
-        if (!portraitHasImage(npc?.portrait) && state.portraitAssets[npc.id]?.dataUrl) npc.portrait = structuredClone(state.portraitAssets[npc.id]);
-    }
-    return state;
-}
-
-function getChatState(key = getChatKey()) {
-    if (key === 'no-chat') return freshChatState();
-    if (!chatStateCache.has(key)) chatStateCache.set(key, freshChatState());
-    touchChatCache(key);
-    return chatStateCache.get(key);
-}
-
-function setChatState(key, state, { markLoaded = false } = {}) {
-    if (!key || key === 'no-chat') return state;
-    const normalized = normalizeChatState(state);
-    chatStateCache.set(key, normalized);
-    touchChatCache(key);
-    if (markLoaded) {
-        hydratedChatKeys.add(key);
-        hydrationErrors.delete(key);
-        workingCopyAdoptions.set(key, workingCopyAdoption(key) + 1);
-        checkPortraitFilesSoon(normalized);
-    }
-    stateVersions.set(key, Number(stateVersions.get(key) || 0) + 1);
-    return normalized;
 }
 
 // (cast portraits) A loaded chat's file-form portraits are asked about once, in one request (/api/files/verify: no 404); one the server says is
@@ -689,67 +383,6 @@ function portraitFileFailed(event) {
     if (!path.startsWith(`${PORTRAIT_FILE_DIR}${PORTRAIT_FILE_PREFIX}`)) return;
     markPortraitFileMissing(path);
     renderDossier();
-}
-
-// Counts how often a loaded/server copy replaced this session's working copy. Unlike the durable
-// revision it does not advance for this session's own saves, so an open editor stays valid across
-// its own Appearance/Life-state/portrait commits but not across another session's installed state.
-function workingCopyAdoption(key = getChatKey()) {
-    return Number(workingCopyAdoptions.get(String(key || '')) || 0);
-}
-
-function hydratedRevision(key = getChatKey()) {
-    const meta = hydratedStateMeta.get(String(key || ''));
-    if (Number.isFinite(Number(meta?.revision))) return Math.max(0, Math.trunc(Number(meta.revision)));
-    const pointer = getSettings().dataFiles?.[key];
-    return Number.isFinite(Number(pointer?.revision)) ? Math.max(0, Math.trunc(Number(pointer.revision))) : 0;
-}
-
-function updateHydratedStateMeta(key, revision, extra = {}) {
-    const normalized = String(key || '');
-    if (!normalized || normalized === 'no-chat') return null;
-    const previous = hydratedStateMeta.get(normalized) || {};
-    const next = {
-        revision: Math.max(0, Math.trunc(Number(revision) || 0)),
-        writerId: String(extra.writerId ?? previous.writerId ?? ''),
-        hydratedAt: Number(extra.hydratedAt || previous.hydratedAt || Date.now()),
-        lastCheckedAt: Number(extra.lastCheckedAt || previous.lastCheckedAt || 0),
-        latestObservedServerRevision: Math.max(0, Math.trunc(Number(extra.latestObservedServerRevision ?? previous.latestObservedServerRevision ?? revision) || 0)),
-        latestObservedServerWriterId: String(extra.latestObservedServerWriterId ?? previous.latestObservedServerWriterId ?? extra.writerId ?? previous.writerId ?? ''),
-    };
-    hydratedStateMeta.set(normalized, next);
-    return next;
-}
-
-function recordFreshnessEvent(key, type, details = {}) {
-    freshnessEvents.push({
-        at: Date.now(),
-        chatKey: String(key || ''),
-        type: String(type || 'check'),
-        reason: String(details.reason || '').slice(0, 80),
-        hydratedRevision: Math.max(0, Math.trunc(Number(details.hydratedRevision) || 0)),
-        serverRevision: Math.max(0, Math.trunc(Number(details.serverRevision) || 0)),
-        dirty: details.dirty === true,
-    });
-    if (freshnessEvents.length > FRESHNESS_EVENT_LIMIT) freshnessEvents.splice(0, freshnessEvents.length - FRESHNESS_EVENT_LIMIT);
-}
-
-function localWorkingStateDirty(key = getChatKey()) {
-    const normalized = String(key || '');
-    const recovery = undurableNpcStateSnapshot(normalized);
-    return stateWriteTimers.has(normalized)
-        || stateWritePromises.has(normalized)
-        || Number(stateVersions.get(normalized) || 0) > Number(persistedVersions.get(normalized) ?? -1)
-        || Boolean(recovery && recovery.recoveryOnly !== true);
-}
-
-function makeRevisionConflict(key, expectedRevision, actualRevision, message = '') {
-    const error = new Error(message || `NPC State Delta sidecar changed in another session (expected revision ${expectedRevision}, found ${actualRevision}).`);
-    error.code = 'NPC_STATE_WRITE_CONFLICT';
-    error.expectedRevision = Number.isFinite(Number(expectedRevision)) ? Math.max(0, Math.trunc(Number(expectedRevision))) : null;
-    error.actualRevision = Number.isFinite(Number(actualRevision)) ? Math.max(0, Math.trunc(Number(actualRevision))) : null;
-    error.chatKey = String(key || '');
-    return error;
 }
 
 function installCanonicalServerState(key, pointer, inspected, { reason = 'freshness-check', dirtyConflict = false } = {}) {
@@ -800,194 +433,6 @@ function installCanonicalServerState(key, pointer, inspected, { reason = 'freshn
         dirty: dirtyConflict,
     });
     return installed;
-}
-
-async function reconcileCrossSessionWriteConflict(key, error, snapshot, knownPointer) {
-    const normalized = String(key || '');
-    const pointer = probeNpcStateDataFilePointer(normalized, knownPointer);
-    const inspected = await inspectNpcStateDataFile(pointer, { expectedChatKey: normalized });
-    cancelPendingNpcStateWrite(normalized);
-    preserveUndurableNpcStateSnapshot({
-        chatKey: normalized,
-        state: structuredClone(chatStateCache.get(normalized) || snapshot),
-        appVersion: NPC_STATE_VERSION,
-        pointer,
-        error,
-        reason: 'guarded-write-conflict',
-    });
-    recordFreshnessEvent(normalized, 'cross-session-write-conflict', {
-        reason: 'guarded-write',
-        hydratedRevision: error?.expectedRevision ?? hydratedRevision(normalized),
-        serverRevision: inspected.revision,
-        dirty: true,
-    });
-    if (inspected.exists) {
-        installCanonicalServerState(normalized, pointer, inspected, { reason: 'guarded-write-conflict', dirtyConflict: true });
-        if (getChatKey() === normalized) globalThis.toastr?.warning?.('NPC State Delta: another session saved a newer dossier first. This local change was preserved for recovery and was not allowed to overwrite the server copy.');
-    }
-    return inspected;
-}
-
-async function ensureHydratedStateFresh(key = getChatKey(), { reason = 'boundary', notify = false, probeMissing = false } = {}) {
-    const normalized = String(key || '');
-    if (!normalized || normalized === 'no-chat' || !isCanonicalChatKey(normalized)) return getChatState(normalized);
-    if (!hydratedChatKeys.has(normalized)) return getChatState(normalized);
-    if (!probeMissing && sidecarMissTrusted(normalized)) return getChatState(normalized);
-    if (freshnessChecks.has(normalized)) return freshnessChecks.get(normalized);
-
-    let task;
-    const epoch = ownershipEpoch(normalized);
-    task = (async () => {
-        const inFlight = stateWritePromises.get(normalized);
-        if (inFlight) {
-            recordFreshnessEvent(normalized, 'local-write-in-flight', {
-                reason,
-                hydratedRevision: hydratedRevision(normalized),
-                serverRevision: hydratedStateMeta.get(normalized)?.latestObservedServerRevision ?? hydratedRevision(normalized),
-                dirty: true,
-            });
-            return getChatState(normalized);
-        }
-        if (!hydratedChatKeys.has(normalized)) return getChatState(normalized);
-        const settings = getSettings();
-        const knownPointer = settings.dataFiles?.[normalized] || null;
-        const unpointered = !knownPointer?.path;
-        if (unpointered && settings.sidecarTombstones?.[normalized]) {
-            updateHydratedStateMeta(normalized, 0, { lastCheckedAt: Date.now(), latestObservedServerRevision: 0 });
-            return getChatState(normalized);
-        }
-        // A session that hydrated before another session created this chat's sidecar has no pointer.
-        // Probe the deterministic path so that session adopts the canonical file instead of later
-        // treating its empty working copy as authoritative.
-        const pointer = unpointered ? probeNpcStateDataFilePointer(normalized, knownPointer) : knownPointer;
-
-        const localRevision = hydratedRevision(normalized);
-        const localWriterId = String(hydratedStateMeta.get(normalized)?.writerId || pointer?.writerId || '');
-        // (beta) Unpointered, a missing file is the usual answer: asked first, so no 404 is fetched.
-        const inspected = await inspectNpcStateDataFile(pointer, { expectedChatKey: normalized, probeHeaders: unpointered ? requestHeaders() : null });
-        // A deletion, rename or retirement that completed while this read was in flight owns the
-        // chat now; the late result must not restore its pointer, tombstone or cached dossier.
-        if (!ownershipEpochCurrent(normalized, epoch) || getSettings().sidecarTombstones?.[normalized]) throw staleOwnershipError(normalized);
-        if (unpointered && !inspected.exists) {
-            missingSidecarChats.add(normalized);
-            updateHydratedStateMeta(normalized, 0, { lastCheckedAt: Date.now(), latestObservedServerRevision: 0 });
-            return getChatState(normalized);
-        }
-        if (inspected.exists) missingSidecarChats.delete(normalized);
-        const writerFork = Boolean(inspected.exists && inspected.revision === localRevision
-            && localWriterId && inspected.writerId && inspected.writerId !== localWriterId);
-        updateHydratedStateMeta(normalized, localRevision, {
-            lastCheckedAt: Date.now(),
-            latestObservedServerRevision: inspected.revision,
-            latestObservedServerWriterId: inspected.writerId,
-        });
-
-        if (!inspected.exists) {
-            const error = makeRevisionConflict(normalized, localRevision, null, `NPC State Delta canonical sidecar for ${normalized} disappeared from the SillyTavern server. Refusing to recreate it from a cached browser copy.`);
-            recordFreshnessEvent(normalized, 'sidecar-missing', { reason, hydratedRevision: localRevision, serverRevision: 0, dirty: localWorkingStateDirty(normalized) });
-            throw error;
-        }
-        if (!inspected.retired && inspected.revision === localRevision && !writerFork) {
-            recordFreshnessEvent(normalized, 'current', { reason, hydratedRevision: localRevision, serverRevision: inspected.revision, dirty: localWorkingStateDirty(normalized) });
-            return getChatState(normalized);
-        }
-
-        const dirty = localWorkingStateDirty(normalized);
-        const preserveLocal = dirty || writerFork;
-        const localSnapshot = preserveLocal ? structuredClone(getChatState(normalized)) : null;
-        const conflict = preserveLocal
-            ? makeRevisionConflict(
-                normalized,
-                localRevision,
-                inspected.revision,
-                writerFork
-                    ? `NPC State Delta detected a same-revision writer conflict at revision ${localRevision}. Another session replaced that revision with a different writer; this session's working copy was preserved for recovery and was not republished.`
-                    : `NPC State Delta detected newer canonical server revision ${inspected.revision} while this session still had unsaved work based on revision ${localRevision}. The local work was preserved for recovery and was not published.`,
-            )
-            : null;
-
-        if (preserveLocal) {
-            if (stateWriteTimers.has(normalized)) {
-                clearTimeout(stateWriteTimers.get(normalized));
-                stateWriteTimers.delete(normalized);
-            }
-            cancelPendingNpcStateWrite(normalized);
-            preserveUndurableNpcStateSnapshot({
-                chatKey: normalized,
-                state: localSnapshot,
-                appVersion: NPC_STATE_VERSION,
-                pointer,
-                error: conflict,
-                reason: writerFork ? `same-revision-writer:${reason}` : `freshness:${reason}`,
-            });
-        }
-
-        try {
-            const state = installCanonicalServerState(normalized, pointer, inspected, { reason, dirtyConflict: preserveLocal });
-            // A same-revision fork means a save this session already reported was overwritten by
-            // another session, so it is always reported, even from a background freshness check.
-            if (preserveLocal && (notify || writerFork)) globalThis.toastr?.warning?.(
-                writerFork
-                    ? 'NPC State Delta: another session replaced the same server revision. This session copy was preserved for recovery; the server copy is now active.'
-                    : 'NPC State Delta: another session advanced this chat. Unsaved local dossier work was preserved for recovery; the server copy is now active.',
-            );
-            if (writerFork) recordFreshnessEvent(normalized, 'same-revision-writer-conflict', { reason, hydratedRevision: localRevision, serverRevision: inspected.revision, dirty: true });
-            return state;
-        } catch (error) {
-            if (preserveLocal) recordFreshnessEvent(normalized, writerFork ? 'same-revision-writer-conflict' : 'cross-session-conflict', { reason, hydratedRevision: localRevision, serverRevision: inspected.revision, dirty: true });
-            throw error;
-        }
-    })().finally(() => {
-        if (freshnessChecks.get(normalized) === task) freshnessChecks.delete(normalized);
-    });
-    freshnessChecks.set(normalized, task);
-    return task;
-}
-
-async function ensureFreshMutationBoundary(action, key = getChatKey(), { notify = true } = {}) {
-    const normalized = String(key || '');
-    if (!normalized || normalized === 'no-chat' || !isCanonicalChatKey(normalized)) {
-        if (notify) globalThis.toastr?.warning?.(`NPC State Delta: open a chat before attempting to ${action}.`);
-        return false;
-    }
-    try {
-        await ensureChatStateLoaded(normalized, { probeMissing: true });
-    } catch (error) {
-        if (notify) globalThis.toastr?.warning?.(`NPC State Delta: cannot ${action} because the canonical server dossier could not be verified. ${error?.message || error}`);
-        return false;
-    }
-    if (getChatKey() !== normalized || !requireReadyChatMutation(action, normalized, { notify })) return false;
-    return true;
-}
-
-async function runFreshMutation(action, key, mutation, options = {}) {
-    if (!await ensureFreshMutationBoundary(action, key, options)) return false;
-    return mutation();
-}
-
-function chatHydrationStatus(key = getChatKey()) {
-    if (!key || key === 'no-chat') return 'none';
-    if (!isCanonicalChatKey(key)) return 'pending';
-    if (hydratedChatKeys.has(key)) return 'ready';
-    if (loadingChatStates.has(key)) return 'loading';
-    if (hydrationErrors.has(key)) return 'error';
-    return 'idle';
-}
-function assertChatHydratedForWrite(key = getChatKey()) {
-    if (!key || key === 'no-chat') return;
-    const pointer = getSettings().dataFiles?.[key];
-    if (pointer?.path && !hydratedChatKeys.has(key)) throw new Error('Refusing to overwrite unhydrated NPC State Delta sidecar for ' + key + '.');
-}
-
-function requireReadyChatMutation(action = 'modify NPC State Delta', key = getChatKey(), { notify = true } = {}) {
-    if (!key || key === 'no-chat' || !isCanonicalChatKey(key)) {
-        if (notify) globalThis.toastr?.warning?.(`NPC State Delta: open a chat before attempting to ${action}.`);
-        return false;
-    }
-    if (chatHydrationStatus(key) === 'ready') return true;
-    const error = hydrationErrors.get(key);
-    if (notify) globalThis.toastr?.warning?.(`NPC State Delta: cannot ${action} until this chat dossier loads successfully.${error?.message ? ` ${error.message}` : ''}`);
-    return false;
 }
 
 async function retryCurrentChatHydration() {
@@ -1070,170 +515,6 @@ function requestHeaders() {
 
 // The last pre-generation freshness read, which the one MESSAGE_SENT that follows it may reuse.
 const GENERATION_FRESHNESS_REUSE_MS = 5000;
-
-// Observed retirement is authoritative at the durability boundary too: dirty local work for that
-// chat must never be published over the retired marker (an unpointered writer may otherwise reuse
-// the deterministic path). Keep it only as a recovery-only snapshot and stop its queued writes.
-function holdRetiredLocalWork(key) {
-    const error = retiredInSessionChats.get(key);
-    if (!error) return null;
-    if (stateWriteTimers.has(key)) {
-        clearTimeout(stateWriteTimers.get(key));
-        stateWriteTimers.delete(key);
-    }
-    const existing = undurableNpcStateSnapshot(key);
-    const dirty = Number(stateVersions.get(key) || 0) > Number(persistedVersions.get(key) ?? -1);
-    if ((dirty && chatStateCache.has(key)) || (existing && existing.recoveryOnly !== true)) {
-        const state = dirty && chatStateCache.has(key) ? structuredClone(chatStateCache.get(key)) : existing.state;
-        cancelPendingNpcStateWrite(key);
-        preserveUndurableNpcStateSnapshot({ chatKey: key, state, appVersion: NPC_STATE_VERSION, pointer: null, error, reason: 'retired-in-session' });
-    }
-    return error;
-}
-
-// probeMissing: an explicit look (the reader's own action, page resume) that asks the server even
-// when this session already found no sidecar for the chat (sidecarMissTrusted).
-async function ensureChatStateLoaded(key = getChatKey(), { probeMissing = false } = {}) {
-    if (!key || key === 'no-chat' || !isCanonicalChatKey(key)) return freshChatState();
-    if (retiredInSessionChats.has(key)) {
-        hydrationErrors.set(key, retiredInSessionChats.get(key));
-        throw retiredInSessionChats.get(key);
-    }
-    if (hydratedChatKeys.has(key)) return ensureHydratedStateFresh(key, { reason: 'hydrate-boundary', probeMissing });
-    if (loadingChatStates.has(key)) return loadingChatStates.get(key);
-    const epoch = ownershipEpoch(key);
-    let task;
-    task = (async () => {
-        const settings = getSettings();
-        let pointer = settings.dataFiles?.[key] || null;
-        let recoveredState = null;
-        let loadedUndurable = false;
-        const tombstone = settings.sidecarTombstones?.[key] || null;
-        const tombstoned = Boolean(tombstone);
-        if (tombstoned && pointer?.path) {
-            if (!settings.recoveryFiles[key]) settings.recoveryFiles[key] = { ...pointer, reason: `tombstoned:${tombstone?.reason || 'retired'}`, retiredAt: Number(tombstone?.at || Date.now()) };
-            delete settings.dataFiles[key];
-            pointer = null;
-            persistSettings();
-            console.warn(`[NPC State Delta] ignored live sidecar pointer for tombstoned ${key}; destructive tombstone remains authoritative.`);
-        }
-        if (!pointer?.path && !tombstoned) {
-            const recoveryName = makeNpcStateDataFileName(key);
-            const recoveryPointer = { name: recoveryName, path: `/user/files/${recoveryName}` };
-            // A missing file reads as null. Any thrown error (server error, auth, malformed JSON)
-            // means the sidecar may exist but could not be read, so it must not become a new empty
-            // dossier: retry, then block hydration like an unreadable known pointer.
-            let discoveryError = null;
-            for (let attempt = 0; attempt < 3; attempt += 1) {
-                try {
-                    discoveryError = null;
-                    // (beta) A new chat has no file: asked first, so no 404 is fetched for it.
-                    const recovered = await readNpcStateDataFile(recoveryPointer, { expectedChatKey: key, probeHeaders: requestHeaders() });
-                    assertOwnershipEpoch(key, epoch);
-                    if (recovered?.retired) {
-                        settings.sidecarTombstones[key] = { reason: recovered.retireReason || 'retired-file', at: Date.now() };
-                        persistSettings();
-                    } else if (recovered?.state) {
-                        recoveredState = recovered.state;
-                        loadedUndurable = recovered.undurable === true;
-                        pointer = recoveryPointer;
-                        settings.dataFiles[key] = recoveryPointer;
-                        persistSettings();
-                        console.info(`[NPC State Delta] recovered deterministic sidecar pointer for ${key}.`);
-                    }
-                    break;
-                } catch (error) {
-                    if (error?.code === 'NPC_STATE_STALE_OWNERSHIP') throw error;
-                    discoveryError = error;
-                    if (attempt < 2) {
-                        await new Promise(resolve => setTimeout(resolve, 120 * (attempt + 1)));
-                        assertOwnershipEpoch(key, epoch);
-                    }
-                }
-            }
-            if (discoveryError) {
-                hydrationErrors.set(key, discoveryError);
-                console.error(`[NPC State Delta] Could not read the existing data file for ${key}; blocking writes instead of starting an empty dossier.`, discoveryError);
-                throw discoveryError;
-            }
-            if (!recoveredState && !settings.sidecarTombstones?.[key]) missingSidecarChats.add(key);
-            else missingSidecarChats.delete(key);
-        }
-        let loaded = recoveredState;
-        if (pointer?.path && !loaded) {
-            let lastError = null;
-            for (let attempt = 0; attempt < 3 && !loaded; attempt += 1) {
-                try {
-                    const payload = await readNpcStateDataFile(pointer, { expectedChatKey: key });
-                    assertOwnershipEpoch(key, epoch);
-                    if (payload?.retired) {
-                        settings.sidecarTombstones[key] = { reason: payload.retireReason || 'retired-file', at: Date.now() };
-                        delete settings.dataFiles[key];
-                        pointer = null;
-                        persistSettings();
-                        break;
-                    }
-                    if (payload?.state) {
-                        loaded = payload.state;
-                        loadedUndurable = payload.undurable === true;
-                    } else throw new Error('NPC State Delta sidecar returned no state payload.');
-                } catch (error) {
-                    if (error?.code === 'NPC_STATE_STALE_OWNERSHIP') throw error;
-                    lastError = error;
-                    if (attempt < 2) {
-                        await new Promise(resolve => setTimeout(resolve, 120 * (attempt + 1)));
-                        assertOwnershipEpoch(key, epoch);
-                    }
-                }
-            }
-            if (pointer?.path && !loaded) {
-                hydrationErrors.set(key, lastError || new Error('NPC State Delta sidecar could not be loaded.'));
-                console.error(`[NPC State Delta] Could not hydrate data file for ${key}; preserving the sidecar and blocking writes.`, lastError);
-                throw lastError || new Error('NPC State Delta could not hydrate ' + key + '.');
-            }
-        }
-        assertOwnershipEpoch(key, epoch);
-        const sourceState = loaded || freshChatState();
-        const state = setChatState(key, sourceState, { markLoaded: true });
-        const durableRevision = Number.isFinite(Number(pointer?.revision)) ? Math.max(0, Math.trunc(Number(pointer.revision))) : 0;
-        updateHydratedStateMeta(key, durableRevision, {
-            hydratedAt: Date.now(),
-            lastCheckedAt: loaded ? Date.now() : 0,
-            latestObservedServerRevision: durableRevision,
-            writerId: String(pointer?.writerId || ''),
-            latestObservedServerWriterId: String(pointer?.writerId || ''),
-        });
-        if (loaded && !loadedUndurable) persistedVersions.set(key, Number(stateVersions.get(key) || 0));
-        return state;
-    })().catch(error => {
-        if (error?.code !== 'NPC_STATE_STALE_OWNERSHIP') hydrationErrors.set(key, error);
-        throw error;
-    }).finally(() => {
-        if (loadingChatStates.get(key) === task) loadingChatStates.delete(key);
-    });
-    loadingChatStates.set(key, task);
-    return task;
-}
-
-function markStateDirty(key = getChatKey()) {
-    if (!key || key === 'no-chat') return;
-    stateVersions.set(key, Number(stateVersions.get(key) || 0) + 1);
-    announceNativeChange(key);
-}
-
-function announceNativeChange(key) {
-    if ((participantWrites.get(key) || 0) > 0 || key !== getChatKey()) return;
-    for (const listener of nativeChangeListeners) {
-        try { listener({ key }); } catch (error) { console.debug('[NPC State Delta] a native-change listener failed', error); }
-    }
-}
-async function quietly(key, task) {
-    participantWrites.set(key, (participantWrites.get(key) || 0) + 1);
-    try { return await task(); } finally {
-        const left = (participantWrites.get(key) || 1) - 1;
-        if (left > 0) participantWrites.set(key, left); else participantWrites.delete(key);
-    }
-}
 
 async function withScanIntent(key, task, skipped = false, defer = null) {
     scanIntents.set(key, (scanIntents.get(key) || 0) + 1);
@@ -1355,133 +636,6 @@ function runTargetedDossierPass(job) {
 }
 function handleAssistantMessageReceived(...args) {
     return withScanIntent(getChatKey(), () => handleAssistantMessageReceivedInner(...args), undefined, { label: `reply:${args[0]}`, what: 'the scan of a new reply', retry: () => handleAssistantMessageReceived(...args), guard: () => replyGuard(args[0]) });
-}
-
-function queueStateFileWrite(key = getChatKey(), delay = STATE_WRITE_DELAY) {
-    if (!key || key === 'no-chat' || !isCanonicalChatKey(key) || !chatStateCache.has(key)) return;
-    if (chatHydrationStatus(key) !== 'ready') {
-        console.warn(`[NPC State Delta] refused to queue an unhydrated state write for ${key}.`);
-        return;
-    }
-    markStateDirty(key);
-    if (stateWriteTimers.has(key)) clearTimeout(stateWriteTimers.get(key));
-    stateWriteTimers.set(key, setTimeout(() => {
-        stateWriteTimers.delete(key);
-        flushStateFile(key).catch(error => {
-            console.error('[NPC State Delta] data-file persistence failed', error);
-            globalThis.toastr?.error?.('NPC State Delta could not save its chat data file. Check the browser/server console.');
-        });
-    }, Math.max(0, Number(delay) || 0)));
-}
-
-async function flushStateFile(key = getChatKey()) {
-    if (!key || key === 'no-chat' || !isCanonicalChatKey(key) || !chatStateCache.has(key)) return null;
-    const retired = holdRetiredLocalWork(key);
-    if (retired) throw retired;
-    assertChatHydratedForWrite(key);
-    if (stateWriteTimers.has(key)) {
-        clearTimeout(stateWriteTimers.get(key));
-        stateWriteTimers.delete(key);
-    }
-    const active = stateWritePromises.get(key);
-    if (active) return active;
-
-    const epoch = ownershipEpoch(key);
-    let task;
-    task = (async () => {
-        let pointer = getSettings().dataFiles?.[key] || null;
-        while (chatStateCache.has(key) && ownershipEpochCurrent(key, epoch)) {
-            const writeVersion = Number(stateVersions.get(key) || 0);
-            if (Number(persistedVersions.get(key) || -1) >= writeVersion) break;
-            const snapshot = structuredClone(getChatState(key));
-            const settings = getSettings();
-            let written;
-            try {
-                written = await writeNpcStateDataFile({
-                    chatKey: key,
-                    state: snapshot,
-                    recoveryState: () => chatStateCache.get(key) || snapshot,
-                    isCurrent: () => ownershipEpochCurrent(key, epoch),
-                    appVersion: NPC_STATE_VERSION,
-                    pointer: settings.dataFiles?.[key] || pointer,
-                    headers: requestHeaders(),
-                });
-            } catch (error) {
-                if (error?.code === 'NPC_STATE_WRITE_CONFLICT' && ownershipEpochCurrent(key, epoch)) {
-                    try { await reconcileCrossSessionWriteConflict(key, error, snapshot, settings.dataFiles?.[key] || pointer); }
-                    catch (reconcileError) { console.warn('[NPC State Delta] write conflict recovery could not hydrate the newer canonical sidecar yet.', reconcileError); }
-                }
-                throw error;
-            }
-            if (!ownershipEpochCurrent(key, epoch)) return written;
-            pointer = written;
-            settings.dataFiles[key] = pointer;
-            delete settings.sidecarTombstones[key];
-            missingSidecarChats.delete(key);
-            persistedVersions.set(key, writeVersion);
-            updateHydratedStateMeta(key, written.revision, {
-                lastCheckedAt: Date.now(),
-                latestObservedServerRevision: written.revision,
-                writerId: String(written.writerId || ''),
-                latestObservedServerWriterId: String(written.writerId || ''),
-            });
-            persistSettings();
-            if (Number(stateVersions.get(key) || 0) <= writeVersion) break;
-        }
-        return pointer;
-    })().finally(() => {
-        if (stateWritePromises.get(key) === task) stateWritePromises.delete(key);
-    });
-    stateWritePromises.set(key, task);
-    return task;
-}
-
-async function settleStateFileWrite(key, { flush = false } = {}) {
-    if (!key || key === 'no-chat') return null;
-    if (stateWriteTimers.has(key)) {
-        clearTimeout(stateWriteTimers.get(key));
-        stateWriteTimers.delete(key);
-    }
-    if (flush && chatStateCache.has(key)) return flushStateFile(key);
-    const active = stateWritePromises.get(key);
-    if (active) return active;
-    return getSettings().dataFiles?.[key] || null;
-}
-
-function persist(key = getChatKey()) {
-    if (!requireReadyChatMutation('save chat dossier changes', key, { notify: false })) {
-        console.warn(`[NPC State Delta] refused to persist unhydrated chat state for ${key}.`);
-        return false;
-    }
-    persistSettings();
-    queueStateFileWrite(key);
-    return true;
-}
-
-function persistCritical(key = getChatKey()) {
-    if (!requireReadyChatMutation('save chat dossier changes', key, { notify: false })) return false;
-    persistSettings();
-    markStateDirty(key);
-    void flushStateFile(key).catch(error => {
-        console.error('[NPC State Delta] critical data-file persistence failed', error);
-        globalThis.toastr?.error?.('NPC State Delta could not immediately save a critical dossier change.');
-    });
-    return true;
-}
-
-// Like persistCritical, but resolves only once the sidecar write has finished, so a caller can
-// report durable success (true) or a write that is still pending/failed (false).
-async function persistCriticalDurable(key = getChatKey()) {
-    if (!requireReadyChatMutation('save chat dossier changes', key, { notify: false })) return false;
-    persistSettings();
-    markStateDirty(key);
-    try {
-        await flushStateFile(key);
-        return true;
-    } catch (error) {
-        console.error('[NPC State Delta] critical data-file persistence failed', error);
-        return false;
-    }
 }
 
 function commitBranchCheckpoint(state, messageId, reason = 'state') {
@@ -3977,6 +3131,12 @@ function clearUserDismissedSuppression(state, target) {
     }
     return state;
 }
+
+const { getChatKey, isCanonicalChatKey, resolveOwnedChatKey, resolveDeletedChatKey, touchChatCache, evictDormantChatStates, ownershipEpoch, bumpOwnershipEpoch, ownershipEpochCurrent, staleOwnershipError, assertOwnershipEpoch } = createChatKeysPart(rt, { isScanBusy, requestHeaders });
+
+const { freshChatState, normalizeChatState, getChatState, setChatState, workingCopyAdoption, hydratedRevision, updateHydratedStateMeta, recordFreshnessEvent, localWorkingStateDirty, reconcileCrossSessionWriteConflict, ensureHydratedStateFresh, ensureFreshMutationBoundary, runFreshMutation, chatHydrationStatus, assertChatHydratedForWrite, requireReadyChatMutation, holdRetiredLocalWork, ensureChatStateLoaded, markStateDirty, announceNativeChange, quietly } = createHydrationPart(rt, { assertOwnershipEpoch, BACKFILL_MAX_ATTEMPTS, checkPortraitFilesSoon, getChatKey, installCanonicalServerState, isCanonicalChatKey, ownershipEpoch, ownershipEpochCurrent, requestHeaders, sidecarMissTrusted, staleOwnershipError, touchChatCache });
+
+const { queueStateFileWrite, flushStateFile, settleStateFileWrite, persist, persistCritical, persistCriticalDurable } = createPersistPart(rt, { assertChatHydratedForWrite, chatHydrationStatus, getChatKey, getChatState, holdRetiredLocalWork, isCanonicalChatKey, markStateDirty, ownershipEpoch, ownershipEpochCurrent, reconcileCrossSessionWriteConflict, requestHeaders, requireReadyChatMutation, updateHydratedStateMeta });
 
 const { storyBlockV2Hosted, storySuiteV2Meters, scanAfterEveryReply, hostedStoryClock, hostedMeterView, isKeyNpc, keyReturnNotes, castList, scenePresenceView, scanScenePresent, dossierHostViews, viewNpcCopies, keyAwayScanOptions, hostedScanState, chatHeadMark, chatHeadUnchanged, forwardRelationshipChangesToHost, hostedNotePromptOptions, hostedTargetNotes, targetNoteOptions, forwardSecretEventsToHost, attachGeneratedSecrets, castEmptyReason } = createHostedPart(rt, { chatHydrationStatus, getChatKey, getChatState, latestMessageId, latestReplyIndex });
 

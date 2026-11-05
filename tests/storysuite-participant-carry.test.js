@@ -6,6 +6,7 @@ import { createNpcRecord } from '../core.js';
 import { bestAncestorState, chatLineage, recordBranchCheckpoint, setBranchProvenanceHint } from '../branch.js';
 import { decodeNpcStateBundle, encodeNpcStateBundle } from '../bundle.js';
 import { hydrateIdentity, storedTimeline, timelineOf } from '../src/storysuite-participant/index.js';
+import { runtimeSource } from './helpers/runtime-source.js';
 
 const user = text => ({ mes: text, is_user: true, is_system: false, name: 'Kazuma' });
 const assistant = text => ({ mes: text, is_user: false, is_system: false, name: 'Megumin' });
@@ -84,7 +85,7 @@ test('N2: after a restore the scanner reads the messages the story stands on: fa
 });
 test('N2: every durable write of the chat\'s state ends in the one function that announces it to the participant', async () => {
     const { readFileSync } = await import('node:fs');
-    const index = readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+    const index = runtimeSource();
     const body = name => index.slice(index.indexOf(`function ${name}(`), index.indexOf('\n}\n', index.indexOf(`function ${name}(`)));
     assert.match(body('markStateDirty'), /announceNativeChange\(key\)/);
     // The three ways to save a chat's state, and the queue every scan, edit, import and reconcile goes through, all pass through it.
