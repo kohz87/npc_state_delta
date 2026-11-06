@@ -29,6 +29,7 @@ Story Block (kohz87/Story_block, the host), RPG Battle (kohz87/rpg_battle), Stor
 - `tests/vendor/story-block/`: Story Block's testkit + runtime, vendored for the adapter tests (VERSION names the commit).
 - `scripts/`: `validate.mjs`, `measure-prompts.mjs`, `measure-stage9.mjs`, `package.mjs`, `browser-stage9.py`.
 - `docs/`: `core-contract.md`, `WORKPLAN.md`, `STORY_SUITE.md`, reviews and history (evidence only); `docs/dev/`: area notes.
+- Every other source file: `docs/dev/codemap.md` (one line each).
 
 ## Commands
 

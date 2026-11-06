@@ -79,8 +79,9 @@ export function confirmedDeath(npc, { event, now }) {
 }
 
 const RETRY_CODES = new Set(['STALE', 'RESTORE_PENDING']);
+const SNAPSHOT_EXPIRED = Symbol('snapshot-expired');
 
-export function createParticipant({ port, vault, module = MODULE_ID, now = () => Date.now(), random, schedule = (fn, ms) => setTimeout(fn, ms), cancel = id => clearTimeout(id), debounceMs = 300, retryMs = 1500, idleMs = 8000, boundMs = 8000, pollMs = 50 }) {
+export function createParticipant({ port, vault, module = MODULE_ID, now = () => Date.now(), random, schedule = (fn, ms) => setTimeout(fn, ms), cancel = id => clearTimeout(id), debounceMs = 300, retryMs = 1500, idleMs = 8000, boundMs = 8000, pollMs = 50, vaultTimeoutMs = 15000 }) {
     let session = null;      // { key, lineage, index }
     let handle = null;
     let queue = Promise.resolve();
@@ -90,6 +91,11 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     let again = false;
     let retries = 0;
     let last = null;
+    const indexRepairs = new Map(); // lineage -> function returning the index to restore before further participant work
+    const writtenIndexes = new Map(); // last confirmed index per lineage, for a write that settles after its timeout
+    const pendingAborts = new Map(); // host aborts that must be finished after a blocked repair or snapshot
+    let repairQueued = false;
+    const unfinishedSnapshots = new Set(); // timed-out calls remain here until their queued work actually ends
     const handed = new Map();   // checkpoint id -> { hash, stateHash }: what the participant handed the host, for `current`
     let announced = 0;          // changes announced to the participant (noteChange), in this run
     const preparedAt = new Map();   // prepared id of an in-place publication -> `announced` when it was prepared (this run only)
@@ -97,6 +103,33 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     const keyNow = () => String(port.chatKey() ?? '');
     const usable = key => Boolean(key) && key !== 'no-chat';
     const readyNow = () => { try { return port.ready() === true; } catch { return false; } };
+
+    // An injected vault, or a file response body, can ignore cancellation altogether. Bound every vault operation so one such call cannot
+    // hold the participant queue forever. A timed-out index write that later settles is repaired to the latest confirmed index in the queue.
+    const backend = vault;
+    const vaultLimit = Number.isFinite(vaultTimeoutMs) && vaultTimeoutMs > 0 ? vaultTimeoutMs : 15000;
+    function vaultCall(method, args) {
+        const lineage = args[0];
+        const index = method === 'putIndex' ? plain(args[1]) : null;
+        if (index) args = [lineage, index];
+        let timedOut = false;
+        let timer;
+        const operation = Promise.resolve().then(() => backend[method](...args)).then(value => {
+            if (index) {
+                if (timedOut) repairLateIndex(lineage);
+                else writtenIndexes.set(lineage, plain(index));
+            }
+            return value;
+        }, error => {
+            if (index && timedOut) repairLateIndex(lineage);
+            throw error;
+        });
+        const timeout = new Promise((_, reject) => {
+            timer = schedule(() => { timedOut = true; reject(new Error(`The participant's vault ${method} did not answer in ${vaultLimit} ms.`)); }, vaultLimit);
+        });
+        return Promise.race([operation, timeout]).finally(() => cancel(timer));
+    }
+    vault = Object.fromEntries(['put', 'get', 'getIndex', 'putIndex'].map(method => [method, (...args) => vaultCall(method, args)]));
     /**
      * Whether Delta has loaded the open chat's state, loading it first when it has not. Before the load `readState()` is an empty state with
      * no story line: a lineage read from it would be minted anew and written over the real one, and the vault's index of the real one (the
@@ -122,15 +155,70 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     }
     /** When a host callback that must answer inside the host's bound has to be done: now + boundMs. */
     const deadline = () => now() + boundMs;
-    /** `exclusive` for a callback with the host's bound: its deadline starts when the host asks (waiting its turn in the queue counts). */
-    const bounded = fn => input => { const until = deadline(); return exclusive(() => fn(input, until)); };
+    const abortPendingHere = () => [...pendingAborts.values()].some(pending => pending.key === keyNow());
+    const bookkeepingPending = () => fail('STALE', indexRepairs.size
+        ? 'NPC State Delta is still restoring the participant index after a failed save; try again in a moment.'
+        : 'NPC State Delta is still finishing an earlier abort; try again in a moment.');
+    const earlierSnapshot = (allowRepair = false) => {
+        if (unfinishedSnapshots.size) return fail('STALE', 'NPC State Delta is still finishing an earlier timed-out save; try again in a moment.');
+        if ((!indexRepairs.size && !abortPendingHere()) || allowRepair) return null;
+        // Do not wait for the repair inside the host's lock: its file request may itself need that lock to be released.
+        queueRepair();
+        return bookkeepingPending();
+    };
+    /** Passes the host callback's deadline to its load wait, starting when the host asks (the queue wait counts). */
+    const bounded = fn => input => {
+        const earlier = earlierSnapshot();
+        if (earlier) return Promise.resolve(earlier);
+        const until = deadline();
+        return exclusive(() => fn(input, until));
+    };
+
+    // A checkpoint also needs to answer while an earlier callback, a durable write, or a vault request is stuck. Keep that work in the
+    // exclusive queue until it really settles; an expired checkpoint must not start later or continue to hand the host a late snapshot.
+    const boundedCheckpoint = fn => input => {
+        const earlier = earlierSnapshot();
+        if (earlier) return Promise.resolve(earlier);
+        const until = deadline();
+        let expired = false;
+        const ticket = {};
+        let phase = 'waiting for earlier participant work';
+        const failure = () => fail('STALE', `NPC State Delta could not save in time while ${phase}; save again in a moment.`);
+        const check = () => {
+            if (!expired && now() < until) return;
+            expired = true;
+            const error = new Error(failure().message);
+            error[SNAPSHOT_EXPIRED] = true;
+            throw error;
+        };
+        let timer;
+        const timeout = new Promise(resolve => {
+            timer = schedule(() => { expired = true; unfinishedSnapshots.add(ticket); resolve(failure()); }, Math.max(0, until - now()));
+        });
+        const guard = { until, check, enter: next => { check(); phase = next; }, wait: promise => Promise.race([promise, timeout]) };
+        const run = exclusive(async () => { check(); return fn(input, guard); });
+        run.then(() => unfinishedSnapshots.delete(ticket), () => unfinishedSnapshots.delete(ticket));
+        return Promise.race([run, timeout]).finally(() => cancel(timer));
+    };
 
     /** Runs `fn` after every earlier callback is done; a thrown error is a FAILED answer, never a crash of the queue. */
     const exclusive = fn => {
         const run = queue.then(async () => {
             try {
+                for (const [lineage, repair] of indexRepairs) {
+                    try { await vault.putIndex(lineage, repair()); }
+                    catch { return fail('STALE', 'NPC State Delta is still restoring the participant index after a failed save; try again in a moment.'); }
+                    if (indexRepairs.get(lineage) === repair) indexRepairs.delete(lineage);
+                }
+                for (const [id, pending] of pendingAborts) {
+                    if (pending.key !== keyNow()) continue;
+                    const answer = await abortPrepared(pending.input);
+                    if (!answer.ok && answer.code !== 'REFUSED') return answer;
+                    if (pendingAborts.get(id) === pending) pendingAborts.delete(id);
+                }
                 return await fn();
             } catch (error) {
+                if (error?.[SNAPSHOT_EXPIRED]) return fail('STALE', error.message);
                 return fail('FAILED', `${module} failed: ${error?.message ?? error}`);
             }
         });
@@ -138,13 +226,84 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         return run;
     };
 
+    function queueRepair() {
+        if (repairQueued) return;
+        repairQueued = true;
+        void exclusive(async () => ({ ok: true })).finally(() => { repairQueued = false; });
+    }
+    function repairLateIndex(lineage) {
+        if (!writtenIndexes.has(lineage)) return;
+        if (!indexRepairs.has(lineage)) indexRepairs.set(lineage, () => writtenIndexes.get(lineage));
+        queueRepair();
+    }
+
+    // A timed-out snapshot may still need the host's lock. Abort and status must also get a pending repair processed: the host does not
+    // retry abort. If that repair needs the host's lock, release it on time and leave the actual callback queued behind the repair.
+    const hostExclusive = (fn, allowRepair = false) => {
+        const earlier = earlierSnapshot(allowRepair);
+        if (earlier) return Promise.resolve(earlier);
+        const repairing = allowRepair && (indexRepairs.size > 0 || abortPendingHere());
+        const key = keyNow();
+        const run = exclusive(() => allowRepair && keyNow() !== key
+            ? fail('STALE', 'Another chat was opened before the participant callback could finish.') : fn());
+        if (!repairing) return run;
+        let timer;
+        const timeout = new Promise(resolve => {
+            timer = schedule(() => resolve(bookkeepingPending()), boundMs);
+        });
+        return Promise.race([run, timeout]).finally(() => cancel(timer));
+    };
+
     /** `exclusive` for a native change's `prepare`: a failure is thrown, so the host tells the reason (it reads a failure envelope as a malformed answer). */
-    const preparing = fn => exclusive(fn).then(out => {
+    const preparing = fn => hostExclusive(fn).then(out => {
         if (out?.ok === false) throw new Error(out.message);
         return out;
     });
 
     const save = () => vault.putIndex(session.lineage, session.index);
+
+    async function restoreIndex(s) {
+        try { await vault.putIndex(s.lineage, s.index); }
+        catch (error) {
+            indexRepairs.set(s.lineage, () => s.index);
+            warn(`NPC State Delta could not restore the participant index after a failed save: ${error?.message ?? error}`);
+        }
+    }
+
+    async function abortPrepared(input) {
+        const s = await hydrate();
+        if (!s) return { ok: true, aborted: true };
+        const idx = s.index;
+        const entry = isRecord(input) ? idx.prepared[input.prepared] : null;
+        if (!entry) return { ok: true, aborted: true };
+        const ret = idx.returns[input.return];
+        if (ret?.status === 'active') return fail('REFUSED', 'That return was committed; it finishes, it is not aborted.');
+        if (ret) idx.returns[input.return] = { ...ret, status: 'aborted' };
+        delete idx.prepared[input.prepared];
+        try { await save(); }
+        catch (error) {
+            if (ret) idx.returns[input.return] = ret;
+            idx.prepared[input.prepared] = entry;
+            await restoreIndex(s);
+            throw error;
+        }
+        return { ok: true, aborted: true };
+    }
+
+    function abort(input) {
+        const key = keyNow();
+        return hostExclusive(() => abortPrepared(input), true).then(answer => {
+            // The host discards abort failures. Retain valid cleanup work after a blocked snapshot/repair or failed write and run it in
+            // the participant queue, with the original chat's ownership, before any subsequent participant operation in that chat.
+            if (['STALE', 'FAILED'].includes(answer?.code) && isRecord(input)
+                && typeof input.return === 'string' && typeof input.prepared === 'string' && usable(key)) {
+                const id = JSON.stringify([key, input.return, input.prepared]);
+                pendingAborts.set(id, { key, input: { return: input.return, prepared: input.prepared } });
+                queueRepair();
+            }
+            return answer;
+        });
+    }
 
     /**
      * Brings the open chat's state up to date: it has a lineage, every dossier has its np_ and a dossier that is gone has its np_ archived;
@@ -153,21 +312,26 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
      * question to `npc.identity`. Opening a chat, a reply, or a scan writes nothing (`started`).
      * → the session { key, lineage, index } or null (no chat, or it changed).
      */
-    async function hydrate(until = null) {
+    async function hydrate(until = null, guard = null) {
         const key = keyNow();
         if (!usable(key)) return null;
         // Nothing is read, minted or written before the chat's state is loaded: a retryable failure (the host asks again later).
+        guard?.enter('loading the dossiers');
         if (!await loaded(until)) {
+            guard?.check();
             if (keyNow() !== key) return null;
             throw new Error('NPC State Delta has not loaded this chat\'s dossiers yet; it is tried again in a moment.');
         }
+        guard?.check();
         if (keyNow() !== key) return null;
         let state = port.readState();
         let block = timelineOf(state);
         // A branch waiting for its parent's dossiers gets them (and the parent's line) from Delta's branch inheritance: a line minted here first
         // would be written into the branch's file and the inheritance would never come (the branch's dossiers empty, its parent's checkpoints refused).
         if (!block.lineage && port.branchPending?.() === true) {
+            guard?.enter('inheriting the parent dossiers');
             try { await port.inheritBranch?.(); } catch { /* looked at below */ }
+            guard?.check();
             if (keyNow() !== key) return null;
             if (port.branchPending?.() === true) throw new Error('NPC State Delta is still carrying the parent chat\'s dossiers into this branch; it is tried again in a moment.');
             state = port.readState();
@@ -189,31 +353,52 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         block.reserved = out.reserved;
         if (write) {
             const was = hashJson(state);
+            guard?.enter('saving the story-line identity');
             await port.writeTimeline(storedTimeline(block));
             if (keyNow() !== key) return null;
-            // The participant's own write is not a change of the story's: a baseline that was the state before it is the state after it.
+            // The write already happened even if the call expired, so the existing baseline must still describe the new state.
             if (session?.index.base?.stateHash === was) session.index.base.stateHash = hashJson(port.readState());
+            guard?.check();
         }
         if (!session || session.key !== key || session.lineage !== block.lineage) {
+            guard?.enter('reading the participant index');
             const index = cleanIndex(await vault.getIndex(block.lineage));
+            guard?.check();
             if (keyNow() !== key) return null;
             session = { key, lineage: block.lineage, index };
+            writtenIndexes.set(block.lineage, plain(index));
         }
         if (!session.index.base) {
+            guard?.enter('building the baseline checkpoint');
             const built = buildCheckpoint({ lineage: block.lineage, state: port.readState() });
+            guard?.enter('saving the baseline checkpoint');
             await vault.put(built.id, built.doc);
+            guard?.check();
             if (keyNow() !== key) return null;
-            session.index.base = { checkpoint: built.id, hash: built.hash, stateHash: hashJson(port.readState()) };
-            await save();
+            const base = { checkpoint: built.id, hash: built.hash, stateHash: hashJson(port.readState()) };
+            guard?.enter('saving the participant index');
+            const s = session;
+            try {
+                await vault.putIndex(s.lineage, { ...s.index, base });
+                guard?.check();
+                if (keyNow() !== key) { await restoreIndex(s); return null; }
+            } catch (error) {
+                await restoreIndex(s);
+                throw error;
+            }
+            s.index.base = base;
         }
         return session;
     }
 
-    async function made({ state = port.readState(), cursor = null, headHash = null }) {
+    async function made({ state = port.readState(), cursor = null, headHash = null }, guard = null) {
         const s = session ?? await hydrate();
         if (!s) throw new Error('There is no open chat to take a checkpoint of.');
+        guard?.enter('building the native checkpoint');
         const built = buildCheckpoint({ lineage: s.lineage, state, cursor, headHash });
+        guard?.enter('saving the native checkpoint');
         await vault.put(built.id, built.doc);
+        guard?.check();
         return built;
     }
 
@@ -286,12 +471,17 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         // A save point is a moment: Delta must be at rest in it. A scan or dossier pass still reading the latest reply would land after the
         // checkpoint and be missing from it (a restore would then drop a person the story still has), so the checkpoint waits for it, and when
         // it does not finish or the state moves while the checkpoint is made, answers a retryable STALE rather than a save that is not true.
-        checkpoint: bounded(async ({ cursor = null, headHash = null } = {}, until) => {
+        checkpoint: boundedCheckpoint(async ({ cursor = null, headHash = null } = {}, guard) => {
             for (let attempt = 0; attempt < 3; attempt += 1) {
-                if (!await quiet(until)) return fail('STALE', 'NPC State Delta is still reading the latest reply; save again in a moment.');
-                const s = await hydrate(until);
+                guard.enter('waiting for dossier work');
+                const idle = await guard.wait(quiet(guard.until));
+                guard.check();
+                if (!idle) return fail('STALE', 'NPC State Delta is still reading the latest reply; save again in a moment.');
+                const s = await hydrate(guard.until, guard);
                 if (!s) return fail('FAILED', 'There is no open chat to save.');
+                guard.enter('reading the dossiers');
                 const at = hashJson(port.readState());
+                guard.check();
                 // A change Delta saved that the timeline has not recorded yet is recorded first: the save point would carry it, but the host would
                 // commit the point at a head that does not know it. The publish is asked for and the save is refused, retryably. When the host gives no
                 // way to publish (no Source for the head: UNSUPPORTED) there is nothing to wait for.
@@ -299,11 +489,21 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
                     schedulePublish(0);
                     return fail('STALE', 'NPC State Delta has a change the story has not recorded yet; save again in a moment.');
                 }
-                const built = await made({ cursor, headHash });
+                const built = await made({ cursor, headHash }, guard);
                 if (busy() || hashJson(port.readState()) !== at) continue;
-                s.index.base = { checkpoint: built.id, hash: built.hash, stateHash: at };
+                guard.enter('saving the participant index');
+                const base = { checkpoint: built.id, hash: built.hash, stateHash: at };
+                try {
+                    await vault.putIndex(s.lineage, { ...s.index, base });
+                    guard.check();
+                } catch (error) {
+                    // A failed or late write may have reached the server. Put back the previous baseline before the queue moves on, so an
+                    // unaccepted checkpoint never becomes the basis of a native publication. If restoration fails, later work must retry it first.
+                    await restoreIndex(s);
+                    throw error;
+                }
+                s.index.base = base;
                 hand(built.id, built.hash, at);
-                await save();
                 return { ok: true, checkpoint: built.id, hash: built.hash, schema: PARTICIPANT_SCHEMA };
             }
             return fail('STALE', 'NPC State Delta kept changing while the save point was made; save again in a moment.');
@@ -333,7 +533,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
             return { ok: true, prepared, hash: input.hash };
         }),
 
-        activate: input => exclusive(async () => {
+        activate: input => hostExclusive(async () => {
             const s = await hydrate();
             if (!s) return fail('FAILED', 'There is no open chat.');
             const idx = s.index;
@@ -386,21 +586,9 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
             return { ok: true, checkpoint: entry.checkpoint, hash: entry.hash };
         }),
 
-        abort: input => exclusive(async () => {
-            const s = await hydrate();
-            if (!s) return { ok: true, aborted: true };
-            const idx = s.index;
-            const entry = isRecord(input) ? idx.prepared[input.prepared] : null;
-            if (!entry) return { ok: true, aborted: true };
-            const ret = idx.returns[input.return];
-            if (ret?.status === 'active') return fail('REFUSED', 'That return was committed; it finishes, it is not aborted.');
-            if (ret) idx.returns[input.return] = { ...ret, status: 'aborted' };
-            delete idx.prepared[input.prepared];
-            await save();
-            return { ok: true, aborted: true };
-        }),
+        abort,
 
-        status: input => exclusive(async () => {
+        status: input => hostExclusive(async () => {
             const s = await hydrate();
             const ret = s && isRecord(input) ? s.index.returns[input.return] : null;
             if (!ret) return fail('NOT_FOUND', 'No such return.');
@@ -412,9 +600,9 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
                 if (!got.ok || !standsOnBytes(got.doc)) return { ok: true, checkpoint: ret.checkpoint, hash: ret.hash, status: 'prepared' };
             }
             return { ok: true, checkpoint: ret.checkpoint, hash: ret.hash, status: ret.status };
-        }),
+        }, true),
 
-        applyEvent: input => exclusive(async () => {
+        applyEvent: input => hostExclusive(async () => {
             if (!isRecord(input) || typeof input.event !== 'string' || !input.event || typeof input.nativeKey !== 'string' || !input.nativeKey) return fail('INVALID', 'applyEvent takes { event, nativeKey, kind }.');
             if (input.kind !== 'confirmed-death') return fail('INVALID', 'The only native event is a confirmed-death.');
             const s = await hydrate();
