@@ -31,10 +31,15 @@ barrier) in kohz87/Story_block. This note is Delta's side; the vendored copy in 
 
 ## The callbacks
 
-- `checkpoint({ cursor, headHash })`: **quiet**. It waits for dossier work (`port.idle`, 20 s), and answers a retryable `STALE` if Delta will not be quiet, the
+- `checkpoint({ cursor, headHash })`: **quiet**. It waits for dossier work (`port.idle`, at most 8 s), and answers a retryable `STALE` if Delta will not be quiet, the
   state moves while the checkpoint is made, or Delta has **saved a change the story has not recorded yet** (the live state is not the baseline the timeline stands
   on; the publish is asked for, and the save made again). When the host gives no way to publish (`UNSUPPORTED`) nothing is waited for. Then it hydrates,
-  snapshots, stores, answers `{ checkpoint, hash, schema }`.
+  snapshots, stores, answers `{ checkpoint, hash, schema }`. Its 8 s deadline begins when asked and includes the participant queue, inheritance, sidecar and vault
+  writes. A timeout says which step was waiting and is retryable. In-flight work stays serialized; an expired checkpoint cannot later hand over a result, and a
+  late participant-index write restores the prior baseline before the queue moves on. If that restoration fails, host callbacks return `STALE` and request a
+  background retry rather than holding the host queue for the repair; other participant work still waits for the prior baseline.
+  While expired snapshot work is still running, host callbacks promptly answer `STALE` instead of holding the host's queue behind it; background bookkeeping stays
+  queued until it settles. Like any event-loop timer, this cannot interrupt synchronous serialization or hashing.
 - `current({ checkpoint, hash, schema })` -> `{ ok: true, current: boolean }`, **synchronous**: Story Block's commit-time probe. The host asks it once, inside
   the synchronous section that commits a save point, for the checkpoint this participant supplied (a native change that lands after `checkpoint()` answered is
   not in the head hash, so the probe is the only thing that sees it). `current` is true only when the checkpoint is one this participant handed over (or

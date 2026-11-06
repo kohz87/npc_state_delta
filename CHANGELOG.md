@@ -1,5 +1,7 @@
 ## Unreleased
 
+- **A stalled timeline snapshot now gives a retryable reason.** Delta's 8-second wait budget covers earlier participant work, dossier inheritance, sidecar saves and checkpoint files instead of leaving those asynchronous waits to the host's timeout. Late work stays serialized and cannot turn an abandoned snapshot into the publication baseline.
+
 - **The scanner's message citations ("[m1, m2]") no longer end up in a dossier.** The scan reads messages labelled "[m12] ..." so evidence can cite them, and the model sometimes appended the citation to ordinary fields too ("Young woman with ... an easily distressed demeanor [m1, m2]"); it was stored, shown to the narrator and read back by the next scan. A citation group (`[m1]`, `[m1, m2]`, `[m3-m5]`, `(m1, m2)`, `[message 12]`, `[messages 3, 4]`) is now removed, with the space and punctuation it leaves, from every stored text field and list item, from named appearance forms and from scan rows before they merge. Other brackets ("[Rank F]") and text are not touched. Evidence keeps its leading "[mN] " tag (message attribution); only citations after it go. No prompt changes.
   - **Existing dossiers are cleaned the next time they are saved.**
 
