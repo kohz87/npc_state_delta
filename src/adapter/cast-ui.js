@@ -1,74 +1,21 @@
-// The Dossiers screens (src/storysuite-v2.js): the drawer copy of Delta's settings panel, the settings section, the dossier list and
-// the present cast's cards and meters (renderCast, renderDossiers), the page API for Story Director's World screen, the Dossiers
-// widget and screen, the meter presets block, the key-person pin, and the cast sync that follows a reply (onTurn).
+// The Dossiers screens (src/storysuite-v2.js): the present cast's cards and meters (renderCast, renderDossiers), the page API for
+// Story Director's World screen, the Dossiers widget and screen, the meter presets block, the key-person pin, and the cast sync
+// that follows a reply (onTurn). The settings section and dossier/meter list live in the cast-ui-*.js parts and are wired here.
 //
 // A part of the adapter closure: createCastUiPart(session, deps) gets the adapter's shared state (session) and the adapter's options,
 // constants and the parts built before it (deps), and returns what the other parts and the adapter use. Text is set with textContent;
 // nothing is parsed as markup. No SillyTavern import.
 
-import { FEATURE_PRESETS, normalizeSecrets } from '../npc-meters.js';
+import { FEATURE_PRESETS } from '../npc-meters.js';
 import { presetIds } from '../npc-meters-presets.js';
-import { findKeyEntry, isKey } from '../key-people.js';
 import { metWithEntry } from '../cast-dossier.js';
+import { createCastSettingsUi } from './cast-ui-settings.js';
+import { createCastDossierList } from './cast-ui-dossier-list.js';
+import { elementOf } from './cast-ui-meter-bar.js';
 
-const PLACEHOLDER_FLAG = 'npcStateDeltaPlaceholder';
-const HIDDEN_FLAG = 'npcStateDeltaHosted';
 const PANE_CLASS = 'npc-state-delta-story-pane';
 
-const METER_TONES = new Set(['neutral', 'accent', 'good', 'warn', 'bad', 'info']);
-
-// DOM helpers for the Cast markup (text is set with textContent; nothing is parsed as markup).
-const elementOf = (doc, tag, className = '', text = null) => {
-    const node = doc.createElement(tag);
-    if (className) node.className = className;
-    if (text !== null && text !== undefined) node.textContent = String(text);
-    return node;
-};
-// One meter as ss.meter draws it (WIDGETS.md: role="meter", aria values, `ss-w-meter-*` parts, `--ss-w-ratio` on the track).
-// `def`: { id, label, min, max, tone }. `extra` (optional): { text, ceiling, ticks: [{ at, label }], delta }.
-export function meterBarNode(doc, def, value, stage = '', extra = {}) {
-    const min = Number.isFinite(def?.min) ? def.min : -100;
-    const max = Number.isFinite(def?.max) && def.max > min ? def.max : min + 100;
-    const now = Math.min(max, Math.max(min, Number.isFinite(Number(value)) ? Math.round(Number(value)) : min));
-    const at = point => Math.round(((Math.min(max, Math.max(min, point)) - min) / (max - min)) * 10000) / 10000;
-    const ratio = at(now);
-    const text = typeof extra?.text === 'string' && extra.text ? extra.text : stage ? `${now} · ${stage}` : String(now);
-    const tone = METER_TONES.has(def?.tone) ? def.tone : 'neutral';
-    const label = String(def?.label ?? def?.id ?? '');
-    const delta = Number.isInteger(extra?.delta) && extra.delta !== 0 ? extra.delta : 0;
-    const node = elementOf(doc, 'div', `ss-w ss-w-meter ss-w-tone-${tone}${ratio >= 1 ? ' ss-w-full' : ''}${ratio <= 0 ? ' ss-w-empty' : ''}`);
-    node.setAttribute('role', 'meter');
-    node.setAttribute('aria-label', label);
-    node.setAttribute('aria-valuemin', String(min));
-    node.setAttribute('aria-valuemax', String(max));
-    node.setAttribute('aria-valuenow', String(now));
-    node.setAttribute('aria-valuetext', text);
-    node.dataset.meter = String(def?.id ?? '');
-    const head = elementOf(doc, 'div', 'ss-w-meter-head');
-    head.append(elementOf(doc, 'span', 'ss-w-meter-label', label));
-    const value_ = elementOf(doc, 'span', 'ss-w-meter-value', text);
-    value_.setAttribute('aria-hidden', 'true');
-    if (delta) value_.append(elementOf(doc, 'span', `npc-state-delta-v2-delta ${delta > 0 ? 'npc-state-delta-v2-delta-up' : 'npc-state-delta-v2-delta-down'}`, `${delta > 0 ? '▲' : '▼'}${Math.abs(delta)}`));
-    head.append(value_);
-    const track = elementOf(doc, 'div', 'ss-w-meter-track');
-    track.setAttribute('style', `--ss-w-ratio: ${ratio}`);
-    track.append(elementOf(doc, 'div', 'ss-w-meter-fill'));
-    for (const tick of (Array.isArray(extra?.ticks) ? extra.ticks : []).slice(0, 8)) {
-        if (!Number.isFinite(tick?.at)) continue;
-        const mark = elementOf(doc, 'span', 'npc-state-delta-v2-tick');
-        mark.setAttribute('style', `--npc-state-delta-at: ${at(tick.at)}`);
-        mark.setAttribute('title', `${tick.label ?? ''} ${tick.at}`.trim());
-        track.append(mark);
-    }
-    if (Number.isFinite(extra?.ceiling) && extra.ceiling < max) {
-        const mark = elementOf(doc, 'span', 'npc-state-delta-v2-ceiling');
-        mark.setAttribute('style', `--npc-state-delta-at: ${at(extra.ceiling)}`);
-        mark.setAttribute('title', `Ceiling ${extra.ceiling}`);
-        track.append(mark);
-    }
-    node.append(head, track);
-    return node;
-}
+export { meterBarNode } from './cast-ui-meter-bar.js';
 
 export function createCastUiPart(session, deps) {
     const {
@@ -78,134 +25,13 @@ export function createCastUiPart(session, deps) {
         send, storedSettings, TICK_TURNS, timers, warn, watchMs, worldShown,
     } = deps;
 
-    let watchTimer = null;
     const castViews = new Set(); // the game view's Cast screens (CAST_WIDGET) drawn now
-    let sectionLead = null;      // the meter presets block above Delta's panel in the settings section
-    let rowsCache = { key: null, rows: [] };
     const watchers = new Set();  // the page API's onChange subscribers
-    const savedDisplay = new WeakMap();
 
-    // ---- the drawer copy ----
-
-    function hidePanel(node) {
-        if (!node?.style || node.dataset?.[HIDDEN_FLAG] === '1') return;
-        savedDisplay.set(node, node.style.display ?? '');
-        node.style.display = 'none';
-        if (node.dataset) node.dataset[HIDDEN_FLAG] = '1';
-    }
-
-    function showPanel(node) {
-        if (!node?.style || node.dataset?.[HIDDEN_FLAG] !== '1') return;
-        node.style.display = savedDisplay.get(node) ?? '';
-        savedDisplay.delete(node);
-        delete node.dataset[HIDDEN_FLAG];
-    }
-
-    // While hosted, the panel is hidden wherever it is except inside the overlay.
-    function syncDrawer() {
-        const node = panel();
-        if (!node || (session.mounted && session.mounted.node === node)) return;
-        if (session.hosted) hidePanel(node);
-        else showPanel(node);
-    }
-
-    // ---- the settings section ----
-
-    function stopWatch() {
-        if (watchTimer !== null) timers.clearInterval?.(watchTimer);
-        watchTimer = null;
-    }
-
-    // Back before its placeholder (v1 overlay rule). A panel Delta removed meanwhile is left alone;
-    // one whose place is gone stays where it is.
-    function unmountSection() {
-        stopWatch();
-        if (!session.mounted) return;
-        const { el, node, placeholder, drawer, parent } = session.mounted;
-        session.mounted = null;
-        drawer?.classList?.remove?.('story-suite-drawer');
-        if (node.dataset) delete node.dataset.storySuiteMoved;
-        clearLead(node);
-        const ours = el.contains?.(node);
-        if (ours && placeholder.parentNode) placeholder.parentNode.insertBefore(node, placeholder);
-        else if (ours && parent?.isConnected) parent.appendChild(node);
-        placeholder.remove?.();
-        syncDrawer();
-    }
-
-    function watchSection() {
-        stopWatch();
-        // The overlay may drop the section's element without telling anyone: the panel then goes
-        // home at once, so Delta's own code (which finds it by id) keeps finding it.
-        watchTimer = timers.setInterval?.(() => {
-            if (!session.mounted) return stopWatch();
-            if (!session.mounted.el.isConnected || session.mounted.node.parentNode !== session.mounted.el) unmountSection();
-        }, watchMs) ?? null;
-        watchTimer?.unref?.();
-    }
-
-    // The meter presets block sits in Delta's own "Meter presets" fold (index.js buildSettingsHtml), which stays hidden
-    // until the block is in it. A panel without that slot gets the block above it, as before.
-    const PRESETS_SLOT = '[data-delta-settings-slot="meter-presets"]';
-    const presetsSlot = node => {
-        try { return node?.querySelector?.(PRESETS_SLOT) ?? null; } catch { return null; }
-    };
-    function placeLead(slot, lead) {
-        slot.replaceChildren(lead);
-        const group = slot.closest?.('[data-delta-settings-group]');
-        if (group) group.hidden = false;
-    }
-    function clearLead(node) {
-        const slot = presetsSlot(node);
-        if (!slot) return;
-        slot.replaceChildren();
-        const group = slot.closest?.('[data-delta-settings-group]');
-        if (group) group.hidden = true;
-    }
-
-    // `lead`: the meter presets block, shown in Delta's "Meter presets" fold (above the panel when it has none).
-    function mountSection(el, lead = null) {
-        if (!el) return () => {};
-        if (session.mounted && session.mounted.el !== el) unmountSection();
-        const node = panel();
-        if (lead) sectionLead = lead;
-        if (!node) {
-            session.pendingSection = el;
-            const loading = "NPC State Delta's settings are still loading.";
-            if (sectionLead && typeof el.replaceChildren === 'function' && typeof doc?.createElement === 'function') {
-                const line = doc.createElement('p');
-                line.textContent = loading;
-                el.replaceChildren(sectionLead, line);
-            } else el.textContent = loading;
-            return () => { if (session.pendingSection === el) session.pendingSection = null; };
-        }
-        session.pendingSection = null;
-        if (!session.mounted) {
-            const placeholder = doc.createElement('div');
-            placeholder.className = 'story-suite-placeholder';
-            placeholder.hidden = true;
-            placeholder.style.display = 'none';
-            placeholder.dataset[PLACEHOLDER_FLAG] = '1';
-            node.before(placeholder);
-            // Its SillyTavern drawer shows open in the overlay, as v1's overlay shows it.
-            const drawer = node.querySelector?.('.inline-drawer') || null;
-            drawer?.classList?.add?.('story-suite-drawer');
-            if (node.dataset) node.dataset.storySuiteMoved = MODULE_ID;
-            session.mounted = { el, node, placeholder, drawer, parent: placeholder.parentNode };
-        }
-        showPanel(node);
-        const top = sectionLead && sectionLead.ownerDocument === node.ownerDocument ? sectionLead : null;
-        const slot = top ? presetsSlot(node) : null;
-        if (slot) placeLead(slot, top);
-        const above = top && !slot ? top : null;
-        if (typeof el.replaceChildren === 'function') el.replaceChildren(...(above ? [above] : []), node);
-        else {
-            if (above) el.appendChild(above);
-            el.appendChild(node);
-        }
-        watchSection();
-        return () => { if (session.mounted?.el === el) unmountSection(); };
-    }
+    const { syncDrawer, unmountSection, mountSection } = createCastSettingsUi(session, deps);
+    const {
+        dossierRows, dossierRowNodesFor, withKeyMarks, dossierListNode, meterEntries, barNodesOf, noteNodes,
+    } = createCastDossierList({ session, runtime, npcList, warn, keyPeople, part, headReply, presentList, dossierOf });
 
     // ---- the Dossiers tab (once Cast) ----
 
@@ -242,159 +68,6 @@ export function createCastUiPart(session, deps) {
         return { ok: out?.ok === true, message: String(out?.receipt?.summary ?? out?.message ?? (out ? '' : 'Story Director did not answer.')) };
     }
 
-    // Every dossier as a row of v1's list (dossier-ui.js dossierIndexProjection), kept until Delta's state
-    // changes (dossierRevision); before that list has loaded, plain rows from the dossiers' names.
-    function dossierRows() {
-        const api = runtime();
-        let revision = '';
-        try { revision = String(api?.dossierRevision?.() ?? ''); } catch { revision = ''; }
-        const key = revision ? `${session.listParts ? 'full' : 'plain'}|${revision}` : null;
-        if (key && rowsCache.key === key) return rowsCache.rows;
-        let rows = [];
-        try {
-            const state = session.listParts?.project ? api?.getDossierState?.() : null;
-            if (state && Array.isArray(state.npcs)) rows = state.npcs.map(npc => session.listParts.project(npc, state.portraitAssets || {}));
-            else {
-                rows = npcList().map(npc => ({
-                    id: String(npc.id ?? ''), name: String(npc.name ?? '').trim() || 'Unnamed NPC', aliases: Array.isArray(npc.aliases) ? npc.aliases : [],
-                    role: '', statusLabel: npc.archived ? 'Archived' : npc.present ? 'Present' : '', bucket: npc.archived ? 'archived' : 'active', portrait: '',
-                }));
-            }
-        } catch (error) {
-            warn('Story Suite v2 dossier list failed', error);
-            rows = [];
-        }
-        rowsCache = { key, rows };
-        return rows;
-    }
-    // The dossier rows and the meters are DOM nodes built with textContent: a name, a role, a stage or a note is text, never
-    // markup. Story Block's list-row classes are the same as story-block-tabs.js dossierRowNodes (its builder, once loaded).
-    // Before story-block-tabs.js has loaded: plain rows of names that still open each dossier.
-    function plainRowNodes(rows, doc, total = 0) {
-        if (!rows.length) return [elementOf(doc, 'p', 'npc-state-delta-story-empty', total ? 'No dossier matches.' : 'No dossiers yet. An NPC gets one when a scan finds them in the story.')];
-        return rows.map(row => {
-            const item = elementOf(doc, 'li', 'ss-listcard-row');
-            const button = elementOf(doc, 'button', 'ss-listcard-item npc-state-delta-story-row');
-            button.dataset.npcId = String(row.id ?? '');
-            button.setAttribute('aria-label', `Open ${row.name} dossier`);
-            button.setAttribute('type', 'button');
-            const text = elementOf(doc, 'span', 'npc-state-delta-story-text ss-listcard-main');
-            text.append(elementOf(doc, 'b', 'ss-listcard-title', row.name), elementOf(doc, 'small', 'ss-listcard-sub', row.statusLabel ?? ''));
-            button.append(elementOf(doc, 'span', 'npc-state-delta-story-thumb ss-listcard-icon', Array.from(String(row.name ?? '').trim())[0]?.toUpperCase() ?? '?'), text);
-            item.append(button);
-            return item;
-        });
-    }
-    // The dossier rows for a search, as nodes (story-block-tabs.js when loaded; the plain rows before that).
-    function dossierRowNodesFor(query, doc) {
-        const rows = dossierRows();
-        let visible;
-        try {
-            if (session.listParts?.filter) visible = session.listParts.filter(rows, { query });
-            else {
-                const needle = String(query).trim().toLocaleLowerCase();
-                visible = rows.filter(row => !needle || [row.name, ...(row.aliases ?? [])].some(name => String(name).toLocaleLowerCase().includes(needle)));
-            }
-        } catch { visible = rows; }
-        try {
-            return session.listParts?.rowNodes ? session.listParts.rowNodes(withMeters(visible), doc, { query, total: rows.length }) : plainRowNodes(visible, doc, rows.length);
-        } catch {
-            return plainRowNodes(visible, doc, rows.length);
-        }
-    }
-    // Each row's stage and meters (npc.cast: the ranks and bars the present cards' meters show; the row draws at most DOSSIER_BAR_MAX).
-    // Read when the list is drawn and never cached with the rows: a reply moves them without changing any dossier.
-    // A ★ on the rows of key people (their `key` flag), read when the list is drawn like the meters.
-    function withKeyMarks(rows) {
-        const list = keyPeople();
-        if (!list?.length) return rows;
-        return rows.map(row => (isKey(findKeyEntry(list, row)) ? { ...row, key: true } : row));
-    }
-    function withMeters(rows) {
-        rows = withKeyMarks(rows);
-        if (!session.hosted || !rows.length || typeof session.sdkRef?.query !== 'function') return rows;
-        let cast;
-        try {
-            const head = headReply?.();
-            cast = session.sdkRef.query('npc.cast', Number.isInteger(head) ? { headReply: head } : {});
-        } catch {
-            return rows;
-        }
-        if (!Array.isArray(cast) || !cast.length) return rows;
-        const byKey = Object.fromEntries(cast.map(entry => [entry.key, entry]));
-        return rows.map(row => {
-            const who = part.identify(byKey, row.name);
-            const entry = who && Object.hasOwn(byKey, who.key) ? byKey[who.key] : null;
-            return entry ? { ...row, stage: entry.rank || '', bars: entry.bars ?? [] } : row;
-        });
-    }
-    // The dossier browser: a search box and every dossier, each opening its dossier view (Delta's own).
-    function dossierListNode(el, doc) {
-        const query = typeof el?.__npcStateDeltaV2Find === 'string' ? el.__npcStateDeltaV2Find : '';
-        const wrap = elementOf(doc, 'div', 'npc-state-delta-story-dossiers npc-state-delta-v2-dossiers');
-        wrap.append(elementOf(doc, 'span', 'npc-state-delta-kicker', 'DOSSIERS'));
-        const box = elementOf(doc, 'input', 'text_pole npc-state-delta-story-search');
-        box.setAttribute('type', 'search');
-        box.setAttribute('placeholder', 'Search dossiers');
-        box.setAttribute('aria-label', 'Search dossiers');
-        box.setAttribute('maxlength', '80');
-        box.value = query;
-        wrap.append(box);
-        const list = elementOf(doc, 'div', 'npc-state-delta-story-list ss-listcard ss-glass');
-        list.append(...dossierRowNodesFor(query, doc));
-        wrap.append(list);
-        return wrap;
-    }
-
-    // The NPCs the meters show, in order: the present dossiers' (dossier order), then (beta) the people the story's change
-    // lines gave meters who have no dossier yet (no scan has made one), straight from the state: those Story Block's scene has
-    // here, or all of them when the scene cannot say. → { shown, byKey, cast } or null.
-    function meterEntries() {
-        if (!session.hosted || typeof session.sdkRef?.query !== 'function') return null;
-        let cast;
-        try {
-            const head = headReply?.();
-            cast = session.sdkRef.query('npc.cast', Number.isInteger(head) ? { headReply: head } : {});
-        } catch {
-            return null;
-        }
-        if (!Array.isArray(cast) || !cast.length) return null;
-        const byKey = Object.fromEntries(cast.map(entry => [entry.key, entry]));
-        const shown = [];
-        for (const npc of presentList()) {
-            const who = part.identify(byKey, npc.name);
-            const entry = who && Object.hasOwn(byKey, who.key) ? byKey[who.key] : null;
-            if (entry && !shown.includes(entry)) shown.push(entry);
-        }
-        let scene = null;
-        try {
-            const list = session.sdkRef.query('scene.present');
-            scene = Array.isArray(list) ? list.map(name => part.identify(byKey, String(name ?? ''))?.key).filter(Boolean) : null;
-        } catch { scene = null; }
-        for (const entry of cast) {
-            if (shown.includes(entry) || dossierOf(entry.name)) continue;
-            if (scene && !scene.includes(entry.key)) continue;
-            shown.push(entry);
-        }
-        return { shown, byKey, cast };
-    }
-    const barNodesOf = (doc, entry, defs) => entry.bars.map(bar => meterBarNode(doc, defs.find(def => def.id === bar.id) ?? bar, bar.value, bar.stage, bar));
-    // The notes and the next-stage line of one NPC (text only). A card shows its stage on its name line, so it leaves the rank out.
-    function noteNodes(doc, entry, { card = false } = {}) {
-        const nodes = [];
-        if (!card && entry.rank) { const p = elementOf(doc, 'p', 'npc-state-delta-v2-rank'); p.append(elementOf(doc, 'b', '', entry.rank)); nodes.push(p); }
-        if (entry.next) nodes.push(elementOf(doc, 'p', 'npc-state-delta-v2-next', entry.next));
-        const texts = entry.opened?.length ? normalizeSecrets(dossierOf(entry.name)?.secrets) : [];
-        for (const note of entry.opened ?? []) {
-            const text = texts.find(secret => secret.id === note.id)?.text ?? '';
-            const p = elementOf(doc, 'p', 'npc-state-delta-v2-note npc-state-delta-v2-note-open');
-            p.append(elementOf(doc, 'b', '', note.title ?? ''));
-            if (text) p.append(doc.createTextNode(`: ${text}`));
-            nodes.push(p);
-        }
-        for (const note of entry.locked ?? []) nodes.push(elementOf(doc, 'p', 'npc-state-delta-v2-note npc-state-delta-v2-note-locked', note.text ?? ''));
-        return nodes;
-    }
     // Delta's own present-cast cards (the same markup as v1's Present NPCs tab; the cards' text is set by fillPresentCast),
     // each with its NPC's stage on the name line, its meters inside the row and its notes under it. Then the NPCs with meters
     // but no card (a block of their own), then the dossier list (`list`). `track: false` (the game view's screen, the World
