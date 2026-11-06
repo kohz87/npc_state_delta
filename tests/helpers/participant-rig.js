@@ -25,7 +25,7 @@ export const freshState = () => ({ npcs: [npc('npc_mira', 'Mira', { aliases: ['T
  *   live: { chatKey, state, installs }  Delta's chat state (what the runtime would hold and save)
  *   disk: the chat file and its metadata as the last save wrote them
  */
-export async function rig(t, { state = freshState(), vault = memoryVault(), image = null, quiet = {}, faults = null, hydrate = true, live = null, modules = [], withoutSource = false } = {}) {
+export async function rig(t, { state = freshState(), vault = memoryVault(), image = null, quiet = {}, faults = null, hydrate = true, live = null, modules = [], withoutSource = false, participantOptions = {} } = {}) {
     const mine = live ?? { chatKey: 'chat:avatar.png:one', state: structuredClone(state), installs: 0 };
     const warnings = [];
     const port = {
@@ -40,7 +40,7 @@ export async function rig(t, { state = freshState(), vault = memoryVault(), imag
         warn: text => warnings.push(text),
         ...quiet,
     };
-    const delta = createParticipant({ port, vault, debounceMs: 1, retryMs: 5 });
+    const delta = createParticipant({ port, vault, debounceMs: 1, retryMs: 5, ...participantOptions });
     if (hydrate) await delta.hydrate();
     const participant = withoutSource
         ? { ...delta.participant, attach: handle => delta.participant.attach({ ...handle, head: async () => { const { source, ...rest } = await handle.head(); void source; return rest; } }) }
