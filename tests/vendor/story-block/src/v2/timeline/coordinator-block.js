@@ -1,8 +1,9 @@
-// The timeline coordinator's blocked-selection half (docs/v2/TIMELINE.md): what the coordinator does when a participant cannot bring its
+// The timeline coordinator's blocked-participant half (docs/v2/TIMELINE.md): what the coordinator does when a participant cannot bring its
 // native state to the checkpoint the selected head names. The answer is classified: a PERMANENT one (SNAPSHOT_UNAVAILABLE: the file is
 // missing; CONFLICT: the checkpoint belongs to another story line; anything else the participant cannot cure by waiting) is a Problem at
 // once; a TRANSIENT one (FAILED: "tried again in a moment"; STALE: still busy; a timeout, which is reported as STALE) is asked again on a
-// fixed schedule, and only when the schedule is used up is it a Problem. Nothing here is stored or replayed: the block and its timer live in
+// fixed schedule, and only when the schedule is used up is it a Problem. Some committed restores wait quietly for a participant on the same
+// schedule. Nothing here is stored or replayed: the block and its timer live in
 // the session (`s.block`, `s.retryTimer`), the schedule is a constant, and no clock or random source decides anything.
 // `createBlock(s, deps)` is given the timeline's state holder `s` and the few coordinator functions it calls.
 
@@ -17,14 +18,17 @@ export function createBlock(s, deps) {
     const { archive, registry, problem, raise, again } = deps;
 
     const nameOf = module => (module ? (registry.module?.(module)?.name ?? module) : 'A part of the story');
+    // A reader waiting on the head must stop waiting once the retry budget is spent. Keep the original
+    // failure as `code`, but make the blocking dependency's unavailable state explicit in `blockedBy`.
+    const blockedBy = block => ({ module: block.module, code: block.gaveUp ? 'DEPENDENCY_UNAVAILABLE' : block.code });
 
     // The plain sentence the reader sees (the barrier's reason, the toast of a send, the Problem).
     function reasonOf(block) {
         const name = nameOf(block.module);
         const cause = trim(block.message);
         if (!block.permanent) return `${name} could not load its saved records for this point yet (${cause}). It is being tried again; wait a moment, or reload the page.`;
-        if (block.gaveUp) return `${name} still could not load its saved records for this point after trying again (${cause}). Reload the page to try once more, or delete the changed reply so the story ends where its records exist.`;
-        return `${name} cannot restore its saved records for this point (${cause}). Reloading will not bring them back; delete the changed reply so the story ends where its records exist.`;
+        if (block.gaveUp) return `${name} still could not load its saved records for this point after trying again (${cause}). Reload the page to try once more, or open the original chat while this is blocked.`;
+        return `${name} cannot restore its saved records for this point (${cause}). Restore the missing records from a backup and reload, or open the original chat.`;
     }
 
     function announce(block) {
@@ -57,16 +61,24 @@ export function createBlock(s, deps) {
 
     return {
         /** A participant (or the plan itself: `module` null) could not bring the story to the selected head. → the failure, with `blockedBy`, `reason`. */
-        note(module, failure) {
+        note(module, failure, { waiting = false } = {}) {
             const holder = archive.holder();
-            const same = s.block && s.block.holder === holder && s.block.module === module && s.block.code === failure.code ? s.block : null;
+            // A timeout can turn into STALE while the old call remains in flight, or a retry can alternate
+            // transient answers. Keep one retry budget, including quiet waits for a late participant.
+            const retryable = waiting || transientCode(failure.code);
+            const same = s.block && s.block.holder === holder && s.block.module === module
+                && ((s.block.code === failure.code && s.block.retryable === retryable) || (s.block.retryable && retryable)) ? s.block : null;
             if (!same && s.block) this.clear();
-            const block = same ?? (s.block = { holder, module, code: failure.code, message: failure.message, permanent: !transientCode(failure.code), gaveUp: false, tries: 0, reported: false });
+            const block = same ?? (s.block = { holder, module, code: failure.code, message: failure.message, retryable, waiting, permanent: !retryable, gaveUp: false, tries: 0, reported: false });
+            // The latest transient answer supplies the current code and message, but not a fresh budget.
+            block.code = failure.code;
             block.message = failure.message;
+            block.waiting = waiting;
             const reason = reasonOf(block);
-            raise(reason);
+            if (waiting && !block.permanent) raise('A restore is finishing; every part must agree before the story goes on.');
+            else raise(reason);
             if (block.permanent) announce(block); else arm();
-            return { ...failure, reason, blockedBy: { module, code: failure.code } };
+            return { ...failure, reason, blockedBy: blockedBy(block) };
         },
         /** The selection went through, or the barrier came down: nothing blocks, and no try is waiting. */
         clear() {
@@ -76,8 +88,8 @@ export function createBlock(s, deps) {
         /** What blocks the open chat now: { reason, code, blockedBy: { module, code } } or null. */
         current() {
             const block = s.block;
-            if (!block || block.holder !== archive.holder()) return null;
-            return { reason: reasonOf(block), code: block.code, blockedBy: { module: block.module, code: block.code } };
+            if (!block || block.holder !== archive.holder() || (block.waiting && !block.permanent)) return null;
+            return { reason: reasonOf(block), code: block.code, blockedBy: blockedBy(block) };
         },
     };
 }

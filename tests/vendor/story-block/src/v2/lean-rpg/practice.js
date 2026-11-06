@@ -5,7 +5,7 @@
 // untrained roll (a skill the character lacks, or one whose resource was Empty) names no skill in its line and gives nothing. Rank-ups follow the
 // block's own rules (a skill at 100 practice rises a rank and starts again).
 //
-// How. `practiceHook` (the part's afterCapture) reads the reply's own roll (the `rpg.resolve` receipt, from a payload that carries `practice`; a roll made before has none and gives none, so past replies replay as recorded) and asks for the step `rpg.practice { uses }`,
+// How. `practiceHook` (the part's afterCapture) reads the reply's own roll (the `rpg.resolve` receipt, from a payload that carries `practice`; a roll made before has none and gives none, so past replies replay as recorded) and asks for guarded `rpg.practice { uses }` steps of at most 40 distinct skills,
 // `uses` = [{ who, skill, n }]: the character, the skill as the roll named it, and how many lines used it; `perUse`: the practice one use gives, the value the roll recorded. The step is a guarded block on the reply
 // (replan: a swipe or a delete takes it away, a Re-read plans it again, REPLAY.md), like the fight's XP.
 //
@@ -21,6 +21,7 @@ import { fold } from './read.js';
 
 /** The replies whose rolls are practised (the same as the fight's: not a Continue's, nor the extractor's late lines). */
 const PAID_TYPES = Object.freeze(['normal', 'swipe', 'regenerate', 'reread']);
+const USES_PER_STEP = 40;
 /** Said once in a reply where the narrator wrote practice for a skill its rolls used (a Problems line). */
 export const PRACTICE_HELD = 'Practice for skills used in rolls is given by code; the narrator\'s practice line was not used.';
 
@@ -65,12 +66,19 @@ export function practiceHook(view, info) {
     if (!PAID_TYPES.includes(info?.type ?? 'normal') || view?.feature?.(LEAN_RPG_FEATURE) !== true) return undefined;
     const roll = rollOf(info?.receipts);
     const uses = roll ? usesOf(roll) : [];
-    return uses.length ? { commands: [{ type: PRACTICE_STEP, payload: { uses, perUse: roll.practice } }] } : undefined;
+    if (!uses.length) return undefined;
+    const commands = [];
+    for (let at = 0; at < uses.length; at += USES_PER_STEP) {
+        // Counts above 99 already reach the per-skill cap even at one practice per use.
+        const batch = uses.slice(at, at + USES_PER_STEP).map(use => ({ ...use, n: Math.min(use.n, 99) }));
+        commands.push({ type: PRACTICE_STEP, payload: { uses: batch, perUse: roll.practice } });
+    }
+    return { commands };
 }
 
 // The payload's uses, checked: a list of { who, skill, n } with n whole and at least 1. → the clean list, or null.
 function usesFrom(value) {
-    if (!Array.isArray(value) || !value.length || value.length > 40) return null;
+    if (!Array.isArray(value) || !value.length || value.length > USES_PER_STEP) return null;
     const out = [];
     for (const entry of value) {
         if (!isObject(entry) || !text(entry.who) || !text(entry.skill) || !whole(entry.n) || entry.n < 1 || entry.n > 99) return null;

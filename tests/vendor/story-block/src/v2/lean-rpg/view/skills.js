@@ -12,6 +12,8 @@ import { skillSlots } from '../../skill-slots.js';
 import { RPG_STRINGS, fill } from '../strings.js';
 import { classTerm, hasLevels, isStandard, statShare } from '../rules.js';
 import { levelBonus, statPart } from '../formula.js';
+import { skillFlags, skillKey } from '../board/flags.js';
+import { drawSkillFlags } from '../board/skill-editor.js';
 
 const K = RPG_STRINGS.skills;
 
@@ -60,7 +62,7 @@ export const newSkillsSession = character => ({ module: character.module, subjec
  * `api` ({ command }; without one there are no pencils), `onBack()`, `rules()` (the numbers a roll is made with now: the roll line follows them), `rolled()` (the RPG is on and Rolls automatic: the footer says practice comes from rolled uses), `onSaved()` (a save ended: the page draws the view again from the session,
  * since it already drew itself once after the first write and this instance may be gone), `doc`. → { el, session, edit(slot), save(), destroy() }.
  */
-export function renderSkills(parent, { character, session = null, api = {}, onBack = () => {}, onSaved = () => {}, rules = () => FORMULA, rolled = () => false, doc = parent.ownerDocument ?? globalThis.document } = {}) {
+export function renderSkills(parent, { character, session = null, api = {}, onBack = () => {}, onSaved = () => {}, rules = () => FORMULA, rolled = () => false, board = null, doc = parent.ownerDocument ?? globalThis.document } = {}) {
     const run = session ?? newSkillsSession(character);
     const block = character.skillsBlock;
     const root = h(doc, 'section', 'rpg-sheet rpg-skills-view ss-glass');
@@ -82,7 +84,9 @@ export function renderSkills(parent, { character, session = null, api = {}, onBa
     function edit(slot) {
         const skill = skillAt(slot);
         if (!skill || run.busy || typeof api.command !== 'function') return;
-        Object.assign(run, { editing: slot, start: { name: skill.name, about: skill.about }, draft: { name: skill.name, about: skill.about }, message: '' });
+        const explicit = board?.on?.() ? board.flags?.()?.[skillKey(character.module, skill)] : null;
+        const flags = board?.on?.() ? skillFlags(skill, explicit) : null;
+        Object.assign(run, { editing: slot, start: { name: skill.name, about: skill.about, ...(flags ? { flags: { ...flags }, explicitFlags: Boolean(explicit) } : {}) }, draft: { name: skill.name, about: skill.about, ...(flags ? { flags: { ...flags } } : {}) }, message: '' });
         draw();
     }
     function cancel() {
@@ -97,15 +101,23 @@ export function renderSkills(parent, { character, session = null, api = {}, onBa
         if (slot === null || run.busy || !alive || typeof api.command !== 'function') return { ok: false };
         const name = run.draft.name.replace(/\s+/g, ' ').trim(), about = run.draft.about.replace(/\s+/g, ' ').trim();
         if (!name) { run.message = K.needName; draw(); return { ok: false }; }
-        if (name === run.start.name && about === run.start.about) { cancel(); return { ok: true }; }
+        const wordsChanged = name !== run.start.name || about !== run.start.about;
+        const flagsChanged = run.draft.flags && JSON.stringify(run.draft.flags) !== JSON.stringify(run.start.flags);
+        if (!wordsChanged && !flagsChanged) { cancel(); return { ok: true }; }
         run.busy = true;
         run.message = '';
         if (saveButton) saveButton.disabled = true;
         if (noteNode) noteNode.textContent = words();
         let failure = null;
         try {
-            const result = await api.command('dm.set', { module: block.module, fields: { [`skill${slot}`]: name, [`about${slot}`]: about } });
-            if (!result?.ok) failure = result ?? { ok: false };
+            if (wordsChanged) {
+                const result = await api.command('dm.set', { module: block.module, fields: { [`skill${slot}`]: name, [`about${slot}`]: about } });
+                if (!result?.ok) failure = result ?? { ok: false };
+            }
+            if (!failure && (flagsChanged || (name !== run.start.name && run.start.explicitFlags))) {
+                const result = await api.command('rpg.boardSkill', { module: character.module, slot, name, flags: run.draft.flags });
+                if (!result?.ok) failure = result ?? { ok: false };
+            }
         } catch (error) {
             failure = { ok: false, message: String(error?.message ?? error) };
         }
@@ -150,6 +162,7 @@ export function renderSkills(parent, { character, session = null, api = {}, onBa
         if (limit(`about${skill.slot}`)) about.setAttribute('maxlength', String(limit(`about${skill.slot}`)));
         field(K.editName, name);
         field(K.editAbout, about);
+        if (run.draft.flags) drawSkillFlags(doc, form, run.draft.flags);
         name.addEventListener('input', () => { run.draft.name = name.value; });
         about.addEventListener('input', () => { run.draft.about = about.value; });
         form.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault?.(); cancel(); } });

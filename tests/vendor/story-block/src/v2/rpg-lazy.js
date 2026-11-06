@@ -12,7 +12,8 @@
 // This file holds: the loaded library's holder (`rpgLib`), the part's stand-in (`createLazyRpgPart`: the same commands,
 // cards, queries, hooks, settings and guard as lean-rpg/index.js createLeanRpgPart, handed to the real part once the
 // library is there), the loader (`createRpgLoader`) and the check of a chat (`holdsRpg`). No DOM, no SillyTavern.
-import { FIGHT, LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING, NOROLL, PLANNER_LIMIT, PLANNER_LIMIT_SETTING, PRACTICE, PRACTICE_SETTING, PRACTICE_STEP, RESOLVE, ROLLS, ROLLS_SETTING, plannerLimitMs } from './lean-rpg/names.js';
+import { CORE_FEATURE } from './features.js';
+import { BOARD_SKILL, FIGHT, LEAN_RPG_FEATURE, LEVEL, LEVEL_CAP_SETTING, NOROLL, PLANNER_LIMIT, PLANNER_LIMIT_SETTING, PRACTICE, PRACTICE_SETTING, PRACTICE_STEP, RESOLVE, ROLLS, ROLLS_SETTING, plannerLimitMs } from './lean-rpg/names.js';
 import { noRoll } from './lean-rpg/noroll.js';
 import { RANK_QUERY, SETTINGS_SCHEMA, XP_RATE, XP_RATE_SETTING, rankQuery } from './lean-rpg/levels.js';
 import { rosterQueries } from './lean-rpg/roster.js';
@@ -108,6 +109,7 @@ export function createLazyRpgPart(deps = {}) {
     const plannerValues = () => { try { const values = deps?.plannerValues?.(); return values && typeof values === 'object' ? values : {}; } catch { return {}; } };
     return {
         commands: {
+            [BOARD_SKILL]: Object.assign(run(BOARD_SKILL, ctx => waiting(ctx)), { feature: CORE_FEATURE.fightBoard }),
             [RESOLVE]: Object.assign(run(RESOLVE, ctx => waiting(ctx)), { prelude: true, internal: true }),
             // (a tiny record with no state, answered at once, the library or not: a stored note replays whatever is loaded)
             [NOROLL]: Object.assign((ctx, payload) => noRoll(ctx, payload), { prelude: true, internal: true }),
@@ -126,9 +128,10 @@ export function createLazyRpgPart(deps = {}) {
             ...rosterQueries({ persona: deps?.persona, on: deps?.rosterOn }),
         },
         hooks: {
+            canGenerate: Object.assign((view, info) => part()?.hooks.canGenerate(view, info), { feature: LEAN_RPG_FEATURE }),
             beforeGenerate: Object.defineProperty((view, info) => part()?.hooks.beforeGenerate(view, info), 'timeoutMs', { enumerable: true, get: () => plannerLimitMs(plannerValues(), timeoutMs) + HOOK_MARGIN_MS }),
             afterCapture: (view, info) => part()?.hooks.afterCapture(view, info),
-            afterReceive: view => { part()?.hooks.afterReceive(view); },
+            afterReceive: (view, info) => { part()?.hooks.afterReceive(view, info); },
         },
         settings: { defaults: { [ROLLS_SETTING]: ROLLS[0], [PRACTICE_SETTING]: PRACTICE.perUse, [XP_RATE_SETTING]: XP_RATE.default, [LEVEL_CAP_SETTING]: LEVEL.max, [PLANNER_LIMIT_SETTING]: PLANNER_LIMIT.default }, schema: SETTINGS_SCHEMA },
         guard: (view, info) => { const made = part(); return made ? made.guard(view, info) : { ok: false, reason: 'The RPG is not loaded.' }; },

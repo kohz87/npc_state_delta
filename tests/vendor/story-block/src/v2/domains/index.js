@@ -81,7 +81,9 @@ export const CORE_KINDS = Object.freeze({
     item: Object.freeze({ grammar: '+ item Name | qty: 1 | note: short detail (- item Name | qty: 1 when used up or lost; ~ item Name | note: … when it changes)' }),
     coin: Object.freeze({ grammar: '+ coin 30 | from: who (- coin 5 | to: who when paid; whenever {{user}} is paid or pays in the story, even a few coins, write the coin line; one number, in the wallet\'s currency)' }),
     place: Object.freeze({ grammar: '~ place Name | kind: settlement|wild|dungeon|… | region: wider area | with: who came along (the rest stay behind)' }),
-    present: Object.freeze({ grammar: '+ present Name when someone arrives, - present Name when they leave; when someone already here is first named, - present the old word and + present the name (- present clerk, + present Nelje)' }),
+    // `after: ['place']`: a move leaves behind everyone it does not bring (scene.js setPlace), so a reply's present lines run behind its place line,
+    // whatever order they were written in (registry captureEntry, capture-flow linesInOrder): the people the story adds at the new place stay.
+    present: Object.freeze({ grammar: '+ present Name when someone arrives, - present Name when they leave; when someone already here is first named, - present the old word and + present the name (- present clerk, + present Nelje)', after: Object.freeze(['place']) }),
     // MODULES §F120: the weather, descriptive only; its grammar line only while `story-block.weather` is on.
     weather: Object.freeze({ grammar: `~ weather cold drizzle, low fog (only when the weather changes, not every reply; a few words, at most ${WEATHER_CHARS} characters)`, feature: CORE_FEATURE.weather }),
     // MODULES §F126: {{user}}'s rank, what they wear and how they are, descriptive only; its grammar line only while `story-block.you` is on.
@@ -124,6 +126,7 @@ export const CORE_FEATURES = Object.freeze([
     // The mounts: on; the grammar line and the narrator's line are there only while it is on.
     Object.freeze({ id: CORE_FEATURE.mounts, label: STRINGS.features.mounts, describe: STRINGS.features.mountsDescribe, default: true, presets: LEAN_OFF }),
     Object.freeze({ id: CORE_FEATURE.leanRpg, label: STRINGS.features.leanRpg, describe: STRINGS.features.leanRpgDescribe, default: false, presets: OUT_OF_PRESETS }),
+    Object.freeze({ id: CORE_FEATURE.fightBoard, label: 'Fight board', describe: 'Choose each exchange on the Fight tab.', default: true, presets: OUT_OF_PRESETS }),
 ]);
 
 
@@ -297,6 +300,7 @@ export function mergeParts(parts) {
                 const lines = [];
                 const commands = [];
                 const problems = [];
+                let fightStart = null;
                 // Each part has its own time limit (turn.js hookTimeout): a part that fails or is too slow is reported, and the
                 // answers of the parts that did answer are kept.
                 for (const fn of fns) {
@@ -314,9 +318,10 @@ export function mergeParts(parts) {
                     else {
                         lines.push(...(Array.isArray(answer?.lines) ? answer.lines : []));
                         commands.push(...(Array.isArray(answer?.commands) ? answer.commands : []));
+                        if (answer?.fightStart) fightStart = answer.fightStart;
                     }
                 }
-                return { lines, commands, ...(problems.length ? { problems } : {}) };
+                return { lines, commands, ...(fightStart ? { fightStart } : {}), ...(problems.length ? { problems } : {}) };
             }, 'timeoutMs', { enumerable: true, get: () => fns.reduce((sum, fn) => sum + hookTimeout(fn), 500) })
             // afterCapture: every part's steps are run, in part order (the data blocks' timers and reply-end steps, then the RPG's fight XP).
             : name === 'afterCapture' ? (...args) => {

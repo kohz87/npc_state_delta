@@ -17,9 +17,11 @@ import { within, TIMED_OUT } from './text.js';
 import { occurrenceOf, operationKey } from '../evidence.js';
 import { hash, readRecord } from '../persist.js';
 import { LEAN_RPG_FEATURE, practiceFromRollsOnly } from '../lean-rpg/names.js';
+import { boardFailure, boardStep } from './held-board.js';
 
 export function createCaptureFlow(s, deps) {
-    const { ctx, store, bus, registry, settings, events, hostSettings, view, viewReader, lateReader, problem, isCarrier, PRACTICE_LINE, HOOK_TIMEOUT_MS } = deps;
+    const { ctx, store, bus, registry, settings, events, hostSettings, view, viewReader, lateReader, problem, isCarrier, boardError, PRACTICE_LINE, HOOK_TIMEOUT_MS } = deps;
+    const holdBoard = message => Object.assign(new Error(`${boardFailure('The fight could not be saved:', message)} Once restored, this reply can finish; after discarding, regenerate it.`), { code: 'BOARD_PRELUDE' });
 
     // Runs the reply's change lines; returns { receipts, problems }.
     // Each line runs on the state the lines before it left (bus.run's `state`), as its owner's
@@ -113,6 +115,11 @@ export function createCaptureFlow(s, deps) {
     // lines marked as its (late: read from the reply before, after the reader had sent), within the same
     // cap per reply (`used`: lines the reply already read in an earlier call).
     async function captureLines(index, all, before = null, type = 'normal', { late = [], assist = [], used = 0, prechecks = [] } = {}) {
+        const board = boardStep({ prechecks })?.payload.board;
+        if (board) {
+            const error = boardError(store.head(), board);
+            if (error) throw holdBoard(error);
+        }
         const receipts = [];
         const found = [];
         const lines = capped(index, all, found);
@@ -183,6 +190,7 @@ export function createCaptureFlow(s, deps) {
                 const result = bus.run(command?.type, payload, { cause: 'system', state: live ? store.head() : now, ...(reply ? { reply: plan ? { ...reply, ...(taking.span && (plan.preserveSources || occurrenceOf(taking.span) === null) ? { ordinal: taking.span.source.ordinal } : {}), pending: plan.pending, opsBefore: plan.blocks.reduce((sum, piece) => sum + (Number.isInteger(piece.n) ? piece.n : 0), 0) + steps.reduce((sum, step) => sum + (Array.isArray(step.ops) ? step.ops.length : 0), 0) } : reply } : {}), ...(plan ? { planned: planned(), replacing: plan.replacing, reusing: taking.span, ...(Number.isInteger(taking.value) ? { occurrence: taking.value } : {}) } : {}), ...(seed === undefined ? {} : { seed }) });
                 if (!result?.ok) {
                     problems.push(problem({ module: moduleId, index, code: result?.code ?? 'FAILED', message: `The step "${command?.type}" after the reply's lines was not run: ${result?.message ?? 'unknown error'}` }));
+                    if (precheck && command?.type === 'rpg.resolve' && payload?.board) throw holdBoard(result?.message);
                     continue;
                 }
                 // Done, but not all of what was asked (a clamp, a line of the story that was not used): the step says why, and it goes to the Problems list.

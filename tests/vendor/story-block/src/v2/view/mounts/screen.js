@@ -76,6 +76,9 @@ export function createScreenMount(deps) {
         };
     }
 
+    const boardHero = () => view?.screenId === 'story-block/fight' && view.phone?.matches === true
+        && Boolean(view.body.querySelector('.rpg-board-active'));
+
     // The header: the widget is made once and updated; no state (no chat) or no `heroOf` takes the header away.
     function drawHero() {
         if (!view?.heroSlot) return;
@@ -93,9 +96,15 @@ export function createScreenMount(deps) {
             return;
         }
         // The one-row variant on a phone (the bars under the name), the wide one from 760px (the hero's own container query).
-        props = { ...props, compact: view.phone?.matches === true };
+        view.boardHero = boardHero();
+        props = { ...props, compact: view.phone?.matches === true, boardExpandable: view.boardHero };
         if (view.hero) view.hero.update(props);
         else view.hero = hero.render(view.heroSlot, props, deps.api ?? {});
+    }
+
+    // Board redraws can open or discard a fight without changing the head or navigating away.
+    function syncBoardHero() {
+        if (view && boardHero() !== view.boardHero) drawHero();
     }
 
     // Whether `screenId` can be shown in the game view although it is not among the listed screens (opened by name).
@@ -114,6 +123,7 @@ export function createScreenMount(deps) {
         view.handle?.unmount();
         drawHero();
         view.handle = mount(view.body, screenId, { settings: bodySettings() });
+        syncBoardHero();
         return true;
     }
 
@@ -167,7 +177,10 @@ export function createScreenMount(deps) {
         // A layer of the shared stack (modal-stack.js): Escape closes the view when no layer above it (the More sheet, a dialog) is open,
         // Tab stays in it, and closing it hands the focus back to what opened it.
         const layer = stackOf(doc).push({ name: 'game view', root, onEscape: () => { close(); return true; } });
-        view = { root, bar: screenBar, title, body, handle: null, screenId: target, layer, off: onHead(deps, update), heroSlot, hero: null, heroShown: false, phone, onWidth };
+        const Observer = doc.defaultView?.MutationObserver;
+        const boardObserver = Observer ? new Observer(syncBoardHero) : null;
+        boardObserver?.observe(body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+        view = { root, bar: screenBar, title, body, handle: null, screenId: target, layer, off: onHead(deps, update), heroSlot, hero: null, heroShown: false, boardHero: false, boardObserver, phone, onWidth };
         show(target, { byName: named === target });
         // by pointer: the window takes the focus (no ring); by key: the close button (its ring is the keyboard's), one task later:
         // the key that opened the view is still being handled, and its own activation (Enter, Space) would click whatever has the
@@ -179,8 +192,9 @@ export function createScreenMount(deps) {
 
     function close() {
         if (!view) return;
-        const { root, handle, layer, off, bar, hero: header, phone, onWidth } = view;
+        const { root, handle, layer, off, bar, hero: header, boardObserver, phone, onWidth } = view;
         view = null;
+        boardObserver?.disconnect();
         off();
         doc.body?.classList?.remove('ss-gameview-open');
         phone?.removeEventListener?.('change', onWidth);

@@ -125,6 +125,7 @@ export function newId(prefix, cryptoApi = globalThis.crypto) {
 export function createCommandBus({ store, registry, settings = () => ({}), onCommitted = null, id = newId, seed = freshSeed } = {}) {
     const previews = new Map();
     let previewCount = 0;
+    let commitGuard = null;
 
     // `again` (a Re-read of a line that made a change before, turn.js): its features are not checked.
     function resolve(type, again = false) {
@@ -831,6 +832,10 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
     // ---- storing ------------------------------------------------------------------------------
 
     function storeResult(ops, receipt, block = null) {
+        if (commitGuard) {
+            const refused = commitGuard(() => apply(store.head(), ops), receipt);
+            if (refused) return { ok: false, code: 'REPLY_BUSY', message: refused };
+        }
         try {
             store.append({ ops, receipt, ...(block ? { block } : {}) });
         } catch (error) {
@@ -870,6 +875,8 @@ export function createCommandBus({ store, registry, settings = () => ({}), onCom
         .map(feature => `${feature.id}:${featureOn(feature.id) ? 1 : 0}`).join(',');
 
     return {
+        /** Host-only guard for edits that would change an in-flight reply's inputs. */
+        setCommitGuard(fn) { commitGuard = typeof fn === 'function' ? fn : null; },
         /** command(type, payload, { cause = 'ui' }) → { ok: true, receipt } | { ok: false, code, message } */
         command(type, payload, { cause = 'ui' } = {}) {
             return guarded(() => {

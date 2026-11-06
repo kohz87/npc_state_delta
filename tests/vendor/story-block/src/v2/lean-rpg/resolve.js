@@ -63,205 +63,31 @@
 // stat (or the defending skill's), `skill` the defending skill (null: none; a roll made before there were any has none) and `pc` the
 // defender (outcome 'fail' means the defender failed). `summary.exchanges` = rounds.length is the
 // number B shows as "Rolled for you: N exchanges". The told count is not recorded: the narrator is not asked to count.
-import { FIGHT, FIX_VERSION, FORMULA, LEVEL, LIMITS, LV_VERSION, PACE, PRACTICE_STEP, RESOLVE, STAGES, practiceOf } from './names.js';
+import { FIGHT, FIX_VERSION, FORMULA, LEVEL, LV_VERSION, PACE, PRACTICE_STEP, RESOLVE, practiceOf } from './names.js';
 import { fightGuard } from './fight.js';
+import { boardGuard, resolveBoard } from './board/commit.js';
 import { practiceGuard } from './practice.js';
-import { classTerm, EARLIER_RULES, hasLevels, isStandard, normalizeRules, STANDARD, statShare } from './rules.js';
-import { prepareStandard, rollStandard, summaryStd } from './standard.js';
+import { EARLIER_RULES, hasLevels, isStandard, normalizeRules, STANDARD } from './rules.js';
+import { rollStandard, summaryStd } from './standard.js';
 import { cueOfResult, fitCue } from './cue.js';
-import { matchCharacter, matchFoe, matchSkill, readSheet, strongestStat } from './read.js';
+import { readSheet } from './read.js';
 import { validatePlan } from './plan.js';
 import { openFoes } from './open.js';
-import { levelBonus } from './formula.js';
 import { applyGear, earnedLegend, gearMarkOf, gearMatches, gearValid, noteGear, planGear, wearGear } from './gear.js';
 import { condWord, stepDown } from '../domains/gear.js';
 import { partyLevels, averageLevel, settleOpen } from './foes.js';
-import { rng as seededRandom } from '../rng.js';
 import { ambushOf, ambushRecord, ambushedClassic, carriedFrom } from './ambush.js';
+import { FLOW_VERSION, laterOf, outcomeOf, prepare, positionalDice, rolled } from './resolve/classic.js';
+
+// Classic's plan preparation and dice streams live in resolve/classic.js; this file keeps the flow, record and guard.
+export { FLOW_VERSION, outcomeOf, prepare, positionalDice };
 
 export const RESULT_VERSION = 1;
 /** The version of the dice scheme a payload asks for (`dice` in the payload of `rpg.resolve`): 2 = dice per action position. */
 export const DICE_VERSION = 2;
-/** The version of the rule a reply's exchanges stop by (`flow` in the payload of `rpg.resolve`): 2 = until won, lost, heavy, the cap or the budget (see the top). */
-export const FLOW_VERSION = 2;
 const KEY = /^\d{1,7}-[0-9a-z]{1,7}$/;
 export const claimKey = key => `rpg:resolve:${key}`;
-const cap = word => word.charAt(0).toUpperCase() + word.slice(1);
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-
-/** The outcome for the party member's die and total against `against` (see the top); `rules` are the numbers in force (default: Standard). */
-export function outcomeOf(die, total, against, rules = STANDARD) {
-    if (die === FORMULA.die) return 'success';
-    if (die === 1) return 'fail';
-    if (total >= against) return 'success';
-    return total >= against - rules.costMargin ? 'cost' : 'fail';
-}
-
-// The party member's side of a roll as the sheet gives it (no die yet).
-// `hidden`: the stat came from a skill whose stat the pack hides; that, or a stat the character's block hides, is used by the
-// rules and not named by the cue (review 163).
-function side(character, stat, rank, edge, rules, hidden = false) {
-    const value = character.stats[stat];
-    return {
-        who: character.who, stat, statBonus: statShare(value, rules),
-        ...classTerm(rules, character), rank, edge,
-        ...(hidden || (character.hidden ?? []).includes(stat) ? { statHidden: true } : {}),
-    };
-}
-
-// A skill phrase on a character's sheet, and what the act rolls with: { skill, rank, stat, uses, refused? }. The skill's own
-// stat and resource win over the plan's; a character without the skill, or with the skill's resource Empty, rolls untrained
-// (rank 0, no skill named), the first with the plan's stat and the second with the skill's. With no stat anywhere (a skill the
-// character lacks and none given, or a skill of an old Skills block that has no stat and none given) the roll is untrained with
-// the character's best stat, and the cue says so.
-//
-// A refusal that would name something the pack hides is said without it (review 163); `refusedPlain` is the wording as if nothing
-// were hidden, which only measures the cue (fitCue), so hiding never changes how many rounds are told (review 166). The hidden
-// wording is never longer than the plain one.
-function skillFor(character, phrase, planned) {
-    if (!phrase) return { skill: null, rank: 0, stat: planned.stat, uses: null };
-    const found = matchSkill(character, phrase);
-    const best = () => strongestStat(character);
-    const named = stat => ` with ${stat?.toUpperCase()}, their best stat`;
-    const bestly = (stat, plain = false) => (stat ? '' : !plain && (character.hidden ?? []).includes(best()) ? ' with their best stat' : named(best()));
-    const say = (fields, text) => ({ ...fields, refused: text(false), refusedPlain: text(true) });
-    if (!found) {
-        const stat = planned.stat ?? best();
-        return say({ skill: null, rank: 0, stat, uses: null }, plain => `${character.who} has no skill called ${phrase}: rolled untrained${bestly(planned.stat, plain)}.`);
-    }
-    if (!found.stat && !planned.stat) return say({ skill: null, rank: 0, stat: best(), uses: null }, plain => `${character.who}'s ${found.name} has no stat of its own: rolled untrained${bestly(null, plain)}.`);
-    const stat = found.stat ?? planned.stat, resource = found.uses ?? (planned.uses === 'mana' ? 'mana' : 'stamina');
-    // A skill's stat or resource the pack hides still counts for the rules; the cue and the refusal leave it out (review 163).
-    const hiddenStat = found.stat && (found.hidden ?? []).includes('stat') ? { statHidden: true } : {};
-    if (character[resource] === 0) {
-        const hidden = Boolean(found.uses) && (found.hidden ?? []).includes('uses');
-        return say({ skill: null, rank: 0, stat, uses: resource, ...hiddenStat }, plain => `${character.who} cannot use ${found.name}${hidden && !plain ? '' : ` (${cap(resource)} ${STAGES[resource][0]})`}: rolled without it.`);
-    }
-    return { skill: found.name, rank: found.rank, stat, uses: resource, ...hiddenStat };
-}
-
-/**
- * The plan against the sheet: what can be rolled, what is refused and why, and the witness (every sheet number the
- * roll depends on, which the replay guard asks again). `rules` are the numbers in force (rules.js; default: Standard).
- * → { acts, foes, checks, refused: [{ who, text }], witness }
- */
-export function prepare(plan, sheet, rules = STANDARD, options = {}) {
-    if (isStandard(rules)) return prepareStandard(plan, sheet, rules, options);
-    // `plainRefused`: each refusal as if nothing were hidden, to measure the cue only (never saved, never told; review 166).
-    const out = { acts: [], foes: [], checks: [], refused: [], plainRefused: [] };
-    const refuse = (who, text, plain = text) => { out.refused.push({ who, text }); out.plainRefused.push(plain); };
-    const ready = who => {
-        const character = matchCharacter(sheet, who);
-        if (!character) return { refusal: `no character called ${who}` };
-        if (character.alive === false || character.health === 0) return { refusal: `${character.who} is Down` };
-        return { character };
-    };
-    // The stat the act rolls with, once the skill has had its say: it must be on the sheet.
-    // `hidden`: the stat is a skill's hidden one, so the refusal does not name it (review 164); `plain` names it, to measure.
-    const statOf = (character, stat, hidden = false) => {
-        if (!stat) return { refusal: `${character.who} has no stat to roll with` };
-        const plain = `${character.who} has no ${stat.toUpperCase()} on the sheet`;
-        if (!Number.isInteger(character.stats[stat])) return { refusal: hidden ? `${character.who} lacks the skill's stat` : plain, plain };
-        return {};
-    };
-    for (const [at, act] of (plan.acts ?? []).entries()) {
-        const foe = matchFoe(sheet, act.target);
-        const actor = ready(act.who);
-        const label = `${act.who} → ${act.target}`;
-        if (actor.refusal) { refuse(act.who, `${label}: not rolled (${actor.refusal}).`); continue; }
-        if (!foe) { refuse(act.who, `${label}: not rolled (no foe called ${act.target}).`); continue; }
-        const skill = skillFor(actor.character, act.skill, act);
-        const stat = statOf(actor.character, skill.stat, skill.statHidden);
-        if (stat.refusal) { refuse(act.who, `${label}: not rolled (${stat.refusal}).`, `${label}: not rolled (${stat.plain ?? stat.refusal}).`); continue; }
-        if (skill.refused) refuse(act.who, skill.refused, skill.refusedPlain);
-        const edge = Math.max(-FORMULA.edgeMax, Math.min(FORMULA.edgeMax, act.edge ?? 0));
-        // The follow-up skill of mark 3 (plan.js `then:`): rounds 2 on roll with it; one that cannot be rolled (no stat on the sheet) is left out, and says nothing.
-        const next = options.then && act.then ? skillFor(actor.character, act.then, act) : null;
-        const later = next && !statOf(actor.character, next.stat, next.statHidden).refusal ? { skill: next.skill, pc: side(actor.character, next.stat, next.rank, edge, rules, next.statHidden) } : null;
-        out.acts.push({ at, kind: 'act', skill: skill.skill, ...(act.why ? { why: act.why } : {}), pc: side(actor.character, skill.stat, skill.rank, edge, rules, skill.statHidden), ...(later ? { then: later } : {}), foe });
-    }
-    for (const [at, entry] of (plan.foes ?? []).entries()) {
-        if (entry.hold) continue;
-        const foe = (sheet.foes ?? []).find(slot => slot.slot === entry.slot && slot.filled);
-        const label = `${foe?.name ?? `Foe ${entry.slot}`} attacks ${entry.target}`;
-        if (!foe) { refuse(`foe${entry.slot}`, `${label}: not rolled (that foe slot is empty).`); continue; }
-        const defender = ready(entry.target);
-        if (defender.refusal) { refuse(entry.target, `${label}: not rolled (${defender.refusal}).`); continue; }
-        // A skill the defender has counts like an act's: its own stat wins over `defend`, its rank adds, an Empty resource rolls without it.
-        const skill = skillFor(defender.character, entry.skill, { stat: entry.defend });
-        const stat = statOf(defender.character, skill.stat, skill.statHidden);
-        if (stat.refusal) { refuse(entry.target, `${label}: not rolled (${stat.refusal}).`, `${label}: not rolled (${stat.plain ?? stat.refusal}).`); continue; }
-        if (skill.refused) refuse(entry.target, skill.refused, skill.refusedPlain);
-        out.foes.push({ at, kind: 'foe', skill: skill.skill, pc: side(defender.character, skill.stat, skill.rank, 0, rules, skill.statHidden), foe });
-    }
-    for (const [at, check] of (plan.checks ?? []).entries()) {
-        const actor = ready(check.who);
-        const label = `${check.who} — ${check.skill ?? check.stat?.toUpperCase() ?? 'check'}`;
-        if (actor.refusal) { refuse(check.who, `${label}: not rolled (${actor.refusal}).`); continue; }
-        const skill = skillFor(actor.character, check.skill, check);
-        const stat = statOf(actor.character, skill.stat, skill.statHidden);
-        if (stat.refusal) { refuse(check.who, `${label}: not rolled (${stat.refusal}).`, `${label}: not rolled (${stat.plain ?? stat.refusal}).`); continue; }
-        if (skill.refused) refuse(check.who, skill.refused, skill.refusedPlain);
-        out.checks.push({ at, kind: 'check', skill: skill.skill, ...(check.ambush === true ? { ambush: true } : {}), difficulty: check.difficulty, dc: LIMITS.dc[check.difficulty], pc: side(actor.character, skill.stat, skill.rank, 0, rules, skill.statHidden) });
-    }
-    // (From a roll of the Levels rules, `options.lv`, a foe adds floor(level / divisor); else classWeight × class, as it did.)
-    const foeSide = foe => (options.lv
-        ? { slot: foe.slot, name: foe.name, base: rules.foeBase, classValue: foe.level, classBonus: levelBonus(foe.level, rules.levelDivisor) }
-        : { slot: foe.slot, name: foe.name, base: rules.foeBase, classValue: foe.class, classBonus: rules.classWeight * foe.class });
-    for (const entry of [...out.acts, ...out.foes]) entry.foe = foeSide(entry.foe);
-    // (Where an action stands in the plan is for its dice; the witness is the sheet numbers only, as it always was.)
-    // Whether a stat is hidden is not a sheet number: it changes what the cue says, never the dice (review 164).
-    const bare = list => list.map(({ at: _, ...entry }) => ({ ...entry, pc: (({ statHidden: _hidden, ...pc }) => pc)(entry.pc) }));
-    out.witness = { acts: bare(out.acts).map(entry => (entry.then ? { ...entry, then: { ...entry.then, pc: (({ statHidden: _hidden, ...pc }) => pc)(entry.then.pc) } } : entry)), foes: bare(out.foes), checks: bare(out.checks), refused: out.refused };
-    // The flow of stage 49 stops by the bars, so the roll depends on them: they join the witness (a roll of the earlier flow has none, as it never did).
-    if (options.flow === FLOW_VERSION) {
-        out.roster = classicRoster(sheet);
-        out.witness = { ...out.witness, roster: { characters: out.roster.characters.map(({ id, name, value, size }) => ({ id, name, value, size })), foes: out.roster.foes.map(({ id, name, value, size }) => ({ id, name, value, size })) } };
-    }
-    return out;
-}
-
-// The sheet as bars for Classic's stop count (flow 2): the characters (a dead one is Down) and the filled foe groups, at their Health as the sheet has it.
-// A Classic block's Health is 0 to 5 stages (a Standard block under Classic rules has its own number of blocks); a Health that cannot be read counts as full.
-function classicRoster(sheet) {
-    const held = (value, size) => (Number.isInteger(value) ? Math.max(0, Math.min(size, value)) : size);
-    return {
-        characters: sheet.characters.map(character => {
-            const size = character.size?.health ?? 5;
-            return { id: `c:${character.key}`, name: character.who, value: character.alive === false ? 0 : held(character.health, size), size };
-        }),
-        foes: sheet.foes.filter(foe => foe.filled).map(foe => {
-            const size = foe.size ?? 5;
-            return { id: `f:${foe.slot}`, slot: foe.slot, name: foe.name, value: held(foe.hurt, size), size };
-        }),
-    };
-}
-
-// From round 2 an act with a `then:` skill rolls with it (Classic): the dice are the entry's own, drawn before this is asked.
-const laterOf = (entry, round) => (round > 1 && entry.then ? (({ then, ...rest }) => ({ ...rest, ...then }))(entry) : entry);
-
-const rolled = (entry, pcDie, foeDie, rules) => {
-    const pcTotal = pcDie + entry.pc.statBonus + entry.pc.classBonus + entry.pc.rank + entry.pc.edge;
-    const line = { kind: entry.kind, skill: entry.skill, ...(entry.ambush === true ? { ambush: true } : {}), ...(entry.why ? { why: entry.why } : {}), pc: { ...entry.pc, die: pcDie, total: pcTotal } };
-    if (entry.kind === 'check') return { ...line, difficulty: entry.difficulty, dc: entry.dc, outcome: outcomeOf(pcDie, pcTotal, entry.dc, rules) };
-    const foeTotal = foeDie + entry.foe.base + entry.foe.classBonus;
-    const decisive = [pcDie, foeDie].some(die => die === 1 || die === FORMULA.die) || Math.abs(pcTotal - foeTotal) >= rules.decisiveMargin;
-    return { ...line, foe: { ...entry.foe, die: foeDie, total: foeTotal }, outcome: outcomeOf(pcDie, pcTotal, foeTotal, rules), decisive };
-};
-
-/**
- * The dice of one roll, one stream per planned action: `streams(kind, at)` → a function that gives that action's next d20 (1–20),
- * `kind` 'act', 'foe' or 'check' and `at` the action's index in the plan's list of that kind. `base` is one number drawn from the
- * receipt's seed; each action's stream is seeded from it and the action's place, so the streams never depend on one another.
- */
-export function positionalDice(base) {
-    // (`init` and `open`: the Standard formula's turn order and opening action; Classic never draws them.)
-    const KIND = { act: 1, foe: 2, check: 3, init: 4, open: 5 };
-    return Object.assign((kind, at) => {
-        const random = seededRandom((base ^ Math.imul(KIND[kind] * 64 + at + 1, 0x9E3779B1)) >>> 0);
-        return () => 1 + Math.floor(random() * FORMULA.die);
-    }, { positional: true });
-}
 
 /**
  * Rolls a prepared plan: `source` is positionalDice's answer (each action draws from its own stream), or, for a roll of the earlier
@@ -411,9 +237,12 @@ const guardOf = (ctx, predicate, witness) => ({ owner: ctx.module, version: 2, e
  * reply with the same seed). `key` is the reader's message (its index and a hash of its text), as Assist's pre-roll keys it.
  */
 export function resolve(ctx, payload = {}) {
+    if (payload?.board !== undefined) return resolveBoard(ctx, payload);
     if (ctx.cause !== 'system' || ctx.caller !== null) ctx.fail('REFUSED', 'Rolls are made by Story Block before a reply, not by an action.');
     const key = String(payload?.key ?? '');
     if (!KEY.test(key)) ctx.fail('INVALID', 'A roll needs the key of the message it was made for.');
+    const start = payload.start;
+    if (start !== undefined && (typeof start !== 'string' || !start || start.length > 120)) ctx.fail('INVALID', 'The fight opening is damaged.');
     const checked = validatePlan(payload?.plan);
     if (!checked.ok) ctx.fail('INVALID', `That is not a plan: ${checked.errors[0]}`);
     const plan = payload.plan;
@@ -447,8 +276,9 @@ export function resolve(ctx, payload = {}) {
     const sheet = applyGear(standing, gear);
     const prepared = prepare(plan, sheet, rules, { maxOf: fieldMax(domain), flow, lv: Boolean(lv), fix: fix >= 2, then: fix >= 3 });
     if (opening) prepared.witness = { ...prepared.witness, opened };
-    if (!prepared.acts.length && !prepared.foes.length && !prepared.checks.length) ctx.fail('NO_LONGER_DONE', 'Nothing is left to roll on this sheet.');
-    if (!ctx.claim(claimKey(key))) ctx.fail('CLAIMED', 'This message has already been rolled for.');
+    if (!opening && !prepared.acts.length && !prepared.foes.length && !prepared.checks.length) ctx.fail('NO_LONGER_DONE', 'Nothing is left to roll on this sheet.');
+    const claim = start ? `${claimKey(`start:${encodeURIComponent(start)}`)}:reply:${ctx.reply?.sid ?? ''}` : claimKey(key);
+    if (!ctx.claim(claim)) ctx.fail('CLAIMED', 'This message has already been rolled for.');
     // A roll that asks for the dice version draws one number from the seed, and each action's dice come from that and its place in
     // the plan; one made before has no version and draws its dice in one sequence, as it did.
     const source = positional ? positionalDice(base) : () => ctx.roll(`d${FORMULA.die}`).total;
@@ -462,8 +292,8 @@ export function resolve(ctx, payload = {}) {
         wear = wearGear(ctx, gear, { opening: dice.opening ?? [], rounds: dice.rounds, rules, condWord });
         legend = earnedLegend(dice, sheet, lv === LV_VERSION);
     }
-    const predicate = { kind: RESOLVE, key, plan: ctx.hash(plan), rules: ctx.hash(rules), ...(order ? { order: ctx.hash(order) } : {}), ...(drop ? { ambush: ctx.hash(drop) } : {}), ...(flow === FLOW_VERSION ? { flow } : {}), ...(fix ? { fix } : {}), ...(practice ? { practice } : {}), ...(lv ? { lv } : {}), ...(settled ? { levels: ctx.hash(levelsOf(settled)) } : {}), ...(gear ? { gear: ctx.hash(gear) } : {}) };
-    ctx.replayGuard(guardOf(ctx, predicate, prepared.witness), { key, plan, rules, ...(order ? { order } : {}), ...(drop ? { ambush: drop } : {}), ...(flow === FLOW_VERSION ? { flow } : {}), ...(fix ? { fix } : {}), ...(practice ? { practice } : {}), ...(lv ? { lv } : {}), ...(settled ? { levels: levelsOf(settled) } : {}), ...(gear ? { gear } : {}) });
+    const predicate = { kind: RESOLVE, key, ...(start ? { start } : {}), plan: ctx.hash(plan), rules: ctx.hash(rules), ...(order ? { order: ctx.hash(order) } : {}), ...(drop ? { ambush: ctx.hash(drop) } : {}), ...(flow === FLOW_VERSION ? { flow } : {}), ...(fix ? { fix } : {}), ...(practice ? { practice } : {}), ...(lv ? { lv } : {}), ...(settled ? { levels: ctx.hash(levelsOf(settled)) } : {}), ...(gear ? { gear: ctx.hash(gear) } : {}) };
+    ctx.replayGuard(guardOf(ctx, predicate, prepared.witness), { key, ...(start ? { start } : {}), plan, rules, ...(order ? { order } : {}), ...(drop ? { ambush: drop } : {}), ...(flow === FLOW_VERSION ? { flow } : {}), ...(fix ? { fix } : {}), ...(practice ? { practice } : {}), ...(lv ? { lv } : {}), ...(settled ? { levels: levelsOf(settled) } : {}), ...(gear ? { gear } : {}) });
     const result = {
         v: RESULT_VERSION, key, pace: plan.pace, rules, ...(flow === FLOW_VERSION ? { flow } : {}), ...(fix ? { fix } : {}), ...(practice ? { practice } : {}), ...(lv ? { lv } : {}), ...(gear ? { gear } : {}), stop: dice.stop, checks: dice.checks, rounds: dice.rounds,
         refused: prepared.refused, summary: dice.summary, ...(dice.ambush ? { ambush: dice.ambush } : {}), ...(opening ? { opened } : {}), ...(wear.length ? { wear } : {}), ...(legend ? { legend: 1 } : {}),
@@ -476,7 +306,7 @@ export function resolve(ctx, payload = {}) {
     if (gear) dice.text = cueOfResult(result, dice.shape);
     const text = cueOfResult(result, dice.shape) === dice.text ? '' : dice.text;
     // (the shape the cue was fitted to is kept beside the record, not in it: a roll made before it is replanned without its record changing)
-    return { summary: text, narrate: true, replan: true, data: { v2: { key: claimKey(key), result, ...(dice.shape ? { shape: dice.shape } : {}) } } };
+    return { summary: text, narrate: true, replan: true, data: { v2: { key: claim, result, ...(dice.shape ? { shape: dice.shape } : {}) } } };
 }
 
 /**
@@ -484,6 +314,7 @@ export function resolve(ctx, payload = {}) {
  * the state before the block and what it recorded, nothing else.
  */
 export function leanRpgGuard({ state, hash }, { guard, source, recorded }) {
+    if (guard?.predicate?.board === 1) return boardGuard({ state, hash }, { guard, source, recorded });
     const bad = reason => ({ ok: false, reason });
     if (guard?.predicate?.kind === FIGHT) return fightGuard({ state, hash }, { guard, source, recorded });
     if (guard?.predicate?.kind === PRACTICE_STEP) return practiceGuard({ state, hash }, { guard, source, recorded });
@@ -491,6 +322,7 @@ export function leanRpgGuard({ state, hash }, { guard, source, recorded }) {
         const predicate = guard?.predicate;
         if (guard?.version !== 2 || guard.rulesHash !== null || !isObject(predicate) || predicate.kind !== RESOLVE) return bad('Malformed roll guard.');
         if (!isObject(recorded) || !validatePlan(recorded.plan).ok || hash(recorded.plan) !== predicate.plan || recorded.key !== predicate.key) return bad('The roll\'s plan was damaged.');
+        if (recorded.start !== predicate.start || (recorded.start !== undefined && (typeof recorded.start !== 'string' || !recorded.start || recorded.start.length > 120))) return bad('The fight opening was damaged.');
         // The numbers are the ones recorded with the roll, not today's settings; damaged numbers are not guessed at.
         // A roll recorded before the numbers were kept has none: it was made with Standard's.
         const rules = rulesOfPayload(recorded.rules);

@@ -1,13 +1,13 @@
 // `content.cast` (pure): the pack's hand-written cast, checked and normalized (PACKS.md "The cast").
 //
-// A cast entry is a prepared person: who they are, how they look and sound, where they start, what they want and
+// A cast entry is a prepared person: who they are, how they look, what they wear and how they sound, where they start, what they want and
 // where they are when. Story Director keeps them off-screen until the party meets them; NPC State Delta makes
 // the dossier from the entry at the first meeting. Every text is plain (no markup characters), one line.
 //
 // checkCast(list, packId, add) → the normalized entries `[{ id, name, aliases, about, look, … , pack }]`, or `[]` when
 // anything is wrong (the problems went to `add`). `id` stays the entry's own slug: the cast key is `pack:id`.
 
-import { CAST_BUILT_IN_METERS, CAST_FIELDS, CAST_SKILL_FIELDS, CAST_SKILL_RANK_WORDS, CAST_SKILL_STATS, CAST_SKILL_USES, CAST_LIMITS, CAST_SECRET_FIELDS, CAST_START_FIELDS, METER_LIMITS, METER_RESERVED, METER_STAGE_FIELDS, PORTRAIT_LIMITS, PORTRAIT_NAME, SLUG } from './limits.js';
+import { CAST_BEHAVIOUR_LEVELS, CAST_BEHAVIOUR_LEVERS, CAST_BUILT_IN_METERS, CAST_FIELDS, CAST_SKILL_FIELDS, CAST_SKILL_RANK_WORDS, CAST_SKILL_STATS, CAST_SKILL_USES, CAST_LIMITS, CAST_SECRET_FIELDS, CAST_START_FIELDS, METER_LIMITS, METER_RESERVED, METER_STAGE_FIELDS, PORTRAIT_LIMITS, PORTRAIT_NAME, SLUG } from './limits.js';
 import { foldKey, oneLine } from '../../text.js';
 import { slotWordOf } from '../domains/gear.js';
 
@@ -74,8 +74,54 @@ export function checkCast(list, packId, add, items = []) {
         }
         const about = text('about', record.about, CAST_LIMITS.about, { required: true });
         const look = text('look', record.look, CAST_LIMITS.look, { required: true });
+        const wears = text('wears', record.wears, CAST_LIMITS.wears);
         const voice = text('voice', record.voice, CAST_LIMITS.voice);
         const personality = text('personality', record.personality, CAST_LIMITS.personality);
+
+        // behaviour: up to 6 "Lever: level - effect" lines, a lever once; the lever word is written the way NPC State Delta writes it.
+        let behaviour;
+        if (record.behaviour !== undefined) {
+            const levers = CAST_BEHAVIOUR_LEVERS.join(', ');
+            const levels = CAST_BEHAVIOUR_LEVELS.join(', ');
+            if (!Array.isArray(record.behaviour) || record.behaviour.length > CAST_LIMITS.behaviour) say('behaviour', `behaviour must be a list of at most ${CAST_LIMITS.behaviour} lines like "Care: high - fiercely protective of the dead"; the lever is one of ${levers}, the level one of ${levels}.`);
+            else {
+                const lines = [];
+                const used = new Set();
+                record.behaviour.forEach((entry, n) => {
+                    const at = `behaviour[${n}]`;
+                    const line = typeof entry === 'string' ? oneLine(entry) : '';
+                    const match = /^([^:]*?)\s*:\s*([^\s-]+)\s*[-\u2013\u2014]\s*(.*)$/u.exec(line);
+                    if (!match) return say(at, `${at} must read "Lever: level - effect" (like "Care: high - fiercely protective of the dead"); the lever is one of ${levers}, the level one of ${levels}.`);
+                    const lever = CAST_BEHAVIOUR_LEVERS.find(word => word.toLowerCase() === match[1].trim().toLowerCase());
+                    if (!lever) return say(at, `${at} starts with "${oneLine(match[1], 40)}", which is not a lever; the levers are ${levers}.`);
+                    const level = match[2].toLowerCase();
+                    if (!CAST_BEHAVIOUR_LEVELS.includes(level)) return say(at, `${at} (${lever}) has the level "${oneLine(match[2], 20)}"; the levels are ${levels}.`);
+                    const effect = match[3].trim();
+                    if (!effect || [...effect].length > CAST_LIMITS.behaviourEffect) return say(at, `${at} (${lever}) needs an effect of 1 to ${CAST_LIMITS.behaviourEffect} characters after the dash.`);
+                    if (SHORT.test(effect)) return say(at, `${at} (${lever}) is plain text: no < > { } |.`);
+                    if (used.has(lever)) return say(at, `${at}: the lever ${lever} is used twice; a person has each lever once.`, 'DUPLICATE');
+                    used.add(lever);
+                    lines.push(`${lever}: ${level} - ${effect}`);
+                });
+                if (lines.length) behaviour = lines;
+            }
+        }
+
+        // mannerisms: up to 4 small recurring habits, one plain line each.
+        let mannerisms;
+        if (record.mannerisms !== undefined) {
+            if (!Array.isArray(record.mannerisms) || record.mannerisms.length > CAST_LIMITS.mannerisms) say('mannerisms', `mannerisms must be a list of at most ${CAST_LIMITS.mannerisms} short habits.`);
+            else {
+                const habits = [];
+                record.mannerisms.forEach((habit, n) => {
+                    const line = typeof habit === 'string' ? oneLine(habit) : '';
+                    if (!line || [...line].length > CAST_LIMITS.mannerism || SHORT.test(line)) return say(`mannerisms[${n}]`, `mannerisms[${n}] must be plain text of 1 to ${CAST_LIMITS.mannerism} characters (no < > { } |).`);
+                    habits.push(line);
+                });
+                if (habits.length) mannerisms = habits;
+            }
+        }
+        const withYou = text('withYou', record.withYou, CAST_LIMITS.withYou);
         const history = text('history', record.history, CAST_LIMITS.history);
 
         let portrait;
@@ -279,7 +325,10 @@ export function checkCast(list, packId, add, items = []) {
         if (!good) { ok = false; return; }
         out.push({
             id, name, aliases, about, look,
-            ...(voice ? { voice } : {}), ...(personality ? { personality } : {}), ...(history ? { history } : {}),
+            ...(wears ? { wears } : {}),
+            ...(voice ? { voice } : {}), ...(personality ? { personality } : {}),
+            ...(behaviour ? { behaviour } : {}), ...(mannerisms ? { mannerisms } : {}), ...(withYou ? { withYou } : {}),
+            ...(history ? { history } : {}),
             ...(portrait ? { portrait } : {}),
             start,
             ...(drawnTo ? { drawnTo } : {}),

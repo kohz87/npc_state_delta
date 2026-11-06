@@ -39,7 +39,7 @@ const sameCharacter = (a, b) => a.module === b.module && a.subject === b.subject
  * its draft, is kept here, outside the widget (as Settings → Blocks keeps its editor): `shared.open` is the Spend points sheet's
  * session and `shared.skills` the Skills view's; at most one of them is open.
  */
-export function createPartyWidget({ headState = () => null, readerName = () => '', roleOf, openWizard = null, exportCharacter = null, rules = undefined, rolled = () => false, levels = () => ({}), gear = null } = {}) {
+export function createPartyWidget({ headState = () => null, readerName = () => '', roleOf, openWizard = null, exportCharacter = null, rules = undefined, rolled = () => false, levels = () => ({}), gear = null, board = null } = {}) {
     // `gear` ({ on(), view(args) }, none without a host): while Gear in fights is on a card has an Inventory button that opens the slot card (gear-card.js).
     const shared = { open: null, skills: null, gear: null };
     const live = new Set();
@@ -139,7 +139,7 @@ export function createPartyWidget({ headState = () => null, readerName = () => '
                 main.hidden = Boolean(open || looking || shared.gear);
                 if (open) sheet = renderDistribute(host, { character: open, session: shared.open, api, doc, onClose: closeSheet, onDone: ended, ...(rules ? { rules } : {}) });
                 else if (shared.gear) sheet = renderGearCard(host, { character: wearing, view: wearView, onBack: closeGear, doc });
-                else if (looking) sheet = renderSkills(host, { character: looking, session: shared.skills, api, doc, onBack: closeSkills, onSaved: tell, rolled, ...(rules ? { rules } : {}) });
+                else if (looking) sheet = renderSkills(host, { character: looking, session: shared.skills, api, doc, onBack: closeSkills, onSaved: tell, rolled, board, ...(rules ? { rules } : {}) });
                 const head = h(doc, 'div', 'rpg-head');
                 head.appendChild(h(doc, 'h3', '', P.title));
                 const count = h(doc, 'div', 'rpg-pills');

@@ -13,7 +13,7 @@ import { fail, isObject, makeId } from './util.js';
 
 export function createRestore(s, deps) {
     const {
-        store, registry, announce, problem, archive, participants, abortEntry, availability, durable, finish, finishNative, finishSelection, headNow,
+        store, registry, announce, problem, archive, participants, block, abortEntry, availability, durable, finish, finishNative, finishSelection, headNow,
         here, makeNow, owe, pendingEntry, pendingNow, point, pointsOf, publishRestore, raise, release, selectionNeeded, session, stillHere,
         syncHidden, withWholePrefixes,
     } = deps;
@@ -88,7 +88,7 @@ export function createRestore(s, deps) {
             return { ok: true, return: entry.return, status: 'complete' };
         }
         if (['committed', 'participants-pending', 'acked'].includes(entry.phase)) {
-            raise('A restore is finishing; every part must agree before the story goes on.');
+            if (!block.current()) raise('A restore is finishing; every part must agree before the story goes on.');
             return answered(await finish(entry));
         }
         if (entry.phase !== 'prepared') return fail('REFUSED', 'That restore was aborted.');
@@ -209,7 +209,7 @@ export function createRestore(s, deps) {
                         archive.patch(entry.id, { phase: 'retracted', why: 'the story no longer holds the restore' });
                         continue;   // (the barrier comes down once, below, when nothing else is left to finish)
                     }
-                    raise('A restore is finishing; every part must agree before the story goes on.');
+                    if (!block.current()) raise('A restore is finishing; every part must agree before the story goes on.');
                     const done = await finish(archive.get(entry.id));
                     if (done.ok === false) return done;
                     ret = entry.return;
@@ -222,7 +222,7 @@ export function createRestore(s, deps) {
                 }
             } else if (entry.kind === 'native-mutation' || entry.kind === 'native-event') {
                 if (entry.phase === 'prepared') {
-                    raise('A native change is finishing; every part must agree before the story goes on.');
+                    if (!block.current()) raise('A native change is finishing; every part must agree before the story goes on.');
                     const done = await finishNative(archive.get(entry.id));
                     if (done.ok === false && done.unprepared && entry.kind === 'native-mutation') {
                         // The participant has no record of the change it published (the page closed before it was activated, and the

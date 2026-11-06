@@ -12,6 +12,7 @@
 // nothing on this page can change a roll already made. Every node is built with createElement and textContent.
 
 import { h } from '../../view/widgets/dom.js';
+import { boardSetting } from '../board/settings.js';
 import { refusalText } from '../../strings.js';
 import { LEAN_RPG_TEMPLATES } from '../templates.js';
 import { LEVEL, LEVEL_CAP_SETTING, levelCapOf, JOIN_SETTING, PLANNER_LIMIT, PLANNER_LIMIT_SETTING, PRACTICE, PRACTICE_SETTING, ROLLS_SETTING, plannerSecondsFrom, practiceOf } from '../names.js';
@@ -76,7 +77,7 @@ const words = (...parts) => parts.join(' ').toLowerCase();
 const CARD_WORDS = Object.freeze({
     formula: words(S.formula, S.formulaStandard, S.formulaClassic, S.formulaStandardHelp, S.formulaClassicHelp, S.formulaNote, S.formulaRows.map(row => `${row.type} ${row.what}`).join(' '), Object.values(S.formulaNums).join(' '), S.formulaFootStandard),
     levels: words(S.levels, S.levelCap, S.levelCapHelp, S.practice, S.practiceHelp, S.xpRate, S.xpRateHelp),
-    rolls: words(S.rolls, S.rollsHelp, S.automatic, S.off),
+    rolls: words(S.rolls, S.rollsHelp, S.automatic, S.off, 'fight board choose exchanges'),
     difficulty: words(S.difficulty, S.gentle, S.standard, S.harsh, S.custom, [...NUMBER_FIELDS, ...STANDARD_FIELDS].map(field => `${fill(field.label, { label: SOUL_LABEL })} ${field.help}`).join(' '), S.replayNote),
     combat: words(S.combat, S.combatHelp, S.combatLabel, S.combatReset),
     planner: words(S.planner, S.plannerHelp, S.plannerShow, S.plannerFixed),
@@ -91,7 +92,7 @@ const CARD_WORDS = Object.freeze({
  * host's commands: the Combat rules text is saved with `dm.redefine`, and added with `dm.define`).
  * → { el, filter(text) → count, refresh(), refreshSize(), destroy() }, as a settings page body expects.
  */
-export function renderRpgSettings(parent, { settings, doc = parent.ownerDocument ?? globalThis.document, featureOn = () => true, onChange = () => {}, headState = () => null, readerName = () => '', roleOf, command = null, pack = () => null, gear = null, gearOf = () => null } = {}) {
+export function renderRpgSettings(parent, { settings, doc = parent.ownerDocument ?? globalThis.document, featureOn = () => true, onChange = () => {}, headState = () => null, readerName = () => '', roleOf, command = null, pack = () => null, gear = null, boardFeature = null, gearOf = () => null } = {}) {
     const root = h(doc, 'div', 'rpg-set');
     parent.appendChild(root);
     const values = () => settings(SETTINGS_MODULE) ?? {};
@@ -189,6 +190,7 @@ export function renderRpgSettings(parent, { settings, doc = parent.ownerDocument
         numberRow(grid, { label: S.plannerLimit, help: S.plannerLimitHelp, setting: PLANNER_LIMIT_SETTING, min: PLANNER_LIMIT.min, max: PLANNER_LIMIT.max, step: PLANNER_LIMIT.step, unit: S.plannerLimitUnit, current: () => plannerSecondsFrom(values()),
             clean: typed => Math.min(PLANNER_LIMIT.max, Math.max(PLANNER_LIMIT.min, PLANNER_LIMIT.min + Math.round((typed - PLANNER_LIMIT.min) / PLANNER_LIMIT.step) * PLANNER_LIMIT.step)) });
         box.appendChild(grid);
+        if (boardFeature) box.appendChild(boardSetting(doc, boardFeature, onChange));
     }
 
     // ---- Levels and practice: the level cap, the practice a skill use gives, the XP rate
