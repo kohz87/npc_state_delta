@@ -17,6 +17,3 @@ Generated 2026-11-07.
 - `src/adapter/editor.js`: Hosted dossier-editor controls for meters, milestones and hidden notes, plus setup reads and watched story events.
 - `src/adapter/queries.js`: Read-only NPC/dossier query helpers, portrait URLs, host and Story Director lookups, and commands Delta sends.
 - `src/adapter/timeline.js`: Story Block module definition, restore participant, story-clock link, own prompt keys, diagnostics and host events.
-
-## Pointer to add
-- Source codemap for files not covered above: `docs/dev/codemap.md`.
