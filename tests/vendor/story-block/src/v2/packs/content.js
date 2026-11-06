@@ -51,7 +51,7 @@ export function itemDefsIn(packs, ids = null) {
  * words a world uses for levels and XP, MODULES §F25; ranks: `{ id, pack, title?, levels?, reward?, xp? }`,
  * each pack's ladder lowest first, so a reader takes one pack's ranks; crafts: `{ id, slug, pack, title,
  * stats, stations, note? }`, see craftsOf for the merged table; meterPresets: `{ id, slug, pack, title,
- * meters, stages? }`, ready-made NPC meter sets; cast: `{ id, pack, packVersion, name, aliases, about, look, voice?, personality?, history?,
+ * meters, stages? }`, ready-made NPC meter sets; cast: `{ id, pack, packVersion, name, aliases, about, look, wears?, voice?, personality?, behaviour?, mannerisms?, withYou?, history?,
  * portrait?, start: { place, goal, routine? }, drawnTo?, meters?, stages?, fields?, secrets?, canDieUnmet? }`, the hand-written people of cast.js, `id` their own
  * slug in the pack),
  * `currency` (one `{ pack, name, short }` per pack that suggests one), `layouts`,

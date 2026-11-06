@@ -63,6 +63,14 @@ const linesOf = value => (Array.isArray(value) ? value : [])
     .map(line => line.trimEnd())
     .filter(line => line.trim());
 
+// A prelude cue is written as its own [Happened] note. It joins the leading note, so a reply
+// never sees two [Happened] markers when an older receipt is still untold.
+const happenedCue = text => {
+    const match = /^\s*\[Happened\](?:\r?\n([\s\S]*))?$/u.exec(String(text ?? ''));
+    const body = match?.[1]?.trim();
+    return match && body ? body : null;
+};
+
 function attempt(fn, fallback, problems, what) {
     try { return fn(); } catch (error) {
         problems.push(`${what} failed: ${error?.message ?? error}`);
@@ -213,16 +221,27 @@ export function assemble({ registry, view, untold = [], settings = {}, cues = {}
         .filter(entry => entry && entry.text.trim())
         .map(({ receipt, text }) => fill(`${text}${typeof receipt.data?.told === 'string' && receipt.data.told.trim() ? ` (${receipt.data.told.trim()})` : ''}`)
             .trim().split(/\n/).map(part => part.trim()).filter(Boolean).join(' '));
-    const head = happened.length
-        ? { module: 'story-suite', label: 'Happened', text: happenedLines(happened, Math.floor(total / 2)).join('\n') }
-        : null;
+    const cueHappened = [];
 
     const sections = [];
     for (const context of tailOrder(registry.contexts())) {
-        // A cue may be `{ text, keep: true }`: kept whole, whatever the budget says (the rolls the narrator must tell).
+        // A cue may be `{ text, keep: true }`: kept whole, whatever the budget says (the rolls the narrator must tell). One marked `board: true`
+        // (the fight board's own [Happened] note) also joins the leading note; the RPG's ordinary roll cues stay in their section.
         const given = Array.isArray(cues?.[context.moduleId]) ? cues[context.moduleId] : [];
-        const extra = linesOf(given.map(cue => (typeof cue?.text === 'string' ? cue.text : cue)));
-        const pinned = new Set(linesOf(given.filter(cue => cue?.keep === true).map(cue => cue.text).map(fill)));
+        const ordinary = [];
+        const pinned = new Set();
+        for (const cue of given) {
+            const text = typeof cue?.text === 'string' ? cue.text : typeof cue === 'string' ? cue : '';
+            if (!text.trim()) continue;
+            const body = cue?.keep === true && cue.board === true ? happenedCue(text) : null;
+            if (body !== null) {
+                cueHappened.push(fill(body));
+                continue;
+            }
+            ordinary.push(fill(text));
+            if (cue?.keep === true) pinned.add(fill(text));
+        }
+        const extra = linesOf(ordinary);
         let tail = null;
         if (typeof context.tail === 'function') tail = attempt(() => context.tail(view), null, problems, `${context.name}: this reply`);
         const section = { context, lines: linesOf([...extra, ...linesOf(tail?.lines)].map(fill)), optional: linesOf(linesOf(tail?.optional).map(fill)), pinned, dropped: 0 };
@@ -230,6 +249,11 @@ export function assemble({ registry, view, untold = [], settings = {}, cues = {}
         if (context.budget) section.dropped += fit(section, context.budget);
         sections.push(section);
     }
+
+    const told = happened.length ? happenedLines(happened, Math.floor(total / 2)) : cueHappened.length ? [HAPPENED] : [];
+    const head = told.length
+        ? { module: 'story-suite', label: 'Happened', text: [...told, ...cueHappened].join('\n') }
+        : null;
 
     // The host's total: what the sections may spend after [Happened] (and the line breaks).
     const tailText = () => [head?.text, ...sections.map(section => [...section.lines, ...section.optional].join('\n'))]

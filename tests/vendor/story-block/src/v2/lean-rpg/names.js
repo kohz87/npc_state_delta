@@ -8,6 +8,8 @@ export const LEAN_RPG_FEATURE = 'story-block.rpg';
 
 /** The prelude command a planned reply's rolls are committed through (turn.js prelude list). */
 export const RESOLVE = 'rpg.resolve';
+/** The reader's saved target, area and defence choices for one skill (board/overrides.js). */
+export const BOARD_SKILL = 'rpg.boardSkill';
 /** The prelude that records, with the reply, that a live fight's roll planner gave nothing usable (noroll.js): the note under the reply is drawn from it. */
 export const NOROLL = 'rpg.noroll';
 

@@ -42,7 +42,7 @@ const lower = stats => Object.fromEntries(Object.entries(isObject(stats) ? stats
  * What the owners `own` of one member give: { add?, enc?, items? } from the inventory's answers (`answerOf(owner)`; `party` is the shared bag's, which also
  * says whether the load is too much). Shared by the planner (the live queries) and the guard (the state before the roll), so both read it the same way.
  */
-function dressOf(own, party, answerOf) {
+export function dressOf(own, party, answerOf) {
     const add = {}, items = [];
     let enc = party.carry?.encumbered === true ? (Number.isSafeInteger(party.carry.penalty) && party.carry.penalty < 0 ? party.carry.penalty : ENCUMBERED) : 0;
     for (const answer of own.map(answerOf)) {

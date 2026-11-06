@@ -57,6 +57,7 @@ export const CORE_FEATURE = Object.freeze({
     mounts: 'story-block.mounts',
     // The RPG (src/v2/lean-rpg/, SPEC_RPG.md): automatic rolls, the Party tab, the battle log.
     leanRpg: 'story-block.rpg',
+    fightBoard: 'story-block.fight-board',
 });
 
 // Where Story Block kept these switches before they were features: a reader who set one keeps that

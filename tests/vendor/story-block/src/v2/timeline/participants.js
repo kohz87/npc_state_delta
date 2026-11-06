@@ -41,19 +41,21 @@ const SHAPES = Object.freeze({
 export function createParticipants({ timeoutMs = PARTICIPANT_TIMEOUT_MS, chat = () => null } = {}) {
     // Callback state belongs to the chat that began it. Late completion clears only that chat's slot.
     const inflight = new Map();
-    async function run(module, callback) {
+    async function run(module, callback, method = 'call') {
         const holder = chat();
         let calls = inflight.get(holder);
         if (!calls) { calls = new Map(); inflight.set(holder, calls); }
-        if (calls.has(module)) throw Object.assign(new Error(`The participant ${module} still has a timed-out callback in flight.`), { [IN_FLIGHT]: true });
+        if (calls.has(module)) throw Object.assign(new Error(`The participant ${module} still has a callback in flight.`), { [IN_FLIGHT]: true, earlier: calls.get(module) });
         const pending = Promise.resolve().then(callback);
-        calls.set(module, pending);
+        const call = { pending, method, timedOut: false };
+        calls.set(module, call);
         const clear = () => {
-            if (calls.get(module) === pending) calls.delete(module);
+            if (calls.get(module) === call) calls.delete(module);
             if (!calls.size && inflight.get(holder) === calls) inflight.delete(holder);
         };
         pending.then(clear, clear);
-        return boundedParticipant(() => pending, timeoutMs);
+        try { return await boundedParticipant(() => pending, timeoutMs); }
+        catch (error) { if (error?.[TIMED_OUT]) call.timedOut = true; throw error; }
     }
     const table = new Map();
     return {
@@ -114,13 +116,15 @@ export function createParticipants({ timeoutMs = PARTICIPANT_TIMEOUT_MS, chat = 
             if (typeof callback !== 'function') return fail('UNSUPPORTED', `The participant ${module} cannot ${method}.`);
             let answer;
             try {
-                answer = await run(module, () => callback(structuredClone(input)));
+                answer = await run(module, () => callback(structuredClone(input)), method);
             } catch (error) {
                 if (crashing(error)) throw error;
                 // A call that ran out of time is still running (its late answer is quarantined, never used), and one that met it is
                 // refused for as long as it runs: neither means the saved state is gone, so both are "retry shortly" (STALE), not a loss.
                 if (error?.[TIMED_OUT]) return fail('STALE', `The participant ${module} did not answer ${method} in time (${Math.round(timeoutMs / 1000)} s); its call is still running. Retry shortly.`);
-                if (error?.[IN_FLIGHT]) return fail('STALE', `The participant ${module} is still running an earlier ${method === 'status' ? 'call' : 'call that timed out'}; its late answer is ignored. Retry shortly.`);
+                if (error?.[IN_FLIGHT]) return fail('STALE', error.earlier?.timedOut
+                    ? `The participant ${module} did not answer ${error.earlier.method} in time (${Math.round(timeoutMs / 1000)} s); its call timed out and is still running. Its late answer is ignored. Retry shortly.`
+                    : `The participant ${module} is still running an earlier call; its answer must settle before another call. Retry shortly.`);
                 return fail('FAILED', `The participant ${module} failed at ${method}: ${error?.message ?? error}`);
             }
             if (!isObject(answer) || typeof answer.ok !== 'boolean') return fail('FAILED', `The participant ${module} answered ${method} with neither a success nor a failure.`);

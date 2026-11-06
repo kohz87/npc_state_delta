@@ -28,6 +28,19 @@ export function h(doc, tag, className = '', text) {
     return node;
 }
 
+/** A `type="button"` button with a class, a label and a click handler. */
+export function button(doc, label, className, click) {
+    const node = h(doc, 'button', className, label);
+    node.setAttribute('type', 'button');
+    node.addEventListener('click', click);
+    return node;
+}
+
+/** A string or number as one trimmed line cut to `max`; anything else is ''. */
+export function text(value, max = 300) {
+    return typeof value === 'string' || typeof value === 'number' ? String(value).replace(/\s+/gu, ' ').trim().slice(0, max) : '';
+}
+
 /** An SVG element with attributes (values stringified; `class` is an attribute on SVG). */
 export function s(doc, tag, attrs = {}) {
     const node = doc.createElementNS(SVG_NS, tag);

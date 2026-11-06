@@ -12,20 +12,24 @@ import { notWritten } from '../assist/extractor.js';
 import { refusedWhy } from '../assist/safety.js';
 import { within } from './text.js';
 import { ensureModules } from '../sdk.js';
+import { boardStep, heldForMessage, rememberHeld, pruneMissingBoard } from './held-board.js';
+import { clearStart, pendingStart } from './fight-start.js';
 
 export function createEvents(s, deps) {
-    const { markIdle, clearPrompts, ctx, isCarrier, store, ensureInitial, problem, changeHeads, readBlock, strayProblems, legacyProblem, lateLines, captureLines, withCaps, timeline, trySave, saveText, redraw, events, registry, view, prepare, RPG_LOAD_WAIT_MS, rebuild, bus, hasCarrier, reconcileNow, REBUILD_REASONS, INTERCEPTOR_NAME, V1_KEYS, setPrompt, interceptor, onGenerationStarted, onPromptReady, onTextPromptReady, getApi } = deps;
+    const { markIdle, clearPrompts, ctx, metadata = () => ctx?.chatMetadata, isCarrier, store, ensureInitial, problem, notify, stopChangedBoard, boardError, changeHeads, readBlock, strayProblems, legacyProblem, lateLines, captureLines, withCaps, timeline, trySave, saveText, redraw, events, registry, view, prepare, RPG_LOAD_WAIT_MS, rebuild, bus, hasCarrier, reconcileNow, REBUILD_REASONS, INTERCEPTOR_NAME, V1_KEYS, setPrompt, interceptor, onGenerationStarted, onPromptReady, onTextPromptReady, getApi } = deps;
 
     /** MESSAGE_RECEIVED: (messageId, type). */
     async function onMessageReceived(messageId) {
         const id = Number(messageId);
         const current = s.session;
         if (!current || !Number.isInteger(id) || id !== current.index) return null;
+        s.heldBoard = null;
         s.session = null;
         markIdle();
         clearPrompts();
         const message = ctx?.chat?.[id];
         if (!isCarrier(message)) return null;
+        s.boardCapture = boardStep(current)?.payload.board ?? null;
         // The turn's save window opens now, so the capture's lines are not saved one by one (400 ms each).
         const idle = store.saveIdle?.() === true;
         try {
@@ -100,7 +104,58 @@ export function createEvents(s, deps) {
             return turn;
         } catch (error) {
             problem({ index: id, code: 'FAILED', message: `The reply's changes could not be kept: ${error?.message ?? error}` });
+            if (error?.code === 'BOARD_PRELUDE') {
+                const staged = metadata()?.rpgFightBoard?.id === s.boardCapture?.id;
+                s.session = current;
+                s.heldBoard = { index: id, message, current, board: s.boardCapture, staged };
+                // Give an otherwise empty reply its stable ID, then save the add-only recovery marker.
+                const record = readRecord(message);
+                if (!record) store.setNarrated(id, []);
+                const sid = store.carrierSid(id);
+                if (rememberHeld(metadata(), sid, current, staged)) {
+                    store.touch?.();
+                    await trySave('after holding the fight');
+                }
+                try { notify?.(error.message, 'story-block'); } catch { /* the problem remains visible */ }
+            }
             return null;
+        } finally {
+            s.boardCapture = null;
+        }
+    }
+
+    // If an input changed after the prompt left, keep the reply uncaptured until the reader restores it.
+    function resumeHeldBoard() {
+        const held = s.heldBoard;
+        if (!held) return;
+        const index = (ctx?.chat ?? []).indexOf(held.message);
+        if (index < 0 || !heldForMessage(metadata(), held.message)) {
+            s.heldBoard = null;
+            if (s.session === held.current) s.session = null;
+            return;
+        }
+        held.index = index;
+        held.current.index = index;
+        const sid = readRecord(held.message)?.sid;
+        if (store.headIndex() !== index || metadata()?.rpgFightHeldDiscarded?.[sid]) return;
+        if (!held.board || boardError(store.head(), held.board)) return;
+        if (held.staged && metadata()?.rpgFightBoard?.id !== held.board.id) return;
+        s.heldBoard = null;
+        Promise.resolve().then(() => onMessageReceived(held.index));
+    }
+
+    function restoreHeldBoard() {
+        if (s.heldBoard || !metadata()?.rpgFightHeld) return;
+        const chat = ctx?.chat ?? [];
+        for (let index = chat.length - 1; index >= 0; index -= 1) {
+            const message = chat[index], saved = heldForMessage(metadata(), message);
+            if (!saved) continue;
+            const current = { ...structuredClone(saved.current), index };
+            const board = boardStep(current).payload.board;
+            s.session = current;
+            s.heldBoard = { index, message, current, board, staged: saved.staged === true };
+            problem({ index, code: 'BOARD_HELD', message: 'The fight reply is still waiting. Restore the sheet or gear, or discard the fight and regenerate the reply.' });
+            return;
         }
     }
 
@@ -214,6 +269,8 @@ export function createEvents(s, deps) {
     async function onChatChanged() {
         // The old chat's session and prompts go at once, before anything is awaited: a generation started while the RPG's code loads is the new chat's.
         s.session = null;
+        s.boardCapture = null;
+        s.heldBoard = null;
         s.quiets = [];
         markIdle();
         clearPrompts();
@@ -221,6 +278,13 @@ export function createEvents(s, deps) {
         // import is waited for only RPG_LOAD_WAIT_MS (the guard mark then says the code is missing, so a later load makes the chat look again).
         if (typeof prepare === 'function') { try { await within(prepare(), RPG_LOAD_WAIT_MS); } catch { /* the loader reports its own failure */ } }
         rebuild({ publish: false });
+        const meta = metadata();
+        const removedBoard = pruneMissingBoard(meta, ctx?.chat);
+        const removedStart = Boolean(meta?.rpgFightStart && (!pendingStart(meta, ctx.chat) || meta.rpgFightStart.mode === 'working'));
+        if (removedStart) clearStart(meta);
+        if (removedBoard || removedStart) {
+            try { (ctx.saveMetadata ?? ctx.saveMetadataDebounced)?.call(ctx); } catch { /* saved on the next chat write */ }
+        }
         timeline?.settle();
         // A1-2: read-backs of a write that timed out before a reload of the page go on.
         try { store.resume?.(); } catch { /* only a guard */ }
@@ -231,6 +295,7 @@ export function createEvents(s, deps) {
             if (store.dirty?.()) store.scheduleSave?.();
         }
         await ensureModules({ store, bus, registry, events });
+        restoreHeldBoard();
         events?.emit('head', { index: store.headIndex(), reason: 'chat' });
     }
 
@@ -273,6 +338,8 @@ export function createEvents(s, deps) {
      */
     async function onTimelineChanged(reason) {
         rebuild({ publish: false });
+        resumeHeldBoard();
+        restoreHeldBoard();
         reconcileNow();
         timeline?.settle();
         if (timeline?.needsRecovery()) await timeline.recover();
@@ -320,6 +387,8 @@ export function createEvents(s, deps) {
         s.offModules = events?.on?.('modules', () => {
             if (store.lifecycleChanged?.()) events?.emit('head', { index: store.headIndex(), reason: 'module' });
         }) ?? null;
+        for (const off of s.offBoard) off();
+        s.offBoard = ['committed', 'head'].flatMap(name => [events?.on?.(name, stopChangedBoard), events?.on?.(name, resumeHeldBoard)]).filter(Boolean);
         const source = ctx?.eventSource;
         const names = ctx?.eventTypes ?? ctx?.event_types ?? {};
         const on = (event, fn) => {
@@ -345,6 +414,8 @@ export function createEvents(s, deps) {
     function uninstall({ globalName = INTERCEPTOR_NAME } = {}) {
         s.offModules?.();
         s.offModules = null;
+        for (const off of s.offBoard) off();
+        s.offBoard = [];
         const source = ctx?.eventSource;
         for (const [event, fn] of s.listeners) (source?.removeListener ?? source?.off)?.call(source, event, fn);
         s.listeners = [];

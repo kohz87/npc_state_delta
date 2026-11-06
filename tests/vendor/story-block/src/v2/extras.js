@@ -26,9 +26,11 @@ import { foldKey } from '../text.js';
 export const CHOICES_FEATURE = CORE_FEATURE.choices;
 export const CHATTER_FEATURE = CORE_FEATURE.chatter;
 
-/** At most this many choices a reply, each at most CHOICE_CHARS code points. */
+/** At most this many choices a reply. The narrator is asked for at most CHOICE_CHARS code points each; a longer
+ * one is kept whole up to CHOICE_KEEP (the button wraps), so a click never sends a choice cut short (USER 5 Nov). */
 export const CHOICE_MAX = 4;
 export const CHOICE_CHARS = 80;
+export const CHOICE_KEEP = 160;
 /** At most this many chatter lines a reply; a thought at most CHATTER_CHARS code points, a name NAME_CHARS. */
 export const CHATTER_MAX = 3;
 /** The reader's setting (Most chatter lines per reply): 1 to CHATTER_LIMIT, CHATTER_MAX when unset. */
@@ -71,7 +73,7 @@ const unwrap = text => {
 export function readChoice(line) {
     const text = flatten(lineBody(line?.raw ?? ''));
     if (!HAS_WORD.test(text)) return { error: 'the choice has no text (write "? choice What to do next")' };
-    return { value: { text: cutPoints(text, CHOICE_CHARS) } };
+    return { value: { text: cutPoints(text, CHOICE_KEEP) } };
 }
 
 // The speaker's name ends at the first colon, or at a dash with a space before it, within the first

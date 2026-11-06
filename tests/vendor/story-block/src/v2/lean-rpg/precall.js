@@ -21,10 +21,20 @@ import { DICE_VERSION, FLOW_VERSION, claimKey, prepare } from './resolve.js';
 import { dropOf } from './ambush.js';
 import { readSheet } from './read.js';
 import { plannerWanted } from './gate.js';
+import { knownFoeAction } from './board/action-gate.js';
 import { SOUL_LABEL, soulShortOf } from './soul.js';
+import { readRecord } from '../persist.js';
+import { boardKey, boardPayload, boardSession, clearSend, lastBoard, linkBoard, priorBoard, readSend, receiveBoard, reconcileBoard } from './board/session.js';
+import { boardInputError } from './board/commit.js';
+import { CORE_FEATURE } from '../features.js';
+import { clearStart, engagesFight, fightsInMessage, holdStart, pendingStart } from '../turn/fight-start.js';
 
 // The query that names a level's rank (LV-C: `rpg.rank { level }` → `{ name } | null`); without it a level has no rank.
 const RANK_QUERY = 'rpg.rank';
+// Whether the fight board is on (one literal id, read once per call).
+const boardOn = view => view?.feature?.(CORE_FEATURE.fightBoard) === true;
+// The fight copied at "Send with this fight" (a clone, or null): canGenerate and beforeGenerate read it the same way.
+const sentBoard = (meta, messages) => structuredClone(readSend(meta, messages)?.board ?? null);
 const averageOf = sheet => averageLevel(partyLevels(sheet));
 
 // (The query the roll record is read through: index.js ROLLS_QUERY, named here too so this file need not import its parent.)
@@ -183,10 +193,15 @@ export const claimed = (state, key) => state?.meta?.claims?.[claimKey(key)] === 
  * chatId() → the open chat's id, hold (plan.js createPlanHold), problem(entry) (the turn's Problems list), moduleId,
  * timeoutMs (the planner's limit in ms; none: the setting Settings → RPG → Rolls → Planner time limit, read at each call), timer, skip { peek() → whether the next reply is to go out with no dice, clear() } (start.js: "Send without the RPG for now") }. Returns { beforeGenerate(view, info) → { commands, lines? } | { lines } | null, afterCapture(view) }.
  */
-export function createPrecall({ callModel, chat, chatId, hold, problem = null, moduleId = 'story-block', timeoutMs, timer, skip: noDice = { peek: () => false, clear: () => {} } }) {
+export function createPrecall({ callModel, chat, chatId, metadata = () => null, hold, problem = null, moduleId = 'story-block', timeoutMs, timer, onPlanning = () => {}, skip: noDice = { peek: () => false, clear: () => {} } }) {
     // The planner's limit in ms: the one the part was given (tests), else the setting of this moment.
     const limitOf = values => plannerLimitMs(values, timeoutMs);
-    const skip = (sheet, failure, key) => {
+    const currentRules = view => {
+        let pack = null;
+        try { pack = packRulesOf(view.query?.('packs.content', { kind: 'rpg' })); } catch { /* no pack rules */ }
+        return rulesFromSettings(readSettings(view, moduleId), pack);
+    };
+    const skip = (sheet, failure, key, board = false) => {
         try { problem?.({ module: moduleId, code: 'ROLLS_SKIPPED', quiet: true, message: `Rolls skipped for this reply: ${failure.failed} Swipe to try again.` }); } catch { /* the Problems list is optional */ }
         // While a fight is on the narrator is told to keep it undecided (outside one there is nothing to hold back), and the reply keeps a record of
         // it (noroll.js) for the note where the battle log would stand: the same fact, shown to the reader, never told to the narrator.
@@ -194,11 +209,12 @@ export function createPrecall({ callModel, chat, chatId, hold, problem = null, m
             const seconds = Math.max(1, Math.round(failure.limit / 1000));
             return { lines: [NO_ROLLS_LINE], commands: [{ type: NOROLL, payload: { key, reason: failure.reason, ...(failure.reason === 'timeout' ? { limit: seconds } : {}) } }] };
         }
-        return noFight(sheet);
+        return noFight(sheet, board);
     };
     // No foe is filled in and nothing was rolled: if a fight starts in this reply, the narrator sets the Foes line and stops at the first clash.
     // (a block of Down groups only is a won fight: no fight is on)
-    const noFight = sheet => (sheet.foes.length && !sheet.foes.some(foe => foe.filled && foe.hurt > 0) ? { lines: [OPEN_FIGHT_LINE] } : null);
+    const noFight = (sheet, board = false) => (sheet.foes.length && !sheet.foes.some(foe => foe.filled && foe.hurt > 0)
+        ? { lines: [board ? { text: 'No foes are set. If a fight begins, set the Foes line and tell the approach only. The fight has not started: end at the moment of engagement.', keep: true } : OPEN_FIGHT_LINE] } : null);
 
     async function plan(view, sheet, message, excerpt, rules) {
         const values = readSettings(view, moduleId);
@@ -238,15 +254,55 @@ export function createPrecall({ callModel, chat, chatId, hold, problem = null, m
         return { plan: open.length ? { ...parsed.plan, open } : parsed.plan, tokens: estimateTokens(prompt) };
     }
 
+    function canGenerate(view, info = {}) {
+        if (view?.feature?.(LEAN_RPG_FEATURE) !== true) return null;
+        let meta;
+        try { meta = metadata(); } catch { return null; }
+        const messages = chat() ?? [], last = messages.at(-1), session = boardSession(meta), pending = pendingStart(meta, messages);
+        const on = boardOn(view), live = Boolean(session?.exchanges?.length);
+        // (With the board off and no staged exchanges the feature is out of the way: a regenerate is allowed exactly as before it existed.)
+        let board = null;
+        if (last?.is_user) {
+            const anchor = readRecord(messages.at(-2))?.sid;
+            // The waiting reply is released only by "Send with this fight" (markSend copies the staged fight, exchanges and all): until then every
+            // generation attempt stays held, whatever the board holds. A copy older than the board (more exchanges staged since) does not release it.
+            if (info.commit === true && on && pending?.choice === 'board' && session?.anchor === anchor) {
+                const sent = readSend(meta, messages)?.board;
+                if (!live || !sent || (sent.exchanges?.length ?? 0) !== session.exchanges.length)
+                    return { ok: false, reason: 'Play the waiting fight on the board.', action: false, fightStart: true };
+            }
+            if (live && !isStandard(currentRules(view))) return { ok: false, reason: 'The fight board needs Standard rules. Switch back to Standard or discard the staged fight before using Classic.', action: false };
+            if (on || live) {
+                board = session?.anchor === anchor ? boardPayload(session) : lastBoard(meta, anchor, last)?.board;
+                // (the copy made at "Send with this fight" stands in when the session itself is gone)
+                if (!board && pending?.choice !== 'narrate') board = sentBoard(meta, messages);
+            }
+            if (!board && live) return { ok: false, reason: 'The fight no longer matches this reply. Restore the reply or discard the fight.', action: false };
+            if (session?.anchor === anchor && live && !session.setup?.witness) return { ok: false, reason: 'This older fight cannot be checked. Discard it and start the fight again.', action: false };
+        } else if ((on || live) && last && !last.is_user && !String(last.mes ?? '')) board = priorBoard(last)?.board;
+        if (!board) {
+            if (info.commit !== true || !['normal', 'regenerate'].includes(normalizeType(info.type)) || !last?.is_user
+                || !on || !isStandard(currentRules(view))) return null;
+            if (!pending && normalizeType(info.type) !== 'normal') return null;
+            if (pending?.choice === 'narrate') return null;
+            const sheet = readSheet(view.state);
+            if (pending || (sheet.characters.length && sheet.foes.some(foe => foe.filled && foe.hurt > 0) && knownFoeAction(last.mes, sheet))) {
+                if (!pending && !holdStart(meta, messages, { mode: 'known' })) return null;
+                return { ok: false, reason: 'Choose how to play the waiting fight.', action: false, fightStart: true };
+            }
+            return null;
+        }
+        if (!on) return { ok: false, reason: 'Turn on the fight board or discard the fight before sending.', action: false };
+        const error = board.setup?.opening ? null : boardInputError(view.state, board);
+        return error ? { ok: false, reason: error, action: false } : null;
+    }
+
     async function beforeGenerate(view, info = {}) {
         if (view?.feature?.(LEAN_RPG_FEATURE) !== true) return null;
         if (info?.commit === false) return null;
         if (!['normal', 'regenerate', 'swipe'].includes(normalizeType(info?.type))) return null;
         // The reader chose to send the first message without the RPG: that reply has no dice (the flag goes when the reply is captured).
-        if (normalizeType(info?.type) === 'normal' && noDice.peek()) return null;
-        if (readSettings(view, moduleId)[ROLLS_SETTING] === 'off') return null;
         const sheet = readSheet(view.state);
-        if (!sheet.characters.length) return null;
         // The reader's message: the last one for a send or a regenerate, the one before the reply for a swipe.
         const messages = chat() ?? [];
         if (!messages.some(message => message && !message.is_user)) return null;
@@ -256,17 +312,50 @@ export function createPrecall({ callModel, chat, chatId, hold, problem = null, m
         const text = String(last.mes ?? '').trim();
         if (!text) return null;
         const key = `${index}-${hashText(text)}`;
+        const startAnchor = readRecord(messages[index - 1])?.sid;
+        const on = boardOn(view);
+        let meta = null;
+        try { meta = metadata(); } catch { /* no board without chat metadata */ }
+        const pending = pendingStart(meta, messages);
+        // Replayed receipts keep their recorded rules; a new session is offered only under current Standard rules.
+        const rules = currentRules(view);
+        if (on) {
+            const anchorRecord = readRecord(messages[index - 1]);
+            const type = normalizeType(info?.type), previous = type === 'swipe' ? priorBoard(messages[index + 1]) : null;
+            const remembered = type === 'regenerate' ? lastBoard(meta, startAnchor, last) : null;
+            let session = boardSession(meta);
+            if (session?.anchor === startAnchor) session = reconcileBoard(meta, id => (anchorRecord?.receipts ?? []).some(item => item?.id === id));
+            // (a live fight: this reply's own anchor holds the session, Standard rules, and the reader did not choose to narrate)
+            const live = isStandard(rules) && session?.anchor === startAnchor && pending?.choice !== 'narrate';
+            // A fight the reader staged on this very anchor is what this send carries: "Send with this fight" is a 'regenerate', and the
+            // cached payload of an earlier send (rpgFightLast, same anchor) must never stand in for it (it kept only the first exchange).
+            const staged = live && session.exchanges?.length ? boardPayload(session) : null;
+            const copied = isStandard(rules) && type !== 'swipe' && pending?.choice !== 'narrate' ? sentBoard(meta, messages) : null;
+            const fresh = previous ? null : staged ?? copied;
+            const board = previous?.board ?? fresh ?? remembered?.board ?? (live ? boardPayload(session) : null);
+            if (board) {
+                const anchored = board.anchor ? board : { ...board, anchor: startAnchor ?? board.id };
+                const fightKey = previous?.key?.startsWith('b:') ? previous.key : !fresh && remembered?.key?.startsWith('b:') ? remembered.key : boardKey(anchored);
+                linkBoard(last, fightKey);
+                const opening = anchored.setup?.opening;
+                return { commands: [
+                    ...(opening ? [{ type: RESOLVE, payload: opening.payload, seed: opening.seed }] : []),
+                    { type: RESOLVE, payload: { key: fightKey, board: anchored, practice: previous?.practice ?? (fresh ? null : remembered?.practice) ?? practiceOf(opening?.payload?.practice) ?? practiceOf(readSettings(view, moduleId)[PRACTICE_SETTING]) ?? PRACTICE.perUse } },
+                ] };
+            }
+        }
+        if (pending?.choice === 'narrate' && pending.original) return { commands: [{ type: RESOLVE, payload: pending.original, seed: pending.opening?.seed }] };
         if (claimed(view.state, key)) return null;
+        if (normalizeType(info?.type) === 'normal' && noDice.peek()) return null;
+        if (!sheet.characters.length) return null;
+        if (readSettings(view, moduleId)[ROLLS_SETTING] === 'off') return null;
         const where = String(chatId() ?? '');
         // The numbers the dice are rolled with are fixed here, from the settings of this moment, and travel in the payload: the roll
         // (and every Re-read of it) uses these, whatever the settings say later (rules.js).
         // (A pack may say which formula its story plays on and its numbers; the reader's own settings win over it.)
-        let pack = null;
-        try { pack = packRulesOf(view.query?.('packs.content', { kind: 'rpg' })); } catch { pack = null; }
-        const rules = rulesFromSettings(readSettings(view, moduleId), pack);
         // A retried interceptor (the same generation, never captured) keeps its plan; any new generation plans anew.
         const held = info?.again === true ? hold.peek(where, key) : null;
-        let planned;
+        let planned, narrateWhilePlanning = false;
         if (held) planned = { plan: held.plan };
         else if (!plannerWanted(sheet, text, messages[index - 1] && !messages[index - 1].is_user ? stripBlock(String(messages[index - 1].mes ?? '')) : '')) {
             // (The planner gate, gate.js: a quiet message with no fight open asks nothing. The decision depends only on the sheet and the message, so a
@@ -278,8 +367,17 @@ export function createPrecall({ callModel, chat, chatId, hold, problem = null, m
             hold.clear();
             const before = messages[index - 1];
             const excerpt = before && !before.is_user ? stripBlock(String(before.mes ?? '')) : '';
+            const working = !pending && normalizeType(info?.type) === 'normal' && on && isStandard(rules)
+                && !sheet.foes.some(foe => foe.filled && foe.hurt > 0) && fightsInMessage(text, sheet)
+                ? holdStart(meta, messages, { mode: 'working' }) : null;
+            if (working) { try { onPlanning(true); } catch { /* the planner still runs */ } }
             planned = await plan(view, sheet, text, excerpt, rules);
-            if (planned.failed) return skip(sheet, planned, key);
+            if (working && metadata() === meta && pendingStart(meta, chat()) === working) {
+                narrateWhilePlanning = working.choice === 'narrate';
+                clearStart(meta);
+                try { onPlanning(false); } catch { /* the screen redraws on the next event */ }
+            }
+            if (planned.failed) return skip(sheet, planned, key, on);
             hold.put(where, key, planned.plan);
         }
         // A Standard fight keeps its turn order across replies: the nearest earlier reply's order goes on in the payload (resolve.js), so a swipe of
@@ -289,7 +387,17 @@ export function createPrecall({ callModel, chat, chatId, hold, problem = null, m
         // from the state before the roll, so a change before it (a reply deleted or edited) changes its gear.
         const drop = planned.plan ? carriedDrop(view, index) : null;
         const gear = planned.plan && gearIsOn(sheet, (name, args) => view.query?.(name, args)) ? gearMarkOf({ v: GEAR_VERSION, lead: String(last.name ?? '') }) : null;
-        return planned.plan ? { commands: [{ type: RESOLVE, payload: { key, plan: planned.plan, rules, dice: DICE_VERSION, flow: FLOW_VERSION, fix: FIX_VERSION, lv: LV_VERSION, practice: practiceOf(readSettings(view, moduleId)[PRACTICE_SETTING]) ?? PRACTICE.perUse, ...(order ? { order } : {}), ...(drop ? { ambush: drop } : {}), ...(gear ? { gear } : {}) } }] } : noFight(sheet);
+        if (!planned.plan) return noFight(sheet, on);
+        const payload = { key, plan: planned.plan, rules, dice: DICE_VERSION, flow: FLOW_VERSION, fix: FIX_VERSION, lv: LV_VERSION, practice: practiceOf(readSettings(view, moduleId)[PRACTICE_SETTING]) ?? PRACTICE.perUse, ...(order ? { order } : {}), ...(drop ? { ambush: drop } : {}), ...(gear ? { gear } : {}) };
+        if (!pending && !narrateWhilePlanning && normalizeType(info?.type) === 'normal' && on && isStandard(rules)
+            && !sheet.foes.some(foe => foe.filled && foe.hurt > 0) && planned.plan.open?.length
+            && (planned.plan.acts?.length || planned.plan.foes?.some(foe => !foe.hold)
+                // (a message that engages, with approach checks and new foes but no act of its own: "hide … as I engage them")
+                || (planned.plan.checks?.length && engagesFight(text)))) {
+            const opening = { ...payload, start: startAnchor, plan: { ...payload.plan, acts: [], foes: [] } };
+            return { fightStart: { opening, original: payload, anchor: startAnchor, message: hashText(text) } };
+        }
+        return { commands: [{ type: RESOLVE, payload }] };
     }
 
     // The reply is captured: its plan has been used, so the hold is let go (best effort; a new generation clears it anyway). Whether
@@ -300,5 +408,18 @@ export function createPrecall({ callModel, chat, chatId, hold, problem = null, m
         noDice.clear();
     }
 
-    return { beforeGenerate, afterCapture };
+    function afterReceive(info = {}, state = null, query = null) {
+        let current = null;
+        try { current = metadata(); } catch { /* no saved start */ }
+        clearStart(current);
+        clearSend(current);
+        const record = readRecord((chat() ?? [])[info.index]);
+        const receipt = record?.receipts?.findLast(item => item?.type === RESOLVE && item.replan?.payload?.board);
+        if (!receipt) return;
+        let meta = null;
+        try { meta = metadata(); } catch { return; }
+        receiveBoard(meta, receipt.replan.payload, receipt.data?.v2?.result, record.sid, receipt.id, state, query);
+    }
+
+    return { canGenerate, beforeGenerate, afterCapture, afterReceive };
 }

@@ -27,6 +27,7 @@ import { FIGHT, FIGHT_XP, FOE_SLOTS, LEAN_RPG_FEATURE, RESOLVE } from './names.j
 import { XP_RATE, clampLevel, scaleXp, xpRateFrom, xpRateOf } from './levels.js';
 import { levelOfClass } from './formula.js';
 import { fold, readSheet } from './read.js';
+import { boardWin } from './board/awards.js';
 
 /** The replies whose story is paid for (the same as the reply-end steps of the blocks: not a Continue's, nor the extractor's late lines). */
 const PAID_TYPES = Object.freeze(['normal', 'swipe', 'regenerate', 'reread']);
@@ -105,6 +106,8 @@ export function openedSlots(receipts) {
  */
 export function fightHook(view, info) {
     if (!PAID_TYPES.includes(info?.type ?? 'normal') || view?.feature?.(LEAN_RPG_FEATURE) !== true) return undefined;
+    const board = boardWin(info?.receipts);
+    if (board && !board.won) return undefined;
     const sheet = readSheet(view.state);
     const filled = sheet.foes.filter(foe => foe.filled);
     // (cheap first: a fight can only be won now if every filled group is Down)
@@ -118,7 +121,7 @@ export function fightHook(view, info) {
     const arrived = filled.filter(foe => filledBefore.get(foe.slot) !== fold(foe.name)).map(foe => foe.slot);
     // (a group the reply's roll opened in a Down group's slot, even one of the same name, is new: it is paid; a stale Down group never is)
     const opened = openedSlots(info?.receipts).filter(slot => filled.some(foe => foe.slot === slot));
-    const was = [...new Set([...standingSlots(before), ...arrived, ...opened])].sort((a, b) => a - b);
+    const was = [...new Set(board ? board.groups : [...standingSlots(before), ...arrived, ...opened])].sort((a, b) => a - b);
     if (!was.length || !fightOf(sheet, was).won) return undefined;
     // The XP rate in force, recorded with the step (a payload without `rate` is 100): a later change of the setting never moves a reply that has it.
     let rate = XP_RATE.default;

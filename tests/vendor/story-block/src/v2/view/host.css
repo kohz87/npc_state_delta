@@ -106,6 +106,8 @@
    The panel is a column: the head, the body (the pane, scrolling) and the screen bar at its foot (floating over the
    body; the body keeps room for it). */
 .story-suite-sheet {
+    --ss-bottom-bar-height: 72px;
+    --ss-bottom-bar-offset: 14px;
     position: fixed; left: 0; right: 0; top: 22dvh; bottom: auto; z-index: 3001;
     height: 78dvh; display: flex; flex-direction: column;
     /* Under Glass the theme (view/theme.js) sets --ss-sheet-bg and --ss-sheet-blur: the dense glass, so the page
@@ -129,16 +131,18 @@
     border: 1px solid var(--ss-border, var(--story-suite-line)); border-radius: var(--ss-radius-m, 8px);
     background: var(--ss-tile, transparent); color: var(--ss-text, inherit);
 }
-.story-suite-sheet-body { flex: 1 1 auto; overflow: auto; padding: 8px 12px 0; min-height: 0; }
+.story-suite-sheet-body {
+    --ss-bottom-bar-space: calc(var(--ss-bottom-bar-height) + var(--ss-bottom-bar-offset) + 12px + env(safe-area-inset-bottom, 0px) / var(--ss-zoomed, 1));
+    flex: 1 1 auto; overflow: auto; padding: 8px 12px 0; min-height: 0; }
 /* the screen bar at the foot of the panel (view/screen-bar.js, className story-suite-sheet-bar): the game view's floating pill */
 .story-suite-sheet-bar {
-    position: absolute; left: 12px; right: 12px; bottom: calc(14px + env(safe-area-inset-bottom, 0px));
-    height: 72px; z-index: 3;
+    position: absolute; left: 12px; right: 12px; bottom: calc(var(--ss-bottom-bar-offset) + env(safe-area-inset-bottom, 0px) / var(--ss-zoomed, 1));
+    height: var(--ss-bottom-bar-height); z-index: 3;
 }
 /* the body ends with room for the bar, so the last thing in the pane can be scrolled above it */
 .story-suite-sheet-body::after {
     content: ''; display: block;
-    height: calc(72px + 14px + 12px + env(safe-area-inset-bottom, 0px));
+    height: var(--ss-bottom-bar-space);
 }
 @media (min-width: 760px) {
     .story-suite-sheet {

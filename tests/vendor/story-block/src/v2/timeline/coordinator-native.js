@@ -49,9 +49,9 @@ export function createNative(s, deps) {
     function withWholePrefixes(fn) {
         const was = registry.restore();
         if (was.state !== 'pending') return fn();
-        registry.setRestore('idle', '');
+        registry.setRestore('idle', '', { temporary: true });
         try { store.lifecycleChanged?.(); return fn(); }
-        finally { registry.setRestore(was.state, was.reason); store.lifecycleChanged?.(); }
+        finally { registry.setRestore(was.state, was.reason, { temporary: true }); store.lifecycleChanged?.(); }
     }
     const selectionNeeded = () => hashJson(selectionPlan()) !== hashJson(archive.selection());
 
@@ -76,7 +76,7 @@ export function createNative(s, deps) {
         });
     }
 
-    const WAITING = 'The selected story is waiting for its records.';
+    const WAITING = 'The selected story is waiting for its records. Wait for the check to finish, or open another chat.';
 
     async function selectHead() {
         if (!selectionNeeded()) return { ok: true };
@@ -172,21 +172,22 @@ export function createNative(s, deps) {
         if (asked.ok && asked.status === 'active') answer = asked;
         else if (asked.ok && asked.status === 'aborted') {
             archive.patch(entry.id, { why: `the participant ${module} reports it aborted` });
-            return fail('CONFLICT', `The participant ${module} aborted a change the journal committed; it is held until it is reconciled.`);
+            return block.note(module, fail('CONFLICT', `The participant ${module} aborted a change the journal committed; it is held until it is reconciled.`));
         }
+        else if (!asked.ok && asked.code === 'STALE') return block.note(module, asked);
         if (!answer) {
             const done = entry.kind === 'native-event'
                 ? await callParticipant(module, 'applyEvent', { event: entry.event, nativeKey: entry.nativeKey, kind: entry.eventKind })
                 : await callParticipant(module, 'activate', { return: entry.id, prepared: entry.preparedId });
             // (`unprepared`: the participant has nothing prepared under that id, which `recover` may let go for a native mutation)
-            if (!done.ok) return done.code === 'NOT_FOUND' && entry.kind === 'native-mutation' ? { ...done, unprepared: true } : done;
-            if (entry.kind === 'native-event' && done.event !== entry.event) return fail('CONFLICT', 'The participant acknowledged another event.');
+            if (!done.ok) return done.code === 'NOT_FOUND' && entry.kind === 'native-mutation' ? { ...done, unprepared: true } : block.note(module, done);
+            if (entry.kind === 'native-event' && done.event !== entry.event) return block.note(module, fail('CONFLICT', 'The participant acknowledged another event.'));
             answer = done;
         }
         let settled = entry;
         if (!entry.after) settled = archive.patch(entry.id, { after: { module, checkpoint: answer.checkpoint, hash: answer.hash, schema: entry.before.schema } });
         else if (answer.checkpoint !== entry.after.checkpoint || answer.hash !== entry.after.hash) {
-            return fail('CONFLICT', `The participant ${module} answered other bytes than the change prepared.`);
+            return block.note(module, fail('CONFLICT', `The participant ${module} answered other bytes than the change prepared.`));
         }
         publish(settled);
         // Told done only when the file has it; a failed save is the caller's failure (a retry of the same event answers once it is saved).

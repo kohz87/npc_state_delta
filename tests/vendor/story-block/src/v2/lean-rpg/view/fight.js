@@ -33,11 +33,11 @@ export function readFight(state, { roleOf, ranks = [] } = {}) {
 export const hasFoes = (state, options) => rpgBlocks(state, options).some(block => block.role === 'foes' && foesOf(block).length > 0);
 
 /** The Fight screen: a tab and a game-view screen, on only while a foe slot is filled. `roleOf` as for the readers. */
-export function createFightScreen({ roleOf } = {}) {
+export function createFightScreen({ roleOf, offer = () => false, waiting = () => false } = {}) {
     return Object.freeze({
         id: FIGHT_SCREEN_ID, title: F.title, icon: 'fa-skull', mounts: Object.freeze(['screen', 'tab']),
         template: `<ss-widget name="${FIGHT_WIDGET}"></ss-widget>`,
-        active: state => ({ on: hasFoes(state, { roleOf }) }),
+        active: state => ({ on: hasFoes(state, { roleOf }) || waiting(), ...(offer() ? { badge: 'Fight offer open' } : {}) }),
         activeNote: 'Shown only while a foe is in the Foes block.',
     });
 }
@@ -52,7 +52,7 @@ const placeOf = state => {
  * latest reply with recorded rolls, `{ index, model }`, or null), `closeView()` (closes the game view), `showReply(index)` (scrolls the
  * chat to that reply; default: SillyTavern's `.mes[mesid]` element scrolls into view).
  */
-export function createFightWidget({ headState = () => null, readerName = () => '', roleOf, battleLog = null, closeView = () => {}, showReply = null, levels = () => ({}) } = {}) {
+export function createFightWidget({ headState = () => null, readerName = () => '', roleOf, battleLog = null, closeView = () => {}, showReply = null, levels = () => ({}), board = null, start = null } = {}) {
     return {
         props: {}, primary: null, validate: () => [],
         render: (el, _props, api) => shell(el, 'section', 'rpg-fight', ({ doc, root }) => {
@@ -60,6 +60,9 @@ export function createFightWidget({ headState = () => null, readerName = () => '
             const clear = () => {
                 for (const handle of handles) handle.destroy?.();
                 handles = [];
+                board?.clear();
+                start?.clear();
+                root.classList.remove('rpg-board-active');
                 root.replaceChildren();
             };
             const scroll = showReply ?? (index => doc.querySelector(`.mes[mesid="${index}"]`)?.scrollIntoView?.({ block: 'start' }));
@@ -90,6 +93,9 @@ export function createFightWidget({ headState = () => null, readerName = () => '
             function draw() {
                 if (!alive) return;
                 clear();
+                if (start?.draw(root)) return;
+                const staged = board?.snapshot(start?.state() ?? headState());
+                if (staged) { board.render(root, staged, draw, handles, api?.resolve?.('settings') ?? {}); return; }
                 const state = headState(), { ranks, playerRank } = levels(), foes = readFight(state, { roleOf, ranks }), party = readParty(state, { own: readerName(), roleOf, ranks, playerRank });
                 // Who has which level, so the turn order can say it ("Astra (Lv 14)").
                 const levelByName = new Map([...party, ...foes].map(item => [fold(item.name), item.level]));
@@ -105,6 +111,7 @@ export function createFightWidget({ headState = () => null, readerName = () => '
                 pills.appendChild(h(doc, 'span', 'ss-pill rpg-foe-count', fill(total === 1 ? F.foesOne : F.foes, { n: total, down })));
                 head.append(title, pills);
                 root.appendChild(head);
+                board?.offer(root, draw);
 
                 // The turn order rolled at the start of this fight (the Standard formula records it with the rolls): "1 Wessel 21 · 2 Weir-drake 18 …".
                 // A record without one (Classic, or no roll yet) draws nothing here.
@@ -154,10 +161,11 @@ export function createFightWidget({ headState = () => null, readerName = () => '
                 }
             }
 
+            const offStart = start?.listen(draw);
             draw();
             return {
                 update() { draw(); },
-                destroy() { alive = false; clear(); },
+                destroy() { alive = false; offStart?.(); clear(); board?.destroy(); },
             };
         }),
     };

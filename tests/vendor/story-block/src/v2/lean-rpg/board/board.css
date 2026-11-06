@@ -1,0 +1,112 @@
+/* The fight board keeps the host's bars and battle-log colours.
+   Choices remain large enough for touch, with the log between the bars and controls.
+   On a phone an active fight fits the screen; a finished fight scrolls with the page. */
+.rpg-board-offer { padding: 12px; border-radius: 14px; }
+.rpg-board-offer p { margin: 0 0 8px; }
+.rpg-board-active { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.rpg-board-status { flex: 0 1 auto; min-height: 0; overflow: auto; }
+.rpg-board-status h3 { margin: 0 0 6px; }
+.rpg-board-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 6px; }
+.rpg-board-cards .rpg-pc, .rpg-board-cards .rpg-foe { padding: 8px; gap: 4px; }
+.rpg-pack-pill { border-color: var(--ss-accent); color: var(--ss-accent-text, var(--ss-accent)); background: var(--ss-accent-soft); font-weight: 600; }
+.rpg-pack-line { margin: 0; color: var(--ss-muted); font-size: calc(12px / var(--ss-zoomed, 1)); overflow-wrap: anywhere; }
+.rpg-board-order, .rpg-board-defence { margin: 4px 0; color: var(--ss-muted); font-size: 13px; }
+.rpg-board-log { flex: 1 1 160px; min-height: 80px; max-height: 35vh; overflow-y: auto; padding: 8px 12px; margin: 0; font-size: calc(13px / var(--ss-zoomed, 1)); overflow-wrap: anywhere; }
+.rpg-board-log-content { display: contents; }
+.rpg-board-log p { margin: 2px 0; }
+.rpg-board-round { font-weight: 700; margin-top: 8px !important; }
+.rpg-board-controls { flex: 0 0 auto; min-width: 0; padding: 8px; border: 1px solid var(--ss-border); border-radius: 10px; background: var(--ss-panel-opaque); }
+.rpg-board-prompt, .rpg-board-end { margin: 0 0 4px; font-weight: 700; }
+.rpg-board-choices { display: grid; gap: 4px; max-height: 35vh; overflow-y: auto; }
+.rpg-board-choice { box-sizing: border-box; width: 100%; min-height: 48px; padding: 9px 12px; border: 1px solid var(--ss-border); border-radius: 8px; color: var(--ss-text); background: var(--ss-glass); font: inherit; font-size: calc(15px / var(--ss-zoomed, 1)); text-align: left; overflow-wrap: anywhere; touch-action: manipulation; cursor: pointer; }
+.rpg-board-choice:active { background: var(--ss-accent-soft); transform: scale(.99); }
+.rpg-board-choice:focus-visible { outline: 2px solid var(--ss-accent); outline-offset: 1px; }
+.rpg-board-choice:disabled { opacity: .55; cursor: not-allowed; }
+.rpg-board-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.rpg-board-actions button, .rpg-board-controls > button { min-height: 44px; touch-action: manipulation; }
+.rpg-board-send { width: 100%; }
+.rpg-board-note { margin-top: 4px; font-size: 13px; }
+.rpg-board-note p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.rpg-board-awards-phone { display: none; }
+.rpg-board-error { color: var(--ss-warn); }
+.rpg-board-skill-flags { display: grid; gap: 4px; border: 1px solid var(--ss-border); border-radius: 8px; }
+.rpg-board-skill-flag { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+/* A finished panel can scroll its final control past the floating bar at any viewport width. */
+.story-suite-sheet-body:has(.rpg-board-active.rpg-board-finished)::after { display: block; height: var(--ss-bottom-bar-space, var(--ss-bottom-bar-height, 0px)); }
+@media (max-width: 759.98px) {
+    .ss-gameview-body:has(.rpg-board-active.rpg-board-finished)::after { display: block; height: var(--ss-bottom-bar-space, var(--ss-bottom-bar-height, 0px)); }
+    .rpg-board-active:not(.rpg-board-finished) { height: calc(100dvh - 170px); min-height: 350px; }
+    /* The panel and game view float their bars over the body. Give the board the actual remaining
+       space, through the widget wrappers, so its controls sit above the bar even in a short sheet. */
+    :is(.story-suite-sheet-body, .ss-gameview-body):has(.rpg-board-active:not(.rpg-board-finished)) {
+        display: flex; flex-direction: column; overflow-y: auto;
+        padding-bottom: var(--ss-bottom-bar-space);
+    }
+    :is(.story-suite-sheet-body, .ss-gameview-body):has(.rpg-board-active:not(.rpg-board-finished))::after { display: none; }
+    :is(.story-suite-sheet-body, .ss-gameview-body) :has(.rpg-board-active:not(.rpg-board-finished)) {
+        display: flex; flex-direction: column; flex: 1 1 auto; min-height: min-content;
+    }
+    :is(.story-suite-sheet-body, .ss-gameview-body) .rpg-board-active:not(.rpg-board-finished) { flex: 1 1 auto; height: auto; min-height: min-content; }
+    .ss-gameview-single .ss-gameview-body:has(.rpg-board-active:not(.rpg-board-finished)) { padding-bottom: 12px; }
+    .rpg-board-active:not(.rpg-board-finished) .rpg-board-status { display: flex; flex-direction: column; flex: 0 0 auto; min-height: 0; overflow: visible; }
+    /* Rows have the height of the tallest card, so scrolling never exposes half of the next row.
+       Without a measurement, show all cards and let the body scroll. */
+    .rpg-board-active:not(.rpg-board-finished) .rpg-board-cards { flex: 0 0 auto; height: var(--rpg-card-row-height, auto); grid-auto-rows: var(--rpg-card-row-height, max-content); overflow-y: auto; scroll-snap-type: y mandatory; }
+    .rpg-board-active:not(.rpg-board-finished) .rpg-board-cards > * { align-self: start; scroll-snap-align: start; }
+    .rpg-board-active:not(.rpg-board-finished) .rpg-board-controls { display: flex; flex-direction: column; flex: 0 0 auto; margin-top: auto; }
+    /* Five complete choices take priority over the log. The measured limit also allows wrapped labels. */
+    .rpg-board-active:not(.rpg-board-finished) .rpg-board-choices { flex: 0 0 auto; grid-auto-rows: max-content; max-height: var(--rpg-choice-limit, calc(5 * (48px / var(--ss-zoomed, 1)) + 16px)); }
+    .rpg-board-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: max-content; }
+    .rpg-board-cards .rpg-foe-pack { grid-column: 1 / -1; }
+    .rpg-board-log.rpg-battle { box-sizing: border-box; min-height: min(var(--rpg-log-content-height, 0px), calc(140px / var(--ss-zoomed, 1))); max-height: none; font-family: inherit; font-size: calc(13px / var(--ss-zoomed, 1)); }
+    .rpg-board-active:not(.rpg-board-finished) .rpg-board-log.rpg-battle { flex: 0 1 auto; }
+    /* Start intrinsic sizing at the minimum, then grow only as far as the log's content. */
+    .rpg-board-active:not(.rpg-board-finished) .rpg-board-log.rpg-battle.rpg-board-log-measured {
+        contain: size; flex: 1 1 min(var(--rpg-log-content-height), calc(140px / var(--ss-zoomed, 1)));
+        max-height: var(--rpg-log-content-height);
+    }
+    .rpg-board-log-content { display: flow-root; }
+    .rpg-board-finished .rpg-board-status { max-height: none; overflow: visible; }
+    .rpg-board-finished .rpg-board-log.rpg-battle { flex: 0 0 auto; overflow: visible; }
+    .rpg-board-end-description, .rpg-board-awards { display: none; }
+    .rpg-board-awards-phone { display: block; margin: 4px 0 8px; color: var(--ss-muted); font-size: calc(12px / var(--ss-zoomed, 1)); }
+    .rpg-board-controls { padding-bottom: max(8px, calc(env(safe-area-inset-bottom, 0px) / var(--ss-zoomed, 1))); }
+    :is(.story-suite-sheet, .ss-gameview, .ss-cards) .rpg-board-ended button { min-height: calc(48px / var(--ss-zoomed, 1)) !important; }
+    :is(.story-suite-sheet, .ss-gameview, .ss-cards) .rpg-board-controls :is(button, summary) { min-height: calc(48px / var(--ss-zoomed, 1)) !important; }
+
+    /* The game header is already ss-hero-compact on phones. While a board is open, fit its
+       portrait, name, place and three accessible meters into one row until More is pressed. */
+    .ss-gameview-main:has(.rpg-board-active) .ss-gameview-hero .ss-hero-board-more:not([hidden]) {
+        display: block; position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+        padding: 4px 8px; border: 1px solid var(--ss-border); border-radius: 999px;
+        background: var(--ss-panel-opaque); color: var(--ss-text); font: inherit; font-size: 12px; cursor: pointer;
+    }
+    .ss-gameview-main:has(.rpg-board-active) .ss-gameview-hero .ss-hero-board-expanded { padding-right: calc(70px / var(--ss-zoomed, 1)); }
+    .ss-gameview-main:has(.rpg-board-active) .ss-gameview-hero .ss-hero-board-expanded .ss-hero-board-more { top: 8px; transform: none; }
+    .ss-gameview-main:has(.rpg-board-active) .ss-gameview-hero .ss-hero-compact:not(.ss-hero-board-expanded) { padding: 8px calc(70px / var(--ss-zoomed, 1)) 8px 10px; }
+    .ss-gameview-main:has(.rpg-board-active) .ss-gameview-hero .ss-hero-compact:not(.ss-hero-board-expanded) .ss-hero-body {
+        grid-template-columns: 30px minmax(0, 1fr); grid-template-areas: "portrait text" "portrait vitals"; gap: 2px 8px;
+    }
+    .ss-gameview-main:has(.rpg-board-active) .ss-gameview-hero .ss-hero-compact:not(.ss-hero-board-expanded) .ss-hero-face { padding: 0; }
+    .ss-gameview-main:has(.rpg-board-active) .ss-gameview-hero .ss-hero-compact:not(.ss-hero-board-expanded) .ss-hero-portrait { width: 30px; height: 30px; }
+    .ss-gameview-main:has(.rpg-board-active) .ss-gameview-hero .ss-hero-compact:not(.ss-hero-board-expanded) .ss-hero-text { flex-direction: row; align-items: baseline; gap: 6px; }
+    .ss-gameview-main:has(.rpg-board-active) .ss-gameview-hero .ss-hero-compact:not(.ss-hero-board-expanded) :is(.ss-hero-name, .ss-hero-corner-text) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ss-gameview-main:has(.rpg-board-active) .ss-gameview-hero .ss-hero-compact:not(.ss-hero-board-expanded) :is(.ss-hero-pill, .ss-hero-edit, .ss-hero-you, .ss-hero-travel, .ss-hero-statuses, .ss-hero-level, .ss-hero-editor, .ss-bar-head, .ss-hero-corner-item:not([data-kind="place"])) { display: none; }
+    .ss-gameview-main:has(.rpg-board-active) .ss-gameview-hero .ss-hero-compact:not(.ss-hero-board-expanded) .ss-hero-pools { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+    /* At wider phone widths the full hero places Edit in its corner; leave room for Less beside it. */
+    @container (min-width: 600px) {
+        .ss-gameview-main:has(.rpg-board-active) .ss-gameview-hero .ss-hero-board-expanded .ss-hero-head .ss-hero-edit { right: calc(70px / var(--ss-zoomed, 1)); }
+    }
+}
+/* A choice line is 48px on the screen; the sheet is drawn at 88% on a phone (view/size.css), so the
+   length before the zoom is 48 / --ss-zoomed. The heavier selector wins over the host's 44px touch rule. */
+@media (max-width: 759.98px), (pointer: coarse) {
+    :is(.story-suite-sheet, .ss-gameview, .ss-cards) .rpg-board-choices > button.rpg-board-choice { min-height: calc(48px / var(--ss-zoomed, 1)) !important; }
+    :is(.story-suite-sheet, .ss-gameview, .ss-cards) .rpg-board-controls > button.rpg-board-send { min-height: calc(48px / var(--ss-zoomed, 1)) !important; }
+    :is(.story-suite-sheet, .ss-gameview, .ss-cards) .rpg-board-members .rpg-board-controls button { min-height: calc(48px / var(--ss-zoomed, 1)) !important; }
+}
+/* The end card: Send and Discard full width, stacked with a gap (approved mockup, frame 4). */
+.rpg-board-ended .rpg-board-send { display: block; width: 100%; }
+.rpg-board-ended .rpg-board-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.rpg-board-ended .rpg-board-actions button { width: 100%; }
+.rpg-board-sending { margin: 8px 0 0; font-weight: 700; }

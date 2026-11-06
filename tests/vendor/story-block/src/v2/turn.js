@@ -24,6 +24,7 @@
 import { PRECHECK } from './assist/classifier.js';
 import { makeView } from './sdk.js';
 import { SKILL_SLOTS_MAX } from './skill-slots.js';
+import { rpgLib } from './rpg-lazy.js';
 
 // A story line that practises a skill (`practice-N`, data-modules/part.js): the lines a reply is marked for (see captureEach).
 const PRACTICE_LINE = new RegExp(`\\|\\s*kind\\s*:\\s*practice-[1-${SKILL_SLOTS_MAX}]\\b`, 'iu');
@@ -34,6 +35,8 @@ import { createReread } from './turn/reread.js';
 import { createPromptBuild } from './turn/prompt-build.js';
 import { createPromptHooks } from './turn/prompt-hooks.js';
 import { createEvents } from './turn/events.js';
+import { boardStartState, boardStep, restoreHint } from './turn/held-board.js';
+import { pendingStart } from './turn/fight-start.js';
 export { QUIET_MARK_MIN, QUIET_WAIT_MS, MAX_NAME, stripBattleMarker, contextRoom, defuseMacros, flatName, substituteNames, quietMark, restoreMissing } from './turn/text.js';
 
 export const STATIC_KEY = 'story_suite_static';
@@ -108,6 +111,9 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
     const viewReader = reader('view.lastUser');
     const s = {
         session: null,
+        boardCapture: null,
+        heldBoard: null,
+        abortBoard: null,
         deferred: false,   // cues committed before a reply, left for the reply's save (runCues)
         listeners: [],
         problemLog: [],
@@ -129,12 +135,27 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         // text with no "<changes" in it at all is passed by without reading it further.
         stripped: new Map(),
         offModules: null,
+        offBoard: [],
     };
     const liveContext = () => {
         try { return live() ?? ctx; } catch { return ctx; }
     };
+    const metadata = () => liveContext()?.chatMetadata ?? null;
     const contextNow = () => contextRoom(liveContext(), s.lastSize);
     const whenIdle = () => (s.replyBusy ? new Promise(resolve => s.idleWaiters.push(resolve)) : Promise.resolve());
+    const boardError = (state, board) => {
+        const start = boardStartState(bus, state, board);
+        if (start.error) return start.error;
+        const check = rpgLib()?.boardInputError;
+        return typeof check === 'function' ? check(start.state, board) : 'The fight could not be checked.';
+    };
+    // Keep the witnessed inputs against reader edits while the reply is in flight. Capture runs its own changes in order.
+    bus.setCommitGuard?.((next, receipt) => {
+        if (receipt?.cause !== 'ui') return null;
+        const board = s.replyBusy && boardStep(s.session)?.payload.board;
+        if (!board) return null;
+        return boardError(next(), board) ? 'Wait for the reply to finish before changing the fight sheet or gear.' : null;
+    });
     // Our own model call's prompt (model-call.js) is never the reply's.
     const isOwn = eventData => {
         try { return ownPrompt(eventData) === true; } catch { return false; }
@@ -151,16 +172,27 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
 
     // Session housekeeping and Re-read (turn/session.js, turn/reread.js): wired here, after every const they are given.
     const { markBusy, markIdle, setPrompt, setPrompts, clearPrompts, problem, trySave, ensureInitial, repairActions, repair, startOver, rebuild, planAgain, reconcileNow } = createSession(s, { ctx, store, bus, events, notify, initial, position, roles, hasCarrier, refusal, STATIC_KEY, TAIL_KEY, REPLY_BUSY_MAX_MS, MAX_PROBLEMS, ROLE_SYSTEM });
+    const stopChangedBoard = () => {
+        const current = s.session, board = s.replyBusy && boardStep(current)?.payload.board;
+        if (!board || current.boardInvalid) return;
+        const error = boardError(store.head(), board);
+        if (!error) return;
+        current.boardInvalid = true;
+        const reason = `${error}${restoreHint(error, ' before retrying.')}`;
+        problem({ module: 'story-block', code: 'BOARD_CHANGED', message: reason });
+        try { s.abortBoard?.(true); } catch { /* the reason is still shown */ }
+        try { notify?.(reason, 'story-block'); } catch { /* the problem remains visible */ }
+    };
     // The capture flow (turn/capture-flow.js): wired here, after the session's `problem` it is given and before the Re-read that calls it.
-    const { changeHeads, readBlock, strayProblems, legacyProblem, capped, assistRoom, lateLines, nowLines, captureLines, afterCapture, stepSeeds, captureEach, storySeeds, heldInReply, withCaps, LATE, NOW } = createCaptureFlow(s, { ctx, store, bus, registry, settings, events, hostSettings, view, viewReader, lateReader, problem, isCarrier, PRACTICE_LINE, HOOK_TIMEOUT_MS });
-    const { reread, saveText, redraw } = createReread(s, { ctx, store, events, timeline, refusal, changeHeads, readBlock, strayProblems, capped, lateLines, assistRoom, nowLines, heldInReply, legacyProblem, storySeeds, afterCapture, captureEach, stepSeeds, withCaps, isPrelude, LATE, NOW, planAgain, problem, trySave });
+    const { changeHeads, readBlock, strayProblems, legacyProblem, capped, assistRoom, lateLines, nowLines, captureLines, afterCapture, stepSeeds, captureEach, storySeeds, heldInReply, withCaps, LATE, NOW } = createCaptureFlow(s, { ctx, store, bus, registry, settings, events, hostSettings, view, viewReader, lateReader, problem, isCarrier, boardError, PRACTICE_LINE, HOOK_TIMEOUT_MS });
+    const { reread, saveText, redraw } = createReread(s, { ctx, metadata, store, events, timeline, refusal, changeHeads, readBlock, strayProblems, capped, lateLines, assistRoom, nowLines, heldInReply, legacyProblem, storySeeds, afterCapture, captureEach, stepSeeds, withCaps, isPrelude, LATE, NOW, planAgain, problem, trySave });
 
     // The prompt side of a turn (turn/prompt-build.js, turn/prompt-hooks.js): wired here, after every const they are given. The interceptor asks for claimQuiet only when it runs.
-    const { runCues, build, askCanGenerate, runOnBlocked, interceptor, battleOn, stripHistory, backgroundPrompt, foreignPrompt } = createPromptBuild(s, { ctx, store, bus, registry, settings, events, onBlocked, notify, initial, prepare, hostSettings, viewReader, view, contextNow, hasCarrier, lastCarrier, isPrelude, markBusy, markIdle, setPrompts, clearPrompts, problem, trySave, claimQuiet: () => claimQuiet(), FOREGROUND, HOOK_TIMEOUT_MS, ASSIST_WAIT_MS, RPG_LOAD_WAIT_MS, OWN_PROMPT_PARTS, OWN_PROMPT_CHARS, STRIP_CACHE, HAS_BLOCK, HAS_LEGACY, hookTimeout, normalizeType });
+    const { runCues, build, askCanGenerate, runOnBlocked, interceptor, battleOn, stripHistory, backgroundPrompt, foreignPrompt } = createPromptBuild(s, { ctx, metadata, store, bus, registry, settings, events, timeline, onBlocked, notify, initial, prepare, hostSettings, viewReader, view, contextNow, hasCarrier, lastCarrier, isPrelude, markBusy, markIdle, setPrompts, clearPrompts, problem, trySave, claimQuiet: () => claimQuiet(), FOREGROUND, HOOK_TIMEOUT_MS, ASSIST_WAIT_MS, RPG_LOAD_WAIT_MS, OWN_PROMPT_PARTS, OWN_PROMPT_CHARS, STRIP_CACHE, HAS_BLOCK, HAS_LEGACY, hookTimeout, normalizeType });
     const { onGenerationStarted, claimQuiet, onPromptReady, onTextPromptReady } = createPromptHooks(s, { isOwn, battleOn, stripHistory, backgroundPrompt, foreignPrompt, HAS_LEGACY, LEGACY_IN_PROMPT, holdsIn, normalizeType });
 
     // The SillyTavern event handlers (turn/events.js): wired here, after every part they are given. `getApi` is read only when install runs, after the api below exists.
-    const { install, uninstall, onMessageReceived, onChatChanged, seed, onChatRenamed, onTimelineChanged, onGenerationEnded } = createEvents(s, { markIdle, clearPrompts, ctx, isCarrier, store, ensureInitial, problem, changeHeads, readBlock, strayProblems, legacyProblem, lateLines, captureLines, withCaps, timeline, trySave, saveText, redraw, events, registry, view, prepare, RPG_LOAD_WAIT_MS, rebuild, bus, hasCarrier, reconcileNow, REBUILD_REASONS, INTERCEPTOR_NAME, V1_KEYS, setPrompt, interceptor, onGenerationStarted, onPromptReady, onTextPromptReady, getApi: () => api });
+    const { install, uninstall, onMessageReceived, onChatChanged, seed, onChatRenamed, onTimelineChanged, onGenerationEnded } = createEvents(s, { markIdle, clearPrompts, ctx, metadata, isCarrier, store, ensureInitial, problem, notify, stopChangedBoard, boardError, changeHeads, readBlock, strayProblems, legacyProblem, lateLines, captureLines, withCaps, timeline, trySave, saveText, redraw, events, registry, view, prepare, RPG_LOAD_WAIT_MS, rebuild, bus, hasCarrier, reconcileNow, REBUILD_REASONS, INTERCEPTOR_NAME, V1_KEYS, setPrompt, interceptor, onGenerationStarted, onPromptReady, onTextPromptReady, getApi: () => api });
 
     const api = {
         repairActions,
@@ -211,6 +243,13 @@ export function createTurn({ ctx, live = () => ctx, store, bus, registry, settin
         unblock: (moduleId, reason = '') => runOnBlocked(moduleId, reason),
         /** The pending reply's session (for status and tests), or null. */
         session: () => (s.session ? { ...s.session } : null),
+        /** The held opening's private sheet, recreated with its saved seed. */
+        fightStartPreview: () => {
+            const pending = pendingStart(metadata(), ctx?.chat);
+            if (!pending?.opening) return null;
+            const preview = bus.run('rpg.resolve', pending.opening.payload, { cause: 'system', seed: pending.opening.seed });
+            return preview?.ok ? { state: preview.state, result: preview.receipt?.data?.v2?.result } : null;
+        },
         /** Whether a reply is being built or awaited (its interceptor ran; not yet received, ended or stopped). */
         replyBusy: () => s.replyBusy,
         /** Resolves when no reply is in progress (at once when none is). */

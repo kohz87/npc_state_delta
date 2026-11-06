@@ -2,7 +2,8 @@
 // the PC, the character card's image, or an NPC's from a query such as Delta's `npc.portrait`; the initial
 // when there is none), the name, a level badge on the portrait (a star and the number), the class · title line, bars for HP, MP and SP and one for experience under the
 // Terms' own word ("Soul growth"), a time / place / weather corner, and a row of status badges. `compact`
-// is the one-row variant for the strip under a reply. With `you` (the game view's header while `story-block.you` is
+// is the one-row variant for the strip under a reply. The game view can also offer More while a phone fight is open.
+// With `you` (the game view's header while `story-block.you` is
 // on), a Rank, a Wearing and a Condition row under the place line; without `you` the card draws no such row. With `travel` (Story Director's trip line)
 // a Travel row follows them. With `where` (the game view's header) the corner is the scene's one place, and a "Here: names" item (the people present)
 // follows the weather. The lines are plain text; with `where` the card has ONE "Edit" button (top-right; beside the name on a phone) that opens one
@@ -50,6 +51,7 @@ const heroProps = {
     clock: { type: 'object', default: null },           // { parts: { year, month, day, minutes } | null, era, months: [{ name, days }] }: the editor's date and time fields (Story Director's clock); none without it
     travel: { type: 'string', default: '' },            // the trip's line (Story Director's `atlas.trip` row): a Travel row under the `you` rows
     compact: { type: 'boolean', default: false },
+    boardExpandable: { type: 'boolean', default: false },
 };
 
 const short = (value, max) => cutAt(str(value).replace(/\s+/g, ' ').trim(), max);
@@ -297,6 +299,17 @@ function renderHero(el, input, api) {
         face.append(portrait, badge);
         body.append(face, main, vitals);
         root.appendChild(body);
+        // CSS exposes this control only when a board is open in the phone game view.
+        const more = h(doc, 'button', 'ss-hero-board-more', 'More');
+        more.setAttribute('type', 'button');
+        more.setAttribute('aria-expanded', 'false');
+        listen(more, 'click', () => {
+            const expanded = !root.classList.contains('ss-hero-board-expanded');
+            root.classList.toggle('ss-hero-board-expanded', expanded);
+            root.classList.toggle('ss-hero-compact', p.compact === true && !expanded);
+            more.setAttribute('aria-expanded', String(expanded));
+            more.textContent = expanded ? 'Less' : 'More';
+        });
         // The pictures that failed to load (kept for this widget: a redraw does not ask for them again), the candidates for the
         // current props, and the picture on screen: an error moves on to the next candidate, the initial past the last.
         const broken = new Set();
@@ -360,7 +373,16 @@ function renderHero(el, input, api) {
         function update() {
             clear();
             const label = short(p.name, 60);
-            root.classList.toggle('ss-hero-compact', p.compact === true);
+            more.hidden = p.boardExpandable !== true;
+            if (p.boardExpandable) {
+                if (more.parentNode !== root) root.appendChild(more);
+            } else {
+                more.remove();
+                root.classList.remove('ss-hero-board-expanded');
+                more.setAttribute('aria-expanded', 'false');
+                more.textContent = 'More';
+            }
+            root.classList.toggle('ss-hero-compact', p.compact === true && !root.classList.contains('ss-hero-board-expanded'));
             root.setAttribute('aria-label', label ? `Character: ${label}` : 'Character');
             name.textContent = label;
             letter.textContent = initials(label);

@@ -1,0 +1,47 @@
+/* The reply's fight offer and the pause screen between Send and the board.
+   Actions keep the board's touch sizing; the waiting state is one quiet status line. */
+.rpg-fight-offer, .rpg-fight-pause { box-sizing: border-box; min-width: 0; color: var(--ss-text); }
+.rpg-fight-offer { display: flex; flex-direction: column; gap: 10px; margin: 10px 0 0; padding: 12px;
+    border: 1px solid var(--ss-accent); border-radius: var(--ss-radius-l); background: var(--ss-accent-soft); }
+.rpg-fight-offer[hidden], .rpg-fight-pause[hidden] { display: none; }
+.rpg-fight-offer-line { margin: 0; font-size: calc(14px / var(--ss-zoomed, 1)); line-height: 1.45; overflow-wrap: anywhere; }
+.rpg-fight-offer-mark { margin-right: 5px; }
+.rpg-fight-offer-line strong { font-weight: 700; }
+.rpg-fight-offer-actions, .rpg-fight-pause-actions { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.rpg-fight-offer-actions > button, .rpg-fight-pause-actions > button { flex: 1 1 140px; min-height: 44px; padding: 0 14px;
+    touch-action: manipulation; cursor: pointer; overflow-wrap: anywhere; }
+.rpg-fight-pause { display: flex; flex-direction: column; gap: 10px; padding: 12px;
+    border: 1px solid var(--ss-border); border-radius: var(--ss-radius-l);
+    background: var(--ss-panel-opaque); }
+.rpg-fight-pause-title { margin: 0; font-size: 1.05em; line-height: 1.3; }
+.rpg-fight-pause-note, .rpg-fight-pause-edge { margin: 0; color: var(--ss-muted); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.rpg-fight-pause-foes { display: grid; gap: 4px; min-width: 0; }
+.rpg-fight-pause-foes-head, .rpg-fight-pause-checks-head { margin: 0; font-size: 13px; letter-spacing: .02em; text-transform: uppercase; color: var(--ss-muted); }
+.rpg-fight-pause-foe { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 10px;
+    padding: 8px 10px; border: 1px solid var(--ss-border); border-radius: 10px; background: var(--ss-glass); }
+.rpg-fight-pause-foe-name { min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
+.rpg-fight-pause-foe-health { color: var(--ss-muted); font-size: 13px; }
+.rpg-fight-pause-checks { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.rpg-fight-pause-check { padding: 8px 10px; border-radius: 10px; background: var(--ss-glass);
+    font-family: ui-monospace, monospace; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.rpg-fight-pause-check.rpg-fight-pause-success { color: var(--ss-good); }
+.rpg-fight-pause-check.rpg-fight-pause-cost { color: var(--ss-warn-text); }
+.rpg-fight-pause-check.rpg-fight-pause-fail { color: var(--ss-bad-text); }
+.rpg-fight-pause-working { display: flex; align-items: center; gap: 10px; min-height: 56px; color: var(--ss-muted); font-size: 14px; }
+.rpg-fight-pause-spinner { flex: none; width: 18px; height: 18px; border: 3px solid var(--ss-track); border-top-color: var(--ss-accent);
+    border-radius: 50%; animation: rpg-fight-start-spin 1s linear infinite; }
+@keyframes rpg-fight-start-spin { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) { .rpg-fight-pause-spinner { animation: none; } }
+@media (max-width: 759.98px), (pointer: coarse) {
+    :is(.story-suite-sheet, .ss-gameview, .ss-cards, .mes) .rpg-fight-offer-actions > button,
+    :is(.story-suite-sheet, .ss-gameview, .ss-cards, .mes) .rpg-fight-pause-actions > button {
+        min-height: calc(48px / var(--ss-zoomed, 1));
+    }
+    .rpg-fight-pause-actions { flex-direction: column; }
+    .rpg-fight-pause-actions > button { flex-basis: auto; width: 100%; }
+}
+
+/* The board switch shares the Rolls card with the planner limit. */
+.rpg-board-setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--ss-text) 16%, transparent); }
+.rpg-board-setting-copy { min-width: 0; }
+.rpg-board-setting .ss-switch { flex: 0 0 auto; }
