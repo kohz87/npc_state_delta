@@ -2,9 +2,9 @@
    complete-form/current-presentation resolution and the shared-feature bridge. A pure part of
    appearance.js (same owner, moved without change); appearance.js keeps the public facade and
    re-exports every public name. Never imports appearance.js. */
-import { CAST_APPEARANCE_WIDE, castAppearanceKept } from '../core-mechanics.js';
-import { APPEARANCE_FORM_LIMIT, APPEARANCE_MODEL_VERSION, appearanceText, clean, combineAppearance, formKey, formState, stripOverallPrefix, truthy } from './text.js';
-import { CHANGEABLE_PRESENTATION, CONCEALED_MENTION, MIXED_CLAUSE_SPLIT, physicalPieces, physicalTraitKeys, presentationSegments, traitParts, withoutSharedPieces } from './physical.js';
+import { CAST_APPEARANCE_WIDE, castAppearanceKept } from './core-mechanics.js';
+import { APPEARANCE_FORM_LIMIT, APPEARANCE_MODEL_VERSION, appearanceText, clean, combineAppearance, formKey, formState, stripOverallPrefix, truthy } from './appearance-text.js';
+import { CHANGEABLE_PRESENTATION, CONCEALED_MENTION, MIXED_CLAUSE_SPLIT, physicalPieces, physicalTraitKeys, presentationSegments, traitParts, withoutSharedPieces } from './appearance-physical.js';
 
 export function normalizeAppearanceForms(value, { updates = false } = {}) {
     const source = Array.isArray(value)

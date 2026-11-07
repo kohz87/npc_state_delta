@@ -1,7 +1,7 @@
 /* Appearance text and form primitives: bounded cleaning, clause splitting, shared-prefix combination,
    form keys/state and the public form/version limits. A pure part of appearance.js (same owner, moved
    without change); appearance.js keeps the public facade and re-exports every public name. Never imports appearance.js. */
-import { DURABLE_PROFILE_LIMITS, normalizeName } from '../core-mechanics.js';
+import { DURABLE_PROFILE_LIMITS, normalizeName } from './core-mechanics.js';
 
 export const APPEARANCE_FORM_LIMIT = 8;
 // Version 2: a named form's description is that form's complete appearance. Version 1 forms were

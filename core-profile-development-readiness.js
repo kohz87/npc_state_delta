@@ -2,9 +2,9 @@
    the matching durable row, and the planned ledger updates for each NPC. A pure part of
    core-profile-development.js (same owner, moved without change); the root file keeps the public
    facade and re-exports every public name it exported before. Never imports core-profile-development.js. */
-import * as mechanics from '../core-mechanics.js';
-import { PROFILE_DEVELOPMENT_FIELDS, PROFILE_DEVELOPMENT_READY_COUNT, PROFILE_DEVELOPMENT_MIN_SPAN, PROFILE_DEVELOPMENT_OBSERVATION_LIMIT, PERSONALITY_SPREAD_READY_COUNT, DEVELOPMENT_SPREAD_MIN_DAYS, PERSONALITY_SPREAD_MIN_MESSAGES, PERSONALITY_SPREAD_MIN_TURNS, profileDevelopmentText, profileDevelopmentEvidence, profileDevelopmentSourceMessageId, profileDevelopmentTurn, parseProfileDevelopmentEvidence, emptyProfileDevelopment, profileDevelopmentForNpc } from './ledger.js';
-import { developmentRecordMatches, observeProfileDevelopment } from './observation.js';
+import * as mechanics from './core-mechanics.js';
+import { PROFILE_DEVELOPMENT_FIELDS, PROFILE_DEVELOPMENT_READY_COUNT, PROFILE_DEVELOPMENT_MIN_SPAN, PROFILE_DEVELOPMENT_OBSERVATION_LIMIT, PERSONALITY_SPREAD_READY_COUNT, DEVELOPMENT_SPREAD_MIN_DAYS, PERSONALITY_SPREAD_MIN_MESSAGES, PERSONALITY_SPREAD_MIN_TURNS, profileDevelopmentText, profileDevelopmentEvidence, profileDevelopmentSourceMessageId, profileDevelopmentTurn, parseProfileDevelopmentEvidence, emptyProfileDevelopment, profileDevelopmentForNpc } from './core-profile-development-ledger.js';
+import { developmentRecordMatches, observeProfileDevelopment } from './core-profile-development-observation.js';
 
 function developmentReadyCount(field, sourceIds = [], turns = [], days = []) {
     if (field !== 'personality' && field !== 'speech') return PROFILE_DEVELOPMENT_READY_COUNT;

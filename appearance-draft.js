@@ -2,8 +2,8 @@
    preserving scanner locks around a manual form edit. A pure part of appearance.js (same owner,
    moved without change); appearance.js keeps the public facade and re-exports every public name.
    Never imports appearance.js. */
-import { APPEARANCE_MODEL_VERSION, clean, formKey, stripOverallPrefix } from './text.js';
-import { currentPresentationText, formatAppearanceForms, normalizeAppearanceModel, parseAppearanceFormsText, resolveNpcAppearance } from './model.js';
+import { APPEARANCE_MODEL_VERSION, clean, formKey, stripOverallPrefix } from './appearance-text.js';
+import { currentPresentationText, formatAppearanceForms, normalizeAppearanceModel, parseAppearanceFormsText, resolveNpcAppearance } from './appearance-model.js';
 
 export function appearanceDraftRecord(npc = {}, draft = {}, { lockAppearance = false } = {}) {
     const forms = parseAppearanceFormsText(draft.formsText ?? formatAppearanceForms(npc?.appearanceForms));

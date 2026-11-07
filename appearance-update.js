@@ -10,10 +10,10 @@ import {
     groundedAppearanceCorrection,
     isSafeUnmarkedDurableRefinement,
     isSafeUnmarkedDurableReplacement,
-} from '../core-mechanics.js';
-import { APPEARANCE_FORM_LIMIT, APPEARANCE_MODEL_VERSION, appearanceText, clean, formKey, formState, hasOwn, sameAppearance, stripOverallPrefix } from './text.js';
-import { mergeRefinement, preserveOmittedPhysicalTraits, withoutSharedPieces } from './physical.js';
-import { completeFormWithShared, normalizeAppearanceForms, normalizeAppearanceModel, resolveNpcAppearance } from './model.js';
+} from './core-mechanics.js';
+import { APPEARANCE_FORM_LIMIT, APPEARANCE_MODEL_VERSION, appearanceText, clean, formKey, formState, hasOwn, sameAppearance, stripOverallPrefix } from './appearance-text.js';
+import { mergeRefinement, preserveOmittedPhysicalTraits, withoutSharedPieces } from './appearance-physical.js';
+import { completeFormWithShared, normalizeAppearanceForms, normalizeAppearanceModel, resolveNpcAppearance } from './appearance-model.js';
 
 function reconcileFormAppearance(existing, update, context = '') {
     const current = appearanceText(existing);

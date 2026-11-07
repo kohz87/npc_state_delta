@@ -1,8 +1,8 @@
 /* Appearance physical-feature rules: trait keys, enduring-trait carry, shared-piece deduplication and
    refinement similarity. A pure part of appearance.js (same owner, moved without change); appearance.js
    keeps the public facade and re-exports every public name. Never imports appearance.js. */
-import { DURABLE_PROFILE_LIMITS, normalizeName } from '../core-mechanics.js';
-import { appearanceClauses, appearanceText, clean, sameAppearance } from './text.js';
+import { DURABLE_PROFILE_LIMITS, normalizeName } from './core-mechanics.js';
+import { appearanceClauses, appearanceText, clean, sameAppearance } from './appearance-text.js';
 
 export const STOPWORDS = new Set([
     'and', 'the', 'with', 'that', 'this', 'their', 'they', 'them', 'when', 'while', 'from', 'into', 'over', 'under',

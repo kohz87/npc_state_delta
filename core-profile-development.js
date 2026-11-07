@@ -1,13 +1,13 @@
 /* NPC State Delta profile development diagnostics: the per-scan profile, appearance, secondary-profile
    and birthday receipts the merge records, plus profile evidence/application markers. The ledger model,
-   observation and readiness parts live in core-profile-development/ and are re-exported here unchanged;
+   observation and readiness parts live in core-profile-development-*.js and are re-exported here unchanged;
    this root path keeps every public export. A pure part of core.js (same owner); never imports core.js. */
 import * as mechanics from './core-mechanics.js';
 import { normalizeCalendarDate } from './calendar.js';
 import * as continuity from './continuity-core.js';
 import { birthdayPromptSource, exactStoredAge, sameCalendarBirthday } from './core-birthday.js';
 import { birthdayEvidenceInText } from './birthday.js';
-import { PROFILE_DEVELOPMENT_OBSERVATION_LIMIT, parseProfileDevelopmentEvidence, profileDevelopmentSourceMessageId, profileDevelopmentText } from './core-profile-development/ledger.js';
+import { PROFILE_DEVELOPMENT_OBSERVATION_LIMIT, parseProfileDevelopmentEvidence, profileDevelopmentSourceMessageId, profileDevelopmentText } from './core-profile-development-ledger.js';
 
 export {
     PROFILE_DEVELOPMENT_READY_COUNT,
@@ -18,13 +18,13 @@ export {
     resetProfileDevelopment,
     rebaseProfileDevelopment,
     profileDevelopmentForNpc,
-} from './core-profile-development/ledger.js';
+} from './core-profile-development-ledger.js';
 export {
     profileDevelopmentProvenanceReady,
     durableUpdateForNpc,
     appearanceUpdateForNpc,
     prepareProfileDevelopmentState,
-} from './core-profile-development/readiness.js';
+} from './core-profile-development-readiness.js';
 
 export function clearProfileEvidence(npc, field) {
     const profileEvidence = npc?.profileEvidence && typeof npc.profileEvidence === 'object' && !Array.isArray(npc.profileEvidence)

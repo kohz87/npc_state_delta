@@ -2,8 +2,8 @@
    ledger normalization, reset/rebase and the per-NPC ledger accessor. A pure part of
    core-profile-development.js (same owner, moved without change); the root file keeps the public
    facade and re-exports every public name it exported before. Never imports core-profile-development.js. */
-import * as mechanics from '../core-mechanics.js';
-import { migrateLegacyStoryDay, STORY_DAY_SCHEME } from '../calendar.js';
+import * as mechanics from './core-mechanics.js';
+import { migrateLegacyStoryDay, STORY_DAY_SCHEME } from './calendar.js';
 
 const PROFILE_DEVELOPMENT_VERSION = 2;
 export const PROFILE_DEVELOPMENT_CONCEPT_LIMIT = 4;
