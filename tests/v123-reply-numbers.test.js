@@ -8,6 +8,7 @@ import { mergeImportedDossierState } from '../bundle.js';
 import { changeStamp, changeSummaryHtml, dossierDetailProjection, lastRelationshipChangeHtml, projectDossierState, replyHeaderLabel } from '../dossier-ui.js';
 import { buildMapModel } from '../relationship-map-core.js';
 import { runtimeSource } from './helpers/runtime-source.js';
+import { dossierUiSource } from './helpers/dossier-ui-source.js';
 
 // 1.2.3: the dossiers show the chat's reply number (the latest assistant reply's message index, as
 // Story Block's "reply #N") instead of Delta's own turn counter, which keeps its internal meaning.
@@ -47,7 +48,7 @@ test('v1.2.3 header: Reply #N from the live chat, never Delta\'s counter', () =>
     assert.equal(replyHeaderLabel(projectDossierState({}, { chatKey: 'no-chat' })), 'No chat');
     assert.equal(replyHeaderLabel(projectDossierState({}, { chatKey: 'c1', hydrationStatus: 'loading' })), 'Loading…');
     assert.equal(replyHeaderLabel(projectDossierState({}, { chatKey: 'c1', hydrationStatus: 'error' })), 'Unavailable');
-    const ui = fs.readFileSync(new URL('../dossier-ui.js', import.meta.url), 'utf8');
+    const ui = dossierUiSource();
     assert.match(ui, /const replyLabel = replyHeaderLabel\(projection\)/);
     assert.doesNotMatch(ui, /`Turn \$\{projection\.turn\}`/);
     const index = runtimeSource();
@@ -127,7 +128,7 @@ test('v1.2.3 the dossier shows reply #N for new records and the old counter as a
     const mixed = dossierDetailProjection(mira({ fieldChanges: { mood: 71, location: 71 }, fieldChangeMessages: { mood: 14 } }));
     assert.equal(mixed.fieldChanges.message, null, 'a latest change whose fields disagree shows the counter, never a guess');
 
-    const ui = fs.readFileSync(new URL('../dossier-ui.js', import.meta.url), 'utf8');
+    const ui = dossierUiSource();
     assert.match(ui, /• \$\{escapeHtml\(stamp\.mark\)\}/);
     assert.doesNotMatch(ui, /• T\$\{escapeHtml\(changes\.latestTurn\)\}/);
     assert.match(ui, /reply: this\.projection\.reply \}\)/, 'a new reply re-renders the change line');

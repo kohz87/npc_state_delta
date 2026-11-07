@@ -5,6 +5,7 @@ import { appearanceUiModel } from '../continuity-ui.js';
 import { appearanceDraftRecord } from '../appearance.js';
 import { normalizeNpcRecord, resolveNpcAppearance } from '../core.js';
 import { runtimeSource } from './helpers/runtime-source.js';
+import { dossierUiSource } from './helpers/dossier-ui-source.js';
 
 function formNpc() {
     return normalizeNpcRecord({
@@ -99,7 +100,7 @@ test('continuity UI ships dedicated calendar/birthday and appearance-form surfac
     assert.match(index, /settingsGroup\('calendar', 'Calendar & birthdays'/);
     assert.match(calendar, /\[data-delta-settings-slot="calendar"\]/);
     assert.doesNotMatch(source, /ensureCalendarDedicatedSection|npc_state_delta_calendar_birthdays_group/, 'the settings owner places the calendar group; no runtime relocation');
-    const dossier = readFileSync(new URL('../dossier-ui.js', import.meta.url), 'utf8');
+    const dossier = dossierUiSource();
     assert.match(dossier, /delta-continuity-birthday-card/);
     assert.match(source, /Named forms/);
     assert.match(source, /Apply appearance</);

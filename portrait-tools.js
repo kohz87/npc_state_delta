@@ -4,27 +4,20 @@ import {
     keepPromptDraft, makeSession, mountOverlay, npcById, promptDrafts,
     recordToolEvent, selectedNpcId, setBusy, stage1Refresh, validatePortraitFile,
 } from './dossier-tools-core.js';
-import { portraitSrc } from './src/portrait-file.js';
+import {
+    finishUploadedPortrait, generatedPreview, generatedPortraitFile, portraitSeedFromOverlay,
+    removePortrait, resetGeneratedSeed, showGeneratedSeed,
+} from './portrait-tools-actions.js';
+import {
+    hiddenUploadInput, npcForms, portraitGenerationAvailable, portraitTargetHtml, targetPortrait,
+} from './portrait-tools-targets.js';
 
 function toast(kind, message) { globalThis.toastr?.[kind]?.(message); }
-
-function hiddenUploadInput(npcId) {
-    return `<input type="file" class="npc-state-delta-inline-portrait-file delta-tools-portrait-file" data-npc-id="${escapeHtml(npcId)}" accept="image/*">`;
-}
 
 // A portrait target is the main portrait ('') or one named appearance form. Each target keeps its
 // own prompt draft so a form starts from that form's accepted appearance.
 function targetDraftKey(chatKey, npcId, form = '') {
     return draftKey(chatKey, form ? `${npcId}::form::${String(form).toLocaleLowerCase()}` : npcId);
-}
-
-function npcForms(npc) {
-    return (Array.isArray(npc?.appearanceForms) ? npc.appearanceForms : []).map(form => String(form?.name || '').trim()).filter(Boolean);
-}
-
-function targetPortrait(npc, form = '') {
-    if (!form) return portraitSrc(npc?.portrait);
-    return api()?.formPortraits?.(npc.id)?.[form]?.dataUrl || '';
 }
 
 function currentDraft(npc, form = '') {
@@ -110,21 +103,6 @@ function combinedPrompt(draft) {
     return blocks.join('\n\n');
 }
 
-function portraitGenerationAvailable() {
-    const runtime = api();
-    if (typeof runtime?.generatePortraitUrl !== 'function') return false;
-    try { return runtime?.portraitSettings?.()?.portraitGenerationEnabled !== false; }
-    catch { return true; }
-}
-
-function portraitTargetHtml(npc, form) {
-    const forms = npcForms(npc);
-    if (!forms.length) return '';
-    const options = [['', 'Main portrait'], ...forms.map(name => [name, `${name} form`])]
-        .map(([value, label]) => `<option value="${escapeHtml(value)}"${value === form ? ' selected' : ''}>${escapeHtml(label)}</option>`).join('');
-    return `<label class="delta-tools-portrait-target">Portrait for<select data-portrait-target>${options}</select></label>`;
-}
-
 function portraitDialogHtml(npc, draft, form = '') {
     const portrait = targetPortrait(npc, form);
     const targetLabel = form ? `${form} form portrait` : 'portrait';
@@ -177,33 +155,6 @@ function portraitDialogHtml(npc, draft, form = '') {
     </section>`;
 }
 
-async function finishUploadedPortrait(session, file) {
-    try {
-        const applied = await api()?.setPortrait?.(session.npcId, file, { chatKey: session.chatKey, isCurrent: () => currentSessionIs(session), form: session.form || '' });
-        if (!applied) throw new Error('The portrait target changed; stale image result was rejected.');
-        const live = npcById(session.npcId);
-        if (!currentSessionIs(session)) throw new Error('The portrait workflow is no longer current; late completion was rejected from this workflow.');
-        const saved = await flushDurably(session.chatKey, 'device portrait');
-        if (!currentSessionIs(session)) return;
-        stage1Refresh();
-        if (saved.persisted) toast('success', `NPC State Delta: ${live.name} portrait updated and saved.`);
-        else toast('warning', `NPC State Delta: portrait applied locally, but durable save failed. ${saved.error?.message || saved.error}`);
-        closeOverlay({ reason: 'portrait-applied', session });
-    } catch (error) {
-        recordToolEvent('portrait-completion', {
-            chatKey: session.chatKey,
-            npcId: session.npcId,
-            action: 'device portrait',
-            outcome: 'rejected-or-failed',
-            stale: /stale|changed|no longer|current/i.test(String(error?.message || error)),
-            detail: error?.message || error,
-        });
-        if (!currentSessionIs(session)) return;
-        setBusy(session, false, error?.message || String(error));
-        toast('error', `NPC State Delta portrait: ${error?.message || error}`);
-    }
-}
-
 function generatePromptsFromDossier(session, overlay) {
     if (!currentSessionIs(session)) return;
     const prompts = api()?.portraitPrompts?.(session.npcId, { form: session.form || '' });
@@ -220,50 +171,6 @@ function generatePromptsFromDossier(session, overlay) {
     toast('info', 'NPC State Delta: portrait prompts generated from the current accepted dossier.');
 }
 
-function generatedPreview(session, overlay, url) {
-    if (!currentSessionIs(session)) return false;
-    const value = String(url || '').trim();
-    if (!value) return false;
-    session.generatedPortraitUrl = value;
-    const box = overlay?.querySelector?.('[data-generated-preview]');
-    const image = overlay?.querySelector?.('[data-generated-image]');
-    const placeholder = overlay?.querySelector?.('[data-generated-placeholder]');
-    const use = overlay?.querySelector?.('[data-use-generated-portrait]');
-    if (box) box.hidden = false;
-    if (image) {
-        image.src = value;
-        image.hidden = false;
-    }
-    if (placeholder) placeholder.hidden = true;
-    if (use) use.disabled = false;
-    return true;
-}
-
-async function generatedPortraitFile(url, npcId = 'npc') {
-    const raw = String(url || '').trim();
-    if (!raw) throw new Error('Generated image URL is empty.');
-    const absolute = new URL(raw, globalThis.location?.href || 'http://localhost/').href;
-    const response = await fetch(absolute, { credentials: 'same-origin' });
-    if (!response.ok) throw new Error(`Could not load generated image (${response.status}).`);
-    const blob = await response.blob();
-    if (!blob.type?.startsWith('image/') || blob.size > 16 * 1024 * 1024) throw new Error('Generated result must be an image no larger than 16 MB.');
-    const validation = validatePortraitFile({ type: blob.type, size: blob.size });
-    if (!validation.ok) throw new Error(validation.reason);
-    const extension = (blob.type.split('/')[1] || 'png').replace(/[^a-z0-9]/gi, '') || 'png';
-    const safeId = String(npcId || 'npc').replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '') || 'npc';
-    return new File([blob], `${safeId}-generated.${extension}`, { type: blob.type });
-}
-
-function portraitSeedFromOverlay(overlay) {
-    const raw = String(overlay?.querySelector?.('#npc_state_delta_tools_seed')?.value ?? '').trim();
-    if (!raw) return null;
-    const seed = Number(raw);
-    if (!Number.isSafeInteger(seed) || seed < 0) {
-        throw new Error('Portrait seed must be a whole number from 0 to 9007199254740991, or blank to generate a fresh seed for each preview.');
-    }
-    return seed;
-}
-
 function randomPortraitSeed() {
     const cryptoApi = globalThis.crypto;
     if (typeof cryptoApi?.getRandomValues === 'function') {
@@ -272,24 +179,6 @@ function randomPortraitSeed() {
         return ((words[0] & 0x1fffff) * 0x100000000) + words[1];
     }
     return Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
-}
-
-function resetGeneratedSeed(session, overlay) {
-    session.generatedPortraitSeed = null;
-    const panel = overlay?.querySelector?.('[data-generation-seed]');
-    const value = overlay?.querySelector?.('[data-generation-seed-value]');
-    if (panel) panel.hidden = true;
-    if (value) value.textContent = '';
-}
-
-function showGeneratedSeed(session, overlay, seed) {
-    if (!currentSessionIs(session) || !Number.isSafeInteger(seed) || seed < 0) return false;
-    session.generatedPortraitSeed = seed;
-    const panel = overlay?.querySelector?.('[data-generation-seed]');
-    const value = overlay?.querySelector?.('[data-generation-seed-value]');
-    if (value) value.textContent = String(seed);
-    if (panel) panel.hidden = false;
-    return true;
 }
 
 async function saveGeneratedPortraitSeed(session, overlay) {
@@ -550,25 +439,4 @@ export function openPortraitTools(npcId = selectedNpcId(), { form = '' } = {}) {
     const overlay = mountOverlay(portraitDialogHtml(npc, currentDraft(npc, target), target), session);
     wirePortraitDialog(session, overlay);
     return overlay;
-}
-
-async function removePortrait(session) {
-    if (!currentSessionIs(session) || session.busy) return;
-    const npc = npcById(session.npcId);
-    if (!npc || !targetPortrait(npc, session.form)) return;
-    setBusy(session, true, 'Removing portrait without changing the dossier...');
-    try {
-        if (!await api()?.removePortrait?.(session.npcId, { chatKey: session.chatKey, form: session.form || '' })) throw new Error('The portrait target is no longer current.');
-        const saved = await flushDurably(session.chatKey, 'portrait removal');
-        if (!currentSessionIs(session)) return;
-        stage1Refresh();
-        toast(saved.persisted ? 'success' : 'warning', saved.persisted
-            ? `NPC State Delta: portrait removed from ${npc.name} and saved.`
-            : `NPC State Delta: portrait removed locally, but durable save failed. ${saved.error?.message || saved.error}`);
-        closeOverlay({ reason: 'portrait-removed', session });
-    } catch (error) {
-        if (!currentSessionIs(session)) return;
-        setBusy(session, false, error?.message || String(error));
-        toast('error', `NPC State Delta portrait removal: ${error?.message || error}`);
-    }
 }

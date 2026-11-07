@@ -9,54 +9,8 @@ const VIEWPORT_MARGIN_PX = 8;
 const START_RETRY_MS = 100;
 const START_RETRY_LIMIT = 50;
 
-function finite(value, fallback = 0) {
-    const number = Number(value);
-    return Number.isFinite(number) ? number : fallback;
-}
-
-export function clampLauncherPosition(position = {}, viewport = {}, size = {}, margin = VIEWPORT_MARGIN_PX) {
-    const safeMargin = Math.max(0, finite(margin, VIEWPORT_MARGIN_PX));
-    const width = Math.max(0, finite(viewport.width));
-    const height = Math.max(0, finite(viewport.height));
-    const itemWidth = Math.max(0, finite(size.width));
-    const itemHeight = Math.max(0, finite(size.height));
-    const maxLeft = Math.max(safeMargin, width - itemWidth - safeMargin);
-    const maxTop = Math.max(safeMargin, height - itemHeight - safeMargin);
-    return {
-        left: Math.min(maxLeft, Math.max(safeMargin, finite(position.left, maxLeft))),
-        top: Math.min(maxTop, Math.max(safeMargin, finite(position.top, maxTop))),
-    };
-}
-
-export function launcherPositionRecord(position = {}) {
-    return {
-        left: Math.round(finite(position.left)),
-        top: Math.round(finite(position.top)),
-    };
-}
-
-function readStoredPosition(storage = globalThis.localStorage) {
-    try {
-        const parsed = JSON.parse(storage?.getItem?.(STORAGE_KEY) || 'null');
-        if (!parsed || !Number.isFinite(Number(parsed.left)) || !Number.isFinite(Number(parsed.top))) return null;
-        return launcherPositionRecord(parsed);
-    } catch {
-        return null;
-    }
-}
-
-function saveStoredPosition(position, storage = globalThis.localStorage) {
-    try { storage?.setItem?.(STORAGE_KEY, JSON.stringify(launcherPositionRecord(position))); }
-    catch { /* UI position persistence is best-effort only. */ }
-}
-
-function viewportSize() {
-    const visual = globalThis.visualViewport;
-    return {
-        width: Math.max(0, finite(visual?.width, globalThis.innerWidth || document.documentElement?.clientWidth || 0)),
-        height: Math.max(0, finite(visual?.height, globalThis.innerHeight || document.documentElement?.clientHeight || 0)),
-    };
-}
+import { clampLauncherPosition, finite, launcherPositionRecord, readStoredPosition, saveStoredPosition, viewportSize } from './launcher-ui-position.js';
+export { clampLauncherPosition, launcherPositionRecord };
 
 class DeltaLauncherRefinement {
     constructor(root) {
@@ -378,7 +332,7 @@ html[data-npc-state-delta-story-block-v2="1"]:not([data-npc-state-delta-launcher
     }
 
     restoreStoredPosition() {
-        const stored = readStoredPosition();
+        const stored = readStoredPosition(globalThis.localStorage, STORAGE_KEY);
         if (!stored || !this.launcher?.isConnected) return;
         this.applyPosition(stored);
     }
@@ -397,7 +351,7 @@ html[data-npc-state-delta-story-block-v2="1"]:not([data-npc-state-delta-launcher
         if (!this.launcher?.isConnected || this.launcher.dataset.positioned !== 'true') return;
         const rect = this.launcher.getBoundingClientRect();
         const clamped = this.applyPosition({ left: rect.left, top: rect.top });
-        if (clamped) saveStoredPosition(clamped);
+        if (clamped) saveStoredPosition(clamped, globalThis.localStorage, STORAGE_KEY);
     }
 
     onPointerDown(event) {
@@ -433,7 +387,7 @@ html[data-npc-state-delta-story-block-v2="1"]:not([data-npc-state-delta-launcher
         event.preventDefault?.();
         const rect = this.launcher.getBoundingClientRect();
         const clamped = this.applyPosition({ left: rect.left, top: rect.top });
-        if (clamped) saveStoredPosition(clamped);
+        if (clamped) saveStoredPosition(clamped, globalThis.localStorage, STORAGE_KEY);
         this.suppressClickUntil = Date.now() + 450;
     }
 
