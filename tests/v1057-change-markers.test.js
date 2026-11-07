@@ -5,6 +5,7 @@ import { appearanceFingerprint, createNpcRecord, mergeScanResult, normalizeNpcRe
 import { mergeImportedDossierState } from '../bundle.js';
 import { dossierDetailProjection } from '../dossier-ui.js';
 import { runtimeSource } from './helpers/runtime-source.js';
+import { dossierUiSource } from './helpers/dossier-ui-source.js';
 
 const base = () => normalizeNpcRecord({ ...createNpcRecord('Elia'), mood: 'calm', location: 'guesthouse', present: true });
 
@@ -53,7 +54,7 @@ test('portrait attachment records the appearance it was made for and the dossier
     const index = runtimeSource();
     assert.match(index, /portrait\.appearanceFingerprint = fingerprint/);
     assert.match(index, /portrait\.appearanceForm = /);
-    const ui = fs.readFileSync(new URL('../dossier-ui.js', import.meta.url), 'utf8');
+    const ui = dossierUiSource();
     assert.match(ui, /changedMark\(selected, 'mood'\)/);
     assert.match(ui, /changeSummaryHtml\(selected, this\.projection\)/);
     assert.match(ui, /Appearance changed since portrait/);

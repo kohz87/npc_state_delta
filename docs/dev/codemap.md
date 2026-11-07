@@ -48,3 +48,14 @@ Generated 2026-11-07.
 - `branch-delete-recovery.js`: Deleted-block NPC reversion, social-graph undo and cleanup split from `branch.js`.
 - `branch-reconcile.js`: `reconcileBranchState` and its exact journal/checkpoint recovery split from `branch.js`.
 - `branch-ancestry.js`: Cross-chat `bestAncestorState` and explicit-parent matching split from `branch.js`.
+- `dossier-ui-catalog.js`: Index filtering, selection, key/cast projections and dossier-state shaping split from `dossier-ui.js`.
+- `dossier-ui-constants.js`: Dossier root, settings, style and observer constants shared by the split UI modules.
+- `dossier-ui-controller.js`: Dossier controller actions, refresh orchestration, editor and settings bridges split from `dossier-ui.js`.
+- `dossier-ui-html.js`: Escaped dossier markup, cards, appearance forms, portrait references and section helpers split from `dossier-ui.js`.
+- `dossier-ui-meters.js`: Hosted meter bars, rank, milestones and Secrets-section projections and markup split from `dossier-ui.js`.
+- `dossier-ui-model.js`: Dossier record lookups, change stamps and index/detail projections split from `dossier-ui.js`.
+- `dossier-ui-mount.js`: Singleton dossier UI mounting and open-dossier request forwarding split from `dossier-ui.js`.
+- `dossier-ui-panel.js`: Dossier panel lifecycle, shell, events, observers and portrait lightbox split from `dossier-ui.js`.
+- `dossier-ui-relationship.js`: Relationship meter steps, latest change and history markup split from `dossier-ui.js`.
+- `dossier-ui-render.js`: Cast rail, filters and selected-dossier rendering split from `dossier-ui.js`.
+- `dossier-ui-styles.js`: The dossier panel's scoped stylesheet split from `dossier-ui.js`.

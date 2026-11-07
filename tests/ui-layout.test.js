@@ -5,13 +5,14 @@ import { snapshotNpc } from '../src/fields/registry.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runtimeSource } from './helpers/runtime-source.js';
+import { dossierUiSource } from './helpers/dossier-ui-source.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
 const index = runtimeSource();
 const continuityUi = fs.readFileSync(path.join(root, 'continuity-ui.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
-const dossierUi = fs.readFileSync(path.join(root, 'dossier-ui.js'), 'utf8');
+const dossierUi = dossierUiSource();
 
 test('present NPC pane uses portrait-first cards that open the launcher dossier', () => {
     assert.match(index, /function inlineRosterHtml/);

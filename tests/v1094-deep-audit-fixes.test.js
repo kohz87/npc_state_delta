@@ -22,6 +22,7 @@ import { mergeImportedDossierState } from '../bundle.js';
 import { normalizeSocialGraph } from '../social.js';
 import { appearanceFingerprint } from '../appearance.js';
 import { quarantineUnreadableNpcStateDataFile } from '../storage.js';
+import { dossierUiSource } from './helpers/dossier-ui-source.js';
 
 const CALENDAR = { era: 'CR', months: [{ name: 'Redleaf', days: 30 }, { name: 'Sunwane', days: 31 }] };
 
@@ -290,7 +291,7 @@ test('RB93-15: apparent age owns portrait generation and the stale-portrait mark
     assert.notEqual(appearanceFingerprint(npc), appearanceFingerprint(older), 'a changed apparent age is a changed presentation');
     assert.match(appearanceFingerprint(npc), /^a2:/);
     assert.equal(appearanceFingerprint(npc, { version: 1 }), appearanceFingerprint(older, { version: 1 }), 'portraits recorded before keep their identity');
-    const ui = fs.readFileSync(new URL('../dossier-ui.js', import.meta.url), 'utf8');
+    const ui = dossierUiSource();
     assert.match(ui, /appearanceFingerprint\(npc, \{ version: recorded\.startsWith\('a1:'\) \? 1 : 2 \}\)/);
 });
 

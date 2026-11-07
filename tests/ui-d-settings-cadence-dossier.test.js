@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { AUTO_SCAN_EVERY_WITHOUT_EVERY_REPLY, autoScanDue } from '../scan-context.js';
 import { FEATURES, FEATURE_SCAN_EVERY_REPLY, FEATURE_SOCIAL, FEATURE_STAGES, FEATURE_DRIFT, FEATURE_PRESETS } from '../src/npc-meters.js';
 import { runtimeSource } from './helpers/runtime-source.js';
+import { dossierUiSource } from './helpers/dossier-ui-source.js';
 
 // UI cleanup (1 Nov): "Scan after every reply" (npc-state-delta.scan-every-reply) and its presets, the settings folds
 // (Meter presets, Expert) and the phone-width dossier window.
@@ -101,6 +102,6 @@ test('phone: the dossier window is the whole screen even inside Story Suite\'s z
     const phone = launcher.slice(launcher.indexOf('@media (max-width: 1100px)'));
     assert.match(phone, /#\$\{ROOT_ID\} \.delta-panel \{[^}]*width: calc\(100vw \/ var\(--ss-zoomed, 1\)\) !important;[^}]*height: calc\(100dvh \/ var\(--ss-zoomed, 1\)\) !important;/s);
     assert.doesNotMatch(phone, /width: 100vw !important/);
-    const ui = read('dossier-ui.js');
+    const ui = dossierUiSource();
     assert.match(ui, /\.delta-panel \{ width:calc\(100vw \/ var\(--ss-zoomed, 1\)\); height:calc\(100dvh \/ var\(--ss-zoomed, 1\)\);/);
 });
