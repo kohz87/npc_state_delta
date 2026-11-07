@@ -192,13 +192,23 @@ export function createReconcilePart(rt, deps) {
         }
     }
 
-    async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true, reason = 'branch', chatKey = null, operation = 'auto' } = {}) {
+    // An automatic reconcile (not a delete/edit/swipe event, not an explicit call) that meets an EMPTY host chat while a lineage is stored means the
+    // host has not loaded the chat yet (page reload), not that every message was deleted: nothing is rolled back; it is retried a bounded number of times.
+    const EMPTY_CHAT_RETRY_MS = 400;
+    const EMPTY_CHAT_RETRY_LIMIT = 25;
+    const emptyChatRetries = new Map();
+    function chatNotLoadedYet(key, before, ctx, { operation, explicit, explicitDivergence }) {
+        if (explicit === true || String(operation || 'auto') !== 'auto' || Number.isInteger(explicitDivergence)) return false;
+        return (ctx.chat || []).length === 0 && Array.isArray(before.lineage) && before.lineage.length > 0;
+    }
+
+    async function reconcileCurrentBranch({ explicitDivergence = null, rescan = true, reason = 'branch', chatKey = null, operation = 'auto', explicit = false } = {}) {
         const key = chatKey || getChatKey();
         if (key === 'no-chat' || getChatKey() !== key) return null;
         // (timeline) A head that moved is followed by the host first (Delta installs the checkpoint of the selected head); this reads Delta's state after.
         if (!await messageGateSettled()) {
             // Not dropped: it runs, with every request made meanwhile merged, when the barrier is down.
-            return deferUntilSettled(key, { label: 'reconcile', what: 'a rollback after a deleted or swiped message', options: { explicitDivergence, rescan, reason, chatKey, operation }, merge: mergeBranchOptions, retry: options => reconcileCurrentBranch(options) }, null, null);
+            return deferUntilSettled(key, { label: 'reconcile', what: 'a rollback after a deleted or swiped message', options: { explicitDivergence, rescan, reason, chatKey, operation, explicit }, merge: mergeBranchOptions, retry: options => reconcileCurrentBranch(options) }, null, null);
         }
         if (getChatKey() !== key) return null;
         const ctx = getContext();
@@ -209,6 +219,18 @@ export function createReconcilePart(rt, deps) {
         const beforeNpcCount = Array.isArray(before.npcs) ? before.npcs.length : 0;
         const previousLength = Array.isArray(before.lineage) ? before.lineage.length : 0;
         const lineageBefore = chatLineage(ctx.chat || []);
+        if (chatNotLoadedYet(key, before, ctx, { operation, explicit, explicitDivergence })) {
+            const tries = (emptyChatRetries.get(key) || 0) + 1;
+            emptyChatRetries.set(key, tries);
+            recordBranchReconciliationEvent({
+                key, reason, operation,
+                result: { recoveryOperation: operation, lineageRelation: 'tail-truncation', recoveryAction: 'deferred-chat-not-loaded', invalidated: false, divergence: 0 },
+                beforeNpcCount, previousLength, currentLength: 0,
+            });
+            if (tries <= EMPTY_CHAT_RETRY_LIMIT) setTimeout(() => { if (getChatKey() === key) queueBranchReconcile({ chatKey: key, rescan, reason }, 0); }, EMPTY_CHAT_RETRY_MS);
+            return null;
+        }
+        emptyChatRetries.delete(key);
         // The dossier can be newer than this browser's chat: another session wrote it after messages
         // this chat has not loaded yet. Until the host reloads the chat, a local chat that is only a
         // shorter prefix of that dossier is stale, not a deletion, so it must not roll the dossier back.
