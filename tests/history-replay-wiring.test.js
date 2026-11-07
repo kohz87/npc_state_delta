@@ -357,3 +357,50 @@ test('Story Block as a replay sees it: reads are asked as of the reply, writes g
         h.equal(writes.map(entry => entry[0]), ['adjust', 'openByEvent'], 'the writes are recorded in the sink');
     });
 });
+
+test('live readers and writers during a catch-up that awaits the model: they see the installed state; a manual edit is kept, the catch-up retries on top of it', () => {
+    runScenario('live-during-wait', async h => {
+        await h.turn('We meet.', 'Yunyun speaks, mark-1.');
+        const chatKey = h.runtime.uiStatus().chatKey;
+        const npcId = h.runtime.getState().npcs[0].id;
+        h.addReplies(4);
+        const installed = JSON.stringify(h.runtime.getDossierState().npcs);
+        let release;
+        let held = 0;
+        h.mockState.holdWhen = async () => { if (!held) { held = 1; await new Promise(resolve => { release = resolve; }); } };
+        const catchUp = h.controller();
+        catchUp.restored();
+        for (let i = 0; i < 100 && !release; i += 1) await h.sleep(10);
+        h.check(release, 'the catch-up is waiting for the model');
+        // A live read sees the installed state, never the copy (and token counts / injection read the same state).
+        h.equal(JSON.stringify(h.runtime.getDossierState().npcs), installed, 'the dossier panel reads the installed state');
+        // A manual edit is applied to the live state and saved.
+        h.check(await h.runtime.setPortraitSeed(npcId, 4242, { chatKey }) === true, 'the manual edit was accepted');
+        await h.runtime.flush();
+        h.equal(h.runtime.getState().npcs.find(n => n.id === npcId).portraitSeed, 4242, 'the edit is in the live state');
+        release();
+        await catchUp.idle();
+        // The first try found the live state moved (stale); the retry ran on top of the edit and installed.
+        h.equal(catchUp.status().outcome, 'done', 'the retry finished');
+        const after = h.runtime.getState();
+        h.check(after.npcs.some(n => n.id === npcId), 'the edited dossier is still there');
+        h.equal(after.npcs.find(n => n.id === npcId).portraitSeed, 4242, 'the manual edit was not lost');
+        h.check(h.mockState.fakeCalls.length > 4, 'the catch-up ran again on top of the edit');
+        h.check(after.catchUp === undefined, 'no field left');
+        h.check(catchUp.canGenerate() === true, 'sending is back');
+    });
+});
+
+test('a publication that fails after a successful install: the catch-up is done, installed, and the publication is retried by the normal path', () => {
+    runScenario('publish-fails', async h => {
+        h.addReplies(3);
+        let retried = 0;
+        const catchUp = h.controller({ publish: async () => { throw new Error('the host was busy'); }, retryPublish: () => { retried += 1; } });
+        catchUp.restored();
+        await catchUp.idle();
+        h.equal(catchUp.status().outcome, 'done', 'done, not failed');
+        h.equal(retried, 1, 'the normal publication path was asked to retry');
+        h.check(h.runtime.getState().catchUp === undefined, 'the field is gone (installed)');
+        h.check(catchUp.canGenerate() === true, 'sending is back');
+    });
+});

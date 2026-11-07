@@ -9,6 +9,7 @@ import { stampNpcChanges } from './src/relationship-pass.js';
 import { normalizeName } from './core.js';
 import { chatLineage, firstLineageDivergence, lineageCheckpointKey, clearUserDismissedGroupsFor } from './branch.js';
 import { getSettings } from './runtime-settings.js';
+import { setScannerWaitAround } from './scanner-routing.js';
 
 // ---- history replay scope ----
 // While a history replay reads one missed reply, `replay` is the scope of that reply (one at a time: the scan operation of the replay holds the chat
@@ -26,6 +27,15 @@ export async function inReplay(scope, fn) {
     replay = scope;
     try { return await fn(); } finally { replay = null; }
 }
+// While the replay's scan waits for the model (minutes), nothing of the replay runs: the scope steps aside, so the dossier panel, token counts,
+// injection and the editor read and write the installed state (an edit there moves the head's fingerprint, the catch-up finds itself stale and
+// retries on top of it). The scope is back before the replay's next line runs.
+export async function awayFromReplay(promise) {
+    const mine = replay;
+    replay = null;
+    try { return await promise; } finally { replay = mine; }
+}
+setScannerWaitAround(awayFromReplay);
 // Story Block as a replay sees it: reads answer from the state after reply `index` (sdk.query { asOf }, adapter.at), writes are not sent.
 const HOSTED_WRITES = new Set(['adjust', 'setMeters', 'refresh', 'applyEditor', 'openByEvent', 'tick', 'pinKeyPerson']);
 export function scopedAdapter(adapter, index, sink) {

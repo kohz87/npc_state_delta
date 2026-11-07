@@ -299,14 +299,16 @@ export function createHistoryReplay(deps = {}) {
             return failure('INSTALL_FAILED', error);
         }
 
+        // The dossiers are installed: a publication that fails is retried by the normal publication path, it does not undo or fail the catch-up.
+        let published = true;
         try { await deps.publishOnce(); }
-        catch (error) { return failure('PUBLISH_FAILED', error, true, false); }
+        catch (error) { published = false; try { deps.retryPublish?.(error); } catch { /* the next durable change publishes it */ } }
 
         try { await deps.persistCatchUp(null); }
-        catch (error) { return failure('PERSIST_FAILED', error, true, true); }
+        catch (error) { return failure('PERSIST_FAILED', error, true, published); }
 
         lastCatchUp = null;
-        return finish('done', { ok: true, code: 'DONE', skipped: false, installed: true, published: true });
+        return finish('done', { ok: true, code: 'DONE', skipped: false, installed: true, published });
     }
 
     async function skip() {
@@ -335,10 +337,8 @@ export function createHistoryReplay(deps = {}) {
 // here. The hold is set before any of them returns: canGenerate answers "not yet" while a catch-up is pending or running. Failure, a switch of
 // chat or a change of head ends the hold and leaves the dossiers as they were; the saved field makes the next chat open try again (3 tries).
 export function createCatchUp(port) {
-    let task = null;
-    let queued = null;
-    let engine = null;
-    let held = false;
+    let task = null, queued = null, engine = null, held = false;
+    let staleRetries = 0;    // a live edit during the wait makes the result stale: one more try on top of it
     let skipAsked = false;   // Skip pressed for the job in hand, also before the engine exists (while Story Block's barrier is still up)
     let info = { active: false, done: 0, total: 0, older: 0, from: null, reason: '', outcome: null, message: '' };
     const live = () => port.live();
@@ -367,15 +367,17 @@ export function createCatchUp(port) {
         const base = job.empty ? L.empty() : L.copy();
         if (job.saved) base.catchUp = job.saved; else delete base.catchUp;
         const head = L.head();
+        const sameHead = now => now.key === key && now.length === head.length && now.last === head.last && now.swipe === head.swipe;
         const first = () => (job.saved && job.saved.to < ids.length ? job.saved.from : Math.max(0, ids.length - cap));
         engine = createHistoryReplay({
             cap,
             copyState: from => { const copy = structuredClone(from); if (first() > 0) L.markRead(copy, ids[first() - 1]); return copy; },
             viewFor: index => ids[index],
             runReply: (copy, id, sink) => L.reply(copy, id, sink, key),
-            stillValid: () => { const now = L.head(); return now.key === key && now.length === head.length && now.last === head.last && now.swipe === head.swipe && now.state === head.state; },
+            stillValid: () => { const now = L.head(); return sameHead(now) && now.state === head.state; },
             install: state => L.install(restoredState(state, L.state())),
             publishOnce: () => port.publish(),
+        retryPublish: error => port.retryPublish?.(error),
             persistCatchUp: field => L.writeCatchUp(field ? { ...field, ids, cap, since: job.from } : null),
             progress: ({ done, total }) => { info = { ...info, done, total }; changed(); },
         });
@@ -383,6 +385,8 @@ export function createCatchUp(port) {
         if (result.skipped && ids.length) { await L.markReadLive(ids[ids.length - 1]); }
         const outcome = result.code === 'DONE' || result.code === 'EMPTY' ? 'done' : result.skipped ? 'skipped' : result.code === 'STALE' ? 'stale' : 'failed';
         info = { ...info, done: result.done ?? info.done, outcome, message: result.error ?? '' };
+        // Not finished, and only the dossiers moved meanwhile (a live edit during the wait): the caller tries once more on top of it.
+        return outcome !== 'done' && outcome !== 'skipped' && sameHead(L.head()) && L.head().state !== head.state;
     }
 
     async function loop() {
@@ -396,7 +400,7 @@ export function createCatchUp(port) {
                     // Story Block asks Story Block's queries only once its barrier is down; a barrier that stays up ends this try (nothing is read as null).
                     if (typeof port.settled === 'function' && await port.settled() === false) { info = { ...info, outcome: 'stale', message: 'The host was still busy.' }; continue; }
                     if (skipAsked) { await live().markReadLive(job.ids[job.ids.length - 1]); info = { ...info, outcome: 'skipped' }; continue; }
-                    await runOnce(job);
+                    if (await runOnce(job) && staleRetries++ < 1) queued = plan('resume');
                 } catch (error) { info = { ...info, outcome: 'failed', message: error?.message ?? String(error) }; }
             }
         } finally {
@@ -411,7 +415,7 @@ export function createCatchUp(port) {
         let job = null;
         try { job = plan(kind, options); } catch (error) { port.warn?.(`The catch-up could not be planned: ${error?.message ?? error}`); }
         if (!job || !job.ids.length) return { ok: true, started: false };
-        held = true;
+        held = true; staleRetries = 0;
         info = { ...info, active: true, total: Math.min(job.ids.length, job.cap), done: 0, from: job.from, reason: job.reason };
         queued = job;
         if (!task) task = loop();

@@ -295,6 +295,7 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     const catchUp = createCatchUp({
         chatKey: keyNow, enabled: () => port.enabled?.() !== false && typeof port.live === 'function', live: () => port.live(), changed: () => port.changed?.(), warn, settled: () => port.settled?.(),
         publish: async () => { announced += 1; if (handle && started()) { schedulePublish(0); await flush(); } },
+        retryPublish: () => schedulePublish(retryMs),
     });
     const api = {
         module,
