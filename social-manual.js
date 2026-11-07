@@ -213,6 +213,9 @@ function repairMirroredKeyRelationships(npcs, graph) {
     resolveConflictingKinship(npcs, said);
 }
 
+// An entry naming two different blood ties to one person ("Greta — niece / sibling") is settled by
+// what that person's own dossier says ("Talia — niece" makes Greta the aunt). Without such a
+// statement the entry is left as it is rather than guessed from word order.
 function resolveConflictingKinship(npcs, said) {
     const locked = npc => Array.isArray(npc?.manualProfileFields) && npc.manualProfileFields.includes('keyRelationships');
     const byId = new Map(npcs.filter(npc => npc?.id).map(npc => [npc.id, npc]));
