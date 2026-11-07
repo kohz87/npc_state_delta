@@ -183,7 +183,7 @@ export function createReplayBlocks(s, deps) {
         }
         const spans = out.parts.map(part => part.span);
         const ops = out.parts.flatMap(part => part.ops);
-        return { state, fields: { ops, receipts, spans, source: advanced(record.source, spans), planned: out.planned, removed: out.removed }, running: out.running };
+        return { state, fields: { ops, receipts, spans, source: advanced(record.source, spans), planned: out.planned, removed: out.removed }, running: out.running, placed };
     }
 
     // Every rerun sees the position the accepted blocks of this plan leave, rather than the old record's offset.

@@ -6,7 +6,7 @@ import { compatible, expressionType, fieldType } from '../expressions.js';
 import { BLOCK_NODE_WIDGETS, FIELDS_WIDGET, fieldsNodeProblems } from '../fields-widget.js';
 import { dmObject, dmOwn } from '../schema.js';
 import { validateLayout } from '../../layout/validate.js';
-import { checkScreens } from '../../packs/validate.js';
+import { checkScreens } from '../../packs/validate/theme.js';
 import { validateScreen } from '../../view/screens.js';
 import { parseHtml } from '../../view/template/html.js';
 

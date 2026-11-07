@@ -236,12 +236,13 @@ export function createRebuildBannerWidget({
                 return root;
             }
 
-            /** The one-line note of a catch-up that ended (a rebuild's done note is the section B one); null for a skip, which tells nothing. */
+            /** The one-line note of a catch-up that ended (a rebuild's done note is the section B one); a skip says it was skipped (mockup v7). */
             function endedNote(info) {
                 const key = `${info.reason}|${info.outcome}|${info.total}|${info.from}`;
-                if (info.outcome === 'skipped' || key === seenNote) return null;
+                if (key === seenNote) return null;
                 let text = '';
                 if (info.outcome === 'done') text = info.reason === 'rebuild' ? (lastRead === REBUILD_READ_ALL ? REBUILD_TEXT.doneAll : REBUILD_TEXT.doneLast) : nice(REBUILD_TEXT.caughtUp, { count: info.total });
+                else if (info.outcome === 'skipped') text = REBUILD_TEXT.skipped;
                 else if (info.outcome === 'stale') text = REBUILD_TEXT.stopped;
                 else text = REBUILD_TEXT.stoppedOther;
                 const root = el(doc, 'div', 'note rebuild-note');

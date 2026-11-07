@@ -307,6 +307,13 @@ export function createEvents(s, deps) {
      */
     function seed() {
         if (store.head()) return true;
+        // The libraries a chat needs come first, as for CHAT_CHANGED; only when one is on its way is a promise returned (→ Promise<boolean>), else the answer is at once.
+        let waiting;
+        if (typeof prepare === 'function') { try { waiting = prepare(); } catch { waiting = undefined; } }
+        return waiting ? within(waiting, RPG_LOAD_WAIT_MS).then(seedNow, seedNow) : seedNow();
+    }
+    function seedNow() {
+        if (store.head()) return true;
         let open = true;
         try { open = typeof ctx?.getCurrentChatId !== 'function' || !!ctx.getCurrentChatId(); } catch { open = true; }
         if (!open || !hasCarrier()) return false;
@@ -337,6 +344,7 @@ export function createEvents(s, deps) {
      * 'edit'; anything else is none) rides on the head event for the public API's `story:rebuilt`.
      */
     async function onTimelineChanged(reason) {
+        if (typeof prepare === 'function') { try { await within(prepare({ scan: false }), RPG_LOAD_WAIT_MS); } catch { /* the loader reports its own failure */ } }
         rebuild({ publish: false });
         resumeHeldBoard();
         restoreHeldBoard();

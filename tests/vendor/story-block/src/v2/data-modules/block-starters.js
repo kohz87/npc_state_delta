@@ -1,7 +1,7 @@
 // The starters at the top of New block: three built-in drafts, kept in code like the RPG templates. Picking one fills the editor's form (fields, layout,
 // card roles, tab name) and everything stays editable before Save. A starter is a draft, so the editor and buildBlock treat it like one the reader typed.
 import { partKey } from './block-builder.js';
-import { slugify } from '../packs/validate.js';
+import { slugify } from '../packs/validate/core.js';
 
 const text = (name, max, extra = {}) => ({ name, type: 'text', max, default: '', ...extra });
 const number = (name, min, max, extra = {}) => ({ name, type: 'number', min, max, default: 0, ...extra });

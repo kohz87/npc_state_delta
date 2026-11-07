@@ -13,7 +13,7 @@ const STOP_WORDS = Object.freeze({
     over: 'Ended: the fight was decided (old rule).',
 });
 const CONTINUES = 'Fight continues: you pick the next exchange.';
-const SETTINGS_HINT = 'The fight goes on next reply. To allow more per reply: Settings → RPG → Rolls → Most exchanges per reply.';
+const SETTINGS_HINT = 'The fight goes on next reply. To allow more per reply: Settings → RPG → Difficulty → Custom → Most exchanges per reply.';
 const integer = value => (Number.isSafeInteger(value) ? value : null);
 
 // The cap the roll used: the reader's resolved `cap`, else its rules, else the default for its flow.

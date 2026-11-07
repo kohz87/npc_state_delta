@@ -202,6 +202,7 @@ export const SCREEN_STRINGS = {
         keepReading: 'Keep reading',
         caughtUp: '✓ Dossiers caught up ({count} replies read). Sending is back on.',
         stopped: 'ⓘ The catch-up stopped (the chat changed). Your dossiers are as they were before it; it will try again when you open this chat.',
+        skipped: '✓ Catch-up skipped. The dossiers stay as they were restored.',
         stoppedOther: 'ⓘ The catch-up stopped. Your dossiers are as they were before it; it will try again when you open this chat.',
     },
     home: {

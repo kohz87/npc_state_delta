@@ -5,7 +5,6 @@ import { openSettingsWindow } from '../view/settings/window.js';
 import { CORE_FEATURE, GEAR_FEATURE, withHiddenFeatures } from '../features.js';
 import { buildReport, caughtSoFar, reportFileName } from '../diagnostics.js';
 import { createThemeBridge } from '../view/theme.js';
-import { openUiSample } from '../screens/ui-sample.js';
 
 export function createUiSettings({ runtime, doc, registry, store, sdk, settings, version, widgets, liveCtx, tabsControl, blockTemplates, blockWidgets, getRpg, getHudAsked, getCardLog, getOverlay, setOverlay }) {
     // The settings overlay. Its prompt size is what the next ordinary reply would be sent (turn.preview:
@@ -35,7 +34,9 @@ export function createUiSettings({ runtime, doc, registry, store, sdk, settings,
     const sanitizer = globalThis.SillyTavern?.libs?.DOMPurify?.sanitize?.bind(globalThis.SillyTavern.libs.DOMPurify) ?? null;
     const diagnostics = Object.freeze({
         // Settings → Diagnostics → Show the UI sample: every building block, light and dark (screens/ui-sample.js).
-        sample: () => {
+        // (the sample's code is fetched when it is first asked for: the returned promise settles once it is open)
+        sample: async () => {
+            const { openUiSample } = await import('../screens/ui-sample.js');
             getOverlay()?.close?.();
             return openUiSample({ doc, widgets, sanitize: sanitizer });
         },

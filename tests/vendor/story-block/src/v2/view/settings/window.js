@@ -191,6 +191,9 @@ export function openSettingsWindow({ registry, settings, doc = globalThis.docume
             const found = entry.body?.filter?.(searchText);
             entry.count = Number.isFinite(found) && shown(entry.section) ? found : 0;
             total += query ? entry.count : 0;
+            // A page whose code is still on its way (Diagnostics) counts nothing yet: the search runs again once it has landed.
+            const arriving = entry.body?.loading?.();
+            if (query && arriving) arriving.then(() => { if (open && searchText === text) applySearch(text); });
         }
         status.hidden = !query;
         status.textContent = query && total ? (total === 1 ? FORM_TEXT.shownOne : fill(FORM_TEXT.shown, { n: total })) : '';

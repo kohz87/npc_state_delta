@@ -68,8 +68,15 @@ export function createSdk({ store, bus, registry, settings, events = createEvent
         timeline?.settle();
         // A chat with a message but no state yet (Story Block has not heard of the chat, turn.seed): the state starts first.
         if (typeof seed === 'function' && !store.head?.()) {
-            try { seed(); } catch (error) { console.warn('[Story Suite] the chat\'s state could not be started', error); }
+            const warn = error => console.warn('[Story Suite] the chat\'s state could not be started', error);
+            try {
+                const started = seed();
+                if (started && typeof started.then === 'function') return started.catch(warn).then(() => afterSeed());   // the checker was on its way
+            } catch (error) { warn(error); }
         }
+        return afterSeed();
+    };
+    const afterSeed = () => {
         announceModules(registry, events);
         if (registry.restore?.().state === 'pending' || store.headIndex?.() < 0) return null;
         const head = store.head?.();

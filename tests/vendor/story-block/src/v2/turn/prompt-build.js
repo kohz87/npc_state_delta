@@ -22,7 +22,7 @@ export const KEPT_LINES_MAX = 4;
 export const KEPT_CHARS_MAX = 4000;
 
 export function createPromptBuild(s, deps) {
-    const { ctx, metadata, store, bus, registry, settings, events, timeline, onBlocked, notify, initial, prepare, hostSettings, viewReader, view, contextNow, hasCarrier, lastCarrier, isPrelude, markBusy, markIdle, setPrompts, clearPrompts, problem, trySave, claimQuiet, FOREGROUND, HOOK_TIMEOUT_MS, ASSIST_WAIT_MS, RPG_LOAD_WAIT_MS, OWN_PROMPT_PARTS, OWN_PROMPT_CHARS, STRIP_CACHE, HAS_BLOCK, HAS_LEGACY, hookTimeout, normalizeType } = deps;
+    const { ctx, metadata, store, bus, registry, settings, events, timeline, onBlocked, notify, initial, prepare, hostSettings, viewReader, view, contextNow, hasCarrier, lastCarrier, isPrelude, markBusy, markIdle, setPrompts, clearPrompts, problem, trySave, held, claimQuiet, FOREGROUND, HOOK_TIMEOUT_MS, ASSIST_WAIT_MS, RPG_LOAD_WAIT_MS, OWN_PROMPT_PARTS, OWN_PROMPT_CHARS, STRIP_CACHE, HAS_BLOCK, HAS_LEGACY, hookTimeout, normalizeType } = deps;
     let toldRestore = null;
     let recovering = null;
 
@@ -332,7 +332,12 @@ export function createPromptBuild(s, deps) {
             } else await trySave('before the reply');
             // A Regenerate removes the old reply before this runs, without an event for it.
             if (store.headIndex() !== lastCarrier()) store.rebuild();
-            if (hasCarrier()) store.ensureInitial(initial());
+            // Stored packs not yet checked (the checker is late or failed): no state is started from a pack-less read and no prompt goes out; it is said once and the reply stops.
+            if (hasCarrier()) {
+                const why = held();
+                if (why) { block({ moduleId: HOST_MODULE, reason: why }, abort); return; }
+                store.ensureInitial(initial());
+            }
             // A pending barrier may need settling after a head change. Healthy sends do not settle here.
             if (registry.restore?.().state === 'pending') {
                 timeline?.settle();

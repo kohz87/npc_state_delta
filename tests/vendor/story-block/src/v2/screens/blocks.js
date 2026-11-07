@@ -85,8 +85,8 @@ export function createBlockWidgets({ templates, directorOn = () => true, leanRpg
                 status.textContent = result?.ok ? S.templateSaved : result?.message ?? STRINGS.editable.failed;
             });
         }
-        button(doc, menu, S.exportPack, () => {
-            const result = exportBlockPack(definition);
+        button(doc, menu, S.exportPack, async () => {
+            const result = await exportBlockPack(definition);
             if (!result.ok) { status.textContent = result.errors?.[0]?.message ?? S.exportFailed; return; }
             try { saveTextFile(doc, result.text, result.filename, 'application/json;charset=utf-8'); }
             catch { status.textContent = S.exportFailed; }

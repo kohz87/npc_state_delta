@@ -57,7 +57,23 @@ export function createSession(s, deps) {
     }
 
     // The chat's state starts on its first carrier; a damaged record set up again goes to the Problems.
+    // While stored packs are not checked (the checker is late or failed to load) nothing is written: their start would be missing from the state.
+    // It is said once; when the checker lands the chat is read again as usual.
+    function held() {
+        const why = initial.hold?.();
+        if (!why) { s.heldStart = false; return ''; }
+        const message = why === 'failed'
+            ? 'The pack checker could not be loaded, so this chat\'s story state was not started. Reload the page to try again.'
+            : 'The pack checker is still loading, so this chat\'s story state is not started yet. It starts when the packs are checked.';
+        if (!s.heldStart) {
+            s.heldStart = true;
+            problem({ code: why === 'failed' ? 'FAILED' : 'LOADING', message });
+            Promise.resolve(initial.landed?.()).then(ok => { if (ok === true && s.heldStart && !initial.hold?.()) rebuild({ reason: 'packs' }); }, () => {});
+        }
+        return message;   // → '' when nothing is held, else the words (the interceptor stops the reply with them)
+    }
     function ensureInitial() {
+        if (held()) return;
         const notes = store.ensureInitial(initial());
         for (const note of Array.isArray(notes) ? notes : []) problem({ code: 'DAMAGED', message: note, ...(repairActions().length ? { actions: repairActions() } : {}) });
     }
@@ -126,5 +142,5 @@ export function createSession(s, deps) {
         }
     }
 
-    return { markBusy, markIdle, setPrompt, setPrompts, clearPrompts, problem, trySave, ensureInitial, repairActions, repair, startOver, rebuild, planAgain, reconcileNow };
+    return { markBusy, markIdle, setPrompt, setPrompts, clearPrompts, problem, trySave, ensureInitial, held, held, repairActions, repair, startOver, rebuild, planAgain, reconcileNow };
 }

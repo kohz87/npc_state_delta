@@ -1,6 +1,5 @@
 // Reader-owned templates contain definitions only; their values and reply history stay in the chat.
 import { byteLength } from '../packs/safety.js';
-import { validatePack } from '../packs/validate.js';
 import { validateDataModules } from './check.js';
 import { DM_LIMITS as L } from './schema.js';
 import { STRINGS } from '../strings.js';
@@ -48,11 +47,13 @@ export function createBlockTemplates({ read, save = () => {} }) {
 const needsEntries = raw => Boolean(raw.layout || raw.roles || raw.tones || raw.show?.into || Object.values(raw.state ?? {}).some(field => field?.type === 'entries'));
 export const ENTRIES_VERSION = '2.22.0';
 
-export function exportBlockPack(definition) {
+// (async: the pack checker is fetched the first time it is needed, not at startup)
+export async function exportBlockPack(definition) {
     const raw = rawDefinition(definition), id = raw.slug, newer = needsEntries(raw);
     const pack = { id, name: raw.name, version: '1.0.0', requires: { storyBlock: newer ? `^${ENTRIES_VERSION}` : '^2', capabilities: ['data-modules-v1'] }, content: { dataModules: [raw] } };
     if (raw.timers?.length || raw.scope === 'character') pack.requires.capabilities.push('story-director');
     // (the keys are checked here by the code that knows them; the host's own version number only moves when 2.22 is released)
+    const { validatePack } = await import('../packs/validate.js');
     const checked = validatePack(pack, newer ? { hostVersion: ENTRIES_VERSION } : {});
     if (!checked.ok) return { ok: false, errors: checked.errors };
     return { ok: true, pack, filename: `${id}.pack.json`, text: `${JSON.stringify(pack, null, 2)}\n` };
