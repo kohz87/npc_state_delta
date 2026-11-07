@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { mergeScanResult } from '../core.js';
 import { completeFormWithShared } from '../appearance.js';
+import { shippedModulePaths } from './helpers/shipped-modules.js';
 
 const BODY = 'Tall and slender, long silver hair, violet eyes';
 
@@ -23,7 +24,7 @@ test('1: only an outfit-only form receives the scan\'s Physical features', () =>
 });
 
 test('2/3: no unused imports or uncalled functions remain in shipped modules', () => {
-    const modules = JSON.parse(fs.readFileSync(new URL('../runtime-modules.json', import.meta.url), 'utf8')).modules.map(module => module.path);
+    const modules = shippedModulePaths();
     const sources = Object.fromEntries(modules.map(path => [path, fs.readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')]));
     const all = Object.values(sources).join('\n');
     // Exported only so the test suite can drive them.

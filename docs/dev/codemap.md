@@ -101,3 +101,16 @@ Generated 2026-11-07.
 - `appearance-update.js`: Form reconciliation, omitted-trait carry and appearance update application split from `appearance.js`.
 - `appearance-portrait.js`: Per-form portrait assets and resolved-appearance fingerprint split from `appearance.js`.
 - `appearance-draft.js`: Appearance editor draft and lock handling split from `appearance.js`.
+- `calendar/config.js`: Calendar month parsing/normalization, active calendar and external calendar source split from `calendar.js`.
+- `calendar/clock.js`: Story Director clock source/memo, story-minute dates and hosted/current date fallbacks split from `calendar.js`.
+- `calendar/date.js`: Date normalization, ordinals, absolute day numbers and legacy story-day migration split from `calendar.js`.
+- `calendar/derived.js`: Deterministic birthdays, World State date extraction, age derivation and prompt date context split from `calendar.js`.
+- `core-development/time.js`: Development time-skip/reason grounding and user-canon checks split from `core-development.js`.
+- `core-development/episode.js`: Targeted/bounded development episodes and developmentScaleReady split from `core-development.js`.
+- `core-development/update.js`: Single-NPC durable profile update rules split from `core-development.js`.
+- `core-development/batch.js`: Batch profile updates and interim identity promotion split from `core-development.js`.
+- `runtime-inline-cards/state.js`: Inline-card state records and present-card lookups split from `runtime-inline-cards.js`.
+- `runtime-inline-cards/present.js`: Portrait/card/speaker markup, scene reads and roster HTML split from `runtime-inline-cards.js`.
+- `runtime-inline-cards/mode.js`: Present-cast display choice, launcher flags and Story Block cast HTML split from `runtime-inline-cards.js`.
+- `runtime-inline-cards/megumin.js`: Megumin block tab/pane integration and cleanup split from `runtime-inline-cards.js`.
+- `runtime-inline-cards/mount.js`: Chat observer, watchdog, renderer and debounced render queue split from `runtime-inline-cards.js`.
