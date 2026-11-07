@@ -6,10 +6,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { adapterSource } from './helpers/adapter-source.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const source = adapterSource();
+const source = fs.readFileSync(path.join(root, 'src/adapter/cast-ui/cast-render.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
 
 test('World → Here draws the present card without meters, and no side copy under it', () => {
