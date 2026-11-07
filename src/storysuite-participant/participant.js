@@ -31,45 +31,15 @@
 // `vault` keeps the bytes (vault.js). The np_ map, the reserved ids and the applied deaths live in the chat's state (timeline.js), the restores
 // in flight and the acknowledged deaths in the vault's index of the state's lineage.
 
-import { PARTICIPANT_SCHEMA, buildCheckpoint, checkpointProblem } from './checkpoint.js';
-import { hydrateIdentity, resolveIdentity } from './identity.js';
-import { hashJson } from './hash.js';
-import { LINEAGE_ID, mintLineage, restoredState, storedTimeline, timelineOf } from './timeline.js';
-import { isTerminalNpcDeath, manualLifeStateRecord } from '../../terminal-lifecycle.js';
+import { resolveIdentity } from './identity.js';
+import { timelineOf } from './timeline.js';
+import { manualLifeStateRecord } from '../../terminal-lifecycle.js';
+import { createParticipantHandlers } from './participant/handlers.js';
+import { createPublication } from './participant/publication.js';
+import { createSessionOps } from './participant/session-ops.js';
+import { fail, isRecord, plain } from './participant/support.js';
 
 export const MODULE_ID = 'npc-state-delta';
-const fail = (code, message) => ({ ok: false, code, message });
-const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-const plain = value => JSON.parse(JSON.stringify(value ?? null));
-const BASE36 = '0123456789abcdefghijklmnopqrstuvwxyz';
-
-function preparedId(seed) {
-    let value = BigInt(`0x${hashJson(seed).slice(0, 12)}`);
-    let text = '';
-    for (let i = 0; i < 8; i += 1) {
-        text = BASE36[Number(value % 36n)] + text;
-        value /= 36n;
-    }
-    return `pn_${text}`;
-}
-
-const HASH = /^[0-9a-f]{64}$/;
-
-/** The lineage's index as stored, checked. */
-function cleanIndex(raw) {
-    const index = { v: 2, acks: {}, prepared: {}, returns: {}, selected: null, base: null };
-    if (!isRecord(raw)) return index;
-    for (const [event, ack] of Object.entries(isRecord(raw.acks) ? raw.acks : {})) if (isRecord(ack) && typeof ack.checkpoint === 'string' && typeof ack.hash === 'string') index.acks[event] = { checkpoint: ack.checkpoint, hash: ack.hash };
-    for (const [id, entry] of Object.entries(isRecord(raw.prepared) ? raw.prepared : {})) {
-        if (isRecord(entry) && typeof entry.checkpoint === 'string' && typeof entry.hash === 'string') index.prepared[id] = { checkpoint: entry.checkpoint, hash: entry.hash, return: typeof entry.return === 'string' ? entry.return : null, inPlace: entry.inPlace === true, stateHash: typeof entry.stateHash === 'string' ? entry.stateHash : null, newer: entry.newer === true };
-    }
-    for (const [id, entry] of Object.entries(isRecord(raw.returns) ? raw.returns : {})) {
-        if (isRecord(entry) && typeof entry.prepared === 'string' && typeof entry.checkpoint === 'string' && ['prepared', 'active', 'aborted'].includes(entry.status)) index.returns[id] = { prepared: entry.prepared, checkpoint: entry.checkpoint, hash: String(entry.hash ?? ''), status: entry.status };
-    }
-    index.selected = typeof raw.selected === 'string' ? raw.selected : null;
-    if (isRecord(raw.base) && typeof raw.base.checkpoint === 'string' && HASH.test(String(raw.base.hash)) && typeof raw.base.stateHash === 'string') index.base = { checkpoint: raw.base.checkpoint, hash: raw.base.hash, stateHash: raw.base.stateHash };
-    return index;
-}
 
 /** A dossier marked dead by a confirmed event: Delta's own explicit, terminal death record, with the event as its reason. */
 export function confirmedDeath(npc, { event, now }) {
@@ -78,7 +48,6 @@ export function confirmedDeath(npc, { event, now }) {
     return dead;
 }
 
-const RETRY_CODES = new Set(['STALE', 'RESTORE_PENDING']);
 const SNAPSHOT_EXPIRED = Symbol('snapshot-expired');
 
 export function createParticipant({ port, vault, module = MODULE_ID, now = () => Date.now(), random, schedule = (fn, ms) => setTimeout(fn, ms), cancel = id => clearTimeout(id), debounceMs = 300, retryMs = 1500, idleMs = 8000, boundMs = 8000, pollMs = 50, vaultTimeoutMs = 15000 }) {
@@ -86,17 +55,11 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
     let handle = null;
     let queue = Promise.resolve();
     let hydrating = false;
-    let timer = null;
-    let publishing = null;
-    let again = false;
-    let retries = 0;
-    let last = null;
     const indexRepairs = new Map(); // lineage -> function returning the index to restore before further participant work
     const writtenIndexes = new Map(); // last confirmed index per lineage, for a write that settles after its timeout
     const pendingAborts = new Map(); // host aborts that must be finished after a blocked repair or snapshot
     let repairQueued = false;
     const unfinishedSnapshots = new Set(); // timed-out calls remain here until their queued work actually ends
-    const handed = new Map();   // checkpoint id -> { hash, stateHash }: what the participant handed the host, for `current`
     let announced = 0;          // changes announced to the participant (noteChange), in this run
     const preparedAt = new Map();   // prepared id of an in-place publication -> `announced` when it was prepared (this run only)
     const warn = text => { try { port.warn?.(text); } catch { /* telling is best effort */ } };
@@ -305,478 +268,22 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
         });
     }
 
-    /**
-     * Brings the open chat's state up to date: it has a lineage, every dossier has its np_ and a dossier that is gone has its np_ archived;
-     * written into the state (durably) when it changed. The chat is looked at again after every await: a chat that changed meanwhile ends it.
-     * Only a chat that uses the timeline gets here: a save point, a restore, a death, a published change of a chat that has its line already, or a
-     * question to `npc.identity`. Opening a chat, a reply, or a scan writes nothing (`started`).
-     * → the session { key, lineage, index } or null (no chat, or it changed).
-     */
-    async function hydrate(until = null, guard = null) {
-        const key = keyNow();
-        if (!usable(key)) return null;
-        // Nothing is read, minted or written before the chat's state is loaded: a retryable failure (the host asks again later).
-        guard?.enter('loading the dossiers');
-        if (!await loaded(until)) {
-            guard?.check();
-            if (keyNow() !== key) return null;
-            throw new Error('NPC State Delta has not loaded this chat\'s dossiers yet; it is tried again in a moment.');
-        }
-        guard?.check();
-        if (keyNow() !== key) return null;
-        let state = port.readState();
-        let block = timelineOf(state);
-        // A branch waiting for its parent's dossiers gets them (and the parent's line) from Delta's branch inheritance: a line minted here first
-        // would be written into the branch's file and the inheritance would never come (the branch's dossiers empty, its parent's checkpoints refused).
-        if (!block.lineage && port.branchPending?.() === true) {
-            guard?.enter('inheriting the parent dossiers');
-            try { await port.inheritBranch?.(); } catch { /* looked at below */ }
-            guard?.check();
-            if (keyNow() !== key) return null;
-            if (port.branchPending?.() === true) throw new Error('NPC State Delta is still carrying the parent chat\'s dossiers into this branch; it is tried again in a moment.');
-            state = port.readState();
-            block = timelineOf(state);
-        }
-        let write = false;
-        if (!block.lineage) {
-            block.lineage = mintLineage(random);
-            write = true;
-        }
-        // The open chat's line changed under the participant (another copy of the state was adopted): the line it knew stays this chat's.
-        if (session?.key === key && session.lineage !== block.lineage && !block.former.includes(session.lineage)) {
-            block.former = [...block.former, session.lineage];
-            write = true;
-        }
-        const out = hydrateIdentity(block.identity, state?.npcs, { seed: block.lineage, reserved: block.reserved });
-        if (out.changed || out.reserved.length !== block.reserved.length) write = true;
-        block.identity = out.identity;
-        block.reserved = out.reserved;
-        if (write) {
-            const was = hashJson(state);
-            guard?.enter('saving the story-line identity');
-            await port.writeTimeline(storedTimeline(block));
-            if (keyNow() !== key) return null;
-            // The write already happened even if the call expired, so the existing baseline must still describe the new state.
-            if (session?.index.base?.stateHash === was) session.index.base.stateHash = hashJson(port.readState());
-            guard?.check();
-        }
-        if (!session || session.key !== key || session.lineage !== block.lineage) {
-            guard?.enter('reading the participant index');
-            const index = cleanIndex(await vault.getIndex(block.lineage));
-            guard?.check();
-            if (keyNow() !== key) return null;
-            session = { key, lineage: block.lineage, index };
-            writtenIndexes.set(block.lineage, plain(index));
-        }
-        if (!session.index.base) {
-            guard?.enter('building the baseline checkpoint');
-            const built = buildCheckpoint({ lineage: block.lineage, state: port.readState() });
-            guard?.enter('saving the baseline checkpoint');
-            await vault.put(built.id, built.doc);
-            guard?.check();
-            if (keyNow() !== key) return null;
-            const base = { checkpoint: built.id, hash: built.hash, stateHash: hashJson(port.readState()) };
-            guard?.enter('saving the participant index');
-            const s = session;
-            try {
-                await vault.putIndex(s.lineage, { ...s.index, base });
-                guard?.check();
-                if (keyNow() !== key) { await restoreIndex(s); return null; }
-            } catch (error) {
-                await restoreIndex(s);
-                throw error;
-            }
-            s.index.base = base;
-        }
-        return session;
-    }
-
-    async function made({ state = port.readState(), cursor = null, headHash = null }, guard = null) {
-        const s = session ?? await hydrate();
-        if (!s) throw new Error('There is no open chat to take a checkpoint of.');
-        guard?.enter('building the native checkpoint');
-        const built = buildCheckpoint({ lineage: s.lineage, state, cursor, headHash });
-        guard?.enter('saving the native checkpoint');
-        await vault.put(built.id, built.doc);
-        guard?.check();
-        return built;
-    }
-
-    /** The checkpoint `id` from the vault, checked against `hash`: { doc } or a failure. */
-    async function verified(id, hash) {
-        const doc = await vault.get(id);
-        if (!doc) return fail('SNAPSHOT_UNAVAILABLE', `The native checkpoint ${id} is gone, so its dossiers cannot be put back.`);
-        const problem = checkpointProblem(doc, doc?.kind ? hashJson(doc) : '');
-        if (problem && /newer|not a native|missing|plain/.test(problem)) return fail('SNAPSHOT_UNAVAILABLE', problem);
-        if (hashJson(doc) !== hash) return fail('CONFLICT', `The native checkpoint ${id} is not the one that was saved (another hash).`);
-        if (doc.lineage !== session?.lineage && !await formerLine(doc)) return fail('CONFLICT', `The native checkpoint ${id} belongs to another story line.`);
-        return { ok: true, doc };
-    }
-
-    /**
-     * Whether `doc` is a checkpoint of an earlier story line of this same chat. Before NSD 1.7.1 a reload's recovery could read the chat's state
-     * before Delta had loaded it and mint a new line over the chat's own (hydrate waits for the load now); the chat's journal still names
-     * checkpoints of the line it had, and refusing them held the chat for good on a swipe, a delete or a branch back past that point. Such a line
-     * is accepted, and only such a line: one the chat records as its former line (`timeline.former`), or a well-formed line this participant kept
-     * an index for whose checkpoint belongs to the chat's own family (`branchFamilyId`, a random id per chat and its branches). A checkpoint of
-     * another chat (another family), or a line nobody kept (forged), is still another story line. Installing it records the line (restoredState).
-     */
-    async function formerLine(doc) {
-        const lineage = doc?.lineage;
-        if (typeof lineage !== 'string' || !LINEAGE_ID.test(lineage)) return false;
-        const live = port.readState();
-        if (timelineOf(live).former.includes(lineage)) return true;
-        const family = typeof live?.branchFamilyId === 'string' ? live.branchFamilyId.trim() : '';
-        if (!family || doc.state?.branchFamilyId !== family) return false;
-        try { return Boolean(await vault.getIndex(lineage)); } catch { return false; }
-    }
-
-    /**
-     * Whether the open chat uses the timeline: it has its story line (the state carries a lineage, made by the first save point, restore, death
-     * or `npc.identity` question) or this run has made it. A chat that never did is left exactly as Delta alone keeps it: nothing is hydrated,
-     * written or published for it, so a populated chat that never asks for the timeline stays byte for byte what it was.
-     */
-    const started = () => {
-        if (session && session.key === keyNow()) return true;
-        try { if (typeof port.started === 'function') return port.started() === true; } catch { return false; }
-        return Boolean(timelineOf(port.readState()).lineage);
-    };
-    const busy = () => (typeof port.busy === 'function' ? port.busy() === true : false);
-    /** Whether the native state is, now, the one this checkpoint was handed over (or installed) as: the part of the host's commit probe that reads the state. */
-    const stands = (checkpoint, hash) => {
-        const held = handed.get(checkpoint);
-        return Boolean(held) && held.hash === hash && hashJson(port.readState()) === held.stateHash;
-    };
-    /** Whether the live state is what installing this checkpoint's document leaves (its state with the timeline block's reserved ids of both timelines). */
-    const standsOnBytes = doc => {
-        const live = port.readState();
-        const wanted = restoredState(doc.state, live);
-        if (hashJson(wanted) === hashJson(live)) return true;
-        // Delta normalizes a state as it installs it (a milestone's missing turn becomes 0, ...), and a checkpoint made in the run that wrote a
-        // record may hold it as written: compared raw, such a checkpoint never "stands" once installed, and its activation is refused for good.
-        // The bytes are compared as Delta keeps them too.
-        if (typeof port.normalize !== 'function') return false;
-        try { return hashJson(port.normalize(wanted)) === hashJson(live); } catch { return false; }
-    };
-    const hand = (checkpoint, hash, stateHash) => {
-        handed.set(checkpoint, { hash, stateHash });
-        while (handed.size > 16) handed.delete(handed.keys().next().value);
-    };
-    // Ends inside the host's bound for the callback (`until`): longer than that, the host gives up on the call and calls the save a failure.
-    const quiet = async until => (typeof port.idle === 'function' ? (await port.idle(Math.max(0, Math.min(idleMs, until - now())))) !== false : true);
-
-    const participant = {
-        schema: PARTICIPANT_SCHEMA,
-
-        // A save point is a moment: Delta must be at rest in it. A scan or dossier pass still reading the latest reply would land after the
-        // checkpoint and be missing from it (a restore would then drop a person the story still has), so the checkpoint waits for it, and when
-        // it does not finish or the state moves while the checkpoint is made, answers a retryable STALE rather than a save that is not true.
-        checkpoint: boundedCheckpoint(async ({ cursor = null, headHash = null } = {}, guard) => {
-            for (let attempt = 0; attempt < 3; attempt += 1) {
-                guard.enter('waiting for dossier work');
-                const idle = await guard.wait(quiet(guard.until));
-                guard.check();
-                if (!idle) return fail('STALE', 'NPC State Delta is still reading the latest reply; save again in a moment.');
-                const s = await hydrate(guard.until, guard);
-                if (!s) return fail('FAILED', 'There is no open chat to save.');
-                guard.enter('reading the dossiers');
-                const at = hashJson(port.readState());
-                guard.check();
-                // A change Delta saved that the timeline has not recorded yet is recorded first: the save point would carry it, but the host would
-                // commit the point at a head that does not know it. The publish is asked for and the save is refused, retryably. When the host gives no
-                // way to publish (no Source for the head: UNSUPPORTED) there is nothing to wait for.
-                if (handle && s.index.base && s.index.base.stateHash !== at && last?.code !== 'UNSUPPORTED') {
-                    schedulePublish(0);
-                    return fail('STALE', 'NPC State Delta has a change the story has not recorded yet; save again in a moment.');
-                }
-                const built = await made({ cursor, headHash }, guard);
-                if (busy() || hashJson(port.readState()) !== at) continue;
-                guard.enter('saving the participant index');
-                const base = { checkpoint: built.id, hash: built.hash, stateHash: at };
-                try {
-                    await vault.putIndex(s.lineage, { ...s.index, base });
-                    guard.check();
-                } catch (error) {
-                    // A failed or late write may have reached the server. Put back the previous baseline before the queue moves on, so an
-                    // unaccepted checkpoint never becomes the basis of a native publication. If restoration fails, later work must retry it first.
-                    await restoreIndex(s);
-                    throw error;
-                }
-                s.index.base = base;
-                hand(built.id, built.hash, at);
-                return { ok: true, checkpoint: built.id, hash: built.hash, schema: PARTICIPANT_SCHEMA };
-            }
-            return fail('STALE', 'NPC State Delta kept changing while the save point was made; save again in a moment.');
-        }),
-
-        /**
-         * Asked by the host inside its synchronous commit section, after it holds the checkpoint it will store and before it commits: is the
-         * checkpoint still the native state? It answers at once (no waiting): the state is the one handed over, and nothing is running, due or
-         * queued that would change it. { ok: true, current: boolean }; false makes the host cancel the save and ask again.
-         */
-        current: input => ({ ok: true, current: isRecord(input) && stands(input.checkpoint, input.hash) && !busy() }),
-
-        prepare: bounded(async (input, until) => {
-            const s = await hydrate(until);
-            if (!s) return fail('FAILED', 'There is no open chat.');
-            const idx = s.index;
-            if (!isRecord(input) || typeof input.checkpoint !== 'string' || typeof input.return !== 'string' || typeof input.hash !== 'string') return fail('INVALID', 'prepare takes { return, checkpoint, hash }.');
-            const held = idx.returns[input.return];
-            if (held && held.status !== 'aborted' && (held.checkpoint !== input.checkpoint || held.hash !== input.hash)) return fail('CONFLICT', 'That return was prepared for another checkpoint.');
-            if (held && held.status !== 'aborted') return { ok: true, prepared: held.prepared, hash: held.hash };
-            const got = await verified(input.checkpoint, input.hash);
-            if (!got.ok) return got;
-            const prepared = preparedId({ return: input.return, checkpoint: input.checkpoint, hash: input.hash, lineage: s.lineage, again: held ? 1 : 0 });
-            idx.prepared[prepared] = { checkpoint: input.checkpoint, hash: input.hash, return: input.return, inPlace: false, stateHash: null };
-            idx.returns[input.return] = { prepared, checkpoint: input.checkpoint, hash: input.hash, status: 'prepared' };
-            await save();
-            return { ok: true, prepared, hash: input.hash };
-        }),
-
-        activate: input => hostExclusive(async () => {
-            const s = await hydrate();
-            if (!s) return fail('FAILED', 'There is no open chat.');
-            const idx = s.index;
-            if (!isRecord(input) || typeof input.prepared !== 'string' || typeof input.return !== 'string') return fail('INVALID', 'activate takes { return, prepared }.');
-            const entry = idx.prepared[input.prepared];
-            if (!entry) return fail('NOT_FOUND', 'Nothing was prepared under that id.');
-            if (entry.return !== null && entry.return !== input.return) return fail('CONFLICT', 'That preparation belongs to another return.');
-            const ret = idx.returns[input.return] ?? { prepared: input.prepared, checkpoint: entry.checkpoint, hash: entry.hash, status: 'prepared' };
-            if (ret.prepared !== input.prepared) return fail('CONFLICT', 'That return was prepared under another id.');
-            if (ret.status === 'aborted') return fail('REFUSED', 'That preparation was aborted.');
-            const got = await verified(entry.checkpoint, entry.hash);
-            if (!got.ok) return got;
-            // A return already active is not skipped: it is acknowledged again only while the live state still is its bytes (a state that never
-            // reached the file after it was activated, found by a recovery, is installed again).
-            if (ret.status === 'active' && standsOnBytes(got.doc)) return { ok: true, checkpoint: ret.checkpoint, hash: ret.hash };
-            // The journal decides what the story stands on: the selected bytes. A change Delta made and published after the fact is live already
-            // when the state is those bytes; only then (or when a newer change of its own is in flight, below) is nothing installed. Anything else
-            // (a restore, a selected head, a recovery that finds the live state is not what the journal selected) is installed, durably, and the
-            // state is looked at again like the host's commit probe does before the activation is acknowledged.
-            const live = port.readState();
-            let install = !entry.inPlace || hashJson(live) !== hashJson(got.doc.state);
-            const newer = entry.newer === true || announced > (preparedAt.get(input.prepared) ?? Infinity);
-            if (install && entry.inPlace && newer) {
-                // A newer change of Delta's own, announced after this one was read (even while its checkpoint was being uploaded, and noted in the
-                // index so a restart knows it too), is live: the older bytes do not overwrite it. It is published next, on this baseline, by the normal
-                // route, which is asked for now (the host cannot take a change while it is finishing this one, so it follows the acknowledgement).
-                install = false;
-                schedulePublish(0);
-            }
-            if (install) {
-                // The saved state, its np_ map and its deaths together; the ids either timeline issued stay reserved (inactive, never issued again).
-                await port.installState(restoredState(got.doc.state, live));
-                try { port.restored?.(); } catch { /* the restore is done; telling is best effort */ }
-                // The state now is the selected bytes (the timeline block aside, which keeps both timelines' reserved ids): read back and compared,
-                // then recorded as handed over so the probe `current` answers for it like for any checkpoint. Not acknowledged otherwise.
-                const now = port.readState();
-                hand(entry.checkpoint, entry.hash, hashJson(now));
-                if (!standsOnBytes(got.doc) || !stands(entry.checkpoint, entry.hash)) {
-                    return fail('STALE', 'NPC State Delta could not confirm that the selected native state is installed; it is tried again.');
-                }
-                idx.base = { checkpoint: entry.checkpoint, hash: entry.hash, stateHash: hashJson(now) };
-            } else {
-                idx.base = { checkpoint: entry.checkpoint, hash: entry.hash, stateHash: entry.stateHash ?? idx.base?.stateHash ?? '' };
-            }
-            preparedAt.delete(input.prepared);
-            idx.selected = entry.checkpoint;
-            entry.return = input.return;
-            idx.returns[input.return] = { ...ret, status: 'active' };
-            await save();
-            return { ok: true, checkpoint: entry.checkpoint, hash: entry.hash };
-        }),
-
-        abort,
-
-        status: input => hostExclusive(async () => {
-            const s = await hydrate();
-            const ret = s && isRecord(input) ? s.index.returns[input.return] : null;
-            if (!ret) return fail('NOT_FOUND', 'No such return.');
-            // The host's recovery asks this to learn whether the participant switched already, and skips the activation when it says active. It
-            // says so only while the live state is the bytes of that checkpoint; otherwise (a write that never reached the file, bytes that are
-            // gone) it says prepared, and the activation is asked for again, which installs them or refuses.
-            if (ret.status === 'active') {
-                const got = await verified(ret.checkpoint, ret.hash);
-                if (!got.ok || !standsOnBytes(got.doc)) return { ok: true, checkpoint: ret.checkpoint, hash: ret.hash, status: 'prepared' };
-            }
-            return { ok: true, checkpoint: ret.checkpoint, hash: ret.hash, status: ret.status };
-        }, true),
-
-        applyEvent: input => hostExclusive(async () => {
-            if (!isRecord(input) || typeof input.event !== 'string' || !input.event || typeof input.nativeKey !== 'string' || !input.nativeKey) return fail('INVALID', 'applyEvent takes { event, nativeKey, kind }.');
-            if (input.kind !== 'confirmed-death') return fail('INVALID', 'The only native event is a confirmed-death.');
-            const s = await hydrate();
-            if (!s) return fail('FAILED', 'There is no open chat.');
-            const idx = s.index;
-            const prior = timelineOf(port.readState()).applied[input.event];
-            if (prior) {
-                if (prior.nativeKey !== input.nativeKey) return fail('CONFLICT', 'That event was delivered already for another person.');
-                const ack = idx.acks[input.event];
-                if (!ack) return fail('FAILED', 'That event is applied but its checkpoint is not recorded.');
-                // A delivery whose install was lost is finished from its checkpoint: the person ends up dead either way.
-                const live = port.readState()?.npcs?.find(npc => npc?.id === input.nativeKey);
-                if (!live || !isTerminalNpcDeath(live)) {
-                    const got = await verified(ack.checkpoint, ack.hash);
-                    if (got.ok) await port.installState(restoredState(got.doc.state, port.readState()));
-                }
-                return { ok: true, event: input.event, checkpoint: ack.checkpoint, hash: ack.hash, ack: true };
-            }
-            const state = plain(port.readState());
-            const at = Array.isArray(state.npcs) ? state.npcs.findIndex(npc => npc?.id === input.nativeKey) : -1;
-            if (at < 0) return fail('NOT_FOUND', 'No dossier answers to that native key, so the death is held rather than guessed.');
-            if (!isTerminalNpcDeath(state.npcs[at])) state.npcs[at] = confirmedDeath(state.npcs[at], { event: input.event, now: now() });
-            const block = timelineOf(state);
-            block.applied[input.event] = { nativeKey: input.nativeKey, at: now() };
-            state.timeline = storedTimeline(block);
-            const built = await made({ state });
-            idx.acks[input.event] = { checkpoint: built.id, hash: built.hash };
-            idx.selected = built.id;
-            await save();
-            await port.installState(state);
-            idx.base = { checkpoint: built.id, hash: built.hash, stateHash: hashJson(port.readState()) };
-            await save();
-            return { ok: true, event: input.event, checkpoint: built.id, hash: built.hash, ack: true };
-        }),
-
-        /** The host gives the module its own handle { head(), nativeMutation(input) } when it registers the participant. */
-        attach: given => { handle = given; },
-    };
-
-    /**
-     * Both checkpoints of a change, made durable: `before` is the one the story stands on, `after` the state in `state`. The baseline is
-     * the checkpoint the story stands on: when its bytes are gone or are not the ones recorded, the change is refused (a Problem is told)
-     * and never published on a baseline made up from the new state, which would tell the story it stood where it did not.
-     */
-    async function pairFor(state, head) {
-        const s = await hydrate();
-        if (!s) throw new Error('There is no open chat.');
-        const base = s.index.base;
-        const kept = await verified(base.checkpoint, base.hash);
-        if (!kept.ok) {
-            const text = `NPC State Delta cannot record a native change: the checkpoint the story stands on (${base.checkpoint}) is not usable (${kept.message}); the change was not published.`;
-            warn(text);
-            throw new Error(text);
-        }
-        const after = await made({ state, cursor: head.cursor, headHash: head.headHash });
-        return { before: base, after };
-    }
-    const shaped = built => ({ module, checkpoint: built.checkpoint ?? built.id, hash: built.hash, schema: PARTICIPANT_SCHEMA });
-
-    /**
-     * A native change published through the timeline (contract §8: "scan, manual dossier edit, meter/native synchronization and confirmed
-     * death" are native mutations): `edit(state)` changes a copy of the native state; the before and after checkpoints are made durable;
-     * the host then activates the after (this module's own `activate`) once the head, the barrier and the journal agree.
-     * → the host's answer { ok, checkpoint, hash } or its failure.
-     */
-    async function nativeChange({ source, edit }) {
-        if (!handle) return fail('UNSUPPORTED', 'The host has not given this participant its handle.');
-        const head = await handle.head();
-        if (!head?.ok) return head;
-        return handle.nativeMutation({
-            participant: module,
-            source,
-            expectedHead: head.headHash,
-            prepare: () => preparing(async () => {
-                const s = await hydrate();
-                if (!s) throw new Error('There is no open chat.');
-                const state = plain(port.readState());
-                edit(state);
-                const block = timelineOf(state);
-                block.lineage = s.lineage;
-                const next = hydrateIdentity(block.identity, state.npcs, { seed: s.lineage, reserved: block.reserved });
-                block.identity = next.identity;
-                block.reserved = next.reserved;
-                state.timeline = storedTimeline(block);
-                const { before, after } = await pairFor(state, head);
-                const prepared = preparedId({ native: true, before: before.checkpoint, after: after.id, lineage: s.lineage, n: Object.keys(s.index.prepared).length });
-                s.index.prepared[prepared] = { checkpoint: after.id, hash: after.hash, return: null, inPlace: false, stateHash: null };
-                await save();
-                return { before: shaped(before), after: shaped(after), prepared };
-            }),
-        });
-    }
-
-    /**
-     * Publishes the change Delta already made (a scan, an edit, a meter step: every durable write of its state ends here, see `noteChange`):
-     * the checkpoint the story stood on, and the checkpoint of the state now, as one native mutation at the head. Nothing to publish when the
-     * state is the one the story stands on. The host's refusal to publish (the head moved, a restore is pending) is retried by `noteChange`.
-     */
-    async function publish() {
-        if (!handle) return fail('UNSUPPORTED', 'The host has not given this participant its handle.');
-        if (!started()) return { ok: true, unchanged: true };
-        // The change belongs to the chat it was made in: once another chat is open nothing is retried, and the new chat is not hydrated here (a
-        // branch just opened must get its dossiers from Delta's branch inheritance first). The chat publishes what it holds when it is open again.
-        const key = keyNow();
-        const left = { ok: true, unchanged: true, left: true };
-        for (let attempt = 0; attempt < 3; attempt += 1) {
-            if (keyNow() !== key) return left;
-            const settled = await exclusive(async () => (keyNow() !== key ? left : { ok: true, session: await hydrate(), stateHash: hashJson(port.readState()) }));
-            if (settled.left) return left;
-            if (!settled.ok || !settled.session) return settled.ok ? { ok: true, unchanged: true } : settled;
-            if (settled.session.index.base?.stateHash === settled.stateHash) return { ok: true, unchanged: true };
-            const head = await handle.head();
-            if (!head?.ok) return head;
-            const source = head.source ?? (typeof port.headSource === 'function' ? port.headSource() : null);
-            if (!isRecord(source)) return fail('UNSUPPORTED', 'The host gives no Source for the reply at the head, so a native change cannot be published yet.');
-            const out = await handle.nativeMutation({
-                participant: module,
-                source,
-                expectedHead: head.headHash,
-                prepare: () => preparing(async () => {
-                    if (keyNow() !== key) throw new Error('Another chat was opened; the change is published when its chat is open again.');
-                    const s = await hydrate();
-                    if (!s) throw new Error('There is no open chat.');
-                    // A change announced from here on (the state is read now; the upload of its checkpoint takes time) is newer than this publication.
-                    const seen = announced;
-                    const state = port.readState();
-                    const { before, after } = await pairFor(state, head);
-                    const prepared = preparedId({ inPlace: true, before: before.checkpoint, after: after.id, lineage: s.lineage, n: Object.keys(s.index.prepared).length });
-                    s.index.prepared[prepared] = { checkpoint: after.id, hash: after.hash, return: null, inPlace: true, stateHash: hashJson(state), newer: announced > seen };
-                    preparedAt.set(prepared, seen);
-                    await save();
-                    return { before: shaped(before), after: shaped(after), prepared };
-                }),
-            });
-            if (out?.ok) return out;
-            if (keyNow() !== key) return left;   // (refused because the chat changed: not retried, not told)
-            if (out?.code !== 'STALE') return out;
-        }
-        return fail('STALE', 'The head kept moving; the change is published with the next one.');
-    }
-
-    function runPublish() {
-        if (publishing) {
-            again = true;
-            return publishing;
-        }
-        publishing = (async () => {
-            try {
-                do {
-                    again = false;
-                    last = await publish();
-                    if (last && last.ok === false && RETRY_CODES.has(last.code) && retries < 5) {
-                        retries += 1;
-                        schedulePublish(retryMs);
-                    } else {
-                        retries = 0;
-                        if (last && last.ok === false && last.code !== 'UNSUPPORTED') warn(`NPC State Delta could not publish a native change (${last.code}): ${last.message}`);
-                    }
-                } while (again);
-            } catch (error) {
-                last = fail('FAILED', String(error?.message ?? error));
-                warn(`NPC State Delta could not publish a native change: ${last.message}`);
-            } finally {
-                publishing = null;
-            }
-            return last;
-        })();
-        return publishing;
-    }
-    function schedulePublish(ms) {
-        if (timer) return;
-        timer = schedule(() => { timer = null; void runPublish(); }, ms);
-    }
-
+    const sessionOps = createSessionOps({
+        port, vault, now, random, idleMs, keyNow, usable, loaded, restoreIndex, writtenIndexes,
+        getSession: () => session,
+        setSession: value => { session = value; },
+    });
+    const { hydrate, made, verified, started, busy, stands, standsOnBytes, hand, quiet } = sessionOps;
+    const publication = createPublication({
+        cancel, exclusive, getAnnounced: () => announced, getHandle: () => handle,
+        hydrate, made, module, port, preparedAt, preparing, retryMs, save, schedule, started, verified, warn, keyNow,
+    });
+    const { participant } = createParticipantHandlers({
+        abort, bounded, boundedCheckpoint, busy, confirmedDeath, getAnnounced: () => announced, getHandle: () => handle,
+        getLast: publication.getLast, hand, hostExclusive, hydrate, made, now, port, preparedAt, quiet, restoreIndex, save,
+        schedulePublish: publication.schedulePublish, setHandle: value => { handle = value; }, stands, standsOnBytes, verified, vault,
+    });
+    const { nativeChange, schedulePublish, flush, getLast } = publication;
     return {
         module,
         participant,
@@ -818,8 +325,8 @@ export function createParticipant({ port, vault, module = MODULE_ID, now = () =>
             if (handle && started()) schedulePublish(debounceMs);
         },
         /** Publishes now what is pending and resolves with the answer (tests; and a chat closing). */
-        flush: async () => { if (timer) { cancel(timer); timer = null; } return runPublish(); },
-        lastPublish: () => last,
+        flush,
+        lastPublish: getLast,
         identity: () => timelineOf(port.readState()).identity,
         timeline: () => timelineOf(port.readState()),
         index: () => (session ? plain(session.index) : null),
