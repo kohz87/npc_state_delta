@@ -68,3 +68,9 @@ Generated 2026-11-07.
 - `social-inference.js`: Shared-parent sibling inference and its suppression rules split from `social.js`.
 - `social-projection.js`: Projection of the social graph into Important Bonds and id remapping split from `social.js`.
 - `social-manual.js`: Manual Important Bond edits, mirrored updates and repair split from `social.js`.
+- `runtime-entry-events.js`: SillyTavern generation, reply, branch, chat lifecycle and deletion listeners split from `index.js`.
+- `runtime-entry-ui-events.js`: Present-card activation, closest-target lookup and launcher-dossier event bridge split from `index.js`.
+- `runtime-entry-card-settings.js`: Character-card settings definition and panel-equivalent saves split from `index.js`.
+- `runtime-entry-startup.js`: Idempotent runtime initialization functions split from `index.js`.
+- `runtime-entry-public-read.js`: Public scan, portrait, status and diagnostics API split from `index.js`.
+- `runtime-entry-public-write.js`: Public state, host-integration and manual-mutation API split from `index.js`.

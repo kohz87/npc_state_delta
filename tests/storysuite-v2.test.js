@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { runtimeSource } from './helpers/runtime-source.js';
 import {
     CAST_TAB_ID,
     DOSSIER_FIELDS,
@@ -784,7 +783,7 @@ test('with a v2 Story Block, the v1 Present NPCs / Dossiers tabs are not registe
 // ---- the hook in index.js ----
 
 test('index.js starts the adapter once at startup through an optional import', () => {
-    const index = fs.readFileSync(fileURLToPath(new URL('../index.js', import.meta.url)), 'utf8');
+    const index = runtimeSource();
     const calls = index.match(/import\('\.\/src\/storysuite-v2\.js'\)/g) || [];
     assert.equal(calls.length, 1);
     assert.match(index, /startStorySuiteV2\(\{ suiteApi: SUITE_API, panelId: UI_ID, version: NPC_STATE_VERSION, headReply: latestReplyIndex, castSync, castPortraitDue, calendarOwn: \(\) => normalizeSourceOfTruth\(getSettings\(\)\.sourceOfTruth\)\.calendar === 'mine', cardSettings: nsdCardSettings\(\) \}\)/);
