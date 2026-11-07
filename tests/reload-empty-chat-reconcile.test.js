@@ -56,6 +56,7 @@ async function emptyChatChecks(mockState, eventSource, manualAddNpc, sleep) {
     const dossiersBefore = JSON.stringify(runtime.getState().npcs);
     const parentPath = runtime.dataFile().path;
     const uploadsBefore = mockState.uploadCalls;
+    const { createParticipant, memoryVault } = await import(pathToFileURL(path.join(sourceRoot, 'src/storysuite-participant/index.js')).href);
 
     // The race: reload, the host has not loaded the chat, the automatic reconcile fires, then the chat loads.
     mockState.context.chat = [];
@@ -63,6 +64,11 @@ async function emptyChatChecks(mockState, eventSource, manualAddNpc, sleep) {
     await sleep(250);
     if (JSON.stringify(runtime.getState().npcs) !== dossiersBefore || runtime.getState().lineage.length !== lineageLength) fail('an empty not-yet-loaded chat rolled the dossiers back');
     if (runtime.uiStatus().branchReconciliations.some(event => event.currentLength === 0 && event.action !== 'deferred-chat-not-loaded')) fail('a destructive reconcile ran against the empty chat');
+    const existingParticipant = createParticipant({ vault: memoryVault(), port: {
+        chatKey: runtime.chatKey, readState: runtime.getState, writeTimeline: runtime.writeTimeline,
+        ready: runtime.timelineReady, load: async () => {}, branchPending: runtime.branchPending, inheritBranch: runtime.inheritBranch,
+    } });
+    if ((await existingParticipant.hydrate()).ok || sidecar() !== savedBefore || mockState.uploadCalls !== uploadsBefore) fail('participant hydration wrote during deferred loading');
     files.set('reload-empty', [{ chat_metadata: null }]);
     eventSource.emit('chat_loaded');
     await sleep(100);
@@ -72,6 +78,14 @@ async function emptyChatChecks(mockState, eventSource, manualAddNpc, sleep) {
     await sleep(650);
     if (JSON.stringify(runtime.getState().npcs) !== dossiersBefore || runtime.getState().lineage.length !== lineageLength) fail('a partially loaded chat rolled the dossiers back');
     if (sidecar() !== savedBefore || mockState.uploadCalls !== uploadsBefore) fail('the deferred path wrote the sidecar');
+    files.delete('reload-empty');
+    eventSource.emit('chat_loaded');
+    await sleep(250);
+    eventSource.emit('message_sent', 0);
+    await sleep(150);
+    if (JSON.stringify(runtime.getState().npcs) !== dossiersBefore || runtime.getState().lineage.length !== lineageLength
+        || sidecar() !== savedBefore || mockState.uploadCalls !== uploadsBefore) fail('a missing host file authorized a partial-chat rollback');
+    files.set('reload-empty', [{ chat_metadata: {} }, ...messages]);
     load();
     await sleep(900);
     if (JSON.stringify(runtime.getState().npcs) !== dossiersBefore || runtime.getState().lineage.length !== lineageLength) fail('the retry after the chat loaded changed the dossiers');
@@ -96,7 +110,6 @@ async function emptyChatChecks(mockState, eventSource, manualAddNpc, sleep) {
     load(0);
     eventSource.emit('chat_changed');
     await sleep(200);
-    const { createParticipant, memoryVault } = await import(pathToFileURL(path.join(sourceRoot, 'src/storysuite-participant/index.js')).href);
     const participant = createParticipant({ vault: memoryVault(), port: {
         chatKey: runtime.chatKey, readState: runtime.getState, writeTimeline: runtime.writeTimeline,
         branchPending: runtime.branchPending, inheritBranch: runtime.inheritBranch,
@@ -117,17 +130,20 @@ async function emptyChatChecks(mockState, eventSource, manualAddNpc, sleep) {
     await sleep(900);
     if (runtime.branchPending() || !names().includes('Lena Empty')) fail('the loaded branch did not inherit its parent checkpoint');
 
-    // A brand-new chat whose host file is not readable yet stays pending without writing, and hydrates once the file appears (a received reply asks again).
+    // A brand-new chat holds a real reply without writing until its host file appears, then processes it once.
     mockState.context.chatId = 'brand-new-chat';
     mockState.context.chatMetadata = {};
     load(2);
     eventSource.emit('chat_changed');
     await sleep(300);
     if (!runtime.branchPending() || runtime.dataFile()) fail('a new chat without a host file was not left pending');
+    eventSource.emit('message_received', 1);
+    eventSource.emit('message_received', 1);
+    await sleep(550);
+    if (!runtime.branchPending() || runtime.dataFile() || runtime.getState().turn !== 0) fail('a reply wrote the pending chat before its host file appeared');
     files.set('brand-new-chat', [{ chat_metadata: {} }, ...messages.slice(0, 2)]);
-    eventSource.emit('message_received', 0);
     await sleep(900);
-    if (runtime.branchPending()) fail('a new chat stayed pending after its host file appeared');
+    if (runtime.branchPending() || runtime.getState().turn !== 1) fail('a new chat did not process the held reply exactly once after its host file appeared');
     mockState.context.chatMetadata = { main_chat: 'reload-empty' }; // (later checks reuse the branch metadata)
 
     // A real delete while a branch waits for its parent stays a delete across the deferred retry.
@@ -163,9 +179,12 @@ async function emptyChatChecks(mockState, eventSource, manualAddNpc, sleep) {
     // A timer from an earlier opening of a chat cannot run after leaving and reopening that same chat.
     mockState.context.chatId = 'reload-empty';
     mockState.context.chatMetadata = {};
-    load(0);
+    const turnBeforeSwitch = runtime.getState().turn;
+    load(2);
     eventSource.emit('chat_changed');
     await sleep(180);
+    eventSource.emit('message_received', 1);
+    await sleep(100);
     mockState.context.chatId = 'other-chat';
     files.set('other-chat', [{ chat_metadata: {} }, ...messages]);
     load(); eventSource.emit('chat_changed');
@@ -176,16 +195,17 @@ async function emptyChatChecks(mockState, eventSource, manualAddNpc, sleep) {
     const eventsAfterReturn = JSON.stringify(runtime.uiStatus().branchReconciliations);
     await sleep(500);
     if (JSON.stringify(runtime.uiStatus().branchReconciliations) !== eventsAfterReturn) fail('an earlier opening retried after a chat switch');
+    if (runtime.getState().turn !== turnBeforeSwitch || sidecar() !== savedBefore) fail('an earlier opening delivered its held reply after a chat switch');
 
     // The retry is bounded even if the host never finishes loading, and a later load event still resumes reconciliation.
     const originalTimeout = globalThis.setTimeout;
-    globalThis.setTimeout = (fn, ms, ...args) => originalTimeout(fn, ms === 400 ? 4 : ms, ...args);
+    globalThis.setTimeout = (fn, ms, ...args) => originalTimeout(fn, ms === 400 ? 4 : ms === 5000 ? 7 : ms, ...args);
     const readStart = reads.length;
     load(0); eventSource.emit('chat_changed');
     await sleep(600);
     const attempts = reads.length - readStart;
     await sleep(200);
-    if (attempts !== 26 || reads.length - readStart !== attempts) fail(`the loading retry was not bounded: ${attempts}`);
+    if (attempts !== 38 || reads.length - readStart !== attempts) fail(`the loading retry was not bounded: ${attempts}`);
     globalThis.setTimeout = originalTimeout;
     load(); eventSource.emit('chat_loaded');
     await sleep(150);

@@ -139,6 +139,14 @@ globalThis.__npcMock = mockState;
 globalThis.window = globalThis;
 
 globalThis.fetch = async (url, options = {}) => {
+    // Ordinary scenarios model an already-saved host chat; loading-race tests override this with an independent file.
+    if (url === '/api/chats/get' || url === '/api/chats/group/get') {
+        const body = JSON.parse(options.body || '{}');
+        const currentId = String(mockState.context.getCurrentChatId?.() || mockState.context.chatId || '');
+        const group = Boolean(mockState.context.groupId);
+        if (String(body.file_name || body.id || '') !== currentId || group !== (url === '/api/chats/group/get')) return { ok: false, status: 404 };
+        return { ok: true, status: 200, json: async () => [{ chat_metadata: structuredClone(mockState.context.chatMetadata || {}) }, ...structuredClone(mockState.context.chat || [])] };
+    }
     if (url === '/api/characters/chats') {
         const body = JSON.parse(options.body || '{}');
         if (!mockState.hostChatsByAvatar.has(body.avatar_url)) return { ok: false, status: 404, json: async () => ({}) };

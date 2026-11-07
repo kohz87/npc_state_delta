@@ -71,7 +71,7 @@ export function createPublicApiStatePart(deps) {
     const {
         normalizeChatState, getChatKey, requestHeaders, ensureFreshMutationBoundary, quietly, setChatState,
         persistCriticalDurable, renderDossier, updateInjection, getChatState, nativeChangeListeners, chatStateCache,
-        branchInheritancePending, maybeInheritKnownBranch, chatHydrationStatus, scanWorkPending, scanIdle,
+        branchInheritancePending, maybeInheritKnownBranch, chatHydrationStatus, loadingReconcilePending, scanWorkPending, scanIdle,
         useMessageGate, normalizeRelationshipBaseline, normalizeRelationshipCaps, getSettings, storyBlockCastHtml,
         castEmptyReason, addNpcManually, fillPresentSceneText, stateVersions, latestReplyIndex, viewNpcCopies,
         hostedMeterView, dossierHostViews, hydrationErrors, portraitFilesVersion, persistedVersions,
@@ -128,6 +128,7 @@ export function createPublicApiStatePart(deps) {
     branchPending: () => branchInheritancePending(),
     inheritBranch: () => maybeInheritKnownBranch(),
     stateReady: () => chatHydrationStatus() === 'ready',
+    timelineReady: () => chatHydrationStatus() === 'ready' && !loadingReconcilePending(),
     stateFailed: () => chatHydrationStatus() === 'error',
     stateLoading: () => chatHydrationStatus() === 'loading',
     scanActive: () => scanWorkPending(),

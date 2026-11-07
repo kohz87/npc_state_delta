@@ -14,7 +14,7 @@ export function createEventRegistration(rt, deps) {
         endTargetedRewriteTolerance, stripSwipedNarrationBlock, queueSettledSwipeReconcile,
         flushPendingSettingsSave, castPortraitMisses, cancelScanOperation, closePortraitGenerator,
         closeNpcEditor, staleHostChats, retiredInSessionChats, openingHostChats, isCanonicalChatKey,
-        maybeInheritKnownBranch, branchInheritancePending, seedBranchTracking, persist, isScanBusy, renderDossier,
+        maybeInheritKnownBranch, branchInheritancePending, deferLoadingReceipt, loadingReconcilePending, seedBranchTracking, persist, isScanBusy, renderDossier,
         ensureInlineObserver, drainPendingAutoScan, castPortraitDue, castSync, evictDormantChatStates,
         runBoundedLifecycleEvent, removeDeletedChatState, moveRenamedChatState, chatStateCache,
     } = deps;
@@ -52,9 +52,11 @@ export function createEventRegistration(rt, deps) {
                 // This listener maintains branch lineage and refreshes the injection so an off-screen NPC
                 // the player names reaches this generation; text never dispatches mutations.
                 const sentState = getChatState();
-                migrateLegacyLineage(sentState, getContext().chat || []);
-                // A turn typed on a chat that is behind the adopted dossier must not replace its lineage.
-                if (!staleHostActive(key)) sentState.lineage = chatLineage(getContext().chat || []);
+                if (!loadingReconcilePending(key)) {
+                    migrateLegacyLineage(sentState, getContext().chat || []);
+                    // A turn typed on a chat that is behind the adopted dossier must not replace its lineage.
+                    if (!staleHostActive(key)) sentState.lineage = chatLineage(getContext().chat || []);
+                }
                 if (!await generationReady(key)) return;
                 updateInjection();
                 noteNarrationCaptureVersion(key);
@@ -117,8 +119,7 @@ export function createEventRegistration(rt, deps) {
             if (typeof source.makeFirst === 'function') source.makeFirst(events.MESSAGE_RECEIVED, stripCapture);
             else source.on(events.MESSAGE_RECEIVED, stripCapture);
             source.on(events.MESSAGE_RECEIVED, async (messageId) => {
-                // The host saves the chat around a reply, so a new chat still waiting for its file can hydrate now.
-                if (branchInheritancePending()) queueBranchReconcile({ chatKey: getChatKey(), rescan: false, reason: 'message-received-pending' }, 400);
+                if (deferLoadingReceipt(messageId)) return;
                 await handleAssistantMessageReceived(messageId);
             });
         }

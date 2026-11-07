@@ -44,7 +44,7 @@ export function createBranchPart(rt, deps) {
 
     // A nonempty array can still be the first chunk of a loading chat. Only the host's complete file can prove an automatic
     // destructive reconcile or a branch inheritance has the whole chat; an unavailable or changing file fails closed.
-    async function hostChatComplete(key, { absentOk = false } = {}) {
+    async function hostChatComplete(key) {
         const place = parseQualifiedChatKey(key);
         if (!place || getChatKey() !== key) return false;
         const context = getContext();
@@ -60,8 +60,8 @@ export function createBranchPart(rt, deps) {
                 const response = await globalThis.fetch(place.kind === 'group' ? '/api/chats/group/get' : '/api/chats/get', {
                     method: 'POST', headers: requestHeaders(), cache: 'no-cache', body: JSON.stringify(body), signal: controller.signal,
                 });
-                // A host that has no file for this chat (404) cannot disagree with the array it loaded; only a rollback with a non-empty chat accepts that.
-                if (!response?.ok) return absentOk && response?.status === 404 && lineage.length > 0 && getChatKey() === key && (rt.chatOpenSequence || 0) === sequence;
+                // A missing file cannot prove that a nonempty array is the complete chat.
+                if (!response?.ok) return false;
                 const data = await response.json();
                 if (!Array.isArray(data) || !data[0] || typeof data[0] !== 'object' || !Object.hasOwn(data[0], 'chat_metadata')
                     || !data[0].chat_metadata || typeof data[0].chat_metadata !== 'object' || Array.isArray(data[0].chat_metadata)) return false;

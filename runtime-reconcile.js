@@ -201,6 +201,49 @@ export function createReconcilePart(rt, deps) {
     const SLOW_CHAT_RETRY_MS = 5000;
     const SLOW_CHAT_RETRY_LIMIT = 12;
     let loadingRetry = null;
+    let loadingReceipts = null;
+    const hostChecks = new Set();
+
+    function loadingReconcilePending(key = getChatKey()) {
+        const sequence = rt.chatOpenSequence || 0;
+        const owned = item => item?.key === key && item.sequence === sequence;
+        const pending = rt.branchReconcilePending;
+        return branchInheritancePending(key) || rt.openingHostChats.has(key) || owned(loadingRetry) || owned(loadingReceipts)
+            || (pending?.chatKey === key && (!pending.operation || pending.operation === 'auto')) || [...hostChecks].some(owned);
+    }
+
+    // A reply received before branch loading is proved must not create a sidecar before inheritance.
+    // Keep its position and parent in memory, then give it to the ordinary receipt owner after verification.
+    function deferLoadingReceipt(messageId) {
+        const key = getChatKey();
+        const sequence = rt.chatOpenSequence || 0;
+        if (!loadingReconcilePending(key)) return false;
+        const chat = getContext().chat || [];
+        const message = chat[messageId];
+        if (!Number.isInteger(messageId) || messageId < 0 || !message || message.is_user || message.is_system || !String(message.mes || '').trim()) return false;
+        if (loadingReceipts?.key !== key || loadingReceipts.sequence !== sequence) loadingReceipts = { key, sequence, items: [] };
+        const parent = chatLineage(chat).slice(0, messageId);
+        if (!loadingReceipts.items.some(item => item.messageId === messageId && firstLineageDivergence(item.parent, parent) === -1)) {
+            loadingReceipts.items.push({ messageId, parent });
+        }
+        queueBranchReconcile({ chatKey: key, rescan: false, reason: 'message-received-pending' }, 400);
+        return true;
+    }
+
+    async function deliverLoadingReceipts(key, sequence) {
+        if (loadingReceipts?.key !== key || loadingReceipts.sequence !== sequence) return;
+        const receipts = loadingReceipts.items;
+        loadingReceipts = null;
+        for (const { messageId, parent } of receipts) {
+            if (getChatKey() !== key || (rt.chatOpenSequence || 0) !== sequence) return;
+            const chat = getContext().chat || [];
+            const message = chat[messageId];
+            if (message && !message.is_user && !message.is_system && firstLineageDivergence(parent, chatLineage(chat).slice(0, messageId)) === -1) {
+                await handleAssistantMessageReceived(messageId);
+            }
+        }
+    }
+
     function deferLoadingChat(key, options, before, lineage) {
         const sequence = rt.chatOpenSequence || 0;
         if (!loadingRetry || loadingRetry.key !== key || loadingRetry.sequence !== sequence) {
@@ -259,9 +302,14 @@ export function createReconcilePart(rt, deps) {
         const previousLength = Array.isArray(before.lineage) ? before.lineage.length : 0;
         const lineageBefore = chatLineage(ctx.chat || []);
         const divergence = firstLineageDivergence(before.lineage || [], lineageBefore);
+        const receiptWaiting = loadingReceipts?.key === key && loadingReceipts.sequence === sequence;
         if (!explicit && String(operation || 'auto').toLowerCase() === 'auto'
-            && divergence >= 0 && divergence < previousLength) {
-            if (!await hostChatComplete(key, { absentOk: true })) {
+            && ((divergence >= 0 && divergence < previousLength) || receiptWaiting)) {
+            const check = { key, sequence };
+            hostChecks.add(check);
+            let complete;
+            try { complete = await hostChatComplete(key); } finally { hostChecks.delete(check); }
+            if (!complete) {
                 if (getChatKey() === key && (rt.chatOpenSequence || 0) === sequence) deferLoadingChat(key, { explicitDivergence, rescan, reason, operation, explicit }, before, lineageBefore);
                 return null;
             }
@@ -288,6 +336,7 @@ export function createReconcilePart(rt, deps) {
         });
         if (!result.invalidated) {
             before.lineage = result.state.lineage;
+            await deliverLoadingReceipts(key, sequence);
             return result;
         }
 
@@ -323,6 +372,7 @@ export function createReconcilePart(rt, deps) {
             if (isScanBusy(key)) queueBranchRescan(targetAssistant, 0, key);
             else await scanNow({ manual: false, messageId: targetAssistant });
         }
+        await deliverLoadingReceipts(key, sequence);
         return result;
     }
 
@@ -358,14 +408,21 @@ export function createReconcilePart(rt, deps) {
             const pending = rt.branchReconcilePending || {};
             rt.branchReconcilePending = null;
             rt.branchReconcileTimer = null;
+            let check = null;
             try {
                 if (pending.chatKey && getChatKey() !== pending.chatKey) return;
+                if (!pending.operation || pending.operation === 'auto') {
+                    check = { key: pending.chatKey || getChatKey(), sequence: rt.chatOpenSequence || 0 };
+                    hostChecks.add(check);
+                }
                 await reconcileCurrentBranch(pending);
             } catch (error) {
                 console.warn('[NPC State Delta] branch reconciliation failed', error);
+            } finally {
+                if (check) hostChecks.delete(check);
             }
         }, delay);
     }
 
-    return { queueSettledSwipeReconcile, branchHistoryDiagnostic, reconcileCurrentBranch, queueBranchReconcile };
+    return { queueSettledSwipeReconcile, branchHistoryDiagnostic, reconcileCurrentBranch, queueBranchReconcile, deferLoadingReceipt, loadingReconcilePending };
 }
