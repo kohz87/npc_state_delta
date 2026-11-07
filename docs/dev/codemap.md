@@ -92,3 +92,12 @@ Generated 2026-11-07.
 - `runtime-entry-startup.js`: Idempotent runtime initialization functions split from `index.js`.
 - `runtime-entry-public-read.js`: Public scan, portrait, status and diagnostics API split from `index.js`.
 - `runtime-entry-public-write.js`: Public state, host-integration and manual-mutation API split from `index.js`.
+- `core-profile-development-ledger.js`: Personality/Speech ledger config, bounded evidence parsing, concept/ledger normalization and the per-NPC ledger accessor split from `core-profile-development.js`.
+- `core-profile-development-observation.js`: Development record matching and non-duplicate observation intake split from `core-profile-development.js`.
+- `core-profile-development-readiness.js`: Spread readiness, aggregate provenance, durable-row selection and per-scan preparation split from `core-profile-development.js`.
+- `appearance-text.js`: Text/form primitives, shared-prefix combination and public appearance form/version limits split from `appearance.js`.
+- `appearance-physical.js`: Physical-trait keys, enduring-trait carry, shared-piece deduplication and refinement similarity split from `appearance.js`.
+- `appearance-model.js`: Form parsing, legacy-form conversion, canonical appearance model and resolution split from `appearance.js`.
+- `appearance-update.js`: Form reconciliation, omitted-trait carry and appearance update application split from `appearance.js`.
+- `appearance-portrait.js`: Per-form portrait assets and resolved-appearance fingerprint split from `appearance.js`.
+- `appearance-draft.js`: Appearance editor draft and lock handling split from `appearance.js`.
