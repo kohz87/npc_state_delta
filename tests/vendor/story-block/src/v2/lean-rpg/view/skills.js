@@ -84,9 +84,9 @@ export function renderSkills(parent, { character, session = null, api = {}, onBa
     function edit(slot) {
         const skill = skillAt(slot);
         if (!skill || run.busy || typeof api.command !== 'function') return;
-        const explicit = board?.on?.() ? board.flags?.()?.[skillKey(character.module, skill)] : null;
+        const explicit = board?.flags?.()?.[skillKey(character.module, skill)] ?? null;
         const flags = board?.on?.() ? skillFlags(skill, explicit) : null;
-        Object.assign(run, { editing: slot, start: { name: skill.name, about: skill.about, ...(flags ? { flags: { ...flags }, explicitFlags: Boolean(explicit) } : {}) }, draft: { name: skill.name, about: skill.about, ...(flags ? { flags: { ...flags } } : {}) }, message: '' });
+        Object.assign(run, { editing: slot, start: { name: skill.name, about: skill.about, ...(flags ? { flags: { ...flags } } : {}), ...(explicit ? { explicitFlags: true } : {}) }, draft: { name: skill.name, about: skill.about, ...(flags ? { flags: { ...flags } } : {}) }, message: '' });
         draw();
     }
     function cancel() {
@@ -115,7 +115,10 @@ export function renderSkills(parent, { character, session = null, api = {}, onBa
                 if (!result?.ok) failure = result ?? { ok: false };
             }
             if (!failure && (flagsChanged || (name !== run.start.name && run.start.explicitFlags))) {
-                const result = await api.command('rpg.boardSkill', { module: character.module, slot, name, flags: run.draft.flags });
+                // Board on: save the three flags. Board off: only carry the explicit entry to the new name.
+                const result = run.draft.flags
+                    ? await api.command('rpg.boardSkill', { module: character.module, slot, name, flags: run.draft.flags })
+                    : await api.command('rpg.boardSkillCarry', { module: character.module, slot, from: run.start.name, name });
                 if (!result?.ok) failure = result ?? { ok: false };
             }
         } catch (error) {

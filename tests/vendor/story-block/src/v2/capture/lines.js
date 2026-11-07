@@ -50,10 +50,12 @@ export function stripMarkdown(text) {
     return String(text ?? '').replace(/\*\*|__|`/g, '');
 }
 
+// A run of ^ at the very start of a line is decoration too (a preset may mark lines with it); a ^ elsewhere stays.
 // A bullet, number or quote mark in front of a line is decoration. A hyphen counts as one only
 // when an op follows it: `- item Rope` is itself an op.
 export function stripDecoration(line) {
     return line
+        .replace(/^\^+\s*/, '')
         .replace(/^>\s*/, '')
         .replace(/^(?:[*•·]\s+|\d+[.)]\s+)/, '')
         .replace(/^-\s+(?=[+\-~!?]\s)/, '');

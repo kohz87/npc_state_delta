@@ -27,6 +27,11 @@ export function runQuery(registry, state, name, args, { receipts = () => [], rep
         ...(typeof pendingProofs === 'function' ? { pendingProofs } : {}),
     });
     const answer = query(state, args === undefined ? undefined : structuredClone(args), tools);
+    // A query that has to read outside the state (the checkpoint reference scan) may answer a promise. Keep it a
+    // promise so its caller can await it; every ordinary query still answers its copied value in the same tick.
+    if (answer !== null && typeof answer === 'object' && typeof answer.then === 'function') {
+        return Promise.resolve(answer).then(value => (value === undefined ? undefined : structuredClone(value)));
+    }
     return answer === undefined ? undefined : structuredClone(answer);
 }
 

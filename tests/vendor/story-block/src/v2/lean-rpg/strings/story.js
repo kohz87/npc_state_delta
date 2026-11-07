@@ -147,7 +147,6 @@ export const STORY_STRINGS = Object.freeze({
         foeBlocked: 'Blocked',
         arrowBar: '{name} {bar} {word}',
         vs: '{total} vs {against}',
-        ended: '[Combat ended: {how}]',
         down: 'Down',
         count: '×{n}',
         details: 'Show the roll behind {line}',

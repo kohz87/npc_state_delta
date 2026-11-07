@@ -1,4 +1,7 @@
-## Unreleased
+## 1.12.0
+
+- **Fewer model calls per reply.** Backfills no longer wait for the Refresh cadence: with a hosted one-pass helper a reply runs at most one backfill, and an NPC gets one model call per reply (the narration catch-up and the backfill skip each other's NPCs; a successful automatic Refresh drops that NPC's queued repair).
+- Requires Story Block 2.24.0 or later (the Storage clean-up asks its `timeline.referenced` query). Story Block testkit re-synced to 2.24.0.
 
 - **Settings → Storage can clean up old dossier files.** It shows how many dossier files exist and their size. **Clean up** removes, after a confirmation, only files that no chat SillyTavern lists uses, that no branch index names, and that are older than 30 days. **Find older files** finds files from before this version; it uses SillyTavern's Data Maid listing only when pressed, and replaces any Data Maid report you have open. Removal is off, with the reason, whenever a listed chat or a branch index can't be read. Chats of deleted characters are not checked.
 
